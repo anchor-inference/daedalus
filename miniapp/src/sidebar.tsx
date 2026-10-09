@@ -1,5 +1,5 @@
-// The left column on a desktop in Agents mode: the sessions, grouped by project, with the project
-// switcher, search and New at the top. Orchestration mode has its column of its own
+// The left column on a desktop in Agents mode: the mode's name, then the projects and the chats with
+// "New chat", the two project buttons and the search above them (screens/Sessions.tsx). Orchestration mode has its column of its own
 // (orchestration.tsx). It stands beside the rail (rail.tsx), which holds the modes, the daily
 // destinations and the menu with the rest. Folded, the column is gone and the rail alone is left: the
 // rail is the folded form, so there is no strip of its own to keep in step with it.
@@ -41,14 +41,14 @@ export function Sidebar(p: SidebarProps) {
     <nav className="sidebar" aria-label={t("shell.sidebar.label")}>
       <div className="sidebar-brand">
         <a className="brand" href={pathFor("agents")} onClick={(e) => go(e, pathFor("agents"))} title="Daedalus">
-          <span className="sidebar-text">Daedalus</span>
+          <span className="sidebar-text">{t("nav.agents")}</span>
         </a>
         <Bell />
         <FoldButton onToggle={p.onToggle} />
       </div>
       <div className="sidebar-body">
         <Suspense fallback={null}>
-          <SessionsScreen onOpen={p.onOpen} toast={p.toast} current={p.session ?? undefined} compact project={p.project} projects={p.projects} onProjects={p.onProjects} />
+          <SessionsScreen onOpen={p.onOpen} toast={p.toast} current={p.session ?? undefined} project={p.project} projects={p.projects} onProjects={p.onProjects} />
         </Suspense>
       </div>
     </nav>

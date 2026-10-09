@@ -22,6 +22,8 @@ def run() -> int:
     ]
     for p in projects:
         p.update(folders=folders('/projects/' + p['id']), created_at='2026-01-01T00:00:00Z', settings={'snapshots': False}, active=0, loops=0)
+    # Garden is a chat's own scratch project, listed as the chat; Empty was made by hand.
+    projects[0]['settings'] = {'snapshots': True, 'ephemeral': True}
     agents = [dict(id=S1, title='Planting plan', project_id='garden', project='Garden', model='Local model', status='waiting', created_at='2026-01-01T00:00:00Z', last_message_at=projects[0]['last_message_at'], run_id=None, metadata={}),
               dict(id='spoken', title='A spoken question', project_id='voice', project='Voice', model='Local model', status='idle', created_at='2026-01-01T00:00:00Z', last_message_at=projects[1]['last_message_at'], run_id=None, metadata={})]
     requests = []
@@ -43,8 +45,8 @@ def run() -> int:
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(executable_path=CHROMIUM)
-        # A phone's chats are the Chats page: a project with one chat has no section of its own (its
-        # chat is filed by day), the Voice folder keeps its section, and an empty project is not drawn
+        # A phone's chats are the Chats page: a chat's own scratch project has no section of its own
+        # (its chat is filed by day), the Voice folder keeps its section, and an empty project is not drawn
         # (the drawer lists every project). The row's commands are behind its ⋮.
         page = browser.new_page(viewport={'width': 390, 'height': 844}, is_mobile=True, has_touch=True)
         page.route('**/api/**', route)
@@ -80,9 +82,10 @@ def run() -> int:
         expect(page.locator('.ph-empty')).to_contain_text('Nothing matches.')
         page.locator('.ph-top').get_by_role('button', name='Back').click()
         expect(page.locator('.ph-row')).to_have_count(2)
-        # A second chat in the project gives it a section of its own, newest first.
+        # A second chat in the project gives it a section of its own, newest first: the server clears
+        # the scratch mark when the second top-level chat arrives.
         agents.append({**agents[0], 'id': 'second', 'title': 'Watering schedule', 'last_message_at': '2026-09-19T01:00:00Z'})
-        projects[0].update(total=2, members=2, last_message_at=agents[-1]['last_message_at'])
+        projects[0].update(total=2, members=2, last_message_at=agents[-1]['last_message_at'], settings={'snapshots': True, 'ephemeral': False})
         garden_section = page.locator('section[data-project="garden"]')
         expect(garden_section.locator('.ph-row')).to_have_count(2, timeout=10000)
         expect(garden_section.locator('.ph-row-t').first).to_have_text('Watering schedule')

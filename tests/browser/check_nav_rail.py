@@ -102,7 +102,7 @@ def desktop(page: Page, lang: str) -> None:
     expect(rail.locator("[data-rail]")).to_have_count(len(ORDER))
     assert rail.locator("[data-rail]").evaluate_all("els => els.map(e => e.dataset.rail)") == ORDER
     box = page.locator(".desktop-column").bounding_box()
-    assert box and box["width"] == 324, f"{lang}: the rail and contextual column do not fit their declared widths"
+    assert box and box["width"] == 340, f"{lang}: the rail and contextual column do not fit their declared widths"
     for key in ORDER:
         want = words[key] if key != "inbox" else f"{words['inbox']} · {UNSEEN}"
         said = rail.locator(f"[data-rail='{key}']").get_attribute("aria-label") or ""

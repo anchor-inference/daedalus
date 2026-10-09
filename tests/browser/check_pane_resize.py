@@ -47,7 +47,10 @@ CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 ASSERT = os.environ.get("ASSERT", "1") != "0"
 
 STEPS = 12
-STRIDE = 7
+# Twelve steps of 5 px move the edge 60 px: from the sidebar's 288 px default that ends at 348, inside
+# its 360 px bound. At 7 px a step the drag ran into the bound once the default went from 272 to 288,
+# and the clamp read as an edge straying from the pointer.
+STRIDE = 5
 
 # Before the app loads: React's commits are counted through a stand-in devtools hook (react-dom
 # reports every commit to one when it is present), and writes of a pane's width to storage are counted.

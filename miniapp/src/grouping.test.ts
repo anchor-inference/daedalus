@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ProjectFolder, SessionSummary } from "./api";
-import { arrange, folderOpen, rememberFolder } from "./grouping";
+import { arrange, folderOpen, isProject, rememberFolder, sidebarSections } from "./grouping";
 
 let clock = 1_700_000_000_000;
 
@@ -119,6 +119,48 @@ describe("arrange", () => {
     const { folders, total } = arrange(sessions, projects, { project: "p1" });
     expect(folders.map((f) => f.key)).toEqual(["p1"]);
     expect(total).toBe(1);
+  });
+});
+
+describe("isProject", () => {
+  it("lists a chat's scratch project as the chat, and everything else as a project", () => {
+    expect(isProject({ settings: { snapshots: true, ephemeral: true } })).toBe(false);
+    // Made by hand, or kept: a project even with one chat or none.
+    expect(isProject({ settings: { snapshots: false } })).toBe(true);
+    expect(isProject({ settings: { snapshots: false, ephemeral: false } })).toBe(true);
+    // The installation's own project is one whatever it holds.
+    expect(isProject({ settings: { snapshots: false, system: "voice", ephemeral: true } })).toBe(true);
+    expect(isProject({ settings: { snapshots: false, ephemeral: true }, system: "voice" })).toBe(true);
+  });
+});
+
+describe("sidebarSections", () => {
+  const now = new Date("2026-10-09T12:00:00");
+  const at = (hours: number) => new Date(now.getTime() - hours * 3_600_000).toISOString();
+  const chatProject = (id: string, last: string) => folder(id, id, { total: 1, last_message_at: last, settings: { snapshots: true, ephemeral: true } });
+
+  it("puts projects in one section and the chats by day, the month folded into earlier", () => {
+    const projects = [folder("esp", "Firmware", { total: 0 }), chatProject("c1", at(1)), chatProject("c2", at(30)), chatProject("c3", at(24 * 4)), chatProject("c4", at(24 * 20)), chatProject("c5", at(24 * 90))];
+    const sessions = ["c1", "c2", "c3", "c4", "c5"].map((id, i) => agent(id, { project_id: id, last_message_at: projects[i + 1].last_message_at }));
+    const { projects: listed, days, chats } = sidebarSections(arrange(sessions, projects).folders, { now });
+    // An empty project made by hand is listed: it is a project before its first chat.
+    expect(listed.map((f) => f.key)).toEqual(["esp"]);
+    expect(days.map((d) => [d.day, d.rows.map((r) => r.s.id)])).toEqual([["today", ["c1"]], ["yesterday", ["c2"]], ["week", ["c3"]], ["older", ["c4", "c5"]]]);
+    expect(chats).toBe(5);
+  });
+
+  it("keeps only the projects with something in the answer under a filter", () => {
+    const projects = [folder("esp", "Firmware", { total: 0 }), folder("home", "Home", { total: 1 })];
+    const { projects: listed } = sidebarSections(arrange([agent("h", { project_id: "home" })], projects).folders, { filtered: true, now });
+    expect(listed.map((f) => f.key)).toEqual(["home"]);
+  });
+
+  it("makes a scratch project a project once the server clears its mark", () => {
+    const sessions = [agent("a", { project_id: "s" }), agent("b", { project_id: "s" })];
+    const scratch = chatProject("s", at(1));
+    expect(sidebarSections(arrange(sessions, [scratch]).folders, { now }).projects).toHaveLength(0);
+    const kept = { ...scratch, settings: { ...scratch.settings, ephemeral: false } };
+    expect(sidebarSections(arrange(sessions, [kept]).folders, { now }).projects.map((f) => f.key)).toEqual(["s"]);
   });
 });
 

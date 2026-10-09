@@ -150,8 +150,10 @@ class ProjectSettings:
     is the folder the concierge and the agents it delegates to work in. A system project keeps its
     name and snapshot switch editable but cannot be removed."""
     ephemeral: bool = False
-    """Made implicitly by a new chat, with a scratch folder of the installation's own, and removed
-    with its last session. "Keep as a project" clears it."""
+    """Made implicitly by a new chat, with a scratch folder of the installation's own or a folder it
+    was started in, and its record removed with its last session (an operator's folder stays on
+    disk). "Keep as a project" clears it, and so does a second top-level session (:meth:`ProjectStore.settle`);
+    once cleared it never comes back."""
     default_env: str = ""
     """Where a new agent of this project runs when nothing names a folder; empty until the store
     fills it with the environment this process runs in."""
@@ -352,6 +354,26 @@ def _nested_under(session_id: str, metadata: dict[str, Any], known: set[str]) ->
     forked = metadata.get("forked_from")
     origin = forked.get("session_id") if isinstance(forked, dict) else None
     return isinstance(origin, str) and origin != session_id and origin in known
+
+
+def top_level_sessions(rows: Iterable[tuple[str, str | None, Any]]) -> dict[str, str]:
+    """``{session id: project id}`` of the top-level sessions, from ``(session id, project id, metadata)``.
+
+    Every row of the sessions table has to be passed, not only one project's: a subagent or a fork
+    is nested only while its leader or origin exists, wherever that one is listed. It is the rule
+    :meth:`ProjectStore.summary` counts ``total`` by, so the chat count the operator sees and the one
+    that turns a chat's scratch project into a project (:meth:`ProjectStore.settle`) never disagree.
+    """
+    parsed: list[tuple[str, str | None, dict[str, Any]]] = []
+    for session_id, project_id, raw in rows:
+        try:
+            metadata = json.loads(raw or "{}")
+        except (TypeError, ValueError):
+            metadata = {}
+        parsed.append((session_id, project_id, metadata if isinstance(metadata, dict) else {}))
+    known = {session_id for session_id, _, _ in parsed}
+    return {session_id: project_id for session_id, project_id, metadata in parsed
+            if project_id and not _nested_under(session_id, metadata, known)}
 
 
 def _detect_git(path: Path) -> bool:
@@ -573,7 +595,10 @@ class ProjectStore:
             if existing is not None:
                 return existing
             await self._refuse_overlap(path)
-            project = await self._insert(uuid.uuid4().hex[:12], label, ProjectSettings(snapshots=True), [(path, FolderSpec(str(path)))])
+            # Ephemeral like any chat's scratch project: a folder used by one chat is that chat's, and
+            # it becomes a project the moment a second chat works in it (:meth:`settle`). Removing the
+            # record with its last chat never touches the folder, which may be the operator's own.
+            project = await self._insert(uuid.uuid4().hex[:12], label, ProjectSettings(snapshots=True, ephemeral=True), [(path, FolderSpec(str(path)))])
             await self.list()
             return project
 
@@ -853,6 +878,35 @@ class ProjectStore:
         updated = await self.get(project_id)
         assert updated is not None
         return updated
+
+    async def settle(self, project_id: str) -> bool:
+        """Make a chat's scratch project an ordinary project once it holds two top-level sessions;
+        whether this call is the one that did.
+
+        The operator's rule is "one chat is a chat, two are a project": a second chat started in, or
+        moved into, a scratch project means the folder is shared work now. Forks and subagents are
+        drawn inside the chat they came from and do not count. The change is one way, like "Keep as
+        a project": deleting back down to one chat leaves it a project, since by then the operator
+        has seen it listed as one. A system project is never ephemeral and is left alone.
+        """
+        async with self._db.transaction() as conn:
+            row = await (await conn.execute(
+                "SELECT 1 FROM projects WHERE id = ? AND system = '' AND json_valid(settings) AND json_extract(settings, '$.ephemeral') = 1",
+                (project_id,),
+            )).fetchone()
+            if row is None:
+                return False
+            sessions = await (await conn.execute("SELECT id, project_id, metadata FROM sessions")).fetchall()
+            top_level = top_level_sessions((r["id"], r["project_id"], r["metadata"]) for r in sessions)
+            if sum(1 for owner in top_level.values() if owner == project_id) < 2:
+                return False
+            # Guarded by the same test as the read, so a second caller racing this one changes nothing.
+            cursor = await conn.execute(
+                "UPDATE projects SET settings = json_set(settings, '$.ephemeral', json('false'))"
+                " WHERE id = ? AND system = '' AND json_extract(settings, '$.ephemeral') = 1",
+                (project_id,),
+            )
+            return cursor.rowcount > 0
 
     async def update_orchestrator(
         self,
@@ -1297,4 +1351,5 @@ __all__ = [
     "RULE_LIFTED_KIND",
     "RULE_TEXT_MAX",
     "normalise_root",
+    "top_level_sessions",
 ]

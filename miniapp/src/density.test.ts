@@ -280,7 +280,7 @@ describe("the scale", () => {
   it("is declared once, in :root", () => {
     const root = all.find((r) => r.selector === ":root" && !r.media);
     expect(root).toBeDefined();
-    for (const name of [...Object.keys(TOKENS), "--space-2", "--radius-sm", "--radius-md", "--radius-lg", "--row-h", "--row-h-dense", "--row-h-touch", "--ctl-h", "--ctl-h-sm", "--ctl-h-lg", "--avatar", "--sidebar-w", "--rail-w", "--panel-w", "--pip-w", "--reading-w", "--chat-w", "--head-h",
+    for (const name of [...Object.keys(TOKENS), "--space-2", "--radius-sm", "--radius-md", "--radius-lg", "--row-h", "--row-h-2", "--row-h-kid", "--row-h-dense", "--row-h-touch", "--ctl-h", "--ctl-h-sm", "--chip-h-dense", "--ctl-h-lg", "--avatar", "--plate", "--sidebar-w", "--rail-w", "--panel-w", "--pip-w", "--reading-w", "--chat-w", "--head-h",
       "--top-h", "--list-row-h", "--list-row-h-1", "--nav-row-h", "--set-row-h", "--tabbar-h", "--ctl-round", "--chip-h", "--drawer-w", "--gutter", "--radius-xl", "--radius-composer"]) {
       expect(root!.body, name).toContain(`${name}:`);
     }
@@ -377,11 +377,39 @@ describe("the phone", () => {
   });
 });
 
-describe("project hierarchy", () => {
-  it("gives multi-agent projects a full header and an always available creation action", () => {
-    expect(css).toContain(".folder-head { display: flex;");
-    expect(css).toContain("min-height: calc(var(--row-h-touch) + var(--space-3))");
-    expect(css).toContain(".sidebar .folder-add");
+describe("the sidebar", () => {
+  const wide = (selector: string) => all.filter((r) => r.media.includes("min-width: 1024px") && selectors(r).includes(selector)).map((r) => r.body).join(";");
+  const declared = () => all.find((r) => r.selector === ":root" && !r.media)!.body;
+
+  it("is 288 px wide, with a chat's two lines at 44 px, a project's one at 36 and a nested chat at 40", () => {
+    // 288 rather than 272 since the rows went to two lines: a Russian title was cut at eighteen
+    // characters in the narrower column. The conversation still keeps its stripe at 1440 (see
+    // check_density.py), and the column stays a drag between the same two bounds.
+    expect(declared()).toContain("--sidebar-w: 288px");
+    expect(declared()).toContain("--row-h-2: 44px");
+    expect(declared()).toContain("--row-h-kid: 40px");
+    expect(declared()).toContain("--chip-h-dense: 24px");
+    expect(declared()).toContain("--plate: 24px");
+    expect(wide(".sb-row")).toContain("min-height: var(--row-h-2)");
+    expect(wide(".sb-prow")).toContain("min-height: var(--row-h)");
+    expect(wide(".sb-kids > .sb-row")).toContain("min-height: var(--row-h-kid)");
+    expect(wide(".sb-plate")).toContain("width: var(--plate)");
+    expect(wide(".sb-plate")).toContain("border-radius: 50%");
+    expect(wide(".sb-tile")).toContain("border-radius: var(--radius-xs)");
+  });
+
+  it("gives the two project buttons a small control's height and its chips the dense one", () => {
+    expect(wide(".sb-pbtn")).toContain("height: var(--ctl-h-sm)");
+    expect(wide(".sb-new")).toContain("height: var(--ctl-h)");
+    expect(wide(".sb-chip")).toContain("height: var(--chip-h-dense)");
+  });
+
+  it("shows a project's + and a row's menu on hover or focus, not always", () => {
+    // The + used to stand on every project row; with a project row of 36 px it is a hover action,
+    // and it is also the first item of the row's menu and of its right click.
+    expect(wide(".sidebar .sb-acts")).toContain("display: none");
+    expect(wide(".sidebar .sb-row:hover .sb-acts")).toContain("display: flex");
+    expect(wide(".sidebar .sb-row:focus-within .sb-acts")).toContain("display: flex");
   });
 });
 

@@ -119,17 +119,35 @@ async def test_the_directory_browser_is_authenticated_sealed_contained_and_bound
         await manager.close()
 
 
-@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("delete_workspace", [False, True])
+async def test_last_chat_removes_its_scratch_project_but_keeps_files(settings: Settings, config: RuntimeConfig, db: Database, delete_workspace: bool) -> None:
+    manager = SessionManager(settings, config, db=db)
+    await manager.start()
+    try:
+        chat = await manager.create_session("automatic")
+        pid = chat.project.id
+        (chat.workspace / "keep.txt").write_text("keep")
+        await manager.close()
+        manager = SessionManager(settings, config, db=db)
+        await manager.start()
+        await manager.delete_session(chat.session.id, delete_workspace=delete_workspace)
+        assert await manager.projects.get(pid) is None
+        assert chat.workspace not in manager.projects.roots
+        assert (chat.workspace / "keep.txt").read_text() == "keep"
+    finally:
+        await manager.close()
+
+
 @pytest.mark.parametrize("creator_first", [False, True])
 @pytest.mark.parametrize("delete_workspace", [False, True])
-async def test_last_member_removes_automatic_project_but_keeps_files(settings: Settings, config: RuntimeConfig, db: Database, creator_first: bool, delete_workspace: bool, legacy: bool) -> None:
+async def test_a_second_chat_keeps_the_scratch_project_for_good(settings: Settings, config: RuntimeConfig, db: Database, creator_first: bool, delete_workspace: bool) -> None:
+    """Two chats make a project, and deleting them both, the one whose id it took first or last,
+    leaves an empty project: once listed as a project it is not taken away with its chats."""
     manager = SessionManager(settings, config, db=db)
     await manager.start()
     try:
         creator = await manager.create_session("automatic")
         pid = creator.project.id
-        if legacy:
-            await db.execute("UPDATE projects SET settings = json_remove(settings, '$.ephemeral') WHERE id = ?", (pid,))
         sibling = await manager.create_session("sibling", project_id=pid)
         (creator.workspace / "keep.txt").write_text("keep")
         await manager.projects.update(pid, name="renamed", snapshots=False)
@@ -140,8 +158,8 @@ async def test_last_member_removes_automatic_project_but_keeps_files(settings: S
         manager = SessionManager(settings, config, db=db)
         await manager.start()
         await manager.delete_session(last.session.id, delete_workspace=delete_workspace)
-        assert await manager.projects.get(pid) is None
-        assert creator.workspace not in manager.projects.roots
+        kept = await manager.projects.get(pid)
+        assert kept is not None and not kept.settings.ephemeral
         assert (creator.workspace / "keep.txt").read_text() == "keep"
     finally:
         await manager.close()

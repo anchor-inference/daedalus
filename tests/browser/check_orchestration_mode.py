@@ -119,11 +119,11 @@ def desktop(page: Page, lang: str) -> None:
     expect(rail.locator("[data-rail='agents']")).to_have_class(re.compile(r"\bon\b"))
     expect(rail.locator("[data-rail='agents']")).to_have_attribute("aria-label", words["agents"])
     expect(rail.locator("[data-rail='orchestration'] .rail-badge.quiet")).to_have_text(WAITING)
-    expect(side.locator(f".folder[data-project='{GARDEN}']")).to_be_visible()
+    expect(side.locator(f"[data-project='{GARDEN}']")).to_be_visible()
     expect(side.locator(f"[data-project='{PID}']")).to_have_count(0)
     expect(side.locator(".main-entry, .main-entry-strip")).to_have_count(0)
-    expect(side.locator(".erow", has_text="Orchestrator")).to_have_count(0)
-    expect(side.locator(".erow[data-session='sess-lev']")).to_have_count(0)
+    expect(side.locator("[data-session]", has_text="Orchestrator")).to_have_count(0)
+    expect(side.locator("[data-session='sess-lev']")).to_have_count(0)
     fits(page, f"{lang} agents mode")
 
     # Into orchestration: the main chat at once, and a column of Main and the orchestrated projects.
@@ -173,7 +173,7 @@ def desktop(page: Page, lang: str) -> None:
     expect(rail.locator("[data-rail='agents']")).to_have_class(re.compile(r"\bon\b"))
     # The address can change before the destination finishes rendering; wait for the Agents column
     # before sending another shortcut from that screen.
-    expect(side.locator(f".folder[data-project='{GARDEN}']")).to_be_visible()
+    expect(side.locator(f"[data-project='{GARDEN}']")).to_be_visible()
     keys(page, "g", "t")
     page.wait_for_url("**/app/terminals")
     expect(page.locator("nav.sidebar")).to_be_visible()

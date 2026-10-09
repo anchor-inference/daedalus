@@ -67,6 +67,12 @@ const SAME_IN_BOTH = [
   "settings.exec.title",
   "settings.search.title",
   "settings.web.title",
+  // Keys on the keyboard, written as their caps are printed: the same on either layout.
+  "side.key.archive",
+  "side.key.beside",
+  "side.key.delete",
+  "side.key.rename",
+  "side.newchat.keys",
   // Lines changed and the files they are in.
   "staff.changes.summary",
   // The key before a member's CLI and its version: the acronym is read as is in either language.
