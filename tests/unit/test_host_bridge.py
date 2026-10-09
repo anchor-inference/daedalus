@@ -24,7 +24,7 @@ from daedalus.config import RuntimeConfig, Settings, TerminalsConfig
 from daedalus.doctor import DoctorContext, _terminals
 from daedalus.extensions import api_projects
 from daedalus.stores.database import Database
-from daedalus.terminals.bridge import HostBridge
+from daedalus.terminals.bridge import HostBridge, HostDaemonOutdated
 from daedalus.terminals.client import PtydClient, Unavailable
 from daedalus.terminals.model import EnvUnavailable
 from daedalus.terminals.service import Terminals
@@ -275,6 +275,49 @@ async def test_a_folder_is_checked_and_made_on_the_host(service: Terminals, daem
     a_file.write_text("x")
     assert (await bridge.check_folder(str(a_file))).problem == "the path on the host is not a folder"
     assert "not a directory" in (await bridge.check_folder(str(a_file), create_missing=True)).problem
+
+
+async def test_the_folder_picker_browses_the_host_outside_the_roots(service: Terminals, daemon: FakePtyd, db: Database, short_dir: Path) -> None:
+    bridge = HostBridge(lambda: service)
+    home = Path(daemon.home)
+    for folder in (home / "Repo" / ".git", home / "notes", home / ".config", home / ".ssh"):
+        folder.mkdir(parents=True)
+    (home / "file.txt").write_text("not a folder")
+    # No root is set: a folder for a new project is under none yet, and the picker still sees it.
+    listing = await bridge.browse("")
+    assert listing["path"] == str(home) and listing["home"] == str(home)
+    assert [entry["name"] for entry in listing["entries"]] == ["notes", "Repo"]
+    repo = next(entry for entry in listing["entries"] if entry["name"] == "Repo")
+    assert repo["is_git"] and repo["writable"] and repo["readable"] and repo["path"] == str(home / "Repo")
+    assert listing["places"][0] == {"name": "home", "path": str(home), "kind": "home"}
+    assert daemon.calls[-1] == ("fs.browse", {"path": "", "limit": 500})
+    hidden = await bridge.browse(str(home), hidden=True)
+    assert [entry["name"] for entry in hidden["entries"]] == [".config", "notes", "Repo"]
+    limited = await bridge.browse("~", limit=1)
+    assert len(limited["entries"]) == 1 and limited["truncated"]
+    # What the deny list or the daemon's own folders hold is refused, and a missing folder is missing.
+    with pytest.raises(OSError, match="denied") as refused:
+        await bridge.browse(str(home / ".ssh"))
+    assert not isinstance(refused.value, (HostDaemonOutdated, FileNotFoundError, ConnectionError))
+    with pytest.raises(OSError, match="denied"):
+        await bridge.browse(str(short_dir / "run"))
+    with pytest.raises(FileNotFoundError):
+        await bridge.browse(str(home / "missing"))
+    # The picker's check and its "new folder" are the project-folder calls, and the folder is audited.
+    made = await bridge.mkdir(str(home / "notes" / "fresh"))
+    assert made["created"] and (home / "notes" / "fresh").is_dir()
+    assert (await bridge.stat_folder(str(home / "notes" / "fresh")))["writable"] is True
+    rows = await db.fetchall("SELECT actor FROM terminal_audit WHERE action = 'mkdir'")
+    assert [r["actor"] for r in rows] == ["operator"]
+    # A daemon from before the call says what to do about it rather than looking broken.
+    daemon.browse_supported = False
+    with pytest.raises(HostDaemonOutdated, match="update it"):
+        await bridge.browse("")
+
+
+async def test_browsing_without_a_host_bridge_is_a_connection_error() -> None:
+    with pytest.raises(ConnectionError):
+        await HostBridge(lambda: None).browse("")
 
 
 async def test_git_goes_to_the_host_and_a_missing_bridge_is_an_os_error(service: Terminals, daemon: FakePtyd, short_dir: Path) -> None:

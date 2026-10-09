@@ -35,6 +35,7 @@ func (d *Daemon) registerSide(srv *server.Server) {
 	srv.Handle("exec.run", d.execRun)
 	srv.Handle("fs.stat", d.fsStat)
 	srv.Handle("fs.list", d.fsList)
+	srv.Handle("fs.browse", d.fsBrowse)
 	srv.Handle("fs.read", d.fsRead)
 	srv.Handle("fs.tail", d.fsTail)
 	srv.Handle("fs.set_roots", d.fsSetRoots)
@@ -159,6 +160,25 @@ func (d *Daemon) fsList(ctx context.Context, c *server.Conn, params json.RawMess
 		entries = []sidechan.Entry{}
 	}
 	return map[string]any{"entries": entries, "truncated": truncated}, nil
+}
+
+// fsBrowse lists the folders of one directory for the new-project folder picker: read-only, held to
+// the deny list and the sealed directories but not to the roots (see sidechan.FS.Browse for why).
+func (d *Daemon) fsBrowse(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p struct {
+		Path   string `json:"path"`
+		Hidden bool   `json:"hidden"`
+		Limit  int    `json:"limit"`
+	}
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	b, err := d.Side.FS.Browse(p.Path, p.Hidden, p.Limit)
+	if err != nil {
+		d.logRefusal("fs.browse", p.Path, err)
+		return nil, sideError(err)
+	}
+	return b, nil
 }
 
 func (d *Daemon) fsRead(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {

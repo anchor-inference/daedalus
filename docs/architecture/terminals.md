@@ -697,6 +697,7 @@ FIFOs and devices are refused.
 | `fs.mkdir` | `{path}` → `fs.stat {as_root}`'s answer plus `created`: makes a folder that is to become a root (a project folder), with its parents, under the same rules; an existing folder is left as it is |
 | `fs.write` | `{path, offset, data_b64}` → `{size, created}`: a file handed to a staff member. Only inside an inbox — below the last `.agents` of the path, `inbox/<…>/<name>` — under a root, by the read rules (resolved, not denied, not the daemon's own); the directories are made and checked again, the file is opened without following a link. Offset 0 creates and refuses an existing file; a later offset continues one that holds exactly that many bytes. At most 512 KiB a call and 50 MiB a file. With `fs.mkdir`, the side channels' only writes |
 | `fs.list` | `{path, glob?, sort? "name"\|"mtime", limit? ≤ 5000}` → `{entries[{name, type, size, mtime}], truncated}`; denied entries are left out, symlinks listed as such |
+| `fs.browse` | `{path, hidden?, limit? ≤ 2000}` → `{path, parent, home, writable, is_git, entries[{name, path, mtime, writable, readable, is_git, link}], truncated, places[{name, path, kind "home"\|"volume"}]}`: the folders of one directory, for the folder picker of a new project. `path` empty or `~…` is the home directory. See below for why it is not held to the roots |
 | `fs.read` | `{path, offset?, max? ≤ 4 MiB}` → `{data_b64, offset, size, eof, file_id}` |
 | `fs.tail` | `{path, from_offset, max?, follow_ms? ≤ 60 000, file_id?}` → `{data_b64, next_offset, size, rotated, file_id}` |
 
@@ -704,6 +705,22 @@ One reply carries at most 640 KiB of a file; a longer read continues at its offs
 waits up to `follow_ms` for bytes past `from_offset` (at most 128 tails wait at once). `rotated`
 means the file at the path is another one than `file_id` names, or it shrank; its data then starts
 at the beginning of the file.
+
+`fs.browse` is the one read that is not held to the roots, because a folder being chosen for a new
+project is under none yet: the roots are the folders of the projects that already exist, so the
+roots rule would leave the picker nothing to show. It is kept safe by what it reads instead. It
+lists directories only — a name, the modification time, whether this user may write and list it,
+whether it holds a `.git` — and never lists a file or opens one. The directory asked for, as written
+and as resolved, may be neither denied nor the daemon's own, and the directory actually opened is
+checked again by the path the kernel reports, so a link swapped in between is refused (`1004`, in
+the log). An entry that is denied or the daemon's own, as written or as resolved, is left out as if
+absent; a symbolic link is listed (`link: true`) only when it resolves to a directory that passes
+the same rules; dot-folders are left out unless `hidden`. It reads at most 100 000 directory
+entries, returns at most `limit` (500 by default), and stops the per-folder stats after 1.5 s, so a
+slow network mount answers with what it has; each cut says `truncated`. It adds no write: the picker
+makes a folder with `fs.mkdir` and checks the chosen one with `fs.stat {as_root}`, which hold the path
+to the rules a project folder is held to. A daemon older than the call answers "method not found",
+which the host turns into "update the host terminal daemon" instead of a broken picker.
 
 ### Launches and hooks
 
@@ -913,7 +930,10 @@ because the token in them is a shell.
   `exec_run` runs git for the staff worktrees of host folders, and a call that cannot reach the
   daemon is an `OSError` there, so "the bridge is down" is never mistaken for git failing;
   `write(path, offset, data)` puts a file handed to a staff member on the host into its inbox
-  through `fs.write` (a daemon older than that call answers "update the host terminal"). Project
+  through `fs.write` (a daemon older than that call answers "update the host terminal");
+  `browse(path)`, `stat_folder(path)` and `mkdir(path)` are the new-project folder picker's view of
+  the host through `fs.browse`, `fs.stat {as_root}` and `fs.mkdir`, and a daemon without `fs.browse`
+  is `HostDaemonOutdated`, an `OSError` that says to update it. Project
   folders accept a host folder only while it answers.
 
 | Route | |

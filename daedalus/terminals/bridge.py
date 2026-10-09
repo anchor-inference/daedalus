@@ -22,6 +22,7 @@ from daedalus.terminals.model import (
     InvalidRequest,
     NotFound,
     TerminalError,
+    Unsupported,
 )
 
 if TYPE_CHECKING:
@@ -49,6 +50,22 @@ class FolderCheck:
 
     def view(self) -> dict[str, Any]:
         return {"path": self.path, "exists": self.exists, "is_dir": self.is_dir, "writable": self.writable, "is_git": self.is_git, "created": self.created, "problem": self.problem}
+
+
+class _Outdated(OSError):
+    """A call the daemon does not know, as ``_side`` raises it: an ``OSError`` with the daemon's
+    words like any refusal, so the readers that catch ``OSError`` are unchanged, and a type of its
+    own so a caller that can name the remedy does."""
+
+
+class HostDaemonOutdated(OSError):
+    """The host daemon answers but predates a call this version makes. It is its own kind so the
+    picker can say "update the host daemon" rather than show the bridge as down or the folder as
+    refused: neither is true, and both would send the operator looking in the wrong place."""
+
+
+OUTDATED_BROWSE = ("the host terminal daemon is older than this version and cannot browse folders; update it "
+                   "(bash deploy/host-terminal.sh install, which ends the open host terminals)")
 
 
 class HostBridge:
@@ -92,6 +109,25 @@ class HostBridge:
         what is on the daemon's deny list is left out."""
         return await self._side(lambda service: service.fs_list(HOST, path, limit=limit))
 
+    async def browse(self, path: str, *, hidden: bool = False, limit: int = 500) -> dict[str, Any]:
+        """The folders of one host directory for the new-project folder picker (see ``fs_browse``):
+        not held to the roots, directories only, nothing denied or the daemon's own. A daemon without
+        the call is ``HostDaemonOutdated``; down, missing and refused are as ``_side`` says."""
+        try:
+            return await self._side(lambda service: service.fs_browse(HOST, path, hidden=hidden, limit=limit))
+        except _Outdated:
+            raise HostDaemonOutdated(OUTDATED_BROWSE) from None
+
+    async def stat_folder(self, path: str) -> dict[str, Any]:
+        """``{exists, type, writable, …}`` of a folder that is to be a project's, held to the rules a
+        project folder is (``fs.stat`` with ``as_root``), for the picker's check of its choice."""
+        return await self._side(lambda service: service.fs_stat(HOST, path, as_root=True))
+
+    async def mkdir(self, path: str, *, actor: str = "operator") -> dict[str, Any]:
+        """Make a folder on the host with its parents, under the project-folder rules; the answer is
+        ``stat_folder``'s plus ``created``. The service audits it, as every side-channel write."""
+        return await self._side(lambda service: service.fs_mkdir(HOST, path, actor=actor))
+
     async def read(self, path: str, *, offset: int, max_bytes: int) -> FileChunk:
         """Up to ``max_bytes`` of a file under the host's roots, from ``offset``."""
         return await self._side(lambda service: service.fs_read(HOST, path, offset=offset, max_bytes=max_bytes))
@@ -120,6 +156,8 @@ class HostBridge:
             raise ConnectionError(f"the host terminal bridge is not available: {exc.message}") from None
         except NotFound as exc:
             raise FileNotFoundError(exc.message) from None
+        except Unsupported as exc:
+            raise _Outdated(exc.message) from None
         except TerminalError as exc:
             raise OSError(exc.message) from None
 
@@ -163,4 +201,4 @@ class HostBridge:
         return result.exit_code == 0 and result.stdout.strip() == "true"
 
 
-__all__ = ["FolderCheck", "HostBridge"]
+__all__ = ["FolderCheck", "HostBridge", "HostDaemonOutdated"]

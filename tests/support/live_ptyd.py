@@ -20,7 +20,7 @@ daemon that actually hosts a CLI:
   and ``terminal.kill`` (hang-up, grace, kill, to the whole group).
 - The side channels: ``exec.run`` (a program of the allowlist, not in a terminal, killed as a group
   on timeout), ``fs.set_roots``/``stat``/``list``/``read``/``tail`` over real files under the roots
-  and never on the deny list, ``net.allow``/``net.dial`` to a unix socket in the launch's dial
+  and never on the deny list, ``fs.browse`` of folders anywhere but the denied and the daemon's own, ``net.allow``/``net.dial`` to a unix socket in the launch's dial
   directory or a registered loopback port, relayed over a channel, and ``hooks.register_launch``
   (file names of a few plain parts)/``put_file``/``unregister_launch``/``reply`` with a real hook listener on ``127.0.0.1:0``: token checked,
   unknown launch 410, a post held for ``wait_ms`` (or ``daedalus_hold_ms`` in the body) until the
@@ -56,7 +56,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from tests.support.fake_ptyd import FakePtyd, FakeTerminal, _RpcFail, stamp, write_inbox
+from tests.support.fake_ptyd import FakePtyd, FakeTerminal, _RpcFail, browse_folders, stamp, write_inbox
 from tests.support.fake_screen import FakeScreen
 
 RING_BYTES = 8 << 20
@@ -793,6 +793,10 @@ class LivePtyd(FakePtyd):
         path.mkdir(parents=True, exist_ok=True)
         st = path.stat()
         return {"exists": True, "type": "dir", "size": st.st_size, "mtime": stamp_of(st.st_mtime), "writable": True, "created": created}
+
+    async def _m_fs_browse(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Not held to the roots, as the daemon's: a folder for a new project is under none yet."""
+        return browse_folders(params, home=self.home, sealed=[str(self.run_dir)])
 
     async def _m_fs_write(self, params: dict[str, Any]) -> dict[str, Any]:
         return write_inbox(self._allowed_path, params)
