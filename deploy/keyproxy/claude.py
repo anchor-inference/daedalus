@@ -21,7 +21,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 import httpx
-from subscriptions import SubscriptionError, _write_json
+from subscriptions import KEEPALIVE, SubscriptionError, _write_json
 
 logger = logging.getLogger("keyproxy.claude")
 
@@ -342,6 +342,9 @@ def chat_to_messages(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, st
         out["tool_choice"] = {"type": "any"} if choice == "required" else {"type": choice}
     if effort and not forced:
         budget = max(1024, EFFORT_BUDGET.get(effort, 8192))
+        # Omitted display keeps time-to-first-token low but makes the model think in silence for a
+        # minute or more; messages_events_to_chunks forwards upstream liveness so the caller's idle
+        # watchdog does not read that silence as a dead stream.
         out["thinking"] = {"type": "enabled", "budget_tokens": min(budget, max_tokens - 1), "display": "omitted"}
         if any(model.startswith(prefix) for prefix in EFFORT_MODELS) and effort in EFFORT_BUDGET:
             out["output_config"] = {"effort": effort}
@@ -371,7 +374,13 @@ def _usage(input_tokens: int, output_tokens: int, cache_read: int = 0, cache_wri
 
 
 async def messages_events_to_chunks(lines: AsyncIterator[str], *, model: str, names: dict[str, str] | None = None) -> AsyncIterator[str]:
-    """Anthropic Messages SSE → chat-completion chunks."""
+    """Anthropic Messages SSE → chat-completion chunks.
+
+    An upstream event that translates to no chunk (ping, the thinking block's start, its signature,
+    block stops) becomes a keepalive comment instead, so the caller still sees the stream is alive
+    while the model thinks silently. It follows real upstream events only, never a timer: a hung
+    upstream stays silent and is still caught by the caller's idle watchdog.
+    """
     names = names or {}
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     calls: dict[int, int] = {}
@@ -396,6 +405,7 @@ async def messages_events_to_chunks(lines: AsyncIterator[str], *, model: str, na
         except json.JSONDecodeError:
             continue
         kind = event.get("type") or event_name
+        spoke = False
         if kind == "error":
             err = event.get("error") or event
             failed = str(err.get("message") or err or "the backend reported a failure")
@@ -411,16 +421,20 @@ async def messages_events_to_chunks(lines: AsyncIterator[str], *, model: str, na
                 calls[index] = index
                 original = names.get(str(block.get("name") or ""), str(block.get("name") or ""))
                 finish = "tool_calls"
+                spoke = True
                 yield _chunk(completion_id, model, {"tool_calls": [{"index": index, "id": str(block.get("id") or ""), "type": "function", "function": {"name": original, "arguments": ""}}]})
         elif kind == "content_block_delta":
             delta = event.get("delta") or {}
             dtype = delta.get("type")
             if dtype == "text_delta" and delta.get("text"):
+                spoke = True
                 yield _chunk(completion_id, model, {"role": "assistant", "content": delta["text"]})
             elif dtype == "thinking_delta" and delta.get("thinking"):
+                spoke = True
                 yield _chunk(completion_id, model, {"reasoning_content": delta["thinking"]})
             elif dtype == "input_json_delta" and delta.get("partial_json"):
                 index = int(event.get("index") or (len(calls) - 1 if calls else 0))
+                spoke = True
                 yield _chunk(completion_id, model, {"tool_calls": [{"index": index, "function": {"arguments": delta["partial_json"]}}]})
         elif kind == "message_delta":
             usage = event.get("usage") or {}
@@ -438,6 +452,8 @@ async def messages_events_to_chunks(lines: AsyncIterator[str], *, model: str, na
         elif kind in ("error",) or event_name == "error":
             err = event.get("error") or event
             failed = str(err.get("message") or err or "the backend reported a failure")
+        if not spoke:
+            yield KEEPALIVE
     if failed:
         yield f"data: {json.dumps({'error': {'message': failed, 'type': 'upstream_error'}})}\n\n"
     else:

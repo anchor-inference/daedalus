@@ -322,8 +322,19 @@ def responses_usage(usage: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# An SSE comment: every OpenAI-compatible client ignores it, and collect_completion reads only
+# ``data: `` lines. Sent for an upstream event that carries nothing to translate, so a model that
+# reasons silently still shows the caller a live stream.
+KEEPALIVE = ": keepalive\n\n"
+
+
 async def responses_events_to_chunks(lines: AsyncIterator[str], *, model: str) -> AsyncIterator[str]:
-    """Responses SSE lines → chat-completion chunks (text, reasoning summaries, tool calls, usage, finish)."""
+    """Responses SSE lines → chat-completion chunks (text, reasoning summaries, tool calls, usage, finish).
+
+    Events with nothing to translate (created, in_progress, reasoning item boundaries) become a
+    keepalive comment, so a long silent reasoning phase is not mistaken for a dead stream. These
+    follow real upstream events, never a timer.
+    """
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     calls: dict[str, int] = {}
     finish = "stop"
@@ -341,19 +352,24 @@ async def responses_events_to_chunks(lines: AsyncIterator[str], *, model: str) -
         except json.JSONDecodeError:
             continue
         kind = event.get("type")
+        spoke = False
         if kind == "response.output_text.delta" and event.get("delta"):
+            spoke = True
             yield _chunk(completion_id, model, {"role": "assistant", "content": event["delta"]})
         elif kind in ("response.reasoning_summary_text.delta", "response.reasoning_text.delta") and event.get("delta"):
+            spoke = True
             yield _chunk(completion_id, model, {"reasoning_content": event["delta"]})
         elif kind == "response.output_item.added":
             item = event.get("item") or {}
             if item.get("type") == "function_call":
                 index = len(calls)
                 calls[str(item.get("id") or item.get("call_id") or index)] = index
+                spoke = True
                 yield _chunk(completion_id, model, {"tool_calls": [{"index": index, "id": str(item.get("call_id") or ""), "type": "function", "function": {"name": str(item.get("name") or ""), "arguments": ""}}]})
                 finish = "tool_calls"
         elif kind == "response.function_call_arguments.delta" and event.get("delta"):
             index = calls.get(str(event.get("item_id")), len(calls) - 1 if calls else 0)
+            spoke = True
             yield _chunk(completion_id, model, {"tool_calls": [{"index": index, "function": {"arguments": event["delta"]}}]})
         elif kind == "response.completed":
             usage = responses_usage((event.get("response") or {}).get("usage") or {})
@@ -363,6 +379,8 @@ async def responses_events_to_chunks(lines: AsyncIterator[str], *, model: str) -
         elif kind in ("response.failed", "error"):
             err = (event.get("response") or {}).get("error") or event.get("error") or {}
             failed = str(err.get("message") or err or "the backend reported a failure")
+        if not spoke:
+            yield KEEPALIVE
     if failed:
         yield f"data: {json.dumps({'error': {'message': failed, 'type': 'upstream_error'}})}\n\n"
     else:
@@ -471,6 +489,7 @@ __all__ = [
     "codex_usage_view",
     "collect_completion",
     "grok_usage_view",
+    "KEEPALIVE",
     "responses_events_to_chunks",
 ]
 
