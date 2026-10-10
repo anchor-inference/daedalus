@@ -62,7 +62,9 @@ func Start(spec Spec) (*Proc, error) {
 }
 
 // DefaultSignalsForChildren makes the programs the daemon starts from now on begin with the default
-// action for the hangup and the interrupt, whatever the daemon itself inherited.
+// action for the hangup, the interrupt and the broken pipe, whatever the daemon itself inherited, and
+// keeps a broken pipe from ever ending the daemon. The daemon calls it as it starts; Start and
+// exec.run call it again, which costs nothing.
 //
 // A signal ignored when a process starts stays ignored across exec, and a shell does not undo that
 // for its commands: bash leaves a signal that was ignored when it started ignored in everything it
@@ -72,10 +74,19 @@ func Start(spec Spec) (*Proc, error) {
 // runtime keeps an inherited ignoring of exactly these two signals, and resets a signal it catches
 // to the default in a child; so catching them, and dropping what arrives, leaves the daemon as it
 // was and gives every program the defaults back.
+//
+// The broken pipe is caught always. The daemon once ignored it with signal.Ignore, and every program
+// it started inherited that: `tail file | head -c N` printed "tail: error writing 'standard output':
+// Broken pipe" into the output the agent read, which corrupted a file read through base64, and every
+// writer cut short by a reader that had enough (`yes | head`) complained the same way. The daemon
+// still must not die of it: a socket write already returns EPIPE, but a write to a standard output or
+// error whose reader went away makes the runtime raise SIGPIPE and end the process unless something
+// has asked for the signal. Catching it and dropping it gives the daemon the error and the children
+// the default.
 func DefaultSignalsForChildren() {
 	defaultSignals.Do(func() {
-		for _, sig := range []os.Signal{syscall.SIGHUP, syscall.SIGINT} {
-			if signal.Ignored(sig) {
+		for _, sig := range []os.Signal{syscall.SIGHUP, syscall.SIGINT, syscall.SIGPIPE} {
+			if sig == syscall.SIGPIPE || signal.Ignored(sig) {
 				c := make(chan os.Signal, 1)
 				signal.Notify(c, sig)
 				go func() {

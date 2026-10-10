@@ -20,6 +20,7 @@ import (
 	"github.com/ascorblack/daedalus/ptyd/internal/containment"
 	"github.com/ascorblack/daedalus/ptyd/internal/emulator/production"
 	"github.com/ascorblack/daedalus/ptyd/internal/logx"
+	"github.com/ascorblack/daedalus/ptyd/internal/ptyproc"
 	"github.com/ascorblack/daedalus/ptyd/internal/rpc"
 	"github.com/ascorblack/daedalus/ptyd/internal/sandbox"
 	"github.com/ascorblack/daedalus/ptyd/internal/shellint"
@@ -119,8 +120,11 @@ func serve(args []string) error {
 	environ := os.Environ()
 
 	// A terminal's program exiting must never take the daemon with it. SIGHUP reaches a daemon that
-	// was started from a terminal when that terminal closes; SIGPIPE is handled per write.
-	signal.Ignore(syscall.SIGHUP, syscall.SIGPIPE)
+	// was started from a terminal when that terminal closes. SIGPIPE is caught rather than ignored:
+	// an ignored signal stays ignored in every program the daemon starts, and pipelines in its
+	// terminals and in exec.run then failed with "Broken pipe" instead of ending quietly.
+	signal.Ignore(syscall.SIGHUP)
+	ptyproc.DefaultSignalsForChildren()
 
 	ep, err := server.Prepare(cfg.RunDir, cfg.Listen, "ptyd")
 	if err != nil {
