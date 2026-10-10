@@ -5,6 +5,8 @@ import { api } from "./api";
 import { Overlay, useLayer } from "./ui/dialogs";
 import { Icon } from "./icons";
 import { t } from "./i18n";
+import { downloadHref, useBlobUrl } from "./preview";
+import { sourceKey, viewerKind, type HostSource } from "./mediaroute";
 export { mediaCopyText, splitMediaAnswer } from "./mediaformat";
 
 // A clip opened from a chat used to start at the browser's full volume. A tenth is loud enough
@@ -169,20 +171,42 @@ function MediaElement({ sessionId, presentation, item, onOpen }: { sessionId: st
   </figure>;
 }
 
-function Viewer({ sessionId, presentation, start, onClose }: { sessionId: string; presentation: MediaPresentation; start: number; onClose: () => void }) {
-  const [index, setIndex] = useState(start);
+/**
+ * One picture or clip the viewer pages through. ``url`` is an address the element can load as it is;
+ * ``source`` is a file under a session root, fetched the way the files panel fetches it — with the
+ * auth header, so it loads wherever the panel's copy does. ``onPanel`` keeps the files panel one
+ * press away for the file the viewer took over from it.
+ */
+export type ViewerItem = { key: string; kind: "image" | "video"; name: string; filename: string; url?: string; source?: HostSource; download: string; onPanel?: () => void };
+
+/** A still from a session file: the same bytes, and the same shared fetch, as the panel's preview. */
+function SourceStill({ source, name, style }: { source: HostSource; name: string; style: CSSProperties }) {
+  const { url, error } = useBlobUrl(source);
+  if (error) return <span className="media-viewer-error">{name}: {error}</span>;
+  if (!url) return <span className="media-viewer-wait" aria-busy="true" aria-label={t("media.loading")} />;
+  return <img src={url} alt={name} draggable={false} style={style} />;
+}
+
+// A drag down this far, mostly downward, with the picture at its fitted size closes the viewer the
+// way a photo app does; the horizontal swipe keeps its meaning of the next picture.
+const SWIPE_CLOSE = 110;
+const SWIPE_PAGE = 60;
+
+/** The centred viewer: zoom, pan, pinch and swipe for a still, the player for a clip. */
+export function MediaViewer({ items, start, onClose }: { items: ViewerItem[]; start: number; onClose: () => void }) {
+  const [index, setIndex] = useState(Math.min(Math.max(0, start), items.length - 1));
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [pull, setPull] = useState(0);
   const root = useRef<HTMLDivElement>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
-  const drag = useRef<{ x: number; y: number; ox: number; oy: number; distance?: number } | null>(null);
-  const item = presentation.items[index];
+  const drag = useRef<{ x: number; y: number; ox: number; oy: number; distance?: number; pinched?: boolean } | null>(null);
+  const item = items[index];
   const video = item.kind === "video";
-  const name = item.alt || item.filename;
-  const src = source(sessionId, presentation.id, item);
+  const name = item.name;
   useLayer(onClose);
   useEffect(() => { root.current?.focus(); }, []);
-  useEffect(() => { setZoom(1); setOffset({ x: 0, y: 0 }); }, [index]);
+  useEffect(() => { setZoom(1); setOffset({ x: 0, y: 0 }); setPull(0); }, [index]);
   const changeZoom = (next: number) => {
     const bounded = Math.max(1, Math.min(4, next));
     setZoom(bounded);
@@ -192,7 +216,7 @@ function Viewer({ sessionId, presentation, start, onClose }: { sessionId: string
     if ((event.target as HTMLElement).closest("button, a, input")) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    drag.current = { x: event.clientX, y: event.clientY, ox: offset.x, oy: offset.y };
+    if (pointers.current.size === 1) drag.current = { x: event.clientX, y: event.clientY, ox: offset.x, oy: offset.y };
   };
   const move = (event: ReactPointerEvent) => {
     if (!pointers.current.has(event.pointerId)) return;
@@ -201,20 +225,29 @@ function Viewer({ sessionId, presentation, start, onClose }: { sessionId: string
     if (points.length === 2) {
       const distance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
       if (drag.current?.distance) changeZoom(zoom * distance / drag.current.distance);
-      if (drag.current) drag.current.distance = distance;
+      if (drag.current) { drag.current.distance = distance; drag.current.pinched = true; }
+      setPull(0);
     } else if (drag.current && zoom > 1) {
       setOffset({ x: drag.current.ox + event.clientX - drag.current.x, y: drag.current.oy + event.clientY - drag.current.y });
+    } else if (drag.current && !drag.current.pinched) {
+      const dy = event.clientY - drag.current.y;
+      setPull(dy > 0 && dy > Math.abs(event.clientX - drag.current.x) ? dy : 0);
     }
   };
   const up = (event: ReactPointerEvent) => {
     pointers.current.delete(event.pointerId);
     if (pointers.current.size || !drag.current) return;
-    const distance = event.clientX - drag.current.x;
-    if (zoom === 1 && Math.abs(distance) > 60) {
-      if (distance < 0 && index < presentation.items.length - 1) setIndex((value) => value + 1);
-      if (distance > 0 && index > 0) setIndex((value) => value - 1);
-    }
+    const dx = event.clientX - drag.current.x;
+    const dy = event.clientY - drag.current.y;
+    const pinched = drag.current.pinched;
     drag.current = null;
+    setPull(0);
+    if (zoom !== 1 || pinched) return;
+    if (dy > SWIPE_CLOSE && dy > Math.abs(dx)) { onClose(); return; }
+    if (Math.abs(dx) > SWIPE_PAGE && Math.abs(dx) > Math.abs(dy)) {
+      if (dx < 0 && index < items.length - 1) setIndex((value) => value + 1);
+      if (dx > 0 && index > 0) setIndex((value) => value - 1);
+    }
   };
   const wheel = (event: ReactWheelEvent) => { event.preventDefault(); changeZoom(zoom * (event.deltaY < 0 ? 1.15 : 0.87)); };
   const onKey = (event: ReactKeyboardEvent) => {
@@ -226,25 +259,54 @@ function Viewer({ sessionId, presentation, start, onClose }: { sessionId: string
       seekBy(root.current?.querySelector("video") ?? null, event.key === "ArrowRight" ? SEEK_STEP_SECONDS : -SEEK_STEP_SECONDS);
       return;
     }
-    if (event.key === "ArrowRight" && index < presentation.items.length - 1) setIndex((value) => value + 1);
+    if (event.key === "ArrowRight" && index < items.length - 1) setIndex((value) => value + 1);
     if (event.key === "ArrowLeft" && index > 0) setIndex((value) => value - 1);
   };
+  const style: CSSProperties = { transform: `translate(${offset.x}px, ${offset.y + pull}px) scale(${zoom})` };
+  const toPanel = item.onPanel;
   return <Overlay>
-    <div ref={root} className="media-viewer lightbox" tabIndex={-1} role="dialog" aria-modal="true" aria-label={name} onKeyDown={onKey}>
-      <div className={`media-viewer-stage ${video ? "video" : ""}`} onPointerDown={video ? undefined : down} onPointerMove={video ? undefined : move} onPointerUp={video ? undefined : up} onPointerCancel={video ? undefined : up} onWheel={video ? undefined : wheel} onDoubleClick={video ? undefined : () => changeZoom(zoom === 1 ? 2 : 1)}>
-        {video ? <VideoPlayer key={item.id} src={src} /> : <img src={src} alt={name} draggable={false} style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }} />}
+    <div ref={root} className="media-viewer lightbox" tabIndex={-1} role="dialog" aria-modal="true" aria-label={name} onKeyDown={onKey} style={pull ? { background: `rgba(0,0,0,${Math.max(0.35, 1 - pull / 400)})` } : undefined}>
+      <div className={`media-viewer-stage ${video ? "video" : ""}`} style={pull ? { background: "transparent" } : undefined} onPointerDown={video ? undefined : down} onPointerMove={video ? undefined : move} onPointerUp={video ? undefined : up} onPointerCancel={video ? undefined : up} onWheel={video ? undefined : wheel} onDoubleClick={video ? undefined : () => changeZoom(zoom === 1 ? 2 : 1)}>
+        {video
+          ? <VideoPlayer key={item.key} src={item.url ?? item.download} />
+          : item.source ? <SourceStill key={item.key} source={item.source} name={name} style={style} /> : <img src={item.url} alt={name} draggable={false} style={style} />}
       </div>
       <div className="lightbox-top">
         <span className="lightbox-title">{name}</span>
-        <span className="lightbox-count">{index + 1}/{presentation.items.length}</span>
+        {items.length > 1 && <span className="lightbox-count">{index + 1}/{items.length}</span>}
         {!video && zoom !== 1 && <button type="button" onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }} aria-label={t("preview.fit")}><span className="lightbox-zoom">{Math.round(zoom * 100)}%</span></button>}
-        <a href={src} download={item.filename} aria-label={t("common.download")}><Icon name="download" /></a>
+        {toPanel && <button type="button" className="lightbox-panel" onClick={() => { onClose(); toPanel(); }} aria-label={t("media.panel")} title={t("media.panel")}><Icon name="panel" /></button>}
+        <a href={item.download} download={item.filename} target={item.source ? "_blank" : undefined} rel="noreferrer" aria-label={t("common.download")} title={t("common.download")}><Icon name="download" /></a>
         <button type="button" onClick={onClose} aria-label={t("common.close")}><Icon name="close" /></button>
       </div>
       {index > 0 && <button type="button" className="lightbox-edge previous" onClick={() => setIndex((value) => value - 1)} aria-label={t("media.previous")}><Icon name="back" /></button>}
-      {index < presentation.items.length - 1 && <button type="button" className="lightbox-edge next" onClick={() => setIndex((value) => value + 1)} aria-label={t("media.next")}><Icon name="forward" /></button>}
+      {index < items.length - 1 && <button type="button" className="lightbox-edge next" onClick={() => setIndex((value) => value + 1)} aria-label={t("media.next")}><Icon name="forward" /></button>}
     </div>
   </Overlay>;
+}
+
+/** The viewer over session files, each fetched as the files panel fetches it and one press from it. */
+export function FileGallery({ sources, start, onClose, onPanel }: { sources: HostSource[]; start: number; onClose: () => void; onPanel: (src: HostSource) => void }) {
+  const items: ViewerItem[] = sources.map((src) => {
+    const filename = src.path.split("/").pop() || src.path;
+    return {
+      key: sourceKey(src),
+      kind: viewerKind(filename) ?? "image",
+      name: filename,
+      filename,
+      source: src,
+      download: downloadHref(src.base, src.path),
+      onPanel: () => onPanel(src),
+    };
+  });
+  return <MediaViewer items={items} start={start} onClose={onClose} />;
+}
+
+function presentationItems(sessionId: string, presentation: MediaPresentation): ViewerItem[] {
+  return presentation.items.map((item) => {
+    const src = source(sessionId, presentation.id, item);
+    return { key: item.id, kind: item.kind === "video" ? "video" : "image", name: item.alt || item.filename, filename: item.filename, url: src, download: src };
+  });
 }
 
 function albumRatio(items: MediaItem[]): string | undefined {
@@ -274,6 +336,6 @@ export function InlineMedia({ sessionId, presentation }: { sessionId: string; pr
         <button type="button" className="inline-media-nav next" onClick={() => rail.current?.scrollBy({ left: rail.current.clientWidth * .8, behavior: "smooth" })} aria-label={t("media.next")}><Icon name="forward" /></button>
       </>}
     </div>
-    {open !== null && <Viewer sessionId={sessionId} presentation={presentation} start={open} onClose={() => setOpen(null)} />}
+    {open !== null && <MediaViewer items={presentationItems(sessionId, presentation)} start={open} onClose={() => setOpen(null)} />}
   </>;
 }

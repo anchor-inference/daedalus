@@ -6,13 +6,13 @@
 
 import { useState } from "react";
 import { Icon, IconName } from "./icons";
-import { AuthImg, PreviewSource, canPreview, downloadHref, previewKind, sessionBase } from "./preview";
+import { AuthImg, PreviewSource, canPreview, downloadHref, previewKind } from "./preview";
 import type { Artifact } from "./turns";
 import { plural, t } from "./i18n";
 import { bytes } from "./format";
 import { useQuery } from "./store";
 import { filesKey, handleIds, keptBase, type KeptFile } from "./keptfiles";
-import { folderBase } from "./folders";
+import { changedSource, sentSource, viewerKind } from "./mediaroute";
 import { useMedia } from "./shell";
 import { Chevron } from "./ui/components";
 import { BottomSheet, ListRow } from "./ui/phone";
@@ -65,10 +65,13 @@ export type ArtifactCardProps = {
 export function ArtifactCard({ item, src, downloadUrl, onOpen }: ArtifactCardProps) {
   const image = previewKind(item.name) === "image";
   const openable = canPreview(item.name);
+  // A picture or a clip opens in the centred viewer at every size, so its button shows the
+  // full-screen glyph rather than the panel's.
+  const media = viewerKind(item.name) !== null;
   const meta = [item.size, extOf(item.name), t(`turn.artifact.${item.how}`)].filter(Boolean).join(" · ");
   const open = () => (openable ? onOpen(src) : window.open(downloadUrl, "_blank", "noreferrer"));
   return (
-    <div className={`artifact ${image ? "image" : ""}`} data-path={item.path}>
+    <div className={`artifact ${image ? "image" : ""} ${media ? "media" : ""}`} data-path={item.path}>
       <button type="button" className="artifact-main" onClick={open} title={openable ? t("turn.artifact.open") : t("preview.download")}>
         <span className="artifact-glyph" aria-hidden><Icon name={fileIcon(item.name)} size={18} /></span>
         <span className="artifact-text">
@@ -120,12 +123,6 @@ export function KeptFiles({ text, onOpen }: { text: string | null | undefined; o
   );
 }
 
-/** Where a changed file is served from: its folder's address and its path there. */
-function changedSource(sessionId: string, file: ChangedFile): { base: string; path: string } {
-  const base = sessionBase(sessionId);
-  return file.place ? { base: folderBase(base, file.place.folder, ""), path: file.place.rel } : { base, path: file.path };
-}
-
 /**
  * The files a turn produced: the sent ones as cards, three before "+N more", and the changed ones as
  * one line that opens into a list. Nothing is drawn for a turn that touched no file.
@@ -140,8 +137,7 @@ export function TurnFiles({ sessionId, sent, changed, onOpen }: { sessionId: str
       {sent.length > 0 && (
         <div className="artifacts" aria-label={t("turn.artifacts")}>
           {shown.map((file) => {
-            // A sent file is served by the call that sent it, so a path outside the workspace opens too.
-            const src: PreviewSource = { base: `${sessionBase(sessionId)}/sent/${encodeURIComponent(file.callId)}`, path: file.name };
+            const src = sentSource(sessionId, file.callId, file.name);
             const item: Artifact = { callId: file.callId, path: file.path, name: file.name, how: "sent", caption: file.caption, size: file.size };
             return <ArtifactCard key={file.callId} item={item} src={src} downloadUrl={downloadHref(src.base, src.path)} onOpen={onOpen} />;
           })}
