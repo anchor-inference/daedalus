@@ -258,6 +258,20 @@ stale_hours = 6            # a 'doing' task whose session went quiet this long i
 # checkpoint_total_max_gb = 2.0         # 0 = no size bound
 # checkpoint_keep_last = 50
 
+# The disk guard measures every session home and managed project folder under the workspaces root.
+# A workspace past the soft limit (and again at twice it) has its agent asked to clean up and the
+# operator told; free space below either floor tells the operator. Directories named like throwaway
+# that nothing inside changed in for cleanup_after_days are deleted, never one a checkout tracks.
+# [disk]
+# check_minutes = 15
+# idle_recheck_hours = 6                # a small workspace whose owner has not run is measured this seldom
+# workspace_soft_limit_gb = 20.0        # 0 = no per-workspace warning
+# min_free_gb = 20.0
+# min_free_percent = 5.0
+# cleanup_after_days = 7                # 0 = never delete throwaway directories
+# throwaway_patterns = ["scratch*", "_scratch*", "*-scratch", "*_scratch", "tmp", ".tmp*", ".uv-cache", "_uvcache", ".uvcache*", "_uv-cache", ".npm-cache", ".pip-cache"]
+# walk_max_entries = 2000000            # past it a measurement is a lower bound
+
 [scheduler]
 topic_mode = "per_task"
 catch_up_missed = true

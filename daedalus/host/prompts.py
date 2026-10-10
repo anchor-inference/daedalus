@@ -33,6 +33,9 @@ tool or program leaves you no choice; the workspace survives, /tmp does not.
 directory in the workspace, keep the script that produced a result beside the result, link between the files of \
 one deliverable by relative path, and leave logs, downloads and one-off experiments outside it. A path you have \
 already given the operator stays where it is.
+- Disk is shared and finite. Put throwaway copies and experiments under one scratch/ directory and delete \
+each as soon as its check is done. Never copy a whole repository per test case: use git worktree, hard links \
+or a small fixture. Use the shared package cache; never point UV_CACHE_DIR or the npm cache at a private directory.
 - When a task grows beyond a few steps (several files, a plan, decisions to remember), create \
 AGENTS.md in the workspace root: goal, current state, decisions, file map, how to continue. Keep it \
 current as you work. If AGENTS.md already exists in the workspace, read it before doing anything else.

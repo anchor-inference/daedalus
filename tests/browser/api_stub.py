@@ -454,6 +454,56 @@ def setting_notice_frame(kind: str, outcome: str, detail: str, page: str, key: s
     return f"event: setting_notice\ndata: {json.dumps(payload)}\n\n"
 
 
+def _disk_entry(path: str, size: int, files: int, **over: object) -> dict[str, object]:
+    return {"path": path, "bytes": size, "files": files, "newest": "2026-10-09T08:00:00Z", "throwaway": False,
+            "tracked": False, "protected": False, "children": [], **over}
+
+
+def disk_detail() -> dict[str, object]:
+    """A workspace of 23 GB over a 20 GB limit: 18 GB of it throwaway, the rest work and bookkeeping."""
+    return {
+        "limit_bytes": 20 * GIB, "free_bytes": 41 * GIB, "total_bytes": 230 * GIB, "low_disk": False,
+        "workspaces": [{
+            "name": "ws-bakery", "label": "bakery", "bytes": 23 * GIB, "truncated": False, "over": 1,
+            "entries": [
+                _disk_entry("_scratch", 15 * GIB, 412000, throwaway=True, children=[
+                    _disk_entry("_scratch/repo-copy-1", 5 * GIB, 140000), _disk_entry("_scratch/repo-copy-2", 5 * GIB, 140000)]),
+                _disk_entry(".uv-cache", 3 * GIB, 18000, throwaway=True),
+                _disk_entry("src", 4 * GIB, 900, tracked=True),
+                _disk_entry(".checkpoints", GIB, 40, protected=True),
+            ],
+        }],
+        "outside": [],
+    }
+
+
+def disk_overview() -> dict[str, object]:
+    return {"free_bytes": 41 * GIB, "total_bytes": 230 * GIB, "low_disk": False, "limit_bytes": 20 * GIB,
+            "checked_at": "2026-10-10T08:00:00Z",
+            "workspaces": [{"name": "ws-bakery", "bytes": 23 * GIB, "truncated": False, "measured_at": "2026-10-10T08:00:00Z",
+                            "over": 1, "owner": {"kind": "project", "id": "p1", "title": "Bakery"}}]}
+
+
+def disk_cleanup(body: object) -> dict[str, object]:
+    """Removes what was asked except a protected path, and says why it kept that."""
+    sizes = {entry["path"]: entry for entry in disk_detail()["workspaces"][0]["entries"]}  # type: ignore[index]
+    paths = list(body.get("paths", [])) if isinstance(body, dict) else []
+    tracked_ok = bool(body.get("include_tracked")) if isinstance(body, dict) else False
+    freed, removed, refused = 0, [], []
+    for path in paths:
+        entry = sizes.get(path)
+        if entry is None:
+            refused.append({"path": path, "reason": "missing"})
+        elif entry["protected"]:
+            refused.append({"path": path, "reason": "protected"})
+        elif entry["tracked"] and not tracked_ok:
+            refused.append({"path": path, "reason": "tracked"})
+        else:
+            freed += int(entry["bytes"])  # type: ignore[call-overload]
+            removed.append(path)
+    return {"freed_bytes": freed, "removed": removed, "refused": refused, "bytes": 23 * GIB - freed}
+
+
 def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str, str | bytes] | None:
     """The answer every harness gives the same way: ``(status, content type, body)``, or ``None``.
 
@@ -598,6 +648,12 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
                                                       "state": "disabled", "limits": None,
                                                       "min_free_disk_bytes": 0,
                                                       "disk_quota_supported": False})
+    if path == "/api/disk" and method.upper() == "GET":
+        return 200, "application/json", json.dumps(disk_overview())
+    if method.upper() == "GET" and len(parts) == 5 and parts[2] == "disk" and parts[3] in ("session", "project"):
+        return 200, "application/json", json.dumps(disk_detail())
+    if method.upper() == "POST" and path == "/api/disk/cleanup":
+        return 200, "application/json", json.dumps(disk_cleanup(body))
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "usage":
         # A project nobody invented spend for spent nothing; a harness with a team answers it itself.
         nothing = {w: {"usd": 0.0, "tokens": 0, "unpriced": 0} for w in ("today", "week", "all")}

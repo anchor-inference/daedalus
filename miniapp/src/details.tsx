@@ -14,6 +14,7 @@ import { confirmAsync, errorText, fmtTok } from "./ui";
 import { plural, t } from "./i18n";
 import { SessionToolGroups } from "./toolgroupsview";
 import { HostMark } from "./runon";
+import { DiskUsage } from "./diskusage";
 
 export type DetailsActions = {
   rename: (title: string) => void;
@@ -52,8 +53,10 @@ export type SessionDetailsProps = {
   focus?: string | null;
 };
 
-export function Section({ ids, id, label, children, className, aside }: { ids: string; id: string; label: string; children: React.ReactNode; className?: string; aside?: React.ReactNode }) {
-  const [open, setOpen] = useState(() => readLayout(`details.${id}`) !== "closed");
+/** `closed`: a section that starts shut until the operator opens it once (then the choice is kept);
+ *  for one whose content costs a request, which only an opened section should make. */
+export function Section({ ids, id, label, children, className, aside, closed }: { ids: string; id: string; label: string; children: React.ReactNode; className?: string; aside?: React.ReactNode; closed?: boolean }) {
+  const [open, setOpen] = useState(() => (readLayout(`details.${id}`) ?? (closed ? "closed" : "open")) !== "closed");
   return (
     <details className={`dt-section ${className ?? ""}`} id={`${ids}-info-${id}`} open={open} onToggle={(e) => { const next = e.currentTarget.open; setOpen(next); writeLayout(`details.${id}`, next ? "open" : "closed"); }}>
       <summary className="dt-label" onClick={(e) => {
@@ -198,6 +201,10 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, modes,
             <button className="linkbtn" onClick={on.move}>{t("session.project.move")}</button>
           </div>
         )}
+      </Section>}
+
+      {role !== "orchestrator" && <Section ids={ids} id="disk" label={t("disk.title")} closed>
+        <DiskUsage kind="session" id={id} toast={toast} />
       </Section>}
 
       {provider && <ProviderUsageCard ids={ids} provider={provider} usage={providerUsage} />}
