@@ -19,7 +19,8 @@ import { KeptFiles, TurnFiles } from "../artifact";
 import { placeOf, turnFiles } from "../turnfiles";
 import { useReveal } from "../reveal";
 import { withoutAttachedList } from "../keptfiles";
-import { InlineMedia, mediaCopyText, splitMediaAnswer } from "../media";
+import { FileGallery, InlineMedia, mediaCopyText, splitMediaAnswer } from "../media";
+import { conversationMedia, galleryFor, toolSource, viewerSource, type HostSource } from "../mediaroute";
 import { Answer, Composer, ComposerHandle } from "../composerbox";
 import { Approval, QueuedMessage, pendingApproval, queuedAfter, readQueued } from "../composer";
 import { ModelChoice } from "../modelselect";
@@ -210,6 +211,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const opened = useRef<OpenedLine | null>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [preview, setPreview] = useState<PreviewSource | null>(null);
+  const [gallery, setGallery] = useState<{ items: HostSource[]; index: number } | null>(null);
   const [filesGeneration, setFilesGeneration] = useState(0);
   const [receipt, setReceipt] = useState<string | null>(null);
   const [dragging, setDragging] = useState(0);
@@ -1293,6 +1295,23 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     [panel.openFile],
   );
 
+  // What the conversation opens: a picture or a clip in the centred viewer, paging through the
+  // conversation's other media, and everything else where openPreview sends it. The turns are read
+  // through a ref so the context, and with it every drawn turn, does not change with each new step.
+  const turnsNow = useRef<Turn[]>([]);
+  turnsNow.current = turns;
+  const placesNow = useRef({ workspace: "", folders: NO_FOLDERS });
+  placesNow.current = { workspace: detail?.workspace ?? "", folders: detail?.folders ?? NO_FOLDERS };
+  const openFromChat = useCallback(
+    (src: PreviewSource) => {
+      const media = viewerSource(src);
+      if (!media) return openPreview(src);
+      const { workspace, folders } = placesNow.current;
+      setGallery(galleryFor(conversationMedia(turnsNow.current, id, workspace, folders), media));
+    },
+    [id, openPreview],
+  );
+
   // Ctrl/⌘ . toggles the panel, with Shift it covers the chat. The pane the URL names owns the keys.
   useEffect(() => {
     if (phone || pane === "right") return;
@@ -1338,12 +1357,12 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       id,
       workspace: detail?.workspace ?? "",
       folders: detail?.folders ?? NO_FOLDERS,
-      preview: openPreview,
+      preview: openFromChat,
       openJobs: () => panel.open("jobs"),
       toast,
       link,
     }),
-    [id, detail?.workspace, detail?.folders, openPreview, panel.open, toast, link],
+    [id, detail?.workspace, detail?.folders, openFromChat, panel.open, toast, link],
   );
 
   // What the answer cited, clicked: a file opens at the lines it named, a Verify receipt opens as a
@@ -1359,12 +1378,12 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         return;
       }
       const rel = workspaceRelative(cited.path, workspace);
-      if (rel) openPreview({ base: sessionBase(id), path: rel, lines: cited.lines });
+      if (rel) openFromChat({ base: sessionBase(id), path: rel, lines: cited.lines });
       else toast(t("session.outside", { path: cited.path }));
     };
     document.addEventListener(EVIDENCE_EVENT, on);
     return () => document.removeEventListener(EVIDENCE_EVENT, on);
-  }, [id, detail?.workspace, toast, openPreview]);
+  }, [id, detail?.workspace, toast, openPreview, openFromChat]);
   const staffId = focus && detail?.staff ? detail.staff.id : null;
   const hasDetails = panelTabs.includes("details");
   const focusPlaceholder = placeholder ?? (orchestrating ? t("focus.composer") : staffName ? t("focus.composer.staff", { name: staffName }) : undefined);
@@ -1754,6 +1773,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       {sharing && <ShareSheet sessionId={id} share={detail?.share} onClose={() => setSharing(false)} onChanged={(share) => setDetail((current) => (current ? { ...current, share } : current))} toast={toast} />}
 
       {preview && <FilePreview src={preview} onClose={() => setPreview(null)} />}
+
+      {gallery && <FileGallery sources={gallery.items} start={gallery.index} onClose={() => setGallery(null)} onPanel={openPreview} />}
 
       {receipt && <ReceiptDialog sessionId={id} receipt={receipt} onClose={() => setReceipt(null)} />}
 
@@ -2566,17 +2587,17 @@ function ThoughtBlock({ text }: { text: string }) {
 const FILE_TOOLS = ["Read", "Write", "Edit", "ImageView", "SendFile"];
 
 function ToolRow({ item, nested }: { item: ToolItem; nested?: boolean }) {
-  const { id: sessionId, workspace, preview, openJobs } = useContext(SessionContext);
+  const { id: sessionId, workspace, folders, preview, openJobs } = useContext(SessionContext);
   const [open, setOpen] = useDisclosed(`${sessionId}:tool:${item.id}`, false);
   const step = useFocusChat()?.orchestrator ? stepDescription(item) : null;
   const d = step ?? describe(item, workspace);
   const expanded = open || (item.running && item.name === "Exec");
   // The file a step names is the evidence: it opens where the answer's citations open.
-  const path = FILE_TOOLS.includes(item.name) && typeof item.args.path === "string" ? workspaceRelative(item.args.path, workspace) : null;
+  const path = FILE_TOOLS.includes(item.name) ? toolSource(item, sessionId, workspace, folders) : null;
   const openFile = (e: React.MouseEvent) => {
     if (!path) return;
     e.stopPropagation();
-    preview({ base: sessionBase(sessionId), path });
+    preview(path);
   };
   return (
     <div className={`act-wrap ${nested ? "nested" : ""}`}>
@@ -2705,14 +2726,12 @@ function workspaceRelative(path: string, workspace: string): string | null {
   return null;
 }
 
-/** The image an ImageView looked at, or the file a SendFile handed over: shown under the step, opened in the preview. */
+/** The image an ImageView looked at: shown under the step, opened in the centred viewer. */
 function ToolAttachment({ item }: { item: ToolItem }) {
-  const { id, workspace, preview } = useContext(SessionContext);
-  const path = typeof item.args.path === "string" ? item.args.path : "";
-  const rel = workspaceRelative(path, workspace);
-  if (!rel || !id) return null;
-  const src: PreviewSource = { base: sessionBase(id), path: rel };
-  const name = rel.split("/").pop() ?? rel;
+  const { id, workspace, folders, preview } = useContext(SessionContext);
+  const src = id ? toolSource(item, id, workspace, folders) : null;
+  if (!src) return null;
+  const name = src.path.split("/").pop() ?? src.path;
   if (previewKind(name) === "image") {
     return (
       <div className="tool-attachment">
