@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFS, FONT_CATALOG, THEMES, appearanceTokens, contrast, fontUrlAllowed, googleStylesheet, isThemeId, readPrefs, resolvedTheme, themeById } from "./appearance";
+import { DEFAULT_PREFS, FONT_CATALOG, THEMES, appearanceTokens, contrast, fontUrlAllowed, googleStylesheet, isThemeId, readPrefs, resolvedTheme, themeById, usualProse } from "./appearance";
 
 const dark = { scheme: "dark" as const, prefersDark: true };
 const light = { scheme: "light" as const, prefersDark: false };
@@ -59,6 +59,32 @@ describe("themes", () => {
     expect(prefs.theme).toBe("claude");
     expect(prefs.follow).toBe(false);
     expect(prefs.colors.bg).toBeUndefined();
+  });
+
+  it("sets answer text to any whole size from 12 to 22 px, independent of the interface step", () => {
+    for (const size of [12, 17, 22]) {
+      expect(appearanceTokens({ ...DEFAULT_PREFS, prose: size }, dark)["--fs-prose"]).toBe(`${size}px`);
+      expect(appearanceTokens({ ...DEFAULT_PREFS, prose: size, scale: "xl" }, dark)["--fs-prose"]).toBe(`${size}px`);
+    }
+    expect(appearanceTokens(DEFAULT_PREFS, dark)["--fs-prose"]).toBeUndefined();
+    expect(usualProse("md", false)).toBe(15);
+    expect(usualProse("md", true)).toBe(16);
+    expect(usualProse("xl", false)).toBe(17.7);
+  });
+
+  it("carries the old answer-text choices over to pixel sizes", () => {
+    const kept = new Map<string, string>();
+    vi.stubGlobal("localStorage", { getItem: (key: string) => kept.get(key) ?? null, setItem: (key: string, value: string) => void kept.set(key, value), removeItem: (key: string) => void kept.delete(key) });
+    const read = (prose: unknown) => {
+      localStorage.setItem("daedalus.appearance", JSON.stringify({ prose }));
+      return readPrefs().prose;
+    };
+    expect(read("17")).toBe(17);
+    expect(read("19")).toBe(19);
+    expect(read("auto")).toBeNull();
+    expect(read(13)).toBe(13);
+    expect(read(40)).toBeNull();
+    expect(read(undefined)).toBeNull();
   });
 
   afterEach(() => vi.unstubAllGlobals());

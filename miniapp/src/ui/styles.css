@@ -1920,6 +1920,10 @@ h1.settings-title { margin: 0 0 16px; font-size: 28px; font-weight: 650; letter-
 .settings-num { display: inline-flex; align-items: center; gap: 8px; }
 .settings-num input.field { width: 104px; margin: 0; padding: 6px 10px; text-align: right; font-variant-numeric: tabular-nums; }
 .settings-num input.field[aria-invalid="true"] { border-color: var(--bad); }
+.prose-stepper { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; min-width: 0; }
+.prose-stepper-ctl { display: inline-flex; align-items: center; gap: 6px; }
+.prose-stepper-value { min-width: 84px; text-align: center; font-variant-numeric: tabular-nums; color: var(--fg); }
+.prose-stepper-preview { margin: 0; max-width: 100%; color: var(--fg-2); font-family: var(--font-prose, var(--font)); line-height: var(--lh-prose); text-align: right; }
 .settings-unit { min-width: 64px; color: var(--fg-2); font-size: var(--fs-13); white-space: nowrap; }
 .settings-row-ctl input.field:not([type="number"]) { margin: 0; }
 /* A short text value in the lane numbers use, ending where their fields end (before the units' slot). */

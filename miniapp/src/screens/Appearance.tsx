@@ -2,7 +2,7 @@ import { usePetModel, usePetPreference } from "../ui/pet";
 // Appearance is this browser's look: the named themes, then the few adjustments that are not a new theme.
 
 import { useState } from "react";
-import { FONT_CATALOG, FONT_ROLES, FontRole, THEMES, ThemeId, fontUrlAllowed, readPrefs, resolvedTheme, resetColors, updatePrefs, type ColorKey, type Column, type Leading, type Prefs, type ProseStep, type Radius, type Scale } from "../appearance";
+import { FONT_CATALOG, FONT_ROLES, PROSE_MAX, PROSE_MIN, usualProse, FontRole, THEMES, ThemeId, fontUrlAllowed, readPrefs, resolvedTheme, resetColors, updatePrefs, type ColorKey, type Column, type Leading, type Prefs, type Radius, type Scale } from "../appearance";
 import { t } from "../i18n";
 import { Dropdown, Segmented, Switch } from "../ui/index";
 import { Row } from "../settingsrow";
@@ -20,6 +20,26 @@ function familyOf(prefs: Prefs, role: FontRole): string {
 
 function urlOf(prefs: Prefs, role: FontRole): string {
   return role === "ui" ? prefs.fontUiUrl : role === "prose" ? prefs.fontProseUrl : prefs.fontCodeUrl;
+}
+
+/** Answer text, one pixel at a time. The number shown is always the size drawn, so "usual" shows what
+ *  the current interface step makes of it; the reset appears only while a size is pinned. */
+function ProseStepper({ prefs, update }: { prefs: Prefs; update: (patch: Partial<Prefs>) => void }) {
+  const phone = window.matchMedia?.("(max-width: 1023px)")?.matches ?? false;
+  const usual = Math.round(usualProse(prefs.scale, phone));
+  const size = prefs.prose ?? usual;
+  const set = (next: number) => update({ prose: Math.min(PROSE_MAX, Math.max(PROSE_MIN, next)) });
+  return (
+    <div className="prose-stepper" data-pinned={prefs.prose !== null ? "true" : "false"}>
+      <div className="prose-stepper-ctl">
+        <button type="button" className="btn small" aria-label={t("theme.prose.smaller")} disabled={size <= PROSE_MIN} onClick={() => set(size - 1)}>{"\u2212"}</button>
+        <output className="prose-stepper-value" aria-live="polite">{t("theme.prose.px", { n: size })}{prefs.prose === null ? ` \u00b7 ${t("theme.prose.auto")}` : ""}</output>
+        <button type="button" className="btn small" aria-label={t("theme.prose.larger")} disabled={size >= PROSE_MAX} onClick={() => set(size + 1)}>+</button>
+        <button type="button" className="btn small" disabled={prefs.prose === null} onClick={() => update({ prose: null })}>{t("theme.prose.reset")}</button>
+      </div>
+      <p className="prose-stepper-preview" style={{ fontSize: `${size}px` }}>{t("theme.prose.preview")}</p>
+    </div>
+  );
 }
 
 export function AppearancePanel() {
@@ -157,7 +177,7 @@ export function AppearancePanel() {
       <p className="sub">{t("theme.size.lead")}</p>
       <div className="card">
         <Row title={t("theme.size.step")}><Segmented value={prefs.scale} onChange={(scale: Scale) => update({ scale })} options={(["sm", "md", "lg", "xl"] as const).map((id) => ({ id, label: t(`theme.scale.${id}`) }))} /></Row>
-        <Row title={t("theme.prose")} desc={t("theme.prose.sub")}><Segmented value={prefs.prose} onChange={(prose: ProseStep) => update({ prose })} options={([{ id: "auto" as const, label: t("theme.prose.auto") }, { id: "17" as const, label: "17" }, { id: "19" as const, label: "19" }])} /></Row>
+        <Row title={t("theme.prose")} desc={t("theme.prose.sub")} stack><ProseStepper prefs={prefs} update={update} /></Row>
         <Row title={t("theme.leading")}><Segmented value={prefs.leading} onChange={(leading: Leading) => update({ leading })} options={(["tight", "normal", "open"] as const).map((id) => ({ id, label: t(`theme.leading.${id}`) }))} /></Row>
         <Row title={t("theme.column")} desc={t("theme.column.sub")}><Segmented value={prefs.column} onChange={(column: Column) => update({ column })} options={(["narrow", "normal", "wide"] as const).map((id) => ({ id, label: t(`theme.column.${id}`) }))} /></Row>
       </div>
