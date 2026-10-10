@@ -211,6 +211,10 @@ def no_credential(kind: str, name: str) -> str:
 LOGIN_WIDGET_MAX_AGE = 24 * 3600
 SESSION_COOKIE = "daedalus_session"
 SESSION_TTL = 30 * 24 * 3600
+SESSION_PAGE = 200
+"""How many sessions the listing's first page carries. The sidebar and the phone's drawer draw what
+it holds, and at thirty most titles sat behind "More": a title costs a row, the column scrolls and
+is windowed, so two hundred are shown at once and the cursor walks on past them."""
 VOICE_AUDIO_MAX = 25 << 20
 """One spoken utterance, not a recording session: anything larger is a mistake, not speech."""
 VOICE_NOTE_MAX = 50 << 20
@@ -2005,7 +2009,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     @api.get("/api/sessions")
     async def list_sessions(
         cursor: str = Query(default="", max_length=512),
-        limit: int = Query(default=30, ge=1, le=100),
+        limit: int = Query(default=SESSION_PAGE, ge=1, le=500),
         view: Literal["all", "attention", "working", "archive"] = "all",
         _: dict[str, Any] = Depends(auth),
     ) -> dict[str, Any]:
@@ -2015,7 +2019,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         ids: list[str] | None = None,
         *,
         cursor: str = "",
-        limit: int = 30,
+        limit: int = SESSION_PAGE,
         view: Literal["all", "attention", "working", "archive"] = "all",
     ) -> dict[str, Any]:
         if ids is not None:

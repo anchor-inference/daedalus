@@ -22,6 +22,8 @@ export type SidebarProps = {
   projects: Project[];
   project: string;
   onProjects: () => void;
+  /** Lifts the project lens: every project's chats again. */
+  onClearProject: () => void;
   onOpen: (id: string) => void;
   toast: (t: string) => void;
 };
@@ -48,7 +50,7 @@ export function Sidebar(p: SidebarProps) {
       </div>
       <div className="sidebar-body">
         <Suspense fallback={null}>
-          <SessionsScreen onOpen={p.onOpen} toast={p.toast} current={p.session ?? undefined} project={p.project} projects={p.projects} onProjects={p.onProjects} />
+          <SessionsScreen onOpen={p.onOpen} toast={p.toast} current={p.session ?? undefined} project={p.project} projects={p.projects} onProjects={p.onProjects} onClearProject={p.onClearProject} />
         </Suspense>
       </div>
     </nav>

@@ -125,6 +125,11 @@ class Stub(BaseHTTPRequestHandler):
             return Stub.listing
         if path == "/api/projects":
             return [{**p, "sessions": []} for p in Stub.listing["projects"]]
+        if path == "/api/settings":
+            return {"presets": {}, "model": {}}
+        if path == "/api/imports/harnesses":
+            # No other program's sessions on this machine: the start screen draws no import card.
+            return {"harnesses": []}
         if path in GATES:
             return GATES[path]
         Stub.unhandled.record(path)
@@ -192,8 +197,8 @@ READ = """
   longFrames: window.__perf.longFrames,
   worstFrame: Math.round(window.__perf.worstFrame),
   nodes: document.getElementsByTagName("*").length,
-  folders: document.querySelectorAll(".folder").length,
-  rows: document.querySelectorAll(".erow").length,
+  folders: document.querySelectorAll("[data-project]").length,
+  rows: document.querySelectorAll("[data-session]").length,
   heap: Math.round((performance.memory ? performance.memory.usedJSHeapSize : 0) / 1048576),
 })
 """
@@ -212,7 +217,9 @@ def run_case(browser, port: int, *, expanded: bool, seconds: float, rate: float,
     cdp.send("Emulation.setCPUThrottlingRate", {"rate": rate})
     t0 = time.time()
     page.goto(f"http://127.0.0.1:{port}/app/agents", wait_until="commit")
-    page.wait_for_selector(".folder", timeout=120_000)
+    # The first project or chat row of the desktop's column or the phone's list; the list's old
+    # ".folder" class is gone, and waiting on it timed every run out.
+    page.wait_for_selector("[data-project], [data-session]", timeout=120_000)
     open_ms = round((time.time() - t0) * 1000)
     with Stub.lock:
         open_bytes = sum(b for _, b in Stub.served)

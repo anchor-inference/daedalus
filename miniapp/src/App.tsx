@@ -177,6 +177,7 @@ export function App() {
     rememberProject(id);
     setProject(id);
   }, []);
+  const clearProject = useCallback(() => pickProject(""), [pickProject]);
   // The sidebar: the current mode's column beside the rail, or folded away with the rail alone left.
   const [folded, flipSidebar] = useSidebar(readSidebar, rememberSidebar);
   const [sidebarWidth, setSidebarWidth] = usePaneWidth("sidebar", SIDEBAR_W, SIDEBAR_W_MIN, SIDEBAR_W_MAX);
@@ -510,7 +511,10 @@ export function App() {
       { id: "new-project", label: t(mode === "orchestration" ? "np.orch.title" : "np.title"), icon: "plus", run: () => openNewProject() },
       { id: "import-session", label: t("imp.palette"), hint: t("imp.entry.hint"), icon: "download", run: () => openImport() },
       { id: "projects", label: t("shell.projects"), hint: agentProjects.find((p) => p.id === project)?.name ?? t("shell.projects.all"), icon: "folder", run: () => { if (wide) navigate(PROJECTS_PAGE); else { navigate(pathFor("agents")); setSwitching(true); } } },
-      ...agentProjects.map((p) => ({ id: `p-${p.id}`, label: t("shell.search.workin", { name: p.name }), hint: projectPath(p), icon: "folder" as const, run: () => { pickProject(p.id); navigate(pathFor("agents")); } })),
+      // "Work in {name}" read like opening the project, and quietly narrowed the column instead; the
+      // items now say what they do, and the one that lifts a lens is offered while one is on.
+      ...(project ? [{ id: "show-all-projects", label: t("shell.search.showall"), hint: agentProjects.find((p) => p.id === project)?.name, icon: "grid" as const, run: clearProject }] : []),
+      ...agentProjects.map((p) => ({ id: `p-${p.id}`, label: t("projects.lens", { name: p.name }), hint: projectPath(p), icon: "folder" as const, run: () => { pickProject(p.id); navigate(pathFor("agents")); } })),
       ...projectList.filter((p) => !p.system && !p.settings.ephemeral && !p.settings.archived).map((p) => ({ id: `open-${p.id}`, label: t("focus.palette", { name: p.name }), icon: "conductor" as const, run: () => navigate(projectHome(p.id)) })),
       ...projectList.filter((p) => !p.system && !p.settings.ephemeral && !p.settings.archived).map((p) => ({ id: `team-${p.id}`, label: t("shell.search.team", { name: p.name }), icon: "bots" as const, run: () => navigate(projectPagePath(p.id, "team")) })),
       ...projectList.filter((p) => !p.system && !p.settings.ephemeral && !p.settings.archived).map((p) => ({ id: `board-${p.id}`, label: t("shell.search.board", { name: p.name }), icon: "board" as const, run: () => navigate(projectPagePath(p.id, "board")) })),
@@ -673,6 +677,7 @@ export function App() {
           projects={agentProjects}
           project={project}
           onProjects={openProjects}
+          onClearProject={clearProject}
           onOpen={open}
           toast={showToast}
         />
@@ -689,8 +694,11 @@ export function App() {
       </div>
       {palette && <Palette items={paletteItems()} onClose={() => setPalette(false)} />}
       {switching && <ProjectSwitcher projects={agentProjects} archived={archivedProjects} current={project} onPick={pickProject} onClose={() => setSwitching(false)} toast={showToast} />}
-      {/* A project just made has no chat yet: its folder opens in the sidebar so it is seen at once. */}
-      <NewProjectHost mode={mode === "orchestration" ? "orchestration" : "agents"} toast={showToast} onCreated={(created) => { rememberFolder(created.id, true); pickProject(created.id); }} />
+      {/* A project just made has no chat yet: its folder opens in the sidebar so it is seen at once.
+          It used to become the lens as well, which narrowed the whole column to one empty project and
+          left the operator thinking every other chat was gone. Now it only opens its folder, and a
+          lens on some other project is lifted so the new folder is not hidden behind it. */}
+      <NewProjectHost mode={mode === "orchestration" ? "orchestration" : "agents"} toast={showToast} onCreated={(created) => { rememberFolder(created.id, true); if (project && project !== created.id) clearProject(); }} />
       <ImportHost toast={showToast} />
       {projectBar?.bar && focusProject && (
         <ErrorBoundary key={`tabs-${focusProject}`}>
@@ -699,7 +707,7 @@ export function App() {
           </Suspense>
         </ErrorBoundary>
       )}
-      {!wide && <AppDrawer mode={mode} counts={counts} waiting={waiting} selfdev={selfdev} projects={agentProjects} onPickProject={pickProject} onProjects={() => setSwitching(true)} />}
+      {!wide && <AppDrawer mode={mode} counts={counts} waiting={waiting} selfdev={selfdev} projects={agentProjects} onProjects={() => setSwitching(true)} />}
       {picking && sessionId && <SessionPicker exclude={sessionId} onPick={(id) => { navigate(sessionPath(sessionId, id)); setPicking(false); }} onClose={() => setPicking(false)} />}
       <NotificationToasts />
       <PetHost needsReply={notifications.needs_you > 0} activity={route.screen} />

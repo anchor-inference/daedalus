@@ -154,6 +154,30 @@ describe("the sidebar", () => {
     expect(importer.open).toHaveBeenCalledWith();
   });
 
+  it("says in words when a project lens narrows the column, and lifts it in one click or with Escape", async () => {
+    // The operator once read a column narrowed to one project as every other chat being gone: the
+    // lens was a grey chip naming the project, with nothing to say the list was filtered.
+    const onClearProject = vi.fn();
+    const home = listing.data.projects[0];
+    await act(async () => root.render(<SessionsScreen onOpen={onOpen} toast={toast} onProjects={onProjects} project="home" projects={[home as never]} onClearProject={onClearProject} />));
+    const strip = host.querySelector<HTMLElement>(".sb-lens")!;
+    expect(strip.textContent).toContain("2 chats in Smart home");
+    expect(strip.textContent).toContain("Show all");
+    expect(rowsOf("esp")).toEqual([]);
+    await act(async () => strip.querySelector<HTMLButtonElement>(".sb-lens-clear")!.click());
+    expect(onClearProject).toHaveBeenCalledTimes(1);
+    await key(projectRow("home"), { key: "Escape" });
+    expect(onClearProject).toHaveBeenCalledTimes(2);
+    // The search keeps its own Escape.
+    await key(host.querySelector("input[type=search]")!, { key: "Escape" });
+    expect(onClearProject).toHaveBeenCalledTimes(2);
+  });
+
+  it("draws no lens strip while every project is listed", async () => {
+    await render();
+    expect(host.querySelector(".sb-lens")).toBeNull();
+  });
+
   it("is driven from the keyboard: slash, arrows, F2 and Delete", async () => {
     await render();
     await key(document.body, { key: "/" });

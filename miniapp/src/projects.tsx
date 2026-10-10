@@ -494,8 +494,11 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
       <ProjectBudget projectId={project.id} write={writes.write} canWrite={writes.ready} confirmed={writes.confirmed} />
       <ProjectResources projectId={project.id} write={writes.write} canWrite={writes.ready} />
       <ProjectExtensions projectId={project.id} toast={toast} />
+      {/* Restoring a project opens its team page and nothing more. It used to write the project lens
+          into storage too, behind the shell's back, so the column narrowed only at the next load,
+          with nothing to connect it to the restore. */}
       <ProjectArchive project={project} toast={toast} onChanged={afterChange} readFailed={!!projects.error}
-        onOpenRestored={(id) => { rememberProject(id); onClose(); navigate(projectPagePath(id, "team")); }} />
+        onOpenRestored={(id) => { onClose(); navigate(projectPagePath(id, "team")); }} />
       {/* Under normal or full autonomy the coordinator holds a standing project grant; the per-task
           permissions only exist for a project that asks first. */}
       {project.settings.orchestrator?.enabled && project.settings.orchestrator.autonomy !== "ask"
