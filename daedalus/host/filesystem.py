@@ -144,7 +144,11 @@ class ShellFS:
         data = bytearray()
         while len(data) < size:
             wanted = min(READ_CHUNK_BYTES, size - len(data))
-            outcome = await self._run(f"tail -c +{len(data) + 1} {quoted} | head -c {wanted} | base64")
+            # ``tail`` is silenced on purpose: ``head`` closes the pipe after its piece, and where SIGPIPE
+            # is ignored (a systemd unit's default, and the host daemon runs as one) ``tail`` does not die
+            # quietly but prints "Broken pipe" into the stream, which ``exec 2>&1`` merges into the base64,
+            # so every file larger than one piece failed to read at byte 0.
+            outcome = await self._run(f"tail -c +{len(data) + 1} {quoted} 2>/dev/null | head -c {wanted} | base64")
             try:
                 piece = base64.b64decode("".join(outcome.output.split()), validate=True)
             except ValueError:

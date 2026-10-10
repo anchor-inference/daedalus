@@ -10,6 +10,10 @@ Description=Daedalus host terminals
 # PATH, and a CLI installed under ~/.local/bin would not be found by the programs the daemon runs.
 EnvironmentFile=-%h/.config/daedalus/ptyd.env
 ExecStart=%h/.local/lib/daedalus/ptyd serve --env host --run-dir "@RUN_DIR@" --state-dir %h/.local/state/daedalus-ptyd
+# systemd ignores SIGPIPE in a unit's processes by default, and every program the daemon runs inherits
+# that: a pipeline cut short by ``head`` then printed "Broken pipe" into the agent's output and broke the
+# base64 file reads. A shell in a terminal has it at the default, so the daemon's programs should too.
+IgnoreSIGPIPE=no
 Restart=on-failure
 RestartSec=2
 # KillMode stays control-group: ptyd owns its PTYs, and when it stops they stop.

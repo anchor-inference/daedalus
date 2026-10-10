@@ -54,6 +54,31 @@ async def test_the_shell_reads_and_writes_bytes_whatever_they_are(host_chat: Any
     assert (folder / "out/blob.bin").read_bytes() == PNG
 
 
+async def test_a_large_file_reads_where_sigpipe_is_ignored(host_chat: Any) -> None:
+    """The host daemon runs as a systemd unit, which ignores SIGPIPE: ``tail`` cut off by ``head``
+    then printed "Broken pipe" into the base64 and every file past one piece failed at byte 0."""
+    _, state, _, host = host_chat
+    host.ignore_sigpipe = True
+    assert await state.services.fs.read_bytes(state.services.resolve("chk1.png"), limit=len(PNG)) == PNG
+
+
+async def test_send_file_without_a_chat_reads_nothing_and_says_where_the_file_is(host_chat: Any) -> None:
+    from daedalus.host.services import NO_CHAT_BOUND
+    from daedalus.tools.chat import send_file
+
+    _, state, _, host = host_chat
+
+    async def unbound(fetch: Any, caption: str | None) -> str:
+        return NO_CHAT_BOUND
+
+    state.services.send_file = unbound
+    before = len(host.calls)
+    result = await send_file().invoke(context(state.session.id), {"path": "chk1.png"})
+    assert not result.is_error, result.content
+    assert "file card in the app" in result.content and "no Telegram chat" in result.content
+    assert not any("base64" in " ".join(argv) for argv, _, _ in host.calls[before:]), "no copy is fetched for nobody"
+
+
 async def test_image_view_looks_at_an_image_on_the_host_by_a_relative_path(host_chat: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     from daedalus.tools import vision
 
@@ -83,7 +108,8 @@ async def test_send_file_and_attach_media_hand_on_a_copy_fetched_from_the_host(h
     sent: list[tuple[Path, bytes]] = []
     attached: list[list[dict[str, str]]] = []
 
-    async def deliver(path: Path, caption: str | None) -> str:
+    async def deliver(fetch: Any, caption: str | None) -> str:
+        path = await fetch()
         sent.append((path, path.read_bytes()))
         return "delivered"
 

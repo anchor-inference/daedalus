@@ -8,6 +8,7 @@ and prove nothing reaches it on the subagent's behalf, whatever the leader's sta
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from aiogram.filters import CommandObject
@@ -45,7 +46,10 @@ async def _nothing_reaches_telegram(front: TelegramFront, session_id: str) -> No
     assert await front.outbox_for_session(session_id) is None
     assert await front._renderer_for(session_id, "run-1") is None
     await front._ask(session_id, {"questions": [{"question": "which one?", "options": [{"label": "a"}]}]})
-    assert await front._service_send_file(session_id, front.settings.state_dir / "missing.txt", None) == "no chat bound"
+    async def fetch() -> Path:
+        raise AssertionError("nothing is fetched for a session with no chat")
+
+    assert await front._service_send_file(session_id, fetch, None) == "no chat bound"
     assert len(bot.sent) == sent and bot.topics == topics
     assert await front.binding_for_session(session_id) is None
 

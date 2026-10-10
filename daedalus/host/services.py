@@ -21,7 +21,12 @@ from daedalus.host.filesystem import ExecBackend, LocalFS, ShellFS
 from daedalus.host.policy import sealed_root
 
 ProgressFn = Callable[[str], Awaitable[None]]
-SendFileFn = Callable[[Path, str | None], Awaitable[str]]
+SendFileFn = Callable[[Callable[[], Awaitable[Path]], str | None], Awaitable[str]]
+"""Deliver a file to the session's chat: given how to fetch it as a file of this process, and a caption.
+The fetch is lazy because a session on the host pays a copy over the daemon for it, which is wasted when
+no chat is bound to deliver to."""
+NO_CHAT_BOUND = "no chat bound"
+"""What :data:`SendFileFn` answers when the session has no Telegram chat to deliver to."""
 AttachMediaFn = Callable[[list[dict[str, str]], str], Awaitable[dict[str, Any]]]
 ScheduleFn = Callable[..., Awaitable[Any]]
 SelfDevFn = Callable[..., Awaitable[str]]

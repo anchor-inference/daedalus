@@ -39,6 +39,9 @@ class ShellHost:
     up: bool = True
     allow: tuple[str, ...] = ("bash", "git")
     calls: list[tuple[list[str], str, bytes | None]] = field(default_factory=list)
+    ignore_sigpipe: bool = False
+    """Run the programs with SIGPIPE ignored, as the daemon's systemd unit does by default: this
+    process ignores it, and ``restore_signals=False`` hands that on instead of resetting it."""
 
     def available(self) -> bool:
         return self.up
@@ -60,7 +63,8 @@ class ShellHost:
         environment = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(self.disk), **(env_vars or {})}
         try:
             done = await asyncio.to_thread(subprocess.run, [self.here(a) for a in argv], cwd=self.here(cwd), input=stdin,
-                                           env=environment, capture_output=True, timeout=timeout, check=False)
+                                           env=environment, capture_output=True, timeout=timeout, check=False,
+                                           restore_signals=not self.ignore_sigpipe)
         except subprocess.TimeoutExpired:
             return ExecResult(exit_code=-1, signal="SIGKILL", stdout="", stderr="", truncated=False, timed_out=True, duration_ms=int(timeout * 1000))
         return ExecResult(exit_code=done.returncode, signal="", stdout=self.there(done.stdout.decode("utf-8", "replace")),
