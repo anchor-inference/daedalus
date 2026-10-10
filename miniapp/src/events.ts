@@ -423,6 +423,9 @@ export function wireCache(to: { on: typeof onEvent; prime: typeof prime; invalid
       to.invalidate("/api/notifications?");
     }),
     to.on(["run.", "session.", "ask.", "permission."], sessionsSoon),
+    // A pin made on another screen moves a row into or out of the pinned block. Only the pin: the
+    // other project changes are the project screens' to read, and most of them come in bursts.
+    to.on(["project.changed"], (event) => { if (event.payload.change === "pinned") sessionsSoon(); }),
     // Whatever the stream could not replay, every mounted read fetches again.
     to.on(["resync"], () => to.invalidate("")),
   ];

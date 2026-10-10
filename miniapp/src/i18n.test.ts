@@ -73,6 +73,7 @@ const SAME_IN_BOTH = [
   "side.key.archive",
   "side.key.beside",
   "side.key.delete",
+  "side.key.pin",
   "side.key.rename",
   "side.newchat.keys",
   // Lines changed and the files they are in.

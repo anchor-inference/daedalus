@@ -970,6 +970,8 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
   .sb-sec.first { margin-top: 0; padding-top: 4px; }
   .sb-sec .n { color: var(--fg-3); font-weight: 400; }
   .sb-sec-acts { margin-left: auto; display: flex; align-items: center; }
+  /* The pinned block's header carries the pin itself, so a row needs no mark of its own to say why it is up here. */
+  .sb-pinsec .ic { color: var(--fg-3); transform: rotate(30deg); }
   .sb-sec-acts .iconbtn.small { width: 22px; height: 22px; min-width: 0; min-height: 0; border-radius: var(--radius-xs); color: var(--fg-3); }
   .sb-dayhead { display: flex; align-items: flex-end; height: 24px; padding: 0 var(--space-2) 3px; font-size: var(--fs-11); color: var(--fg-3); }
   /* A row: the phone's plate at a desktop's height. A chat is two lines at 44 px, a project one

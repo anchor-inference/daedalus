@@ -144,6 +144,12 @@ class ProjectPatch(MutationBody):
     """Archive (true) or restore (false): hidden from the lists and never woken, nothing deleted."""
 
 
+class PinBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pinned: bool
+
+
 class FolderPatch(MutationBody):
     model_config = ConfigDict(extra="forbid")
 
@@ -381,6 +387,20 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         except ProjectError as exc:
             raise HTTPException(400, str(exc)) from exc
         return response
+
+    @api.put("/api/projects/{project_id}/pin")
+    async def pin_project(project_id: str, body: PinBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Pin a project, or a chat by its scratch project, to the top of the sidebar, or unpin it.
+
+        Its own address rather than a field of the settings write: that write is revisioned and
+        journalled, and a pin is a view preference toggled from a list, which must neither be refused
+        because the project was renamed elsewhere nor make an open settings form stale. The event tells the other screens to read the
+        listing again, so a pin made on the phone appears on the desktop without a reload.
+        """
+        await existing(project_id)
+        pinned_at = await manager.projects.pin(project_id, body.pinned)
+        await manager.bus.publish("project.changed", {"change": "pinned", "actor": "operator"}, project_id=project_id)
+        return {"project_id": project_id, "pinned_at": pinned_at}
 
     @api.delete("/api/projects/{project_id}")
     async def delete_project(project_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

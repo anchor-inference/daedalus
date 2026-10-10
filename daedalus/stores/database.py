@@ -2068,6 +2068,17 @@ CREATE TABLE IF NOT EXISTS session_imports (
 CREATE INDEX IF NOT EXISTS session_imports_session ON session_imports(session_id);
 """)
 
+# A project or a chat pinned to the top of the sidebar, and since when: the time is the block's order,
+# newest first. A chat is pinned by its scratch project, so the pin survives the chat becoming a
+# project and leaves with the project's row. A table of its own rather than a key of the project's
+# settings: every write to ``projects`` raises its revision, and a pin is not a change to the project.
+MIGRATIONS.append("""
+CREATE TABLE IF NOT EXISTS project_pins (
+    project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+    pinned_at TEXT NOT NULL
+);
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

@@ -1,13 +1,15 @@
 // Every chat, on a phone: borderless 60 px rows grouped by project (a project with more than one chat
 // keeps its own section) and by day for the rest, the status chips above them and the search behind
 // an icon. A row's commands — the old "…" and "+" — live in its long-press sheet and behind its ⋮, and
-// a swipe reaches the three most used; nothing the old row offered is gone. The desktop keeps
+// a swipe reaches the three most used; nothing the old row offered is gone. What the operator pinned
+// is a block above everything, the same block the desktop's sidebar draws. The desktop keeps
 // Sessions.tsx; both read the same listing and the same commands (useSessionCommands).
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type Project, type SessionList, type SessionSummary } from "../api";
 import { relTime, shortModel, untilShort } from "../format";
-import { type Folder, type Row, agentName, arrange, dayGroup, kindOf } from "../grouping";
+import { type Folder, type Row, agentName, arrange, dayGroup, kindOf, liveRow, splitPinned } from "../grouping";
+import { pinCommand } from "../pins";
 import { plural, t } from "../i18n";
 import { Icon } from "../icons";
 import { agentsListingOf } from "../mode";
@@ -38,17 +40,19 @@ function rememberSection(key: string, closed: boolean): void {
 const DAYS = ["today", "yesterday", "week", "month", "older"] as const;
 
 /**
- * The page's sections: a project (`isProject`, the same rule the desktop's sidebar splits by) is a
- * section of its own, in recency order; every chat falls into its day, with its forks and subagents
- * under it. Projects with no chat in the current view are left out, as the drawer lists every
- * project anyway.
+ * The page's sections: what is pinned first, as one section (`splitPinned`, the desktop's rule);
+ * then a project (`isProject`, the same rule the desktop's sidebar splits by) is a section of its
+ * own, in recency order; every chat falls into its day, with its forks and subagents under it.
+ * Projects with no chat in the current view are left out, as the drawer lists every project anyway.
  */
-export function chatSections(folders: Folder[], now = new Date()): { key: string; folder?: Folder; day?: typeof DAYS[number]; rows: Row[] }[] {
+export function chatSections(all: Folder[], now = new Date(), opts: { pins?: boolean } = {}): { key: string; folder?: Folder; day?: typeof DAYS[number]; pinned?: Folder[]; rows: Row[] }[] {
+  // Every pinned folder with something in the view; the page leaves out an empty project anyway.
+  const { pinned, rest: folders } = splitPinned(all, { filtered: true, pins: opts.pins });
   const projects = folders.filter((f) => f.rows.length > 0 && !f.chat);
   const loose = folders.filter((f) => f.rows.length > 0 && f.chat).flatMap((f) => f.rows);
   const days = DAYS.map((day) => ({ key: `day:${day}`, day, rows: loose.filter((r) => dayGroup(r.s.last_message_at || r.s.created_at, now) === day) }))
     .filter((d) => d.rows.length > 0);
-  return [...projects.map((f) => ({ key: f.key, folder: f, rows: f.rows })), ...days];
+  return [...(pinned.length ? [{ key: "pinned", pinned, rows: [] }] : []), ...projects.map((f) => ({ key: f.key, folder: f, rows: f.rows })), ...days];
 }
 
 function loopLine(s: SessionSummary): string {
@@ -91,7 +95,7 @@ function RowMeta({ row, fork }: { row: Row; fork?: number }) {
   );
 }
 
-function ChatRow({ row, fork, projectName, toast, onOpen, onNewIn }: { row: Row; fork?: number; projectName: string; toast: (text: string) => void; onOpen: (id: string) => void; onNewIn: () => void }) {
+function ChatRow({ row, fork, projectName, toast, onOpen, onNewIn, pin }: { row: Row; fork?: number; projectName: string; toast: (text: string) => void; onOpen: (id: string) => void; onNewIn: () => void; pin?: "on" | "off" }) {
   const s = row.s;
   const [projectOpen, setProjectOpen] = useState(false);
   const projects = useProjects();
@@ -99,6 +103,7 @@ function ChatRow({ row, fork, projectName, toast, onOpen, onNewIn }: { row: Row;
   const { items, layers } = useSessionCommands(s, { onProject: project ? () => setProjectOpen(true) : undefined, projectName });
   const actions: MenuItem[] = [
     { label: t("ph.newchat.in", { name: projectName }), icon: "compose", onSelect: onNewIn },
+    ...(pin ? [pinCommand(s.project_id, pin === "on")] : []),
     ...row.kids.map((kid) => ({ label: t("agents.sub.open", { name: agentName(kid) }), icon: "bots" as const, hint: statusWord(kid.status), onSelect: () => onOpen(kid.id) })),
     ...items,
   ];
@@ -151,6 +156,7 @@ function ProjectSection({ folder, rows, toast, onOpen, filtered }: { folder: Fol
       </>}>{folder.name}</SectionHeader>
       {menu && <ActionSheet preview={{ title: folder.name, meta: plural("agents.count", folder.total) }} onClose={() => setMenu(false)} items={[
         { label: t("ph.newchat.in", { name: folder.name }), icon: "compose", onSelect: () => setAdding(true) },
+        pinCommand(folder.key, false),
         ...(folder.system ? [{ label: t("agents.folder.tovoice"), icon: "mic" as const, onSelect: () => navigate(pathFor("voice")) }] : [{ label: t("project.settings.for", { name: folder.name }), icon: "settings" as const, onSelect: () => setEditing(true) }]),
         { label: t(shown ? "agents.folder.hide" : "agents.folder.show", { name: folder.name }), icon: shown ? "chevron" : "forward", onSelect: toggle },
       ]} />}
@@ -158,6 +164,58 @@ function ProjectSection({ folder, rows, toast, onOpen, filtered }: { folder: Fol
       {adding && <NewAgentSheet project={folder.key} onClose={() => setAdding(false)} onCreated={onOpen} toast={toast} />}
       {editing && <ProjectSettingsSheet project={{ ...folder.project, sessions: folder.rows.map((r) => ({ id: r.s.id, title: r.s.title })) }} onClose={() => setEditing(false)} onRemoved={() => setEditing(false)} toast={toast} />}
     </section>
+  );
+}
+
+/**
+ * The pinned block: a pinned chat is its row, a pinned project a row that folds and unfolds its chats
+ * under it. A folded pinned project still shows the chats that ask for the operator or work, as on
+ * the desktop, because a pin is the last place a question should hide.
+ */
+function PinnedSection({ folders, toast, onOpen, onNewIn, filtered }: { folders: Folder[]; toast: (text: string) => void; onOpen: (id: string) => void; onNewIn: (project: string) => void; filtered: boolean }) {
+  return (
+    <section data-pinned="">
+      <SectionHeader count={folders.length}><span className="ph-pinhead"><Icon name="pushpin" size={14} />{t("side.pinned")}</span></SectionHeader>
+      <div className="ph-list">
+        {folders.map((f) => f.chat
+          ? lines(f.rows).map(({ row, fork }) => <ChatRow key={row.s.id} row={row} fork={fork} projectName={f.name} toast={toast} onOpen={onOpen} onNewIn={() => onNewIn(f.key)} pin={fork ? undefined : "on"} />)
+          : <PinnedProject key={f.key} folder={f} toast={toast} onOpen={onOpen} filtered={filtered} />)}
+      </div>
+    </section>
+  );
+}
+
+function PinnedProject({ folder, toast, onOpen, filtered }: { folder: Folder; toast: (text: string) => void; onOpen: (id: string) => void; filtered: boolean }) {
+  const [closed, setClosed] = useState(() => sectionClosed(folder.key));
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const shown = !closed || filtered;
+  const toggle = () => { setClosed(!closed); rememberSection(folder.key, !closed); };
+  const all = lines(folder.rows);
+  const visible = shown ? all : all.filter(({ row }) => liveRow(row));
+  const actions: MenuItem[] = [
+    { label: t("ph.newchat.in", { name: folder.name }), icon: "compose", onSelect: () => setAdding(true) },
+    pinCommand(folder.key, true),
+    ...(folder.system ? [{ label: t("agents.folder.tovoice"), icon: "mic" as const, onSelect: () => navigate(pathFor("voice")) }] : [{ label: t("project.settings.for", { name: folder.name }), icon: "settings" as const, onSelect: () => setEditing(true) }]),
+    { label: t(shown ? "agents.folder.hide" : "agents.folder.show", { name: folder.name }), icon: shown ? "chevron" : "forward", onSelect: toggle },
+  ];
+  return (
+    <div data-project={folder.key} className={`ph-pinproject ${shown ? "open" : ""}`}>
+      <ListRow
+        data={{ "project-head": folder.key }}
+        title={folder.name}
+        meta={<span className="ph-ell">{plural("agents.count", folder.total)}</span>}
+        lead={<span className="ph-sicon"><Icon name={folder.system ? "mic" : "folder"} size={18} /></span>}
+        trail={<span className={`ph-pinchev ${shown ? "open" : ""}`} aria-hidden><Icon name={shown ? "chevron" : "forward"} size={16} /></span>}
+        label={t(shown ? "agents.folder.hide" : "agents.folder.show", { name: folder.name })}
+        onOpen={toggle}
+        actions={actions}
+        preview={{ title: folder.name, meta: plural("agents.count", folder.total) }}
+      />
+      {visible.length > 0 && <div className="ph-pinkids">{visible.map(({ row, fork }) => <ChatRow key={row.s.id} row={row} fork={fork} projectName={folder.name} toast={toast} onOpen={onOpen} onNewIn={() => setAdding(true)} />)}</div>}
+      {adding && <NewAgentSheet project={folder.key} onClose={() => setAdding(false)} onCreated={onOpen} toast={toast} />}
+      {editing && <ProjectSettingsSheet project={{ ...folder.project, sessions: folder.rows.map((r) => ({ id: r.s.id, title: r.s.title })) }} onClose={() => setEditing(false)} onRemoved={() => setEditing(false)} toast={toast} />}
+    </div>
   );
 }
 
@@ -219,7 +277,8 @@ export function ChatsScreen({ onOpen, toast, project = "", projects = [], onPick
 
   const listing = useMemo(() => (data && Array.isArray(data.sessions) ? agentsListingOf({ ...data, sessions: [...data.sessions, ...extra] }) : null), [data, extra]);
   const arranged = useMemo(() => (listing ? arrange(listing.sessions, listing.projects, { project, filter: view === "loops" ? "loops" : "all" }) : null), [listing, project, view]);
-  const sections = useMemo(() => (arranged ? chatSections(arranged.folders) : []), [arranged]);
+  // The archive lists what was put away in its own order, with nothing lifted out of it.
+  const sections = useMemo(() => (arranged ? chatSections(arranged.folders, new Date(), { pins: view !== "archive" }) : []), [arranged, view]);
   // The chips count over the whole list, whichever chip is on, so a number never changes under the
   // finger that is about to press it.
   const counts = useMemo(() => {
@@ -283,13 +342,15 @@ export function ChatsScreen({ onOpen, toast, project = "", projects = [], onPick
     body = (
       <>
         {view === "archive" && arranged && <SectionHeader count={arranged.shown}>{t("ph.archived")}</SectionHeader>}
-        {sections.map((section) => section.folder && view !== "archive"
+        {sections.map((section) => section.pinned
+          ? <PinnedSection key={section.key} folders={section.pinned} toast={toast} onOpen={onOpen} onNewIn={setAdding} filtered={view !== "all"} />
+          : section.folder && view !== "archive"
           ? <ProjectSection key={section.key} folder={section.folder} rows={section.rows} toast={toast} onOpen={onOpen} filtered={view !== "all"} />
           : (
             <section key={section.key}>
               {view !== "archive" && <SectionHeader count={section.day === "week" || section.day === "month" || section.day === "older" ? section.rows.length : undefined}>{section.folder ? section.folder.name : t(`ph.day.${section.day}`)}</SectionHeader>}
               <div className="ph-list">
-                {lines(section.rows).map(({ row, fork }) => <ChatRow key={row.s.id} row={row} fork={fork} projectName={section.folder?.name ?? projectName(row.s.project_id)} toast={toast} onOpen={onOpen} onNewIn={() => setAdding(row.s.project_id)} />)}
+                {lines(section.rows).map(({ row, fork }) => <ChatRow key={row.s.id} row={row} fork={fork} projectName={section.folder?.name ?? projectName(row.s.project_id)} toast={toast} onOpen={onOpen} onNewIn={() => setAdding(row.s.project_id)} pin={!section.folder && !fork && view !== "archive" ? "off" : undefined} />)}
               </div>
             </section>
           ))}

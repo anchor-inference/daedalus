@@ -4,7 +4,7 @@ export type IconName =
   | "back" | "more" | "plus" | "up" | "stop" | "model" | "terminal" | "file" | "pen" | "search" | "globe" | "attach" | "image"
   | "question" | "skill" | "spawn" | "bulb" | "wrench" | "clock" | "calendar" | "plug" | "dot" | "compact"
   | "folder" | "settings" | "bots" | "inbox" | "board" | "changes" | "chart" | "loop" | "pause" | "play" | "trash" | "check" | "close" | "send"
-  | "download" | "share" | "split" | "key" | "link" | "unlink" | "down" | "copy" | "paste" | "columns" | "eye" | "mic" | "fork" | "undo" | "phone" | "expand" | "external" | "reload" | "forward" | "panel" | "chevron" | "bolt" | "volume" | "mute" | "lock" | "bell" | "shield" | "conductor" | "journal" | "alert" | "compass" | "user" | "ask" | "archive" | "braces" | "sidebar" | "reply" | "flag" | "menu" | "pin"
+  | "download" | "share" | "split" | "key" | "link" | "unlink" | "down" | "copy" | "paste" | "columns" | "eye" | "mic" | "fork" | "undo" | "phone" | "expand" | "external" | "reload" | "forward" | "panel" | "chevron" | "bolt" | "volume" | "mute" | "lock" | "bell" | "shield" | "conductor" | "journal" | "alert" | "compass" | "user" | "ask" | "archive" | "braces" | "sidebar" | "reply" | "flag" | "menu" | "pin" | "pushpin"
   | "compose" | "grid" | "vdots" | "camera" | "offline" | "logo" | "sliders";
 
 const PATHS: Record<IconName, string> = {
@@ -94,6 +94,8 @@ const PATHS: Record<IconName, string> = {
   menu: "M4 7h16M4 12h16M4 17h16",
   // An event's place.
   pin: "M12 21s-6-5.6-6-11a6 6 0 0 1 12 0c0 5.4-6 11-6 11zM12 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4z",
+  // A chat or a project held at the top of the sidebar: a drawing pin, not the map pin above.
+  pushpin: "M12 16v5M8 4h8M9.5 4v5.5L7 13v3h10v-3l-2.5-3.5V4",
   // A spoken conversation, as opposed to the microphone of a voice note: the phone composer's white
   // circle when the field is empty.
   // A page and a pen: a new chat, the one creation action of the phone drawer.

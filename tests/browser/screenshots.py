@@ -140,10 +140,22 @@ FOLDER_COUNTS = {
     "5a8d1c0b6e22": {"total": 0, "active": 0, "loops": 0, "last_message_at": ""},
     PV: {"total": 3, "active": 1, "loops": 0, "last_message_at": ago(seconds=20)},
 }
-def listing() -> dict:
-    """What GET /api/sessions answers: the page of rows and their project folders."""
-    folders = [{k: v for k, v in p.items() if k != "sessions"} | FOLDER_COUNTS[p["id"]] for p in PROJECTS]
-    return {"sessions": SESSIONS, "projects": folders}
+PINS: dict[str, str] = {}
+"""The projects pinned to the top of the sidebar, a chat by its scratch project, with the time each was
+pinned: kept here across page loads as the host keeps them in its table, and empty unless a scene or
+a check pins something (``PUT /api/projects/{id}/pin``)."""
+
+
+def listing(view: str = "all") -> dict:
+    """What GET /api/sessions answers: the page of rows and their project folders, cut by the status
+    chip's view as the host cuts it, so a check of a filtered list sees what the operator would."""
+    folders = [{k: v for k, v in p.items() if k != "sessions"} | FOLDER_COUNTS[p["id"]] | {"pinned_at": PINS.get(p["id"], "")} for p in PROJECTS]
+    keeps = {
+        "attention": lambda s: s.get("needs_attention") or s["status"] == "waiting",
+        "working": lambda s: s["status"] in ("running", "waiting", "compacting"),
+        "archive": lambda s: s.get("archived"),
+    }.get(view, lambda s: not s.get("archived"))
+    return {"sessions": [s for s in SESSIONS if keeps(s)], "projects": folders}
 
 ANSWER = """The menu page is live and checked on a phone.
 
@@ -720,6 +732,13 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         # host does about a setting: the sentence and the row it names.
         refused = getattr(stub, "command_refusal", None)
         return respond(route, refused, status=409) if refused else respond(route, {"text": "Done."})
+    if request.method == "PUT" and rel.startswith("/api/projects/") and rel.endswith("/pin"):
+        pid = rel.split("/")[3]
+        if json.loads(request.post_data or "{}").get("pinned"):
+            PINS.setdefault(pid, datetime.now(UTC).isoformat())
+        else:
+            PINS.pop(pid, None)
+        return respond(route, {"project_id": pid, "pinned_at": PINS.get(pid, "")})
     if request.method != "GET":
         return respond(route, {"ok": True})
     if rel == "/api/events" and getattr(stub, "events", ""):
@@ -751,7 +770,7 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
     if rel == "/api/auth/config":
         return respond(route, {"telegram": None, "passkeys": 1, "pairing": True})
     if rel == "/api/sessions":
-        return respond(route, listing())
+        return respond(route, listing(params.get("view", ["all"])[0]))
     if rel == "/api/doctor":
         return respond(route, DOCTOR)
     if rel == "/api/integrations/health":
@@ -1890,6 +1909,37 @@ def run_staff() -> int:
     return UNHANDLED.report()
 
 
+def pins_shots(browser) -> None:  # type: ignore[no-untyped-def]
+    """The pinned block: a project and a chat pinned above both sections on a desktop, at the head of
+    the phone's drawer and of its Chats page. The pins are dropped again after, so no other picture
+    has the block."""
+    PINS.update({P3: ago(days=2), P4: ago(hours=3)})
+    try:
+        desk = browser.new_context(viewport=DESK, device_scale_factor=2, color_scheme="dark")
+        page = desk.new_page()
+        page.route("**/api/**", stub)
+        shot(page, "sidebar-pins", "agents", wait=".sb-pinned .sb-row")
+        desk.close()
+        phone = browser.new_context(viewport=PHONE, device_scale_factor=3, color_scheme="dark", is_mobile=True, has_touch=True)
+        page = phone.new_page()
+        page.route("**/api/**", stub)
+        shot(page, "phone-drawer-pins", "agents", wait=".ph-home", before=open_drawer)
+        shot(page, "phone-chats-pins", "agents?view=chats", wait="[data-pinned] .ph-row")
+        phone.close()
+    finally:
+        PINS.clear()
+
+
+def run_pins() -> int:
+    """The pinned block on a desktop and a phone (``ONLY=pins``)."""
+    OUT.mkdir(parents=True, exist_ok=True)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM)
+        pins_shots(browser)
+        browser.close()
+    return UNHANDLED.report()
+
+
 def run_phone() -> int:
     """The phone's terminal and a project on the phone (``ONLY=phone``)."""
     OUT.mkdir(parents=True, exist_ok=True)
@@ -1995,6 +2045,7 @@ def run() -> int:
         shot(page, "phone-add-model", "agents", wait=".addmodel", before=pick_a_model, settle=600)
         stub.fresh = False  # type: ignore[attr-defined]
         phone.close()
+        pins_shots(browser)
         browser.close()
     # The notification centre needs a stream of its own for the toasts, and focus mode an installation
     # with an orchestrated project; each reports what went unanswered.
@@ -2266,4 +2317,4 @@ if __name__ == "__main__":
     # Before anything is driven: is the address the built app, or whatever else holds the port?
     expect_app(BASE)
     only = os.environ.get("ONLY")
-    sys.exit(run_imports() if only == "imports" else run_modes() if only == "modes" else run_browser() if only == "browser" else run_harnesses() if only == "harnesses" else run_staff() if only == "staff" else run_details() if only == "details" else run_terminals() if only == "terminals" else run_focus() if only == "focus" else run_phone() if only == "phone" else run_main() if only == "main" else run_notifications() if only == "notifications" else run_composer() if only == "composer" else run_voice() if only == "voice" else agents_shots() if only == "agents" else run_workspace() if only == "workspace" else run())
+    sys.exit(run_pins() if only == "pins" else run_imports() if only == "imports" else run_modes() if only == "modes" else run_browser() if only == "browser" else run_harnesses() if only == "harnesses" else run_staff() if only == "staff" else run_details() if only == "details" else run_terminals() if only == "terminals" else run_focus() if only == "focus" else run_phone() if only == "phone" else run_main() if only == "main" else run_notifications() if only == "notifications" else run_composer() if only == "composer" else run_voice() if only == "voice" else agents_shots() if only == "agents" else run_workspace() if only == "workspace" else run())

@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-// The desktop's sidebar: the projects and the chats apart by the project rule, a collapsed project
+// The desktop's sidebar: the pinned block, the projects and the chats apart by the project rule, a collapsed project
 // that still shows what asks for the operator, the two buttons under "New chat", and the keyboard.
 import { act } from "react";
 import { createRoot, Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ProjectFolder, SessionSummary } from "../api";
+import { ProjectFolder, SessionSummary, api } from "../api";
 import { setLang } from "../i18n";
 import { SessionsScreen } from "./Sessions";
 
@@ -25,7 +25,12 @@ vi.mock("../imports/ImportExplorer", () => ({ openImport: importer.open }));
 const dialogs = vi.hoisted(() => ({ confirm: vi.fn(async () => false) }));
 vi.mock("../ui/dialogs", async (original) => ({ ...(await original<typeof import("../ui/dialogs")>()), confirmDialog: dialogs.confirm }));
 
-const NOW = Date.now();
+// A fixed clock at local noon. The day groups are cut at local midnight, and the rows were placed at
+// hours before the real now: between midnight and six in the morning "30 hours ago" is two days back
+// and lands in "This week", and before half past midnight "half an hour ago" is yesterday. The test
+// failed every night until it stopped reading the clock. Only `Date` is faked; the search's debounce
+// still waits on a real timer.
+const NOW = new Date(2026, 9, 8, 12, 0, 0).getTime();
 const ago = (hours: number) => new Date(NOW - hours * 3_600_000).toISOString();
 function project(id: string, name: string, extra: Partial<ProjectFolder> = {}): ProjectFolder {
   return { id, name, created_at: "2026-01-01T00:00:00Z", settings: { snapshots: false }, folders: [{ id: `f-${id}`, path: `/projects/${id}`, label: "", env: "container", is_git: false, readonly: false, position: 0, managed: false, reachable: true, writable: true }], total: 1, members: 1, active: 0, loops: 0, last_message_at: ago(1), ...extra };
@@ -41,6 +46,7 @@ const toast = vi.fn();
 const onProjects = vi.fn();
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"], now: NOW });
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
   setLang("en");
@@ -68,7 +74,7 @@ beforeEach(() => {
   onOpen.mockClear();
   onProjects.mockClear();
 });
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks(); });
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 async function render(current?: string) {
   await act(async () => root.render(<SessionsScreen onOpen={onOpen} toast={toast} current={current} onProjects={onProjects} />));
@@ -180,6 +186,46 @@ describe("the sidebar", () => {
     const words = Array.from(document.querySelectorAll('[role="menuitem"]')).map((b) => b.textContent ?? "");
     expect(words).toEqual(expect.arrayContaining(["Open beside", "Rename", "Move…", "Archive", "Delete"]));
     expect(words[words.length - 1]).toBe("Delete");
+  });
+
+  it("lists what is pinned in a block above both sections, and not again below it", async () => {
+    listing.data.projects = listing.data.projects.map((p) => p.id === "esp" ? { ...p, pinned_at: "2026-10-01T09:00:00Z" } : p.id === "c2" ? { ...p, pinned_at: "2026-10-02T09:00:00Z" } : p);
+    await render();
+    expect(Array.from(host.querySelectorAll(".sb-sec")).map((s) => s.textContent)).toEqual(["Pinned2", "Projects2", "Chats1"]);
+    const block = host.querySelector("[data-pinned]")!;
+    // Newest pin first: the chat, then the project, which keeps its fold.
+    expect(Array.from(block.querySelectorAll("[data-session], [data-project-head]")).map((r) => (r as HTMLElement).dataset.session ?? (r.closest("[data-project]") as HTMLElement).dataset.project)).toEqual(["c2", "esp"]);
+    expect(host.querySelectorAll('[data-session="c2"]')).toHaveLength(1);
+    expect(host.querySelectorAll('[data-project="esp"]')).toHaveLength(1);
+    expect(block.querySelector('[data-project="esp"] .sb-prow')?.getAttribute("aria-expanded")).toBe("false");
+    await act(async () => block.querySelector<HTMLElement>('[data-project="esp"] .sb-prow')!.click());
+    expect(Array.from(block.querySelectorAll('[data-project="esp"] [data-session]')).map((r) => (r as HTMLElement).dataset.session)).toEqual(["e1"]);
+    // Nothing pinned, no block.
+    listing.data.projects = listing.data.projects.map((p) => ({ ...p, pinned_at: "" }));
+    await render();
+    expect(host.querySelector("[data-pinned]")).toBeNull();
+  });
+
+  it("pins and unpins from the row menu and with P, a chat by its scratch project", async () => {
+    const put = vi.spyOn(api, "put").mockResolvedValue({ project_id: "c1", pinned_at: "2026-10-08T12:00:00Z" });
+    listing.data.projects = listing.data.projects.map((p) => p.id === "c2" ? { ...p, pinned_at: "2026-10-02T09:00:00Z" } : p);
+    await render();
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-session="c1"] .sb-acts button[aria-haspopup="menu"]')!.click());
+    const pin = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find((b) => b.textContent === "Pin")!;
+    expect(pin.title).toBe("P");
+    await act(async () => pin.click());
+    expect(put).toHaveBeenLastCalledWith("/api/projects/c1/pin", { pinned: true });
+    const pinned = host.querySelector<HTMLElement>('[data-session="c2"]')!;
+    pinned.focus();
+    await key(pinned, { key: "p", code: "KeyP" });
+    expect(put).toHaveBeenLastCalledWith("/api/projects/c2/pin", { pinned: false });
+    // By the key's place, so a Russian layout's "з" pins too.
+    await key(projectRow("esp"), { key: "з", code: "KeyP" });
+    expect(put).toHaveBeenLastCalledWith("/api/projects/esp/pin", { pinned: true });
+    // A chat inside a project is not pinned on its own: its project is.
+    await act(async () => projectRow("home").click());
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-session="h2"] .sb-acts button[aria-haspopup="menu"]')!.click());
+    expect(Array.from(document.querySelectorAll('[role="menuitem"]')).map((b) => b.textContent)).not.toContain("Pin");
   });
 
   it("searches after a pause and says when the search is exact only", async () => {

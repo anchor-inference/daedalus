@@ -370,6 +370,18 @@ describe("the cache", () => {
     unwire();
   });
 
+  it("reads the session lists again for a pin made elsewhere, and not for other project changes", async () => {
+    const { invalidated, send, unwire } = wired();
+    const now = new Date().toISOString();
+    send({ ...event(1, now, "project.changed"), payload: { change: "settings" } });
+    await vi.advanceTimersByTimeAsync(LIST_DEBOUNCE_MS);
+    expect(invalidated).toEqual([]);
+    send({ ...event(2, now, "project.changed"), payload: { change: "pinned" } });
+    await vi.advanceTimersByTimeAsync(LIST_DEBOUNCE_MS);
+    expect(invalidated).toEqual(["/api/sessions"]);
+    unwire();
+  });
+
   it("reads everything mounted again after a resync, and stops listening when unwired", () => {
     const { handlers, invalidated, send, unwire } = wired();
     send({ ...event(0, new Date().toISOString(), "resync"), payload: { reason: "expired", head: 9 } });
