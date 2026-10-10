@@ -96,6 +96,11 @@ def runtime_constants(config: RuntimeConfig, *, context_window: int, max_output_
         run_max_output_tokens_budget=0,
         tool_timeout_seconds=int(tool_timeout),
         steer_follow_up_enabled=True,
+        # The core's session work pool is not used here: Exec runs background jobs itself and the job
+        # watcher (daedalus/extensions/jobs.py) wakes the session when one ends. Left on, the core
+        # looked for a pool nobody binds and reported every run as "background_tasks_detached:
+        # no_pool_bound", which read as the reason jobs never woke the agent and was not.
+        background_tasks_enabled=False,
         steer_default_mode="all",
         follow_up_default_mode="all",
         memory_enabled=True,

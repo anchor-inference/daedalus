@@ -334,7 +334,9 @@ def _with_secrets(session_id: str, command: str, env: dict[str, str] | None, *, 
         "is clipped to its head and tail and the whole of it is kept in a file the result names. "
         "background=true starts the command as a job and returns at once with a job id: "
         "JobOutput reads its output, JobKill stops it, JobList shows the jobs; use it for servers, "
-        "builds and anything longer than a few minutes instead of holding this call open."
+        "builds and anything longer than a few minutes instead of holding this call open. "
+        "When a job ends you are told, with its exit code and the last lines of its log, "
+        "unless you already read its end yourself; there is no need to poll it."
     ),
 )
 async def exec_command(
@@ -512,6 +514,13 @@ def _spill_path(services: Any, context: ToolContext) -> Path:
 
 @dataclass(slots=True)
 class Job:
+    """A background job of this process: a child it waits for, gone with the process.
+
+    ``ended`` is the wall-clock moment the job was first seen finished, and ``reported`` whether the
+    agent knows how it ended — it read the end itself, or was woken with it. The watcher in
+    :mod:`daedalus.extensions.jobs` wakes the session once for every finished job that is not.
+    """
+
     id: str
     command: str
     cwd: Path
@@ -519,10 +528,16 @@ class Job:
     process: asyncio.subprocess.Process
     started: float
     sandboxed: bool = False
+    ended: float | None = None
+    reported: bool = False
 
     @property
     def running(self) -> bool:
         return self.process.returncode is None
+
+    @property
+    def exit_code(self) -> int | None:
+        return self.process.returncode
 
 
 @dataclass(slots=True)
@@ -541,25 +556,40 @@ class RemoteJob:
     started: float
     backend: Any
     exit_code: int | None = None
+    ended: float | None = None
+    reported: bool = False
+    started_at: float = 0.0
+    """The wall-clock start, which a record kept across a restart of this process is read back from:
+    ``started`` is this process's monotonic clock and means nothing to the next one."""
 
     @property
     def running(self) -> bool:
         return self.exit_code is None
 
     async def refresh(self) -> None:
-        """Ask the other machine whether the job still runs; a finished one keeps its exit code."""
+        """Ask the other machine whether the job still runs; a finished one keeps its exit code.
+
+        The exit file is asked first and the process id only after it. A record read back after a
+        restart of this process can name a process id the host has since given to something else,
+        and asked first, ``kill -0`` called that stranger the job and kept a finished job running
+        forever. The file's time is when the job ended, which the agent is told as its duration.
+        """
         if self.exit_code is not None:
             return
         done = shlex.quote(f"{self.log}.exit")
         outcome = await self.backend.run(
-            f"if kill -0 {self.pid} 2>/dev/null; then echo running; elif [ -s {done} ]; then cat {done}; else echo gone; fi",
+            f"if [ -s {done} ]; then echo \"$(cat {done}) $(stat -c %Y {done} 2>/dev/null || stat -f %m {done} 2>/dev/null)\"; "
+            f"elif kill -0 {self.pid} 2>/dev/null; then echo running; else echo gone; fi",
             cwd=None, env=None, timeout=30.0,
         )
         answer = outcome.output.strip().splitlines()[-1:] if outcome.exit_code == 0 else []
         if not answer or answer[0] == "running":
             return
+        words = answer[0].split()
         # "gone" is a job ended without its wrapper writing the code: killed with the whole group.
-        self.exit_code = int(answer[0]) if answer[0].lstrip("-").isdigit() else -1
+        self.exit_code = int(words[0]) if words and words[0].lstrip("-").isdigit() else -1
+        if self.ended is None:
+            self.ended = float(words[1]) if len(words) > 1 and words[1].isdigit() else time.time()
 
     async def kill(self) -> None:
         """The hangup to the job's group (or to the job alone where it has none), the kill after a grace."""
@@ -605,13 +635,15 @@ async def _start_remote_job(context: ToolContext, services: Any, command: str, w
     last = outcome.output.strip().splitlines()[-1:] if outcome.output.strip() else []
     if outcome.exit_code != 0 or not last or not last[0].isdigit():
         return error(context, f"the job did not start: {outcome.output.strip() or f'exit code {outcome.exit_code}'}")
-    job = RemoteJob(id=job_id, command=command, cwd=workdir, log=log, pid=int(last[0]), started=time.monotonic(), backend=backend)
+    job = RemoteJob(id=job_id, command=command, cwd=workdir, log=log, pid=int(last[0]), started=time.monotonic(), backend=backend, started_at=time.time())
     jobs[job_id] = job
+    await _track(services, context.session_id, job)
     await asyncio.sleep(0.3)  # long enough for an immediate failure (a typo, a missing binary) to show up in the answer
     await job.refresh()
     head = (await job.tail(40))[:1500]
     status = f"running (pid {job.pid})" if job.running else f"already exited with code {job.exit_code}"
-    return ok(context, f"{job_id}: {status} on the host; output in {log} (the job outlives a restart of the bot, but JobOutput forgets it; read the log)\n{head}".rstrip(), job_id=job_id, pid=job.pid)
+    job.reported = not job.running  # the answer below is how it ended
+    return ok(context, f"{job_id}: {status} on the host; output in {log} (the job outlives a restart of the bot; you are told when it ends)\n{head}".rstrip(), job_id=job_id, pid=job.pid)
 
 
 async def _start_job(context: ToolContext, services: Any, command: str, workdir: Path, env: dict[str, str] | None) -> ToolResult:
@@ -631,12 +663,30 @@ async def _start_job(context: ToolContext, services: Any, command: str, workdir:
         )
     finally:
         fh.close()
-    jobs[job_id] = Job(id=job_id, command=command, cwd=workdir, log=log, process=process, started=time.monotonic(), sandboxed=sandboxed)
+    job = Job(id=job_id, command=command, cwd=workdir, log=log, process=process, started=time.monotonic(), sandboxed=sandboxed)
+    jobs[job_id] = job
     await asyncio.sleep(0.3)  # long enough for an immediate failure (a typo, a missing binary) to show up in the answer
     status = f"running (pid {process.pid})" if process.returncode is None else f"already exited with code {process.returncode}"
+    job.reported = not job.running  # the answer below is how it ended
     head = log.read_text(encoding="utf-8", errors="replace")[:1500]
     where = " in the sandbox" if sandboxed else ""
-    return ok(context, f"{job_id}: {status}{where}; output in {log} (jobs do not survive a restart of the bot; the log does)\n{head}".rstrip(), job_id=job_id, pid=process.pid)
+    return ok(context, f"{job_id}: {status}{where}; output in {log} (you are told when it ends; jobs do not survive a restart of the bot, the log does)\n{head}".rstrip(), job_id=job_id, pid=process.pid)
+
+
+async def _track(services: Any, session_id: str, job: RemoteJob) -> None:
+    """Hand a host job to the watcher at once, so its record is kept before anything can restart.
+
+    The watcher would find it on its next round anyway; this closes the seconds in between, in which a
+    restart lost a job that outlives it — the one kind of job that does.
+    """
+    manager = services.extra.get("manager")
+    hook = getattr(manager, "service_hooks", {}).get("jobs") if manager is not None else None
+    if hook is None:
+        return
+    try:
+        await hook("track", session_id=session_id, job=job)
+    except Exception:  # noqa: BLE001 — the job runs whether or not its record was written now
+        logging.getLogger(__name__).warning("could not record host job %s of session %s", job.id, session_id, exc_info=True)
 
 
 def _tail(path: Path, lines: int) -> str:
@@ -661,11 +711,19 @@ async def job_output(context: ToolContext, job_id: str, tail_lines: int = 100) -
         await job.refresh()
         status = "running" if job.running else f"exited with code {job.exit_code}"
         text = f"{job.id}: {status} after {time.monotonic() - job.started:.0f}s — `{job.command[:200]}`\n{await job.tail(tail_lines)}"
+        _seen(job)
         return ok(context, clip(text, services.max_tool_output_chars), running=job.running, exit_code=job.exit_code)
     status = "running" if job.running else f"exited with code {job.process.returncode}"
     elapsed = time.monotonic() - job.started
     text = f"{job.id}: {status} after {elapsed:.0f}s — `{job.command[:200]}`\n{_tail(job.log, tail_lines)}"
+    _seen(job)
     return ok(context, clip(text, services.max_tool_output_chars), running=job.running, exit_code=job.process.returncode)
+
+
+def _seen(job: Job | RemoteJob) -> None:
+    """The agent has just read how a job ended, so being woken with the same news would be noise."""
+    if not job.running:
+        job.reported = True
 
 
 @search_hint(
@@ -693,11 +751,13 @@ async def job_kill(context: ToolContext, job_id: str) -> ToolResult:
             except ProcessLookupError:
                 pass
             await job.process.wait()
+    _seen(job)
     return ok(context, f"{job.id}: exited with code {job.process.returncode}; log in {job.log}", exit_code=job.process.returncode)
 
 
 async def _kill_remote(context: ToolContext, job: RemoteJob) -> ToolResult:
     await job.kill()
+    _seen(job)
     return ok(context, f"{job.id}: exited with code {job.exit_code}; log in {job.log}", exit_code=job.exit_code)
 
 
@@ -714,14 +774,12 @@ async def job_list(context: ToolContext) -> ToolResult:
     for job in jobs.values():
         if isinstance(job, RemoteJob):
             await job.refresh()
-    lines = [f"- {j.id}: {'running' if j.running else f'exited {_code(j)}'}, {time.monotonic() - j.started:.0f}s, `{j.command[:120]}` → {j.log}" for j in jobs.values()]
+    lines = [f"- {j.id}: {'running' if j.running else f'exited {j.exit_code}'}, {time.monotonic() - j.started:.0f}s, `{j.command[:120]}` → {j.log}" for j in jobs.values()]
+    for job in jobs.values():
+        _seen(job)
     return ok(context, "\n".join(lines), count=len(jobs))
-
-
-def _code(job: Job | RemoteJob) -> int | None:
-    return job.exit_code if isinstance(job, RemoteJob) else job.process.returncode
 
 
 TOOLS = [exec_command, job_output, job_kill, job_list]
 
-__all__ = ["TOOLS", "RemoteJob", "exec_command", "job_kill", "job_list", "job_output"]
+__all__ = ["TOOLS", "Job", "RemoteJob", "exec_command", "job_kill", "job_list", "job_output"]
