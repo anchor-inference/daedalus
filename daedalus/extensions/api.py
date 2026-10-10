@@ -2333,6 +2333,10 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             "staff": {"id": state.metadata["staff_id"], "session_id": state.metadata.get("staff_session_id")} if state.metadata.get("staff_id") else None,
             "leader_title": leader.session.title if leader is not None else None,
             "subagents": subagents,
+            # What the session still waits for once its turn is over: the app says "waiting for N jobs"
+            # instead of drawing a session whose render is still out there as finished.
+            "background_count": sum(1 for job in manager.jobs.get(session_id, {}).values() if job.running)
+            + sum(1 for child in subagents if child.get("status") in ("running", "waiting", "compacting")),
             "telegram_linked": bool(app.front is not None and await app.front.binding_for_session(session_id)),
             "share": await app.extensions["dialogs"].for_session(session_id) if "dialogs" in app.extensions else {"mode": "local", "slug": None, "key": None, "url": None, "public_base": ""},
             "verifications": dict(await app.db.fetchone("SELECT count(*) total, sum(passed) passed FROM verifications WHERE session_id = ?", (session_id,)) or {}),

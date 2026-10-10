@@ -132,7 +132,9 @@ from daedalus.terminals import endpoint as terminal_endpoint
 from daedalus.terminals.bridge import HostBridge
 from daedalus.tools import TOOL_GROUPS, discover_tools
 from daedalus.tools.dispatcher import build as build_dispatcher_tools
-from daedalus.tools.shell import RemoteJob
+from daedalus.tools.shell import RemoteJob, stop_job
+from daedalus.tools.shell import outcome as shell_outcome
+from daedalus.tools.shell import title as shell_title
 
 logger = logging.getLogger(__name__)
 
@@ -1576,7 +1578,9 @@ class SessionManager:
         for row in rows:
             archived = bool(row["metadata"].get("archived"))
             unread = bool(row["metadata"].get("unread_result"))
-            background = len(self.jobs.get(row["id"], {})) + children.get(row["id"], 0)
+            # Running jobs only: every job the session ever started was counted, so a session whose jobs had
+            # all ended long ago still looked as if it waited for something.
+            background = sum(1 for job in self.jobs.get(row["id"], {}).values() if job.running) + children.get(row["id"], 0)
             row.update(
                 {
                     "archived": archived,
@@ -1588,34 +1592,53 @@ class SessionManager:
         return rows
 
     async def task_views(self, session_id: str) -> list[dict[str, Any]]:
-        """Project existing jobs and child sessions into one operator-facing task list."""
-        now = datetime.now(UTC)
+        """Every job and child session of a session, as one operator-facing list.
+
+        A job's state comes from what the watcher last saw (it asks the host every few seconds), and its
+        records outlive a restart, so a job that ended or was lost while the bot was down is listed with
+        that outcome rather than dropped. This is the one list the app shows: it used to show these beside
+        a second list read out of the transcript, which named the same jobs again without their state.
+        """
         out: list[dict[str, Any]] = []
+        states = {"succeeded": "done", "failed": "failed", "killed": "cancelled", "timed_out": "failed", "lost": "lost"}
+        quiet_limit = self.config.tools.jobs.quiet_minutes * 60.0
+        overdue_limit = self.config.tools.jobs.max_hours * 3600.0
+        mono = time.monotonic()
         for job in self.jobs.get(session_id, {}).values():
-            # A job on the host has no process here; its code is what it was last seen to end with, and
-            # the job watcher asks the host every few seconds. Nothing asked before it, so a host job that
-            # had long finished stayed "running" here, with a stop button, until the agent read it.
-            code = job.exit_code
-            state = "running" if code is None else "cancelled" if code < 0 else "done" if code == 0 else "failed"
-            started = now.timestamp() - max(0.0, time.monotonic() - job.started)
+            word = shell_outcome(job)
+            state = "running" if word is None else states[word]
+            started = job.started_at or time.time() - max(0.0, mono - job.started)
             try:
                 active = datetime.fromtimestamp(job.log.stat().st_mtime, UTC)
             except OSError:
-                active = datetime.fromtimestamp(started, UTC)
+                active = datetime.fromtimestamp(job.ended or started, UTC)
+            flag = None
+            if word is None and job.kind == "job":
+                if "quiet" in job.flags or (quiet_limit > 0 and job.grown_at and mono - job.grown_at >= quiet_limit):
+                    flag = "quiet"
+                elif "overdue" in job.flags or (overdue_limit > 0 and mono - job.started >= overdue_limit):
+                    flag = "overdue"
             out.append(
                 {
                     "id": job.id,
                     "owner_session_id": session_id,
                     "parent_run_id": None,
-                    "kind": "job",
+                    "kind": job.kind,
                     "state": state,
-                    "title": job.command[:200],
+                    "outcome": word,
+                    "exit_code": job.exit_code,
+                    "title": shell_title(job)[:200],
+                    "command": job.command,
+                    "where": job.where,
                     "started_at": datetime.fromtimestamp(started, UTC).isoformat(),
                     "last_activity_at": active.isoformat(),
+                    "ended_at": datetime.fromtimestamp(job.ended, UTC).isoformat() if job.ended and word is not None else None,
+                    "flag": flag,
+                    "reported": job.reported,
                     "progress": None,
                     "child_session_id": None,
                     "result_ref": f".jobs/{job.log.name}",
-                    "stop_supported": code is None,
+                    "stop_supported": word is None,
                 }
             )
         for row in await self.list_sessions(limit=10_000):
@@ -1629,9 +1652,16 @@ class SessionManager:
                     "parent_run_id": None,
                     "kind": "agent",
                     "state": state,
+                    "outcome": None if state == "running" else "failed" if state == "failed" else "succeeded",
+                    "exit_code": None,
                     "title": str(row["metadata"].get("subagent_name") or row["title"]),
+                    "command": None,
+                    "where": None,
                     "started_at": row["created_at"],
                     "last_activity_at": row["last_message_at"],
+                    "ended_at": None,
+                    "flag": None,
+                    "reported": state != "running",
                     "progress": None,
                     "child_session_id": row["id"],
                     "result_ref": None,
@@ -1653,15 +1683,7 @@ class SessionManager:
         job = self.jobs.get(session_id, {}).get(task_id)
         if job is None:
             return False
-        if isinstance(job, RemoteJob):
-            await job.kill()
-            return True
-        if job.process.returncode is None:
-            try:
-                end_tree(job.process.pid, hard=False)
-            except ProcessLookupError:
-                pass
-            await job.process.wait()
+        await stop_job(job, by="operator")
         return True
 
     async def delete_session(self, session_id: str, *, delete_workspace: bool = True) -> bool:
@@ -4093,6 +4115,22 @@ class SessionManager:
         await self._publish_status(state, "running")
         return run_id
 
+    def _running_jobs_note(self, session_id: str) -> str:
+        """The turn-context line naming the session's jobs that still run, and the promise about them.
+
+        An agent that started a job in an earlier turn did not know, at the start of the next one, that
+        it was still out there — and either started another waiter for it or claimed it was finished."""
+        running = [job for job in self.jobs.get(session_id, {}).values() if job.running]
+        if not running:
+            return ""
+        mono = time.monotonic()
+        named = "; ".join(
+            f"{job.id}{' (service)' if job.kind == 'service' else ''}, {int((mono - job.started) // 60)} min: `{' '.join(shell_title(job).split())[:80]}`"
+            for job in running[:6]
+        )
+        more = f" and {len(running) - 6} more" if len(running) > 6 else ""
+        return f"- Background jobs still running: {named}{more}. Each wakes you with its outcome when it ends; there is nothing to poll."
+
     async def _with_turn_context(self, state: SessionState, message: Message) -> Message:
         """The run's opening message with the turn context as its last block.
 
@@ -4126,6 +4164,8 @@ class SessionManager:
         yagni = await self._yagni_note(state)
         if yagni:
             volatile.append("\n- " + yagni)
+        if waiting := self._running_jobs_note(state.session.id):
+            volatile.append("\n" + waiting)
         if handed := operator_secrets.prompt_section(self.secrets.available(state.session.id)):
             # In the turn context rather than the system prompt: the set changes whenever the operator adds
             # one, and the system prompt is the part every later call is cached on.

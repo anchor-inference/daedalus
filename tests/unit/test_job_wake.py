@@ -161,8 +161,8 @@ async def test_a_job_the_agent_read_to_its_end_wakes_nothing(settings: Settings,
         submitted.clear()
         manager.jobs[sid][read].reported = False
         manager.jobs[sid][listed].reported = False
-        assert "exited with code 0" in (await job_output().invoke(context(sid), {"job_id": read})).content
-        assert "exited 0" in (await job_list().invoke(context(sid), {})).content
+        assert "succeeded" in (await job_output().invoke(context(sid), {"job_id": read})).content
+        assert "succeeded" in (await job_list().invoke(context(sid), {})).content
         assert not (await job_kill().invoke(context(sid), {"job_id": killed})).is_error
         for _ in range(3):
             await watch.check()
@@ -215,7 +215,7 @@ async def test_a_job_the_operator_stopped_is_told_as_killed(settings: Settings, 
         assert await manager.stop_task(state.session.id, job_id)
         await watch.check()
         [wake] = submitted
-        assert f"[background job {job_id} was killed" in wake["text"] and "waiting" in wake["text"]
+        assert f"[background job {job_id} was killed by the operator" in wake["text"] and "waiting" in wake["text"]
     finally:
         await manager.close()
 
@@ -308,9 +308,7 @@ async def test_a_deleted_session_takes_its_host_job_records_along(settings: Sett
 
 def test_the_note_reads_durations_and_outcomes_plainly() -> None:
     assert job_watch._duration(9) == "9s" and job_watch._duration(556) == "9m 16s" and job_watch._duration(3 * 3600 + 120) == "3h 2m"
-    assert job_watch._outcome(0) == "succeeded" and job_watch._outcome(2) == "failed with exit code 2"
-    assert job_watch._outcome(-1) == "was killed" and job_watch._outcome(-15) == "was killed (exit code -15)"
     long = "rm -rf a; " + "x" * 400 + "\nnext line"
     short = job_watch._short(long)
     assert len(short) == job_watch.COMMAND_CHARS and short.endswith("…") and "\n" not in short
-    assert time.time() - job_watch.started_at(SimpleNamespace(started=time.monotonic() - 60)) == pytest.approx(60, abs=2)  # type: ignore[arg-type]
+    assert time.time() - job_watch.started_at(SimpleNamespace(started=time.monotonic() - 60, started_at=0.0)) == pytest.approx(60, abs=2)  # type: ignore[arg-type]

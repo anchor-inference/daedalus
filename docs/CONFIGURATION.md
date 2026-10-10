@@ -32,6 +32,11 @@ sandbox = "off"              # off | workspace — bubblewrap: the filesystem re
                              # actually run — installed is not enough, the machine has to allow the
                              # namespaces — and "off" everywhere else, a container included.
 
+[tools.jobs]                 # what the watcher says about a background job that still runs; its
+quiet_minutes = 15           # end is always reported. One "possibly stuck" note when its log has
+max_hours = 6                # not grown this long, one "overdue" note past this age; 0 = never.
+                             # Services (Exec service=true) and JobWait waits are spared both.
+
 [tools.results]              # what happens to results the agent has moved past
 fresh_count = 6              # the newest results, always shown whole
 stale_max_chars = 2000       # head kept of an older result longer than this

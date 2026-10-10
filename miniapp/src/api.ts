@@ -623,11 +623,23 @@ export type TaskView = {
   id: string;
   owner_session_id: string;
   parent_run_id: string | null;
-  kind: "job" | "agent";
-  state: "running" | "done" | "failed" | "cancelled";
+  /** A waiter is a JobWait; a service is a job marked as a long-running server. */
+  kind: "job" | "wait" | "service" | "agent";
+  /** Lost: the process vanished without an exit code, across a restart for one. */
+  state: "running" | "done" | "failed" | "cancelled" | "lost";
+  outcome: "succeeded" | "failed" | "killed" | "lost" | "timed_out" | null;
+  exit_code: number | null;
   title: string;
+  command: string | null;
+  /** "host" runs on the operator's machine. */
+  where: "host" | "local" | null;
   started_at: string;
   last_activity_at: string;
+  ended_at: string | null;
+  /** Quiet: running, but its log has not grown for a long time. Overdue: running past the configured maximum age. */
+  flag: "quiet" | "overdue" | null;
+  /** The agent has been told how it ended. */
+  reported: boolean;
   progress: number | null;
   child_session_id: string | null;
   result_ref: string | null;
@@ -781,6 +793,8 @@ export type SessionDetail = {
   id: string;
   title: string;
   status: string;
+  /** Running jobs and sub-agents: an idle session with some is not finished. */
+  background_count?: number;
   /** The run is over and its answer is written; what the session is still saving behind it is not a run. */
   housekeeping?: boolean;
   /** Why the last run ended in an error, in the words the host was given — a provider's own refusal, typically.

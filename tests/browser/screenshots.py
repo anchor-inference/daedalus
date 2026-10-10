@@ -49,6 +49,7 @@ from api_stub import (  # noqa: E402
     folders,
     fulfil_shared,
     notification_preferences,
+    session_tasks,
     session_tool_groups,
 )
 
@@ -805,6 +806,8 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
             return respond(route, getattr(stub, "queued", []) if sid == S1 and getattr(stub, "running", False) else [])
         if tail == "checkpoints":
             return respond(route, {"checkpoints": [], "total": 0, "pruned": False, "pruned_before": None, "removed": 0, "note": "", "keep_days": 30, "keep_last": 50})
+        if tail == "tasks":
+            return respond(route, session_tasks(sid))
         if tail == "mcp":
             return respond(route, {"enabled": [], "servers": []})
         if tail == "tools":
