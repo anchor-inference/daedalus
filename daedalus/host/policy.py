@@ -72,7 +72,8 @@ a server needs a moment to come up."""
 WAIT_REASON = (
     "waiting in the foreground blocks the run that would receive what it waits for: a subagent's report and a "
     "finished job arrive as messages that wake you the moment they are ready. If there is nothing to do "
-    "meanwhile, end the turn; to read a running job, use JobOutput; a service's log, ServiceLogs."
+    "meanwhile, end the turn; to read a running job, use JobOutput; a service's log, ServiceLogs. To wait for a "
+    "process, a file, a log line or a port, use JobWait (background=true to be woken), not a loop in a job."
 )
 INSTALLATION_REASON = (
     "the installation's own files — the provider keys, the state database, the restart channel's secret, "
@@ -949,7 +950,7 @@ class Policy:
                  similar: Iterable[dict[str, Any]] = ()) -> Decision:
         text = canonical(tool, arguments)
         if tool in SHELL_TOOLS:
-            decision = self._shell(text, str(arguments.get("cwd") or "") or None, foreground=tool == "Exec" and not bool(arguments.get("background")))
+            decision = self._shell(text, str(arguments.get("cwd") or "") or None, foreground=tool == "Exec" and not (arguments.get("background") or arguments.get("service")))
         elif tool == "WebFetch":
             decision = self._web(text)
         elif tool in BROWSER_NAV_TOOLS:

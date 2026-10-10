@@ -266,13 +266,13 @@ async def test_a_background_job_runs_on_the_host_and_is_read_and_ended_through_t
         assert "running" in (await job_list().invoke(ctx, {})).content
         assert [v["state"] for v in await manager.task_views(state.session.id)] == ["running"]
         ended = await job_kill().invoke(ctx, {"job_id": job_id})
-        assert not ended.is_error and "exited with code" in ended.content and "None" not in ended.content
+        assert not ended.is_error and "was killed by you" in ended.content and "None" not in ended.content
 
         quick = await exec_command().invoke(ctx, {"command": "exit 4", "background": True})
         quick_id = quick.content.split(":", 1)[0]
 
         async def ended_by_itself() -> bool:
-            return "exited with code 4" in (await job_output().invoke(ctx, {"job_id": quick_id})).content
+            return "failed with exit code 4" in (await job_output().invoke(ctx, {"job_id": quick_id})).content
 
         await until_await(ended_by_itself, "a job that ended was seen with its exit code")
     finally:

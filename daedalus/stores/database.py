@@ -2079,6 +2079,25 @@ CREATE TABLE IF NOT EXISTS project_pins (
 );
 """)
 
+async def _all_jobs_kept(conn: aiosqlite.Connection) -> None:
+    """Background job records move from ``host_jobs:<session>`` to ``jobs:<session>`` and say where they ran.
+
+    Only host jobs were kept across a restart, so a job of the bot's own process that a restart ended
+    was never reported at all. Every job is kept now, and a record names its machine."""
+    rows = await (await conn.execute("SELECT key, value FROM kv WHERE key LIKE 'host\\_jobs:%' ESCAPE '\\'")).fetchall()
+    for key, value in rows:
+        try:
+            records = json.loads(value)
+        except (TypeError, ValueError):
+            records = []
+        moved = [{**record, "where": "host"} for record in records if isinstance(record, dict)] if isinstance(records, list) else []
+        await conn.execute("DELETE FROM kv WHERE key = ?", (key,))
+        if moved:
+            await conn.execute("INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)", ("jobs:" + key.removeprefix("host_jobs:"), json.dumps(moved)))
+
+
+MIGRATIONS.append(DataMigration("", _all_jobs_kept))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

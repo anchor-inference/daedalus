@@ -699,6 +699,18 @@ class ResultToolsConfig(BaseModel):
     prompt prefix and costs a cache miss on the whole request, so it is done in batches."""
 
 
+class JobsToolsConfig(BaseModel):
+    """What the background job watcher says about a job that is still running, ``[tools.jobs]``.
+
+    The end of every job is reported regardless; these are the two reminders a running one can earn,
+    each sent once. A job started as a service, and a JobWait wait, are spared both."""
+
+    quiet_minutes: float = Field(default=15.0, ge=0, le=24 * 60)
+    """A running job whose log has not grown for this long is reported as possibly stuck; 0 never."""
+    max_hours: float = Field(default=6.0, ge=0, le=24 * 30)
+    """A job running longer than this is reported as overdue; 0 never."""
+
+
 class ToolGroupConfig(BaseModel):
     """The operator's choice for one group of host tools, ``[tools.groups.<name>]``."""
 
@@ -713,6 +725,7 @@ class ToolsConfig(BaseModel):
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolsConfig = Field(default_factory=ExecToolsConfig)
     results: ResultToolsConfig = Field(default_factory=ResultToolsConfig)
+    jobs: JobsToolsConfig = Field(default_factory=JobsToolsConfig)
     groups: dict[str, ToolGroupConfig] = Field(default_factory=dict)
     """Only the groups the operator changed; the rest keep the default their declaration carries
     (``daedalus.tools.TOOL_GROUPS``), so a better default reaches every installation that never chose."""

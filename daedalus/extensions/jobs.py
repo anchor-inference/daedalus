@@ -12,9 +12,16 @@ parallel builds ending within a second wake the agent once and not ten times. A 
 mark that it was is set before the note is submitted, and the agent's own JobOutput, JobKill or JobList
 that read its end sets the same mark, so a job awaited within the turn wakes nothing.
 
-Host jobs outlive a restart of this process (they run detached on the operator's machine), so their
-records are kept in the ``kv`` table and read back at start: a job that ended while the bot was down is
-told after it is up again. Jobs of this process die with it and are not kept.
+Every job's record is kept in the ``kv`` table and read back at start, so the contract holds across a
+restart. A host job outlives this process (it runs detached on the operator's machine): one that ended
+while the bot was down is told after it is up again, and one whose process vanished without its exit
+file is told as lost. A job of this process does not outlive it, and is told as lost — before, it was
+simply never heard of again, and the agent waited for news that could not come.
+
+While a job runs the watcher says something at most twice, once each: when its log has not grown for
+``tools.jobs.quiet_minutes`` (possibly stuck — a waiter that finds itself forever looks exactly like
+this), and when it has run past ``tools.jobs.max_hours``. A service is expected to run and quietly, and
+is spared both; a wait has its own timeout, and is spared both too.
 """
 
 from __future__ import annotations
@@ -26,7 +33,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from daedalus.host.host_exec import HostExecBackend
-from daedalus.tools.shell import Job, RemoteJob
+from daedalus.tools.shell import Job, RemoteJob, grew, outcome, outcome_words, title
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -47,8 +54,11 @@ TAIL_LINE_CHARS = 240
 TAIL_CHARS = 1500
 COMMAND_CHARS = 160
 KEPT_RECORDS = 30
-"""Host job records kept per session; the oldest finished ones go first."""
-KEY_PREFIX = "host_jobs:"
+"""Job records kept per session; the oldest finished ones go first."""
+QUIET_MINUTES = 15.0
+MAX_HOURS = 6.0
+"""The defaults of ``tools.jobs``, for a watcher whose manager has no configuration (the tests)."""
+KEY_PREFIX = "jobs:"
 
 
 def _short(command: str, limit: int = COMMAND_CHARS) -> str:
@@ -67,35 +77,60 @@ def _duration(seconds: float) -> str:
     return f"{hours}h {minutes}m"
 
 
-def _outcome(code: int | None) -> str:
-    if code == 0:
-        return "succeeded"
-    if code is None or code < 0:
-        # A negative code is a signal (a local job) or a host job that ended without its wrapper
-        # writing a code, which is what a kill of the whole group leaves.
-        return f"was killed (exit code {code})" if code is not None and code != -1 else "was killed"
-    return f"failed with exit code {code}"
-
-
 def started_at(job: Job | RemoteJob) -> float:
     """The wall-clock start of a job, from this process's monotonic clock where nothing better is kept."""
-    if isinstance(job, RemoteJob) and job.started_at:
+    if job.started_at:
         return job.started_at
     return time.time() - max(0.0, time.monotonic() - job.started)
 
 
-def _record(job: RemoteJob) -> dict[str, Any]:
+def _record(job: Job | RemoteJob) -> dict[str, Any]:
+    pid = job.pid if isinstance(job, RemoteJob) else (job.process.pid if job.process is not None else 0)
     return {
         "id": job.id,
+        "where": job.where,
+        "kind": job.kind,
+        "label": job.label,
         "command": job.command,
         "cwd": str(job.cwd),
         "log": str(job.log),
-        "pid": job.pid,
+        "pid": pid,
         "started_at": started_at(job),
         "exit_code": job.exit_code,
         "ended": job.ended,
         "reported": job.reported,
+        "stopped_by": job.stopped_by,
+        "lost": job.lost,
+        "flags": list(job.flags),
     }
+
+
+def _from_record(record: dict[str, Any], backend: Any, now_wall: float, now_mono: float) -> Job | RemoteJob:
+    start = float(record.get("started_at") or now_wall)
+    common: dict[str, Any] = {
+        "id": record["id"], "command": record["command"], "cwd": Path(record["cwd"]), "log": Path(record["log"]),
+        "started": now_mono - max(0.0, now_wall - start), "ended": record.get("ended"), "reported": bool(record.get("reported")),
+        "started_at": start, "kind": record.get("kind") or "job", "label": record.get("label") or "",
+        "stopped_by": record.get("stopped_by") or "", "lost": bool(record.get("lost")), "flags": list(record.get("flags") or []),
+        "grown_at": now_mono,
+    }
+    if record["where"] == "host":
+        return RemoteJob(pid=int(record["pid"]), backend=backend, exit_code=record.get("exit_code"), **common)
+    job = Job(process=None, **common)
+    if record.get("exit_code") is None and not job.lost:
+        # It was running when the last process ended, and it was that process's child: it is gone, and
+        # nobody saw how it ended. Told as lost, once, like any other end.
+        job.lost = True
+        job.ended = now_wall
+        job.reported = False
+    return job
+
+
+def _local_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return -1
 
 
 class JobWatch:
@@ -133,28 +168,25 @@ class JobWatch:
         manager = self.manager
         records = await manager.db.kv_get(KEY_PREFIX + session_id, []) or []
         state = await manager.get_state(session_id)
-        backend = state.services.exec_backend if state is not None and state.services is not None else None
-        if not isinstance(backend, HostExecBackend):
-            # The session is gone, or no longer works on the host: nobody could ask after these jobs.
+        if state is None:
             await manager.db.execute("DELETE FROM kv WHERE key = ?", (KEY_PREFIX + session_id,))
             return
+        backend = state.services.exec_backend if state.services is not None else None
         jobs = manager.jobs.setdefault(session_id, {})
         now_wall, now_mono = time.time(), time.monotonic()
         for record in records:
             if record["id"] in jobs:
                 continue
-            start = float(record.get("started_at") or now_wall)
-            jobs[record["id"]] = RemoteJob(
-                id=record["id"], command=record["command"], cwd=Path(record["cwd"]), log=Path(record["log"]),
-                pid=int(record["pid"]), started=now_mono - max(0.0, now_wall - start), backend=backend,
-                exit_code=record.get("exit_code"), ended=record.get("ended"), reported=bool(record.get("reported")),
-                started_at=start,
-            )
+            if record["where"] == "host" and not isinstance(backend, HostExecBackend):
+                continue  # the session no longer works on the host: nobody could ask after this job
+            jobs[record["id"]] = _from_record(record, backend, now_wall, now_mono)
         self._written[session_id] = list(records)
+        # Written back at once: a local job just found lost is a change the next start must not find again.
+        await self._persist(session_id)
 
     async def _persist(self, session_id: str) -> None:
         jobs = self.manager.jobs.get(session_id, {})
-        records = [_record(job) for job in jobs.values() if isinstance(job, RemoteJob)]
+        records = [_record(job) for job in jobs.values() if isinstance(job, Job | RemoteJob)]
         # The newest records stay; a finished, told job is the first to go, a running one never does.
         while len(records) > KEPT_RECORDS:
             spare = next((r for r in records if r["exit_code"] is not None and r["reported"]), None)
@@ -178,11 +210,19 @@ class JobWatch:
 
     # -- watching ------------------------------------------------------------------------------
 
+    def _limits(self) -> tuple[float, float]:
+        """The quiet and the overdue thresholds, in seconds; zero switches one off."""
+        config = getattr(getattr(getattr(self.manager, "config", None), "tools", None), "jobs", None)
+        quiet = float(getattr(config, "quiet_minutes", QUIET_MINUTES)) * 60.0
+        overdue = float(getattr(config, "max_hours", MAX_HOURS)) * 3600.0
+        return quiet, overdue
+
     async def check(self) -> None:
-        """One round: see which jobs ended, keep the host records, and tell the bursts that are over."""
+        """One round: see which jobs ended, keep the records, nudge about the stuck, tell the bursts that are over."""
         manager = self.manager
         now = time.monotonic()
         for session_id, jobs in list(manager.jobs.items()):
+            nudges: list[tuple[Job | RemoteJob, str]] = []
             for job in list(jobs.values()):
                 if job.reported:
                     continue
@@ -195,7 +235,11 @@ class JobWatch:
                         await job.refresh()
                     except Exception:  # noqa: BLE001 — the host is asked again next round
                         logger.debug("could not ask after host job %s", job.id, exc_info=True)
+                elif job.running:
+                    grew(job, _local_size(job.log))
                 if job.running:
+                    if (flag := self._due_flag(job, now)) is not None:
+                        nudges.append((job, flag))
                     continue
                 self._asked.pop(key, None)
                 if job.ended is None:
@@ -204,8 +248,45 @@ class JobWatch:
             try:
                 await self._persist(session_id)
             except Exception:  # noqa: BLE001 — the records are written again next round
-                logger.warning("could not record the host jobs of session %s", session_id, exc_info=True)
+                logger.warning("could not record the jobs of session %s", session_id, exc_info=True)
             await self._tell_if_due(session_id, now)
+            if nudges:
+                await self._nudge(session_id, nudges)
+
+    def _due_flag(self, job: Job | RemoteJob, now: float) -> str | None:
+        """The nudge a running job has earned and not yet had: "quiet", "overdue", or None."""
+        if job.kind != "job":
+            return None
+        quiet, overdue = self._limits()
+        if quiet > 0 and "quiet" not in job.flags and job.grown_at and now - job.grown_at >= quiet:
+            return "quiet"
+        if overdue > 0 and "overdue" not in job.flags and now - job.started >= overdue:
+            return "overdue"
+        return None
+
+    async def _nudge(self, session_id: str, nudges: list[tuple[Job | RemoteJob, str]]) -> None:
+        manager = self.manager
+        if manager.shutting_down or manager.recovering:
+            return
+        for job, flag in nudges:
+            job.flags.append(flag)  # before the submit, which yields: a nudge is said once
+        try:
+            await self._persist(session_id)
+            blocks = [await self._nudge_block(job, flag) for job, flag in nudges]
+            await manager.submit(session_id, "\n\n".join(blocks), steer=True, as_answer=False, origin="job")
+        except Exception:  # noqa: BLE001 — a nudge is a courtesy; the end is still reported
+            logger.exception("could not nudge session %s about its running jobs", session_id)
+
+    async def _nudge_block(self, job: Job | RemoteJob, flag: str) -> str:
+        took = _duration(time.time() - started_at(job))
+        if flag == "quiet":
+            silent = _duration(time.monotonic() - job.grown_at)
+            head = f"[background job {job.id} is still running after {took}, and its log has not grown for {silent}: possibly stuck — `{_short(title(job))}`]"
+        else:
+            head = f"[background job {job.id} has been running for {took}, past the {_duration(self._limits()[1])} expected of a job — `{_short(title(job))}`]"
+        tail = await self._tail(job)
+        advice = "JobOutput reads it, JobKill stops it; it still wakes you when it ends, and this is the only reminder."
+        return self.manager.redactor.redact(f"{head}\n{advice}" + (f"\nthe last lines of {job.log}:\n{tail}" if tail else ""))
 
     async def _tell_if_due(self, session_id: str, now: float) -> None:
         manager = self.manager
@@ -242,7 +323,10 @@ class JobWatch:
 
     async def _block(self, job: Job | RemoteJob) -> str:
         took = (job.ended or time.time()) - started_at(job)
-        head = f"[background job {job.id} {_outcome(job.exit_code)} after {_duration(took)}: `{_short(job.command)}`]"
+        noun = {"wait": "wait", "service": "service"}.get(job.kind, "background job")
+        head = f"[{noun} {job.id} {outcome_words(job)} after {_duration(took)}: `{_short(title(job))}`]"
+        if job.label:
+            head += f"\ncommand: `{_short(job.command)}`" if outcome(job) not in ("succeeded", "timed_out") else ""
         tail = await self._tail(job)
         where = f"the last lines of {job.log}" if tail else f"it printed nothing; the log is {job.log}"
         # The command and its log alike: a command line carries a key as readily as its output prints one.
@@ -262,7 +346,7 @@ class JobWatch:
 
     async def service(self, op: str, **kwargs: Any) -> Any:
         if op == "track":
-            # A host job just started: its record is written now, not on the next round.
+            # A job just started: its record is written now, not on the next round.
             await self._persist(str(kwargs["session_id"]))
             return None
         raise ValueError(op)

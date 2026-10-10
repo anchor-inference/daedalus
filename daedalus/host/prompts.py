@@ -875,7 +875,14 @@ def environment_section(
         "taken its place; the note in its place says so. Nothing is lost — read the file or run the "
         "command again when you need it, rather than answering from what you remember it said"
     )
-    lines.append("- Exec kills a command at its timeout (the result names it) and the wait is lost: a build, a solver, a test suite or a server that may run longer starts with background=true and is read with JobOutput; where jobs are unavailable, `nohup … > log 2>&1 &` and poll the log")
+    lines.append(
+        "- Background work, one contract: start the long process itself with Exec(background=true) — a build, a render, a "
+        "test suite — and end your turn. When it ends (exit, crash, kill, or lost to a restart) you are woken once with "
+        "its outcome and the last lines of its log, mid-turn or idle; a job silent for a long time earns one nudge. Never "
+        "poll with sleep loops, never `nohup … &` inside a plain Exec (nothing reports it), never `pgrep -f` a pattern your "
+        "own command line contains (it finds itself and never ends). To wait for a pid, a file, a log line or a port, use "
+        "JobWait. A server goes to ServiceStart, or Exec(service=true) where services are unavailable"
+    )
     if sandboxed:
         lines.append("- Exec and Verify run in a sandbox: the filesystem is read-only outside the workspace, /tmp is private, and background processes end with the command")
     if extra_notes:

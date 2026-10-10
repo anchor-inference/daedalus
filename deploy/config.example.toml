@@ -161,6 +161,14 @@ max_output_chars = 60000
 # sandbox = "off"                # off | workspace
 # sandbox_extra_writable = []    # absolute paths the sandbox may write beside the workspace
 
+[tools.jobs]
+# The end of every background job wakes the session that started it, once. While a job runs, the
+# watcher says something at most twice: when its log has not grown for quiet_minutes (possibly
+# stuck), and when it has run past max_hours. 0 switches either off. A job started as a service
+# (Exec service=true) and a JobWait wait are spared both.
+# quiet_minutes = 15
+# max_hours = 6
+
 [tools.results]
 # What happens to a result the agent has already moved past. max_output_chars above bounds ONE
 # call; these bound the twenty results the request carries again on every turn.

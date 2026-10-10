@@ -13,7 +13,7 @@ import sys
 import time
 from collections import deque
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +25,7 @@ from daedalus.processes import end_tree
 from daedalus.security import operator_secrets
 from daedalus.tools import search_hint
 from daedalus.tools._common import FRAME_CHARS, clip, error, ok, services_for, tool_config
+from daedalus.tools.job_guard import WAIT_TIMED_OUT, orphan_note, self_match_reason, wait_script
 
 _warned_missing_bwrap = False
 _bwrap_state: str | None = None
@@ -333,10 +334,13 @@ def _with_secrets(session_id: str, command: str, env: dict[str, str] | None, *, 
         "workspace. Output (stdout and stderr, interleaved) is returned; very long output "
         "is clipped to its head and tail and the whole of it is kept in a file the result names. "
         "background=true starts the command as a job and returns at once with a job id: "
-        "JobOutput reads its output, JobKill stops it, JobList shows the jobs; use it for servers, "
-        "builds and anything longer than a few minutes instead of holding this call open. "
-        "When a job ends you are told, with its exit code and the last lines of its log, "
-        "unless you already read its end yourself; there is no need to poll it."
+        "JobOutput reads its output, JobKill stops it, JobList shows the jobs. Start anything "
+        "longer than a minute or two (a build, a render, a test suite) this way — the long process "
+        "itself, not a waiter for it — and end your turn: when the job ends you are woken with its "
+        "outcome and the last lines of its log, whether you are mid-turn or idle. Never poll it, "
+        "never start it with `nohup … &` (nothing reports such a process), never wait with "
+        "`pgrep -f` (it matches its own shell); JobWait waits for a pid, a file, a log line or a port. "
+        "service=true starts a server as a job that is expected to keep running."
     ),
 )
 async def exec_command(
@@ -346,18 +350,36 @@ async def exec_command(
     timeout_seconds: int | None = None,
     env: dict[str, str] | None = None,
     background: bool = False,
+    service: bool = False,
 ) -> ToolResult:
+    if (reason := self_match_reason(command)) is not None:
+        return error(context, f"refused: {reason}")
+    if service or background:
+        return await start_job(context, command, cwd, env, kind="service" if service else "job")
+    result = await _run(context, command, cwd, timeout_seconds, env)
+    note = orphan_note(command, sandboxed="sandbox=workspace" in result.content.split("\n", 1)[0])
+    return result.model_copy(update={"content": result.content + note}) if note else result
+
+
+async def start_job(context: ToolContext, command: str, cwd: str | None, env: dict[str, str] | None, *, kind: str = "job", label: str = "") -> ToolResult:
+    """Start ``command`` as a background job of the session, wherever its commands run."""
+    services = services_for(context)
+    workdir = services.resolve(cwd)
+    command, env = _with_secrets(context.session_id, command, env, remote=services.exec_backend is not None)
+    if services.exec_backend is not None:
+        return await _start_remote_job(context, services, command, workdir, env, kind=kind, label=label)
+    if not workdir.exists():
+        return error(context, f"working directory does not exist: {workdir}")
+    return await _start_job(context, services, command, workdir, env, kind=kind, label=label)
+
+
+async def _run(context: ToolContext, command: str, cwd: str | None, timeout_seconds: int | None, env: dict[str, str] | None) -> ToolResult:
+    """One command in the foreground, to its end or its timeout."""
     services = services_for(context)
     workdir = services.resolve(cwd)
     limit = float(timeout_seconds or services.tool_timeout_seconds)
     started = time.monotonic()
     command, env = _with_secrets(context.session_id, command, env, remote=services.exec_backend is not None)
-    if background:
-        if services.exec_backend is not None:
-            return await _start_remote_job(context, services, command, workdir, env)
-        if not workdir.exists():
-            return error(context, f"working directory does not exist: {workdir}")
-        return await _start_job(context, services, command, workdir, env)
     if services.exec_backend is not None:
         outcome = await services.exec_backend.run(command, cwd=str(workdir), env=env, timeout=limit)
         elapsed = time.monotonic() - started
@@ -489,8 +511,10 @@ async def exec_command(
     return ok(context, text, exit_code=proc.returncode)
 
 
-LOCAL_TIMEOUT_HINT = " — waiting this long in the foreground is the mistake, not the command: start it again with background=true and read it with JobOutput, or pass a larger timeout_seconds if it must block"
-REMOTE_TIMEOUT_HINT = " — waiting this long in the foreground is the mistake, not the command: start it again with `nohup … > /tmp/job.log 2>&1 &` and poll the log with later calls, or pass a larger timeout_seconds if it must block"
+LOCAL_TIMEOUT_HINT = " — waiting this long in the foreground is the mistake, not the command: start it again with background=true and end your turn (you are woken when it ends), or pass a larger timeout_seconds if it must block"
+REMOTE_TIMEOUT_HINT = LOCAL_TIMEOUT_HINT
+"""The same advice on the host: it once said `nohup … &` and poll the log, from before host sessions had
+jobs, and an agent that followed it started a render nothing watched and slept waiting for its end."""
 
 SPILL_MAX_BYTES = 20 * 1024 * 1024
 """The most of one command's output kept on disk; beyond it the file says it was capped."""
@@ -512,6 +536,12 @@ def _spill_path(services: Any, context: ToolContext) -> Path:
     return services.logs_dir(".exec") / f"{call}.log"
 
 
+JOB_KINDS = ("job", "wait", "service")
+"""What a background job is for. A ``wait`` is a JobWait waiter, whose exit 124 means it timed out; a
+``service`` is a long-lived server, which the watcher never calls quiet or overdue — running is its
+work — though its end is still reported, since a server that dies is news."""
+
+
 @dataclass(slots=True)
 class Job:
     """A background job of this process: a child it waits for, gone with the process.
@@ -519,25 +549,45 @@ class Job:
     ``ended`` is the wall-clock moment the job was first seen finished, and ``reported`` whether the
     agent knows how it ended — it read the end itself, or was woken with it. The watcher in
     :mod:`daedalus.extensions.jobs` wakes the session once for every finished job that is not.
+
+    ``process`` is None for a job read back from the record of an earlier process of the bot: its child
+    died with that process (or is no longer anyone's child), so it is ``lost`` — nobody can tell how it
+    ended, and saying so is the report.
     """
 
     id: str
     command: str
     cwd: Path
     log: Path
-    process: asyncio.subprocess.Process
+    process: asyncio.subprocess.Process | None
     started: float
     sandboxed: bool = False
     ended: float | None = None
     reported: bool = False
+    started_at: float = 0.0
+    kind: str = "job"
+    label: str = ""
+    """What the reports call the job instead of its command: a wait's condition, in words."""
+    stopped_by: str = ""
+    """Who ended it on purpose — "agent" (JobKill) or "operator" (the app's stop button) — or empty."""
+    lost: bool = False
+    flags: list[str] = field(default_factory=list)
+    """The nudges already sent about it while it ran ("quiet", "overdue"): each is sent once."""
+    log_size: int = -1
+    grown_at: float = 0.0
+    """The monotonic moment the log was last seen to grow: the clock of the "possibly stuck" nudge."""
 
     @property
     def running(self) -> bool:
-        return self.process.returncode is None
+        return self.process is not None and self.process.returncode is None
 
     @property
     def exit_code(self) -> int | None:
-        return self.process.returncode
+        return self.process.returncode if self.process is not None else None
+
+    @property
+    def where(self) -> str:
+        return "local"
 
 
 @dataclass(slots=True)
@@ -561,10 +611,24 @@ class RemoteJob:
     started_at: float = 0.0
     """The wall-clock start, which a record kept across a restart of this process is read back from:
     ``started`` is this process's monotonic clock and means nothing to the next one."""
+    kind: str = "job"
+    label: str = ""
+    stopped_by: str = ""
+    lost: bool = False
+    """The process is gone and its wrapper wrote no exit code: killed together with its group from
+    outside, or the machine restarted under it. It used to be told as "was killed", which blamed a
+    kill nobody made when the host had rebooted."""
+    flags: list[str] = field(default_factory=list)
+    log_size: int = -1
+    grown_at: float = 0.0
 
     @property
     def running(self) -> bool:
-        return self.exit_code is None
+        return self.exit_code is None and not self.lost
+
+    @property
+    def where(self) -> str:
+        return "host"
 
     async def refresh(self) -> None:
         """Ask the other machine whether the job still runs; a finished one keeps its exit code.
@@ -574,20 +638,33 @@ class RemoteJob:
         and asked first, ``kill -0`` called that stranger the job and kept a finished job running
         forever. The file's time is when the job ended, which the agent is told as its duration.
         """
-        if self.exit_code is not None:
+        if not self.running:
             return
         done = shlex.quote(f"{self.log}.exit")
+        log = shlex.quote(str(self.log))
+        size = f"$(stat -c %s {log} 2>/dev/null || stat -f %z {log} 2>/dev/null || echo -1)"
         outcome = await self.backend.run(
             f"if [ -s {done} ]; then echo \"$(cat {done}) $(stat -c %Y {done} 2>/dev/null || stat -f %m {done} 2>/dev/null)\"; "
-            f"elif kill -0 {self.pid} 2>/dev/null; then echo running; else echo gone; fi",
+            f"elif kill -0 {self.pid} 2>/dev/null; then echo \"running {size}\"; else echo gone; fi",
             cwd=None, env=None, timeout=30.0,
         )
         answer = outcome.output.strip().splitlines()[-1:] if outcome.exit_code == 0 else []
-        if not answer or answer[0] == "running":
+        if not answer:
             return
         words = answer[0].split()
-        # "gone" is a job ended without its wrapper writing the code: killed with the whole group.
-        self.exit_code = int(words[0]) if words and words[0].lstrip("-").isdigit() else -1
+        if words[0] == "running":
+            if len(words) > 1 and words[1].lstrip("-").isdigit():
+                grew(self, int(words[1]))
+            return
+        if words[0] == "gone":
+            # No code was written: the wrapper died along with the command. A kill this side made is
+            # a kill; anything else is a loss nobody here can explain.
+            self.exit_code = -1 if self.stopped_by else None
+            self.lost = not self.stopped_by
+            if self.ended is None:
+                self.ended = time.time()
+            return
+        self.exit_code = int(words[0]) if words[0].lstrip("-").isdigit() else -1
         if self.ended is None:
             self.ended = float(words[1]) if len(words) > 1 and words[1].isdigit() else time.time()
 
@@ -610,6 +687,57 @@ class RemoteJob:
         return outcome.output.rstrip("\n")
 
 
+def grew(job: Job | RemoteJob, size: int) -> None:
+    """Note the log's size; a change restarts the clock of the "possibly stuck" nudge."""
+    if size != job.log_size:
+        job.log_size = size
+        job.grown_at = time.monotonic()
+
+
+def outcome(job: Job | RemoteJob) -> str | None:
+    """How a job ended, as one word the app and the reports share; None while it runs.
+
+    ``succeeded``, ``failed``, ``killed`` (by a signal, or stopped by the agent or the operator),
+    ``timed_out`` (a wait that ran out of time) or ``lost`` (the process vanished without a code).
+    """
+    if job.running:
+        return None
+    code = job.exit_code
+    if job.lost or code is None:
+        return "lost"
+    if job.kind == "wait" and code == WAIT_TIMED_OUT:
+        return "timed_out"
+    if code == 0:
+        return "succeeded"
+    if code < 0 or job.stopped_by or code in (128 + 1, 128 + 2, 128 + 9, 128 + 15):
+        return "killed"
+    return "failed"
+
+
+def outcome_words(job: Job | RemoteJob) -> str:
+    """The outcome as the agent reads it, with the code and who stopped it where that is known."""
+    word = outcome(job)
+    code = job.exit_code
+    if word is None:
+        return "is running"
+    if word == "succeeded":
+        return "succeeded"
+    if word == "timed_out":
+        return "timed out"
+    if word == "lost":
+        if isinstance(job, RemoteJob):
+            return "vanished without an exit code (killed from outside together with its group, or the machine restarted)"
+        return "was lost: the bot restarted while it ran, and a job of the bot's own process does not outlive it"
+    if word == "killed":
+        by = {"agent": " by you (JobKill)", "operator": " by the operator"}.get(job.stopped_by, "")
+        return f"was killed{by}" + (f" (exit code {code})" if code is not None and code != -1 else "")
+    return f"failed with exit code {code}"
+
+
+def title(job: Job | RemoteJob) -> str:
+    return job.label or job.command
+
+
 def _jobs(services: Any) -> dict[str, Any]:
     return services.extra.setdefault("jobs", {})
 
@@ -625,7 +753,7 @@ of its own that ``JobKill`` can end whole, and a wrapper that writes the exit co
 because nothing on this side is the job's parent and could wait for it."""
 
 
-async def _start_remote_job(context: ToolContext, services: Any, command: str, workdir: Path, env: dict[str, str] | None) -> ToolResult:
+async def _start_remote_job(context: ToolContext, services: Any, command: str, workdir: Path, env: dict[str, str] | None, *, kind: str = "job", label: str = "") -> ToolResult:
     jobs = _jobs(services)
     job_id = f"job-{len(jobs) + 1}-{int(time.time() * 1000) % 1000000}"
     log = services.logs_dir(".jobs") / f"{job_id}.log"
@@ -635,18 +763,27 @@ async def _start_remote_job(context: ToolContext, services: Any, command: str, w
     last = outcome.output.strip().splitlines()[-1:] if outcome.output.strip() else []
     if outcome.exit_code != 0 or not last or not last[0].isdigit():
         return error(context, f"the job did not start: {outcome.output.strip() or f'exit code {outcome.exit_code}'}")
-    job = RemoteJob(id=job_id, command=command, cwd=workdir, log=log, pid=int(last[0]), started=time.monotonic(), backend=backend, started_at=time.time())
+    job = RemoteJob(id=job_id, command=command, cwd=workdir, log=log, pid=int(last[0]), started=time.monotonic(), backend=backend, started_at=time.time(), kind=kind, label=label, grown_at=time.monotonic())
     jobs[job_id] = job
     await _track(services, context.session_id, job)
     await asyncio.sleep(0.3)  # long enough for an immediate failure (a typo, a missing binary) to show up in the answer
     await job.refresh()
     head = (await job.tail(40))[:1500]
-    status = f"running (pid {job.pid})" if job.running else f"already exited with code {job.exit_code}"
+    status = f"running (pid {job.pid})" if job.running else outcome_words(job)
     job.reported = not job.running  # the answer below is how it ended
-    return ok(context, f"{job_id}: {status} on the host; output in {log} (the job outlives a restart of the bot; you are told when it ends)\n{head}".rstrip(), job_id=job_id, pid=job.pid)
+    return ok(context, f"{job_id}: {status} on the host; output in {log} ({_promise(job)}; the job outlives a restart of the bot)\n{head}".rstrip(), job_id=job_id, pid=job.pid)
 
 
-async def _start_job(context: ToolContext, services: Any, command: str, workdir: Path, env: dict[str, str] | None) -> ToolResult:
+def _promise(job: Job | RemoteJob) -> str:
+    """What the start of a job tells the agent about hearing of it again: the contract, in one clause."""
+    if not job.running:
+        return "it has already ended"
+    if job.kind == "service":
+        return "a service: you are told if it stops; it is never reported as stuck"
+    return "you are woken with its outcome when it ends, so end your turn rather than wait"
+
+
+async def _start_job(context: ToolContext, services: Any, command: str, workdir: Path, env: dict[str, str] | None, *, kind: str = "job", label: str = "") -> ToolResult:
     jobs = _jobs(services)
     job_id = f"job-{len(jobs) + 1}-{int(time.time() * 1000) % 1000000}"
     log = services.logs_dir(".jobs") / f"{job_id}.log"
@@ -663,21 +800,23 @@ async def _start_job(context: ToolContext, services: Any, command: str, workdir:
         )
     finally:
         fh.close()
-    job = Job(id=job_id, command=command, cwd=workdir, log=log, process=process, started=time.monotonic(), sandboxed=sandboxed)
+    job = Job(id=job_id, command=command, cwd=workdir, log=log, process=process, started=time.monotonic(), sandboxed=sandboxed, started_at=time.time(), kind=kind, label=label, grown_at=time.monotonic())
     jobs[job_id] = job
+    await _track(services, context.session_id, job)
     await asyncio.sleep(0.3)  # long enough for an immediate failure (a typo, a missing binary) to show up in the answer
-    status = f"running (pid {process.pid})" if process.returncode is None else f"already exited with code {process.returncode}"
+    status = f"running (pid {process.pid})" if process.returncode is None else outcome_words(job)
     job.reported = not job.running  # the answer below is how it ended
     head = log.read_text(encoding="utf-8", errors="replace")[:1500]
     where = " in the sandbox" if sandboxed else ""
-    return ok(context, f"{job_id}: {status}{where}; output in {log} (you are told when it ends; jobs do not survive a restart of the bot, the log does)\n{head}".rstrip(), job_id=job_id, pid=process.pid)
+    return ok(context, f"{job_id}: {status}{where}; output in {log} ({_promise(job)}; a restart of the bot ends it, and you are told it was lost)\n{head}".rstrip(), job_id=job_id, pid=process.pid)
 
 
-async def _track(services: Any, session_id: str, job: RemoteJob) -> None:
-    """Hand a host job to the watcher at once, so its record is kept before anything can restart.
+async def _track(services: Any, session_id: str, job: Job | RemoteJob) -> None:
+    """Hand a job to the watcher at once, so its record is kept before anything can restart.
 
     The watcher would find it on its next round anyway; this closes the seconds in between, in which a
-    restart lost a job that outlives it — the one kind of job that does.
+    restart lost a host job that outlives it, and a job of this process that a restart ends without
+    anybody being told it was lost.
     """
     manager = services.extra.get("manager")
     hook = getattr(manager, "service_hooks", {}).get("jobs") if manager is not None else None
@@ -697,6 +836,14 @@ def _tail(path: Path, lines: int) -> str:
     return "\n".join(data.decode("utf-8", "replace").splitlines()[-max(1, lines):])
 
 
+def _age(job: Job | RemoteJob) -> float:
+    return ((job.ended or time.time()) - job.started_at) if job.started_at else time.monotonic() - job.started
+
+
+def _status(job: Job | RemoteJob) -> str:
+    return "running" if job.running else outcome_words(job)
+
+
 @search_hint(
     "background job output progress status last lines of job log "
     "вывод фоновой задачи что пишет джоба как там прогресс команды в фоне сборка"
@@ -709,15 +856,12 @@ async def job_output(context: ToolContext, job_id: str, tail_lines: int = 100) -
         return error(context, f"no job {job_id!r}; JobList shows the jobs of this session")
     if isinstance(job, RemoteJob):
         await job.refresh()
-        status = "running" if job.running else f"exited with code {job.exit_code}"
-        text = f"{job.id}: {status} after {time.monotonic() - job.started:.0f}s — `{job.command[:200]}`\n{await job.tail(tail_lines)}"
-        _seen(job)
-        return ok(context, clip(text, services.max_tool_output_chars), running=job.running, exit_code=job.exit_code)
-    status = "running" if job.running else f"exited with code {job.process.returncode}"
-    elapsed = time.monotonic() - job.started
-    text = f"{job.id}: {status} after {elapsed:.0f}s — `{job.command[:200]}`\n{_tail(job.log, tail_lines)}"
+        tail = await job.tail(tail_lines)
+    else:
+        tail = _tail(job.log, tail_lines)
+    text = f"{job.id}: {_status(job)} after {_age(job):.0f}s — `{title(job)[:200]}`\n{tail}"
     _seen(job)
-    return ok(context, clip(text, services.max_tool_output_chars), running=job.running, exit_code=job.process.returncode)
+    return ok(context, clip(text, services.max_tool_output_chars), running=job.running, exit_code=job.exit_code)
 
 
 def _seen(job: Job | RemoteJob) -> None:
@@ -736,29 +880,32 @@ async def job_kill(context: ToolContext, job_id: str) -> ToolResult:
     job = _jobs(services).get(job_id)
     if job is None:
         return error(context, f"no job {job_id!r}")
+    await stop_job(job, by="agent")
+    _seen(job)
+    return ok(context, f"{job.id}: {outcome_words(job)}; log in {job.log}", exit_code=job.exit_code)
+
+
+async def stop_job(job: Job | RemoteJob, *, by: str) -> None:
+    """End a job's whole process group, gently and then not, and remember who ended it."""
+    if not job.running:
+        return
+    job.stopped_by = by
     if isinstance(job, RemoteJob):
-        return await _kill_remote(context, job)
-    if job.running:
+        await job.kill()
+        return
+    assert job.process is not None
+    try:
+        end_tree(job.process.pid, hard=False)
+    except ProcessLookupError:
+        pass
+    try:
+        await asyncio.wait_for(job.process.wait(), timeout=5)
+    except TimeoutError:
         try:
-            end_tree(job.process.pid, hard=False)
+            end_tree(job.process.pid, hard=True)
         except ProcessLookupError:
             pass
-        try:
-            await asyncio.wait_for(job.process.wait(), timeout=5)
-        except TimeoutError:
-            try:
-                end_tree(job.process.pid, hard=True)
-            except ProcessLookupError:
-                pass
-            await job.process.wait()
-    _seen(job)
-    return ok(context, f"{job.id}: exited with code {job.process.returncode}; log in {job.log}", exit_code=job.process.returncode)
-
-
-async def _kill_remote(context: ToolContext, job: RemoteJob) -> ToolResult:
-    await job.kill()
-    _seen(job)
-    return ok(context, f"{job.id}: exited with code {job.exit_code}; log in {job.log}", exit_code=job.exit_code)
+        await job.process.wait()
 
 
 @search_hint(
@@ -774,12 +921,110 @@ async def job_list(context: ToolContext) -> ToolResult:
     for job in jobs.values():
         if isinstance(job, RemoteJob):
             await job.refresh()
-    lines = [f"- {j.id}: {'running' if j.running else f'exited {j.exit_code}'}, {time.monotonic() - j.started:.0f}s, `{j.command[:120]}` → {j.log}" for j in jobs.values()]
+    lines = [f"- {j.id}{' (' + j.kind + ')' if j.kind != 'job' else ''}: {_status(j)}, {_age(j):.0f}s, `{title(j)[:120]}` → {j.log}" for j in jobs.values()]
     for job in jobs.values():
         _seen(job)
     return ok(context, "\n".join(lines), count=len(jobs))
 
 
-TOOLS = [exec_command, job_output, job_kill, job_list]
+WAIT_POLL_SECONDS = 2.0
+"""How often a foreground wait for a job looks at it; a host job's look is one command on the host."""
+FOREGROUND_WAIT_MARGIN = 15.0
+"""Seconds of the tool timeout a foreground wait leaves free, so it answers before the call is cut."""
 
-__all__ = ["TOOLS", "Job", "RemoteJob", "exec_command", "job_kill", "job_list", "job_output"]
+
+@search_hint(
+    "wait until process exits file appears log line port open job finishes block until ready "
+    "подождать дождаться пока процесс завершится файл появится порт откроется строка в логе"
+)
+@tool(
+    name="JobWait",
+    description=(
+        "Wait for one thing instead of writing a polling loop: a background job to end (job_id), a line "
+        "matching a regular expression in a log (log + pattern, or job_id + pattern for a job's own log), a "
+        "process to exit (pid — checked through /proc, never by matching command lines), a file to appear "
+        "(path), or a TCP port to accept connections (port, host defaults to 127.0.0.1). timeout_seconds "
+        "bounds the wait. In the foreground it answers when the thing happens or the time is up; "
+        "background=true starts the wait as a job and returns at once — you are woken when it ends, "
+        "succeeded or timed out, like any job. A wait longer than the tool timeout goes to the background "
+        "by itself. A job of yours already wakes you when it ends: wait for it only when you want its end "
+        "inside this turn."
+    ),
+)
+async def job_wait(
+    context: ToolContext,
+    job_id: str | None = None,
+    pid: int | None = None,
+    path: str | None = None,
+    log: str | None = None,
+    pattern: str | None = None,
+    port: int | None = None,
+    host: str = "127.0.0.1",
+    timeout_seconds: int = 600,
+    background: bool = False,
+) -> ToolResult:
+    services = services_for(context)
+    timeout = max(1, int(timeout_seconds))
+    job = None
+    if job_id is not None:
+        job = _jobs(services).get(job_id)
+        if job is None:
+            return error(context, f"no job {job_id!r}; JobList shows the jobs of this session")
+        if pid is not None or path is not None or port is not None or log is not None:
+            return error(context, "with job_id, name nothing else to wait for but an optional pattern for its log")
+        if pattern is not None:
+            log = str(job.log)
+    room = max(1.0, float(services.tool_timeout_seconds) - FOREGROUND_WAIT_MARGIN)
+    if job is not None and pattern is None:
+        if background:
+            return error(context, f"{job.id} already wakes you when it ends; end your turn instead of starting a wait for it")
+        return await _wait_for_job(context, job, min(float(timeout), room))
+    try:
+        if path is not None:
+            path = str(services.resolve(path)) if not Path(path).is_absolute() else path
+        if log is not None:
+            log = str(services.resolve(log)) if not Path(log).is_absolute() else log
+        script, label = wait_script(timeout=timeout, pid=pid, path=path, log=log, pattern=pattern, port=port, host=host)
+    except ValueError as exc:
+        return error(context, str(exc))
+    moved = ""
+    if not background and timeout > room:
+        background = True
+        moved = f"(a {timeout}s wait is longer than one call may last, so it runs as a job)\n"
+    if background:
+        started = await start_job(context, script, None, None, kind="wait", label=label)
+        return started if started.is_error else started.model_copy(update={"content": moved + started.content})
+    result = await _run(context, script, None, timeout + 10, None)
+    code = result.metadata.get("exit_code") if isinstance(result.metadata, dict) else None
+    body = result.content.split("\n", 1)[1] if "\n" in result.content else ""
+    if code == 0:
+        return ok(context, f"{label}: done\n{body}".rstrip(), satisfied=True)
+    if code == WAIT_TIMED_OUT:
+        return error(context, f"{label}: timed out after {timeout}s\n{body}".rstrip(), satisfied=False, timed_out=True)
+    return error(context, f"{label}: the wait itself failed\n{result.content}", satisfied=False)
+
+
+async def _wait_for_job(context: ToolContext, job: Job | RemoteJob, limit: float) -> ToolResult:
+    deadline = time.monotonic() + limit
+    while True:
+        if isinstance(job, RemoteJob):
+            await job.refresh()
+        if not job.running:
+            break
+        if time.monotonic() >= deadline:
+            return ok(context, f"{job.id} is still running after {limit:.0f}s of waiting; it wakes you when it ends, so end your turn rather than wait again", running=True)
+        if isinstance(job, Job) and job.process is not None:
+            try:
+                await asyncio.wait_for(job.process.wait(), timeout=min(WAIT_POLL_SECONDS * 5, max(0.1, deadline - time.monotonic())))
+            except TimeoutError:
+                pass
+        else:
+            await asyncio.sleep(min(WAIT_POLL_SECONDS, max(0.1, deadline - time.monotonic())))
+    tail = await job.tail(20) if isinstance(job, RemoteJob) else _tail(job.log, 20)
+    _seen(job)
+    return ok(context, f"{job.id} {outcome_words(job)} after {_age(job):.0f}s — `{title(job)[:200]}`\n{tail}".rstrip(), running=False, exit_code=job.exit_code)
+
+
+TOOLS = [exec_command, job_output, job_kill, job_list, job_wait]
+
+__all__ = ["JOB_KINDS", "TOOLS", "Job", "RemoteJob", "exec_command", "job_kill", "job_list", "job_output", "job_wait", "outcome", "outcome_words", "start_job", "stop_job", "title"]

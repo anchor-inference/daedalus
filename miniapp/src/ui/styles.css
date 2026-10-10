@@ -901,7 +901,20 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .details .field { margin-bottom: 6px; }
 .details .btnrow, .jobs .btnrow { margin-top: 6px; }
 .dt-section.danger .dt-label { color: var(--bad); }
-.jobs .job-row .mono { font-size: var(--fs-mono); }
+/* A task is two lines — what it is, how it stands — so the row grows past the dense height; the
+   state dot is set here because .aside-row .dot paints every dot green. */
+.jobs .task-row { padding: 4px 0; }
+.jobs .task-row .dot.running { background: var(--accent); }
+.jobs .task-row .dot.failed { background: var(--bad); }
+.jobs .task-row .dot.cancelled, .jobs .task-row .dot.lost { background: var(--fg-3); animation: none; }
+.jobs .task-open { display: flex; flex-direction: column; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.jobs .task-open.mono .name { font-size: var(--fs-mono); }
+.jobs .task-open .name { display: block; }
+.jobs .task-sub { display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); }
+.jobs .task-flag { color: var(--warn); }
+.jobs .task-flag.overdue { color: var(--bad); }
+.jobs .task-where { color: var(--fg-3); }
+.jobs .task-row > .ic { color: var(--muted); }
 .receipt summary { list-style: none; cursor: pointer; }
 .receipt summary::-webkit-details-marker { display: none; }
 .receipt .filetext { margin-top: 6px; }

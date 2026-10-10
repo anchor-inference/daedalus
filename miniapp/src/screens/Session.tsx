@@ -1430,12 +1430,15 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     { icon: "trash", label: t("session.clear"), danger: true, disabled: busy, onSelect: clearHistory },
     { icon: "trash", label: t("session.delete"), danger: true, onSelect: remove },
   ] : [];
+  // An idle session with jobs still running has not finished: say what it waits for rather than look done.
+  const jobsPending = !busy && !saving && !compacting && status !== "failed" ? detail?.background_count ?? 0 : 0;
   const effortWord = detail ? t(detail.thinking === false ? "add.effort.off" : `add.effort.${detail.reasoning_effort || "medium"}`) : "";
   const phoneSub = offline ? <StateSub tone="offline">{t("session.phone.reconnecting")}</StateSub>
     : compacting ? <StateSub tone="compacting">{t("session.compacting.bar")}</StateSub>
     : busy ? <LiveSub status={status} base={tail} live={live} />
     : saving ? <StateSub tone="saving">{t("session.livebar.saving")}</StateSub>
     : status === "failed" ? <StateSub tone="failed">{statusWord("failed")}</StateSub>
+    : jobsPending > 0 ? <StateSub tone="running">{plural("session.jobs.waiting", jobsPending)}</StateSub>
     : detail ? <span className={detail.fallback ? "ph-chat-fallback" : undefined}>{shortModel(detail.fallback?.to ?? detail.model, 28)}{effortWord ? ` · ${effortWord}` : ""}</span>
     : null;
   const phoneChip = phone && browserShown
@@ -1495,7 +1498,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               <span className="truncate chat-sub-model">{shortModel(detail.fallback?.to ?? detail.model, 28)}{effortWord && <span className="chat-sub-effort"> {effortWord}</span>}</span>
               {detail.imported && <><span className="sep">·</span><span className="truncate chat-sub-from">{t("imp.head.from", { name: harnessMeta(detail.imported.harness, detail.imported.harness_name).name })}</span></>}
               {compacting ? null : busy || saving ? <><span className="sep">·</span><LiveBar status={status} saving={saving} base={tail} live={live} workspace={detail.workspace} onJump={jumpToBottom} /></>
-                : status === "failed" ? <><span className="sep">·</span><span className="head-status failed" role="status"><b>{statusWord(status)}</b></span></> : null}
+                : status === "failed" ? <><span className="sep">·</span><span className="head-status failed" role="status"><b>{statusWord(status)}</b></span></>
+                : jobsPending > 0 ? <><span className="sep">·</span><button type="button" className="head-status jobs-pending" onClick={() => panel.open("jobs")}>{plural("session.jobs.waiting", jobsPending)}</button></> : null}
             </span>
           )}
         </div>

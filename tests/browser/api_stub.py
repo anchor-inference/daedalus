@@ -504,6 +504,40 @@ def disk_cleanup(body: object) -> dict[str, object]:
     return {"freed_bytes": freed, "removed": removed, "refused": refused, "bytes": 23 * GIB - freed}
 
 
+def session_tasks(session_id: str) -> dict:
+    """``GET /api/sessions/<id>/tasks`` for the bakery session: one of every kind of row the Jobs list draws.
+
+    Running first, as the host orders them. The other sessions have no jobs, so a picture of their
+    Jobs tab stays the empty state it always was.
+    """
+    if session_id != "a1b2c3d4e5f6":
+        return {"tasks": [], "background_count": 0}
+    now = datetime.now(UTC)
+
+    def row(id_: str, title: str, *, kind: str = "job", state: str = "running", minutes: float = 5, took: float | None = None, **over: object) -> dict:
+        started = now - timedelta(minutes=minutes)
+        ended = started + timedelta(minutes=took) if took is not None else None
+        base = {
+            "id": id_, "owner_session_id": session_id, "parent_run_id": None, "kind": kind, "state": state,
+            "outcome": None, "exit_code": None, "title": title, "command": title, "where": None,
+            "started_at": started.isoformat(), "last_activity_at": (ended or now).isoformat(), "ended_at": ended.isoformat() if ended else None,
+            "flag": None, "reported": state != "running", "progress": None, "child_session_id": None,
+            "result_ref": f".jobs/{id_}.log", "stop_supported": state == "running",
+        }
+        return {**base, **over}
+
+    tasks = [
+        row("job-1", "npm run build -- --watch", minutes=42, where="host", flag="quiet"),
+        row("job-2", "wait for pid 4212 to exit", kind="wait", minutes=3, command=None),
+        row("job-3", "python3 -m http.server 8100", kind="service", minutes=18),
+        row("agent-1", "link-check", kind="agent", minutes=6, command=None, result_ref=None, child_session_id="sub1"),
+        row("job-4", "pytest tests/unit -q", state="done", minutes=30, took=4, outcome="succeeded", exit_code=0),
+        row("job-5", "make deploy", state="failed", minutes=25, took=1, outcome="failed", exit_code=3),
+        row("job-6", "rsync -a site/ backup/", state="lost", minutes=90, took=12, outcome="lost"),
+    ]
+    return {"tasks": tasks, "background_count": sum(task["state"] == "running" for task in tasks)}
+
+
 def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str, str | bytes] | None:
     """The answer every harness gives the same way: ``(status, content type, body)``, or ``None``.
 
@@ -516,6 +550,11 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     path = path[path.index("/api/"):] if "/api/" in path else path
     if method.upper() == "GET" and path == EVENTS:
         return 200, "text/event-stream", event_stream_hello()
+    parts = path.split("/")
+    if len(parts) == 5 and parts[2] == "sessions" and parts[4] == "tasks" and method.upper() == "GET":
+        return 200, "application/json", json.dumps(session_tasks(parts[3]))
+    if len(parts) == 7 and parts[2] == "sessions" and parts[4] == "tasks" and parts[6] == "stop" and method.upper() == "POST":
+        return 200, "application/json", json.dumps({"stopped": True})
     write = SHARED_WRITES.get((method.upper(), path))
     if write is not None:
         return write
@@ -785,7 +824,7 @@ def expect_app(base: str) -> None:
 
 
 
-__all__ = ["CALENDAR", "CalendarStub", "VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "IMPORTS", "ImportStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "TOOL_GROUP_CATALOGUE", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tool_groups", "terminal_load"]
+__all__ = ["CALENDAR", "CalendarStub", "VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "IMPORTS", "ImportStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "TOOL_GROUP_CATALOGUE", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tasks", "session_tool_groups", "terminal_load"]
 
 # What the harness manager reports for the container: Claude Code installed and signed in, Codex
 # installed but signed out, the rest absent. Enough for the hiring form to show one command-line agent
