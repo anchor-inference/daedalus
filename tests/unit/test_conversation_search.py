@@ -8,7 +8,7 @@ import httpx
 import pytest
 from protocore.contracts.types import Message, MessageRole, Session, TextBlock
 
-from daedalus.extensions.api import build_app
+from daedalus.extensions.api import SESSION_PAGE, build_app
 from daedalus.host.session_runner import SessionManager
 from daedalus.search.service import ConversationSearch
 from daedalus.search.store import PASSAGE_CHARS, Index, collapse, fusion, pack, search
@@ -163,7 +163,7 @@ async def test_api_auth_limits_and_retrieval_beyond_the_listing_page(db, setting
         assert (await client.get('/api/sessions/search', params={'q': 'bicycle'})).status_code == 401
         headers = {'X-Daedalus-Token': 'test-token'}
         page = (await client.get('/api/sessions', headers=headers)).json()
-        assert len(page['sessions']) == 30 and page['next_cursor'] and all(s['id'] != 'old' for s in page['sessions'])
+        assert len(page['sessions']) == SESSION_PAGE and page['next_cursor'] and all(s['id'] != 'old' for s in page['sessions'])
         assert (await client.get('/api/sessions/search', params={'q': 'x', 'limit': 51}, headers=headers)).status_code == 422
         answer = await client.get('/api/sessions/search', params={'q': 'bicycle'}, headers=headers)
         assert answer.status_code == 200, answer.text

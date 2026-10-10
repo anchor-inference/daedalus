@@ -957,6 +957,14 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
   .sb-pbtn .ic { color: var(--fg-2); flex: none; }
   .sb-pbtn:hover { background: var(--surface-2); }
   .sb-pbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  /* A lens on is a strip in the accent's tint, not another grey button: it changes what the whole
+     column lists, so it has to be seen from across the room. */
+  .sb-lens { display: flex; align-items: center; gap: 6px; height: var(--ctl-h-sm); padding: 0 var(--space-1) 0 var(--space-2); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--fg); font-size: var(--fs-12); font-weight: 500; }
+  .sb-lens > .ic { color: var(--accent); flex: none; }
+  .sb-lens > .truncate { flex: 1; min-width: 0; }
+  .sb-lens-clear { display: inline-flex; align-items: center; gap: 4px; flex: none; height: var(--chip-h-dense); padding: 0 8px; border: 0; border-radius: var(--radius-pill); background: var(--accent); color: var(--accent-ink); font: inherit; font-size: var(--fs-12); font-weight: 600; cursor: pointer; }
+  .sb-lens-clear:hover { background: color-mix(in srgb, var(--accent) 88%, var(--fg)); }
+  .sb-lens-clear:focus-visible { outline: 2px solid var(--fg); outline-offset: 1px; }
   .sb-search { display: flex; align-items: center; gap: var(--space-2); height: var(--ctl-h); padding: 0 var(--space-1) 0 var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--fg-3); cursor: text; }
   .sb-search.filled, .sb-search:focus-within { border-color: var(--line-strong); }
   .sb-search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; padding: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-13); }

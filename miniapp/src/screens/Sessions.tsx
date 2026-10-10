@@ -55,7 +55,7 @@ function typing(target: EventTarget | null): boolean {
   return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
 }
 
-export function SessionsScreen({ onOpen, toast, current, project = "", projects = [], onProjects }: { onOpen: (id: string) => void; toast: (t: string) => void; current?: string; project?: string; projects?: Project[]; onProjects?: () => void }) {
+export function SessionsScreen({ onOpen, toast, current, project = "", projects = [], onProjects, onClearProject }: { onOpen: (id: string) => void; toast: (t: string) => void; current?: string; project?: string; projects?: Project[]; onProjects?: () => void; onClearProject?: () => void }) {
   const [view, setView] = useState<View>("all");
   // Loops is a cut of the whole list the server has no view for; the chip filters it here.
   const serverView = view === "loops" ? "all" : view;
@@ -76,10 +76,13 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
   const [searchError, setSearchError] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
   const searching = !!query.trim();
+  // The pages fetched past the first are kept while the first page's end stays where it was. Reset on
+  // every poll, as they were, the rows scrolled into would vanish each minute under the reader.
+  const firstCursor = data?.next_cursor ?? null;
   useEffect(() => {
     setExtra([]);
-    setNext(data?.next_cursor ?? null);
-  }, [data, view]);
+    setNext(firstCursor);
+  }, [firstCursor, view]);
   useEffect(() => {
     setResults(null);
     setSearchError("");
@@ -116,7 +119,8 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
   const lens = projects.find((p) => p.id === project);
 
   // The Agents list never shows what belongs to orchestration mode, found by a search or not.
-  const raw = searching ? results : data ? { ...data, sessions: [...data.sessions, ...extra], next_cursor: next } : data;
+  // A row a later page brought that has since moved up into the first page is drawn once.
+  const raw = searching ? results : data ? { ...data, sessions: [...data.sessions, ...extra.filter((row) => !data.sessions.some((first) => first.id === row.id))], next_cursor: next } : data;
   const listing = useMemo(() => (raw ? agentsListing(raw) : raw), [raw]);
   const sessions = listing?.sessions ?? [];
   const arranged = useMemo(
@@ -136,6 +140,33 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
   }, [everything.data, project]);
 
   const list = useRef<HTMLDivElement>(null);
+  // Past the first page the list goes on by itself: the "More" button loads the next page as soon as
+  // it scrolls into sight, and stays a button for a keyboard and for a failed page.
+  const more = useRef<HTMLButtonElement>(null);
+  const fetchingMore = useRef(false);
+  const loadMore = useCallback(async () => {
+    if (!next || fetchingMore.current) return;
+    fetchingMore.current = true;
+    setPaging(true);
+    try {
+      const page = await api.get<SessionList>(`/api/sessions?view=${serverView}&cursor=${encodeURIComponent(next)}`);
+      setExtra((held) => [...held, ...page.sessions.filter((row) => !held.some((old) => old.id === row.id))]);
+      setNext(page.next_cursor ?? null);
+    } catch (e) {
+      // The button stays for a retry; the watcher does not fire again until it leaves sight and returns.
+      toast(errorText(e));
+    } finally {
+      fetchingMore.current = false;
+      setPaging(false);
+    }
+  }, [next, serverView, toast]);
+  useEffect(() => {
+    const button = more.current;
+    if (!button || searching || typeof IntersectionObserver === "undefined") return;
+    const watcher = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) void loadMore(); });
+    watcher.observe(button);
+    return () => watcher.disconnect();
+  }, [loadMore, searching, next]);
   const onListKey = useCallback((e: React.KeyboardEvent) => {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
     if (typing(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -146,6 +177,16 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
     e.preventDefault();
     rows[to].focus();
   }, []);
+
+  // Escape anywhere in the column lifts a lens, the same key that clears the search. A field keeps
+  // its own Escape, and an open menu or dialog closes first: those are drawn in a portal, whose keys
+  // still bubble through React to here.
+  const onColumnKey = (e: React.KeyboardEvent) => {
+    if (e.key !== "Escape" || !lens || !onClearProject || e.defaultPrevented || typing(e.target)) return;
+    if (document.querySelector("[role=dialog], [role=menu]")) return;
+    e.preventDefault();
+    onClearProject();
+  };
 
   const chip = (name: View, label: string, count?: number, tone = "") => (
     <button type="button" className={`sb-chip ${tone} ${view === name ? "on" : ""}`} aria-pressed={view === name} onClick={() => setView(view === name && name !== "all" ? "all" : name)}>
@@ -158,7 +199,7 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
 
   return (
     <>
-      <div className="sb-tools">
+      <div className="sb-tools" onKeyDown={onColumnKey}>
         <button type="button" className="sb-new" onClick={() => navigate(pathFor("agents"))} title={t("side.newchat.title")}>
           <Icon name="compose" size={16} />
           <span>{t("ph.newchat")}</span>
@@ -180,6 +221,18 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
               { label: t("imp.entry"), icon: "download", hint: t("imp.entry.hint"), onSelect: () => openImport() },
             ]} />
         </div>
+        {/* The lens narrows every list in the column, and a quiet chip naming a project was all that
+            said so: an operator who forgot it was on read a column of two chats as "my dialogs are
+            gone". So a lens is announced in words with its count and lifted in one click. */}
+        {lens && onClearProject && (
+          <div className="sb-lens" role="status" title={t("side.lens.hint")}>
+            <Icon name="folder" size={14} />
+            <span className="truncate">{everything.data ? plural("side.lens.count", counts.all, { name: lens.name }) : t("side.lens.only", { name: lens.name })}</span>
+            <button type="button" className="sb-lens-clear" onClick={onClearProject} aria-label={t("ph.lens.clear", { name: lens.name })}>
+              {t("side.lens.showall")}<Icon name="close" size={12} />
+            </button>
+          </div>
+        )}
         <label className={`sb-search ${query ? "filled" : ""}`}>
           <Icon name="search" size={15} />
           <input ref={searchRef} type="search" placeholder={t("side.search.placeholder")} value={query} maxLength={500} aria-label={t("search.label")}
@@ -205,7 +258,7 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
           </div>
         )}
       </div>
-      <div ref={list} className="screen agents-screen sb-list" onKeyDown={onListKey}>
+      <div ref={list} className="screen agents-screen sb-list" onKeyDown={(e) => { onListKey(e); onColumnKey(e); }}>
         {searching && <div className="search-notice sb-notice" role="status">
           <Icon name="search" size={13} />
           <span>
@@ -258,15 +311,7 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
             {sections.days.map((d) => <DayGroup key={d.day} day={d.day} rows={d.rows} onOpen={onOpen} current={current} />)}
           </>
         )}
-        {!searching && next && <button className="btn ghost load-more" disabled={paging} onClick={async () => {
-          setPaging(true);
-          try {
-            const page = await api.get<SessionList>(`/api/sessions?view=${serverView}&cursor=${encodeURIComponent(next)}`);
-            setExtra((held) => [...held, ...page.sessions.filter((row) => !data?.sessions.some((first) => first.id === row.id) && !held.some((old) => old.id === row.id))]);
-            setNext(page.next_cursor ?? null);
-          } catch (e) { toast(errorText(e)); }
-          finally { setPaging(false); }
-        }}>{t(paging ? "agents.loading" : "agents.more")}</button>}
+        {!searching && next && <button ref={more} className="btn ghost load-more" disabled={paging} onClick={() => void loadMore()}>{t(paging ? "agents.loading" : "agents.more")}</button>}
       </div>
     </>
   );

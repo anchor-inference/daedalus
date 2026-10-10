@@ -233,8 +233,16 @@ function Skeleton() {
   );
 }
 
-export function ChatsScreen({ onOpen, toast, project = "", projects = [], onPickProject }: { onOpen: (id: string) => void; toast: (t: string) => void; project?: string; projects?: Project[]; onPickProject?: (id: string) => void }) {
+export function ChatsScreen({ onOpen, toast, project: kept = "", projects = [], onPickProject }: { onOpen: (id: string) => void; toast: (t: string) => void; project?: string; projects?: Project[]; onPickProject?: (id: string) => void }) {
   const route = useRoute();
+  // A project tapped in the drawer narrows this visit only, through the address: it used to set the
+  // remembered lens, which then narrowed every list on the device until someone found the chip.
+  const visit = route.query.get("project") ?? "";
+  const project = visit || kept;
+  const clearLens = () => {
+    if (visit) navigate(pathFor("agents", null, { view: "chats" }), { replace: true });
+    if (kept) onPickProject?.("");
+  };
   const [view, setView] = useState<View>("all");
   const [searching, setSearching] = useState(route.query.get("search") === "1");
   const [query, setQuery] = useState("");
@@ -375,7 +383,7 @@ export function ChatsScreen({ onOpen, toast, project = "", projects = [], onPick
       {offline && <Banner strip tone="bad" icon="offline">{t("app.offline")}</Banner>}
       {!searching && (
         <ChipBar label={t("agents.filter.label")}>
-          {lens && onPickProject && <Chip on onClick={() => onPickProject("")} label={t("ph.lens.clear", { name: lens.name })}><span className="ph-lens"><Icon name="folder" size={16} />{lens.name}<Icon name="close" size={14} /></span></Chip>}
+          {lens && (visit || onPickProject) && <Chip on onClick={clearLens} label={t("ph.lens.clear", { name: lens.name })}><span className="ph-lens"><Icon name="folder" size={16} />{lens.name}<Icon name="close" size={14} /></span></Chip>}
           <Chip on={view === "all"} count={all.data ? counts.all : undefined} onClick={() => setView("all")}>{t("agents.filter.all")}</Chip>
           <Chip on={view === "attention"} tone="warn" count={all.data ? counts.attention : undefined} onClick={() => setView("attention")}>{t("ph.filter.attention")}</Chip>
           <Chip on={view === "working"} count={all.data ? counts.working : undefined} onClick={() => setView("working")}>{t("agents.filter.working")}</Chip>

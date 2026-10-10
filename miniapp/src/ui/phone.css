@@ -67,6 +67,8 @@
   .ph-dsec { display: flex; align-items: center; padding: var(--space-3) var(--gutter) 0; font-size: var(--fs-13); font-weight: 500; color: var(--fg-2); }
   .ph-dsec-act { margin-left: auto; margin-right: -8px; min-width: var(--tap); min-height: var(--tap); padding: 0 8px; border: 0; background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-13); font-weight: 500; cursor: pointer; }
   .ph-drow { display: flex; align-items: center; gap: 12px; width: 100%; min-height: var(--tap); padding: 0 var(--gutter); border: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-15); text-align: left; cursor: pointer; }
+  /* Recents lists the whole first page, up to two hundred rows: the ones below the fold skip layout and paint. */
+  .ph-drow[data-session] { content-visibility: auto; contain-intrinsic-size: auto var(--tap); }
   .ph-drow-t { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .ph-drow-tm { flex: none; font-size: var(--fs-13); color: var(--fg-3); }
   .ph-drow > .ic { color: var(--fg-2); flex: none; }

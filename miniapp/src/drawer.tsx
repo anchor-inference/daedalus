@@ -23,12 +23,16 @@ import { BottomSheet, Drawer, IconButton, NewChatPill, SegmentedControl, SheetRo
 /** Where Chats lives: the agents screen with its list open, since /app/agents/<id> is a session. */
 export const CHATS_PATH = pathFor("agents", null, { view: "chats" });
 
+/** Chats narrowed to one project for this visit, without touching the remembered lens. */
+function chatsIn(project: string): string {
+  return pathFor("agents", null, { view: "chats", project });
+}
+
 /** The daily destinations of each mode, in the drawer's order; the rest wait in More. */
 const AGENTS_PLACES: Screen[] = ["inbox", "terminals", "board", "voice", "usage"];
 const ORCHESTRATION_PLACES: Screen[] = ["inbox", "terminals", "usage"];
 const MORE: Screen[] = ["calendar", "diagrams", "changes", "schedules", "services", "memory", "harnesses", "health"];
 const BETA: Screen[] = ["voice"];
-const RECENTS = 8;
 const PROJECTS = 5;
 
 /** Initials for a project's avatar: the first letters of its first two words. */
@@ -50,14 +54,13 @@ export type AppDrawerProps = {
   /** What waits for the operator in orchestration mode. */
   waiting: number;
   selfdev: SelfDevMode;
-  /** Agents mode's projects (none with an orchestrator), for the project lens. */
+  /** Agents mode's projects (none with an orchestrator). */
   projects: Project[];
-  onPickProject: (id: string) => void;
   /** The project switcher: every project, adding one, the archived ones. */
   onProjects: () => void;
 };
 
-export function AppDrawer({ mode, counts, waiting, selfdev, projects, onPickProject, onProjects }: AppDrawerProps) {
+export function AppDrawer({ mode, counts, waiting, selfdev, projects, onProjects }: AppDrawerProps) {
   const open = useDrawerOpen();
   const route = useRoute();
   // The switch shows a mode's lists without leaving the page; a destination inside it goes there.
@@ -72,10 +75,12 @@ export function AppDrawer({ mode, counts, waiting, selfdev, projects, onPickProj
   // listed again under Projects or Recents.
   const pinned = useMemo(() => (agents ? splitPinned(arrange(agents.sessions, agents.projects).folders).pinned : []), [agents]);
   const pinnedIds = useMemo(() => new Set(pinned.map((f) => f.key)), [pinned]);
+  // Every chat of the listing's first page, not the last eight: the drawer scrolls, and a title the
+  // operator has to go looking for under Chats is a title hidden for no reason. The page is the
+  // server's (two hundred); "See all" beside the heading is the way to the rest and to the filters.
   const recents = useMemo(() => [...(agents?.sessions ?? [])]
     .filter((s) => !s.metadata?.subagent_of && !s.archived && !pinnedIds.has(s.project_id))
-    .sort((a, b) => Date.parse(b.last_message_at) - Date.parse(a.last_message_at))
-    .slice(0, RECENTS), [agents, pinnedIds]);
+    .sort((a, b) => Date.parse(b.last_message_at) - Date.parse(a.last_message_at)), [agents, pinnedIds]);
   const orchestrated = useMemo(() => orchestratedProjects(Array.isArray(listing.data?.projects) ? listing.data!.projects : []), [listing.data]);
   const agentsWaiting = (agents?.sessions ?? []).filter((s) => s.status === "waiting").length;
   const folderOf = (id: string) => agents?.projects.find((p) => p.id === id);
@@ -151,7 +156,7 @@ export function AppDrawer({ mode, counts, waiting, selfdev, projects, onPickProj
                   <span className="ph-drow-tm">{relTime(s.last_message_at)}</span>
                 </button>
               ) : (
-                <button key={f.key} type="button" className="ph-drow" data-pinned="" data-project={f.key} onClick={() => { onPickProject(f.key); navigateFromDrawer(CHATS_PATH); }}>
+                <button key={f.key} type="button" className="ph-drow" data-pinned="" data-project={f.key} onClick={() => navigateFromDrawer(chatsIn(f.key))}>
                   <Icon name={f.system ? "mic" : "folder"} size={18} />
                   <span className="ph-drow-t">{f.name}</span>
                   <span className="ph-drow-tm">{plural("agents.count", f.total)}</span>
@@ -166,7 +171,7 @@ export function AppDrawer({ mode, counts, waiting, selfdev, projects, onPickProj
                 {projects.filter((p) => !pinnedIds.has(p.id)).slice(0, PROJECTS).map((p) => {
                   const folder = folderOf(p.id);
                   return (
-                    <button key={p.id} type="button" className="ph-drow" data-project={p.id} onClick={() => { onPickProject(p.id); navigateFromDrawer(CHATS_PATH); }}>
+                    <button key={p.id} type="button" className="ph-drow" data-project={p.id} onClick={() => navigateFromDrawer(chatsIn(p.id))}>
                       <Icon name="folder" size={18} />
                       <span className="ph-drow-t">{p.name}</span>
                       {folder && <span className="ph-drow-tm">{plural("agents.count", folder.total)}</span>}
@@ -175,7 +180,7 @@ export function AppDrawer({ mode, counts, waiting, selfdev, projects, onPickProj
                 })}
               </>
             )}
-            {recents.length > 0 && <div className="ph-dsec">{t("ph.recents")}</div>}
+            {recents.length > 0 && <div className="ph-dsec">{t("ph.recents")}<button type="button" className="ph-dsec-act" data-nav="chats" onClick={() => navigateFromDrawer(CHATS_PATH)}>{t("ph.seeall")}</button></div>}
             {recents.map((s) => (
               <button key={s.id} type="button" className={`ph-drow ${route.session === s.id ? "on" : ""}`} data-session={s.id} onClick={() => navigateFromDrawer(sessionPath(s.id))}>
                 <span className={`ph-dot ${s.status}`} aria-hidden />
