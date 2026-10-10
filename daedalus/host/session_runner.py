@@ -644,7 +644,9 @@ class SessionManager:
         """What the operator's windows show: whether a finished run was watched, and when an unread
         result has been seen."""
         self._background: set[asyncio.Task[Any]] = set()
-        self._jobs: dict[str, dict[str, Any]] = {}
+        self.jobs: dict[str, dict[str, Any]] = {}
+        """Each session's background jobs by id, shared with its tools; :mod:`daedalus.extensions.jobs`
+        watches them and wakes the session when one ends."""
         self.tools = ToolRegistry()
         """Every tool but the main orchestrator's, MCP proxies included; a session sees the part its policy admits."""
         self.dispatcher_tools = ToolRegistry()
@@ -1574,7 +1576,7 @@ class SessionManager:
         for row in rows:
             archived = bool(row["metadata"].get("archived"))
             unread = bool(row["metadata"].get("unread_result"))
-            background = len(self._jobs.get(row["id"], {})) + children.get(row["id"], 0)
+            background = len(self.jobs.get(row["id"], {})) + children.get(row["id"], 0)
             row.update(
                 {
                     "archived": archived,
@@ -1589,9 +1591,11 @@ class SessionManager:
         """Project existing jobs and child sessions into one operator-facing task list."""
         now = datetime.now(UTC)
         out: list[dict[str, Any]] = []
-        for job in self._jobs.get(session_id, {}).values():
-            # A job on the host has no process here; its code is what it was last seen to end with.
-            code = job.exit_code if isinstance(job, RemoteJob) else job.process.returncode
+        for job in self.jobs.get(session_id, {}).values():
+            # A job on the host has no process here; its code is what it was last seen to end with, and
+            # the job watcher asks the host every few seconds. Nothing asked before it, so a host job that
+            # had long finished stayed "running" here, with a stop button, until the agent read it.
+            code = job.exit_code
             state = "running" if code is None else "cancelled" if code < 0 else "done" if code == 0 else "failed"
             started = now.timestamp() - max(0.0, time.monotonic() - job.started)
             try:
@@ -1646,7 +1650,7 @@ class SessionManager:
                 return False
             await self.stop(child_id)
             return True
-        job = self._jobs.get(session_id, {}).get(task_id)
+        job = self.jobs.get(session_id, {}).get(task_id)
         if job is None:
             return False
         if isinstance(job, RemoteJob):
@@ -1694,7 +1698,7 @@ class SessionManager:
             await self.providers.close_retired()
         self._states.pop(session_id, None)
         locator.unregister(session_id)
-        for job in self._jobs.pop(session_id, {}).values():
+        for job in self.jobs.pop(session_id, {}).values():
             if isinstance(job, RemoteJob):
                 # Its host goes on running it otherwise, with nobody left who knows it is there.
                 with suppress(Exception):
@@ -2738,7 +2742,7 @@ class SessionManager:
             # every local folder of the project to read, the ones not marked read-only to write, or
             # the session's own directory alone when it has one.
             walls=self.walls_of(state),
-            extra={"skill_store": self.skills, "manager": self, "vision": _LiveVision(self), "jobs": self._jobs.setdefault(state.session.id, {})},
+            extra={"skill_store": self.skills, "manager": self, "vision": _LiveVision(self), "jobs": self.jobs.setdefault(state.session.id, {})},
         )
         host_folder = self.host_folder_of(state.session.id, state.session.metadata, state.project)
         if host_folder is not None:

@@ -30,6 +30,7 @@ EXTENSIONS = (
     "daedalus.extensions.board",
     "daedalus.extensions.peers",
     "daedalus.extensions.subagents",
+    "daedalus.extensions.jobs",
     "daedalus.extensions.staff",
     "daedalus.extensions.orchestrator",
     "daedalus.extensions.project_topics",
