@@ -101,6 +101,10 @@ type DebugHook = {
   fontSize(id: string): number;
   /** Line feeds xterm.js has parsed since the first call for this terminal: output parsed twice shows here. */
   lineFeeds(id: string): number;
+  /** Parse data as if the program wrote it, straight into xterm.js: for output a check must time itself. */
+  write(id: string, data: string): void;
+  /** What xterm.js has selected: whether a copy key would copy, and whether a copy cleared it. */
+  selection(id: string): string;
 };
 
 const lineFeedCounts = new Map<string, { count: number }>();
@@ -127,6 +131,8 @@ try {
       webglContexts: () => [...live].filter((i) => i.rendererKind === "webgl").length,
       feed: (id, data) => instanceFor(id)?.terminal?.input(data, true),
       fontSize: (id) => instanceFor(id)?.terminal?.options.fontSize ?? 0,
+      write: (id, data) => instanceFor(id)?.terminal?.write(data),
+      selection: (id) => instanceFor(id)?.terminal?.getSelection() ?? "",
       lineFeeds: (id) => {
         let counter = lineFeedCounts.get(id);
         if (!counter) {

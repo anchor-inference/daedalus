@@ -127,6 +127,9 @@ export function TerminalView({ id, visible, readOnly, env, fileOpener, workspace
       if (request.kind === "search") setSearching(true);
       else if (request.kind === "paste") void confirmPaste(instance, request.text, request.lines);
       else if (request.kind === "link") void confirmLink(request.uri);
+      else if (request.kind === "copied") toast(request.ok ? t("term.copied") : t("term.copyFailed"));
+      // A button as well as the key: a phone has no copy key, and the button's own tap may write.
+      else if (request.kind === "copy-held") toast(t("term.copyHeld", { key: isMac() ? "⌘C" : "Ctrl+Shift+C" }), { action: { label: t("term.copy"), run: () => void instance.copyHeld() }, ms: 10_000 });
     });
   }, [instance]);
 
@@ -200,7 +203,7 @@ export function CopyOutputButton({ id, state }: { id: string | null; state: Term
 }
 
 function TerminalMenu({ anchor, instance, state, onClose, onSearch }: { anchor: HTMLElement | null; instance: TerminalInstance; state: TerminalState; onClose: () => void; onSearch: () => void }) {
-  const selection = !!instance.terminal?.hasSelection();
+  const selection = instance.hasCopyable();
   const commands = state.commands;
   const mod = isMac() ? "⌘" : "Ctrl+Shift+";
   const item = (label: string, shortcut: string, icon: IconName, disabled: boolean, run: () => void) => (

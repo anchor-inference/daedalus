@@ -5051,6 +5051,9 @@ Object.assign(DICT, {
 // A shell's commands in its terminal: the marks beside prompts, the jumps, the last output.
 Object.assign(DICT, {
   "term.copy": { en: "Copy", ru: "Копировать" },
+  "term.copied": { en: "Copied", ru: "Скопировано" },
+  "term.copyFailed": { en: "Could not copy", ru: "Не удалось скопировать" },
+  "term.copyHeld": { en: "Press {key} to copy what the program selected", ru: "Нажмите {key}, чтобы скопировать выделенное программой" },
   "term.marks.menu": { en: "Terminal", ru: "Терминал" },
   "term.marks.copy": { en: "Copy last command output", ru: "Копировать вывод последней команды" },
   "term.marks.copied": { en: "Output copied", ru: "Вывод скопирован" },

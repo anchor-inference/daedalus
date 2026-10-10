@@ -29,6 +29,36 @@ describe("reservedKey", () => {
     expect(reservedKey(key("KeyC", { metaKey: true }), linux)).toBeNull();
   });
 
+  it("copies with plain Ctrl+C only while something is selected, and never on a Mac", () => {
+    const selected = { ...linux, selection: true };
+    expect(reservedKey(key("KeyC", { ctrlKey: true }), selected)).toBe("copy-clear");
+    // Nothing selected: the interrupt, as always.
+    expect(reservedKey(key("KeyC", { ctrlKey: true }), linux)).toBeNull();
+    expect(reservedKey(key("KeyC", { ctrlKey: true }), { ...linux, mouseProgram: true })).toBeNull();
+    // On a Mac Ctrl+C is the interrupt even over a selection; Cmd+C is the copy.
+    expect(reservedKey(key("KeyC", { ctrlKey: true }), { ...mac, selection: true })).toBeNull();
+    expect(reservedKey(key("KeyC", { metaKey: true }), { ...mac, selection: true })).toBe("copy");
+    // Ctrl+Shift+C copies a selection and leaves it in place.
+    expect(reservedKey(key("KeyC", { ctrlKey: true, shiftKey: true }), selected)).toBe("copy");
+  });
+
+  it("hands the copy keys to a program that reports the mouse when xterm.js selected nothing", () => {
+    // Claude Code's full-screen view draws its own selection and copies it on Cmd+C or Ctrl+Shift+C.
+    const program = { mouseProgram: true };
+    expect(reservedKey(key("KeyC", { metaKey: true }), { ...mac, ...program })).toBeNull();
+    expect(reservedKey(key("KeyC", { ctrlKey: true, shiftKey: true }), { ...linux, ...program })).toBeNull();
+    // A Shift- or Option-drag selection is xterm.js's own, and is copied here.
+    expect(reservedKey(key("KeyC", { metaKey: true }), { ...mac, ...program, selection: true })).toBe("copy");
+    // The program already copied, but the browser refused it: the key delivers what is held.
+    expect(reservedKey(key("KeyC", { metaKey: true }), { ...mac, ...program, held: true })).toBe("copy");
+    expect(reservedKey(key("KeyC", { ctrlKey: true, shiftKey: true }), { ...linux, ...program, held: true })).toBe("copy");
+    // Over a plain shell the keys stay taken: Ctrl+Shift+C would reach it as an interrupt.
+    expect(reservedKey(key("KeyC", { ctrlKey: true, shiftKey: true }), linux)).toBe("copy");
+    expect(reservedKey(key("KeyC", { metaKey: true }), mac)).toBe("copy");
+    // Paste is the browser's in every case.
+    expect(reservedKey(key("KeyV", { metaKey: true }), { ...mac, ...program })).toBe("paste");
+  });
+
   it("opens search with Ctrl+Shift+F and sizes the font with Ctrl+=, Ctrl+- and Ctrl+0", () => {
     expect(reservedKey(key("KeyF", { ctrlKey: true, shiftKey: true }), linux)).toBe("search");
     expect(reservedKey(key("Equal", { ctrlKey: true }), linux)).toBe("font-bigger");

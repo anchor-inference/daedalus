@@ -25,6 +25,7 @@ import { CommandMarks, MarksSummary } from "./marks";
 import type { EventMessage, KeyboardOwner, SizeOwner } from "./protocol";
 import { selectableText } from "./phonekeys";
 import { attachTheme, documentTokens, terminalTheme } from "./theme";
+import { copyText } from "./clipboard";
 
 /** Lines of history each terminal keeps, and asks a snapshot for. */
 export const SCROLLBACK = 10_000;
@@ -64,7 +65,11 @@ const REFILL_MS = 600;
 export type TerminalRequest =
   | { kind: "search" }
   | { kind: "paste"; text: string; lines: number }
-  | { kind: "link"; uri: string };
+  | { kind: "link"; uri: string }
+  /** A copy the operator asked for by key or menu: whether it reached the clipboard. */
+  | { kind: "copied"; ok: boolean }
+  /** The program copied (OSC 52) while the browser would not let the page write the clipboard. */
+  | { kind: "copy-held" };
 
 /** What the current view lends the terminal: where files open, the workspace they resolve against. */
 export type TerminalBinding = {
@@ -83,36 +88,14 @@ export interface InstanceShared {
 }
 
 const PASTE_KEY = (id: string) => `daedalus.term.paste.${id}`;
+/** How long a program's refused copy waits for the copy key before it is forgotten. */
+const HELD_COPY_MS = 120_000;
 
 function remembered(key: string): boolean {
   try {
     return localStorage.getItem(key) === "1";
   } catch {
     return false;
-  }
-}
-
-/** Copies text, with a hidden text field for webviews (Telegram's) where the clipboard API is refused. */
-export async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    const field = document.createElement("textarea");
-    field.value = text;
-    field.setAttribute("readonly", "");
-    field.style.position = "fixed";
-    field.style.opacity = "0";
-    document.body.appendChild(field);
-    field.select();
-    let ok = false;
-    try {
-      ok = document.execCommand("copy");
-    } catch {
-      ok = false;
-    }
-    field.remove();
-    return ok;
   }
 }
 
@@ -179,6 +162,8 @@ export class TerminalInstance {
   private inputHook: ((data: string) => string | null) | null = null;
   /** A key of the phone's row is on its way through xterm.js: it is already what it should be. */
   private keyInFlight = false;
+  /** The program's last copy (OSC 52) that could not reach the clipboard: the next copy key delivers it. */
+  private held: { text: string; at: number } | null = null;
 
   constructor(readonly id: string, private readonly shared: InstanceShared, private readonly readOnly = false) {
     this.host = document.createElement("div");
@@ -190,6 +175,7 @@ export class TerminalInstance {
     // stopped and confirmed — each line of it would otherwise run as a command.
     this.host.addEventListener("paste", (e) => this.onPaste(e), true);
     this.host.addEventListener("pointerdown", () => this.interact(), true);
+    this.host.addEventListener("mousedown", (e) => this.shiftSelectsOnMac(e), true);
     this.host.addEventListener("keydown", () => this.interact(), true);
     loadTerminalKit().then(
       (kit) => this.start(kit),
@@ -346,11 +332,34 @@ export class TerminalInstance {
     return selectableText(term.buffer.active, term.rows, history);
   }
 
-  /** Copies the selection; false when there is none. */
+  /** Whether there is anything for Copy to take: a selection, or a copy the program asked for. */
+  hasCopyable(): boolean {
+    return !!this.term?.hasSelection() || this.heldCopy() !== null;
+  }
+
+  /**
+   * Copies the selection, or else the program's held copy; false when there is neither. The
+   * clipboard is written before the first await, so it still counts as the key press or click
+   * that asked: on a plain-http page nothing else may write it.
+   */
   async copySelection(): Promise<boolean> {
-    const text = this.term?.getSelection() ?? "";
+    const selected = this.term?.getSelection() ?? "";
+    const text = selected || this.heldCopy();
     if (!text) return false;
-    return copyText(text);
+    const ok = await copyText(text);
+    if (ok && !selected) this.held = null;
+    this.request({ kind: "copied", ok });
+    return ok;
+  }
+
+  /** Copies the program's held copy (the toast's button, whose own tap may write the clipboard); false when nothing is held. */
+  async copyHeld(): Promise<boolean> {
+    const text = this.heldCopy();
+    if (!text) return false;
+    const ok = await copyText(text);
+    if (ok) this.held = null;
+    this.request({ kind: "copied", ok });
+    return ok;
   }
 
   /** Scroll to the previous or next command's prompt; false when the shell marks none that way. */
@@ -493,8 +502,15 @@ export class TerminalInstance {
     term.loadAddon(
       new kit.ClipboardAddon(undefined, {
         readText: () => "",
+        // Claude Code copies its own mouse selection this way the moment the button is released,
+        // and again on its copy keys. Outside a secure context, or in Safari after the click's
+        // moment has passed, the browser refuses: the text is held for the next copy key, which
+        // is a key press and so may write the clipboard.
         writeText: (_selection, text) => {
-          void copyText(text);
+          void copyText(text).then((ok) => {
+            this.held = ok ? null : { text, at: Date.now() };
+            if (!ok) this.request({ kind: "copy-held" });
+          });
         },
       }),
     );
@@ -704,7 +720,14 @@ export class TerminalInstance {
   }
 
   private onKey(e: KeyboardEvent): boolean {
-    const action = reservedKey(e, { mac: isMac(), altScreen: this.stateValue.altScreen || this.term?.buffer.active.type === "alternate" });
+    const term = this.term;
+    const action = reservedKey(e, {
+      mac: isMac(),
+      altScreen: this.stateValue.altScreen || term?.buffer.active.type === "alternate",
+      selection: !!term?.hasSelection(),
+      mouseProgram: !!term && term.modes.mouseTrackingMode !== "none",
+      held: this.heldCopy() !== null,
+    });
     if (action === null) return true;
     // Ctrl+↑/↓ move between commands only where the shell marks them; anywhere else they belong to
     // the program, as they always did.
@@ -718,6 +741,12 @@ export class TerminalInstance {
       case "copy":
         e.preventDefault();
         void this.copySelection();
+        break;
+      case "copy-clear":
+        // Cleared so that a second Ctrl+C is the interrupt again, as it is in VS Code.
+        e.preventDefault();
+        void this.copySelection();
+        this.term?.clearSelection();
         break;
       case "paste":
         // Left to the browser: the key's own paste event arrives at the listener above, which is
@@ -744,6 +773,30 @@ export class TerminalInstance {
       default:
         break;
     }
+  }
+
+  private heldCopy(): string | null {
+    if (this.held && Date.now() - this.held.at > HELD_COPY_MS) this.held = null;
+    return this.held?.text ?? null;
+  }
+
+  /**
+   * Shift-drag selects over a program that reports the mouse, on a Mac too. xterm.js forces its own
+   * selection there with Option only (`macOptionClickForcesSelection`), while Linux and Windows use
+   * Shift — and Claude Code's hint names Shift. So a Shift press on a Mac is handed on as an Option
+   * press; the release stays as it was, so a short click does not move the cursor the way an
+   * Option-click does.
+   */
+  private shiftSelectsOnMac(e: MouseEvent): void {
+    if (!e.isTrusted || !e.shiftKey || e.altKey || e.button !== 0 || !isMac()) return;
+    if (!this.term || this.term.modes.mouseTrackingMode === "none" || !e.target) return;
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    e.target.dispatchEvent(new MouseEvent("mousedown", {
+      bubbles: true, cancelable: true, composed: true, view: e.view, detail: e.detail,
+      screenX: e.screenX, screenY: e.screenY, clientX: e.clientX, clientY: e.clientY,
+      shiftKey: true, altKey: true, ctrlKey: e.ctrlKey, metaKey: e.metaKey, button: e.button, buttons: e.buttons,
+    }));
   }
 
   private onPaste(e: ClipboardEvent): void {
