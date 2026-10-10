@@ -9,9 +9,12 @@
 // one holding the open chat opens itself, and a collapsed project still shows its live chats, because
 // a closed folder must never hide a question.
 //
+// What the operator pins sits in a block of its own above both sections, newest pin first, and is not
+// drawn again below it: a pinned project keeps its fold and its live chats, a pinned chat its row.
+//
 // The keyboard: `/` reaches the search from anywhere outside a text field, the arrows walk the rows
 // (left and right fold and unfold a project), Enter opens, Ctrl+Enter opens beside, F2 renames, E
-// archives and Delete deletes after the same confirmation the menu asks for.
+// archives, P pins or unpins, and Delete deletes after the same confirmation the menu asks for.
 
 import { useContextActions } from "../ui/context-menu";
 import { type ReactNode, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -36,6 +39,7 @@ import { latinKey } from "../navigation";
 import { insideTerminal } from "../terminal/keys";
 import { plural, t } from "../i18n";
 import { useReveal } from "../reveal";
+import { pinCommand, setPinned } from "../pins";
 import { HostMark, RunEnv, useRunOn } from "../runon";
 
 type SearchList = SessionList & { semantic: boolean; reason: string; partial: boolean; indexing: boolean };
@@ -120,7 +124,8 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
     [listing, project, searching, view],
   );
   const filtered = searching || view !== "all";
-  const sections = useMemo(() => sidebarSections(arranged.folders, { filtered }), [arranged, filtered]);
+  // The archive is a list of what was put away, where nothing is lifted out of its order.
+  const sections = useMemo(() => sidebarSections(arranged.folders, { filtered, pins: view !== "archive" }), [arranged, filtered, view]);
   const counts = useMemo(() => {
     const top = (everything.data ? agentsListing(everything.data).sessions : []).filter((s) => !s.metadata?.subagent_of && (!project || s.project_id === project));
     return {
@@ -149,6 +154,7 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
   );
   const moreOn = view === "loops" || view === "archive";
   const projectCount = sections.projects.length;
+  const pinnedCount = sections.pinned.length;
 
   return (
     <>
@@ -218,9 +224,19 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
           </div>
         )}
         {((results && !pending && arranged.shown === 0) || (!searching && data && filtered && arranged.shown === 0)) && <div className="empty">{t("common.nothing")}</div>}
+        {pinnedCount > 0 && (
+          <>
+            <div className="sb-sec first sb-pinsec"><Icon name="pushpin" size={12} /><span>{t("side.pinned")}</span><span className="n num">{pinnedCount}</span></div>
+            <div className="sb-pinned" data-pinned="">
+              {sections.pinned.map((f) => f.chat
+                ? <PinnedChat key={f.key} folder={f} onOpen={onOpen} current={current} />
+                : <ProjectGroup key={f.key} folder={f} onOpen={onOpen} current={current} filtered={filtered} toast={toast} />)}
+            </div>
+          </>
+        )}
         {projectCount > 0 && (
           <>
-            <div className="sb-sec first"><span>{t("side.projects")}</span><span className="n num">{projectCount}</span></div>
+            <div className={`sb-sec ${pinnedCount > 0 ? "" : "first"}`}><span>{t("side.projects")}</span><span className="n num">{projectCount}</span></div>
             {sections.projects.map((f) => (
               <ProjectGroup key={f.key} folder={f} onOpen={onOpen} current={current} filtered={filtered} toast={toast} />
             ))}
@@ -228,7 +244,7 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
         )}
         {(sections.chats > 0 || view === "archive") && (
           <>
-            <div className={`sb-sec ${projectCount > 0 ? "" : "first"}`}>
+            <div className={`sb-sec ${projectCount > 0 || pinnedCount > 0 ? "" : "first"}`}>
               <span>{view === "archive" ? t("agents.filter.archive") : t("side.chats")}</span><span className="n num">{sections.chats}</span>
               {!searching && (
                 <span className="sb-sec-acts">
@@ -292,10 +308,17 @@ function DayGroup({ day, rows, onOpen, current }: { day: SidebarDay; rows: RowMo
     <div ref={host} className="sb-day" data-day={day}>
       <div className="sb-dayhead">{t(`side.day.${day}`)}</div>
       <WindowedRows keys={keys} host={host} rowSelector=":scope > .sb-row" estimate={44} render={(i) => (
-        <ChatRow row={shown[i].row} fork={shown[i].fork} onOpen={onOpen} current={current} projectName={shown[i].row.s.project} />
+        <ChatRow row={shown[i].row} fork={shown[i].fork} onOpen={onOpen} current={current} projectName={shown[i].row.s.project} pin={shown[i].fork ? undefined : "off"} />
       )} />
     </div>
   );
+}
+
+/** A pinned chat in the pinned block: its row and the forks taken from it, as under its day. Not
+ *  windowed: a pin is a handful of rows by intent. */
+function PinnedChat({ folder, onOpen, current }: { folder: Folder; onOpen: (id: string) => void; current?: string }) {
+  const shown = useMemo(() => lines(folder.rows), [folder.rows]);
+  return <>{shown.map((l) => <ChatRow key={l.row.s.id} row={l.row} fork={l.fork} onOpen={onOpen} current={current} projectName={l.row.s.project} pin={l.fork ? undefined : "on"} />)}</>;
 }
 
 type GroupProps = { folder: Folder; onOpen: (id: string) => void; current?: string; filtered: boolean; toast: (text: string) => void };
@@ -306,7 +329,7 @@ type GroupProps = { folder: Folder; onOpen: (id: string) => void; current?: stri
 function sameGroup(a: GroupProps, b: GroupProps): boolean {
   const l = a.folder, r = b.folder;
   if (a.filtered !== b.filtered || a.current !== b.current || a.onOpen !== b.onOpen || a.toast !== b.toast) return false;
-  if (l.key !== r.key || l.name !== r.name || l.total !== r.total || l.system !== r.system || l.last_message_at !== r.last_message_at) return false;
+  if (l.key !== r.key || l.name !== r.name || l.total !== r.total || l.system !== r.system || l.last_message_at !== r.last_message_at || l.pinned_at !== r.pinned_at) return false;
   if (projectPath(l.project) !== projectPath(r.project)) return false;
   return l.sig === r.sig;
 }
@@ -334,8 +357,10 @@ const ProjectGroup = memo(function ProjectGroup({ folder, onOpen, current, filte
   const editProject = useCallback(() => setEditing(true), []);
   const newIn = useCallback(() => setAdding(true), []);
   const revealer = useReveal();
+  const pinned = !!folder.pinned_at;
   const items: MenuItem[] = [
     { label: t("side.project.new", { name: folder.name }), icon: "compose", onSelect: newIn },
+    pinCommand(folder.key, pinned, { key: true }),
     ...(folder.system ? [{ label: t("agents.folder.tovoice"), icon: "mic" as const, onSelect: () => navigate(pathFor("voice")) }] : []),
     { label: t("project.settings.for", { name: folder.name }), icon: "settings", onSelect: editProject },
     ...(revealer ? [{ label: revealer.label, icon: "external" as const, onSelect: () => void revealer.reveal({ project_id: folder.key }) }] : []),
@@ -352,7 +377,9 @@ const ProjectGroup = memo(function ProjectGroup({ folder, onOpen, current, filte
   const state = folderState(folder.rows);
   const onKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.target !== e.currentTarget) return;
+    const plain = !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
+    else if (latinKey(e) === "p" && plain) { e.preventDefault(); void setPinned(folder.key, !pinned); }
     else if (e.key === "ArrowRight") {
       e.preventDefault();
       if (!showing) toggle(true);
@@ -418,6 +445,9 @@ type RowProps = {
   onNewIn?: () => void;
   /** Where Left goes from a chat inside a project: to the project's row. */
   onParent?: () => void;
+  /** Whether the row is a chat that can be pinned (its scratch project is), and whether it is: a chat
+   *  inside a project is not pinned on its own, its project is. */
+  pin?: "on" | "off";
 };
 
 /** What a row actually draws, so a fresh read of the list does not reconcile a row that did not
@@ -429,7 +459,7 @@ function sameRow(a: RowProps, b: RowProps): boolean {
   if ((l.terminals ?? 0) !== (r.terminals ?? 0) || l.match?.snippet !== r.match?.snippet || l.project_id !== r.project_id) return false;
   if (a.projectName !== b.projectName || a.onProject !== b.onProject || a.onNewIn !== b.onNewIn || a.onOpen !== b.onOpen) return false;
   if ((a.current === l.id || a.row.kids.some((k) => k.id === a.current)) !== (b.current === r.id || b.row.kids.some((k) => k.id === b.current))) return false;
-  if (a.nested !== b.nested || a.system !== b.system || a.fork?.seq !== b.fork?.seq || a.fork?.of !== b.fork?.of) return false;
+  if (a.nested !== b.nested || a.system !== b.system || a.fork?.seq !== b.fork?.seq || a.fork?.of !== b.fork?.of || a.pin !== b.pin) return false;
   if (JSON.stringify(l.metadata?.loop ?? null) !== JSON.stringify(r.metadata?.loop ?? null)) return false;
   const lk = a.row.kids, rk = b.row.kids;
   return lk.length === rk.length && lk.every((k, i) => k.id === rk[i].id && k.status === rk[i].status && k.title === rk[i].title);
@@ -448,7 +478,7 @@ function rowState(s: SessionSummary, kids: SessionSummary[]): "waiting" | "runni
  * meta line under it. Hovering or focusing it shows "Open beside" and the menu; the right click opens
  * the same menu, with the commands of the phone's sheet.
  */
-const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, projectName, system, onProject, onNewIn, onParent }: RowProps) {
+const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, projectName, system, onProject, onNewIn, onParent, pin }: RowProps) {
   const s = row.s;
   const kids = row.kids;
   const { items, layers, run } = useSessionCommands(s, { onProject, projectName });
@@ -465,6 +495,7 @@ const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, proj
   };
   const menu: MenuItem[] = [
     { label: t("side.beside"), icon: "columns", hint: t("side.key.beside"), onSelect: beside },
+    ...(pin ? [pinCommand(s.project_id, pin === "on", { key: true })] : []),
     ...(onNewIn ? [{ label: t("side.project.new", { name: projectName }), icon: "compose" as const, onSelect: onNewIn }] : []),
     ...kids.map((kid) => ({ label: t("agents.sub.open", { name: agentName(kid) }), icon: "bots" as const, hint: statusWord(kid.status), onSelect: () => onOpen(kid.id) })),
     "-",
@@ -482,6 +513,7 @@ const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, proj
     else if ((e.key === "Enter" || e.key === " ") && plain) { e.preventDefault(); open(); }
     else if (e.key === "F2" && plain) { e.preventDefault(); run.rename(); }
     else if (latinKey(e) === "e" && plain) { e.preventDefault(); void run.archive(); }
+    else if (latinKey(e) === "p" && plain && pin) { e.preventDefault(); void setPinned(s.project_id, pin === "off"); }
     else if (e.key === "Delete" && plain) { e.preventDefault(); void run.remove(); }
     else if (e.key === "ArrowLeft" && plain && onParent) { e.preventDefault(); onParent(); }
   };

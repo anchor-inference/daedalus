@@ -2038,6 +2038,16 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 tail = rows[-1]
                 next_cursor = base64.urlsafe_b64encode(json.dumps({"id": tail["id"], "at": tail["last_message_at"]}, separators=(",", ":")).encode()).decode().rstrip("=")
         projects = await manager.projects.list()
+        pins = await manager.projects.pins()
+        if ids is None and not cursor and view != "archive":
+            # A pinned chat is at the top of the sidebar however old it is, so the first page carries
+            # it even when its last message falls beyond the page: otherwise an old pin would vanish
+            # from the block until "More" is pressed. Appended after the cursor was taken, so paging
+            # still walks the recency order, and the app drops the duplicate a later page brings.
+            # Only chats: a pinned project is listed from the projects whatever rows the page holds.
+            pinned = {p.id for p in projects if p.id in pins and p.settings.ephemeral}
+            taken = {row["id"] for row in rows}
+            rows = [*rows, *(row for row in visible if row["project_id"] in pinned and row["id"] not in taken)]
         names = {p.id: p.name for p in projects}
         default = app.config.default_preset()
         default_label = default[1].display(default[0]) if default else NO_MODEL_LABEL
@@ -2077,7 +2087,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         orchestrated = [p for p in projects if p.settings.orchestrator.enabled]
         teams = await manager.staff.team_counts() if orchestrated else {}
         waiting = await manager.asks.open_counts("operator") if orchestrated else {}
-        folders = [{**p.view(), **counts.get(p.id, empty), "orchestrator": orchestration(p, teams, waiting)} for p in projects]
+        # ``pinned_at`` orders the sidebar's Pinned block; empty is not pinned.
+        folders = [{**p.view(), **counts.get(p.id, empty), "orchestrator": orchestration(p, teams, waiting), "pinned_at": pins.get(p.id, "")} for p in projects]
         folders.sort(key=lambda p: (p["last_message_at"] or p["created_at"], p["id"]), reverse=True)
         return {"sessions": rows, "projects": folders, "next_cursor": next_cursor}
 

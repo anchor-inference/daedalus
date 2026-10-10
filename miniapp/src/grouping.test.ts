@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ProjectFolder, SessionSummary } from "./api";
-import { arrange, folderOpen, isProject, rememberFolder, sidebarSections } from "./grouping";
+import { arrange, folderOpen, isProject, rememberFolder, sidebarSections, splitPinned } from "./grouping";
 
 let clock = 1_700_000_000_000;
 
@@ -161,6 +161,59 @@ describe("sidebarSections", () => {
     expect(sidebarSections(arrange(sessions, [scratch]).folders, { now }).projects).toHaveLength(0);
     const kept = { ...scratch, settings: { ...scratch.settings, ephemeral: false } };
     expect(sidebarSections(arrange(sessions, [kept]).folders, { now }).projects.map((f) => f.key)).toEqual(["s"]);
+  });
+});
+
+describe("pins", () => {
+  const now = new Date("2026-10-09T12:00:00");
+  const at = (hours: number) => new Date(now.getTime() - hours * 3_600_000).toISOString();
+  const chatProject = (id: string, last: string, pinned_at = "") => folder(id, id, { total: 1, last_message_at: last, pinned_at, settings: { snapshots: true, ephemeral: true } });
+  const projects = () => [
+    folder("esp", "Firmware", { total: 1, pinned_at: "2026-10-01T10:00:00Z" }),
+    folder("home", "Home", { total: 1 }),
+    folder("empty", "Empty", { total: 0, pinned_at: "2026-10-03T10:00:00Z" }),
+    chatProject("c1", at(1), "2026-10-02T10:00:00Z"),
+    chatProject("c2", at(30)),
+  ];
+  const sessions = () => [
+    agent("e", { project_id: "esp", status: "running" }),
+    agent("h", { project_id: "home" }),
+    agent("c1", { project_id: "c1", last_message_at: at(1) }),
+    agent("c2", { project_id: "c2", last_message_at: at(30) }),
+  ];
+
+  it("lists what is pinned in its own block, newest pin first, and nowhere below it", () => {
+    const { pinned, projects: listed, days, chats } = sidebarSections(arrange(sessions(), projects()).folders, { now });
+    // An empty project is a project before its first chat, pinned or not.
+    expect(pinned.map((f) => f.key)).toEqual(["empty", "c1", "esp"]);
+    expect(listed.map((f) => f.key)).toEqual(["home"]);
+    expect(days.map((d) => [d.day, d.rows.map((r) => r.s.id)])).toEqual([["yesterday", ["c2"]]]);
+    expect(chats).toBe(1);
+  });
+
+  it("applies the filter and the search to the block too", () => {
+    // Only what works: the running chat's project stays, the idle chat and the empty project go.
+    const working = arrange(sessions(), projects(), { query: "e" }).folders;
+    expect(sidebarSections(working, { filtered: true, now }).pinned.map((f) => f.key)).toEqual(["esp"]);
+    expect(sidebarSections(arrange(sessions(), projects(), { query: "nothing" }).folders, { filtered: true, now }).pinned).toEqual([]);
+  });
+
+  it("drops a pinned chat whose row is gone, archived or deleted", () => {
+    const left = sessions().filter((s) => s.id !== "c1");
+    expect(sidebarSections(arrange(left, projects()).folders, { now }).pinned.map((f) => f.key)).toEqual(["empty", "esp"]);
+  });
+
+  it("keeps the pin on a chat that became a project, and lists it as a pinned project", () => {
+    const grown = projects().map((p) => (p.id === "c1" ? { ...p, settings: { ...p.settings, ephemeral: false } } : p));
+    const two = [...sessions(), agent("c1b", { project_id: "c1" })];
+    const pinned = sidebarSections(arrange(two, grown).folders, { now }).pinned;
+    expect(pinned.map((f) => [f.key, f.chat])).toEqual([["empty", false], ["c1", false], ["esp", false]]);
+    expect(pinned[1].rows.map((r) => r.s.id).sort()).toEqual(["c1", "c1b"]);
+  });
+
+  it("pins nothing where pins are off, for the archive", () => {
+    const folders = arrange(sessions(), projects()).folders;
+    expect(splitPinned(folders, { pins: false })).toEqual({ pinned: [], rest: folders });
   });
 });
 

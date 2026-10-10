@@ -158,6 +158,11 @@
   .ph-sec { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-4) var(--gutter) var(--space-1); font-size: var(--fs-13); font-weight: 500; color: var(--fg-2); }
   .ph-sec-t { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .ph-sec-n { flex: none; font-weight: 400; color: var(--fg-3); }
+  .ph-pinhead { display: inline-flex; align-items: center; gap: 6px; }
+  .ph-pinhead .ic { color: var(--fg-3); transform: rotate(30deg); }
+  /* A pinned project's chats hang under its row, indented by the lead's width so the row reads as theirs. */
+  .ph-pinkids { padding-left: var(--space-5); }
+  .ph-pinchev { display: inline-flex; color: var(--fg-3); }
   .ph-sec-act { margin-left: auto; display: inline-flex; align-items: center; margin-right: -12px; }
   .ph-sec.warn { color: var(--warn); }
   .ph-sec.bad { color: var(--bad); }

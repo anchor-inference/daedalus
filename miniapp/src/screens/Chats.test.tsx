@@ -16,8 +16,8 @@ vi.mock("../events", () => ({ useStreamUp: () => true }));
 
 const NOW = new Date("2026-10-08T12:00:00");
 const iso = (hoursAgo: number) => new Date(NOW.getTime() - hoursAgo * 3_600_000).toISOString();
-function folder(id: string, name: string, total: number, last: string, ephemeral = false): ProjectFolder {
-  return { id, name, created_at: "2026-01-01T00:00:00Z", settings: { snapshots: false, ephemeral }, folders: [], total, members: total, active: 0, loops: 0, last_message_at: last };
+function folder(id: string, name: string, total: number, last: string, ephemeral = false, pinned_at = ""): ProjectFolder {
+  return { id, name, created_at: "2026-01-01T00:00:00Z", settings: { snapshots: false, ephemeral }, folders: [], total, members: total, active: 0, loops: 0, last_message_at: last, pinned_at };
 }
 function chat(id: string, project: string, hoursAgo: number, extra: Partial<SessionSummary> = {}): SessionSummary {
   return { id, title: `Chat ${id}`, project_id: project, project, model: "DeepSeek V4 Flash", status: "idle", created_at: iso(hoursAgo + 1), last_message_at: iso(hoursAgo), run_id: null, ...extra };
@@ -53,6 +53,17 @@ describe("chatSections", () => {
   });
 });
 
+describe("chatSections with pins", () => {
+  it("puts what is pinned first, in one section, and leaves it out of the rest", () => {
+    const projects = [folder("bakery", "Bakery site", 2, iso(0.1), false, "2026-10-01T00:00:00Z"), folder("solo", "translator", 1, iso(5), true, "2026-10-02T00:00:00Z"), folder("old", "Router", 1, iso(30), true)];
+    const sessions = [chat("a", "bakery", 0.1), chat("b", "bakery", 2), chat("c", "solo", 5), chat("d", "old", 30)];
+    const sections = chatSections(arrange(sessions, projects).folders, NOW);
+    expect(sections.map((s) => s.key)).toEqual(["pinned", "day:yesterday"]);
+    expect(sections[0].pinned!.map((f) => f.key)).toEqual(["solo", "bakery"]);
+    expect(chatSections(arrange(sessions, projects).folders, NOW, { pins: false }).map((s) => s.key)).toEqual(["bakery", "day:today", "day:yesterday"]);
+  });
+});
+
 let host: HTMLDivElement;
 let root: Root;
 beforeEach(() => {
@@ -80,6 +91,29 @@ describe("ChatsScreen", () => {
       "New chat in Bakery site", expect.stringContaining("review"), "Rename", "Move…", "Settings for Bakery site", "Archive", "Delete",
     ]));
     expect(words[words.length - 1]).toBe("Delete");
+  });
+
+  it("draws the pinned block first, a pinned project folding with its live chat still in sight, and offers Pin and Unpin", async () => {
+    const projects = [folder("bakery", "Bakery site", 2, iso(0.1), false, "2026-10-01T00:00:00Z"), folder("solo", "translator", 1, iso(5), true, "2026-10-02T00:00:00Z"), folder("old", "Router", 1, iso(30), true)];
+    listing.data = { sessions: [chat("a", "bakery", 0.1, { status: "waiting" }), chat("b", "bakery", 2), chat("c", "solo", 5), chat("d", "old", 30)], projects, next_cursor: null } as SessionList;
+    await act(async () => root.render(<ChatsScreen onOpen={vi.fn()} toast={vi.fn()} />));
+    const block = host.querySelector("[data-pinned]")!;
+    expect(block.querySelector(".ph-sec")?.textContent).toContain("Pinned");
+    expect(Array.from(block.querySelectorAll("[data-session]")).map((r) => (r as HTMLElement).dataset.session)).toEqual(["c", "a", "b"]);
+    expect(host.querySelectorAll("[data-session=\"c\"]")).toHaveLength(1);
+    // Folded, the project keeps the chat that waits for the operator.
+    await act(async () => block.querySelector<HTMLElement>("[data-project-head=\"bakery\"] .ph-row")!.click());
+    expect(Array.from(block.querySelectorAll("[data-session]")).map((r) => (r as HTMLElement).dataset.session)).toEqual(["c", "a"]);
+    await act(async () => block.querySelector<HTMLButtonElement>("[data-session=\"c\"] .ph-row-more")!.click());
+    expect(Array.from(document.querySelectorAll(".ph-mrow")).map((b) => b.textContent)).toContain("Unpin");
+  });
+
+  it("offers Pin on a chat below the block", async () => {
+    listing.data = { sessions: [chat("d", "old", 30)], projects: [folder("old", "Router", 1, iso(30), true)], next_cursor: null } as SessionList;
+    await act(async () => root.render(<ChatsScreen onOpen={vi.fn()} toast={vi.fn()} />));
+    expect(host.querySelector("[data-pinned]")).toBeNull();
+    await act(async () => host.querySelector<HTMLButtonElement>(".ph-row-more")!.click());
+    expect(Array.from(document.querySelectorAll(".ph-mrow")).map((b) => b.textContent)).toContain("Pin");
   });
 
   it("says nothing matches under a chip with nothing in it and offers the whole list back", async () => {

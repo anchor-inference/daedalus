@@ -952,7 +952,10 @@ export type ProjectRef = Omit<Project, "sessions">;
 
 /** A project in the agents listing: the project, and how many agents are in it — counted over the
  *  whole table, not over the page of rows beside it. */
-export type ProjectFolder = ProjectRef & { members?: number; total: number; active: number; loops: number; last_message_at: string; orchestrator?: Orchestration | null };
+export type ProjectFolder = ProjectRef & { members?: number; total: number; active: number; loops: number; last_message_at: string; orchestrator?: Orchestration | null;
+  /** When the project, or the chat it is the scratch project of, was pinned to the top of the
+   *  sidebar; empty or absent when it is not pinned. The newest pin is listed first. */
+  pinned_at?: string };
 
 /** What the agents list says about a project whose orchestrator is on: it is drawn as one entry. */
 export type Orchestration = { enabled: boolean; session_id: string; staff: number; working: number; needs_you: number };

@@ -22,6 +22,9 @@ export type Folder = {
   system: boolean;
   /** True on a chat's own scratch project: it is listed as the chat, not as a project (`isProject`). */
   chat: boolean;
+  /** When it was pinned to the top of the sidebar; empty when it is not. A chat's pin is its
+   *  scratch project's, so a chat that becomes a project is still pinned. */
+  pinned_at: string;
   rows: Row[];
   /** What the rows of this folder would look different for, built once while they are arranged.
    *  The listing is re-fetched whole every few seconds and every object in it is new, so a folder
@@ -93,15 +96,33 @@ export function liveRow(r: Row): boolean {
 }
 
 /**
- * The desktop sidebar's two sections: the projects, and the chats by day.
+ * The pinned projects and chats, newest pin first, and every other folder in its order.
+ *
+ * A pinned folder is listed in the pinned block alone, never again below it. It obeys the same
+ * filter as the rest: a pinned chat is there while its row is (an archived or deleted chat has none),
+ * and a pinned project under a filter or a search only while something in it answers. `pins: false`
+ * pins nothing, for a list that is not the everyday one (the archive).
+ */
+export function splitPinned(folders: Folder[], opts: { filtered?: boolean; pins?: boolean } = {}): { pinned: Folder[]; rest: Folder[] } {
+  if (opts.pins === false) return { pinned: [], rest: folders };
+  const pinned = folders.filter((f) => f.pinned_at)
+    .filter((f) => (f.chat || opts.filtered ? f.rows.length > 0 : true))
+    .sort((a, b) => b.pinned_at.localeCompare(a.pinned_at) || a.key.localeCompare(b.key));
+  return { pinned, rest: folders.filter((f) => !f.pinned_at) };
+}
+
+/**
+ * The desktop sidebar's sections: the pinned block, the projects, and the chats by day.
  *
  * Every project is listed, an empty one included, since a project made by hand is a project before
  * its first chat; under a filter or a search only those with something in the answer are, or the
  * section would answer with a list of names that hold nothing. A chat's forks and subagents travel
- * with its row. The chats are in recency order across their scratch projects.
+ * with its row. The chats are in recency order across their scratch projects. What is pinned is in
+ * `pinned` and in neither of the other two (`splitPinned`).
  */
-export function sidebarSections(folders: Folder[], opts: { filtered?: boolean; now?: Date } = {}): { projects: Folder[]; days: { day: SidebarDay; rows: Row[] }[]; chats: number } {
+export function sidebarSections(all: Folder[], opts: { filtered?: boolean; now?: Date; pins?: boolean } = {}): { pinned: Folder[]; projects: Folder[]; days: { day: SidebarDay; rows: Row[] }[]; chats: number } {
   const now = opts.now ?? new Date();
+  const { pinned, rest: folders } = splitPinned(all, opts);
   const projects = folders.filter((f) => !f.chat && (!opts.filtered || f.rows.length > 0));
   const loose = folders.filter((f) => f.chat).flatMap((f) => f.rows)
     .sort((a, b) => activity(b.s) - activity(a.s) || a.s.id.localeCompare(b.s.id));
@@ -110,7 +131,7 @@ export function sidebarSections(folders: Folder[], opts: { filtered?: boolean; n
     return day === "month" ? "older" : day;
   };
   const days = SIDEBAR_DAYS.map((day) => ({ day, rows: loose.filter((r) => bucket(r) === day) })).filter((d) => d.rows.length > 0);
-  return { projects, days, chats: loose.length };
+  return { pinned, projects, days, chats: loose.length };
 }
 
 /** What the status chips count and what the Active filter keeps. */
@@ -210,6 +231,7 @@ export function arrange(
       project: p,
       system: !!p.system,
       chat: !isProject(p),
+      pinned_at: p.pinned_at ?? "",
       rows: byProject.get(p.id) ?? [],
       sig: rowSig(byProject.get(p.id) ?? []),
       total: p.total,

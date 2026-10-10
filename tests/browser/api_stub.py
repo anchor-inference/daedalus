@@ -469,6 +469,11 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     write = SHARED_WRITES.get((method.upper(), path))
     if write is not None:
         return write
+    if method.upper() == "PUT" and path.startswith("/api/projects/") and path.endswith("/pin"):
+        # A pin answers with the time it holds, empty once unpinned; a harness that draws the block
+        # keeps the pins itself (screenshots.PINS).
+        pinned = bool(body.get("pinned")) if isinstance(body, dict) else False
+        return 200, "application/json", json.dumps({"project_id": path.split("/")[3], "pinned_at": datetime.now(UTC).isoformat() if pinned else ""})
     if method.upper() == "POST" and path.startswith("/api/notifications/") and path.endswith("/act"):
         # The shared centre is empty, so every entry a harness might answer is one the host no
         # longer has; a harness that invents entries answers this route itself.

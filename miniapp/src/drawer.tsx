@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Project, SessionList } from "./api";
 import { SelfDevMode, screenTag, visibleScreens } from "./capabilities";
 import { relTime } from "./format";
-import { agentName } from "./grouping";
+import { agentName, arrange, splitPinned } from "./grouping";
 import { plural, t } from "./i18n";
 import { Icon, type IconName } from "./icons";
 import { useMain } from "./main/data";
@@ -68,10 +68,14 @@ export function AppDrawer({ mode, counts, waiting, selfdev, projects, onPickProj
   const listing = useQuery<SessionList>("/api/sessions", { pollMs: live ? 60000 : 15000, staleMs: 5000 });
   const { data: main } = useMain();
   const agents = useMemo(() => agentsListingOf(listing.data), [listing.data]);
+  // The pinned block heads the menu as it heads the desktop's sidebar, and what is in it is not
+  // listed again under Projects or Recents.
+  const pinned = useMemo(() => (agents ? splitPinned(arrange(agents.sessions, agents.projects).folders).pinned : []), [agents]);
+  const pinnedIds = useMemo(() => new Set(pinned.map((f) => f.key)), [pinned]);
   const recents = useMemo(() => [...(agents?.sessions ?? [])]
-    .filter((s) => !s.metadata?.subagent_of && !s.archived)
+    .filter((s) => !s.metadata?.subagent_of && !s.archived && !pinnedIds.has(s.project_id))
     .sort((a, b) => Date.parse(b.last_message_at) - Date.parse(a.last_message_at))
-    .slice(0, RECENTS), [agents]);
+    .slice(0, RECENTS), [agents, pinnedIds]);
   const orchestrated = useMemo(() => orchestratedProjects(Array.isArray(listing.data?.projects) ? listing.data!.projects : []), [listing.data]);
   const agentsWaiting = (agents?.sessions ?? []).filter((s) => s.status === "waiting").length;
   const folderOf = (id: string) => agents?.projects.find((p) => p.id === id);
@@ -137,12 +141,29 @@ export function AppDrawer({ mode, counts, waiting, selfdev, projects, onPickProj
               <span className="ph-nrow-l">{t("nav.more")}</span>
               {moreCount > 0 ? <span className="ph-badge">{moreCount}</span> : <span className="ph-cnt">{moreScreens.length}</span>}
             </button>
+            {pinned.length > 0 && <div className="ph-dsec"><span className="ph-pinhead"><Icon name="pushpin" size={14} />{t("side.pinned")}</span></div>}
+            {pinned.map((f) => {
+              const s = f.chat ? f.rows[0]?.s : undefined;
+              return s ? (
+                <button key={f.key} type="button" className={`ph-drow ${route.session === s.id ? "on" : ""}`} data-pinned="" data-session={s.id} onClick={() => navigateFromDrawer(sessionPath(s.id))}>
+                  <span className={`ph-dot ${s.status}`} aria-hidden />
+                  <span className="ph-drow-t">{agentName(s)}</span>
+                  <span className="ph-drow-tm">{relTime(s.last_message_at)}</span>
+                </button>
+              ) : (
+                <button key={f.key} type="button" className="ph-drow" data-pinned="" data-project={f.key} onClick={() => { onPickProject(f.key); navigateFromDrawer(CHATS_PATH); }}>
+                  <Icon name={f.system ? "mic" : "folder"} size={18} />
+                  <span className="ph-drow-t">{f.name}</span>
+                  <span className="ph-drow-tm">{plural("agents.count", f.total)}</span>
+                </button>
+              );
+            })}
             {/* The project switcher (every project, adding one, the archived ones) is "See all"
                 here, even with no project yet: it is where the first one is added. */}
             <div className="ph-dsec">{t("shell.projects")}<button type="button" className="ph-dsec-act" data-nav="projects" onClick={() => { closeDrawer(); onProjects(); }}>{t(projects.length ? "ph.seeall" : "shell.projects.add")}</button></div>
             {projects.length > 0 && (
               <>
-                {projects.slice(0, PROJECTS).map((p) => {
+                {projects.filter((p) => !pinnedIds.has(p.id)).slice(0, PROJECTS).map((p) => {
                   const folder = folderOf(p.id);
                   return (
                     <button key={p.id} type="button" className="ph-drow" data-project={p.id} onClick={() => { onPickProject(p.id); navigateFromDrawer(CHATS_PATH); }}>

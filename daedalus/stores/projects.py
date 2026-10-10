@@ -923,6 +923,30 @@ class ProjectStore:
         assert updated is not None
         return updated
 
+    async def pin(self, project_id: str, pinned: bool) -> str:
+        """Pin the project to the top of the sidebar, or take the pin away; the time it is pinned
+        since, empty when it is not.
+
+        A chat is pinned by its scratch project, so a chat that becomes a project keeps its pin with
+        nothing moving it, and the row goes with the project (``ON DELETE CASCADE``). Pinning what is
+        already pinned keeps the first time, which is the item's place in the block: a second tap
+        from another device does not lift it to the head. The pin has a table of its own because a
+        write to ``projects`` raises the project's revision, and a pin toggled from a list must not
+        make an open settings form on another screen stale.
+        """
+        if pinned:
+            await self._db.execute(
+                "INSERT INTO project_pins(project_id, pinned_at) SELECT id, ? FROM projects WHERE id = ? ON CONFLICT(project_id) DO NOTHING",
+                (datetime.now(UTC).isoformat(), project_id),
+            )
+        else:
+            await self._db.execute("DELETE FROM project_pins WHERE project_id = ?", (project_id,))
+        return (await self.pins()).get(project_id, "")
+
+    async def pins(self) -> dict[str, str]:
+        """Every pinned project with the time it was pinned."""
+        return {str(row["project_id"]): str(row["pinned_at"]) for row in await self._db.fetchall("SELECT project_id, pinned_at FROM project_pins")}
+
     async def settle(self, project_id: str) -> bool:
         """Make a chat's scratch project an ordinary project once it holds two top-level sessions;
         whether this call is the one that did.
