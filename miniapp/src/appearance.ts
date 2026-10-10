@@ -87,7 +87,10 @@ export type Scale = "sm" | "md" | "lg" | "xl";
 export type Leading = "tight" | "normal" | "open";
 export type Column = "narrow" | "normal" | "wide";
 export type Radius = "sharp" | "normal" | "round";
-export type ProseStep = "auto" | "17" | "19";
+/** Answer text in pixels, one per step; `null` is "usual", which follows the interface step. */
+export const PROSE_MIN = 12;
+export const PROSE_MAX = 22;
+export type ProseSize = number | null;
 
 export type ColorKey = "bg" | "surface" | "fg" | "fg2" | "accent" | "send";
 
@@ -105,7 +108,7 @@ export type Prefs = {
   fontProseUrl: string;
   fontCodeUrl: string;
   scale: Scale;
-  prose: ProseStep;
+  prose: ProseSize;
   leading: Leading;
   column: Column;
   radius: Radius;
@@ -129,7 +132,7 @@ export const DEFAULT_PREFS: Prefs = {
   fontProseUrl: "",
   fontCodeUrl: "",
   scale: "md",
-  prose: "auto",
+  prose: null,
   leading: "normal",
   column: "normal",
   radius: "normal",
@@ -203,6 +206,19 @@ export function contrast(a: string, b: string): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
+/** What "usual" is drawn at: 15 px on a desktop and 16 on a phone, moved with the interface step. */
+export function usualProse(scale: Scale, phone: boolean): number {
+  return Math.round((phone ? 16 : 15) * SCALE[scale] * 10) / 10;
+}
+
+/** The earlier choices were "auto", "17" and "19"; they are now plain pixel sizes, and "auto" is null.
+ *  Anything else that is not a whole size in range falls back to usual rather than to a clamp. */
+function proseFromStored(value: unknown): ProseSize {
+  const size = typeof value === "string" ? Number(value) : value;
+  if (typeof size !== "number" || !Number.isInteger(size)) return DEFAULT_PREFS.prose;
+  return size >= PROSE_MIN && size <= PROSE_MAX ? size : DEFAULT_PREFS.prose;
+}
+
 function readJson(): Partial<Prefs> | null {
   try {
     const raw = localStorage.getItem(KEY);
@@ -229,7 +245,7 @@ export function readPrefs(): Prefs {
     dark: isThemeId(stored.dark ?? "") ? stored.dark! : DEFAULT_PREFS.dark,
     light: isThemeId(stored.light ?? "") ? stored.light! : DEFAULT_PREFS.light,
     scale: oneOf(stored.scale, ["sm", "md", "lg", "xl"] as const, DEFAULT_PREFS.scale),
-    prose: oneOf(stored.prose, ["auto", "17", "19"] as const, DEFAULT_PREFS.prose),
+    prose: proseFromStored(stored.prose),
     leading: oneOf(stored.leading, ["tight", "normal", "open"] as const, DEFAULT_PREFS.leading),
     column: oneOf(stored.column, ["narrow", "normal", "wide"] as const, DEFAULT_PREFS.column),
     radius: oneOf(stored.radius, ["sharp", "normal", "round"] as const, DEFAULT_PREFS.radius),
@@ -316,8 +332,7 @@ export function appearanceTokens(prefs: Prefs, env: AppearanceEnv): Record<strin
   if (prefs.scale !== "md") {
     for (const [name, size] of Object.entries(FS)) out[name] = `${Math.round(size * SCALE[prefs.scale] * 10) / 10}px`;
   }
-  if (prefs.prose === "17") out["--fs-prose"] = "17px";
-  if (prefs.prose === "19") out["--fs-prose"] = "19px";
+  if (prefs.prose !== null) out["--fs-prose"] = `${prefs.prose}px`;
   if (prefs.leading === "tight") out["--lh-prose"] = "1.4";
   if (prefs.leading === "open") out["--lh-prose"] = "1.75";
   if (prefs.column === "narrow") out["--chat-w"] = "760px";
