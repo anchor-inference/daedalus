@@ -1471,6 +1471,39 @@ class HarnessConfig(BaseModel):
         return value
 
 
+class DiskConfig(BaseModel):
+    """The disk guard: how big a workspace may grow before its agent and the operator hear of it,
+    how little free disk is too little, and which throwaway directories are swept once they go stale.
+
+    A single session once filled the host disk with hundreds of full repository copies made for
+    experiments and never deleted; nothing in the installation looked at the sizes. The guard
+    measures every top-level directory under the workspaces root (a session's home or a managed
+    project folder) and says so once per threshold crossed, not once per measurement."""
+
+    check_minutes: int = Field(default=15, ge=1)
+    """How often the guard looks. A workspace whose owner has not run since its last measurement and
+    which was well under the limit is measured again only every ``idle_recheck_hours``."""
+    idle_recheck_hours: int = Field(default=6, ge=1)
+    workspace_soft_limit_gb: float = Field(default=20.0, ge=0)
+    """The size past which a workspace's agent is asked to clean up and the operator is told; told
+    again at twice the size. 0 turns the per-workspace warning off."""
+    min_free_gb: float = Field(default=20.0, ge=0)
+    """Free space on the workspaces volume below which the operator is told, whoever filled it."""
+    min_free_percent: float = Field(default=5.0, ge=0, le=100)
+    """The same as a share of the volume; whichever of the two is crossed first counts."""
+    cleanup_after_days: int = Field(default=7, ge=0)
+    """A throwaway directory nothing inside has changed in for this long is deleted. 0 = never."""
+    throwaway_patterns: list[str] = Field(default_factory=lambda: [
+        "scratch*", "_scratch*", "*-scratch", "*_scratch", "tmp", ".tmp*",
+        ".uv-cache", "_uvcache", ".uvcache*", "_uv-cache", ".npm-cache", ".pip-cache",
+    ])
+    """Directory names (shell patterns) taken for throwaway. Only directories inside a workspace
+    under the managed root match, never one holding a file git tracks."""
+    walk_max_entries: int = Field(default=2_000_000, ge=1000)
+    """The most directory entries one measurement of one workspace may visit; past it the size is
+    reported as a lower bound. It is what keeps a pass over a runaway workspace bounded."""
+
+
 class LoopsConfig(BaseModel):
     """Loop agents: a session woken up for one standing task, on an interval or when it asks."""
 
@@ -1774,6 +1807,7 @@ class RuntimeConfig(BaseModel):
     hooks: HooksConfig = Field(default_factory=HooksConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
     ops: OpsConfig = Field(default_factory=OpsConfig)
+    disk: DiskConfig = Field(default_factory=DiskConfig)
     asr: AsrConfig = Field(default_factory=AsrConfig)
     stt: SttConfig = Field(default_factory=SttConfig)
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
@@ -2357,6 +2391,7 @@ __all__ = [
     "HeartbeatConfig",
     "ModeConfig",
     "OpsConfig",
+    "DiskConfig",
     "WebhookConfig",
     "VisionConfig",
     "VoiceConfig",

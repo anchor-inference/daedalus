@@ -2528,6 +2528,20 @@ h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500;
 .worktree-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .worktree-head .btn { flex: none; }
 .worktree-row .toggle-row { margin: 4px 0 0; }
+/* A workspace's disk use: one head line, the bar, then the largest folders as dense rows. */
+.disk-usage { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.disk-workspace { display: flex; flex-direction: column; gap: 4px; min-width: 0; align-items: flex-start; }
+.disk-workspace > .bar { align-self: stretch; }
+.disk-head, .disk-row { display: flex; align-items: center; gap: 6px; min-width: 0; align-self: stretch; font-size: var(--fs-13); }
+.disk-entries, .disk-pick { display: flex; flex-direction: column; align-self: stretch; min-width: 0; }
+.disk-name { flex: 1 1 auto; min-width: 0; text-align: left; font-size: var(--fs-12); }
+.disk-name:disabled { color: inherit; cursor: default; text-decoration: none; }
+.disk-size { flex: none; margin-left: auto; font-variant-numeric: tabular-nums; }
+.disk-meta { padding-left: 2px; font-size: var(--fs-12); }
+.disk-child { padding-left: 14px; color: var(--fg-2); font-size: var(--fs-12); }
+.disk-pick-row { margin: 0; font-size: var(--fs-13); }
+.disk-pick-row .badge { flex: none; }
+.disk-refused { display: flex; flex-direction: column; gap: 2px; }
 .project-archived-note { margin: 0 0 8px; }
 /* Archived rows are not picked, only restored or opened in settings, so they read quieter. */
 .project-row.archived .project-pick { cursor: default; color: var(--fg-2); }

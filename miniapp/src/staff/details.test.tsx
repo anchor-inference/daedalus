@@ -165,7 +165,7 @@ describe("the panels", () => {
     expect(host.querySelector("[data-usage-today]")!.textContent).toContain("$0.75");
     expect(host.querySelector("[data-last-compaction]")!.textContent).toContain("(auto)");
     await render("main");
-    expect(sections()).toEqual(["session", "context", "usage", "workspace", "mcp", "toolgroups", "brief", "spend", "advanced"]);
+    expect(sections()).toEqual(["session", "context", "usage", "workspace", "disk", "mcp", "toolgroups", "brief", "spend", "advanced"]);
     await render("session");
     expect(sections()).toContain("danger");
     expect(sections()).toContain("loop");

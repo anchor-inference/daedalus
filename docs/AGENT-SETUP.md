@@ -167,6 +167,16 @@ the stores; `python -m daedalus db checkpoints-prune` does it now and prints wha
 `doctor` shows the stores against their bounds. A turn whose snapshot has been dropped is no longer
 offered as an undo in the app, which says once that the older ones were removed.
 
+The workspaces themselves are watched by the disk guard, set in `[disk]`. Every session home and
+managed project folder under the workspaces root is measured (at most every `check_minutes`, an idle
+small one every `idle_recheck_hours`); one past `workspace_soft_limit_gb` (20), and again at twice
+that, has its agent asked to clean up and the operator told, once per crossing. Free space below
+`min_free_gb` or `min_free_percent` tells the operator whoever filled it. Directories named like
+throwaway (`throwaway_patterns`: `scratch*`, `_scratch*`, `tmp`, private `uv` and `npm` caches)
+that nothing inside changed in for `cleanup_after_days` (7) are deleted and the agent is told at its
+next turn; one a checkout tracks, or anything outside the managed root, is never touched. The
+session's details and the project page show the largest folders and clean up the chosen ones.
+
 In this Compose install the container sees only what is mounted into it, so a folder outside the stack
 needs a bind mount before an agent can work in it. The app says which projects are not reachable; add
 the mount to the agent service and to the terminals service, and restart:

@@ -75,6 +75,7 @@ from daedalus.extensions import (
     api_control,
     api_coordinator_authority,
     api_diagrams,
+    api_disk,
     api_files,
     api_folder_browser,
     api_goal_budget,
@@ -698,6 +699,8 @@ class SettingsBody(BaseModel):
     modes: dict[str, Any] | None = None
     webhooks: dict[str, Any] | None = None
     ops: dict[str, Any] | None = None
+    disk: dict[str, Any] | None = None
+    """The disk guard's limits: the per-workspace soft limit, the free-disk floor, the throwaway sweep."""
     compaction: dict[str, Any] | None = None
     orchestrator: dict[str, Any] | None = None
     """The project orchestrator's defaults: its model preset, its wake-up batching and its limits."""
@@ -1625,6 +1628,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_staff_reports.register(api, app, auth)
     api_workflows.register(api, app, auth)
     api_workspace_archive.register(api, app, auth)
+    # How much disk each workspace takes, and the operator's clean-up of it.
+    api_disk.register(api, app, auth)
     api_plugins.register(api, app, auth)
     api_skill_quality.register(api, app, auth)
     api_integrations.register(api, app, auth)
