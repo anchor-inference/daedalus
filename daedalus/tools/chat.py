@@ -6,6 +6,7 @@ from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
+from daedalus.host.services import NO_CHAT_BOUND
 from daedalus.tools import search_hint, tool_group
 from daedalus.tools._common import error, local_copy, ok, refuse_protected, services_for
 
@@ -29,19 +30,28 @@ async def send_file(context: ToolContext, path: str, caption: str | None = None)
     target = services.resolve(path)
     if refusal := refuse_protected(context, services, target, "sent"):
         return refusal
+    try:
+        if not await services.fs.is_file(target):
+            return error(context, f"no such file: {target}")
+        size = await services.fs.size(target)
+    except OSError as exc:
+        return error(context, str(exc))
+    # The app draws every SendFile as a card the operator downloads from the session's files, so the
+    # file is handed over whether or not a Telegram chat is bound; the chat only gets a copy on top.
+    # That copy is fetched lazily: a session on the host reads it over the daemon, which is wasted when
+    # nothing is bound, and a failed read there once turned a file the app showed into an error.
     if services.send_file is None:
-        return error(context, "file delivery is not available in this session")
+        return ok(context, f"shown {target.name} ({size} bytes) to the operator as a file card in the app")
     try:
         # A session working on the host names a file there; the chat is sent a copy fetched here.
-        local = await local_copy(services, target)
+        result = await services.send_file(lambda: local_copy(services, target), caption)
     except FileNotFoundError:
         return error(context, f"no such file: {target}")
     except (OSError, ValueError) as exc:
         return error(context, str(exc))
-    if not local.is_file():
-        return error(context, f"no such file: {target}")
-    result = await services.send_file(local, caption)
-    return ok(context, f"sent {target.name} ({local.stat().st_size} bytes): {result}")
+    if result == NO_CHAT_BOUND:
+        return ok(context, f"shown {target.name} ({size} bytes) to the operator as a file card in the app; no Telegram chat is bound to this session, so nothing went there")
+    return ok(context, f"sent {target.name} ({size} bytes): {result}")
 
 
 @search_hint(

@@ -42,6 +42,7 @@ from protocore.runtime.events.types import EventType
 from daedalus.config import NO_MODEL_MESSAGE, NoModelConfigured, RuntimeConfig, Settings
 from daedalus.host.events import AppEvent, EventFilter
 from daedalus.host.prompts import DEFAULT_RULES, split_headline
+from daedalus.host.services import NO_CHAT_BOUND
 from daedalus.host.session_runner import Attachment, SessionManager, SessionState
 from daedalus.security.operator_secrets import SecretError
 from daedalus.speech.service import LocalSpeech, recogniser_available, transcribe_recording
@@ -2450,10 +2451,11 @@ class TelegramFront:
 
     # -- services for tools ---------------------------------------------------------
 
-    async def _service_send_file(self, session_id: str, path: Path, caption: str | None) -> str:
+    async def _service_send_file(self, session_id: str, fetch: Callable[[], Awaitable[Path]], caption: str | None) -> str:
         outbox = await self.outbox_for_session(session_id)
         if outbox is None:
-            return "no chat bound"
+            return NO_CHAT_BOUND
+        path = await fetch()
         mime = mimetypes.guess_type(path.name)[0] or ""
         if mime.startswith("image/") and path.stat().st_size < 10_000_000:
             await outbox.send_photo(path, caption)
