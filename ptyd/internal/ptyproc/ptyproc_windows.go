@@ -31,6 +31,10 @@ const statusControlCExit = 0xC000013A
 // the daemon caused is reported by the signal it stood for.
 const killedExitCode = 1
 
+// DefaultSignalsForChildren has nothing to do on Windows: a program there inherits no ignored
+// signals, and a write to a closed pipe is an error, never a signal.
+func DefaultSignalsForChildren() {}
+
 // Console is the daemon's side of a pseudoconsole: the pipe the program's input is written to, the
 // pipe its rendered output is read from, and the console itself. It reads and writes like the
 // master of a Unix PTY.
