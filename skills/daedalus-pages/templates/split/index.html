@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{title}}</title>
+<link rel="stylesheet" href="/pages/_kit/kit.css">
+<script src="/pages/_kit/daedalus.js"></script>
+<style>
+  /* The tool on the left, the page's agent on the right; on a phone the agent goes under the tool. */
+  .dk-split { --dk-side: 340px; grid-template-columns: minmax(0, 1fr) minmax(260px, var(--dk-side)); min-height: calc(100vh - var(--head-h)); }
+  .dk-split > .dk-pane + .dk-pane { display: flex; flex-direction: column; }
+  .tool { padding: var(--space-4) var(--page-pad); }
+  .agent-log { flex: 1; overflow: auto; padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
+  .bubble { max-width: 90%; padding: 8px 10px; border-radius: var(--radius-md); background: var(--surface-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .bubble.mine { align-self: flex-end; background: color-mix(in srgb, var(--accent) 18%, var(--surface-1)); }
+  .composer { display: flex; gap: var(--space-2); padding: var(--space-3); border-top: 1px solid var(--line); padding-bottom: max(var(--space-3), env(safe-area-inset-bottom)); }
+  .composer .dk-textarea { min-height: var(--ctl-h); height: var(--ctl-h); resize: none; }
+  @media (max-width: 1023px) { .dk-split { grid-template-columns: minmax(0, 1fr); } .agent-log { min-height: 160px; } }
+</style>
+</head>
+<body>
+<header class="dk-toolbar">
+  <b class="dk-h2">{{title}}</b>
+  <span class="dk-spacer"></span>
+  <button class="dk-btn small ghost" id="open-session" data-i18n="session.open" hidden>Open the session</button>
+</header>
+<div class="dk-split">
+  <section class="dk-pane tool dk-stack">
+    <!-- The tool itself goes here: a form, a canvas, a table, an editor. -->
+    <div class="dk-card dk-stack">
+      <b class="dk-h2" data-i18n="tool.title">The tool</b>
+      <span class="dk-muted" data-i18n="tool.body">Build the tool in this pane. The panel beside it talks to the page's agent.</span>
+    </div>
+  </section>
+  <aside class="dk-pane" aria-labelledby="agent-title">
+    <div class="dk-toolbar"><b class="dk-h2" id="agent-title" data-i18n="agent.title">Agent</b></div>
+    <div class="agent-log" id="log">
+      <div class="dk-empty" id="empty"><span data-i18n="agent.empty">Ask the page's agent to do something with this tool.</span></div>
+    </div>
+    <form class="composer" id="composer">
+      <textarea class="dk-textarea" id="text" rows="1" data-i18n-placeholder="agent.placeholder" placeholder="Message"></textarea>
+      <button class="dk-btn primary" type="submit" data-i18n="agent.send">Send</button>
+    </form>
+  </aside>
+</div>
+<script>
+  // The page's agent is the session the page belongs to (its session_id). A message typed here goes to
+  // that session through the API, and the answer arrives there; "Open the session" goes to it. The
+  // bridge's agent.message event is reserved for a page agent that answers inside the page itself.
+  const STRINGS = {
+    en: { "session.open": "Open the session", "tool.title": "The tool", "tool.body": "Build the tool in this pane. The panel beside it talks to the page's agent.",
+          "agent.title": "Agent", "agent.empty": "Ask the page's agent to do something with this tool.", "agent.placeholder": "Message", "agent.send": "Send",
+          "agent.sent": "Sent. The answer arrives in the session.", "agent.none": "This page has no agent session yet.", "agent.failed": "Not sent: {error}" },
+    ru: { "session.open": "Открыть сессию", "tool.title": "Инструмент", "tool.body": "Соберите инструмент в этой части. Панель рядом говорит с агентом страницы.",
+          "agent.title": "Агент", "agent.empty": "Попросите агента страницы что-нибудь сделать с этим инструментом.", "agent.placeholder": "Сообщение", "agent.send": "Отправить",
+          "agent.sent": "Отправлено. Ответ придёт в сессию.", "agent.none": "У этой страницы пока нет сессии агента.", "agent.failed": "Не отправлено: {error}" },
+  };
+  let lang = "en";
+  let sessionId = null;
+  const t = (key, vars = {}) => ((STRINGS[lang] && STRINGS[lang][key]) || STRINGS.en[key] || key).replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? "");
+  function translate() {
+    document.documentElement.lang = lang;
+    document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.dataset.i18n); });
+    document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => { el.placeholder = t(el.dataset.i18nPlaceholder); });
+  }
+  function bubble(text, mine) {
+    document.getElementById("empty")?.remove();
+    const node = document.createElement("div");
+    node.className = "bubble" + (mine ? " mine" : "");
+    node.textContent = text;
+    const log = document.getElementById("log");
+    log.append(node);
+    log.scrollTop = log.scrollHeight;
+  }
+  document.getElementById("composer").onsubmit = async (event) => {
+    event.preventDefault();
+    const box = document.getElementById("text");
+    const text = box.value.trim();
+    if (!text) return;
+    if (!sessionId) { bubble(t("agent.none"), false); return; }
+    bubble(text, true);
+    box.value = "";
+    try {
+      await Daedalus.api(`sessions/${encodeURIComponent(sessionId)}/messages`, { method: "POST", body: { text, follow_up: true } });
+      bubble(t("agent.sent"), false);
+    } catch (error) {
+      bubble(t("agent.failed", { error: error.message }), false);
+    }
+  };
+  document.getElementById("text").addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); document.getElementById("composer").requestSubmit(); }
+  });
+  document.getElementById("open-session").onclick = () => sessionId && Daedalus.ui.openSession(sessionId);
+  Daedalus.ready().then(async (context) => {
+    lang = context.lang in STRINGS ? context.lang : "en";
+    translate();
+    try {
+      const page = await Daedalus.api(`pages/${encodeURIComponent(context.slug || "{{slug}}")}`);
+      sessionId = page.session_id || null;
+      document.getElementById("open-session").hidden = !sessionId;
+    } catch (error) {
+      sessionId = null;
+    }
+  });
+  Daedalus.theme.onChange((theme) => { if (theme.lang && theme.lang !== lang) { lang = theme.lang in STRINGS ? theme.lang : "en"; translate(); } });
+</script>
+</body>
+</html>

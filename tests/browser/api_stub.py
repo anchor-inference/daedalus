@@ -31,6 +31,7 @@ from calendar_stub import CalendarStub
 from folder_stub import DEFAULT as FOLDERS
 from import_stub import DEFAULT as IMPORTS
 from import_stub import ImportStub
+from pages_stub import PagesStub
 
 # Outside services_port_range (8100-8119), the range this product hands to an agent's own preview
 # servers: a harness that serves its build into that range competes with the installation running
@@ -346,6 +347,10 @@ GATES: dict[str, object] = {
 }
 
 
+PAGES = PagesStub()
+"""The custom page a shown-page card reads (``GET /api/pages/orders``)."""
+
+
 CALENDAR = CalendarStub()
 """The calendar and planner every harness shares: calendars, a week of events, tasks and connections."""
 
@@ -596,6 +601,13 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         return status, "application/json", json.dumps(payload)
     if path in GATES:
         return 200, "application/json", json.dumps(GATES[path])
+    if method.upper() == "GET" and path.startswith("/api/pages/"):
+        # One page, as a card for an agent's PageShow asks for it: the shared host knows ``orders`` and
+        # answers 404 for any other, which the card draws as a removed page. The navigation's list
+        # above stays empty; check_pages.py keeps a host of its own for everything else.
+        answered = PAGES.answer("GET", path)
+        if answered is not None:
+            return answered[0], "application/json", json.dumps(answered[1])
     if method.upper() == "GET" and path.startswith("/api/folders"):
         # The new-project dialog's folder browser, over the invented trees; a check that drives it
         # installs a FolderStub of its own to change the host's state and read the writes back.

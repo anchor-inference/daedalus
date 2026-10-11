@@ -16,7 +16,8 @@ import { Explorer } from "../explorerpanel";
 import { DiffView } from "../previewparts";
 import { looksLikeDiff } from "../diff";
 import { KeptFiles, TurnFiles } from "../artifact";
-import { placeOf, turnFiles } from "../turnfiles";
+import { placeOf, turnFiles, turnPages } from "../turnfiles";
+import { PageCards } from "../pagecard";
 import { useReveal } from "../reveal";
 import { withoutAttachedList } from "../keptfiles";
 import { FileGallery, InlineMedia, mediaCopyText, splitMediaAnswer } from "../media";
@@ -2076,6 +2077,9 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
           opening the turn's work, and it can be answered while the agent is still writing. */}
       {settingsChangeIds(turn.activity).map((id) => <SettingsChangeCard key={id} changeId={id} />)}
       {files && <TurnFiles sessionId={sessionId} sent={files.sent} changed={files.changed} onOpen={preview} />}
+      {/* A page the agent showed is drawn as soon as the call returns, not when the turn ends: the
+          point of showing it is that the operator can open it while the agent goes on. */}
+      <PageCards pages={turnPages(turn.activity)} />
       {turn.answer && !live && (
         <MessageActions
           text={mediaCopyText(turn.answer, turn.media ?? [])}

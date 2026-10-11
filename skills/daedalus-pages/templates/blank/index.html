@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{title}}</title>
+<!-- Optional: the app's tokens and components, and the bridge that hands the page the app's theme. -->
+<link rel="stylesheet" href="/pages/_kit/kit.css">
+<script src="/pages/_kit/daedalus.js"></script>
+<style>
+  /* The page's own styles. Colours, sizes and fonts come from the app's tokens, so every theme fits. */
+  .dk-page { padding-bottom: max(var(--space-6), env(safe-area-inset-bottom)); }
+</style>
+</head>
+<body>
+<header class="dk-toolbar">
+  <b class="dk-h2">{{title}}</b>
+</header>
+<main class="dk-page dk-stack">
+  <div class="dk-empty">
+    <b data-i18n="empty.title">Nothing here yet</b>
+    <span data-i18n="empty.body">This page is ready to be built.</span>
+  </div>
+</main>
+<script>
+  // The page's own words in each language it speaks; the app says which one the operator reads.
+  const STRINGS = {
+    en: { "empty.title": "Nothing here yet", "empty.body": "This page is ready to be built." },
+    ru: { "empty.title": "Пока пусто", "empty.body": "Страница готова, её можно наполнять." },
+  };
+  let lang = "en";
+  const t = (key) => (STRINGS[lang] && STRINGS[lang][key]) || STRINGS.en[key] || key;
+  function translate() {
+    document.documentElement.lang = lang;
+    document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.dataset.i18n); });
+  }
+  function useLanguage(next) {
+    const chosen = next in STRINGS ? next : "en";
+    if (chosen !== lang) { lang = chosen; translate(); }
+  }
+  Daedalus.ready().then((context) => useLanguage(context.lang));
+  Daedalus.theme.onChange((theme) => useLanguage(theme.lang));
+</script>
+</body>
+</html>

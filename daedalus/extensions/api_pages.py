@@ -151,6 +151,26 @@ def link_page(title: str, url: str) -> str:
     )
 
 
+def static_file(served: Served, path: str, headers: dict[str, str]) -> Response:
+    """A file of the served side. A folder's address is its ``index.html`` (the page's entry at the
+    root); an address with no extension that names no file is the entry, so an app with its own
+    router keeps working on a reload of any of its addresses."""
+    wanted = path
+    if not wanted or wanted.endswith("/"):
+        wanted = served.entry if not wanted else wanted + "index.html"
+    try:
+        target = PageStore._inside(served.root, posixpath.normpath(wanted) if wanted else served.entry)
+    except PageError:
+        return _plain_page(404, "Daedalus", "There is no such file in this page.")
+    if target.is_dir():
+        target = target / "index.html"
+    if not target.is_file() and "." not in Path(wanted).name:
+        target = served.root / served.entry
+    if not target.is_file():
+        return _plain_page(404, "Daedalus", "There is no such file in this page.")
+    return FileResponse(target, media_type=content_type(target.name), headers=headers)
+
+
 def register(
     api: FastAPI,
     app: Application,
@@ -342,25 +362,6 @@ def register(
             response.delete_cookie(DRAFT_COOKIE, path=f"/pages/{slug}/")
         return response
 
-    def static_file(served: Served, path: str, headers: dict[str, str]) -> Response:
-        """A file of the served side. A folder's address is its ``index.html`` (the page's entry at the
-        root); an address with no extension that names no file is the entry, so an app with its own
-        router keeps working on a reload of any of its addresses."""
-        wanted = path
-        if not wanted or wanted.endswith("/"):
-            wanted = served.entry if not wanted else wanted + "index.html"
-        try:
-            target = PageStore._inside(served.root, posixpath.normpath(wanted) if wanted else served.entry)
-        except PageError:
-            return _plain_page(404, "Daedalus", "There is no such file in this page.")
-        if target.is_dir():
-            target = target / "index.html"
-        if not target.is_file() and "." not in Path(wanted).name:
-            target = served.root / served.entry
-        if not target.is_file():
-            return _plain_page(404, "Daedalus", "There is no such file in this page.")
-        return FileResponse(target, media_type=content_type(target.name), headers=headers)
-
     @api.websocket("/pages/{slug}/{path:path}")
     async def pages_socket(websocket: WebSocket, slug: str, path: str) -> None:
         """A service page's WebSocket, relayed to the service. Signed in by the session cookie, which a
@@ -392,4 +393,4 @@ def register(
         await forward_websocket(websocket, upstream, f"/pages/{slug}", strip_cookies=(session_cookie, DRAFT_COOKIE))
 
 
-__all__ = ["content_type", "link_page", "manifest_view", "register"]
+__all__ = ["FRAME_POLICY", "content_type", "link_page", "manifest_view", "register", "static_file"]
