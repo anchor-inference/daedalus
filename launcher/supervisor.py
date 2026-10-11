@@ -543,13 +543,24 @@ def install_from_candidate(repo: Path) -> tuple[bool, str]:
         target = repo / "miniapp" / "dist"
         shutil.rmtree(target, ignore_errors=True)
         shutil.copytree(built, target)
+        if digest := baked_app_digest():
+            (target / ".daedalus-baked-index").write_text(digest)
     restore_owner(repo)
     return True, out
 
 
-def build_app_if_missing(repo: Path) -> None:
-    """A fresh checkout has no built app: the bundle is not in git, and a rebuild builds it on the candidate.
+def baked_app_digest() -> str:
+    try:
+        return hashlib.sha256((BAKED_APP / "index.html").read_bytes()).hexdigest()
+    except OSError:
+        return ""
 
+
+def build_app_if_missing(repo: Path) -> None:
+    """Install the current bundled app when the checkout has no build for this release.
+
+    A desktop upgrade retains the checkout's untracked dist. Its old index still answers /app even
+    after the launcher and source code change, so a native start compares the bundle's stamp.
     The first start of an installation — a clone the desktop launcher or a setup script just made —
     would otherwise serve 404 at /app until the first merged pull request. A built copy handed over
     with the installation (the image's, or the one a desktop release carries beside its launcher) is
@@ -563,17 +574,40 @@ def build_app_if_missing(repo: Path) -> None:
     FileNotFoundError out of this function, so a desktop machine with Node installed restarted the
     supervisor forever and never served the app."""
     miniapp = repo / "miniapp"
-    if (miniapp / "dist" / "index.html").is_file() or not (miniapp / "package.json").exists():
+    if not (miniapp / "package.json").exists():
         return
-    if (BAKED_APP / "index.html").is_file():
-        log("no built app in the checkout; installing the one that came with the installation")
+    target = miniapp / "dist"
+    baked = baked_app_digest()
+    stamp = target / ".daedalus-baked-index"
+    native = os.environ.get("DAEDALUS_NATIVE", "").lower() in ("1", "true", "yes", "on")
+    if (target / "index.html").is_file() and (not native or not baked or (stamp.is_file() and stamp.read_text(errors="ignore") == baked)):
+        return
+    if baked:
+        log("the checkout's app build predates this installation; installing the bundled app")
+        stage = miniapp / (".dist-next-" + secrets.token_hex(6))
+        previous = miniapp / (".dist-previous-" + secrets.token_hex(6))
         try:
-            shutil.copytree(BAKED_APP, miniapp / "dist", dirs_exist_ok=True)
+            shutil.copytree(BAKED_APP, stage)
+            (stage / ".daedalus-baked-index").write_text(baked)
+            if target.exists():
+                target.rename(previous)
+            stage.rename(target)
+            if previous.exists():
+                shutil.rmtree(previous)
             log("app installed")
         except OSError as exc:
             log(f"could not install the built-in app: {exc}")
+            if previous.exists() and not target.exists():
+                try:
+                    previous.rename(target)
+                except OSError as restore_error:
+                    log(f"could not restore the previous app build: {restore_error}")
         finally:
+            if stage.exists():
+                shutil.rmtree(stage, ignore_errors=True)
             restore_owner(repo)
+        return
+    if (target / "index.html").is_file():
         return
     npm = shutil.which("npm")
     if not npm:

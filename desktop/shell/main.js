@@ -266,13 +266,16 @@ async function upgrade(data) {
     new Notification({ title: 'Daedalus', body: strings.upgrading }).show();
   }
   await stopEngine();
-  const options = { cwd: path.dirname(engineExe), stdio: 'ignore', windowsHide: true };
-  // Detached elsewhere, so the upgrade outlives this process's session. Not on Windows: a detached
-  // console program there has no console at all, and every console program it starts would open a
-  // visible window of its own. A child on Windows outlives its parent anyway.
-  if (!isWindows) options.detached = true;
+  // The installer must outlive Electron on Windows too. A regular child can be torn down when
+  // Electron exits; the old window is then gone, and the upgrade's localhost page dies with it.
+  const options = { cwd: path.dirname(engineExe), stdio: 'ignore', windowsHide: true, detached: true };
+  let child;
   try {
-    const child = spawn(engineExe, ['upgrade', '--yes', '--from-app', '--data', data], options);
+    child = spawn(engineExe, ['upgrade', '--yes', '--from-app', '--data', data], options);
+    await new Promise((resolve, reject) => {
+      child.once('spawn', resolve);
+      child.once('error', reject);
+    });
     child.unref();
   } catch (err) {
     upgrading = false;

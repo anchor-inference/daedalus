@@ -66,6 +66,31 @@ def no_command(page: Page, where: str, problems: list[str]) -> None:
         problems.append(f"{where}: the launcher's command is on the page")
 
 
+def startup_check(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-def]
+    """A fresh desktop launch asks for a release before the launcher's delayed check completes."""
+    context = browser.new_context(viewport={"width": 1440, "height": 900})
+    page = context.new_page()
+    launcher = LauncherStub()
+    original_view = launcher.view
+
+    def view() -> dict[str, object]:
+        state = original_view()
+        if "check" not in launcher.posts:
+            state["checked_at"] = ""
+        return state
+
+    launcher.view = view  # type: ignore[method-assign]
+    serve(page, launcher)
+    go(page, "/agents", "en")
+    for _ in range(50):
+        if "check" in launcher.posts:
+            break
+        page.wait_for_timeout(100)
+    if "check" not in launcher.posts:
+        problems.append("a fresh desktop launch did not check for a newer release")
+    context.close()
+
+
 def shoot(page: Page, name: str, clip: dict | None = None) -> None:
     if SHOTS:
         Path(SHOTS).mkdir(parents=True, exist_ok=True)
@@ -178,6 +203,7 @@ def run() -> int:
     problems: list[str] = []
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(executable_path=CHROMIUM)
+        startup_check(browser, problems)
         for lang in ("en", "ru"):
             desktop(browser, lang, problems)
         phone(browser, problems)

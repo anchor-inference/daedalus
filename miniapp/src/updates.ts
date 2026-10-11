@@ -149,7 +149,18 @@ let started = false;
 function start(): void {
   if (started) return;
   started = true;
-  void refreshLauncher();
+  void refreshLauncher().then(async () => {
+    // The launcher's own background check starts after the window opens. Reading its status only
+    // once here left the app's update button unaware of a release until focus or the next poll.
+    if (!state?.connected) return;
+    const checked = Date.parse(state.checked_at || "");
+    if (Number.isFinite(checked) && Date.now() - checked < RECHECK_MS) return;
+    try {
+      await checkLauncher();
+    } catch {
+      await refreshLauncher();
+    }
+  });
   window.setInterval(() => void refreshLauncher(), RECHECK_MS);
   window.addEventListener("focus", () => void refreshLauncher());
 }

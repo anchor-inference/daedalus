@@ -119,6 +119,50 @@ def test_the_app_that_came_with_the_installation_is_used_before_building_one(tmp
     assert (repo / "miniapp" / "dist" / "index.html").read_text() == "<!doctype html>"
 
 
+def test_a_new_desktop_release_replaces_an_old_untracked_app_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A launcher upgrade keeps the checkout's untracked dist, so startup must refresh it."""
+    sup = _load(tmp_path)
+    repo = tmp_path / "bot"
+    dist = repo / "miniapp" / "dist"
+    dist.mkdir(parents=True)
+    (dist / "index.html").write_text("old interface")
+    (dist / "old.js").write_text("old asset")
+    (repo / "miniapp" / "package.json").write_text("{}")
+    baked = tmp_path / "miniapp-dist"
+    baked.mkdir()
+    (baked / "index.html").write_text("new interface")
+    monkeypatch.setattr(sup, "BAKED_APP", baked)
+    monkeypatch.setenv("DAEDALUS_NATIVE", "1")
+    sup.restore_owner = lambda repo: None
+
+    sup.build_app_if_missing(repo)
+    assert (dist / "index.html").read_text() == "new interface"
+    assert not (dist / "old.js").exists()
+    (dist / "index.html").write_text("newer local build")
+    sup.build_app_if_missing(repo)
+    assert (dist / "index.html").read_text() == "newer local build"
+
+    (baked / "index.html").write_text("next release")
+    sup.build_app_if_missing(repo)
+    assert (dist / "index.html").read_text() == "next release"
+
+
+def test_container_restart_keeps_its_checkout_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sup = _load(tmp_path)
+    repo = tmp_path / "bot"
+    dist = repo / "miniapp" / "dist"
+    dist.mkdir(parents=True)
+    (repo / "miniapp" / "package.json").write_text("{}")
+    (dist / "index.html").write_text("checkout build")
+    baked = tmp_path / "miniapp-dist"
+    baked.mkdir()
+    (baked / "index.html").write_text("image build")
+    monkeypatch.setattr(sup, "BAKED_APP", baked)
+    monkeypatch.delenv("DAEDALUS_NATIVE", raising=False)
+    sup.build_app_if_missing(repo)
+    assert (dist / "index.html").read_text() == "checkout build"
+
+
 def test_an_npm_that_cannot_be_started_does_not_stop_the_supervisor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """What Windows did with a bare "npm": FileNotFoundError, every start, and no app ever served."""
     sup = _load(tmp_path)
