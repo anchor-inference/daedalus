@@ -65,8 +65,14 @@ export function parse(pathname = window.location.pathname, search = window.locat
   return { screen, session: screen === "agents" ? detail : null, with: screen === "agents" ? query.get("with") : null, detail: screen === "agents" ? null : detail, project: null, page: null, inner: null, query };
 }
 
+/** A custom page inside the app: /app/p/<slug>, the slug in the route's `detail`. */
+export function pagePath(slug: string): string {
+  return `${BASE}/p/${encodeURIComponent(slug)}`;
+}
+
 export function pathFor(screen: Screen, detail?: string | null, query?: Record<string, string | null | undefined>): string {
-  let p = `${BASE}/${screen}`;
+  // The page screen's address is /app/p/<slug> (see parse), never /app/page.
+  let p = `${BASE}/${screen === "page" ? "p" : screen}`;
   if (detail) p += `/${encodeURIComponent(detail)}`;
   return withQuery(p, query);
 }

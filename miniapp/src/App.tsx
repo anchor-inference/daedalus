@@ -59,7 +59,6 @@ const VoiceScreen = lazy(retried(() => import("./screens/Voice"), (m) => ({ defa
 const ProposalsScreen = lazy(retried(() => import("./screens/Proposals"), (m) => ({ default: m.ProposalsScreen })));
 const SchedulesScreen = lazy(retried(() => import("./screens/Schedules"), (m) => ({ default: m.SchedulesScreen })));
 const CalendarScreen = lazy(retried(() => import("./calendar/Calendar"), (m) => ({ default: m.CalendarScreen })));
-const PageHost = lazy(retried(() => import("./screens/PageHost"), (m) => ({ default: m.PageHost })));
 const DiagramsScreen = lazy(retried(() => import("./screens/Diagrams"), (m) => ({ default: m.DiagramsScreen })));
 const UsageScreen = lazy(retried(() => import("./screens/Usage"), (m) => ({ default: m.UsageScreen })));
 const SettingsScreen = lazy(retried(() => import("./screens/Settings"), (m) => ({ default: m.SettingsScreen })));
@@ -70,6 +69,7 @@ const BrowserFullScreen = lazy(retried(() => import("./screens/BrowserFull"), (m
 const TerminalFullScreen = lazy(retried(() => import("./screens/TerminalFull"), (m) => ({ default: m.TerminalFullScreen })));
 const HarnessesScreen = lazy(retried(() => import("./screens/Harnesses"), (m) => ({ default: m.HarnessesScreen })));
 const ServicesScreen = lazy(retried(() => import("./screens/Services"), (m) => ({ default: m.ServicesScreen })));
+const PageHostScreen = lazy(retried(() => import("./screens/PageHost"), (m) => ({ default: m.PageHostScreen })));
 const LoginScreen = lazy(retried(() => import("./screens/Login"), (m) => ({ default: m.LoginScreen })));
 const ProjectScreen = chunk(retried(() => import("./project/ProjectScreen"), (m) => ({ default: m.ProjectScreen })));
 const ProjectSidebar = chunk(retried(() => import("./project/ProjectSidebar"), (m) => ({ default: m.ProjectSidebar })));
@@ -618,12 +618,12 @@ export function App() {
         {route.screen === "terminals" && route.detail && <TerminalFullScreen id={route.detail} beside={route.query.get("with")} toast={showToast} />}
         {route.screen === "browser" && route.detail && <BrowserFullScreen id={route.detail} toast={showToast} />}
         {route.screen === "services" && <ServicesScreen onOpen={open} toast={showToast} />}
+        {route.screen === "page" && route.detail && <PageHostScreen slug={route.detail} toast={showToast} />}
         {route.screen === "harnesses" && <HarnessesScreen toast={showToast} />}
         {route.screen === "memory" && <MemoryScreen toast={showToast} onOpen={open} />}
         {route.screen === "usage" && <UsageScreen onOpen={open} />}
         {route.screen === "health" && <HealthScreen toast={showToast} />}
         {route.screen === "settings" && <SettingsScreen toast={showToast} section={route.detail} />}
-        {route.screen === "page" && <PageHost slug={route.detail} />}
         {mainChat && <MainScreen toast={showToast} />}
         {orchestrationList && !listInColumn && <OrchestrationList onProjects={() => setSwitching(true)} />}
         {focusProject !== null &&
@@ -639,8 +639,8 @@ export function App() {
   // Inside a project the main orchestrator stays one click away, pinned above the project's column.
   const pinned = <MainEntry current={false} />;
   // A terminal full screen takes the column the way a conversation does: no scrolling page around it
-  // and, on a phone, no tab bar under it.
-  const terminalOpen = (route.screen === "terminals" || route.screen === "browser") && !!route.detail;
+  // and, on a phone, no tab bar under it. So does a custom page, which scrolls inside its own frame.
+  const terminalOpen = (route.screen === "terminals" || route.screen === "browser" || route.screen === "page") && !!route.detail;
   // A project on a phone keeps a bar of its own: four tabs and a More (project/phone.tsx); a session
   // inside it is a detail with a back of its own and no bar under it. Everywhere else a phone has no
   // bottom bar at all: the destinations are in the drawer, which every top bar's hamburger opens.

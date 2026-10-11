@@ -1,0 +1,10 @@
+/* A custom page: the app's header, then the page filling everything below it. The frame is the page's
+   own scroll container, so the app's main column must not scroll around it (App.tsx marks it open). */
+.page-host { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.page-host > .screen { overflow-y: auto; }
+.page-host-stage { position: relative; flex: 1; min-height: 0; background: var(--bg); }
+.page-host-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; background: var(--bg); }
+.page-host-loading { flex: 1; display: grid; place-items: center; color: var(--fg-2); font-size: var(--fs-13); }
+.page-host-loading.over { position: absolute; inset: 0; background: var(--bg); pointer-events: none; }
+.page-host-note { position: absolute; z-index: 1; top: var(--space-2); left: 50%; transform: translateX(-50%); padding: 4px 10px; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--fg-2); font-size: var(--fs-12); box-shadow: var(--shadow-pop); pointer-events: none; }
+.page-host-badge { align-self: center; padding: 2px 8px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); font-size: var(--fs-11); font-weight: 600; }

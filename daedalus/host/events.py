@@ -549,6 +549,13 @@ class HarnessModels(TypedDict):
     """The models now offered; None when every one is."""
 
 
+class PagesChanged(TypedDict):
+    slug: str
+    change: Literal["created", "updated", "draft", "published", "rolled_back", "removed"]
+    version: int | None
+    """The live version after the change; None for a page with nothing published, or removed."""
+
+
 @dataclass(frozen=True, slots=True)
 class EventSpec:
     payload: type
@@ -619,6 +626,7 @@ REGISTRY: dict[str, EventSpec] = {
     "harness.updated": EventSpec(HarnessUpdated),
     "harness.check": EventSpec(HarnessCheck),
     "harness.models": EventSpec(HarnessModels),
+    "pages.changed": EventSpec(PagesChanged),
 }
 
 GAP = "bus.gap"

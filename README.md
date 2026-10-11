@@ -283,6 +283,7 @@ Every session command also works from the app's composer with the same `/` palet
 | [docs/ORCHESTRATION.md](docs/ORCHESTRATION.md) | a project from its goal to an accepted result: autonomy, review, the team, host folders |
 | [docs/API.md](docs/API.md) | the HTTP API: files, steers, the event stream, notifications, projects, orchestration, push |
 | [docs/VOICE.md](docs/VOICE.md) | voice mode (beta): hearing you, speaking back, the local voices |
+| [docs/PAGES.md](docs/PAGES.md) | custom pages: your own screens inside the app, the kit, the bridge, the API |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | the repository's layout, and benchmark runs |
 | [docs/architecture/](docs/architecture/) | the browser, the terminals, conversation search |
 

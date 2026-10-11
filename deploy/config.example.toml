@@ -292,6 +292,14 @@ stale_hours = 6            # a 'doing' task whose session went quiet this long i
 # hidden = ["voice"]                       # never shown, on any device
 # icons = { terminals = "bolt" }           # a built-in icon name in place of the item's own
 
+# Custom pages live in the state volume and are served at /pages/<slug>/ behind the normal sign-in.
+# The caps only stop a runaway writer from filling the disk; 0 lifts each of them.
+# [pages]
+# max_page_bytes = 2147483648           # one page's draft, all files together; 0 = no limit
+# max_files = 0                         # 0 = no limit
+# keep_versions = 20                    # published versions kept for rollback
+# storage_value_max_bytes = 0           # one value of a page's storage; 0 = no limit
+
 [scheduler]
 topic_mode = "per_task"
 catch_up_missed = true

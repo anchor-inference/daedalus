@@ -663,6 +663,22 @@ export type LoopView = {
 
 export type ShareMode = "local" | "public" | "key";
 export type ShareView = { mode: ShareMode; slug: string | null; key: string | null; url: string | null; public_base: string };
+/** One custom page as `GET /api/pages` lists it: what the navigation draws. `title` is the plain (or
+ *  English) title; `titles` has one per language when the page was given them. */
+export type PageListing = { slug: string; title: string; titles: Record<string, string>; icon: string | null; icon_path: string | null; path: string; version: number | null; updated_at: string | null };
+export type PageVersion = { n: number; at: string; note: string; kind: "static" | "service" | "link"; entry: string; target: number | string | null; files: number; bytes: number };
+/** One page as `GET /api/pages/<slug>` answers it: the listing, what is live, and every kept version. */
+export type PageDetail = Omit<PageListing, "title"> & {
+  title: string | Record<string, string>;
+  kind: "static" | "service" | "link";
+  entry: string;
+  target: number | string | null;
+  session_id: string | null;
+  url: string;
+  draft_url: string;
+  versions: PageVersion[];
+};
+
 export type ServiceView = { name: string; command: string; cwd: string; port: number | null; url: string | null; pid: number | null; status: "running" | "stopped" | "dead"; restart: boolean; note: string | null; started_at: string; stopped_at: string | null; share?: ShareView };
 
 /** One provider's usage for the card beside the chat: a subscription's windows, or the day's metered spend. */
