@@ -2,6 +2,12 @@
 
 Notable changes, newest first. The repository's `main` is the released version.
 
+## 2026-10-12 — desktop-v0.17.1
+
+- **Desktop upgrades complete after the window closes.** On Windows, the application starts the upgrade as an independent process and waits for it to start before exiting. A Windows release check now downloads a signed update, installs it from the application, watches the progress page and verifies the new version.
+- **The installed interface follows the desktop release.** Native installations replace an older built Mini App left in the checkout with the bundle shipped in the new application. A separately built interface from a later code change remains in place on ordinary restarts.
+- **New releases appear when the app opens.** The Mini App checks for a newer desktop release on its first read when the launcher has no recent result.
+
 ## 2026-10-11 — desktop-v0.17.0
 
 - **Build pages inside Daedalus.** The agent can create or import an app, check it on a phone and a desktop, publish it without restarting Daedalus, and roll back to an earlier version. Pages can call the signed-in app's API, appear in the navigation, and work alongside an agent bound to that page. Treat custom page code as trusted code.
