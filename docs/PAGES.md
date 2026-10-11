@@ -85,7 +85,7 @@ are kept, and the live one always is. Removing a page deletes its folder and its
 - `title` is a string, or one per language.
 - `icon` is the name of one of the app's icons; `icon_path` is a single SVG path (`d`) on a 24-unit
   grid, stroked in the current colour like the app's own icons. Either may be null.
-- `session_id` names the agent session that owns the page, if any.
+- `session_id` names the page's agent: the session bound to it (see [A page's own agent](#a-pages-own-agent)), or null.
 - `version` is the live version, null until the first publish.
 - The title, icon and session apply at once. The kind, entry and target are the draft's and go live
   with the next publish, so changing a service page's port can be rolled back like any other change.
@@ -99,8 +99,11 @@ Telegram's init data).
 |---|---|
 | `GET /api/pages` | the published pages, for the navigation: `{"pages": [{"slug", "title", "titles", "icon", "icon_path", "path", "version", "updated_at"}]}`; `title` is the plain or English title, `titles` one per language, `path` is `/app/p/<slug>`. `?all=1` adds pages with nothing published (`version` null) |
 | `POST /api/pages` | create: `{"slug", "title", "kind", "entry", "target", "icon", "icon_path", "session_id"}` |
-| `GET /api/pages/<slug>` | the manifest with `url` (`/pages/<slug>/`), `draft_url`, and the live `kind`, `entry`, `target`; `versions` newest first |
-| `PATCH /api/pages/<slug>` | change any of `title`, `icon`, `icon_path`, `session_id`, `kind`, `entry`, `target` |
+| `GET /api/pages/<slug>` | the manifest with `url` (`/pages/<slug>/`), `draft_url`, and the live `kind`, `entry`, `target`; `versions` newest first; `agent` is the bound session as `{"id", "title", "running", "gone"}` (`gone` once the session was deleted) or null |
+| `PATCH /api/pages/<slug>` | change any of `title`, `icon`, `icon_path`, `session_id`, `kind`, `entry`, `target`; `session_id` binds the page's agent (an unknown session is refused with 404) and null unbinds it |
+| `POST /api/pages/<slug>/agent` | a new session made to be the page's agent and bound to it: `{"title", "preset", "project_id"}`, all optional; answers `{"session_id", "title", "page"}` |
+| `POST /api/pages/<slug>/ask` | a message from the page to its agent: JSON `{"text", "silent", "follow_up"}`, or a form with the same fields and `files`; answers `{"run_id", "session_id"}`, 409 when the page has no agent |
+| `POST /api/pages/<slug>/emit` | `{"event", "data"}` pushed to every open instance of the page; nothing is kept |
 | `DELETE /api/pages/<slug>` | remove the page, its versions and its storage |
 | `PUT /api/pages/<slug>/draft/<path>` | write one draft file; the body is the file, as it is, streamed to disk |
 | `GET`, `DELETE /api/pages/<slug>/draft/<path>` | read or delete one draft file (deleting a folder's path deletes the folder) |
@@ -113,7 +116,12 @@ Telegram's init data).
 
 Every change publishes a `pages.changed` event on `/api/events` (`{"slug", "change", "version"}`,
 `change` being `created`, `updated`, `draft`, `published`, `rolled_back` or `removed`), so an open app
-redraws its navigation and an open page without polling.
+redraws its navigation without polling. An open page is not reloaded by it: the page screen keeps the
+version it opened with and shows a quiet "Version N is out · Reload" chip (or "The draft changed" for a
+draft being looked at), so a new version never interrupts the operator in the middle of using the page.
+
+`emit` publishes `pages.emit` (`{"slug", "event", "data"}`), which is delivered live and never kept:
+a page opened later does not see it. Its data is any JSON up to the event stream's 64 KB.
 
 ### Trying a draft
 
@@ -169,7 +177,11 @@ row and control sizes. Below 1024 px they switch to the phone's sizes, the same 
 | `Daedalus.ui.openFile(sessionId, path)` | open a file of a session's workspace in its Preview |
 | `Daedalus.storage.get(key)`, `.set(key, value)`, `.delete(key)`, `.list(prefix)` | the page's own durable values, shared across your devices (any JSON) |
 | `Daedalus.api(path, init)` | `fetch` for an API route with the session cookie: `path` is `/api/…` or the part after `/api/`; a plain object body is sent as JSON; resolves with the parsed answer, rejects with an error carrying `status` |
-| `Daedalus.on(event, fn)` | events the app forwards to the page; returns the function that stops listening. `theme` is one; `agent.message` is reserved for a page's own agent |
+| `Daedalus.on(event, fn)` | events the app forwards to the page; returns the function that stops listening. `theme` is one; every event the page's agent pushes with `PageEmit` (or a script with `POST …/emit`) arrives under its own name |
+| `Daedalus.agent.ask(text, {attachments, silent, followUp})` | a message to the page's agent (`POST /api/pages/<slug>/ask`); `attachments` are `File`s or `Blob`s; resolves with `{run_id, session_id}`, rejects with `status` 409 when the page has no agent. Works outside the app too |
+| `Daedalus.agent.on("message" \| "run" \| "event", fn)` | the agent's side, forwarded by the app while the page is open in it: `message` is each answer (`{role, text, run_id, seq, at}`) once its run ends, `run` the run's state (`{run_id, status, origin, summary?, error?}`, status `running`, `waiting`, `idle`, `completed`, `failed`, `cancelled`, …), `event` every event of the agent's session as the app hears it (`{type, payload, at}`) |
+| `Daedalus.agent.open()` | show the agent's conversation beside the page (in its place on a phone); rejects when the page has no agent |
+| `Daedalus.agent.session()` | the bound session, `{id, title, running, gone}`, or null |
 
 The bridge speaks `postMessage` with the app that frames the page and checks that every message comes
 from that frame. Opened in a tab of its own, a page keeps working: the theme stays as its stylesheet
@@ -227,6 +239,9 @@ Ask for a page in a chat and the agent builds it with the `pages` tools, guided 
 | `PagePublish`, `PageRollback`, `PageList` | versions, as above |
 | `PageRemove` | a page that was ever published only with `confirm=true`, after the agent asked you |
 | `PageShow` | a card with Open in the chat |
+| `PageBind` | make this session, another one, or none the page's agent (`PageCreate` binds the session that made the page) |
+| `PageEmit` | push data to every open instance of the page, heard as `Daedalus.on(event)` |
+| `PageStorage` | read, write, delete and list the page's storage, the same values `Daedalus.storage` keeps |
 
 `PageCheck` never sees your sign-in. It serves the page from a short-lived address of its own on a
 free port of the services range (the only ports the agent's browser may reach), opened by a random
@@ -235,6 +250,46 @@ page's `/api` requests are answered 401 there, and the result says so. The check
 agent decides when to publish.
 
 The agent puts a published page on the rail through the `[navigation]` setting (`page:<slug>`).
+
+## A page's own agent
+
+A page may have an agent of its own: one session bound to it, with its own model, prompt and tools
+like any session. A 3D modeller's page has an agent that edits the scene; an orders dashboard has one
+that answers questions about the orders. The operator talks to it beside the page while seeing it.
+
+- **Binding.** The session that creates a page with `PageCreate` is bound to it. The page screen's
+  header names the agent ("Agent: <title>") and offers Change (any session), New agent for this page,
+  and Unbind; the same is `PATCH session_id`, `POST …/agent` and `PageBind`. A new page agent is a
+  session whose brief says which page it serves, its kind, and the tools and skill to use, with the
+  page tools loaded from its first turn.
+- **The panel.** On a desktop the agent's conversation opens as a column beside the page, dragged
+  wider at its edge; whether it is open is remembered per page. On a phone it takes the page's place
+  and gives it back as it was: the page stays loaded underneath. It is the session's ordinary chat,
+  with everything the chat can do.
+- **The page talks to its agent** with `Daedalus.agent.ask`. The message arrives with origin
+  `page:<slug>` and a note the model reads ("Sent from the page «Orders» …"), so the agent knows the
+  operator pressed something in the page rather than wrote in the chat; the chat shows it as the
+  operator's message marked "from the page". `silent: true` is for the page reporting on its own (a
+  selection, a state, an error): it is folded into a note in the chat, never taken as the answer to a
+  question the agent asked, and waits for a turn under way to end instead of interrupting it.
+- **The agent talks to its page** with `PageEmit(slug, event, data)` (heard as `Daedalus.on(event)`)
+  and shares state through `PageStorage`, which is the page's own storage. Lasting state goes in the
+  storage and an event says that it changed, because an event reaches only the instances open now.
+- **The app forwards** to each open page only what is about it: the `PageEmit` events for its slug,
+  and the events, runs and answers of its own agent. Two pages open side by side never hear each
+  other's agents.
+
+```js
+// A button in the page asks the agent; its answer and the scene it rebuilt come back.
+document.querySelector("#optimise").onclick = () =>
+  Daedalus.agent.ask("Optimise this mesh", { attachments: [currentMeshFile] });
+Daedalus.agent.on("run", (run) => (busy.hidden = run.status !== "running"));
+Daedalus.agent.on("message", (reply) => log(reply.text));
+Daedalus.on("scene.updated", ({ file }) => viewer.load(file));   // the agent: PageEmit("cad", "scene.updated", {"file": "model.glb"})
+```
+
+The `split` template is this wired up: a tool pane that shows the state the agent keeps in the page's
+storage, and a strip that talks to the agent.
 
 ## Settings
 

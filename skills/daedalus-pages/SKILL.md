@@ -16,7 +16,8 @@ A page is data, not app code: creating, changing, publishing or rolling one back
 app, restarts anything or interrupts a session. A broken page breaks only its own frame.
 
 The tools are the `pages` group: `PageCreate`, `PageWrite`, `PageImport`, `PageRead`, `PageFiles`,
-`PageDelete`, `PageCheck`, `PagePublish`, `PageRollback`, `PageList`, `PageRemove`, `PageShow`.
+`PageDelete`, `PageCheck`, `PagePublish`, `PageRollback`, `PageList`, `PageRemove`, `PageShow`, and for
+a page's own agent `PageBind`, `PageEmit`, `PageStorage`.
 
 ## The workflow
 
@@ -126,10 +127,39 @@ one small file, kit-based, phone-correct, theme-following and bilingual. Change 
 |---|---|
 | `blank` | anything: a toolbar and an empty state |
 | `dashboard` | numbers and a chart from any source, refreshed on demand |
-| `split` | a tool with a panel for the page's agent (sends to the page's session) |
+| `split` | a tool and its agent working together: `agent.ask`, the agent's answers and runs, state shared through the page's storage and `PageEmit` |
 | `viewer` | a three.js 3D viewer loaded from a CDN, opening glTF/GLB/STL, colours from the theme |
 | `embed-service` | a toolbar of the page's own around a framed web app |
 | `form` | a validated form whose entries are kept in the page's storage |
+
+## The page and its agent
+
+A page may have an agent of its own: the session bound to it. The session that runs `PageCreate` is
+bound at once, so if you made the page, **you are its agent** until the operator (or `PageBind`) binds
+another. The operator sees your conversation beside the page (in its place on a phone) and talks to
+you there while looking at the page; they can change the agent, make a new one for the page, or
+unbind it from the page's header.
+
+- **From the page to you.** A button or composer in the page calls `Daedalus.agent.ask(text,
+  {attachments, silent})`. Such a message reaches you opening with "(Sent from the page «Title»
+  (/app/p/<slug>) …)": the operator pressed something in the page. With `silent` it says the page
+  reports this itself (a selection, a state, an error): context, not an order; act on it only when it
+  asks for something or matters to what you are doing.
+- **From you to the page.** `PageEmit(slug, event, data)` reaches every open instance of the page as
+  `Daedalus.on(event, fn)`: "scene rebuilt, reload model.glb", "new results", "select part 12". It is
+  live only and carries at most 64 KB, so lasting state goes in the page's storage with
+  `PageStorage(slug, "set", key, value)` (the page reads it with `Daedalus.storage.get(key)`) and the
+  event only says it changed. Big things (a model, a dataset) go in as files with `PageImport` and the
+  event names the file.
+- **Your answers** reach the page too: when your run ends, the page's `Daedalus.agent.on("message")`
+  gets your reply and `agent.on("run")` your run's state, so a page can show "working…" and the
+  result without the operator opening the chat.
+- **Publishing never interrupts.** `PagePublish` while the operator has the page open shows them a
+  quiet "Version N is out · Reload" chip; nothing reloads under them. Prefer `PageEmit` with data
+  over a publish for anything that changes while they work (a scene, numbers): a publish is for the
+  page's code.
+- Design a page that has an agent around that loop: the tool, a place where the agent's answer and
+  state appear, and actions that ask the agent in plain words. Start from the `split` template.
 
 ## Checking
 
