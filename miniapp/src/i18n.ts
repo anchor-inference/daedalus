@@ -326,7 +326,6 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "nav.group.observe": { en: "Observe", ru: "Наблюдение" },
   "nav.group.pages": { en: "Pages", ru: "Страницы" },
   "nav.page": { en: "Page", ru: "Страница" },
-  "page.missing": { en: "The page “{slug}” is not available.", ru: "Страница «{slug}» недоступна." },
   "nav.customise": { en: "Customise…", ru: "Настроить…" },
   "settings.sec.navigation": { en: "Navigation", ru: "Навигация" },
   "settings.sec.navigation.hint": { en: "The rail, the More menu and the phone drawer", ru: "Боковая панель, меню «Ещё» и меню телефона" },
