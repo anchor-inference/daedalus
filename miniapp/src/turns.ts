@@ -279,7 +279,7 @@ export function applyLive(base: Turn | null, live: LiveState, now: number): Turn
 /** A user message that is not the operator's own words, and what it is instead. */
 export type SystemNote = {
   /** Who wrote it: the loop, a schedule, a reminder, the core, or a source named by its prefix. */
-  kind: "loop" | "schedule" | "reminder" | "intent" | "core" | "heartbeat" | "context" | "events" | "other";
+  kind: "loop" | "schedule" | "reminder" | "intent" | "core" | "heartbeat" | "context" | "events" | "page" | "other";
   origin: string;
   /** For a loop wake-up: the run number and the cadence, read off the host's own header line. */
   iteration?: number;
@@ -299,7 +299,7 @@ const CONTEXT_RE = /<(turn_context|heartbeat)>\s*([\s\S]*?)\s*<\/\1>/;
  * A message a person sent through another channel (`inbound:<source>`) is not a note: it is a
  * message, and stays a card with its source on it.
  */
-export function systemNote(m: Pick<MessageView, "role" | "text" | "origin" | "internal">): SystemNote | null {
+export function systemNote(m: Pick<MessageView, "role" | "text" | "origin" | "internal" | "silent">): SystemNote | null {
   if (m.role !== "user" || m.internal) return null;
   const origin = m.origin ?? "";
   const text = m.text ?? "";
@@ -311,6 +311,9 @@ export function systemNote(m: Pick<MessageView, "role" | "text" | "origin" | "in
   const ctx = CONTEXT_RE.exec(text);
   if (ctx) return { kind: ctx[1] === "heartbeat" ? "heartbeat" : "context", origin: origin || ctx[1], body: ctx[2] };
   if (!origin || origin === "operator" || origin.startsWith("inbound")) return null;
+  // A custom page's message: the operator's request (a button, the page's composer) is their bubble
+  // with the page named on it; the page reporting on its own is a note.
+  if (origin.startsWith("page:")) return m.silent ? { kind: "page", origin: origin.slice(5), body: text } : null;
   const kind = origin === "schedule" || origin === "reminder" || origin === "intent" || origin === "core" || origin === "heartbeat" || origin === "events" ? origin : "other";
   return { kind, origin, body: text };
 }

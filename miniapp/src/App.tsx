@@ -1,7 +1,7 @@
 import { Component, Suspense, lazy, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { api, SessionList, SessionSummary, telegram, TerminalList } from "./api";
-import { StatusLabel } from "./ui/components";
-import { ConfirmHost, Sheet, ToastHost, toast as showToast } from "./ui/dialogs";
+import { api, SessionList, telegram, TerminalList } from "./api";
+import { ConfirmHost, ToastHost, toast as showToast } from "./ui/dialogs";
+import { SessionPicker } from "./sessionpicker";
 import type { AuthConfig } from "./screens/Login";
 import type { OnboardingState } from "./screens/AddModel";
 import * as passkeys from "./passkeys";
@@ -717,7 +717,7 @@ export function App() {
         </ErrorBoundary>
       )}
       {!wide && <AppDrawer mode={mode} nav={nav} waiting={waiting} selfdev={selfdev} projects={agentProjects} onProjects={() => setSwitching(true)} />}
-      {picking && sessionId && <SessionPicker exclude={sessionId} onPick={(id) => { navigate(sessionPath(sessionId, id)); setPicking(false); }} onClose={() => setPicking(false)} />}
+      {picking && sessionId && <SessionPicker title={t("app.beside.title")} exclude={sessionId} onPick={(id) => { navigate(sessionPath(sessionId, id)); setPicking(false); }} onClose={() => setPicking(false)} />}
       <NotificationToasts />
       <PetHost needsReply={notifications.needs_you > 0} activity={route.screen} />
       <UpdateHost />
@@ -773,28 +773,4 @@ function PasskeyNudge() {
 /** Whether the layout is the wide one (the rail and the sidebar beside the screen): the same breakpoint as the stylesheet. */
 function useWide(): boolean {
   return useMedia("(min-width: 1024px)");
-}
-
-/** Which session to open beside the current one. */
-function SessionPicker({ exclude, onPick, onClose }: { exclude: string | null; onPick: (id: string) => void; onClose: () => void }) {
-  const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
-  const [filter, setFilter] = useState("");
-  useEffect(() => {
-    api.get<SessionList>("/api/sessions").then((listing) => setSessions(listing.sessions)).catch(() => setSessions([]));
-  }, []);
-  const q = filter.trim().toLowerCase();
-  const items = (sessions ?? []).filter((s) => s.id !== exclude && (!q || s.title.toLowerCase().includes(q) || s.id.includes(q)));
-  return (
-    <Sheet title={t("app.beside.title")} onClose={onClose} size="narrow">
-      <input className="field" autoFocus placeholder={t("app.beside.filter")} value={filter} onChange={(e) => setFilter(e.target.value)} style={{ marginBottom: 8 }} />
-      {sessions === null && <div className="empty">{t("common.loading")}</div>}
-      {sessions !== null && items.length === 0 && <div className="empty">{t("app.beside.empty")}</div>}
-      {items.map((s) => (
-        <button key={s.id} className="menu-item" onClick={() => onPick(s.id)}>
-          <span className="grow truncate">{s.title}</span>
-          <StatusLabel status={s.status} />
-        </button>
-      ))}
-    </Sheet>
-  );
 }
