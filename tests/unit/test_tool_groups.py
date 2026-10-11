@@ -26,7 +26,7 @@ H = {"X-Daedalus-Token": "tok"}
 
 def test_the_rare_groups_wait_on_demand_and_the_everyday_ones_stay_while_they_fit() -> None:
     loads = {name: spec.load for name, spec in TOOL_GROUPS.items()}
-    assert {name for name, load in loads.items() if load == "lazy"} == {"browser", "self_development", "scheduling", "calendar", "diagrams", "loop", "docs", "learning", "mcp_oauth"}
+    assert {name for name, load in loads.items() if load == "lazy"} == {"browser", "self_development", "scheduling", "calendar", "diagrams", "loop", "docs", "learning", "mcp_oauth", "pages"}
     assert {name for name, load in loads.items() if load == "auto"} == {"board", "services", "agents", "mcp"}
     grouped = {tool.name: getattr(tool, "tool_group", "") for tool in discover_tools()}
     # What every session needs is in no group, so nothing can hold it back.
@@ -36,6 +36,7 @@ def test_the_rare_groups_wait_on_demand_and_the_everyday_ones_stay_while_they_fi
     assert {grouped[n] for n in ("LearningReport", "SkillDraft")} == {"learning"}
     assert {grouped[n] for n in ("McpOAuthBegin", "McpOAuthFinish", "McpOAuthStatus", "McpOAuthDisconnect")} == {"mcp_oauth"}
     assert {grouped[n] for n in ("McpList", "McpEnable", "McpDisable")} == {"mcp"}
+    assert {grouped[n] for n in ("PageCreate", "PageImport", "PageCheck", "PagePublish", "PageShow")} == {"pages"}
     # The line the model reads says what the group is for, and the browser's sends plain pages elsewhere.
     assert "WebFetch" in TOOL_GROUPS["browser"].description and "JavaScript" in TOOL_GROUPS["browser"].description
 
