@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{title}}</title>
+<link rel="stylesheet" href="/pages/_kit/kit.css">
+<script src="/pages/_kit/daedalus.js"></script>
+<style>
+  .dk-page { max-width: 720px; margin: 0 auto; width: 100%; padding-bottom: max(var(--space-6), env(safe-area-inset-bottom)); }
+  .check { display: flex; align-items: center; gap: var(--space-2); min-height: var(--ctl-h); }
+  .check input { width: 20px; height: 20px; accent-color: var(--accent); }
+</style>
+</head>
+<body>
+<header class="dk-toolbar">
+  <b class="dk-h2">{{title}}</b>
+</header>
+<main class="dk-page dk-stack">
+  <form class="dk-card dk-stack" id="form" novalidate>
+    <div class="dk-field">
+      <label for="name" data-i18n="name">Name</label>
+      <input class="dk-input" id="name" name="name" autocomplete="name" required>
+      <span class="dk-error" id="name-error" hidden data-i18n="required">Fill this in</span>
+    </div>
+    <div class="dk-field">
+      <label for="kind" data-i18n="kind">Kind</label>
+      <select class="dk-select" id="kind" name="kind">
+        <option value="question" data-i18n="kind.question">Question</option>
+        <option value="request" data-i18n="kind.request">Request</option>
+        <option value="note" data-i18n="kind.note">Note</option>
+      </select>
+    </div>
+    <div class="dk-field">
+      <label for="details" data-i18n="details">Details</label>
+      <textarea class="dk-textarea" id="details" name="details"></textarea>
+    </div>
+    <label class="check"><input type="checkbox" id="urgent" name="urgent"> <span data-i18n="urgent">Urgent</span></label>
+    <div class="dk-row-flex">
+      <button class="dk-btn primary" type="submit" data-i18n="save">Save</button>
+      <button class="dk-btn ghost" type="reset" data-i18n="clear">Clear</button>
+    </div>
+  </form>
+  <h2 class="dk-section-title" data-i18n="saved">Saved</h2>
+  <div class="dk-list" id="entries"></div>
+</main>
+<script>
+  // Entries are kept in the page's own storage (durable, on the server, shared by the operator's
+  // devices); the agent and other pages can read them through /api/pages/{{slug}}/storage.
+  const STRINGS = {
+    en: { name: "Name", required: "Fill this in", kind: "Kind", "kind.question": "Question", "kind.request": "Request", "kind.note": "Note",
+          details: "Details", urgent: "Urgent", save: "Save", clear: "Clear", saved: "Saved", none: "Nothing saved yet", remove: "Remove",
+          "saved.toast": "Saved", failed: "Not saved: {error}" },
+    ru: { name: "Имя", required: "Заполните поле", kind: "Тип", "kind.question": "Вопрос", "kind.request": "Просьба", "kind.note": "Заметка",
+          details: "Подробности", urgent: "Срочно", save: "Сохранить", clear: "Очистить", saved: "Сохранено", none: "Пока ничего не сохранено", remove: "Удалить",
+          "saved.toast": "Сохранено", failed: "Не сохранено: {error}" },
+  };
+  let lang = "en";
+  const t = (key, vars = {}) => ((STRINGS[lang] && STRINGS[lang][key]) || STRINGS.en[key] || key).replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? "");
+  const form = document.getElementById("form");
+
+  function translate() {
+    document.documentElement.lang = lang;
+    document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.dataset.i18n); });
+  }
+
+  async function showEntries() {
+    const list = document.getElementById("entries");
+    let keys = [];
+    try {
+      keys = (await Daedalus.storage.list("entries/")).map((row) => row.key).reverse();
+    } catch (error) {
+      keys = [];
+    }
+    const values = await Promise.all(keys.map((key) => Daedalus.storage.get(key).then((value) => ({ key, value }), () => null)));
+    const rows = values.filter((row) => row && row.value).map(({ key, value }) => {
+      const row = document.createElement("div");
+      row.className = "dk-row";
+      const main = document.createElement("div");
+      main.className = "dk-row-main";
+      const title = document.createElement("div");
+      title.className = "dk-row-title";
+      title.textContent = `${value.name} · ${t("kind." + value.kind)}`;
+      const meta = document.createElement("div");
+      meta.className = "dk-row-meta";
+      meta.textContent = value.details || new Date(value.at).toLocaleString(lang);
+      main.append(title, meta);
+      row.append(main);
+      if (value.urgent) {
+        const badge = document.createElement("span");
+        badge.className = "dk-badge warn";
+        badge.textContent = t("urgent");
+        row.append(badge);
+      }
+      const remove = document.createElement("button");
+      remove.className = "dk-btn small ghost";
+      remove.textContent = t("remove");
+      remove.onclick = async () => { await Daedalus.storage.delete(key); showEntries(); };
+      row.append(remove);
+      return row;
+    });
+    if (!rows.length) {
+      const empty = document.createElement("div");
+      empty.className = "dk-empty";
+      empty.textContent = t("none");
+      rows.push(empty);
+    }
+    list.replaceChildren(...rows);
+  }
+
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    // By id, not form.name: a form's own "name" property hides a field of that name.
+    const field = (id) => document.getElementById(id);
+    const name = field("name").value.trim();
+    field("name").setAttribute("aria-invalid", name ? "false" : "true");
+    field("name-error").hidden = !!name;
+    if (!name) { field("name").focus(); return; }
+    const entry = { name, kind: field("kind").value, details: field("details").value.trim(), urgent: field("urgent").checked, at: new Date().toISOString() };
+    try {
+      await Daedalus.storage.set(`entries/${Date.now()}`, entry);
+      Daedalus.ui.toast(t("saved.toast"));
+      form.reset();
+      showEntries();
+    } catch (error) {
+      Daedalus.ui.toast(t("failed", { error: error.message }));
+    }
+  };
+
+  Daedalus.ready().then((context) => { lang = context.lang in STRINGS ? context.lang : "en"; translate(); showEntries(); });
+  Daedalus.theme.onChange((theme) => { if (theme.lang && theme.lang !== lang) { lang = theme.lang in STRINGS ? theme.lang : "en"; translate(); showEntries(); } });
+</script>
+</body>
+</html>

@@ -7,7 +7,7 @@ import { anchorHash, parseAnchor } from "./anchor";
 
 export const BASE = "/app";
 
-export type Screen = "agents" | "voice" | "inbox" | "board" | "terminals" | "harnesses" | "changes" | "schedules" | "calendar" | "diagrams" | "services" | "memory" | "usage" | "health" | "settings" | "orchestration" | "browser";
+export type Screen = "agents" | "voice" | "inbox" | "board" | "terminals" | "harnesses" | "changes" | "schedules" | "calendar" | "diagrams" | "services" | "memory" | "usage" | "health" | "settings" | "orchestration" | "browser" | "page";
 
 export const SCREENS: Screen[] = ["agents", "voice", "inbox", "board", "terminals", "harnesses", "changes", "schedules", "calendar", "diagrams", "services", "memory", "usage", "health", "settings"];
 /** Orchestration is a mode of its own rather than a destination of the menu: its item on the rail
@@ -51,7 +51,9 @@ export function parse(pathname = window.location.pathname, search = window.locat
   path = path.replace(/^\/+|\/+$/g, "");
   const [head, ...rest] = path.split("/").map(decodeURIComponent);
   const query = new URLSearchParams(search);
-  const screen = ([...SCREENS, ...INNER] as string[]).includes(head) ? (head as Screen) : ALIASES[head] ?? "agents";
+  // A page the agent published lives under /app/p/<slug>: a segment of its own, so no slug can ever
+  // take a screen's address.
+  const screen = head === "p" ? "page" : ([...SCREENS, ...INNER] as string[]).includes(head) ? (head as Screen) : ALIASES[head] ?? "agents";
   const detail = rest[0] || null;
   if (screen === "orchestration") {
     if (detail === "project") {
@@ -63,8 +65,14 @@ export function parse(pathname = window.location.pathname, search = window.locat
   return { screen, session: screen === "agents" ? detail : null, with: screen === "agents" ? query.get("with") : null, detail: screen === "agents" ? null : detail, project: null, page: null, inner: null, query };
 }
 
+/** A custom page inside the app: /app/p/<slug>, the slug in the route's `detail`. */
+export function pagePath(slug: string): string {
+  return `${BASE}/p/${encodeURIComponent(slug)}`;
+}
+
 export function pathFor(screen: Screen, detail?: string | null, query?: Record<string, string | null | undefined>): string {
-  let p = `${BASE}/${screen}`;
+  // The page screen's address is /app/p/<slug> (see parse), never /app/page.
+  let p = `${BASE}/${screen === "page" ? "p" : screen}`;
   if (detail) p += `/${encodeURIComponent(detail)}`;
   return withQuery(p, query);
 }

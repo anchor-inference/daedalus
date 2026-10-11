@@ -210,6 +210,18 @@ purpose is achieved, LoopPause when only the operator can unblock it, StaySilent
 report; a dynamically paced loop ends its turn with LoopNext(delay_seconds, reason) or LoopStop.
 """
 
+SETTINGS = """Daedalus's settings: when the operator asks to change how you or the app behave — the answer \
+language, when the history is compacted, the rail, a limit, the default model — change it with SettingsChange, \
+after SettingsGet for that section. Never edit config.toml or any other settings file, and never ask the \
+operator to: the tools validate the change and show it to them. Send only the fields that change. A section \
+they let you apply changes at once; any other waits for their Apply on a card in this chat — say so plainly, \
+do not propose it again while it waits, and carry on: the outcome reaches you as a message. Tell them when a \
+change takes effect: next_step from your next model call, reconnect when the provider or MCP connection is \
+rebuilt, restart after Daedalus restarts. Credentials, policy, self-change and the other settings only the \
+operator may change are refused: point them to Settings instead.
+"""
+
+
 NOTIFY = """Reaching the operator: Notify(title, body, level, link, key) reaches them outside this chat — a \
 toast, their phone, the desktop. Use it only for what they would want to know now while not watching: a long \
 job finished or failed, a decision you are blocked on that is not a question to them, a service they rely on \
@@ -758,13 +770,15 @@ def group_instructions(group: str, *, selfdev_mode: str) -> str:
         return SCHEDULING
     if group == "loop":
         return LOOP.removeprefix("- ")
+    if group == "settings":
+        return SETTINGS
     return ""
 
 
 def tool_sections(advertised: Collection[str], *, admitted: Collection[str] | None = None) -> tuple[str, ...]:
     """The sections of an agent's prompt that teach the tools in no group, or in a group without rules.
 
-    The browser's, self-development's, scheduling's and the loop's are the rules of their groups
+    The browser's, self-development's, scheduling's, the loop's and the settings' are the rules of their groups
     (:func:`group_instructions`) and reach the model through the core. Of what is left, a section
     that carries RULES — Notify's (only what cannot wait; urgent breaks quiet hours) — is shown
     wherever the session's policy ADMITS the tool, ``admitted``. A section that only TEACHES — history
@@ -935,9 +949,21 @@ MID_TURN_NOTE = (
 MID_TURN_NOTE_RE = re.compile(r"\(The operator wrote this while you were in the middle of a turn.*?\)\n\n", re.S)
 
 
+PAGE_NOTE_RE = re.compile(r"\A\(Sent from the page «[^\n]*?» \(/app/p/[a-z0-9-]+\)[^\n]*?\)\n\n")
+"""Finds the note :func:`page_note` puts before a message a custom page sent, at the very start only."""
+
+
+def page_note(slug: str, title: str, *, silent: bool) -> str:
+    """Put before a message a custom page sent to its agent, so the model knows where it came from:
+    the page's own composer or a button the operator pressed (their request), or, ``silent``, the page
+    reporting something on its own (a selection, a state, an error), which is context and not an order."""
+    how = ": the page reports this itself, it is not the operator's words" if silent else " at the operator's request"
+    return f"(Sent from the page «{' '.join(title.split())[:120]}» (/app/p/{slug}){how}.)\n\n"
+
+
 def without_host_notes(text: str) -> str:
-    """A message as its writer wrote it: the turn context and a mid-turn note are the host's, for the model."""
-    return MID_TURN_NOTE_RE.sub("", without_turn_context(text))
+    """A message as its writer wrote it: the turn context, a mid-turn note and a page's note are the host's, for the model."""
+    return PAGE_NOTE_RE.sub("", MID_TURN_NOTE_RE.sub("", without_turn_context(text)), count=1)
 
 
 def turn_context(*, now: datetime | None = None, notes: str = "") -> str:
@@ -961,4 +987,4 @@ def governance_section(path: Path) -> str:
     return ""
 
 
-__all__ = ["BOARD_HEADER", "BOARD_PARTS", "BOARD_PEERS", "BOARD_SERVICES", "BOARD_SUBAGENT", "BOARD_TASKS", "BOARD_TERMINALS", "BOARD_TWO_WAYS", "BOARD_WAKES", "CONCIERGE", "DEFAULT_RULES", "DISPATCHER", "DISPATCHER_COMPACTION", "HEADLINE_RE", "HISTORY_HEADER", "HISTORY_HEADLINE", "HISTORY_PARTS", "HISTORY_SEARCH", "LOOP", "NOTIFY", "ORCHESTRATOR", "ORCHESTRATOR_COMPACTION", "PERSONA", "SCHEDULING", "SELF_DEVELOPMENT", "SELF_DEVELOPMENT_LOCAL", "YAGNI_OFF", "YAGNI_ON", "YAGNI_RULES", "group_instructions", "concierge_sections", "dispatcher_sections", "environment_section", "governance_section", "language_section", "orchestrator_sections", "rules_section", "self_development_section", "split_headline", "tool_sections", "turn_context", "without_turn_context", "yagni_note"]
+__all__ = ["BOARD_HEADER", "BOARD_PARTS", "BOARD_PEERS", "BOARD_SERVICES", "BOARD_SUBAGENT", "BOARD_TASKS", "BOARD_TERMINALS", "BOARD_TWO_WAYS", "BOARD_WAKES", "CONCIERGE", "DEFAULT_RULES", "DISPATCHER", "DISPATCHER_COMPACTION", "HEADLINE_RE", "HISTORY_HEADER", "HISTORY_HEADLINE", "HISTORY_PARTS", "HISTORY_SEARCH", "LOOP", "NOTIFY", "ORCHESTRATOR", "ORCHESTRATOR_COMPACTION", "PERSONA", "SCHEDULING", "SELF_DEVELOPMENT", "SELF_DEVELOPMENT_LOCAL", "YAGNI_OFF", "YAGNI_ON", "YAGNI_RULES", "group_instructions", "concierge_sections", "dispatcher_sections", "environment_section", "governance_section", "language_section", "orchestrator_sections", "page_note", "rules_section", "self_development_section", "split_headline", "tool_sections", "turn_context", "without_turn_context", "yagni_note"]

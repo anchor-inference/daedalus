@@ -25,6 +25,7 @@ import { describeIntegration, type IntegrationRow } from "../integrationHealth";
 import { Dropdown, LangPicker, MultiDropdown, Segmented, Switch } from "../ui/index";
 import { NumInput, NumRow, Row, TextBlock } from "../settingsrow";
 import { AppearancePanel } from "./Appearance";
+import { NavigationSettings } from "./NavigationSettings";
 import { modeHome, storedMode } from "../mode";
 import { useQuery } from "../store";
 import { Capabilities, componentsNeedAttention } from "../capabilities";
@@ -1045,11 +1046,12 @@ function SecurityTab({ toast }: { toast: (t: string) => void }) {
   );
 }
 
-type Section = "appearance" | "models" | "rules" | "limits" | "environments" | "tools" | "voice" | "components" | "dependencies" | "chat" | "notifications" | "security" | "heartbeat" | "about";
+type Section = "appearance" | "navigation" | "models" | "rules" | "limits" | "environments" | "tools" | "voice" | "components" | "dependencies" | "chat" | "notifications" | "security" | "heartbeat" | "about";
 /** The sections, grouped the way the page lists them. The words come from the table, not from here. */
 const GROUPS: { id: "you" | "work" | "system"; sections: { id: Section; icon: IconName }[] }[] = [
   { id: "you", sections: [
     { id: "appearance", icon: "eye" },
+    { id: "navigation", icon: "sliders" },
     { id: "notifications", icon: "bell" },
     { id: "voice", icon: "mic" },
     { id: "security", icon: "key" },
@@ -1424,6 +1426,8 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
             <NumRow id="balance-poll" title={t("settings.balance.poll")} unit={t("settings.unit.seconds")} value={s.balance.poll_seconds} min={1} onSave={(v) => save({ balance: { ...s.balance, poll_seconds: v } })} />
           </div>
         );
+      case "navigation":
+        return <NavigationSettings s={s} save={save} selfdev={caps.data?.selfdev?.mode ?? "server"} />;
       case "environments":
         return <EnvironmentsTab s={s} save={save} toast={toast} />;
       case "tools":

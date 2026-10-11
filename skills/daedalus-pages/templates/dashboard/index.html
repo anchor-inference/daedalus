@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{title}}</title>
+<link rel="stylesheet" href="/pages/_kit/kit.css">
+<script src="/pages/_kit/daedalus.js"></script>
+<style>
+  .dk-page { padding-bottom: max(var(--space-6), env(safe-area-inset-bottom)); }
+  .stat { display: grid; gap: 4px; }
+  .stat-value { font-size: var(--fs-22); font-weight: 650; font-variant-numeric: tabular-nums; }
+  .chart { width: 100%; height: 160px; display: block; }
+  .chart rect { fill: var(--accent); }
+  /* The labels are text under the drawing rather than in it: a drawing stretched to the width would
+     stretch its letters too. */
+  .chart-days { display: flex; justify-content: space-around; color: var(--fg-3); font-size: var(--fs-11); }
+  .chart line { stroke: var(--line); }
+</style>
+</head>
+<body>
+<header class="dk-toolbar">
+  <b class="dk-h2">{{title}}</b>
+  <span class="dk-spacer"></span>
+  <span class="dk-meta" id="updated"></span>
+  <button class="dk-btn small" id="refresh" data-i18n="refresh">Refresh</button>
+</header>
+<main class="dk-page dk-stack">
+  <section class="dk-grid" id="stats"></section>
+  <section class="dk-card dk-stack">
+    <b class="dk-h2" data-i18n="chart.title">This week</b>
+    <svg class="chart" id="chart" viewBox="0 0 700 160" preserveAspectRatio="none" role="img"></svg>
+    <div class="chart-days" id="days"></div>
+  </section>
+  <h2 class="dk-section-title" data-i18n="recent">Recent</h2>
+  <div class="dk-list" id="recent"></div>
+</main>
+<script>
+  const STRINGS = {
+    en: { refresh: "Refresh", "chart.title": "This week", recent: "Recent", updated: "Updated {time}", empty: "Nothing yet",
+          "stat.open": "Open", "stat.done": "Done today", "stat.waiting": "Waiting", days: "Mon,Tue,Wed,Thu,Fri,Sat,Sun" },
+    ru: { refresh: "Обновить", "chart.title": "Эта неделя", recent: "Недавнее", updated: "Обновлено {time}", empty: "Пока ничего",
+          "stat.open": "Открыто", "stat.done": "Сделано сегодня", "stat.waiting": "Ждут", days: "Пн,Вт,Ср,Чт,Пт,Сб,Вс" },
+  };
+  let lang = "en";
+  const t = (key, vars = {}) => ((STRINGS[lang] && STRINGS[lang][key]) || STRINGS.en[key] || key).replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? "");
+  let data = null;
+
+  // Where the numbers come from. Replace this with the real source: fetch("/api/…") (the page has the
+  // whole API with the operator's session), a file shipped with the page (fetch("data.json")), the
+  // page's own storage (Daedalus.storage.get("data")), or any service the page can reach.
+  async function load() {
+    return {
+      stats: [{ key: "stat.open", value: 12 }, { key: "stat.done", value: 5 }, { key: "stat.waiting", value: 3 }],
+      week: [4, 7, 3, 9, 6, 2, 5],
+      recent: [{ title: "Example item", meta: "2 min ago" }, { title: "Another item", meta: "1 h ago" }],
+    };
+  }
+
+  function el(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function render() {
+    document.querySelectorAll("[data-i18n]").forEach((node) => { node.textContent = t(node.dataset.i18n); });
+    document.documentElement.lang = lang;
+    if (!data) return;
+    const stats = document.getElementById("stats");
+    stats.replaceChildren(...data.stats.map((s) => {
+      const card = el("div", "dk-card stat");
+      card.append(el("span", "dk-meta", t(s.key)), el("span", "stat-value", String(s.value)));
+      return card;
+    }));
+    const chart = document.getElementById("chart");
+    const max = Math.max(1, ...data.week);
+    const days = t("days").split(",");
+    const step = 700 / data.week.length;
+    chart.innerHTML = '<line x1="0" y1="160" x2="700" y2="160"></line>';
+    data.week.forEach((value, i) => {
+      const height = (value / max) * 150;
+      chart.insertAdjacentHTML("beforeend", `<rect x="${i * step + step * 0.2}" y="${160 - height}" width="${step * 0.6}" height="${height}" rx="3"></rect>`);
+    });
+    document.getElementById("days").replaceChildren(...data.week.map((_, i) => el("span", "", days[i] || "")));
+    const recent = document.getElementById("recent");
+    recent.replaceChildren(...(data.recent.length ? data.recent : [{ title: t("empty"), meta: "" }]).map((item) => {
+      const row = el("div", "dk-row");
+      const main = el("div", "dk-row-main");
+      main.append(el("div", "dk-row-title", item.title), el("div", "dk-row-meta", item.meta));
+      row.append(main);
+      return row;
+    }));
+    document.getElementById("updated").textContent = t("updated", { time: new Date().toLocaleTimeString(lang, { hour: "2-digit", minute: "2-digit" }) });
+  }
+
+  async function refresh() {
+    data = await load();
+    render();
+  }
+
+  document.getElementById("refresh").onclick = refresh;
+  Daedalus.ready().then((context) => { lang = context.lang in STRINGS ? context.lang : "en"; render(); });
+  Daedalus.theme.onChange((theme) => { if (theme.lang && theme.lang !== lang) { lang = theme.lang in STRINGS ? theme.lang : "en"; render(); } });
+  refresh();
+</script>
+</body>
+</html>

@@ -209,3 +209,41 @@ async def test_withholding_an_unknown_tool_is_refused_rather_than_ignored(app: A
     result = await subs.spawn(leader_id=leader.session.id, task="t")
     child = await manager.get_state(result["session_id"])
     assert child is not None and "tools_off" not in child.metadata
+
+
+async def test_a_subagent_with_a_running_job_reports_when_the_job_has_woken_it(app: Any) -> None:
+    # A subagent that ended its turn on "the suite is running" was reported half-done and removed,
+    # and the delete ended the suite it was waiting for.
+    manager: SessionManager = app.manager
+    subs = Subagents(app)
+    leader = await manager.create_session("lead")
+    submitted = _capture(manager)
+    result = await subs.spawn(leader_id=leader.session.id, task="run the suite")
+    sid = result["session_id"]
+    job = SimpleNamespace(kind="job", running=True, reported=False)
+    service = SimpleNamespace(kind="service", running=True, reported=False)
+    manager.jobs[sid] = {"job-1": job, "svc-1": service}
+    await manager.sessions.append_transcript(sid, [Message(role=MessageRole.assistant, content_blocks=[TextBlock(text="the suite is running")])])
+    await subs.on_run_finished(sid, "run-1", "completed")
+    assert all(target != leader.session.id for target, _, _ in submitted)
+    assert await manager.get_state(sid) is not None
+    # Ended but not yet told: still the subagent's to read first.
+    job.running = False
+    await subs.on_run_finished(sid, "run-1", "completed")
+    assert all(target != leader.session.id for target, _, _ in submitted)
+    # Told, and the run it woke has ended: now the report goes, even with the service still up.
+    job.reported = True
+    await manager.sessions.append_transcript(sid, [Message(role=MessageRole.assistant, content_blocks=[TextBlock(text="all 40 tests pass")])])
+    await subs.on_run_finished(sid, "run-2", "completed")
+    assert submitted[-1][0] == leader.session.id and "all 40 tests pass" in submitted[-1][1]
+
+
+async def test_a_failed_subagent_reports_even_with_a_job_running(app: Any) -> None:
+    manager: SessionManager = app.manager
+    subs = Subagents(app)
+    leader = await manager.create_session("lead")
+    submitted = _capture(manager)
+    result = await subs.spawn(leader_id=leader.session.id, task="explode")
+    manager.jobs[result["session_id"]] = {"job-1": SimpleNamespace(kind="job", running=True, reported=False)}
+    await subs.on_run_finished(result["session_id"], "run-x", "failed")
+    assert submitted[-1][0] == leader.session.id and "failed" in submitted[-1][1]

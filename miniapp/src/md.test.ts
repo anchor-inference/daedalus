@@ -12,6 +12,9 @@ describe("renderMarkdown", () => {
   it("opens an internal diagram link without accepting arbitrary app paths", () => {
     const id = "0123456789abcdef0123456789abcdef";
     expect(renderMarkdown(`[Open diagram](/app/diagrams/${id})`)).toContain(`<a href="/app/diagrams/${id}">Open diagram</a>`);
+    expect(renderMarkdown("[Orders](/app/p/orders)")).toContain('<a href="/app/p/orders">Orders</a>');
+    expect(renderMarkdown("[Draft](/app/p/orders?draft=1)")).toContain('<a href="/app/p/orders?draft=1">Draft</a>');
+    expect(renderMarkdown("[Bad](/app/p/../api/settings)")).not.toContain("<a");
     expect(renderMarkdown("[bad](/api/settings)")).not.toContain('<a href=');
   });
   it("survives a header row followed by a bare rule", () => {

@@ -16,10 +16,10 @@ import type { RefObject } from "react";
 import { plural, t } from "./i18n";
 import { Icon, type IconName } from "./icons";
 import { type Mode, modeHome } from "./mode";
-import { DESKTOP_PLACES, menuSections } from "./navigation";
+import { type ResolvedNav, currentId } from "./navconfig";
 import { type Screen, pathFor } from "./router";
-import { type SelfDevMode, visibleScreens } from "./capabilities";
-import { type Counts, ICONS, countFor, go, screenTitle } from "./shell";
+import type { SelfDevMode } from "./capabilities";
+import { type Counts, ICONS, go, screenTitle } from "./shell";
 import { openUpdate, releaseVersion, useUpdates } from "./updates";
 
 /** A Mac says ⌘ where everything else says Ctrl; the shortcut is the same key either way. */
@@ -29,9 +29,6 @@ export const KEYS = { sidebar: MAC ? "⌘ \\" : "Ctrl \\", menu: MAC ? "⌘ ⇧ 
 /** The account is Settings' security section: the passkeys that sign this browser in, and signing
  *  every browser out. There is one operator, so there is no profile beyond it. */
 const ACCOUNT = "security";
-
-/** The destinations under the two modes, in the operator's order. */
-const PLACES = DESKTOP_PLACES;
 
 export type RailProps = {
   onSearch: () => void;
@@ -46,6 +43,8 @@ export type RailProps = {
   /** What waits for the operator in orchestration mode: a quiet count on its icon, from Agents. */
   waiting: number;
   selfdev: SelfDevMode;
+  /** What the rail holds and in which order: navconfig.ts's answer for this installation. */
+  nav: ResolvedNav;
   menuOpen: boolean;
   onMenu: () => void;
   menuButton: RefObject<HTMLButtonElement | null>;
@@ -61,11 +60,11 @@ function Tip({ text, keys }: { text: string; keys?: string }) {
   );
 }
 
-function Item({ href, icon, label, on, mode = false, badge, quiet, data }: { href: string; icon: IconName; label: string; on: boolean; mode?: boolean; badge?: number; quiet?: number; data: string }) {
+function Item({ href, icon, iconPath, label, on, mode = false, badge, quiet, data }: { href: string; icon: IconName; iconPath?: string | null; label: string; on: boolean; mode?: boolean; badge?: number; quiet?: number; data: string }) {
   const counted = badge ? `${label} · ${badge}` : quiet ? `${label} · ${plural("mode.waiting", quiet)}` : label;
   return (
     <a className={`rail-item ${on ? "on" : ""} ${mode ? "mode" : ""}`} href={href} onClick={(e) => go(e, href)} aria-label={counted} aria-current={on ? "page" : undefined} data-rail={data}>
-      <Icon name={icon} size={18} />
+      <Icon name={icon} size={18} path={iconPath} />
       <span className="rail-label">{label}</span>
       {!!badge && <span className="rail-badge" data-count={badge} aria-hidden>{badge > 99 ? "99+" : badge}</span>}
       {!badge && !!quiet && <span className="rail-badge quiet" data-waiting={quiet} aria-hidden>{quiet > 99 ? "99+" : quiet}</span>}
@@ -93,7 +92,8 @@ export function Rail(p: RailProps) {
   const home = modeHome(p.mode);
   // A destination the menu alone reaches lights the menu's button, so Changes or Usage answers
   // "where am I" on the rail the way Services does; without it nothing on the rail was lit.
-  const inMenu = !PLACES.includes(p.screen) && p.screen !== "agents" && menuSections(p.selfdev).some((g) => g.items.includes(p.screen));
+  const here = currentId(p.screen, p.detail);
+  const inMenu = p.nav.more.some((g) => g.items.some((it) => it.id === here));
   const modeItem = (m: Mode) => (
     <Item
       key={m}
@@ -126,8 +126,8 @@ export function Rail(p: RailProps) {
       <button className="rail-item rail-search" onClick={p.onSearch} aria-label={t("shell.search.label")}><Icon name="search" size={18} /><Tip text={t("shell.search.label")} /></button>
       <div className="rail-modes">{modeItem("agents")}{modeItem("orchestration")}</div>
       <div className="rail-rule" />
-      <div className="rail-places">{visibleScreens(PLACES, p.selfdev).map((s) => (
-        <Item key={s} data={s} href={pathFor(s)} icon={ICONS[s]} label={screenTitle(s)} on={p.screen === s} badge={countFor(s, p.counts)} />
+      <div className="rail-places">{p.nav.rail.map((it) => (
+        <Item key={it.id} data={it.id} href={it.path} icon={it.icon} iconPath={it.iconPath} label={it.title} on={here === it.id} badge={it.badge} />
       ))}</div>
       <div className="rail-foot">
         <UpdateItem />

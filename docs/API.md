@@ -361,3 +361,9 @@ the ones that chat may use, with the project it could file one under. `DELETE /a
 one back at once. A message names the secrets it carries in `secrets` (a list on
 `/messages`, comma-separated on `/upload`); the model is told the name, the note and the placeholder
 `«secret:name»`, never the value.
+
+**Custom pages.** `GET /api/pages` lists the published pages the navigation offers, `POST /api/pages`
+makes one, `PUT /api/pages/{slug}/draft/{path}` writes its files, `POST …/publish` and `…/rollback`
+switch the live version, and `/api/pages/{slug}/storage/{key}` keeps the page's own values. The pages
+themselves are served at `/pages/{slug}/`. Everything about them, with the kit and the bridge a page
+may use, is in [PAGES.md](PAGES.md).

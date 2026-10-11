@@ -141,14 +141,18 @@ def test_claude_chat_body_becomes_messages() -> None:
     out, names = claude_mod.chat_to_messages(body)
     assert out["model"] == "claude-opus-5" and out["stream"] is True and out["thinking"]["type"] == "enabled" and out["thinking"]["budget_tokens"] >= 1024
     assert out["system"][0]["text"].startswith("x-anthropic-billing-header:") and "Claude Agent SDK" in out["system"][1]["text"]
-    assert "2.1.282" in out["system"][0]["text"] and claude_mod.attribution_hash("open x") in out["system"][0]["text"]
-    # Indexes 4, 7 and 20 of this sentence are o, w, s. The digest is the CLI's stamp for 2.1.282.
-    assert claude_mod.attribution_hash("hello world, this is long enough") == "783"
+    assert "2.1.296" in out["system"][0]["text"] and claude_mod.attribution_hash("open x") in out["system"][0]["text"]
+    # Indexes 4, 7 and 20 of this sentence are o, o and a space. The digest is the CLI's stamp for 2.1.296.
+    assert claude_mod.attribution_hash("hello world, this is long enough") == "0e0"
     assert out["system"][2]["text"] == "You are Daedalus." and "cache_control" not in out["system"][2]
     assert out["system"][1]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
     assert "cache_control" not in out["system"][0]
     assert names["mcp_Read"] == "Read" and out["tools"][0]["name"] == "mcp_Read"
-    assert out["tools"][-1]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+    # The identity breakpoint already covers the tools in front of it; a marker on them would be spent twice.
+    assert all("cache_control" not in tool for tool in out["tools"])
+    # Thinking is on, so the CLI's keep-everything thinking edit rides along; it clears nothing.
+    assert out["context_management"] == {"edits": [{"type": "clear_thinking_20251015", "keep": "all"}]}
+    assert out["output_config"] == {"effort": "medium"} and "effort-2025-11-24" in claude_mod.request_betas(out)
     items = out["messages"]
     assert items[0]["role"] == "user" and items[0]["content"][0]["text"] == "open x"
     assert items[1]["content"][0]["name"] == "mcp_Read"
@@ -156,10 +160,53 @@ def test_claude_chat_body_becomes_messages() -> None:
     assert items[-1]["content"][-1]["cache_control"]["type"] == "ephemeral"
     assert items[-2]["content"][-1]["cache_control"]["type"] == "ephemeral"
     assert "cache_control" not in items[0]["content"][0]
-    assert _cache_control_count(out) == 4
+    assert _cache_control_count(out) == 3
 
 
-def test_claude_prompt_cache_stays_at_four_breakpoints_on_a_long_thread() -> None:
+def test_claude_betas_follow_the_cli_and_name_effort_only_when_sent() -> None:
+    plain, _ = claude_mod.chat_to_messages({"model": "claude-opus-5", "messages": [{"role": "user", "content": "hi"}]})
+    betas = claude_mod.request_betas(plain).split(",")
+    assert betas[:2] == ["claude-code-20250219", "oauth-2025-04-20"] and betas[-1] == "extended-cache-ttl-2025-04-11"
+    assert "effort-2025-11-24" not in betas and "context_management" not in plain and "thinking" not in plain
+    effortful, _ = claude_mod.chat_to_messages({"model": "claude-opus-5", "reasoning_effort": "high", "messages": [{"role": "user", "content": "hi"}]})
+    betas = claude_mod.request_betas(effortful).split(",")
+    assert betas[-2:] == ["effort-2025-11-24", "extended-cache-ttl-2025-04-11"]
+
+
+def _tool_loop(rounds: int) -> list[dict[str, Any]]:
+    messages: list[dict[str, Any]] = [{"role": "system", "content": "You are Daedalus."}, {"role": "user", "content": "start"}]
+    for n in range(rounds):
+        messages.append({"role": "assistant", "content": "", "tool_calls": [{"id": f"c{n}", "type": "function", "function": {"name": "Read", "arguments": "{}"}}]})
+        messages.append({"role": "tool", "tool_call_id": f"c{n}", "content": f"result {n}"})
+    return messages
+
+
+def _marked(payload: dict[str, Any]) -> list[int]:
+    return [index for index, message in enumerate(payload["messages"]) if isinstance(message["content"], list) and "cache_control" in message["content"][-1]]
+
+
+def test_claude_prompt_cache_anchors_a_long_thread_mid_history() -> None:
+    tools = [{"type": "function", "function": {"name": "Read", "parameters": {"type": "object", "properties": {}}}}]
+    short, _ = claude_mod.chat_to_messages({"model": "claude-opus-5", "messages": _tool_loop(10), "tools": tools})
+    # Under two strides there is nothing deep enough to be worth an anchor: identity and the tail.
+    assert _cache_control_count(short) == 3 and _marked(short) == [19, 20]
+    anchors = []
+    for rounds in range(16, 40):
+        out, _ = claude_mod.chat_to_messages({"model": "claude-opus-5", "messages": _tool_loop(rounds), "tools": tools})
+        marked = _marked(out)
+        assert _cache_control_count(out) == 4 and len(marked) == 3
+        anchor = marked[0]
+        tail = len(out["messages"]) - 1
+        # The anchor is a user turn, so an earlier request wrote an entry ending exactly there, and it trails the tail by one to two strides.
+        assert out["messages"][anchor]["role"] == "user"
+        assert claude_mod.CACHE_ANCHOR_STRIDE <= tail - anchor <= 2 * claude_mod.CACHE_ANCHOR_STRIDE
+        anchors.append(anchor)
+    # It holds still between strides, so consecutive requests mark the same prefix instead of a new one each:
+    # twenty-four requests, 33 to 79 messages long, cross three stride boundaries and use three anchors.
+    assert anchors == sorted(anchors) and len(set(anchors)) == 3
+
+
+def test_claude_prompt_cache_stays_within_four_breakpoints_on_a_short_thread() -> None:
     body = {
         "model": "claude-opus-5",
         "messages": [
@@ -174,7 +221,7 @@ def test_claude_prompt_cache_stays_at_four_breakpoints_on_a_long_thread() -> Non
         "tools": [{"type": "function", "function": {"name": "Read", "parameters": {"type": "object", "properties": {}}}}],
     }
     out, _ = claude_mod.chat_to_messages(body)
-    assert _cache_control_count(out) == 4
+    assert _cache_control_count(out) == 3
     assert "cache_control" not in out["messages"][0]["content"][0]
     assert out["messages"][-1]["content"][-1]["cache_control"]["type"] == "ephemeral"
     assert out["messages"][-2]["content"][-1]["cache_control"]["type"] == "ephemeral"
@@ -327,8 +374,9 @@ async def test_proxy_routes_claude(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
         assert sent.headers["authorization"] == "Bearer sk-ant-oat-test" and sent.headers["x-app"] == "cli"
         assert payload["system"][0]["text"].startswith("x-anthropic-billing-header:") and payload["tools"][0]["name"] == "mcp_Read"
         assert payload["system"][2]["text"] == "Be terse."
-        assert payload["tools"][-1]["cache_control"]["type"] == "ephemeral"
+        assert "cache_control" not in payload["tools"][-1] and payload["system"][1]["cache_control"]["type"] == "ephemeral"
         assert payload["messages"][0]["content"][-1]["cache_control"]["type"] == "ephemeral"
+        assert sent.headers["anthropic-beta"] == claude_mod.CLAUDE_BETAS and sent.headers["x-stainless-package-version"] == "0.128.0"
         models = await (await client.get("/claude/v1/models")).json()
         assert "claude-opus-5" in {m["id"] for m in models["data"]}
         usage = await (await client.get("/subscriptions/usage")).json()
@@ -523,3 +571,47 @@ async def test_codex_reasoning_phase_forwards_keepalive_comments() -> None:
     assert json.loads(out[5][6:])["choices"][0]["delta"]["content"] == "Hi"
     full = await subs.collect_completion(subs.responses_events_to_chunks(_lines(events), model="m"), model="m")
     assert full["choices"][0]["message"]["content"] == "Hi"
+
+
+def test_claude_header_windows_read_the_unified_rate_limit_headers() -> None:
+    headers = httpx.Headers({
+        "anthropic-ratelimit-unified-5h-utilization": "0.23",
+        "anthropic-ratelimit-unified-5h-reset": "1791714000",
+        "anthropic-ratelimit-unified-7d-utilization": "0.84",
+        "anthropic-ratelimit-unified-7d-reset": "1791835200",
+    })
+    windows = claude_mod.claude_header_windows(headers)
+    assert windows == [
+        {"name": "5h", "used_percent": 23.0, "resets_at": 1791714000.0},
+        {"name": "weekly", "used_percent": 84.0, "resets_at": 1791835200.0},
+    ]
+    assert claude_mod.claude_header_windows(httpx.Headers({})) == []
+
+
+async def test_claude_usage_429_after_a_restart_shows_the_reply_headers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # A fresh proxy has no snapshot, and the usage endpoint refusing left the screen with no bars at all.
+    def upstream(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url.endswith("/api/oauth/usage"):
+            return httpx.Response(429, json={"error": {"type": "rate_limit_error", "message": "Rate limited"}}, headers={"Retry-After": "0"})
+        if url.endswith("/api/oauth/profile"):
+            return httpx.Response(200, json={"organization": {"rate_limit_tier": "default_claude_max_20x"}})
+        return httpx.Response(404)
+
+    cred = tmp_path / ".credentials.json"
+    cred.write_text(json.dumps({"claudeAiOauth": {"accessToken": "sk-ant-oat-test", "refreshToken": "r", "expiresAt": 4102444800000}}))
+    monkeypatch.setattr(proxy, "CLAUDE_AUTH", claude_mod.ClaudeAuth(cred))
+    monkeypatch.setattr(proxy, "CODEX_AUTH", subs.CodexAuth(tmp_path / "no-codex.json"))
+    monkeypatch.setattr(proxy, "GROK_AUTH", subs.GrokAuth(tmp_path / "no-grok.json"))
+    monkeypatch.setattr(proxy, "USAGE_CACHE_SECONDS", 0.0)
+    monkeypatch.setattr(proxy, "_usage_cache", {})
+    monkeypatch.setattr(proxy, "_claude_usage_retry_at", 0.0)
+    monkeypatch.setattr(proxy, "_claude_header_snapshot", {"windows": [{"name": "5h", "used_percent": 23.0, "resets_at": 1.0}, {"name": "weekly", "used_percent": 100.0, "resets_at": 2.0}], "at": 5.0})
+    app = proxy.make_app()
+    await app["client"].aclose()
+    app["client"] = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    async with TestClient(TestServer(app)) as client:
+        usage = await (await client.get("/subscriptions/usage")).json()
+    claude = usage["claude"]
+    assert [w["name"] for w in claude["windows"]] == ["5h", "weekly"] and claude["windows"][0]["used_percent"] == 23.0
+    assert claude["limit_reached"] is True and "error" not in claude

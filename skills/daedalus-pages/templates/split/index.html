@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{title}}</title>
+<link rel="stylesheet" href="/pages/_kit/kit.css">
+<script src="/pages/_kit/daedalus.js"></script>
+<style>
+  /* The tool on the left, a strip for the page's agent on the right; on a phone the strip goes under the tool. */
+  .dk-split { --dk-side: 340px; grid-template-columns: minmax(0, 1fr) minmax(260px, var(--dk-side)); min-height: calc(100vh - var(--head-h)); }
+  .dk-split > .dk-pane + .dk-pane { display: flex; flex-direction: column; }
+  .tool { padding: var(--space-4) var(--page-pad); }
+  .state { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
+  .agent-log { flex: 1; overflow: auto; padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
+  .bubble { max-width: 90%; padding: 8px 10px; border-radius: var(--radius-md); background: var(--surface-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .bubble.mine { align-self: flex-end; background: color-mix(in srgb, var(--accent) 18%, var(--surface-1)); }
+  .bubble.note { align-self: center; background: transparent; color: var(--fg-2); font-size: var(--fs-12); padding: 2px 6px; }
+  .composer { display: flex; gap: var(--space-2); padding: var(--space-3); border-top: 1px solid var(--line); padding-bottom: max(var(--space-3), env(safe-area-inset-bottom)); }
+  .composer .dk-textarea { min-height: var(--ctl-h); height: var(--ctl-h); resize: none; }
+  @media (max-width: 1023px) { .dk-split { grid-template-columns: minmax(0, 1fr); } .agent-log { min-height: 160px; } }
+</style>
+</head>
+<body>
+<header class="dk-toolbar">
+  <b class="dk-h2">{{title}}</b>
+  <span class="dk-spacer"></span>
+  <span class="dk-badge" id="run-state" hidden></span>
+  <button class="dk-btn small ghost" id="open-agent" data-i18n="agent.open" hidden>Talk beside the page</button>
+</header>
+<div class="dk-split">
+  <section class="dk-pane tool dk-stack">
+    <!-- The tool itself goes here: a form, a canvas, a table, an editor. This one shows the state the
+         page shares with its agent, and asks the agent to work on it. -->
+    <div class="dk-card dk-stack">
+      <b class="dk-h2" data-i18n="tool.title">The tool</b>
+      <span class="dk-muted" data-i18n="tool.body">The agent keeps this page's state in its storage (PageStorage) and says when it changed (PageEmit "state.changed"). The page reads it again then.</span>
+      <pre class="state dk-mono" id="state" data-i18n="state.empty">Nothing stored yet.</pre>
+      <div class="dk-row-flex">
+        <button class="dk-btn primary" id="improve" data-i18n="tool.improve">Ask the agent to improve it</button>
+        <button class="dk-btn" id="reload-state" data-i18n="tool.reload">Read again</button>
+      </div>
+    </div>
+  </section>
+  <aside class="dk-pane" aria-labelledby="agent-title">
+    <div class="dk-toolbar"><b class="dk-h2" id="agent-title" data-i18n="agent.title">Agent</b></div>
+    <div class="agent-log" id="log">
+      <div class="dk-empty" id="empty"><span data-i18n="agent.empty">Ask the page's agent to do something with this tool.</span></div>
+    </div>
+    <form class="composer" id="composer">
+      <textarea class="dk-textarea" id="text" rows="1" data-i18n-placeholder="agent.placeholder" placeholder="Message"></textarea>
+      <button class="dk-btn primary" type="submit" data-i18n="agent.send">Send</button>
+    </form>
+  </aside>
+</div>
+<script>
+  // The page's agent is the session bound to this page. Daedalus.agent.ask sends it a message marked as
+  // the page's; its answers and runs come back through Daedalus.agent.on, forwarded by the app while
+  // the page is open in it; what it pushes with PageEmit arrives as Daedalus.on(event). The state both
+  // work on lives in the page's storage, so it outlasts the page being closed.
+  const STRINGS = {
+    en: { "agent.open": "Talk beside the page", "tool.title": "The tool", "tool.body": "The agent keeps this page's state in its storage (PageStorage) and says when it changed (PageEmit \"state.changed\"). The page reads it again then.",
+          "state.empty": "Nothing stored yet.", "tool.improve": "Ask the agent to improve it", "tool.reload": "Read again", "tool.improve.text": "Look at the state this page shows and improve it. Keep the result under the key \"state\" and tell the page with PageEmit \"state.changed\".",
+          "agent.title": "Agent", "agent.empty": "Ask the page's agent to do something with this tool.", "agent.placeholder": "Message", "agent.send": "Send",
+          "agent.sent": "Sent; the agent is on it.", "agent.none": "This page has no agent yet: pick one with the Agent button in the page's header.", "agent.failed": "Not sent: {error}",
+          "run.running": "Working…", "run.waiting": "Waiting for you", "run.completed": "Done", "run.failed": "Failed", "run.cancelled": "Stopped", "state.changed": "The agent updated the state." },
+    ru: { "agent.open": "Говорить рядом со страницей", "tool.title": "Инструмент", "tool.body": "Агент хранит состояние страницы в её хранилище (PageStorage) и сообщает об изменениях (PageEmit \"state.changed\"). Тогда страница читает его заново.",
+          "state.empty": "Пока ничего не сохранено.", "tool.improve": "Попросить агента улучшить", "tool.reload": "Прочитать заново", "tool.improve.text": "Посмотри на состояние, которое показывает эта страница, и улучши его. Сохрани результат под ключом \"state\" и сообщи странице через PageEmit \"state.changed\".",
+          "agent.title": "Агент", "agent.empty": "Попросите агента страницы что-нибудь сделать с этим инструментом.", "agent.placeholder": "Сообщение", "agent.send": "Отправить",
+          "agent.sent": "Отправлено, агент взялся.", "agent.none": "У страницы пока нет агента: выберите его кнопкой «Агент» в заголовке страницы.", "agent.failed": "Не отправлено: {error}",
+          "run.running": "Работает…", "run.waiting": "Ждёт вас", "run.completed": "Готово", "run.failed": "Ошибка", "run.cancelled": "Остановлено", "state.changed": "Агент обновил состояние." },
+  };
+  let lang = "en";
+  const t = (key, vars = {}) => ((STRINGS[lang] && STRINGS[lang][key]) || STRINGS.en[key] || key).replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? "");
+  function translate() {
+    document.documentElement.lang = lang;
+    document.querySelectorAll("[data-i18n]").forEach((el) => { if (el.id !== "state" || !el.dataset.filled) el.textContent = t(el.dataset.i18n); });
+    document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => { el.placeholder = t(el.dataset.i18nPlaceholder); });
+  }
+  function bubble(text, kind) {
+    document.getElementById("empty")?.remove();
+    const node = document.createElement("div");
+    node.className = "bubble" + (kind ? " " + kind : "");
+    node.textContent = text;
+    const log = document.getElementById("log");
+    log.append(node);
+    log.scrollTop = log.scrollHeight;
+  }
+  async function ask(text, options) {
+    try {
+      await Daedalus.agent.ask(text, options);
+      if (!options || !options.silent) bubble(t("agent.sent"), "note");
+    } catch (error) {
+      bubble(error.status === 409 ? t("agent.none") : t("agent.failed", { error: error.message }), "note");
+    }
+  }
+  async function readState() {
+    const value = await Daedalus.storage.get("state");
+    const box = document.getElementById("state");
+    box.dataset.filled = value == null ? "" : "1";
+    box.textContent = value == null ? t("state.empty") : JSON.stringify(value, null, 2);
+  }
+
+  document.getElementById("composer").onsubmit = (event) => {
+    event.preventDefault();
+    const box = document.getElementById("text");
+    const text = box.value.trim();
+    if (!text) return;
+    bubble(text, "mine");
+    box.value = "";
+    ask(text);
+  };
+  document.getElementById("text").addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); document.getElementById("composer").requestSubmit(); }
+  });
+  document.getElementById("improve").onclick = () => { bubble(t("tool.improve"), "mine"); ask(t("tool.improve.text")); };
+  document.getElementById("reload-state").onclick = readState;
+  document.getElementById("open-agent").onclick = () => Daedalus.agent.open().catch(() => undefined);
+
+  // The agent's side, as the app forwards it.
+  Daedalus.agent.on("message", (reply) => bubble(reply.text));
+  Daedalus.agent.on("run", (run) => {
+    const badge = document.getElementById("run-state");
+    const word = t("run." + run.status);
+    badge.hidden = word === "run." + run.status || run.status === "idle";
+    badge.textContent = word;
+    badge.className = "dk-badge " + (run.status === "running" ? "info" : run.status === "failed" ? "bad" : run.status === "waiting" ? "warn" : "ok");
+  });
+  Daedalus.on("state.changed", () => { readState(); bubble(t("state.changed"), "note"); });
+
+  Daedalus.ready().then(async (context) => {
+    lang = context.lang in STRINGS ? context.lang : "en";
+    translate();
+    readState().catch(() => undefined);
+    const agent = await Daedalus.agent.session().catch(() => null);
+    document.getElementById("open-agent").hidden = !agent || agent.gone || !context.embedded;
+  });
+  Daedalus.theme.onChange((theme) => { if (theme.lang && theme.lang !== lang) { lang = theme.lang in STRINGS ? theme.lang : "en"; translate(); } });
+</script>
+</body>
+</html>

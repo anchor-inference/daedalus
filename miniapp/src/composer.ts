@@ -257,11 +257,6 @@ export function pendingApproval(messages: readonly MessageLike[], seen: Readonly
   return null;
 }
 
-/** Whether the answers to the agent's questions are complete enough to send: one for each question. */
-export function answersComplete(questions: readonly Question[], answers: readonly { selected: string[]; custom: string }[]): boolean {
-  return questions.length > 0 && answers.length === questions.length && answers.every((a) => a.selected.length > 0 || a.custom.trim().length > 0);
-}
-
 /** What makes the agent's questions the same questions, whatever object carries them. The session is
  *  read again every few seconds, and every read carries the pending questions as a new array: keyed on
  *  that array, the answers the operator had started were wiped by a refresh between picking an option

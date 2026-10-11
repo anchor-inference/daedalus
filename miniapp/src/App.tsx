@@ -1,7 +1,7 @@
 import { Component, Suspense, lazy, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { api, SessionList, SessionSummary, telegram, TerminalList } from "./api";
-import { StatusLabel } from "./ui/components";
-import { ConfirmHost, Sheet, ToastHost, toast as showToast } from "./ui/dialogs";
+import { api, SessionList, telegram, TerminalList } from "./api";
+import { ConfirmHost, ToastHost, toast as showToast } from "./ui/dialogs";
+import { SessionPicker } from "./sessionpicker";
 import type { AuthConfig } from "./screens/Login";
 import type { OnboardingState } from "./screens/AddModel";
 import * as passkeys from "./passkeys";
@@ -39,6 +39,8 @@ import { Mode, modeHome, modeOf, rememberMode, storedMode } from "./mode";
 import { applyAppearance } from "./appearance";
 import { OrchestrationList, OrchestrationSidebar, useOrchestrationWaiting } from "./orchestration";
 import { Rail } from "./rail";
+import { useNav } from "./usenav";
+import { currentId } from "./navconfig";
 import { SessionScreen, chunk, chunkVerdict, mayReload, retried, whenIdle } from "./chunks";
 
 /** A chunk that would not load: the build moved under an open page, or its download dropped. */
@@ -67,6 +69,7 @@ const BrowserFullScreen = lazy(retried(() => import("./screens/BrowserFull"), (m
 const TerminalFullScreen = lazy(retried(() => import("./screens/TerminalFull"), (m) => ({ default: m.TerminalFullScreen })));
 const HarnessesScreen = lazy(retried(() => import("./screens/Harnesses"), (m) => ({ default: m.HarnessesScreen })));
 const ServicesScreen = lazy(retried(() => import("./screens/Services"), (m) => ({ default: m.ServicesScreen })));
+const PageHostScreen = lazy(retried(() => import("./screens/PageHost"), (m) => ({ default: m.PageHostScreen })));
 const LoginScreen = lazy(retried(() => import("./screens/Login"), (m) => ({ default: m.LoginScreen })));
 const ProjectScreen = chunk(retried(() => import("./project/ProjectScreen"), (m) => ({ default: m.ProjectScreen })));
 const ProjectSidebar = chunk(retried(() => import("./project/ProjectSidebar"), (m) => ({ default: m.ProjectSidebar })));
@@ -286,6 +289,7 @@ export function App() {
   const proposals = useQuery<{ status: string }[]>(authed && selfdev !== "off" ? "/api/proposals" : null, { pollMs: 60000, staleMs: 30000 });
   const counts: Counts = { inbox: notifications.unseen, changes: (proposals.data ?? []).filter((p) => p.status === "pending").length };
   useShortcuts(openPalette, selfdev);
+  const nav = useNav(selfdev, counts, !!authed);
   // Three more on a desktop: the menu, the sidebar and a new chat, each with a modifier so a text field never eats them.
   useEffect(() => {
     if (!wide) return;
@@ -428,7 +432,8 @@ export function App() {
   // Telegram's own back button leaves a detail; the vertical swipe must not close the app mid-chat.
   // Orchestration's list is the mode's top on a phone, as the start screen is Agents'; on a desktop the
   // main chat is, with the list in the column beside it.
-  const inDetail = !!route.session || (!!route.detail && !orchestrationList) || !!focusProject || (mainChat && !wide);
+  // A page's slug is its address, not a detail under a list: it is a top-level destination.
+  const inDetail = !!route.session || (!!route.detail && !orchestrationList && route.screen !== "page") || !!focusProject || (mainChat && !wide);
   useEffect(() => {
     const tg = telegram();
     if (!tg?.initData || !tg.BackButton) return;
@@ -518,7 +523,9 @@ export function App() {
       ...projectList.filter((p) => !p.system && !p.settings.ephemeral && !p.settings.archived).map((p) => ({ id: `open-${p.id}`, label: t("focus.palette", { name: p.name }), icon: "conductor" as const, run: () => navigate(projectHome(p.id)) })),
       ...projectList.filter((p) => !p.system && !p.settings.ephemeral && !p.settings.archived).map((p) => ({ id: `team-${p.id}`, label: t("shell.search.team", { name: p.name }), icon: "bots" as const, run: () => navigate(projectPagePath(p.id, "team")) })),
       ...projectList.filter((p) => !p.system && !p.settings.ephemeral && !p.settings.archived).map((p) => ({ id: `board-${p.id}`, label: t("shell.search.board", { name: p.name }), icon: "board" as const, run: () => navigate(projectPagePath(p.id, "board")) })),
-      ...visibleScreens(SCREENS, selfdev).map((s) => ({ id: `go-${s}`, label: t("shell.search.goto", { name: screenTitle(s) }), icon: "back" as const, run: () => navigate(pathFor(s)) })),
+      ...visibleScreens(SCREENS, selfdev).filter((s) => !nav.hidden.has(s)).map((s) => ({ id: `go-${s}`, label: t("shell.search.goto", { name: screenTitle(s) }), icon: "back" as const, run: () => navigate(pathFor(s)) })),
+      // A page is a destination like a screen, offered under its own name and glyph.
+      ...nav.shown.filter((it) => it.kind === "page").map((it) => ({ id: `go-${it.id}`, label: t("shell.search.goto", { name: it.title }), icon: it.icon, iconPath: it.iconPath, run: () => navigate(it.path) })),
       // An orchestrated session opens inside its project, not in the Agents list.
       ...sessions.filter((s) => !s.metadata?.dispatcher).map((s) => ({ id: `s-${s.id}`, label: s.title, hint: orchestratedIds.has(s.project_id) ? `${s.project} · ${s.model ?? ""}` : s.model ?? "", icon: orchestratedIds.has(s.project_id) ? "conductor" as const : "bots" as const, run: () => (orchestratedIds.has(s.project_id) ? navigate(orchestratedSessionPath(s.id, s.project_id)) : open(s.id)) })),
       ...terminalItems,
@@ -611,6 +618,7 @@ export function App() {
         {route.screen === "terminals" && route.detail && <TerminalFullScreen id={route.detail} beside={route.query.get("with")} toast={showToast} />}
         {route.screen === "browser" && route.detail && <BrowserFullScreen id={route.detail} toast={showToast} />}
         {route.screen === "services" && <ServicesScreen onOpen={open} toast={showToast} />}
+        {route.screen === "page" && route.detail && <PageHostScreen slug={route.detail} toast={showToast} />}
         {route.screen === "harnesses" && <HarnessesScreen toast={showToast} />}
         {route.screen === "memory" && <MemoryScreen toast={showToast} onOpen={open} />}
         {route.screen === "usage" && <UsageScreen onOpen={open} />}
@@ -631,8 +639,8 @@ export function App() {
   // Inside a project the main orchestrator stays one click away, pinned above the project's column.
   const pinned = <MainEntry current={false} />;
   // A terminal full screen takes the column the way a conversation does: no scrolling page around it
-  // and, on a phone, no tab bar under it.
-  const terminalOpen = (route.screen === "terminals" || route.screen === "browser") && !!route.detail;
+  // and, on a phone, no tab bar under it. So does a custom page, which scrolls inside its own frame.
+  const terminalOpen = (route.screen === "terminals" || route.screen === "browser" || route.screen === "page") && !!route.detail;
   // A project on a phone keeps a bar of its own: four tabs and a More (project/phone.tsx); a session
   // inside it is a detail with a back of its own and no bar under it. Everywhere else a phone has no
   // bottom bar at all: the destinations are in the drawer, which every top bar's hamburger opens.
@@ -649,6 +657,7 @@ export function App() {
           counts={counts}
           waiting={waiting}
           selfdev={selfdev}
+          nav={nav}
           menuOpen={menu}
           onMenu={() => setMenu((m) => !m)}
           menuButton={menuButton}
@@ -684,7 +693,7 @@ export function App() {
       )}
         </div>{!columnFolded && <PaneHandle side="right" drag={sidebarDrag} />}</div>
       )}
-      {wide && menu && <NavMenu screen={route.screen} counts={counts} selfdev={selfdev} onClose={() => setMenu(false)} opener={menuButton.current} />}
+      {wide && menu && <NavMenu current={currentId(route.screen, route.detail)} nav={nav} selfdev={selfdev} onClose={() => setMenu(false)} opener={menuButton.current} />}
       <div ref={main} className={`main ${sessionId || focusChat || terminalOpen || diagramOpen ? "chat-open" : ""}`}>
         <MaintenanceNotice />
         {offline && <div className="offline-strip" role="status">{t("app.offline")}</div>}
@@ -707,8 +716,8 @@ export function App() {
           </Suspense>
         </ErrorBoundary>
       )}
-      {!wide && <AppDrawer mode={mode} counts={counts} waiting={waiting} selfdev={selfdev} projects={agentProjects} onProjects={() => setSwitching(true)} />}
-      {picking && sessionId && <SessionPicker exclude={sessionId} onPick={(id) => { navigate(sessionPath(sessionId, id)); setPicking(false); }} onClose={() => setPicking(false)} />}
+      {!wide && <AppDrawer mode={mode} nav={nav} waiting={waiting} selfdev={selfdev} projects={agentProjects} onProjects={() => setSwitching(true)} />}
+      {picking && sessionId && <SessionPicker title={t("app.beside.title")} exclude={sessionId} onPick={(id) => { navigate(sessionPath(sessionId, id)); setPicking(false); }} onClose={() => setPicking(false)} />}
       <NotificationToasts />
       <PetHost needsReply={notifications.needs_you > 0} activity={route.screen} />
       <UpdateHost />
@@ -764,28 +773,4 @@ function PasskeyNudge() {
 /** Whether the layout is the wide one (the rail and the sidebar beside the screen): the same breakpoint as the stylesheet. */
 function useWide(): boolean {
   return useMedia("(min-width: 1024px)");
-}
-
-/** Which session to open beside the current one. */
-function SessionPicker({ exclude, onPick, onClose }: { exclude: string | null; onPick: (id: string) => void; onClose: () => void }) {
-  const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
-  const [filter, setFilter] = useState("");
-  useEffect(() => {
-    api.get<SessionList>("/api/sessions").then((listing) => setSessions(listing.sessions)).catch(() => setSessions([]));
-  }, []);
-  const q = filter.trim().toLowerCase();
-  const items = (sessions ?? []).filter((s) => s.id !== exclude && (!q || s.title.toLowerCase().includes(q) || s.id.includes(q)));
-  return (
-    <Sheet title={t("app.beside.title")} onClose={onClose} size="narrow">
-      <input className="field" autoFocus placeholder={t("app.beside.filter")} value={filter} onChange={(e) => setFilter(e.target.value)} style={{ marginBottom: 8 }} />
-      {sessions === null && <div className="empty">{t("common.loading")}</div>}
-      {sessions !== null && items.length === 0 && <div className="empty">{t("app.beside.empty")}</div>}
-      {items.map((s) => (
-        <button key={s.id} className="menu-item" onClick={() => onPick(s.id)}>
-          <span className="grow truncate">{s.title}</span>
-          <StatusLabel status={s.status} />
-        </button>
-      ))}
-    </Sheet>
-  );
 }

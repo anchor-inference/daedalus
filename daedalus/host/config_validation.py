@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -78,21 +79,31 @@ def _group(path: str) -> Literal["provider", "mcp", "runtime"]:
     return "runtime"
 
 
-UNKNOWN_REFERENCE_PATHS = frozenset({"compaction.preset"})
+UNKNOWN_REFERENCE_PATHS = frozenset({"compaction.preset", "model.preset", "model.chain"})
 """Problems on these paths name something that does not exist, not a malformed value; the save answers 422."""
 
 
 def _dangling_references(current: RuntimeConfig, candidate: RuntimeConfig) -> list[ConfigProblem]:
-    """A newly chosen preset id that names no configured preset.
+    """A newly chosen preset id — the summary model, the default model, a fallback — that names no configured preset.
 
     Only a change is refused. A preset chosen earlier and deleted since stays in the configuration on
     purpose — the runtime summarises with the session's own model until it is replaced, and the app
     shows it as missing — so every unrelated save that carries the section along must still pass.
     """
+    problems: list[ConfigProblem] = []
     chosen = candidate.compaction.preset
-    if not chosen or chosen == current.compaction.preset or chosen in candidate.presets:
-        return []
-    return [ConfigProblem(group="runtime", path="compaction.preset", message=f"no such model preset {chosen!r} for the summary model; pick one from Settings → Models")]
+    if chosen and chosen != current.compaction.preset and chosen not in candidate.presets:
+        problems.append(ConfigProblem(group="runtime", path="compaction.preset", message=f"no such model preset {chosen!r} for the summary model; pick one from Settings → Models"))
+    # The default model and its fallbacks are chosen in the app through a patch that refuses an unknown
+    # id itself; a candidate built any other way (the agent's SettingsChange) met no such check, and a
+    # default naming nothing would leave every new run without a model.
+    chosen = candidate.model.preset
+    if chosen and chosen != current.model.preset and chosen not in candidate.presets:
+        problems.append(ConfigProblem(group="runtime", path="model.preset", message=f"no such model preset {chosen!r}; the presets are {', '.join(sorted(candidate.presets)) or 'none'}"))
+    added = [pid for pid in candidate.model.chain if pid not in current.model.chain and pid not in candidate.presets]
+    if added:
+        problems.append(ConfigProblem(group="runtime", path="model.chain", message=f"no such model preset {', '.join(map(repr, added))} for the fallback chain"))
+    return problems
 
 
 def validate_candidate(current: RuntimeConfig, raw: dict[str, Any], *, base_revision: str) -> tuple[ConfigValidation, RuntimeConfig | None]:
@@ -122,4 +133,23 @@ def validate_candidate(current: RuntimeConfig, raw: dict[str, Any], *, base_revi
     ), candidate
 
 
-__all__ = ["UNKNOWN_REFERENCE_PATHS", "ConfigConflict", "ConfigProblem", "ConfigValidation", "EffectiveConfigChange", "config_revision", "validate_candidate"]
+def _merged(base: Any, patch: Mapping[str, Any]) -> dict[str, Any]:
+    out = dict(base) if isinstance(base, dict) else {}
+    for key, value in patch.items():
+        out[key] = _merged(out.get(key), value) if isinstance(value, Mapping) else value
+    return out
+
+
+def patched(current: RuntimeConfig, patch: Mapping[str, Any]) -> tuple[ConfigValidation, RuntimeConfig | None]:
+    """``patch`` merged over the current configuration and validated against the current revision.
+
+    For a command that changes a field or two (``/approval``, ``/verbosity``). Those used to set the
+    field on the live configuration and save that same object: the revision check had nothing to
+    compare, and the rollback after a failed reload restored the object it had just changed, so a
+    reload that failed left the change in force with nothing saying so. A candidate is a new object,
+    and the save's rollback has the old one to go back to.
+    """
+    return validate_candidate(current, _merged(current.model_dump(mode="json"), patch), base_revision=config_revision(current))
+
+
+__all__ = ["UNKNOWN_REFERENCE_PATHS", "ConfigConflict", "ConfigProblem", "ConfigValidation", "EffectiveConfigChange", "config_revision", "patched", "validate_candidate"]

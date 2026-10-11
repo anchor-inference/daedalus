@@ -4,7 +4,7 @@
 // hash along, or the link opens the chat at its end as if it pointed at nothing.
 
 import { afterEach, describe, expect, it } from "vitest";
-import { canonical, markAnchor, navigate } from "./router";
+import { canonical, markAnchor, navigate, pagePath, parse } from "./router";
 
 afterEach(() => {
   window.history.replaceState(null, "", "/");
@@ -16,6 +16,15 @@ describe("canonical", () => {
     expect(canonical("/app/main#m42")).toBe("/app/orchestration#m42");
     expect(canonical("/app/main?panel=jobs#m42")).toBe("/app/orchestration?panel=jobs#m42");
     expect(canonical("/app/agents/s1#m42")).toBe("/app/agents/s1#m42");
+  });
+});
+
+describe("parse", () => {
+  it("reads a published page from /app/p/<slug>, and a screen's own name is never taken for one", () => {
+    expect(parse("/app/p/dosing-calc", "")).toMatchObject({ screen: "page", detail: "dosing-calc" });
+    expect(parse("/app/p/inbox", "")).toMatchObject({ screen: "page", detail: "inbox" });
+    expect(parse("/app/inbox", "")).toMatchObject({ screen: "inbox", detail: null });
+    expect(parse("/app/page/x", "").screen).toBe("agents");
   });
 });
 
@@ -44,5 +53,14 @@ describe("navigate", () => {
     window.history.replaceState(null, "", "/app/orchestration?panel=jobs");
     markAnchor(9);
     expect(window.location.pathname + window.location.search + window.location.hash).toBe("/app/orchestration?panel=jobs#m9");
+  });
+});
+
+describe("custom pages", () => {
+  it("routes /app/p/<slug> to the page screen with the slug as its detail", () => {
+    const route = parse("/app/p/bakery-orders", "");
+    expect(route.screen).toBe("page");
+    expect(route.detail).toBe("bakery-orders");
+    expect(pagePath("bakery-orders")).toBe("/app/p/bakery-orders");
   });
 });

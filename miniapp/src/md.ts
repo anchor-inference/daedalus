@@ -66,6 +66,8 @@ function inline(s: string): string {
   // Only known app routes are accepted as relative links; arbitrary relative paths could
   // turn model text into a request to an authenticated API endpoint.
   s = s.replace(/\[([^\]]+)\]\((\/app\/diagrams\/[a-f0-9]{32})\)/g, '<a href="$2">$1</a>');
+  // A custom page an agent built: its screen, and nothing past the slug but the draft's question.
+  s = s.replace(/\[([^\]]+)\]\((\/app\/p\/[a-z0-9][a-z0-9-]{0,62}(?:\?draft=1)?)\)/g, '<a href="$2">$1</a>');
   s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, '$1<a href="$2" target="_blank" rel="noreferrer">$2</a>');
   return s.replace(/ \uE000(\d+)\uE000 /g, (_, i) => codes[Number(i)]);
 }

@@ -1,24 +1,7 @@
-// The menu's model without its markup: which groups an installation has, where the arrows go, and
-// which key combinations are the shell's.
+// The menu's keyboard without its markup: where the arrows go, and which key combinations are the shell's.
 
 import { describe, expect, it } from "vitest";
-import { GROUPS, latinKey, menuSections, moveIndex, shortcutFor } from "./navigation";
-
-describe("the sections", () => {
-  it("list every destination once, in the rail's old order, with the terminals after the board and the command-line agents after them", () => {
-    const all = menuSections("server").flatMap((g) => g.items);
-    expect(all).toEqual(["agents", "voice", "inbox", "board", "calendar", "diagrams", "terminals", "harnesses", "changes", "schedules", "services", "memory", "usage", "health"]);
-    expect(new Set(all).size).toBe(all.length);
-    expect(menuSections("server").map((g) => g.key)).toEqual(GROUPS.map((g) => g.key));
-  });
-
-  it("leave out what the installation does not have, and a group that is left empty", () => {
-    const off = menuSections("off");
-    expect(off.flatMap((g) => g.items)).not.toContain("changes");
-    expect(off.find((g) => g.key === "autonomy")?.items).toEqual(["schedules", "services"]);
-    expect(off.every((g) => g.items.length > 0)).toBe(true);
-  });
-});
+import { latinKey, moveIndex, shortcutFor } from "./navigation";
 
 describe("the arrows", () => {
   it("move down and up and wrap at both ends", () => {

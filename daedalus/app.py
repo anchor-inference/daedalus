@@ -90,6 +90,11 @@ class Application:
                     self.manager.reload_config(old)
                 raise
             self.config = config
+            if self.front is not None:
+                # The chat front holds the configuration it was built with. Only some savers handed it
+                # the new one, so after any other save a chat command read, and saved back, the
+                # configuration as it was before that save.
+                self.front.config = config
             self.speech.config = config
             self.tts.config = config
             was = old.stt

@@ -684,7 +684,7 @@ class ResultToolsConfig(BaseModel):
     ``[tools.exec] max_output_chars`` bounds what ONE call returns. It says
     nothing about the twenty results already in the transcript, which the
     request carries again on every turn — which is how a handful of large reads
-    fills the window. These three bound that: past the fresh window, a long
+    fills the window. These four bound that: past the fresh window, a long
     result is cut to its head in the request only, and the whole result stays
     in the stored history.
     """
@@ -697,6 +697,14 @@ class ResultToolsConfig(BaseModel):
     trim_batch_chars: int = Field(default=40_000, ge=0, le=5_000_000)
     """How much trimmable excess must build up before any trimming happens. Every trim moves the
     prompt prefix and costs a cache miss on the whole request, so it is done in batches."""
+    trim_min_share: float = Field(default=0.25, ge=0.0, le=1.0)
+    """The smallest share of the request a trim must save. The cache breakpoints sit on the system
+    prompt and the last messages, and a hit is found only there or a few blocks short, so a trim
+    further back loses the whole conversation: the provider writes it into its cache again at 1.25
+    times the input price instead of reading it at 0.1. A trim measured on a 465,000-token request
+    saved 42,000 characters of 1.6 million and was served only the system prompt from the cache —
+    repaid after hundreds of calls, if ever. At 0.25 a trim pays back within about fifty; 0 leaves
+    only the batch threshold."""
 
 
 class JobsToolsConfig(BaseModel):
@@ -1201,6 +1209,7 @@ STAFF_BLOCKED_TOOLS = [
     "SelfRollback",
     "SelfWorkspace",
     "Notify",
+    "SettingsChange",
 ]
 """What a staff member of a project may not call. It asks the orchestrator, not the operator
 (``AskOrchestrator``), reports to the orchestrator rather than notifying the operator itself, works
@@ -1211,10 +1220,11 @@ not through a mode, so editing a mode cannot hand a staff member any of them."""
 STAFF_ONLY_TOOLS = ["Report", "AskOrchestrator"]
 """The tools that exist for staff alone; every other session is blocked from them."""
 
-SUBAGENT_BLOCKED_TOOLS = ["Notify"]
+SUBAGENT_BLOCKED_TOOLS = ["Notify", "SettingsChange"]
 """What a subagent may not call, whoever its leader is. Its work reaches the operator through the
 agent that started it, which decides what is worth the operator's attention; a subagent that could
-notify on its own would put a dozen workers' progress on the operator's phone. Enforced by the host
+notify on its own would put a dozen workers' progress on the operator's phone, and one that changed
+the settings would post its card in a chat the operator does not read. Enforced by the host
 beside the staff rule, so no mode or leader can hand it back."""
 
 ORCHESTRATOR_ONLY_TOOLS = [
@@ -1625,6 +1635,22 @@ class TerminalsConfig(BaseModel):
     model — a password prompt's surroundings, another project's secrets."""
 
 
+class PagesConfig(BaseModel):
+    """Custom pages: the operator's own screens, kept as files in the state volume and served at
+    ``/pages/<slug>/``. The caps exist only so a runaway writer cannot fill the disk; they are never
+    meant to shape what a page may be, so they are generous and 0 lifts each one entirely."""
+
+    max_page_bytes: int = Field(default=2 << 30, ge=0)
+    """The most one page's draft may hold, all files together. 0 = no limit."""
+    max_files: int = Field(default=0, ge=0)
+    """The most files one page's draft may hold. 0 = no limit."""
+    keep_versions: int = Field(default=20, ge=1)
+    """Published versions kept per page for rollback; older ones are deleted at the next publish.
+    The live version is always kept, whatever its age."""
+    storage_value_max_bytes: int = Field(default=0, ge=0)
+    """The largest value a page may keep under one key of its storage. 0 = no limit."""
+
+
 class BrowserRuleConfig(BaseModel):
     """An operator's rule about sensitive browser actions on one site: ``allow`` lets the kinds named
     through without asking, ``deny`` refuses them, ``ask`` asks where nothing else would."""
@@ -1725,6 +1751,60 @@ class BrowserConfig(BaseModel):
     classified as a ref's would be, so a sensitive one is still asked about."""
 
 
+NAV_ID = re.compile(r"^(page:)?[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
+"""A navigation item: a built-in screen's name (``inbox``) or a page's slug (``page:dosing``)."""
+NAV_ICON = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
+NAV_LIST_MAX = 200
+
+
+class NavigationConfig(BaseModel):
+    """Where each destination of the app sits: the desktop rail, its More menu, the phone drawer.
+
+    Every list empty is the layout the app ships with. An id the app does not know (a page that was
+    removed, a screen of an older build) is kept here and ignored where it is drawn, so removing a
+    page never makes the saved navigation invalid. A malformed id is refused: the agent may write
+    this section, and a typo that silently vanished would read as a change that did not take.
+    """
+
+    rail: list[str] = Field(default_factory=list)
+    """The desktop rail, top to bottom. A built-in place not listed anywhere keeps its usual spot."""
+    more: list[str] = Field(default_factory=list)
+    """Items under the rail's More menu, in order within their group."""
+    drawer: list[str] = Field(default_factory=list)
+    """The phone drawer's places, top to bottom. Non-empty means the whole drawer: everything else
+    waits in the phone's More sheet. Empty is each mode's usual drawer."""
+    hidden: list[str] = Field(default_factory=list)
+    """Never shown, on any device. It wins over the three lists above."""
+    icons: dict[str, str] = Field(default_factory=dict)
+    """Item id → the name of a built-in icon to draw in place of its own."""
+
+    @field_validator("rail", "more", "drawer", "hidden")
+    @classmethod
+    def _ids(cls, value: list[str]) -> list[str]:
+        if len(value) > NAV_LIST_MAX:
+            raise ValueError(f"at most {NAV_LIST_MAX} items")
+        seen: list[str] = []
+        for item in value:
+            item = item.strip()
+            if not NAV_ID.match(item):
+                raise ValueError(f"{item!r} is not a screen name or page:<slug>")
+            if item not in seen:
+                seen.append(item)
+        return seen
+
+    @field_validator("icons")
+    @classmethod
+    def _icons(cls, value: dict[str, str]) -> dict[str, str]:
+        if len(value) > NAV_LIST_MAX:
+            raise ValueError(f"at most {NAV_LIST_MAX} icons")
+        for key, name in value.items():
+            if not NAV_ID.match(key):
+                raise ValueError(f"{key!r} is not a screen name or page:<slug>")
+            if not NAV_ICON.match(name):
+                raise ValueError(f"{name!r} is not an icon name")
+        return value
+
+
 class HeartbeatConfig(BaseModel):
     """A periodic unattended check driven by the HEARTBEAT.md file on the state volume."""
 
@@ -1735,6 +1815,22 @@ class HeartbeatConfig(BaseModel):
     preset: str = ""
     """Model preset for heartbeat runs; empty = the default preset."""
     max_runs_per_day: int = Field(default=24, ge=1)
+
+
+class AgentSettingsConfig(BaseModel):
+    """What the agent's SettingsChange may apply without asking, and how long a request waits for an answer.
+
+    Everything else the agent may change goes to the operator as an Apply / Reject card. What it may
+    never touch is not here at all: that list is code (``daedalus/host/agent_settings.py``), so no
+    change through this section can widen it, and this section itself always waits for the operator.
+    """
+
+    auto_apply: list[str] = Field(default_factory=lambda: ["navigation", "answer_language", "compaction"])
+    """Sections a change of the agent's applies at once, the operator told afterwards in the chat. The
+    defaults change how things look and read, never what the agent may do or spend: the rail and the
+    drawer, the language of the answers, and when and how long the history is summarised."""
+    proposal_hours: int = Field(default=24, ge=1, le=24 * 14)
+    """How long a change waiting for the operator stays open; then it expires and the agent is told."""
 
 
 class TelegramConfig(BaseModel):
@@ -1835,9 +1931,12 @@ class RuntimeConfig(BaseModel):
     loops: LoopsConfig = Field(default_factory=LoopsConfig)
     terminals: TerminalsConfig = Field(default_factory=TerminalsConfig)
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
+    navigation: NavigationConfig = Field(default_factory=NavigationConfig)
+    pages: PagesConfig = Field(default_factory=PagesConfig)
     modes: dict[str, ModeConfig] = Field(default_factory=lambda: {k: v.model_copy() for k, v in DEFAULT_MODES.items()})
     webhooks: dict[str, WebhookConfig] = Field(default_factory=dict)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+    agent_settings: AgentSettingsConfig = Field(default_factory=AgentSettingsConfig)
     answer_language: str = "auto"
     """"auto" answers in the language of the request; otherwise a language name."""
 
@@ -2366,6 +2465,7 @@ __all__ = [
     "NoModelConfigured",
     "preset_id_for",
     "ApprovalMode",
+    "AgentSettingsConfig",
     "BalanceConfig",
     "LimitsConfig",
     "McpConfig",

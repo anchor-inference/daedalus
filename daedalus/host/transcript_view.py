@@ -20,6 +20,7 @@ from typing import Any
 from protocore.contracts.blob import IBlobStore
 from protocore.contracts.types import (
     COMPACTION_SUMMARY_METADATA_KEY,
+    OPERATOR_WORDS_METADATA_KEY,
     Message,
     MessageRole,
     TextBlock,
@@ -141,6 +142,9 @@ def message_view(message: Message) -> dict[str, Any]:
         "secrets": handed if isinstance(handed, list) else None,
         # A member's steps for the operator the host put in the chat, drawn as a card of their own.
         "operator_steps": message.metadata.get("daedalus.operator_steps") if isinstance(message.metadata, dict) else None,
+        # A custom page's message that is the page's own report rather than the operator's request: the
+        # chat folds it into a note, where the page's other messages are the operator's bubbles.
+        "silent": bool(isinstance(origin, str) and origin.startswith("page:") and not message.metadata.get(OPERATOR_WORDS_METADATA_KEY)),
         # A message brought in from another agent program: which one, and for a renamed tool call the
         # name the operator knew it by there (``tools``: call id to name), so the step is labelled with it.
         "imported": message.metadata.get("daedalus.imported") if isinstance(message.metadata, dict) else None,

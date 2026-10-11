@@ -2,6 +2,14 @@
 
 Notable changes, newest first. The repository's `main` is the released version.
 
+## 2026-10-11 — desktop-v0.17.0
+
+- **Build pages inside Daedalus.** The agent can create or import an app, check it on a phone and a desktop, publish it without restarting Daedalus, and roll back to an earlier version. Pages can call the signed-in app's API, appear in the navigation, and work alongside an agent bound to that page. Treat custom page code as trusted code.
+- **Arrange the navigation and change settings by request.** Icons and destinations can be ordered separately for the desktop rail and phone drawer. The agent can change selected ordinary settings directly; changes to other permitted settings await approval.
+- **Clearer conversations.** Questions show the controls for their kind and a review step for several questions; session details group context, cache, usage and limits. Pictures and clips open in the central viewer. Project filters are obvious and can be cleared, and the conversation list loads more rows.
+- **More reliable work in the background.** Jobs tell their session when they end and can be waited for. A subagent keeps working until its background jobs are done. Terminal selections can be copied over programs that capture the mouse; child processes inherit the usual SIGPIPE behavior.
+- **Guard storage and reduce repeated tokens.** Workspace usage and cleanup are visible; long-running sessions retain tool and cache state across runs, and the Claude key proxy keeps quota bars available while the quota endpoint is rate-limited. Sessions from other supported agent programs can be imported.
+
 ## 2026-10-01
 
 - **Daedalus installs and opens like any desktop application.** Windows has an installer

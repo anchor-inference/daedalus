@@ -138,6 +138,9 @@ from daedalus.tools.shell import title as shell_title
 
 logger = logging.getLogger(__name__)
 
+TOOL_RULES_KEY_FILE = "tool-rules-mark.key"
+"""Beside the operator's sealing key in the secrets directory, which no command the agent runs can read."""
+
 PROVIDER_OUTAGE_KINDS = frozenset({"llm_provider_error", "llm_timeout", "llm_stream_idle", "llm_rate_limit"})
 """Terminal error kinds that mean the endpoint, not the request, failed: the run is driven again once the wait is over."""
 RECOVERY_REASONS = frozenset({"transient_llm_error_retry", "model_fallback_triggered", "soft_stop_notified", "llm_context_window_exceeded", "context_window_recovered", "reasoning_length_cut_retry", "continue_prompt_injected", "max_output_token_recovery"})
@@ -637,6 +640,7 @@ class SessionManager:
         because the policy refuses every command that names the sealed state directory."""
         self.secrets.project_of = self._project_of
         self.secrets.staff_of = self._staff_of
+        self._tool_rules_key: bytes | None = None
         self.hooks = DaedalusHookManager(self.redactor, hooks_config=lambda: self.config.hooks)
         self.bus = EventBus(db, redactor=self.redactor, queue_size=config.ops.event_subscriber_queue, replay_max=config.ops.event_replay_max)
         """What happens to sessions, terminals and staff, for whoever subscribes: the app's stream,
@@ -3707,6 +3711,7 @@ class SessionManager:
             policy_gate=self.policy_gate,
             selfdev_mode=self.capabilities.selfdev.mode,
             request_manifest_sink=self.request_manifests,
+            tool_rules_key=self.tool_rules_key(),
         )
         mode = self.mode_for(state)
         enabled = self.mcp_enabled(state)
@@ -3759,6 +3764,9 @@ class SessionManager:
             max_advertised_tools=self.advertised_tools_limit(rungs),
             discovered_tools=self.discovered_tools_for(state),
             loaded_tool_groups=self.loaded_groups_for(state),
+            # The previous run's engine is still the state's here: what it cut stays cut, or the new run
+            # decided again from nothing and cut, at its first request, what the last one left whole.
+            trimmed_tool_result_ids=state.engine.trimmed_tool_result_ids if state.engine is not None else (),
             tool_group_loads=self.tool_group_loads_for(state) if not self.is_dispatcher(state) else None,
         )
         self._attach_hooks(engine, state)
@@ -5137,14 +5145,45 @@ class SessionManager:
         limits = [max_advertised_tools_for(self.config.providers.get(provider.endpoint.id), model) for provider, model in rungs]
         return min((limit for limit in limits if limit > 0), default=0)
 
-    def discovered_tools_for(self, state: SessionState) -> tuple[str, ...]:
-        """The tools the session's last run loaded through ToolSearch and called that it may still call.
+    def tool_rules_key(self) -> bytes:
+        """The key every session's rules mark is derived from, kept beside the operator's sealing key.
+
+        The mark sits in the tool catalogue at the head of the cached prompt. Drawn anew in every process,
+        it changed at each restart and rewrote the system prompt of every session whose catalogue carries
+        a group's rules — a full cache miss per session per deploy — and left the rules already in the
+        history under a mark the catalogue no longer named. A key that cannot be read or made falls back to
+        the process key: a cost, not a failure.
+        """
+        if self._tool_rules_key is None:
+            try:
+                self._tool_rules_key = operator_secrets.load_key(self.settings.secrets_dir / TOOL_RULES_KEY_FILE)
+            except (OSError, operator_secrets.SecretError):
+                logger.warning("tool rules key unavailable; marks change at every restart", exc_info=True)
+                self._tool_rules_key = b""
+        return self._tool_rules_key
+
+    def discovered_tools_for(self, state: SessionState) -> tuple[str | dict[str, str], ...]:
+        """The tools loaded in the session that it may still call, as the next run is to load them.
 
         Handed to the next run so it starts with them loaded rather than searching again, in the order
-        they were loaded, so the tail of the tool list a prefix cache keys on comes back the same. The
-        session's current policy decides, not the one they were loaded under: a tool switched off or
-        refused to the role since then is not carried back.
+        they were loaded, so the tail of the tool list a prefix cache keys on comes back the same. A tool
+        of a group carried whole goes as ``{"name", "group"}``: the core then counts the group as the one
+        entry it was, and puts it back where it was loaded — as a separate seed the groups came after
+        every name, and a run that loaded a group and then one more tool started the next one with the
+        tool list reordered. The session's current policy decides, not the one they were loaded under: a
+        tool switched off or refused to the role since then is not carried back.
         """
+        registry = self.registry_for(state)
+        declared = registry.tool_groups()
+        whole = set(self.loaded_groups_for(state))
+        out: list[str | dict[str, str]] = []
+        for name in self._carried_names(state):
+            tool = registry.get(name)
+            group = tool_group_of(tool, declared) if tool is not None else ""
+            out.append({"name": name, "group": group} if group in whole else name)
+        return tuple(out)
+
+    def _carried_names(self, state: SessionState) -> tuple[str, ...]:
         registry = self.registry_for(state)
         policy = self.tool_policy_for(state)
         names = [str(name) for name in (state.metadata.get("discovered_tools") or ()) if isinstance(name, str)]
@@ -5163,8 +5202,8 @@ class SessionManager:
         return out
 
     def loaded_groups_for(self, state: SessionState) -> tuple[str, ...]:
-        """The groups the next run starts with loaded whole: what the last run carried, then what the operator
-        asked for. Whole, because the core counts a group as one of the loaded tools it keeps: passed as
+        """The groups the next run starts with loaded whole: what the session loaded so far, then what the
+        operator asked for. Whole, because the core counts a group as one of the loaded tools it keeps: passed as
         names, the browser's twelve and the schedules' six pushed each other out. A group the session may
         no longer call any tool of is dropped here, as a tool is; so is one now always on the surface,
         which loading would only spend one of those entries on."""
@@ -5182,21 +5221,20 @@ class SessionManager:
         await self.sessions.update_metadata(state.session.id, state.session.metadata)
 
     def _keep_loaded_tools(self, state: SessionState, engine: QueryEngine) -> bool:
-        """Remember what the finished run had loaded and used, and what it last said of its groups;
-        ``True`` when that changed what is stored.
+        """Remember what the finished run had loaded, and what it last said of its groups; ``True`` when
+        that changed what is stored.
 
-        A group it loaded whole and called a tool of is carried whole; otherwise only the tools it called
-        are carried: a search loads its best three matches whether or not the model wanted them, and every
-        unused near-miss carried along cost a definition on every request of every later run. A group
-        seeded whole and then never used goes the same way. A tool seeded by name counts as called — an
-        earlier run called it.
+        Everything loaded is carried, in the order it was loaded, and the groups loaded whole are named
+        as such. Only the tools a run called used to be carried, so an unused search match or a group
+        loaded and then left alone for one run dropped out of the next one's tool list — and the tool
+        list is the head of the cached prompt, so the session wrote its whole context into the cache
+        again (a long one, four hundred thousand tokens) to save one definition that a cache read costs
+        a tenth of the input price. What bounds the carried set now is the core's cap on loaded tools,
+        applied at the start of a run.
         """
         manager = engine.context_manager
-        called = manager.called_discovered_tool_names()
-        group_of = manager.discovered_tool_groups()
-        used = {group_of[name] for name in called if name in group_of}
-        groups = [g for g in manager.loaded_tool_group_names() if g in used]
-        names = [name for name in called if group_of.get(name) not in used]
+        names = list(manager.discovered_tool_names())
+        groups = list(manager.loaded_tool_group_names())
         wanted: dict[str, Any] = {"discovered_tools": names, tool_groups.CARRIED_KEY: groups}
         if state.tool_group_surface:
             wanted[tool_groups.SURFACE_KEY] = dict(state.tool_group_surface)
@@ -5304,7 +5342,7 @@ class SessionManager:
         policy = self.tool_policy_for(state)
         loads = self.tool_group_loads_for(state)
         searches = self._searches_for_tools(state)
-        carried = set(self.discovered_tools_for(state))
+        carried = set(self._carried_names(state))
         carried_groups = {str(g) for g in (state.metadata.get(tool_groups.CARRIED_KEY) or ())}
         queued = {str(g) for g in (state.metadata.get(tool_groups.LOAD_NOW_KEY) or ())}
         surface = state.tool_group_surface or self._stored_surface(state)
@@ -5373,8 +5411,8 @@ class SessionManager:
 
         Queued in the metadata rather than written into ``discovered_tools``: the run in progress
         rewrites that list when it ends, and would drop what was put there while it ran. The next
-        run's engine takes the queue and empties it, and from then on the group is carried whole for as
-        long as the runs call a tool of it.
+        run's engine takes the queue and empties it, and from then on the group is carried whole for the
+        rest of the session.
         """
         if group not in TOOL_GROUPS:
             raise KeyError(group)

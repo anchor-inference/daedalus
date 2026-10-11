@@ -29,6 +29,22 @@ POLL_SECONDS = 3.0
 NO_ANSWER = "(the subagent's run ended without a final reply; see its session)"
 
 
+def unfinished_jobs(manager: Any, session_id: str) -> int:
+    """Background jobs of the session still running, or ended and not yet told to it.
+
+    A subagent that ends its turn on "the suite is running" has not finished: the job's end wakes it
+    with a new run. Reporting and removing it at that turn's end delivered a half-done report and,
+    because deleting a session ends its jobs, killed the very job it was waiting for. A service is
+    left running on purpose and never ends, so it does not hold the report back.
+    """
+    jobs = getattr(manager, "jobs", {}).get(session_id, {})
+    return sum(
+        1
+        for job in jobs.values()
+        if getattr(job, "kind", "job") != "service" and (getattr(job, "running", False) or not getattr(job, "reported", True))
+    )
+
+
 def no_answer(state: Any) -> str:
     """The missing reply, with the error that ended the run when the host recorded one."""
     kind = str(getattr(state, "last_error_kind", "") or "")
@@ -43,7 +59,9 @@ TASK_HEADER = (
 BRIEF = (
     "You are a subagent of session {leader}: a helper started for one task. Work in the shared workspace "
     "(the leader reads the files you leave there), do not ask the operator questions, do not start "
-    "subagents of your own, and end with a final reply that contains everything the leader needs."
+    "subagents of your own, and end with a final reply that contains everything the leader needs. "
+    "A background job you start is part of the task: wait for it (JobWait) before your final reply — "
+    "while one of yours is still running, your turn ending is not your report."
 )
 
 WITHHELD = (
@@ -267,7 +285,7 @@ class Subagents:
                 state = await manager.get_state(cid)
                 if state is None:
                     raise RuntimeError("the subagent session disappeared")
-                if not state.running and state.pending is None:
+                if not state.running and state.pending is None and not unfinished_jobs(manager, cid):
                     result["answer"] = contract_verdict(state, await self.answer(cid) or no_answer(state))
                     if not state.metadata.get("subagent_keep"):
                         self._remove_later(cid)
@@ -359,6 +377,9 @@ class Subagents:
             return
         if session_id in self._waited:
             return  # the leader's tool call collects the answer itself
+        if status == "completed" and unfinished_jobs(manager, session_id):
+            # Not done: the job's end starts the subagent's next run, and that run's end reports.
+            return
         leader_id = str(state.metadata["subagent_of"])
         leader = await manager.get_state(leader_id)
         if leader is None:

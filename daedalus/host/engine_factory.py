@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Collection, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -51,6 +51,8 @@ class EngineDeps:
     is the one that promises nothing."""
     request_manifest_sink: Any | None = None
     """Host-owned durable request evidence; absent keeps the core instrumentation inert."""
+    tool_rules_key: bytes = field(default=b"", repr=False)
+    """What the session's rules mark is derived from; empty leaves the core's key, new in every process."""
 
 
 class PolicyAdapter:
@@ -148,6 +150,7 @@ def runtime_constants(config: RuntimeConfig, *, context_window: int, max_output_
         tool_result_fresh_count=config.tools.results.fresh_count,
         tool_result_stale_max_chars=config.tools.results.stale_max_chars,
         tool_result_stale_trim_batch_chars=config.tools.results.trim_batch_chars,
+        tool_result_stale_trim_min_share=config.tools.results.trim_min_share,
     )
 
 
@@ -222,18 +225,21 @@ def build_engine(
     role: Role = "agent",
     project: str = "",
     max_advertised_tools: int = 0,
-    discovered_tools: Collection[str] = (),
+    discovered_tools: Collection[str | Mapping[str, str]] = (),
     loaded_tool_groups: Collection[str] = (),
     tool_group_loads: Mapping[str, str] | None = None,
+    trimmed_tool_result_ids: Collection[str] = (),
 ) -> QueryEngine:
     """``role`` picks the system prompt: an agent that works in a folder, the voice concierge that
     only talks and hands over, a project's orchestrator that only runs a team, or the main
     orchestrator that only hands work to projects and follows it.
 
     ``max_advertised_tools`` is the lowest cap on tools among the run's providers (0 for none);
-    ``discovered_tools`` are the tools an earlier run of the session loaded through ToolSearch, oldest
-    first, which this run starts with loaded; ``loaded_tool_groups`` are groups it starts with loaded
-    whole, each one entry under the core's cap on loaded tools; ``tool_group_loads`` is each host group's load mode for
+    ``discovered_tools`` are the tools an earlier run of the session loaded, oldest first, which this run
+    starts with loaded — a name, or ``{"name", "group"}`` for a tool loaded with its whole group, so the
+    loaded tail comes back in the order it was loaded; ``loaded_tool_groups`` are groups it starts with loaded
+    whole, each one entry under the core's cap on loaded tools; ``trimmed_tool_result_ids`` are the results
+    the session's last run cut to their head in its requests; ``tool_group_loads`` is each host group's load mode for
     this run, the settings and the session's own choice over the defaults the groups were declared with."""
     primary_provider, primary_model = rungs[0]
     model = model_name or primary_model
@@ -263,6 +269,8 @@ def build_engine(
         discovered_tools=tuple(discovered_tools),
         loaded_tool_groups=tuple(loaded_tool_groups),
         tool_group_loads=dict(tool_group_loads or {}),
+        trimmed_tool_result_ids=tuple(trimmed_tool_result_ids),
+        tool_rules_key=deps.tool_rules_key,
     )
     engine = QueryEngine(
         config=engine_config,

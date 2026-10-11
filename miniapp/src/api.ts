@@ -2,6 +2,7 @@
 // inside Telegram, or with ?token=... for a browser session.
 
 import type { ImportedOrigin, MessageImport } from "./imports/model";
+import type { NavConfig } from "./navconfig";
 
 declare global {
   interface Window {
@@ -662,6 +663,27 @@ export type LoopView = {
 
 export type ShareMode = "local" | "public" | "key";
 export type ShareView = { mode: ShareMode; slug: string | null; key: string | null; url: string | null; public_base: string };
+/** One custom page as `GET /api/pages` lists it: what the navigation draws. `title` is the plain (or
+ *  English) title; `titles` has one per language when the page was given them. */
+export type PageListing = { slug: string; title: string; titles: Record<string, string>; icon: string | null; icon_path: string | null; path: string; version: number | null; updated_at: string | null };
+export type PageVersion = { n: number; at: string; note: string; kind: "static" | "service" | "link"; entry: string; target: number | string | null; files: number; bytes: number };
+/** One page as `GET /api/pages/<slug>` answers it: the listing, what is live, and every kept version. */
+export type PageDetail = Omit<PageListing, "title"> & {
+  title: string | Record<string, string>;
+  kind: "static" | "service" | "link";
+  entry: string;
+  target: number | string | null;
+  session_id: string | null;
+  /** The bound session as the screen names it; `gone` once the session was deleted after binding. */
+  agent?: PageAgent | null;
+  url: string;
+  draft_url: string;
+  versions: PageVersion[];
+  draft?: { kind: string; entry: string; target: number | string | null; updated_at: string };
+};
+
+export type PageAgent = { id: string; title: string; gone: boolean; running: boolean };
+
 export type ServiceView = { name: string; command: string; cwd: string; port: number | null; url: string | null; pid: number | null; status: "running" | "stopped" | "dead"; restart: boolean; note: string | null; started_at: string; stopped_at: string | null; share?: ShareView };
 
 /** One provider's usage for the card beside the chat: a subscription's windows, or the day's metered spend. */
@@ -780,6 +802,8 @@ export type MessageView = {
   imported?: MessageImport | null;
   /** The operator's secrets the message carried, by name and scope; a value never comes back. */
   secrets?: { name: string; scope: "session" | "project" }[] | null;
+  /** A custom page's message (origin `page:<slug>`) that is the page's own report, not the operator's request. */
+  silent?: boolean;
   text: string;
   thinking: string;
   tool_calls: { id: string; name: string; arguments: Record<string, unknown> }[];
@@ -1179,7 +1203,8 @@ export type SkillEntry = { id: string; name: string; description: string };
 export type Question = {
   question: string;
   header?: string;
-  options?: { label: string; description?: string | null }[];
+  /** `preview`: text (a diagram, a mockup, a snippet) the card shows beside the list for the chosen option. */
+  options?: { label: string; description?: string | null; preview?: string | null }[];
   multiSelect?: boolean;
   allow_custom?: boolean;
 };
@@ -1420,6 +1445,8 @@ export type Settings = {
   compaction: { auto_ratio: number; keep_recent_messages: number; max_words: number; chunk_tokens: number; min_messages: number; call_timeout_seconds: number; core_trigger_ratio: number; preset: string };
   terminals?: { running_cap: number };
   browser?: BrowserSettings;
+  /** The rail, its More menu and the phone drawer (navconfig.ts reads it). Missing on an older host. */
+  navigation?: NavConfig;
   telegram: {
     mode: "topics" | "private" | null;
     forum_chat_id: number;

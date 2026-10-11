@@ -2098,6 +2098,20 @@ async def _all_jobs_kept(conn: aiosqlite.Connection) -> None:
 
 MIGRATIONS.append(DataMigration("", _all_jobs_kept))
 
+# What a custom page keeps for itself through its storage API: small shared values under keys it
+# names. A page's files live in the state volume, not here; this is the part a page writes while it
+# runs, so it needs the database's transactions rather than a file rewritten on every change. No
+# foreign key: a page is a folder, not a row, and removing a page deletes its keys by slug.
+MIGRATIONS.append("""
+CREATE TABLE IF NOT EXISTS page_storage (
+    slug TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (slug, key)
+);
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

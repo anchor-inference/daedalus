@@ -48,8 +48,10 @@ from claude import (
     CLAUDE_FALLBACK_MODELS,
     ClaudeAuth,
     chat_to_messages,
+    claude_header_windows,
     claude_usage_view,
     messages_events_to_chunks,
+    request_betas,
 )
 from subscriptions import (
     CODEX_BASE,
@@ -118,6 +120,8 @@ CLAUDE_AUTH = ClaudeAuth(Path(os.environ.get("KEYPROXY_CLAUDE_AUTH", os.path.exp
 _usage_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 USAGE_CACHE_SECONDS = 60.0
 _claude_usage_retry_at = 0.0
+_claude_header_snapshot: dict[str, Any] = {}
+"""The 5h and weekly windows read off the latest Claude model reply, with when they were read."""
 CLAUDE_USAGE_BACKOFF_SECONDS = 120.0
 
 
@@ -573,6 +577,7 @@ async def handle_claude(request: web.Request, rest: str) -> web.StreamResponse:
     model = str(body.get("model") or "")
     stream = bool(body.get("stream", False))
     payload, names = chat_to_messages(body)
+    headers["anthropic-beta"] = request_betas(payload)
     upstream = client.build_request("POST", CLAUDE_API + "/v1/messages?beta=true", json=payload, headers={**headers, "accept": "text/event-stream", "content-type": "application/json"})
     try:
         response = await client.send(upstream, stream=True)
@@ -586,6 +591,8 @@ async def handle_claude(request: web.Request, rest: str) -> web.StreamResponse:
         except ValueError:
             payload_err = {"error": {"message": raw[:400], "type": "upstream_error"}}
         return web.json_response(payload_err, status=response.status_code)
+    if windows := claude_header_windows(response.headers):
+        _claude_header_snapshot.update(windows=windows, at=time.monotonic())
     chunks = messages_events_to_chunks(_sse_lines(response), model=model, names=names)
     served = served_headers("claude", str(payload.get("model") or model))
     try:
@@ -704,20 +711,36 @@ async def _claude_profile(client: httpx.AsyncClient, headers: dict[str, str]) ->
     return {}
 
 
+def _with_header_windows(view: dict[str, Any], taken: float) -> dict[str, Any]:
+    """``view`` with its 5h and weekly windows replaced by the reply headers' when those are newer.
+
+    The usage endpoint can refuse for hours, and a snapshot from before that is stale by the same
+    hours; the reply headers move with every model call. Per-model windows (Fable) exist only in the
+    endpoint's answer, so they are kept from it.
+    """
+    windows = _claude_header_snapshot.get("windows")
+    if not windows or _claude_header_snapshot.get("at", 0.0) <= taken:
+        return view
+    rest = [w for w in view.get("windows") or [] if w.get("name") not in ("5h", "weekly")]
+    merged = [*windows, *rest]
+    return {**view, "windows": merged, "limit_reached": any(float(w.get("used_percent") or 0) >= 100 for w in merged)}
+
+
 async def _claude_usage(client: httpx.AsyncClient, headers: dict[str, str]) -> dict[str, Any]:
     """Quota for the Usage screen. The usage endpoint rate-limits independently of inference;
-    a 429 is served from the last good snapshot (or profile) instead of hammering it."""
+    a 429 is served from the last good snapshot (or profile) instead of hammering it, and the
+    5h and weekly windows come from the latest model reply's headers when those are newer."""
     global _claude_usage_retry_at
     cached = _usage_cache.get("claude")
     now = time.monotonic()
     if cached and now - cached[0] < USAGE_CACHE_SECONDS:
-        return cached[1]
+        return _with_header_windows(cached[1], cached[0])
     if now < _claude_usage_retry_at and cached:
-        return cached[1]
+        return _with_header_windows(cached[1], cached[0])
     light = await CLAUDE_AUTH.usage_headers(client)
     if now < _claude_usage_retry_at:
         profile = await _claude_profile(client, light)
-        return claude_usage_view({}, profile)
+        return _with_header_windows(claude_usage_view({}, profile), 0.0)
     usage = await client.get(CLAUDE_API + "/api/oauth/usage", headers=light)
     if usage.status_code == 429:
         retry = usage.headers.get("retry-after")
@@ -727,8 +750,8 @@ async def _claude_usage(client: httpx.AsyncClient, headers: dict[str, str]) -> d
             wait = CLAUDE_USAGE_BACKOFF_SECONDS
         _claude_usage_retry_at = now + wait
         if cached:
-            return cached[1]
-        return claude_usage_view({}, await _claude_profile(client, light))
+            return _with_header_windows(cached[1], cached[0])
+        return _with_header_windows(claude_usage_view({}, await _claude_profile(client, light)), 0.0)
     if usage.status_code != 200:
         raise SubscriptionError(f"claude usage: HTTP {usage.status_code}")
     view = claude_usage_view(usage.json(), await _claude_profile(client, light))

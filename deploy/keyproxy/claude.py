@@ -31,19 +31,32 @@ CLAUDE_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 # The server refuses models to CLI versions it considers too old: a stale default here answers every request
 # with a 400 invalid_request_error (claude_code_version_too_old), not with a degraded reply. Raise it when that
 # refusal appears; the attribution stamp below follows the version on its own.
-CLAUDE_CLI_VERSION = os.environ.get("KEYPROXY_CLAUDE_CLI_VERSION", "2.1.282")
+CLAUDE_CLI_VERSION = os.environ.get("KEYPROXY_CLAUDE_CLI_VERSION", "2.1.296")
 CLAUDE_ENTRYPOINT = os.environ.get("KEYPROXY_CLAUDE_ENTRYPOINT", "sdk-cli")
 # The CLI's attribution stamp: sha256(salt + three characters of the first user text + version)[:3].
 # A fixed "9d8" belonged to 2.1.270. KEYPROXY_CLAUDE_VERSION_HASH still pins one stamp for every call.
 _ATTRIBUTION_SALT = "59cf53e54c78"
 _ATTRIBUTION_INDEXES = (4, 7, 20)
-CLAUDE_BETAS = (
-    "oauth-2025-04-20,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,"
-    "context-management-2025-06-27,prompt-caching-scope-2026-01-05,claude-code-20250219,"
-    "extended-cache-ttl-2025-04-11"
+# The betas in the order the CLI assembles them for a subscriber's main loop: its fixed list first, then
+# effort when the request carries one, then the long cache TTL. The effort beta is per request, so it is
+# added by request_betas and not here; refresh and model listing never carry an effort.
+_BETAS_FIXED = (
+    "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,"
+    "context-management-2025-06-27,prompt-caching-scope-2026-01-05"
 )
+_BETA_EFFORT = "effort-2025-11-24"
+_BETA_CACHE_TTL = "extended-cache-ttl-2025-04-11"
+CLAUDE_BETAS = f"{_BETAS_FIXED},{_BETA_CACHE_TTL}"
 CLAUDE_IDENTITY = "You are a Claude agent, built on Anthropic's Claude Agent SDK."
-CLAUDE_FALLBACK_MODELS = ("claude-haiku-4-5-20251001", "claude-sonnet-5", "claude-opus-5", "claude-fable-5-1")
+CLAUDE_FALLBACK_MODELS = (
+    "claude-haiku-4-5-20251001",
+    "claude-haiku-5-5",
+    "claude-sonnet-5",
+    "claude-sonnet-5-5",
+    "claude-opus-5",
+    "claude-opus-5-5",
+    "claude-fable-5-1",
+)
 REFRESH_SKEW_SECONDS = 300
 TOOL_PREFIX = "mcp_"
 EFFORT_BUDGET = {"low": 2048, "medium": 8192, "high": 16384, "xhigh": 31999, "max": 31999}
@@ -51,6 +64,12 @@ EFFORT_MODELS = ("claude-opus-5", "claude-sonnet-5", "claude-fable-5", "claude-f
 MAX_OUTPUT = 32000
 CACHE_CONTROL = {"type": "ephemeral", "ttl": "1h"}
 """Anthropic prompt-cache marker. Prefix order is tools → system → messages; at most four per request."""
+CACHE_ANCHOR_STRIDE = 16
+"""Messages between moves of the mid-history cache anchor; see ``_anchor_index``."""
+# Sent whenever thinking is on, as the CLI does. keep="all" clears nothing: it pins the server to keeping
+# every earlier thinking block rather than whatever its default for the model is, so the prefix never
+# changes under the cache. The proxy replays no thinking blocks today, which makes it a no-op here.
+_KEEP_THINKING_EDIT = {"type": "clear_thinking_20251015", "keep": "all"}
 _UNCACHABLE_BLOCKS = frozenset({"thinking", "redacted_thinking"})
 
 
@@ -64,7 +83,7 @@ def _cli_headers() -> dict[str, str]:
         "X-Stainless-Lang": "js",
         "X-Stainless-OS": "Linux",
         "X-Stainless-Arch": "x64",
-        "X-Stainless-Package-Version": "0.112.1",
+        "X-Stainless-Package-Version": "0.128.0",
         "X-Stainless-Runtime": "node",
         "X-Stainless-Runtime-Version": "v26.3.0",
     }
@@ -73,7 +92,7 @@ def _cli_headers() -> dict[str, str]:
 def attribution_hash(text: str) -> str:
     """The three hex characters Claude Code writes after ``cc_version``.
 
-    Taken from the CLI (2.1.278): the salt, the characters at indexes 4, 7 and 20 of the
+    Taken from the CLI (2.1.278, unchanged through 2.1.296): the salt, the characters at indexes 4, 7 and 20 of the
     first user text (``0`` when the text is shorter), then the CLI version. A missing
     character is ``0``, not omitted, which is what makes a short prompt still stamp.
     """
@@ -86,6 +105,16 @@ def attribution_hash(text: str) -> str:
 
 def _billing_header(user_text: str) -> str:
     return f"x-anthropic-billing-header: cc_version={CLAUDE_CLI_VERSION}.{attribution_hash(user_text)}; cc_entrypoint={CLAUDE_ENTRYPOINT};"
+
+
+def request_betas(payload: dict[str, Any]) -> str:
+    """The ``anthropic-beta`` value for one ``/v1/messages`` body.
+
+    The CLI names the effort beta exactly when ``output_config.effort`` is on the wire, so a request
+    without an effort keeps the shorter list the CLI would send.
+    """
+    effort = isinstance(payload.get("output_config"), dict) and "effort" in payload["output_config"]
+    return f"{_BETAS_FIXED},{_BETA_EFFORT},{_BETA_CACHE_TTL}" if effort else CLAUDE_BETAS
 
 
 class ClaudeAuth:
@@ -229,23 +258,47 @@ def _stamp_last_block(message: dict[str, Any]) -> None:
         message["content"] = [_with_cache({"type": "text", "text": content})]
 
 
-def _apply_prompt_cache(system: list[dict[str, Any]], tools: list[dict[str, Any]], messages: list[dict[str, Any]]) -> None:
-    """Lock the stable prefix and the conversation tail (≤4 breakpoints).
+def _anchor_index(messages: list[dict[str, Any]], taken: set[int]) -> int | None:
+    """Where the mid-history breakpoint goes, or ``None`` while the thread is short.
 
-    The last tool and the identity system block are byte-stable across turns.
-    The harness prompt (system[2]) carries a clock, so it is *not* a breakpoint:
-    a miss there would also drop the conversation cache. The last two stampable
-    messages let a tool-call loop reuse the growing transcript.
+    The server looks back only about twenty blocks from a breakpoint for an earlier entry, so when the
+    host rewrites a message deep in the history (stale-result trimming, eviction) the tail breakpoints
+    find nothing and the whole transcript after the identity block is written again. An entry from
+    before the rewrite still exists if some breakpoint sits on it: every user message was the tail of
+    an earlier request and was stamped then, so marking one again costs nothing (writes are billed from
+    the longest hit) and keeps a partial hit available.
+
+    The anchor must not drift, or each request would mark a prefix no earlier request wrote. It moves
+    once per ``CACHE_ANCHOR_STRIDE`` messages, to the last user message before a stride boundary, and
+    always trails the tail by one to two strides: close enough that the entry is inside the hour-long
+    TTL, far enough back to sit before a batch trim of results the run has finished reading.
     """
-    if tools:
-        tools[-1] = _with_cache(tools[-1])
+    boundary = (len(messages) // CACHE_ANCHOR_STRIDE - 1) * CACHE_ANCHOR_STRIDE
+    for index in range(boundary - 1, -1, -1):
+        message = messages[index]
+        if message.get("role") == "user" and _stampable(message):
+            return None if index in taken else index
+    return None
+
+
+def _apply_prompt_cache(system: list[dict[str, Any]], messages: list[dict[str, Any]]) -> None:
+    """Lock the stable prefix, a mid-history anchor and the conversation tail (≤4 breakpoints).
+
+    The identity block (system[1]) is byte-stable across turns, and its breakpoint already covers
+    every tool definition before it, so the tools carry no marker of their own; the CLI does not mark
+    them either. The billing block before it varies with the first user text and is no breakpoint.
+    The harness prompt (system[2]) carries a clock, so it is not one either. The last two stampable
+    messages let a tool-call loop reuse the growing transcript; ``_anchor_index`` explains the fourth.
+    """
     if len(system) >= 2:
         system[1] = _with_cache(system[1])
     elif system:
         system[-1] = _with_cache(system[-1])
-    stampable = [message for message in messages if _stampable(message)]
-    for message in stampable[-2:]:
-        _stamp_last_block(message)
+    stampable = [index for index, message in enumerate(messages) if _stampable(message)]
+    tail = stampable[-2:]
+    anchor = _anchor_index(messages, set(tail))
+    for index in ([anchor] if anchor is not None else []) + tail:
+        _stamp_last_block(messages[index])
 
 
 def _parse_args(raw: Any) -> Any:
@@ -324,7 +377,7 @@ def chat_to_messages(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, st
         wire = _wire_tool_name(original)
         names[wire] = original
         tools.append({"name": wire, "description": fn.get("description") or tool.get("description") or "", "input_schema": fn.get("parameters") or tool.get("input_schema") or {"type": "object", "properties": {}}})
-    _apply_prompt_cache(system, tools, items)
+    _apply_prompt_cache(system, items)
     out: dict[str, Any] = {
         "model": model,
         "max_tokens": max(1, max_tokens),
@@ -346,6 +399,7 @@ def chat_to_messages(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, st
         # minute or more; messages_events_to_chunks forwards upstream liveness so the caller's idle
         # watchdog does not read that silence as a dead stream.
         out["thinking"] = {"type": "enabled", "budget_tokens": min(budget, max_tokens - 1), "display": "omitted"}
+        out["context_management"] = {"edits": [dict(_KEEP_THINKING_EDIT)]}
         if any(model.startswith(prefix) for prefix in EFFORT_MODELS) and effort in EFFORT_BUDGET:
             out["output_config"] = {"effort": effort}
     return out, names
@@ -472,6 +526,31 @@ def _iso_to_unix(value: Any) -> Any:
         return value
 
 
+def claude_header_windows(headers: Any) -> list[dict[str, Any]]:
+    """The 5h and weekly windows from the ``anthropic-ratelimit-unified-*`` headers of an inference reply.
+
+    The usage endpoint rate-limits on its own and answers 429 for long stretches, and a restarted
+    proxy has no earlier snapshot to serve, so the Usage screen lost both bars. Every model reply
+    carries the same two utilisations (as fractions) with their resets, which keeps them current.
+    """
+    windows = []
+    for name, key in (("5h", "5h"), ("weekly", "7d")):
+        raw = headers.get(f"anthropic-ratelimit-unified-{key}-utilization")
+        if raw is None:
+            continue
+        try:
+            used = round(float(raw) * 100, 1)
+        except ValueError:
+            continue
+        reset = headers.get(f"anthropic-ratelimit-unified-{key}-reset")
+        try:
+            resets_at: Any = float(reset) if reset is not None else None
+        except ValueError:
+            resets_at = None
+        windows.append({"name": name, "used_percent": used, "resets_at": resets_at})
+    return windows
+
+
 def claude_usage_view(data: dict[str, Any], profile: dict[str, Any] | None = None) -> dict[str, Any]:
     windows = []
     for name, key in (("5h", "five_hour"), ("weekly", "seven_day")):
@@ -502,6 +581,8 @@ __all__ = [
     "ClaudeAuth",
     "attribution_hash",
     "chat_to_messages",
+    "claude_header_windows",
     "claude_usage_view",
     "messages_events_to_chunks",
+    "request_betas",
 ]

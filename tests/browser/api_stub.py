@@ -31,6 +31,7 @@ from calendar_stub import CalendarStub
 from folder_stub import DEFAULT as FOLDERS
 from import_stub import DEFAULT as IMPORTS
 from import_stub import ImportStub
+from pages_stub import PagesStub
 
 # Outside services_port_range (8100-8119), the range this product hands to an agent's own preview
 # servers: a harness that serves its build into that range competes with the installation running
@@ -224,6 +225,13 @@ class LauncherStub:
         return None
 
 
+SAMPLE_PAGE: dict[str, object] = {
+    "slug": "dosing", "title": {"en": "Dosing calculator", "ru": "Калькулятор дозировки"}, "icon": None,
+    "icon_path": "M5 19L19 5M7 3h4v4H7zM13 17h4v4h-4z", "path": "/app/p/dosing", "version": 1, "updated_at": "2026-10-11T08:00:00Z",
+}
+"""A published page as ``GET /api/pages`` lists it, with a glyph of its own."""
+
+
 GATES: dict[str, object] = {
     "/api/terminals/envs": {"envs": [
         {"env": "container", "available": True, "sandbox": "ok", "containment": {"kind": "cgroup_v2", "available": True}},
@@ -241,6 +249,11 @@ GATES: dict[str, object] = {
     # Drawn before any screen: no model means the whole app is the "Add a model" flow.
     "/api/onboarding": {"has_model": True, "presets": 1, "default_preset": "p", "providers": [], "keyproxy_base": "", "needs": [], "message": ""},
     "/api/providers/free-catalog": {"providers": [], "updated_at": None, "stale": False},
+    # Where the rail, its More menu and the phone drawer put each destination: nothing configured, the
+    # layout the app ships with. check_navigation.py answers it itself to move things about.
+    "/api/navigation": {"rail": [], "more": [], "drawer": [], "hidden": [], "icons": {}},
+    # The pages the agent published: one, so the menus show where a page goes until it is placed.
+    "/api/pages": {"pages": [SAMPLE_PAGE]},
     # Decides which screens the navigation has at all.
     "/api/capabilities": {
         "selfdev": {"mode": "off", "configured": "off", "reasons": [], "missing": [], "tools": []},
@@ -334,6 +347,10 @@ GATES: dict[str, object] = {
 }
 
 
+PAGES = PagesStub()
+"""The custom page a shown-page card reads (``GET /api/pages/orders``)."""
+
+
 CALENDAR = CalendarStub()
 """The calendar and planner every harness shares: calendars, a week of events, tasks and connections."""
 
@@ -345,6 +362,8 @@ SHARED_WRITES: dict[tuple[str, str], tuple[int, str, str]] = {
     # "Mark all read" in the bell's popover and on the Inbox.
     ("POST", "/api/notifications/seen"): (200, "application/json", json.dumps({"marked": 0, "summary": {"unseen": 0, "needs_you": 0}})),
     ("POST", "/api/pet/react"): (200, "application/json", json.dumps({"line": "I'm here.", "emotion": "joy", "action": "wave", "prop": ""})),
+    # The session cookie a custom page's frame needs; the stub's frames need none.
+    ("POST", "/api/pages/_signin"): (200, "application/json", json.dumps({"ok": True})),
 }
 
 
@@ -567,6 +586,10 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         # The shared centre is empty, so every entry a harness might answer is one the host no
         # longer has; a harness that invents entries answers this route itself.
         return 404, "application/json", json.dumps({"detail": "no such notification"})
+    if path.startswith("/api/settings/changes/"):
+        # The card under an agent's settings change; the shared host keeps none, and a harness that
+        # draws one (check_settings_card.py) answers these itself.
+        return 404, "application/json", json.dumps({"detail": "no such settings change"})
     if method.upper() == "POST" and path in ("/api/system/launcher/check", "/api/system/launcher/download"):
         return 200, "application/json", json.dumps(launcher_state())
     if method.upper() == "POST" and path == "/api/system/launcher/install":
@@ -578,6 +601,13 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         return status, "application/json", json.dumps(payload)
     if path in GATES:
         return 200, "application/json", json.dumps(GATES[path])
+    if method.upper() == "GET" and path.startswith("/api/pages/"):
+        # One page, as a card for an agent's PageShow asks for it: the shared host knows ``orders`` and
+        # answers 404 for any other, which the card draws as a removed page. The navigation's list
+        # above stays empty; check_pages.py keeps a host of its own for everything else.
+        answered = PAGES.answer("GET", path)
+        if answered is not None:
+            return answered[0], "application/json", json.dumps(answered[1])
     if method.upper() == "GET" and path.startswith("/api/folders"):
         # The new-project dialog's folder browser, over the invented trees; a check that drives it
         # installs a FolderStub of its own to change the host's state and read the writes back.
@@ -823,8 +853,55 @@ def expect_app(base: str) -> None:
         raise SystemExit(1)
 
 
+# Every kind of question the AskUser schema can express (protocore/tools/ask_user.py), as the
+# session's ``pending`` carries it: the payload is handed to the app untouched, preview included.
+# The six-question batch is the shape the operator once photographed as a wall of identical blocks.
+_WEEK = {"question": "Which week should this digest cover?", "header": "Week", "options": [
+    {"label": "The one that just ended (Recommended)", "description": "Monday 5 to Sunday 11 October: every item is final."},
+    {"label": "The running week", "description": "Up to today; two items are still in review."},
+], "allow_custom": True}
+_SECTIONS = {"question": "Which sections go in this time?", "header": "Sections", "multiSelect": True, "options": [
+    {"label": "Releases", "description": "Three tags and the desktop build."},
+    {"label": "Incidents", "description": "The search outage on Tuesday."},
+    {"label": "Reading list"},
+    {"label": "Numbers", "description": "Tokens, cost and the busiest sessions."},
+]}
+_SEND = {"question": "Send it to the list as soon as it is ready?", "header": "Send", "options": [{"label": "Yes"}, {"label": "No"}]}
+_SUBJECT = {"question": "What subject line should the mail carry? The last three were dated; a phrase reads better in a busy inbox.", "header": "Subject", "allow_custom": True}
+_LAYOUT = {"question": "Which layout should the digest use?", "header": "Layout", "options": [
+    {"label": "One column", "description": "Easiest on a phone.", "preview": "+--------------------+\n| Digest · week 41   |\n+--------------------+\n| Releases           |\n|  - v0.16.2         |\n| Incidents          |\n|  - search, Tue     |\n| Numbers            |\n+--------------------+"},
+    {"label": "Two columns", "description": "Denser; better on a desktop.", "preview": "+---------+----------+\n| Digest  · week 41  |\n+---------+----------+\n| Releases| Incidents|\n|  v0.16.2|  search  |\n+---------+----------+\n| Numbers | Reading  |\n+---------+----------+"},
+    {"label": "Cards", "preview": "+------+ +------+\n| Rel. | | Inc. |\n+------+ +------+\n+------+ +------+\n| Num. | | Read |\n+------+ +------+"},
+], "allow_custom": True}
+_TONE = {"question": "How formal should the opening paragraph be?", "header": "Tone", "options": [
+    {"label": "Plain and short", "description": "Two sentences, no greeting."},
+    {"label": "Warm", "description": "A greeting and a line about the week."},
+    {"label": "Formal", "description": "As the quarterly report reads."},
+], "allow_custom": True}
+ASK_KINDS: dict[str, dict] = {
+    "single": {"questions": [_WEEK]},
+    "multi": {"questions": [_SECTIONS]},
+    "yesno": {"questions": [_SEND]},
+    "text": {"questions": [_SUBJECT]},
+    "preview": {"questions": [_LAYOUT]},
+    "pair": {"questions": [_WEEK, _SEND]},
+    "batch": {"questions": [_WEEK, _SECTIONS, _SEND, _SUBJECT, _LAYOUT, _TONE]},
+}
 
-__all__ = ["CALENDAR", "CalendarStub", "VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "IMPORTS", "ImportStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "TOOL_GROUP_CATALOGUE", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tasks", "session_tool_groups", "terminal_load"]
+
+def ask_turn(seq: int, call_id: str, questions: list[dict], answers: list[dict] | None, *, source: str = "user", created_at: str = "2026-10-11T09:00:00+00:00") -> list[dict]:
+    """An AskUser call in the transcript, and the host's result for it when it was answered.
+
+    ``answers`` None leaves the call without a result, which is how a run stopped while it waited
+    looks afterwards; ``source="timeout"`` is the scheduler answering an unattended run for nobody."""
+    base = {"summary": False, "internal": False, "origin": "", "compaction": None, "headline": "", "text": "", "thinking": "", "created_at": created_at, "model": "", "provider": "", "fallback": None}
+    rows = [{**base, "role": "assistant", "seq": seq, "tool_calls": [{"id": call_id, "name": "AskUser", "arguments": {"questions": questions}}], "tool_results": []}]
+    if answers is not None:
+        rows.append({**base, "role": "tool", "seq": seq + 1, "tool_calls": [], "tool_results": [{"id": call_id, "content": json.dumps({"answers": answers, "source": source}), "is_error": False}]})
+    return rows
+
+
+__all__ = ["ASK_KINDS", "ask_turn", "CALENDAR", "CalendarStub", "VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "IMPORTS", "ImportStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "SAMPLE_PAGE", "TOOL_GROUP_CATALOGUE", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tasks", "session_tool_groups", "terminal_load"]
 
 # What the harness manager reports for the container: Claude Code installed and signed in, Codex
 # installed but signed out, the rest absent. Enough for the hiring form to show one command-line agent

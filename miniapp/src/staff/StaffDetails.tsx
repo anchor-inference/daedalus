@@ -5,7 +5,8 @@
 // meter drawn from a guessed window, or a cost where there is none, would read as a fact.
 
 import type { KeptLine, StaffSessionView, StaffTurn } from "../api";
-import { Section } from "../details";
+import { Meter, Section } from "../detailsparts";
+import { quotaTone } from "../detailsmodel";
 import { duration, relTimeLong, shortDateTime, tokens, usd } from "../format";
 import { DICT, plural, t } from "../i18n";
 import { HarnessBadge } from "../team/parts";
@@ -57,7 +58,7 @@ export function StaffDetails({ member, view, turns, now = Date.now() }: { member
   const status = session ? session.status : member.status;
   return (
     <div className="details staff-details" data-staff-details>
-      <Section ids={ids} id="staff-run" label={t("staff.details.run")} aside={<HarnessBadge harness={member.harness} />}>
+      <Section ids={ids} id="staff-run" icon="terminal" label={t("staff.details.run")} aside={<HarnessBadge harness={member.harness} />}>
         <Row label={t("staff.details.cli")}>{launch?.version ? `${cli} ${launch.version}` : cli}</Row>
         <Row label={t("staff.details.model")}>{launch?.model || member.model || t("staff.details.model.default")}</Row>
         <Row label={t("staff.details.effort")}>{launch?.effort || member.effort || "—"}</Row>
@@ -66,14 +67,14 @@ export function StaffDetails({ member, view, turns, now = Date.now() }: { member
       </Section>
 
       {(view?.kept ?? []).length > 0 && (
-        <Section ids={ids} id="staff-kept" label={t("staff.kept.title")}>
+        <Section ids={ids} id="staff-kept" icon="shield" label={t("staff.kept.title")}>
           <KeptList lines={view?.kept ?? []} harness={member.harness} />
         </Section>
       )}
 
       {/* The heading names the state only when no session has a Status row to say it: both at once
           read "working" twice, one line under the other. */}
-      <Section ids={ids} id="staff-state" label={t("staff.details.state")} aside={session ? undefined : t(`team.status.${status}`)}>
+      <Section ids={ids} id="staff-state" icon="clock" label={t("staff.details.state")} aside={session ? undefined : t(`team.status.${status}`)}>
         {!session && <p className="sub">{t("staff.details.nosession")}</p>}
         {session && (
           <>
@@ -88,7 +89,7 @@ export function StaffDetails({ member, view, turns, now = Date.now() }: { member
         )}
       </Section>
 
-      <Section ids={ids} id="staff-context" label={t("session.context")} aside={fill?.pct != null ? `${fill.pct}%` : undefined}>
+      <Section ids={ids} id="staff-context" icon="braces" label={t("session.context")} aside={fill?.pct != null ? `${fill.pct}%` : undefined}>
         {fill ? (
           <>
             {fill.pct !== null && <div className={`bar ${fill.pct >= 90 ? "bad" : fill.pct >= 60 ? "attn" : ""}`} style={{ ["--v" as string]: fill.pct }}><i /></div>}
@@ -104,7 +105,7 @@ export function StaffDetails({ member, view, turns, now = Date.now() }: { member
         )}
       </Section>
 
-      <Section ids={ids} id="staff-usage" label={t("session.usage")} aside={hasSpend(usage) && usage?.cost_usd != null ? usd(usage.cost_usd) : undefined}>
+      <Section ids={ids} id="staff-usage" icon="chart" label={t("session.usage")} aside={hasSpend(usage) && usage?.cost_usd != null ? usd(usage.cost_usd) : undefined}>
         {hasSpend(usage) ? (
           <>
             <div className="dt-row sub" data-staff-spend>
@@ -120,15 +121,7 @@ export function StaffDetails({ member, view, turns, now = Date.now() }: { member
         {(usage?.windows ?? []).map((w) => {
           const name = windowName(w.minutes);
           return (
-            <div key={w.minutes} className="quota" data-window={w.minutes}>
-              <div className="sub quota-line">
-                <span className="grow">{t(name.key, { n: name.n ?? 0 })}</span>
-                <span>{Math.round(w.used_pct)}%</span>
-              </div>
-              <div className="quota-bar">
-                <i style={{ width: `${Math.min(100, Math.max(0, w.used_pct))}%`, background: w.used_pct >= 100 ? "var(--bad)" : w.used_pct >= 80 ? "var(--warn)" : "var(--ok)" }} />
-              </div>
-            </div>
+            <Meter key={w.minutes} label={t(name.key, { n: name.n ?? 0 })} percent={w.used_pct} tone={quotaTone(w.used_pct)} data={{ window: String(w.minutes) }} />
           );
         })}
         {hasSpend(usage) && !(usage?.windows ?? []).length && <p className="sub" data-no-windows>{t("staff.details.nowindows", { cli })}</p>}

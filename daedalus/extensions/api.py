@@ -84,6 +84,7 @@ from daedalus.extensions import (
     api_issue_sync,
     api_knowledge,
     api_lifecycle,
+    api_pages,
     api_plugins,
     api_project_start,
     api_projects,
@@ -95,6 +96,7 @@ from daedalus.extensions import (
     api_runtime_handoff,
     api_secrets,
     api_session_import,
+    api_settings_changes,
     api_skill_quality,
     api_staff,
     api_staff_reports,
@@ -106,6 +108,7 @@ from daedalus.extensions import (
 )
 from daedalus.extensions import commands as slash
 from daedalus.extensions.api_host_pane import HostPane
+from daedalus.extensions.api_proxy import forward_http
 from daedalus.extensions.artifact_headers import artifact_headers
 from daedalus.extensions.calendar_sync import sync_loop
 from daedalus.extensions.ci_observations import record_signed_delivery
@@ -716,7 +719,15 @@ class SettingsBody(BaseModel):
     """Settings → Browser: the cap, the idle close, recording, watch mode, the local network the
     browser may be let into, the injection monitor. The browser service hands the daemon its part at
     once (``limits.set``, ``net.configure``)."""
+    navigation: dict[str, Any] | None = None
+    """The rail, its More menu and the phone drawer. Each field sent replaces that field whole, so
+    an icon override or a hidden item can be taken away; a field left out is kept."""
+    pages: dict[str, Any] | None = None
+    """The caps of custom pages: bytes and files per page, versions kept, the largest stored value."""
+    agent_settings: dict[str, Any] | None = None
+    """Which sections the agent's SettingsChange applies without asking, and how long a change waits."""
     answer_language: str | None = None
+    """The language every answer is written in; ``auto`` answers in the operator's own."""
 
 
 class SettingsValidationBody(BaseModel):
@@ -1418,6 +1429,10 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             path="/",
         )
 
+    async def owner_cookie(value: str | None) -> bool:
+        """Whether a session cookie is the owner's: for a WebSocket, which carries no other credential."""
+        return bool(value) and verify_session_cookie(await session_secret(), value or "") == settings.owner_user_id
+
     async def auth(request: Request) -> dict[str, Any]:
         header = request.headers.get("authorization", "")
         if header.startswith("tma "):
@@ -1627,6 +1642,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_runtime.register(api, app, auth)
     api_runtime_handoff.register(api, app, auth)
     api_secrets.register(api, app, auth)
+    # The card under an agent's settings change: what it proposes, and the operator's Apply or Reject.
+    api_settings_changes.register(api, app, auth)
     api_update_drains.register(api, app, auth)
     api_lifecycle.register(api, app, auth)
     api_staff_reports.register(api, app, auth)
@@ -1646,6 +1663,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_worktrees.register(api, app, auth)
     # The files orchestration keeps by handle: the cards a chat draws, their bytes, the audit.
     api_files.register(api, app, auth)
+    # The operator's custom pages: their list and management, their storage, and the pages at /pages/<slug>/.
+    api_pages.register(api, app, auth, sign_in=sign_in, owner_cookie=owner_cookie, session_cookie=SESSION_COOKIE)
     # The operator's own file manager on a folder or a file of the agent's, natively and on this machine only.
     api_reveal.register(api, app, auth)
     if isinstance(getattr(app, "db", None), Database):
@@ -4257,8 +4276,6 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     # same address instead of a port of its own. No auth dependency here: public mode is open to anyone,
     # key mode to whoever presents the key (once in the query, then in a cookie scoped to the slug).
 
-    hop_headers = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade", "host"}
-
     @api.get("/s/{slug}/robots.txt")
     async def shared_robots(slug: str) -> Any:
         """Crawlers that reach a shared service anyway are told to leave (the proxied pages say the same in a header)."""
@@ -4289,39 +4306,13 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if row["status"] != "running" or not pid_alive(row.get("pid")) or not row.get("port"):
             raise HTTPException(503, "the service is not running")
         upstream = f"http://127.0.0.1:{row['port']}/{path}" + (f"?{request.url.query}" if request.url.query else "")
-        headers = {k: v for k, v in request.headers.items() if k.lower() not in hop_headers}
-        headers["x-forwarded-prefix"] = f"/s/{slug}"
-        headers["x-forwarded-host"] = request.headers.get("host", "")
-        headers["x-forwarded-proto"] = request.url.scheme
-        client = httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=300.0))
-        try:
-            up = await client.send(client.build_request(request.method, upstream, headers=headers, content=await request.body()), stream=True)
-        except httpx.HTTPError as exc:
-            await client.aclose()
-            raise HTTPException(502, f"the service did not answer: {exc}") from exc
         # Nothing under /s/ is for search engines: the address is the only secret of a public share.
-        out: dict[str, str] = {"X-Robots-Tag": "noindex, nofollow, noarchive"}
-        for k, v in up.headers.multi_items():
-            lk = k.lower()
-            if lk in hop_headers or lk == "x-robots-tag":
-                continue
-            if lk == "location" and v.startswith("/") and not v.startswith(f"/s/{slug}/"):
-                v = f"/s/{slug}{v}"  # a redirect to the service's root stays under the slug
-            out[k] = v
+        response = await forward_http(request, upstream, f"/s/{slug}", strip_cookies=(SESSION_COOKIE,), extra_headers={"X-Robots-Tag": "noindex, nofollow, noarchive"})
         # A page must not outlive the share in a browser cache: switching a service back to LAN-only takes
         # effect on the next reload, not when the cached copy expires.
-        if up.headers.get("content-type", "").startswith("text/html"):
-            out["Cache-Control"] = "no-store"
-
-        async def body() -> Any:
-            try:
-                async for chunk in up.aiter_raw():
-                    yield chunk
-            finally:
-                await up.aclose()
-                await client.aclose()
-
-        return StreamingResponse(body(), status_code=up.status_code, headers=out)
+        if response.headers.get("content-type", "").startswith("text/html"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
 
     @api.post("/api/sessions/{session_id}/loop")
     async def set_session_loop(session_id: str, body: LoopBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -5879,6 +5870,12 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 entry["proxy"] = upstreams_cache["state"]
         return view
 
+    @api.get("/api/navigation")
+    async def get_navigation(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The rail and drawer layout alone. The shell reads it on every load, and the whole settings
+        view asks the key proxy about every provider on the way, which a menu has no need to wait for."""
+        return app.config.navigation.model_dump(mode="json")
+
     pet_calls: dict[str, Any] = {"day": "", "count": 0, "last": 0.0}
 
     @api.post("/api/pet/react")
@@ -5936,6 +5933,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         for section in ("modes", "webhooks"):
             if isinstance(dumped.get(section), dict):
                 current[section] = dumped.pop(section)
+        if isinstance(dumped.get("navigation"), dict):
+            # One level only: merged deeper, an icon override sent away came back from the old copy.
+            current["navigation"] = {**current.get("navigation", {}), **dumped.pop("navigation")}
         for section, value in dumped.items():
             if isinstance(value, dict):
                 current[section] = _deep_merge(current.get(section, {}), value)

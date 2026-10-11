@@ -420,6 +420,8 @@ def usage_data() -> dict:
 
 
 SETTINGS = {
+    # Settings → Navigation: the layout the app ships with.
+    "navigation": {"rail": [], "more": [], "drawer": [], "hidden": [], "icons": {}},
     "model": {"preset": "deepseek-flash", "chain": ["deepseek-flash", "gpt-5.6-luna"], "fallback_to_session": True},
     "presets": {
         "deepseek-flash": {"provider": "deepseek", "model": "deepseek-flash", "label": "DeepSeek Flash", "thinking": True, "reasoning_effort": "medium", "images": False, "context_window": 128000, "max_output_tokens": 16384},
