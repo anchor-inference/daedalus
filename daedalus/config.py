@@ -684,7 +684,7 @@ class ResultToolsConfig(BaseModel):
     ``[tools.exec] max_output_chars`` bounds what ONE call returns. It says
     nothing about the twenty results already in the transcript, which the
     request carries again on every turn — which is how a handful of large reads
-    fills the window. These three bound that: past the fresh window, a long
+    fills the window. These four bound that: past the fresh window, a long
     result is cut to its head in the request only, and the whole result stays
     in the stored history.
     """
@@ -697,6 +697,14 @@ class ResultToolsConfig(BaseModel):
     trim_batch_chars: int = Field(default=40_000, ge=0, le=5_000_000)
     """How much trimmable excess must build up before any trimming happens. Every trim moves the
     prompt prefix and costs a cache miss on the whole request, so it is done in batches."""
+    trim_min_share: float = Field(default=0.25, ge=0.0, le=1.0)
+    """The smallest share of the request a trim must save. The cache breakpoints sit on the system
+    prompt and the last messages, and a hit is found only there or a few blocks short, so a trim
+    further back loses the whole conversation: the provider writes it into its cache again at 1.25
+    times the input price instead of reading it at 0.1. A trim measured on a 465,000-token request
+    saved 42,000 characters of 1.6 million and was served only the system prompt from the cache —
+    repaid after hundreds of calls, if ever. At 0.25 a trim pays back within about fifty; 0 leaves
+    only the batch threshold."""
 
 
 class JobsToolsConfig(BaseModel):
