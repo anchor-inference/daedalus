@@ -426,7 +426,10 @@ class Scheduler:
             try:
                 if front is not None:
                     await front.close_question(row["session_id"], f"⏳ No answer for {self.app.config.scheduler.question_timeout_minutes} min: the unattended run continues on its own judgement.")
-                await manager.answer(row["session_id"], [{"custom": UNATTENDED_ANSWER}], via="timeout")
+                # ``source`` says who answered, in the result the model and the app both read: nobody
+                # did, and the transcript draws this as a question that went unanswered, not as the
+                # operator's words.
+                await manager.answer(row["session_id"], [{"custom": UNATTENDED_ANSWER}], via="timeout", source="timeout")
                 await self._post("schedule_question_timeout", "An unattended run waited too long for an answer", f"Session '{state.session.title}': the question was answered with 'continue on your own judgement'.", tone="warning", session_id=row["session_id"])
             except RuntimeError:
                 pass
