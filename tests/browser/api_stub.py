@@ -327,6 +327,8 @@ GATES: dict[str, object] = {
     # check_health.py answers both itself, with failing rows; these are a quiet installation's.
     "/api/doctor": {"checks": [{"name": "default model", "ok": True, "message": "main = DeepSeek V4", "severity": "ok", "fix_hint": "", "fixable": False, "fixed": False}],
                     "summary": {"ok": 1, "warn": 0, "fail": 0, "fixed": 0}},
+    # The custom pages the navigation offers: none here. check_pages.py keeps a host of its own (pages_stub.py).
+    "/api/pages": {"pages": []},
     "/api/integrations/health": {"rows": [
         {"kind": "github", "name": "GitHub", "state": "not_configured", "severity": "info", "detail": ""},
         {"kind": "provider", "name": "deepseek", "state": "ready", "severity": "ok", "detail": "deepseek, key: proxy"},
@@ -345,6 +347,8 @@ SHARED_WRITES: dict[tuple[str, str], tuple[int, str, str]] = {
     # "Mark all read" in the bell's popover and on the Inbox.
     ("POST", "/api/notifications/seen"): (200, "application/json", json.dumps({"marked": 0, "summary": {"unseen": 0, "needs_you": 0}})),
     ("POST", "/api/pet/react"): (200, "application/json", json.dumps({"line": "I'm here.", "emotion": "joy", "action": "wave", "prop": ""})),
+    # The session cookie a custom page's frame needs; the stub's frames need none.
+    ("POST", "/api/pages/_signin"): (200, "application/json", json.dumps({"ok": True})),
 }
 
 
