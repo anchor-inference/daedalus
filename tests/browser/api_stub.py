@@ -339,8 +339,6 @@ GATES: dict[str, object] = {
     # check_health.py answers both itself, with failing rows; these are a quiet installation's.
     "/api/doctor": {"checks": [{"name": "default model", "ok": True, "message": "main = DeepSeek V4", "severity": "ok", "fix_hint": "", "fixable": False, "fixed": False}],
                     "summary": {"ok": 1, "warn": 0, "fail": 0, "fixed": 0}},
-    # The custom pages the navigation offers: none here. check_pages.py keeps a host of its own (pages_stub.py).
-    "/api/pages": {"pages": []},
     "/api/integrations/health": {"rows": [
         {"kind": "github", "name": "GitHub", "state": "not_configured", "severity": "info", "detail": ""},
         {"kind": "provider", "name": "deepseek", "state": "ready", "severity": "ok", "detail": "deepseek, key: proxy"},
