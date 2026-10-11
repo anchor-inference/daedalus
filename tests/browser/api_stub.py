@@ -224,6 +224,13 @@ class LauncherStub:
         return None
 
 
+SAMPLE_PAGE: dict[str, object] = {
+    "slug": "dosing", "title": {"en": "Dosing calculator", "ru": "Калькулятор дозировки"}, "icon": None,
+    "icon_path": "M5 19L19 5M7 3h4v4H7zM13 17h4v4h-4z", "path": "/app/p/dosing", "version": 1, "updated_at": "2026-10-11T08:00:00Z",
+}
+"""A published page as ``GET /api/pages`` lists it, with a glyph of its own."""
+
+
 GATES: dict[str, object] = {
     "/api/terminals/envs": {"envs": [
         {"env": "container", "available": True, "sandbox": "ok", "containment": {"kind": "cgroup_v2", "available": True}},
@@ -241,6 +248,11 @@ GATES: dict[str, object] = {
     # Drawn before any screen: no model means the whole app is the "Add a model" flow.
     "/api/onboarding": {"has_model": True, "presets": 1, "default_preset": "p", "providers": [], "keyproxy_base": "", "needs": [], "message": ""},
     "/api/providers/free-catalog": {"providers": [], "updated_at": None, "stale": False},
+    # Where the rail, its More menu and the phone drawer put each destination: nothing configured, the
+    # layout the app ships with. check_navigation.py answers it itself to move things about.
+    "/api/navigation": {"rail": [], "more": [], "drawer": [], "hidden": [], "icons": {}},
+    # The pages the agent published: one, so the menus show where a page goes until it is placed.
+    "/api/pages": {"pages": [SAMPLE_PAGE]},
     # Decides which screens the navigation has at all.
     "/api/capabilities": {
         "selfdev": {"mode": "off", "configured": "off", "reasons": [], "missing": [], "tools": []},
@@ -824,7 +836,7 @@ def expect_app(base: str) -> None:
 
 
 
-__all__ = ["CALENDAR", "CalendarStub", "VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "IMPORTS", "ImportStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "TOOL_GROUP_CATALOGUE", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tasks", "session_tool_groups", "terminal_load"]
+__all__ = ["CALENDAR", "CalendarStub", "VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "IMPORTS", "ImportStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "SAMPLE_PAGE", "TOOL_GROUP_CATALOGUE", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tasks", "session_tool_groups", "terminal_load"]
 
 # What the harness manager reports for the container: Claude Code installed and signed in, Codex
 # installed but signed out, the rest absent. Enough for the hiring form to show one command-line agent

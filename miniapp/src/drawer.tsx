@@ -6,7 +6,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { Project, SessionList } from "./api";
-import { SelfDevMode, screenTag, visibleScreens } from "./capabilities";
+import { SelfDevMode, screenTag } from "./capabilities";
 import { relTime } from "./format";
 import { agentName, arrange, splitPinned } from "./grouping";
 import { plural, t } from "./i18n";
@@ -14,7 +14,8 @@ import { Icon, type IconName } from "./icons";
 import { useMain } from "./main/data";
 import { type Mode, agentsListingOf, orchestratedProjects } from "./mode";
 import { ORCHESTRATION, ORCHESTRATION_LIST, type Screen, pathFor, projectHome, sessionPath, useRoute } from "./router";
-import { type Counts, ICONS, countFor, screenTitle } from "./shell";
+import { type NavItem, type ResolvedNav, currentId } from "./navconfig";
+import { screenTitle } from "./shell";
 import { useQuery } from "./store";
 import { useStreamUp } from "./events";
 import { LangPicker } from "./ui/components";
@@ -28,10 +29,8 @@ function chatsIn(project: string): string {
   return pathFor("agents", null, { view: "chats", project });
 }
 
-/** The daily destinations of each mode, in the drawer's order; the rest wait in More. */
-const AGENTS_PLACES: Screen[] = ["inbox", "terminals", "board", "voice", "usage"];
-const ORCHESTRATION_PLACES: Screen[] = ["inbox", "terminals", "usage"];
-const MORE: Screen[] = ["calendar", "diagrams", "changes", "schedules", "services", "memory", "harnesses", "health"];
+/** The daily destinations of each mode and what waits in More come from navconfig.ts, which knows
+ *  the shipped drawer and the operator's own order. */
 const BETA: Screen[] = ["voice"];
 const PROJECTS = 5;
 
@@ -50,7 +49,8 @@ export function colourOf(id: string): string {
 
 export type AppDrawerProps = {
   mode: Mode;
-  counts: Counts;
+  /** What the drawer and its More sheet hold, badges included. */
+  nav: ResolvedNav;
   /** What waits for the operator in orchestration mode. */
   waiting: number;
   selfdev: SelfDevMode;
@@ -60,7 +60,7 @@ export type AppDrawerProps = {
   onProjects: () => void;
 };
 
-export function AppDrawer({ mode, counts, waiting, selfdev, projects, onProjects }: AppDrawerProps) {
+export function AppDrawer({ mode, nav: layout, waiting, selfdev, projects, onProjects }: AppDrawerProps) {
   const open = useDrawerOpen();
   const route = useRoute();
   // The switch shows a mode's lists without leaving the page; a destination inside it goes there.
@@ -84,17 +84,18 @@ export function AppDrawer({ mode, counts, waiting, selfdev, projects, onProjects
   const orchestrated = useMemo(() => orchestratedProjects(Array.isArray(listing.data?.projects) ? listing.data!.projects : []), [listing.data]);
   const agentsWaiting = (agents?.sessions ?? []).filter((s) => s.status === "waiting").length;
   const folderOf = (id: string) => agents?.projects.find((p) => p.id === id);
-  const moreScreens = visibleScreens(MORE, selfdev);
-  const moreCount = moreScreens.reduce((n, s) => n + countFor(s, counts), 0);
-  const here = (s: Screen) => route.screen === s && !route.session;
+  const moreItems = layout.phoneMore;
+  const moreCount = moreItems.reduce((n, it) => n + it.badge, 0);
+  const standing = currentId(route.screen, route.detail);
+  const here = (it: NavItem) => !route.session && standing === it.id;
 
-  const place = (s: Screen) => {
-    const n = countFor(s, counts);
-    const tag = screenTag(s, selfdev, BETA);
+  const place = (it: NavItem) => {
+    const n = it.badge;
+    const tag = it.screen ? screenTag(it.screen, selfdev, BETA) : "";
     return (
-      <a key={s} className={`ph-nrow ${here(s) ? "on" : ""}`} href={pathFor(s)} data-screen={s} aria-current={here(s) ? "page" : undefined} onClick={(e) => { e.preventDefault(); navigateFromDrawer(pathFor(s)); }}>
-        <Icon name={ICONS[s]} size={20} />
-        <span className="ph-nrow-l">{screenTitle(s)}</span>
+      <a key={it.id} className={`ph-nrow ${here(it) ? "on" : ""}`} href={it.path} data-screen={it.id} aria-current={here(it) ? "page" : undefined} onClick={(e) => { e.preventDefault(); navigateFromDrawer(it.path); }}>
+        <Icon name={it.icon} size={20} path={it.iconPath} />
+        <span className="ph-nrow-l">{it.title}</span>
         {tag && <span className="ph-tag">{t(tag)}</span>}
         {n > 0 && <span className="ph-badge">{n > 99 ? "99+" : n}</span>}
       </a>
@@ -140,11 +141,11 @@ export function AppDrawer({ mode, counts, waiting, selfdev, projects, onProjects
         {shown === "agents" ? (
           <>
             {nav("chats", "bots", t("ph.chats"), CHATS_PATH, onChats, agents ? <span className="ph-cnt">{agents.sessions.filter((s) => !s.metadata?.subagent_of).length}</span> : undefined)}
-            {visibleScreens(AGENTS_PLACES, selfdev).map(place)}
+            {layout.drawer.agents.map(place)}
             <button type="button" className="ph-nrow" onClick={() => setMore(true)} aria-haspopup="dialog" data-nav="more">
               <Icon name="grid" size={20} />
               <span className="ph-nrow-l">{t("nav.more")}</span>
-              {moreCount > 0 ? <span className="ph-badge">{moreCount}</span> : <span className="ph-cnt">{moreScreens.length}</span>}
+              {moreCount > 0 ? <span className="ph-badge">{moreCount}</span> : <span className="ph-cnt">{moreItems.length}</span>}
             </button>
             {pinned.length > 0 && <div className="ph-dsec"><span className="ph-pinhead"><Icon name="pushpin" size={14} />{t("side.pinned")}</span></div>}
             {pinned.map((f) => {
@@ -193,11 +194,11 @@ export function AppDrawer({ mode, counts, waiting, selfdev, projects, onProjects
           <>
             {nav("main", "conductor", t("main.title"), ORCHESTRATION, route.screen === "orchestration" && !route.project && route.detail !== "projects",
               main && waiting > 0 ? <span className="ph-badge warn">{waiting > 99 ? "99+" : waiting}</span> : undefined)}
-            {visibleScreens(ORCHESTRATION_PLACES, selfdev).map(place)}
+            {layout.drawer.orchestration.map(place)}
             <button type="button" className="ph-nrow" onClick={() => setMore(true)} aria-haspopup="dialog" data-nav="more">
               <Icon name="grid" size={20} />
               <span className="ph-nrow-l">{t("nav.more")}</span>
-              {moreCount > 0 ? <span className="ph-badge">{moreCount}</span> : <span className="ph-cnt">{moreScreens.length}</span>}
+              {moreCount > 0 ? <span className="ph-badge">{moreCount}</span> : <span className="ph-cnt">{moreItems.length}</span>}
             </button>
             <div className="ph-dsec">{t("orch.projects")}<button type="button" className="ph-dsec-act" data-nav="orchestration-list" onClick={() => navigateFromDrawer(ORCHESTRATION_LIST)}>{t("ph.seeall")}</button></div>
             {orchestrated.map((p) => {
@@ -220,10 +221,9 @@ export function AppDrawer({ mode, counts, waiting, selfdev, projects, onProjects
       </Drawer>
       {more && (
         <BottomSheet title={t("nav.more")} onClose={() => setMore(false)} className="ph-more-sheet">
-          {moreScreens.map((s) => {
-            const n = countFor(s, counts);
-            const tag = screenTag(s, selfdev, BETA);
-            return <SheetRow key={s} data={{ screen: s }} icon={ICONS[s]} label={screenTitle(s)} hint={tag ? t(tag) : undefined} value={n > 0 ? <span className="ph-badge">{n}</span> : undefined} onClick={() => { setMore(false); navigateFromDrawer(pathFor(s)); }} />;
+          {moreItems.map((it) => {
+            const tag = it.screen ? screenTag(it.screen, selfdev, BETA) : "";
+            return <SheetRow key={it.id} data={{ screen: it.id }} icon={it.icon} iconPath={it.iconPath} label={it.title} hint={tag ? t(tag) : undefined} value={it.badge > 0 ? <span className="ph-badge">{it.badge}</span> : undefined} onClick={() => { setMore(false); navigateFromDrawer(it.path); }} />;
           })}
           <div className="ph-msep" />
           {/* The language is changed from here as well as from Settings: a reader who cannot read the

@@ -13,22 +13,10 @@ import { insideTerminal } from "./terminal/keys";
 import { latinKey } from "./navigation";
 import { MenuButton } from "./ui/phone";
 
-export type Counts = { inbox?: number; changes?: number; services?: number; agents?: number };
-
-export const ICONS: Record<Screen, IconName> = { agents: "bots", voice: "mic", inbox: "inbox", board: "board", terminals: "terminal", harnesses: "wrench", changes: "changes", schedules: "clock", calendar: "calendar", diagrams: "pen", services: "globe", memory: "bulb", usage: "chart", health: "check", settings: "settings", orchestration: "compass", browser: "globe" };
-
-/** A destination's name, in the reader's language. The components below re-render with it because
- *  the shell's own `useLang` does; nothing here holds a translated string of its own. */
-export function screenTitle(s: Screen): string {
-  return t(`nav.${s}`);
-}
-
-export function countFor(s: Screen, counts: Counts): number {
-  if (s === "inbox") return counts.inbox ?? 0;
-  if (s === "changes") return counts.changes ?? 0;
-  if (s === "services") return counts.services ?? 0;
-  return 0;
-}
+// The names, icons and counts of the destinations live with the resolver that places them; these
+// are the same objects, re-exported for the screens that have always imported them from here.
+export { ICONS, countFor, screenTitle } from "./navconfig";
+export type { Counts } from "./navconfig";
 
 export function go(e: React.MouseEvent, path: string) {
   if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
@@ -65,7 +53,7 @@ export function PageHeader({ title, subtitle, actions, back, children }: { title
 
 // ── command palette ──────────────────────────────────────────────────────────────────────
 
-export type PaletteItem = { id: string; label: string; hint?: string; icon: IconName; run: () => void };
+export type PaletteItem = { id: string; label: string; hint?: string; icon: IconName; iconPath?: string | null; run: () => void };
 
 /** Ctrl/⌘ K: go somewhere by name — a screen, a session, an action. */
 export function Palette({ items, onClose }: { items: PaletteItem[]; onClose: () => void }) {
@@ -100,7 +88,7 @@ export function Palette({ items, onClose }: { items: PaletteItem[]; onClose: () 
       <div className="palette-list" role="listbox">
         {shown.map((it, i) => (
           <button key={it.id} role="option" aria-selected={i === cursor} className={`palette-row ${i === cursor ? "on" : ""}`} onMouseEnter={() => setCursor(i)} onClick={() => run(it)}>
-            <Icon name={it.icon} size={16} />
+            <Icon name={it.icon} size={16} path={it.iconPath} />
             <span className="truncate">{it.label}</span>
             {it.hint && <PaletteHint hint={it.hint} />}
           </button>

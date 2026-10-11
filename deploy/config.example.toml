@@ -282,6 +282,16 @@ stale_hours = 6            # a 'doing' task whose session went quiet this long i
 # throwaway_patterns = ["scratch*", "_scratch*", "*-scratch", "*_scratch", "tmp", ".tmp*", ".uv-cache", "_uvcache", ".uvcache*", "_uv-cache", ".npm-cache", ".pip-cache"]
 # walk_max_entries = 2000000            # past it a measurement is a lower bound
 
+# Where the app puts each destination: the desktop rail, its More menu and the phone drawer. Every list
+# empty is the shipped layout; Settings -> Navigation edits it. An item is a screen name ("inbox",
+# "terminals", ...) or "page:<slug>"; one the app does not know is ignored where it is drawn.
+[navigation]
+# rail = ["inbox", "terminals", "board"]   # the desktop rail, top to bottom; a place listed nowhere keeps its spot
+# more = ["usage"]                         # under the rail's More menu
+# drawer = ["inbox", "terminals"]          # the phone drawer; non-empty is the whole drawer
+# hidden = ["voice"]                       # never shown, on any device
+# icons = { terminals = "bolt" }           # a built-in icon name in place of the item's own
+
 [scheduler]
 topic_mode = "per_task"
 catch_up_missed = true

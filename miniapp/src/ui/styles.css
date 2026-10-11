@@ -4702,3 +4702,20 @@ button.staff-row:hover { background: var(--surface-2); }
 .empty .team-setup b { font-size: var(--fs-14); }
 .team-setup:disabled { opacity: 0.6; cursor: default; }
 .setup-steps { margin: 0; padding-inline-start: 1.2em; display: grid; gap: 4px; }
+
+/* Settings → Navigation: one row per destination, with its grip, glyph, name, arrows and place. The
+   rows are a list's rows, not settings rows: several controls share them and none is the row's own. */
+.nav-cfg-list { margin-top: var(--space-3); }
+.nav-cfg-head { margin: var(--space-2) 0 var(--space-1); font-size: var(--fs-12); color: var(--muted); }
+.nav-cfg-row { display: flex; align-items: center; gap: var(--space-2); min-height: var(--row-h); padding: 0 var(--space-2); border-radius: var(--radius-xs); cursor: grab; }
+.nav-cfg-row:hover { background: var(--surface-2); }
+.nav-cfg-row.dragging { opacity: 0.5; }
+.nav-cfg-row.off { color: var(--fg-2); }
+.nav-cfg-grip { display: inline-flex; color: var(--fg-3); }
+.nav-cfg-glyph { display: inline-flex; justify-content: center; width: var(--ctl-h); }
+.nav-cfg-title { flex: 1; min-width: 0; font-size: var(--fs-13); }
+.nav-cfg-arrows { display: inline-flex; gap: 2px; }
+.nav-cfg-place.field { flex: none; width: auto; min-height: var(--ctl-h-sm); padding-top: 0; padding-bottom: 0; }
+.nav-cfg-empty { padding: var(--space-2); }
+.nav-cfg-icons { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--ctl-h), 1fr)); gap: var(--space-1); margin-bottom: var(--space-3); }
+.nav-cfg-icons .iconbtn.on { background: var(--surface-3); color: var(--accent); }

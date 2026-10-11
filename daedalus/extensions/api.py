@@ -716,6 +716,9 @@ class SettingsBody(BaseModel):
     """Settings → Browser: the cap, the idle close, recording, watch mode, the local network the
     browser may be let into, the injection monitor. The browser service hands the daemon its part at
     once (``limits.set``, ``net.configure``)."""
+    navigation: dict[str, Any] | None = None
+    """The rail, its More menu and the phone drawer. Each field sent replaces that field whole, so
+    an icon override or a hidden item can be taken away; a field left out is kept."""
     answer_language: str | None = None
 
 
@@ -5879,6 +5882,12 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 entry["proxy"] = upstreams_cache["state"]
         return view
 
+    @api.get("/api/navigation")
+    async def get_navigation(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The rail and drawer layout alone. The shell reads it on every load, and the whole settings
+        view asks the key proxy about every provider on the way, which a menu has no need to wait for."""
+        return app.config.navigation.model_dump(mode="json")
+
     pet_calls: dict[str, Any] = {"day": "", "count": 0, "last": 0.0}
 
     @api.post("/api/pet/react")
@@ -5936,6 +5945,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         for section in ("modes", "webhooks"):
             if isinstance(dumped.get(section), dict):
                 current[section] = dumped.pop(section)
+        if isinstance(dumped.get("navigation"), dict):
+            # One level only: merged deeper, an icon override sent away came back from the old copy.
+            current["navigation"] = {**current.get("navigation", {}), **dumped.pop("navigation")}
         for section, value in dumped.items():
             if isinstance(value, dict):
                 current[section] = _deep_merge(current.get(section, {}), value)

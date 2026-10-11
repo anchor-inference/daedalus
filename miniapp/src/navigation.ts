@@ -1,23 +1,5 @@
-// What the menu holds and how the keyboard moves through it, with no DOM in sight: the popover in
-// navmenu.tsx renders these and a test can ask them questions without a browser.
-
-import { SelfDevMode, visibleScreens } from "./capabilities";
-import type { Screen } from "./router";
-
-export const DESKTOP_PLACES: Screen[] = ["inbox", "board", "calendar", "diagrams", "changes", "terminals", "voice", "schedules"];
-
-/** The destinations in the order the old rail listed them, one group per key of `nav.group.*`. */
-export const GROUPS: { key: string; items: Screen[] }[] = [
-  { key: "work", items: ["agents", "voice", "inbox", "board", "calendar", "diagrams", "terminals", "harnesses"] },
-  { key: "autonomy", items: ["changes", "schedules", "services"] },
-  { key: "knowledge", items: ["memory"] },
-  { key: "observe", items: ["usage", "health"] },
-];
-
-/** The groups this installation really has: an empty one is not drawn. */
-export function menuSections(selfdev: SelfDevMode): { key: string; items: Screen[] }[] {
-  return GROUPS.map((g) => ({ key: g.key, items: visibleScreens(g.items, selfdev) })).filter((g) => g.items.length > 0);
-}
+// How the keyboard moves through the menu, with no DOM in sight: the popover in navmenu.tsx uses
+// these and a test can ask them questions without a browser. What the menu holds is navconfig.ts's.
 
 /** Where focus goes from `index` of `count` items on a key, or null when the key is not one of ours. Arrows wrap. */
 export function moveIndex(index: number, key: string, count: number): number | null {

@@ -232,11 +232,11 @@ function EscapeLayer({ onEscape }: { onEscape: () => void }) {
 
 // ── sheets ──────────────────────────────────────────────────────────────────────────────────────
 
-export function SheetRow({ icon, label, hint, value, danger, checked, chevron, disabled, onClick, children, data }: { icon?: IconName; label: ReactNode; hint?: ReactNode; value?: ReactNode; danger?: boolean; checked?: boolean; chevron?: boolean; disabled?: boolean; onClick?: () => void; children?: ReactNode; data?: Record<string, string> }) {
+export function SheetRow({ icon, iconPath, label, hint, value, danger, checked, chevron, disabled, onClick, children, data }: { icon?: IconName; iconPath?: string | null; label: ReactNode; hint?: ReactNode; value?: ReactNode; danger?: boolean; checked?: boolean; chevron?: boolean; disabled?: boolean; onClick?: () => void; children?: ReactNode; data?: Record<string, string> }) {
   const attrs = Object.fromEntries(Object.entries(data ?? {}).map(([k, v]) => [`data-${k}`, v]));
   const body = (
     <>
-      {icon && <Icon name={icon} size={20} />}
+      {icon && <Icon name={icon} size={20} path={iconPath} />}
       <span className="ph-mrow-main">
         <span className="ph-mrow-t">{label}</span>
         {hint && <span className="ph-mrow-m">{hint}</span>}
