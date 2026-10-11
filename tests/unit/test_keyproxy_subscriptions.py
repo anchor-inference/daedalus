@@ -571,3 +571,47 @@ async def test_codex_reasoning_phase_forwards_keepalive_comments() -> None:
     assert json.loads(out[5][6:])["choices"][0]["delta"]["content"] == "Hi"
     full = await subs.collect_completion(subs.responses_events_to_chunks(_lines(events), model="m"), model="m")
     assert full["choices"][0]["message"]["content"] == "Hi"
+
+
+def test_claude_header_windows_read_the_unified_rate_limit_headers() -> None:
+    headers = httpx.Headers({
+        "anthropic-ratelimit-unified-5h-utilization": "0.23",
+        "anthropic-ratelimit-unified-5h-reset": "1791714000",
+        "anthropic-ratelimit-unified-7d-utilization": "0.84",
+        "anthropic-ratelimit-unified-7d-reset": "1791835200",
+    })
+    windows = claude_mod.claude_header_windows(headers)
+    assert windows == [
+        {"name": "5h", "used_percent": 23.0, "resets_at": 1791714000.0},
+        {"name": "weekly", "used_percent": 84.0, "resets_at": 1791835200.0},
+    ]
+    assert claude_mod.claude_header_windows(httpx.Headers({})) == []
+
+
+async def test_claude_usage_429_after_a_restart_shows_the_reply_headers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # A fresh proxy has no snapshot, and the usage endpoint refusing left the screen with no bars at all.
+    def upstream(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url.endswith("/api/oauth/usage"):
+            return httpx.Response(429, json={"error": {"type": "rate_limit_error", "message": "Rate limited"}}, headers={"Retry-After": "0"})
+        if url.endswith("/api/oauth/profile"):
+            return httpx.Response(200, json={"organization": {"rate_limit_tier": "default_claude_max_20x"}})
+        return httpx.Response(404)
+
+    cred = tmp_path / ".credentials.json"
+    cred.write_text(json.dumps({"claudeAiOauth": {"accessToken": "sk-ant-oat-test", "refreshToken": "r", "expiresAt": 4102444800000}}))
+    monkeypatch.setattr(proxy, "CLAUDE_AUTH", claude_mod.ClaudeAuth(cred))
+    monkeypatch.setattr(proxy, "CODEX_AUTH", subs.CodexAuth(tmp_path / "no-codex.json"))
+    monkeypatch.setattr(proxy, "GROK_AUTH", subs.GrokAuth(tmp_path / "no-grok.json"))
+    monkeypatch.setattr(proxy, "USAGE_CACHE_SECONDS", 0.0)
+    monkeypatch.setattr(proxy, "_usage_cache", {})
+    monkeypatch.setattr(proxy, "_claude_usage_retry_at", 0.0)
+    monkeypatch.setattr(proxy, "_claude_header_snapshot", {"windows": [{"name": "5h", "used_percent": 23.0, "resets_at": 1.0}, {"name": "weekly", "used_percent": 100.0, "resets_at": 2.0}], "at": 5.0})
+    app = proxy.make_app()
+    await app["client"].aclose()
+    app["client"] = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    async with TestClient(TestServer(app)) as client:
+        usage = await (await client.get("/subscriptions/usage")).json()
+    claude = usage["claude"]
+    assert [w["name"] for w in claude["windows"]] == ["5h", "weekly"] and claude["windows"][0]["used_percent"] == 23.0
+    assert claude["limit_reached"] is True and "error" not in claude

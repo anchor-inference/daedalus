@@ -526,6 +526,31 @@ def _iso_to_unix(value: Any) -> Any:
         return value
 
 
+def claude_header_windows(headers: Any) -> list[dict[str, Any]]:
+    """The 5h and weekly windows from the ``anthropic-ratelimit-unified-*`` headers of an inference reply.
+
+    The usage endpoint rate-limits on its own and answers 429 for long stretches, and a restarted
+    proxy has no earlier snapshot to serve, so the Usage screen lost both bars. Every model reply
+    carries the same two utilisations (as fractions) with their resets, which keeps them current.
+    """
+    windows = []
+    for name, key in (("5h", "5h"), ("weekly", "7d")):
+        raw = headers.get(f"anthropic-ratelimit-unified-{key}-utilization")
+        if raw is None:
+            continue
+        try:
+            used = round(float(raw) * 100, 1)
+        except ValueError:
+            continue
+        reset = headers.get(f"anthropic-ratelimit-unified-{key}-reset")
+        try:
+            resets_at: Any = float(reset) if reset is not None else None
+        except ValueError:
+            resets_at = None
+        windows.append({"name": name, "used_percent": used, "resets_at": resets_at})
+    return windows
+
+
 def claude_usage_view(data: dict[str, Any], profile: dict[str, Any] | None = None) -> dict[str, Any]:
     windows = []
     for name, key in (("5h", "five_hour"), ("weekly", "seven_day")):
@@ -556,6 +581,7 @@ __all__ = [
     "ClaudeAuth",
     "attribution_hash",
     "chat_to_messages",
+    "claude_header_windows",
     "claude_usage_view",
     "messages_events_to_chunks",
     "request_betas",
