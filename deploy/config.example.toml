@@ -282,6 +282,14 @@ stale_hours = 6            # a 'doing' task whose session went quiet this long i
 # throwaway_patterns = ["scratch*", "_scratch*", "*-scratch", "*_scratch", "tmp", ".tmp*", ".uv-cache", "_uvcache", ".uvcache*", "_uv-cache", ".npm-cache", ".pip-cache"]
 # walk_max_entries = 2000000            # past it a measurement is a lower bound
 
+# Custom pages live in the state volume and are served at /pages/<slug>/ behind the normal sign-in.
+# The caps only stop a runaway writer from filling the disk; 0 lifts each of them.
+# [pages]
+# max_page_bytes = 2147483648           # one page's draft, all files together; 0 = no limit
+# max_files = 0                         # 0 = no limit
+# keep_versions = 20                    # published versions kept for rollback
+# storage_value_max_bytes = 0           # one value of a page's storage; 0 = no limit
+
 [scheduler]
 topic_mode = "per_task"
 catch_up_missed = true

@@ -1633,6 +1633,22 @@ class TerminalsConfig(BaseModel):
     model — a password prompt's surroundings, another project's secrets."""
 
 
+class PagesConfig(BaseModel):
+    """Custom pages: the operator's own screens, kept as files in the state volume and served at
+    ``/pages/<slug>/``. The caps exist only so a runaway writer cannot fill the disk; they are never
+    meant to shape what a page may be, so they are generous and 0 lifts each one entirely."""
+
+    max_page_bytes: int = Field(default=2 << 30, ge=0)
+    """The most one page's draft may hold, all files together. 0 = no limit."""
+    max_files: int = Field(default=0, ge=0)
+    """The most files one page's draft may hold. 0 = no limit."""
+    keep_versions: int = Field(default=20, ge=1)
+    """Published versions kept per page for rollback; older ones are deleted at the next publish.
+    The live version is always kept, whatever its age."""
+    storage_value_max_bytes: int = Field(default=0, ge=0)
+    """The largest value a page may keep under one key of its storage. 0 = no limit."""
+
+
 class BrowserRuleConfig(BaseModel):
     """An operator's rule about sensitive browser actions on one site: ``allow`` lets the kinds named
     through without asking, ``deny`` refuses them, ``ask`` asks where nothing else would."""
@@ -1843,6 +1859,7 @@ class RuntimeConfig(BaseModel):
     loops: LoopsConfig = Field(default_factory=LoopsConfig)
     terminals: TerminalsConfig = Field(default_factory=TerminalsConfig)
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
+    pages: PagesConfig = Field(default_factory=PagesConfig)
     modes: dict[str, ModeConfig] = Field(default_factory=lambda: {k: v.model_copy() for k, v in DEFAULT_MODES.items()})
     webhooks: dict[str, WebhookConfig] = Field(default_factory=dict)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
