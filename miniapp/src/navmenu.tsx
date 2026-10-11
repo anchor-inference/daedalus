@@ -6,15 +6,17 @@ import { LangPicker } from "./ui/components";
 import { Overlay, useLayer } from "./ui/dialogs";
 import { Icon } from "./icons";
 import { t } from "./i18n";
-import { DESKTOP_PLACES, menuSections, moveIndex } from "./navigation";
+import { moveIndex } from "./navigation";
+import type { NavItem, ResolvedNav } from "./navconfig";
 import { Screen, pathFor } from "./router";
 import { SelfDevMode, screenTag } from "./capabilities";
-import { Counts, ICONS, countFor, go, screenTitle } from "./shell";
+import { go } from "./shell";
 import { usePetPreference } from "./ui/pet";
 
 const BETA: Screen[] = ["voice"];
 
-export function NavMenu({ screen, counts, selfdev, onClose, opener }: { screen: Screen; counts: Counts; selfdev: SelfDevMode; onClose: () => void; opener?: HTMLElement | null }) {
+/** `current` is the id of the item the route stands on (navconfig's `currentId`). */
+export function NavMenu({ current, nav, selfdev, onClose, opener }: { current: string; nav: ResolvedNav; selfdev: SelfDevMode; onClose: () => void; opener?: HTMLElement | null }) {
   const [pet, setPet] = usePetPreference();
   const panel = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left:8, top:8 });
@@ -61,27 +63,28 @@ export function NavMenu({ screen, counts, selfdev, onClose, opener }: { screen: 
       e.preventDefault();
     }
   };
-  const item = (s: Screen, kbd?: string) => {
-    const n = countFor(s, counts);
-    const tag = screenTag(s, selfdev, BETA);
+  const item = (it: NavItem) => {
+    const n = it.badge;
+    const tag = it.screen ? screenTag(it.screen, selfdev, BETA) : "";
+    const on = current === it.id;
     return (
-      <a key={s} role="menuitem" href={pathFor(s)} className={`navmenu-item ${screen === s ? "active" : ""}`} aria-current={screen === s ? "page" : undefined} onClick={(e) => { go(e, pathFor(s)); if (!e.defaultPrevented) return; onClose(); }}>
-        <Icon name={ICONS[s]} size={18} />
-        <span className="truncate">{screenTitle(s)}</span>
+      <a key={it.id} role="menuitem" href={it.path} data-nav-item={it.id} className={`navmenu-item ${on ? "active" : ""}`} aria-current={on ? "page" : undefined} onClick={(e) => { go(e, it.path); if (!e.defaultPrevented) return; onClose(); }}>
+        <Icon name={it.icon} size={18} path={it.iconPath} />
+        <span className="truncate">{it.title}</span>
         {tag && <span className="beta-tag">{t(tag)}</span>}
-        {n > 0 && <span className={`count ${s === "services" ? "ok" : s === "changes" ? "attn" : ""}`}>{n}</span>}
-        {kbd && n === 0 && <kbd>{kbd}</kbd>}
+        {n > 0 && <span className={`count ${it.screen === "services" ? "ok" : it.screen === "changes" ? "attn" : ""}`}>{n}</span>}
       </a>
     );
   };
+  const customise = pathFor("settings", "navigation");
   return (
     <Overlay>
       <div className="navmenu-backdrop" onClick={onClose} />
       <div ref={panel} className="navmenu" style={{ ...position, bottom:"auto" }} role="menu" aria-label={t("nav.menu")} onKeyDown={onKey}>
-        {menuSections(selfdev).map((g) => ({ ...g, items:g.items.filter((s) => s !== "agents" && !DESKTOP_PLACES.includes(s)) })).filter((g) => g.items.length > 0).map((g) => (
+        {nav.more.map((g) => (
           <div key={g.key} className="navmenu-section" role="group" aria-label={t(`nav.group.${g.key}`)}>
             <div className="navmenu-label">{t(`nav.group.${g.key}`)}</div>
-            {g.items.map((s) => item(s))}
+            {g.items.map(item)}
           </div>
         ))}
         <div className="navmenu-section">
@@ -89,6 +92,10 @@ export function NavMenu({ screen, counts, selfdev, onClose, opener }: { screen: 
             <Icon name="bots" size={18} />
             <span className="truncate">{pet ? t("pet.off") : t("pet.on")}</span>
           </button>
+          <a role="menuitem" href={customise} className="navmenu-item" data-nav="customise" onClick={(e) => { go(e, customise); if (e.defaultPrevented) onClose(); }}>
+            <Icon name="sliders" size={18} />
+            <span className="truncate">{t("nav.customise")}</span>
+          </a>
           <div className="navmenu-lang">
             <span><Icon name="globe" size={18} /> {t("lang.menu")}</span>
             <LangPicker />

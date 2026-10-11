@@ -1733,6 +1733,60 @@ class BrowserConfig(BaseModel):
     classified as a ref's would be, so a sensitive one is still asked about."""
 
 
+NAV_ID = re.compile(r"^(page:)?[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
+"""A navigation item: a built-in screen's name (``inbox``) or a page's slug (``page:dosing``)."""
+NAV_ICON = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
+NAV_LIST_MAX = 200
+
+
+class NavigationConfig(BaseModel):
+    """Where each destination of the app sits: the desktop rail, its More menu, the phone drawer.
+
+    Every list empty is the layout the app ships with. An id the app does not know (a page that was
+    removed, a screen of an older build) is kept here and ignored where it is drawn, so removing a
+    page never makes the saved navigation invalid. A malformed id is refused: the agent may write
+    this section, and a typo that silently vanished would read as a change that did not take.
+    """
+
+    rail: list[str] = Field(default_factory=list)
+    """The desktop rail, top to bottom. A built-in place not listed anywhere keeps its usual spot."""
+    more: list[str] = Field(default_factory=list)
+    """Items under the rail's More menu, in order within their group."""
+    drawer: list[str] = Field(default_factory=list)
+    """The phone drawer's places, top to bottom. Non-empty means the whole drawer: everything else
+    waits in the phone's More sheet. Empty is each mode's usual drawer."""
+    hidden: list[str] = Field(default_factory=list)
+    """Never shown, on any device. It wins over the three lists above."""
+    icons: dict[str, str] = Field(default_factory=dict)
+    """Item id → the name of a built-in icon to draw in place of its own."""
+
+    @field_validator("rail", "more", "drawer", "hidden")
+    @classmethod
+    def _ids(cls, value: list[str]) -> list[str]:
+        if len(value) > NAV_LIST_MAX:
+            raise ValueError(f"at most {NAV_LIST_MAX} items")
+        seen: list[str] = []
+        for item in value:
+            item = item.strip()
+            if not NAV_ID.match(item):
+                raise ValueError(f"{item!r} is not a screen name or page:<slug>")
+            if item not in seen:
+                seen.append(item)
+        return seen
+
+    @field_validator("icons")
+    @classmethod
+    def _icons(cls, value: dict[str, str]) -> dict[str, str]:
+        if len(value) > NAV_LIST_MAX:
+            raise ValueError(f"at most {NAV_LIST_MAX} icons")
+        for key, name in value.items():
+            if not NAV_ID.match(key):
+                raise ValueError(f"{key!r} is not a screen name or page:<slug>")
+            if not NAV_ICON.match(name):
+                raise ValueError(f"{name!r} is not an icon name")
+        return value
+
+
 class HeartbeatConfig(BaseModel):
     """A periodic unattended check driven by the HEARTBEAT.md file on the state volume."""
 
@@ -1843,6 +1897,7 @@ class RuntimeConfig(BaseModel):
     loops: LoopsConfig = Field(default_factory=LoopsConfig)
     terminals: TerminalsConfig = Field(default_factory=TerminalsConfig)
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
+    navigation: NavigationConfig = Field(default_factory=NavigationConfig)
     modes: dict[str, ModeConfig] = Field(default_factory=lambda: {k: v.model_copy() for k, v in DEFAULT_MODES.items()})
     webhooks: dict[str, WebhookConfig] = Field(default_factory=dict)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)

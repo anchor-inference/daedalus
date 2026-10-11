@@ -85,6 +85,17 @@ provider_retry_max_seconds = 600.0
 [memory]
 extract_after_run = false    # store durable facts after a completed run (a paid call)
 
+[navigation]                 # where the app puts each destination; Settings -> Navigation edits it
+rail = ["inbox", "terminals", "page:dosing"]  # the desktop rail, top to bottom
+more = ["usage"]             # under the rail's More menu, in order within its group
+drawer = ["inbox", "terminals", "board"]  # the phone drawer; non-empty is the whole drawer, the rest
+                             # waits in the phone's More sheet
+hidden = ["voice"]           # never shown on any device; wins over the lists above
+icons = { terminals = "bolt" }  # a built-in icon name in place of the item's own
+                             # Every list empty is the shipped layout. An item is a screen name or
+                             # page:<slug>; a place listed nowhere keeps its usual spot, and an id
+                             # the app does not know (a removed page) is ignored where it is drawn.
+
 [modes.review]               # your own mode; the built-in ones (quick, deep, careful, plan) stay unless you redefine the whole table
 tools_only = ["Read", "Find", "Search", "WebFetch", "AskUser"]
 prompt = "Mode: review. Read and report; change nothing."

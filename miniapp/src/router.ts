@@ -7,7 +7,7 @@ import { anchorHash, parseAnchor } from "./anchor";
 
 export const BASE = "/app";
 
-export type Screen = "agents" | "voice" | "inbox" | "board" | "terminals" | "harnesses" | "changes" | "schedules" | "calendar" | "diagrams" | "services" | "memory" | "usage" | "health" | "settings" | "orchestration" | "browser";
+export type Screen = "agents" | "voice" | "inbox" | "board" | "terminals" | "harnesses" | "changes" | "schedules" | "calendar" | "diagrams" | "services" | "memory" | "usage" | "health" | "settings" | "orchestration" | "browser" | "page";
 
 export const SCREENS: Screen[] = ["agents", "voice", "inbox", "board", "terminals", "harnesses", "changes", "schedules", "calendar", "diagrams", "services", "memory", "usage", "health", "settings"];
 /** Orchestration is a mode of its own rather than a destination of the menu: its item on the rail
@@ -51,7 +51,9 @@ export function parse(pathname = window.location.pathname, search = window.locat
   path = path.replace(/^\/+|\/+$/g, "");
   const [head, ...rest] = path.split("/").map(decodeURIComponent);
   const query = new URLSearchParams(search);
-  const screen = ([...SCREENS, ...INNER] as string[]).includes(head) ? (head as Screen) : ALIASES[head] ?? "agents";
+  // A page the agent published lives under /app/p/<slug>: a segment of its own, so no slug can ever
+  // take a screen's address.
+  const screen = head === "p" ? "page" : ([...SCREENS, ...INNER] as string[]).includes(head) ? (head as Screen) : ALIASES[head] ?? "agents";
   const detail = rest[0] || null;
   if (screen === "orchestration") {
     if (detail === "project") {

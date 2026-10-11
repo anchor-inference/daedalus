@@ -39,6 +39,8 @@ import { Mode, modeHome, modeOf, rememberMode, storedMode } from "./mode";
 import { applyAppearance } from "./appearance";
 import { OrchestrationList, OrchestrationSidebar, useOrchestrationWaiting } from "./orchestration";
 import { Rail } from "./rail";
+import { useNav } from "./usenav";
+import { currentId } from "./navconfig";
 import { SessionScreen, chunk, chunkVerdict, mayReload, retried, whenIdle } from "./chunks";
 
 /** A chunk that would not load: the build moved under an open page, or its download dropped. */
@@ -57,6 +59,7 @@ const VoiceScreen = lazy(retried(() => import("./screens/Voice"), (m) => ({ defa
 const ProposalsScreen = lazy(retried(() => import("./screens/Proposals"), (m) => ({ default: m.ProposalsScreen })));
 const SchedulesScreen = lazy(retried(() => import("./screens/Schedules"), (m) => ({ default: m.SchedulesScreen })));
 const CalendarScreen = lazy(retried(() => import("./calendar/Calendar"), (m) => ({ default: m.CalendarScreen })));
+const PageHost = lazy(retried(() => import("./screens/PageHost"), (m) => ({ default: m.PageHost })));
 const DiagramsScreen = lazy(retried(() => import("./screens/Diagrams"), (m) => ({ default: m.DiagramsScreen })));
 const UsageScreen = lazy(retried(() => import("./screens/Usage"), (m) => ({ default: m.UsageScreen })));
 const SettingsScreen = lazy(retried(() => import("./screens/Settings"), (m) => ({ default: m.SettingsScreen })));
@@ -286,6 +289,7 @@ export function App() {
   const proposals = useQuery<{ status: string }[]>(authed && selfdev !== "off" ? "/api/proposals" : null, { pollMs: 60000, staleMs: 30000 });
   const counts: Counts = { inbox: notifications.unseen, changes: (proposals.data ?? []).filter((p) => p.status === "pending").length };
   useShortcuts(openPalette, selfdev);
+  const nav = useNav(selfdev, counts, !!authed);
   // Three more on a desktop: the menu, the sidebar and a new chat, each with a modifier so a text field never eats them.
   useEffect(() => {
     if (!wide) return;
@@ -428,7 +432,8 @@ export function App() {
   // Telegram's own back button leaves a detail; the vertical swipe must not close the app mid-chat.
   // Orchestration's list is the mode's top on a phone, as the start screen is Agents'; on a desktop the
   // main chat is, with the list in the column beside it.
-  const inDetail = !!route.session || (!!route.detail && !orchestrationList) || !!focusProject || (mainChat && !wide);
+  // A page's slug is its address, not a detail under a list: it is a top-level destination.
+  const inDetail = !!route.session || (!!route.detail && !orchestrationList && route.screen !== "page") || !!focusProject || (mainChat && !wide);
   useEffect(() => {
     const tg = telegram();
     if (!tg?.initData || !tg.BackButton) return;
@@ -518,7 +523,9 @@ export function App() {
       ...projectList.filter((p) => !p.system && !p.settings.ephemeral && !p.settings.archived).map((p) => ({ id: `open-${p.id}`, label: t("focus.palette", { name: p.name }), icon: "conductor" as const, run: () => navigate(projectHome(p.id)) })),
       ...projectList.filter((p) => !p.system && !p.settings.ephemeral && !p.settings.archived).map((p) => ({ id: `team-${p.id}`, label: t("shell.search.team", { name: p.name }), icon: "bots" as const, run: () => navigate(projectPagePath(p.id, "team")) })),
       ...projectList.filter((p) => !p.system && !p.settings.ephemeral && !p.settings.archived).map((p) => ({ id: `board-${p.id}`, label: t("shell.search.board", { name: p.name }), icon: "board" as const, run: () => navigate(projectPagePath(p.id, "board")) })),
-      ...visibleScreens(SCREENS, selfdev).map((s) => ({ id: `go-${s}`, label: t("shell.search.goto", { name: screenTitle(s) }), icon: "back" as const, run: () => navigate(pathFor(s)) })),
+      ...visibleScreens(SCREENS, selfdev).filter((s) => !nav.hidden.has(s)).map((s) => ({ id: `go-${s}`, label: t("shell.search.goto", { name: screenTitle(s) }), icon: "back" as const, run: () => navigate(pathFor(s)) })),
+      // A page is a destination like a screen, offered under its own name and glyph.
+      ...nav.shown.filter((it) => it.kind === "page").map((it) => ({ id: `go-${it.id}`, label: t("shell.search.goto", { name: it.title }), icon: it.icon, iconPath: it.iconPath, run: () => navigate(it.path) })),
       // An orchestrated session opens inside its project, not in the Agents list.
       ...sessions.filter((s) => !s.metadata?.dispatcher).map((s) => ({ id: `s-${s.id}`, label: s.title, hint: orchestratedIds.has(s.project_id) ? `${s.project} · ${s.model ?? ""}` : s.model ?? "", icon: orchestratedIds.has(s.project_id) ? "conductor" as const : "bots" as const, run: () => (orchestratedIds.has(s.project_id) ? navigate(orchestratedSessionPath(s.id, s.project_id)) : open(s.id)) })),
       ...terminalItems,
@@ -616,6 +623,7 @@ export function App() {
         {route.screen === "usage" && <UsageScreen onOpen={open} />}
         {route.screen === "health" && <HealthScreen toast={showToast} />}
         {route.screen === "settings" && <SettingsScreen toast={showToast} section={route.detail} />}
+        {route.screen === "page" && <PageHost slug={route.detail} />}
         {mainChat && <MainScreen toast={showToast} />}
         {orchestrationList && !listInColumn && <OrchestrationList onProjects={() => setSwitching(true)} />}
         {focusProject !== null &&
@@ -649,6 +657,7 @@ export function App() {
           counts={counts}
           waiting={waiting}
           selfdev={selfdev}
+          nav={nav}
           menuOpen={menu}
           onMenu={() => setMenu((m) => !m)}
           menuButton={menuButton}
@@ -684,7 +693,7 @@ export function App() {
       )}
         </div>{!columnFolded && <PaneHandle side="right" drag={sidebarDrag} />}</div>
       )}
-      {wide && menu && <NavMenu screen={route.screen} counts={counts} selfdev={selfdev} onClose={() => setMenu(false)} opener={menuButton.current} />}
+      {wide && menu && <NavMenu current={currentId(route.screen, route.detail)} nav={nav} selfdev={selfdev} onClose={() => setMenu(false)} opener={menuButton.current} />}
       <div ref={main} className={`main ${sessionId || focusChat || terminalOpen || diagramOpen ? "chat-open" : ""}`}>
         <MaintenanceNotice />
         {offline && <div className="offline-strip" role="status">{t("app.offline")}</div>}
@@ -707,7 +716,7 @@ export function App() {
           </Suspense>
         </ErrorBoundary>
       )}
-      {!wide && <AppDrawer mode={mode} counts={counts} waiting={waiting} selfdev={selfdev} projects={agentProjects} onProjects={() => setSwitching(true)} />}
+      {!wide && <AppDrawer mode={mode} nav={nav} waiting={waiting} selfdev={selfdev} projects={agentProjects} onProjects={() => setSwitching(true)} />}
       {picking && sessionId && <SessionPicker exclude={sessionId} onPick={(id) => { navigate(sessionPath(sessionId, id)); setPicking(false); }} onClose={() => setPicking(false)} />}
       <NotificationToasts />
       <PetHost needsReply={notifications.needs_you > 0} activity={route.screen} />

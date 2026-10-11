@@ -2,6 +2,7 @@
 // inside Telegram, or with ?token=... for a browser session.
 
 import type { ImportedOrigin, MessageImport } from "./imports/model";
+import type { NavConfig } from "./navconfig";
 
 declare global {
   interface Window {
@@ -1420,6 +1421,8 @@ export type Settings = {
   compaction: { auto_ratio: number; keep_recent_messages: number; max_words: number; chunk_tokens: number; min_messages: number; call_timeout_seconds: number; core_trigger_ratio: number; preset: string };
   terminals?: { running_cap: number };
   browser?: BrowserSettings;
+  /** The rail, its More menu and the phone drawer (navconfig.ts reads it). Missing on an older host. */
+  navigation?: NavConfig;
   telegram: {
     mode: "topics" | "private" | null;
     forum_chat_id: number;
