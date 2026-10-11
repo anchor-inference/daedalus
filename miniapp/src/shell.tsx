@@ -15,7 +15,7 @@ import { MenuButton } from "./ui/phone";
 
 export type Counts = { inbox?: number; changes?: number; services?: number; agents?: number };
 
-export const ICONS: Record<Screen, IconName> = { agents: "bots", voice: "mic", inbox: "inbox", board: "board", terminals: "terminal", harnesses: "wrench", changes: "changes", schedules: "clock", calendar: "calendar", diagrams: "pen", services: "globe", memory: "bulb", usage: "chart", health: "check", settings: "settings", orchestration: "compass", browser: "globe" };
+export const ICONS: Record<Screen, IconName> = { agents: "bots", voice: "mic", inbox: "inbox", board: "board", terminals: "terminal", harnesses: "wrench", changes: "changes", schedules: "clock", calendar: "calendar", diagrams: "pen", services: "globe", memory: "bulb", usage: "chart", health: "check", settings: "settings", orchestration: "compass", browser: "globe", p: "grid" };
 
 /** A destination's name, in the reader's language. The components below re-render with it because
  *  the shell's own `useLang` does; nothing here holds a translated string of its own. */

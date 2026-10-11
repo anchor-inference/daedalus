@@ -7,12 +7,12 @@ import { anchorHash, parseAnchor } from "./anchor";
 
 export const BASE = "/app";
 
-export type Screen = "agents" | "voice" | "inbox" | "board" | "terminals" | "harnesses" | "changes" | "schedules" | "calendar" | "diagrams" | "services" | "memory" | "usage" | "health" | "settings" | "orchestration" | "browser";
+export type Screen = "agents" | "voice" | "inbox" | "board" | "terminals" | "harnesses" | "changes" | "schedules" | "calendar" | "diagrams" | "services" | "memory" | "usage" | "health" | "settings" | "orchestration" | "browser" | "p";
 
 export const SCREENS: Screen[] = ["agents", "voice", "inbox", "board", "terminals", "harnesses", "changes", "schedules", "calendar", "diagrams", "services", "memory", "usage", "health", "settings"];
 /** Orchestration is a mode of its own rather than a destination of the menu: its item on the rail
  *  (its tab on a phone) goes there, and so does everything that belongs to it. */
-const INNER: Screen[] = ["orchestration", "browser"];
+const INNER: Screen[] = ["orchestration", "browser", "p"];
 
 /** Orchestration mode's home on a desktop: the main orchestrator's chat. */
 export const ORCHESTRATION = `${BASE}/orchestration`;
@@ -61,6 +61,11 @@ export function parse(pathname = window.location.pathname, search = window.locat
     return { screen, session: null, with: null, detail, project: null, page: null, inner: null, query };
   }
   return { screen, session: screen === "agents" ? detail : null, with: screen === "agents" ? query.get("with") : null, detail: screen === "agents" ? null : detail, project: null, page: null, inner: null, query };
+}
+
+/** A custom page inside the app: /app/p/<slug>, the slug in the route's `detail`. */
+export function pagePath(slug: string): string {
+  return `${BASE}/p/${encodeURIComponent(slug)}`;
 }
 
 export function pathFor(screen: Screen, detail?: string | null, query?: Record<string, string | null | undefined>): string {

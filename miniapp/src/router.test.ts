@@ -4,7 +4,7 @@
 // hash along, or the link opens the chat at its end as if it pointed at nothing.
 
 import { afterEach, describe, expect, it } from "vitest";
-import { canonical, markAnchor, navigate } from "./router";
+import { canonical, markAnchor, navigate, pagePath, parse } from "./router";
 
 afterEach(() => {
   window.history.replaceState(null, "", "/");
@@ -44,5 +44,14 @@ describe("navigate", () => {
     window.history.replaceState(null, "", "/app/orchestration?panel=jobs");
     markAnchor(9);
     expect(window.location.pathname + window.location.search + window.location.hash).toBe("/app/orchestration?panel=jobs#m9");
+  });
+});
+
+describe("custom pages", () => {
+  it("routes /app/p/<slug> to the page screen with the slug as its detail", () => {
+    const route = parse("/app/p/bakery-orders", "");
+    expect(route.screen).toBe("p");
+    expect(route.detail).toBe("bakery-orders");
+    expect(pagePath("bakery-orders")).toBe("/app/p/bakery-orders");
   });
 });

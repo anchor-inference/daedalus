@@ -67,6 +67,7 @@ const BrowserFullScreen = lazy(retried(() => import("./screens/BrowserFull"), (m
 const TerminalFullScreen = lazy(retried(() => import("./screens/TerminalFull"), (m) => ({ default: m.TerminalFullScreen })));
 const HarnessesScreen = lazy(retried(() => import("./screens/Harnesses"), (m) => ({ default: m.HarnessesScreen })));
 const ServicesScreen = lazy(retried(() => import("./screens/Services"), (m) => ({ default: m.ServicesScreen })));
+const PageHostScreen = lazy(retried(() => import("./screens/PageHost"), (m) => ({ default: m.PageHostScreen })));
 const LoginScreen = lazy(retried(() => import("./screens/Login"), (m) => ({ default: m.LoginScreen })));
 const ProjectScreen = chunk(retried(() => import("./project/ProjectScreen"), (m) => ({ default: m.ProjectScreen })));
 const ProjectSidebar = chunk(retried(() => import("./project/ProjectSidebar"), (m) => ({ default: m.ProjectSidebar })));
@@ -428,7 +429,7 @@ export function App() {
   // Telegram's own back button leaves a detail; the vertical swipe must not close the app mid-chat.
   // Orchestration's list is the mode's top on a phone, as the start screen is Agents'; on a desktop the
   // main chat is, with the list in the column beside it.
-  const inDetail = !!route.session || (!!route.detail && !orchestrationList) || !!focusProject || (mainChat && !wide);
+  const inDetail = !!route.session || (!!route.detail && !orchestrationList && route.screen !== "p") || !!focusProject || (mainChat && !wide);
   useEffect(() => {
     const tg = telegram();
     if (!tg?.initData || !tg.BackButton) return;
@@ -611,6 +612,7 @@ export function App() {
         {route.screen === "terminals" && route.detail && <TerminalFullScreen id={route.detail} beside={route.query.get("with")} toast={showToast} />}
         {route.screen === "browser" && route.detail && <BrowserFullScreen id={route.detail} toast={showToast} />}
         {route.screen === "services" && <ServicesScreen onOpen={open} toast={showToast} />}
+        {route.screen === "p" && route.detail && <PageHostScreen slug={route.detail} toast={showToast} />}
         {route.screen === "harnesses" && <HarnessesScreen toast={showToast} />}
         {route.screen === "memory" && <MemoryScreen toast={showToast} onOpen={open} />}
         {route.screen === "usage" && <UsageScreen onOpen={open} />}
@@ -631,8 +633,8 @@ export function App() {
   // Inside a project the main orchestrator stays one click away, pinned above the project's column.
   const pinned = <MainEntry current={false} />;
   // A terminal full screen takes the column the way a conversation does: no scrolling page around it
-  // and, on a phone, no tab bar under it.
-  const terminalOpen = (route.screen === "terminals" || route.screen === "browser") && !!route.detail;
+  // and, on a phone, no tab bar under it. So does a custom page, which scrolls inside its own frame.
+  const terminalOpen = (route.screen === "terminals" || route.screen === "browser" || route.screen === "p") && !!route.detail;
   // A project on a phone keeps a bar of its own: four tabs and a More (project/phone.tsx); a session
   // inside it is a detail with a back of its own and no bar under it. Everywhere else a phone has no
   // bottom bar at all: the destinations are in the drawer, which every top bar's hamburger opens.

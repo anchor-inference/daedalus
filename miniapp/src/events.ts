@@ -426,6 +426,8 @@ export function wireCache(to: { on: typeof onEvent; prime: typeof prime; invalid
     // A pin made on another screen moves a row into or out of the pinned block. Only the pin: the
     // other project changes are the project screens' to read, and most of them come in bursts.
     to.on(["project.changed"], (event) => { if (event.payload.change === "pinned") sessionsSoon(); }),
+    // A page published, rolled back or removed anywhere: the navigation's list of pages is read again.
+    to.on(["pages.changed"], () => to.invalidate("/api/pages")),
     // Whatever the stream could not replay, every mounted read fetches again.
     to.on(["resync"], () => to.invalidate("")),
   ];
