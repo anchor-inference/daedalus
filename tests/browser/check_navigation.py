@@ -36,8 +36,8 @@ LANG = os.environ.get("LANG_UI", "")
 SHIPPED = ["inbox", "board", "calendar", "diagrams", "changes", "terminals", "voice", "schedules"]
 EMPTY = {"rail": [], "more": [], "drawer": [], "hidden": [], "icons": {}}
 WORDS = {
-    "en": {"page": "Dosing calculator", "pages": "Pages", "missing": "is not available", "customise": "Customise…", "reset": "Reset to default", "rail": "Rail"},
-    "ru": {"page": "Калькулятор дозировки", "pages": "Страницы", "missing": "недоступна", "customise": "Настроить…", "reset": "Сбросить по умолчанию", "rail": "Панель"},
+    "en": {"page": "Dosing calculator", "pages": "Pages", "customise": "Customise…", "reset": "Reset to default", "rail": "Rail"},
+    "ru": {"page": "Калькулятор дозировки", "pages": "Страницы", "customise": "Настроить…", "reset": "Сбросить по умолчанию", "rail": "Панель"},
 }
 
 
@@ -159,10 +159,9 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
         say("a hidden Board is still in the menu")
     page.keyboard.press("Escape")
 
-    # The page opens from the rail, on the placeholder that names it.
+    # The page opens from the rail at its own address; what the page screen draws is check_pages.py's.
     page.locator(".rail [data-rail='page:dosing']").click()
     page.wait_for_url("**/app/p/dosing**")
-    expect(page.locator("[data-page-missing='dosing']")).to_contain_text(words["missing"])
     expect(page.locator(".rail [data-rail='page:dosing']")).to_have_attribute("aria-current", "page")
 
     # Reset brings the shipped rail back.

@@ -114,7 +114,8 @@ export function PageHostScreen({ slug, toast }: { slug: string; toast: (text: st
 
   const menu = useMemo<MenuItem[]>(() => {
     if (!data) return [];
-    const items: MenuItem[] = data.versions.map((v) => ({
+    // A manifest without versions (an older host, a stub) is a page never published, not a crash.
+    const items: MenuItem[] = (data.versions ?? []).map((v) => ({
       label: `${t("page.version", { n: v.n })} · ${shortDateTime(v.at)}`,
       hint: v.note || undefined,
       checked: !showDraft && v.n === data.version,
