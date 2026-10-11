@@ -63,7 +63,7 @@ function WorkspaceUsage({ workspace, limit, toast, onCleaned }: { workspace: Wor
       <b data-disk-total>{sizeText(workspace.bytes, workspace.truncated)}</b>
       {limit > 0 && <span className="sub">{t("disk.ofLimit", { limit: bytes(limit) })}</span>}
     </div>
-    {limit > 0 && <div className={`bar ${tone(workspace.over)}`} style={{ "--v": fillPercent(workspace.bytes, limit) } as React.CSSProperties} />}
+    {limit > 0 && <div className={`bar ${tone(workspace.over)}`} style={{ "--v": fillPercent(workspace.bytes, limit) } as React.CSSProperties}><i /></div>}
     {workspace.over > 0 && <div className="sub attn">{t(workspace.over === 2 ? "disk.over2" : "disk.over1")}</div>}
     <div className="disk-entries">
       {workspace.entries.map((entry) => <EntryRow key={entry.path} entry={entry} />)}

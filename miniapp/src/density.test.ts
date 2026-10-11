@@ -125,8 +125,9 @@ function covered(selector: string, allowed: string[]): boolean {
   });
 }
 
-/** Where text is allowed to be larger than the UI: running prose, headings, numbers meant to be read from across a room, and glyphs. */
-const LARGE_ALLOWED = [".answer", ".summary-body", ".preview-doc", ".composer-box textarea", "h1", "h2", "h3", ".kpi .value", ".empty b", ".stat b", ".step-head b", ".dropzone", ".attachment-glyph", ".btn.big", ".chev", ".voice-", ".orb", ".onboard-head", ".login"];
+/** Where text is allowed to be larger than the UI: running prose, headings, numbers meant to be read from across a room (a
+ *  Details card opens on its one headline number, the reason that card exists), and glyphs. */
+const LARGE_ALLOWED = [".answer", ".summary-body", ".preview-doc", ".composer-box textarea", "h1", "h2", "h3", ".kpi .value", ".dt-big", ".empty b", ".stat b", ".step-head b", ".dropzone", ".attachment-glyph", ".btn.big", ".chev", ".voice-", ".orb", ".onboard-head", ".login"];
 
 /** Surfaces that are meant to be large: a screen, a dialog, a stage, an empty state, a bar that holds
  *  rows rather than being one. Everything else is a row, a control or an avatar, and is held to the tokens. */

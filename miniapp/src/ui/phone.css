@@ -487,19 +487,19 @@
   .ph-member .staff-compose-send { position: relative; width: var(--ctl-round); height: var(--ctl-round); min-height: var(--ctl-round); border-radius: 50%; background: var(--primary); color: var(--primary-ink); }
   .ph-member .staff-compose-send::after { content: ""; position: absolute; inset: -4px; }
   .ph-member .staff-compose-send:disabled { opacity: .35; }
-  /* Its details: the column's tabs as words with a pill under the current one, and the facts in
-     grouped cards. */
+  /* Its details: the column's tabs as words with a pill under the current one, and the facts as rows
+     with hairlines inside the Details tab's cards. */
   .ph-member-sheet .staff-panel { display: flex; flex-direction: column; min-height: 0; }
   .ph-member-sheet .panel-tabs { padding: 0 var(--space-2); border: 0; }
   .ph-member-sheet .panel-tab { position: relative; min-height: var(--tap); padding: 0 12px; border: 0; border-radius: var(--radius-pill); font-size: var(--fs-14); color: var(--fg-2); }
   .ph-member-sheet .panel-tab.on { background: var(--surface-2); color: var(--fg); }
   .ph-member-sheet .panel-body { padding: var(--space-2) var(--gutter); }
-  .ph-member-sheet .staff-details .dt-section { padding: var(--space-2) 0; border: 0; }
-  .ph-member-sheet .staff-details .dt-label { padding: var(--space-2) 4px; font-size: var(--fs-13); color: var(--fg-2); }
-  .ph-member-sheet .staff-details .dt-content { display: flex; flex-direction: column; gap: 2px; }
-  .ph-member-sheet .staff-details .dt-row.sub { align-items: center; min-height: var(--set-row-h); padding: 8px var(--space-4); border-radius: var(--radius-xs); background: var(--surface-2); color: var(--fg); font-size: var(--fs-15); }
-  .ph-member-sheet .staff-details .dt-row.sub:first-child { border-top-left-radius: var(--radius-xl); border-top-right-radius: var(--radius-xl); }
-  .ph-member-sheet .staff-details .dt-row.sub:last-child { border-bottom-left-radius: var(--radius-xl); border-bottom-right-radius: var(--radius-xl); }
+  .ph-member-sheet .staff-details { gap: var(--space-3); --dt-card: var(--surface-2); --dt-tile: var(--surface-1); }
+  .ph-member-sheet .staff-details .dt-section, .ph-member-sheet .staff-details .dt-section:first-child { border: 0; border-radius: var(--radius-xl); }
+  .ph-member-sheet .staff-details summary.dt-label { min-height: var(--tap); padding: 0 var(--space-3); border-radius: var(--radius-xl); font-size: var(--fs-15); }
+  .ph-member-sheet .staff-details .dt-content { gap: 0; padding: 0 var(--space-4) var(--space-3); }
+  .ph-member-sheet .staff-details .dt-row.sub { align-items: center; min-height: var(--set-row-h); padding: 8px 0; border-top: 1px solid var(--line); color: var(--fg); font-size: var(--fs-15); }
+  .ph-member-sheet .staff-details .dt-row.sub:first-child { border-top: 0; }
   .ph-member-sheet .staff-details .dt-key { flex: 1; color: var(--fg); }
   .ph-member-sheet .staff-details .dt-row > .grow { flex: none; max-width: 60%; text-align: right; color: var(--fg-2); overflow-wrap: anywhere; }
   .ph-foot-row.wrap { flex-wrap: wrap; }
@@ -1139,17 +1139,20 @@
   .ph-compact-row .livebar { max-width: 100%; gap: var(--space-2); font-size: var(--fs-14); color: var(--fg-2); background: none; border: 0; padding: 0; }
   .ph-compact-row .livebar b { font-weight: 500; color: var(--fg); }
 
-  /* Details in the sheet: every section a grouped card under a grey label, controls 36–44 px. */
-  .panel-sheet .details { padding: var(--space-2) 4px var(--space-6); }
-  .panel-sheet .dt-section, .panel-sheet .dt-section:first-child { padding: 0; margin: 0 0 var(--space-3); border: 0; }
-  .panel-sheet .details summary.dt-label { min-height: var(--tap); padding: 0 4px; font-size: var(--fs-13); font-weight: 500; color: var(--fg-2); }
-  .panel-sheet .dt-section.danger .dt-label { color: var(--bad); }
-  .panel-sheet .dt-content { padding: 12px var(--space-4); border-radius: var(--radius-xl); background: var(--surface-2); font-size: var(--fs-15); }
-  .panel-sheet .dt-content .sub, .panel-sheet .dt-content p.sub { font-size: var(--fs-13); }
-  .panel-sheet .dt-row { min-height: 40px; }
+  /* Details in the sheet: the desktop's cards as the phone's grouped cards, a 44 px header with the
+     title in the body's size, controls 36–44 px. The sheet is the lighter surface here, so the tiles
+     inside a card are the sheet's colour, set into it. */
+  .panel-sheet .details { gap: var(--space-3); padding: var(--space-2) 0 var(--space-6); --dt-card: var(--surface-2); --dt-tile: var(--surface-1); }
+  .panel-sheet .details .dt-section, .panel-sheet .details .dt-section:first-child { margin: 0; border: 0; border-radius: var(--radius-xl); }
+  .panel-sheet .details summary.dt-label { min-height: var(--tap); padding: 0 var(--space-3); border-radius: var(--radius-xl); font-size: var(--fs-15); }
+  .panel-sheet .details .dt-content { padding: 0 var(--space-4) var(--space-4); font-size: var(--fs-15); }
+  .panel-sheet .dt-content .sub, .panel-sheet .dt-content p.sub, .panel-sheet .dt-content .dt-hint, .panel-sheet .dt-note { font-size: var(--fs-13); }
+  .panel-sheet .dt-stat-value, .panel-sheet .dt-today b { font-size: var(--fs-15); }
+  .panel-sheet .dt-row, .panel-sheet .dt-control { min-height: 40px; }
   .panel-sheet .details .field { min-height: var(--tap); border: 0; border-radius: 12px; background: var(--surface-1); font-size: var(--fs-16); }
   .panel-sheet .details .btn.small { position: relative; min-height: 36px; padding: 0 var(--space-4); border: 0; border-radius: var(--radius-pill); background: var(--surface-1); font-size: var(--fs-14); font-weight: 600; }
   .panel-sheet .details .btn.small::after { content: ""; position: absolute; inset: -4px 0; }
+  .panel-sheet .dt-legend { grid-template-columns: minmax(0, 1fr); }
   /* Files in the sheet: 44 px rows in the body's size, with their ⋮ always in view. */
   .panel-sheet .files .filerow, .panel-sheet .files .filerow .title { min-height: var(--tap); font-size: var(--fs-15); }
   .panel-sheet .files .explorer-actions { opacity: 1; }
