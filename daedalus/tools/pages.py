@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import json
 import os
 import re
 from collections.abc import AsyncIterator
@@ -231,6 +232,8 @@ async def page_create(context: ToolContext, slug: str, title: str | dict[str, st
         notes.append("A link page frames the site; a site that refuses to be framed is offered as a link to open in a tab of its own.")
     what = f"from the template {template!r} ({', '.join(written)})" if written else f"pointing at {target!r}"
     lines = [f"Created the page {slug!r} ({kind}, a draft) {what}.", f"It will be at {_addresses(slug)}.", *notes,
+             "This session is the page's agent: the operator talks to it beside the page, and the page's agent.ask reaches it "
+             "(PageBind hands the page to another session).",
              "Next: change the draft with PageWrite or PageImport (build anything in your workspace and import the output), "
              "look at it with PageCheck, then PagePublish."]
     return ok(context, "\n".join(lines), slug=slug, kind=kind)
@@ -678,7 +681,7 @@ async def _draft_changed(store: PageStore, manifest: dict[str, Any], live: dict[
     "list pages custom pages which pages exist my screens "
     "список страниц какие есть страницы свои мои экраны покажи перечень"
 )
-@tool(name="PageList", description="The custom pages: slug, title, kind, the live version and whether the draft has changed since, and the page's owning session.")
+@tool(name="PageList", description="The custom pages: slug, title, kind, the live version and whether the draft has changed since, and the page's agent (its bound session).")
 async def page_list(context: ToolContext) -> ToolResult:
     desk = _desk(context)
     if desk is None:
@@ -694,7 +697,7 @@ async def page_list(context: ToolContext) -> ToolResult:
         if live and await _draft_changed(desk.store, m, live):
             state += ", the draft has changed since"
         kept = ", ".join(str(v["n"]) for v in m["versions"])
-        owner = f" · session {m['session_id']}" if m.get("session_id") else ""
+        owner = (" · agent: this session" if m["session_id"] == context.session_id else f" · agent: session {m['session_id']}") if m.get("session_id") else ""
         lines.append(f"- {m['slug']} \"{_plain_title(m['title'])}\" · {kind} · {state}" + (f" (versions {kept})" if kept else "") + f" · /app/p/{m['slug']}{owner}")
     return ok(context, "\n".join(lines), count=len(pages))
 
@@ -765,6 +768,125 @@ async def page_show(context: ToolContext, slug: str, draft: bool = False) -> Too
                        f"Notify(title, link='{path}') reaches them elsewhere.", slug=slug, path=path, title=title)
 
 
-TOOLS = [page_create, page_write, page_import, page_read, page_files, page_delete, page_check, page_publish, page_rollback, page_list, page_remove, page_show]
+# -- the page's agent ---------------------------------------------------------------------------
+
+
+@tool_group("pages")
+@search_hint(
+    "page agent bind session to page own agent of the page hand page to another session unbind "
+    "агент страницы привязать сессию к странице свой агент передать страницу другой сессии отвязать"
+)
+@tool(
+    name="PageBind",
+    description=(
+        "Make a session the custom page's own agent: the app shows its conversation beside the page, and the page's "
+        "Daedalus.agent.ask(…) reaches it. session_id omitted binds this session; unbind=true leaves the page without an "
+        "agent. A page has one agent at a time; PageCreate already binds the session that made the page."
+    ),
+)
+async def page_bind(context: ToolContext, slug: str, session_id: str | None = None, unbind: bool = False) -> ToolResult:
+    desk = _desk(context)
+    if desk is None:
+        return _unavailable(context)
+    store: PageStore = desk.store
+    try:
+        manifest = await store.require(slug)
+        if unbind:
+            if not manifest.get("session_id"):
+                return ok(context, f"{slug!r} has no agent; nothing changed.")
+            await store.update(slug, session_id=None)
+            return ok(context, f"{slug!r} has no agent now; the app no longer offers a conversation beside it, and agent.ask from the page is refused until one is bound.")
+        target = (session_id or "").strip() or context.session_id
+        title = await desk.session_title(target)
+        if title is None:
+            return error(context, f"there is no session {target!r}")
+        await store.update(slug, session_id=target)
+    except PageError as exc:
+        return _refused(context, exc)
+    who = "this session" if target == context.session_id else f"the session {title!r} ({target})"
+    before = manifest.get("session_id")
+    was = f" (it was {before})" if before and before != target else ""
+    return ok(context, f"{who[0].upper()}{who[1:]} is the agent of {slug!r} now{was}: its conversation opens beside the page, and messages the "
+                       "page sends arrive there marked as the page's.", slug=slug, session_id=target)
+
+
+@tool_group("pages")
+@search_hint(
+    "push data to the open page notify page reload model update page live event send to page "
+    "отправить данные на страницу обновить открытую страницу событие странице перезагрузить модель"
+)
+@tool(
+    name="PageEmit",
+    description=(
+        "Push data to every open instance of a custom page: the page hears it with Daedalus.on(event, fn) — say a scene "
+        "was rebuilt (PageEmit('cad', 'scene.updated', {\"file\": \"model.glb\"})) and the page reloads it without the "
+        "operator lifting a finger. event: 1-64 letters, digits, . _ : - ('theme' and 'agent.*' are the bridge's own). "
+        "data: any JSON up to 64 KB. Nothing is kept: a page opened later never sees it, so keep lasting state in "
+        "PageStorage or a file of the page and emit only that it changed."
+    ),
+)
+async def page_emit(context: ToolContext, slug: str, event: str, data: Any = None) -> ToolResult:
+    desk = _desk(context)
+    if desk is None:
+        return _unavailable(context)
+    try:
+        await desk.store.emit(slug, event, data)
+    except PageError as exc:
+        return _refused(context, exc)
+    return ok(context, f"Sent {event!r} to every open instance of {slug!r}; one opened later will not see it.", slug=slug, event=event)
+
+
+STORAGE_OPS = ("get", "set", "delete", "list")
+
+
+@tool_group("pages")
+@search_hint(
+    "page storage read write page state shared state with page key value page data settings saved by page "
+    "хранилище страницы прочитать записать состояние страницы общие данные со страницей ключ значение"
+)
+@tool(
+    name="PageStorage",
+    description=(
+        "Read or write a custom page's own storage, the durable values the page keeps with Daedalus.storage: share state "
+        "with the page (a scene, settings, the operator's entries in a form, results for it to show). op: 'get' (key), "
+        "'set' (key, value: any JSON), 'delete' (key), 'list' (key = a prefix, or empty for all). After a 'set' the open "
+        "page sees the new value only when it reads again: PageEmit tells it to."
+    ),
+)
+async def page_storage(context: ToolContext, slug: str, op: str, key: str = "", value: Any = None) -> ToolResult:
+    desk = _desk(context)
+    if desk is None:
+        return _unavailable(context)
+    if op not in STORAGE_OPS:
+        return error(context, f"op is one of {', '.join(STORAGE_OPS)}")
+    store: PageStore = desk.store
+    try:
+        if op == "list":
+            rows = await store.storage_list(slug, key)
+            if not rows:
+                return ok(context, f"{slug!r} keeps nothing" + (f" under {key!r}." if key else "."), count=0)
+            lines = [f"- {row['key']} ({human_size(row['bytes'])}, {row['updated_at']})" for row in rows[:LIST_SHOWN]]
+            if len(rows) > LIST_SHOWN:
+                lines.append(f"… and {len(rows) - LIST_SHOWN} more; narrow with a prefix")
+            return ok(context, f"{len(rows)} keys in {slug!r}:\n" + "\n".join(lines), count=len(rows))
+        if not key:
+            return error(context, f"op {op!r} needs a key")
+        if op == "get":
+            found = await store.storage_get(slug, key)
+            if found is None:
+                return ok(context, f"Nothing is stored under {key!r} in {slug!r}.", found=False)
+            text = json.dumps(found["value"], ensure_ascii=False, indent=2)
+            return ok(context, f"{key!r} in {slug!r} (written {found['updated_at']}):\n{text}", found=True)
+        if op == "set":
+            written = await store.storage_set(slug, key, value)
+            return ok(context, f"Stored {key!r} in {slug!r} ({written['updated_at']}). PageEmit tells an open page to read it again.", key=key)
+        removed = await store.storage_delete(slug, key)
+        return ok(context, f"Deleted {key!r} from {slug!r}." if removed else f"Nothing was stored under {key!r} in {slug!r}.", deleted=removed)
+    except (PageError, ValueError) as exc:
+        return error(context, str(exc))
+
+
+TOOLS = [page_create, page_write, page_import, page_read, page_files, page_delete, page_check, page_publish, page_rollback, page_list, page_remove, page_show,
+         page_bind, page_emit, page_storage]
 
 __all__ = ["TOOLS", "check_text"]

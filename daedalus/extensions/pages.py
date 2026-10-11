@@ -3,8 +3,9 @@
 The tools live below the extensions and may not import them, and the state directory where pages are
 kept is sealed from a session's own commands; so the tools are handed a desk here that holds the one
 page store the API also uses (its locks and its ``pages.changed`` events are shared with the app), the
-services range a service page may point into, the templates the shipped skill carries, and the page
-check, which needs the browser service and a server of its own (``api_page_check``).
+services range a service page may point into, the templates the shipped skill carries, the page
+check, which needs the browser service and a server of its own (``api_page_check``), and the sessions
+a page's agent may be bound to.
 """
 
 from __future__ import annotations
@@ -49,6 +50,12 @@ class PageDesk:
         if services is None:
             return []
         return list(await services.rows(session_id))  # type: ignore[attr-defined]
+
+    async def session_title(self, session_id: str) -> str | None:
+        """A session's title, or None when there is no such session: what binding a page checks."""
+        manager = self.app.manager
+        state = await manager.get_state(session_id) if manager is not None else None
+        return state.session.title if state is not None else None
 
     async def service_port(self, manifest: dict[str, Any], served: Served) -> int:
         """A service page's port for the check: a port of the services range, or the port of the

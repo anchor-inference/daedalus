@@ -175,8 +175,8 @@ TOOL_GROUPS: dict[str, ToolGroupSpec] = {
         "The operator's own screens inside the Daedalus app, whenever they want something to open there rather than "
         "in a separate browser or app: a dashboard, a tool, a form, a 3D or CAD viewer, a client for some service, a "
         "web app they run, another site. Build anything (any framework, CDN, the whole /api), import a build, look at "
-        "it on a phone and a desktop (PageCheck), publish, show it (PageShow). Not an HTML file sent in the chat, not a "
-        "change to the app's own code",
+        "it on a phone and a desktop (PageCheck), publish, show it (PageShow); a page's own agent talks to it (PageBind, "
+        "PageEmit, PageStorage). Not an HTML file sent in the chat, not a change to the app's own code",
         "lazy",
     ),
     "self_development": ToolGroupSpec(

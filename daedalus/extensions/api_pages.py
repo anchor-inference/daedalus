@@ -9,13 +9,19 @@ operator's own. Nothing here sandboxes a page or restricts what it may load.
 
 A browser signed in by token or by Telegram holds no cookie, and a frame's navigation cannot carry a
 header; ``POST /api/pages/_signin`` hands such a browser the session cookie before the app frames a page.
+
+A page may have an agent of its own: one session bound by the manifest's ``session_id``, which the app
+shows beside the page. ``/ask`` hands that session a message from the page, marked as the page's, and
+``/emit`` pushes data the other way, to every open instance of the page.
 """
 
 from __future__ import annotations
 
+import hashlib
 import html
 import mimetypes
 import posixpath
+import secrets
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -23,12 +29,26 @@ from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from starlette.datastructures import UploadFile
 from starlette.websockets import WebSocket
 
 from daedalus.extensions.api_proxy import forward_http, forward_websocket
 from daedalus.extensions.services import pid_alive
-from daedalus.host.pages import PageError, PageStore, Served, check_slug, clean_path, listing_row, store_for, title_text
+from daedalus.host.pages import (
+    PageError,
+    PageStore,
+    Served,
+    agent_brief,
+    check_slug,
+    clean_path,
+    listing_row,
+    store_for,
+    title_text,
+)
+from daedalus.host.prompts import page_note
+from daedalus.host.session_runner import Attachment
+from daedalus.host.tool_groups import SESSION_LOADS_KEY
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -100,6 +120,38 @@ class StorageBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     value: Any = None
+
+
+class AgentBody(BaseModel):
+    """A new session made to be the page's agent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(default="", max_length=200)
+    """The session's name; the page's title when empty."""
+    preset: str | None = None
+    project_id: str | None = None
+    """The project the agent works in; a folder of its own when empty."""
+
+
+class AskBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(default="", max_length=200_000)
+    silent: bool = False
+    follow_up: bool = False
+
+
+class EmitBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event: str = Field(min_length=1, max_length=64)
+    data: Any = None
+
+
+def _flag(value: Any) -> bool:
+    """A form field's yes: a browser's FormData sends every value as text."""
+    return isinstance(value, str) and value.strip().lower() in ("1", "true", "yes", "on")
 
 
 def manifest_view(manifest: dict[str, Any]) -> dict[str, Any]:
@@ -209,16 +261,140 @@ def register(
     async def pages_create(body: CreateBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         manifest = await call(store().create(body.slug, title=body.title, kind=body.kind, entry=body.entry, target=body.target,
                                              icon=body.icon, icon_path=body.icon_path, session_id=body.session_id))
-        return manifest_view(manifest)
+        return await detail(manifest)
+
+    def manager() -> Any:
+        found = getattr(app, "manager", None)
+        if found is None:
+            raise HTTPException(503, "sessions are not available in this installation")
+        return found
+
+    async def agent_of(manifest: dict[str, Any]) -> dict[str, Any] | None:
+        """The bound session as the page screen names it, or None; a session deleted since it was bound
+        is reported as gone rather than dropped, so the screen can offer to bind another."""
+        session_id = manifest.get("session_id")
+        if not session_id:
+            return None
+        state = await manager().get_state(session_id)
+        if state is None:
+            return {"id": session_id, "title": "", "gone": True, "running": False}
+        return {"id": session_id, "title": state.session.title, "gone": False, "running": bool(state.running)}
+
+    async def detail(manifest: dict[str, Any]) -> dict[str, Any]:
+        return {**manifest_view(manifest), "agent": await agent_of(manifest)}
 
     @api.get("/api/pages/{slug}")
     async def pages_detail(slug: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        return manifest_view(await call(store().require(slug)))
+        return await detail(await call(store().require(slug)))
 
     @api.patch("/api/pages/{slug}")
     async def pages_update(slug: str, body: UpdateBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Change what describes a page; ``session_id`` binds the page's agent (null unbinds it)."""
         fields = body.model_dump(exclude_unset=True)
-        return manifest_view(await call(store().update(slug, **fields)))
+        if fields.get("session_id") and await manager().get_state(fields["session_id"]) is None:
+            raise HTTPException(404, "no such session")
+        return await detail(await call(store().update(slug, **fields)))
+
+    @api.post("/api/pages/{slug}/agent")
+    async def pages_new_agent(slug: str, body: AgentBody | None = None, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """A new session made to be the page's agent, bound to it: the page in its brief, the page tools
+        loaded from the start, and otherwise a session like any other, with its own model and prompt."""
+        body = body or AgentBody()
+        manifest = await call(store().require(slug))
+        sessions = manager()
+        title = " ".join(body.title.split()) or title_text(manifest["title"])
+        metadata: dict[str, Any] = {
+            # Made here, not in Telegram: without this, private-chat mode would deliver its answers to
+            # the operator's direct messages.
+            "telegram_detached": True,
+            "brief": agent_brief(manifest),
+            "page": slug,
+            SESSION_LOADS_KEY: {"pages": "eager"},
+        }
+        try:
+            state = await sessions.create_session(title, metadata=metadata, project_id=body.project_id or None)
+        except KeyError as exc:
+            raise HTTPException(404, "no such project") from exc
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+        session_id = state.session.id
+        if body.preset:
+            try:
+                await sessions.set_model(session_id, preset=body.preset)
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
+        manifest = await call(store().update(slug, session_id=session_id))
+        return {"session_id": session_id, "title": title, "page": await detail(manifest)}
+
+    @api.post("/api/pages/{slug}/ask")
+    async def pages_ask(slug: str, request: Request, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """A message from the page to its agent: JSON ``{text, silent, follow_up}``, or a form with the
+        same fields and ``files``. It reaches the session marked as the page's (origin ``page:<slug>``
+        and a note the model reads), so the agent knows the operator pressed something in the page
+        rather than wrote in the chat. ``silent`` is the page reporting on its own: context for the
+        agent, folded in the chat, never the answer to a question the agent asked, and never
+        interrupting a turn under way."""
+        manifest = await call(store().require(slug))
+        session_id = manifest.get("session_id")
+        if not session_id:
+            raise HTTPException(409, "this page has no agent: bind a session to it, or make one with POST /api/pages/<slug>/agent")
+        uploads: list[UploadFile] = []
+        if request.headers.get("content-type", "").startswith("application/json"):
+            try:
+                asked = AskBody.model_validate(await request.json())
+            except (ValidationError, ValueError) as exc:
+                raise HTTPException(422, f"the message is not understood: {exc}") from None
+            text, silent, follow_up = asked.text, asked.silent, asked.follow_up
+        else:
+            form = await request.form()
+            text = str(form.get("text") or "")
+            silent, follow_up = _flag(form.get("silent")), _flag(form.get("follow_up"))
+            uploads = [item for item in form.getlist("files") if isinstance(item, UploadFile)]
+        sessions = manager()
+        staging = app.settings.state_dir / "upload-staging"
+        attachments: list[Attachment] = []
+        try:
+            if uploads:
+                staging.mkdir(parents=True, exist_ok=True)
+            for upload in uploads:
+                name = Path((upload.filename or "file").replace("\\", "/")).name or "file"
+                target = staging / f"{secrets.token_hex(16)}.part"
+                digest = hashlib.sha256()
+                with target.open("wb") as handle:
+                    while chunk := await upload.read(1 << 20):
+                        digest.update(chunk)
+                        handle.write(chunk)
+                attachments.append(Attachment(path=target, name=name, content_sha256=digest.hexdigest(),
+                                              mime_type=upload.content_type or mimetypes.guess_type(name)[0] or "application/octet-stream"))
+            said = text.strip() or ("Files attached." if len(attachments) > 1 else "File attached." if attachments else "")
+            if not said:
+                raise HTTPException(400, "nothing to send")
+            run_id = await sessions.submit(
+                session_id,
+                page_note(slug, title_text(manifest["title"]), silent=silent) + said,
+                attachments,
+                follow_up=follow_up or silent,
+                as_answer=not silent,
+                origin=f"page:{slug}",
+                via="page",
+                # The operator's own request is quoted as theirs when the chat is compacted; the page's
+                # report is not, exactly as a reminder's text is not.
+                operator_words=None if silent else [said],
+            )
+        except KeyError as exc:
+            raise HTTPException(404, "the page's agent session is gone; bind another one") from exc
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        finally:
+            for attachment in attachments:
+                attachment.path.unlink(missing_ok=True)
+        return {"run_id": run_id, "session_id": session_id}
+
+    @api.post("/api/pages/{slug}/emit")
+    async def pages_emit(slug: str, body: EmitBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Push data to every open instance of the page (``Daedalus.on(event)`` there); nothing is kept."""
+        await call(store().emit(slug, body.event, body.data))
+        return {"sent": True}
 
     @api.delete("/api/pages/{slug}")
     async def pages_remove(slug: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

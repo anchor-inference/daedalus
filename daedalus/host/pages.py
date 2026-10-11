@@ -51,6 +51,11 @@ ICON_PATH_RE = re.compile(r"^[MmLlHhVvCcSsQqTtAaZz0-9eE.,+\-\s]{1,4000}$")
 ICON_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
 TITLE_MAX = 120
 MANIFEST = "page.json"
+EVENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$")
+"""A name a page listens for with ``Daedalus.on(name)``."""
+RESERVED_EVENTS = ("theme", "agent.")
+"""Names the bridge itself delivers: an emitted ``theme`` would be written onto the page's root as
+its colours, and ``agent.*`` are the page agent's own conversation, which the app forwards."""
 
 
 class PageError(ValueError):
@@ -153,11 +158,13 @@ class PageStore:
     """
 
     def __init__(self, root: Path, config: PagesConfig | Callable[[], PagesConfig] | None = None, *, db: Database | None = None,
-                 on_change: Callable[[str, Change, int | None], Awaitable[None]] | None = None) -> None:
+                 on_change: Callable[[str, Change, int | None], Awaitable[None]] | None = None,
+                 on_emit: Callable[[str, str, Any], Awaitable[None]] | None = None) -> None:
         self.root = root
         self._config = config or PagesConfig()
         self.db = db
         self.on_change = on_change
+        self.on_emit = on_emit
         self._locks: dict[str, asyncio.Lock] = {}
 
     @property
@@ -585,6 +592,26 @@ class PageStore:
         )
         return [{"key": row["key"], "bytes": row["bytes"], "updated_at": row["updated_at"]} for row in rows]
 
+    # -- the open page ----------------------------------------------------------------------------
+
+    async def emit(self, slug: str, event: str, data: Any = None) -> None:
+        """Hand ``data`` to every open instance of the page, as ``Daedalus.on(event)`` there.
+
+        Nothing is kept: a page opened afterwards never sees it, which is why lasting state belongs in
+        the page's storage and an event only says that it changed."""
+        await self.require(slug)
+        if not isinstance(event, str) or not EVENT_RE.fullmatch(event):
+            raise PageError("an event's name is 1 to 64 letters, digits and . _ : - (starting with a letter or digit)")
+        if event == RESERVED_EVENTS[0] or event.startswith(RESERVED_EVENTS[1]):
+            raise PageError(f"{event!r} is a name the bridge delivers itself; pick another")
+        try:
+            json.dumps(data, allow_nan=False)
+        except (TypeError, ValueError) as exc:
+            raise PageError(f"an event's data is JSON: {exc}") from None
+        if self.on_emit is None:
+            raise PageError("this installation cannot reach open pages", 503)
+        await self.on_emit(slug, event, data)
+
     # -- serving --------------------------------------------------------------------------------
 
     def served(self, manifest: dict[str, Any], *, draft: bool = False) -> Served | None:
@@ -635,10 +662,42 @@ def store_for(app: Any) -> PageStore:
         if bus is not None:
             await bus.publish("pages.changed", {"slug": slug, "change": change, "version": version})
 
+    async def emit(slug: str, event: str, data: Any) -> None:
+        bus = getattr(getattr(app, "manager", None), "bus", None)
+        if bus is None:
+            raise PageError("this installation cannot reach open pages", 503)
+        try:
+            await bus.publish("pages.emit", {"slug": slug, "event": event, "data": data})
+        except ValueError as exc:
+            # The bus carries references, not content: a payload past its limit is refused there.
+            raise PageError(f"{exc}; keep the data in the page's storage or a file of the page and send its key", 413) from None
+
     db = getattr(app, "db", None)
-    made = PageStore(app.settings.state_dir / "pages", lambda: app.config.pages, db=db, on_change=announce)
+    made = PageStore(app.settings.state_dir / "pages", lambda: app.config.pages, db=db, on_change=announce, on_emit=emit)
     app.extensions["pages"] = made
     return made
 
 
-__all__ = ["KINDS", "PageError", "PageStore", "Served", "check_slug", "clean_path", "clean_target", "clean_title", "listing_row", "store_for", "title_text"]
+def agent_brief(manifest: dict[str, Any]) -> str:
+    """The standing instructions of a session made to be a page's own agent: which page it serves,
+    how the operator reaches it, and the tools that change the page and talk to it."""
+    slug = manifest["slug"]
+    title = title_text(manifest["title"])
+    kind = manifest["draft"]["kind"]
+    live = f"version {manifest['version']} is live" if manifest.get("version") is not None else "nothing is published yet"
+    return (
+        f"You are the agent of the custom page «{title}» (slug {slug!r}, kind {kind}; {live}), a screen of the operator's "
+        f"own in the Daedalus app at /app/p/{slug}. The operator works in the page and talks to you in a panel beside it. "
+        "A message that opens with \"(Sent from the page …)\" was sent by the page itself: a button, the page's own composer, "
+        "or a report of what the operator did there.\n"
+        "- Change the page with the pages tools (load the daedalus-pages skill first): PageRead / PageWrite / PageImport the "
+        "draft, PageCheck it, PagePublish. A publish never reloads the page under the operator; they see a quiet "
+        "\"New version\" chip and reload when it suits them.\n"
+        "- Push data to the open page with PageEmit(slug, event, data), which the page hears with Daedalus.on(event); keep "
+        "whatever must last (a scene, settings, results) in the page's storage with PageStorage, which the page reads with "
+        "Daedalus.storage, and emit only that it changed.\n"
+        "- Files the page needs (models, data) can live in your workspace and go into the page with PageImport."
+    )
+
+
+__all__ = ["KINDS", "PageError", "PageStore", "Served", "agent_brief", "check_slug", "clean_path", "clean_target", "clean_title", "listing_row", "store_for", "title_text"]
