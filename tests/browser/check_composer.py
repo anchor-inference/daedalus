@@ -5,7 +5,7 @@ the part that only exists once it is drawn against a host: a message goes out an
 Send; while a run is on an empty pill is Stop and a written one is queued for after the turn with no
 choice asked, appearing as a card above the pill whose Steer hands it to the run now and whose ×
 withdraws it, with Stop still beside the circle; a tool call the policy refused is a dock above the
-pill whose Allow once spends the key; the agent's question is a dock whose answer the circle sends
+pill whose Allow once spends the key; the agent's question is a card whose answer the circle sends
 as Reply; the model list opens from inside the pill and a pick reaches the host; and while another
 model stands in the selector says so and offers the way back.
 
@@ -522,18 +522,18 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     if page.locator(".composer .dock.approval").count():
         problems.append("the dock stayed after the call was refused")
 
-    # The agent's question: a dock with the options; the circle reads Reply and sends the answer.
+    # The agent's question: a card with the options; the circle reads Reply and sends the answer.
     HOST.messages = HOST.messages[:2]
     HOST.status = "waiting"
     HOST.pending = {"questions": [{"question": "Keep it to the usual 8?", "header": "Length", "options": [{"label": "Top 8", "description": "the usual"}, {"label": "All 14"}], "allow_custom": True}]}
     page.reload()
-    page.wait_for_selector(".composer .dock.question", timeout=15000)
+    page.wait_for_selector(".composer .ask", timeout=15000)
     print("waiting primary:", primary(page))
     if primary(page) != "reply":
         problems.append(f"with a question open the circle is {primary(page)!r}, not reply")
-    if page.locator(".composer .dock.question .btn.option").count() != 2:
-        problems.append("the question's options are not buttons in the dock")
-    page.locator(".composer .dock.question .btn.option", has_text="Top 8").click()
+    if page.locator(".composer .ask .ask-opt:not(.other) input[type='radio']").count() != 2:
+        problems.append("the question's options are not radio rows in the card")
+    page.locator(".composer .ask .ask-opt", has_text="Top 8").click()
     # The session is read again while the operator is still answering — its stream ends and is
     # re-opened, the safety-net poll runs — and each read brings the same question as a new object.
     # The pick must survive that read; it once did not, and Reply then sent nothing. Wait for one.
@@ -544,7 +544,7 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     if HOST.reads == reads:
         problems.append("the session was not read again while the question was open")
     page.wait_for_timeout(300)
-    if page.locator(".composer .dock.question .btn.option.selected", has_text="Top 8").count() != 1:
+    if page.locator(".composer .ask .ask-opt.on", has_text="Top 8").count() != 1:
         problems.append("reading the session again dropped the answer the operator had picked")
     before = len(posts("/answer"))
     page.locator(".composer .roundbtn.primary").click()

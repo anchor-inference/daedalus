@@ -789,12 +789,7 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .dock-title .ic { color:var(--warn); flex:none; }
 .dock-title kbd { font:inherit; font-size:var(--fs-11); color:var(--fg-3); white-space:nowrap; }
 .dock-detail { font-size:var(--fs-mono); color:var(--fg-2); padding:6px 8px; background:var(--surface-1); border-radius:var(--radius-sm); }
-.dock-options { display:flex; flex-wrap:wrap; gap:6px; }
-.dock-options .btn.option { border-color:var(--line-strong); }
-.dock-options .btn.option.selected { background:var(--fg); color:var(--bg); border-color:transparent; }
 .dock-actions { display:flex; gap:6px; }
-.dock-q + .dock-q { border-top:1px solid var(--line); padding-top:8px; }
-.dock .field { margin:0; }
 
 /* the + and the model list open upward from the pill */
 /* Popovers open upward from the composer. `.menu` itself is `right:10px` for the header overflow;
@@ -1304,7 +1299,7 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
   /* The conversation is one centred stripe, and running text inside it stops at a reading width:
      the shell takes the whole window, the prose does not. */
   .timeline, .composer-box { width: min(100%, var(--chat-w)); margin-inline: auto; }
-  .composer > .steers, .composer > .dock, .composer > .palette { width: min(100%, var(--chat-w)); margin-inline: auto; }
+  .composer > .steers, .composer > .dock, .composer > .ask, .composer > .palette { width: min(100%, var(--chat-w)); margin-inline: auto; }
   .codecard pre { white-space: pre; }
   /* One column. The prose, the operator's card, the step list, the files a turn produced and the
      field they are answered in all take the same stripe, so nothing is offset against anything
@@ -3030,7 +3025,7 @@ input.field[type="range"] {
   .composer-box textarea { min-height:calc(var(--fs-prose) * 1.4 + var(--space-2) * 2); }
 }
 @media (min-width: 1024px) {
-  .composer-box, .composer > .steers, .composer > .dock, .composer > .palette { width:min(100%, var(--chat-w)); margin-inline:auto; }
+  .composer-box, .composer > .steers, .composer > .dock, .composer > .ask, .composer > .palette { width:min(100%, var(--chat-w)); margin-inline:auto; }
 }
 
 /* Keep the newest-message shortcut above a card of any height. */

@@ -853,8 +853,55 @@ def expect_app(base: str) -> None:
         raise SystemExit(1)
 
 
+# Every kind of question the AskUser schema can express (protocore/tools/ask_user.py), as the
+# session's ``pending`` carries it: the payload is handed to the app untouched, preview included.
+# The six-question batch is the shape the operator once photographed as a wall of identical blocks.
+_WEEK = {"question": "Which week should this digest cover?", "header": "Week", "options": [
+    {"label": "The one that just ended (Recommended)", "description": "Monday 5 to Sunday 11 October: every item is final."},
+    {"label": "The running week", "description": "Up to today; two items are still in review."},
+], "allow_custom": True}
+_SECTIONS = {"question": "Which sections go in this time?", "header": "Sections", "multiSelect": True, "options": [
+    {"label": "Releases", "description": "Three tags and the desktop build."},
+    {"label": "Incidents", "description": "The search outage on Tuesday."},
+    {"label": "Reading list"},
+    {"label": "Numbers", "description": "Tokens, cost and the busiest sessions."},
+]}
+_SEND = {"question": "Send it to the list as soon as it is ready?", "header": "Send", "options": [{"label": "Yes"}, {"label": "No"}]}
+_SUBJECT = {"question": "What subject line should the mail carry? The last three were dated; a phrase reads better in a busy inbox.", "header": "Subject", "allow_custom": True}
+_LAYOUT = {"question": "Which layout should the digest use?", "header": "Layout", "options": [
+    {"label": "One column", "description": "Easiest on a phone.", "preview": "+--------------------+\n| Digest · week 41   |\n+--------------------+\n| Releases           |\n|  - v0.16.2         |\n| Incidents          |\n|  - search, Tue     |\n| Numbers            |\n+--------------------+"},
+    {"label": "Two columns", "description": "Denser; better on a desktop.", "preview": "+---------+----------+\n| Digest  · week 41  |\n+---------+----------+\n| Releases| Incidents|\n|  v0.16.2|  search  |\n+---------+----------+\n| Numbers | Reading  |\n+---------+----------+"},
+    {"label": "Cards", "preview": "+------+ +------+\n| Rel. | | Inc. |\n+------+ +------+\n+------+ +------+\n| Num. | | Read |\n+------+ +------+"},
+], "allow_custom": True}
+_TONE = {"question": "How formal should the opening paragraph be?", "header": "Tone", "options": [
+    {"label": "Plain and short", "description": "Two sentences, no greeting."},
+    {"label": "Warm", "description": "A greeting and a line about the week."},
+    {"label": "Formal", "description": "As the quarterly report reads."},
+], "allow_custom": True}
+ASK_KINDS: dict[str, dict] = {
+    "single": {"questions": [_WEEK]},
+    "multi": {"questions": [_SECTIONS]},
+    "yesno": {"questions": [_SEND]},
+    "text": {"questions": [_SUBJECT]},
+    "preview": {"questions": [_LAYOUT]},
+    "pair": {"questions": [_WEEK, _SEND]},
+    "batch": {"questions": [_WEEK, _SECTIONS, _SEND, _SUBJECT, _LAYOUT, _TONE]},
+}
 
-__all__ = ["CALENDAR", "CalendarStub", "VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "IMPORTS", "ImportStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "SAMPLE_PAGE", "TOOL_GROUP_CATALOGUE", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tasks", "session_tool_groups", "terminal_load"]
+
+def ask_turn(seq: int, call_id: str, questions: list[dict], answers: list[dict] | None, *, source: str = "user", created_at: str = "2026-10-11T09:00:00+00:00") -> list[dict]:
+    """An AskUser call in the transcript, and the host's result for it when it was answered.
+
+    ``answers`` None leaves the call without a result, which is how a run stopped while it waited
+    looks afterwards; ``source="timeout"`` is the scheduler answering an unattended run for nobody."""
+    base = {"summary": False, "internal": False, "origin": "", "compaction": None, "headline": "", "text": "", "thinking": "", "created_at": created_at, "model": "", "provider": "", "fallback": None}
+    rows = [{**base, "role": "assistant", "seq": seq, "tool_calls": [{"id": call_id, "name": "AskUser", "arguments": {"questions": questions}}], "tool_results": []}]
+    if answers is not None:
+        rows.append({**base, "role": "tool", "seq": seq + 1, "tool_calls": [], "tool_results": [{"id": call_id, "content": json.dumps({"answers": answers, "source": source}), "is_error": False}]})
+    return rows
+
+
+__all__ = ["ASK_KINDS", "ask_turn", "CALENDAR", "CalendarStub", "VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "IMPORTS", "ImportStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "SAMPLE_PAGE", "TOOL_GROUP_CATALOGUE", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tasks", "session_tool_groups", "terminal_load"]
 
 # What the harness manager reports for the container: Claude Code installed and signed in, Codex
 # installed but signed out, the rest absent. Enough for the hiring form to show one command-line agent

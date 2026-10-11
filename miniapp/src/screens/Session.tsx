@@ -1,7 +1,7 @@
 import { useContextActions } from "../ui/context-menu";
 import { Component, createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactElement, ReactNode } from "react";
-import { api, ApiError, AsrStatus, ModelFallback, ProviderUsage, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, SessionDetail, Compacting, type SessionFolder } from "../api";
+import { api, ApiError, AsrStatus, ModelFallback, ProviderUsage, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, SessionDetail, Compacting, type SessionFolder, type Question } from "../api";
 import { Chevron, Dot, Status, copyText, fmtInt, statusWord, timeAgo } from "../ui/components";
 import { MenuItem, OverflowMenu, Popover, confirmDialog, Overlay } from "../ui/dialogs";
 import { absDate, clock, commandPreview, duration, plainPreview, shortDateTime } from "../format";
@@ -23,7 +23,7 @@ import { withoutAttachedList } from "../keptfiles";
 import { FileGallery, InlineMedia, mediaCopyText, splitMediaAnswer } from "../media";
 import { conversationMedia, galleryFor, toolSource, viewerSource, type HostSource } from "../mediaroute";
 import { Answer, Composer, ComposerHandle } from "../composerbox";
-import { Approval, QueuedMessage, pendingApproval, queuedAfter, readQueued } from "../composer";
+import { Approval, QueuedMessage, pendingApproval, queuedAfter, questionsKey, readQueued } from "../composer";
 import { ModelChoice } from "../modelselect";
 import { ModeInfo, modeName } from "../modeselect";
 import { MoveSessionSheet } from "../projects";
@@ -48,6 +48,7 @@ import { EventCard, FocusChat, FocusChatContext, MessageFate, ReplyChip, ReplyQu
 import { GoalStrip } from "../project/goalstrip";
 import { excerptOf, messageBody, uploadText } from "../project/goalmodel";
 import { QuestionsLine, QuestionsPanel } from "../questions/QuestionsPanel";
+import { AskRecord } from "../questions/AskRecord";
 import { useQuestions, type QuestionScope } from "../questions/data";
 import { StaffHeader, StaffMessages, useMember } from "../project/staff";
 import { BriefPage, FoldersPage, WakeupsPage } from "../project/pages";
@@ -1363,8 +1364,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       openJobs: () => panel.open("jobs"),
       toast,
       link,
+      asking: questionsKey(detail?.pending?.questions ?? null),
     }),
-    [id, detail?.workspace, detail?.folders, openFromChat, panel.open, toast, link],
+    [id, detail?.workspace, detail?.folders, openFromChat, panel.open, toast, link, detail?.pending?.questions],
   );
 
   // What the answer cited, clicked: a file opens at the lines it named, a Verify receipt opens as a
@@ -2064,6 +2066,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
           {live && !turn.answer && turn.pendingTools === 0 && turn.activity.length > 0 && <div className="working">{t("session.working")}</div>}
         </div>
       )}
+      {turn.activity.map((item) => item.kind === "tool" && item.name === "AskUser" ? <AskUserRecord key={item.id} item={item} /> : null)}
       {turn.fallback && (turn.answer || live) && <FallbackChip fallback={turn.fallback} />}
       {turn.answer && (turn.media?.length ? (
         <div className={`answer answer-with-media ${live ? "streaming" : ""}`}>
@@ -2495,6 +2498,11 @@ function ActivityList({ items, compact, onRetry }: { items: Activity[]; compact:
       i++;
       continue;
     }
+    // The agent's questions are drawn as their record outside the folded steps (TurnView).
+    if (it.kind === "tool" && it.name === "AskUser") {
+      i++;
+      continue;
+    }
     // The orchestrator's own steps are one row each, named in the project's words: "Task created ·
     // Photos" twice says more than "Called Tasks 2 times".
     if (steps && stepDescription(it)) {
@@ -2601,6 +2609,17 @@ function ThoughtBlock({ text }: { text: string }) {
 
 /** The tools whose detail is a file the panel can open. */
 const FILE_TOOLS = ["Read", "Write", "Edit", "ImageView", "SendFile"];
+
+/** An AskUser call's record, drawn outside the turn's folded steps (TurnView): what the operator
+ *  decided is read back without opening the work. The call the session still waits on draws nothing
+ *  here — its card is above the composer. */
+function AskUserRecord({ item }: { item: ToolItem }) {
+  const { asking } = useContext(SessionContext);
+  const asked = Array.isArray(item.args.questions) ? (item.args.questions as Question[]) : [];
+  const waiting = item.result === undefined && asking !== "" && asking === questionsKey(asked);
+  if (waiting) return null;
+  return <AskRecord item={item} />;
+}
 
 function ToolRow({ item, nested }: { item: ToolItem; nested?: boolean }) {
   const { id: sessionId, workspace, folders, preview, openJobs } = useContext(SessionContext);
@@ -2723,7 +2742,9 @@ function ReceiptDialog({ sessionId, receipt, onClose }: { sessionId: string; rec
 /** `link` is the address this chat lives at, which a link to one of its messages starts from. */
 const NO_FOLDERS: SessionFolder[] = [];
 
-const SessionContext = createContext<{ id: string; workspace: string; folders: SessionFolder[]; preview: (src: PreviewSource) => void; openJobs: () => void; toast: (text: string) => void; link: string }>({
+/** `asking`: the key of the questions the session waits on (empty: none), so the transcript's AskUser
+ *  call that asked them reads as waiting and an older unanswered one does not. */
+const SessionContext = createContext<{ id: string; workspace: string; folders: SessionFolder[]; preview: (src: PreviewSource) => void; openJobs: () => void; toast: (text: string) => void; link: string; asking: string }>({
   id: "",
   workspace: "",
   folders: NO_FOLDERS,
@@ -2731,6 +2752,7 @@ const SessionContext = createContext<{ id: string; workspace: string; folders: S
   openJobs: () => undefined,
   toast: () => undefined,
   link: "",
+  asking: "",
 });
 
 /** A tool's path as the workspace knows it: absolute paths inside the workspace become relative, others stay unreachable. */

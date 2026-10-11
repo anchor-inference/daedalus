@@ -286,3 +286,34 @@ async def test_schedule_update_moves_the_next_run_and_pauses(app: Any) -> None:
         await _change(app, created["id"], 5, {"cron": "not a cron"})
     with pytest.raises(KeyError):
         await _change(app, "nope", 1, {"name": "x"})
+
+
+async def test_an_unattended_question_left_too_long_is_answered_in_nobodys_name() -> None:
+    """The scheduler settles an unattended run's question with its own words, and the result says the
+    answer came from the timeout: the transcript then draws the call as one nobody answered rather
+    than as something the operator said."""
+    answered: list[tuple[str, list[dict[str, Any]], str, str]] = []
+    posted: list[str] = []
+    state = SimpleNamespace(pending=object(), session=SimpleNamespace(metadata={"unattended": True}, title="Digest"))
+
+    class Manager:
+        async def get_state(self, session_id: str) -> Any:
+            return state
+
+        async def answer(self, session_id: str, answers: list[dict[str, Any]], *, via: str, source: str = "user") -> str:
+            answered.append((session_id, answers, via, source))
+            return "run"
+
+    class Rows:
+        async def fetchall(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, str]]:
+            return [{"session_id": "s1", "created_at": (datetime.now(UTC) - timedelta(days=1)).isoformat()}]
+
+    scheduler = Scheduler(SimpleNamespace(manager=Manager(), db=Rows(), config=RuntimeConfig(), front=None))
+
+    async def post(kind: str, *args: Any, **kwargs: Any) -> None:
+        posted.append(kind)
+
+    scheduler._post = post  # type: ignore[method-assign]
+    await scheduler._answer_stale_questions(datetime.now(UTC))
+    assert [(session, via, source) for session, _, via, source in answered] == [("s1", "timeout", "timeout")]
+    assert posted == ["schedule_question_timeout"]

@@ -1110,11 +1110,6 @@
   .ph-tray-actions { display: flex; flex-direction: column; gap: var(--space-2); margin-top: 4px; }
   .ph-tray-actions .ph-btn { width: 100%; min-width: 0; }
   .ph-btn.ph-deny { background: none; color: var(--bad); }
-  .ph-tray-q { display: flex; flex-direction: column; gap: var(--space-2); }
-  .ph-tray-q + .ph-tray-q { margin-top: var(--space-2); padding-top: var(--space-3); border-top: 1px solid var(--line); }
-  .ph-option { width: 100%; min-height: var(--tap); display: flex; flex-direction: column; justify-content: center; padding: 8px 16px; border: 0; border-radius: var(--radius-md); background: var(--surface-2); color: var(--fg); font: inherit; font-size: var(--fs-14); text-align: left; cursor: pointer; }
-  .ph-option.on { background: color-mix(in srgb, var(--accent) 16%, var(--surface-2)); box-shadow: inset 0 0 0 1.5px var(--accent); }
-  .ph-option-m { margin-top: 1px; font-size: var(--fs-13); color: var(--fg-2); }
   .ph-tray-answer { display: flex; gap: var(--space-2); }
   .ph-tray-answer .ph-field { flex: 1; min-width: 0; height: var(--tap); }
   .ph-tray-answer .ph-btn { flex: none; }
