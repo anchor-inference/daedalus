@@ -294,6 +294,18 @@ func (h *Hub) route(e events.Event) {
 	switch e.Type {
 	case "group.closed":
 		h.endGroup(gid)
+	case "group.resized":
+		h.mu.Lock()
+		var casts []*cast
+		for t, c := range h.casts {
+			if t.Group.ID == gid {
+				casts = append(casts, c)
+			}
+		}
+		h.mu.Unlock()
+		for _, c := range casts {
+			c.reconfigure(true)
+		}
 	case "tab.created", "tab.closed":
 		for _, cl := range cls {
 			cl.sendTabs()

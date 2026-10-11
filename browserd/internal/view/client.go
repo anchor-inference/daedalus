@@ -241,7 +241,7 @@ func (cl *Client) attach(v wire.View, full bool) {
 			c.add(cl)
 			cl.hub.sendViewers(cl.group, tab)
 		} else {
-			c.reconfigure()
+			c.reconfigure(false)
 			if full {
 				cl.hub.sendViewers(cl.group, tab)
 			}

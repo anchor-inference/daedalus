@@ -458,8 +458,14 @@ func (m *Manager) Resize(ctx context.Context, groupID string, vp Viewport) (View
 			continue
 		}
 		m.sizeWindow(ctx, g.Browser, t.TargetID, vp)
+		// Chromium can accept new window bounds before its page has the new size. A restart
+		// of the watched screencast before that point can send only the old picture.
+		m.settledInner(ctx, g.Browser, t.Session)
 	}
 	g.setViewport(vp)
+	// A still page does not always emit a screencast frame after its window changes.
+	// Restarting the watched cast makes the new viewport visible without a page action.
+	m.publish("group.resized", map[string]any{"group_id": g.ID})
 	return vp, nil
 }
 

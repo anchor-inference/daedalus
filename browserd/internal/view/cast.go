@@ -124,7 +124,7 @@ func (c *cast) wantedLocked() (w, h, q int, live, some bool) {
 }
 
 // reconfigure starts, restarts or stops the screencast to match the clients.
-func (c *cast) reconfigure() {
+func (c *cast) reconfigure(force bool) {
 	go func() {
 		<-c.ops
 		defer func() { c.ops <- struct{}{} }()
@@ -134,7 +134,7 @@ func (c *cast) reconfigure() {
 		wasRunning := c.running
 		c.liveNow = live
 		c.mu.Unlock()
-		if same || (!wasRunning && !some) {
+		if (same && !force) || (!wasRunning && !some) {
 			return
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -180,6 +180,12 @@ func (c *cast) frame(params json.RawMessage) {
 		return
 	}
 	c.scheduleAck(f.SessionID)
+	// Chromium may deliver a frame queued before a window resize (or before the first
+	// window sizing completed). Its metadata would map clicks onto the wrong pixels.
+	vp := c.tab.Group.ViewportNow()
+	if f.Metadata.DeviceWidth != float64(vp.W) || f.Metadata.DeviceHeight != float64(vp.H) {
+		return
+	}
 	data, err := base64.StdEncoding.DecodeString(f.Data)
 	if err != nil || len(data) == 0 {
 		return
@@ -248,7 +254,7 @@ func (c *cast) add(cl *Client) {
 	if newest != nil {
 		cl.offer(newest)
 	}
-	c.reconfigure()
+	c.reconfigure(false)
 }
 
 // remove takes a client off; it reports whether the cast has no clients left.
@@ -257,7 +263,7 @@ func (c *cast) remove(cl *Client) bool {
 	delete(c.clients, cl)
 	empty := len(c.clients) == 0
 	c.mu.Unlock()
-	c.reconfigure()
+	c.reconfigure(false)
 	return empty
 }
 
