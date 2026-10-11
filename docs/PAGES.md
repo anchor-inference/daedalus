@@ -213,6 +213,29 @@ curl -X POST http://<host>:<port>/api/pages/notes/publish -H "X-Daedalus-Token: 
 
 The page is then at `/app/p/notes`.
 
+## Built by an agent
+
+Ask for a page in a chat and the agent builds it with the `pages` tools, guided by the bundled
+`daedalus-pages` skill:
+
+| Tool | |
+|---|---|
+| `PageCreate` | a new page (a draft) from a template: `blank`, `dashboard`, `split` (a tool with a panel for the page's agent), `viewer` (three.js), `embed-service`, `form`; or a `service` page on a port of the services range or a service the agent runs, or a `link` page |
+| `PageWrite`, `PageImport` | one text file into the draft, or a file or a whole folder from the agent's workspace — a build made with any toolchain, models, data — streamed whatever its size |
+| `PageRead`, `PageFiles`, `PageDelete` | the draft's or a version's files |
+| `PageCheck` | the page loaded in the agent's browser at 390×844 and 1440×900, in the dark theme and the light scheme: what a vision model saw on each screenshot, console errors, failed requests and missing files, sideways overflow and small tap targets at phone width, whether the bridge shook hands |
+| `PagePublish`, `PageRollback`, `PageList` | versions, as above |
+| `PageRemove` | a page that was ever published only with `confirm=true`, after the agent asked you |
+| `PageShow` | a card with Open in the chat |
+
+`PageCheck` never sees your sign-in. It serves the page from a short-lived address of its own on a
+free port of the services range (the only ports the agent's browser may reach), opened by a random
+token and closed when the check ends, inside a frame that answers the bridge as the app does. A
+page's `/api` requests are answered 401 there, and the result says so. The check is advice: the
+agent decides when to publish.
+
+The agent puts a published page on the rail through the `[navigation]` setting (`page:<slug>`).
+
 ## Settings
 
 ```toml

@@ -142,11 +142,12 @@ How local mode checks a change before it restarts on it, the gates both modes sh
 | Delegation | `SubAgent`, `SubAgentSend`, `SubAgentList`, `SpawnAgent`, `AskPeer` — helpers in the same workspace (a report wakes the leader when it is ready; an idle helper can be raised without a task; `tools_off` takes tools away from a helper, so a launch it must not make is impossible rather than discouraged), sibling sessions, named peers |
 | Time | `ScheduleCreate`, `LoopNext`, `IntentCreate` — cron, self-paced loops, standing intents on inbound events |
 | Hosting | `ServiceStart` / `ServiceStop` / `ServiceLogs` — processes that outlive the turn, on ports you can reach and share; `TerminalRead` — the screen, output and commands of the session's own terminals, read-only |
+| Pages | `PageCreate`, `PageWrite`, `PageImport`, `PageCheck`, `PagePublish`, `PageShow`, … — screens of your own inside the app, at `/app/p/<slug>` and on the rail: built from a template or with any toolchain and imported, looked at on a phone and a desktop in both schemes before you see them, published and rolled back without a restart ([`docs/PAGES.md`](docs/PAGES.md)) |
 | Memory | `Remember`, `Recall`, `Forget`, `HistorySearch`, `HistoryExpand` |
 | Quality | `Verify` — a check with a criterion, recorded as a receipt; `LearningReport` |
 | Self | `SelfWorkspace` plus either `SelfApply` (local: commit into the running checkout, restart to apply) or `SelfPropose`, `SelfRebuild`, `SelfRollback` (server: pull request, rebuild, roll back) — registered according to `[self_change] mode`; on an installation that does not change its own code there are none |
 | Planning | `BoardAdd` / `BoardUpdate` / `BoardList` / `BoardGet` — the agent's own board (shared with its subagents; tasks you post to nobody in particular are on every board), with acceptance criteria, checklists, dependencies and a per-agent work-in-progress limit; `PLAN.md` in the workspace is its rendering |
-| Extensions | `Skill` (33 bundled skills: design systems, web QA, writing, scheduling, comparable variants, figures, search discipline…), `Mcp*` with OAuth, `SendFile` (attached under the answer in the app too), `StaySilent`, `Notify` — tells you something outside the chat, routed like any notification and limited per session |
+| Extensions | `Skill` (37 bundled skills: design systems, web QA, writing, scheduling, comparable variants, figures, search discipline…), `Mcp*` with OAuth, `SendFile` (attached under the answer in the app too), `StaySilent`, `Notify` — tells you something outside the chat, routed like any notification and limited per session |
 
 Every tool can be switched off per session from the app, and a **mode** (`quick`, `deep`, `careful`) bundles limits and extra rules.
 

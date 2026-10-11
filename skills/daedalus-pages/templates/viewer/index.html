@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{title}}</title>
+<link rel="stylesheet" href="/pages/_kit/kit.css">
+<script src="/pages/_kit/daedalus.js"></script>
+<!-- three.js straight from a CDN: any library, any version, any CDN works in a page. -->
+<script type="importmap">
+  { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+                 "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/" } }
+</script>
+<style>
+  html, body { height: 100%; }
+  body { display: flex; flex-direction: column; overflow: hidden; }
+  .stage { position: relative; flex: 1; min-height: 0; touch-action: none; }
+  .stage canvas { display: block; width: 100%; height: 100%; }
+  .hint { position: absolute; left: var(--space-3); bottom: max(var(--space-3), env(safe-area-inset-bottom)); pointer-events: none; }
+  .file { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+</style>
+</head>
+<body>
+<header class="dk-toolbar">
+  <b class="dk-h2">{{title}}</b>
+  <span class="dk-spacer"></span>
+  <label class="dk-btn small" for="file" data-i18n="open">Open a model</label>
+  <input class="file" id="file" type="file" accept=".glb,.gltf,.stl">
+  <button class="dk-btn small" id="reset" data-i18n="reset">Reset view</button>
+</header>
+<div class="stage" id="stage">
+  <span class="hint dk-meta" id="hint" data-i18n="hint">Drag to turn, pinch or scroll to zoom</span>
+</div>
+<script type="module">
+  import * as THREE from "three";
+  import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+  import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+  import { STLLoader } from "three/addons/loaders/STLLoader.js";
+
+  const STRINGS = {
+    en: { open: "Open a model", reset: "Reset view", hint: "Drag to turn, pinch or scroll to zoom", failed: "The model could not be read: {error}" },
+    ru: { open: "Открыть модель", reset: "Сбросить вид", hint: "Тяните, чтобы вращать; щипок или колесо — масштаб", failed: "Модель не прочиталась: {error}" },
+  };
+  let lang = "en";
+  const t = (key, vars = {}) => ((STRINGS[lang] && STRINGS[lang][key]) || STRINGS.en[key] || key).replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? "");
+  const translate = () => document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.dataset.i18n); });
+
+  const stage = document.getElementById("stage");
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  stage.prepend(renderer.domElement);
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2));
+  const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+  sun.position.set(3, 5, 4);
+  scene.add(sun);
+  const grid = new THREE.GridHelper(4, 16);
+  scene.add(grid);
+  let model = new THREE.Mesh(new THREE.TorusKnotGeometry(0.6, 0.2, 160, 24), new THREE.MeshStandardMaterial({ metalness: 0.2, roughness: 0.4 }));
+  scene.add(model);
+
+  // The colours follow the app's theme: the bridge writes the theme's tokens onto this page's root.
+  function paint() {
+    const style = getComputedStyle(document.documentElement);
+    const token = (name, fallback) => style.getPropertyValue(name).trim() || fallback;
+    scene.background = new THREE.Color(token("--bg", "#151515"));
+    // A solid token for the grid, faded by the material: three.js takes no alpha in a colour.
+    grid.material.color = new THREE.Color(token("--fg-3", "#888888"));
+    grid.material.transparent = true;
+    grid.material.opacity = 0.35;
+    if (model.material && model.material.color && !model.userData.loaded) model.material.color = new THREE.Color(token("--accent", "#7aa2f7"));
+  }
+
+  function frame(object) {
+    const box = new THREE.Box3().setFromObject(object);
+    const size = box.getSize(new THREE.Vector3()).length() || 1;
+    const centre = box.getCenter(new THREE.Vector3());
+    controls.target.copy(centre);
+    camera.position.copy(centre).add(new THREE.Vector3(size * 0.6, size * 0.45, size * 0.8));
+    camera.near = size / 100;
+    camera.far = size * 100;
+    camera.updateProjectionMatrix();
+  }
+
+  function resize() {
+    const { clientWidth: w, clientHeight: h } = stage;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / Math.max(h, 1);
+    camera.updateProjectionMatrix();
+  }
+
+  function show(object) {
+    scene.remove(model);
+    model = object;
+    model.userData.loaded = true;
+    scene.add(model);
+    frame(model);
+  }
+
+  document.getElementById("file").onchange = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    try {
+      const data = await file.arrayBuffer();
+      if (file.name.toLowerCase().endsWith(".stl")) {
+        const geometry = new STLLoader().parse(data);
+        show(new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: 0xb0b0b0 })));
+      } else {
+        new GLTFLoader().parse(data, "", (gltf) => show(gltf.scene), (error) => Daedalus.ui.toast(t("failed", { error: error.message || error })));
+      }
+    } catch (error) {
+      Daedalus.ui.toast(t("failed", { error: error.message }));
+    }
+  };
+  document.getElementById("reset").onclick = () => frame(model);
+
+  new ResizeObserver(resize).observe(stage);
+  resize();
+  frame(model);
+  paint();
+  renderer.setAnimationLoop(() => {
+    controls.update();
+    renderer.render(scene, camera);
+  });
+  Daedalus.ready().then((context) => { lang = context.lang in STRINGS ? context.lang : "en"; translate(); paint(); });
+  Daedalus.theme.onChange((theme) => { lang = theme.lang in STRINGS ? theme.lang : lang; translate(); paint(); });
+</script>
+</body>
+</html>

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{title}}</title>
+<link rel="stylesheet" href="/pages/_kit/kit.css">
+<script src="/pages/_kit/daedalus.js"></script>
+<style>
+  /* A toolbar of the page's own around a web app. For the bare app, make a 'service' page instead:
+     it needs no files at all. This template is for when the app wants native chrome around it. */
+  html, body { height: 100%; }
+  body { display: flex; flex-direction: column; overflow: hidden; }
+  .frame { flex: 1; min-height: 0; border: 0; width: 100%; display: block; background: var(--bg); }
+  .missing { flex: 1; }
+</style>
+</head>
+<body>
+<header class="dk-toolbar">
+  <b class="dk-h2">{{title}}</b>
+  <span class="dk-badge" id="state" data-i18n="state.loading">loading</span>
+  <span class="dk-spacer"></span>
+  <button class="dk-btn small" id="reload" data-i18n="reload">Reload</button>
+  <a class="dk-btn small ghost" id="tab" target="_blank" rel="noopener" data-i18n="tab">Open in a tab</a>
+</header>
+<script>
+  // What is framed. A service page of this installation is the usual choice — "/pages/<its slug>/",
+  // same origin, so the app inside keeps the sign-in — but any address works if that site allows
+  // being framed.
+  const TARGET = "/pages/SERVICE-SLUG/";
+</script>
+<iframe class="frame" id="frame" title="{{title}}" allow="clipboard-read; clipboard-write; fullscreen; camera; microphone" hidden></iframe>
+<div class="dk-empty missing" id="missing" hidden>
+  <b data-i18n="missing.title">Nothing to show yet</b>
+  <span data-i18n="missing.body">Set TARGET in this page to the address of the app it frames.</span>
+</div>
+<script>
+  const STRINGS = {
+    en: { "state.loading": "loading", "state.ready": "ready", reload: "Reload", tab: "Open in a tab", "missing.title": "Nothing to show yet",
+          "missing.body": "Set TARGET in this page to the address of the app it frames." },
+    ru: { "state.loading": "загрузка", "state.ready": "готово", reload: "Обновить", tab: "Открыть во вкладке", "missing.title": "Пока нечего показать",
+          "missing.body": "Укажите в TARGET адрес приложения, которое показывает страница." },
+  };
+  let lang = "en";
+  let state = "state.loading";
+  const t = (key) => (STRINGS[lang] && STRINGS[lang][key]) || STRINGS.en[key] || key;
+  function translate() {
+    document.documentElement.lang = lang;
+    document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.dataset.i18n); });
+    document.getElementById("state").textContent = t(state);
+  }
+  const frame = document.getElementById("frame");
+  const badge = document.getElementById("state");
+  function load() {
+    state = "state.loading";
+    badge.className = "dk-badge";
+    translate();
+    frame.src = TARGET;
+  }
+  frame.addEventListener("load", () => { state = "state.ready"; badge.className = "dk-badge ok"; translate(); });
+  document.getElementById("reload").onclick = load;
+  document.getElementById("tab").href = TARGET;
+  if (TARGET.includes("SERVICE-SLUG")) {
+    document.getElementById("missing").hidden = false;
+    badge.hidden = true;
+  } else {
+    frame.hidden = false;
+    load();
+  }
+  Daedalus.ready().then((context) => { lang = context.lang in STRINGS ? context.lang : "en"; translate(); });
+  Daedalus.theme.onChange((theme) => { if (theme.lang && theme.lang !== lang) { lang = theme.lang in STRINGS ? theme.lang : "en"; translate(); } });
+</script>
+</body>
+</html>
