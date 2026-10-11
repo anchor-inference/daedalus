@@ -16,6 +16,7 @@ import { navigate, pathFor } from "../router";
 import { shortDateTime } from "../format";
 import { t, useLang } from "../i18n";
 import { serveBridge, themeSnapshot } from "../pagebridge";
+import { pageTitle } from "../pagecard";
 import "./pagehost.css";
 
 let signedIn: Promise<void> | null = null;
@@ -30,13 +31,6 @@ function ensureCookie(): Promise<void> {
     },
   );
   return signedIn;
-}
-
-/** The title in the reader's language: one per language when the page has them, else the one it has. */
-export function pageTitle(title: string | Record<string, string> | undefined, lang: string, slug: string): string {
-  if (!title) return slug;
-  if (typeof title === "string") return title;
-  return title[lang] || title.en || Object.values(title)[0] || slug;
 }
 
 export function PageHostScreen({ slug, toast }: { slug: string; toast: (text: string) => void }) {
@@ -64,8 +58,9 @@ export function PageHostScreen({ slug, toast }: { slug: string; toast: (text: st
     };
   }, []);
   // Another page is another document: nothing of the last one's state carries over.
+  // An address that asks for the draft (an agent showing its work before publishing) opens on it.
   useEffect(() => {
-    setDraft(false);
+    setDraft(new URLSearchParams(window.location.search).get("draft") === "1");
     setLoaded(false);
   }, [slug]);
   // A publish or a rollback (from an agent, another window) redraws the page at its new version.

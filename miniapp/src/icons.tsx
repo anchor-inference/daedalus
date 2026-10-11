@@ -110,6 +110,11 @@ const PATHS: Record<IconName, string> = {
   sliders: "M4 7h9M17 7h3M4 17h3M11 17h9M15 5a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM9 15a2 2 0 1 0 0 4 2 2 0 0 0 0-4z",
 };
 
+/** Whether a name from outside the app (a page's manifest, a setting) is one of the app's icons. */
+export function isIconName(name: unknown): name is IconName {
+  return typeof name === "string" && Object.prototype.hasOwnProperty.call(PATHS, name);
+}
+
 export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   return (
     <svg className={`ic ic-${name}`} viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

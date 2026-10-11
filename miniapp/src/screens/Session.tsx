@@ -16,7 +16,8 @@ import { Explorer } from "../explorerpanel";
 import { DiffView } from "../previewparts";
 import { looksLikeDiff } from "../diff";
 import { KeptFiles, TurnFiles } from "../artifact";
-import { placeOf, turnFiles } from "../turnfiles";
+import { placeOf, turnFiles, turnPages } from "../turnfiles";
+import { PageCards } from "../pagecard";
 import { useReveal } from "../reveal";
 import { withoutAttachedList } from "../keptfiles";
 import { FileGallery, InlineMedia, mediaCopyText, splitMediaAnswer } from "../media";
@@ -2072,6 +2073,9 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
       ) : <Md className={`answer ${live ? "streaming" : ""}`} text={turn.answer} cacheKey={live ? undefined : `a${turn.key}`} />)}
       {turn.answer && !live && <KeptFiles text={turn.answer} onOpen={preview} />}
       {files && <TurnFiles sessionId={sessionId} sent={files.sent} changed={files.changed} onOpen={preview} />}
+      {/* A page the agent showed is drawn as soon as the call returns, not when the turn ends: the
+          point of showing it is that the operator can open it while the agent goes on. */}
+      <PageCards pages={turnPages(turn.activity)} />
       {turn.answer && !live && (
         <MessageActions
           text={mediaCopyText(turn.answer, turn.media ?? [])}

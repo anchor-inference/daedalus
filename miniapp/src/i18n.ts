@@ -3078,6 +3078,13 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "page.rollback.failed": { en: "Could not switch the version: {error}", ru: "Не удалось сменить версию: {error}" },
   "page.home": { en: "Go to the start", ru: "На главную" },
   "page.frame": { en: "Page: {title}", ru: "Страница: {title}" },
+  "pagecard.list": { en: "Pages shown", ru: "Показанные страницы" },
+  "pagecard.kind": { en: "Page", ru: "Страница" },
+  "pagecard.open": { en: "Open", ru: "Открыть" },
+  "pagecard.draft": { en: "draft", ru: "черновик" },
+  "pagecard.unpublished": { en: "not published yet", ru: "ещё не опубликована" },
+  "pagecard.version": { en: "version {n}", ru: "версия {n}" },
+  "pagecard.gone": { en: "This page has been removed", ru: "Эта страница удалена" },
   "services.empty.sub": {
     en: "Agents can host local web apps, workers and dev servers; they appear here with the address to open them at.",
     ru: "Агенты могут поднимать локальные веб-приложения, воркеры и дев-серверы — они появятся здесь вместе с адресом.",
