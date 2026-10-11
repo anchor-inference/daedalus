@@ -60,6 +60,7 @@ import { BrowserHeadButton, BrowserNeedsRow, useFirstOpenToast } from "../browse
 import { pipGroup } from "../browser/model";
 import { orchestrationPathOf } from "../mode";
 import { FullResult, ToolResultView } from "../toolresult";
+import { SettingsChangeCard, settingsChangeIds } from "../settingschange";
 import { useQuery } from "../store";
 import { sentMessageReachedTranscript } from "../pending-message";
 import { Banner, IconButton } from "../ui/phone";
@@ -2071,6 +2072,9 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
         </div>
       ) : <Md className={`answer ${live ? "streaming" : ""}`} text={turn.answer} cacheKey={live ? undefined : `a${turn.key}`} />)}
       {turn.answer && !live && <KeptFiles text={turn.answer} onOpen={preview} />}
+      {/* Outside the folded steps: a change that waits for the operator's Apply must be seen without
+          opening the turn's work, and it can be answered while the agent is still writing. */}
+      {settingsChangeIds(turn.activity).map((id) => <SettingsChangeCard key={id} changeId={id} />)}
       {files && <TurnFiles sessionId={sessionId} sent={files.sent} changed={files.changed} onOpen={preview} />}
       {turn.answer && !live && (
         <MessageActions
@@ -2370,6 +2374,10 @@ function describe(item: ToolItem, workspace?: string): { verb: string; family: s
       return { verb: t("tool.AskUser"), family: "AskUser", detail: "", icon: "question" };
     case "Skill":
       return { verb: verb("Skill", r), family: "Skill", detail: str("skill") || str("name"), icon: "skill" };
+    case "SettingsGet":
+      return { verb: verb("SettingsGet", r), family: "SettingsGet", detail: str("section"), icon: "settings" };
+    case "SettingsChange":
+      return { verb: verb("SettingsChange", r), family: "SettingsChange", detail: a.changes && typeof a.changes === "object" ? Object.keys(a.changes).join(", ") : "", icon: "settings" };
     case "Remember":
     case "Recall":
     case "Forget":

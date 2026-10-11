@@ -40,6 +40,7 @@ from protocore.runtime.events.envelope import TurnEvent
 from protocore.runtime.events.types import EventType
 
 from daedalus.config import NO_MODEL_MESSAGE, NoModelConfigured, RuntimeConfig, Settings
+from daedalus.host.config_validation import ConfigConflict, patched
 from daedalus.host.events import AppEvent, EventFilter
 from daedalus.host.prompts import DEFAULT_RULES, split_headline
 from daedalus.host.services import NO_CHAT_BOUND
@@ -450,7 +451,7 @@ class TelegramFront:
         config: RuntimeConfig,
         manager: SessionManager,
         *,
-        save_config: Callable[[RuntimeConfig], Awaitable[None]],
+        save_config: Callable[..., Awaitable[None]],
         speech: LocalSpeech | None = None,
     ) -> None:
         self.settings = settings
@@ -1721,6 +1722,20 @@ class TelegramFront:
             )
         )
 
+    async def _save_patch(self, patch: dict[str, Any]) -> str | None:
+        """A chat command's change saved as a validated candidate against the current revision, as the
+        settings screen saves; see :func:`daedalus.host.config_validation.patched`. Returns why it was
+        not saved, or ``None``."""
+        report, candidate = patched(self.config, patch)
+        if candidate is None:
+            return "not saved: " + ("; ".join(f"{p.path}: {p.message}" for p in report.problems) or "the settings changed meanwhile, try again")
+        try:
+            await self.save_config(candidate, expected_revision=report.base_revision)
+        except ConfigConflict:
+            return "not saved: the settings changed meanwhile, try again"
+        self.config = candidate
+        return None
+
     async def cmd_operator(self, message: Message, command: CommandObject) -> None:
         if not self._is_owner(message.from_user.id if message.from_user else None):
             return
@@ -1741,21 +1756,20 @@ class TelegramFront:
             return
         if name == "verbosity":
             try:
-                self.config.telegram.verbosity = max(0, min(2, int((command.args or "").strip())))
+                level = max(0, min(2, int((command.args or "").strip())))
             except ValueError:
                 await message.answer("usage: /verbosity 0|1|2")
                 return
-            await self.save_config(self.config)
-            await message.answer(f"verbosity={self.config.telegram.verbosity}")
+            refused = await self._save_patch({"telegram": {"verbosity": level}})
+            await message.answer(refused or f"verbosity={level}")
             return
         if name == "approval":
             arg = (command.args or "").strip()
             if arg not in ("manual", "auto"):
                 await message.answer(f"approval={self.config.self_change.approval}\nusage: /approval manual|auto")
                 return
-            self.config.self_change.approval = arg  # type: ignore[assignment]
-            await self.save_config(self.config)
-            await message.answer(f"approval={arg}")
+            refused = await self._save_patch({"self_change": {"approval": arg}})
+            await message.answer(refused or f"approval={arg}")
             return
         hook = self.command_hooks.get(name) or None
         if hook is not None:

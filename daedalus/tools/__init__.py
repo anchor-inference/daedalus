@@ -165,6 +165,12 @@ TOOL_GROUPS: dict[str, ToolGroupSpec] = {
         "Create and edit native Excalidraw diagrams the operator can open in the app",
         "lazy",
     ),
+    "settings": ToolGroupSpec(
+        "Daedalus's own settings whenever the operator asks to change one ('answer in English', 'compact the history "
+        "later', 'raise the iteration limit'): read them (SettingsGet) and change them (SettingsChange). Never edit "
+        "config.toml or any other settings file yourself",
+        "lazy",
+    ),
     "self_development": ToolGroupSpec(
         "Any change to yourself, your code, prompts or skills (repositories 'bot' and 'core'): a worktree "
         "(SelfWorkspace), then a pull request (SelfPropose) or an applied change, a rebuild, a rollback. Never git "

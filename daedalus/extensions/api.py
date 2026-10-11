@@ -96,6 +96,7 @@ from daedalus.extensions import (
     api_runtime_handoff,
     api_secrets,
     api_session_import,
+    api_settings_changes,
     api_skill_quality,
     api_staff,
     api_staff_reports,
@@ -723,7 +724,10 @@ class SettingsBody(BaseModel):
     an icon override or a hidden item can be taken away; a field left out is kept."""
     pages: dict[str, Any] | None = None
     """The caps of custom pages: bytes and files per page, versions kept, the largest stored value."""
+    agent_settings: dict[str, Any] | None = None
+    """Which sections the agent's SettingsChange applies without asking, and how long a change waits."""
     answer_language: str | None = None
+    """The language every answer is written in; ``auto`` answers in the operator's own."""
 
 
 class SettingsValidationBody(BaseModel):
@@ -1638,6 +1642,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_runtime.register(api, app, auth)
     api_runtime_handoff.register(api, app, auth)
     api_secrets.register(api, app, auth)
+    # The card under an agent's settings change: what it proposes, and the operator's Apply or Reject.
+    api_settings_changes.register(api, app, auth)
     api_update_drains.register(api, app, auth)
     api_lifecycle.register(api, app, auth)
     api_staff_reports.register(api, app, auth)

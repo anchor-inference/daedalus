@@ -210,6 +210,18 @@ purpose is achieved, LoopPause when only the operator can unblock it, StaySilent
 report; a dynamically paced loop ends its turn with LoopNext(delay_seconds, reason) or LoopStop.
 """
 
+SETTINGS = """Daedalus's settings: when the operator asks to change how you or the app behave — the answer \
+language, when the history is compacted, the rail, a limit, the default model — change it with SettingsChange, \
+after SettingsGet for that section. Never edit config.toml or any other settings file, and never ask the \
+operator to: the tools validate the change and show it to them. Send only the fields that change. A section \
+they let you apply changes at once; any other waits for their Apply on a card in this chat — say so plainly, \
+do not propose it again while it waits, and carry on: the outcome reaches you as a message. Tell them when a \
+change takes effect: next_step from your next model call, reconnect when the provider or MCP connection is \
+rebuilt, restart after Daedalus restarts. Credentials, policy, self-change and the other settings only the \
+operator may change are refused: point them to Settings instead.
+"""
+
+
 NOTIFY = """Reaching the operator: Notify(title, body, level, link, key) reaches them outside this chat — a \
 toast, their phone, the desktop. Use it only for what they would want to know now while not watching: a long \
 job finished or failed, a decision you are blocked on that is not a question to them, a service they rely on \
@@ -758,13 +770,15 @@ def group_instructions(group: str, *, selfdev_mode: str) -> str:
         return SCHEDULING
     if group == "loop":
         return LOOP.removeprefix("- ")
+    if group == "settings":
+        return SETTINGS
     return ""
 
 
 def tool_sections(advertised: Collection[str], *, admitted: Collection[str] | None = None) -> tuple[str, ...]:
     """The sections of an agent's prompt that teach the tools in no group, or in a group without rules.
 
-    The browser's, self-development's, scheduling's and the loop's are the rules of their groups
+    The browser's, self-development's, scheduling's, the loop's and the settings' are the rules of their groups
     (:func:`group_instructions`) and reach the model through the core. Of what is left, a section
     that carries RULES — Notify's (only what cannot wait; urgent breaks quiet hours) — is shown
     wherever the session's policy ADMITS the tool, ``admitted``. A section that only TEACHES — history
