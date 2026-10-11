@@ -20,7 +20,6 @@ import {
   Approval,
   ComposerStatus,
   QueuedMessage,
-  answersComplete,
   questionsKey,
   clearDraft,
   clearSendIntent,
@@ -43,8 +42,10 @@ import { fmtInt } from "./ui/components";
 import { t } from "./i18n";
 import { insideTerminal } from "./terminal/keys";
 import { raiseFromError } from "./settinglink";
+import { AskCard, type AskCardHandle } from "./questions/AskCard";
+import type { Answer } from "./questions/ask";
 
-export type Answer = { question: string; selected: string[]; custom: string | null };
+export type { Answer } from "./questions/ask";
 
 export type ComposerHandle = {
   focus: () => void;
@@ -279,26 +280,10 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   // ── the agent's question ──
   const questions = props.questions ?? null;
   const asking = !!questions && questions.length > 0;
-  const [answers, setAnswers] = useState<{ selected: string[]; custom: string }[]>([]);
-  // A fresh set of blanks for new questions only; the same questions read again keep what was picked.
-  const asked = questionsKey(questions);
-  useEffect(() => {
-    setAnswers((questions ?? []).map(() => ({ selected: [], custom: "" })));
-    // `asked` stands for `questions`: the array is new on every read of the session.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [asked]);
-  const complete = asking && answersComplete(questions!, answers);
-  async function reply() {
-    if (!questions || !props.onAnswer) return;
-    if (!complete) {
-      dock.current?.querySelector<HTMLElement>("button, input")?.focus();
-      return;
-    }
-    try {
-      await props.onAnswer(questions.map((q, i) => ({ question: q.question, selected: answers[i].selected, custom: answers[i].custom || null })));
-    } catch (e) {
-      toast(errorText(e));
-    }
+  const ask = useRef<AskCardHandle>(null);
+  // The Reply circle does what the card's own button does: the next question, the review, or the send.
+  function reply() {
+    ask.current?.go();
   }
 
   // ── send / stop / queue ──
@@ -547,64 +532,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           </div>
         </div>
       )}
-      {asking && !approval && phone && (
-        <div ref={dock} className="dock question ph-tray" role="group" aria-label={t("composer.question")}>
-          <div className="ph-tray-head warn"><Icon name="question" size={14} /><span>{t("composer.question")}</span></div>
-          {questions!.map((q, qi) => {
-            const custom = q.allow_custom || !(q.options ?? []).length;
-            const last = qi === questions!.length - 1;
-            return (
-              <div key={qi} className="ph-tray-q">
-                <div className="ph-tray-title">{q.header ? `${q.header} · ` : ""}{q.question}</div>
-                {(q.options ?? []).map((o) => {
-                  const on = answers[qi]?.selected.includes(o.label);
-                  return (
-                    <button key={o.label} type="button" className={`ph-option ${on ? "on" : ""}`} aria-pressed={on} onClick={() => setAnswers((prev) => prev.map((a, i) => (i !== qi ? a : !q.multiSelect ? { ...a, selected: [o.label] } : { ...a, selected: on ? a.selected.filter((x) => x !== o.label) : [...a.selected, o.label] })))}>
-                      <span className="ph-option-l">{o.label}</span>
-                      {o.description && <span className="ph-option-m">{o.description}</span>}
-                    </button>
-                  );
-                })}
-                {(custom || last) && (
-                  <div className="ph-tray-answer">
-                    {custom && <input className="ph-field" placeholder={t("composer.tray.ownwords")} value={answers[qi]?.custom ?? ""} onChange={(e) => setAnswers((p) => p.map((a, i) => (i === qi ? { ...a, custom: e.target.value } : a)))} onKeyDown={(e) => { if (e.key === "Enter") void reply(); }} aria-label={t("composer.tray.ownwords")} />}
-                    {last && <button type="button" className="ph-btn primary" disabled={!complete} onClick={() => void reply()}>{t("session.answer")}</button>}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-      {asking && !approval && !phone && (
-        <div ref={dock} className="dock question" role="group" aria-label={t("composer.question")}>
-          {questions!.map((q, qi) => (
-            <div key={qi} className="dock-q">
-              <div className="dock-title">
-                <Icon name="question" size={16} />
-                <span className="grow">{q.header ? `${q.header} · ` : ""}{q.question}</span>
-              </div>
-              {(q.options ?? []).length > 0 && (
-                <div className="dock-options">
-                  {(q.options ?? []).map((o) => {
-                    const on = answers[qi]?.selected.includes(o.label);
-                    return (
-                      <button key={o.label} type="button" className={`btn small option ${on ? "selected" : ""}`} aria-pressed={on} title={o.description ?? undefined} onClick={() => setAnswers((prev) => prev.map((a, i) => (i !== qi ? a : !q.multiSelect ? { ...a, selected: [o.label] } : { ...a, selected: on ? a.selected.filter((x) => x !== o.label) : [...a.selected, o.label] })))}>
-                        {o.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              {(q.allow_custom || !(q.options ?? []).length) && (
-                <input className="field" placeholder={t("session.answer.placeholder")} value={answers[qi]?.custom ?? ""} onChange={(e) => setAnswers((p) => p.map((a, i) => (i === qi ? { ...a, custom: e.target.value } : a)))} onKeyDown={(e) => { if (e.key === "Enter") void reply(); }} />
-              )}
-            </div>
-          ))}
-          <div className="dock-actions">
-            <button type="button" className="btn small primary" disabled={!complete} onClick={() => void reply()}>{t("session.answer")}</button>
-          </div>
-        </div>
+      {asking && !approval && props.onAnswer && (
+        <AskCard key={questionsKey(questions)} ref={ask} questions={questions!} phone={phone} onSend={props.onAnswer} toast={toast} />
       )}
       {paletteItems.length + skillItems.length > 0 && (
         <div className="palette" role="listbox">

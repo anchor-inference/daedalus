@@ -2,7 +2,6 @@
 
 import { describe, expect, it } from "vitest";
 import {
-  answersComplete,
   questionsKey,
   composerKey,
   composerContext,
@@ -220,15 +219,6 @@ describe("the approval dock", () => {
 });
 
 describe("the agent's questions", () => {
-  it("are complete when every one has a choice or a word", () => {
-    const qs = [{ question: "a" }, { question: "b" }];
-    expect(answersComplete(qs, [{ selected: ["x"], custom: "" }, { selected: [], custom: "" }])).toBe(false);
-    expect(answersComplete(qs, [{ selected: ["x"], custom: "" }, { selected: [], custom: "y" }])).toBe(true);
-    expect(answersComplete([], [])).toBe(false);
-    // Blanks not yet laid out for the questions are not an answer.
-    expect(answersComplete(qs, [])).toBe(false);
-  });
-
   it("are the same questions when the session is read again, and new ones when they change", () => {
     const asked = [{ question: "Keep it to the usual 8?", header: "Length", options: [{ label: "Top 8" }, { label: "All 14" }], allow_custom: true }];
     // Every read of the session brings the pending questions as a new array with new objects.

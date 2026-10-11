@@ -1196,7 +1196,8 @@ export type SkillEntry = { id: string; name: string; description: string };
 export type Question = {
   question: string;
   header?: string;
-  options?: { label: string; description?: string | null }[];
+  /** `preview`: text (a diagram, a mockup, a snippet) the card shows beside the list for the chosen option. */
+  options?: { label: string; description?: string | null; preview?: string | null }[];
   multiSelect?: boolean;
   allow_custom?: boolean;
 };
