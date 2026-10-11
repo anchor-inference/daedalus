@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -61,12 +62,35 @@ func sample(t *testing.T, env *Env, s *Service, harness, id string) []byte {
 		from = page.Next
 	}
 	out.Read.Masked = masked
+	// The parser uses native paths. Canonicalize the fixture's source references before JSON
+	// marshaling: Windows escapes backslashes in JSON, so replacing the native home afterward
+	// misses the escaped path and makes this sample differ from the checked-in wire.
+	for i := range out.Scan.Here {
+		out.Scan.Here[i].Source.Path = fixtureSourcePath(t, env.Home, out.Scan.Here[i].Source.Path)
+	}
+	out.Read.Header.Source.Path = fixtureSourcePath(t, env.Home, out.Read.Header.Source.Path)
 	b, err := json.MarshalIndent(out, "", " ")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The test's home is a temporary folder; the samples name the one the fixtures pretend to be.
-	return append(bytes.ReplaceAll(b, []byte(env.Home), []byte("/home/someone")), '\n')
+	return append(b, '\n')
+}
+
+func fixtureSourcePath(t *testing.T, home, source string) string {
+	t.Helper()
+	rel, err := filepath.Rel(home, source)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		t.Fatalf("fixture source path must be within the temporary home: %q", source)
+	}
+	return path.Join("/home/someone", filepath.ToSlash(rel))
+}
+
+func TestFixtureSourcePath(t *testing.T) {
+	home := t.TempDir()
+	source := filepath.Join(home, ".claude", "projects", "session.jsonl")
+	if got := fixtureSourcePath(t, home, source); got != "/home/someone/.claude/projects/session.jsonl" {
+		t.Fatalf("portable source path = %q", got)
+	}
 }
 
 func claudeWireSession(t *testing.T, env *Env) {
