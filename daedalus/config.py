@@ -1209,6 +1209,7 @@ STAFF_BLOCKED_TOOLS = [
     "SelfRollback",
     "SelfWorkspace",
     "Notify",
+    "SettingsChange",
 ]
 """What a staff member of a project may not call. It asks the orchestrator, not the operator
 (``AskOrchestrator``), reports to the orchestrator rather than notifying the operator itself, works
@@ -1219,10 +1220,11 @@ not through a mode, so editing a mode cannot hand a staff member any of them."""
 STAFF_ONLY_TOOLS = ["Report", "AskOrchestrator"]
 """The tools that exist for staff alone; every other session is blocked from them."""
 
-SUBAGENT_BLOCKED_TOOLS = ["Notify"]
+SUBAGENT_BLOCKED_TOOLS = ["Notify", "SettingsChange"]
 """What a subagent may not call, whoever its leader is. Its work reaches the operator through the
 agent that started it, which decides what is worth the operator's attention; a subagent that could
-notify on its own would put a dozen workers' progress on the operator's phone. Enforced by the host
+notify on its own would put a dozen workers' progress on the operator's phone, and one that changed
+the settings would post its card in a chat the operator does not read. Enforced by the host
 beside the staff rule, so no mode or leader can hand it back."""
 
 ORCHESTRATOR_ONLY_TOOLS = [
@@ -1745,6 +1747,22 @@ class HeartbeatConfig(BaseModel):
     max_runs_per_day: int = Field(default=24, ge=1)
 
 
+class AgentSettingsConfig(BaseModel):
+    """What the agent's SettingsChange may apply without asking, and how long a request waits for an answer.
+
+    Everything else the agent may change goes to the operator as an Apply / Reject card. What it may
+    never touch is not here at all: that list is code (``daedalus/host/agent_settings.py``), so no
+    change through this section can widen it, and this section itself always waits for the operator.
+    """
+
+    auto_apply: list[str] = Field(default_factory=lambda: ["navigation", "answer_language", "compaction"])
+    """Sections a change of the agent's applies at once, the operator told afterwards in the chat. The
+    defaults change how things look and read, never what the agent may do or spend: the rail and the
+    drawer, the language of the answers, and when and how long the history is summarised."""
+    proposal_hours: int = Field(default=24, ge=1, le=24 * 14)
+    """How long a change waiting for the operator stays open; then it expires and the agent is told."""
+
+
 class TelegramConfig(BaseModel):
     mode: TelegramMode | None = None
     """Where sessions live in Telegram. ``topics``: one forum topic per session in the bound
@@ -1846,6 +1864,7 @@ class RuntimeConfig(BaseModel):
     modes: dict[str, ModeConfig] = Field(default_factory=lambda: {k: v.model_copy() for k, v in DEFAULT_MODES.items()})
     webhooks: dict[str, WebhookConfig] = Field(default_factory=dict)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+    agent_settings: AgentSettingsConfig = Field(default_factory=AgentSettingsConfig)
     answer_language: str = "auto"
     """"auto" answers in the language of the request; otherwise a language name."""
 
@@ -2374,6 +2393,7 @@ __all__ = [
     "NoModelConfigured",
     "preset_id_for",
     "ApprovalMode",
+    "AgentSettingsConfig",
     "BalanceConfig",
     "LimitsConfig",
     "McpConfig",

@@ -22,7 +22,7 @@ from tests.support.models import model_config
 def _app(settings: Settings, db: Database, manager: SessionManager, config: RuntimeConfig) -> Any:
     """What ``run_command`` reads of the Application, with nothing behind it but the manager."""
 
-    async def save_config(cfg: RuntimeConfig) -> None:
+    async def save_config(cfg: RuntimeConfig, *, expected_revision: str | None = None) -> None:
         app.config = cfg
 
     async def create_session(title: str, **kw: Any) -> Any:

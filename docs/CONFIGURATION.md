@@ -85,6 +85,14 @@ provider_retry_max_seconds = 600.0
 [memory]
 extract_after_run = false    # store durable facts after a completed run (a paid call)
 
+[agent_settings]             # what the agent's SettingsChange may apply without asking
+auto_apply = ["navigation", "answer_language", "compaction"]
+                             # every other section waits for your Apply on a card in the chat and in
+                             # the notifications; this section itself always does. Credentials, policy,
+                             # self_change, ops, webhooks, the sandbox and the browser's network wall are
+                             # never the agent's to change (daedalus/host/agent_settings.py)
+proposal_hours = 24          # a change nobody answered expires and the agent is told
+
 [modes.review]               # your own mode; the built-in ones (quick, deep, careful, plan) stay unless you redefine the whole table
 tools_only = ["Read", "Find", "Search", "WebFetch", "AskUser"]
 prompt = "Mode: review. Read and report; change nothing."

@@ -348,7 +348,7 @@ def _flat(text: str) -> str:
     return "\n".join(line.strip() for line in text.strip().splitlines())
 
 
-RULED = {"browser": "BrowserOpen", "self_development": "SelfWorkspace", "scheduling": "ScheduleCreate", "loop": "LoopNext"}
+RULED = {"browser": "BrowserOpen", "self_development": "SelfWorkspace", "scheduling": "ScheduleCreate", "loop": "LoopNext", "settings": "SettingsChange"}
 """Each group that carries rules, and a tool of it."""
 
 
@@ -554,6 +554,7 @@ def test_sections_left_in_the_prompt_follow_the_policy_or_the_surface() -> None:
     assert prompts.group_instructions("self_development", selfdev_mode="local") == prompts.SELF_DEVELOPMENT_LOCAL
     assert prompts.group_instructions("self_development", selfdev_mode="off") == ""
     assert prompts.group_instructions("board", selfdev_mode="server") == ""
+    assert prompts.group_instructions("settings", selfdev_mode="off") == prompts.SETTINGS and "config.toml" in prompts.SETTINGS
 
 
 # -- what a run loaded, carried to the next ----------------------------------------------------------

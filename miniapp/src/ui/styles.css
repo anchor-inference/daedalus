@@ -501,6 +501,26 @@ button.more-item { border: 0; font-family: inherit; cursor: pointer; }
 .changed-file:hover .changed-file-actions, .changed-file:focus-within .changed-file-actions { opacity:1; }
 .changed-file-actions .iconbtn.small { width:22px; height:22px; background:transparent; color:var(--fg-2); }
 .changed-file-actions .iconbtn.small:hover { background:var(--surface-3); color:var(--fg); }
+/* The agent's settings change under its answer: a card of its own, because one waiting for Apply is a
+   question to the operator and must not hide among the folded steps. A line is the path above the
+   values rather than beside them, so a long path and a long value both fit a phone without a scroll. */
+.setchange { display:flex; flex-direction:column; gap:8px; margin-top:8px; padding:10px 12px; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--surface-1); min-width:0; }
+.setchange.pending { border-color:color-mix(in srgb, var(--warn) 45%, var(--line)); }
+.setchange-head { display:flex; align-items:center; gap:8px; min-width:0; color:var(--fg-2); }
+.setchange-title { flex:1; min-width:0; font-size:var(--fs-14); font-weight:600; color:var(--fg); }
+.setchange-reason { font-size:var(--fs-13); color:var(--fg-2); overflow-wrap:anywhere; }
+.setchange-lines { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
+.setchange-line { display:flex; flex-direction:column; gap:2px; min-width:0; padding:6px 8px; border-radius:var(--radius-sm); background:var(--surface-2); }
+.setchange-path { font-family:var(--mono); font-size:var(--fs-12); color:var(--fg-2); overflow-wrap:anywhere; }
+.setchange-values { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px; min-width:0; font-size:var(--fs-13); }
+.setchange-old { color:var(--fg-3); text-decoration:line-through; overflow-wrap:anywhere; min-width:0; }
+.setchange-new { color:var(--fg); font-weight:500; overflow-wrap:anywhere; min-width:0; }
+.setchange-arrow { color:var(--fg-3); }
+.setchange-foot { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; }
+.setchange-when { font-size:var(--fs-12); color:var(--fg-2); min-width:0; overflow-wrap:anywhere; }
+.setchange-actions { display:inline-flex; gap:6px; margin-left:auto; }
+.setchange-note { font-size:var(--fs-12); color:var(--fg-2); }
+.setchange-note.error { color:var(--bad); }
 /* No hover on a touch screen: the actions are there from the start rather than never. */
 @media (hover: none) { .changed-file-actions { opacity:1; } }
 .reveal-btn { flex:none; background:transparent; color:var(--fg-2); }

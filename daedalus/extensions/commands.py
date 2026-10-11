@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from daedalus.config import NO_MODEL_MESSAGE, REASONING_EFFORTS
 from daedalus.doctor import DoctorContext, render_text, run_checks
 from daedalus.extensions.notifications import format_entries
+from daedalus.host.config_validation import ConfigConflict, patched
 from daedalus.host.prompts import DEFAULT_RULES
 from daedalus.security import redact
 from daedalus.transport.telegram.front import SESSION_LIST_LIMIT, yagni_argument
@@ -116,6 +117,19 @@ def _cost_words(usd: float | None, unmetered: int) -> str:
     if unmetered:
         text += f" (+{unmetered} unmetered call{'s' if unmetered != 1 else ''})"
     return text
+
+
+async def save_patch(app: Application, patch: dict[str, object]) -> str | None:
+    """Save a command's change of a field or two the way the settings screen saves: as a validated
+    candidate against the current revision. Returns why it was not saved, or ``None`` when it was."""
+    report, candidate = patched(app.config, patch)
+    if candidate is None:
+        return "not saved: " + ("; ".join(f"{p.path}: {p.message}" for p in report.problems) or "the settings changed meanwhile, try again")
+    try:
+        await app.save_config(candidate, expected_revision=report.base_revision)
+    except ConfigConflict:
+        return "not saved: the settings changed meanwhile, try again"
+    return None
 
 
 async def run_command(app: Application, session_id: str, line: str) -> str:  # noqa: C901, PLR0911, PLR0912, PLR0915 — one branch per command reads better than a table of thirty callbacks
@@ -408,8 +422,9 @@ async def run_command(app: Application, session_id: str, line: str) -> str:  # n
             return "The heartbeat is not installed."
         arg = args.lower()
         if arg in ("on", "off"):
-            app.config.heartbeat.enabled = arg == "on"
-            await app.save_config(app.config)
+            refused = await save_patch(app, {"heartbeat": {"enabled": arg == "on"}})
+            if refused:
+                return refused
             return f"heartbeat {'on' if app.config.heartbeat.enabled else 'off'}" + ("" if heartbeat.read().strip() else " (HEARTBEAT.md is empty: fill it in Settings → Heartbeat)")
         if arg == "run":
             try:
@@ -460,18 +475,17 @@ async def run_command(app: Application, session_id: str, line: str) -> str:  # n
         )
     if name == "verbosity":
         try:
-            app.config.telegram.verbosity = max(0, min(2, int(args.strip())))
+            level = max(0, min(2, int(args.strip())))
         except ValueError:
             return "usage: /verbosity 0|1|2"
-        await app.save_config(app.config)
-        return f"verbosity={app.config.telegram.verbosity}"
+        refused = await save_patch(app, {"telegram": {"verbosity": level}})
+        return refused or f"verbosity={app.config.telegram.verbosity}"
     if name == "approval":
         arg = args.strip()
         if arg not in ("manual", "auto"):
             return f"approval={app.config.self_change.approval}\nusage: /approval manual|auto"
-        app.config.self_change.approval = arg
-        await app.save_config(app.config)
-        return f"approval={arg}"
+        refused = await save_patch(app, {"self_change": {"approval": arg}})
+        return refused or f"approval={arg}"
     if name in ("rebuild", "rollback"):
         selfdev = app.extensions.get("selfdev")
         if selfdev is None:
@@ -487,4 +501,4 @@ async def run_command(app: Application, session_id: str, line: str) -> str:  # n
     raise KeyError(name)  # a spec with no branch: the two lists are kept together above
 
 
-__all__ = ["BY_NAME", "COMMANDS", "NEEDS_EXTENSION", "TELEGRAM_ONLY", "CommandSpec", "available", "parse", "run_command"]
+__all__ = ["BY_NAME", "COMMANDS", "NEEDS_EXTENSION", "TELEGRAM_ONLY", "CommandSpec", "available", "parse", "run_command", "save_patch"]

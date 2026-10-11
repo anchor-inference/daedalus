@@ -567,6 +567,10 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         # The shared centre is empty, so every entry a harness might answer is one the host no
         # longer has; a harness that invents entries answers this route itself.
         return 404, "application/json", json.dumps({"detail": "no such notification"})
+    if path.startswith("/api/settings/changes/"):
+        # The card under an agent's settings change; the shared host keeps none, and a harness that
+        # draws one (check_settings_card.py) answers these itself.
+        return 404, "application/json", json.dumps({"detail": "no such settings change"})
     if method.upper() == "POST" and path in ("/api/system/launcher/check", "/api/system/launcher/download"):
         return 200, "application/json", json.dumps(launcher_state())
     if method.upper() == "POST" and path == "/api/system/launcher/install":
