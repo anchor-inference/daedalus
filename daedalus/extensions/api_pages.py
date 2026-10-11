@@ -26,8 +26,8 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.websockets import WebSocket
 
+from daedalus.extensions.api_proxy import forward_http, forward_websocket
 from daedalus.extensions.services import pid_alive
-from daedalus.extensions.web_proxy import forward_http, forward_websocket
 from daedalus.host.pages import PageError, PageStore, Served, check_slug, clean_path, listing_row, store_for, title_text
 
 if TYPE_CHECKING:

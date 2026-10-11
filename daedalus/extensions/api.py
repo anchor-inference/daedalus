@@ -107,6 +107,7 @@ from daedalus.extensions import (
 )
 from daedalus.extensions import commands as slash
 from daedalus.extensions.api_host_pane import HostPane
+from daedalus.extensions.api_proxy import forward_http
 from daedalus.extensions.artifact_headers import artifact_headers
 from daedalus.extensions.calendar_sync import sync_loop
 from daedalus.extensions.ci_observations import record_signed_delivery
@@ -122,7 +123,6 @@ from daedalus.extensions.push import PushRefused, PushService
 from daedalus.extensions.review import ReviewRefused
 from daedalus.extensions.services import SHARE_COOKIE_PREFIX, SHARE_MODES, pid_alive
 from daedalus.extensions.voice import model_options, tts_configured
-from daedalus.extensions.web_proxy import forward_http
 from daedalus.harness.capabilities import CAPABILITIES
 from daedalus.host import capabilities, component_install, launcher_bridge
 from daedalus.host import components as component_list

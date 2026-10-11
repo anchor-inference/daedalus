@@ -20,6 +20,10 @@ from fastapi import HTTPException, Request
 from fastapi.responses import StreamingResponse
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
+# ``websockets`` comes with uvicorn's standard extra, which serves this API.
+from websockets.asyncio.client import connect
+from websockets.exceptions import ConnectionClosed
+
 logger = logging.getLogger(__name__)
 
 HOP_HEADERS = frozenset({"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade", "host"})
@@ -141,11 +145,6 @@ async def forward_websocket(
     or refuses the path closes the browser's socket instead of accepting it into silence. The
     subprotocols the browser offered go along, and the one the server chose is the one accepted.
     """
-    # ``websockets`` comes with uvicorn's standard extra, which serves this API; it is imported here
-    # so the module loads in a test that never opens a socket.
-    from websockets.asyncio.client import connect
-    from websockets.exceptions import ConnectionClosed
-
     headers = []
     cookie = websocket.headers.get("cookie", "")
     drop = list(strip_cookies)

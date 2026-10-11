@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 from daedalus.config import PagesConfig, RuntimeConfig, Settings
 from daedalus.extensions.api import SESSION_COOKIE, build_app
-from daedalus.extensions.web_proxy import frameable_policy, scoped_set_cookie, without_cookies
+from daedalus.extensions.api_proxy import frameable_policy, scoped_set_cookie, without_cookies
 from daedalus.host.pages import PageError, PageStore, clean_path, listing_row
 from daedalus.stores.database import Database
 
