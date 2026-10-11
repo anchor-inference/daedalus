@@ -32,7 +32,10 @@ LOAD_NOW_KEY = "load_tool_groups"
 """Session metadata: groups the operator asked to have loaded, handed to the next run and then dropped."""
 
 CARRIED_KEY = "loaded_tool_groups"
-"""Session metadata: groups the last run loaded whole and called a tool of, handed to the next run whole."""
+"""Session metadata: groups loaded whole in this session, handed to every later run whole.
+
+Beside it, ``discovered_tools`` lists every tool loaded in the session in the order it was loaded, the
+groups' tools among them, which is the order the next run puts them back in."""
 
 SURFACE_KEY = "tool_group_surface"
 """Session metadata: ``{group: state}`` as the last run's last advertisement put it — the core's word on

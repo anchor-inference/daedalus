@@ -475,7 +475,7 @@ async def test_groups_loaded_now_are_seeded_whole_and_each_is_one_loaded_entry(s
         await manager.close()
 
 
-async def test_a_group_is_carried_whole_only_while_the_runs_use_it(settings: Settings, db: Database) -> None:
+async def test_a_group_loaded_in_a_session_stays_loaded_in_its_later_runs(settings: Settings, db: Database) -> None:
     manager = await _manager(settings, db)
     try:
         state = await manager.create_session("carry groups")
@@ -485,16 +485,22 @@ async def test_a_group_is_carried_whole_only_while_the_runs_use_it(settings: Set
         assert engine.config.loaded_tool_groups == ("scheduling", "loop")
         build_tool_surface(engine)
         engine.context_manager.discover_tool("DocsRead")
-        engine.context_manager.note_tool_used("DocsRead")
         engine.context_manager.note_tool_used("ScheduleList")
         assert manager._keep_loaded_tools(state, engine)
-        # The schedules were used and go on whole; the loop was seeded and never called, so it is let go;
-        # a tool loaded on its own and called is carried by name, as before.
-        assert state.metadata[tool_groups.CARRIED_KEY] == ["scheduling"]
-        assert state.metadata["discovered_tools"] == ["DocsRead"]
+        # Both groups go on whole, the loop too though this run never called it, and the tool loaded on
+        # its own goes on though it was never called either: dropping any of them would change the next
+        # run's tool list, the head of the cached prompt.
+        members = tool_groups.members(manager.tools.list_all())
+        assert state.metadata[tool_groups.CARRIED_KEY] == ["scheduling", "loop"]
+        assert state.metadata["discovered_tools"] == [*members["scheduling"], *members["loop"], "DocsRead"]
         assert not manager._keep_loaded_tools(state, engine)
         groups = {g["name"]: g for g in manager.tool_group_states(state)}
-        assert groups["scheduling"]["state"] == "loaded" and groups["loop"]["state"] == "deferred"
+        assert groups["scheduling"]["state"] == "loaded" and groups["loop"]["state"] == "loaded"
+        # The next run is handed them in that order, each group's tools marked as the group's.
+        seed = manager.discovered_tools_for(state)
+        assert seed[0] == {"name": members["scheduling"][0], "group": "scheduling"}
+        assert seed[-1] == "DocsRead"
+        state.metadata[tool_groups.CARRIED_KEY] = ["scheduling"]
 
         # One the session now keeps on the surface needs no loading.
         await manager.set_session_tool_group(state.session.id, "scheduling", "eager")
@@ -503,7 +509,6 @@ async def test_a_group_is_carried_whole_only_while_the_runs_use_it(settings: Set
         assert manager.loaded_groups_for(state) == ("scheduling",)
 
         # A group the session may no longer call is not carried back, whatever the last run used.
-        members = tool_groups.members(manager.tools.list_all())
         await manager.set_tools_off(state.session.id, members["scheduling"])
         assert manager.loaded_groups_for(state) == ()
         assert {g["name"]: g for g in manager.tool_group_states(state)}["scheduling"]["state"] == "off"
@@ -572,24 +577,67 @@ async def test_the_tools_a_run_loaded_are_loaded_in_the_next_run_of_the_session(
         await manager.submit(sid, "load the tracker")
         await until_await(lambda: _idle(manager, sid), "the first run ended")
         assert [t.name for t in provider.requests[1].tools or []][-2:] == [tool, unused]
-        # Loaded both, called one: the one it never called is not carried into every later request.
-        assert state.metadata["discovered_tools"] == [tool]
-        await until_await(lambda: _stored(manager, sid, [tool]), "the loaded tools were stored")
+        # Loaded both, called one: both are carried, or the second run's tool list would differ from
+        # the first run's last one and miss the cache on the whole conversation.
+        assert state.metadata["discovered_tools"] == [tool, unused]
+        await until_await(lambda: _stored(manager, sid, [tool, unused]), "the loaded tools were stored")
 
         await manager.submit(sid, "again")
         await until_await(lambda: _answered_twice(manager, sid), "the second run ended")
-        # Loaded from the first request of the second run, after the base surface.
-        assert [t.name for t in provider.requests[3].tools or []][-1] == tool
-        assert unused not in [t.name for t in provider.requests[3].tools or []]
+        # Loaded from the first request of the second run, after the base surface, as the first run ended.
+        assert [t.name for t in provider.requests[3].tools or []] == [t.name for t in provider.requests[2].tools or []]
 
         # What the session may no longer call is not carried back.
         state.metadata["tools_off"] = [tool]
-        assert manager.discovered_tools_for(state) == ()
+        assert manager.discovered_tools_for(state) == (unused,)
         state.metadata.pop("tools_off")
         state.metadata["mcp_enabled"] = []
         assert manager.discovered_tools_for(state) == ()
     finally:
         await manager.close()
+
+
+async def test_a_group_loaded_mid_run_leaves_the_next_run_with_the_prompt_the_last_one_ended_on(settings: Settings, db: Database) -> None:
+    # A group with rules loaded by a search and then not called again. The run after it starts with the
+    # same tools in the same order and the same system prompt as the last request of the run before —
+    # the rules joined the catalogue in the request the load changed — so the second run reads the
+    # whole conversation from the cache instead of writing it again, twice.
+    provider = ScriptedProvider([
+        {"tool": "ToolSearch", "args": {"group": "scheduling"}},
+        {"text": "loaded"},
+        {"text": "second"},
+    ])
+    manager = await _manager(settings, db)
+    manager.providers.rungs_for = lambda config, preset=None: [(provider, "scripted-model")]  # type: ignore[method-assign]
+    try:
+        state = await manager.create_session("stable")
+        sid = state.session.id
+        await manager.submit(sid, "load the schedules")
+        await until_await(lambda: _idle(manager, sid), "the first run ended")
+        assert state.metadata[tool_groups.CARRIED_KEY] == ["scheduling"]
+        await manager.submit(sid, "again")
+        await until_await(lambda: _answered_twice_text(manager, sid), "the second run ended")
+
+        def tools(index: int) -> list[str]:
+            return [t.name for t in provider.requests[index].tools or []]
+
+        def system(index: int) -> str:
+            return "".join(b.text for m in provider.requests[index].messages if m.role is MessageRole.system for b in m.content_blocks if isinstance(b, TextBlock))
+
+        assert tools(1) != tools(0)
+        assert system(1) != system(0)
+        assert tools(2) == tools(1)
+        assert system(2) == system(1)
+    finally:
+        await manager.close()
+
+
+async def _answered_twice_text(manager: SessionManager, session_id: str) -> bool:
+    state = manager.live_state(session_id)
+    if state is None or state.running or not state.settled.is_set():
+        return False
+    answers = [m for m in await manager.sessions.list_transcript(session_id) if m.role is MessageRole.assistant]
+    return len(answers) >= 3
 
 
 async def _stored(manager: SessionManager, session_id: str, names: list[str]) -> bool:
@@ -616,4 +664,39 @@ async def test_only_registered_admitted_names_are_carried(settings: Settings, db
         engine = await manager._build_engine(state, "run-s")
         assert engine.config.discovered_tools == (("BoardAdd",) if names else ())
     finally:
+        await manager.close()
+
+
+async def test_a_sessions_rules_mark_survives_a_restart(settings: Settings, db: Database) -> None:
+    # The mark is in the catalogue at the head of the cached prompt; drawn anew in each process it rewrote
+    # the system prompt of every session with a group's rules in its catalogue at every deploy.
+    manager = await _manager(settings, db)
+    try:
+        state = await manager.create_session("marked")
+        sid = state.session.id
+        mark = (await manager._build_engine(state, "run-one"))._tool_rules_mark
+    finally:
+        await manager.close()
+    key = settings.secrets_dir / "tool-rules-mark.key"
+    assert key.stat().st_mode & 0o077 == 0
+    restarted = await _manager(settings, db)
+    try:
+        state = await restarted.get_state(sid)
+        assert state is not None
+        assert (await restarted._build_engine(state, "run-two"))._tool_rules_mark == mark
+    finally:
+        await restarted.close()
+
+
+async def test_what_a_run_trimmed_stays_trimmed_in_the_next_run(settings: Settings, db: Database) -> None:
+    manager = await _manager(settings, db)
+    try:
+        state = await manager.create_session("trimmed")
+        first = await manager._build_engine(state, "run-one")
+        first._trimmed_tool_result_ids = frozenset({"call-1"})
+        state.engine = first
+        second = await manager._build_engine(state, "run-two")
+        assert second.trimmed_tool_result_ids == frozenset({"call-1"})
+    finally:
+        state.engine = None
         await manager.close()
