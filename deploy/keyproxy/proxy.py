@@ -50,6 +50,7 @@ from claude import (
     chat_to_messages,
     claude_usage_view,
     messages_events_to_chunks,
+    request_betas,
 )
 from subscriptions import (
     CODEX_BASE,
@@ -573,6 +574,7 @@ async def handle_claude(request: web.Request, rest: str) -> web.StreamResponse:
     model = str(body.get("model") or "")
     stream = bool(body.get("stream", False))
     payload, names = chat_to_messages(body)
+    headers["anthropic-beta"] = request_betas(payload)
     upstream = client.build_request("POST", CLAUDE_API + "/v1/messages?beta=true", json=payload, headers={**headers, "accept": "text/event-stream", "content-type": "application/json"})
     try:
         response = await client.send(upstream, stream=True)
