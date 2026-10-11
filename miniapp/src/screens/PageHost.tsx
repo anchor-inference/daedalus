@@ -140,16 +140,26 @@ export function PageHostScreen({ slug, toast }: { slug: string; toast: (text: st
   const nothingLive = !!data && data.version === null;
   const showDraft = draft || nothingLive;
   const draftStamp = data?.draft?.updated_at ?? "";
-  // The first manifest decides what the frame shows; later ones only light the chip.
+  // The first manifest decides what the frame shows; later ones only light the chip. Until the state
+  // has caught up the manifest stands in for it, so that first render already has the key the frame
+  // keeps: a key that changed a render later loaded every page twice.
   useEffect(() => {
     if (!data) return;
-    if (shownVersion === undefined) setShownVersion(data.version);
+    if (shownVersion === undefined) {
+      setShownVersion(data.version);
+      // Opened on the draft because nothing was live: it stays the draft when the first version is
+      // published, rather than turning into the live page under the operator.
+      if (data.version === null) setDraft(true);
+    }
     if (shownDraft === undefined) setShownDraft(draftStamp);
   }, [data, shownVersion, shownDraft, draftStamp]);
-  const newerLive = !!data && !showDraft && shownVersion !== undefined && data.version !== null && data.version !== shownVersion;
-  const newerDraft = !!data && showDraft && shownDraft !== undefined && draftStamp !== shownDraft;
+  const frameVersion = shownVersion === undefined ? data?.version ?? null : shownVersion;
+  const frameDraft = shownDraft === undefined ? draftStamp : shownDraft;
+  // A version published since the frame opened, even one opened on the draft before anything was live.
+  const newerLive = !!data && data.version !== null && data.version !== frameVersion && (!showDraft || frameVersion === null);
+  const newerDraft = !!data && showDraft && !newerLive && draftStamp !== frameDraft;
   const src = data ? `${data.url}${showDraft ? "?draft=1" : ""}` : null;
-  const frameKey = `${slug}:${showDraft ? `d:${shownDraft ?? ""}` : `l:${shownVersion ?? "-"}`}:${reloads}`;
+  const frameKey = `${slug}:${showDraft ? `d:${frameDraft}` : `l:${frameVersion ?? "-"}`}:${reloads}`;
 
   /** The frame on what is current now: the reload button, the chip, a version picked in the menu. */
   const catchUp = useCallback((version?: number | null) => {
@@ -246,11 +256,11 @@ export function PageHostScreen({ slug, toast }: { slug: string; toast: (text: st
     const items: MenuItem[] = (data.versions ?? []).map((v) => ({
       label: `${t("page.version", { n: v.n })} · ${shortDateTime(v.at)}`,
       hint: v.note || undefined,
-      checked: !showDraft && v.n === shownVersion,
+      checked: !showDraft && v.n === frameVersion,
       onSelect: () => {
         if (v.n === data.version) {
           setDraft(false);
-          if (v.n !== shownVersion) catchUp(v.n);
+          if (v.n !== frameVersion) catchUp(v.n);
         } else void rollback(v.n);
       },
     }));
@@ -259,7 +269,7 @@ export function PageHostScreen({ slug, toast }: { slug: string; toast: (text: st
       items.push({ label: t(showDraft ? "page.showLive" : "page.showDraft"), icon: "eye", onSelect: () => { setDraft((d) => !d); catchUp(); } });
     }
     return items;
-  }, [data, showDraft, nothingLive, shownVersion, lang, catchUp]);
+  }, [data, showDraft, nothingLive, frameVersion, lang, catchUp]);
 
   const agentItems: MenuItem[] = [
     ...(agentId && !phone ? [{ label: t(showAgent ? "page.agent.hide" : "page.agent.show"), icon: "panel" as const, onSelect: () => setShown(!showAgent) }] : []),
@@ -371,7 +381,7 @@ export function PageHostScreen({ slug, toast }: { slug: string; toast: (text: st
         <div className="page-host-stage" aria-hidden={phone && showAgent ? true : undefined}>
           {nothingLive && !newer && <div className="page-host-note" data-page-state="unpublished">{t("page.unpublished")}</div>}
           {newer && (
-            <button type="button" className="page-host-chip" onClick={() => catchUp()} data-page-newversion>
+            <button type="button" className="page-host-chip" onClick={() => { if (newerLive && frameVersion === null) setDraft(false); catchUp(); }} data-page-newversion>
               <Icon name="reload" size={14} />
               <span>{newerLive ? t("page.newVersion", { n: data.version ?? 0 }) : t("page.draftChanged")}</span>
               <b>{t("page.reloadNow")}</b>
