@@ -897,7 +897,8 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
   .panel-sheet .panel-tab .ic { display: none; }
 }
 
-/* the Details tab: flat sections, a 12 px label, hairlines between */
+/* The Jobs tab's flat sections: a 12 px label and hairlines between. The Details tab started from the
+   same rules and is drawn as cards below. */
 .details, .jobs { font-size: var(--fs-13); }
 .dt-section { padding: 10px 0 12px; border-top: 1px solid var(--line); }
 .dt-section:first-child { border-top: 0; padding-top: 4px; }
@@ -921,6 +922,139 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .details .field { margin-bottom: 6px; }
 .details .btnrow, .jobs .btnrow { margin-top: 6px; }
 .dt-section.danger .dt-label { color: var(--bad); }
+
+/* The Details tab: one card per section, each opening on its headline. It was hairline-separated
+   sections of 12 px grey text, where a raw byte count weighed as much as the context's fill and no
+   section could be told from the next by eye. Two surfaces are named once here, the card and the
+   tile inside it, so the phone (whose sheet is a step lighter) swaps them without restating a rule. */
+.details { display: flex; flex-direction: column; gap: var(--space-2); container: details / inline-size; --dt-card: var(--surface-2); --dt-tile: var(--surface-1); --dt-track: color-mix(in srgb, var(--fg) 10%, transparent); }
+.details .dt-section, .details .dt-section:first-child { padding: 0; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--dt-card); overflow: visible; }
+.details summary.dt-label { display: flex; align-items: center; gap: var(--space-2); min-height: var(--row-h); margin: 0; padding: 0 10px 0 var(--space-2); border-radius: var(--radius-md); font-size: var(--fs-13); font-weight: 600; color: var(--fg); cursor: pointer; list-style: none; }
+.details summary.dt-label::-webkit-details-marker { display: none; }
+.details summary.dt-label:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
+.details summary.dt-label:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.dt-icon { display: inline-grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: var(--radius-xs); background: var(--dt-tile); color: var(--fg-2); }
+.dt-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.details .dt-aside { margin-left: auto; font-size: var(--fs-12); font-weight: 500; color: var(--fg-2); font-variant-numeric: tabular-nums; }
+.dt-title + .dt-chevron { margin-left: auto; }
+.dt-chevron { display: inline-grid; flex: none; color: var(--fg-3); transform: rotate(-90deg); transition: transform var(--t-base) var(--ease-out); }
+.details [open] > summary .dt-chevron { transform: none; }
+.details .dt-content { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 2px var(--space-3) var(--space-3); }
+.details .dt-section.danger { border-color: color-mix(in srgb, var(--bad) 30%, var(--line)); }
+.details .dt-section.danger .dt-icon { color: var(--bad); }
+.details .dt-aside .badge.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
+/* Inside a card the gap spaces the pieces; the margins the flat sections needed would double it. */
+.details .dt-content .field, .details .dt-content .btnrow, .details .dt-content .bar { margin: 0; }
+.details .dt-content .btn:not(.primary):not(.danger):not(.warn):not(.ghost) { background: var(--dt-tile); }
+.dt-hint { margin: 0; font-size: var(--fs-12); line-height: 1.45; color: var(--fg-2); }
+.dt-hint.quiet { color: var(--fg-3); }
+.dt-caption { font-size: var(--fs-13); color: var(--fg); overflow-wrap: anywhere; }
+
+.dt-headline { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.dt-big { flex: none; font-size: var(--fs-20); font-weight: 650; line-height: 1.1; letter-spacing: -0.02em; color: var(--fg); font-variant-numeric: tabular-nums; }
+.dt-big.attn { color: var(--warn); }
+.dt-big.bad { color: var(--bad); }
+.dt-headline-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.dt-headline-side { flex: none; margin-left: auto; }
+.dt-today { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 1px; padding: var(--space-1) 10px; border-radius: var(--radius-sm); background: var(--dt-tile); }
+.dt-today-label { font-size: var(--fs-11); color: var(--fg-2); }
+.dt-today b { font-size: var(--fs-14); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Two tiles to a row in a narrow panel, all on one row once the panel has room for them. */
+.dt-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+@container details (min-width: 400px) { .dt-stats { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); } }
+.dt-stat { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: var(--space-2) 10px; border-radius: var(--radius-sm); background: var(--dt-tile); }
+.dt-stat-label { overflow: hidden; font-size: var(--fs-11); color: var(--fg-2); text-overflow: ellipsis; white-space: nowrap; }
+.dt-stat-value { font-size: var(--fs-14); font-weight: 600; font-variant-numeric: tabular-nums; }
+.dt-stat-sub { font-size: var(--fs-11); color: var(--fg-3); overflow-wrap: anywhere; }
+
+.dt-meter { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.dt-meter-line { display: flex; align-items: baseline; gap: var(--space-2); }
+.dt-meter-label { flex: 1; min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
+.dt-meter-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+.dt-meter[data-tone="attn"] .dt-meter-value { color: var(--warn); }
+.dt-meter[data-tone="bad"] .dt-meter-value { color: var(--bad); }
+.dt-meter-bar { height: 8px; border-radius: var(--radius-pill); background: var(--dt-track); overflow: hidden; }
+.dt-meter-bar i { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .3s; }
+.dt-meter[data-tone="ok"] .dt-meter-bar i { background: var(--ok); }
+.dt-meter[data-tone="attn"] .dt-meter-bar i, .dt-meter-bar.solo.attn i { background: var(--warn); }
+.dt-meter[data-tone="bad"] .dt-meter-bar i, .dt-meter-bar.solo.bad i { background: var(--bad); }
+
+/* The context's parts on one bar for the whole window, the empty end being the room left. The
+   reserved response is hatched: room held back for the answer, not text already in the window. */
+.dt-segments { display: flex; flex-direction: column; gap: var(--space-2); }
+.dt-segbar { display: flex; gap: 2px; height: 10px; border-radius: var(--radius-pill); background: var(--dt-track); overflow: hidden; }
+.dt-segbar i { display: block; flex: none; height: 100%; background: var(--part); }
+[data-part="instructions"] { --part: var(--staff-violet); }
+[data-part="tools"] { --part: var(--staff-blue); }
+[data-part="conversation"] { --part: var(--accent); }
+[data-part="attachments"] { --part: var(--staff-amber); }
+[data-part="reserved_response"] { --part: repeating-linear-gradient(135deg, var(--fg-3) 0 2px, transparent 2px 5px); }
+.dt-legend { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-1) var(--space-4); margin: 0; padding: 0; list-style: none; }
+.dt-legend li { display: flex; align-items: center; gap: var(--space-2); min-width: 0; color: var(--fg-2); }
+.dt-legend li > .grow { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dt-legend b { font-weight: 600; color: var(--fg); font-variant-numeric: tabular-nums; }
+.dt-swatch { flex: none; width: 8px; height: 8px; border-radius: 2px; background: var(--part); }
+
+.dt-facts { display: flex; flex-direction: column; margin: 0; }
+.dt-facts:empty { display: none; }
+.dt-fact { display: flex; align-items: baseline; gap: var(--space-3); min-width: 0; padding: 6px 0; border-top: 1px solid var(--line); }
+.dt-fact:first-child { border-top: 0; }
+.dt-fact dt { flex: none; width: 38%; max-width: 150px; color: var(--fg-2); }
+.dt-fact dd { flex: 1; min-width: 0; margin: 0; text-align: right; overflow-wrap: anywhere; }
+.dt-fact dd.mono { font-size: var(--fs-mono); }
+.dt-fact dd:has(.dt-prose) { text-align: left; line-height: 1.4; }
+
+.dt-more > summary { display: inline-flex; align-items: center; gap: var(--space-1); min-height: var(--ctl-h-sm); font-size: var(--fs-12); font-weight: 500; color: var(--fg-2); cursor: pointer; list-style: none; }
+.dt-more > summary::-webkit-details-marker { display: none; }
+.dt-more > summary:hover { color: var(--fg); }
+.dt-more > summary .ic { transform: rotate(-90deg); transition: transform var(--t-base) var(--ease-out); }
+.dt-more[open] > summary .ic { transform: none; }
+.dt-more-body { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-1) 10px var(--space-2); border-radius: var(--radius-sm); background: var(--dt-tile); }
+
+.dt-note { display: flex; align-items: flex-start; gap: var(--space-2); margin: 0; padding: var(--space-2) 10px; border-radius: var(--radius-sm); background: var(--dt-tile); font-size: var(--fs-12); line-height: 1.45; color: var(--fg-2); }
+.dt-note .ic { flex: none; margin-top: 1px; color: var(--fg-3); }
+.dt-note.attn { background: color-mix(in srgb, var(--warn) 10%, var(--dt-tile)); color: var(--fg); }
+.dt-note.attn .ic { color: var(--warn); }
+.dt-note.bad { background: color-mix(in srgb, var(--bad) 10%, var(--dt-tile)); color: var(--fg); }
+.dt-note.bad .ic { color: var(--bad); }
+
+.dt-copy { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: var(--ctl-h-sm); padding: 0 var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--dt-tile); color: var(--fg); font-size: var(--fs-12); cursor: pointer; vertical-align: middle; }
+.dt-copy:hover { border-color: var(--line-strong); }
+.dt-copy .ic { flex: none; color: var(--fg-3); }
+.dt-tags { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.dt-tag { display: inline-flex; align-items: center; gap: var(--space-1); max-width: 100%; padding: 2px var(--space-2); border-radius: var(--radius-pill); background: var(--dt-tile); font-size: var(--fs-12); color: var(--fg-2); overflow-wrap: anywhere; }
+.dt-tag .ic { flex: none; color: var(--fg-3); }
+
+.dt-control { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: var(--ctl-h); }
+.dt-control-label { flex: none; width: 64px; color: var(--fg-2); }
+.dt-action { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.dt-action .dt-hint { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.dt-empty { display: flex; align-items: center; gap: 10px; color: var(--fg-2); }
+.details .dt-workspace { padding: 0 10px; border-radius: var(--radius-sm); background: var(--dt-tile); }
+.dt-link { display: inline-flex; align-items: center; gap: 2px; font-size: var(--fs-12); color: var(--fg-2); }
+.dt-path { display: flex; align-items: flex-start; gap: var(--space-2); color: var(--fg-2); }
+.dt-path .mono { min-width: 0; font-size: var(--fs-mono); line-height: 1.4; overflow-wrap: anywhere; }
+.dt-origin-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.dt-origin-name { display: flex; flex-direction: column; min-width: 0; }
+.dt-origin-name b { font-size: var(--fs-14); font-weight: 600; }
+.imp-origin { display: flex; flex-direction: column; gap: 10px; }
+.dt-provider-today { padding-top: var(--space-1); }
+
+.dt-mcp { display: flex; flex-direction: column; gap: var(--space-2); }
+.dt-server { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 10px var(--space-3); border-radius: var(--radius-sm); background: var(--dt-tile); }
+.dt-server-head { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.dt-server-name { font-weight: 600; overflow-wrap: anywhere; }
+.dt-state { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--fg-2); }
+.dt-state::before { content: ""; flex: none; width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--fg-3); }
+.dt-state[data-tone="ok"]::before { background: var(--ok); }
+.dt-state[data-tone="attn"]::before { background: var(--warn); }
+.dt-state[data-tone="bad"]::before { background: var(--bad); }
+.dt-server .dt-tag { background: var(--dt-card); }
+.details .tool-timing { padding: 0 10px; border-radius: var(--radius-sm); background: var(--dt-tile); color: var(--fg-2); }
+.details .tool-timing summary { list-style: none; }
+.details .tool-timing summary::-webkit-details-marker { display: none; }
+.details .loop-panel { margin: 0; padding: 0; border: 0; }
 /* A task is two lines — what it is, how it stands — so the row grows past the dense height; the
    state dot is set here because .aside-row .dot paints every dot green. */
 .jobs .task-row { padding: 4px 0; }
@@ -1552,10 +1686,6 @@ button.secret-chip:hover { background: var(--card-2); }
 .share-field .btn.small { white-space: nowrap; min-height: var(--ctl-h-sm); padding: 4px 9px; }
 
 /* ── the session panel: usage of its provider, its cron ────────────────────────────────── */
-.quota { margin-top: 6px; }
-.quota-line { display: flex; gap: 8px; font-size: var(--fs-12); }
-.quota-bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin-top: 3px; }
-.quota-bar i { display: block; height: 100%; border-radius: 3px; transition: width .3s; }
 .sched-row { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-top: 1px solid var(--line); }
 .sched-row:first-of-type { border-top: 0; }
 .sched-name { font-size: var(--fs-13); font-weight: 600; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -2795,13 +2925,6 @@ input.field[type="range"] {
 .panel-viewer.html { padding:8px 0 0; }
 .panel-viewer.html .source-tools { padding:0 8px; }
 .panel-viewer.html .preview-body { flex:1; }
-.details .dt-section { overflow:visible; }
-.details summary.dt-label { cursor:pointer; min-height:28px; font-weight:500; list-style:none; margin:0; justify-content:flex-start; }
-.details summary.dt-label::-webkit-details-marker { display:none; }
-.details summary.dt-label::before { content:"›"; width:10px; transition:transform 180ms; }
-.details [open] > summary.dt-label::before { transform:rotate(90deg); }
-.details .dt-aside { margin-left:auto; }
-.dt-content { padding-top:6px; }
 .panel-body.tab-details { overflow-y:auto; overscroll-behavior:contain; }
 .menu, .popover { animation:menu-enter 180ms var(--ease-out); }
 @keyframes menu-enter { from { opacity:0; translate:0 6px; } to { opacity:1; translate:0 0; } }

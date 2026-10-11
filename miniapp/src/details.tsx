@@ -1,15 +1,18 @@
-// The Details tab: what the session is and what it is set to, in flat sections — a 12 px label, a
-// value or a row or two, a hairline between sections. It is the old aside's cards and the "Session
-// info" sheet in one place; the right panel hosts it on a desktop and a full sheet on a phone.
+// The Details tab: what the session is and what it is set to, one card per section. A card opens on
+// its headline (the context's fill, the spend, the quota windows) and keeps the rest beneath it in
+// tiles, quiet facts or a "More" fold; the parts it is built from are in detailsparts.tsx. It is the
+// old aside's cards and the "Session info" sheet in one place; the right panel hosts it on a desktop
+// and a full sheet on a phone.
 
 import { OriginSection } from "./imports/ImportedChat";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, LoopView, ProviderUsage, Schedule, SessionDetail } from "./api";
 import { projectPath } from "./folders";
-import { Dot, ServiceRow, ToolPicker, copyText, fmtInt, fmtUsd, loopLabel, statusWord, timeAgo } from "./ui/components";
-import { readLayout, writeLayout } from "./layout";
-import { clock, planName, relTimeLong, shortDateTime, untilShort } from "./format";
+import { ServiceRow, Switch, ToolPicker, fmtInt, fmtUsd, loopLabel, statusWord, timeAgo } from "./ui/components";
+import { absTime, clock, planName, relTimeLong, shortDateTime, untilShort } from "./format";
 import { Icon } from "./icons";
+import { CopyValue, Fact, Facts, Headline, Meter, Note, Section, Stat, Stats, Until } from "./detailsparts";
+import { contextSegments, contextTone, quotaTone } from "./detailsmodel";
 import { confirmAsync, errorText, fmtTok } from "./ui";
 import { plural, t } from "./i18n";
 import { SessionToolGroups } from "./toolgroupsview";
@@ -53,30 +56,9 @@ export type SessionDetailsProps = {
   focus?: string | null;
 };
 
-/** `closed`: a section that starts shut until the operator opens it once (then the choice is kept);
- *  for one whose content costs a request, which only an opened section should make. */
-export function Section({ ids, id, label, children, className, aside, closed }: { ids: string; id: string; label: string; children: React.ReactNode; className?: string; aside?: React.ReactNode; closed?: boolean }) {
-  const [open, setOpen] = useState(() => (readLayout(`details.${id}`) ?? (closed ? "closed" : "open")) !== "closed");
-  return (
-    <details className={`dt-section ${className ?? ""}`} id={`${ids}-info-${id}`} open={open} onToggle={(e) => { const next = e.currentTarget.open; setOpen(next); writeLayout(`details.${id}`, next ? "open" : "closed"); }}>
-      <summary className="dt-label" onClick={(e) => {
-        // Persist at the click, before a navigation can discard the native toggle event's task.
-        e.preventDefault();
-        setOpen(!open);
-        writeLayout(`details.${id}`, open ? "closed" : "open");
-      }}>
-        <span>{label}</span>
-        {aside && <span className="dt-aside">{aside}</span>}
-      </summary>
-      <div className="dt-content">{children}</div>
-    </details>
-  );
-}
-
 export function SessionDetails({ ids, id, role = "session", detail, busy, modes, schedules, provider, providerUsage, onOpen, toast, reload, on, focus }: SessionDetailsProps) {
   const container = useRef<HTMLDivElement>(null);
   const conductor = role !== "session";
-  const usage = detail.usage;
   const ctxPct = detail.context && detail.context.window > 0 ? Math.round((100 * detail.context.tokens) / detail.context.window) : null;
   useEffect(() => {
     if (!focus || focus === "session") return;
@@ -86,92 +68,45 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, modes,
   return (
     <div ref={container} className="details">
       {detail.imported && (
-        <Section ids={ids} id="origin" label={t("imp.origin")}>
+        <Section ids={ids} id="origin" icon="fork" label={t("imp.origin")}>
           <OriginSection sessionId={id} origin={detail.imported} toast={toast} onPulled={() => reload(true)} />
         </Section>
       )}
-      <Section ids={ids} id="session" label={t("session.card")}>
+      <Section ids={ids} id="session" icon="sliders" label={t("session.card")}>
         <input className="field" defaultValue={detail.title} aria-label={t("session.title")} onBlur={(e) => on.rename(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-        <div className="dt-row">
-          <span className="dt-key">{t("session.model")}</span>
+        <div className="dt-control">
+          <span className="dt-control-label">{t("session.model")}</span>
           <button className="linkbtn grow truncate" onClick={on.openPicker} title={detail.model}>{detail.model || t("session.model.global")}</button>
           <button className="btn small" onClick={on.openPicker}>{t("session.model.change")}</button>
         </div>
-        <div className="dt-row">
-          <span className="dt-key">{t("session.mode")}</span>
+        <label className="dt-control">
+          <span className="dt-control-label">{t("session.mode")}</span>
           <select className="field grow" value={detail.mode || "default"} onChange={(e) => on.setMode(e.target.value)}>
             {["default", ...modes].map((m) => (
               <option key={m} value={m}>{m}</option>
             ))}
           </select>
-        </div>
+        </label>
       </Section>
 
       {detail.context && (
-        <Section ids={ids} id="context" label={t("session.context")} aside={ctxPct !== null ? `${ctxPct}%` : undefined}>
-          {ctxPct !== null && (
-            <div className={`bar ${ctxPct >= 90 ? "bad" : ctxPct >= 60 ? "attn" : ""}`} title={t("session.ctx.title", { used: fmtInt(detail.context.tokens), window: fmtInt(detail.context.window) })} style={{ ["--v" as string]: Math.min(100, ctxPct) }}><i /></div>
-          )}
-          <div className="dt-row sub">
-            <span>{fmtTok(detail.context.tokens)}{detail.context.window > 0 ? ` / ${fmtTok(detail.context.window)}` : ""}</span>
-            <span className="dt-sep">·</span>
-            <span>{t(detail.context.estimated ? "session.context.estimated" : "session.context.measured")}</span>
-          </div>
-          <p className="sub">{t("session.context.messages", { n: plural("session.context.count.messages", detail.context.messages), s: plural("session.context.count.summaries", detail.context.summaries), o: plural("session.context.count.originals", detail.context.operator_turns) })}</p>
-          {detail.context.last_compaction?.at && (
-            <p className="sub" data-last-compaction>{t("session.context.lastcompaction", { when: relTimeLong(detail.context.last_compaction.at), reason: detail.context.last_compaction.reason || "—" })}</p>
-          )}
-          {detail.context.breakdown && (
-            <div className="context-breakdown">
-              {(["instructions", "tools", "conversation", "attachments", "reserved_response"] as const).map((key) => (
-                <div className="dt-row sub" key={key}>
-                  <span className="grow">{t(`session.context.part.${key}`)}</span>
-                  <span>{fmtTok(detail.context?.breakdown?.[key] ?? 0)}</span>
-                </div>
-              ))}
-              <p className="sub">{t("session.context.breakdown.estimated")}</p>
-            </div>
-          )}
-          {detail.context.recent_cache && (
-            <p className="sub">{t("session.context.cache", { percent: detail.context.recent_cache?.hit_percent ?? 0, tokens: fmtTok(detail.context.recent_cache?.read_tokens ?? 0) })}</p>
-          )}
-          {!!detail.context.prefix_changed?.length && (
-            <p className="sub">{t("session.context.prefix", { reasons: detail.context.prefix_changed?.map((reason: string) => t(`session.context.prefix.${reason}`)).join(", ") ?? "" })}</p>
-          )}
-          <div className="btnrow">
-            <button className="btn small" onClick={on.compact} disabled={busy}><Icon name="compact" size={14} /> {t("session.compact")}</button>
-          </div>
+        <Section ids={ids} id="context" icon="braces" label={t("session.context")} aside={ctxPct !== null ? `${ctxPct}%` : undefined}>
+          <ContextBody context={detail.context} percent={ctxPct} busy={busy} onCompact={on.compact} />
         </Section>
       )}
 
-      <Section ids={ids} id="usage" label={t("session.usage")} aside={fmtUsd(detail.usage.usd)}>
-        <p className="sub">{t("session.usage.scope")}</p>
-        <div className="dt-row sub">
-          {/* The arrow says which way the tokens went, and an arrow is neither translatable nor
-              announced: the label carries the word and the glyph stays decoration. */}
-          <span title={t("session.usage.in")} aria-label={`${fmtTok(detail.usage.i)} ${t("session.usage.in")}`}>{fmtTok(detail.usage.i)}<span aria-hidden>↑</span></span>
-          <span title={t("session.usage.out")} aria-label={`${fmtTok(detail.usage.o)} ${t("session.usage.out")}`}>{fmtTok(detail.usage.o)}<span aria-hidden>↓</span></span>
-          {!!detail.usage.ch && <span title={t("session.usage.cache")}>{t("panel.usage.cache", { n: fmtTok(detail.usage.ch) })}</span>}
-          <span className="dt-sep">·</span>
-          <span>{plural("usage.calls", detail.usage.c ?? 0)}</span>
-        </div>
-        {usage.c_today != null && (
-          <div className="dt-row sub" data-usage-today>
-            <span className="dt-key">{t("session.usage.today")}</span>
-            <span className="grow">{t("session.usage.today.line", { usd: fmtUsd(usage.usd_today ?? 0), in: fmtTok(usage.i_today ?? 0), out: fmtTok(usage.o_today ?? 0), calls: plural("usage.calls", usage.c_today ?? 0) })}</span>
-          </div>
-        )}
-        <ToolTiming sessionId={id} />
+      <Section ids={ids} id="usage" icon="chart" label={t("session.usage")} aside={fmtUsd(detail.usage.usd)}>
+        <UsageBody sessionId={id} usage={detail.usage} />
       </Section>
 
-      {role !== "orchestrator" && <Section ids={ids} id="workspace" label={t("session.workspace")}>
-        <button className="aside-row link" onClick={on.openFiles} title={detail.project ? projectPath(detail.project) : detail.workspace}>
+      {role !== "orchestrator" && <Section ids={ids} id="workspace" icon="folder" label={t("session.workspace")}>
+        <button className="aside-row link dt-workspace" onClick={on.openFiles} title={detail.project ? projectPath(detail.project) : detail.workspace}>
           <Icon name="folder" size={16} />
           <span className="grow name">{detail.project ? t("session.aside.project", { name: detail.project.name }) : detail.workspace_own === false ? t("session.aside.workspace", { name: detail.workspace_name ?? "" }) : t("session.aside.own")}</span>
           <HostMark env={detail.env} />
-          <span className="sub">{t("panel.tab.files")}</span>
+          <span className="dt-link">{t("panel.tab.files")}<Icon name="forward" size={12} /></span>
         </button>
-        <div className="dt-row sub path" title={detail.workspace}>
+        <div className="dt-path" title={detail.workspace}>
           <span className="mono grow">{detail.project ? projectPath(detail.project) : detail.workspace}</span>
           {detail.project && (
             <span className="badge" title={t(detail.project.settings.snapshots ? "session.aside.snapshots.title" : "session.aside.nosnapshots.title")}>
@@ -179,66 +114,62 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, modes,
             </span>
           )}
         </div>
-        {detail.workspace_sessions && detail.workspace_sessions.length > 0 && (
-          <div className="dt-row sub">
-            <span className="dt-key">{t("panel.shared")}</span>
-            <span className="grow truncate">
+        <Facts>
+          {detail.workspace_sessions && detail.workspace_sessions.length > 0 && (
+            <Fact label={t("panel.shared")}>
               {detail.workspace_sessions.slice(0, 4).map((w, i) => (
                 <span key={w.id}>
                   {i > 0 && ", "}
                   <button className="linkbtn" onClick={() => onOpen?.(w.id)} title={t("session.aside.sameworkspace")}>{w.title}</button>
                 </span>
               ))}
-            </span>
-          </div>
-        )}
-        {!conductor && (
-          <div className="dt-row sub prose">
-            <span className="dt-key">{t("session.project")}</span>
-            <span className="grow" title={projectPath(detail.project)}>
-              {t("session.project.inside", { name: detail.project.name })}
-            </span>
-            <button className="linkbtn" onClick={on.move}>{t("session.project.move")}</button>
-          </div>
-        )}
+            </Fact>
+          )}
+          {!conductor && (
+            <Fact label={t("session.project")} title={projectPath(detail.project)}>
+              <span className="dt-prose">{t("session.project.inside", { name: detail.project.name })}</span>
+            </Fact>
+          )}
+        </Facts>
+        {!conductor && <div className="btnrow"><button className="btn small" onClick={on.move}>{t("session.project.move")}</button></div>}
       </Section>}
 
-      {role !== "orchestrator" && <Section ids={ids} id="disk" label={t("disk.title")} closed>
+      {role !== "orchestrator" && <Section ids={ids} id="disk" icon="archive" label={t("disk.title")} closed>
         <DiskUsage kind="session" id={id} toast={toast} />
       </Section>}
 
       {provider && <ProviderUsageCard ids={ids} provider={provider} usage={providerUsage} />}
 
-      {!conductor && <Section ids={ids} id="loop" label={t("session.loop")} aside={detail.loop ? <span className={`badge loop ${detail.loop.status}`}>{statusWord(detail.loop.status).toLowerCase()}</span> : undefined}>
+      {!conductor && <Section ids={ids} id="loop" icon="loop" label={t("session.loop")} aside={detail.loop ? <span className={`badge loop ${detail.loop.status}`}>{statusWord(detail.loop.status).toLowerCase()}</span> : undefined}>
         {detail.loop && (
-          <div className="sub">{loopLabel(detail.loop).replace(/^\S+ · /, "")}{detail.loop.next_run_at && detail.loop.status === "active" ? t("agents.loop.next", { t: untilShort(detail.loop.next_run_at) }) : ""}</div>
+          <div className="dt-hint">{loopLabel(detail.loop).replace(/^\S+ · /, "")}{detail.loop.next_run_at && detail.loop.status === "active" ? t("agents.loop.next", { t: untilShort(detail.loop.next_run_at) }) : ""}</div>
         )}
         <LoopPanel sessionId={id} loop={detail.loop ?? null} onChange={() => reload(true)} toast={toast} />
       </Section>}
 
       {schedules.length > 0 && (
-        <Section ids={ids} id="cron" label={t("session.cron")} aside={t("session.cron.on", { n: schedules.filter((x) => x.enabled).length })}>
+        <Section ids={ids} id="cron" icon="calendar" label={t("session.cron")} aside={t("session.cron.on", { n: schedules.filter((x) => x.enabled).length })}>
           {schedules.map((sc) => <ScheduleRow key={sc.id} sc={sc} sessionId={id} onAction={on.scheduleAction} />)}
         </Section>
       )}
 
       {detail.services && detail.services.length > 0 && (
-        <Section ids={ids} id="services" label={t("session.services")} aside={t("session.services.running", { n: detail.services.filter((s) => s.status === "running").length })}>
+        <Section ids={ids} id="services" icon="globe" label={t("session.services")} aside={t("session.services.running", { n: detail.services.filter((s) => s.status === "running").length })}>
           {detail.services.map((s) => (
             <ServiceRow key={s.name} s={s} sessionId={id} onChange={() => reload(true)} toast={toast} onLogs={(text) => on.showLog(`service ${s.name} · log`, text)} />
           ))}
         </Section>
       )}
 
-      <Section ids={ids} id="mcp" label={t("session.mcp")}>
+      <Section ids={ids} id="mcp" icon="plug" label={t("session.mcp")}>
         <McpPanel sessionId={id} toast={toast} />
       </Section>
 
-      <Section ids={ids} id="toolgroups" label={t("session.toolgroups")}>
+      <Section ids={ids} id="toolgroups" icon="skill" label={t("session.toolgroups")}>
         <SessionToolGroups sessionId={id} toast={toast} />
       </Section>
 
-      {!conductor && <Section ids={ids} id="tools" label={t("session.tools")}>
+      {!conductor && <Section ids={ids} id="tools" icon="wrench" label={t("session.tools")}>
         <ToolPicker
           off={detail.tools_off ?? []}
           note={t("session.tools.note")}
@@ -253,8 +184,8 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, modes,
         />
       </Section>}
 
-      <Section ids={ids} id="brief" label={t("session.brief")}>
-        <label className="field">{t("session.brief.label")}{detail.spawned_by ? t("session.brief.by", { id: detail.spawned_by }) : ""}</label>
+      <Section ids={ids} id="brief" icon="journal" label={t("session.brief")}>
+        <label className="field dt-hint">{t("session.brief.label")}{detail.spawned_by ? t("session.brief.by", { id: detail.spawned_by }) : ""}</label>
         <textarea
           className="field"
           rows={4}
@@ -274,7 +205,7 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, modes,
         />
       </Section>
 
-      <Section ids={ids} id="spend" label={t("session.cap")} aside={t("settings.limits.spent", { sum: fmtUsd(detail.usage.usd) })}>
+      <Section ids={ids} id="spend" icon="flag" label={t("session.cap")} aside={t("settings.limits.spent", { sum: fmtUsd(detail.usage.usd) })}>
         <input
           className="field"
           type="number"
@@ -299,16 +230,18 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, modes,
         />
       </Section>
 
-      <Section ids={ids} id="advanced" label={t("session.advanced")}>
-        <div className="dt-row sub"><span className="dt-key">{t("session.id")}</span><button className="linkbtn mono" onClick={async () => toast((await copyText(id)) ? t("session.id.copied") : id)} title={t("common.copy")}>{id}</button></div>
-        <div className="dt-row sub"><span className="dt-key">{t("session.workspace")}</span><button className="linkbtn mono truncate" onClick={async () => toast((await copyText(detail.workspace)) ? t("session.path.copied") : detail.workspace)} title={detail.workspace}>{detail.workspace_own === false ? detail.workspace_name : detail.workspace}</button></div>
-        {detail.run_id && <div className="dt-row sub"><span className="dt-key">{t("session.runid")}</span><span className="mono">{detail.run_id}</span></div>}
+      <Section ids={ids} id="advanced" icon="settings" label={t("session.advanced")}>
+        <Facts>
+          <Fact label={t("session.id")}><CopyValue value={id} shown={id} toast={toast} copied={t("session.id.copied")} /></Fact>
+          <Fact label={t("session.workspace")}><CopyValue value={detail.workspace} shown={detail.workspace_own === false ? detail.workspace_name : undefined} max={28} toast={toast} copied={t("session.path.copied")} /></Fact>
+          {detail.run_id && <Fact label={t("session.runid")} mono>{detail.run_id}</Fact>}
+        </Facts>
         <div className="btnrow">
           <button className="btn small" onClick={on.exportMarkdown}><Icon name="download" size={14} /> {t("session.export")}</button>
         </div>
       </Section>
 
-      {!conductor && <Section ids={ids} id="danger" label={t("session.danger")} className="danger">
+      {!conductor && <Section ids={ids} id="danger" icon="alert" label={t("session.danger")} className="danger">
         <div className="btnrow" style={{ marginTop: 0 }}>
           <button className="btn small danger" onClick={on.clearHistory} disabled={busy}><Icon name="trash" size={14} /> {t("session.clear.short")}</button>
           <button className="btn small danger" onClick={on.remove}><Icon name="trash" size={14} /> {t("session.delete.short")}</button>
@@ -316,6 +249,89 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, modes,
       </Section>}
     </div>
   );
+}
+
+type ContextView = NonNullable<SessionDetail["context"]>;
+
+/** The context: how full the window is, what fills it, what the cache reused, and when it was last
+ *  compacted beside the button that compacts it. Each was a sentence of its own before. */
+function ContextBody({ context, percent, busy, onCompact }: { context: ContextView; percent: number | null; busy: boolean; onCompact: () => void }) {
+  const tone = percent !== null ? contextTone(percent) : null;
+  const segments = context.breakdown ? contextSegments(context.breakdown, context.window) : null;
+  const measured = t(context.estimated ? "session.context.estimated" : "session.context.measured");
+  return <>
+    <Headline
+      value={percent !== null ? `${percent}%` : fmtTok(context.tokens)}
+      tone={tone}
+      title={context.window > 0 ? t("session.ctx.title", { used: fmtInt(context.tokens), window: fmtInt(context.window) }) : undefined}
+      caption={context.window > 0 ? t("details.context.of", { used: fmtTok(context.tokens), window: fmtTok(context.window) }) : t("details.context.used", { used: fmtTok(context.tokens) })}
+      sub={measured}
+    />
+    {segments ? (
+      <div className="dt-segments" data-context-segments>
+        <div className="dt-segbar" role="img" aria-label={t("details.context.split")}>
+          {segments.filter((part) => part.percent > 0).map((part) => <i key={part.key} data-part={part.key} style={{ width: `${part.percent}%` }} title={`${t(`session.context.part.${part.key}`)}: ${fmtTok(part.tokens)}`} />)}
+        </div>
+        <ul className="dt-legend">
+          {segments.map((part) => (
+            <li key={part.key} data-segment={part.key}>
+              <span className="dt-swatch" data-part={part.key} aria-hidden />
+              <span className="grow">{t(`session.context.part.${part.key}`)}</span>
+              <b>{fmtTok(part.tokens)}</b>
+            </li>
+          ))}
+        </ul>
+        <p className="dt-hint">{t("session.context.breakdown.estimated")}</p>
+      </div>
+    ) : percent !== null && (
+      <div className={`dt-meter-bar solo ${tone ?? ""}`}><i style={{ width: `${Math.min(100, percent)}%` }} /></div>
+    )}
+    <Stats>
+      <Stat label={t("details.context.messages")} value={fmtInt(context.messages)}
+        sub={`${plural("session.context.count.summaries", context.summaries)} · ${plural("details.context.yours", context.operator_turns)}`}
+        title={t("session.context.messages", { n: plural("session.context.count.messages", context.messages), s: plural("session.context.count.summaries", context.summaries), o: plural("session.context.count.originals", context.operator_turns) })} />
+      {context.recent_cache && <Stat label={t("details.context.cache")} value={`${context.recent_cache.hit_percent ?? 0}%`} sub={t("details.context.cache.read", { tokens: fmtTok(context.recent_cache.read_tokens ?? 0) })} />}
+    </Stats>
+    <p className="dt-hint">{t("details.context.archive")}</p>
+    {!!context.prefix_changed?.length && (
+      <Note tone="attn">{t("session.context.prefix", { reasons: context.prefix_changed.map((reason: string) => t(`session.context.prefix.${reason}`)).join(", ") })}</Note>
+    )}
+    <div className="dt-action">
+      {context.last_compaction?.at ? (
+        <span className="dt-hint grow" data-last-compaction title={absTime(context.last_compaction.at)}>
+          <Icon name="clock" size={12} /> {t("session.context.lastcompaction", { when: relTimeLong(context.last_compaction.at), reason: context.last_compaction.reason || "—" })}
+        </span>
+      ) : <span className="grow" />}
+      <button className="btn small" onClick={onCompact} disabled={busy}><Icon name="compact" size={14} /> {t("session.compact")}</button>
+    </div>
+  </>;
+}
+
+/** What the session spent: the sum as the headline with today beside it, then the four counts as
+ *  tiles, each with today's share under its total. */
+function UsageBody({ sessionId, usage }: { sessionId: string; usage: SessionDetail["usage"] }) {
+  const today = usage.c_today != null;
+  return <>
+    <Headline
+      value={fmtUsd(usage.usd)}
+      caption={t("details.usage.total")}
+      side={today ? (
+        <span className="dt-today" data-usage-today>
+          <span className="dt-today-label">{t("session.usage.today")}</span>
+          <b>{fmtUsd(usage.usd_today ?? 0)}</b>
+        </span>
+      ) : undefined}
+    />
+    <Stats>
+      {/* The arrows of the old line said which way the tokens went; the tiles say it in words. */}
+      <Stat label={t("details.usage.in")} value={fmtTok(usage.i)} title={t("session.usage.in")} sub={today ? t("details.usage.today", { n: fmtTok(usage.i_today ?? 0) }) : undefined} />
+      <Stat label={t("details.usage.out")} value={fmtTok(usage.o)} title={t("session.usage.out")} sub={today ? t("details.usage.today", { n: fmtTok(usage.o_today ?? 0) }) : undefined} />
+      <Stat label={t("details.usage.cached")} value={fmtTok(usage.ch ?? 0)} title={t("session.usage.cache")} />
+      <Stat label={t("details.usage.calls")} value={fmtInt(usage.c ?? 0)} title={plural("usage.calls", usage.c ?? 0)} sub={today ? t("details.usage.today", { n: fmtInt(usage.c_today ?? 0) }) : undefined} />
+    </Stats>
+    <ToolTiming sessionId={sessionId} />
+    <p className="dt-hint">{t("session.usage.scope")}</p>
+  </>;
 }
 
 function LoopPanel({ sessionId, loop, onChange, toast }: { sessionId: string; loop: LoopView | null; onChange: () => void; toast: (t: string) => void }) {
@@ -346,8 +362,8 @@ function LoopPanel({ sessionId, loop, onChange, toast }: { sessionId: string; lo
   }
   if (!loop && !editing) {
     return (
-      <div className="btnrow" style={{ marginTop: 0 }}>
-        <span className="sub">{t("session.loop.none")}</span>
+      <div className="dt-empty">
+        <span className="grow">{t("session.loop.none")}</span>
         <button className="btn small" onClick={() => setEditing(true)}>{t("session.loop.add")}</button>
       </div>
     );
@@ -406,40 +422,24 @@ function providerLabel(id: string): string {
   return PROVIDER_LABEL[id] ?? (id ? id[0].toUpperCase() + id.slice(1) : id);
 }
 
-function resetIn(at: number | string | null | undefined): string {
-  if (!at) return "";
-  const d = typeof at === "number" ? new Date(at * 1000) : new Date(at);
-  if (Number.isNaN(d.getTime())) return "";
-  const mins = Math.max(0, Math.round((d.getTime() - Date.now()) / 60000));
-  if (mins < 60) return t("fmt.min", { n: mins });
-  return mins < 48 * 60 ? t("fmt.hour", { n: Math.round(mins / 60) }) : t("fmt.day", { n: Math.round(mins / 1440) });
-}
-
 /** What the session's provider has left: a subscription's windows, or the day's metered spend and balance. */
 function ProviderUsageCard({ ids, provider, usage }: { ids: string; provider: string; usage: ProviderUsage | null }) {
   const sub = usage?.subscription;
   const today = usage?.today ?? {};
   return (
-    <Section ids={ids} id="provider" label={providerLabel(provider)} aside={<>
+    <Section ids={ids} id="provider" icon="bolt" label={providerLabel(provider)} aside={<>
       {sub?.plan && <span className="badge">{planName(sub.plan)}</span>}
-      {sub?.limit_reached && <span className="badge" style={{ color: "var(--bad)" }}>{t("usage.limitreached")}</span>}
+      {sub?.limit_reached && <span className="badge bad">{t("usage.limitreached")}</span>}
     </>}>
-      {!usage && <div className="sub">…</div>}
-      {sub && !sub.logged_in && <div className="sub">{t("usage.notloggedin")}</div>}
-      {sub?.error && <div className="sub" style={{ color: "var(--bad)" }}>{sub.error}</div>}
+      {!usage && <div className="dt-hint">…</div>}
+      {sub && !sub.logged_in && <div className="dt-hint">{t("usage.notloggedin")}</div>}
+      {sub?.error && <Note tone="bad">{sub.error}</Note>}
       {(sub?.windows ?? []).map((w) => (
-        <div key={w.name} className="quota">
-          <div className="sub quota-line">
-            <span className="grow">{w.name}</span>
-            <span>{Math.round(w.used_percent)}%{w.resets_at ? t("session.provider.resets", { t: resetIn(w.resets_at) }) : ""}</span>
-          </div>
-          <div className="quota-bar">
-            <i style={{ width: `${Math.min(100, Math.max(0, w.used_percent))}%`, background: w.used_percent >= 100 ? "var(--bad)" : w.used_percent >= 80 ? "var(--warn)" : "var(--ok)" }} />
-          </div>
-        </div>
+        <Meter key={w.name} label={w.name} percent={w.used_percent} tone={quotaTone(w.used_percent)} data={{ quota: w.name }}
+          detail={w.resets_at ? <>{t("details.quota.resets")} <Until at={w.resets_at} /></> : undefined} />
       ))}
       {usage && (
-        <div className="sub" style={{ marginTop: sub ? 6 : 0 }}>
+        <div className="dt-hint dt-provider-today">
           {t("session.provider.today", { calls: plural("usage.calls", today.calls ?? 0), in: fmtTok(today.input_tokens), out: fmtTok(today.output_tokens) })}
           {!sub && ` · ${fmtUsd(today.cost_usd)}`}
           {usage.balance !== undefined && usage.balance !== null && t("session.provider.balance", { sum: fmtUsd(usage.balance) })}
@@ -473,7 +473,7 @@ function ScheduleRow({ sc, sessionId, onAction }: { sc: Schedule; sessionId: str
   );
 }
 
-/** A file waiting in the composer: a thumbnail for images, a glyph and the size for the rest. */
+/** The time each tool took over the session, folded under its total. */
 function ToolTiming({ sessionId }: { sessionId: string }) {
   const [rows, setRows] = useState<{ name: string; calls: number; errors: number; total_ms: number; mean_ms: number }[]>([]);
   useEffect(() => {
@@ -519,26 +519,29 @@ function McpPanel({ sessionId, toast }: { sessionId: string; toast: (t: string) 
   if (!data) return <div className="empty">…</div>;
   if (data.servers.length === 0) return <div className="empty">{t("session.mcp.none")}</div>;
   return (
-    <div>
-      <div className="sub" style={{ marginBottom: 8 }}>{t("session.mcp.sub")}</div>
+    <div className="dt-mcp">
+      <p className="dt-hint">{t("session.mcp.sub")}</p>
       {data.servers.map((s) => {
         const on = data.enabled.includes(s.name);
         return (
-          <div key={s.name} className="card">
-            <div className="row">
-              <div className="grow">
-                <div className="title">{s.name}</div>
-                <div className="sub">{t(`session.mcp.state.${s.state}`)}{s.in_flight > 0 ? ` · ${t("session.mcp.inflight", { n: s.in_flight })}` : ""}</div>
-                <div className="sub">{s.description || t("session.mcp.nodesc")}{s.error && t("session.mcp.error", { error: s.error })}</div>
-                {s.tools.length > 0 && <div className="sub">{s.tools.join(", ")}</div>}
-              </div>
-              <button className={`btn small ${on ? "primary" : ""}`} disabled={busy === s.name} onClick={() => toggle(s.name, !on)}>
-                {t(on ? "common.on" : "common.off")}
-              </button>
+          <div key={s.name} className="dt-server" data-mcp-server={s.name}>
+            <div className="dt-server-head">
+              <span className="dt-server-name">{s.name}</span>
+              <span className="dt-state" data-tone={MCP_TONE[s.state] ?? ""}>
+                {t(`session.mcp.state.${s.state}`)}{s.in_flight > 0 ? ` · ${t("session.mcp.inflight", { n: s.in_flight })}` : ""}
+              </span>
+              <span className="grow" />
+              <Switch checked={on} disabled={busy === s.name} label={s.name} onChange={(next) => void toggle(s.name, next)} />
             </div>
+            <div className={`dt-hint${s.description ? "" : " quiet"}`}>{s.description || t("session.mcp.nodesc")}</div>
+            {s.error && <Note tone="bad">{t("session.mcp.error", { error: s.error }).replace(/^ · /, "")}</Note>}
+            {s.tools.length > 0 && <div className="dt-tags">{s.tools.map((tool) => <span key={tool} className="dt-tag mono">{tool}</span>)}</div>}
           </div>
         );
       })}
     </div>
   );
 }
+
+/** A server's state as a coloured dot: ready is good, a passing state is amber, one the operator must fix is red. */
+const MCP_TONE: Partial<Record<McpServer["state"], string>> = { ready: "ok", connecting: "attn", draining: "attn", auth_required: "bad", unavailable: "bad" };

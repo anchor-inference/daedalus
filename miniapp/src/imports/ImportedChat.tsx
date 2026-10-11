@@ -5,17 +5,18 @@
 
 import { useState } from "react";
 import { api, type SessionList } from "../api";
-import { clock, relTime } from "../format";
+import { bytes, clock, relTime } from "../format";
 import { plural, t } from "../i18n";
 import { Icon } from "../icons";
 import { useQuery } from "../store";
-import { copyText } from "../ui/components";
 import { errorText } from "../ui";
 import { ListRow, SectionHeader } from "../ui/phone";
 import { openImport } from "./ImportExplorer";
 import { HarnessMark } from "./parts";
 import { cardDismissed, cardSessions, dismissCard, harnessMeta, originMessages, shortId, shortPath, type ForeignSession, type ImportedOrigin } from "./model";
 import { useFreshSessions } from "./fresh";
+import { CopyValue, Fact, Facts, More, Note, When } from "../detailsparts";
+import { originalNote } from "../detailsmodel";
 import "./imports.css";
 
 /** Pull in what the other program wrote since the import, by the cursor the host kept. */
@@ -97,25 +98,47 @@ export function HandoffLine({ at }: { at?: number }) {
 export function OriginSection({ sessionId, origin, toast, onPulled }: { sessionId: string; origin: ImportedOrigin; toast: (text: string) => void; onPulled?: () => void }) {
   const name = harnessMeta(origin.harness, origin.harness_name).name;
   const counts = origin.counts;
-  const messages = originMessages(origin);
+  const messages = plural("imp.origin.messages", originMessages(origin));
   const brought = origin.mode === "tail" ? t("imp.origin.tail", { all: messages }) : t("imp.origin.full", { all: messages });
-  const copy = async () => toast((await copyText(origin.id)) ? t("common.copied") : origin.id);
+  const missing = origin.original && !origin.original.stored ? origin.original.reason : null;
+  const sizes = originalNote(missing);
+  // The program, its model and the branch are what tells one imported chat from another; the rest is
+  // reference, folded under "More" so the card opens on three lines instead of nine.
   return (
     <div className="imp-origin" data-origin={origin.harness}>
-      <div className="dt-row"><span className="dt-key">{t("imp.origin.program")}</span><span className="grow">{name}</span></div>
-      <div className="dt-row"><span className="dt-key">{t("imp.origin.session")}</span><span className="grow mono truncate" title={origin.id}>{origin.id}</span><button type="button" className="btn small" onClick={() => void copy()}>{t("common.copy")}</button></div>
-      {origin.source_model && <div className="dt-row"><span className="dt-key">{t("imp.origin.model")}</span><span className="grow">{origin.source_model}</span></div>}
-      {origin.branch && <div className="dt-row"><span className="dt-key">{t("imp.origin.branch")}</span><span className="grow mono">{origin.branch}</span></div>}
-      <div className="dt-row"><span className="dt-key">{t("imp.origin.brought")}</span><span className="grow">{brought}</span></div>
-      {!!counts.sidechains && <div className="dt-row"><span className="dt-key">{t("imp.origin.subagents")}</span><span className="grow">{t("imp.origin.subagents.n", { n: counts.sidechains })}</span></div>}
-      <div className="dt-row"><span className="dt-key">{t("imp.origin.masked")}</span><span className="grow">{origin.masked}</span></div>
-      <div className="dt-row sub"><span className="dt-key">{t("imp.origin.when")}</span><span className="grow">{relTime(origin.refreshed_at || origin.imported_at)}</span></div>
-      <p className="sub">{origin.live ? t("imp.origin.live", { name }) : t("imp.origin.fork", { name })}</p>
+      <div className="dt-origin-head">
+        <HarnessMark id={origin.harness} name={origin.harness_name} />
+        <span className="dt-origin-name">
+          <b>{name}</b>
+          {origin.source_model && <span className="dt-caption" title={t("imp.origin.model")}>{origin.source_model}</span>}
+        </span>
+      </div>
+      <div className="dt-tags">
+        {origin.branch && <span className="dt-tag mono" title={t("imp.origin.branch")}><Icon name="fork" size={12} />{origin.branch}</span>}
+        <span className="dt-tag" title={t("imp.origin.brought")}>{brought}</span>
+      </div>
+      {missing && (
+        <Note tone="attn" title={missing} data={{ "original-missing": "" }}>
+          {sizes ? (sizes.size !== null ? t("imp.origin.toolarge", { size: bytes(sizes.size), limit: bytes(sizes.limit) }) : t("imp.origin.overlimit", { limit: bytes(sizes.limit) })) : t("imp.origin.nooriginal", { reason: missing })}
+        </Note>
+      )}
       <div className="btnrow">
         <button type="button" className="btn small" onClick={() => void pullNew(sessionId, toast, onPulled)}><Icon name="reload" size={14} />{t("imp.pull")}</button>
         {origin.original?.stored && <button type="button" className="btn small" onClick={() => void downloadOriginal(sessionId, origin, toast)}><Icon name="download" size={14} />{t("imp.original")}</button>}
       </div>
-      {origin.original && !origin.original.stored && origin.original.reason && <p className="sub" data-original-missing>{t("imp.origin.nooriginal", { reason: origin.original.reason })}</p>}
+      <More id="origin">
+        <Facts>
+          <Fact label={t("imp.origin.program")}>{name}</Fact>
+          <Fact label={t("imp.origin.session")}><CopyValue value={origin.id} toast={toast} data={{ "origin-id": "" }} /></Fact>
+          {origin.source_model && <Fact label={t("imp.origin.model")}>{origin.source_model}</Fact>}
+          {origin.branch && <Fact label={t("imp.origin.branch")} mono>{origin.branch}</Fact>}
+          <Fact label={t("imp.origin.brought")}>{brought}</Fact>
+          {!!counts.sidechains && <Fact label={t("imp.origin.subagents")}>{t("imp.origin.subagents.n", { n: counts.sidechains })}</Fact>}
+          <Fact label={t("imp.origin.masked")}>{origin.masked}</Fact>
+          <Fact label={t("imp.origin.when")}><When at={origin.refreshed_at || origin.imported_at} /></Fact>
+        </Facts>
+        <p className="dt-hint">{origin.live ? t("imp.origin.live", { name }) : t("imp.origin.fork", { name })}</p>
+      </More>
     </div>
   );
 }
