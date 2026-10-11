@@ -4,8 +4,14 @@
 // bridge carries only what the app alone knows or does: the live theme, toasts, navigation, and the
 // events the app forwards. Every message is checked against the frame it must come from — the frame
 // is same-origin, so the origin alone would also let any other window of the site speak for it.
+//
+// The events forwarded are the page's own: what its agent pushed with PageEmit (`pages.emit` for its
+// slug), and the conversation of the session bound to it — its replies, its run state, and every event
+// of that session. The app holds one event stream for everything; each open page is handed only what
+// is about it, and only through its own frame.
 
 /// <reference types="vite/client" />
+import type { AppEvent, MessageView } from "./api";
 import tokensCss from "./ui/tokens.css?raw";
 
 export const PROTOCOL = 1;
@@ -38,6 +44,8 @@ export type BridgeDeps = {
   toast: (text: string) => void;
   navigate: (path: string) => void;
   openFile: (sessionId: string, path: string) => void;
+  /** Show the page's agent beside it (a sheet on a phone); false when the page has none. */
+  openAgent?: () => boolean;
 };
 
 export function isRequest(data: unknown): data is BridgeRequest {
@@ -74,6 +82,10 @@ export function answer(request: BridgeRequest, deps: BridgeDeps): { result?: unk
     case "openFile": {
       if (typeof p.sessionId !== "string" || !p.sessionId || typeof p.path !== "string" || !p.path) return { error: "openFile takes a session id and a path" };
       deps.openFile(p.sessionId, p.path);
+      return { result: true };
+    }
+    case "agent.open": {
+      if (!deps.openAgent?.()) return { error: "this page has no agent" };
       return { result: true };
     }
     default:
@@ -129,5 +141,92 @@ export function serveBridge(frame: HTMLIFrameElement, deps: BridgeDeps, win: Win
       dark?.removeEventListener?.("change", pushTheme);
       frame.removeEventListener("load", loaded);
     },
+  };
+}
+
+// ── what the app forwards to an open page ──────────────────────────────────────────────────
+
+/** Which page a frame shows and which session is its agent, read afresh for every event. */
+export type PageContext = { slug: string; sessionId: string | null };
+export type PageEvent = { event: string; data: unknown };
+export type AgentRun = { run_id: string | null; status: string; origin?: string; summary?: string; error?: string };
+export type AgentReply = { role: "assistant"; text: string; run_id: string | null; seq: number | null; at: string };
+
+/** A run's state as the page's `agent.on("run")` hears it, from the three events that move it. */
+export function runState(event: AppEvent): AgentRun | null {
+  const p = event.payload ?? {};
+  if (event.type === "run.started") return { run_id: p.run_id ?? null, status: "running", origin: p.origin };
+  if (event.type === "session.status") return { run_id: p.run_id ?? null, status: String(p.status ?? "") };
+  if (event.type === "run.finished") {
+    const run: AgentRun = { run_id: p.run_id ?? null, status: String(p.status ?? ""), origin: p.origin };
+    if (typeof p.summary === "string") run.summary = p.summary;
+    if (typeof p.error === "string") run.error = p.error;
+    return run;
+  }
+  return null;
+}
+
+/**
+ * What one event of the app's stream means to one open page: nothing, unless it is a PageEmit for
+ * this page's slug (handed over under the agent's own event name) or an event of this page's agent
+ * session (`agent.event` with the whole event, and `agent.run` when it moves a run). Pure, so the
+ * filtering is tested without a frame or a stream.
+ */
+export function pageEvents(event: AppEvent, page: PageContext): PageEvent[] {
+  if (event.type === "pages.emit") {
+    const p = event.payload ?? {};
+    return p.slug === page.slug && typeof p.event === "string" ? [{ event: p.event, data: p.data ?? null }] : [];
+  }
+  if (!page.sessionId || event.session_id !== page.sessionId) return [];
+  const out: PageEvent[] = [{ event: "agent.event", data: { type: event.type, payload: event.payload, at: event.at } }];
+  const run = runState(event);
+  if (run) out.push({ event: "agent.run", data: run });
+  return out;
+}
+
+/** The agent's answers of one run, after the last one already handed over: the assistant's text only,
+ *  never a step without words, a summary or a note of the host's. */
+export function runReplies(messages: MessageView[], runId: string | null, afterSeq: number): AgentReply[] {
+  return messages
+    .filter((m) => m.role === "assistant" && !m.internal && !m.summary && (m.text ?? "").trim() !== "" && (runId === null || m.run_id === runId) && (m.seq ?? Infinity) > afterSeq)
+    .map((m) => ({ role: "assistant" as const, text: m.text, run_id: m.run_id ?? null, seq: m.seq ?? null, at: m.created_at }));
+}
+
+export type ForwardDeps = {
+  /** Subscribe to the app's event stream (events.ts `onEvent`). */
+  on: (types: readonly string[], handler: (event: AppEvent) => void) => () => void;
+  /** The newest messages of a session. */
+  messages: (sessionId: string) => Promise<MessageView[]>;
+};
+
+/**
+ * Forward to one frame (`send` is that frame's) everything the app hears that is about its page,
+ * until the returned function is called. When the agent's run ends, its answers are read once and
+ * handed over as `agent.message`, each at most once.
+ */
+export function forwardToPage(send: (event: string, data: unknown) => void, page: () => PageContext, deps: ForwardDeps): () => void {
+  let lastSeq = -1;
+  let stopped = false;
+  const off = deps.on([], (event) => {
+    const now = page();
+    for (const item of pageEvents(event, now)) send(item.event, item.data);
+    if (event.type !== "run.finished" || !now.sessionId || event.session_id !== now.sessionId) return;
+    const sessionId = now.sessionId;
+    const runId = typeof event.payload?.run_id === "string" ? event.payload.run_id : null;
+    deps.messages(sessionId).then(
+      (messages) => {
+        // Rebound while the answers were being read: they belong to an agent this page no longer has.
+        if (stopped || page().sessionId !== sessionId) return;
+        for (const reply of runReplies(messages, runId, lastSeq)) {
+          if (reply.seq !== null) lastSeq = Math.max(lastSeq, reply.seq);
+          send("agent.message", reply);
+        }
+      },
+      () => undefined,
+    );
+  });
+  return () => {
+    stopped = true;
+    off();
   };
 }

@@ -1951,6 +1951,7 @@ function noteTitle(note: SystemNote): string {
     return [head, note.cadence, t("turn.note.instruction")].filter(Boolean).join(" · ");
   }
   if (note.kind === "other") return t("turn.note.other", { origin: note.origin });
+  if (note.kind === "page") return t("turn.note.page", { slug: note.origin });
   return t(`turn.note.${note.kind}`);
 }
 
@@ -2004,6 +2005,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
   const seq = turn.user?.seq ?? null;
   const settled = !!seq && !!onTurnAction && !live;
   const inbound = turn.user?.origin?.startsWith("inbound:") ? turn.user.origin.slice(8) : "";
+  const fromPage = turn.user?.origin?.startsWith("page:") ? turn.user.origin.slice(5) : "";
   const files = live ? null : turnFiles(turn.activity, workspace, folders);
   const families = open ? "" : focusChat?.orchestrator ? stepLine(turn.activity) : familyLine(turn.activity);
   const copyLink = async () => {
@@ -2025,6 +2027,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
         <div className="msg-wrap">
           <UserBubble>
             {inbound && <span className="msg-origin">{t("turn.origin.inbound", { source: inbound })}</span>}
+            {fromPage && <span className="msg-origin" data-from-page={fromPage}>{t("turn.origin.page", { slug: fromPage })}</span>}
             {turn.user.yagni && <span className="msg-origin msg-yagni" title={t("turn.yagni.title")}>{t(turn.user.yagni === "on" ? "turn.yagni.on" : "turn.yagni.off")}</span>}
             {turn.user.reply_to && <ReplyQuote reply={turn.user.reply_to} />}
             <Md className="msg-text" text={withoutAttachedList(turn.user.text)} cacheKey={live ? undefined : `u${seq ?? turn.key}`} />

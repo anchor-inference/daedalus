@@ -46,7 +46,10 @@ Tokens, usable in any style of the page:
 | `Daedalus.ui.openSession(id)`, `Daedalus.ui.openFile(sessionId, path)` | open a session, or a workspace file in its Preview |
 | `Daedalus.storage.get(key)`, `.set(key, value)`, `.delete(key)`, `.list(prefix)` | the page's durable values (any JSON, keys may hold `/`) |
 | `Daedalus.api(path, init)` | `fetch` for `/api/…` (or the part after `/api/`); a plain object body is sent as JSON; resolves with the parsed answer, rejects with an error that has `status` |
-| `Daedalus.on(event, fn)` | events the app forwards; returns the function that stops listening |
+| `Daedalus.on(event, fn)` | events the app forwards; returns the function that stops listening. Whatever you push with `PageEmit(slug, event, data)` arrives here under `event` |
+| `Daedalus.agent.ask(text, {attachments, silent, followUp})` | a message to the page's agent (you, when this session is bound to the page); resolves `{run_id, session_id}`, rejects with `status` 409 when the page has no agent. `silent`: the page reporting on its own, not the operator's request |
+| `Daedalus.agent.on("message" \| "run" \| "event", fn)` | the agent's answers (`{text, run_id, seq, at}`, once its run ends), its run state (`{run_id, status}`), every event of its session; inside the app only |
+| `Daedalus.agent.open()`, `Daedalus.agent.session()` | show the agent's conversation beside the page; the bound session `{id, title, running, gone}` or null |
 
 Opened in a tab of its own, every call still works: the theme stays as the stylesheet has it, a toast
 is logged to the console, navigation goes to the app in that tab.
@@ -89,6 +92,22 @@ Any API route, with the operator's session:
 ```js
 const page = await Daedalus.api("pages/orders");          // GET /api/pages/orders
 await Daedalus.api("sessions/" + id + "/messages", { method: "POST", body: { text: "Refresh the report", follow_up: true } });
+```
+
+A page and its agent (the `split` template is this, complete):
+
+```js
+// The page: a button asks the agent, its run and answer come back, and what it pushes is applied.
+optimise.onclick = () => Daedalus.agent.ask("Optimise this mesh", { attachments: [meshFile] });
+Daedalus.agent.on("run", (run) => (spinner.hidden = run.status !== "running"));
+Daedalus.agent.on("message", (reply) => log.append(reply.text));
+Daedalus.on("scene.updated", async () => viewer.load(await Daedalus.storage.get("scene")));
+```
+
+```
+# The agent, answering "(Sent from the page «CAD» …) Optimise this mesh":
+PageStorage("cad", "set", "scene", {"file": "model.glb", "triangles": 120000})
+PageEmit("cad", "scene.updated", {"file": "model.glb"})
 ```
 
 A React or Vue app built with Vite, imported as a page:

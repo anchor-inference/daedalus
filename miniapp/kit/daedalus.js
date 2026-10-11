@@ -12,13 +12,17 @@
  * Outside the app (the page opened in a tab of its own) every call still works: the theme stays as
  * the page's stylesheet has it, a toast is logged, and navigation goes to the app in this tab.
  *
+ * A page may have an agent of its own, the session bound to it: Daedalus.agent.ask sends it a message
+ * marked as the page's, and Daedalus.agent.on hears its replies and runs, which the app forwards
+ * while the page is open in it. What the agent pushes with PageEmit arrives as Daedalus.on(event).
+ *
  * The API is versioned by Daedalus.version (semver). A minor version adds; only a major one removes.
  */
 (function () {
   "use strict";
   if (window.Daedalus && window.Daedalus.version) return;
 
-  var VERSION = "1.0.0";
+  var VERSION = "1.1.0";
   var PROTOCOL = 1;
   var parentWindow = window.parent !== window ? window.parent : null;
   var origin = window.location.origin;
@@ -140,9 +144,13 @@
     });
   }
 
+  function pagePath(rest) {
+    if (!context.slug) throw new Error("this needs the page's address (/pages/<slug>/)");
+    return "/api/pages/" + encodeURIComponent(context.slug) + (rest ? "/" + rest : "");
+  }
+
   function storagePath(key) {
-    if (!context.slug) throw new Error("storage needs the page's address (/pages/<slug>/)");
-    var base = "/api/pages/" + encodeURIComponent(context.slug) + "/storage";
+    var base = pagePath("storage");
     return key === undefined ? base : base + "/" + String(key).split("/").map(encodeURIComponent).join("/");
   }
 
@@ -210,6 +218,41 @@
     },
   };
 
+  // The agent's conversation, as the app forwards it: its answers, its run's state, and every event
+  // of its session for a page that wants the whole of it.
+  var AGENT_EVENTS = { message: "agent.message", run: "agent.run", event: "agent.event" };
+
+  var agent = {
+    ask: function (text, options) {
+      var o = options || {};
+      var form = new FormData();
+      form.append("text", text == null ? "" : String(text));
+      if (o.silent) form.append("silent", "1");
+      if (o.followUp) form.append("follow_up", "1");
+      (o.attachments || []).forEach(function (file, i) {
+        if (file instanceof Blob) form.append("files", file, file.name || "file-" + (i + 1));
+      });
+      return apiFetch(pagePath("ask"), { method: "POST", body: form });
+    },
+    on: function (kind, fn) {
+      var name = AGENT_EVENTS[kind];
+      if (!name) throw new Error("agent.on takes message, run or event, not " + kind);
+      return on(name, fn);
+    },
+    open: function () {
+      if (!parentWindow) {
+        window.location.href = "/app/p/" + encodeURIComponent(context.slug || "");
+        return Promise.resolve(false);
+      }
+      return call("agent.open", {});
+    },
+    session: function () {
+      return apiFetch(pagePath()).then(function (page) {
+        return page.agent || null;
+      });
+    },
+  };
+
   function on(event, fn) {
     if (!listeners.has(event)) listeners.set(event, new Set());
     listeners.get(event).add(fn);
@@ -235,6 +278,7 @@
     }),
     ui: Object.freeze(ui),
     storage: Object.freeze(storage),
+    agent: Object.freeze(agent),
     api: apiFetch,
     on: on,
   });

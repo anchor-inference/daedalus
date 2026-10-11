@@ -556,6 +556,14 @@ class PagesChanged(TypedDict):
     """The live version after the change; None for a page with nothing published, or removed."""
 
 
+class PagesEmit(TypedDict):
+    slug: str
+    event: str
+    data: Any
+    """Whatever the agent (or a script) pushed to the open page: the app hands it to the page's
+    ``Daedalus.on(event)`` unchanged."""
+
+
 @dataclass(frozen=True, slots=True)
 class EventSpec:
     payload: type
@@ -627,6 +635,9 @@ REGISTRY: dict[str, EventSpec] = {
     "harness.check": EventSpec(HarnessCheck),
     "harness.models": EventSpec(HarnessModels),
     "pages.changed": EventSpec(PagesChanged),
+    # Live only: a page opened later reads lasting state from its storage, and a replay after a
+    # reconnect would hand an open page an instruction ("reload the model") that is long stale.
+    "pages.emit": EventSpec(PagesEmit, persist=False),
 }
 
 GAP = "bus.gap"

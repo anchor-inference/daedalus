@@ -674,10 +674,15 @@ export type PageDetail = Omit<PageListing, "title"> & {
   entry: string;
   target: number | string | null;
   session_id: string | null;
+  /** The bound session as the screen names it; `gone` once the session was deleted after binding. */
+  agent?: PageAgent | null;
   url: string;
   draft_url: string;
   versions: PageVersion[];
+  draft?: { kind: string; entry: string; target: number | string | null; updated_at: string };
 };
+
+export type PageAgent = { id: string; title: string; gone: boolean; running: boolean };
 
 export type ServiceView = { name: string; command: string; cwd: string; port: number | null; url: string | null; pid: number | null; status: "running" | "stopped" | "dead"; restart: boolean; note: string | null; started_at: string; stopped_at: string | null; share?: ShareView };
 
@@ -797,6 +802,8 @@ export type MessageView = {
   imported?: MessageImport | null;
   /** The operator's secrets the message carried, by name and scope; a value never comes back. */
   secrets?: { name: string; scope: "session" | "project" }[] | null;
+  /** A custom page's message (origin `page:<slug>`) that is the page's own report, not the operator's request. */
+  silent?: boolean;
   text: string;
   thinking: string;
   tool_calls: { id: string; name: string; arguments: Record<string, unknown> }[];

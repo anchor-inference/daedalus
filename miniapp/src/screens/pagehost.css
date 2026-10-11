@@ -8,3 +8,34 @@
 .page-host-loading.over { position: absolute; inset: 0; background: var(--bg); pointer-events: none; }
 .page-host-note { position: absolute; z-index: 1; top: var(--space-2); left: 50%; transform: translateX(-50%); padding: 4px 10px; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--fg-2); font-size: var(--fs-12); box-shadow: var(--shadow-pop); pointer-events: none; }
 .page-host-badge { align-self: center; padding: 2px 8px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); font-size: var(--fs-11); font-weight: 600; }
+
+/* The page and its agent: one row on a desktop, the agent's column dragged wider at its left edge
+   (--page-agent-w, kept per browser) and never leaving the page less than 360 px. */
+.page-host-body { position: relative; flex: 1; min-height: 0; display: flex; }
+.page-host-body > .page-host-stage { flex: 1; min-width: 0; }
+.page-agent { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--line); background: var(--bg); }
+.page-agent > .chat { flex: 1; min-height: 0; }
+.page-agent > .pane-handle { position: absolute; top: 0; bottom: 0; left: -4px; margin: 0; }
+.page-agent > .pane-handle:focus-visible { outline: none; }
+.page-agent > .pane-handle:focus-visible::after { background: var(--accent); width: 2px; }
+@media (min-width: 1024px) {
+  .page-agent { flex: none; width: max(320px, min(var(--page-agent-w, clamp(360px, 32%, 520px)), calc(100% - 360px))); }
+}
+/* A phone has no room beside the page: the conversation takes its place, and the page stays loaded
+   under it so switching back finds it as it was left. */
+@media (max-width: 1023px) {
+  .page-agent { position: absolute; inset: 0; z-index: 3; border-left: 0; }
+  .page-host-body.with-agent > .page-host-stage { visibility: hidden; }
+}
+
+/* A new version waits: a quiet chip over the page instead of a reload under the operator. */
+.page-host-chip { position: absolute; z-index: 2; top: var(--space-2); left: 50%; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 6px; max-width: calc(100% - 2 * var(--space-3)); min-height: 32px; padding: 4px 12px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--surface-2); color: var(--fg-2); font: inherit; font-size: var(--fs-12); box-shadow: var(--shadow-pop); cursor: pointer; white-space: nowrap; }
+.page-host-chip span { overflow: hidden; text-overflow: ellipsis; }
+.page-host-chip b { color: var(--accent); font-weight: 600; }
+.page-host-chip:hover { color: var(--fg); }
+
+.page-agent-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 260px; min-width: 0; }
+.page-agent-chip.warn { color: var(--warn); }
+/* The header's toggles keep their glyph when pressed: the header's transparent buttons would otherwise
+   take the pressed colour for the glyph and none for the ground, and the glyph disappears. */
+.page-host .pagehead .iconbtn.on { background: var(--surface-3); color: var(--fg); }
