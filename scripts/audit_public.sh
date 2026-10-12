@@ -47,12 +47,16 @@ OWN_TRAILER='Co-authored-by: daedalus'
 # Anything whose first bytes are one of these is an executable image, wherever it sits and whatever it
 # is called. `desktop/desktop` had no extension to catch it by.
 is_executable_image() {
-  local head
-  head=$(head -c 4 -- "$1" 2>/dev/null | od -An -tx1 | tr -d ' \n')
+  # Read with the shell's own `read`, in the C locale so that a byte is a character: this runs once per
+  # tracked file, and a `head | od | tr` pipeline per file was three processes times three thousand
+  # files. `read` stops at a NUL, which none of the signatures has before the bytes that tell them
+  # apart (MZ is two bytes), so the prefixes below are matched on what it returns.
+  local LC_ALL=C head=""
+  IFS= read -r -n 4 -d '' head < "$1" 2>/dev/null || true
   case "$head" in
-    7f454c46*) return 0 ;;   # ELF
-    cffaedfe*|cefaedfe*|cafebabe*) return 0 ;;   # Mach-O, and a fat binary
-    4d5a*) return 0 ;;       # PE / MZ
+    $'\x7f'ELF*) return 0 ;;   # ELF
+    $'\xcf\xfa\xed\xfe'*|$'\xce\xfa\xed\xfe'*|$'\xca\xfe\xba\xbe'*) return 0 ;;   # Mach-O, and a fat binary
+    MZ*) return 0 ;;       # PE / MZ
     *) return 1 ;;
   esac
 }
@@ -64,7 +68,7 @@ audit() {
   if git grep -InE "$PATTERNS" -- . 2>/dev/null | grep -EvI "$PATTERN_EXEMPT" | grep -vi "$OWN_TRAILER"; then failed=1; else echo "clean"; fi
 
   echo "== history (all blobs)"
-  local history_hits history_report walked unreadable commit_list enum_rc shallow duplicate_ids
+  local history_hits history_report walked unreadable commit_list enum_rc shallow duplicate_ids log_rc
   # Captured, then tested -- never tested by the pipeline's status. Under pipefail the status of
   # `cmd | while ...; done | grep ...` is the status of the loop's LAST iteration, so a pattern
   # present in an older commit and absent from the newest one printed its line here and answered
@@ -89,22 +93,58 @@ audit() {
   # rather than quietly deduplicated, because a substituted list is not a repository to be tidied.
   # `git rev-list` never repeats an id, so this cannot fire on a healthy tree.
   duplicate_ids=$(sort "$commit_list" | uniq -d)
+  # One reader for the whole history: `git log -p` over the listed commits, each diffed against its
+  # first parent (a root commit, and the boundary of a shallow clone, against nothing), and only the
+  # added lines searched. Every line of every file in every commit is either a line its first parent
+  # has at that path -- read when the parent was, since the parent is on the same list -- or an added
+  # line here, so the union of what is read is every line of every commit, as before. The walk it
+  # replaces ran `git grep` over the whole tree of each commit and so read the same unchanged files
+  # once per commit: with every branch of every worktree on this machine in `--all` that was two
+  # thousand full-tree greps, five minutes, and three of them in one round of the gates. A finding is
+  # now printed at the commit that brought it in, rather than again at every commit that still has it.
+  #
+  # The parsing is awk's, and the pattern is matched against the added text only, never against the
+  # commit id or the path in front of it. The prefixes and the diff options are spelled out so that a
+  # local `diff.noprefix`, `log.showRoot`, an external diff or a textconv filter cannot change what is
+  # read. A file git takes for binary prints no lines, as `git grep -I` skipped it. The count of
+  # commits comes from the same stream that is searched, for the reason given above.
   history_report=$(
-    walked=0
-    unreadable=0
-    while read -r c; do
-      walked=$((walked + 1))
-      out=""
-      rc=0
-      out=$(git grep -InE "$PATTERNS" "$c" -- . 2>/dev/null) || rc=$?
-      [ "$rc" -le 1 ] || unreadable=$((unreadable + 1))
-      # `git grep <commit>` already prefixes every line it prints with the commit it found it in,
-      # so the line goes out as it comes back. Prefixing it again printed the same id twice:
-      # `<sha>:<sha>:<path>:<line>:<text>`, which a reader comparing this output with plain
-      # `git grep` sees as a prefix the tool did not generate.
-      [ -z "$out" ] || printf '%s\n' "$out"
-    done < <(sort -u "$commit_list")
-    printf 'walked %d\nunreadable %d\n' "$walked" "$unreadable"
+    log_rc=0
+    # An empty list is read as nothing: `git log --stdin` given no commits would fall back to HEAD.
+    [ -s "$commit_list" ] || { printf 'walked 0\nunreadable 0\n'; exit 0; }
+    sort -u "$commit_list" |
+      git -c core.quotepath=off log --no-walk=unsorted --stdin -m --diff-merges=first-parent -p -U0 --root \
+        --no-relative --no-renames --no-ext-diff --no-textconv --no-color --src-prefix=a/ --dst-prefix=b/ \
+        --format='%x01commit %H' 2>/dev/null |
+      PATTERNS="$PATTERNS" awk '
+        BEGIN { walked = 0; pattern = ENVIRON["PATTERNS"] }
+        /^\001commit / { walked++; commit = substr($0, 9); header = 0; next }
+        /^diff --git / { header = 1; path = ""; next }
+        header && /^\+\+\+ / {
+          path = substr($0, 5)
+          if (substr(path, 1, 1) == "\"") path = substr(path, 2, length(path) - 2)
+          if (substr(path, 1, 2) == "b/") path = substr(path, 3)
+          next
+        }
+        /^@@ / {
+          header = 0
+          line = $0
+          sub(/^@@ -[0-9,]+ \+/, "", line)
+          sub(/[^0-9].*$/, "", line)
+          number = line + 0
+          next
+        }
+        header { next }
+        /^\+/ {
+          text = substr($0, 2)
+          if (text ~ pattern) print commit ":" path ":" number ":" text
+          number++
+        }
+        END { printf "walked %d\n", walked }
+      ' || log_rc=$?
+    # Under pipefail the pipeline fails if git did, which is a reader that could not answer: a missing
+    # or corrupt object ends the log part-way through, and what it printed before is not a history.
+    printf 'unreadable %d\n' "$((log_rc != 0))"
   )
   rm -f "$commit_list"
   walked=$(printf '%s\n' "$history_report" | sed -n 's/^walked \([0-9][0-9]*\)$/\1/p')
@@ -330,6 +370,48 @@ Generated with a tool: see the session log at https://example.invalid/session_01
   fi
   echo "self-check: the audit refuses a pattern that survives only in history"
 
+  # The history reader reads each commit as a diff against its first parent, so the commit that can
+  # hide from it is a merge: a file the merge itself brings in is in neither side's own history. Here
+  # the credential is added while the merge is being made and deleted by the next commit, so the merge
+  # is the only commit that has it, and the audit must name it there.
+  local merged status_merge report_merge merge_commit
+  merged=$(mktemp -d)
+  (
+    cd "$merged"
+    git init -q -b trunk .
+    git config user.email a@b.c
+    git config user.name a
+    printf 'a note\n' > note.md
+    git add -A
+    git commit -qm "a first commit"
+    git checkout -q -b side
+    printf 'a side note\n' > side.md
+    git add -A
+    git commit -qm "a side commit"
+    git checkout -q trunk
+    printf 'a trunk note\n' > trunk.md
+    git add -A
+    git commit -qm "a trunk commit"
+    git merge -q --no-ff --no-commit side > /dev/null 2>&1
+    printf 'a key %s_%s\n' ghp "$(printf 'D%.0s' $(seq 1 40))" > merged.txt
+    git add -A
+    git commit -qm "the merge"
+    git rm -q merged.txt
+    git commit -qm "and the file is gone"
+    git branch -q -D side
+  )
+  merge_commit=$(git -C "$merged" rev-parse HEAD^)
+  status_merge=0
+  bash "$SELF" "$merged" > "$merged/out.txt" 2>&1 || status_merge=$?
+  report_merge=$(cat "$merged/out.txt")
+  rm -rf "$merged"
+  if [ "$status_merge" -eq 0 ] || ! grep -q "^$merge_commit:merged.txt:" <<< "$report_merge"; then
+    echo "SELF-CHECK FAILED: a credential that only a merge commit carries was not named at that merge"
+    printf '%s\n' "$report_merge"
+    return 1
+  fi
+  echo "self-check: the audit refuses a pattern that only a merge brought in"
+
   # The same separation, asked of the other place. Every credential in the first fixture is
   # committed, so it lives in the working tree and in history at once: with the working-tree reader
   # replaced by a no-op (`git grep -InE "$PATTERNS" -- .` -> `printf ""`) the self-check still
@@ -392,16 +474,16 @@ Generated with a tool: see the session log at https://example.invalid/session_01
   fi
   echo "self-check: the audit refuses a fault that lives only in the working tree"
 
-  # A hit line is what gets quoted back at this file, so it must be the line `git grep` printed and
-  # nothing else. `git grep <commit>` already carries the commit, and prefixing it again printed
-  # `<sha>:<sha>:<path>...` -- a reader comparing this output with plain `git grep` would see a
-  # prefix the tool never generated.
+  # A hit line is what gets quoted back at this file, so it must have the shape `git grep <commit>`
+  # prints -- `<sha>:<path>:<line>:<text>` -- and nothing else. An earlier reader prefixed git grep's
+  # own output with the commit again and printed `<sha>:<sha>:<path>...`, a prefix a reader comparing
+  # it with plain `git grep` would not recognise.
   if grep -Eq '^[0-9a-f]{40}:[0-9a-f]{40}:' <<< "$report2"; then
     echo "SELF-CHECK FAILED: a history hit printed the commit id twice"
     printf '%s\n' "$report2"
     return 1
   fi
-  echo "self-check: a history hit carries the commit once, as git grep printed it"
+  echo "self-check: a history hit carries the commit once, in the form git grep prints"
 
   # A checkout git itself records as short. The walk succeeds, visits every commit the clone
   # has, and reports one -- a section that answered "clean" here would certify a history it
