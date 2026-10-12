@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import functools
 import logging
+import ssl
 import time
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -25,6 +27,18 @@ from daedalus.providers.pricing import ModelPricing, pricing_table
 logger = logging.getLogger(__name__)
 
 VENDOR_HOSTS = {"deepseek": "api.deepseek.com", "openrouter": "openrouter.ai", "opencode": "opencode.ai"}
+
+
+@functools.cache
+def _tls() -> ssl.SSLContext:
+    """One verifying TLS context for every provider client, built the way httpx builds its default.
+
+    Each client made its own, and building one reads the whole certificate bundle: about ten
+    milliseconds, times every configured endpoint, on every registry made and every reload that
+    changes an endpoint. A context is safe to share between clients; what it trusts cannot differ
+    between them, since they were all built from the same bundle and the same environment.
+    """
+    return httpx.create_ssl_context()
 
 
 def _is_vendor_host(kind: str, base_url: str) -> bool:
@@ -90,7 +104,7 @@ class ProviderRegistry:
             fresh[provider_id] = OpenAICompatibleProvider(
                 endpoint,
                 client=httpx.AsyncClient(
-                    timeout=httpx.Timeout(endpoint.timeout_seconds, connect=30.0)
+                    timeout=httpx.Timeout(endpoint.timeout_seconds, connect=30.0), verify=_tls()
                 ),
                 usage_sink=self._usage_sink,
                 image_loader=self._image_loader,
