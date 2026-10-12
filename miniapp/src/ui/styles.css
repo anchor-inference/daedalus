@@ -1099,6 +1099,13 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
   .sb-new kbd { color: inherit; border-color: currentColor; opacity: .7; }
   .sb-new:hover { background: color-mix(in srgb, var(--accent) 88%, var(--fg)); }
   .sb-new:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+  /* New chat as a split button: one accent shape, the narrow segment parted from the wide one by a
+     hairline of the ink colour, so the two read as one control with a second door. */
+  .sb-newsplit { display: flex; align-items: stretch; min-width: 0; }
+  .sb-newsplit .sb-new { flex: 1; min-width: 0; border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+  .sb-newsplit .sb-new-more { width: 30px; height: var(--ctl-h); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: var(--accent); color: var(--accent-ink); box-shadow: inset 1px 0 0 color-mix(in srgb, var(--accent-ink) 28%, transparent); }
+  .sb-newsplit .sb-new-more:hover, .sb-newsplit .sb-new-more.on { background: color-mix(in srgb, var(--accent) 88%, var(--fg)); }
+  .sb-newsplit .sb-new-more:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
   /* Two plain buttons side by side; each label is held whole at 288 px, and only a lens's project
      name (which can be anything) is cut. */
   .sb-pbtns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
@@ -1215,7 +1222,15 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
   .rail-gap { height: 6px; flex: none; }
   .rail-rule { width: 24px; height: 1px; margin: 6px 0; background: var(--line); flex: none; }
   .rail-foot { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 2px; }
-  .rail-item { position: relative; display: grid; place-items: center; width: var(--row-h); height: var(--row-h); flex: none; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg-2); cursor: pointer; text-decoration: none; }
+  /* The icons at rest are near the text colour with a heavier stroke: in the second text colour, at
+     the 1.7 stroke the rest of the app draws, they faded into the dark themes' rail on many monitors.
+     The lit item still stands apart by its tile. */
+  .rail-item { position: relative; display: grid; place-items: center; width: var(--row-h); height: var(--row-h); flex: none; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: color-mix(in srgb, var(--fg) 82%, var(--fg-2)); cursor: pointer; text-decoration: none; }
+  .rail-item .ic { stroke-width: 2; }
+  /* The menu of everything else: its tiles and a word under them, as the folded Home has, so it reads
+     as a button at rest rather than as a mark. */
+  .rail .rail-item.rail-more { height: auto; min-height: var(--row-h); padding: 6px 0 4px; gap: 2px; align-content: center; }
+  .rail-more-word { font-size: var(--fs-11); font-weight: 600; line-height: 1.1; letter-spacing: -.01em; }
   .rail-item:hover, .rail-item:focus-visible { background: var(--surface-1); color: var(--fg); outline: none; }
   .rail-item.on { background: var(--surface-2); color: var(--fg); }
   /* The mode whose column is open, marked at the rail's edge even on a screen both modes share. */
@@ -4857,3 +4872,34 @@ button.staff-row:hover { background: var(--surface-2); }
 .nav-cfg-empty { padding: var(--space-2); }
 .nav-cfg-icons { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--ctl-h), 1fr)); gap: var(--space-1); margin-bottom: var(--space-3); }
 .nav-cfg-icons .iconbtn.on { background: var(--surface-3); color: var(--accent); }
+/* "Choose a project" for a chat about to start: a search over rows of the sidebar's own shape (a square
+   tile, the name over its path), in a popover on a desktop and a sheet on a phone. */
+.project-pick { display: flex; flex-direction: column; gap: var(--space-2); width: 100%; min-width: 0; }
+.project-pick, .project-pick * { box-sizing: border-box; }
+.project-pick > * { width: 100%; }
+.menu.pop.start-where-menu { width: min(360px, calc(100vw - 16px)); max-width: min(360px, calc(100vw - 16px)); padding: var(--space-2); }
+/* On the popover's raised surface the hover and the pick take the next step up, or they vanish. */
+.start-where-menu .project-pick-row:hover:not(:disabled), .start-where-menu .project-pick-row:focus-visible, .start-where-menu .project-pick-row.on { background: var(--surface-3); }
+.project-pick-search { display: flex; align-items: center; gap: var(--space-2); height: var(--ctl-h); padding: 0 var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--fg-3); }
+.project-pick-search input { flex: 1; width: 100%; min-width: 0; border: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-13); outline: none; }
+.project-pick-search:focus-within { border-color: var(--fg-3); }
+.project-pick-list { display: flex; flex-direction: column; gap: 1px; max-height: min(360px, 50vh); overflow-y: auto; }
+.project-pick-row { overflow: hidden; display: flex; align-items: center; gap: var(--space-2); min-height: var(--row-h); width: 100%; padding: 4px var(--space-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+.project-pick-row:hover:not(:disabled), .project-pick-row:focus-visible { background: var(--surface-2); outline: none; }
+.project-pick-row.on { background: var(--surface-2); }
+.project-pick-row:disabled { opacity: .55; cursor: default; }
+.project-pick-row > .ic:last-child { flex: none; color: var(--accent); }
+.project-pick-tile { display: grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: var(--radius-xs); background: var(--surface-2); color: var(--fg-2); }
+.project-pick-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.project-pick-name { font-size: var(--fs-13); font-weight: 500; }
+.project-pick-sub { font-size: var(--fs-11); color: var(--fg-3); }
+.project-pick-note { color: var(--warn); font-weight: 500; }
+.project-pick-empty { padding: var(--space-2); }
+.start-where-n { padding: 0 5px; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--fg-3); font-size: var(--fs-11); }
+.ph-where { max-width: min(280px, 80vw); }
+.ph-where .truncate { min-width: 0; }
+@media (pointer: coarse) { .project-pick-row { min-height: var(--row-h-touch); } .project-pick-search { height: var(--row-h-touch); } }
+/* A rail icon's own tooltip stays under the pointer while its right-click menu is open, and the two
+   overlapped; the menu is the answer to that click, so the tip steps aside. */
+body:has(.context-menu) .rail-tip { visibility: hidden; }
+.start-where-menu .project-pick-tile { background: var(--surface-3); }

@@ -194,17 +194,30 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
     </button>
   );
   const moreOn = view === "loops" || view === "archive";
+  // The split New chat button's menu, and the right click anywhere on it: both ways a chat begins.
+  const newSplit = useRef<HTMLDivElement>(null);
+  const newChatItems = useMemo<MenuItem[]>(() => [
+    { label: t("ph.newchat"), icon: "compose", hint: t("side.newchat.keys"), onSelect: () => navigate(pathFor("agents")) },
+    { label: t("side.import"), icon: "import", hint: t("imp.entry.hint"), onSelect: () => openImport() },
+  ], []);
+  useContextActions(newSplit, newChatItems);
   const projectCount = sections.projects.length;
   const pinnedCount = sections.pinned.length;
 
   return (
     <>
       <div className="sb-tools" onKeyDown={onColumnKey}>
-        <button type="button" className="sb-new" onClick={() => navigate(pathFor("agents"))} title={t("side.newchat.title")}>
-          <Icon name="compose" size={16} />
-          <span>{t("ph.newchat")}</span>
-          <kbd>{t("side.newchat.keys")}</kbd>
-        </button>
+        {/* A split button: the wide part starts a chat, the narrow one beside it holds the other way a
+            chat begins, a session another program left on the machine. That used to hide in the New
+            project menu, where nobody looking to continue a chat would think to open it. */}
+        <div className="sb-newsplit" ref={newSplit}>
+          <button type="button" className="sb-new" onClick={() => navigate(pathFor("agents"))} title={t("side.newchat.title")}>
+            <Icon name="compose" size={16} />
+            <span>{t("ph.newchat")}</span>
+            <kbd>{t("side.newchat.keys")}</kbd>
+          </button>
+          <OverflowMenu className="sb-new-more" icon="chevron" label={t("side.newchat.more")} items={newChatItems} />
+        </div>
         <div className="sb-pbtns">
           {onProjects && (
             <button type="button" className="project-chip sb-pbtn" onClick={onProjects} aria-haspopup="dialog" title={lens ? projectPath(lens) : t("side.allprojects.title")}>
@@ -212,14 +225,9 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
               <span className="truncate">{lens ? lens.name : t("shell.projects.all")}</span>
             </button>
           )}
-          {/* One button, two ways a project starts: a new one, or a session another program left on
-              the machine, continued here. */}
-          <OverflowMenu className="sb-pbtn sb-newproject" label={t("ph.newproject")}
-            trigger={<><Icon name="plus" size={15} /><span className="truncate">{t("ph.newproject")}</span></>}
-            items={[
-              { label: t("np.title"), icon: "plus", onSelect: () => openNewProject() },
-              { label: t("imp.entry"), icon: "download", hint: t("imp.entry.hint"), onSelect: () => openImport() },
-            ]} />
+          <button type="button" className="sb-pbtn sb-newproject" onClick={() => openNewProject()} title={t("np.title")}>
+            <Icon name="plus" size={15} /><span className="truncate">{t("ph.newproject")}</span>
+          </button>
         </div>
         {/* The lens narrows every list in the column, and a quiet chip naming a project was all that
             said so: an operator who forgot it was on read a column of two chats as "my dialogs are
@@ -450,7 +458,7 @@ const ProjectGroup = memo(function ProjectGroup({ folder, onOpen, current, filte
         <div className={`sb-kids ${showing ? "" : "peek"}`}>
           {showing && folder.rows.length === 0 && <div className="sb-empty sub">{filtered ? t("common.nothing") : t("agents.folder.none")}</div>}
           <WindowedRows keys={keys} host={section} rowSelector=":scope > .sb-kids > .sb-row" estimate={40} render={(i) => (
-            <ChatRow row={shown[i].row} fork={shown[i].fork} nested onOpen={onOpen} current={current} projectName={folder.name} system={folder.system} onProject={editProject} onNewIn={newIn} onParent={() => head.current?.focus()} />
+            <ChatRow row={shown[i].row} fork={shown[i].fork} nested onOpen={onOpen} current={current} projectName={folder.name} system={folder.system} onNewIn={newIn} onParent={() => head.current?.focus()} />
           )} />
           {(hidden > 0 || (all && all_lines.length > KIDS_SHOWN)) && (
             <button type="button" className="sb-more" onClick={() => setAll((v) => !v)}>
@@ -486,7 +494,6 @@ type RowProps = {
   projectName: string;
   /** The chat lives in the installation's own project, whose chats carry the mic. */
   system?: boolean;
-  onProject?: () => void;
   onNewIn?: () => void;
   /** Where Left goes from a chat inside a project: to the project's row. */
   onParent?: () => void;
@@ -502,7 +509,7 @@ function sameRow(a: RowProps, b: RowProps): boolean {
   const l = a.row.s, r = b.row.s;
   if (l.id !== r.id || l.title !== r.title || l.status !== r.status || !!l.unread_result !== !!r.unread_result || l.last_message_at !== r.last_message_at || l.model !== r.model || l.env !== r.env || !!l.archived !== !!r.archived) return false;
   if ((l.terminals ?? 0) !== (r.terminals ?? 0) || l.match?.snippet !== r.match?.snippet || l.project_id !== r.project_id) return false;
-  if (a.projectName !== b.projectName || a.onProject !== b.onProject || a.onNewIn !== b.onNewIn || a.onOpen !== b.onOpen) return false;
+  if (a.projectName !== b.projectName || a.onNewIn !== b.onNewIn || a.onOpen !== b.onOpen) return false;
   if ((a.current === l.id || a.row.kids.some((k) => k.id === a.current)) !== (b.current === r.id || b.row.kids.some((k) => k.id === b.current))) return false;
   if (a.nested !== b.nested || a.system !== b.system || a.fork?.seq !== b.fork?.seq || a.fork?.of !== b.fork?.of || a.pin !== b.pin) return false;
   if (JSON.stringify(l.metadata?.loop ?? null) !== JSON.stringify(r.metadata?.loop ?? null)) return false;
@@ -523,10 +530,12 @@ function rowState(s: SessionSummary, kids: SessionSummary[]): "waiting" | "runni
  * meta line under it. Hovering or focusing it shows "Open beside" and the menu; the right click opens
  * the same menu, with the commands of the phone's sheet.
  */
-const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, projectName, system, onProject, onNewIn, onParent, pin }: RowProps) {
+const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, projectName, system, onNewIn, onParent, pin }: RowProps) {
   const s = row.s;
   const kids = row.kids;
-  const { items, layers, run } = useSessionCommands(s, { onProject, projectName });
+  // The project's own settings are the project row's to offer; in a chat's menu they were one more
+  // entry about something other than the chat clicked.
+  const { items, layers, run } = useSessionCommands(s, { projectName });
   const here = current === s.id || kids.some((k) => k.id === current);
   const unread = !!s.unread_result;
   const state = rowState(s, kids);
@@ -539,7 +548,9 @@ const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, proj
     else open();
   };
   const menu: MenuItem[] = [
+    { label: t("common.open"), hint: t("side.key.open"), onSelect: open },
     { label: t("side.beside"), icon: "columns", hint: t("side.key.beside"), onSelect: beside },
+    { label: t("rail.ctx.newtab"), icon: "external", onSelect: () => void window.open(new URL(sessionPath(s.id), location.href).href, "_blank", "noopener") },
     ...(pin ? [pinCommand(s.project_id, pin === "on", { key: true })] : []),
     ...(onNewIn ? [{ label: t("side.project.new", { name: projectName }), icon: "compose" as const, onSelect: onNewIn }] : []),
     ...kids.map((kid) => ({ label: t("agents.sub.open", { name: agentName(kid) }), icon: "bots" as const, hint: statusWord(kid.status), onSelect: () => onOpen(kid.id) })),
