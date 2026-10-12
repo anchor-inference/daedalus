@@ -382,21 +382,21 @@ async def test_report_to_leader_is_refused_without_text_leader_or_a_live_leader(
     assert submitted == []
 
 
-async def test_only_a_subagent_and_its_own_subagents_may_report_to_a_leader(app: Any) -> None:
-    """Judged per session after the chain: a block on the leader inherited down the chain would take it from every helper."""
+async def test_only_a_subagent_may_report_to_a_leader(app: Any) -> None:
+    """Judged per session: a session without a leader has nobody to report to. A subagent starts no
+    subagents of its own, so the chain is one step deep."""
     manager: SessionManager = app.manager
     subs = Subagents(app)
     leader = await manager.create_session("lead")
     _capture(manager)
     first = await subs.spawn(leader_id=leader.session.id, task="t", name="one")
-    second = await subs.spawn(leader_id=first["session_id"], task="t", name="two")
+    with pytest.raises(ValueError, match="cannot start subagents of its own"):
+        await subs.spawn(leader_id=first["session_id"], task="t", name="two")
     child = await manager.get_state(first["session_id"])
-    grandchild = await manager.get_state(second["session_id"])
-    assert child is not None and grandchild is not None
+    assert child is not None
     assert "ReportToLeader" in {t.name for t in manager.tools.list_all()}
     assert "ReportToLeader" in manager.blocked_tools_for(leader)
     assert "ReportToLeader" not in manager.blocked_tools_for(child)
-    assert "ReportToLeader" not in manager.blocked_tools_for(grandchild)
 
 
 async def test_subagent_delete_removes_a_helper_by_name_and_keeps_its_files(app: Any) -> None:

@@ -9,9 +9,8 @@ from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
-from daedalus.extensions.subagents import idle_words
 from daedalus.tools import search_hint, tool_group
-from daedalus.tools._common import clip, error, ok, services_for
+from daedalus.tools._common import clip, error, idle_words, ok, services_for
 
 
 def _hook(context: ToolContext):  # type: ignore[no-untyped-def]

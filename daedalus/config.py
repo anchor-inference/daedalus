@@ -2443,8 +2443,10 @@ def _seed_context_window_source(raw: dict[str, Any]) -> bool:
     if "context-window-source" in seeded:
         return False
     seeded.append("context-window-source")
-    # Lazy: the provider package imports this module.
-    from daedalus.providers.context_window import DEFAULT_WINDOW, table_window
+    from daedalus.providers.context_window import (  # Lazy: the provider package imports this module.
+        DEFAULT_WINDOW,
+        table_window,
+    )
 
     for preset in (raw.get("presets") or {}).values():
         if not isinstance(preset, dict) or preset.get("context_window_source"):

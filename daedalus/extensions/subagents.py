@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 from protocore.contracts.types import MessageRole, TextBlock
 
 from daedalus.host.prompts import split_headline
+from daedalus.tools._common import idle_words
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -133,17 +134,6 @@ def contract_verdict(state: Any, answer: str) -> str:
             notes.append(f"expected in the report (not machine-checked): {expects}")
     return ("[contract] " + "; ".join(notes) + "\n\n" + answer) if notes else answer
 
-
-def idle_words(seconds: float) -> str:
-    """A span as a person says it in a status line: "4 min", "3 h", "2 days"."""
-    seconds = max(0.0, seconds)
-    if seconds < 60:
-        return "under a minute"
-    if seconds < 3600:
-        return f"{int(seconds // 60)} min"
-    if seconds < 2 * 86400:
-        return f"{int(seconds // 3600)} h"
-    return f"{int(seconds // 86400)} days"
 
 
 def _timestamp(value: Any) -> float:

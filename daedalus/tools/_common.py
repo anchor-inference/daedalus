@@ -139,3 +139,14 @@ def clip(text: str, limit: int, *, note: str = "") -> str:
 
 
 __all__ = ["FRAME_CHARS", "call_id", "clip", "error", "ok", "output_limit", "refuse_protected", "services_for", "tool_config"]
+
+def idle_words(seconds: float) -> str:
+    """A span as a person says it in a status line: "4 min", "3 h", "2 days"."""
+    seconds = max(0.0, seconds)
+    if seconds < 60:
+        return "under a minute"
+    if seconds < 3600:
+        return f"{int(seconds // 60)} min"
+    if seconds < 2 * 86400:
+        return f"{int(seconds // 3600)} h"
+    return f"{int(seconds // 86400)} days"
