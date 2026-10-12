@@ -12,6 +12,22 @@ from tests.support.models import model_config
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
+def pytest_collection_finish(session: pytest.Session) -> None:
+    """Take everything that exists once the tests are collected out of the collector's sight.
+
+    By then every module of the code base and of the suite is imported, which is well over a million
+    objects that live until the process ends. The cyclic collector walks all of them on every full
+    collection, and it runs one every so often for the whole of a suite that allocates constantly:
+    measured over a third of the suite, thirty-one full collections took twenty seconds between them,
+    and each one costs more as the run goes on. ``gc.freeze`` moves what exists now into a generation
+    the collector never scans; what the tests themselves allocate is collected exactly as before.
+    """
+    import gc
+
+    gc.collect()
+    gc.freeze()
+
+
 def rebuilder_at(tmp_path: Path) -> Path:
     """A trigger directory with a fresh heartbeat in it: what a running rebuilder looks like.
 
@@ -101,6 +117,18 @@ def migrated_template(tmp_path_factory: pytest.TempPathFactory) -> object:
         yield template
     finally:
         Database.open = real_open  # type: ignore[method-assign]
+
+
+@pytest.fixture(autouse=True)
+def no_push_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The doctor's push dry run is answered in place for every test, not sent to the remote.
+
+    It runs in a git subprocess, which the socket guard below cannot see: every test that ran the
+    doctor in server mode asked GitHub twice, about a second each. See ``tests/support/doctor.py``.
+    """
+    from tests.support.doctor import answer_the_push_probe
+
+    answer_the_push_probe(monkeypatch)
 
 
 class NetworkBlocked(OSError):
