@@ -22,6 +22,7 @@ from protocore.contracts.types import MessageRole, TextBlock
 from daedalus.config import Settings
 from daedalus.extensions import jobs as job_watch
 from daedalus.extensions.jobs import KEY_PREFIX, JobWatch
+from daedalus.host.events import EventFilter
 from daedalus.host.session_runner import SessionManager
 from daedalus.stores.database import Database
 from daedalus.tools.shell import RemoteJob, exec_command, job_kill, job_list, job_output
@@ -115,6 +116,28 @@ async def test_a_job_that_ends_while_the_session_is_idle_starts_a_turn_with_how_
         for _ in range(3):
             await watch.check()
         assert submitted == []
+    finally:
+        await manager.close()
+
+
+async def test_the_jobs_list_hears_a_job_start_and_end_even_when_the_agent_read_the_end_first(settings: Settings, db: Database) -> None:
+    """The Jobs tab showed a job running until it was switched away from and back: nothing told it a
+    job had started or ended. The end is announced once, whether the watcher or the agent saw it first."""
+    manager = await _manager(settings, db, ScriptedProvider([]))
+    try:
+        watch = watch_for(manager)
+        capture(manager)
+        state = await manager.create_session("jobs")
+        sid = state.session.id
+        first = await start(sid, "sleep 0.3", call="c1")
+        second = await start(sid, "sleep 0.3", call="c2")
+        await ended(manager, sid, first)
+        await ended(manager, sid, second)
+        await job_output().invoke(context(sid, "c3"), {"job_id": second})  # the agent read this end itself
+        for _ in range(3):
+            await watch.check()
+        told = [(e.payload["job_id"], e.payload["change"]) for e in await manager.bus.replay(0, EventFilter(types=("session.jobs",), session_id=sid), limit=100)]
+        assert sorted(told) == sorted([(first, "started"), (second, "started"), (first, "ended"), (second, "ended")])
     finally:
         await manager.close()
 

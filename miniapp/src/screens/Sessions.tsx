@@ -695,6 +695,10 @@ export function NewAgentSheet({ onClose, onCreated, toast, project: initial = ""
         ? { instruction: loopText.trim(), mode: loopMode, interval_minutes: loopMode === "interval" ? Math.max(1, Number(loopMinutes) || 10) : null, max_runs: loopMax.trim() ? Math.max(1, Number(loopMax) || 1) : null }
         : undefined;
       const created = await api.post<{ id: string }>("/api/sessions", { title: title.trim(), prompt: prompt.trim() || undefined, tools_off: toolsOff, loop, project_id: project || undefined, folder_id: chosenFolder?.id, own_directory: ownDirectory, preset: preset || undefined, ...run.body });
+      // Read again now: a chat made without a first message starts no run, so no run event would
+      // bring it into the column, and it stayed missing from its project until the next poll.
+      invalidate("/api/sessions");
+      invalidate("/api/projects");
       onClose();
       onCreated(created.id);
     } catch (e) {

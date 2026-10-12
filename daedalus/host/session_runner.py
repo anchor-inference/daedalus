@@ -1375,6 +1375,10 @@ class SessionManager:
         state = SessionState(session=session, workspace=workspace, metadata=dict(meta), project=project)
         self._states[sid] = state
         self.register_services(state)
+        created: dict[str, Any] = {"title": title}
+        if meta.get("subagent_of"):
+            created["parent"] = str(meta["subagent_of"])
+        await self._publish(state, "session.created", created)
         return state
 
     async def _settle_project(self, project: Project) -> Project:
@@ -1688,7 +1692,16 @@ class SessionManager:
         if job is None:
             return False
         await stop_job(job, by="operator")
+        await self.publish_jobs(session_id, job.id, "stopped")
         return True
+
+    async def publish_jobs(self, session_id: str, job_id: str, change: str) -> None:
+        """Tell the open Jobs lists that one of the session's background jobs changed."""
+        state = self._states.get(session_id)
+        if state is None:
+            return
+        running = sum(1 for job in self.jobs.get(session_id, {}).values() if job.running)
+        await self._publish(state, "session.jobs", {"job_id": job_id, "change": change, "running": running})
 
     async def delete_session(self, session_id: str, *, delete_workspace: bool = True) -> bool:
         """Remove a session entirely: its run, records, events and (optionally) its workspace."""
@@ -1774,6 +1787,8 @@ class SessionManager:
         await self.projects.list()
         if state.project is not None and await self.projects.get(state.project.id) is None:
             await self._remove_host_chat_folder(state.project, session_id)
+        # After the rows are gone, so a list read on hearing it no longer carries the session.
+        await self._publish(state, "session.deleted", {"title": state.session.title})
         # The logs a read-only folder's session kept in the state volume are the session's alone.
         # Removed whether or not the folder is read-only today: it may have been when they were written.
         shutil.rmtree(session_scratch_dir(self.settings.state_dir, session_id), ignore_errors=True)

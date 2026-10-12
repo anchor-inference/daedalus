@@ -242,3 +242,23 @@ def test_the_refuse_route_answers_from_the_app(tmp_path: Path) -> None:
         assert client.post("/api/sessions/s1/policy/refuse", json={"key": "x"}, headers=HEAD).status_code == 400
         assert client.post("/api/sessions/missing/policy/refuse", json={"key": "0123456789ab"}, headers=HEAD).status_code == 404
     assert calls == [("s1", "0123456789ab", "app")]
+
+
+async def test_a_session_made_or_deleted_anywhere_is_told_to_the_open_lists(settings: Settings, db: Database) -> None:
+    """A chat made without a first message, by the agent, by a subagent, an import or a fork used to
+    reach the sidebar only at its next minute's poll: nothing on the bus said it existed."""
+    manager = await _manager(settings, db, ScriptedProvider([]))
+    try:
+        leader = await manager.create_session("leader")
+        child = await manager.create_session("[sub] helper", metadata={"subagent_of": leader.session.id}, project_id=leader.project.id)
+        made = await events(manager, "session.created")
+        assert [(e.session_id, e.payload) for e in made] == [
+            (leader.session.id, {"title": "leader"}),
+            (child.session.id, {"title": "[sub] helper", "parent": leader.session.id}),
+        ]
+        assert made[1].project_id == leader.project.id
+        assert await manager.delete_session(child.session.id)
+        [gone] = await events(manager, "session.deleted")
+        assert gone.session_id == child.session.id and gone.payload == {"title": "[sub] helper"}
+    finally:
+        await manager.close()

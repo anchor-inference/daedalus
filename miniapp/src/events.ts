@@ -423,6 +423,8 @@ export function wireCache(to: { on: typeof onEvent; prime: typeof prime; invalid
       to.invalidate("/api/notifications?");
     }),
     to.on(["run.", "session.", "ask.", "permission."], sessionsSoon),
+    // A session made or deleted changes the projects' own lists (their chats and counts) as well.
+    to.on(["session.created", "session.deleted"], () => to.invalidate("/api/projects")),
     // A pin made on another screen moves a row into or out of the pinned block. Only the pin: the
     // other project changes are the project screens' to read, and most of them come in bursts.
     to.on(["project.changed"], (event) => { if (event.payload.change === "pinned") sessionsSoon(); }),

@@ -79,6 +79,28 @@ class SessionUnreadResult(TypedDict):
     run_id: NotRequired[str]
 
 
+class SessionCreated(TypedDict):
+    """A session exists. Without it a chat the agent, a subagent, an import or a fork made, or one
+    made without a first message, reached the open lists only at their next minute's poll."""
+
+    title: str
+    parent: NotRequired[str]
+    """The session a subagent works for, so that session's Jobs list hears of its new child."""
+
+
+class SessionDeleted(TypedDict):
+    title: str
+
+
+class SessionJobs(TypedDict):
+    """A background job of the session started, ended, was stopped or was flagged as stuck. The job's
+    end is only seen by the watcher's round, so the Jobs list hears it from here rather than by asking."""
+
+    job_id: str
+    change: Literal["started", "ended", "stopped", "flagged"]
+    running: int
+
+
 class AskOption(TypedDict):
     label: str
     description: str
@@ -579,6 +601,9 @@ REGISTRY: dict[str, EventSpec] = {
     "run.finished": EventSpec(RunFinished),
     "session.status": EventSpec(SessionStatus),
     "session.unread_result": EventSpec(SessionUnreadResult),
+    "session.created": EventSpec(SessionCreated),
+    "session.deleted": EventSpec(SessionDeleted),
+    "session.jobs": EventSpec(SessionJobs),
     "ask.pending": EventSpec(AskPending),
     "ask.answered": EventSpec(AskAnswered),
     "ask.routed": EventSpec(AskRouted),
