@@ -827,16 +827,6 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .badge.sub { margin-left: 8px; color: var(--info); border-color: color-mix(in srgb, var(--info) 40%, transparent); vertical-align: 2px; }
 .leader-link { cursor: pointer; color: var(--info); }
 .leader-link b { font-weight: 600; }
-.subagents { display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--card); }
-.subagents::-webkit-scrollbar { display: none; }
-.chip.subchip { flex: none; max-width: 46vw; min-height: var(--ctl-h-sm); }
-.chip.subchip .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.subagents-label { color: var(--muted); font-size: var(--fs-11); text-transform: uppercase; letter-spacing: 0.06em; margin-right: 2px; }
-.chip.subchip { padding: 3px 10px; font: inherit; font-size: var(--fs-13); }
-.chip.subchip .sub { font-size: var(--fs-11); }
-.chip.subchip.running { border-color: color-mix(in srgb, var(--info) 45%, var(--line)); }
-.chip.subchip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; }
-.chip.subchip .dot.failed { background: var(--bad); }
 
 /* files */
 .files .crumbs { display:flex; align-items:center; flex-wrap:wrap; gap:2px; margin-bottom:8px; font-size:var(--fs-13); }
@@ -1208,6 +1198,29 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
   .sb-kids::before { content: ""; position: absolute; left: 4px; top: 0; bottom: 8px; width: 1px; background: var(--line); }
   .sb-kids > .sb-row { min-height: var(--row-h-kid); padding-top: 2px; padding-bottom: 2px; }
   .sb-kids .sb-plate { width: 20px; height: 20px; }
+  /* A leader's plate is the fold of its subagents: their number on its corner, a chevron under the
+     pointer and while they are unfolded. */
+  .sb-subs { padding: 0; border: 0; font: inherit; cursor: pointer; }
+  .sb-subs:hover, .sb-subs.open { background: var(--surface-3); color: var(--fg); }
+  .sb-subs:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .sb-subs-chev { display: none; transform: rotate(-90deg); transition: transform .12s ease; }
+  .sb-subs.open .sb-subs-chev { transform: none; }
+  .sb-subs:hover .sb-subs-icon, .sb-subs.open .sb-subs-icon, .sb-subs:focus-visible .sb-subs-icon { display: none; }
+  .sb-subs:hover .sb-subs-chev, .sb-subs.open .sb-subs-chev, .sb-subs:focus-visible .sb-subs-chev { display: grid; }
+  .sb-subs-n { position: absolute; left: -4px; top: -4px; display: grid; place-items: center; min-width: 14px; height: 14px; padding: 0 3px; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--fg-2); box-shadow: 0 0 0 2px var(--bg); font-size: 10px; font-weight: 600; line-height: 1; }
+  .sb-row.current .sb-subs-n { box-shadow: 0 0 0 2px var(--surface-2); }
+  .sb-kids .sb-subs-n { min-width: 12px; height: 12px; }
+  /* A subagent hangs from its leader's plate on a tree line: one short muted line, a dot for its state. */
+  .sb-sub { min-height: var(--row-h-dense); gap: 8px; padding: 0 var(--space-2) 0 calc(var(--space-2) + var(--plate) / 2 + 14px); color: var(--fg-2); }
+  .sb-kids > .sb-row.sb-sub { min-height: var(--row-h-dense); padding-left: calc(var(--space-2) + 24px); }
+  .sb-sub .sb-t { flex: 1; font-size: var(--fs-12); color: var(--fg-2); }
+  .sb-sub:hover .sb-t, .sb-sub.current .sb-t { color: var(--fg); }
+  .sb-sub .sb-word { flex: none; font-size: var(--fs-11); }
+  .sb-tree { position: absolute; left: calc(var(--space-2) + var(--plate) / 2); top: -4px; bottom: 0; width: 1px; background: var(--line-strong); }
+  .sb-sub.nested .sb-tree { left: calc(var(--space-2) + 10px); }
+  .sb-sub.last .sb-tree { bottom: 50%; }
+  .sb-tree::after { content: ""; position: absolute; left: 0; bottom: 0; width: 9px; height: 1px; background: var(--line-strong); }
+  .sb-sub:not(.last) .sb-tree::after { bottom: auto; top: calc(50% + 4px); }
   .sb-empty { padding: 6px var(--space-2); font-size: var(--fs-12); }
   .sb-more { display: flex; align-items: center; gap: 6px; height: var(--ctl-h-sm); width: 100%; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg-3); font: inherit; font-size: var(--fs-12); text-align: left; cursor: pointer; }
   .sb-more:hover { background: color-mix(in srgb, var(--surface-2) 60%, transparent); color: var(--fg); }
@@ -3126,16 +3139,32 @@ input.field[type="range"] {
 .subagents-trigger { position:relative; }
 .subagents-count { position:absolute; right:2px; bottom:2px; display:grid; place-items:center; min-width:15px; height:15px; padding:0 3px; border:1px solid var(--bg); border-radius:var(--radius-pill); background:var(--surface-3); color:var(--fg); font-size:var(--fs-11); font-weight:700; line-height:1; scale:.82; transform-origin:right bottom; }
 .subagents-live { position:absolute; top:3px; right:3px; width:7px; height:7px; border:1px solid var(--bg); border-radius:50%; background:var(--accent); }
-.menu.pop.subagents-popover { width:min(340px,calc(100vw - 16px)); padding:6px; gap:2px; }
-.subagents-popover-head { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:36px; padding:0 8px 4px; border-bottom:1px solid var(--line); }
-.subagents-popover-head b { font-size:var(--fs-14); }
-.subagents-popover-head span { color:var(--fg-3); font-size:var(--fs-11); }
-.menu.pop .subagent-option { display:grid; grid-template-columns:16px minmax(0,1fr) 16px; align-items:center; gap:10px; width:100%; min-height:var(--row-h-touch); padding:6px 8px; }
-.subagent-option > .ic:last-child { color:var(--fg-3); }
-.subagent-option-copy { display:flex; flex-direction:column; min-width:0; gap:2px; }
-.subagent-option-copy b, .subagent-option-copy small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.subagent-option-copy b { font-size:var(--fs-13); font-weight:600; }
-.subagent-option-copy small { color:var(--fg-3); font-size:var(--fs-11); }
+/* A subagent's state, the same dot in the left column and the Subagents tab: hollow at rest. */
+.sub-dot { flex:none; width:7px; height:7px; border-radius:50%; box-shadow:inset 0 0 0 1.5px var(--fg-3); }
+.sub-dot.running { background:var(--info); box-shadow:none; animation:pulse 1.2s ease-in-out infinite; }
+.sub-dot.waiting { background:var(--warn); box-shadow:none; }
+.sub-dot.failed { background:var(--bad); box-shadow:none; }
+/* The Subagents tab: the list, then one helper's conversation under a head that stays in place. */
+.panel-body.tab-subagents { padding-top:0; }
+.subagents { font-size:var(--fs-13); }
+.subagents .dt-section { padding-top:8px; }
+.subagent-row { align-items:flex-start; padding:6px 0; border-radius:var(--radius-xs); cursor:pointer; }
+.subagent-row > .sub-dot { margin-top:6px; }
+.subagent-row > .ic { align-self:center; color:var(--fg-3); }
+.subagent-row:hover .name { text-decoration:underline; }
+.subagent-copy { display:flex; flex-direction:column; gap:1px; min-width:0; }
+.subagent-copy .name { font-weight:600; }
+.subagent-title { color:var(--fg-2); font-size:var(--fs-12); }
+.subagent-copy .sub { font-size:var(--fs-12); }
+.subagents-loading { padding:12px 0; }
+.subagent-head { position:sticky; top:0; z-index:2; display:flex; align-items:center; gap:8px; margin:0 -12px; padding:6px 8px 6px 6px; border-bottom:1px solid var(--line); background:var(--bg); }
+.subagent-head-copy { display:flex; flex-direction:column; flex:1; min-width:0; }
+.subagent-head-copy b { font-size:var(--fs-13); }
+.subagent-head-copy small { color:var(--fg-3); font-size:var(--fs-11); }
+.subagent-chat { padding-top:12px; }
+.subagent-chat .msg-wrap, .subagent-chat .answer { max-width:none; }
+.sysnote-open { flex:none; padding:0; border:0; background:none; color:var(--info); font:inherit; font-size:var(--fs-12); cursor:pointer; }
+.sysnote-open:hover { text-decoration:underline; }
 
 /* The agents screen is a canvas: type the first message and the chat exists. The list of chats
    lives in the sidebar. A phone has no sidebar, so the same list follows the canvas, and the

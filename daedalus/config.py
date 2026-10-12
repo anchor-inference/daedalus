@@ -1279,6 +1279,10 @@ asked a session of an unrelated project to forward a client's deployment details
 that project's transcript. It starts no agents of its own, as its brief says. Enforced by the host
 beside the staff rule, so no mode or leader can hand it back."""
 
+SUBAGENT_ONLY_TOOLS = ["ReportToLeader"]
+"""What only a subagent may call: a message to the session that started it. A session without a
+leader has nobody to report to, and the tool on its surface would be a distraction it can only fail."""
+
 ORCHESTRATOR_ONLY_TOOLS = [
     "Brief",
     "Folders",
@@ -1361,6 +1365,10 @@ class SubagentsConfig(BaseModel):
     max_active: int = Field(default=4, ge=1)
     """Running subagents one leader may have at a time."""
     wait_timeout_minutes: int = Field(default=30, ge=1)
+    linger_remind_minutes: int = Field(default=30, ge=0)
+    """How long a finished subagent sits idle before its leader is asked, once, whether it still needs
+    it. A helper used a minute ago is between jobs, not forgotten; one left for half an hour usually is,
+    and kept helpers otherwise pile up in a session for weeks."""
 
 
 class StaffConfig(BaseModel):
@@ -2614,6 +2622,7 @@ __all__ = [
     "STAFF_BLOCKED_TOOLS",
     "STAFF_ONLY_TOOLS",
     "SUBAGENT_BLOCKED_TOOLS",
+    "SUBAGENT_ONLY_TOOLS",
     "compaction_ratio",
     "core_compaction_trigger",
     "ORCHESTRATOR_TOOLS",

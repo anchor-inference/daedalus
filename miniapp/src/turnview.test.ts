@@ -143,3 +143,23 @@ describe("the files a turn produced", () => {
     expect(producedFiles(turns[0].activity)).toEqual([]);
   });
 });
+
+describe("what subagents write into a conversation", () => {
+  it("names the helper on its message to the leader, and the host's note about idle helpers", () => {
+    expect(systemNote({ role: "user", text: "[message from subagent 'triage' via ReportToLeader]\n\nblocked on the key", origin: "subagent:triage" })).toMatchObject({ kind: "subagent", origin: "triage" });
+    expect(systemNote({ role: "user", text: "[subagents] two are idle", origin: "subagents" })).toMatchObject({ kind: "subagents" });
+  });
+  it("shows the task a helper was handed without the host's framing line", () => {
+    const text = "[task from your leader session abc via SubAgent — you work in the leader's workspace; do the task]\n\nCount the open issues.";
+    expect(systemNote({ role: "user", text, origin: "subagent-task:abc" })).toEqual({ kind: "task", origin: "abc", body: "Count the open issues." });
+    const follow = "[message from your leader session abc via SubAgentSend — act on it]\n\nNow close the stale ones.";
+    expect(systemNote({ role: "user", text: follow, origin: "subagent-task:abc" })?.body).toBe("Now close the stale ones.");
+  });
+  it("has a title for each in both languages", () => {
+    for (const lang of LANGS) {
+      setLang(lang);
+      for (const key of ["turn.note.subagent", "turn.note.subagents", "turn.note.task"]) expect(t(key, { name: "x" })).not.toBe(key);
+    }
+    setLang("en");
+  });
+});

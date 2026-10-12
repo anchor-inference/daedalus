@@ -727,7 +727,24 @@ export type SessionToolGroup = {
   loaded?: number;
 };
 
-export type SubagentView = { session_id: string; name: string | null; running: boolean; status: string; model: string; kept?: boolean };
+/** One helper of a session, as the host lists it for the Subagents tab and the session's detail. */
+export type SubagentView = {
+  session_id: string;
+  name: string | null;
+  running: boolean;
+  /** running, waiting, compacting, failed or idle. */
+  status: string;
+  model: string;
+  kept?: boolean;
+  /** The first line of the task it was handed; empty for a standing helper or an old one. */
+  title?: string;
+  /** Started without a task, to wait for the leader's messages. */
+  idle_start?: boolean;
+  created_at?: string;
+  last_activity_at?: string | null;
+  /** When the run it is on began; null while it does nothing. */
+  run_started_at?: string | null;
+};
 
 /** A model answering in place of the configured one: what it replaced, what took over, and why. */
 export type ModelFallback = { from: string; to: string; reason: string };

@@ -2329,10 +2329,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         )
         context = await manager.context_status(state)
         leader = await manager.get_state(str(state.metadata["subagent_of"])) if state.metadata.get("subagent_of") else None
-        subagents = []
-        for child in await app.extensions["subagents"].children(session_id) if "subagents" in app.extensions else []:
-            child_state = await manager.get_state(child["session_id"])
-            subagents.append({**child, "model": await session_model_label(child_state) if child_state else ""})
+        subagents = await app.extensions["subagents"].views(session_id, model_label=session_model_label) if "subagents" in app.extensions else []
         return {
             "context": context,
             "id": session_id,
@@ -2396,6 +2393,15 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             "has_older": bool(first_seq and oldest and first_seq > oldest),
             "usage": dict(usage) if usage else {},
         }
+
+    @api.get("/api/sessions/{session_id}/subagents")
+    async def session_subagents(session_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The session's subagents for the Subagents panel: the same rows the session detail carries."""
+        if await manager.get_state(session_id) is None:
+            raise HTTPException(404, "no such session")
+        if "subagents" not in app.extensions:
+            return {"subagents": []}
+        return {"subagents": await app.extensions["subagents"].views(session_id, model_label=session_model_label)}
 
     @api.get("/api/sessions/{session_id}/tasks")
     async def session_tasks(session_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

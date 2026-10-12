@@ -3,7 +3,7 @@
 // should reproduce (`?panel=preview&path=reports/menu.md`), the browser remembers the width and the
 // last open tab, and the component in panel.tsx is the only thing that turns either into pixels.
 
-export type PanelTab = "details" | "files" | "preview" | "jobs" | "board" | "brief" | "wakeups" | "folders" | "questions" | "browser";
+export type PanelTab = "details" | "files" | "preview" | "jobs" | "subagents" | "board" | "brief" | "wakeups" | "folders" | "questions" | "browser";
 
 /** A session's own tabs: what the agent is, the files it works on, one of them open, its jobs. */
 export const PANEL_TABS: PanelTab[] = ["details", "files", "preview", "jobs"];
@@ -25,17 +25,21 @@ export type PanelContext = "session" | "orchestrator" | "member" | "main";
  *
  * The Browser tab is there only for a session that has had a browser (`browser`): most never do,
  * and the member panel already has eight tabs. It follows the agent's own tabs, before the project's.
+ * The Subagents tab is there only for a session that has helpers (`subagents`), right after Jobs:
+ * subagents used to be rows among the jobs, where a helper's conversation was one more click and a
+ * whole screen away, and a session that never started one does not need a tab that is always empty.
  *
  * The orchestrator has no Preview tab of its own, yet its chat carries file cards — a member's
  * patch, the operator's attachment — that open in Preview. With `preview` (a file has been opened)
  * the tab joins its strip after Details, so the file on screen has a tab to be on.
  */
-export function tabsFor(context: PanelContext, opts: { browser?: boolean; preview?: boolean } = {}): PanelTab[] {
+export function tabsFor(context: PanelContext, opts: { browser?: boolean; preview?: boolean; subagents?: boolean } = {}): PanelTab[] {
   const browser: PanelTab[] = opts.browser ? ["browser"] : [];
+  const own: PanelTab[] = [...PANEL_TABS, ...(opts.subagents ? (["subagents"] as PanelTab[]) : [])];
   if (context === "orchestrator") return ["questions", "details", ...(opts.preview ? (["preview"] as PanelTab[]) : []), ...browser, ...PROJECT_TABS];
-  if (context === "member") return [...PANEL_TABS, ...browser, ...PROJECT_TABS];
-  if (context === "main") return ["questions", ...PANEL_TABS, ...browser];
-  return [...PANEL_TABS, ...browser];
+  if (context === "member") return [...own, ...browser, ...PROJECT_TABS];
+  if (context === "main") return ["questions", ...own, ...browser];
+  return [...own, ...browser];
 }
 
 /** Every tab a route may name in this context. A link to `?panel=browser` must open the tab even
@@ -45,7 +49,7 @@ export function tabsFor(context: PanelContext, opts: { browser?: boolean; previe
  *  moment — the first click fetched the file and showed nothing, and only a second click, landing
  *  on an address that no longer changed, kept it open. */
 export function routeTabsFor(context: PanelContext): PanelTab[] {
-  return tabsFor(context, { browser: true, preview: true });
+  return tabsFor(context, { browser: true, preview: true, subagents: true });
 }
 
 /** One file the Preview tab showed: where the bytes come from, and the lines an answer cited, if any. */
@@ -59,11 +63,13 @@ export type PanelState = {
   at: number;
   /** Whether the panel covers the chat column. Closing the panel drops it. */
   expanded: boolean;
+  /** The subagent whose conversation the Subagents tab shows, or null for the list of them. */
+  sub: string | null;
 };
 
-export const PANEL_CLOSED: PanelState = { tab: null, stack: [], at: -1, expanded: false };
+export const PANEL_CLOSED: PanelState = { tab: null, stack: [], at: -1, expanded: false, sub: null };
 
-export function isPanelTab(v: string | null | undefined, tabs: readonly PanelTab[] = [...PANEL_TABS, ...PROJECT_TABS, "questions", "browser"]): v is PanelTab {
+export function isPanelTab(v: string | null | undefined, tabs: readonly PanelTab[] = [...PANEL_TABS, "subagents", ...PROJECT_TABS, "questions", "browser"]): v is PanelTab {
   return !!v && (tabs as readonly string[]).includes(v);
 }
 
@@ -78,6 +84,11 @@ export function closePanel(s: PanelState): PanelState {
 /** The toggle the shortcut and the header button share: closed → the last tab (Details by default), open → closed. */
 export function togglePanel(s: PanelState, last: PanelTab | null = null, first: PanelTab = "details"): PanelState {
   return s.tab === null ? openTab(s, last ?? first) : closePanel(s);
+}
+
+/** A subagent opened beside its leader: the Subagents tab on its conversation; null goes back to the list. */
+export function openSubagent(s: PanelState, sub: string | null): PanelState {
+  return s.tab === "subagents" && s.sub === sub ? s : { ...s, tab: "subagents", sub };
 }
 
 export function toggleExpanded(s: PanelState): PanelState {
@@ -118,29 +129,33 @@ function sameEntry(a: PanelEntry, b: PanelEntry): boolean {
 
 // ── the route ────────────────────────────────────────────────────────────────────────────────
 
-/** What a link carries: the open tab and the previewed file. `tab=` is read as the tab too, so a
- *  link written as `?panel=files&tab=preview&path=…` opens Preview on that path. */
-export function readPanelQuery(query: URLSearchParams, tabs: readonly PanelTab[] = PANEL_TABS): { tab: PanelTab; path: string | null; lines?: string } | null {
+export type PanelQuery = { tab: PanelTab; path: string | null; lines?: string; sub?: string | null };
+
+/** What a link carries: the open tab, the previewed file, the subagent the Subagents tab shows.
+ *  `tab=` is read as the tab too, so a link written as `?panel=files&tab=preview&path=…` opens
+ *  Preview on that path. */
+export function readPanelQuery(query: URLSearchParams, tabs: readonly PanelTab[] = PANEL_TABS): PanelQuery | null {
   const tab = query.get("tab");
   const panel = query.get("panel");
   const which = isPanelTab(tab, tabs) ? tab : isPanelTab(panel, tabs) ? panel : null;
   if (!which) return null;
   const path = query.get("path");
   const lines = query.get("lines") ?? "";
-  return { tab: which, path: path || null, ...(/^\d+(?:-\d+)?$/.test(lines) ? { lines } : {}) };
+  const sub = which === "subagents" ? query.get("sub") || null : null;
+  return { tab: which, path: path || null, ...(/^\d+(?:-\d+)?$/.test(lines) ? { lines } : {}), ...(which === "subagents" ? { sub } : {}) };
 }
 
 /** The query parameters the state writes; null for the ones to drop. */
 export function panelQuery(s: PanelState): Record<string, string | null> {
   const current = currentEntry(s);
-  return { panel: s.tab, path: s.tab === "preview" && current ? current.path : null, lines: s.tab === "preview" ? current?.lines ?? null : null, tab: null };
+  return { panel: s.tab, path: s.tab === "preview" && current ? current.path : null, lines: s.tab === "preview" ? current?.lines ?? null : null, sub: s.tab === "subagents" ? s.sub : null, tab: null };
 }
 
 /** The state a route describes, over what the pane already holds: the tab from the link, the file
  *  on top of the history when the link names one the pane is not already showing. */
-export function applyPanelQuery(s: PanelState, q: { tab: PanelTab; path: string | null; lines?: string } | null, base: string): PanelState {
+export function applyPanelQuery(s: PanelState, q: PanelQuery | null, base: string): PanelState {
   if (!q) return closePanel(s);
-  let next = openTab(s, q.tab);
+  let next = q.tab === "subagents" ? openSubagent(s, q.sub ?? null) : openTab(s, q.tab);
   if (q.path && (q.tab === "preview" || !currentEntry(next))) {
     const current = currentEntry(next);
     if (!current || current.path !== q.path || current.lines !== q.lines) next = openFile(next, { base, path: q.path, ...(q.lines ? { lines: q.lines } : {}) });

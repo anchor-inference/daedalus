@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import time
+from datetime import datetime
+
 from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
+from daedalus.extensions.subagents import idle_words
 from daedalus.tools import search_hint, tool_group
 from daedalus.tools._common import clip, error, ok, services_for
 
@@ -111,17 +115,92 @@ async def sub_agent_send(context: ToolContext, name: str, text: str, wait: bool 
     "subagents list running helpers presets models "
     "сабагенты субагенты список помощники пресеты моделей какие помощники работают"
 )
-@tool(name="SubAgentList", description="List this session's subagents and whether they are still running, plus the model presets SubAgent accepts.")
+@tool(
+    name="SubAgentList",
+    description=(
+        "List this session's subagents: whether each is running, waiting, idle or failed, whether it is kept, "
+        "and how long ago it was last active — plus the model presets SubAgent accepts."
+    ),
+)
 async def sub_agent_list(context: ToolContext) -> ToolResult:
     hook = _hook(context)
     if hook is None:
         return error(context, "subagents are not available")
-    children = await hook("children", leader_id=context.session_id)
+    views = await hook("views", leader_id=context.session_id)
     models = await hook("models")
-    lines = [f"- {c['name']} → session {c['session_id']} ({'running' if c['running'] else 'finished'}{', kept' if c.get('kept') else ''})" for c in children] or ["(no subagents yet)"]
+    lines = [_list_line(v) for v in views] or ["(no subagents yet)"]
     return ok(context, "\n".join(lines) + "\n\nmodels: " + ", ".join(models))
 
 
-TOOLS = [sub_agent, sub_agent_list, sub_agent_send]
+def _list_line(view: dict) -> str:  # type: ignore[type-arg]
+    status = str(view["status"])
+    if status == "idle":
+        # A helper that never had a task is idle, not finished: it has nothing to have finished.
+        status = "idle, never given work" if view.get("idle_start") and view["last_activity_at"] == view["created_at"] else "idle (finished)"
+    try:
+        ago = idle_words(time.time() - datetime.fromisoformat(str(view["last_activity_at"])).timestamp()) + " ago"
+    except (TypeError, ValueError):
+        ago = "unknown"
+    kept = ", kept" if view.get("kept") else ""
+    title = f" — {view['title']}" if view.get("title") else ""
+    return f"- {view['name']} → session {view['session_id']} ({status}{kept}, last active {ago}){title}"
+
+
+@tool_group("agents")
+@search_hint(
+    "delete remove subagent helper no longer needed clean up kept idle "
+    "удалить удали сабагента субагента помощника убрать убери ненужного"
+)
+@tool(
+    name="SubAgentDelete",
+    description=(
+        "Delete one of your subagents by name (or session id) when you no longer need it — typically a kept or "
+        "idle helper whose work is done. Its session and context go; the files it wrote stay in your workspace. "
+        "A subagent still running is stopped first."
+    ),
+)
+async def sub_agent_delete(context: ToolContext, name: str) -> ToolResult:
+    hook = _hook(context)
+    if hook is None:
+        return error(context, "subagents are not available")
+    try:
+        result = await hook("delete", leader_id=context.session_id, name=name)
+    except (ValueError, RuntimeError) as exc:
+        return error(context, str(exc))
+    stopped = " (it was stopped mid-run)" if result.get("was_running") else ""
+    return ok(context, f"subagent {result['name']!r} deleted{stopped}; its files stay in the workspace", session_id=result["session_id"])
+
+
+# In no tool group, so it is never deferred behind ToolSearch: a helper must not have to search for the
+# one way to reach its leader, and a group would put it on the catalogue of every session that has the
+# group. Every session without a leader has it blocked (SUBAGENT_ONLY_TOOLS), which keeps it off their
+# surface entirely, so its definition costs only the subagents that can use it.
+@search_hint(
+    "report to leader message leader progress blocked finding tell the session that started me "
+    "сообщить лидеру доложить отчитаться написать лидеру ведущему сессии заблокирован находка"
+)
+@tool(
+    name="ReportToLeader",
+    description=(
+        "Send a message to your leader — the session that started you as a subagent — while you are still "
+        "working. Use it when you are blocked, or have a finding the leader should act on before you finish, "
+        "or are done with a part it is waiting for. It reaches the leader at once (a running leader sees it "
+        "before its next step; an idle one is woken). It is not your report: your final reply still carries "
+        "the complete result and is delivered when your run ends. Keep it short and self-contained."
+    ),
+)
+async def report_to_leader(context: ToolContext, text: str) -> ToolResult:
+    hook = _hook(context)
+    if hook is None:
+        return error(context, "subagents are not available")
+    try:
+        result = await hook("report", session_id=context.session_id, text=text)
+    except (ValueError, RuntimeError) as exc:
+        return error(context, str(exc))
+    how = "it sees it before its next step" if result.get("delivered") == "steer" else "it was idle and now starts a turn on it"
+    return ok(context, f"delivered to your leader ({how}); carry on with the task — your final reply is still the report")
+
+
+TOOLS = [sub_agent, sub_agent_list, sub_agent_send, sub_agent_delete, report_to_leader]
 
 __all__ = ["TOOLS"]

@@ -159,7 +159,9 @@ tools_off=["Exec", "ServiceStart"] takes those tools away from that subagent's s
 subagent it starts in turn, so it cannot hand on what you withheld — and its refusal \
 then names the tool and says you withheld it. SubAgent without a task (just \
 a name) raises an idle helper that runs nothing until you send it work — for a standing assistant you want \
-in place before you know the job. SubAgentList shows them.
+in place before you know the job. SubAgentList shows them and how long each has sat idle; \
+SubAgentDelete(name) removes a kept or idle helper you no longer need (its files stay). A subagent may \
+message you before it finishes (ReportToLeader): such a message says the helper is still working.
 """
 
 BOARD_SERVICES = """- A demo, a server or any process that must keep running after your turn ends is a service: \

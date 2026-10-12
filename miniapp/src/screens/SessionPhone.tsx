@@ -1,14 +1,13 @@
 // The session's phone dress: the top bar, the ⋮ sheet that holds every action the desktop header
-// shows as buttons, and the small sheets those actions open (search, rename, sub-agents). The
+// shows as buttons, and the small sheets those actions open (search, rename). The
 // screen keeps the state and the commands; this file only lays them out the way the phone design
 // does, so a desktop never renders any of it and the two cannot drift apart in what they can do —
 // every desktop header action has its row or tile here.
 
 import { useEffect, useState, type ReactNode } from "react";
-import type { SessionDetail } from "../api";
-import { Dot, statusWord } from "../ui/components";
+import { Dot } from "../ui/components";
 import { Icon, type IconName } from "../icons";
-import { plural, t } from "../i18n";
+import { t } from "../i18n";
 import { BottomSheet, IconButton, SheetRow, TopBar } from "../ui/phone";
 import { ChatSearchBody } from "../chatsearch";
 
@@ -97,30 +96,6 @@ export function RenameSheet({ title, onSave, onClose }: { title: string; onSave:
     >
       <div className="ph-sheet-pad">
         <input className="ph-field" autoFocus value={value} onChange={(e) => setValue(e.target.value)} aria-label={t("session.rename")} onKeyDown={(e) => { if (e.key === "Enter") onSave(value); }} />
-      </div>
-    </BottomSheet>
-  );
-}
-
-/** The sub-agents and the leader, as rows: the desktop's popover beside its header button. */
-export function SubagentsSheet({ detail, onOpen, onClose }: { detail: SessionDetail; onOpen?: (id: string) => void; onClose: () => void }) {
-  const children = detail.subagents ?? [];
-  const open = (id: string) => { onClose(); onOpen?.(id); };
-  return (
-    <BottomSheet title={t("session.subagents.title")} onClose={onClose} className="ph-actions">
-      {children.length > 0 && <div className="ph-sheet-pad sub">{plural("session.subagents", children.length)}</div>}
-      <div role="menu">
-        {detail.subagent_of && <SheetRow icon="back" label={detail.leader_title ?? t("session.leader.word")} hint={t("session.leader.word")} onClick={() => open(detail.subagent_of!)} />}
-        {children.map((child) => (
-          <SheetRow
-            key={child.session_id}
-            icon="spawn"
-            label={child.name || child.session_id}
-            hint={`${child.running ? statusWord("running") : child.status === "failed" ? statusWord("failed") : child.kept ? t("session.sub.kept") : statusWord("done")}${child.model ? ` · ${child.model}` : ""}`}
-            chevron
-            onClick={() => open(child.session_id)}
-          />
-        ))}
       </div>
     </BottomSheet>
   );

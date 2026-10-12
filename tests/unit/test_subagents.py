@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import time
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -224,3 +226,271 @@ async def test_a_failed_subagent_reports_even_with_a_job_running(app: Any) -> No
     manager.jobs[result["session_id"]] = {"job-1": SimpleNamespace(kind="job", running=True, reported=False)}
     await subs.on_run_finished(result["session_id"], "run-x", "failed")
     assert submitted[-1][0] == leader.session.id and "failed" in submitted[-1][1]
+
+
+def _capture_all(manager: SessionManager) -> list[dict[str, Any]]:
+    """Every submit with its keyword arguments: the steer flag is the point of these tests."""
+    submitted: list[dict[str, Any]] = []
+
+    async def fake_submit(session_id: str, text: str, attachments: Any = (), **kwargs: Any) -> str:
+        submitted.append({"session_id": session_id, "text": text, **kwargs})
+        return "run-x"
+
+    manager.submit = fake_submit  # type: ignore[method-assign]
+    return submitted
+
+
+async def _idle_since(db: Database, session_id: str, minutes: float) -> None:
+    """Make the session's last activity lie this far in the past, as the list reads it."""
+    at = (datetime.now(UTC) - timedelta(minutes=minutes)).isoformat()
+    await db.execute("UPDATE sessions SET last_message_at = ? WHERE id = ?", (at, session_id))
+
+
+def _running(state: Any) -> None:
+    state.task = asyncio.get_running_loop().create_future()
+
+
+def _stopped(state: Any) -> None:
+    state.task.cancel()
+    state.task = None
+
+
+async def test_subagents_are_not_listed_among_the_jobs(app: Any) -> None:
+    """They have a panel of their own; listed as jobs too, a standing helper looked like a job that never ends."""
+    manager: SessionManager = app.manager
+    subs = Subagents(app)
+    leader = await manager.create_session("lead")
+    _capture(manager)
+    await subs.spawn(leader_id=leader.session.id, task="count the files")
+    assert await manager.task_views(leader.session.id) == []
+    assert not await manager.stop_task(leader.session.id, "agent:anything")
+
+
+async def test_the_views_carry_what_the_panel_draws_and_put_the_active_ones_first(app: Any, db: Database) -> None:
+    manager: SessionManager = app.manager
+    subs = Subagents(app)
+    leader = await manager.create_session("lead")
+    _capture(manager)
+    long_task = "audit the logs for errors\n" + "x" * 1000
+    worker = await subs.spawn(leader_id=leader.session.id, task=long_task, name="auditor")
+    standby = await subs.spawn(leader_id=leader.session.id, name="analyst")
+    await _idle_since(db, worker["session_id"], 120)
+    await _idle_since(db, standby["session_id"], 5)
+    state = await manager.get_state(worker["session_id"])
+    assert state is not None
+    assert state.metadata["subagent_task"] == long_task[:400]
+
+    async def label(s: Any) -> str:
+        return f"model-of-{s.session.metadata['subagent_name']}"
+
+    views = await subs.views(leader.session.id, model_label=label)
+    assert [v["name"] for v in views] == ["analyst", "auditor"]  # newest activity first while none runs
+    analyst = views[0]
+    assert set(analyst) >= {"session_id", "name", "title", "status", "running", "model", "kept", "idle_start", "created_at", "last_activity_at", "run_started_at"}
+    assert analyst["title"] == "" and analyst["idle_start"] is True and analyst["kept"] is True and analyst["status"] == "idle"
+    assert analyst["model"] == "model-of-analyst" and analyst["run_started_at"] is None
+    # A running helper goes first whatever its age, and says when its run began.
+    state.run_active_since = time.monotonic() - 90
+    _running(state)
+    try:
+        views = await subs.views(leader.session.id)
+        auditor = views[0]
+        assert auditor["name"] == "auditor" and auditor["status"] == "running" and auditor["running"] is True
+        assert auditor["title"] == "audit the logs for errors" and auditor["idle_start"] is False and auditor["kept"] is False
+        assert auditor["model"] == ""  # no label given: left empty rather than guessed
+        began = datetime.fromisoformat(auditor["run_started_at"])
+        assert abs((datetime.now(UTC) - began).total_seconds() - 90) < 5
+    finally:
+        _stopped(state)
+    state.last_error_kind = "llm_error"
+    assert {v["name"]: v["status"] for v in await subs.views(leader.session.id)}["auditor"] == "failed"
+
+
+async def test_the_subagents_route_answers_with_the_views(app: Any) -> None:
+    import httpx
+
+    from daedalus.extensions.api import build_app
+
+    manager: SessionManager = app.manager
+    subs = Subagents(app)
+    app.extensions["subagents"] = subs
+    app.guard = None
+    app.create_session = manager.create_session
+    leader = await manager.create_session("lead")
+    _capture(manager)
+    await subs.spawn(leader_id=leader.session.id, name="analyst")
+    headers = {"X-Daedalus-Token": "tok"}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=build_app(app, "tok")), base_url="http://test") as client:  # type: ignore[arg-type]
+        body = (await client.get(f"/api/sessions/{leader.session.id}/subagents", headers=headers)).json()
+        assert [v["name"] for v in body["subagents"]] == ["analyst"] and body["subagents"][0]["model"]
+        assert (await client.get("/api/sessions/nope/subagents", headers=headers)).status_code == 404
+        assert (await client.get(f"/api/sessions/{leader.session.id}/subagents")).status_code in (401, 403)
+        detail = (await client.get(f"/api/sessions/{leader.session.id}", headers=headers)).json()
+        assert detail["subagents"] == body["subagents"]
+
+
+async def test_report_to_leader_steers_a_running_leader_and_wakes_an_idle_one(app: Any) -> None:
+    from protocore.contracts.tools import ToolContext
+
+    from daedalus.tools.subagent import report_to_leader
+
+    manager: SessionManager = app.manager
+    subs = Subagents(app)
+    manager.service_hooks["subagents"] = subs.service
+    leader = await manager.create_session("lead")
+    submitted = _capture_all(manager)
+    child = await subs.spawn(leader_id=leader.session.id, task="dig", name="digger")
+    submitted.clear()
+    _running(leader)
+    try:
+        result = await subs.report(session_id=child["session_id"], text="  found the bug in parse()  ")
+    finally:
+        _stopped(leader)
+    assert result["delivered"] == "steer"
+    [sent] = submitted
+    assert sent["session_id"] == leader.session.id and sent["steer"] is True and sent["as_answer"] is False
+    assert sent["origin"] == "subagent:digger"
+    assert sent["text"].startswith("[message from subagent 'digger' via ReportToLeader — it is still working") and sent["text"].endswith("found the bug in parse()")
+    # Idle leader: the same steer submit, which starts a run on a session that has none.
+    context = ToolContext(tenant_id="t", run_id="r", session_id=child["session_id"], metadata={"tool_call_id": "c1"})
+    answer = await report_to_leader().invoke(context, {"text": "blocked: no access to the db"})
+    assert not answer.is_error and "starts a turn" in str(answer.content)
+    assert submitted[-1]["steer"] is True and submitted[-1]["session_id"] == leader.session.id and "blocked: no access" in submitted[-1]["text"]
+
+
+async def test_report_to_leader_is_refused_without_text_leader_or_a_live_leader(app: Any) -> None:
+    from protocore.contracts.tools import ToolContext
+
+    from daedalus.tools.subagent import report_to_leader
+
+    manager: SessionManager = app.manager
+    subs = Subagents(app)
+    manager.service_hooks["subagents"] = subs.service
+    leader = await manager.create_session("lead")
+    submitted = _capture_all(manager)
+    child = await subs.spawn(leader_id=leader.session.id, task="dig", name="digger")
+    submitted.clear()
+    with pytest.raises(ValueError, match="empty"):
+        await subs.report(session_id=child["session_id"], text="   ")
+    with pytest.raises(ValueError, match="not a subagent"):
+        await subs.report(session_id=leader.session.id, text="hello")
+    refused = await report_to_leader().invoke(ToolContext(tenant_id="t", run_id="r", session_id=leader.session.id, metadata={"tool_call_id": "c1"}), {"text": "hello"})
+    assert refused.is_error and "not a subagent" in str(refused.content)
+    await manager.delete_session(leader.session.id, delete_workspace=False)
+    with pytest.raises(RuntimeError, match="no longer exists"):
+        await subs.report(session_id=child["session_id"], text="anyone?")
+    assert submitted == []
+
+
+async def test_only_a_subagent_and_its_own_subagents_may_report_to_a_leader(app: Any) -> None:
+    """Judged per session after the chain: a block on the leader inherited down the chain would take it from every helper."""
+    manager: SessionManager = app.manager
+    subs = Subagents(app)
+    leader = await manager.create_session("lead")
+    _capture(manager)
+    first = await subs.spawn(leader_id=leader.session.id, task="t", name="one")
+    second = await subs.spawn(leader_id=first["session_id"], task="t", name="two")
+    child = await manager.get_state(first["session_id"])
+    grandchild = await manager.get_state(second["session_id"])
+    assert child is not None and grandchild is not None
+    assert "ReportToLeader" in {t.name for t in manager.tools.list_all()}
+    assert "ReportToLeader" in manager.blocked_tools_for(leader)
+    assert "ReportToLeader" not in manager.blocked_tools_for(child)
+    assert "ReportToLeader" not in manager.blocked_tools_for(grandchild)
+
+
+async def test_subagent_delete_removes_a_helper_by_name_and_keeps_its_files(app: Any) -> None:
+    manager: SessionManager = app.manager
+    subs = Subagents(app)
+    leader = await manager.create_session("lead")
+    _capture(manager)
+    kept = await subs.spawn(leader_id=leader.session.id, name="analyst")
+    (leader.workspace / "notes.txt").write_text("stay")
+    with pytest.raises(ValueError, match="yours: analyst"):
+        await subs.service("delete", leader_id=leader.session.id, name="nobody")
+    result = await subs.service("delete", leader_id=leader.session.id, name="analyst")
+    assert result["session_id"] == kept["session_id"] and result["was_running"] is False
+    assert await manager.get_state(kept["session_id"]) is None
+    assert (leader.workspace / "notes.txt").read_text() == "stay"
+    assert await subs.children(leader.session.id) == []
+
+
+async def _reminders(subs: Subagents) -> None:
+    await asyncio.gather(*subs._reminders)
+
+
+async def test_a_leader_is_reminded_once_about_helpers_left_idle(app: Any, db: Database) -> None:
+    manager: SessionManager = app.manager
+    subs = Subagents(app)
+    leader = await manager.create_session("lead")
+    lid = leader.session.id
+    submitted = _capture_all(manager)
+    old = await subs.spawn(leader_id=lid, task="review", name="reviewer", keep=True)
+    standby = await subs.spawn(leader_id=lid, name="analyst")
+    fresh = await subs.spawn(leader_id=lid, task="still useful", name="fresh", keep=True)
+    busy = await subs.spawn(leader_id=lid, task="long one", name="busy", keep=True)
+    await manager.sessions.append_transcript(old["session_id"], [Message(role=MessageRole.assistant, content_blocks=[TextBlock(text="the diff looks fine " + "y" * 400)])])
+    for sid in (old["session_id"], standby["session_id"], busy["session_id"]):
+        await _idle_since(db, sid, 180)
+    await _idle_since(db, fresh["session_id"], 5)
+    busy_state = await manager.get_state(busy["session_id"])
+    assert busy_state is not None
+    _running(busy_state)
+    submitted.clear()
+    try:
+        await subs.on_run_finished(lid, "run-1", "completed")
+        await _reminders(subs)
+    finally:
+        _stopped(busy_state)
+    [note] = submitted
+    assert note["session_id"] == lid and note["origin"] == "subagents" and note["steer"] is True and note["as_answer"] is False
+    text = note["text"]
+    assert "- reviewer (idle, kept, idle for 3 h): the diff looks fine" in text and "…" in text
+    assert "- analyst (idle, kept, idle for 3 h): (no reply yet)" in text
+    assert "fresh" not in text and "busy" not in text  # active a moment ago, and still running
+    assert "SubAgentDelete(name)" in text and "will not be asked about them again" in text
+    assert sorted(leader.metadata["subagents_reminded"]) == sorted([old["session_id"], standby["session_id"]])
+    row = (await manager.list_sessions(ids=[lid]))[0]
+    assert sorted(row["metadata"]["subagents_reminded"]) == sorted([old["session_id"], standby["session_id"]])
+
+    # The reminder's own run ending, and any later one, asks nothing again about the same helpers.
+    await _idle_since(db, busy["session_id"], 1)  # its run has just ended
+    await subs.on_run_finished(lid, "run-2", "completed")
+    await _reminders(subs)
+    assert len(submitted) == 1
+
+    # A helper that goes idle later is named alone.
+    await _idle_since(db, busy["session_id"], 60)
+    await subs.on_run_finished(lid, "run-3", "completed")
+    await _reminders(subs)
+    assert len(submitted) == 2
+    assert "- busy (idle, kept, idle for 1 h)" in submitted[-1]["text"]
+    assert "reviewer" not in submitted[-1]["text"] and "analyst" not in submitted[-1]["text"]
+
+
+async def test_no_reminder_after_a_run_that_did_not_complete_or_for_a_helper_on_its_way_out(app: Any, db: Database) -> None:
+    manager: SessionManager = app.manager
+    subs = Subagents(app)
+    leader = await manager.create_session("lead")
+    lid = leader.session.id
+    submitted = _capture_all(manager)
+    kept = await subs.spawn(leader_id=lid, task="t", name="kept", keep=True)
+    await _idle_since(db, kept["session_id"], 300)
+    submitted.clear()
+    for status in ("failed", "cancelled", "awaiting"):
+        await subs.on_run_finished(lid, "run-x", status)
+    await _reminders(subs)
+    assert submitted == [] and "subagents_reminded" not in leader.metadata
+    # A removal already scheduled is not a forgotten helper.
+    subs._removing.add(kept["session_id"])
+    await subs.on_run_finished(lid, "run-y", "completed")
+    await _reminders(subs)
+    assert submitted == []
+    subs._removing.clear()
+    manager.shutting_down = True
+    try:
+        await subs.on_run_finished(lid, "run-z", "completed")
+        await _reminders(subs)
+    finally:
+        manager.shutting_down = False
+    assert submitted == []

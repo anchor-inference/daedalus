@@ -1,9 +1,14 @@
-"""The desktop sidebar stays flat, its menus escape the sidebar, and subagents live in the header."""
+"""The desktop sidebar stays flat, its menus escape the sidebar, and subagents open beside their leader.
+
+A leader's subagents unfold under its row from the left of it, and every way to a helper — the header's
+button, the left column, the phone's menu — opens it in the right panel's Subagents tab, its conversation
+read-only with the steps open, and a button there opens it as a full chat."""
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -11,7 +16,7 @@ from playwright.sync_api import expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
-from screenshots import S1, UNHANDLED, stub  # noqa: E402
+from screenshots import S1, S12, S13, UNHANDLED, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -104,20 +109,65 @@ def run() -> int:
         expect(page.get_by_role("dialog", name="Rename")).to_be_visible()
         page.get_by_role("dialog").get_by_role("button", name="Close").click()
 
+        # The header's button opens the tab and says how many helpers there are.
         trigger = page.locator(".subagents-trigger")
         expect(trigger).to_be_visible()
+        expect(trigger.locator(".subagents-count")).to_have_text("3")
         trigger.click()
-        popover = page.locator(".subagents-popover")
-        expect(popover).to_be_visible()
-        expect(popover).to_contain_text("link-check")
-        popover_box = popover.bounding_box()
-        assert popover_box
-        if popover_box["width"] > 360 or popover_box["x"] + popover_box["width"] > 1432:
-            problems.append(f"the subagent window is misplaced: {popover_box}")
-        expect(page.locator('.details [id$="-info-subagents"]')).to_have_count(0)
-
+        expect(page.locator('.panel-tab[data-tab="subagents"].on')).to_be_visible()
+        rows = page.locator(".panel .subagent-row")
+        expect(rows).to_have_count(3)
+        if "panel=subagents" not in page.url:
+            problems.append(f"the Subagents tab is not in the address: {page.url}")
+        # Working first, with its task and model under its name.
+        expect(rows.first).to_contain_text("link-check")
+        expect(rows.first).to_contain_text("Check every link")
+        expect(page.locator('.panel-tab[data-tab="jobs"]')).to_be_visible()
+        rows.first.click()
+        opened = page.locator(".panel .subagent-open")
+        expect(opened.locator(".subagent-head")).to_contain_text("link-check")
+        chat = opened.locator(".subagent-chat")
+        expect(chat).to_contain_text("Task from the leader")
+        # The steps are drawn open: the tool rows are on screen without a click.
+        expect(chat.locator(".act").first).to_be_visible()
+        if f"sub={S12}" not in page.url:
+            problems.append(f"the open helper is not in the address: {page.url}")
+        if chat.locator(".composer-box, textarea").count():
+            problems.append("the helper's conversation beside the leader offers a composer")
         if os.environ.get("SHOTS"):
-            page.screenshot(path="/tmp/daedalus-sidebar-subagents.png", full_page=True)
+            page.screenshot(path=os.environ["SHOTS"] + "/sidebar-subagents-panel.png")
+        opened.locator(".subagent-full").click()
+        page.wait_for_url(f"**/agents/{S12}")
+        expect(page.locator(".leader-link")).to_be_visible()
+
+        # The left column: the leader's plate folds its helpers, quieter rows on a tree line.
+        page.goto(f"{BASE}/agents/{S1}?token=t&lang=en&scheme=dark", wait_until="networkidle")
+        leader = page.locator(f'.sidebar [data-session="{S1}"]')
+        fold = leader.locator(".sb-subs")
+        expect(fold).to_have_attribute("aria-expanded", "false")
+        expect(fold.locator(".sb-subs-n")).to_have_text("3")
+        expect(page.locator(".sidebar .sb-sub")).to_have_count(0)
+        fold.click()
+        subs = page.locator(".sidebar .sb-sub")
+        expect(subs).to_have_count(3)
+        if "panel=subagents" in page.url:
+            problems.append("unfolding the helpers opened the panel")
+        sizes = subs.first.evaluate("row => ({ h: row.getBoundingClientRect().height, font: parseFloat(getComputedStyle(row.querySelector('.sb-t')).fontSize), lead: parseFloat(getComputedStyle(document.querySelector('.sb-chat .sb-t')).fontSize) })")
+        if sizes["h"] > 34 or sizes["font"] >= sizes["lead"]:
+            problems.append(f"a subagent row does not read as one: {sizes}")
+        page.locator(f'.sidebar [data-subagent="{S13}"]').click()
+        page.wait_for_url(f"**/agents/{S1}?*sub={S13}*")
+        expect(page.locator(".panel .subagent-open .subagent-head")).to_contain_text("photo-alt")
+        expect(page.locator(f'.sidebar [data-subagent="{S13}"]')).to_have_class(re.compile(r"\bcurrent\b"))
+        # Remembered: the fold is still open on the next visit.
+        page.goto(f"{BASE}/agents/{S1}?token=t&lang=en&scheme=dark", wait_until="networkidle")
+        expect(page.locator(f'.sidebar [data-session="{S1}"] .sb-subs')).to_have_attribute("aria-expanded", "true")
+        expect(page.locator(".sidebar .sb-sub")).to_have_count(3)
+        if os.environ.get("SHOTS"):
+            page.screenshot(path=os.environ["SHOTS"] + "/sidebar-subagents.png")
+        page.locator(f'.sidebar [data-session="{S1}"] .sb-subs').click()
+        expect(page.locator(".sidebar .sb-sub")).to_have_count(0)
+
         # A phone's rows carry no "+" of their own: a new chat in a project is the first command of
         # the project's sheet (its section's ⋮) and of each of its rows' sheets.
         phone = browser.new_page(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
@@ -138,15 +188,20 @@ def run() -> int:
             if width != 390:
                 page_.close()
         phone.goto(f"{BASE}/agents/{S1}?token=t&lang=en&scheme=dark", wait_until="networkidle")
-        # A phone reaches the sub-agents from the bar's ⋮ sheet, as a sheet of rows of its own.
+        # A phone reaches the subagents from the bar's ⋮ sheet: a tile that opens the panel's sheet on them.
         phone.locator(".ph-chat-top button[aria-haspopup='menu']").first.click()
-        phone.locator(".ph-session-menu .ph-mrow", has_text="Subagents").click()
-        phone_sheet = phone.locator(".sheet", has_text="Subagents")
-        expect(phone_sheet).to_be_visible()
+        phone.locator('.ph-session-menu .ph-tile[data-tile="subagents"]').click()
+        phone_sheet = phone.locator(".panel-sheet")
+        expect(phone_sheet.locator('.panel-tab[data-tab="subagents"].on')).to_be_visible()
+        expect(phone_sheet.locator(".subagent-row")).to_have_count(3)
+        phone_sheet.locator(".subagent-row").nth(1).click()
+        expect(phone_sheet.locator(".subagent-chat")).to_contain_text("alt text")
         phone_box = phone_sheet.bounding_box()
         assert phone_box
         if phone_box["x"] < 0 or phone_box["x"] + phone_box["width"] > 390:
             problems.append(f"the phone subagent sheet runs off screen: {phone_box}")
+        if os.environ.get("SHOTS"):
+            phone.screenshot(path=os.environ["SHOTS"] + "/phone-subagents.png")
         phone.close()
         browser.close()
     print("problems:", problems or "none")

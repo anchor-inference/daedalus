@@ -1,5 +1,5 @@
 // The right panel: the session's workspace beside the conversation. Four tabs — Details, Files,
-// Preview, Jobs — a toolbar of its own, a drag handle on its left edge, expand-to-full and close.
+// Preview, Jobs — and Subagents for a session that has helpers, a toolbar of its own, a drag handle on its left edge, expand-to-full and close.
 // On a desktop it is a column of the chat grid; on a phone the same tabs in a full-height sheet.
 // The state is a value (panel.ts); this file draws it and wires the pointer and the keys.
 
@@ -25,6 +25,7 @@ import {
   goBack,
   goForward,
   openFile,
+  openSubagent,
   openTab,
   panelQuery,
   readPanelPct,
@@ -147,7 +148,7 @@ function Column(props: HostProps) {
   );
 }
 
-const TAB_ICON: Record<PanelTab, IconName> = { details: "settings", files: "folder", preview: "eye", jobs: "terminal", board: "board", brief: "pen", wakeups: "clock", folders: "folder", questions: "ask", browser: "globe" };
+const TAB_ICON: Record<PanelTab, IconName> = { details: "settings", files: "folder", preview: "eye", jobs: "terminal", subagents: "spawn", board: "board", brief: "pen", wakeups: "clock", folders: "folder", questions: "ask", browser: "globe" };
 
 function Tabs({ state, onTab, onClose, onExpand, badges, marks, inSheet, local, tabs = PANEL_TABS }: HostProps & { inSheet?: boolean }) {
   const strip = useRef<HTMLDivElement>(null);
@@ -278,6 +279,8 @@ export type PanelControls = {
   back: () => void;
   forward: () => void;
   openFile: (entry: PanelEntry) => void;
+  /** The Subagents tab on one helper's conversation, or on the list with null. */
+  openSubagent: (sub: string | null) => void;
 };
 
 /** A pane's panel. With `route`, the URL carries the open tab and the previewed path, so a link
@@ -378,6 +381,16 @@ export function usePanel(sessionId: string, base: string, opts: { route: URLSear
         const s = stateRef.current;
         if (s.tab === null) announce();
         commit(openFile(s, entry), s.tab === null);
+      },
+      [commit, announce],
+    ),
+    openSubagent: useCallback(
+      (sub: string | null) => {
+        const s = stateRef.current;
+        if (s.tab === null) announce();
+        // A step into a helper's conversation is one Back can undo; a step back to the list is not
+        // worth an entry of its own.
+        commit(openSubagent(s, sub), s.tab === null || (sub !== null && s.sub !== sub));
       },
       [commit, announce],
     ),

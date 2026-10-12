@@ -55,17 +55,13 @@ describe("tasksAside", () => {
 
 describe("which events read the Jobs list again", () => {
   const ev = (type: string, session_id: string | null, payload: Record<string, unknown> = {}) => ({ type, session_id, payload });
-  const kids = new Set(["child1"]);
-  it("hears its own jobs, a subagent made for it, and the subagents it lists", () => {
-    expect(touchesJobs(ev("session.jobs", "lead", { change: "ended" }), "lead", kids)).toBe(true);
-    expect(touchesJobs(ev("session.created", "child2", { parent: "lead" }), "lead", kids)).toBe(true);
-    expect(touchesJobs(ev("session.status", "child1", { status: "idle" }), "lead", kids)).toBe(true);
-    expect(touchesJobs(ev("run.finished", "child1"), "lead", kids)).toBe(true);
+  it("hears its own jobs", () => {
+    expect(touchesJobs(ev("session.jobs", "lead", { change: "ended" }), "lead")).toBe(true);
   });
-  it("ignores other sessions and its own runs, which the transcript already follows", () => {
-    expect(touchesJobs(ev("session.jobs", "other", { change: "ended" }), "lead", kids)).toBe(false);
-    expect(touchesJobs(ev("session.created", "x", { parent: "other" }), "lead", kids)).toBe(false);
-    expect(touchesJobs(ev("session.status", "lead", { status: "running" }), "lead", kids)).toBe(false);
-    expect(touchesJobs(ev("session.status", "stranger"), "lead", kids)).toBe(false);
+  it("ignores other sessions, its subagents, which have a tab of their own, and its own runs", () => {
+    expect(touchesJobs(ev("session.jobs", "other", { change: "ended" }), "lead")).toBe(false);
+    expect(touchesJobs(ev("session.created", "child2", { parent: "lead" }), "lead")).toBe(false);
+    expect(touchesJobs(ev("session.status", "lead", { status: "running" }), "lead")).toBe(false);
+    expect(touchesJobs(ev("run.finished", "child1"), "lead")).toBe(false);
   });
 });
