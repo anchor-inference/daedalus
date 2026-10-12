@@ -9,6 +9,7 @@ states why it is not at the top of the module.
 from __future__ import annotations
 
 import ast
+import functools
 import re
 from pathlib import Path
 
@@ -23,11 +24,23 @@ HTTP_FRAMEWORK = ("fastapi", "uvicorn", "starlette")
 NO_UPWARD = ("daedalus.transport", "daedalus.extensions", "daedalus.app", *TELEGRAM_ONLY, *HTTP_FRAMEWORK)
 
 
+@functools.cache
+def _parsed(path: Path) -> tuple[ast.Module, str]:
+    """The tree and the text of one source file, parsed once per run.
+
+    Every test here walks the same four hundred files, and parsing them is most of the cost:
+    each test parsing the tree afresh made this module take ten seconds. The tests only read
+    the trees, so sharing them changes nothing they assert.
+    """
+    text = path.read_text(encoding="utf-8")
+    return ast.parse(text, filename=str(path)), text
+
+
 def _modules(base: Path):  # type: ignore[no-untyped-def]
     for path in sorted(base.rglob("*.py")):
         if "__pycache__" in path.parts:
             continue
-        yield path, ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        yield path, _parsed(path)[0]
 
 
 def _package_of(path: Path) -> str:
@@ -38,9 +51,17 @@ def _package_of(path: Path) -> str:
     return ".".join(parts[:-1])
 
 
-def _imports(tree: ast.AST, path: Path):  # type: ignore[no-untyped-def]
-    """Runtime imports, resolved to absolute names: relative imports and ``importlib.import_module``
-    with a literal count too. An ``if TYPE_CHECKING:`` block never executes, so it crosses no boundary."""
+@functools.cache
+def _imports(path: Path) -> tuple[tuple[str, int], ...]:
+    """Runtime imports as (absolute name, line), resolved: relative imports and ``importlib.import_module``
+    with a literal count too. An ``if TYPE_CHECKING:`` block never executes, so it crosses no boundary.
+
+    Cached per file because five tests ask the same question of the same files, and walking every
+    tree twice for each of them was the bulk of what remained once the parse was shared."""
+    return tuple((name, node.lineno) for name, node in _import_nodes(_parsed(path)[0], path))
+
+
+def _import_nodes(tree: ast.AST, path: Path):  # type: ignore[no-untyped-def]
     skip: set[int] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.If) and isinstance(node.test, ast.Name) and node.test.id == "TYPE_CHECKING":
@@ -69,13 +90,13 @@ def _imports(tree: ast.AST, path: Path):  # type: ignore[no-untyped-def]
 
 def _violations(base: Path, forbidden: tuple[str, ...], *, allowed_dirs: tuple[str, ...] = ()) -> list[str]:
     out = []
-    for path, tree in _modules(base):
+    for path, _tree in _modules(base):
         rel = path.relative_to(ROOT).as_posix()
         if any(rel.startswith(d) for d in allowed_dirs):
             continue
-        for name, node in _imports(tree, path):
+        for name, lineno in _imports(path):
             if any(name == f or name.startswith(f + ".") for f in forbidden):
-                out.append(f"{rel}:{node.lineno} imports {name}")
+                out.append(f"{rel}:{lineno} imports {name}")
     return out
 
 
@@ -134,19 +155,20 @@ def test_in_function_imports_state_their_reason() -> None:
     """An import hidden inside a function is how an import cycle gets papered over; each one says why."""
     offenders = []
     for path, tree in list(_modules(PKG)) + list(_modules(ROOT / "launcher")):
-        lines = path.read_text(encoding="utf-8").splitlines()
+        lines = _parsed(path)[1].splitlines()
         rel = path.relative_to(ROOT).as_posix()
-        seen: set[int] = set()
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-                continue
-            for inner in ast.walk(node):
-                if not isinstance(inner, ast.Import | ast.ImportFrom) or inner.lineno in seen:
-                    continue
-                seen.add(inner.lineno)
-                span = "\n".join(lines[inner.lineno - 1 : (inner.end_lineno or inner.lineno)])
+        # One pass that remembers whether it is inside a function or a class. Walking every
+        # definition's subtree again re-visited each nested function once per enclosing
+        # definition, and that repeated walk cost several seconds for the same answer.
+        stack: list[tuple[ast.AST, bool]] = [(tree, False)]
+        while stack:
+            node, nested = stack.pop()
+            if nested and isinstance(node, ast.Import | ast.ImportFrom):
+                span = "\n".join(lines[node.lineno - 1 : (node.end_lineno or node.lineno)])
                 if not LAZY_RE.search(span):
-                    offenders.append(f"{rel}:{inner.lineno}")
+                    offenders.append(f"{rel}:{node.lineno}")
+            inside = nested or isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+            stack.extend((child, inside) for child in ast.iter_child_nodes(node))
     assert offenders == [], "annotate with '# Lazy: <reason>' or move the import to the top"
 
 
