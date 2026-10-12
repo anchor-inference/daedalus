@@ -2469,12 +2469,47 @@ class SessionManager:
             await self.sessions.append_transcript(session_id, [marker])
             return {"dropped": len(history)}
 
+    async def fork(self, source_id: str, seq: int, *, title: str | None = None) -> dict[str, Any]:
+        """Make a new session from the source's history before transcript ``seq``, or nothing at all.
+
+        The session is created first because the copy needs somewhere to go, and a failure after
+        that used to leave an empty session in the project: a fork pressed during a run was refused
+        by ``fork_into`` and the operator found a blank chat next to the one they wanted to copy.
+        Whatever goes wrong now — a refusal, a full disk, a cancelled request — the new session is
+        deleted again before the error is passed on.
+        """
+        source = await self.get_state(source_id)
+        if source is None:
+            raise KeyError(source_id)
+        name = (title or f"{re.sub(r'\s*\(fork @\d+\)$', '', source.session.title)} (fork @{seq})")[:128]
+        # A fork of a project session stays in the project: the two sessions share the root, which
+        # is what "several agents work in one project" already means, and the fork keeps the wall.
+        # It is opened on the site, so it does not grow a topic or speak in the private chat.
+        target = await self.create_session(
+            name,
+            metadata={"forked_from": {"session_id": source_id, "seq": seq}, "telegram_detached": True},
+            project_id=source.project.id if source.project is not None else None,
+            own_directory=bool(source.metadata.get("directory")),
+            folder_id=source.metadata.get("folder_id") or None,
+        )
+        try:
+            result = await self.fork_into(source_id, seq, target)
+        except BaseException:
+            # Shielded: a cancelled request must still take its half-made session with it.
+            await asyncio.shield(self.delete_session(target.session.id, delete_workspace=True))
+            raise
+        return {"id": target.session.id, "title": name, **result}
+
     async def fork_into(self, source_id: str, seq: int, target: SessionState) -> dict[str, Any]:
         """Give ``target`` the source's history before transcript ``seq`` and the right project files.
 
         Turns a revert undid and turns a compaction summary already stands for are left out of
         the working history; the archived originals still go into the fork's transcript, and
         the summary is re-pointed at the fork's own seqs so HistoryExpand keeps working there.
+
+        A source in the middle of a run is forked from its last settled point: nothing of the run
+        in flight (its prompt included) is copied, and the run is neither waited for nor touched.
+        A fork only reads the source, so refusing it the way an undo is refused protected nothing.
 
         Two sessions in the same project share one directory and nothing is copied at all. Where a
         copy does happen it is a whole directory tree, so it is measured first and refused above
@@ -2484,11 +2519,24 @@ class SessionManager:
         if source is None:
             raise KeyError(source_id)
         async with source.lock:
-            await self._wait_until_quiet(source, what="the source session")
+            live_run = self._live_run_of(source)
+            if not live_run:
+                try:
+                    await self._wait_until_quiet(source, what="the source session")
+                except RuntimeError:
+                    # A run that started while the last one was being saved is forked around like
+                    # any other; a save that never finished is still refused.
+                    live_run = self._live_run_of(source)
+                    if not live_run:
+                        raise
             pending = [t for t in source.persist_tasks if not t.done()]
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
             rows = await self.sessions.list_transcript(source_id)
+            if live_run:
+                started = [int(m.metadata.get("daedalus.seq", 0)) for m in rows if m.metadata.get("daedalus.run_id") == live_run]
+                if started:
+                    seq = min(seq, min(started))
             reverted: set[int] = set()
             archived: set[int] = set()
             for m in rows:
@@ -2670,6 +2718,11 @@ class SessionManager:
             _ensure_inbox(state.workspace, self.inbox_folder(session_id, metadata, project))
         self.register_services(state)
         return state
+
+    @staticmethod
+    def _live_run_of(state: SessionState) -> str:
+        """The run in flight in a session — one working, or one waiting on a question — or ""."""
+        return (state.run_id or "") if (state.running or state.pending is not None) else ""
 
     @staticmethod
     def _settling(state: SessionState) -> bool:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -96,6 +97,51 @@ async def test_fork_copies_history_before_the_turn_and_the_workspace(settings: S
     assert [m.content_blocks[0].text for m in working] == ["ask one", "answer one"]  # type: ignore[attr-defined]
     refreshed = await manager.sessions.get(target.session.id, "daedalus")
     assert refreshed.metadata["forked_from"]["seq"] == seqs[1]
+    await manager.close()
+
+
+async def test_fork_during_a_run_copies_the_settled_turns_and_leaves_the_run_alone(settings: Settings, db: Database) -> None:
+    """A fork pressed while the source was working was refused, and the refusal left an empty
+    session behind. It now forks from the last settled point and never waits for the run."""
+    manager = await _manager(settings, db)
+    source = await manager.create_session("busy")
+    seqs = await _seed(manager, source, [("ask one", "answer one"), ("ask two", "answer two")])
+    prompt = Message(role=MessageRole.user, content_blocks=[TextBlock(text="ask three, in flight")], metadata={"daedalus.origin": "operator", "daedalus.run_id": "run-live"})
+    await manager.sessions.append_transcript(source.session.id, [prompt])
+    release = asyncio.Event()
+    source.task = asyncio.create_task(release.wait())
+    source.run_id = "run-live"
+    try:
+        # Past the end of the transcript: clamped to the run's prompt, which is not copied.
+        result = await asyncio.wait_for(manager.fork(source.session.id, 10_000), timeout=10)
+        working = await manager.sessions.list_messages(result["id"], "daedalus", limit=100)
+        assert [m.content_blocks[0].text for m in working] == ["ask one", "answer one", "ask two", "answer two"]  # type: ignore[attr-defined]
+        earlier = await asyncio.wait_for(manager.fork(source.session.id, seqs[1]), timeout=10)
+        working = await manager.sessions.list_messages(earlier["id"], "daedalus", limit=100)
+        assert [m.content_blocks[0].text for m in working] == ["ask one", "answer one"]  # type: ignore[attr-defined]
+        assert source.running and source.run_id == "run-live"
+    finally:
+        release.set()
+        await source.task
+        await manager.close()
+
+
+async def test_a_failed_fork_leaves_no_session_behind(settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = await _manager(settings, db)
+    source = await manager.create_session("origin")
+    seqs = await _seed(manager, source, [("ask one", "answer one")])
+    before = [r["id"] for r in await db.fetchall("SELECT id FROM sessions ORDER BY id")]
+
+    async def refuse(source_id: str, seq: int, target: Any) -> dict[str, Any]:
+        await manager.sessions.append_transcript(target.session.id, [Message(role=MessageRole.user, content_blocks=[TextBlock(text="half copied")])])
+        raise RuntimeError("the copy failed")
+
+    monkeypatch.setattr(manager, "fork_into", refuse)
+    with pytest.raises(RuntimeError, match="the copy failed"):
+        await manager.fork(source.session.id, seqs[0])
+    assert [r["id"] for r in await db.fetchall("SELECT id FROM sessions ORDER BY id")] == before
+    assert await db.fetchall("SELECT seq FROM transcript WHERE session_id NOT IN (SELECT id FROM sessions)") == []
+    assert set(manager._states) == set(before)
     await manager.close()
 
 

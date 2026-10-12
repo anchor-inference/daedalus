@@ -3861,25 +3861,12 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     @api.post("/api/sessions/{session_id}/fork")
     async def fork_session(session_id: str, body: ForkBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        source = await manager.get_state(session_id)
-        if source is None:
-            raise HTTPException(404, "no such session")
-        title = (body.title or f"{re.sub(r'\s*\(fork @\d+\)$', '', source.session.title)} (fork @{body.seq})")[:128]
-        # A fork of a project session stays in the project: the two sessions share the root, which
-        # is what "several agents work in one project" already means, and the fork keeps the wall.
-        # It is opened on the site, so it does not grow a topic or speak in the private chat.
-        target = await manager.create_session(
-            title,
-            metadata={"forked_from": {"session_id": session_id, "seq": body.seq}, "telegram_detached": True},
-            project_id=source.project.id if source.project is not None else None,
-            own_directory=bool(source.metadata.get("directory")),
-            folder_id=source.metadata.get("folder_id") or None,
-        )
         try:
-            result = await manager.fork_into(session_id, body.seq, target)
+            return await manager.fork(session_id, body.seq, title=body.title)
+        except KeyError:
+            raise HTTPException(404, "no such session") from None
         except RuntimeError as exc:
             raise HTTPException(409, str(exc)) from exc
-        return {"id": target.session.id, "title": title, **result}
 
     @api.post("/api/sessions/{session_id}/mode")
     async def set_mode(session_id: str, body: ModeBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
