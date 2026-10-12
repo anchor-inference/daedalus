@@ -106,7 +106,8 @@ export function FreeModels({ onSaved, toast }: { onSaved: (id: string, settings:
       const next = await api.put<Settings>(`/api/presets/${encodeURIComponent(id)}`, {
         provider: provider.id, model: model.id, label: model.name ?? model.id,
         free_only: true, thinking: model.reasoning ?? false, images: model.images ?? false,
-        context_window: Math.max(8000, Math.min(model.context_length ?? 128000, 400000)),
+        // The catalogue's window is a starting point; the host finds and keeps the real one.
+        context_window: Math.max(8000, Math.min(model.context_length ?? 128000, 4000000)), context_window_source: "auto",
         max_output_tokens: Math.max(1024, Math.min(model.max_output_tokens ?? 8192, 64000)),
       });
       onSaved(id, next);

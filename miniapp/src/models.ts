@@ -13,6 +13,8 @@ export type ModelEntry = {
   id: string;
   name?: string;
   context_length?: number;
+  /** Which source the window came from: the endpoint's listing, models.dev or the built-in table. */
+  context_source?: "provider" | "catalog" | "table";
   max_output_tokens?: number;
   input_modalities?: string[];
   images?: boolean;
@@ -75,9 +77,11 @@ export function prefilled(entry: ModelEntry, current: Preset): Preset {
     label: entry.name && entry.name !== entry.id ? entry.name : current.label,
     images: entry.images ?? current.images,
     thinking: entry.reasoning ?? current.thinking,
-    // The history a run may hold is capped below a very large hosted window on purpose: every turn
-    // pays for the context it carries. llama.cpp windows at or below that cap are preserved exactly.
-    context_window: entry.context_length ? Math.min(entry.context_length, 400000) : current.context_window,
+    // The model's real window, as the host found it. It used to be capped at 400K here so that a run
+    // would not carry a huge history, but the host now keeps an automatic window true by itself and
+    // would rewrite the capped number on save; holding runs below the real window is a number the
+    // operator types, which the host then leaves alone.
+    context_window: entry.context_length ?? current.context_window,
     max_output_tokens: entry.max_output_tokens ? Math.min(entry.max_output_tokens, 64000) : current.max_output_tokens,
   };
 }

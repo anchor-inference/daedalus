@@ -394,5 +394,5 @@ def test_add_model_lookup_prefills_discovered_values_through_the_api(monkeypatch
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["models"] == ["local-model"]
-    assert payload["entries"] == [{"id": "local-model", "context_length": 128000, "images": True, "input_modalities": ["text", "image"]}]
+    assert payload["entries"] == [{"id": "local-model", "context_length": 128000, "context_source": "provider", "images": True, "input_modalities": ["text", "image"]}]
     assert payload["discovery"]["tools"] is True and payload["discovery"]["slots"] == 3

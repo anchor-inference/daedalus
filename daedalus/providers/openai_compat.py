@@ -37,6 +37,7 @@ from protocore.contracts.types import Message, MessageRole, StopReason, TextBloc
 from daedalus import __version__
 from daedalus.config import keyproxy_upstream
 from daedalus.providers.admission import InferenceAdmission
+from daedalus.providers.context_window import stated_window
 from daedalus.providers.dsml import DsmlGuard
 from daedalus.providers.failure_evidence import FailureEvidence, failure_evidence
 from daedalus.providers.llamacpp import tools_to_llamacpp_wire
@@ -367,9 +368,14 @@ class OpenAICompatibleProvider(ILLMProvider):
         image_loader: ImageLoader | None = None,
         images_for: Callable[[str], bool] | None = None,
         admission: InferenceAdmission | None = None,
+        context_refusal: Callable[[str, str, int], None] | None = None,
     ) -> None:
-        """``images_for(model)`` says whether that model takes image parts (a preset setting)."""
+        """``images_for(model)`` says whether that model takes image parts (a preset setting).
+
+        ``context_refusal(endpoint id, model, window)`` hears every refusal that states the model's real
+        context window, so the window the presets run with can be corrected from it."""
         self.endpoint = endpoint
+        self._context_refusal = context_refusal
         self._images_for = images_for or (lambda _model: False)
         self._client = client or httpx.AsyncClient(
             timeout=httpx.Timeout(endpoint.timeout_seconds, connect=30.0)
@@ -740,6 +746,13 @@ class OpenAICompatibleProvider(ILLMProvider):
                                text: str, headers: httpx.Headers) -> FailureEvidence:
         evidence = failure_evidence(status, text, headers, provider_kind=self.endpoint.kind,
                                     provider_host=(urlsplit(self.endpoint.base_url).hostname or "").lower())
+        if self._context_refusal is not None and status in (400, 413, 422):
+            window = stated_window(text)
+            if window:
+                try:
+                    self._context_refusal(self.endpoint.id, request.model, window)
+                except Exception:  # noqa: BLE001 — learning the window is a side effect; the refusal is the error
+                    logger.exception("could not record the context window %s stated for %s", window, request.model)
         if self._admission is not None and hasattr(self._admission, "failure"):
             try:
                 await self._admission.failure(self.endpoint, request, reservation, evidence)
