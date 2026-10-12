@@ -70,12 +70,12 @@ async def test_http_refusal_is_saved_without_body_or_credentials(db: Database) -
     body = json.dumps({"error": {"code": "rate_limit_exceeded", "message": "private prompt text"}})
 
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.headers["authorization"] == "Bearer secret"
+        assert request.headers["authorization"] == "Bearer credential-xyzzy"
         return httpx.Response(429, text=body, headers={"x-ratelimit-reset-requests": "30s"})
 
     provider = OpenAICompatibleProvider(
         ProviderEndpoint(id="vendor", kind="openai_compat", base_url="https://api.openai.com/v1",
-                         api_key="secret"),
+                         api_key="credential-xyzzy"),
         client=httpx.AsyncClient(transport=httpx.MockTransport(handler)), admission=Admission(db),
     )
     with pytest.raises(LLMRateLimitError):
@@ -88,8 +88,12 @@ async def test_http_refusal_is_saved_without_body_or_credentials(db: Database) -
         "session", "failed", "vendor", "model")
     assert row["failure_class"] == "rate"
     assert row["reset_at"] is not None
-    assert "private prompt text" not in Path(db.path).read_bytes().decode("utf-8", "ignore")
-    assert "secret" not in Path(db.path).read_bytes().decode("utf-8", "ignore")
+    # Both files: a fresh row sits in the write-ahead log until a checkpoint, so reading only the main
+    # file looked at a place the row had not reached yet and passed whatever was stored. The key is a
+    # value no table or column is named after; "secret" is part of the schema itself.
+    stored = b"".join(p.read_bytes() for p in (Path(db.path), Path(f"{db.path}-wal")) if p.exists())
+    assert b"private prompt text" not in stored
+    assert b"credential-xyzzy" not in stored
     await db.execute("UPDATE runs SET status = 'error' WHERE id = 'failed'")
     async with db.transaction() as conn:
         assert (await validate_hold_in(conn, row["id"]))["id"] == row["id"]

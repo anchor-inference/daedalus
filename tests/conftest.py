@@ -58,6 +58,51 @@ async def db(settings: Settings) -> Database:
     await database.close()
 
 
+@pytest.fixture(scope="session", autouse=True)
+def migrated_template(tmp_path_factory: pytest.TempPathFactory) -> object:
+    """Every new database in the suite starts as a copy of one migrated once, not as an empty file.
+
+    Running the hundred-odd migrations on an empty file costs about 0.2 s, and nearly every test that
+    touches the host opens a fresh database — directly, through ``DaedalusApp`` or through a session
+    manager — so the suite spent minutes replaying the same schema. The copy is made by the very same
+    ``Database.open`` on an empty path, and ``open`` still runs on the copy (pragmas, the version
+    check, ``_migrate`` finding nothing left to do), so what a test sees is byte for byte what it
+    would have built itself. The migrations on an empty database insert nothing that depends on the
+    workspaces folder or the environment, which is why one template serves every test.
+
+    The copy is skipped whenever a test has replaced ``MIGRATIONS`` (to stop at an older schema or to
+    break one step) or the path already exists (a test that built an old database by hand): those
+    tests are about migrating, and they get the real walk from wherever they start.
+    """
+    import asyncio
+    import shutil
+
+    from daedalus.stores import database as database_module
+
+    template = tmp_path_factory.mktemp("migrated-template") / "template.sqlite"
+
+    async def build() -> None:
+        database = Database(template, workspaces_dir=template.parent / "workspaces")
+        await database.open()
+        await database.close()  # the last connection closing folds the write-ahead log into the file
+
+    asyncio.run(build())
+    migrations, count = database_module.MIGRATIONS, len(database_module.MIGRATIONS)
+    real_open = Database.open
+
+    async def open_from_template(self: Database) -> None:
+        if database_module.MIGRATIONS is migrations and len(migrations) == count and not self.path.exists():
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(template, self.path)
+        await real_open(self)
+
+    Database.open = open_from_template  # type: ignore[method-assign]
+    try:
+        yield template
+    finally:
+        Database.open = real_open  # type: ignore[method-assign]
+
+
 class NetworkBlocked(OSError):
     """Raised in place of a connection the test suite is not allowed to make.
 
