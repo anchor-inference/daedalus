@@ -42,7 +42,7 @@ import { DICT, plural, t } from "../i18n";
 import { groupDetail, groupName, searchedGroup } from "../toolgroups";
 import { usePresenceScope } from "../presence";
 import { endsTerminals, TerminalButton, TerminalDock, TerminalFull, TerminalSheet, useSessionTerminals, useTerminalDock } from "../terminal/dock";
-import { insideTerminal } from "../terminal/keys";
+import { dockShortcut, insideTerminal, isMac } from "../terminal/keys";
 import { tabsFor } from "../panel";
 import { EventCard, FocusChat, FocusChatContext, MessageFate, ReplyChip, ReplyQuote, StepsCard, currentReply, setReply, stepDescription, useAnsweredMark, useFocusChat } from "../project/chat";
 import { GoalStrip } from "../project/goalstrip";
@@ -1336,12 +1336,14 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const toggleDock = terminalDock.toggle;
 
   // Ctrl+` opens and closes the terminal dock, from anywhere in the session — the terminal included,
-  // where it is the one key the program does not get. Matched by the physical key, so it works in a
-  // Russian layout too, where the same key types "ё".
+  // where it is the one key the program does not get. Ctrl+J (⌘J on a Mac) does the same outside a
+  // terminal, as in VS Code. Matched by the physical key, so both work in a Russian layout too.
   useEffect(() => {
     if (phone || pane === "right") return;
+    const mac = isMac();
     const onKey = (e: KeyboardEvent) => {
-      if (!e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.code !== "Backquote") return;
+      if (!dockShortcut(e, mac)) return;
+      if (e.code === "KeyJ" && insideTerminal(e.target)) return;
       e.preventDefault();
       toggleDock();
     };

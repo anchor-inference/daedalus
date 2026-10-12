@@ -19,6 +19,7 @@ import { errorText } from "../ui";
 import { createTerminalConfirmed, endTerminal } from "./actions";
 import { clampHeight, closeTab, DockState, loadDock, loadSandboxChoice, openTab, prune, replaceTab, sandboxOffer, sandboxToggle, saveDock, saveSandboxChoice, setSplit, splitCandidate, toggleDock } from "./dockstate";
 import type { TerminalState } from "./instance";
+import { isMac } from "./keys";
 import { instanceFor, setTerminalEnvs, terminals } from "./terminals";
 import { PhoneTerminal } from "./mobile";
 import { CopyOutputButton, TerminalView } from "./view";
@@ -396,6 +397,11 @@ function dockMenu(dock: DockController, active: string | null): MenuItem[] {
   return items;
 }
 
+/** The dock's key as a tooltip names it: VS Code's, the one people already know. */
+function dockKeyHint(): string {
+  return isMac() ? "\u2318J" : "Ctrl+J";
+}
+
 /** The header's terminal button: a count, and on a phone the sheet instead of the dock. */
 export function TerminalButton({ dock, phone }: { dock: DockController; phone: boolean }) {
   const count = dock.terms.running.length;
@@ -407,7 +413,7 @@ export function TerminalButton({ dock, phone }: { dock: DockController; phone: b
       className={`iconbtn term-button ${!phone && dock.state.open ? "on" : ""}`}
       onClick={() => (phone ? dock.setSheet(true) : dock.toggle())}
       aria-label={label}
-      title={phone ? label : `${label} (Ctrl+\`)`}
+      title={phone ? label : `${label} (${dockKeyHint()})`}
       disabled={disabled}
       {...(phone ? {} : { "aria-pressed": dock.state.open })}
       data-count={count}
@@ -494,7 +500,7 @@ export function TerminalDock({ dock, workspace, fileOpener }: { dock: DockContro
           <button className="iconbtn small flat" onClick={() => active && instanceFor(active)?.openSearch()} aria-label={t("term.search")} title={`${t("term.search")} (Ctrl+Shift+F)`} disabled={!active}><Icon name="search" size={16} /></button>
           <button className={`iconbtn small flat ${state.split ? "on" : ""}`} onClick={dock.split} aria-label={t("term.split")} title={t("term.split")} aria-pressed={!!state.split} disabled={!active}><Icon name="split" size={16} /></button>
           <button className="iconbtn small flat" onClick={() => active && dock.maximise(active)} aria-label={t("term.maximize")} title={t("term.maximize")} disabled={!active}><Icon name="expand" size={16} /></button>
-          <button className="iconbtn small flat" onClick={dock.toggle} aria-label={t("term.dock.close")} title={`${t("term.dock.close")} (Ctrl+\`)`}><Icon name="close" size={16} /></button>
+          <button className="iconbtn small flat" onClick={dock.toggle} aria-label={t("term.dock.close")} title={`${t("term.dock.close")} (${dockKeyHint()})`}><Icon name="close" size={16} /></button>
         </div>
       </div>
       <div className={`term-panes ${state.split && state.open ? "split" : ""}`}>

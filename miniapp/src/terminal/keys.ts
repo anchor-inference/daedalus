@@ -78,6 +78,20 @@ function copyKey(context: KeyContext): TerminalAction | null {
   return !context.selection && !context.held && context.mouseProgram ? null : "copy";
 }
 
+/**
+ * Whether a key press outside a terminal opens or closes the terminal dock: Ctrl+` as before, and
+ * VS Code's panel key — Ctrl+J, or ⌘J on a Mac. Matched by the physical key like the rest. Inside a
+ * terminal only Ctrl+` is taken (`reservedKey`): Ctrl+J is a line feed there, which shells and
+ * Claude Code's prompt use for a new line, so the program keeps it. A text field loses nothing,
+ * since neither key types a character.
+ */
+export function dockShortcut(e: KeyLike, mac: boolean): boolean {
+  if (e.altKey || e.shiftKey) return false;
+  if (e.ctrlKey && !e.metaKey && e.code === "Backquote") return true;
+  if (e.code !== "KeyJ") return false;
+  return mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+}
+
 /** Whether a key event's target is inside a terminal, where the app's global shortcuts stand aside. */
 export function insideTerminal(target: EventTarget | null): boolean {
   const element = target as { closest?: (selector: string) => unknown } | null;

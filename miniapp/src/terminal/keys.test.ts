@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { insideTerminal, KeyLike, reservedKey } from "./keys";
+import { dockShortcut, insideTerminal, KeyLike, reservedKey } from "./keys";
 
 const key = (code: string, mods: Partial<KeyLike> = {}): KeyLike => ({ code, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...mods });
 const linux = { mac: false, altScreen: false };
@@ -94,5 +94,26 @@ describe("insideTerminal", () => {
     expect(insideTerminal(document.getElementById("out"))).toBe(false);
     expect(insideTerminal(null)).toBe(false);
     expect(insideTerminal(window)).toBe(false);
+  });
+});
+
+describe("dockShortcut", () => {
+  it("opens the dock with Ctrl+` and with VS Code's panel key", () => {
+    expect(dockShortcut(key("Backquote", { ctrlKey: true }), false)).toBe(true);
+    expect(dockShortcut(key("KeyJ", { ctrlKey: true }), false)).toBe(true);
+    expect(dockShortcut(key("KeyJ", { metaKey: true }), true)).toBe(true);
+  });
+
+  it("leaves every other combination alone", () => {
+    expect(dockShortcut(key("KeyJ"), false)).toBe(false);
+    expect(dockShortcut(key("KeyJ", { metaKey: true }), false)).toBe(false);
+    expect(dockShortcut(key("KeyJ", { ctrlKey: true }), true)).toBe(false);
+    expect(dockShortcut(key("KeyJ", { ctrlKey: true, shiftKey: true }), false)).toBe(false);
+    expect(dockShortcut(key("KeyJ", { ctrlKey: true, altKey: true }), false)).toBe(false);
+    expect(dockShortcut(key("KeyK", { ctrlKey: true }), false)).toBe(false);
+  });
+
+  it("is not a key the terminal takes from its program", () => {
+    expect(reservedKey(key("KeyJ", { ctrlKey: true }), linux)).toBeNull();
   });
 });

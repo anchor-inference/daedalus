@@ -3,7 +3,8 @@
 Ctrl+K kills a line in a shell and Ctrl+\\ quits a program: with the terminal focused they must reach
 it, and the command palette and the sidebar must stay as they are. Ctrl+` belongs to the app in any
 keyboard layout — matched by the physical key, so a Russian layout's "ё" on the same key works — and
-sends nothing. Ctrl+Shift+C copies the selection. A multi-line paste into a shell without bracketed
+sends nothing; Ctrl+J, VS Code's panel key, does the same outside the terminal and stays a line feed
+inside it. Ctrl+Shift+C copies the selection. A multi-line paste into a shell without bracketed
 paste asks first; with bracketed paste on, it goes straight through, marked.
 
     APP_URL=http://127.0.0.1:8163/app python3 tests/browser/check_terminal_keys.py
@@ -14,7 +15,7 @@ import os
 import sys
 from pathlib import Path
 
-from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
@@ -121,6 +122,34 @@ def main() -> int:
             problems.append(f"Ctrl+` typed into the terminal: {since(term, mark)!r}")
         page.keyboard.press("Control+Backquote")
         page.wait_for_timeout(500)
+
+        # Ctrl+J is VS Code's panel key: outside a terminal it toggles the dock, a draft untouched;
+        # inside one it stays the line feed it is to the program.
+        focus(page)
+        mark = len(term.inputs(ID))
+        page.keyboard.press("Control+j")
+        page.wait_for_timeout(300)
+        if since(term, mark) != b"\n":
+            problems.append(f"Ctrl+J did not reach the terminal as a line feed: {since(term, mark)!r}")
+        if not page.locator(".term-dock.open").count():
+            problems.append("Ctrl+J inside the terminal hid the dock")
+        field = page.locator(".composer textarea")
+        field.click()
+        field.fill("a draft")
+        page.keyboard.press("Control+j")
+        try:
+            expect(page.locator(".term-dock.open")).to_have_count(0, timeout=3000)
+        except AssertionError:
+            problems.append("Ctrl+J in the composer did not hide the dock")
+        if field.input_value() != "a draft":
+            problems.append(f"Ctrl+J changed the draft: {field.input_value()!r}")
+        page.keyboard.press("Control+j")
+        try:
+            expect(page.locator(".term-dock.open")).to_have_count(1, timeout=3000)
+        except AssertionError:
+            problems.append("Ctrl+J did not bring the dock back")
+        field.fill("")
+        page.wait_for_timeout(300)
 
         # Ctrl+Shift+C copies what is selected.
         row = page.locator(f".term-view[data-terminal-view='{ID}'] .term-screen").bounding_box()
