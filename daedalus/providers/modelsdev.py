@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 
 from daedalus.providers.pricing import ModelPricing
+from daedalus.providers.tls import shared_context
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ async def fetch_catalog(client: httpx.AsyncClient | None = None, *, timeout: flo
     it is, through the same path a refused connection takes.
     """
     own = client is None
-    client = client or httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=timeout, pool=timeout))
+    client = client or httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=timeout, pool=timeout), verify=shared_context())
     try:
         async with asyncio.timeout(timeout * 2):
             try:
