@@ -54,6 +54,7 @@ func (d *Daemon) registerSide(srv *server.Server) {
 		srv.Handle("sessions.harnesses", d.sessionsHarnesses)
 		srv.Handle("sessions.scan", d.sessionsScan)
 		srv.Handle("sessions.read", d.sessionsRead)
+		srv.Handle("sessions.instructions", d.sessionsInstructions)
 	}
 }
 
@@ -326,6 +327,19 @@ func (d *Daemon) sessionsRead(ctx context.Context, c *server.Conn, params json.R
 	r, err := d.Side.Sessions.Read(p)
 	if err != nil {
 		d.logRefusal("sessions.read", p.Harness+":"+p.ID, err)
+		return nil, sideError(err)
+	}
+	return r, nil
+}
+
+func (d *Daemon) sessionsInstructions(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p sessions.InstructionsRequest
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	r, err := d.Side.Sessions.Instructions(p)
+	if err != nil {
+		d.logRefusal("sessions.instructions", p.Harness+":"+p.ID, err)
 		return nil, sideError(err)
 	}
 	return r, nil
