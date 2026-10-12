@@ -161,7 +161,10 @@ async def _config(ctx: DoctorContext) -> list[Check]:
     if cfg.has_model:
         out.append(Check("vision preset", vision is not None, f"{vision[0]}" if vision else "no image-capable preset: ImageView and photos in chat are unavailable", "ok" if vision else "warn", "mark a preset as accepting images"))
     chain_bad = [c for c in cfg.model.chain if c not in cfg.presets]
-    out.append(Check("fallback chain", not chain_bad, ", ".join(cfg.model.chain) or "none" if not chain_bad else f"unknown presets: {', '.join(chain_bad)}", "ok" if not chain_bad else "warn", "fix the chain in Settings → Models"))
+    chain_detail = ", ".join(cfg.model.chain) or "none"
+    if not cfg.model.auto_fallback:
+        chain_detail = f"off (configured: {chain_detail})"
+    out.append(Check("fallback chain", not chain_bad, chain_detail if not chain_bad else f"unknown presets: {', '.join(chain_bad)}", "ok" if not chain_bad else "warn", "fix the chain in Settings → Models"))
     sandbox = cfg.tools.exec.sandbox
     status = await asyncio.to_thread(bwrap_status)
     usable = status == "ok"

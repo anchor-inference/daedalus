@@ -212,10 +212,10 @@ class ProviderRegistry:
         return tuple(sorted(self._providers))
 
     def rungs_for(self, config: RuntimeConfig, preset_id: str | None = None) -> list[tuple[OpenAICompatibleProvider, str]]:
-        """``(adapter, model)`` pairs: the chosen (or default) preset first, then the fallback chain."""
+        """``(adapter, model)`` pairs, with fallbacks only when the operator enabled them."""
         first_id, first = config.preset(preset_id)
         order = [first_id]
-        if not first.free_only:
+        if config.model.auto_fallback and not first.free_only:
             order.extend(c for c in config.model.chain if c != first_id)
             if config.model.preset not in order:
                 order.append(config.model.preset)
@@ -236,10 +236,12 @@ class ProviderRegistry:
         return {(p.provider, p.model): (int(p.context_window), int(p.max_output_tokens)) for p in config.presets.values() if p.model}
 
     def rungs_for_pair(self, config: RuntimeConfig, provider_id: str, model: str) -> list[tuple[OpenAICompatibleProvider, str]]:
-        """An ad-hoc provider/model pair first (a manual ``/model vllm/x``), the chain behind it."""
+        """An ad-hoc provider/model pair first, with the opted-in chain behind it."""
         target = self._providers.get(provider_id)
         if target is None or not model:
             return self.rungs_for(config)
+        if not config.model.auto_fallback:
+            return [(target, model)]
         rest = [(p, m) for p, m in self.rungs_for(config) if not (p.endpoint.id == provider_id and m == model)]
         return [(target, model), *rest]
 

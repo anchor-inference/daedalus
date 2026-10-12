@@ -1,13 +1,14 @@
 answer_language = "auto"
 
-# Which model opens a new session, and which ones stand in when it fails.
+# Which model opens a new session, and whether another may stand in when it fails.
 # A fresh install has NO model: a provider endpoint is not a model, and which one to run — and pay
 # for — is yours to pick. The app asks at first login (Settings -> Models -> Add a model) and writes
 # the [presets.*] entry for you. The examples below are documentation, not defaults: uncomment one
 # only if you would rather type it than click it, and make sure its provider has a key.
 [model]
 preset = ""              # the preset id below that opens new sessions; empty = the first one
-chain = []               # preset ids tried in order after the default one fails
+chain = []               # preset ids tried after a failure when auto_fallback is true
+auto_fallback = false    # opt in before the chain can replace a session's chosen model
 
 # One preset per provider kind, to show the shape of an entry. Every field has a default;
 # provider and model are the only ones a preset cannot do without.

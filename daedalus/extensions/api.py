@@ -845,7 +845,7 @@ def model_refusal(exc: LLMError) -> HTTPException:
 
 
 def resolve_model_patch(current: dict[str, Any], patch: dict[str, Any]) -> None:
-    """Merge a ``model`` settings patch (default preset id, fallback chain, auxiliary fallback) in place."""
+    """Merge a ``model`` settings patch, including the independent fallback choices."""
     presets = current.get("presets") or {}
     merged = dict(current.get("model", {}))
     if "preset" in patch:
@@ -856,6 +856,8 @@ def resolve_model_patch(current: dict[str, Any], patch: dict[str, Any]) -> None:
     if "chain" in patch:
         chain = [str(c) for c in (patch.get("chain") or []) if str(c) in presets and str(c) != merged.get("preset")]
         merged["chain"] = chain
+    if "auto_fallback" in patch:
+        merged["auto_fallback"] = bool(patch["auto_fallback"])
     if "fallback_to_session" in patch:
         merged["fallback_to_session"] = bool(patch["fallback_to_session"])
     current["model"] = merged

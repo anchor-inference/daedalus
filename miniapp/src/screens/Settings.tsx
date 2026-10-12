@@ -1279,6 +1279,9 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
             <div className="card">
               <div className="section-title" style={{ marginTop: 0 }}>{t("settings.models.title")}</div>
               <div className="sub">{t("settings.models.sub")}</div>
+              <Row title={t("settings.models.auto_fallback")} desc={t("settings.models.auto_fallback.sub")} data-setting="model.auto_fallback">
+                <Switch checked={s.model.auto_fallback} onChange={(auto_fallback) => save({ model: { auto_fallback } as any })} label={t("settings.models.auto_fallback")} />
+              </Row>
               <div className="mlist">
                 {Object.entries(s.presets ?? {}).map(([id, p]) => (
                   <PresetRow

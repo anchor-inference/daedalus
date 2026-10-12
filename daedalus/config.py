@@ -438,12 +438,14 @@ class NoModelConfigured(RuntimeError):
 
 
 class ModelConfig(BaseModel):
-    """Which model preset runs by default, and which ones stand in when it fails."""
+    """Which model preset runs by default, and whether another may stand in when it fails."""
 
     preset: str = ""
     """Empty until the operator adds one; the first preset in the table stands in for it."""
     chain: list[str] = Field(default_factory=list)
-    """Fallback preset ids tried in order after the default one."""
+    """Fallback preset ids, retained even while automatic fallback is off."""
+    auto_fallback: bool = False
+    """Only an explicit opt-in may move a running session to another model after a failure."""
     fallback_to_session: bool = True
     """When an auxiliary model (the summary model, the vision model) is not set or refuses, do its
     work with the session's own model and warn, rather than fail. On by default: a summary or a look

@@ -316,6 +316,23 @@ def test_preset_rungs_put_the_chosen_model_first_then_the_chain() -> None:
     assert rungs[0][0].accepts_images("Qwen3.6") is False  # no image loader wired in this registry
 
 
+def test_fallback_chain_needs_explicit_opt_in_for_presets_and_manual_pairs() -> None:
+    from daedalus.config import ModelPresetConfig, Settings
+    from daedalus.providers.registry import ProviderRegistry
+    from tests.support.models import model_config
+
+    config = model_config()
+    config.model.auto_fallback = False
+    config.presets["vllm.Qwen3.6"] = ModelPresetConfig(provider="vllm", model="Qwen3.6")
+    registry = ProviderRegistry(Settings(deepseek_api_key="a", openrouter_api_key="b", vllm_base_url="http://vllm.test/v1"), config)
+    assert [(p.endpoint.id, m) for p, m in registry.rungs_for(config, "vllm.Qwen3.6")] == [("vllm", "Qwen3.6")]
+    assert [(p.endpoint.id, m) for p, m in registry.rungs_for_pair(config, "vllm", "Qwen3.6")] == [("vllm", "Qwen3.6")]
+    assert config.model.chain  # the operator's configured order survives while switching is off
+    config.model.auto_fallback = True
+    assert len(registry.rungs_for(config, "vllm.Qwen3.6")) > 1
+    assert len(registry.rungs_for_pair(config, "vllm", "Qwen3.6")) > 1
+
+
 def test_free_preset_never_enters_the_paid_fallback_chain() -> None:
     from daedalus.config import ModelPresetConfig, Settings
     from daedalus.providers.registry import ProviderRegistry

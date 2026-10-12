@@ -466,7 +466,7 @@ async def run_command(app: Application, session_id: str, line: str) -> str:  # n
             chat = f"one topic per session in forum {c.telegram.forum_chat_id or 'not bound'}"
         return (
             f"model: {model_line}\n"
-            f"fallback: {', '.join(c.model.chain) or 'none'}\n"
+            f"fallback: {(', '.join(c.model.chain) or 'none') if c.model.auto_fallback else 'off'}\n"
             f"self-change approval: {c.self_change.approval}, auto_rebuild={c.self_change.auto_rebuild}\n"
             f"limits: ${app.settings.usd_per_day}/day (env), {c.limits.max_iterations} iterations, tool timeout {c.limits.tool_timeout_seconds:.0f}s\n"
             f"balance thresholds: {c.balance.thresholds_usd} (every {c.balance.poll_seconds}s)\n"

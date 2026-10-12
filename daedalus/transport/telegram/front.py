@@ -1710,7 +1710,7 @@ class TelegramFront:
         model_line = f"{default[1].display(default[0])} thinking={default[1].thinking} effort={default[1].reasoning_effort}" if default else f"none — {NO_MODEL_MESSAGE}"
         await message.answer(
             f"model: {model_line}\n"
-            f"fallback: {', '.join(c.model.chain) or 'none'}\n"
+            f"fallback: {(', '.join(c.model.chain) or 'none') if c.model.auto_fallback else 'off'}\n"
             f"self-change approval: {c.self_change.approval}, auto_rebuild={c.self_change.auto_rebuild}\n"
             f"limits: ${self.settings.usd_per_day}/day (env), {c.limits.max_iterations} iterations, tool timeout {c.limits.tool_timeout_seconds:.0f}s\n"
             f"balance thresholds: {c.balance.thresholds_usd} (every {c.balance.poll_seconds}s)\n"

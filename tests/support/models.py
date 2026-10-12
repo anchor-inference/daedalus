@@ -29,7 +29,7 @@ def presets() -> dict[str, ModelPresetConfig]:
 def model_config(**overrides: object) -> RuntimeConfig:
     """A :class:`RuntimeConfig` with a model in it; keyword arguments override any other section."""
     return RuntimeConfig(
-        model=ModelConfig(preset=DEFAULT_PRESET, chain=[FALLBACK_PRESET]),
+        model=ModelConfig(preset=DEFAULT_PRESET, chain=[FALLBACK_PRESET], auto_fallback=True),
         presets=presets(),
         vision=VisionConfig(preset=VISION_PRESET),
         voice=VoiceConfig(preset=VISION_PRESET),

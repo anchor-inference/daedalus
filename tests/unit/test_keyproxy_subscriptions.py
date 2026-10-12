@@ -81,6 +81,25 @@ async def test_responses_events_become_chat_chunks() -> None:
     assert (await subs.collect_completion(subs.responses_events_to_chunks(_lines(failed), model="m"), model="m"))["error"]["message"] == "nope"
 
 
+async def test_codex_function_call_final_item_recovers_missing_arguments() -> None:
+    events = [
+        {"type": "response.output_item.added", "item": {"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "Read"}},
+        {"type": "response.function_call_arguments.delta", "item_id": "fc_1", "delta": "{\"path\":"},
+        {"type": "response.function_call_arguments.done", "item_id": "fc_1", "arguments": "{\"path\":\"file\"}"},
+        {"type": "response.output_item.done", "item": {"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "Read", "arguments": "{\"path\":\"file\"}"}},
+    ]
+    full = await subs.collect_completion(subs.responses_events_to_chunks(_lines(events), model="m"), model="m")
+    assert full["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"] == '{"path":"file"}'
+
+    events.pop(1)
+    full = await subs.collect_completion(subs.responses_events_to_chunks(_lines(events), model="m"), model="m")
+    assert full["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"] == '{"path":"file"}'
+
+    events.pop(1)
+    full = await subs.collect_completion(subs.responses_events_to_chunks(_lines(events), model="m"), model="m")
+    assert full["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"] == '{"path":"file"}'
+
+
 def test_grok_version_is_the_mounted_cli_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     home = tmp_path / "grok"
     blob = home / "downloads" / "grok-1.2.3-linux-x86_64"

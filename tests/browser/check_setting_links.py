@@ -9,7 +9,7 @@ At 1440 × 900 and on a 390 px phone, in English and Russian:
 - the toast's button opens Settings → Limits, where the summary model's row is in view and blinks
   (it carries the highlight class), and the address no longer names the row afterwards;
 - the conversation's warning opens Settings → Models with the vision model's row in view and blinking;
-- the fallback switch sits on the models page, on by default.
+- the auxiliary fallback stays separate, and automatic session fallback is off until switched on.
 
 Exit 0 when every step holds.
 """
@@ -23,7 +23,7 @@ from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app, setting_notice_frame, setting_refusal  # noqa: E402
-from screenshots import S2, UNHANDLED, respond, stub  # noqa: E402
+from screenshots import S2, SETTINGS, UNHANDLED, respond, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -36,6 +36,13 @@ GO = {"en": "Go to setting", "ru": "К настройке"}
 def route(r) -> None:  # type: ignore[no-untyped-def]
     path = r.request.url.split("?", 1)[0]
     rel = path[path.index("/api/"):]
+    if rel == "/api/settings/validate":
+        return respond(r, {"valid": True, "stale": False, "problems": []})
+    if rel == "/api/settings":
+        settings = {**SETTINGS, "revision": "browser-check"}
+        if r.request.method == "PUT":
+            settings["model"] = {**SETTINGS["model"], **r.request.post_data_json.get("model", {})}
+        return respond(r, settings)
     if rel == "/api/commands":
         return respond(r, COMMANDS)
     if rel == f"/api/sessions/{S2}/stream":
@@ -143,6 +150,14 @@ def run(browser, lang: str, viewport: dict, problems: list[str], **context) -> N
     print(f"{where} fallback switch: {checked}")
     if checked != "true":
         say(f"the fallback switch is not on by default: {checked}")
+    automatic = page.locator('[data-setting="model.auto_fallback"] [role=switch], [data-setting="model.auto_fallback"] input[type=checkbox]').first
+    automatic_checked = automatic.get_attribute("aria-checked") or str(automatic.is_checked()).lower()
+    if automatic_checked != "false":
+        say(f"automatic session fallback is not off by default: {automatic_checked}")
+    with page.expect_request(lambda request: request.url.split("?", 1)[0].endswith("/api/settings") and request.method == "PUT") as saved:
+        automatic.click()
+    if saved.value.post_data_json.get("model") != {"auto_fallback": True}:
+        say(f"the switch saved the wrong model patch: {saved.value.post_data_json.get('model')}")
     widths = page.evaluate("[document.documentElement.scrollWidth, document.documentElement.clientWidth]")
     if widths[0] > widths[1]:
         say(f"the page scrolls sideways: {widths}")

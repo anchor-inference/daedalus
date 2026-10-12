@@ -204,6 +204,19 @@ def test_the_fallback_switch_is_a_setting_on_by_default(tmp_path) -> None:
         assert app.config.model.fallback_to_session is False
 
 
+def test_automatic_model_fallback_defaults_off_and_saves_its_opt_in(tmp_path) -> None:
+    assert RuntimeConfig().model.auto_fallback is False
+    assert RuntimeConfig.model_validate({"model": {"preset": "", "chain": ["standby"]}}).model.auto_fallback is False
+    app = FakeApp(tmp_path, native=True)
+    app.config.model.auto_fallback = False
+    with TestClient(build_app(app, "tok")) as client:
+        view = client.get("/api/settings", headers=HEAD).json()
+        assert view["model"]["auto_fallback"] is False
+        saved = client.put("/api/settings", headers=HEAD, json={"base_revision": view["revision"], "model": {"auto_fallback": True}})
+        assert saved.status_code == 200 and saved.json()["model"]["auto_fallback"] is True
+        assert app.config.model.auto_fallback is True
+
+
 class _Blobs:
     async def put(self, tenant: str, data: bytes, *, content_type: str) -> Any:
         return SimpleNamespace(ref="blob-1")

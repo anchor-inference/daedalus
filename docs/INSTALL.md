@@ -257,7 +257,7 @@ and the two-line summary section 8 asks for. Never paste keys or tokens back int
 
 ## Models and keys
 
-Providers are OpenAI-compatible endpoints (DeepSeek, OpenRouter, a self-hosted vLLM, anything else) with their own base URL, key and timeout; **presets** on top of them name a model with its thinking mode, effort, image support, context window and output cap. One preset is the default, others are fallbacks, any session can switch. Speech-to-text and the vision model pick a provider the same way.
+Providers are OpenAI-compatible endpoints (DeepSeek, OpenRouter, a self-hosted vLLM, anything else) with their own base URL, key and timeout; **presets** on top of them name a model with its thinking mode, effort, image support, context window and output cap. One preset is the default; any session can switch. Automatic use of configured fallback presets is off until enabled in Settings → Models. Temporary failures can still retry on the selected model. Speech-to-text and the vision model pick a provider the same way.
 
 **llama.cpp** is a first-class self-hosted provider. Add a `llamacpp` endpoint such as `http://127.0.0.1:8080/v1` or `http://<host>:<port>/v1`; no key is needed unless the server was started with one. Daedalus reads `/props` and `/v1/models` to prefill the model id, context window and image support, and reports tool support, slots, build and sleep state in the doctor. Older servers and proxies that expose only `/v1` still work: whatever they do not publish stays editable. Calls run on your hardware, are recorded at zero cost, and never consume a spending cap.
 

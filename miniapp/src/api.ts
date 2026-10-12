@@ -1421,7 +1421,7 @@ export type Preset = {
 
 export type Settings = {
   revision: string;
-  model: { preset: string; chain: string[]; fallback_to_session?: boolean };
+  model: { preset: string; chain: string[]; auto_fallback: boolean; fallback_to_session?: boolean };
   presets: Record<string, Preset>;
   /** What each preset left to its model does with the tool groups on demand, as the host knows the model. */
   on_demand_defaults?: Record<string, boolean>;

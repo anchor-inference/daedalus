@@ -337,6 +337,7 @@ async def responses_events_to_chunks(lines: AsyncIterator[str], *, model: str) -
     """
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     calls: dict[str, int] = {}
+    arguments: dict[int, str] = {}
     finish = "stop"
     usage: dict[str, Any] | None = None
     failed: str | None = None
@@ -369,8 +370,25 @@ async def responses_events_to_chunks(lines: AsyncIterator[str], *, model: str) -
                 finish = "tool_calls"
         elif kind == "response.function_call_arguments.delta" and event.get("delta"):
             index = calls.get(str(event.get("item_id")), len(calls) - 1 if calls else 0)
+            arguments[index] = arguments.get(index, "") + event["delta"]
             spoke = True
             yield _chunk(completion_id, model, {"tool_calls": [{"index": index, "function": {"arguments": event["delta"]}}]})
+        elif kind in ("response.function_call_arguments.done", "response.output_item.done"):
+            item = event.get("item") or {}
+            if kind == "response.function_call_arguments.done" or item.get("type") == "function_call":
+                index = calls.get(str(event.get("item_id") or item.get("id")))
+                final = event.get("arguments") if kind == "response.function_call_arguments.done" else item.get("arguments")
+                if index is not None and isinstance(final, str):
+                    current = arguments.get(index, "")
+                    if final.startswith(current) and len(final) > len(current):
+                        # Some Codex streams put the complete arguments only on the final item.
+                        # Preserve streamed deltas, then fill in the missing suffix exactly once.
+                        missing = final[len(current):]
+                        arguments[index] = final
+                        if final != "{}":
+                            logger.warning("Codex function call %d omitted %d streamed argument characters; recovered from final item", index, len(missing))
+                        spoke = True
+                        yield _chunk(completion_id, model, {"tool_calls": [{"index": index, "function": {"arguments": missing}}]})
         elif kind == "response.completed":
             usage = responses_usage((event.get("response") or {}).get("usage") or {})
             status = (event.get("response") or {}).get("status")
