@@ -36,9 +36,11 @@ H = {"X-Daedalus-Token": "tok"}
 class Install:
     """A running installation with no model in it, and the four ways in wired to the same config."""
 
-    def __init__(self, settings: Settings, db: Database, manager: SessionManager, front: TelegramFront, client: httpx.AsyncClient) -> None:
-        self.settings, self.db, self.manager, self.front, self.client = settings, db, manager, front, client
+    def __init__(self, settings: Settings, db: Database, manager: SessionManager, front: TelegramFront, api_app: SimpleNamespace) -> None:
+        self.settings, self.db, self.manager, self.front = settings, db, manager, front
         self.config = manager.config
+        self._api_app = api_app
+        self._client: httpx.AsyncClient | None = None
         self.app = SimpleNamespace(
             settings=settings,
             config=manager.config,
@@ -51,6 +53,23 @@ class Install:
             create_session=manager.create_session,
         )
         self.app.notifications = NotificationService(db, manager.bus)
+
+    @property
+    def client(self) -> httpx.AsyncClient:
+        """The HTTP API, built the first time an entry point asks for it.
+
+        Building the application registers some six hundred routes and costs about a second; only
+        the API entry points use it, and the other fifteen cases each paid for it in their setup.
+        Nothing the routes register touches the manager, so the other entry points see the same
+        installation whether or not it was built.
+        """
+        if self._client is None:
+            self._client = httpx.AsyncClient(transport=httpx.ASGITransport(app=build_app(self._api_app, "tok")), base_url="http://test")  # type: ignore[arg-type]
+        return self._client
+
+    async def aclose(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
 
     async def _save(self, config: RuntimeConfig) -> None:
         self.app.config = config
@@ -84,8 +103,9 @@ async def install(settings: Settings, db: Database) -> Any:
         manager.reload_config(cfg)
 
     api_app = SimpleNamespace(settings=settings, config=config, db=db, manager=manager, front=None, extensions={}, guard=None, create_session=manager.create_session, save_config=save_config)
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=build_app(api_app, "tok")), base_url="http://test") as client:  # type: ignore[arg-type]
-        yield Install(settings, db, manager, front, client)
+    installation = Install(settings, db, manager, front, api_app)
+    yield installation
+    await installation.aclose()
     await manager.close()
 
 

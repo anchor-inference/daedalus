@@ -138,6 +138,11 @@ async def chain(settings: Settings, db: Database, tmp_path: Path) -> AsyncIterat
         pytest.skip("a host folder is out of reach only in a container installation")
     model = Routed()
     r.manager.providers.rungs_for = lambda config, preset=None: [(model, "scripted-model")]  # type: ignore[method-assign]
+    # Reports reach both orchestrators as routine wake-ups, which wait out a batching window first:
+    # ten seconds for the main one, twenty for a project's. The chain is about where a file goes, not
+    # about batching, and at the shipped windows it spent most of its run time waiting them out.
+    r.manager.config.dispatcher.batch_seconds = 1
+    r.manager.config.orchestrator.batch_seconds = 1
     app = r.team.app
     dispatches = Dispatches(app)
     app.extensions["dispatches"] = dispatches

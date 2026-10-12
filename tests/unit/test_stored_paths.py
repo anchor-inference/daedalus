@@ -20,6 +20,7 @@ import pytest
 from daedalus import doctor
 from daedalus.config import RuntimeConfig, Settings
 from daedalus.extensions import install_all
+from daedalus.extensions import services as services_module
 from daedalus.extensions.notifications import NotificationService
 from daedalus.extensions.recurring import Recurring
 from daedalus.extensions.scheduler import Scheduler
@@ -49,8 +50,11 @@ async def _stranded_row(app: Any, services: Services, *, owner: str, name: str, 
     )
 
 
-async def test_a_service_pointing_into_another_sessions_folder_is_reported_not_fatal(app: Any) -> None:
+async def test_a_service_pointing_into_another_sessions_folder_is_reported_not_fatal(app: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """Today's shape exactly: the row is left dead with both paths, the other services still start."""
+    # The healthy service is meant to stay up, so the start's grace for a broken command is not
+    # under test here; at its full length it was three of the test's seconds over two starts.
+    monkeypatch.setattr(services_module, "START_GRACE_SECONDS", 0.05)
     neighbour = await app.manager.create_session("the site")
     owner = await app.manager.create_session("serve it on the network")
     (neighbour.workspace / "test-site").mkdir(parents=True, exist_ok=True)

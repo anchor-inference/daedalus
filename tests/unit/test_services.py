@@ -13,6 +13,7 @@ from daedalus.extensions.services import Services, parse_range, pid_alive
 from daedalus.host.session_runner import SessionManager
 from daedalus.stores.database import Database
 from tests.support.notifications import RecordingNotifications
+from tests.support.waiting import until_await
 
 
 @pytest.fixture
@@ -27,12 +28,26 @@ async def app(settings: Settings, db: Database) -> Any:
     await manager.close()
 
 
+@pytest.fixture
+def brief_start_grace(monkeypatch: pytest.MonkeyPatch) -> None:
+    """For tests whose services are meant to stay up: the start's grace is not what they test.
+
+    Every start waits a second and a half to tell a broken command from a service, and the tests
+    that start two or three long-running services sat through all of it. A command that is meant
+    to die is still judged with the full grace, in the test about exactly that.
+    """
+    from daedalus.extensions import services as services_module
+
+    monkeypatch.setattr(services_module, "START_GRACE_SECONDS", 0.05)
+
+
 def test_port_range_parsing() -> None:
     assert parse_range("8100-8119") == (8100, 8119) and parse_range("9000") == (9000, 9000)
     with pytest.raises(ValueError):
         parse_range("9-1")
 
 
+@pytest.mark.usefixtures("brief_start_grace")
 async def test_service_runs_detached_with_a_port_and_a_log(app: Any) -> None:
     services = Services(app)
     state = await app.manager.create_session("host")
@@ -40,6 +55,8 @@ async def test_service_runs_detached_with_a_port_and_a_log(app: Any) -> None:
     s = await services.start(sid, name="Web Demo", command='echo "up on $PORT"; python3 -c "import time; print(\'serving\', flush=True); time.sleep(30)"')
     assert s["name"] == "web-demo" and s["status"] == "running" and 18100 <= s["port"] <= 18103
     assert s["url"] == f"http://10.0.0.5:{s['port']}" and pid_alive(s["pid"])
+    # The grace no longer gives the command time to print, so the test waits for the log itself.
+    await until_await(lambda: _logged(services, sid, "web-demo", "serving"), "the service wrote to its log")
     assert "serving" in await services.logs(sid, "web-demo") and f"up on {s['port']}" in await services.logs(sid, "web-demo")
     with pytest.raises(ValueError, match="already running"):
         await services.start(sid, name="web-demo", command="sleep 5")
@@ -53,6 +70,10 @@ async def test_service_runs_detached_with_a_port_and_a_log(app: Any) -> None:
     assert await services.stop_all(sid) == 1 and await services.list(sid) == []
 
 
+async def _logged(services: Services, session_id: str, name: str, text: str) -> bool:
+    return text in await services.logs(session_id, name)
+
+
 async def test_a_command_that_dies_at_once_is_reported_with_its_log(app: Any) -> None:
     services = Services(app)
     state = await app.manager.create_session("host")
@@ -63,6 +84,7 @@ async def test_a_command_that_dies_at_once_is_reported_with_its_log(app: Any) ->
         await services.start(state.session.id, name="p", command="sleep 5", port=1)
 
 
+@pytest.mark.usefixtures("brief_start_grace")
 async def test_reconcile_restarts_or_reports_after_a_rebuild(app: Any) -> None:
     services = Services(app)
     state = await app.manager.create_session("host")
@@ -81,6 +103,7 @@ async def test_reconcile_restarts_or_reports_after_a_rebuild(app: Any) -> None:
     await asyncio.sleep(0)
 
 
+@pytest.mark.usefixtures("brief_start_grace")
 async def test_sharing_mints_a_slug_once_and_a_key_only_for_key_mode(app: Any) -> None:
     app.settings.miniapp_public_url = "https://daedalus.example.com/app/"
     services = Services(app)
@@ -107,6 +130,7 @@ async def test_sharing_mints_a_slug_once_and_a_key_only_for_key_mode(app: Any) -
     await services.stop_all(sid)
 
 
+@pytest.mark.usefixtures("brief_start_grace")
 async def test_a_service_without_a_port_cannot_be_shared(app: Any) -> None:
     services = Services(app)
     state = await app.manager.create_session("host")

@@ -20,8 +20,12 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import select
 import signal
+import socket
 import sys
+import threading
+import time
 from typing import Any
 
 import pytest
@@ -174,11 +178,8 @@ async def test_a_call_held_past_its_wait_is_answered_once_as_a_message(settings:
         async def delivered() -> bool:
             return any("the left one" in e["text"] for e in read_log(s.log) if e["event"] == "submitted")
 
-        await asyncio.sleep(3)
-        sess = s.runtime.sessions[(await s.session_row(ada)).id]
-        print("STATUSES", [(e.payload["status"], e.payload.get("waiting_for")) for e in await s.events("staff.status", staff_id=ada.id)])
-        print("SESSION", sess.open, sess.worker.waiting, sess.worker.inflight, sess.turn_ended_waiting)
-        print("SCREEN", await sess.term.screen())
+        # A fixed three-second sleep and a dump of the session's state used to stand here, left from
+        # chasing this test once; the wait below already gives the delivery all the time it needs.
         await eventually(delivered, "the answer was delivered as a message")
         told = [e["text"] for e in read_log(s.log) if e["event"] == "submitted" and "the left one" in e["text"]]
         assert len(told) == 1 and told[0].startswith("[the orchestrator answers your question]")
@@ -196,8 +197,10 @@ async def test_a_caller_that_gave_up_gets_the_answer_as_a_message(settings: Any,
         launch = await HarnessStore(db).open_launch_for((await s.session_row(ada)).id)
         assert launch is not None
         body = {"tool": "ask", "question": QUESTION, "options": [], "call_id": f"{launch.launch_id}:beef:1"}
-        gave_up = asyncio.create_task(asyncio.to_thread(post_giving_up, s, launch.launch_id, body))
+        give_up = threading.Event()
+        gave_up = asyncio.create_task(asyncio.to_thread(post_giving_up, s, launch.launch_id, body, give_up))
         ask = await the_open_question(s, ada.id)
+        give_up.set()
         await gave_up
         await asyncio.sleep(0.3)
         await s.team.answer(ask.short_id, text="the left one", by="orchestrator")
@@ -210,22 +213,25 @@ async def test_a_caller_that_gave_up_gets_the_answer_as_a_message(settings: Any,
         await eventually(delivered, "the answer was delivered as a message")
 
 
-def post_giving_up(s: Stand, launch_id: str, body: dict[str, Any]) -> None:
-    """A team post held for a minute whose caller stops waiting after two seconds."""
-    import urllib.request
+def post_giving_up(s: Stand, launch_id: str, body: dict[str, Any], give_up: threading.Event) -> None:
+    """A team post held for a minute whose caller stops waiting once ``give_up`` is set.
 
+    It gave up on a two-second timer before, which held every run for those two seconds although
+    the host had the question open in a fraction of one; the test now says when, after the question
+    is open, which is the order the timer only made likely."""
     launch = s.ptyd.launches[launch_id]
-    request = urllib.request.Request(
-        f"http://127.0.0.1:{s.ptyd.hook_port}/hook/{launch_id}/team?wait_ms=60000",
-        data=json.dumps(body).encode(),
-        method="POST",
-        headers={"Authorization": f"Bearer {launch.token}", "Content-Type": "application/json"},
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=2):
-            raise AssertionError("the post was answered before anyone answered it")
-    except TimeoutError:
-        pass
+    data = json.dumps(body).encode()
+    head = (f"POST /hook/{launch_id}/team?wait_ms=60000 HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+            f"Authorization: Bearer {launch.token}\r\nContent-Type: application/json\r\n"
+            f"Content-Length: {len(data)}\r\nConnection: close\r\n\r\n")
+    with socket.create_connection(("127.0.0.1", s.ptyd.hook_port), timeout=10) as connection:
+        connection.sendall(head.encode() + data)
+        deadline = time.monotonic() + 30
+        while not give_up.is_set():
+            assert time.monotonic() < deadline, "nobody said to give up"
+            readable, _, _ = select.select([connection], [], [], 0.05)
+            if readable:
+                raise AssertionError("the post was answered before anyone answered it")
 
 
 async def test_a_replayed_post_after_its_answer_opens_nothing_new(settings: Any, db: Database) -> None:

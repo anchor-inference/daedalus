@@ -570,7 +570,10 @@ async def test_a_long_message_goes_as_a_file_in_the_launch(settings: Settings, d
 
 
 async def test_a_dialog_that_takes_a_paste_gets_no_enter_and_the_message_waits(settings: Settings, db: Database) -> None:
-    async with stand(settings, db, extra_env={"FAKE_CLI_FAULTS": "dialog_during_paste"}, answer_confirm_s=1.0, **claude()) as s:
+    # The person's Esc below holds the keyboard for the daemon's idle window before the message may go;
+    # at the default ten seconds that window was most of this test's run time, and its length is not
+    # what the test is about.
+    async with stand(settings, db, extra_env={"FAKE_CLI_FAULTS": "dialog_during_paste"}, answer_confirm_s=1.0, input_idle_ms=1500, **claude()) as s:
         trust(s)
         ada = await started(s, "echo:ready")
         await s.status_event(ada, "turn_done_unseen")
@@ -664,18 +667,27 @@ async def test_a_team_call_seen_twice_is_acted_on_once(settings: Settings, db: D
         assert [r.payload["kind"] for r in await s.events("staff.report", staff_id=ada.id) if not r.payload.get("implicit")] == ["checkpoint"]
         # The same question asked twice while the first is open is one request, answered to the newest post.
         ask = {"tool": "ask", "question": "Which oven?", "options": ["left", "right"]}
-        asks = [asyncio.create_task(asyncio.to_thread(post, s, launch.launch_id, "team", {**ask, "call_id": f"{launch.launch_id}:cafe:{n}"}, wait_ms=20_000)) for n in (2, 3)]
+        asks = {f"{launch.launch_id}:cafe:{n}": asyncio.create_task(asyncio.to_thread(post, s, launch.launch_id, "team", {**ask, "call_id": f"{launch.launch_id}:cafe:{n}"}, wait_ms=20_000)) for n in (2, 3)}
         await s.status_event(ada, "question")
 
+        def held_asks() -> list[str]:
+            return [e["data"]["body"]["call_id"] for e in s.ptyd.events if e["type"] == "hook" and e["data"].get("name") == "team" and e["data"]["body"].get("tool") == "ask"]
+
         async def both_held() -> bool:
-            return sum(1 for e in s.ptyd.events if e["type"] == "hook" and e["data"].get("name") == "team" and e["data"]["body"].get("tool") == "ask") == 2
+            return len(held_asks()) == 2
 
         await eventually(both_held, "both questions reached the host")
         await asyncio.sleep(0.3)
         [open_ask] = await s.manager.asks.open_for(s.project.id)
         await s.team.answer(open_ask.short_id, text="the left one", by="orchestrator")
-        answers = sorted([await t for t in asks], key=lambda r: str(r[1]))
-        assert answers[-1] == (200, {"text": "the left one"})
+        older, newest = held_asks()
+        assert await asks[newest] == (200, {"text": "the left one"})
+        # The older post is still held by the daemon. Awaiting it here once cost the whole 20 second
+        # hold on every run; the daemon releases it when the stand stops, and it must not have been
+        # given the answer as well.
+        assert not asks[older].done()
+    stale = await asks[older]
+    assert stale[0] != 200 and stale[1] is None
 
 
 async def test_a_team_report_carries_the_members_confirmations_and_evidence_to_the_host(settings: Settings, db: Database) -> None:
@@ -824,9 +836,14 @@ async def test_a_next_task_brief_claude_collapsed_is_acknowledged_by_its_hook(se
 
         async def new_session() -> bool:
             current = await s.manager.staff.live(ada.id)
-            return current is not None and current.id != first.id and current.task_id == next_id
+            if current is None or current.id == first.id or current.task_id != next_id:
+                return False
+            return any(m.staff_session_id == current.id for m in await s.manager.staff.messages(ada.id))
 
-        await eventually(new_session, "the new task's resumed session")
+        # The start claims the new session row first and records its brief only after pinning the
+        # context and composing the brief, several awaits later. Waiting for the session alone let
+        # the newest message still be the first task's brief now and then, and the check below failed.
+        await eventually(new_session, "the new task's resumed session and its brief")
         brief = (await s.manager.staff.messages(ada.id))[0]
         assert brief.origin == "operator" and f"[task {next_id} · assigned by the operator]" in brief.text
         assert all(f"{part}:" in brief.text for part in ("Objective", "Deliverable", "Boundaries", "Done when"))

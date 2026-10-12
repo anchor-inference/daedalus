@@ -7,7 +7,10 @@ import shlex
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from daedalus.config import Settings
+from daedalus.extensions import services as services_module
 from daedalus.extensions.services import Services, pid_alive
 from daedalus.host.session_runner import SessionManager
 from daedalus.stores.database import Database
@@ -105,8 +108,11 @@ async def test_an_empty_setup_command_runs_nothing(settings: Settings, db: Datab
         await manager.close()
 
 
-async def test_releasing_a_worker_stops_the_services_its_session_started(settings: Settings, db: Database, tmp_path: Path) -> None:
+async def test_releasing_a_worker_stops_the_services_its_session_started(settings: Settings, db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     settings.services_port_range = "18140-18143"
+    # Both services are meant to stay up, so the start's grace for a broken command is not under
+    # test here; at its full length it was three of the test's seconds over the two starts.
+    monkeypatch.setattr(services_module, "START_GRACE_SECONDS", 0.05)
     manager, team, runtime, project = await fake_team(settings, db, tmp_path)
     try:
         app: Any = team.app

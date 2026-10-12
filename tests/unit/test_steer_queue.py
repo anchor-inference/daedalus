@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
+import shlex
 from types import SimpleNamespace
 from typing import Any
 
@@ -87,26 +88,64 @@ def _watch(manager: SessionManager) -> list[dict[str, Any]]:
     return seen
 
 
+def _held_tool(settings: Settings) -> dict[str, Any]:
+    """An Exec call that keeps the run inside its tool until the test lets it go.
+
+    These tests used to hold the run with ``sleep 3``: every test that let the run finish waited
+    out the whole three seconds, and on a loaded machine the requests made inside that window could
+    outlast it and meet a run that had already moved on. The tool now ends when the test creates
+    the gate file, so it is held exactly as long as the test needs it. The loop gives up after
+    thirty seconds so a run a test abandons by closing the manager cannot leave a command polling.
+    """
+    gate = shlex.quote(str(settings.state_dir / "release-the-tool"))
+    return {"tool": "Exec", "args": {"command": f"for _ in $(seq 600); do [ -e {gate} ] && exit 0; sleep 0.05; done"}}
+
+
+async def _start_in_tool(manager: SessionManager, session_id: str) -> None:
+    """Submit the opening message and return once the run is inside its held tool.
+
+    A fixed ``sleep(0.3)`` stood here: a guess that was waste on a quiet machine and could be too
+    short on a busy one, where the run had not reached its tool when the test began steering.
+    """
+    started = asyncio.Event()
+
+    async def sink(sid: str, event: Any) -> None:
+        if sid == session_id and getattr(event.type, "value", "") == "tool_use_start":
+            started.set()
+
+    manager.add_sink(sink)
+    await manager.submit(session_id, "start")
+    await asyncio.wait_for(started.wait(), timeout=30)
+
+
 async def _await_run(manager: SessionManager) -> None:
+    """Let the held tool finish, if there is one, and wait for the run to end.
+
+    It takes only the manager because test_operator_messages shares it, with tools of its own that
+    no gate holds; for those the gate is a file nothing looks at.
+    """
     done = asyncio.Event()
 
     async def on_finished(session_id: str, run_id: str, status: str) -> None:
         done.set()
 
+    # Registered before the gate opens, so a run that ends at once is still heard.
     manager.on_finished(on_finished)
+    gate = manager.settings.state_dir / "release-the-tool"
+    gate.parent.mkdir(parents=True, exist_ok=True)
+    gate.touch()
     await asyncio.wait_for(done.wait(), timeout=30)
 
 
 async def test_a_steer_is_listed_while_it_waits_and_can_be_taken_back(settings: Settings, db: Database) -> None:
-    provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "sleep 3"}}, {"text": "done"}])
+    provider = ScriptedProvider([_held_tool(settings), {"text": "done"}])
     manager = await _manager(settings, db, provider)
     changes = _watch(manager)
     state = await manager.create_session("steered")
     sid = state.session.id
     async with _client(settings, db, manager) as client:
         assert (await client.get(f"/api/sessions/{sid}/steer", headers=H)).json() == []
-        await manager.submit(sid, "start")
-        await asyncio.sleep(0.3)
+        await _start_in_tool(manager, sid)
         assert state.running
 
         posted = await client.post(f"/api/sessions/{sid}/messages", json={"text": "also look at the log", "steer": True}, headers=H)
@@ -130,13 +169,12 @@ async def test_a_steer_is_listed_while_it_waits_and_can_be_taken_back(settings: 
 
 
 async def test_a_retried_input_returns_one_receipt_and_one_queue_item(settings: Settings, db: Database) -> None:
-    provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "sleep 3"}}, {"text": "done"}])
+    provider = ScriptedProvider([_held_tool(settings), {"text": "done"}])
     manager = await _manager(settings, db, provider)
     state = await manager.create_session("deduplicated")
     sid = state.session.id
     async with _client(settings, db, manager) as client:
-        await manager.submit(sid, "start")
-        await asyncio.sleep(0.3)
+        await _start_in_tool(manager, sid)
         body = {"text": "read this once", "steer": True, "client_message_id": "70a4b61b-cce4-4515-9100-f53340f9b01c"}
         first = await client.post(f"/api/sessions/{sid}/messages", json=body, headers=H)
         repeated = await client.post(f"/api/sessions/{sid}/messages", json=body, headers=H)
@@ -211,15 +249,14 @@ async def test_a_retried_upload_keeps_one_file_and_one_message(settings: Setting
 
 
 async def test_explicit_delivery_keeps_queue_and_upload_intents_distinct(settings: Settings, db: Database) -> None:
-    provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "sleep 3"}}, {"text": "done"}])
+    provider = ScriptedProvider([_held_tool(settings), {"text": "done"}])
     manager = await _manager(settings, db, provider)
     state = await manager.create_session("explicit delivery")
     sid = state.session.id
     async with _client(settings, db, manager) as client:
         premature = await client.post(f"/api/sessions/{sid}/messages", json={"text": "later", "follow_up": True, "expected_running": True}, headers=H)
         assert premature.status_code == 409
-        await manager.submit(sid, "start")
-        await asyncio.sleep(0.3)
+        await _start_in_tool(manager, sid)
         assert state.running
         queued = await client.post(f"/api/sessions/{sid}/messages", json={"text": "later", "follow_up": True, "expected_running": True, "client_message_id": "later-1"}, headers=H)
         assert queued.status_code == 200 and queued.json()["receipt"]["status"] == "queued"
@@ -236,14 +273,13 @@ async def test_explicit_delivery_keeps_queue_and_upload_intents_distinct(setting
 
 
 async def test_a_steer_the_run_has_read_is_gone_from_the_queue_and_cannot_be_withdrawn(settings: Settings, db: Database) -> None:
-    provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "sleep 1"}}, {"text": "first"}, {"text": "second"}])
+    provider = ScriptedProvider([_held_tool(settings), {"text": "first"}, {"text": "second"}])
     manager = await _manager(settings, db, provider)
     changes = _watch(manager)
     state = await manager.create_session("steered")
     sid = state.session.id
     async with _client(settings, db, manager) as client:
-        await manager.submit(sid, "start")
-        await asyncio.sleep(0.3)
+        await _start_in_tool(manager, sid)
         assert state.running
         await manager.submit(sid, "and also this", steer=True)
         item_id = (await client.get(f"/api/sessions/{sid}/steer", headers=H)).json()[0]["id"]
@@ -282,12 +318,11 @@ async def test_the_queue_endpoints_answer_for_a_session_and_only_to_a_caller_wit
 @pytest.mark.parametrize("kind", ["steer"])
 async def test_the_id_the_app_holds_is_the_id_the_store_wrote(settings: Settings, db: Database, kind: str) -> None:
     """The card's ``×`` quotes an id back, so it has to be the one the persist path keeps."""
-    provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "sleep 3"}}, {"text": "done"}])
+    provider = ScriptedProvider([_held_tool(settings), {"text": "done"}])
     manager = await _manager(settings, db, provider)
     state = await manager.create_session("ids")
     sid = state.session.id
-    await manager.submit(sid, "start")
-    await asyncio.sleep(0.3)
+    await _start_in_tool(manager, sid)
     await manager.submit(sid, "one", steer=True)
     await manager.submit(sid, "two", steer=True)
     listed = await manager.queued_input(sid)
@@ -300,13 +335,12 @@ async def test_the_id_the_app_holds_is_the_id_the_store_wrote(settings: Settings
 
 async def test_a_steer_queued_after_the_round_read_the_queue_survives_the_round(settings: Settings, db: Database) -> None:
     """The round writes back what it is holding, and what arrived behind its back is still waiting."""
-    provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "sleep 3"}}, {"text": "done"}])
+    provider = ScriptedProvider([_held_tool(settings), {"text": "done"}])
     manager = await _manager(settings, db, provider)
     changes = _watch(manager)
     state = await manager.create_session("racing")
     sid = state.session.id
-    await manager.submit(sid, "start")
-    await asyncio.sleep(0.3)
+    await _start_in_tool(manager, sid)
     engine = state.engine
     assert engine is not None
 
@@ -331,12 +365,11 @@ async def test_a_steer_queued_after_the_round_read_the_queue_survives_the_round(
 
 
 async def test_a_withdrawn_steer_is_not_brought_back_by_a_reload_that_raced_it(settings: Settings, db: Database) -> None:
-    provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "sleep 3"}}, {"text": "done"}])
+    provider = ScriptedProvider([_held_tool(settings), {"text": "done"}])
     manager = await _manager(settings, db, provider)
     state = await manager.create_session("withdrawn")
     sid = state.session.id
-    await manager.submit(sid, "start")
-    await asyncio.sleep(0.3)
+    await _start_in_tool(manager, sid)
     engine = state.engine
     assert engine is not None
     await engine.reload_live_control(engine)
@@ -382,14 +415,13 @@ async def test_a_change_event_carries_cards_and_the_true_count(settings: Setting
 
 
 async def test_a_follow_up_waits_as_a_card_and_can_be_turned_into_a_steer(settings: Settings, db: Database) -> None:
-    provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "sleep 3"}}, {"text": "done"}])
+    provider = ScriptedProvider([_held_tool(settings), {"text": "done"}])
     manager = await _manager(settings, db, provider)
     changes = _watch(manager)
     state = await manager.create_session("steer a follow-up")
     sid = state.session.id
     async with _client(settings, db, manager) as client:
-        await manager.submit(sid, "start")
-        await asyncio.sleep(0.3)
+        await _start_in_tool(manager, sid)
         assert state.running
         body = {"text": "check the log too", "follow_up": True, "expected_running": True, "client_message_id": "later-1"}
         assert (await client.post(f"/api/sessions/{sid}/messages", json=body, headers=H)).status_code == 200
@@ -421,13 +453,12 @@ async def test_a_follow_up_waits_as_a_card_and_can_be_turned_into_a_steer(settin
 
 
 async def test_a_follow_up_the_engine_holds_is_steered_once_even_past_a_stale_reload(settings: Settings, db: Database) -> None:
-    provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "sleep 3"}}, {"text": "done"}])
+    provider = ScriptedProvider([_held_tool(settings), {"text": "done"}])
     manager = await _manager(settings, db, provider)
     changes = _watch(manager)
     state = await manager.create_session("held")
     sid = state.session.id
-    await manager.submit(sid, "start")
-    await asyncio.sleep(0.3)
+    await _start_in_tool(manager, sid)
     engine = state.engine
     assert engine is not None
     await manager.submit(sid, "after this", follow_up=True)
@@ -461,13 +492,12 @@ async def test_a_follow_up_the_engine_holds_is_steered_once_even_past_a_stale_re
 
 async def test_a_steered_follow_up_the_round_places_takes_its_card_away(settings: Settings, db: Database) -> None:
     """Once the run reads a message the operator steered, the app is told its card is gone."""
-    provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "sleep 3"}}, {"text": "done"}])
+    provider = ScriptedProvider([_held_tool(settings), {"text": "done"}])
     manager = await _manager(settings, db, provider)
     changes = _watch(manager)
     state = await manager.create_session("steered and read")
     sid = state.session.id
-    await manager.submit(sid, "start")
-    await asyncio.sleep(0.3)
+    await _start_in_tool(manager, sid)
     engine = state.engine
     assert engine is not None
     await manager.submit(sid, "cheaper, please", follow_up=True)
@@ -486,12 +516,11 @@ async def test_a_steered_follow_up_the_round_places_takes_its_card_away(settings
 
 
 async def test_a_follow_up_the_run_is_placing_cannot_be_steered(settings: Settings, db: Database) -> None:
-    provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "sleep 3"}}, {"text": "done"}])
+    provider = ScriptedProvider([_held_tool(settings), {"text": "done"}])
     manager = await _manager(settings, db, provider)
     state = await manager.create_session("placing")
     sid = state.session.id
-    await manager.submit(sid, "start")
-    await asyncio.sleep(0.3)
+    await _start_in_tool(manager, sid)
     engine = state.engine
     assert engine is not None
     await manager.submit(sid, "after this", follow_up=True)
@@ -552,13 +581,12 @@ async def test_a_screenshot_sent_while_the_agent_works_waits_with_its_message_an
     # write tried to sync its directory. Once that passed, the queued item still carried only words,
     # so the model was told a path and never shown the picture.
     _behave_like_windows(monkeypatch)
-    provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "sleep 2"}}, {"text": "done"}, {"text": "looked"}])
+    provider = ScriptedProvider([_held_tool(settings), {"text": "done"}, {"text": "looked"}])
     manager = await _manager(settings, db, provider)
     state = await manager.create_session("screenshot during a run")
     sid = state.session.id
     async with _client(settings, db, manager) as client:
-        await manager.submit(sid, "start")
-        await asyncio.sleep(0.3)
+        await _start_in_tool(manager, sid)
         assert state.running
         sent = await client.post(
             f"/api/sessions/{sid}/upload",
@@ -588,13 +616,12 @@ async def test_a_screenshot_sent_while_the_agent_works_waits_with_its_message_an
 
 
 async def test_a_queued_message_with_words_and_a_file_shows_the_words_and_names_the_file(settings: Settings, db: Database) -> None:
-    provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "sleep 2"}}, {"text": "done"}, {"text": "after"}])
+    provider = ScriptedProvider([_held_tool(settings), {"text": "done"}, {"text": "after"}])
     manager = await _manager(settings, db, provider)
     state = await manager.create_session("words and a file")
     sid = state.session.id
     async with _client(settings, db, manager) as client:
-        await manager.submit(sid, "start")
-        await asyncio.sleep(0.3)
+        await _start_in_tool(manager, sid)
         sent = await client.post(
             f"/api/sessions/{sid}/upload",
             data={"text": "look at this window", "client_message_id": "shot-2", "follow_up": "true", "expected_running": "true"},

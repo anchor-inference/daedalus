@@ -12,6 +12,22 @@ from tests.support.models import model_config
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
+def pytest_collection_finish(session: pytest.Session) -> None:
+    """Take everything that exists once the tests are collected out of the collector's sight.
+
+    By then every module of the code base and of the suite is imported, which is well over a million
+    objects that live until the process ends. The cyclic collector walks all of them on every full
+    collection, and it runs one every so often for the whole of a suite that allocates constantly:
+    measured over a third of the suite, thirty-one full collections took twenty seconds between them,
+    and each one costs more as the run goes on. ``gc.freeze`` moves what exists now into a generation
+    the collector never scans; what the tests themselves allocate is collected exactly as before.
+    """
+    import gc
+
+    gc.collect()
+    gc.freeze()
+
+
 def rebuilder_at(tmp_path: Path) -> Path:
     """A trigger directory with a fresh heartbeat in it: what a running rebuilder looks like.
 
@@ -56,6 +72,63 @@ async def db(settings: Settings) -> Database:
     await database.open()
     yield database  # type: ignore[misc]
     await database.close()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def migrated_template(tmp_path_factory: pytest.TempPathFactory) -> object:
+    """Every new database in the suite starts as a copy of one migrated once, not as an empty file.
+
+    Running the hundred-odd migrations on an empty file costs about 0.2 s, and nearly every test that
+    touches the host opens a fresh database — directly, through ``DaedalusApp`` or through a session
+    manager — so the suite spent minutes replaying the same schema. The copy is made by the very same
+    ``Database.open`` on an empty path, and ``open`` still runs on the copy (pragmas, the version
+    check, ``_migrate`` finding nothing left to do), so what a test sees is byte for byte what it
+    would have built itself. The migrations on an empty database insert nothing that depends on the
+    workspaces folder or the environment, which is why one template serves every test.
+
+    The copy is skipped whenever a test has replaced ``MIGRATIONS`` (to stop at an older schema or to
+    break one step) or the path already exists (a test that built an old database by hand): those
+    tests are about migrating, and they get the real walk from wherever they start.
+    """
+    import asyncio
+    import shutil
+
+    from daedalus.stores import database as database_module
+
+    template = tmp_path_factory.mktemp("migrated-template") / "template.sqlite"
+
+    async def build() -> None:
+        database = Database(template, workspaces_dir=template.parent / "workspaces")
+        await database.open()
+        await database.close()  # the last connection closing folds the write-ahead log into the file
+
+    asyncio.run(build())
+    migrations, count = database_module.MIGRATIONS, len(database_module.MIGRATIONS)
+    real_open = Database.open
+
+    async def open_from_template(self: Database) -> None:
+        if database_module.MIGRATIONS is migrations and len(migrations) == count and not self.path.exists():
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(template, self.path)
+        await real_open(self)
+
+    Database.open = open_from_template  # type: ignore[method-assign]
+    try:
+        yield template
+    finally:
+        Database.open = real_open  # type: ignore[method-assign]
+
+
+@pytest.fixture(autouse=True)
+def no_push_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The doctor's push dry run is answered in place for every test, not sent to the remote.
+
+    It runs in a git subprocess, which the socket guard below cannot see: every test that ran the
+    doctor in server mode asked GitHub twice, about a second each. See ``tests/support/doctor.py``.
+    """
+    from tests.support.doctor import answer_the_push_probe
+
+    answer_the_push_probe(monkeypatch)
 
 
 class NetworkBlocked(OSError):

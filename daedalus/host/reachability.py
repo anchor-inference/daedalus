@@ -31,6 +31,7 @@ because nothing is loadable from them.
 from __future__ import annotations
 
 import ast
+import hashlib
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 
@@ -332,9 +333,34 @@ def imports_of(path: Path, module: str, *, is_package: bool) -> set[str]:
     interpreter never enters (``if TYPE_CHECKING:``, ``if False:``) are not walked.
     """
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    except (SyntaxError, UnicodeDecodeError):
+        source = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
         return set()
+    key = (hashlib.blake2b(source.encode(), digest_size=16).digest(), module, is_package)
+    if key not in _IMPORTS_SEEN:
+        if len(_IMPORTS_SEEN) >= IMPORTS_REMEMBERED:
+            _IMPORTS_SEEN.clear()
+        _IMPORTS_SEEN[key] = _imports_in(source, module, is_package)
+    return set(_IMPORTS_SEEN[key])
+
+
+IMPORTS_REMEMBERED = 4096
+_IMPORTS_SEEN: dict[tuple[bytes, str, bool], frozenset[str]] = {}
+"""What :func:`imports_of` found, by a digest of the file's text, its module name and its kind.
+
+Parsing and walking every file is most of what one graph costs, about a second and a half for this
+tree, and one gate builds the graph several times over the same files (the whole tree, then a path
+for each candidate). The key is a digest of the text, not the path or its timestamp, so an edit is
+always read, including one that keeps the size and the clock; and it is the digest rather than the
+text so that what is remembered is a few hundred kilobytes, not a copy of every tree ever walked.
+"""
+
+
+def _imports_in(source: str, module: str, is_package: bool) -> frozenset[str]:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return frozenset()
     importlib_names, bare_names = _import_module_bindings(tree)
     found: set[str] = set()
     for node in _live_nodes(tree):
@@ -394,7 +420,7 @@ def imports_of(path: Path, module: str, *, is_package: bool) -> set[str]:
                 found.update(
                     e.value for e in node.value.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)
                 )
-    return found
+    return frozenset(found)
 
 
 def import_graph(root: Path) -> dict[str, set[str]]:

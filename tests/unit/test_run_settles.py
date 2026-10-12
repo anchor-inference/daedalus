@@ -49,16 +49,23 @@ async def test_the_run_reports_itself_over_before_the_housekeeping_runs(settings
             stopped.append(time.perf_counter())
 
     manager.add_sink(watch)
+    # The housekeeping is held until the first announcement has been checked, instead of sleeping
+    # for SLOW: a run that announced itself only after its housekeeping would then never announce
+    # itself at all and fail the wait below, and the test no longer sits out both sleeps.
+    housekeeping_may_finish = asyncio.Event()
 
     async def slow_callback(session_id: str, run_id: str, status: str) -> None:
-        await asyncio.sleep(SLOW)
+        await housekeeping_may_finish.wait()
 
     manager.on_finished(slow_callback)
     snapshot_took = asyncio.Event()
 
-    async def slow_snapshot(*args: Any, **kwargs: Any) -> str | None:
-        await asyncio.sleep(SLOW)
-        snapshot_took.set()
+    async def slow_snapshot(st: Any, *, kind: str, seq: int | None = None, run_id: str | None = None) -> str | None:
+        # Only the snapshot after the turn is housekeeping; the one before it opens the run, which
+        # would otherwise wait for a release that only comes once the run has ended.
+        if kind == "after":
+            await housekeeping_may_finish.wait()
+            snapshot_took.set()
         return "sha"
 
     manager.checkpoint = slow_snapshot  # type: ignore[method-assign]
@@ -71,6 +78,8 @@ async def test_the_run_reports_itself_over_before_the_housekeeping_runs(settings
     assert not state.running, "the session still reads as running after it announced the end of the run"
     assert events[0].payload["housekeeping"] is True and events[0].payload["status"] == "completed"
     # …and the second one when there is nothing left to save.
+    assert len(events) == 1 and not snapshot_took.is_set()
+    housekeeping_may_finish.set()
     await asyncio.wait_for(snapshot_took.wait(), timeout=30)
     await until(lambda: len(events) >= 2, "the second settled event arrived")
     assert events[1].payload["housekeeping"] is False
@@ -100,8 +109,13 @@ async def test_the_next_run_waits_for_the_history_and_the_snapshot(settings: Set
         order.append(f"snapshot:{kind}")
         return "sha"
 
+    # The callback is held until the end rather than sleeping out twice the snapshot's time: the
+    # second run starting before it can then only mean the run never waited for it, never that a
+    # loaded host happened to run the snapshot first, and close() no longer sits out the sleep.
+    callback_may_finish = asyncio.Event()
+
     async def slow_callback(session_id: str, run_id: str, status: str) -> None:
-        await asyncio.sleep(SLOW * 2)
+        await callback_may_finish.wait()
         order.append("callback")
 
     manager._persist_history = watch_persist  # type: ignore[method-assign]
@@ -112,12 +126,17 @@ async def test_the_next_run_waits_for_the_history_and_the_snapshot(settings: Set
     await until(lambda: bool(events), "the first run announced itself settled")
     assert not state.running
     started = time.perf_counter()
-    await manager.submit(state.session.id, "two")
+    # Bounded because the callback is held: a run that waited for it would otherwise hang here.
+    try:
+        await asyncio.wait_for(manager.submit(state.session.id, "two"), timeout=30)
+    except TimeoutError:
+        raise AssertionError("the next run waited for a run-finished callback it does not depend on") from None
     order.append("submitted")
     # The second run waited for the first one's snapshot and not for its callback.
     assert order.index("persist") < order.index("snapshot:after") < order.index("submitted")
     assert "callback" not in order, "the next run waited for a run-finished callback it does not depend on"
     assert time.perf_counter() - started >= SLOW * 0.5
+    callback_may_finish.set()
     await manager.close()
 
 

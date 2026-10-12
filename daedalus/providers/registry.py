@@ -22,6 +22,7 @@ from daedalus.providers.openai_compat import (
     UsageSink,
 )
 from daedalus.providers.pricing import ModelPricing, pricing_table
+from daedalus.providers.tls import shared_context
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +102,7 @@ class ProviderRegistry:
             fresh[provider_id] = OpenAICompatibleProvider(
                 endpoint,
                 client=httpx.AsyncClient(
-                    timeout=httpx.Timeout(endpoint.timeout_seconds, connect=30.0)
+                    timeout=httpx.Timeout(endpoint.timeout_seconds, connect=30.0), verify=shared_context()
                 ),
                 usage_sink=self._usage_sink,
                 image_loader=self._image_loader,
