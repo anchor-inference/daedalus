@@ -26,7 +26,7 @@ browserd version
 | `--listen` | `unix` (a socket in the run directory), or `tcp:127.0.0.1:<port>`; on Windows `tcp:127.0.0.1:0` |
 | `--chromium` | the browser to run; see Which Chromium |
 | `--mode` | `headless` (the default) or `headed`: real windows, on `$DISPLAY` or, where there is none, on a virtual display (Xvfb) the daemon starts with its first headed browser; see Which Chromium |
-| `--config` | a JSON file: `{"limits": {…}, "chromium": {"path", "args": [], "no_sandbox", "mode", "screen": "<w>x<h>"}, "input": {"screen_fix"}}`; unknown keys are refused; a flag wins over the file |
+| `--config` | a JSON file: `{"limits": {…}, "chromium": {"path", "args": [], "no_sandbox", "mode", "screen": "<w>x<h>"}, "input": {"human", "budget_ms", "screen_fix"}}`; unknown keys are refused; a flag wins over the file |
 | `--log-file`, `--log-level` | the daemon's own JSON-lines log (stderr, `info`) |
 
 `SIGTERM` or `SIGINT` stops the daemon: the endpoint file is removed first, every browser is asked to
@@ -221,6 +221,18 @@ upload_ids?, x?, y?, allow_point?, dry_run?, origin?}`
   offset derived from the action id, never outside) with `Input.dispatchMouseEvent`; text goes in
   with `Input.insertText` and keys with `Input.dispatchKeyEvent`. Pages see trusted events
   (`isTrusted` is true, measured).
+- **Human-like input** (`input.human`, on unless the file says `false`). The input is what a hand
+  makes, within `input.budget_ms` (300) added to any one action, so an agent's task is not slowed
+  by more than that per step: an element of the page below or above the viewport is brought toward
+  its middle by the wheel, a notch of about 100 px at a time, where the pointer is (prepare's instant
+  scroll brings in whatever the wheel's share of the budget did not); the pointer travels from
+  where it last was — the operator's last move included — on an eased curve with a pixel of jitter
+  (a Fitts's-law time, at most half the budget left); it rests a moment before the press and holds
+  the button 40–90 ms; a text of up to 200 characters without line breaks or tabs is typed a key at
+  a time, Shift held for capitals and shifted symbols, the pauses between keys shrunk together to
+  fit the budget (a longer text, or one with a line break, goes in with `Input.insertText`); a
+  scroll is sent as a wheel's notches. With `input.human: false` every action is the instant one
+  described above. A dry run does not wheel.
 - **Where a click lands on the screen.** A person's click reports its screen position as its place
   in the page plus the frame's place, the window's place on the screen and the browser's toolbar.
   Some builds report a dispatched event's page position as its screen position instead

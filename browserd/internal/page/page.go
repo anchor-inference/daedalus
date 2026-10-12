@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/rand"
 	_ "embed"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"github.com/ascorblack/daedalus/browserd/internal/browser"
 	"github.com/ascorblack/daedalus/browserd/internal/cdp"
 	"github.com/ascorblack/daedalus/browserd/internal/config"
+	"github.com/ascorblack/daedalus/browserd/internal/human"
 	"github.com/ascorblack/daedalus/ptyd/proto/wire"
 )
 
@@ -34,6 +36,10 @@ type Model struct {
 	log      *slog.Logger
 	lim      config.Limits
 	stateDir string
+	// How the agent's actions move the pointer and type (human.go), and where the randomness in that
+	// comes from.
+	inputCfg config.Input
+	planner  *human.Planner
 
 	// run tells this daemon's actions from an earlier one's: a recording outlives the daemon, and its
 	// keyframes name the action they followed, so a restarted daemon counting from a1 again would
@@ -55,8 +61,11 @@ type Model struct {
 func New(m *browser.Manager, cfg *config.Config, log *slog.Logger) *Model {
 	raw := make([]byte, 3)
 	_, _ = rand.Read(raw)
+	seed := make([]byte, 8)
+	_, _ = rand.Read(seed)
 	return &Model{m: m, log: log, lim: cfg.Limits, run: hex.EncodeToString(raw), stateDir: cfg.StateDir, downloads: map[string]*Download{},
-		byGUID: map[string]*Download{}, uploads: map[string]*upload{}, asked: map[string]string{}}
+		byGUID: map[string]*Download{}, uploads: map[string]*upload{}, asked: map[string]string{},
+		inputCfg: cfg.Input, planner: human.New(binary.BigEndian.Uint64(seed))}
 }
 
 // worldKey keys a document's world among a tab's values: the session and frame it was made in.

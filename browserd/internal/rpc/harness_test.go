@@ -61,6 +61,13 @@ func fixture(t *testing.T) *httptest.Server {
 	page("/still", "Still", "<h1>Still</h1><p>"+strings.Repeat("Nothing moves on this page. ", 50)+"</p>")
 	page("/anim", "Anim", `<div style="position:fixed;inset:0;background:conic-gradient(red,yellow,lime,aqua,blue,magenta,red);animation:s 2s linear infinite"></div><style>@keyframes s{to{transform:rotate(360deg)}}</style>`)
 	page("/button", "Button", `<button id="b" style="position:absolute;left:100px;top:100px;width:200px;height:60px" onclick="document.title='clicked '+event.isTrusted">Press</button>`)
+	// What a hand does on the way to a press, counted (human_test.go): the moves, the wheel, each key.
+	page("/hand", "Hand", `<input id="name" aria-label="Name" style="position:absolute;left:100px;top:80px;width:300px;height:30px">`+
+		`<button id="far" style="position:absolute;left:600px;top:1500px;width:200px;height:50px" onclick="seen.clicked++">Far button</button>`+
+		`<div style="height:3000px"></div><script>window.seen = {moves: 0, wheels: 0, keys: 0, shifts: 0, clicked: 0, jumps: 0, last: 0};`+
+		`addEventListener("mousemove", e => seen.moves++); addEventListener("wheel", e => seen.wheels++, {passive: true});`+
+		`addEventListener("keydown", e => { seen.keys++; if (e.key === "Shift") seen.shifts++; });`+
+		`addEventListener("scroll", () => { if (Math.abs(scrollY - seen.last) > 450) seen.jumps++; seen.last = scrollY; });</script>`)
 	page("/popup", "Popup", `<a id="a" href="/still" target="_blank" style="position:absolute;left:100px;top:100px;width:200px;height:60px;display:block">open</a>`)
 	page("/confirm-writes", "Confirm", `<button onclick="if (confirm('Reset?')) document.getElementById('m').textContent = 'Filters reset.'">Reset</button><p id="m">Four filters.</p>`)
 	page("/dialog", "Dialog", `<button id="b" style="position:absolute;left:100px;top:100px;width:200px;height:60px" onclick="document.title=confirm('Leave?')?'yes':'no'">Ask</button>`)

@@ -55,37 +55,38 @@ func TestConfigFile(t *testing.T) {
 	}
 	for _, bad := range []string{`{"limits": {"max_browser": 4}}`, `{"limits": {"max_browsers": 0}}`,
 		`{"limits": {"fps_cap": 61}}`, `{"chromium": {"path": "relative"}}`, `{"extra": 1}`,
-		`{"chromium": {"screen": "wide"}}`, `{"chromium": {"screen": "100x100"}}`,
-		`{"input": {"screen_fix": "sometimes"}}`} {
+		`{"chromium": {"screen": "wide"}}`, `{"chromium": {"screen": "100x100"}}`, `{"input": {"budget_ms": 5000}}`,
+		`{"input": {"humane": true}}`, `{"input": {"screen_fix": "sometimes"}}`} {
 		if _, err := Parse(append(base, write(bad))); err == nil || !strings.Contains(err.Error(), "c.json") {
 			t.Errorf("%s: %v", bad, err)
 		}
 	}
 }
 
-func TestModeAndScreen(t *testing.T) {
+func TestModeScreenAndInput(t *testing.T) {
 	dir := t.TempDir()
 	base := []string{"--env", "x", "--run-dir", dir + "/r", "--state-dir", dir + "/s"}
 	c, err := Parse(base)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Headless unless something says otherwise.
-	if c.Chromium.Headed() || c.Chromium.Mode != ModeHeadless || c.Input.ScreenFix != "" {
+	// Headless and human input unless something says otherwise.
+	if c.Chromium.Headed() || c.Chromium.Mode != ModeHeadless || c.Input.Plain || c.Input.HumanBudget() != DefaultHumanBudget {
 		t.Fatalf("defaults: %+v %+v", c.Chromium, c.Input)
 	}
 	if w, h := c.Chromium.Screen(); w != DefaultScreenW || h != DefaultScreenH {
 		t.Fatalf("default screen %dx%d", w, h)
 	}
 	p := filepath.Join(dir, "c.json")
-	if err := os.WriteFile(p, []byte(`{"chromium": {"mode": "headed", "screen": "1920x1080"}, "input": {"screen_fix": "never"}}`), 0o600); err != nil {
+	if err := os.WriteFile(p, []byte(`{"chromium": {"mode": "headed", "screen": "1920x1080"}, "input": {"human": false, "budget_ms": 120, "screen_fix": "never"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	c, err = Parse(append(base, "--config", p))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if w, h := c.Chromium.Screen(); !c.Chromium.Headed() || w != 1920 || h != 1080 || c.Input.ScreenFix != ScreenFixNever {
+	if w, h := c.Chromium.Screen(); !c.Chromium.Headed() || w != 1920 || h != 1080 || !c.Input.Plain || c.Input.HumanBudget() != 120*time.Millisecond ||
+		c.Input.ScreenFix != ScreenFixNever {
 		t.Fatalf("file: %+v %+v", c.Chromium, c.Input)
 	}
 	// The flag wins over the file, as --chromium does.

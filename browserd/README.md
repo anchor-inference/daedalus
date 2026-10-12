@@ -26,6 +26,7 @@ specified in [`docs/architecture/browser.md`](../docs/architecture/browser.md).
 | `internal/cdp` | the DevTools protocol over Chromium's pipe: calls, ordered sends, events |
 | `internal/chrome` | finding a Chromium, its switches and preferences, starting it on a profile, ending its tree; its private memory and sandbox state from `/proc` |
 | `internal/display` | the virtual X display (Xvfb) a headed browser draws on where the daemon has no display |
+| `internal/human` | plans of a hand's input: the pointer's eased, jittered travel, the pauses, the wheel's notches, the delays between keys, each within a budget |
 | `internal/browser` | browsers, groups, tabs and control; following Chromium's targets; navigation; idle close; statistics and the memory limit |
 | `internal/view` | live views: one screencast per watched tab, its pacing, each client's mailbox and acknowledgements, thumbnails, a person's input |
 | `internal/page` | what the agent reads and does on a page: the outline with refs, the readable text and the search from `js/page.js` (run in an isolated world the page cannot reach, and in one of each frame of another site), masked screenshots, actions as real input, waiting, dialogs, downloads and uploads, and the moments the operator is needed |

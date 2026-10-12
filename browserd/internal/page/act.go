@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ascorblack/daedalus/browserd/internal/browser"
+	"github.com/ascorblack/daedalus/browserd/internal/human"
 	"github.com/ascorblack/daedalus/browserd/internal/sensitive"
 	"github.com/ascorblack/daedalus/ptyd/proto/wire"
 )
@@ -173,6 +174,7 @@ func (p *Model) Act(ctx context.Context, t *browser.Tab, ap ActParams) (*ActResu
 	id := "a" + p.run + "-" + strconv.Itoa(p.actions)
 	p.mu.Unlock()
 	res := &ActResult{ActionID: id, Effects: map[string]any{}}
+	g := p.gesture(t)
 
 	// The element and its document, brought into view — or, for a point, found where it is.
 	var pr *prepared
@@ -215,6 +217,10 @@ func (p *Model) Act(ctx context.Context, t *browser.Tab, ap ActParams) (*ActResu
 		fn := "prepare"
 		if ap.Action == "scroll" && ap.Direction != "" {
 			fn = "measure" // the pane is scrolled where it is, not first brought to the middle
+		}
+		if fn == "prepare" && !ap.DryRun {
+			// A dry run is asked what an action would do; it scrolls only as far as prepare must.
+			g.wheelIntoView(ctx, d, ref)
 		}
 		if pr, err = p.measureIn(ctx, t, d, ref, fn); err != nil {
 			return nil, err
@@ -303,7 +309,7 @@ func (p *Model) Act(ctx context.Context, t *browser.Tab, ap ActParams) (*ActResu
 	}
 	p.m.Publish("action", event)
 
-	err = p.dispatch(ctx, t, ap, d, ref, pr, res, id)
+	err = p.dispatch(ctx, t, ap, d, ref, pr, res, id, g)
 	done := map[string]any{"action_id": id, "group_id": t.Group.ID, "tab_id": t.ID, "ok": err == nil}
 	if err != nil {
 		done["error"] = err.Error()
@@ -542,6 +548,7 @@ func (p *Model) mouse(ctx context.Context, t *browser.Tab, typ string, pt point,
 			params["buttons"] = map[string]int{"left": 1, "right": 2, "middle": 4}[button]
 		}
 	}
+	t.SetPointer(pt.X, pt.Y)
 	return p.input(ctx, t, "Input.dispatchMouseEvent", params)
 }
 
@@ -577,14 +584,32 @@ func (p *Model) reach(ctx context.Context, t *browser.Tab, d *doc, ref string, p
 	}
 }
 
-// clickIn is click on an element of d, reached first as reach says.
-func (p *Model) clickIn(ctx context.Context, t *browser.Tab, d *doc, ref string, pt point, button string, count int) error {
+// clickIn is click on an element of d: the pointer travels there, is reached as reach says, rests a
+// moment, and the button is held as long as a finger holds it (all within the gesture's budget).
+func (p *Model) clickIn(ctx context.Context, t *browser.Tab, d *doc, ref string, pt point, button string, count int, g *gesture) error {
+	if err := g.travel(ctx, pt, 0); err != nil {
+		return err
+	}
 	if err := p.reach(ctx, t, d, ref, pt); err != nil {
 		return err
 	}
+	if err := g.wait(ctx, 15*time.Millisecond, 45*time.Millisecond); err != nil {
+		return err
+	}
 	for i := 1; i <= count && t.Dialog() == nil; i++ {
+		if i > 1 {
+			if err := g.wait(ctx, 50*time.Millisecond, 90*time.Millisecond); err != nil {
+				return err
+			}
+		}
 		if err := p.mouse(ctx, t, "mousePressed", pt, button, i, 0); err != nil {
 			return err
+		}
+		// Not while a dialog the press opened waits: the release is the same either way.
+		if t.Dialog() == nil {
+			if err := g.wait(ctx, 40*time.Millisecond, 90*time.Millisecond); err != nil {
+				return err
+			}
 		}
 		if err := p.mouse(ctx, t, "mouseReleased", pt, button, i, 0); err != nil {
 			return err
@@ -642,7 +667,7 @@ func coveredErr(ref, by string) *wire.Error {
 	return e
 }
 
-func (p *Model) press(ctx context.Context, t *browser.Tab, c chord) error {
+func (p *Model) press(ctx context.Context, t *browser.Tab, c chord, g *gesture) error {
 	for _, m := range c.mods {
 		k := modifiers[m].key
 		if err := p.input(ctx, t, "Input.dispatchKeyEvent", map[string]any{"type": "rawKeyDown", "key": k.Key, "code": k.Code,
@@ -660,6 +685,11 @@ func (p *Model) press(ctx context.Context, t *browser.Tab, c chord) error {
 	if err := p.input(ctx, t, "Input.dispatchKeyEvent", down); err != nil {
 		return err
 	}
+	if t.Dialog() == nil {
+		if err := g.wait(ctx, 30*time.Millisecond, 70*time.Millisecond); err != nil {
+			return err
+		}
+	}
 	if err := p.input(ctx, t, "Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": c.key.Key, "code": c.key.Code,
 		"windowsVirtualKeyCode": c.key.KeyCode, "modifiers": c.modBits}); err != nil {
 		return err
@@ -674,7 +704,7 @@ func (p *Model) press(ctx context.Context, t *browser.Tab, c chord) error {
 	return nil
 }
 
-func (p *Model) dispatch(ctx context.Context, t *browser.Tab, ap ActParams, d *doc, ref string, pr *prepared, res *ActResult, id string) error {
+func (p *Model) dispatch(ctx context.Context, t *browser.Tab, ap ActParams, d *doc, ref string, pr *prepared, res *ActResult, id string, g *gesture) error {
 	pt := point{}
 	if res.Point != nil {
 		pt = *res.Point
@@ -700,12 +730,15 @@ func (p *Model) dispatch(ctx context.Context, t *browser.Tab, ap ActParams, d *d
 		}
 		switch ap.Action {
 		case "click":
-			return p.clickIn(ctx, t, d, ref, pt, "left", 1)
+			return p.clickIn(ctx, t, d, ref, pt, "left", 1, g)
 		case "double_click":
-			return p.clickIn(ctx, t, d, ref, pt, "left", 2)
+			return p.clickIn(ctx, t, d, ref, pt, "left", 2, g)
 		}
-		return p.clickIn(ctx, t, d, ref, pt, "right", 1)
+		return p.clickIn(ctx, t, d, ref, pt, "right", 1, g)
 	case "hover":
+		if err := g.travel(ctx, pt, 0); err != nil {
+			return err
+		}
 		return p.reach(ctx, t, d, ref, pt)
 	case "check", "uncheck":
 		want := ap.Action == "check"
@@ -716,7 +749,7 @@ func (p *Model) dispatch(ctx context.Context, t *browser.Tab, ap ActParams, d *d
 		if err := hit(); err != nil {
 			return err
 		}
-		return p.clickIn(ctx, t, d, ref, pt, "left", 1)
+		return p.clickIn(ctx, t, d, ref, pt, "left", 1, g)
 	case "type":
 		if disabled {
 			return wire.Errorf(wire.CodeForbidden, "%s is disabled", ref)
@@ -724,7 +757,7 @@ func (p *Model) dispatch(ctx context.Context, t *browser.Tab, ap ActParams, d *d
 		// Focused by a real click where the field can be clicked, so the page sees what a person's
 		// typing makes it see; then its content selected and replaced.
 		if err := hit(); err == nil {
-			if err := p.clickIn(ctx, t, d, ref, pt, "left", 1); err != nil {
+			if err := p.clickIn(ctx, t, d, ref, pt, "left", 1, g); err != nil {
 				return err
 			}
 		}
@@ -734,16 +767,16 @@ func (p *Model) dispatch(ctx context.Context, t *browser.Tab, ap ActParams, d *d
 			return err
 		}
 		if *ap.Text != "" {
-			if err := p.input(ctx, t, "Input.insertText", map[string]any{"text": *ap.Text}); err != nil {
+			if err := g.typeText(ctx, *ap.Text); err != nil {
 				return err
 			}
 		} else {
-			if err := p.press(ctx, t, chord{key: named["Delete"]}); err != nil {
+			if err := p.press(ctx, t, chord{key: named["Delete"]}, g); err != nil {
 				return err
 			}
 		}
 		if ap.Submit {
-			return p.press(ctx, t, chord{key: named["Enter"]})
+			return p.press(ctx, t, chord{key: named["Enter"]}, g)
 		}
 		return nil
 	case "press":
@@ -755,7 +788,7 @@ func (p *Model) dispatch(ctx context.Context, t *browser.Tab, ap ActParams, d *d
 				return err
 			}
 		}
-		return p.press(ctx, t, c)
+		return p.press(ctx, t, c, g)
 	case "select":
 		if disabled {
 			return wire.Errorf(wire.CodeForbidden, "%s is disabled", ref)
@@ -766,7 +799,7 @@ func (p *Model) dispatch(ctx context.Context, t *browser.Tab, ap ActParams, d *d
 		}
 		return checkScript(raw)
 	case "scroll":
-		return p.scroll(ctx, t, ap, d, ref, res)
+		return p.scroll(ctx, t, ap, d, ref, res, g)
 	case "drag":
 		td, tref, err := p.docOf(ctx, t, ap.ToRef)
 		if err != nil {
@@ -782,18 +815,36 @@ func (p *Model) dispatch(ctx context.Context, t *browser.Tab, ap ActParams, d *d
 			return err
 		}
 		a, b := aim(from.Box, id), aim(to.Box, id+"to")
+		if err := g.travel(ctx, a, 0); err != nil {
+			return err
+		}
 		if err := p.mouse(ctx, t, "mouseMoved", a, "", 0, 0); err != nil {
 			return err
 		}
 		if err := p.mouse(ctx, t, "mousePressed", a, "left", 1, 0); err != nil {
 			return err
 		}
-		for i := 1; i <= 10; i++ {
-			f := float64(i) / 10
-			if err := t.Call(ctx, "Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": a.X + (b.X-a.X)*f,
-				"y": a.Y + (b.Y-a.Y)*f, "button": "left", "buttons": 1}, nil); err != nil {
+		if err := g.wait(ctx, 60*time.Millisecond, 120*time.Millisecond); err != nil {
+			return err
+		}
+		if g.on() {
+			// The hand carries it over on a curve, the button held; the last move is the plain one
+			// below.
+			if err := g.travel(ctx, b, 1); err != nil {
 				return err
 			}
+		} else {
+			for i := 1; i < 10; i++ {
+				f := float64(i) / 10
+				if err := t.Call(ctx, "Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": a.X + (b.X-a.X)*f,
+					"y": a.Y + (b.Y-a.Y)*f, "button": "left", "buttons": 1}, nil); err != nil {
+					return err
+				}
+			}
+		}
+		if err := t.Call(ctx, "Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": b.X, "y": b.Y,
+			"button": "left", "buttons": 1}, nil); err != nil {
+			return err
 		}
 		return p.mouse(ctx, t, "mouseReleased", b, "left", 1, 0)
 	case "upload":
@@ -817,7 +868,7 @@ func (p *Model) dispatch(ctx context.Context, t *browser.Tab, ap ActParams, d *d
 // element by most of its height or width, the window by most of a screen, or the page to the first
 // text that holds a phrase. Every scroll is the mouse wheel, as a person scrolls; a pane that does
 // not move for the wheel is scrolled by the script. effects.scroll says where the page is now.
-func (p *Model) scroll(ctx context.Context, t *browser.Tab, ap ActParams, d *doc, ref string, res *ActResult) error {
+func (p *Model) scroll(ctx context.Context, t *browser.Tab, ap ActParams, d *doc, ref string, res *ActResult, g *gesture) error {
 	state := func() *Scrolled {
 		raw, err := p.call(ctx, t, "scrollState")
 		if err != nil {
@@ -838,7 +889,7 @@ func (p *Model) scroll(ctx context.Context, t *browser.Tab, ap ActParams, d *doc
 	case ap.Text != nil && strings.TrimSpace(*ap.Text) != "":
 		return p.scrollToText(ctx, t, *ap.Text, res)
 	case ref != "" && ap.Direction != "":
-		return p.scrollPane(ctx, t, d, ref, ap.Direction, res)
+		return p.scrollPane(ctx, t, d, ref, ap.Direction, res, g)
 	case ap.Ref != "":
 		return nil // prepare already brought it into view
 	}
@@ -850,7 +901,7 @@ func (p *Model) scroll(ctx context.Context, t *browser.Tab, ap ActParams, d *doc
 	c := point{X: float64(vp.W) / 2, Y: float64(vp.H) / 2}
 	res.Point = &c
 	dx, dy := wheelDelta(ap.Direction, float64(vp.W), float64(vp.H))
-	if err := p.wheel(ctx, t, c, dx, dy); err != nil {
+	if err := p.wheelBy(ctx, t, c, dx, dy, g); err != nil {
 		return err
 	}
 	time.Sleep(150 * time.Millisecond)
@@ -882,8 +933,53 @@ func wheelDelta(direction string, w, h float64) (float64, float64) {
 }
 
 func (p *Model) wheel(ctx context.Context, t *browser.Tab, at point, dx, dy float64) error {
+	t.SetPointer(at.X, at.Y)
 	return t.Call(ctx, "Input.dispatchMouseEvent", map[string]any{"type": "mouseWheel", "x": at.X, "y": at.Y,
 		"deltaX": dx, "deltaY": dy}, nil)
+}
+
+// wheelBy scrolls by (dx, dy) at a point: in one turn of the wheel with plain input, or, human, with
+// the pointer carried there first and the scroll sent as a wheel's notches a moment apart (as many
+// as the budget allows; the last carries what is left, so the distance is the same either way).
+func (p *Model) wheelBy(ctx context.Context, t *browser.Tab, at point, dx, dy float64, g *gesture) error {
+	if !g.on() {
+		return p.wheel(ctx, t, at, dx, dy)
+	}
+	if err := g.travel(ctx, at, 0); err != nil {
+		return err
+	}
+	horizontal := dx != 0
+	notches := human.WheelSteps(dy, 8)
+	if horizontal {
+		notches = human.WheelSteps(dx, 8)
+	}
+	sent := 0.0
+	total := dy
+	if horizontal {
+		total = dx
+	}
+	for i, n := range notches {
+		if i == len(notches)-1 || g.budget.Left() <= 0 {
+			n = total - sent
+		}
+		var err error
+		if horizontal {
+			err = p.wheel(ctx, t, at, n, 0)
+		} else {
+			err = p.wheel(ctx, t, at, 0, n)
+		}
+		if err != nil {
+			return err
+		}
+		sent += n
+		if sent == total {
+			return nil
+		}
+		if err := g.wait(ctx, 18*time.Millisecond, 40*time.Millisecond); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type paneInfo struct {
@@ -912,7 +1008,7 @@ func (p *Model) pane(ctx context.Context, t *browser.Tab, d *doc, ref string, ho
 
 // scrollPane scrolls the pane an element is in (a list, a sidebar, a table that scrolls of its own),
 // or the window when nothing inside the page scrolls it.
-func (p *Model) scrollPane(ctx context.Context, t *browser.Tab, d *doc, ref, direction string, res *ActResult) error {
+func (p *Model) scrollPane(ctx context.Context, t *browser.Tab, d *doc, ref, direction string, res *ActResult, g *gesture) error {
 	horizontal := direction == "left" || direction == "right"
 	before, err := p.pane(ctx, t, d, ref, horizontal)
 	if err != nil {
@@ -930,7 +1026,7 @@ func (p *Model) scrollPane(ctx context.Context, t *browser.Tab, d *doc, ref, dir
 	}
 	res.Point = &at
 	dx, dy := wheelDelta(direction, w, h)
-	if err := p.wheel(ctx, t, at, dx, dy); err != nil {
+	if err := p.wheelBy(ctx, t, at, dx, dy, g); err != nil {
 		return err
 	}
 	time.Sleep(150 * time.Millisecond)

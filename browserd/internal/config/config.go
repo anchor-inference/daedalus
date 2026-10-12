@@ -65,6 +65,11 @@ const (
 	// finds a window wider than the screen it is on has found a browser nobody looks at.
 	DefaultScreenW = 2560
 	DefaultScreenH = 1440
+
+	// DefaultHumanBudget bounds what human-like input adds to one action: the pointer's travel, the
+	// pauses around a press, the wheel that brings the element into view and the delays between
+	// keys, together.
+	DefaultHumanBudget = 300 * time.Millisecond
 )
 
 // The two ways a browser runs. Headless needs nothing around it; headed draws real windows on a
@@ -89,8 +94,14 @@ type Config struct {
 	Input    Input
 }
 
-// Input is how the input pages receive is made. The zero value is the default.
+// Input is how the agent's actions move the pointer and type. The zero value is the default: human
+// input on, within DefaultHumanBudget, so a configuration that says nothing gets it.
 type Input struct {
+	// Plain turns human-like input off: the pointer jumps to the point, a press is let go at once,
+	// an element is scrolled into view instantly and text is inserted in one piece.
+	Plain bool
+	// Budget replaces DefaultHumanBudget when it is not zero.
+	Budget time.Duration
 	// ScreenFix is when the script that gives trusted mouse events their true screen position is
 	// put into pages: ScreenFixAuto (empty) where the browser was found to report a click's screen
 	// position as its position in the page, ScreenFixAlways or ScreenFixNever.
@@ -102,6 +113,14 @@ const (
 	ScreenFixAlways = "always"
 	ScreenFixNever  = "never"
 )
+
+// HumanBudget is the most human-like input may add to one action.
+func (i Input) HumanBudget() time.Duration {
+	if i.Budget > 0 {
+		return i.Budget
+	}
+	return DefaultHumanBudget
+}
 
 // Limits are the numbers a deployment may tune from the JSON file.
 type Limits struct {
@@ -191,6 +210,8 @@ type file struct {
 		Screen string `json:"screen"`
 	} `json:"chromium"`
 	Input struct {
+		Human     *bool  `json:"human"`
+		BudgetMs  *int64 `json:"budget_ms"`
 		ScreenFix string `json:"screen_fix"`
 	} `json:"input"`
 }
@@ -318,6 +339,14 @@ func (c *Config) load(path string) error {
 		}
 		c.Chromium.ScreenW, c.Chromium.ScreenH = w, h
 	}
+	if f.Input.Human != nil {
+		c.Input.Plain = !*f.Input.Human
+	}
+	var budget int64
+	if err := int64In("budget_ms", f.Input.BudgetMs, 0, 2000, &budget); err != nil {
+		return fmt.Errorf("input.%s", strings.TrimPrefix(err.Error(), "limits."))
+	}
+	c.Input.Budget = time.Duration(budget) * time.Millisecond
 	switch f.Input.ScreenFix {
 	case "", ScreenFixAuto, ScreenFixAlways, ScreenFixNever:
 		c.Input.ScreenFix = f.Input.ScreenFix
