@@ -3,7 +3,7 @@ import { Component, Fragment, createContext, memo, useCallback, useContext, useE
 import type { ReactElement, ReactNode } from "react";
 import { api, ApiError, AsrStatus, ModelFallback, ProviderUsage, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, SessionDetail, Compacting, type SessionFolder, type Question } from "../api";
 import { Chevron, Dot, Status, copyText, fmtInt, statusWord, timeAgo } from "../ui/components";
-import { MenuItem, OverflowMenu, Popover, confirmDialog, Overlay } from "../ui/dialogs";
+import { MenuItem, OverflowMenu, confirmDialog, Overlay } from "../ui/dialogs";
 import { absDate, clock, commandPreview, duration, plainPreview, shortDateTime } from "../format";
 import { HostMark } from "../runon";
 import { isProject } from "../grouping";
@@ -12,6 +12,7 @@ import { EVIDENCE_EVENT, EvidenceRequest, codeBlock, renderCached, renderMarkdow
 import { confirmAsync, errorText, fmtBytes, haptic } from "../ui";
 import { Icon, IconName } from "../icons";
 import { AuthImg, FilePreview, PreviewSource, canPreview, downloadHref, fileGlyph, previewKind, sessionBase } from "../preview";
+import { followSession } from "../sessionstream";
 import { Activity, LiveStore, Segment, SummaryItem, SystemNote, ToolItem, Turn, activitySummary, applyLive, buildTurns, createLiveStore, familyCounts, isOlderPage, liveAfter, liveBase, prepend, producedFiles, reconcile, splitActivity } from "../turns";
 import { Explorer } from "../explorerpanel";
 import { DiffView } from "../previewparts";
@@ -34,7 +35,7 @@ import { SessionDetails } from "../details";
 import { HandoffLine, ImportBanner } from "../imports/ImportedChat";
 import { harnessMeta } from "../imports/model";
 import { JobsTab } from "../jobs";
-import { markAnchor, navigate, pathFor, projectHome, projectSessionPath, useAnchor, useRoute } from "../router";
+import { markAnchor, navigate, pathFor, projectHome, projectSessionPath, sessionPath, useAnchor, useRoute } from "../router";
 import { turnFor, withOlder } from "../anchor";
 import { ChatSearch } from "../chatsearch";
 import { useMedia } from "../ui/index";
@@ -69,7 +70,8 @@ import { sentMessageReachedTranscript } from "../pending-message";
 import { Banner, IconButton } from "../ui/phone";
 import { SecretChip } from "../secrets";
 import { RawHtml } from "../rawhtml";
-import { RenameSheet, SearchSheet, SessionMenuSheet, SessionTopBar, StateSub, SubagentsSheet, type SessionRow, type SessionTile } from "./SessionPhone";
+import { RenameSheet, SearchSheet, SessionMenuSheet, SessionTopBar, StateSub, type SessionRow, type SessionTile } from "./SessionPhone";
+import { SubagentsTab, subagentIdFor } from "../subagents";
 import { noticeFromEvent, raiseFromError, raiseSettingNotice, SettingNoticeLines, settingRef } from "../settinglink";
 
 /**
@@ -165,8 +167,19 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     [focus?.projectId, focus?.kind, id, main],
   );
   const panel = usePanel(id, sessionBase(id), { route: pane === "right" ? null : route.query, beside: pane === "left" ? route.with : null, pane, context: panelContext, at: panelAt });
-  const panelTabs = tabsFor(panelContext, { browser: hasBrowser || panel.state.tab === "browser", preview: panel.state.stack.length > 0 });
+  const panelTabs = tabsFor(panelContext, { browser: hasBrowser || panel.state.tab === "browser", preview: panel.state.stack.length > 0, subagents: (detail?.subagents?.length ?? 0) > 0 || panel.state.tab === "subagents" });
   const browserShown = pipGroup(browsers.groups);
+  const runningSubagents = detail?.subagents?.filter((child) => child.running).length ?? 0;
+  // Every way the conversation names a helper — its SubAgent step, its report, the reminder about the
+  // idle ones — opens it here, beside the leader, rather than taking the leader off the screen.
+  const subagentsNow = useRef(detail?.subagents);
+  subagentsNow.current = detail?.subagents;
+  const openSubagentRef = useCallback((ref: { id?: string; name?: string } | null) => {
+    if (!ref) return panel.openSubagent(null);
+    const child = subagentIdFor(subagentsNow.current ?? [], ref);
+    if (child) panel.openSubagent(child);
+    else toast(t("subagents.gone"));
+  }, [panel.openSubagent, toast]);
   const openBrowser = useCallback(() => panel.open("browser"), [panel.open]);
   useFirstOpenToast(browsers.groups, phone && panel.state.tab !== "browser", openBrowser);
   const orchestrating = focus?.kind === "orchestrator";
@@ -201,7 +214,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const [detailsFocus, setDetailsFocus] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState<string | null>(null);
   // The phone's sheets: the ⋮ menu and the three it leads to that the desktop shows in place.
-  const [phoneSheet, setPhoneSheet] = useState<"menu" | "search" | "rename" | "subagents" | null>(null);
+  const [phoneSheet, setPhoneSheet] = useState<"menu" | "search" | "rename" | null>(null);
   const [modes, setModes] = useState<ModeInfo[]>([]);
   const [commands, setCommands] = useState<SlashCommand[]>([]);
   const [skills, setSkills] = useState<SkillEntry[]>([]);
@@ -642,72 +655,10 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
 
   // Live events while the screen is open.
   useEffect(() => {
-    const streamUrl = api.streamUrl(id);
-    const headers = api.authHeaders();
-    let stop = false;
-    let after: number | null = null;
-    const controller = new AbortController();
-    (async () => {
-      let backoff = 1000;
-      while (!stop) {
-        try {
-          const url = after === null ? streamUrl : `${streamUrl}?after=${after}`;
-          const res = await fetch(url, { headers, signal: controller.signal });
-          if (!res.body) return;
-          const reader = res.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = "";
-          backoff = 1000;
-          while (!stop) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            const frames = buffer.split("\n\n");
-            buffer = frames.pop() ?? "";
-            let resync = false;
-            for (const frame of frames) {
-              const event = /^event: (.*)$/m.exec(frame)?.[1];
-              const data = /^data: (.*)$/m.exec(frame)?.[1];
-              if (!event || !data) continue;
-              if (event === "resync_required") {
-                try {
-                  const boundary = JSON.parse(data) as { watermark?: number };
-                  if (typeof boundary.watermark === "number") after = boundary.watermark;
-                } catch {
-                  after = null;
-                }
-                resync = true;
-                break;
-              }
-              try {
-                const decoded = JSON.parse(data) as Record<string, any>;
-                if (event === "hello" && typeof decoded.event_seq === "number") after = decoded.event_seq;
-                const envelope = decoded.kind && decoded.payload && typeof decoded.payload === "object" ? decoded : null;
-                if (envelope && typeof envelope.event_seq === "number") after = Math.max(after ?? 0, envelope.event_seq);
-                handle(envelope ? String(envelope.kind) : event, envelope ? { ...envelope.payload, run_id: envelope.run_id, event_seq: envelope.event_seq, history_revision: envelope.history_revision } : decoded);
-              } catch {
-                /* one malformed frame must not end the stream */
-              }
-            }
-            if (resync) {
-              await reader.cancel();
-              break;
-            }
-          }
-        } catch {
-          /* aborted or dropped: reconnect below */
-        }
-        if (stop) return;
-        // The stream ended (server restart, proxy timeout): re-read the transcript and reconnect.
-        // Whatever the last stream was in the middle of is over as far as this screen knows, and a
-        // half-written turn kept across the gap would put the cursor back under an answer that
-        // finished while the connection was down. The re-read brings back everything that is real.
-        live.reset();
-        load(true);
-        await new Promise((r) => setTimeout(r, backoff));
-        backoff = Math.min(backoff * 2, 15000);
-      }
-    })();
+    // Whatever the last stream was in the middle of is over as far as this screen knows when it
+    // drops, and a half-written turn kept across the gap would put the cursor back under an answer
+    // that finished while the connection was down. The re-read brings back everything that is real.
+    const stop = followSession(id, { handle, onDrop: () => { live.reset(); load(true); } });
     function handle(event: string, p: Record<string, any>) {
       const activeRun = live.get().runId;
       if (event === "run_settled" && p.run_id && activeRun && p.run_id !== activeRun) return;
@@ -765,10 +716,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       } else if (event === "compaction_completed") refreshSoon("tail");
       else if (event === "state_changed" || event === "tool_call_pending") refreshSoon("state");
     }
-    return () => {
-      stop = true;
-      controller.abort();
-    };
+    return stop;
   }, [id, live, load, refresh, refreshSoon]);
 
   // The settled conversation, built once per message that lands. A turn whose messages did not
@@ -1419,6 +1367,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     ...(hasDetails ? [{ id: "details", icon: "settings" as IconName, label: t("panel.tab.details"), onSelect: () => { setDetailsFocus("session"); panel.open("details"); } }] : []),
     ...(panelTabs.includes("preview") && panel.state.stack.length > 0 ? [{ id: "preview", icon: "eye" as IconName, label: t("panel.tab.preview"), onSelect: () => panel.open("preview") }] : []),
     ...(panelTabs.includes("jobs") && hasDetails ? [{ id: "jobs", icon: "clock" as IconName, label: t("panel.tab.jobs"), onSelect: () => panel.open("jobs") }] : []),
+    ...(panelTabs.includes("subagents") ? [{ id: "subagents", icon: "spawn" as IconName, label: t("panel.tab.subagents"), count: detail?.subagents?.length || undefined, onSelect: () => panel.openSubagent(null) }] : []),
     ...(hasDetails ? [{ id: "mcp", icon: "plug" as IconName, label: t("session.mcp"), onSelect: () => { setDetailsFocus("mcp"); panel.open("details"); } }] : []),
     ...(sessionDiagrams?.length ? [{ id: "diagrams", icon: "pen" as IconName, label: t("session.phone.diagrams"), count: sessionDiagrams.length, onSelect: () => navigate(pathFor("diagrams", null, { session: id })) }] : []),
   ] : [];
@@ -1426,7 +1375,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const phoneRows: SessionRow[] = phone && !pane ? [
     { icon: "pen", label: t("session.rename"), onSelect: () => setPhoneSheet("rename") },
     ...(focus ? [] : [{ icon: "folder" as IconName, label: t("session.project.move"), value: detail?.project?.name, onSelect: () => setMoving(true) }]),
-    ...(detail && ((detail.subagents?.length ?? 0) > 0 || detail.subagent_of) ? [{ icon: "spawn" as IconName, label: t("session.subagents.title"), value: detail.subagents?.length || undefined, onSelect: () => setPhoneSheet("subagents") }] : []),
+    // A helper's own chat leads back to its leader; a leader's helpers are a tile of the panel above.
+    ...(detail?.subagent_of ? [{ icon: "back" as IconName, label: t("session.leader.word"), value: detail.leader_title ?? undefined, onSelect: () => onOpen?.(detail.subagent_of!) }] : []),
     ...(lastSeq !== null && !main && !orchestrating ? [{ icon: "fork" as IconName, label: t("session.phone.fork"), onSelect: () => void turnAction("fork", lastSeq) }] : []),
     ...(onSplit ? [{ icon: "split" as IconName, label: t("session.split"), onSelect: onSplit }] : []),
     { icon: "share", label: t("session.share"), value: detail?.share && detail.share.mode !== "local" ? t(detail.share.mode === "public" ? "session.share.chip.public" : "session.share.chip.key") : undefined, onSelect: () => setSharing(true) },
@@ -1526,8 +1476,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               {t(detail.share.mode === "public" ? "session.share.chip.public" : "session.share.chip.key")}
             </button>
           )}
-          {detail && ((detail.subagents?.length ?? 0) > 0 || detail.subagent_of) && (
-            <SubagentsMenu detail={detail} onOpen={onOpen} />
+          {!phone && detail && (detail.subagents?.length ?? 0) > 0 && (
+            <SubagentsButton detail={detail} on={panel.state.tab === "subagents"} onToggle={() => (panel.state.tab === "subagents" ? panel.close() : panel.openSubagent(null))} />
           )}
           {phone && questionScope && (
             // A phone has no panel column: the questions open as a sheet from here, with how many wait.
@@ -1600,6 +1550,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                 </div>
               )}
               <SessionContext.Provider value={sessionCtx}>
+                <SubagentOpener.Provider value={openSubagentRef}>
                 <Windowed
                   keys={turnKeys}
                   scroller={scroller}
@@ -1618,6 +1569,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                 {/* A message the host is holding is drawn once, as its card above the composer, where
                     its Steer and × are; the bubble here would be the same words a second time. */}
                 {sendingMessages.filter((pending) => !sentMessageReachedTranscript(detail?.messages, pending.id) && !queuedInput.some((queued) => queued.id === pending.id)).map((pending) => <div className="turn" key={pending.id}><div className="turn-content"><div className="msg-wrap"><div className="msg user"><Md text={pending.text} /></div></div></div></div>)}
+                </SubagentOpener.Provider>
               </SessionContext.Provider>
               {flow}
               {/* The agent waiting in its browser is said in the conversation too, with Open, so the
@@ -1724,8 +1676,16 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               } : {}),
               ...(questionScope ? { questions: <QuestionsPanel scope={questionScope} toast={toast} /> } : {}),
               browser: <BrowserTab groups={browsers.groups} toast={toast} phone={phone} />,
+              subagents: <SubagentsTab
+                leaderId={id}
+                selected={panel.state.sub}
+                onSelect={panel.openSubagent}
+                onOpenFull={(child) => navigate(sessionPath(child))}
+                toast={toast}
+                chat={(child) => <SubagentTranscript key={child} id={child} onPreview={openPreview} toast={toast} />}
+              />,
             }}
-            badges={questionScope && waiting ? { questions: waiting } : undefined}
+            badges={{ ...(questionScope && waiting ? { questions: waiting } : {}), ...(runningSubagents ? { subagents: runningSubagents } : {}) }}
             marks={browserShown ? { browser: browserShown.needs_you ? "attn" : browserShown.acting ? "busy" : undefined } : undefined}
             details={hasDetails ? (ids) =>
               <SessionDetails
@@ -1759,7 +1719,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               />
             : undefined}
             files={hasDetails && panelTabs.includes("files") ? <Explorer key={id} base={sessionBase(id)} root={detail?.project?.name} upload folders={detail?.folders} home={detail?.folder_id} onPreview={openPreview} toast={toast} refresh={filesGeneration} written={producedFiles(turns.at(-1)?.activity ?? []).filter((f) => f.how === "wrote").map((f) => { const place = placeOf(f.path, detail.workspace); return place && !place.folder ? place.rel : ""; })} /> : undefined}
-            jobs={hasDetails ? <JobsTab sessionId={id} messages={detail.messages} onOpen={panel.openFile} onPreview={openPreview} onOpenSession={onOpen} /> : undefined}
+            jobs={hasDetails ? <JobsTab sessionId={id} messages={detail.messages} onOpen={panel.openFile} onPreview={openPreview} /> : undefined}
           />
         )}
       </div>
@@ -1792,58 +1752,30 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       {phoneSheet === "menu" && <SessionMenuSheet tiles={phoneTiles} rows={phoneRows} onClose={() => setPhoneSheet(null)} />}
       {phoneSheet === "search" && <SearchSheet sessionId={id} onPick={openMessage} onClose={() => setPhoneSheet(null)} />}
       {phoneSheet === "rename" && <RenameSheet title={detail?.title ?? ""} onSave={(title) => { setPhoneSheet(null); void rename(title); }} onClose={() => setPhoneSheet(null)} />}
-      {phoneSheet === "subagents" && detail && <SubagentsSheet detail={detail} onOpen={onOpen} onClose={() => setPhoneSheet(null)} />}
 
     </div>
     </FocusChatContext.Provider>
   );
 }
 
-function SubagentsMenu({ detail, onOpen }: { detail: SessionDetail; onOpen?: (id: string) => void }) {
-  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
+/**
+ * The header's way to the Subagents tab: how many helpers the session has, and a live dot while one
+ * works. It used to open a popover listing them, which was the tab's list a second time with nothing
+ * of their conversations; now it opens and closes the tab itself, and the count keeps the helpers in
+ * sight while the panel is closed or on another tab. A helper's own chat has no button: the line
+ * under its title leads back to the leader.
+ */
+function SubagentsButton({ detail, on, onToggle }: { detail: SessionDetail; on: boolean; onToggle: () => void }) {
   const children = detail.subagents ?? [];
   const running = children.filter((child) => child.running).length;
-  const label = plural("session.subagents", children.length);
-  const open = (sessionId: string) => {
-    setAnchor(null);
-    onOpen?.(sessionId);
-  };
-  return <>
-    <button
-      className={`iconbtn subagents-trigger ${anchor ? "on" : ""}`}
-      onClick={(event) => setAnchor((current) => current ? null : event.currentTarget)}
-      aria-label={t("session.subagents.open")}
-      title={t("session.subagents.open")}
-      aria-haspopup="menu"
-      aria-expanded={!!anchor}
-    >
+  const label = `${t("session.subagents.open")}: ${plural("session.subagents", children.length)}${running ? t("session.subagents.working", { n: running }) : ""}`;
+  return (
+    <button className={`iconbtn subagents-trigger ${on ? "on" : ""}`} onClick={onToggle} aria-label={label} title={label} aria-pressed={on}>
       <Icon name="spawn" />
-      {children.length > 0 && <span className="subagents-count">{children.length}</span>}
-      {running > 0 && <span className="subagents-live" aria-label={t("session.subagents.working", { n: running }).replace(/^ · /, "")} />}
+      <span className="subagents-count">{children.length}</span>
+      {running > 0 && <span className="subagents-live" aria-hidden="true" />}
     </button>
-    {anchor && <Popover anchor={anchor} onClose={() => setAnchor(null)} align="right" className="subagents-popover" label={t("session.subagents.title")}>
-      <div className="subagents-popover-head">
-        <b>{t("session.subagents.title")}</b>
-        {children.length > 0 && <span>{label}</span>}
-      </div>
-      {detail.subagent_of && (
-        <button role="menuitem" className="subagent-option" onClick={() => open(detail.subagent_of!)}>
-          <Icon name="back" size={16} />
-          <span className="subagent-option-copy"><b>{detail.leader_title ?? t("session.leader.word")}</b><small>{t("session.leader.word")}</small></span>
-        </button>
-      )}
-      {children.map((child) => (
-        <button key={child.session_id} role="menuitem" className="subagent-option" onClick={() => open(child.session_id)} title={`${child.model} · ${child.session_id}`}>
-          {child.running ? <span className="live-dot" /> : <Dot status={child.status === "failed" ? "failed" : "done"} />}
-          <span className="subagent-option-copy">
-            <b>{child.name || child.session_id}</b>
-            <small>{child.running ? statusWord("running") : child.status === "failed" ? statusWord("failed") : child.kept ? t("session.sub.kept") : statusWord("done")}{child.model ? ` · ${child.model}` : ""}</small>
-          </span>
-          <Icon name="forward" size={15} />
-        </button>
-      ))}
-    </Popover>}
-  </>;
+  );
 }
 
 class Safe extends Component<{ children: ReactNode }, { failed: boolean }> {
@@ -1954,21 +1886,26 @@ function noteTitle(note: SystemNote): string {
     return [head, note.cadence, t("turn.note.instruction")].filter(Boolean).join(" · ");
   }
   if (note.kind === "other") return t("turn.note.other", { origin: note.origin });
+  if (note.kind === "subagent") return t("turn.note.subagent", { name: note.origin });
   if (note.kind === "page") return t("turn.note.page", { slug: note.origin });
   return t(`turn.note.${note.kind}`);
 }
 
 /** A loop's wake-up, a schedule's prompt, a reminder: one folded line, never a bubble. */
 function SystemNoteRow({ note, cacheKey, run }: { note: SystemNote; cacheKey?: string; run?: { folded: boolean; toggle: () => void } }) {
-  const [open, setOpen] = useState(false);
+  // The task a helper was given is what its conversation is about: open, where a wake-up is folded.
+  const [open, setOpen] = useState(note.kind === "task");
+  const openSubagent = useContext(SubagentOpener);
+  const subagentLink = openSubagent && (note.kind === "subagent" || note.kind === "subagents");
   return (
     <div className={`sysnote ${note.kind}`}>
       <div className="sysnote-row">
       <button type="button" className="sysnote-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-        <Icon name={note.kind === "loop" ? "loop" : note.kind === "schedule" || note.kind === "reminder" ? "clock" : "compact"} size={14} />
+        <Icon name={note.kind === "loop" ? "loop" : note.kind === "schedule" || note.kind === "reminder" ? "clock" : note.kind === "subagent" || note.kind === "subagents" || note.kind === "task" ? "spawn" : "compact"} size={14} />
         <span className="truncate">{noteTitle(note)}</span>
         <Chevron open={open} />
       </button>
+      {subagentLink && <button type="button" className="sysnote-open" onClick={() => openSubagent(note.kind === "subagent" ? { name: note.origin } : null)}>{t(note.kind === "subagent" ? "subagents.open.one" : "subagents.open.all")}</button>}
       {run && <button type="button" className="run-disclosure" onClick={run.toggle} aria-expanded={!run.folded} aria-label={t(run.folded ? "turn.run.show" : "turn.run.hide")} title={t(run.folded ? "turn.run.show" : "turn.run.hide")}>
         <span>{t(run.folded ? "turn.run.show" : "turn.run.hide")}</span><Chevron open={!run.folded} />
       </button>}
@@ -2121,11 +2058,13 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
  * remembers it, and each folds itself away when the run that filled it ends.
  */
 function WorkBlock({ disclosure, items, live, elapsed, imported, current, waiting, orchestrator, onRetry }: { disclosure: string; items: Activity[]; live: boolean; elapsed: number | null; imported?: string; current: string; waiting: boolean; orchestrator: boolean; onRetry?: (seq: number) => void }) {
-  const [open, setOpen] = useDisclosed(disclosure, false);
+  const always = useContext(StepsOpen);
+  const [open, setOpen] = useDisclosed(disclosure, always);
   const wasLive = useRef(live);
   useEffect(() => {
-    // Activity is opt-in, including during streaming; completion folds the details away.
-    if (wasLive.current && !live) setOpen(false);
+    // Activity is opt-in, including during streaming; completion folds the details away — except
+    // where the steps are what the reader came for.
+    if (wasLive.current && !live && !always) setOpen(false);
     wasLive.current = live;
   }, [live]);
   const steps = stepCount(items);
@@ -2273,6 +2212,105 @@ function LiveTurn({ base, live, onTurnAction, onRender }: { base: Turn | null; l
     <Safe>
       <TurnView turn={turn} live={!state.ended} onTurnAction={onTurnAction} />
     </Safe>
+  );
+}
+
+/** How much of a helper's conversation the panel reads: its newest messages. A helper's run is one task,
+ *  and the full chat is a button away for the rare one longer than this. */
+const SUBAGENT_TAIL = 160;
+
+/**
+ * A subagent's conversation as the Subagents tab shows it beside the leader: read-only, following the
+ * helper's own event stream so its run is drawn as it happens, every block of steps open. Nothing in it
+ * acts on the helper — no composer, no fork or revert — because the leader is the one who talks to it.
+ */
+export function SubagentTranscript({ id, onPreview, toast }: { id: string; onPreview: (src: PreviewSource) => void; toast: (text: string) => void }) {
+  const [detail, setDetail] = useState<SessionDetail | null>(null);
+  const [failed, setFailed] = useState(false);
+  const liveRef = useRef<LiveStore | null>(null);
+  if (!liveRef.current) liveRef.current = createLiveStore();
+  const live = liveRef.current;
+  const box = useRef<HTMLDivElement>(null);
+  const seq = useRef(0);
+  const load = useCallback(async () => {
+    const mine = ++seq.current;
+    try {
+      const next = await api.get<SessionDetail>(`/api/sessions/${id}?tail=${SUBAGENT_TAIL}`);
+      if (mine === seq.current) { setDetail(next); setFailed(false); }
+    } catch {
+      if (mine === seq.current) setFailed(true);
+    }
+  }, [id]);
+  const soon = useRef<number | null>(null);
+  const loadSoon = useCallback(() => {
+    if (soon.current) return;
+    soon.current = window.setTimeout(() => { soon.current = null; void load(); }, EVENT_COALESCE_MS);
+  }, [load]);
+  useEffect(() => {
+    void load();
+    const stop = followSession(id, {
+      handle: (event, p) => {
+        live.update((state) => liveAfter(state, event, p));
+        if (event === "message_start") setDetail((prev) => (prev && prev.status !== "running" ? { ...prev, status: "running", run_id: p.run_id || prev.run_id } : prev));
+        if (event === "run_settled") setDetail((prev) => (prev ? { ...prev, status: p.status === "awaiting" ? "waiting" : p.status === "failed" ? "failed" : "idle" } : prev));
+        if (event === "message_start" || event === "message_stop" || event === "run_settled" || event === "compaction_completed" || event === "history_cut" || (event === "steer_changed" && p.reason === "consumed")) loadSoon();
+      },
+      onDrop: () => { live.reset(); void load(); },
+    });
+    return () => {
+      stop();
+      if (soon.current) window.clearTimeout(soon.current);
+      soon.current = null;
+      live.reset();
+      forgetDisclosed(id);
+    };
+  }, [id, live, load, loadSoon]);
+  const status = (detail?.status ?? "idle") as Status;
+  const busy = status === "running" || status === "waiting";
+  useEffect(() => { if (!busy) live.reset(); }, [busy, live]);
+  const built = useRef<Turn[]>([]);
+  const turns = useMemo(() => {
+    built.current = buildTurns(detail?.messages ?? [], built.current);
+    return built.current;
+  }, [detail?.messages]);
+  const tail = busy ? liveBase(turns, detail?.run_id) : null;
+  const settled = tail ? turns.slice(0, -1) : turns;
+  // The panel scrolls, not this list: it follows the end while the reader is at it, as the chat does,
+  // and lands there once when the conversation first arrives.
+  const scroller = () => box.current?.closest<HTMLElement>(".panel-body, .sheet-body") ?? null;
+  const landed = useRef(false);
+  const follow = useCallback(() => {
+    const el = scroller();
+    if (!el) return;
+    if (!landed.current || el.scrollHeight - el.scrollTop - el.clientHeight < 160) el.scrollTop = el.scrollHeight;
+  }, []);
+  useLayoutEffect(() => {
+    if (!detail) return;
+    follow();
+    landed.current = true;
+  }, [detail?.messages, follow]);
+  const ctx = useMemo(() => ({
+    id,
+    workspace: detail?.workspace ?? "",
+    folders: detail?.folders ?? NO_FOLDERS,
+    preview: onPreview,
+    openJobs: () => undefined,
+    toast,
+    link: sessionPath(id),
+    asking: questionsKey(detail?.pending?.questions ?? null),
+  }), [id, detail?.workspace, detail?.folders, onPreview, toast, detail?.pending?.questions]);
+  if (!detail) return failed ? <div className="empty">{t("subagents.unreadable")}</div> : <TurnSkeleton />;
+  return (
+    <div ref={box} className="timeline subagent-chat" data-subagent={id}>
+      {detail.messages.length >= SUBAGENT_TAIL && <div className="sub older-note">{t("subagents.older")}</div>}
+      <SessionContext.Provider value={ctx}>
+        <StepsOpen.Provider value={true}>
+          {settled.map((turn) => <Safe key={turn.key}><TurnView turn={turn} live={false} /></Safe>)}
+          {busy && <LiveTurn base={tail} live={live} onRender={follow} />}
+        </StepsOpen.Provider>
+      </SessionContext.Provider>
+      {!busy && turns.length === 0 && <div className="empty">{t("subagents.idle.empty")}</div>}
+    </div>
   );
 }
 
@@ -2467,6 +2505,11 @@ function describe(item: ToolItem, workspace?: string): { verb: string; family: s
       return { verb: verb("SubAgent", r), family: "SubAgent", detail: str("name") || str("task").split("\n")[0].slice(0, 60), icon: "spawn" };
     case "SubAgentList":
       return { verb: t("tool.SubAgentList"), family: "SubAgentList", detail: "", icon: "spawn" };
+    case "SubAgentSend":
+    case "SubAgentDelete":
+      return { verb: verb(item.name, r), family: item.name, detail: str("name"), icon: "spawn" };
+    case "ReportToLeader":
+      return { verb: verb("ReportToLeader", r), family: "ReportToLeader", detail: str("text").split("\n")[0].slice(0, 80), icon: "spawn" };
     case "SpawnAgent":
       return { verb: verb("SpawnAgent", r), family: "SpawnAgent", detail: str("title"), icon: "spawn" };
     case "AskPeer":
@@ -2682,6 +2725,16 @@ function ThoughtBlock({ text }: { text: string }) {
 /** The tools whose detail is a file the panel can open. */
 const FILE_TOOLS = ["Read", "Write", "Edit", "ImageView", "SendFile"];
 
+/** The steps that name one subagent, and so offer to open it beside the leader. */
+const SUBAGENT_STEPS = ["SubAgent", "SubAgentSend"];
+
+/** Which subagent a step names: the session the host's answer reports, else the name in the call. */
+function subagentOfStep(item: ToolItem): { id?: string; name?: string } | null {
+  const id = /\(session ([\w-]+)\)/.exec(item.result ?? "")?.[1];
+  const name = typeof item.args.name === "string" && item.args.name.trim() ? item.args.name.trim() : undefined;
+  return id || name ? { id, name } : null;
+}
+
 /** An AskUser call's record, drawn outside the turn's folded steps (TurnView): what the operator
  *  decided is read back without opening the work. The call the session still waits on draws nothing
  *  here — its card is above the composer. */
@@ -2696,6 +2749,8 @@ function AskUserRecord({ item }: { item: ToolItem }) {
 function ToolRow({ item, nested }: { item: ToolItem; nested?: boolean }) {
   const { id: sessionId, workspace, folders, preview, openJobs } = useContext(SessionContext);
   const [open, setOpen] = useDisclosed(`${sessionId}:tool:${item.id}`, false);
+  const openSubagent = useContext(SubagentOpener);
+  const subagentRef = SUBAGENT_STEPS.includes(item.name) ? subagentOfStep(item) : null;
   const step = useFocusChat()?.orchestrator ? stepDescription(item) : null;
   const d = step ?? describe(item, workspace);
   const expanded = open || (item.running && item.name === "Exec");
@@ -2722,6 +2777,9 @@ function ToolRow({ item, nested }: { item: ToolItem; nested?: boolean }) {
           {item.error && !item.running && <span className="failed">{t("turn.failed")}</span>}
           {item.name === "Verify" && !item.running && (
             <button type="button" className="receipt-link" onClick={(e) => { e.stopPropagation(); openJobs(); }}>{t("turn.receipt")}</button>
+          )}
+          {openSubagent && subagentRef && (
+            <button type="button" className="receipt-link subagent-link" onClick={(e) => { e.stopPropagation(); openSubagent(subagentRef); }}>{t("subagents.open.one")}</button>
           )}
           {item.ms !== undefined && item.ms >= 500 && <span className="dur num">{duration(item.ms)}</span>}
           <Chevron open={expanded} />
@@ -2826,6 +2884,14 @@ const SessionContext = createContext<{ id: string; workspace: string; folders: S
   link: "",
   asking: "",
 });
+
+/** Opens one of the session's subagents beside it, by id or by the name its leader gave it; null opens
+ *  the list. Absent (null) where the transcript is not a leader's own screen. */
+const SubagentOpener = createContext<((ref: { id?: string; name?: string } | null) => void) | null>(null);
+
+/** Whether the steps of a turn are drawn open and stay open when the run ends: a helper's conversation
+ *  beside its leader is read for what it did, where the leader's own chat folds the work away. */
+const StepsOpen = createContext(false);
 
 /** A tool's path as the workspace knows it: absolute paths inside the workspace become relative, others stay unreachable. */
 function workspaceRelative(path: string, workspace: string): string | null {

@@ -1,5 +1,5 @@
-// The Jobs tab: what the session did off the transcript — its jobs, waiters and sub-agents as the
-// host tracks them, the receipts of what it verified, the files it sent. The transcript row says a
+// The Jobs tab: what the session did off the transcript — its jobs and waiters as the host tracks
+// them (its subagents have a tab of their own), the receipts of what it verified, the files it sent. The transcript row says a
 // job was started; this is where its outcome is. The list comes only from the host: a list rebuilt
 // from the transcript showed the same command twice and could not tell a finished job from a running one.
 
@@ -22,20 +22,16 @@ export type Verification = { id: number; criterion: string; command: string; exi
 export type SentFile = { callId: string; path: string; name: string; caption: string; at: string };
 
 /** How often the list is read again while something runs and the event stream is down: the net
- *  under the events, which say when a job starts, ends or a subagent changes. */
+ *  under the events, which say when a job starts or ends. */
 export const TASK_POLL_MS = 5000;
 /** How often a running job's "running · 3m" is drawn again; nothing is fetched for it. */
 export const TASK_TICK_MS = 15000;
 /** Several events of one turn arrive together; the list is read once for the burst. */
 export const TASK_EVENT_DEBOUNCE_MS = 250;
 
-/** Whether an event changes this session's Jobs list: one of its own jobs, or a subagent of it made,
- *  changing state or gone. A subagent is known by the list already holding it, or by the parent its
- *  creation names. */
-export function touchesJobs(event: { type: string; session_id: string | null; payload: Record<string, unknown> }, sessionId: string, children: ReadonlySet<string>): boolean {
-  if (event.session_id === sessionId) return event.type === "session.jobs";
-  if (event.type === "session.created") return event.payload.parent === sessionId;
-  return !!event.session_id && children.has(event.session_id);
+/** Whether an event changes this session's Jobs list: one of its own jobs started, ended or stopped. */
+export function touchesJobs(event: { type: string; session_id: string | null; payload: Record<string, unknown> }, sessionId: string): boolean {
+  return event.session_id === sessionId && event.type === "session.jobs";
 }
 
 /** The words under a task's title: how it stands (or ended) and how long, and the warning flag if it has one. */
@@ -71,7 +67,7 @@ export function sentFiles(messages: MessageView[]): SentFile[] {
   return out.reverse();
 }
 
-export function JobsTab({ sessionId, messages, onOpen, onPreview, onOpenSession }: { sessionId: string; messages: MessageView[]; onOpen: (entry: PanelEntry) => void; onPreview: (src: PreviewSource) => void; onOpenSession?: (id: string) => void }) {
+export function JobsTab({ sessionId, messages, onOpen, onPreview }: { sessionId: string; messages: MessageView[]; onOpen: (entry: PanelEntry) => void; onPreview: (src: PreviewSource) => void }) {
   const [receipts, setReceipts] = useState<Verification[] | null>(null);
   const [tasks, setTasks] = useState<TaskView[] | null>(null);
   const load = (gone: () => boolean = () => false) => api.get<{ tasks: TaskView[] }>(`/api/sessions/${sessionId}/tasks`).then((answer) => !gone() && setTasks(answer.tasks)).catch(() => !gone() && setTasks([]));
@@ -89,14 +85,12 @@ export function JobsTab({ sessionId, messages, onOpen, onPreview, onOpenSession 
   const anyRunning = !!tasks?.some((task) => task.state === "running");
   const live = useStreamUp();
   // The list used to be read when the tab opened and then only while something already ran: a job
-  // started with nothing else running, or a subagent made, showed only once the tab was left and
-  // opened again. The event stream now says when; the poll is kept for a stream that is down.
-  const children = useRef<Set<string>>(new Set());
-  children.current = new Set((tasks ?? []).map((task) => task.child_session_id).filter((id): id is string => !!id));
+  // started with nothing else running showed only once the tab was left and opened again. The event
+  // stream now says when; the poll is kept for a stream that is down.
   const soon = useRef<number | null>(null);
   useEffect(() => () => { if (soon.current) window.clearTimeout(soon.current); }, [sessionId]);
-  useEvent(["session.jobs", "session.created", "session.status", "session.deleted", "run.finished"], (event) => {
-    if (!touchesJobs(event, sessionId, children.current) || soon.current) return;
+  useEvent(["session.jobs"], (event) => {
+    if (!touchesJobs(event, sessionId) || soon.current) return;
     soon.current = window.setTimeout(() => { soon.current = null; void load(); }, TASK_EVENT_DEBOUNCE_MS);
   }, [sessionId]);
   // The stream coming back may have missed an end while it was away.
@@ -122,7 +116,7 @@ export function JobsTab({ sessionId, messages, onOpen, onPreview, onOpenSession 
   const sent = sentFiles(messages);
   const base = sessionBase(sessionId);
   const empty = (tasks?.length ?? 0) === 0 && sent.length === 0 && (receipts?.length ?? 0) === 0;
-  const open = (task: TaskView) => (task.child_session_id ? onOpenSession?.(task.child_session_id) : task.result_ref ? onOpen({ base, path: task.result_ref }) : undefined);
+  const open = (task: TaskView) => (task.result_ref ? onOpen({ base, path: task.result_ref }) : undefined);
   return (
     <div className="jobs">
       {tasks && tasks.length > 0 && (
@@ -133,8 +127,8 @@ export function JobsTab({ sessionId, messages, onOpen, onPreview, onOpenSession 
             return (
               <div key={task.id} className={`aside-row task-row ${task.state}`} data-kind={task.kind}>
                 <span className={`dot ${task.state}`} />
-                <Icon name={task.kind === "agent" ? "bots" : "terminal"} size={14} />
-                <button className={`grow task-open ${task.kind === "agent" ? "" : "mono"}`} title={task.command ?? task.title} onClick={() => open(task)}>
+                <Icon name="terminal" size={14} />
+                <button className="grow task-open mono" title={task.command ?? task.title} onClick={() => open(task)}>
                   <span className="name">{task.title}</span>
                   <span className="sub task-sub">
                     {sub.text}

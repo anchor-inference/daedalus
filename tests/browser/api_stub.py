@@ -549,7 +549,6 @@ def session_tasks(session_id: str) -> dict:
         row("job-1", "npm run build -- --watch", minutes=42, where="host", flag="quiet"),
         row("job-2", "wait for pid 4212 to exit", kind="wait", minutes=3, command=None),
         row("job-3", "python3 -m http.server 8100", kind="service", minutes=18),
-        row("agent-1", "link-check", kind="agent", minutes=6, command=None, result_ref=None, child_session_id="sub1"),
         row("job-4", "pytest tests/unit -q", state="done", minutes=30, took=4, outcome="succeeded", exit_code=0),
         row("job-5", "make deploy", state="failed", minutes=25, took=1, outcome="failed", exit_code=3),
         row("job-6", "rsync -a site/ backup/", state="lost", minutes=90, took=12, outcome="lost"),

@@ -74,6 +74,8 @@ def ahead(**kw: float) -> str:
 
 S1, S2, S3, S4, S5, S6, S7, S8 = "a1b2c3d4e5f6", "b2c3d4e5f6a1", "c3d4e5f6a1b2", "d4e5f6a1b2c3", "e5f6a1b2c3d4", "f6a1b2c3d4e5", "0a1b2c3d4e5f", "1b2c3d4e5f6a"
 S9, S10, S11 = "2c3d4e5f6a1b", "3d4e5f6a1b2c", "4e5f6a1b2c3d"
+# The Bakery site's helpers: one checking links as the picture is taken, one standing by, one failed.
+S12, S13, S14 = "5f6a1b2c3d4e", "6a1b2c3d4e5f", "7b2c3d4e5f6a"
 
 LOOP = {"mode": "interval", "interval_seconds": 5400, "status": "active", "run_count": 14, "max_runs": None, "next_run_at": ahead(minutes=38), "last_run_at": ago(minutes=52), "last_reason": None, "stop_reason": None, "pause_note": None, "instruction": "Read the support inbox, answer what you can, and put the rest on the board."}
 
@@ -122,6 +124,9 @@ SESSIONS = [
     session(S3, "Support inbox", "GPT-5.6 Luna", last=ago(minutes=52), meta={"loop": LOOP}, project=P3),
     session(S7, "[sub] triage", "GPT-5.6 Luna", last=ago(minutes=53), meta={"subagent_of": S3, "subagent_name": "triage"}, project=P3),
     session(S8, "[sub] reply-drafts", "GPT-5.6 Luna", last=ago(minutes=51), meta={"subagent_of": S3, "subagent_name": "reply-drafts"}, project=P3),
+    session(S12, "[sub] link-check", "Local Qwen3.8", status="running", last=ago(seconds=12), meta={"subagent_of": S1, "subagent_name": "link-check", "subagent_task": "Check every link on the site and list the broken ones"}, project=P1),
+    session(S13, "[sub] photo-alt", "Claude Opus 5", last=ago(minutes=18), meta={"subagent_of": S1, "subagent_name": "photo-alt", "subagent_keep": True, "subagent_task": "Write alt text for the 24 product photos"}, project=P1),
+    session(S14, "[sub] price-audit", "DeepSeek Flash", status="failed", last=ago(hours=2), meta={"subagent_of": S1, "subagent_name": "price-audit", "subagent_task": "Compare the price list with the menu page"}, project=P1),
     session(S4, "Weekly digest", "DeepSeek Flash", status="waiting", last=ago(minutes=4), project=P4),
     session(S5, "Bakery site (fork @412)", "DeepSeek Flash", last=ago(hours=1), meta={"forked_from": {"session_id": S1, "seq": 412}}, project=P1),
     session(S6, "Expense tracker", "Local Qwen3.8", last=ago(days=1), project=P2),
@@ -226,14 +231,47 @@ SERVICES_ALL = [
     {"name": "expense-ui", "command": "npm run dev -- --port $PORT", "cwd": "/srv/workspaces/f6a1b2c3d4e5", "port": 8102, "url": None, "pid": None, "status": "stopped", "restart": False, "note": "stopped by the operator", "started_at": ago(days=1), "stopped_at": ago(hours=20), "share": {"mode": "local", "slug": None, "key": None, "url": None, "public_base": "https://agent.example.com"}, "session_id": S6, "session_title": "Expense tracker"},
 ]
 
-SUBAGENTS_S1 = [{"session_id": "sub1", "name": "link-check", "running": False, "status": "done", "model": "Local Qwen3.8", "kept": False}]
+def subagents_of(leader: str) -> list[dict]:
+    """``GET /api/sessions/<id>/subagents``, and the session detail's ``subagents``: the helpers the
+    session list holds under this leader, working ones first, as the host lists them."""
+    out = []
+    for s in SESSIONS:
+        meta = s["metadata"]
+        if meta.get("subagent_of") != leader:
+            continue
+        running = s["status"] == "running"
+        out.append({
+            "session_id": s["id"], "name": meta.get("subagent_name"), "running": running, "status": s["status"], "model": s["model"],
+            "kept": bool(meta.get("subagent_keep")), "title": meta.get("subagent_task", ""), "idle_start": False,
+            "created_at": s["created_at"], "last_activity_at": s["last_message_at"], "run_started_at": ago(minutes=3) if running else None,
+        })
+    return sorted(out, key=lambda c: (not c["running"], c["status"] != "waiting"))
+
+
+def subagent_messages(id_: str) -> list[dict]:
+    """A helper's conversation: the task its leader handed it, the steps it took, and where it is now."""
+    task = next(s["metadata"].get("subagent_task", "") for s in SESSIONS if s["id"] == id_)
+    framed = f"[task from your leader session {S1} via SubAgent — you work in the leader's workspace; do the task, then put the complete result in your final reply]\n\n{task}."
+    steps = [
+        {"role": "user", "seq": 1, "origin": f"subagent-task:{S1}", "text": framed, "thinking": "", "tool_calls": [], "tool_results": [], "created_at": ago(minutes=4)},
+        {"role": "assistant", "seq": 2, "text": "", "thinking": "", "tool_calls": [{"id": "s_ls", "name": "Exec", "arguments": {"command": "grep -rhoE 'href=\"[^\"]+\"' site/*.html | sort -u | wc -l"}}], "tool_results": [], "created_at": ago(minutes=4)},
+        {"role": "tool", "seq": 3, "text": "", "thinking": "", "tool_calls": [], "tool_results": [{"id": "s_ls", "content": "37", "is_error": False}], "created_at": ago(minutes=4)},
+        {"role": "assistant", "seq": 4, "text": "37 distinct links. Checking each one now; the external ones get a HEAD request.", "thinking": "", "tool_calls": [{"id": "s_read", "name": "Read", "arguments": {"path": "site/menu.html"}}], "tool_results": [], "created_at": ago(minutes=3)},
+        {"role": "tool", "seq": 5, "text": "", "thinking": "", "tool_calls": [], "tool_results": [{"id": "s_read", "content": "<!doctype html>…", "is_error": False}], "created_at": ago(minutes=3)},
+    ]
+    if id_ == S14:
+        steps.append({"role": "assistant", "seq": 6, "text": "The price list is a spreadsheet export I cannot open here; the leader withheld Exec for binaries. Stopping.", "thinking": "", "tool_calls": [], "tool_results": [], "created_at": ago(hours=2)})
+    elif id_ == S13:
+        steps.append({"role": "assistant", "seq": 6, "text": "Wrote alt text for all 24 photos into `site/data/photos.json`; the six cakes share a pattern the owner can follow.", "thinking": "", "tool_calls": [], "tool_results": [], "created_at": ago(minutes=18)})
+    return steps
+
 
 QUESTION = {"questions": [{"question": "The digest has 14 items this week; keep it to the usual 8?", "header": "Length", "options": [{"label": "Top 8", "description": "the usual"}, {"label": "All 14"}, {"label": "Split into two mails"}], "allow_custom": True}]}
 
 
 def detail(id_: str) -> dict:
     s = next(x for x in SESSIONS if x["id"] == id_)
-    messages = MESSAGES if id_ == S1 else MESSAGES_S2 if id_ == S2 else MESSAGES_S3 if id_ == S3 else [{"role": "user", "seq": 1, "text": "Start.", "thinking": "", "tool_calls": [], "tool_results": [], "created_at": ago(hours=1)}, {"role": "assistant", "seq": 2, "text": "Started. Waiting for the sheet.", "thinking": "", "tool_calls": [], "tool_results": [], "created_at": ago(hours=1)}]
+    messages = MESSAGES if id_ == S1 else MESSAGES_S2 if id_ == S2 else MESSAGES_S3 if id_ == S3 else subagent_messages(id_) if s["metadata"].get("subagent_of") == S1 else [{"role": "user", "seq": 1, "text": "Start.", "thinking": "", "tool_calls": [], "tool_results": [], "created_at": ago(hours=1)}, {"role": "assistant", "seq": 2, "text": "Started. Waiting for the sheet.", "thinking": "", "tool_calls": [], "tool_results": [], "created_at": ago(hours=1)}]
     project = next(p for p in PROJECTS if p["id"] == s["project_id"])
     # A project session works in the project root, and the server answers exactly that: the folder is
     # not a directory of the session's own, and its name is the folder's.
@@ -243,9 +281,11 @@ def detail(id_: str) -> dict:
     yagni = id_ == S1 and getattr(stub, "yagni", False)
     if yagni:
         messages = [{**m, "yagni": "on"} if m["seq"] == 401 else m for m in messages]
-    running = id_ == S1 and getattr(stub, "running", False)
+    helper = bool(s["metadata"].get("subagent_of"))
+    running = (id_ == S1 and getattr(stub, "running", False)) or (helper and s["status"] == "running")
+    status = "running" if running else "waiting" if id_ == S4 else "failed" if helper and s["status"] == "failed" else "idle"
     return {
-        "id": id_, "title": s["title"], "status": "running" if running else "idle" if id_ != S4 else "waiting", "run_id": "r-modes" if running else None, "compacting": None,
+        "id": id_, "title": s["title"], "status": status, "run_id": "r-modes" if running else None, "compacting": None,
         "yagni": yagni,
         "workspace": workspace, "workspace_name": workspace.rsplit("/", 1)[-1], "workspace_own": s["workspace_own"],
         "project": project,
@@ -253,7 +293,8 @@ def detail(id_: str) -> dict:
         "pending": QUESTION if id_ == S4 else None, "model": (id_ == S1 and getattr(stub, "model", None)) or s["model"], "provider": "claude" if id_ == S1 else "opencode",
         "thinking": True, "reasoning_effort": "high",
         "messages": messages, "mode": "", "usd_cap": 4.0, "brief": "Site of a small bakery. Static HTML, no frameworks; the owner edits data files, never markup.", "spawned_by": None, "tools_off": [],
-        "loop": LOOP if id_ == S3 else None, "services": SERVICES_S1 if id_ == S1 else [], "subagents": SUBAGENTS_S1 if id_ == S1 else [],
+        "loop": LOOP if id_ == S3 else None, "services": SERVICES_S1 if id_ == S1 else [], "subagents": subagents_of(id_),
+        "subagent_of": s["metadata"].get("subagent_of"), "subagent_name": s["metadata"].get("subagent_name"), "leader_title": "Bakery site" if s["metadata"].get("subagent_of") == S1 else None,
         "context": {"tokens": 41200, "window": 200000, "messages": len(messages), "summaries": 1, "operator_turns": 6},
         "usage": {"c": 38, "i": 612000, "o": 24100, "ch": 540000, "usd": 1.84},
     }
@@ -810,6 +851,8 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
             return respond(route, {"checkpoints": [], "total": 0, "pruned": False, "pruned_before": None, "removed": 0, "note": "", "keep_days": 30, "keep_last": 50})
         if tail == "tasks":
             return respond(route, session_tasks(sid))
+        if tail == "subagents":
+            return respond(route, {"subagents": subagents_of(sid)})
         if tail == "mcp":
             return respond(route, {"enabled": [], "servers": []})
         if tail == "tools":

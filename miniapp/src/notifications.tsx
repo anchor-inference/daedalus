@@ -6,11 +6,12 @@
 // translates what a notification says; only the frame around it (headings, outcomes, the category
 // word) comes from the dictionary.
 
+import { openPathOf } from "./subagents";
 import { useState, type ReactNode } from "react";
 import { ApiError, api, type Notification, type NotificationPage, type NotificationSummary, type Project, type SessionList } from "./api";
 import { absTime, relTime } from "./format";
 import { Icon, type IconName } from "./icons";
-import { canonical, navigate, pathFor, sessionPath } from "./router";
+import { canonical, navigate, pathFor } from "./router";
 import { invalidate, peek, prime, useQuery } from "./store";
 import { SUMMARY_KEY, streamUp, useStreamUp } from "./events";
 import { toast } from "./ui/dialogs";
@@ -178,7 +179,8 @@ export async function markAllSeen(): Promise<void> {
 export function entryPath(entry: Pick<Notification, "link" | "session_id">): string {
   // The host's links to a project or the main chat are older than orchestration mode's addresses.
   if (entry.link && entry.link.startsWith("/app/")) return canonical(entry.link);
-  if (entry.session_id) return sessionPath(entry.session_id);
+  // A helper's session opens beside its leader, where the rest of what it did is in view.
+  if (entry.session_id) return openPathOf(entry.session_id);
   return pathFor("inbox");
 }
 

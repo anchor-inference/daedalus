@@ -305,8 +305,10 @@ export function splitActivity(items: readonly Activity[]): Segment[] {
 
 /** A user message that is not the operator's own words, and what it is instead. */
 export type SystemNote = {
-  /** Who wrote it: the loop, a schedule, a reminder, the core, or a source named by its prefix. */
-  kind: "loop" | "schedule" | "reminder" | "intent" | "core" | "heartbeat" | "context" | "events" | "page" | "other";
+  /** Who wrote it: the loop, a schedule, a reminder, the core, or a source named by its prefix. A
+   *  subagent's message to its leader is `subagent` (the origin is then the helper's name), the host's
+   *  note about idle helpers is `subagents`, and the task a helper was handed is `task`. */
+  kind: "loop" | "schedule" | "reminder" | "intent" | "core" | "heartbeat" | "context" | "events" | "page" | "subagent" | "subagents" | "task" | "other";
   origin: string;
   /** For a loop wake-up: the run number and the cadence, read off the host's own header line. */
   iteration?: number;
@@ -318,6 +320,7 @@ export type SystemNote = {
 
 const LOOP_HEAD_RE = /^\s*\[Loop iteration (\d+)(?: of (\d+))?\s*[—-]\s*([^.\]]+)[^\]]*\]/;
 const LOOP_BODY_RE = /<loop_instruction>\s*([\s\S]*?)\s*<\/loop_instruction>/;
+const TASK_HEAD_RE = /^\s*\[(?:task|message) from your leader session [^\]]*\]\s*/;
 const CONTEXT_RE = /<(turn_context|heartbeat)>\s*([\s\S]*?)\s*<\/\1>/;
 
 /**
@@ -341,6 +344,10 @@ export function systemNote(m: Pick<MessageView, "role" | "text" | "origin" | "in
   // A custom page's message: the operator's request (a button, the page's composer) is their bubble
   // with the page named on it; the page reporting on its own is a note.
   if (origin.startsWith("page:")) return m.silent ? { kind: "page", origin: origin.slice(5), body: text } : null;
+  if (origin.startsWith("subagent:")) return { kind: "subagent", origin: origin.slice(9), body: text };
+  if (origin === "subagents") return { kind: "subagents", origin, body: text };
+  // The leader's task, or a later message from it: the host's framing line goes, the words stay.
+  if (origin.startsWith("subagent-task:")) return { kind: "task", origin: origin.slice(14), body: text.replace(TASK_HEAD_RE, "").trim() };
   const kind = origin === "schedule" || origin === "reminder" || origin === "intent" || origin === "core" || origin === "heartbeat" || origin === "events" ? origin : "other";
   return { kind, origin, body: text };
 }

@@ -34,9 +34,9 @@ def run() -> int:
         def route(r):  # type: ignore[no-untyped-def]
             url = urlsplit(r.request.url)
             if url.path == f"/api/sessions/{S1}":
-                # Idle, with the four jobs the task list holds still running.
+                # Idle, with the three jobs the task list holds still running.
                 data = copy.deepcopy(detail(S1))
-                data["background_count"] = 4
+                data["background_count"] = 3
                 return respond(r, data)
             if url.path.endswith("/stop") and r.request.method == "POST":
                 stops.append(url.path)
@@ -48,26 +48,27 @@ def run() -> int:
 
         assert page.locator(".jobs .task-list").count() == 1, "one jobs list"
         assert page.get_by_text("Background jobs").count() == 0, "no second list"
-        assert page.locator(".task-row").count() == 7, page.locator(".task-row").count()
-        expect(page.locator(".task-list .dt-aside")).to_have_text("4 running · 7")
+        assert page.locator(".task-row").count() == 6, page.locator(".task-row").count()
+        expect(page.locator(".task-list .dt-aside")).to_have_text("3 running · 6")
         expect(page.locator(".task-flag")).to_have_text("possibly stuck")
         rows = page.locator(".task-list").inner_text()
         for word in ("failed · exit 3", "lost", "succeeded", "service", "host"):
             assert word in rows, f"{word!r} missing from the list: {rows!r}"
-        assert page.locator(".task-row.running .task-stop").count() == 4
+        assert page.locator(".task-row.running .task-stop").count() == 3
         assert page.locator(".task-row.done .task-stop").count() == 0
-        assert page.locator('.task-row[data-kind="agent"]').count() == 1
+        # Subagents have a tab of their own and are not among the jobs.
+        assert page.locator('.task-row[data-kind="agent"]').count() == 0
         assert page.locator(".task-open").first.get_attribute("title") == "npm run build -- --watch"
 
-        expect(page.locator(".head-status.jobs-pending")).to_have_text("waiting for 4 jobs")
+        expect(page.locator(".head-status.jobs-pending")).to_have_text("waiting for 3 jobs")
         page.locator(".task-row.running .task-stop").first.click()
         assert stops and stops[0].endswith("/tasks/job-1/stop"), stops
 
         phone = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True).new_page()
         phone.route("**/api/**", route)
         phone.goto(f"{BASE}/agents/{S1}?token=t&lang=en")
-        expect(phone.locator(".ph-chat-state")).to_contain_text("waiting for 4 jobs", timeout=20000)
-        print("one list, seven rows, labels, stop, and the waiting line on desktop and phone: passed")
+        expect(phone.locator(".ph-chat-state")).to_contain_text("waiting for 3 jobs", timeout=20000)
+        print("one list, six rows, labels, stop, and the waiting line on desktop and phone: passed")
         assert not errors, errors
         browser.close()
     return UNHANDLED.report()

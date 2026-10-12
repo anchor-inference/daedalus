@@ -18,6 +18,7 @@ import {
   goBack,
   goForward,
   openFile,
+  openSubagent,
   openTab,
   panelQuery,
   panelShortcut,
@@ -112,10 +113,10 @@ describe("the route", () => {
   });
 
   it("writes the tab and, on Preview, the path", () => {
-    expect(panelQuery(PANEL_CLOSED)).toEqual({ panel: null, path: null, lines: null, tab: null });
-    expect(panelQuery(openTab(PANEL_CLOSED, "files"))).toEqual({ panel: "files", path: null, lines: null, tab: null });
+    expect(panelQuery(PANEL_CLOSED)).toEqual({ panel: null, path: null, lines: null, sub: null, tab: null });
+    expect(panelQuery(openTab(PANEL_CLOSED, "files"))).toEqual({ panel: "files", path: null, lines: null, sub: null, tab: null });
     const s = openFile(PANEL_CLOSED, { base, path: "reports/menu-check.md" });
-    expect(panelQuery(s)).toEqual({ panel: "preview", path: "reports/menu-check.md", lines: null, tab: null });
+    expect(panelQuery(s)).toEqual({ panel: "preview", path: "reports/menu-check.md", lines: null, sub: null, tab: null });
     expect(panelQuery(openTab(s, "details")).path).toBeNull();
   });
 
@@ -251,12 +252,40 @@ describe("the Browser tab", () => {
     const q = readPanelQuery(new URLSearchParams("panel=browser"), routeTabsFor("session"));
     expect(q).toEqual({ tab: "browser", path: null });
     expect(applyPanelQuery(PANEL_CLOSED, q, base).tab).toBe("browser");
-    expect(panelQuery(openTab(PANEL_CLOSED, "browser"))).toEqual({ panel: "browser", path: null, lines: null, tab: null });
+    expect(panelQuery(openTab(PANEL_CLOSED, "browser"))).toEqual({ panel: "browser", path: null, lines: null, sub: null, tab: null });
   });
 
   it("is never where a session opens by itself: the next session may have no browser", () => {
     const kept = new Map<string, string>([["daedalus.session.panel", "browser"]]);
     const storage = { getItem: (k: string) => kept.get(k) ?? null };
     expect(readPanelTab(1440, storage)).toBe("details");
+  });
+});
+
+describe("the Subagents tab", () => {
+  const base = "/api/files/0123456789ab";
+  it("is offered only to a session that has helpers, right after Jobs", () => {
+    expect(tabsFor("session")).not.toContain("subagents");
+    expect(tabsFor("session", { subagents: true })).toEqual(["details", "files", "preview", "jobs", "subagents"]);
+    expect(tabsFor("session", { subagents: true, browser: true })).toEqual(["details", "files", "preview", "jobs", "subagents", "browser"]);
+    expect(tabsFor("orchestrator", { subagents: true })).not.toContain("subagents");
+  });
+  it("opens from a link on one helper, before the listing says there are helpers", () => {
+    const q = readPanelQuery(new URLSearchParams("panel=subagents&sub=child1"), routeTabsFor("session"));
+    expect(q).toEqual({ tab: "subagents", path: null, sub: "child1" });
+    const s = applyPanelQuery(PANEL_CLOSED, q, base);
+    expect(s.tab).toBe("subagents");
+    expect(s.sub).toBe("child1");
+  });
+  it("writes the helper it shows, and drops it on any other tab", () => {
+    const s = openSubagent(PANEL_CLOSED, "child1");
+    expect(panelQuery(s)).toEqual({ panel: "subagents", path: null, lines: null, sub: "child1", tab: null });
+    expect(panelQuery(openSubagent(s, null)).sub).toBeNull();
+    expect(panelQuery(openTab(s, "files")).sub).toBeNull();
+  });
+  it("goes back to the list when the link names no helper", () => {
+    const s = openSubagent(PANEL_CLOSED, "child1");
+    const back = applyPanelQuery(s, readPanelQuery(new URLSearchParams("panel=subagents"), routeTabsFor("session")), base);
+    expect(back.sub).toBeNull();
   });
 });

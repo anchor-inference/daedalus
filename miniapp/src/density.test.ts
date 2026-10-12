@@ -398,6 +398,9 @@ describe("the sidebar", () => {
     expect(wide(".sb-row")).toContain("min-height: var(--row-h-2)");
     expect(wide(".sb-prow")).toContain("min-height: var(--row-h)");
     expect(wide(".sb-kids > .sb-row")).toContain("min-height: var(--row-h-kid)");
+    // A subagent under its unfolded leader is one short line, quieter than a chat: the dense row.
+    expect(wide(".sb-sub")).toContain("min-height: var(--row-h-dense)");
+    expect(wide(".sb-kids > .sb-row.sb-sub")).toContain("min-height: var(--row-h-dense)");
     expect(wide(".sb-plate")).toContain("width: var(--plate)");
     expect(wide(".sb-plate")).toContain("border-radius: 50%");
     expect(wide(".sb-tile")).toContain("border-radius: var(--radius-xs)");

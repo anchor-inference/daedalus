@@ -1,4 +1,5 @@
 import { Component, Suspense, lazy, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { openPathOf } from "./subagents";
 import { api, SessionList, telegram, TerminalList } from "./api";
 import { ConfirmHost, ToastHost, toast as showToast } from "./ui/dialogs";
 import { SessionPicker } from "./sessionpicker";
@@ -480,7 +481,8 @@ export function App() {
 
   // Stable, so the Agents list can skip a folder that did not change between two polls: a new
   // function on every render of the shell would defeat every memo below it.
-  const open = useCallback((id: string) => navigate(sessionPath(id)), []);
+  // A subagent opens beside its leader, in the Subagents tab; its full chat is the tab's own button.
+  const open = useCallback((id: string) => navigate(openPathOf(id)), []);
   const closeSession = () => back(pathFor("agents"));
   const paletteItems = (): PaletteItem[] => {
     const listed = peek<SessionList>("/api/sessions");

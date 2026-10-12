@@ -17,7 +17,7 @@
 // archives, P pins or unpins, and Delete deletes after the same confirmation the menu asks for.
 
 import { useContextActions } from "../ui/context-menu";
-import { type ReactNode, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { api, Project, SessionList, SessionSummary, Settings } from "../api";
 import { agentFolders, folderName, offersFolderChoice, projectPath, projectReachable } from "../folders";
 import { Skeleton, ToolPicker, fmtInterval, statusWord } from "../ui/components";
@@ -29,7 +29,8 @@ import { MoveSessionSheet, ProjectSettingsSheet, useProjects } from "../projects
 import { openNewProject } from "../project/NewProject";
 import { openImport } from "../imports/ImportExplorer";
 import { PlateMark, importedHarness } from "../imports/ImportedChat";
-import { navigate, parse, pathFor, sessionPath } from "../router";
+import { navigate, parse, pathFor, sessionPath, useRoute } from "../router";
+import { subagentPath } from "../subagents";
 import { agentsListing } from "../mode";
 import { invalidate, useQuery } from "../store";
 import { useStreamUp } from "../events";
@@ -325,9 +326,68 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
   );
 }
 
-/** One row per line a list draws: a chat, then the forks taken from it, then theirs. The nesting is
- *  in the model and not in the DOM, so the rows can be windowed as one list. */
-type Line = { row: RowModel; fork?: { of: string; seq: number } };
+/** One row per line a list draws: a chat, then the forks taken from it, then theirs, and under a chat
+ *  whose helpers are unfolded, each of them (`sub`, with `last` on the one that ends the tree). The
+ *  nesting is in the model and not in the DOM, so the rows can be windowed as one list. */
+type Line = { row: RowModel; fork?: { of: string; seq: number }; sub?: SessionSummary; last?: boolean };
+
+// Which chats have their subagents unfolded in the column. A convenience of this browser, kept per
+// chat: the helpers used to be reachable only through the right-click menu, so the fold is offered on
+// every row that has them and remembered, and a chat whose helper is open beside it unfolds itself.
+const SUBS_KEY = "daedalus.side.subagents";
+const subsListeners = new Set<() => void>();
+let subsOpen: ReadonlySet<string> = readSubsOpen();
+
+function readSubsOpen(): ReadonlySet<string> {
+  try {
+    const stored = JSON.parse(localStorage.getItem(SUBS_KEY) ?? "[]");
+    return new Set(Array.isArray(stored) ? stored.filter((id): id is string => typeof id === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/** Fold or unfold one chat's subagents, and remember it. */
+export function toggleSubagents(id: string, to?: boolean): void {
+  const next = new Set(subsOpen);
+  if (to ?? !next.has(id)) next.add(id);
+  else next.delete(id);
+  subsOpen = next;
+  try {
+    localStorage.setItem(SUBS_KEY, JSON.stringify([...next]));
+  } catch {
+    /* private mode: the fold lasts for the visit */
+  }
+  for (const listener of [...subsListeners]) listener();
+}
+
+function subscribeSubs(listener: () => void): () => void {
+  subsListeners.add(listener);
+  return () => {
+    subsListeners.delete(listener);
+  };
+}
+
+/** Whether a chat's subagents are drawn: unfolded by the reader, or holding the helper open beside it. */
+function useSubsShown(): (row: RowModel) => boolean {
+  const open = useSyncExternalStore(subscribeSubs, () => subsOpen, () => subsOpen);
+  const route = useRoute();
+  const sub = route.query.get("panel") === "subagents" ? route.query.get("sub") : null;
+  return useCallback((row: RowModel) => row.kids.length > 0 && (open.has(row.s.id) || (!!sub && row.kids.some((k) => k.id === sub))), [open, sub]);
+}
+
+/** The lines with each unfolded chat's subagents under it. */
+function withSubs(shown: Line[], unfolded: (row: RowModel) => boolean): Line[] {
+  const out: Line[] = [];
+  for (const line of shown) {
+    out.push(line);
+    if (line.sub || !unfolded(line.row)) continue;
+    line.row.kids.forEach((kid, i) => out.push({ row: line.row, sub: kid, last: i === line.row.kids.length - 1 }));
+  }
+  return out;
+}
+
+const lineKey = (l: Line) => (l.sub ? `sub:${l.sub.id}` : l.row.s.id);
 
 function lines(rows: RowModel[], fork?: { of: string; seq: number }): Line[] {
   const out: Line[] = [];
@@ -355,13 +415,16 @@ function folderState(rows: RowModel[]): "waiting" | "running" | "" {
 /** One day of the chats section. Windowed: a long history is the same few rows in the DOM. */
 function DayGroup({ day, rows, onOpen, current }: { day: SidebarDay; rows: RowModel[]; onOpen: (id: string) => void; current?: string }) {
   const host = useRef<HTMLDivElement>(null);
-  const shown = useMemo(() => lines(rows), [rows]);
-  const keys = useMemo(() => shown.map((l) => l.row.s.id), [shown]);
+  const unfolded = useSubsShown();
+  const shown = useMemo(() => withSubs(lines(rows), unfolded), [rows, unfolded]);
+  const keys = useMemo(() => shown.map(lineKey), [shown]);
   return (
     <div ref={host} className="sb-day" data-day={day}>
       <div className="sb-dayhead">{t(`side.day.${day}`)}</div>
-      <WindowedRows keys={keys} host={host} rowSelector=":scope > .sb-row" estimate={44} render={(i) => (
-        <ChatRow row={shown[i].row} fork={shown[i].fork} onOpen={onOpen} current={current} projectName={shown[i].row.s.project} pin={shown[i].fork ? undefined : "off"} />
+      <WindowedRows keys={keys} host={host} rowSelector=":scope > .sb-row" estimate={44} render={(i) => shown[i].sub ? (
+        <SubagentRow kid={shown[i].sub!} leader={shown[i].row.s} last={!!shown[i].last} />
+      ) : (
+        <ChatRow row={shown[i].row} fork={shown[i].fork} onOpen={onOpen} current={current} projectName={shown[i].row.s.project} pin={shown[i].fork ? undefined : "off"} subsOpen={unfolded(shown[i].row)} />
       )} />
     </div>
   );
@@ -370,8 +433,11 @@ function DayGroup({ day, rows, onOpen, current }: { day: SidebarDay; rows: RowMo
 /** A pinned chat in the pinned block: its row and the forks taken from it, as under its day. Not
  *  windowed: a pin is a handful of rows by intent. */
 function PinnedChat({ folder, onOpen, current }: { folder: Folder; onOpen: (id: string) => void; current?: string }) {
-  const shown = useMemo(() => lines(folder.rows), [folder.rows]);
-  return <>{shown.map((l) => <ChatRow key={l.row.s.id} row={l.row} fork={l.fork} onOpen={onOpen} current={current} projectName={l.row.s.project} pin={l.fork ? undefined : "on"} />)}</>;
+  const unfolded = useSubsShown();
+  const shown = useMemo(() => withSubs(lines(folder.rows), unfolded), [folder.rows, unfolded]);
+  return <>{shown.map((l) => l.sub
+    ? <SubagentRow key={lineKey(l)} kid={l.sub} leader={l.row.s} last={!!l.last} />
+    : <ChatRow key={lineKey(l)} row={l.row} fork={l.fork} onOpen={onOpen} current={current} projectName={l.row.s.project} pin={l.fork ? undefined : "on"} subsOpen={unfolded(l.row)} />)}</>;
 }
 
 type GroupProps = { folder: Folder; onOpen: (id: string) => void; current?: string; filtered: boolean; toast: (text: string) => void };
@@ -424,9 +490,11 @@ const ProjectGroup = memo(function ProjectGroup({ folder, onOpen, current, filte
   // Only the live lines themselves: an idle fork of a working chat is not what the collapsed row
   // keeps in sight for.
   const peek = useMemo(() => all_lines.filter((l) => liveRow(l.row)), [all_lines]);
-  const shown = showing ? (all ? all_lines : all_lines.slice(0, KIDS_SHOWN)) : peek;
-  const keys = useMemo(() => shown.map((l) => l.row.s.id), [shown]);
-  const hidden = showing ? all_lines.length - shown.length : 0;
+  const chats = showing ? (all ? all_lines : all_lines.slice(0, KIDS_SHOWN)) : peek;
+  const hidden = showing ? all_lines.length - chats.length : 0;
+  const unfolded = useSubsShown();
+  const shown = useMemo(() => withSubs(chats, unfolded), [chats, unfolded]);
+  const keys = useMemo(() => shown.map(lineKey), [shown]);
   const state = folderState(folder.rows);
   const onKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.target !== e.currentTarget) return;
@@ -457,8 +525,10 @@ const ProjectGroup = memo(function ProjectGroup({ folder, onOpen, current, filte
       {(shown.length > 0 || (showing && folder.rows.length === 0)) && (
         <div className={`sb-kids ${showing ? "" : "peek"}`}>
           {showing && folder.rows.length === 0 && <div className="sb-empty sub">{filtered ? t("common.nothing") : t("agents.folder.none")}</div>}
-          <WindowedRows keys={keys} host={section} rowSelector=":scope > .sb-kids > .sb-row" estimate={40} render={(i) => (
-            <ChatRow row={shown[i].row} fork={shown[i].fork} nested onOpen={onOpen} current={current} projectName={folder.name} system={folder.system} onNewIn={newIn} onParent={() => head.current?.focus()} />
+          <WindowedRows keys={keys} host={section} rowSelector=":scope > .sb-kids > .sb-row" estimate={40} render={(i) => shown[i].sub ? (
+            <SubagentRow kid={shown[i].sub!} leader={shown[i].row.s} last={!!shown[i].last} nested />
+          ) : (
+            <ChatRow row={shown[i].row} fork={shown[i].fork} nested onOpen={onOpen} current={current} projectName={folder.name} system={folder.system} onNewIn={newIn} onParent={() => head.current?.focus()} subsOpen={unfolded(shown[i].row)} />
           )} />
           {(hidden > 0 || (all && all_lines.length > KIDS_SHOWN)) && (
             <button type="button" className="sb-more" onClick={() => setAll((v) => !v)}>
@@ -500,6 +570,8 @@ type RowProps = {
   /** Whether the row is a chat that can be pinned (its scratch project is), and whether it is: a chat
    *  inside a project is not pinned on its own, its project is. */
   pin?: "on" | "off";
+  /** Whether the chat's subagents are unfolded under it. */
+  subsOpen?: boolean;
 };
 
 /** What a row actually draws, so a fresh read of the list does not reconcile a row that did not
@@ -511,7 +583,7 @@ function sameRow(a: RowProps, b: RowProps): boolean {
   if ((l.terminals ?? 0) !== (r.terminals ?? 0) || l.match?.snippet !== r.match?.snippet || l.project_id !== r.project_id) return false;
   if (a.projectName !== b.projectName || a.onNewIn !== b.onNewIn || a.onOpen !== b.onOpen) return false;
   if ((a.current === l.id || a.row.kids.some((k) => k.id === a.current)) !== (b.current === r.id || b.row.kids.some((k) => k.id === b.current))) return false;
-  if (a.nested !== b.nested || a.system !== b.system || a.fork?.seq !== b.fork?.seq || a.fork?.of !== b.fork?.of || a.pin !== b.pin) return false;
+  if (a.nested !== b.nested || a.system !== b.system || a.fork?.seq !== b.fork?.seq || a.fork?.of !== b.fork?.of || a.pin !== b.pin || !!a.subsOpen !== !!b.subsOpen) return false;
   if (JSON.stringify(l.metadata?.loop ?? null) !== JSON.stringify(r.metadata?.loop ?? null)) return false;
   const lk = a.row.kids, rk = b.row.kids;
   return lk.length === rk.length && lk.every((k, i) => k.id === rk[i].id && k.status === rk[i].status && k.title === rk[i].title);
@@ -530,7 +602,7 @@ function rowState(s: SessionSummary, kids: SessionSummary[]): "waiting" | "runni
  * meta line under it. Hovering or focusing it shows "Open beside" and the menu; the right click opens
  * the same menu, with the commands of the phone's sheet.
  */
-const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, projectName, system, onNewIn, onParent, pin }: RowProps) {
+const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, projectName, system, onNewIn, onParent, pin, subsOpen }: RowProps) {
   const s = row.s;
   const kids = row.kids;
   // The project's own settings are the project row's to offer; in a chat's menu they were one more
@@ -571,20 +643,34 @@ const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, proj
     else if (latinKey(e) === "e" && plain) { e.preventDefault(); void run.archive(); }
     else if (latinKey(e) === "p" && plain && pin) { e.preventDefault(); void setPinned(s.project_id, pin === "off"); }
     else if (e.key === "Delete" && plain) { e.preventDefault(); void run.remove(); }
+    else if (e.key === "ArrowRight" && plain && kids.length && !subsOpen) { e.preventDefault(); toggleSubagents(s.id, true); }
+    else if (e.key === "ArrowLeft" && plain && kids.length && subsOpen) { e.preventDefault(); toggleSubagents(s.id, false); }
     else if (e.key === "ArrowLeft" && plain && onParent) { e.preventDefault(); onParent(); }
   };
   const tail = [
     s.metadata?.loop ? loopLine(s) : "",
     fork ? t("agents.fork.at", { n: fork.seq }) : "",
     s.model ? shortModel(s.model, 28) : "",
-    kids.length ? plural("ph.subagents", kids.length) : "",
     s.workspace_own && !fork ? t("agents.own.chip") : "",
     s.metadata?.subagent_of ? t("agents.orphan") : "",
   ].filter(Boolean).join(" · ");
   return (
     <div data-session={s.id} data-nav="chat" className={`sb-row sb-chat ${here ? "current" : ""} ${unread ? "unread" : ""} ${nested ? "nested" : ""} ${fork ? "fork" : ""}`}
       title={s.model ? `${s.model} · ${s.id}` : s.id} role="link" aria-current={here ? "page" : undefined} tabIndex={0} onClick={open} onKeyDown={onKey}>
-      <span className="sb-plate"><Icon name={icon} size={nested ? 12 : 14} />{state && <span className={`sb-st ${state}`} />}{imported && <PlateMark harness={imported} />}</span>
+      {kids.length ? (
+        // The left of a leader's row folds its helpers: the plate turns into the disclosure, with
+        // their number on it, so the row says it has them without a word in its meta line.
+        <button type="button" className={`sb-plate sb-subs ${subsOpen ? "open" : ""}`} aria-expanded={!!subsOpen}
+          aria-label={t(subsOpen ? "side.subs.hide" : "side.subs.show", { name: agentName(s) })} title={t(subsOpen ? "side.subs.hide" : "side.subs.show", { name: agentName(s) })}
+          onClick={(e) => { e.stopPropagation(); toggleSubagents(s.id); }} onKeyDown={(e) => e.stopPropagation()}>
+          <span className="sb-subs-icon"><Icon name={icon} size={nested ? 12 : 14} /></span>
+          <span className="sb-subs-chev" aria-hidden><Icon name="chevron" size={nested ? 12 : 14} /></span>
+          <span className="sb-subs-n num" aria-hidden>{kids.length}</span>
+          {state && <span className={`sb-st ${state}`} />}{imported && <PlateMark harness={imported} />}
+        </button>
+      ) : (
+        <span className="sb-plate"><Icon name={icon} size={nested ? 12 : 14} />{state && <span className={`sb-st ${state}`} />}{imported && <PlateMark harness={imported} />}</span>
+      )}
       <span className="sb-main">
         <span className="sb-l1">
           <span className="sb-t">{agentName(s)}</span>
@@ -610,6 +696,46 @@ const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, proj
     </div>
   );
 }, sameRow);
+
+/** The dot a helper's row carries: working, waiting on a question, failed, or at rest. */
+function subState(s: SessionSummary): "running" | "waiting" | "failed" | "idle" {
+  if (s.status === "waiting") return "waiting";
+  if (s.status === "running" || s.status === "compacting") return "running";
+  return s.status === "failed" ? "failed" : "idle";
+}
+
+/**
+ * A subagent under its unfolded leader: one short line on the leader's tree, smaller and quieter than
+ * a chat, with its state as a dot. It opens beside the leader, in the Subagents tab; its full chat is
+ * the tab's button and the row's menu. The arrows walk it like any row, and Left goes to the leader.
+ */
+const SubagentRow = memo(function SubagentRow({ kid, leader, last, nested }: { kid: SessionSummary; leader: SessionSummary; last: boolean; nested?: boolean }) {
+  const route = useRoute();
+  const here = route.session === leader.id && route.query.get("panel") === "subagents" && route.query.get("sub") === kid.id;
+  const state = subState(kid);
+  const box = useRef<HTMLDivElement>(null);
+  const open = () => navigate(subagentPath(leader.id, kid.id));
+  const full = () => navigate(sessionPath(kid.id));
+  useContextActions(box, [
+    { label: t("side.sub.panel"), icon: "spawn", onSelect: open },
+    { label: t("subagents.full"), icon: "expand", onSelect: full },
+  ]);
+  const onKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.target !== e.currentTarget || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); box.current?.parentElement?.querySelector<HTMLElement>(`[data-session="${CSS.escape(leader.id)}"]`)?.focus(); }
+  };
+  return (
+    <div ref={box} data-subagent={kid.id} data-nav="chat" role="link" tabIndex={0} aria-current={here ? "page" : undefined}
+      className={`sb-row sb-sub ${here ? "current" : ""} ${last ? "last" : ""} ${nested ? "nested" : ""}`} title={kid.model ? `${kid.model} · ${kid.id}` : kid.id} onClick={open} onKeyDown={onKey}>
+      <span className="sb-tree" aria-hidden />
+      <span className={`sub-dot ${state}`} aria-hidden />
+      <span className="sb-t">{agentName(kid)}</span>
+      {state !== "idle" && <span className={`sb-word ${state}`}>{statusWord(state)}</span>}
+      <span className="sb-time num">{relTime(kid.last_message_at)}</span>
+    </div>
+  );
+});
 
 /**
  * A session's commands, for every place that offers them: the desktop row's ⋮ menu and the phone's
