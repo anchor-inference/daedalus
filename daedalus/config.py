@@ -1222,11 +1222,14 @@ not through a mode, so editing a mode cannot hand a staff member any of them."""
 STAFF_ONLY_TOOLS = ["Report", "AskOrchestrator"]
 """The tools that exist for staff alone; every other session is blocked from them."""
 
-SUBAGENT_BLOCKED_TOOLS = ["Notify", "SettingsChange"]
+SUBAGENT_BLOCKED_TOOLS = ["Notify", "SettingsChange", "AskUser", "AskPeer", "PeerList", "SubAgent", "SpawnAgent"]
 """What a subagent may not call, whoever its leader is. Its work reaches the operator through the
 agent that started it, which decides what is worth the operator's attention; a subagent that could
 notify on its own would put a dozen workers' progress on the operator's phone, and one that changed
-the settings would post its card in a chat the operator does not read. Enforced by the host
+the settings would post its card in a chat the operator does not read. It asks nobody but its
+leader, in its report: a subagent told to "notify the host when done" once found the peer list,
+asked a session of an unrelated project to forward a client's deployment details, and put them in
+that project's transcript. It starts no agents of its own, as its brief says. Enforced by the host
 beside the staff rule, so no mode or leader can hand it back."""
 
 ORCHESTRATOR_ONLY_TOOLS = [
@@ -1308,8 +1311,6 @@ class PeersConfig(BaseModel):
 
 
 class SubagentsConfig(BaseModel):
-    max_depth: int = Field(default=2, ge=1)
-    """How deep SubAgent may nest (a subagent starting a subagent …) before the call is refused."""
     max_active: int = Field(default=4, ge=1)
     """Running subagents one leader may have at a time."""
     wait_timeout_minutes: int = Field(default=30, ge=1)

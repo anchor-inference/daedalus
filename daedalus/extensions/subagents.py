@@ -157,9 +157,9 @@ class Subagents:
             persona_text = self.persona(persona)
             if persona_text is None:
                 raise ValueError(f"unknown persona {persona!r}; available: {', '.join(self.personas()) or 'none'}")
-        depth = int(leader.metadata.get("subagent_depth", 0)) + 1
-        if depth > self.app.config.subagents.max_depth:
-            raise ValueError(f"subagent chain too deep ({depth} > {self.app.config.subagents.max_depth}); do this yourself")
+        if leader.metadata.get("subagent_of"):
+            # SubAgent is withheld from subagents (SUBAGENT_BLOCKED_TOOLS); this refuses any other way in.
+            raise ValueError("a subagent cannot start subagents of its own; do this yourself or say in your report that it needs another agent")
         active = [s for s in await self.children(leader_id) if s["running"]]
         if len(active) >= self.app.config.subagents.max_active:
             raise RuntimeError(f"{len(active)} subagents are already running for this session (limit {self.app.config.subagents.max_active}); wait for their reports")
@@ -184,7 +184,6 @@ class Subagents:
         metadata: dict[str, Any] = {
             "subagent_of": leader_id,
             "subagent_name": label,
-            "subagent_depth": depth,
             "subagent_keep": bool(keep) or idle,
             "subagent_expects": (expects or "").strip(),
             "subagent_deliverable": (deliverable or "").strip(),
