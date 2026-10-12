@@ -340,6 +340,7 @@ class Zoo(BaseHTTPRequestHandler):
     served: list[str] = []
     stall_after = 0
     hold = 0.0
+    released = threading.Event()
 
     def do_GET(self) -> None:  # noqa: N802
         body = Zoo.payload
@@ -361,8 +362,11 @@ class Zoo(BaseHTTPRequestHandler):
         self.wfile.flush()
         if Zoo.hold:
             # The rest never comes. A download stuck like this is the only state in which cancelling
-            # means anything, so it is the state the test needs.
-            time.sleep(Zoo.hold)
+            # means anything, so it is the state the test needs. It is held on an event rather than
+            # slept out: the server answers one request at a time and its shutdown waits for this one,
+            # so a plain sleep made every test that stalls a download sit out the whole hold in its
+            # teardown, ten seconds each, after the test itself had long finished.
+            Zoo.released.wait(Zoo.hold)
 
     def log_message(self, *args: Any) -> None:
         pass
@@ -376,7 +380,9 @@ def zoo() -> Any:
     Zoo.served = []
     Zoo.stall_after = 0
     Zoo.hold = 0.0
+    Zoo.released = threading.Event()
     yield f"http://127.0.0.1:{server.server_port}/model.tar.bz2"
+    Zoo.released.set()
     server.shutdown()
 
 

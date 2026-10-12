@@ -570,7 +570,10 @@ async def test_a_long_message_goes_as_a_file_in_the_launch(settings: Settings, d
 
 
 async def test_a_dialog_that_takes_a_paste_gets_no_enter_and_the_message_waits(settings: Settings, db: Database) -> None:
-    async with stand(settings, db, extra_env={"FAKE_CLI_FAULTS": "dialog_during_paste"}, answer_confirm_s=1.0, **claude()) as s:
+    # The person's Esc below holds the keyboard for the daemon's idle window before the message may go;
+    # at the default ten seconds that window was most of this test's run time, and its length is not
+    # what the test is about.
+    async with stand(settings, db, extra_env={"FAKE_CLI_FAULTS": "dialog_during_paste"}, answer_confirm_s=1.0, input_idle_ms=1500, **claude()) as s:
         trust(s)
         ada = await started(s, "echo:ready")
         await s.status_event(ada, "turn_done_unseen")

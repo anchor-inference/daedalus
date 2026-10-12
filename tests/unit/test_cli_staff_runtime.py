@@ -327,8 +327,12 @@ def harness_config(**changes: Any) -> HarnessConfig:
     return HarnessConfig.model_construct(**{**HarnessConfig().model_dump(), "ready_poll_ms": 50, "stop_grace_s": 5.0, **changes})
 
 
-def terminals_service(db: Database, manager: SessionManager, run: Path, home: Path, *, cap: int = 20) -> Terminals:
-    service = Terminals(db, run_dirs={"container": run, "host": None}, config=lambda: TerminalsConfig(running_cap=cap, kill_grace_ms=300, agent_launch_wait_seconds=60), owners=ManagerOwners(manager), bus=manager.bus)
+def terminals_service(db: Database, manager: SessionManager, run: Path, home: Path, *, cap: int = 20, input_idle_ms: int = 0) -> Terminals:
+    # The idle window goes in the host's configuration, which is where the daemon is told it: every
+    # terminal is created with the host's value, so one given only to the daemon never took effect and
+    # a stand asking for a short window waited out the default ten seconds behind each keystroke.
+    idle = {"input_idle_ms": input_idle_ms} if input_idle_ms else {}
+    service = Terminals(db, run_dirs={"container": run, "host": None}, config=lambda: TerminalsConfig(running_cap=cap, kill_grace_ms=300, agent_launch_wait_seconds=60, **idle), owners=ManagerOwners(manager), bus=manager.bus)
     # Exactly what the host lets itself read of a home, not the whole home: a transcript directory
     # missing from that list makes the adapter's reads fail here as they would against the daemon.
     service.set_extra_roots("container", "harness-catalog", catalog_roots(str(home)))
@@ -345,7 +349,7 @@ async def stand(settings: Settings, db: Database, *, adapter: Any = None, extra_
     ptyd = LivePtyd(root / "run", home=home, bin_dir=bin_dir, base_env={"FAKE_CLI_LOG": str(log), "FAKE_CLI_TIME_SCALE": "0.05", **(extra_env or {})}, input_idle_ms=input_idle_ms)
     await ptyd.start()
     manager = await _manager(settings, db, ScriptedProvider([]))
-    terminals = terminals_service(db, manager, root / "run", home, cap=cap)
+    terminals = terminals_service(db, manager, root / "run", home, cap=cap, input_idle_ms=input_idle_ms)
     try:
         await terminals.start()
         assert await terminals.wait_available("container")
