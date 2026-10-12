@@ -424,12 +424,19 @@ SETTINGS = {
     "navigation": {"rail": [], "more": [], "drawer": [], "hidden": [], "icons": {}},
     "model": {"preset": "deepseek-flash", "chain": ["deepseek-flash", "gpt-5.6-luna"], "auto_fallback": False, "fallback_to_session": True},
     "presets": {
-        "deepseek-flash": {"provider": "deepseek", "model": "deepseek-flash", "label": "DeepSeek Flash", "thinking": True, "reasoning_effort": "medium", "images": False, "context_window": 128000, "max_output_tokens": 16384},
-        "claude-opus-5": {"provider": "claude", "model": "claude-opus-5", "label": "Claude Opus 5", "thinking": True, "reasoning_effort": "high", "images": True, "context_window": 200000, "max_output_tokens": 32000},
-        "gpt-5.6-luna": {"provider": "opencode", "model": "gpt-5.6-luna", "label": "GPT-5.6 Luna", "thinking": True, "reasoning_effort": "medium", "images": True, "context_window": 200000, "max_output_tokens": 32000},
-        "qwen-local": {"provider": "vllm", "model": "Qwen3.8", "label": "Local Qwen3.8", "thinking": False, "reasoning_effort": "", "images": False, "context_window": 65536, "max_output_tokens": 4096},
+        "deepseek-flash": {"provider": "deepseek", "model": "deepseek-flash", "label": "DeepSeek Flash", "thinking": True, "reasoning_effort": "medium", "images": False, "context_window": 128000, "context_window_source": "table", "max_output_tokens": 16384},
+        "claude-opus-5": {"provider": "claude", "model": "claude-opus-5", "label": "Claude Opus 5", "thinking": True, "reasoning_effort": "high", "images": True, "context_window": 1000000, "context_window_source": "provider", "max_output_tokens": 32000},
+        "gpt-5.6-luna": {"provider": "opencode", "model": "gpt-5.6-luna", "label": "GPT-5.6 Luna", "thinking": True, "reasoning_effort": "medium", "images": True, "context_window": 200000, "context_window_source": "manual", "max_output_tokens": 32000},
+        "qwen-local": {"provider": "vllm", "model": "Qwen3.8", "label": "Local Qwen3.8", "thinking": False, "reasoning_effort": "", "images": False, "context_window": 65536, "context_window_source": "provider", "max_output_tokens": 4096},
     },
     "on_demand_defaults": {"deepseek-flash": True, "claude-opus-5": True, "gpt-5.6-luna": True, "qwen-local": False},
+    # What each source says about each window: the settings explain the number with it.
+    "context_window_sources": {
+        "deepseek-flash": {"provider": None, "catalog": None, "table": 128000, "error": None},
+        "claude-opus-5": {"provider": 1000000, "catalog": 1000000, "table": 1000000, "error": None},
+        "gpt-5.6-luna": {"provider": None, "catalog": 272000, "table": None, "error": None},
+        "qwen-local": {"provider": 65536, "catalog": None, "table": None, "error": None},
+    },
     "providers": {}, "prompt": {"rules": ""}, "vision": {"preset": "gpt-5.6-luna", "max_output_tokens": 800},
     "orchestrator": {"preset": "", "strongest": "claude-opus-5"},
     "asr": {"provider": "", "url": "", "api_key": "", "model": "", "language": "auto", "timeout_seconds": 60, "max_seconds": 120, "autosend": False},

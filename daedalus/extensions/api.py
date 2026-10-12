@@ -143,6 +143,7 @@ from daedalus.host.setting_refs import LOCAL_SPEECH_MODEL, SPEECH_RECOGNITION, S
 from daedalus.host.transcript_view import full_tool_result, message_view
 from daedalus.model_capabilities import known_image_input
 from daedalus.processes import end_tree
+from daedalus.providers.context_window import catalog_window, table_window, window_from_entry
 from daedalus.providers.free_catalog import approved_endpoint, probe_agent_cycle
 from daedalus.providers.free_catalog import catalog as free_catalog
 from daedalus.providers.llamacpp import discover_llamacpp
@@ -806,11 +807,16 @@ class PresetPatch(BaseModel):
     images: bool | None = None
     free_only: bool | None = None
     context_window: int | None = None
+    context_window_source: Literal["auto", "manual"] | None = None
+    """``auto`` hands the window back to the resolver (the number stays until it finds better); a window
+    sent without this is the operator's own, ``manual``."""
     max_output_tokens: int | None = None
     on_demand_tool_groups: bool | None = None
     """Sent as null, it goes back to what the model is known for; the one field where null is a value."""
 
 
+CONTEXT_WINDOW_WAIT_SECONDS = 12.0
+"""How long saving a preset waits for its window to be found before answering with what it has."""
 PRESET_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 NO_MODEL_LABEL = "no model"
 """Where a model name would go in a list or a chip and there is none yet."""
@@ -892,9 +898,10 @@ def model_entry(raw: dict[str, Any]) -> dict[str, Any]:
     if isinstance(name, str) and name.strip():
         entry["name"] = name.strip()
     top = raw.get("top_provider") if isinstance(raw.get("top_provider"), dict) else {}
-    context = raw.get("context_length") or top.get("context_length")
-    if type(context) in (int, float) and 0 < context <= 2**63 - 1 and math.isfinite(context):
-        entry["context_length"] = int(context)
+    context = window_from_entry(raw)
+    if context is not None:
+        entry["context_length"] = context
+        entry["context_source"] = "provider"
     max_output = top.get("max_completion_tokens")
     if type(max_output) in (int, float) and 0 < max_output <= 2**63 - 1 and math.isfinite(max_output):
         entry["max_output_tokens"] = int(max_output)
@@ -988,6 +995,25 @@ async def lookup_openai_models(
         if owns_client:
             await client.aclose()
     raise ValueError("; ".join(errors[:3]) or "no response")
+
+
+def with_known_windows(result: dict[str, Any], catalog: dict[str, int]) -> dict[str, Any]:
+    """Give every listed model the window the resolver would choose when the listing named none.
+
+    The listing's own number stays first; models.dev, then the bundled table, fill the rest, and
+    ``context_source`` says which, so Add a model can show where the prefilled window came from.
+    """
+    for entry in result.get("entries") or []:
+        if entry.get("context_length"):
+            entry.setdefault("context_source", "provider")
+            continue
+        model = str(entry.get("id") or "")
+        for source, tokens in (("catalog", catalog_window(catalog, model)), ("table", table_window(model))):
+            if tokens:
+                entry["context_length"] = tokens
+                entry["context_source"] = source
+                break
+    return result
 
 
 def extend_model_list(result: dict[str, Any], extra: list[str]) -> dict[str, Any]:
@@ -5662,6 +5688,10 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         data["dispatcher"]["middle"] = app.config.middle_preset() or ""
         # What a preset left to its model does with the on-demand tool groups, so the switch can say it.
         data["on_demand_defaults"] = {pid: on_demand_tool_groups_for(None, preset.model) for pid, preset in app.config.presets.items()}
+        # What every source knows about each preset's window, so the settings can say why it is what it is.
+        windows = getattr(app, "extensions", {}).get("context_windows")
+        if windows is not None:
+            data["context_window_sources"] = {pid: windows.view(preset)["sources"] for pid, preset in app.config.presets.items()}
         data["keyproxy_base"] = _keyproxy_origin()
         data["provider_keys"] = {pid: _key_state(_provider_view(pid, pc, usable, keys)) for pid, pc in app.config.providers.items()}
         masked = mask_provider_keys(data)
@@ -6109,6 +6139,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             entry: dict[str, Any] = {"id": discovered.model_id}
             if discovered.context_window is not None:
                 entry["context_length"] = discovered.context_window
+                entry["context_source"] = "provider"
             if discovered.images is not None:
                 entry["images"] = discovered.images
                 entry["input_modalities"] = ["text", "image"] if discovered.images else ["text"]
@@ -6130,7 +6161,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             if store is not None:
                 rows = await store.catalog_rows()
                 extend_model_list(found, [model for row in rows if row.harness == "codex" for model in row.models])
-        return found
+        return with_known_windows(found, dict(getattr(getattr(app.manager, "providers", None), "catalog_windows", None) or {}))
 
     # -- model presets -------------------------------------------------------------------
 
@@ -6146,9 +6177,18 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if existing is None and sent.get("images") is None and known_image_input(str(sent.get("model") or "")):
             # A new model whose caller did not say: the family decides, not a default of "no".
             entry["images"] = True
+        source = sent.pop("context_window_source", None)
+        was = (entry.get("provider"), entry.get("model"))
         for key, value in sent.items():
             if value is not None or key == "on_demand_tool_groups":
                 entry[key] = value.strip() if isinstance(value, str) else value
+        if source == "auto":
+            entry["context_window_source"] = "default"
+        elif source == "manual" or sent.get("context_window") is not None:
+            entry["context_window_source"] = "manual"
+        # An automatic window is found again whenever it may have changed: a new preset, a different
+        # model or endpoint, or the operator handing it back.
+        find_window = entry.get("context_window_source") != "manual" and (existing is None or source == "auto" or was != (entry["provider"], entry["model"]))
         if entry["provider"] not in raw.get("providers", {}):
             raise HTTPException(400, f"provider {entry['provider']!r} is not a configured client")
         if not entry["model"]:
@@ -6165,7 +6205,31 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             new_config = type(app.config).model_validate(raw)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(400, str(exc)) from exc
-        return await _save_provider_config(new_config)
+        view = await _save_provider_config(new_config)
+        windows = getattr(app, "extensions", {}).get("context_windows")
+        if find_window and windows is not None:
+            try:
+                # Bounded: the save is done; a provider slow to answer is left to the background sweep.
+                await asyncio.wait_for(windows.resolve_preset(preset_id, refresh=True), CONTEXT_WINDOW_WAIT_SECONDS)
+            except (TimeoutError, KeyError):
+                pass
+            view = await _settings_view()
+        return view
+
+    @api.post("/api/presets/{preset_id}/context-window")
+    async def refresh_context_window(preset_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Ask the sources again for one preset's window; writes it when the preset's window is automatic.
+
+        Answers ``{"window", "source", "sources"}``, ``sources`` being what each one said
+        (``provider``, ``catalog``, ``table``, ``error``; null where it knows nothing).
+        """
+        windows = getattr(app, "extensions", {}).get("context_windows")
+        if windows is None:
+            raise HTTPException(503, "context-window resolution is not running")
+        try:
+            return await windows.resolve_preset(preset_id, refresh=True)
+        except KeyError as exc:
+            raise HTTPException(404, "no such preset") from exc
 
     @api.delete("/api/presets/{preset_id}")
     async def delete_preset(preset_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

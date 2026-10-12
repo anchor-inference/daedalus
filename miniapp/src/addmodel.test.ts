@@ -81,6 +81,11 @@ describe("the provider lookup prefill", () => {
     expect(out.images).toBe(true);
     expect(out.provider).toBe("local");
   });
+
+  it("keeps a large hosted window as found, since the host keeps automatic windows true and would rewrite a capped one", () => {
+    expect(prefilled({ id: "claude-opus-5-5", context_length: 1000000, context_source: "provider" }, BLANK).context_window).toBe(1000000);
+    expect(prefilled({ id: "mystery" }, BLANK).context_window).toBe(BLANK.context_window);
+  });
 });
 
 describe("the project orchestrator's default model in Settings", () => {
