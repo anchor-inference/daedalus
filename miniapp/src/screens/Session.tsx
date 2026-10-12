@@ -1,5 +1,5 @@
 import { useContextActions } from "../ui/context-menu";
-import { Component, createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Component, Fragment, createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { api, ApiError, AsrStatus, ModelFallback, ProviderUsage, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, SessionDetail, Compacting, type SessionFolder, type Question } from "../api";
 import { Chevron, Dot, Status, copyText, fmtInt, statusWord, timeAgo } from "../ui/components";
@@ -7,11 +7,12 @@ import { MenuItem, OverflowMenu, Popover, confirmDialog, Overlay } from "../ui/d
 import { absDate, clock, commandPreview, duration, plainPreview, shortDateTime } from "../format";
 import { HostMark } from "../runon";
 import { isProject } from "../grouping";
+import { readPrefs, type Prefs } from "../appearance";
 import { EVIDENCE_EVENT, EvidenceRequest, codeBlock, renderCached, renderMarkdown } from "../md";
 import { confirmAsync, errorText, fmtBytes, haptic } from "../ui";
 import { Icon, IconName } from "../icons";
 import { AuthImg, FilePreview, PreviewSource, canPreview, downloadHref, fileGlyph, previewKind, sessionBase } from "../preview";
-import { Activity, LiveStore, SummaryItem, SystemNote, ToolItem, Turn, activitySummary, applyLive, buildTurns, createLiveStore, familyCounts, isOlderPage, liveAfter, liveBase, prepend, producedFiles, reconcile } from "../turns";
+import { Activity, LiveStore, Segment, SummaryItem, SystemNote, ToolItem, Turn, activitySummary, applyLive, buildTurns, createLiveStore, familyCounts, isOlderPage, liveAfter, liveBase, prepend, producedFiles, reconcile, splitActivity } from "../turns";
 import { Explorer } from "../explorerpanel";
 import { DiffView } from "../previewparts";
 import { looksLikeDiff } from "../diff";
@@ -1980,19 +1981,11 @@ function SystemNoteRow({ note, cacheKey, run }: { note: SystemNote; cacheKey?: s
 const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Turn; live: boolean; onTurnAction?: (kind: "revert" | "fork" | "retry", seq: number) => void }) {
   const { id: sessionId, workspace, folders, preview, toast, link } = useContext(SessionContext);
   const focusChat = useFocusChat();
-  const [open, setOpen] = useDisclosed(`${sessionId}:turn:${turn.key}`, false);
   const [folded, setFolded] = useDisclosed(`${sessionId}:run:${turn.key}`, false);
-  const wasLive = useRef(live);
-  useEffect(() => {
-    // Activity is opt-in, including during streaming; completion folds the details away.
-    if (wasLive.current && !live) setOpen(false);
-    wasLive.current = live;
-  }, [live]);
+  const split = useReplies() === "split";
   if (turn.summary) return <SummaryBlock message={turn.summary} />;
-  const hasWork = turn.activity.length > 0 || live;
   const elapsed = (live ? Date.now() : turn.endedAt) - turn.startedAt;
   const summary = activitySummary(turn, live, Date.now());
-  const steps = summary.steps;
   const activeTool = live ? [...turn.activity].reverse().find((item) => item.kind === "tool" && item.running) as ToolItem | undefined : undefined;
   const activeAction = activeTool ? describe(activeTool) : null;
   const currentAction = summary.staleSeconds >= 30
@@ -2009,7 +2002,31 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
   const inbound = turn.user?.origin?.startsWith("inbound:") ? turn.user.origin.slice(8) : "";
   const fromPage = turn.user?.origin?.startsWith("page:") ? turn.user.origin.slice(5) : "";
   const files = live ? null : turnFiles(turn.activity, workspace, folders);
-  const families = open ? "" : focusChat?.orchestrator ? stepLine(turn.activity) : familyLine(turn.activity);
+  // Split, every text the agent wrote between its steps is a reply of its own and cuts the steps
+  // into blocks around it; merged, the texts fold into one block of steps with the tool calls.
+  const segments: Segment[] = split ? splitActivity(turn.activity) : turn.activity.length || live ? [{ kind: "work", items: turn.activity }] : [];
+  // While the run works past its last reply there is a block for what it is doing now to live in.
+  if (split && live && !turn.answer && segments.at(-1)?.kind !== "work") segments.push({ kind: "work", items: [] });
+  let lastWork = -1;
+  let lastText = -1;
+  segments.forEach((segment, index) => {
+    if (segment.kind === "work") lastWork = index;
+    else lastText = index;
+  });
+  // The copy, link and retry row goes under the last text of the turn: the answer, or, when the
+  // turn ended on a step, the last reply before it.
+  const closing = turn.answer ? null : lastText >= 0 && !live ? (segments[lastText] as Extract<Segment, { kind: "text" }>) : null;
+  const answerActions = (text: string, answerSeq: number | undefined): MessageAction[] => [
+    ...(seq ? [{ icon: "link" as IconName, label: t("turn.link"), onSelect: copyLink }] : []),
+    ...(answerSeq && focusChat?.reply ? [{ icon: "reply" as IconName, label: t("reply.action"), onSelect: () => focusChat.reply!({ seq: answerSeq, excerpt: excerptOf(text) }) }] : []),
+    ...(answerSeq && onTurnAction ? [{ icon: "reload" as IconName, label: t("turn.retry"), onSelect: () => onTurnAction("retry", answerSeq) }] : []),
+  ];
+  const turnMenu: MenuItem[] | undefined = settled
+    ? [
+        { label: t("session.fork.action"), icon: "fork", onSelect: () => onTurnAction!("fork", seq!) },
+        ...(canRevert ? [{ label: t("session.revert.action.menu"), icon: "undo" as IconName, danger: true, onSelect: () => onTurnAction!("revert", seq!) }] : []),
+      ]
+    : undefined;
   const copyLink = async () => {
     const url = `${window.location.origin}${link}#m${seq}`;
     toast((await copyText(url)) ? t("turn.link.copied") : url);
@@ -2051,26 +2068,26 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
           />
         </div>
       )}
-      {hasWork && (
-        <button className="thinking-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-          <span className={`dots ${live ? "on" : ""}`}>
-            <i />
-            <i />
-            <i />
-          </span>
-          <span className="worked">{turn.imported && !live ? t("imp.worked", { name: harnessMeta(turn.imported).name }) : t(live ? "session.activity" : "session.worked", { t: duration(elapsed) })}</span>
-          {currentAction && <span className="activity-current truncate">{currentAction}</span>}
-          {steps > 0 && <span className="steps">{plural("session.steps", steps)}</span>}
-          {families && <span className="families truncate" title={families}>· {families}</span>}
-          <Chevron open={open} />
-        </button>
-      )}
-      {open && (
-        <div className="activity">
-          <ActivityList items={turn.activity} compact={false} onRetry={!live && onTurnAction ? (seq) => onTurnAction("retry", seq) : undefined} />
-          {live && !turn.answer && turn.pendingTools === 0 && turn.activity.length > 0 && <div className="working">{t("session.working")}</div>}
-        </div>
-      )}
+      {segments.map((segment, index) => segment.kind === "work" ? (
+        <WorkBlock
+          key={`w${index}`}
+          disclosure={index === 0 ? `${sessionId}:turn:${turn.key}` : `${sessionId}:turn:${turn.key}:${index}`}
+          items={segment.items}
+          live={live && index === lastWork}
+          elapsed={index === lastWork ? elapsed : null}
+          imported={turn.imported}
+          current={index === lastWork ? currentAction : ""}
+          waiting={live && index === lastWork && !turn.answer && turn.pendingTools === 0 && turn.activity.length > 0}
+          orchestrator={!!focusChat?.orchestrator}
+          onRetry={!live && onTurnAction ? (retrySeq) => onTurnAction("retry", retrySeq) : undefined}
+        />
+      ) : (
+        <Fragment key={`t${index}`}>
+          <Md className="answer interim" text={segment.text} cacheKey={live ? undefined : `r${turn.key}-${index}`} />
+          {!live && <KeptFiles text={segment.text} onOpen={preview} />}
+          {closing === segment && <MessageActions text={segment.text} actions={answerActions(segment.text, segment.seq)} more={turnMenu} />}
+        </Fragment>
+      ))}
       {turn.activity.map((item) => item.kind === "tool" && item.name === "AskUser" ? <AskUserRecord key={item.id} item={item} /> : null)}
       {turn.fallback && (turn.answer || live) && <FallbackChip fallback={turn.fallback} />}
       {turn.answer && (turn.media?.length ? (
@@ -2088,24 +2105,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
       {/* A page the agent showed is drawn as soon as the call returns, not when the turn ends: the
           point of showing it is that the operator can open it while the agent goes on. */}
       <PageCards pages={turnPages(turn.activity)} />
-      {turn.answer && !live && (
-        <MessageActions
-          text={mediaCopyText(turn.answer, turn.media ?? [])}
-          actions={[
-            ...(seq ? [{ icon: "link" as IconName, label: t("turn.link"), onSelect: copyLink }] : []),
-            ...(turn.answerSeq && focusChat?.reply ? [{ icon: "reply" as IconName, label: t("reply.action"), onSelect: () => focusChat.reply!({ seq: turn.answerSeq!, excerpt: excerptOf(turn.answer) }) }] : []),
-            ...(turn.answerSeq && onTurnAction ? [{ icon: "reload" as IconName, label: t("turn.retry"), onSelect: () => onTurnAction("retry", turn.answerSeq!) }] : []),
-          ]}
-          more={
-            settled
-              ? [
-                  { label: t("session.fork.action"), icon: "fork", onSelect: () => onTurnAction!("fork", seq!) },
-                  ...(canRevert ? [{ label: t("session.revert.action.menu"), icon: "undo" as IconName, danger: true, onSelect: () => onTurnAction!("revert", seq!) }] : []),
-                ]
-              : undefined
-          }
-        />
-      )}
+      {turn.answer && !live && <MessageActions text={mediaCopyText(turn.answer, turn.media ?? [])} actions={answerActions(turn.answer, turn.answerSeq)} more={turnMenu} />}
       </div>
       {/* Outside the folded content: a loop's turn is folded by default, and this line is the one
           thing about it that must be seen without unfolding it. */}
@@ -2113,6 +2113,69 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
     </div>
   );
 });
+
+/**
+ * One block of a turn's steps under its folding line. A turn has one when its texts fold into the
+ * steps and one between every two replies when they do not; the last block carries the turn's time
+ * and what the run is doing now, the earlier ones only what they hold. Each folds on its own and
+ * remembers it, and each folds itself away when the run that filled it ends.
+ */
+function WorkBlock({ disclosure, items, live, elapsed, imported, current, waiting, orchestrator, onRetry }: { disclosure: string; items: Activity[]; live: boolean; elapsed: number | null; imported?: string; current: string; waiting: boolean; orchestrator: boolean; onRetry?: (seq: number) => void }) {
+  const [open, setOpen] = useDisclosed(disclosure, false);
+  const wasLive = useRef(live);
+  useEffect(() => {
+    // Activity is opt-in, including during streaming; completion folds the details away.
+    if (wasLive.current && !live) setOpen(false);
+    wasLive.current = live;
+  }, [live]);
+  const steps = stepCount(items);
+  const families = open ? "" : orchestrator ? stepLine(items) : familyLine(items);
+  const label = elapsed !== null
+    ? imported && !live ? t("imp.worked", { name: harnessMeta(imported).name }) : t(live ? "session.activity" : "session.worked", { t: duration(elapsed) })
+    : steps > 0 ? plural("session.part.steps", steps) : t("session.reasoning");
+  return (
+    <>
+      <button className="thinking-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        <span className={`dots ${live ? "on" : ""}`}>
+          <i />
+          <i />
+          <i />
+        </span>
+        <span className="worked">{label}</span>
+        {current && <span className="activity-current truncate">{current}</span>}
+        {elapsed !== null && steps > 0 && <span className="steps">{plural("session.steps", steps)}</span>}
+        {families && <span className="families truncate" title={families}>· {families}</span>}
+        <Chevron open={open} />
+      </button>
+      {open && (
+        <div className="activity">
+          <ActivityList items={items} compact={false} onRetry={onRetry} />
+          {waiting && <div className="working">{t("session.working")}</div>}
+        </div>
+      )}
+    </>
+  );
+}
+
+let repliesNow: Prefs["replies"] | null = null;
+function subscribeReplies(changed: () => void): () => void {
+  const fresh = () => {
+    repliesNow = null;
+    changed();
+  };
+  window.addEventListener("daedalus-appearance", fresh);
+  window.addEventListener("storage", fresh);
+  return () => {
+    window.removeEventListener("daedalus-appearance", fresh);
+    window.removeEventListener("storage", fresh);
+  };
+}
+
+/** How the agent's texts between steps are drawn, read once per change rather than once per turn:
+ *  six hundred turns each parsing the stored preferences on every token would be the whole frame. */
+function useReplies(): Prefs["replies"] {
+  return useSyncExternalStore(subscribeReplies, () => (repliesNow ??= readPrefs().replies));
+}
 
 /**
  * The operator's bubble. On a phone its text stops at six lines with "Show all" under it: a long
@@ -2313,7 +2376,11 @@ function MessageActions({ text, actions = [], more }: { text: string; actions?: 
   const controls = useRef<HTMLDivElement>(null);
   const context = useRef<HTMLElement>(null);
   useEffect(() => {
-    context.current = controls.current?.closest<HTMLElement>(".msg-wrap") ?? controls.current?.parentElement?.querySelector<HTMLElement>(".answer") ?? null;
+    // The text this row belongs to is the nearest answer above it: a turn whose replies split its
+    // steps holds several, and the first of them is not the one the row copies.
+    let above = controls.current?.previousElementSibling ?? null;
+    while (above && !above.classList.contains("answer")) above = above.previousElementSibling;
+    context.current = controls.current?.closest<HTMLElement>(".msg-wrap") ?? (above as HTMLElement | null);
   });
   useContextActions(context, [{ label:t("common.copy"), icon:"copy", onSelect:() => void copy() }, ...actions, ...(more ?? [])]);
   return (

@@ -274,6 +274,33 @@ export function applyLive(base: Turn | null, live: LiveState, now: number): Turn
   return t;
 }
 
+/** A stretch of a turn as the transcript draws it: the steps between two texts, or a text. */
+export type Segment = { kind: "work"; items: Activity[] } | { kind: "text"; text: string; seq?: number };
+
+/**
+ * The turn's activity cut at every text the agent wrote between its steps, for the transcript
+ * that shows each of those texts as a reply rather than inside the folded steps. A text is what
+ * the agent said to the reader — an answer it went on to act on is still an answer — and folding it
+ * away with the tool calls hid real replies, the last of them sometimes, when a file was written
+ * after it. Steps keep their order; texts never merge with each other, and a stretch of steps is
+ * never empty.
+ */
+export function splitActivity(items: readonly Activity[]): Segment[] {
+  const out: Segment[] = [];
+  let work: Activity[] = [];
+  for (const item of items) {
+    if (item.kind !== "note") {
+      work.push(item);
+      continue;
+    }
+    if (work.length) out.push({ kind: "work", items: work });
+    work = [];
+    out.push({ kind: "text", text: item.text, seq: item.seq });
+  }
+  if (work.length) out.push({ kind: "work", items: work });
+  return out;
+}
+
 // ── what a turn is made of, read for the reader ───────────────────────────────────────────
 
 /** A user message that is not the operator's own words, and what it is instead. */

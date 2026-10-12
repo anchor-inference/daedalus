@@ -116,6 +116,9 @@ export type Prefs = {
   contrast: "normal" | "high";
   code: "theme" | "dark";
   bubble: "card" | "plain";
+  /** The agent's texts between its steps: drawn as replies that split the steps ("split"), or
+   *  folded into the steps with the tool calls, as the transcript once did ("merged"). */
+  replies: "split" | "merged";
 };
 
 export const DEFAULT_PREFS: Prefs = {
@@ -140,6 +143,7 @@ export const DEFAULT_PREFS: Prefs = {
   contrast: "normal",
   code: "theme",
   bubble: "card",
+  replies: "split",
 };
 
 const KEY = "daedalus.appearance";
@@ -253,6 +257,7 @@ export function readPrefs(): Prefs {
     contrast: oneOf(stored.contrast, ["normal", "high"] as const, DEFAULT_PREFS.contrast),
     code: oneOf(stored.code, ["theme", "dark"] as const, DEFAULT_PREFS.code),
     bubble: oneOf(stored.bubble, ["card", "plain"] as const, DEFAULT_PREFS.bubble),
+    replies: oneOf(stored.replies, ["split", "merged"] as const, DEFAULT_PREFS.replies),
     colors,
     fontUiUrl: fontUrlAllowed(stored.fontUiUrl ?? "") ? (stored.fontUiUrl ?? "") : "",
     fontProseUrl: fontUrlAllowed(stored.fontProseUrl ?? "") ? (stored.fontProseUrl ?? "") : "",

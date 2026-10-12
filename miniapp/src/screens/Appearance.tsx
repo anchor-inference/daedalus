@@ -188,6 +188,7 @@ export function AppearancePanel() {
         <Row title={t("theme.motion")}><Segmented value={prefs.motion} onChange={(motion) => update({ motion })} options={([{ id: "full" as const, label: t("theme.motion.full") }, { id: "reduce" as const, label: t("theme.motion.reduce") }])} /></Row>
         <Row title={t("theme.contrast")} desc={t("theme.contrast.sub")}><Segmented value={prefs.contrast} onChange={(contrast) => update({ contrast })} options={([{ id: "normal" as const, label: t("theme.contrast.normal") }, { id: "high" as const, label: t("theme.contrast.high") }])} /></Row>
         <Row title={t("theme.code")} desc={t("theme.code.sub")}><Segmented value={prefs.code} onChange={(code) => update({ code })} options={([{ id: "theme" as const, label: t("theme.code.theme") }, { id: "dark" as const, label: t("theme.code.dark") }])} /></Row>
+        <Row title={t("theme.replies")} desc={t("theme.replies.sub")}><Segmented label={t("theme.replies")} value={prefs.replies} onChange={(replies) => update({ replies })} options={([{ id: "split" as const, label: t("theme.replies.split") }, { id: "merged" as const, label: t("theme.replies.merged") }])} /></Row>
         <Row title={t("theme.bubble")}><Segmented value={prefs.bubble} onChange={(bubble) => update({ bubble })} options={([{ id: "card" as const, label: t("theme.bubble.card") }, { id: "plain" as const, label: t("theme.bubble.plain") }])} /></Row>
       </div>
     </>

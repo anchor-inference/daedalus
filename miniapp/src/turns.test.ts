@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MessageView } from "./api";
 import type { LiveState } from "./turns";
-import { activitySummary, applyLive, buildTurns, EMPTY_LIVE, isOlderPage, liveAfter, liveBase, prepend, reconcile, stripHeadline } from "./turns";
+import { activitySummary, applyLive, buildTurns, EMPTY_LIVE, isOlderPage, liveAfter, liveBase, prepend, reconcile, splitActivity, stripHeadline } from "./turns";
 
 let clock = 1_700_000_000_000;
 
@@ -419,5 +419,36 @@ describe("a long run's steps and the words between them", () => {
     const known = [start, ...before.slice(8), words];
     const turn = applyLive(liveBase(buildTurns(known)), streamed([...ids("a", 14), "b1", "b2", "c1"]), Date.now());
     expect(order(turn)).toEqual([...ids("a", 14).slice(4), "note", "b1", "b2", "c1"]);
+  });
+});
+
+describe("splitActivity", () => {
+  it("cuts a turn's steps at every reply, so a reply before a written file is not folded away", () => {
+    // The shape that hid an answer: steps, the full answer, a Write after it, a one-line close.
+    const [turn] = buildTurns([
+      msg(1, { role: "user", text: "research" }),
+      call(2, "a"), result(3, "a", "ok"),
+      call(4, "b", "Read"), result(5, "b", "ok"),
+      msg(6, { text: "The long answer.", tool_calls: [{ id: "w", name: "Write", arguments: { path: "sources.md" } }] }), result(7, "w", "ok"),
+      msg(8, { text: "The sources are in sources.md." }),
+    ]);
+    const segments = splitActivity(turn.activity);
+    expect(segments.map((s) => s.kind)).toEqual(["work", "text", "work"]);
+    expect(segments[0].kind === "work" && segments[0].items.map((a) => (a.kind === "tool" ? a.name : a.kind))).toEqual(["Exec", "Read"]);
+    expect(segments[1]).toEqual({ kind: "text", text: "The long answer.", seq: 6 });
+    expect(segments[2].kind === "work" && segments[2].items.map((a) => (a.kind === "tool" ? a.name : a.kind))).toEqual(["Write"]);
+    expect(turn.answer).toBe("The sources are in sources.md.");
+  });
+
+  it("keeps two texts apart and never makes an empty block of steps", () => {
+    expect(splitActivity([])).toEqual([]);
+    const segments = splitActivity([{ kind: "note", text: "one" }, { kind: "note", text: "two" }, { kind: "thinking", text: "hm" }]);
+    expect(segments).toEqual([{ kind: "text", text: "one", seq: undefined }, { kind: "text", text: "two", seq: undefined }, { kind: "work", items: [{ kind: "thinking", text: "hm" }] }]);
+  });
+
+  it("splits the streaming turn the same way once newer work arrives after a text", () => {
+    const base = buildTurns([msg(1, { role: "user", text: "go" }), msg(2, { text: "First I will look.", tool_calls: [{ id: "x", name: "Exec", arguments: {} }] })])[0];
+    const turn = applyLive(base, { ...EMPTY_LIVE, tools: [{ id: "x", name: "Exec", args: "{}" }, { id: "y", name: "Read", args: "{}" }] }, Date.now());
+    expect(splitActivity(turn.activity).map((s) => s.kind)).toEqual(["text", "work"]);
   });
 });
