@@ -383,10 +383,22 @@ async def test_a_dial_the_daemon_refuses_fails_the_start_at_once_in_the_daemons_
     # its timeout with "not ready" over the TUI's empty screen, and the refusal was never shown.
     async with stand(settings, db, extra_env={"FAKE_CODEX_SOCKET": "link"}, ready_timeout_s=8.0, **codex()) as s:
         s.ptyd.follow_links = False
+        # The test used to sleep past the gate's whole timeout to prove no "not ready" followed; the
+        # gate's own end proves the same at once: it ends on the refusal, or, as it did before the
+        # fix, at its timeout with "not ready", which the wait below outlasts and then sees.
+        gate, gate_ended = s.runtime._gate, asyncio.Event()
+
+        async def watched_gate(session: Any) -> None:
+            try:
+                await gate(session)
+            finally:
+                gate_ended.set()
+
+        s.runtime._gate = watched_gate  # type: ignore[method-assign]
         ada = await started(s, "echo:never")
         failed = await s.status_event(ada, "error", timeout=6.0)
         assert "codex.sock is not a socket" in failed.payload["detail"] and "daemon predates" in failed.payload["detail"]
-        await asyncio.sleep(8.5)
+        await asyncio.wait_for(gate_ended.wait(), 12.0)
         errors = [e.payload for e in await s.events("staff.status", staff_id=ada.id) if e.payload["status"] == "error"]
         assert all("not ready" not in e["detail"] for e in errors), errors
 

@@ -59,6 +59,9 @@ PROMPT = "This is a self-check. Call the Report tool with kind checkpoint and no
 TURN_TIMEOUT_S = 180.0
 FOLDER = ".cache/daedalus-selfcheck"
 ACTOR = "agent:harness-self-check"
+# How long a session end may trail the process's exit. Codex and OpenCode report none at all, and the
+# check used to wait out the whole stop grace plus five seconds for one after they had already exited.
+SESSION_END_AFTER_EXIT_S = 2.0
 
 
 class _Steps:
@@ -197,7 +200,7 @@ async def session_check(
                 detail = "the turn ended and its Report came through the team channel" if ok else ("the turn did not end" if done is None or done.kind is not EventKind.TURN_COMPLETED else "the turn ended without a Report through the team channel")
                 steps.add("reply", ok, detail)
         await adapter.stop(term)
-        ended = await until({EventKind.SESSION_ENDED}, cfg.stop_grace_s + 5)
+        ended = await _session_end(terminals, term_id, until, cfg.stop_grace_s + 5)
         code = await _exit_code(terminals, term_id, cfg.stop_grace_s + 5)
         steps.add("exit", code == 0, f"exit code {code}" + ("" if ended is not None else "; no session end reported"))
     except TerminalError as exc:
@@ -241,6 +244,23 @@ async def _gate(adapter: HarnessAdapter, term: RuntimeTerminal, cfg: HarnessConf
         if event is not None:
             return None if event.kind is EventKind.READY else str(event.payload.get("failure") or "failed")
     return f"not ready after {cfg.ready_timeout_s:g} s; the screen ended: {_tail(screen)}"
+
+
+async def _session_end(terminals: Terminals, terminal_id: str, until: Any, timeout: float) -> StaffEvent | None:
+    """The session end the CLI reports, or None: given up a moment after the terminal has exited."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    exited_at: float | None = None
+    while loop.time() < deadline:
+        event = await until({EventKind.SESSION_ENDED}, 0.2)
+        if event is not None:
+            return event
+        if exited_at is None:
+            if (await terminals.get(terminal_id))["status"] != "running":
+                exited_at = loop.time()
+        elif loop.time() - exited_at >= SESSION_END_AFTER_EXIT_S:
+            return None
+    return None
 
 
 def _tail(screen: str) -> str:
