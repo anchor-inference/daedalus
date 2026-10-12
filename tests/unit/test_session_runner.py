@@ -338,22 +338,22 @@ async def test_rename_updates_session_and_topic(settings: Settings, db: Database
     await manager.close()
 
 
-SECTIONED = "## Goal\ng\n## Constraints\nc\n## State\ns\n## Discoveries\nd\n## Open\no\n## Next steps\nn\n## Unknowns\nu\n## Identifiers\ni"
+SECTIONED = "## Standing instructions\ns\n## Stable facts\nf\n## Threads\n### t\nx\n## Closed threads\nc\n## Unknowns\nu\n## Identifiers\ni"
 
 
 def test_summary_sections_are_validated() -> None:
-    from daedalus.host.session_runner import validate_summary_sections
+    from daedalus.host.summaries import validate_summary_sections
 
     assert validate_summary_sections(SECTIONED) == ""
-    assert "appears 0 times" in validate_summary_sections("## Goal\nx")
-    assert "appears 2 times" in validate_summary_sections(SECTIONED + "\n## State\nagain")
-    assert validate_summary_sections("## Constraints\nc\n## Goal\ng\n## State\ns\n## Discoveries\nd\n## Open\no\n## Next steps\nn\n## Unknowns\nu\n## Identifiers\ni") == "sections are out of order"
+    assert "appears 0 times" in validate_summary_sections("## Threads\nx")
+    assert "appears 2 times" in validate_summary_sections(SECTIONED + "\n## Threads\nagain")
+    assert validate_summary_sections("## Stable facts\nf\n## Standing instructions\ns\n## Threads\nt\n## Closed threads\nc\n## Unknowns\nu\n## Identifiers\ni") == "sections are out of order"
 
 
 def test_transcript_for_summary_clips_tool_results() -> None:
     from protocore.contracts.types import Message, MessageRole, TextBlock, ToolResultBlock, ToolUseBlock
 
-    from daedalus.host.session_runner import transcript_for_summary
+    from daedalus.host.summaries import transcript_for_summary
 
     history = [
         Message(role=MessageRole.user, content_blocks=[TextBlock(text="do it")]),
@@ -382,7 +382,7 @@ async def test_compaction_reports_its_progress_to_the_listeners(settings: Settin
 
     manager.add_sink(sink)
 
-    async def fake_summarise(provider, model, history, *, language, instructions, observability, progress=None):  # type: ignore[no-untyped-def]
+    async def fake_summarise(provider, model, history, *, language, instructions, observability, progress=None, window=0):  # type: ignore[no-untyped-def]
         assert state.compacting is not None and state.compacting["stage"] == "summarising"
         await progress(parts_total=2, parts_done=0)
         await progress(parts_done=1)
@@ -411,14 +411,14 @@ async def test_compact_replaces_history_with_summary_and_keeps_a_backup(settings
 
         assert "hello there" in request.messages[0].content_blocks[0].text
         calls.append(1)
-        text = "## Goal\nx\n## State\ny" if len(calls) == 1 else SECTIONED
+        text = "## Threads\nx\n## Unknowns\ny" if len(calls) == 1 else SECTIONED
         return LLMResponse(message=Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=text)]), stop_reason=StopReason.end_turn)
 
     calls: list[int] = []
     provider.complete_text = fake_complete  # type: ignore[attr-defined]
     summary = await manager.compact(state.session.id)
     assert len(calls) == 2, "a summary missing sections is rejected and asked for again"
-    assert summary.startswith("## Goal") and "## Recent operator messages (verbatim)" in summary and "hello there" in summary
+    assert summary.startswith("## Standing instructions") and "## Recent operator messages (verbatim)" in summary and "hello there" in summary
     messages = await manager.sessions.list_messages(state.session.id, "daedalus", limit=100)
     assert len(messages) == 1 and messages[0].metadata.get("protocore.compaction_summary") is True
     assert "<compacted-turn" in messages[0].content_blocks[0].text
@@ -578,7 +578,7 @@ async def test_compact_falls_back_to_the_sessions_model_when_the_compaction_mode
 
     manager._compaction_rungs = rungs  # type: ignore[method-assign]
     summary = await manager.compact(state.session.id)
-    assert summary.startswith("## Goal")
+    assert summary.startswith("## Standing instructions")
 
     async def only_cheap(_state):  # type: ignore[no-untyped-def]
         return [(cheap, "cheap-model")]

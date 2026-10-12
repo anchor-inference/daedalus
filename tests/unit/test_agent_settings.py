@@ -77,7 +77,7 @@ async def test_a_harmless_section_applies_at_once_and_says_when(db: Database) ->
     assert record["status"] == "applied" and record["kind"] == "auto"
     assert app.config.compaction.auto_ratio == 0.6 and app.config.answer_language == "English"
     assert {(c["path"], c["old"], c["new"], c["apply_at"]) for c in record["changes"]} == {
-        ("compaction.auto_ratio", 0.5, 0.6, "next_step"), ("answer_language", "auto", "English", "next_step"),
+        ("compaction.auto_ratio", 0.8, 0.6, "next_step"), ("answer_language", "auto", "English", "next_step"),
     }
     text = rules.result_text(record)
     assert text.splitlines()[0] == f"Settings change: {record['id']}"
@@ -255,7 +255,7 @@ async def test_the_change_must_be_valid_and_name_real_sections_and_presets(db: D
     with pytest.raises(rules.ChangeRefused, match="no such model preset 'ghost'"):
         await propose(service, {"model": {"preset": "ghost"}})
     with pytest.raises(rules.ChangeRefused, match="nothing would change"):
-        await propose(service, {"compaction": {"auto_ratio": 0.5}})
+        await propose(service, {"compaction": {"auto_ratio": 0.8}})
     with pytest.raises(rules.ChangeRefused, match="reason"):
         await service.change(session_id="s1", tool_call_id="c", changes={"limits": {"max_iterations": 3}}, reason=" ")
 
@@ -266,7 +266,7 @@ async def test_null_resets_a_field_and_a_map_entry_can_be_added_and_removed(db: 
     app = make_app(db, config)
     service = ext.SettingsChanges(app)
     assert (await propose(service, {"compaction": {"auto_ratio": None}}))["status"] == "applied"
-    assert app.config.compaction.auto_ratio == 0.5
+    assert app.config.compaction.auto_ratio == 0.8
     added = await propose(service, {"modes": {"brief": {"description": "terse answers", "max_iterations": 10}}})
     await service.decide(added["id"], "apply", via="app")
     assert app.config.modes["brief"].max_iterations == 10
@@ -294,7 +294,7 @@ async def test_settings_get_masks_credentials_and_describes_each_field(db: Datab
     assert asr["values"]["api_key"] == "" and asr["values"]["api_key_set"] is True
     compaction = await service.get("compaction")
     assert compaction["fields"]["compaction.auto_ratio"]["ge"] == 0.0 and compaction["fields"]["compaction.auto_ratio"]["le"] == 1.0
-    assert compaction["fields"]["compaction.auto_ratio"]["default"] == 0.5 and compaction["fields"]["compaction.auto_ratio"]["about"]
+    assert compaction["fields"]["compaction.auto_ratio"]["default"] == 0.8 and compaction["fields"]["compaction.auto_ratio"]["about"]
     browser = await service.get("browser")
     assert "browser.rules" in browser["operator_only"] and "browser.running_cap" not in browser["operator_only"]
     mcp = await service.get("mcp")

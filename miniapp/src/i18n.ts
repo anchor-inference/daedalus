@@ -3885,7 +3885,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
     ru: "Когда после запуска промпт занял такую долю окна модели, история заменяется одной структурированной выжимкой (фиксированные разделы, ваши сообщения дословно) перед следующим запуском. 0 — только ручная команда /compact.",
   },
   "settings.compaction.ratio": { en: "Compact above", ru: "Сжимать выше" },
-  "settings.compaction.ratio.sub": { en: "A share of the model's window, from 0 to 1.", ru: "Доля окна модели, от 0 до 1." },
+  "settings.compaction.ratio.sub": { en: "A share of the model's window, from 0 to 1. A smaller window compacts earlier, to keep room for a run.", ru: "Доля окна модели, от 0 до 1. Модель с окном поменьше сжимается раньше, чтобы оставалось место на ход." },
   "settings.compaction.keep": { en: "Keep recent messages", ru: "Сохранять последних сообщений" },
   "settings.compaction.words": { en: "Summary budget", ru: "Объём выжимки" },
   "settings.compaction.core": { en: "Core mid-run trigger", ru: "Порог ядра внутри запуска" },

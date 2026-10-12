@@ -52,7 +52,13 @@ from daedalus.host.foreign_sessions import (
     parse_time,
     plan_history,
 )
-from daedalus.host.session_runner import _forget_persisted, annotate_summary, identifier_index, operator_quotes
+from daedalus.host.session_runner import (
+    _forget_persisted,
+    annotate_summary,
+    identifier_index,
+    operator_quotes,
+    verbatim_tail,
+)
 from daedalus.stores.projects import FolderSpec, Project, ProjectError, ProjectFolder, ProjectSettings
 
 if TYPE_CHECKING:
@@ -680,7 +686,9 @@ class SessionImporter:
             except Exception as exc:  # noqa: BLE001 — the import stands without our summary; the turns are in the transcript
                 logger.warning("import of %s: the turns before the kept tail could not be summarised: %s", sid, exc)
                 parts.append(f"[{len(gap)} earlier messages could not be summarised at import ({str(exc)[:200]}); HistoryExpand returns them]")
-            parts.append(operator_quotes(gap) + identifier_index(gap))
+            # ``operator_quotes`` leaves the last three passages to ``verbatim_tail``, as a compaction
+            # does; without it the operator's three latest words before the kept turns were quoted nowhere.
+            parts.append(operator_quotes(gap) + identifier_index(gap) + verbatim_tail(gap))
         note = f"\n\n[archived turns seq {archived[0]}–{archived[-1]}: HistoryExpand({archived[0]}, {archived[-1]}) returns them verbatim]" if archived else ""
         body = manager.redactor.redact("\n\n".join(p for p in parts if p.strip()).strip())
         kept = [entries[i].tail_history or entries[i].history for i in plan.kept]

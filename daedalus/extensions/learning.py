@@ -21,7 +21,8 @@ from protocore.contracts.types import Message, MessageRole, TextBlock, ToolResul
 
 from daedalus.extensions.notifications import Draft
 from daedalus.host.prompts import split_headline, without_turn_context
-from daedalus.host.session_runner import TENANT, transcript_for_summary
+from daedalus.host.session_runner import TENANT
+from daedalus.host.summaries import transcript_for_summary
 from daedalus.stores.knowledge import KnowledgeStore
 
 if TYPE_CHECKING:
