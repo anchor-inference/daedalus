@@ -201,5 +201,15 @@ async def test_workspace_notes_carry_agents_md_and_open_board_items(settings, db
         await db.execute("INSERT INTO board_tasks(id, title, status, priority, session_id, created_at, updated_at) VALUES ('t1', 'Write the adapter', 'doing', 1, ?, '2026-09-10', '2026-09-10')", (state.session.id,))
         notes = await manager.workspace_notes(state)
         assert "AGENTS.md" in notes and "Ship it." in notes and "[doing] t1: Write the adapter" in notes
+        # A CLAUDE.md that differs is read beside it, the memory index too, and on a large window a long
+        # file is not cut at 6,000 characters.
+        state.context_window = 1_000_000
+        (state.workspace / "CLAUDE.md").write_text("# Rules\n" + "Deliver by format-patch. " * 600, encoding="utf-8")
+        (state.workspace / ".agents" / "memory").mkdir(parents=True)
+        (state.workspace / ".agents" / "memory" / "MEMORY.md").write_text("- [Stands](stands.md): the client stand is work-sandbox\n", encoding="utf-8")
+        notes = await manager.workspace_notes(state)
+        assert notes.count("Deliver by format-patch.") == 600 and "the client stand is work-sandbox" in notes and ".agents/memory/MEMORY.md" in notes
+        (state.workspace / "CLAUDE.md").write_text("# Goal\nShip it.\n", encoding="utf-8")
+        assert (await manager.workspace_notes(state)).count("Ship it.") == 1, "a CLAUDE.md that repeats AGENTS.md is read once"
     finally:
         await manager.close()

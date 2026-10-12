@@ -14,6 +14,7 @@ import pytest
 from protocore.contracts.types import COMPACTION_SUMMARY_METADATA_KEY, MessageRole, ThinkingBlock, ToolUseBlock
 
 from daedalus.config import ModelPresetConfig, RuntimeConfig, Settings
+from daedalus.host import standing
 from daedalus.host.engine_factory import TENANT
 from daedalus.host.session_import import SessionImporter, normalise_cwd
 from daedalus.host.session_runner import SessionManager
@@ -50,6 +51,7 @@ class FakeHost:
         self.folders = {HOME: ["projects"], f"{HOME}/projects": ["door", "lab"], DOOR: ["firmware"], f"{DOOR}/firmware": [], f"{HOME}/projects/lab": []}
         self.sessions: dict[str, dict[str, Any]] = {}
         self.reads: list[tuple[str, Any, bool]] = []
+        self.instructions: dict[str, list[dict[str, Any]]] = {}
 
     def add(self, ext_id: str, cwd: str, turns: list[dict[str, Any]], **kwargs: Any) -> None:
         self.sessions[ext_id] = {"header": header(ext_id, cwd, messages=len(turns), **kwargs), "turns": turns,
@@ -98,6 +100,10 @@ class FakeHost:
         following = int(start) + len(turns)
         return {"header": found["header"], "turns": turns, "next": following, "done": following >= len(found["turns"]),
                 "live": found["header"]["flags"]["live"], "masked": 1 if start == 0 else 0}
+
+    async def sessions_instructions(self, harness: str, session: str) -> dict[str, Any]:
+        self._check()
+        return {"cwd": self.sessions[session]["header"]["cwd"], "files": self.instructions.get(session, [])}
 
     async def browse(self, path: str, *, hidden: bool = False, limit: int = 500) -> dict[str, Any]:
         self._check()
@@ -150,6 +156,10 @@ async def test_an_import_writes_the_whole_transcript_and_a_history_without_think
     session = claude_session()
     session[0] = turn(0, "user", text(f"fix the flaky door sensor test, the token is {SECRET}"))
     host.add("c-door", DOOR, session)
+    host.instructions["c-door"] = [
+        {"path": f"{HOME}/.claude/CLAUDE.md", "kind": "user", "content": f"Answer in Russian. The deploy token is {SECRET}.", "bytes": 60, "truncated": False, "omitted": False},
+        {"path": f"{HOME}/.claude/projects/-door/memory/MEMORY.md", "kind": "memory_index", "content": "- [stands](stands.md): test on work-sandbox, deliver by format-patch", "bytes": 70, "truncated": False, "omitted": False},
+    ]
     async with await _client(settings, import_config(), db, manager) as client:
         started = await client.post("/api/imports", headers=HEADERS, json={"harness": "claude", "id": "c-door"})
         assert started.status_code == 200, started.text
@@ -193,6 +203,16 @@ async def test_an_import_writes_the_whole_transcript_and_a_history_without_think
 
         listed = (await client.get("/api/sessions", headers=HEADERS)).json()["sessions"]
         assert next(r for r in listed if r["id"] == sid)["imported_from"] == "claude"
+
+        # The program's standing instructions and memory ride in every prompt of the session.
+        carried = imported["instructions"]
+        assert [f["path"] for f in carried["files"]] == [f"{HOME}/.claude/CLAUDE.md", f"{HOME}/.claude/projects/-door/memory/MEMORY.md"]
+        assert carried["problem"] == "" and "content" not in carried["files"][0]
+        state = await manager.get_state(sid)
+        assert state is not None
+        await standing.load(manager, state)
+        notes = manager.notes_for(state, window=200_000)
+        assert "Answer in Russian." in notes and "work-sandbox, deliver by format-patch" in notes and SECRET not in notes
 
 
 async def test_a_second_import_is_refused_unless_asked_for_as_a_new_chat(settings: Settings, db: Database, manager: SessionManager) -> None:
@@ -362,6 +382,7 @@ async def test_a_long_session_starts_from_a_summary_and_its_tail(settings: Setti
         assert len(history) < 400, "the working history is the summary and a tail"
         assert len(await manager.sessions.list_transcript(sid)) == 2402, "the transcript keeps every message and the summary"
         assert (await client.get(f"/api/sessions/{sid}", headers=HEADERS)).json()["imported"]["mode"] == "tail"
+        assert "## Recent operator messages (verbatim)" in summary.text, "the operator's last words before the kept turns are quoted"
 
 
 async def test_the_preview_shows_what_was_said_not_compactions_or_made_up_replies(settings: Settings, db: Database, manager: SessionManager) -> None:

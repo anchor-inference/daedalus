@@ -66,13 +66,14 @@ from daedalus.config import (
     max_advertised_tools_for,
     on_demand_tool_groups_for,
 )
-from daedalus.host import capabilities, launcher_bridge, prompts, summaries, tool_groups
+from daedalus.host import capabilities, launcher_bridge, prompts, standing, summaries, tool_groups
 from daedalus.host.checkpoint_retention import CheckpointRetention, RetentionBounds, RetentionReport
 from daedalus.host.checkpoints import DIR_NAME as CHECKPOINT_DIR_NAME
 from daedalus.host.checkpoints import CheckpointError, Checkpoints, scan_workspace
 from daedalus.host.containment import Walls, walls_for, worktree_writable_paths
 from daedalus.host.engine_factory import TENANT, EngineDeps, PolicyAdapter, build_engine
 from daedalus.host.events import AppEvent, EventBus, EventFilter
+from daedalus.host.foreign_sessions import harness_name
 from daedalus.host.hooks import DaedalusHookManager
 from daedalus.host.host_exec import BRIDGE_DOWN, HostExecBackend
 from daedalus.host.inference_admission import HostInferenceAdmission
@@ -172,6 +173,11 @@ rather than claiming the provider was unreachable."""
 BRIEF_MAX_CHARS = 12_000
 """A spawned agent's brief lives in its system prompt; longer hand-overs belong in files."""
 WORKSPACE_NOTES_CHARS = 6000
+"""The least room the workspace's notes files get, on a window too small for their share."""
+WORKSPACE_NOTES_WINDOW_SHARE = 0.04
+"""The share of the window the workspace's AGENTS.md, CLAUDE.md and memory index may take: 40k tokens on a million."""
+MEMORY_INDEX = ".agents/memory/MEMORY.md"
+"""The project's memory index, where agents of every program working in the folder keep their notes."""
 MCP_EXAMPLE_NAMES = 5
 """How many of a large MCP server's tool names McpList and McpEnable show beside its prefix and count:
 enough to show what the server covers and how its names are spelt, not so many that the list is back."""
@@ -183,7 +189,6 @@ STEER_CARD_CHARS = 200
 STEER_CARD_LIMIT = 20
 """Cards one change event carries. Past this the count is the answer; nobody reads the twenty-first card."""
 """How long an approval key stays spendable: long enough for the agent to retry, short enough that a forgotten grant does not wait for a later call."""
-"""How much of the workspace AGENTS.md rides along in the prompt; the rest is one Read away."""
 
 EventSink = Callable[[str, Any], Awaitable[None]]
 """A session's listener. It takes the loop's ``TurnEvent`` and the host's own ``HostEvent`` alike: both carry ``type``, ``run_id`` and ``payload``."""
@@ -296,6 +301,9 @@ class SessionState:
     """Lowered when a run starts, raised again once its history is persisted and its snapshot taken.
     The next run waits for it: the files a revert would restore must describe the turn that just ended,
     not the one starting. The rest of the housekeeping nobody waits for."""
+    standing: tuple[str, list[dict[str, Any]]] = ("", [])
+    """The carried instructions and memory of an imported session, as read from their blob (the blob's
+    reference, then the files); see :mod:`daedalus.host.standing`."""
     compacting: dict[str, Any] | None = None
     """A compaction in flight: reason, stage (summarising/merging/writing), parts done of total, started_at.
     The Mini App and the list read it; ``None`` when none is running."""
@@ -3747,6 +3755,7 @@ class SessionManager:
 
     async def _assemble_engine(self, state: SessionState, run_id: str, overrides: dict[str, Any], rungs: list[Any], preset: Any) -> QueryEngine:
         await self._load_capability_ancestors(state)
+        await standing.load(self, state)
         if rungs and self.provider_costs_nothing(rungs[0][0].endpoint.id, rungs[0][1]):
             # A local, free or subscription primary remains usable after a priced budget is
             # exhausted. Paid fallbacks do not inherit that exemption: when any applicable dollar
@@ -3822,7 +3831,7 @@ class SessionManager:
             reasoning_effort=overrides.get("reasoning_effort") or preset.reasoning_effort,
             context_window=state.context_window or preset.context_window,
             max_output_tokens=preset.max_output_tokens,
-            extra_notes=self.notes_for(state),
+            extra_notes=self.notes_for(state, window=int(state.context_window or preset.context_window or 0)),
             tool_visibility_policy=self.tool_policy_for(state),
             role="voice" if self.is_voice(state) else "orchestrator" if self.is_orchestrator(state) else "dispatcher" if self.is_dispatcher(state) else "agent",
             max_advertised_tools=self.advertised_tools_limit(rungs),
@@ -5493,8 +5502,10 @@ class SessionManager:
         await self.refresh_on_demand_groups(state)
         return self.tool_group_states(state)
 
-    def notes_for(self, state: SessionState) -> str:
-        """What the system prompt says about this session beyond the environment: the brief it was created with."""
+    def notes_for(self, state: SessionState, *, window: int = 0) -> str:
+        """What the system prompt says about this session beyond the environment: the brief it was created
+        with, and what an imported session carries from the program it came from (loaded beforehand into
+        ``state.standing`` by :func:`standing.load`)."""
         parts = [state.extra_notes.strip()] if state.extra_notes.strip() else []
         if state.services is not None and isinstance(state.services.exec_backend, HostExecBackend):
             # The sandbox line of the environment section describes this process's commands, not these.
@@ -5515,27 +5526,47 @@ class SessionManager:
         if brief:
             origin = state.metadata.get("spawned_by") or state.metadata.get("subagent_of")
             parts.append("- Your brief" + (f" (from session {origin})" if origin else "") + ", the standing instructions for this session:\n" + brief)
+        record = standing.record_of(state.session.metadata)
+        if record is not None and state.standing[1]:
+            imported = state.session.metadata.get("imported") or {}
+            carried = standing.render(state.standing[1], source=harness_name(str(record.get("source") or "")), window=window, workspace=str(imported.get("cwd") or ""))
+            if carried:
+                parts.append(carried)
         return "\n".join(parts)
 
     async def workspace_notes(self, state: SessionState) -> str:
         """What the workspace and the board say about the work in progress: read at every run start, so a run
         begins from the plan of record rather than from memory of it.
 
-        ``AGENTS.md`` (or ``CLAUDE.md``) in the workspace root is the agent's own project memory; the open
-        board tasks of this session are its plan. Both are volatile text: they change between runs, so
-        they travel in the turn context at the end of the run's opening message, never in the system
-        prompt, whose bytes must not change between runs if the provider is to serve them from cache.
+        ``AGENTS.md`` and ``CLAUDE.md`` in the workspace root, and the index of ``.agents/memory``, are the
+        agent's own project memory; the open board tasks of this session are its plan. Both are volatile
+        text: they change between runs, so they travel in the turn context at the end of the run's opening
+        message, never in the system prompt, whose bytes must not change between runs if the provider is
+        to serve them from cache.
         """
         parts: list[str] = []
+        # Its room is a share of the window, not a fixed few thousand characters: a 20 KB CLAUDE.md
+        # cut at 6,000 lost the rules an imported session had been working under. Both files are read
+        # when both exist and differ — a project kept for Claude Code and for Codex has one of each.
+        room = max(WORKSPACE_NOTES_CHARS, int(await self.session_window(state) * CHARS_PER_TOKEN * WORKSPACE_NOTES_WINDOW_SHARE))
+        seen: list[str] = []
         for name in ("AGENTS.md", "CLAUDE.md"):
             text = await self._workspace_note(state, name)
-            if text is None:
+            if not text or text in seen:
                 continue
-            if text:
-                if len(text) > WORKSPACE_NOTES_CHARS:
-                    text = text[:WORKSPACE_NOTES_CHARS] + f"\n[… {name} continues; Read it for the rest]"
-                parts.append(f"- {name} in the workspace (your project memory; keep it current):\n{self.redactor.redact(text)}")
-            break
+            seen.append(text)
+            if len(text) > room:
+                text = text[:room] + f"\n[… {name} continues; Read it for the rest]"
+            room = max(0, room - len(text))
+            parts.append(f"- {name} in the workspace (your project memory; keep it current):\n{self.redactor.redact(text)}")
+        # The index of the project's memory notes, where the operator keeps what every agent working in
+        # the folder should know; the notes themselves are read when the work touches them. Without it
+        # an agent asked "you remember the stand?" had nothing to look in.
+        index = await self._workspace_note(state, MEMORY_INDEX)
+        if index and room:
+            if len(index) > room:
+                index = index[:room] + f"\n[… {MEMORY_INDEX} continues; Read it for the rest]"
+            parts.append(f"- {MEMORY_INDEX} in the workspace (the project's memory notes; Read the ones the work touches before you plan, and keep them current):\n{self.redactor.redact(index)}")
         try:
             rows = await self.db.fetchall("SELECT id, title, status, priority FROM board_tasks WHERE session_id = ? AND status NOT IN ('done', 'cancelled') ORDER BY priority, updated_at DESC LIMIT 8", (state.session.id,))
         except Exception:  # noqa: BLE001 — the board is optional

@@ -134,6 +134,13 @@ export function OriginSection({ sessionId, origin, toast, onPulled }: { sessionI
           {origin.branch && <Fact label={t("imp.origin.branch")} mono>{origin.branch}</Fact>}
           <Fact label={t("imp.origin.brought")}>{brought}</Fact>
           {!!counts.sidechains && <Fact label={t("imp.origin.subagents")}>{t("imp.origin.subagents.n", { n: counts.sidechains })}</Fact>}
+          {origin.instructions && (
+            <Fact label={t("imp.origin.instructions")}>
+              {origin.instructions.files.length
+                ? <span data-origin-instructions="" title={origin.instructions.files.map((f) => f.path).join("\n")}>{plural("imp.origin.instructions.files", origin.instructions.files.length)}</span>
+                : <span data-origin-instructions="none" title={origin.instructions.problem || ""}>{t("imp.origin.instructions.none")}</span>}
+            </Fact>
+          )}
           <Fact label={t("imp.origin.masked")}>{origin.masked}</Fact>
           <Fact label={t("imp.origin.when")}><When at={origin.refreshed_at || origin.imported_at} /></Fact>
         </Facts>
