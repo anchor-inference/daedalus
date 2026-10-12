@@ -105,6 +105,10 @@ def check(browser, phone: bool) -> list[str]:  # type: ignore[no-untyped-def]
     context = browser.new_context(viewport=viewport, is_mobile=phone, has_touch=phone, color_scheme="dark")
     page = context.new_page()
     page.add_init_script(STREAM)
+    # The order is read off the one list of steps the "In the steps" choice draws. The default draws
+    # the words as replies that split the steps into blocks of their own, which check_interim_replies
+    # covers; here one list keeps every row's position comparable with the run's.
+    page.add_init_script("localStorage.setItem('daedalus.appearance', JSON.stringify({replies: 'merged'}))")
     page.route("**/api/**", serve(run))
 
     def event(name: str, payload: dict) -> None:
