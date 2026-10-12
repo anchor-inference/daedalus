@@ -60,6 +60,20 @@ async def daemon(run_dir: Path) -> AsyncIterator[FakePtyd]:
 
 
 @pytest.fixture
+def frequent_housekeeping(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Roots reach the daemon on the service's housekeeping tick, every two seconds in production.
+
+    A test that waits for a root to arrive and then to leave sat out one whole tick per step, six
+    seconds for nothing. The tick is shortened before the service starts, because the loop has
+    already begun its first two-second sleep by the time the test body runs; the roots are still
+    delivered by the same tick, so what the tests claim about it is unchanged.
+    """
+    from daedalus.terminals import service as service_module
+
+    monkeypatch.setattr(service_module, "FLUSH_SECONDS", 0.05)
+
+
+@pytest.fixture
 async def service(db: Database, run_dir: Path, daemon: FakePtyd) -> AsyncIterator[Terminals]:
     made = Terminals(db, run_dirs={"container": run_dir, "host": None}, config=lambda: TerminalsConfig(), owners=FreeOwners())  # type: ignore[arg-type]
     await made.start()
@@ -87,6 +101,7 @@ async def test_programs_run_and_are_audited(service: Terminals, daemon: FakePtyd
     assert "error" in rows[1]["detail"]
 
 
+@pytest.mark.usefixtures("frequent_housekeeping")
 async def test_roots_follow_the_project_folders_and_the_adapters(service: Terminals, daemon: FakePtyd, db: Database, tmp_path: Path) -> None:
     folder = tmp_path / "site"
     folder.mkdir()
@@ -119,6 +134,7 @@ async def test_roots_follow_the_project_folders_and_the_adapters(service: Termin
     await eventually(gone)
 
 
+@pytest.mark.usefixtures("frequent_housekeeping")
 async def test_a_restarted_daemon_is_given_its_roots_again(service: Terminals, daemon: FakePtyd, db: Database) -> None:
     service.set_extra_roots("container", "codex", ["/root/.codex/sessions"])
 

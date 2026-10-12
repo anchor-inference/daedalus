@@ -8,6 +8,7 @@ so the agent waited for news that could not come.
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import signal
@@ -25,6 +26,8 @@ from daedalus.config import Settings
 from daedalus.extensions import jobs as job_watch
 from daedalus.extensions.jobs import KEY_PREFIX
 from daedalus.stores.database import Database, _all_jobs_kept
+from daedalus.tools import job_guard
+from daedalus.tools import shell as shell_tools
 from daedalus.tools.job_guard import self_matching_pattern
 from daedalus.tools.shell import RemoteJob, exec_command, job_kill, job_wait
 from tests.support.waiting import until_await
@@ -43,6 +46,9 @@ def quick_watch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(job_watch, "HOST_REFRESH_SECONDS", 0.0)
     monkeypatch.setattr(job_watch, "QUIET_SECONDS", 0.0)
     monkeypatch.setattr(job_watch, "MAX_HOLD_SECONDS", 30.0)
+    # The JobWait loop looks every two seconds, so a condition met half a second in was heard of
+    # two seconds in: most of what these tests spent was that interval, not the thing awaited.
+    monkeypatch.setattr(shell_tools, "wait_script", functools.partial(job_guard.wait_script, interval=0.05))
 
 
 async def session(settings: Settings, db: Database) -> tuple[Any, str]:

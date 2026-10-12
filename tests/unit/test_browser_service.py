@@ -94,6 +94,18 @@ def woken() -> list[tuple[Owner, str]]:
 
 
 @pytest.fixture
+def frequent_housekeeping(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The limits reach the daemon on the service's housekeeping tick, every two seconds in production.
+
+    Shortened before the service starts, because its loop is already asleep for the first tick by
+    the time a test body runs. The limits still travel by that tick, so what is claimed is the same.
+    """
+    from daedalus.browser import service as service_module
+
+    monkeypatch.setattr(service_module, "FLUSH_SECONDS", 0.05)
+
+
+@pytest.fixture
 async def service(db: Database, run_dir: Path, owners: FakeOwners, bus: FakeBus, cfg: BrowserConfig, daemon: FakeBrowserd, woken: list[tuple[Owner, str]]) -> AsyncIterator[Browsers]:
     async def wake(owner: Owner, text: str) -> None:
         woken.append((owner, text))
@@ -358,13 +370,25 @@ async def _acting(service: Browsers) -> bool:
     return bool((await service.get("s-sess1"))["acting"])
 
 
+@pytest.mark.usefixtures("frequent_housekeeping")
 async def test_the_daemon_gets_the_operators_limits_and_again_when_they_change(service: Browsers, daemon: FakeBrowserd, cfg: BrowserConfig) -> None:
     await wait_until(lambda: asyncio.sleep(0, daemon.limits), {"max_browsers": 2, "idle_close_ms": 600_000, "record_max_bytes": 500 << 20, "record_retention_ms": 7 * 86_400_000})
     cfg.running_cap = 3
     cfg.idle_close_minutes = 0
     await wait_until(lambda: asyncio.sleep(0, (daemon.limits.get("max_browsers"), daemon.limits.get("idle_close_ms"))), (3, 0), timeout=10)
     sent = len([c for c in daemon.calls if c[0] == "limits.set"])
-    await asyncio.sleep(2.5)
+    # Three housekeeping passes counted rather than two and a half seconds slept: each pass is a
+    # chance to send the limits again, and on a loaded host a fixed sleep proved no number of them.
+    passes = 0
+    configure = service._configure_wall
+
+    async def counted(link: Any) -> None:
+        nonlocal passes
+        await configure(link)
+        passes += 1
+
+    service._configure_wall = counted  # type: ignore[method-assign]
+    await wait_until(lambda: asyncio.sleep(0, passes >= 3), True)
     assert len([c for c in daemon.calls if c[0] == "limits.set"]) == sent, "an unchanged setting is not sent again"
 
 

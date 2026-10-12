@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shlex
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -120,12 +121,24 @@ async def test_a_job_that_ends_while_the_session_is_idle_starts_a_turn_with_how_
 
 
 async def test_a_job_that_ends_during_a_turn_is_steered_into_that_turn(settings: Settings, db: Database) -> None:
+    # The second tool keeps the turn busy until the job's note is waiting in its steer queue. It
+    # used to be ``sleep 3``, which every run sat out in full, and which a loaded host could outlast
+    # before the watcher had told anyone; the loop gives up after thirty seconds, so a note that
+    # never comes still ends the turn, and the assertions below say what went wrong.
+    gate = settings.state_dir / "the-note-is-queued"
     provider = ScriptedProvider([
         {"tool": "Exec", "args": {"command": "echo built-it; sleep 0.2", "background": True}},
-        {"tool": "Exec", "args": {"command": "sleep 3"}},
+        {"tool": "Exec", "args": {"command": f"for _ in $(seq 600); do [ -e {shlex.quote(str(gate))} ] && exit 0; sleep 0.05; done"}},
         {"text": "both done"},
     ])
     manager = await _manager(settings, db, provider)
+
+    async def open_the_gate(session_id: str, event: Any) -> None:
+        if getattr(event.type, "value", "") == "steer_changed" and event.payload.get("reason") == "queued":
+            gate.parent.mkdir(parents=True, exist_ok=True)
+            gate.touch()
+
+    manager.add_sink(open_the_gate)
     watch = watch_for(manager)
     watcher = asyncio.create_task(watch.run())
     try:

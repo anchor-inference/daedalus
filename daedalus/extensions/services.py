@@ -39,6 +39,8 @@ logger = logging.getLogger(__name__)
 NAME_MAX = 32
 LOG_DIR = ".services"
 STOP_GRACE_SECONDS = 5.0
+START_GRACE_SECONDS = 1.5
+"""How long a fresh service has to stay up to count as started rather than as a broken command."""
 SHARE_MODES = ("local", "public", "key")
 SHARE_COOKIE_PREFIX = "dshare-"
 
@@ -247,7 +249,11 @@ class Services:
             (session_id, name, command, str(workdir), chosen, proc.pid, int(restart), str(log_path), _now()),
         )
         # A command that dies within a moment is a broken command, not a service: say so with the log.
-        await asyncio.sleep(1.5)
+        # Watched rather than slept through, so one that dies at once is reported at once; one that
+        # stays up is judged at the same moment as before.
+        deadline = asyncio.get_running_loop().time() + START_GRACE_SECONDS
+        while proc.poll() is None and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(0.05)
         if proc.poll() is not None:
             await self.app.db.execute("UPDATE services SET status = 'dead', note = ?, stopped_at = ? WHERE session_id = ? AND name = ?", (f"exited with code {proc.returncode} right after start", _now(), session_id, name))
             tail = await self.logs(session_id, name, 40)
