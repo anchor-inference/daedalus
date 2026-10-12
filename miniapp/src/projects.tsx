@@ -9,7 +9,7 @@ import { folderName, projectPath, projectReachable, reachIsProblem, reachKey } f
 import { Sheet } from "./ui/dialogs";
 import { EnvPill } from "./envpill";
 import { Icon } from "./icons";
-import { navigate, projectPagePath } from "./router";
+import { navigate, pathFor, projectPagePath } from "./router";
 import { invalidate, useOffline, useQuery } from "./store";
 import { confirmAsync, errorText } from "./ui";
 import { plural, t } from "./i18n";
@@ -213,7 +213,9 @@ export function ProjectSwitcher({ projects, archived = [], current, onPick, onCl
         }} onContextMenu={(event) => {
           event.preventDefault(); event.stopPropagation();
           openContextMenu({ x:event.clientX, y:event.clientY, owner:event.currentTarget.querySelector<HTMLElement>("button")!, items:[
-            { label:p.name, icon:"folder", onSelect:() => pick(p.id) },
+            // Named for what it does: the bare project name read as a heading, not as "show only this".
+            { label:t("project.ctx.only"), icon:"folder", onSelect:() => pick(p.id) },
+            ...(projectReachable(p) ? [{ label:t("side.project.new", { name:p.name }), icon:"compose" as const, onSelect:() => { onClose(); navigate(pathFor("agents", null, { in:p.id })); } }] : []),
             ...(!p.system && !p.settings.ephemeral ? [
               { label:t("project.team.for", { name:p.name }), icon:"bots" as const, onSelect:() => { onClose(); navigate(projectPagePath(p.id, "team")); } },
               { label:t("project.board.for", { name:p.name }), icon:"board" as const, onSelect:() => { onClose(); navigate(projectPagePath(p.id, "board")); } },

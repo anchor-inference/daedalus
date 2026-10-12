@@ -5,7 +5,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, api } from "./api";
-import { retryDelay, useQuery } from "./store";
+import { invalidate, retryDelay, useQuery } from "./store";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -70,5 +70,33 @@ describe("a screen whose first read failed", () => {
     act(() => root.render(<Member path="/api/staff/three" pollMs={0} />));
     await settle(20000);
     expect(get).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("a change made while a read is on the way", () => {
+  let box: HTMLDivElement;
+  let root: ReturnType<typeof createRoot>;
+  beforeEach(() => {
+    box = document.createElement("div");
+    root = createRoot(box);
+  });
+  afterEach(() => {
+    act(() => root.unmount());
+    vi.restoreAllMocks();
+  });
+
+  it("reads again rather than taking the answer that was asked for before it", async () => {
+    // The list asked before the chat was made answers without it; the read the change asks for
+    // must be a new request whose answer wins, not the old one joined.
+    let answerOld: (value: { name: string }) => void = () => {};
+    const get = vi.spyOn(api, "get")
+      .mockImplementationOnce(() => new Promise((resolve) => { answerOld = resolve as typeof answerOld; }))
+      .mockResolvedValue({ name: "with the new chat" });
+    act(() => root.render(<Member path="/api/sessions?view=race" pollMs={0} />));
+    await act(async () => { invalidate("/api/sessions"); });
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(box.textContent).toBe("with the new chat");
+    await act(async () => { answerOld({ name: "before the chat" }); });
+    expect(box.textContent).toBe("with the new chat");
   });
 });

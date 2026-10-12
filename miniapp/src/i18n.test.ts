@@ -71,6 +71,7 @@ const SAME_IN_BOTH = [
   "side.key.archive",
   "side.key.beside",
   "side.key.delete",
+  "side.key.open",
   "side.key.pin",
   "side.key.rename",
   "side.newchat.keys",

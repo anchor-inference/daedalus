@@ -144,6 +144,10 @@ class JobWatch:
         """When each running host job was last asked about."""
         self._written: dict[str, list[dict[str, Any]]] = {}
         """The host job records last written per session, so an unchanged list is not written again."""
+        self._ended: set[tuple[str, str]] = set()
+        """The job ends already announced on the bus, by (session, job). Kept apart from ``reported``,
+        which says the agent was told: the agent may read an end with JobOutput before this round sees
+        it, and the operator's Jobs list must hear of it all the same."""
 
     @property
     def manager(self) -> SessionManager:
@@ -180,6 +184,8 @@ class JobWatch:
             if record["where"] == "host" and not isinstance(backend, HostExecBackend):
                 continue  # the session no longer works on the host: nobody could ask after this job
             jobs[record["id"]] = _from_record(record, backend, now_wall, now_mono)
+        # What had ended before this process started is no news to a list that reads it fresh.
+        self._ended.update((session_id, job_id) for job_id, job in jobs.items() if not job.running)
         self._written[session_id] = list(records)
         # Written back at once: a local job just found lost is a change the next start must not find again.
         await self._persist(session_id)
@@ -206,6 +212,7 @@ class JobWatch:
         self._written.pop(session_id, None)
         for key in [k for k in self._detected if k[0] == session_id]:
             self._detected.pop(key, None)
+        self._ended = {key for key in self._ended if key[0] != session_id}
         await self.manager.db.execute("DELETE FROM kv WHERE key = ?", (KEY_PREFIX + session_id,))
 
     # -- watching ------------------------------------------------------------------------------
@@ -223,8 +230,12 @@ class JobWatch:
         now = time.monotonic()
         for session_id, jobs in list(manager.jobs.items()):
             nudges: list[tuple[Job | RemoteJob, str]] = []
+            ended: list[str] = []
             for job in list(jobs.values()):
                 if job.reported:
+                    if not job.running and (session_id, job.id) not in self._ended:
+                        self._ended.add((session_id, job.id))
+                        ended.append(job.id)
                     continue
                 key = (session_id, job.id)
                 if isinstance(job, RemoteJob) and job.running:
@@ -245,13 +256,20 @@ class JobWatch:
                 if job.ended is None:
                     job.ended = time.time()
                 self._detected.setdefault(key, now)
+                if key not in self._ended:
+                    self._ended.add(key)
+                    ended.append(job.id)
             try:
                 await self._persist(session_id)
             except Exception:  # noqa: BLE001 — the records are written again next round
                 logger.warning("could not record the jobs of session %s", session_id, exc_info=True)
+            for job_id in ended:
+                await manager.publish_jobs(session_id, job_id, "ended")
             await self._tell_if_due(session_id, now)
             if nudges:
                 await self._nudge(session_id, nudges)
+                for job, _flag in nudges:
+                    await manager.publish_jobs(session_id, job.id, "flagged")
 
     def _due_flag(self, job: Job | RemoteJob, now: float) -> str | None:
         """The nudge a running job has earned and not yet had: "quiet", "overdue", or None."""
@@ -347,7 +365,11 @@ class JobWatch:
     async def service(self, op: str, **kwargs: Any) -> Any:
         if op == "track":
             # A job just started: its record is written now, not on the next round.
-            await self._persist(str(kwargs["session_id"]))
+            session_id = str(kwargs["session_id"])
+            await self._persist(session_id)
+            job = kwargs.get("job")
+            if job is not None:
+                await self.manager.publish_jobs(session_id, str(job.id), "started")
             return None
         raise ValueError(op)
 

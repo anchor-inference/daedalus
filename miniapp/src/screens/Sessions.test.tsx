@@ -142,15 +142,15 @@ describe("the sidebar", () => {
     expect(host.querySelector(".sb-new")?.textContent).toContain("New chat");
     await act(async () => host.querySelector<HTMLButtonElement>(".sb-pbtns .project-chip")!.click());
     expect(onProjects).toHaveBeenCalled();
-    // New project is a menu of the two ways a project starts: the one new-project dialog the app
-    // mounts, in the mode on screen, or a session another program left on the machine.
+    // New project starts a project and nothing else; continuing a session another program left on
+    // the machine is the second door of New chat, a split button.
     await act(async () => host.querySelector<HTMLButtonElement>(".sb-newproject")!.click());
-    const items = () => Array.from(document.querySelectorAll<HTMLButtonElement>(".menu [role=menuitem]"));
-    expect(items().map((b) => b.textContent)).toEqual(["New project", "Session from another program…"]);
-    await act(async () => items()[0].click());
     expect(newProject.open).toHaveBeenCalledWith();
-    await act(async () => host.querySelector<HTMLButtonElement>(".sb-newproject")!.click());
-    await act(async () => items()[1].click());
+    expect(document.querySelector(".menu [role=menuitem]")).toBeNull();
+    await act(async () => host.querySelector<HTMLButtonElement>(".sb-newsplit .sb-new-more")!.click());
+    const items = Array.from(document.querySelectorAll<HTMLButtonElement>(".menu [role=menuitem]"));
+    expect(items.map((b) => b.textContent)).toEqual(["New chat", "Import session"]);
+    await act(async () => items[1].click());
     expect(importer.open).toHaveBeenCalledWith();
   });
 

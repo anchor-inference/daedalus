@@ -3,8 +3,9 @@
 // job was started; this is where its outcome is. The list comes only from the host: a list rebuilt
 // from the transcript showed the same command twice and could not tell a finished job from a running one.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, MessageView, TaskView } from "./api";
+import { useEvent, useStreamUp } from "./events";
 import { timeAgo } from "./ui/components";
 import { duration } from "./format";
 import { codeBlock } from "./md";
@@ -20,8 +21,22 @@ export type Verification = { id: number; criterion: string; command: string; exi
 
 export type SentFile = { callId: string; path: string; name: string; caption: string; at: string };
 
-/** How often the list is read again while something runs: a job ends with no message in the transcript to say so. */
+/** How often the list is read again while something runs and the event stream is down: the net
+ *  under the events, which say when a job starts, ends or a subagent changes. */
 export const TASK_POLL_MS = 5000;
+/** How often a running job's "running · 3m" is drawn again; nothing is fetched for it. */
+export const TASK_TICK_MS = 15000;
+/** Several events of one turn arrive together; the list is read once for the burst. */
+export const TASK_EVENT_DEBOUNCE_MS = 250;
+
+/** Whether an event changes this session's Jobs list: one of its own jobs, or a subagent of it made,
+ *  changing state or gone. A subagent is known by the list already holding it, or by the parent its
+ *  creation names. */
+export function touchesJobs(event: { type: string; session_id: string | null; payload: Record<string, unknown> }, sessionId: string, children: ReadonlySet<string>): boolean {
+  if (event.session_id === sessionId) return event.type === "session.jobs";
+  if (event.type === "session.created") return event.payload.parent === sessionId;
+  return !!event.session_id && children.has(event.session_id);
+}
 
 /** The words under a task's title: how it stands (or ended) and how long, and the warning flag if it has one. */
 export function taskSub(task: TaskView, now: number): { text: string; flag: string; service: boolean } {
@@ -72,15 +87,38 @@ export function JobsTab({ sessionId, messages, onOpen, onPreview, onOpenSession 
     };
   }, [sessionId, messages.length]);
   const anyRunning = !!tasks?.some((task) => task.state === "running");
+  const live = useStreamUp();
+  // The list used to be read when the tab opened and then only while something already ran: a job
+  // started with nothing else running, or a subagent made, showed only once the tab was left and
+  // opened again. The event stream now says when; the poll is kept for a stream that is down.
+  const children = useRef<Set<string>>(new Set());
+  children.current = new Set((tasks ?? []).map((task) => task.child_session_id).filter((id): id is string => !!id));
+  const soon = useRef<number | null>(null);
+  useEffect(() => () => { if (soon.current) window.clearTimeout(soon.current); }, [sessionId]);
+  useEvent(["session.jobs", "session.created", "session.status", "session.deleted", "run.finished"], (event) => {
+    if (!touchesJobs(event, sessionId, children.current) || soon.current) return;
+    soon.current = window.setTimeout(() => { soon.current = null; void load(); }, TASK_EVENT_DEBOUNCE_MS);
+  }, [sessionId]);
+  // The stream coming back may have missed an end while it was away.
+  const wasLive = useRef(live);
+  useEffect(() => {
+    if (live && !wasLive.current) void load();
+    wasLive.current = live;
+  }, [live]);
+  const [, tick] = useState(0);
   useEffect(() => {
     if (!anyRunning) return;
     let gone = false;
-    const timer = window.setInterval(() => void load(() => gone), TASK_POLL_MS);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      if (live) tick((n) => n + 1);
+      else void load(() => gone);
+    }, live ? TASK_TICK_MS : TASK_POLL_MS);
     return () => {
       gone = true;
       window.clearInterval(timer);
     };
-  }, [sessionId, anyRunning]);
+  }, [sessionId, anyRunning, live]);
   const sent = sentFiles(messages);
   const base = sessionBase(sessionId);
   const empty = (tasks?.length ?? 0) === 0 && sent.length === 0 && (receipts?.length ?? 0) === 0;

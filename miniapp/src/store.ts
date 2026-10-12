@@ -48,6 +48,10 @@ export function prime<T>(key: string, data: T): void {
 /** Marks every entry under the prefix stale (the data stays so nothing flashes) and asks the mounted readers to refresh. */
 export function invalidate(prefix: string): void {
   for (const [key, entry] of cache) if (key.startsWith(prefix)) cache.set(key, { ...entry, at: 0 });
+  // A read already on the way was asked before the change and answers from before it. The refresh
+  // below used to join it, so a chat just made was missing from the list until the next poll; it
+  // is let go, and since only the newest request for a key writes, its stale answer is dropped.
+  for (const key of inflight.keys()) if (key.startsWith(prefix)) inflight.delete(key);
   for (const key of listeners.keys()) if (key.startsWith(prefix)) notify(`refresh:${key}`);
 }
 

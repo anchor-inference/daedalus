@@ -12,26 +12,31 @@
 // has no pointer to hover with, and below 1280 px the sidebar starts folded, so a newcomer on a tablet
 // saw an empty start page and no sign that the chat list was one tap away.
 
-import type { RefObject } from "react";
+import { useMemo, useRef, type RefObject } from "react";
+import { api, type Settings } from "./api";
 import { plural, t } from "./i18n";
 import { Icon, type IconName } from "./icons";
 import { type Mode, modeHome } from "./mode";
-import { type ResolvedNav, currentId } from "./navconfig";
-import { type Screen, pathFor } from "./router";
+import { type NavConfig, type ResolvedNav, currentId, desktopLayout } from "./navconfig";
+import { type Screen, navigate, pathFor } from "./router";
 import type { SelfDevMode } from "./capabilities";
 import { type Counts, ICONS, go, screenTitle } from "./shell";
 import { openUpdate, releaseVersion, useUpdates } from "./updates";
+import { useContextActions } from "./ui/context-menu";
+import { type MenuItem, toast } from "./ui/dialogs";
+import { prime } from "./store";
+import { NAV_KEY } from "./usenav";
+import { errorText } from "./ui";
 
 /** A Mac says ⌘ where everything else says Ctrl; the shortcut is the same key either way. */
 const MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
-export const KEYS = { sidebar: MAC ? "⌘ \\" : "Ctrl \\", menu: MAC ? "⌘ ⇧ M" : "Ctrl ⇧ M" };
+export const KEYS = { sidebar: MAC ? "⌘ \\" : "Ctrl \\", menu: MAC ? "⌘ ⇧ M" : "Ctrl ⇧ M", search: MAC ? "⌘ K" : "Ctrl K" };
 
 /** The account is Settings' security section: the passkeys that sign this browser in, and signing
  *  every browser out. There is one operator, so there is no profile beyond it. */
 const ACCOUNT = "security";
 
 export type RailProps = {
-  onSearch: () => void;
   screen: Screen;
   /** The route's detail: Settings' security section is the account. */
   detail: string | null;
@@ -60,10 +65,51 @@ function Tip({ text, keys }: { text: string; keys?: string }) {
   );
 }
 
-function Item({ href, icon, iconPath, label, on, mode = false, badge, quiet, data }: { href: string; icon: IconName; iconPath?: string | null; label: string; on: boolean; mode?: boolean; badge?: number; quiet?: number; data: string }) {
+/** Moves one rail destination into the More menu or out of sight, through the same settings write as
+ *  Settings → Navigation, and shows the answer on the rail at once. */
+async function placeRailItem(nav: ResolvedNav, id: string, to: "more" | "hidden"): Promise<void> {
+  const placement: Record<string, "rail" | "more" | "hidden"> = {};
+  const order: string[] = [];
+  for (const it of nav.rail) { placement[it.id] = "rail"; order.push(it.id); }
+  for (const it of nav.more.flatMap((g) => g.items)) { placement[it.id] = "more"; order.push(it.id); }
+  for (const it of nav.catalogue) if (nav.hidden.has(it.id)) { placement[it.id] = "hidden"; order.push(it.id); }
+  placement[id] = to;
+  try {
+    const settings = await api.get<Settings>("/api/settings");
+    const previous: NavConfig = settings.navigation ?? {};
+    const known = new Set(nav.catalogue.map((it) => it.id));
+    const navigation = { drawer: [], icons: {}, ...previous, ...desktopLayout(previous, order, placement, known) };
+    const next = await api.put<Settings>("/api/settings", { navigation, base_revision: settings.revision });
+    if (next.navigation) prime(NAV_KEY, next.navigation);
+  } catch (e) {
+    toast(errorText(e));
+  }
+}
+
+/** What a right click on a rail destination offers: that destination, and where it sits. Before, it
+ *  fell through to the page's generic menu, which offered a search unrelated to the icon clicked. */
+function useItemMenu(ref: RefObject<HTMLElement | null>, href: string, nav: ResolvedNav | null, id: string) {
+  const items = useMemo<MenuItem[]>(() => {
+    const customise = pathFor("settings", "navigation");
+    const out: MenuItem[] = [
+      { label: t("common.open"), onSelect: () => ref.current?.click() },
+      { label: t("rail.ctx.newtab"), icon: "external", onSelect: () => void window.open(new URL(href, location.href).href, "_blank", "noopener") },
+    ];
+    if (nav) out.push("-",
+      { label: t("rail.ctx.tomore"), icon: "apps", onSelect: () => void placeRailItem(nav, id, "more") },
+      { label: t("rail.ctx.hide"), icon: "eyeoff", onSelect: () => void placeRailItem(nav, id, "hidden") });
+    out.push("-", { label: t("rail.ctx.customise"), icon: "sliders", onSelect: () => navigate(customise) });
+    return out;
+  }, [ref, href, nav, id]);
+  useContextActions(ref, items);
+}
+
+function Item({ href, icon, iconPath, label, on, mode = false, badge, quiet, data, nav = null }: { href: string; icon: IconName; iconPath?: string | null; label: string; on: boolean; mode?: boolean; badge?: number; quiet?: number; data: string; nav?: ResolvedNav | null }) {
   const counted = badge ? `${label} · ${badge}` : quiet ? `${label} · ${plural("mode.waiting", quiet)}` : label;
+  const link = useRef<HTMLAnchorElement>(null);
+  useItemMenu(link, href, nav, data);
   return (
-    <a className={`rail-item ${on ? "on" : ""} ${mode ? "mode" : ""}`} href={href} onClick={(e) => go(e, href)} aria-label={counted} aria-current={on ? "page" : undefined} data-rail={data}>
+    <a ref={link} className={`rail-item ${on ? "on" : ""} ${mode ? "mode" : ""}`} href={href} onClick={(e) => go(e, href)} aria-label={counted} aria-current={on ? "page" : undefined} data-rail={data}>
       <Icon name={icon} size={18} path={iconPath} />
       <span className="rail-label">{label}</span>
       {!!badge && <span className="rail-badge" data-count={badge} aria-hidden>{badge > 99 ? "99+" : badge}</span>}
@@ -123,16 +169,17 @@ export function Rail(p: RailProps) {
           <Tip text={t("rail.home")} />
         </a>
       )}
-      <button className="rail-item rail-search" onClick={p.onSearch} aria-label={t("shell.search.label")}><Icon name="search" size={18} /><Tip text={t("shell.search.label")} /></button>
       <div className="rail-modes">{modeItem("agents")}{modeItem("orchestration")}</div>
       <div className="rail-rule" />
       <div className="rail-places">{p.nav.rail.map((it) => (
-        <Item key={it.id} data={it.id} href={it.path} icon={it.icon} iconPath={it.iconPath} label={it.title} on={here === it.id} badge={it.badge} />
+        <Item key={it.id} data={it.id} href={it.path} icon={it.icon} iconPath={it.iconPath} label={it.title} on={here === it.id} badge={it.badge} nav={p.nav} />
       ))}</div>
       <div className="rail-foot">
         <UpdateItem />
-        <button ref={p.menuButton} className={`rail-item ${p.menuOpen || inMenu ? "on" : ""}`} onClick={p.onMenu} aria-label={t("nav.menu")} aria-haspopup="menu" aria-expanded={p.menuOpen} data-rail="menu">
-          <Icon name="more" size={18} /><span className="rail-label">{t("nav.more")}</span>
+        {/* Tiles and a word, where three thin dots were: on a dim monitor the dots were not seen at
+            all, and the button that holds everything else must be found without hovering for it. */}
+        <button ref={p.menuButton} className={`rail-item rail-more ${p.menuOpen || inMenu ? "on" : ""}`} onClick={p.onMenu} aria-label={t("nav.menu")} aria-haspopup="menu" aria-expanded={p.menuOpen} data-rail="menu">
+          <Icon name="apps" size={18} /><span className="rail-more-word" aria-hidden>{t("nav.more")}</span>
           {(p.counts.changes ?? 0) > 0 && <span className="rail-dot" aria-hidden />}
           <Tip text={t("nav.menu")} keys={KEYS.menu} />
         </button>

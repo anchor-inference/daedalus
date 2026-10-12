@@ -594,7 +594,7 @@ export function App() {
   } else {
     content = (
       <ErrorBoundary key={route.screen}>
-        {route.screen === "agents" && <StartScreen onOpen={open} toast={showToast} project={project} projects={agentProjects} onProjects={wide ? undefined : () => setSwitching(true)} onPickProject={pickProject} />}
+        {route.screen === "agents" && <StartScreen onOpen={open} toast={showToast} project={project} projects={agentProjects} onPickProject={pickProject} />}
         {route.screen === "voice" && <VoiceScreen onOpen={open} toast={showToast} />}
         {route.screen === "inbox" && <InboxScreen onOpen={open} toast={showToast} />}
         {route.screen === "board" && <BoardScreen onOpen={open} toast={showToast} selected={route.detail} project={projectList.find((p) => p.id === project) ?? null} />}
@@ -661,7 +661,6 @@ export function App() {
           menuOpen={menu}
           onMenu={() => setMenu((m) => !m)}
           menuButton={menuButton}
-          onSearch={() => setPalette(true)}
         />
         <div className="desktop-context">
       {wide && !columnFolded && focusProject && (
@@ -693,7 +692,7 @@ export function App() {
       )}
         </div>{!columnFolded && <PaneHandle side="right" drag={sidebarDrag} />}</div>
       )}
-      {wide && menu && <NavMenu current={currentId(route.screen, route.detail)} nav={nav} selfdev={selfdev} onClose={() => setMenu(false)} opener={menuButton.current} />}
+      {wide && menu && <NavMenu current={currentId(route.screen, route.detail)} nav={nav} selfdev={selfdev} onClose={() => setMenu(false)} opener={menuButton.current} onSearch={() => setPalette(true)} />}
       <div ref={main} className={`main ${sessionId || focusChat || terminalOpen || diagramOpen ? "chat-open" : ""}`}>
         <MaintenanceNotice />
         {offline && <div className="offline-strip" role="status">{t("app.offline")}</div>}

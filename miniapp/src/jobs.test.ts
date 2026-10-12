@@ -4,7 +4,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { TaskView } from "./api";
 import { setLang } from "./i18n";
-import { taskSub, tasksAside } from "./jobs";
+import { taskSub, tasksAside, touchesJobs } from "./jobs";
 
 const NOW = Date.parse("2026-09-11T12:00:00Z");
 
@@ -50,5 +50,22 @@ describe("tasksAside", () => {
   it("counts what runs against the total, and only the total when nothing runs", () => {
     expect(tasksAside([task({}), task({ id: "b", state: "done", outcome: "succeeded" })])).toBe("1 running · 2");
     expect(tasksAside([task({ state: "done", outcome: "succeeded" })])).toBe("1");
+  });
+});
+
+describe("which events read the Jobs list again", () => {
+  const ev = (type: string, session_id: string | null, payload: Record<string, unknown> = {}) => ({ type, session_id, payload });
+  const kids = new Set(["child1"]);
+  it("hears its own jobs, a subagent made for it, and the subagents it lists", () => {
+    expect(touchesJobs(ev("session.jobs", "lead", { change: "ended" }), "lead", kids)).toBe(true);
+    expect(touchesJobs(ev("session.created", "child2", { parent: "lead" }), "lead", kids)).toBe(true);
+    expect(touchesJobs(ev("session.status", "child1", { status: "idle" }), "lead", kids)).toBe(true);
+    expect(touchesJobs(ev("run.finished", "child1"), "lead", kids)).toBe(true);
+  });
+  it("ignores other sessions and its own runs, which the transcript already follows", () => {
+    expect(touchesJobs(ev("session.jobs", "other", { change: "ended" }), "lead", kids)).toBe(false);
+    expect(touchesJobs(ev("session.created", "x", { parent: "other" }), "lead", kids)).toBe(false);
+    expect(touchesJobs(ev("session.status", "lead", { status: "running" }), "lead", kids)).toBe(false);
+    expect(touchesJobs(ev("session.status", "stranger"), "lead", kids)).toBe(false);
   });
 });

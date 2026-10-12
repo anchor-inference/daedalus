@@ -114,7 +114,10 @@ export function ContextMenuHost() {
         { label:t("common.open"), onSelect:() => link.click() },
         { label:t("context.copyLink"), icon:"link", onSelect:() => void copyText(link.href).then(report) },
       );
-      if (!items.length) items.push({ label:t("shell.search.label"), icon:"search", onSelect:() => document.dispatchEvent(new KeyboardEvent("keydown", { key:"k", ctrlKey:true, bubbles:true })) });
+      // Nothing here belongs to what was clicked: no menu of ours. It used to offer "Search and go"
+      // on every such click, an entry about nothing under the pointer; the browser's own menu is
+      // left to answer instead.
+      if (!items.length) return;
       event.preventDefault();
       const rect = owner.getBoundingClientRect();
       setRequest({ x:event instanceof MouseEvent ? event.clientX : rect.left, y:event instanceof MouseEvent ? event.clientY : rect.bottom, items, owner });

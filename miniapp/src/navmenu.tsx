@@ -12,11 +12,12 @@ import { Screen, pathFor } from "./router";
 import { SelfDevMode, screenTag } from "./capabilities";
 import { go } from "./shell";
 import { usePetPreference } from "./ui/pet";
+import { KEYS } from "./rail";
 
 const BETA: Screen[] = ["voice"];
 
 /** `current` is the id of the item the route stands on (navconfig's `currentId`). */
-export function NavMenu({ current, nav, selfdev, onClose, opener }: { current: string; nav: ResolvedNav; selfdev: SelfDevMode; onClose: () => void; opener?: HTMLElement | null }) {
+export function NavMenu({ current, nav, selfdev, onClose, opener, onSearch }: { current: string; nav: ResolvedNav; selfdev: SelfDevMode; onClose: () => void; opener?: HTMLElement | null; onSearch?: () => void }) {
   const [pet, setPet] = usePetPreference();
   const panel = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left:8, top:8 });
@@ -81,6 +82,17 @@ export function NavMenu({ current, nav, selfdev, onClose, opener }: { current: s
     <Overlay>
       <div className="navmenu-backdrop" onClick={onClose} />
       <div ref={panel} className="navmenu" style={{ ...position, bottom:"auto" }} role="menu" aria-label={t("nav.menu")} onKeyDown={onKey}>
+        {/* The search left the rail's top, where it duplicated Ctrl+K; it is kept here, first, with
+            its key, so a mouse still reaches it and the key is learnt from it. */}
+        {onSearch && (
+          <div className="navmenu-section">
+            <button role="menuitem" className="navmenu-item navmenu-action" data-nav="search" onClick={() => { onClose(); onSearch(); }}>
+              <Icon name="search" size={18} />
+              <span className="truncate">{t("shell.search.label")}</span>
+              <kbd className="navmenu-kbd">{KEYS.search}</kbd>
+            </button>
+          </div>
+        )}
         {nav.more.map((g) => (
           <div key={g.key} className="navmenu-section" role="group" aria-label={t(`nav.group.${g.key}`)}>
             <div className="navmenu-label">{t(`nav.group.${g.key}`)}</div>

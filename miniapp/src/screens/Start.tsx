@@ -33,14 +33,26 @@ import { HostMark, RunOn, RunOnRow, RunOnSelect, useRunOn } from "../runon";
 import { projectReachable } from "../folders";
 import { ProjectsPage } from "./Projects";
 import { PhoneImportCard, StartImportCard } from "../imports/ImportedChat";
+import { Sheet } from "../ui/dialogs";
+import { ProjectPickList } from "../projectpick";
 
-export function StartScreen({ onOpen, toast, project = "", projects = [], onProjects, onPickProject }: { onOpen: (id: string) => void; toast: (t: string) => void; project?: string; projects?: Project[]; onProjects?: () => void; onPickProject?: (id: string) => void }) {
+/** Every project a chat could start in, the most recently used first and the installation's own last;
+ *  a scratch folder of a single chat is not one. */
+function useChoosable(projects: Project[], listing: SessionList | null): Project[] {
+  return useMemo(() => {
+    const recent = new Map((listing?.projects ?? []).map((folder) => [folder.id, Date.parse(folder.last_message_at) || 0]));
+    // The installation's own project goes last: it is where talking lands, rarely where one types.
+    return projects.filter((p) => isProject(p))
+      .sort((a, b) => Number(!!a.system) - Number(!!b.system) || (recent.get(b.id) ?? 0) - (recent.get(a.id) ?? 0));
+  }, [projects, listing]);
+}
+
+export function StartScreen({ onOpen, toast, project = "", projects = [], onPickProject }: { onOpen: (id: string) => void; toast: (t: string) => void; project?: string; projects?: Project[]; onPickProject?: (id: string) => void }) {
   const phone = !useMedia("(min-width: 1024px)");
   const route = useRoute();
   const creating = route.query.get("new") === "1";
   const closeNew = () => navigate(pathFor("agents"), { replace: true });
   const model = useStartModel();
-  const run = useRunOn(project);
   const sheet = creating && <NewAgentSheet onClose={closeNew} onCreated={onOpen} toast={toast} project={project} />;
   // The projects page is opened from a desktop's column; a phone opens the projects sheet instead.
   // It stays mounted at any width all the same, so a window narrowed with a project's settings open
@@ -59,7 +71,7 @@ export function StartScreen({ onOpen, toast, project = "", projects = [], onProj
   }
   if (phone) {
     return <>
-      <PhoneHome onOpen={onOpen} toast={toast} project={project} projects={projects} model={model} run={run} onProjects={onProjects} />
+      <PhoneHome onOpen={onOpen} toast={toast} project={project} projects={projects} model={model} />
       {sheet}
     </>;
   }
@@ -87,12 +99,8 @@ function DesktopStart({ onOpen, toast, project, projects, model }: { onOpen: (id
   const asked = route.query.get("in") ?? "";
   const [target, setTarget] = useState(asked || project);
   useEffect(() => setTarget(asked || project), [asked, project]);
-  const startable = useMemo(() => {
-    const recent = new Map((listing?.projects ?? []).map((folder) => [folder.id, Date.parse(folder.last_message_at) || 0]));
-    // The installation's own project goes last: it is where talking lands, rarely where one types.
-    return projects.filter((p) => isProject(p) && projectReachable(p))
-      .sort((a, b) => Number(!!a.system) - Number(!!b.system) || (recent.get(b.id) ?? 0) - (recent.get(a.id) ?? 0));
-  }, [projects, listing]);
+  const choosable = useChoosable(projects, listing);
+  const startable = useMemo(() => choosable.filter(projectReachable), [choosable]);
   const known = !target || startable.some((p) => p.id === target);
   const run = useRunOn(known ? target : "");
   return (
@@ -103,7 +111,7 @@ function DesktopStart({ onOpen, toast, project, projects, model }: { onOpen: (id
           <h1 className="start-greeting">{t("start.greeting")}</h1>
         </div>
         <StartComposer phone={false} project={known ? target : ""} toast={toast} model={model} run={run} />
-        {startable.length > 0 && <StartWhere projects={startable} target={known ? target : ""} onPick={setTarget} />}
+        {startable.length > 0 && <StartWhere projects={startable} all={choosable} target={known ? target : ""} onPick={setTarget} />}
         <LiveNow listing={listing} project={project} onOpen={onOpen} />
         <StartImportCard />
       </div>
@@ -115,8 +123,9 @@ function DesktopStart({ onOpen, toast, project, projects, model }: { onOpen: (id
 const WHERE = 3;
 
 /** "Start in …": a chat of its own, or one of the projects, so a chat starts in a project without the
- *  new-agent sheet. The project picked stays in the row even when it was one of the hidden ones. */
-function StartWhere({ projects, target, onPick }: { projects: Project[]; target: string; onPick: (id: string) => void }) {
+ *  new-agent sheet. The chips are the recent few; "Choose a project" searches them all. The project
+ *  picked stays in the row even when it was not one of the chips. */
+function StartWhere({ projects, all, target, onPick }: { projects: Project[]; all: Project[]; target: string; onPick: (id: string) => void }) {
   const more = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   let shown = projects.slice(0, WHERE);
@@ -134,18 +143,13 @@ function StartWhere({ projects, target, onPick }: { projects: Project[]; target:
       <span className="start-where-word">{t("start.where")}</span>
       {chip("", t("start.where.chat"), "bots")}
       {shown.map((p) => chip(p.id, p.name, p.system === "voice" ? "mic" : "folder"))}
-      {hidden.length > 0 && (
-        <button ref={more} type="button" className="start-where-chip more" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
-          {t("start.where.more", { n: hidden.length })}<Icon name="chevron" size={12} />
-        </button>
-      )}
+      <button ref={more} type="button" className="start-where-chip more start-where-pick" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}
+        title={hidden.length ? t("start.where.more", { n: hidden.length }) : undefined}>
+        <Icon name="search" size={12} />{t("start.pick")}{hidden.length > 0 && <span className="start-where-n num">{hidden.length}</span>}<Icon name="chevron" size={12} />
+      </button>
       {open && (
-        <Popover anchor={more.current} onClose={() => setOpen(false)} className="plus-menu start-where-menu" label={t("start.where.label")}>
-          {hidden.map((p) => (
-            <button key={p.id} type="button" role="menuitem" data-project={p.id} onClick={() => { setOpen(false); onPick(p.id); }}>
-              <Icon name={p.system === "voice" ? "mic" : "folder"} size={16} /><span className="truncate">{p.name}</span>
-            </button>
-          ))}
+        <Popover anchor={more.current} onClose={() => setOpen(false)} className="start-where-menu" label={t("start.where.label")}>
+          <ProjectPickList projects={all} target={target} onPick={(id) => { setOpen(false); onPick(id); }} />
         </Popover>
       )}
     </div>
@@ -217,12 +221,20 @@ const LIVE = 3;
  * whole list is the Chats page (the drawer, or "See all"). Offline, the live rows stay, dimmed, with
  * the time they were last confirmed, and the composer keeps the draft until the bot is back.
  */
-function PhoneHome({ onOpen, toast, project, projects, model, run, onProjects }: { onOpen: (id: string) => void; toast: (t: string) => void; project: string; projects: Project[]; model: StartModel; run: RunOn; onProjects?: () => void }) {
+function PhoneHome({ onOpen, toast, project, projects, model }: { onOpen: (id: string) => void; toast: (t: string) => void; project: string; projects: Project[]; model: StartModel }) {
   const live = useStreamUp();
   const offline = useOffline();
   const summary = useSummary();
   const { data, updatedAt } = useQuery<SessionList>("/api/sessions?view=all", { pollMs: live ? 60000 : 5000, staleMs: 3000 });
-  const lens = projects.find((p) => p.id === project);
+  // Where the chat starts, as on a desktop: the project in view at first, any project by the picker.
+  // A phone used to start every chat in the lens or in a chat of its own, with nothing to choose.
+  const choosable = useChoosable(projects, agentsListingOf(data));
+  const asked = useRoute().query.get("in") ?? "";
+  const [target, setTarget] = useState(asked || project);
+  useEffect(() => setTarget(asked || project), [asked, project]);
+  const [picking, setPicking] = useState(false);
+  const picked = choosable.find((p) => p.id === target && projectReachable(p));
+  const run = useRunOn(picked ? target : "");
   const rows = useMemo(() => {
     const listing = agentsListingOf(data);
     const rank = (s: SessionSummary) => ({ waiting: 0, working: 1, loop: 2, idle: 3 })[kindOf(s, false)];
@@ -248,7 +260,11 @@ function PhoneHome({ onOpen, toast, project, projects, model, run, onProjects }:
         <div className={`ph-hero ${offline ? "offline" : ""}`}>
           <Icon name="logo" size={36} />
           <h1>{t("start.greeting")}</h1>
-          {lens && onProjects && <button type="button" className="ph-btn sm" onClick={onProjects}><Icon name="folder" size={16} />{lens.name}</button>}
+          <button type="button" className="ph-btn sm ph-where" onClick={() => setPicking(true)} aria-haspopup="dialog" aria-label={`${t("start.where.label")}: ${picked ? picked.name : t("start.pick.none")}`}>
+            <Icon name={picked ? (picked.system === "voice" ? "mic" : "folder") : "bots"} size={16} />
+            <span className="truncate">{picked ? picked.name : t("start.pick.none")}</span>
+            <Icon name="chevron" size={14} />
+          </button>
           {/* The host is picked in the + sheet; said here too, since the composer at rest has no room for it. */}
           {run.env === "host" && <span className="runon-hero" aria-label={`${t("runon.label")}: ${t("term.env.host")}`}><EnvPill env="host" /></span>}
         </div>
@@ -268,7 +284,12 @@ function PhoneHome({ onOpen, toast, project, projects, model, run, onProjects }:
         )}
         <PhoneImportCard />
       </div>
-      <StartComposer phone project={project} toast={toast} model={model} run={run} />
+      <StartComposer phone project={picked ? target : ""} toast={toast} model={model} run={run} />
+      {picking && (
+        <Sheet title={t("start.pick")} onClose={() => setPicking(false)} size="narrow">
+          <ProjectPickList projects={choosable} target={picked ? target : ""} onPick={(id) => { setTarget(id); setPicking(false); }} />
+        </Sheet>
+      )}
     </div>
   );
 }

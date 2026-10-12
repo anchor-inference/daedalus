@@ -382,6 +382,19 @@ describe("the cache", () => {
     unwire();
   });
 
+  it("reads the session and project lists when a session is made or deleted anywhere", async () => {
+    const { invalidated, send, unwire } = wired();
+    const now = new Date().toISOString();
+    send(event(1, now, "session.created"));
+    expect(invalidated).toEqual(["/api/projects"]);
+    await vi.advanceTimersByTimeAsync(LIST_DEBOUNCE_MS);
+    expect(invalidated).toEqual(["/api/projects", "/api/sessions"]);
+    send(event(2, now, "session.deleted"));
+    await vi.advanceTimersByTimeAsync(LIST_DEBOUNCE_MS);
+    expect(invalidated).toEqual(["/api/projects", "/api/sessions", "/api/projects", "/api/sessions"]);
+    unwire();
+  });
+
   it("reads everything mounted again after a resync, and stops listening when unwired", () => {
     const { handlers, invalidated, send, unwire } = wired();
     send({ ...event(0, new Date().toISOString(), "resync"), payload: { reason: "expired", head: 9 } });

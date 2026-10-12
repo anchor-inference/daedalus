@@ -2,7 +2,7 @@
 
 What is checked:
 
-- the entry points: the New project menu, the start screen's card (which opens on its session), and
+- the entry points: the split New chat button's menu, the start screen's card (which opens on its session), and
   the command palette;
 - the explorer: the strip of programs with their counts and the missing one dimmed, the places with
   sessions, the folders inside with their counts, the sessions of a folder with the first one chosen,
@@ -45,7 +45,7 @@ LIVE = "b71d09e5-2c4f-4a6e-8d0b-9f1e3a5c7b42"
 GONE = "41aa2f60-8e1c-4b3d-a5f7-2c9e0d4b6a81"
 
 WORDS = {
-    "en": {"title": "Continue a session from another program", "entry": "Session from another program…", "palette": "Import a session",
+    "en": {"title": "Continue a session from another program", "entry": "Import session", "palette": "Import a session",
            "notfound": "not found", "here": "Claude Code sessions in this folder · 6", "join": "Into the project «Smart home»",
            "import": "Import", "snapshot": "Import a snapshot", "again": "Import again as a new chat", "tail": "A summary and the latest messages",
            "large": "A large session", "live": "still running in Claude Code", "refused": "It cannot land here", "already": "Already imported",
@@ -53,7 +53,7 @@ WORDS = {
            "banner": "Brought over from", "secrets": "secrets hidden: 3", "pull": "Pull in what's new", "original": "Original",
            "handoff": "Continued in Daedalus", "worked": "Work in Claude Code", "origin": "Origin", "down": "The machine is not answering",
            "card": "Continue from other programs", "fresh": "Fresh on the machine", "phone_title": "Continue a session", "pulled": "Pulled in 2 new messages", "nosessions": "no sessions"},
-    "ru": {"title": "Продолжить сессию из другой программы", "entry": "Сессия из другой программы…", "palette": "Импорт сессии",
+    "ru": {"title": "Продолжить сессию из другой программы", "entry": "Импорт сессии", "palette": "Импорт сессии",
            "notfound": "не найден", "here": "Сессии Claude Code в этой папке · 6", "join": "В проект «Smart home»",
            "import": "Импортировать", "snapshot": "Импортировать снимок", "again": "Импортировать заново как новый чат", "tail": "Сводка и последние сообщения",
            "large": "Большая сессия", "live": "ещё идёт в Claude Code", "refused": "Сюда перенести нельзя", "already": "Уже импортирована",
@@ -120,8 +120,8 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
     page.keyboard.press("Escape")
     expect(sheet).to_have_count(0)
 
-    # The New project menu.
-    page.locator(".sb-newproject").click()
+    # The second door of the split New chat button.
+    page.locator(".sb-newsplit .sb-new-more").click()
     page.get_by_role("menuitem", name=words["entry"]).click()
     expect(sheet).to_be_visible()
     expect(sheet.locator(".sheet-head h3")).to_have_text(words["title"])
