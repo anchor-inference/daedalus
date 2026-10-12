@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from daedalus.config import NO_MODEL_MESSAGE, REASONING_EFFORTS
 from daedalus.doctor import DoctorContext, render_text, run_checks
 from daedalus.extensions.notifications import format_entries
+from daedalus.host import standing
 from daedalus.host.config_validation import ConfigConflict, patched
 from daedalus.host.prompts import DEFAULT_RULES
 from daedalus.security import redact
@@ -243,7 +244,13 @@ async def run_command(app: Application, session_id: str, line: str) -> str:  # n
     if name == "brief":
         if not args:
             current = str(state.metadata.get("brief") or "")
-            return ("Brief:\n" + current) if current else "No brief. /brief <text> sets one; it lives in this session's system prompt."
+            text = ("Brief:\n" + current) if current else "No brief. /brief <text> sets one; it lives in this session's system prompt."
+            carried = standing.record_of(state.session.metadata)
+            if carried is not None:
+                # What an imported session carries from the program it came from rides in the same prompt.
+                files = "\n".join(f"- {f.get('path')} ({f.get('kind')}{', left out for room' if f.get('omitted') else ''})" for f in carried.get("files") or [])
+                text += "\n\nCarried from the program this session was imported from:\n" + (files or f"nothing: {carried.get('problem') or 'it keeps no instructions'}")
+            return text
         await manager.set_brief(session_id, args)
         return "Brief updated; it applies from the next run."
 

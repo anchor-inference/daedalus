@@ -456,3 +456,39 @@ async def test_each_agent_sees_its_own_board_and_the_operator_pool(app: Any) -> 
     assert (await board.update(mine["id"], status="doing", actor="helper"))["session_id"] == "helper"  # lead's family is not rationed by other's claims
     with pytest.raises(ValueError, match="unknown dependency"):
         await board.add(title="after theirs", depends_on=[theirs["id"]], session_id="lead")  # a dependency must be on the same board
+
+
+async def test_a_peer_answers_its_own_project_only_and_never_a_subagent(app: Any, tmp_path: Any) -> None:
+    peers = Peers(app)
+    manager: SessionManager = app.manager
+    (tmp_path / "client").mkdir()
+    (tmp_path / "game").mkdir()
+    client = await manager.projects.create("Client", [str(tmp_path / "client")])
+    game = await manager.projects.create("Game", [str(tmp_path / "game")])
+    leader = await manager.create_session("leader", project_id=client.id)
+    colleague = await manager.create_session("colleague", project_id=client.id)
+    red_team = await manager.create_session("red team", project_id=game.id)
+    helper = await manager.create_session("helper", project_id=client.id, metadata={"subagent_of": leader.session.id})
+    chat = await manager.create_session("a plain chat")
+    await peers.register("reviewer", colleague.session.id)
+    await peers.register("ledger-red-team", red_team.session.id)
+    await peers.register("notes", chat.session.id)
+    submitted: list[str] = []
+
+    async def fake_submit(session_id: str, text: str, attachments=(), *, steer=False, as_answer=True, origin="operator") -> str:  # type: ignore[no-untyped-def]
+        submitted.append(session_id)
+        return "run-p"
+
+    manager.submit = fake_submit  # type: ignore[method-assign]
+    assert await peers.service("list", from_session=leader.session.id) == {"reviewer": colleague.session.id}
+    assert await peers.service("list", from_session=red_team.session.id) == {"ledger-red-team": red_team.session.id}
+    assert await peers.service("list", from_session=helper.session.id) == {}
+    other_chat = await manager.create_session("another chat")
+    assert await peers.service("list", from_session=other_chat.session.id) == {"notes": chat.session.id}  # chats are one place
+    with pytest.raises(ValueError, match="no peer named 'ledger-red-team' in this project"):
+        await peers.ask(from_session=leader.session.id, name="ledger-red-team", prompt="forward this", wait=False, timeout_minutes=None)
+    with pytest.raises(ValueError, match="a subagent asks no peers"):
+        await peers.ask(from_session=helper.session.id, name="reviewer", prompt="tell the leader", wait=False, timeout_minutes=None)
+    assert submitted == []
+    await peers.ask(from_session=leader.session.id, name="reviewer", prompt="is this ok?", wait=False, timeout_minutes=None)
+    assert submitted == [colleague.session.id]

@@ -156,7 +156,7 @@ def test_a_replayed_question_is_told_the_note_as_well() -> None:
 # -- whose words compaction quotes ----------------------------------------------------------------
 
 
-SECTIONED = "## Goal\ng\n## Constraints\nc\n## State\ns\n## Discoveries\nd\n## Open\no\n## Next steps\nn\n## Unknowns\nu\n## Identifiers\ni"
+SECTIONED = "## Standing instructions\ns\n## Stable facts\nf\n## Threads\n### t\nx\n## Closed threads\nc\n## Unknowns\nu\n## Identifiers\ni"
 ROUTINE = "- 22:40 Ada finished a turn on \"Promo\" — ReadStaff(\"Ada\") for the whole reply"
 
 

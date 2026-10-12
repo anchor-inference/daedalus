@@ -314,6 +314,14 @@ class SideChannels:
         result: dict[str, Any] = await self._side_call(env, "sessions.read", params, what=f"reading the {harness} session {session}", timeout=60.0)
         return result
 
+    async def sessions_instructions(self, env: str, *, harness: str, session: str) -> dict[str, Any]:
+        """The standing instructions and memory the program gives its model for one session, read where
+        the program keeps them: ``{cwd, files: [{path, kind, content, bytes, truncated, omitted}]}``, the
+        global files first and the closest last, masked as a transcript is."""
+        result: dict[str, Any] = await self._side_call(env, "sessions.instructions", {"harness": harness, "id": session},
+                                                       what=f"reading the instructions of the {harness} session {session}", timeout=30.0)
+        return result
+
     async def fs_read(self, env: str, path: str, *, offset: int = 0, max_bytes: int = 64 << 10) -> FileChunk:
         """Up to ``max_bytes`` at ``offset``. One reply carries at most about 640 KiB; ``eof`` says
         whether the end was reached, and a longer read continues at ``next_offset``."""

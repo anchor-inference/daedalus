@@ -97,8 +97,8 @@ async def test_native_packet_stays_in_system_brief_after_real_history_compaction
 
         async def summary(_request: Any) -> LLMResponse:
             return LLMResponse(message=Message(role=MessageRole.assistant, content_blocks=[TextBlock(
-                text="## Goal\nMenu\n## Constraints\nSee pinned session brief\n## State\nWorking\n"
-                     "## Discoveries\nNone\n## Open\nNone\n## Next steps\nReview\n## Unknowns\nNone\n"
+                text="## Standing instructions\nSee pinned session brief\n## Stable facts\nNone\n## Threads\n### Menu\nWorking\n"
+                     "## Closed threads\nNone\n## Unknowns\nNone\n"
                      "## Identifiers\nNone")]), stop_reason=StopReason.end_turn)
 
         summariser.complete_text = summary  # type: ignore[method-assign]

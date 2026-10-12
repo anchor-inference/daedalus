@@ -20,7 +20,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from protocore.contracts.llm import LLMError, LLMObservabilityContext, LLMRequest
+from protocore.contracts.llm import LLMError, LLMObservabilityContext, LLMRateLimitError, LLMRequest
 from protocore.contracts.runtime_constants import LoopConstants
 from protocore.contracts.tool_registry import ToolVisibilityPolicy, policy_admits, tool_group_of
 from protocore.contracts.types import (
@@ -62,16 +62,18 @@ from daedalus.config import (
     NoModelConfigured,
     RuntimeConfig,
     Settings,
+    compaction_ratio,
     max_advertised_tools_for,
     on_demand_tool_groups_for,
 )
-from daedalus.host import capabilities, launcher_bridge, prompts, tool_groups
+from daedalus.host import capabilities, launcher_bridge, prompts, standing, summaries, tool_groups
 from daedalus.host.checkpoint_retention import CheckpointRetention, RetentionBounds, RetentionReport
 from daedalus.host.checkpoints import DIR_NAME as CHECKPOINT_DIR_NAME
 from daedalus.host.checkpoints import CheckpointError, Checkpoints, scan_workspace
 from daedalus.host.containment import Walls, walls_for, worktree_writable_paths
 from daedalus.host.engine_factory import TENANT, EngineDeps, PolicyAdapter, build_engine
 from daedalus.host.events import AppEvent, EventBus, EventFilter
+from daedalus.host.foreign_sessions import harness_name
 from daedalus.host.hooks import DaedalusHookManager
 from daedalus.host.host_exec import BRIDGE_DOWN, HostExecBackend
 from daedalus.host.inference_admission import HostInferenceAdmission
@@ -171,6 +173,11 @@ rather than claiming the provider was unreachable."""
 BRIEF_MAX_CHARS = 12_000
 """A spawned agent's brief lives in its system prompt; longer hand-overs belong in files."""
 WORKSPACE_NOTES_CHARS = 6000
+"""The least room the workspace's notes files get, on a window too small for their share."""
+WORKSPACE_NOTES_WINDOW_SHARE = 0.04
+"""The share of the window the workspace's AGENTS.md, CLAUDE.md and memory index may take: 40k tokens on a million."""
+MEMORY_INDEX = ".agents/memory/MEMORY.md"
+"""The project's memory index, where agents of every program working in the folder keep their notes."""
 MCP_EXAMPLE_NAMES = 5
 """How many of a large MCP server's tool names McpList and McpEnable show beside its prefix and count:
 enough to show what the server covers and how its names are spelt, not so many that the list is back."""
@@ -182,7 +189,6 @@ STEER_CARD_CHARS = 200
 STEER_CARD_LIMIT = 20
 """Cards one change event carries. Past this the count is the answer; nobody reads the twenty-first card."""
 """How long an approval key stays spendable: long enough for the agent to retry, short enough that a forgotten grant does not wait for a later call."""
-"""How much of the workspace AGENTS.md rides along in the prompt; the rest is one Read away."""
 
 EventSink = Callable[[str, Any], Awaitable[None]]
 """A session's listener. It takes the loop's ``TurnEvent`` and the host's own ``HostEvent`` alike: both carry ``type``, ``run_id`` and ``payload``."""
@@ -295,6 +301,9 @@ class SessionState:
     """Lowered when a run starts, raised again once its history is persisted and its snapshot taken.
     The next run waits for it: the files a revert would restore must describe the turn that just ended,
     not the one starting. The rest of the housekeeping nobody waits for."""
+    standing: tuple[str, list[dict[str, Any]]] = ("", [])
+    """The carried instructions and memory of an imported session, as read from their blob (the blob's
+    reference, then the files); see :mod:`daedalus.host.standing`."""
     compacting: dict[str, Any] | None = None
     """A compaction in flight: reason, stage (summarising/merging/writing), parts done of total, started_at.
     The Mini App and the list read it; ``None`` when none is running."""
@@ -1917,10 +1926,12 @@ class SessionManager:
         cfg = self.config.compaction
         if cfg.auto_ratio <= 0 or state.pending is not None or self.shutting_down:
             return
-        ratio = 1.0 if required_only else cfg.auto_ratio
+
+        def ratio_of(status: dict[str, Any]) -> float:
+            return 1.0 if required_only else compaction_ratio(cfg, int(status["window"] or 0), int(status.get("output_cap") or 0))
 
         def below(status: dict[str, Any]) -> bool:
-            return not status["window"] or status["tokens"] < ratio * status["window"] or status["messages"] < cfg.min_messages
+            return not status["window"] or status["tokens"] < ratio_of(status) * status["window"] or status["messages"] < cfg.min_messages
 
         def held(status: dict[str, Any]) -> bool:
             # A compaction that failed, or one that left the prompt about as large as it found it,
@@ -1961,6 +1972,7 @@ class SessionManager:
             after = await self.context_status(state)
             logger.warning("session %s: auto-compacted %d → %d messages in %.0fs (prompt was %d of %d tokens)", state.session.id, status["messages"], after["messages"], time.monotonic() - started, status["tokens"], status["window"])
             freed = status["tokens"] - after["tokens"]
+            ratio = ratio_of(status)
             if after["tokens"] >= ratio * status["window"] or freed < COMPACTION_MIN_FREED * status["tokens"]:
                 # What is left is still over the trigger — the kept tail, or whatever the host puts in
                 # front of every prompt, is itself that large — so the next turn would compact again and
@@ -2091,6 +2103,14 @@ class SessionManager:
     async def _compaction_rung(self, state: SessionState) -> tuple[Any, str]:
         return (await self._compaction_rungs(state))[0]
 
+    async def session_window(self, state: SessionState) -> int:
+        """The window of the model this session runs on, in tokens; 0 when no model is usable."""
+        try:
+            _, preset = self.resolve_model(await self.live.load(state.session.id))
+            return int(state.context_window or preset.context_window or 0)
+        except Exception:  # noqa: BLE001 — no usable model is reported elsewhere
+            return int(state.context_window or 0)
+
     async def summarise_with_fallback(self, state: SessionState, history: Sequence[Message], instructions: str = "", *, progress: Callable[..., Awaitable[None]] | None = None) -> str:
         """One summary of ``history`` from the first model of the compaction's ladder that answers.
 
@@ -2108,12 +2128,13 @@ class SessionManager:
         if not rungs:
             raise CompactionFailed(f"no model may summarise the history now: the daily budget is exceeded ({exceeded}) and every model that could is a paid one" if exceeded else "no model may summarise the history")
         preset_rung, problem = self._compaction_preset_rung()
+        window = await self.session_window(state)
         failures: list[str] = []
         summary = ""
         for index, (provider, model) in enumerate(rungs):
             try:
                 with self.providers.hold([provider]):
-                    summary = await self._summarise_history(provider, model, history, language=language, instructions=instructions, observability=observability, progress=progress)
+                    summary = await self._summarise_history(provider, model, history, language=language, instructions=instructions, observability=observability, progress=progress, window=window)
                 break
             except LLMError as exc:
                 # Out of quota, refused, timed out or too small a window: the next model may well answer.
@@ -2141,7 +2162,7 @@ class SessionManager:
         # Their room is a share of the window as well as a fixed bound: a summary that quoted every
         # long message whole could itself fill the window past the trigger, and compact again each turn.
         window = int((await self.context_status(state)).get("window") or 0)
-        share = min(OPERATOR_QUOTES_WINDOW_SHARE, self.config.compaction.auto_ratio / 4 or OPERATOR_QUOTES_WINDOW_SHARE)
+        share = min(OPERATOR_QUOTES_WINDOW_SHARE, compaction_ratio(self.config.compaction, window) / 4 or OPERATOR_QUOTES_WINDOW_SHARE)
         room = min(OPERATOR_QUOTES_MAX_CHARS, int(window * CHARS_PER_TOKEN * share)) if window else OPERATOR_QUOTES_MAX_CHARS
         summary = self.redactor.redact(summary + operator_quotes(history, room=room) + identifier_index(history) + verbatim_tail(history, room=room))
         busy = state.running and not (own_task_ok and state.task is asyncio.current_task())
@@ -2216,11 +2237,15 @@ class SessionManager:
         state.observed_prompt_tokens = min(measured, scaled)
         await self.db.kv_set(f"context_measurement:{state.session.id}", {"floor": state.usage_floor_seq, "tokens": state.observed_prompt_tokens})
 
-    async def _summarise_history(self, provider: Any, model: str, history: Sequence[Message], *, language: str, instructions: str, observability: LLMObservabilityContext, progress: Callable[..., Awaitable[None]] | None = None) -> str:
-        """One structured summary of ``history``: a single call, or parallel part summaries merged when the transcript is long.
+    async def _summarise_history(self, provider: Any, model: str, history: Sequence[Message], *, language: str, instructions: str, observability: LLMObservabilityContext, progress: Callable[..., Awaitable[None]] | None = None, window: int = 0) -> str:
+        """One structured summary of ``history``, built on the summary it starts with.
 
-        ``progress`` hears how many parts there are and each one finishing, then the merge; a
-        compaction of a long history takes minutes and the operator watches it."""
+        The previous summary goes to the summariser whole, as the base to update (see
+        :mod:`daedalus.host.summaries`). The transcript after it goes whole as well: in one call
+        when it fits ``chunk_tokens``, otherwise as parts summarised in parallel into notes, the
+        notes merged in rounds while they are still too long for one call, and the last merge
+        made onto the base. ``progress`` hears how many parts there are, each one finishing, then
+        the merge; a compaction of a long history takes minutes and the operator watches it."""
 
         async def report(**fields: Any) -> None:
             if progress is not None:
@@ -2228,27 +2253,45 @@ class SessionManager:
 
         cfg = self.config.compaction
         focus = f"\n\nThe operator asks to focus on: {instructions.strip()}" if instructions.strip() else ""
-        transcript_text = transcript_for_summary(history)
-        parts = split_transcript(transcript_text, cfg.chunk_tokens)
+        words = summaries.summary_words(cfg.max_words, window)
+        rendered = summaries.summary_input(history)
+        base = rendered.previous
+        parts = summaries.split_transcript(rendered.transcript, cfg.chunk_tokens)
         await report(parts_total=len(parts), parts_done=0, stage="summarising")
         if len(parts) == 1:
-            return await self._summary_call(provider, model, COMPACT_PROMPT.format(language=language, max_words=cfg.max_words) + focus, transcript_text, observability)
-        part_words = max(300, cfg.max_words // 2)
+            prompt = summaries.compact_prompt(language=language, max_words=words, has_base=bool(base)) + focus
+            return await self._summary_call(provider, model, prompt, summaries.with_base(base, rendered.transcript), observability, max_tokens=summaries.summary_max_tokens(words))
+        part_words = max(400, words // 2)
+        gate = asyncio.Semaphore(SUMMARY_PARALLEL_CALLS)
         done = 0
 
-        async def part_summary(index: int, part: str) -> str:
+        async def note(prompt: str, body: str) -> str:
+            async with gate:
+                return await self._summary_call(provider, model, prompt + focus, body, observability, strict=False, max_tokens=summaries.summary_max_tokens(part_words))
+
+        async def part_note(index: int, part: str) -> str:
             nonlocal done
-            text = await self._summary_call(provider, model, CHUNK_PROMPT.format(index=index + 1, total=len(parts), language=language, max_words=part_words) + focus, part, observability, strict=False)
+            text = await note(summaries.CHUNK_PROMPT.format(index=index + 1, total=len(parts), language=language, max_words=part_words), part)
             done += 1
             await report(parts_done=done)
             return text
 
-        partials = await asyncio.gather(*(part_summary(i, part) for i, part in enumerate(parts)))
-        joined = "\n\n".join(f"<part {i + 1}>\n{text}\n</part {i + 1}>" for i, text in enumerate(partials) if text)
+        notes = [text for text in await asyncio.gather(*(part_note(i, part) for i, part in enumerate(parts))) if text]
+        limit = cfg.chunk_tokens * summaries.CHARS_PER_TOKEN
+        for _ in range(summaries.MERGE_ROUNDS_MAX):
+            # A history of a million tokens leaves thirty parts whose notes alone exceed one call; they
+            # are merged in groups first, so the last merge reads all of them rather than the newest.
+            if len(summaries.joined_notes(notes)) <= limit or len(notes) < 2:
+                break
+            groups = summaries.pack(notes, limit)
+            await report(stage="merging")
+            prompt = summaries.MERGE_NOTES_PROMPT.format(language=language, max_words=part_words)
+            notes = list(await asyncio.gather(*(note(prompt, summaries.joined_notes(group)) if len(group) > 1 else asyncio.sleep(0, group[0]) for group in groups)))
         await report(stage="merging")
-        return await self._summary_call(provider, model, MERGE_PROMPT.format(language=language, max_words=cfg.max_words) + focus, joined, observability)
+        prompt = summaries.merge_prompt(language=language, max_words=words, has_base=bool(base)) + focus
+        return await self._summary_call(provider, model, prompt, summaries.with_base(base, summaries.joined_notes(notes)), observability, max_tokens=summaries.summary_max_tokens(words))
 
-    async def _summary_call(self, provider: Any, model: str, prompt: str, body: str, observability: LLMObservabilityContext, *, strict: bool = True) -> str:
+    async def _summary_call(self, provider: Any, model: str, prompt: str, body: str, observability: LLMObservabilityContext, *, strict: bool = True, max_tokens: int = 6000) -> str:
         summary = ""
         candidate = ""
         problem = ""
@@ -2258,22 +2301,14 @@ class SessionManager:
             request = LLMRequest(
                 model=model,
                 messages=[Message(role=MessageRole.user, content_blocks=[TextBlock(text=prompt + reminder + "\n\n" + body)])],
-                max_tokens=6000,
+                max_tokens=max_tokens,
                 temperature=0.2,
                 extra={"enable_thinking": False},
                 observability=observability,
             )
-            try:
-                response = await asyncio.wait_for(provider.complete_text(request), timeout=timeout)
-            except TimeoutError:
-                # A provider stall must not hold the session: one more try, then the compaction gives up.
-                # The retry gets twice the time. A model that reasons whether or not it is asked to (Grok
-                # spends four to six thousand reasoning tokens on a part) takes 70 to 90 s over a 30k-token
-                # part, and the same request under the same limit failed the same way every time.
-                logger.warning("compaction summariser call exceeded %.0fs; retrying once with %.0fs", timeout, 2 * timeout)
-                response = await asyncio.wait_for(provider.complete_text(request), timeout=2 * timeout)
+            response = await self._summary_request(provider, request, timeout)
             candidate = "".join(b.text for b in response.message.content_blocks if isinstance(b, TextBlock)).strip()
-            problem = validate_summary_sections(candidate)
+            problem = summaries.validate_summary_sections(candidate)
             if not problem:
                 summary = candidate
                 break
@@ -2284,6 +2319,34 @@ class SessionManager:
             logger.warning("compaction summary accepted without the fixed sections: %s", problem)
             summary = candidate  # a usable summary beats a session the operator cannot compact
         return summary
+
+    async def _summary_request(self, provider: Any, request: LLMRequest, timeout: float) -> Any:
+        """One summariser call, asked again when the provider failed in a way that passes.
+
+        A compaction once died on a single HTTP 500 from the provider and the session went on
+        growing to nine tenths of its window. A transient failure — a 5xx, a dropped stream — is
+        asked again after a pause, twice; what still fails goes back to the caller,
+        which tries the next model of the ladder or reports the compaction as failed with the
+        history untouched."""
+        for attempt, pause in enumerate((*SUMMARY_RETRY_PAUSES, None)):
+            try:
+                try:
+                    return await asyncio.wait_for(provider.complete_text(request), timeout=timeout)
+                except TimeoutError:
+                    # A provider stall must not hold the session: one more try, then the compaction gives up.
+                    # The retry gets twice the time. A model that reasons whether or not it is asked to (Grok
+                    # spends four to six thousand reasoning tokens on a part) takes 70 to 90 s over a 30k-token
+                    # part, and the same request under the same limit failed the same way every time.
+                    logger.warning("compaction summariser call exceeded %.0fs; retrying once with %.0fs", timeout, 2 * timeout)
+                    return await asyncio.wait_for(provider.complete_text(request), timeout=2 * timeout)
+            except LLMError as exc:
+                # A rate limit is a quota, not a hiccup: the next model of the ladder answers sooner than a
+                # pause on this one, and the auto-compaction's own back-off covers the case of none.
+                if pause is None or not exc.retryable or isinstance(exc, LLMRateLimitError):
+                    raise
+                logger.warning("compaction summariser call failed (%s, attempt %d); asking again in %.0fs", exc, attempt + 1, pause)
+                await asyncio.sleep(pause)
+        raise AssertionError("unreachable")
 
     # -- checkpoints, revert, fork ------------------------------------------------------
 
@@ -3646,10 +3709,19 @@ class SessionManager:
         if state is None:
             await self._set_model_locked(session_id, **arguments)
             return
+        was = await self.session_window(state)
         # A continuation pins its model while holding this lock. Checking before acquiring it
         # let a concurrent override change the engine after the durable pin was written.
         async with state.submit_lock:
             await self._set_model_locked(session_id, **arguments)
+        now = await self.session_window(state)
+        if 0 < now < was and not state.running and state.pending is None:
+            # A history built for a larger window is compacted as soon as the operator moves it onto a
+            # smaller one, with the summary it deserves, rather than at the next message, or by the
+            # core masking half of it in the middle of a run. A hold left by an earlier compaction
+            # measured the old window and does not apply to this one.
+            state.compaction_hold = None
+            state.auto_compaction = self._spawn_background(self._maybe_auto_compact(state), f"auto-compact:{session_id}")
 
     async def _set_model_locked(
         self,
@@ -3751,6 +3823,7 @@ class SessionManager:
 
     async def _assemble_engine(self, state: SessionState, run_id: str, overrides: dict[str, Any], rungs: list[Any], preset: Any) -> QueryEngine:
         await self._load_capability_ancestors(state)
+        await standing.load(self, state)
         if rungs and self.provider_costs_nothing(rungs[0][0].endpoint.id, rungs[0][1]):
             # A local, free or subscription primary remains usable after a priced budget is
             # exhausted. Paid fallbacks do not inherit that exemption: when any applicable dollar
@@ -3826,7 +3899,7 @@ class SessionManager:
             reasoning_effort=overrides.get("reasoning_effort") or preset.reasoning_effort,
             context_window=state.context_window or preset.context_window,
             max_output_tokens=preset.max_output_tokens,
-            extra_notes=self.notes_for(state),
+            extra_notes=self.notes_for(state, window=int(state.context_window or preset.context_window or 0)),
             tool_visibility_policy=self.tool_policy_for(state),
             role="voice" if self.is_voice(state) else "orchestrator" if self.is_orchestrator(state) else "dispatcher" if self.is_dispatcher(state) else "agent",
             max_advertised_tools=self.advertised_tools_limit(rungs),
@@ -5030,7 +5103,7 @@ class SessionManager:
             reserved_response = int(preset.max_output_tokens or 0)
         except Exception:  # noqa: BLE001 — no usable model is reported elsewhere
             window = int(state.context_window or 0)
-        summaries = sum(1 for m in history if m.metadata.get(COMPACTION_SUMMARY_METADATA_KEY))
+        summary_count = sum(1 for m in history if m.metadata.get(COMPACTION_SUMMARY_METADATA_KEY))
         # The newest summary the host wrote says when and why the history was last compacted; the
         # core's own summaries carry no such record, and then there is none to show rather than a guess.
         stamps = [m.metadata.get("daedalus.compaction") for m in history if m.metadata.get(COMPACTION_SUMMARY_METADATA_KEY)]
@@ -5082,8 +5155,9 @@ class SessionManager:
             "tokens": tokens,
             "estimated": estimated,
             "window": window,
+            "output_cap": reserved_response,
             "messages": len(history),
-            "summaries": summaries,
+            "summaries": summary_count,
             "last_compaction": last_compaction,
             "operator_turns": operator,
             "breakdown": breakdown,
@@ -5496,8 +5570,10 @@ class SessionManager:
         await self.refresh_on_demand_groups(state)
         return self.tool_group_states(state)
 
-    def notes_for(self, state: SessionState) -> str:
-        """What the system prompt says about this session beyond the environment: the brief it was created with."""
+    def notes_for(self, state: SessionState, *, window: int = 0) -> str:
+        """What the system prompt says about this session beyond the environment: the brief it was created
+        with, and what an imported session carries from the program it came from (loaded beforehand into
+        ``state.standing`` by :func:`standing.load`)."""
         parts = [state.extra_notes.strip()] if state.extra_notes.strip() else []
         if state.services is not None and isinstance(state.services.exec_backend, HostExecBackend):
             # The sandbox line of the environment section describes this process's commands, not these.
@@ -5518,27 +5594,47 @@ class SessionManager:
         if brief:
             origin = state.metadata.get("spawned_by") or state.metadata.get("subagent_of")
             parts.append("- Your brief" + (f" (from session {origin})" if origin else "") + ", the standing instructions for this session:\n" + brief)
+        record = standing.record_of(state.session.metadata)
+        if record is not None and state.standing[1]:
+            imported = state.session.metadata.get("imported") or {}
+            carried = standing.render(state.standing[1], source=harness_name(str(record.get("source") or "")), window=window, workspace=str(imported.get("cwd") or ""))
+            if carried:
+                parts.append(carried)
         return "\n".join(parts)
 
     async def workspace_notes(self, state: SessionState) -> str:
         """What the workspace and the board say about the work in progress: read at every run start, so a run
         begins from the plan of record rather than from memory of it.
 
-        ``AGENTS.md`` (or ``CLAUDE.md``) in the workspace root is the agent's own project memory; the open
-        board tasks of this session are its plan. Both are volatile text: they change between runs, so
-        they travel in the turn context at the end of the run's opening message, never in the system
-        prompt, whose bytes must not change between runs if the provider is to serve them from cache.
+        ``AGENTS.md`` and ``CLAUDE.md`` in the workspace root, and the index of ``.agents/memory``, are the
+        agent's own project memory; the open board tasks of this session are its plan. Both are volatile
+        text: they change between runs, so they travel in the turn context at the end of the run's opening
+        message, never in the system prompt, whose bytes must not change between runs if the provider is
+        to serve them from cache.
         """
         parts: list[str] = []
+        # Its room is a share of the window, not a fixed few thousand characters: a 20 KB CLAUDE.md
+        # cut at 6,000 lost the rules an imported session had been working under. Both files are read
+        # when both exist and differ — a project kept for Claude Code and for Codex has one of each.
+        room = max(WORKSPACE_NOTES_CHARS, int(await self.session_window(state) * CHARS_PER_TOKEN * WORKSPACE_NOTES_WINDOW_SHARE))
+        seen: list[str] = []
         for name in ("AGENTS.md", "CLAUDE.md"):
             text = await self._workspace_note(state, name)
-            if text is None:
+            if not text or text in seen:
                 continue
-            if text:
-                if len(text) > WORKSPACE_NOTES_CHARS:
-                    text = text[:WORKSPACE_NOTES_CHARS] + f"\n[… {name} continues; Read it for the rest]"
-                parts.append(f"- {name} in the workspace (your project memory; keep it current):\n{self.redactor.redact(text)}")
-            break
+            seen.append(text)
+            if len(text) > room:
+                text = text[:room] + f"\n[… {name} continues; Read it for the rest]"
+            room = max(0, room - len(text))
+            parts.append(f"- {name} in the workspace (your project memory; keep it current):\n{self.redactor.redact(text)}")
+        # The index of the project's memory notes, where the operator keeps what every agent working in
+        # the folder should know; the notes themselves are read when the work touches them. Without it
+        # an agent asked "you remember the stand?" had nothing to look in.
+        index = await self._workspace_note(state, MEMORY_INDEX)
+        if index and room:
+            if len(index) > room:
+                index = index[:room] + f"\n[… {MEMORY_INDEX} continues; Read it for the rest]"
+            parts.append(f"- {MEMORY_INDEX} in the workspace (the project's memory notes; Read the ones the work touches before you plan, and keep them current):\n{self.redactor.redact(index)}")
         try:
             rows = await self.db.fetchall("SELECT id, title, status, priority FROM board_tasks WHERE session_id = ? AND status NOT IN ('done', 'cancelled') ORDER BY priority, updated_at DESC LIMIT 8", (state.session.id,))
         except Exception:  # noqa: BLE001 — the board is optional
@@ -6210,39 +6306,12 @@ class SessionManager:
         resumed.append(entry["run_id"])
 
 
-SUMMARY_SECTIONS = ("Goal", "Constraints", "State", "Discoveries", "Open", "Next steps", "Unknowns", "Identifiers")
-
-COMPACT_PROMPT = """Summarise the conversation transcript below so that an agent can continue the work \
-in a fresh context. Write the summary in {language}, as Markdown with exactly these eight sections, \
-each once, in this order, as level-2 headings whose titles stay in English verbatim whatever the \
-language of the body: ## Goal · ## Constraints · ## State · ## Discoveries · ## Open · ## Next steps · \
-## Unknowns · ## Identifiers.
-Goal: what was asked and why, with the success criteria. Constraints: rules, preferences and decisions \
-the operator stated — quote them, do not paraphrase. State: what is done, with concrete results (paths, \
-commands, numbers, decisions) — every identifier verbatim, never rounded or guessed. Discoveries: \
-technical facts learned, errors and how they were resolved, approaches that failed and why. Open: what \
-is in progress or untouched. Next steps: the exact actions to take next, in order. Unknowns: what the \
-transcript does not show. The absence of a tool result or confirmation means the outcome is UNKNOWN, \
-not that it did not happen or that it succeeded; put such items under Unknowns rather than asserting \
-them. Identifiers: one line per path, id, URL, port, command, name or number that later work may need, \
-each exactly as it appeared. Never include credentials or tokens. At most ~{max_words} words. No \
-commentary outside the sections."""
-
-CHUNK_PROMPT = """The text below is ONE PART of a longer conversation transcript (part {index} of {total}). \
-Summarise this part in {language} with exactly these eight level-2 headings, each once, in this order, \
-titles in English: ## Goal · ## Constraints · ## State · ## Discoveries · ## Open · ## Next steps · \
-## Unknowns · ## Identifiers. Keep every identifier (paths, ids, URLs, ports, commands, numbers) \
-verbatim; quote operator rules rather than paraphrasing; an outcome the part does not show is UNKNOWN. \
-Never include credentials or tokens. At most ~{max_words} words. No commentary outside the sections."""
-
-MERGE_PROMPT = """Below are summaries of consecutive parts of one conversation, oldest first. Merge them \
-into ONE summary in {language} with exactly these eight level-2 headings, each once, in this order, \
-titles in English: ## Goal · ## Constraints · ## State · ## Discoveries · ## Open · ## Next steps · \
-## Unknowns · ## Identifiers. Keep the latest known state of each thing and every identifier verbatim; \
-keep every quoted operator rule; an item still unknown stays under Unknowns. At most ~{max_words} \
-words. No commentary outside the sections."""
-
 VERBATIM_TAIL_MESSAGES = 3
+SUMMARY_PARALLEL_CALLS = 6
+"""Part summaries in flight at once. A long history is thirty parts, and thirty calls at once is what
+a provider answers with a rate limit."""
+SUMMARY_RETRY_PAUSES = (5.0, 20.0)
+"""The pauses before a failed summariser call is asked again, one per retry."""
 COMPACTION_RETRY_GROWTH = 0.1
 """After an automatic compaction that failed or freed almost nothing, the prompt must grow by this share of
 the window before the next one is tried: about twenty turns of an orchestrator on a 490k window."""
@@ -6382,20 +6451,6 @@ def _quoted(text: str, room: int) -> str:
     if len(text) > room:
         text = f"{text[:room].rstrip()} [truncated {len(text) - room} chars — full text: {ARCHIVE_POINTER}]"
     return "- " + "\n  ".join(text.splitlines())
-
-
-def validate_summary_sections(summary: str) -> str:
-    """The reason a summary is rejected, or an empty string when every section appears once, in order."""
-    positions: list[int] = []
-    for name in SUMMARY_SECTIONS:
-        pattern = re.compile(rf"^##\s+{re.escape(name)}\s*$", re.MULTILINE | re.IGNORECASE)
-        found = pattern.findall(summary)
-        if len(found) != 1:
-            return f"section '## {name}' appears {len(found)} times (expected once)"
-        positions.append(pattern.search(summary).start())  # type: ignore[union-attr]
-    if positions != sorted(positions):
-        return "sections are out of order"
-    return ""
 
 
 def operator_quotes(history: Sequence[Message], *, skip_last: int = VERBATIM_TAIL_MESSAGES, room: int = OPERATOR_QUOTES_MAX_CHARS) -> str:
@@ -6546,48 +6601,6 @@ def operator_language(history: Sequence[Message]) -> str:
     return "English"
 
 
-def split_transcript(text: str, chunk_tokens: int) -> list[str]:
-    """Consecutive parts of a rendered transcript, each about ``chunk_tokens`` (4 chars per token), split on line ends."""
-    limit = max(1, chunk_tokens) * 4
-    if len(text) <= limit:
-        return [text]
-    parts: list[str] = []
-    current: list[str] = []
-    size = 0
-    for line in text.split("\n"):
-        if size + len(line) + 1 > limit and current:
-            parts.append("\n".join(current))
-            current, size = [], 0
-        current.append(line)
-        size += len(line) + 1
-    if current:
-        parts.append("\n".join(current))
-    return parts
-
-
-def transcript_for_summary(history: Sequence[Message], *, result_chars: int = 600) -> str:
-    """A compact textual rendering of the history for the summariser."""
-    lines: list[str] = []
-    for message in history:
-        if message.role is MessageRole.system or is_ledger(message):
-            continue  # the ledger is carried beside the summary, not through it
-        for block in message.content_blocks:
-            if isinstance(block, TextBlock):
-                text = prompts.without_turn_context(block.text).strip()  # the clock and the board of a past turn are not history
-                if text:
-                    lines.append(f"[{message.role.value}] {text[:4000]}")
-            elif isinstance(block, ToolUseBlock):
-                lines.append(f"[tool call] {block.name} {(block.arguments_json or '')[:300]}")
-            elif isinstance(block, ToolResultBlock):
-                body = (block.content or "").strip()
-                if len(body) > result_chars:
-                    body = body[: result_chars // 2] + " … " + body[-result_chars // 2 :]
-                lines.append(f"[tool result{' ERROR' if block.is_error else ''}] {body}")
-            elif isinstance(block, ThinkingBlock):
-                continue
-    return "\n".join(lines)[-200_000:]
-
-
 class _LiveVision:
     """Resolves the ImageView provider/model at call time, so settings edits apply immediately."""
 
@@ -6669,4 +6682,4 @@ def _bind(fn: Callable[..., Awaitable[Any]] | None, session_id: str) -> Callable
     return bound
 
 
-__all__ = ["HOME_KEY", "Attachment", "HostUnreachable", "PendingQuestion", "SessionManager", "SessionState", "WorkspaceUnreachable", "annotate_summary", "home_of", "host_home_name", "transcript_for_summary", "validate_summary_sections", "verbatim_tail"]
+__all__ = ["HOME_KEY", "Attachment", "HostUnreachable", "PendingQuestion", "SessionManager", "SessionState", "WorkspaceUnreachable", "annotate_summary", "home_of", "host_home_name", "verbatim_tail"]

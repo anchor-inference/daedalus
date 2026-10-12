@@ -18,13 +18,13 @@ from daedalus.host.session_runner import (
     history_tokens,
     identifier_index,
     operator_quotes,
-    split_transcript,
 )
+from daedalus.host.summaries import split_transcript
 from daedalus.providers.openai_compat import UsageRecord
 from daedalus.stores.database import Database
 from tests.support.models import model_config
 
-SECTIONED = "## Goal\ng\n## Constraints\nc\n## State\ns\n## Discoveries\nd\n## Open\no\n## Next steps\nn\n## Unknowns\nu\n## Identifiers\ni"
+SECTIONED = "## Standing instructions\ns\n## Stable facts\nf\n## Threads\n### t\nx\n## Closed threads\nc\n## Unknowns\nu\n## Identifiers\ni"
 
 
 def _op(text: str) -> Message:

@@ -1,9 +1,14 @@
 """Named peers: sessions other sessions can talk to.
 
-The operator names a topic (``/peer here reviewer``); any session can then AskPeer it — the
-question runs as a turn in the peer's session and the peer's final reply comes back as the
-tool result. A depth counter stops a peer from asking a peer from asking a peer forever,
-and a peer that is busy or waiting on the operator says so instead of queueing silently.
+The operator names a topic (``/peer here reviewer``); a session of the same project can then
+AskPeer it — the question runs as a turn in the peer's session and the peer's final reply comes
+back as the tool result. A depth counter stops a peer from asking a peer from asking a peer
+forever, and a peer that is busy or waiting on the operator says so instead of queueing silently.
+
+A peer is reachable only from its own project, and never by a subagent. The registry was once
+global: a subagent of a client project, told to notify its leader, listed the peers, found a
+red-team session of another project and asked it to forward the client's deployment details,
+which then sat in that project's transcript.
 """
 
 from __future__ import annotations
@@ -58,20 +63,42 @@ class Peers:
         await self.app.db.kv_set(KV_KEY, peers)
         return True
 
+    async def visible(self, from_session: str) -> dict[str, str]:
+        """The peers ``from_session`` may see: those whose session is in its own project.
+
+        A plain chat has a scratch project of its own (``ephemeral``), so chats count as one place
+        together: one chat may still consult another, and neither reaches into a project the
+        operator made, nor such a project into them. A subagent sees none: it answers its leader,
+        and asks nobody else."""
+        manager = self.app.manager
+        assert manager is not None
+        origin = await manager.get_state(from_session)
+        if origin is None or origin.metadata.get("subagent_of"):
+            return {}
+        here = _place(origin)
+        seen: dict[str, str] = {}
+        for name, session_id in (await self.registry()).items():
+            target = await manager.get_state(session_id)
+            if target is not None and _place(target) == here:
+                seen[name] = session_id
+        return seen
+
     async def ask(self, *, from_session: str, name: str, prompt: str, wait: bool, timeout_minutes: int | None) -> dict[str, Any]:
         manager = self.app.manager
         assert manager is not None
-        peers = await self.registry()
+        origin = await manager.get_state(from_session)
+        if origin is not None and origin.metadata.get("subagent_of"):
+            raise ValueError("a subagent asks no peers: put what the leader needs in your final reply, which is delivered to it")
+        peers = await self.visible(from_session)
         target_id = peers.get(name.strip().lower())
         if target_id is None:
-            raise ValueError(f"no peer named {name!r}; known: {', '.join(sorted(peers)) or 'none'}")
+            raise ValueError(f"no peer named {name!r} in this project; known: {', '.join(sorted(peers)) or 'none'}")
         if target_id == from_session:
             raise ValueError("a session cannot ask itself")
         target = await manager.get_state(target_id)
         if target is None:
             await self.forget(name)
             raise ValueError(f"peer {name!r} points at a session that no longer exists; it was forgotten")
-        origin = await manager.get_state(from_session)
         depth = int(origin.metadata.get("peer_depth", 0)) + 1 if origin is not None else 1
         if depth > self.app.config.peers.max_depth:
             raise ValueError(f"peer chain too deep ({depth} > {self.app.config.peers.max_depth}); answer this yourself")
@@ -131,11 +158,19 @@ class Peers:
         if op == "ask":
             return await self.ask(**kwargs)
         if op == "list":
-            return await self.registry()
+            return await self.visible(kwargs["from_session"])
         if op == "register":
             await self.register(kwargs["name"], kwargs["session_id"])
             return {"registered": kwargs["name"]}
         raise ValueError(op)
+
+
+def _place(state: Any) -> str:
+    """Where a session is for the peers: its project, or the chats, all together."""
+    project = state.project
+    if project is None or project.settings.ephemeral:
+        return "chats"
+    return f"project:{project.id}"
 
 
 async def install(app: Application) -> list[asyncio.Task[None]]:

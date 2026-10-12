@@ -156,6 +156,9 @@ export type ImportedOrigin = {
   transcript_dropped?: number;
   /** The masked original, when it was kept. */
   original?: { stored: boolean; bytes?: number | null; name?: string | null; reason?: string | null };
+  /** The program's standing instructions and memory, carried in every prompt of this session; `problem`
+   *  says why none could be read. */
+  instructions?: { files: { path: string; kind: string; bytes: number; truncated: boolean; omitted: boolean }[]; read_at?: string | null; problem?: string } | null;
 };
 
 /** The marker the host puts on a message that came from another program: which program, and the

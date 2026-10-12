@@ -119,7 +119,7 @@ async def test_with_the_fallback_on_a_refusing_summary_model_is_replaced_and_the
     manager._compaction_preset_rung = lambda: ((cheap, "flash"), "")  # type: ignore[method-assign]
     assert manager.config.model.fallback_to_session is True  # on unless the operator turns it off
     summary = await manager.compact(state.session.id)
-    assert summary.startswith("## Goal") and cheap.asked == 1
+    assert summary.startswith("## Standing instructions") and cheap.asked == 1
     assert [(p["kind"], p["outcome"], p["setting"]) for p in posted] == [("compaction", "fallback", COMPACTION_MODEL.as_dict())]
     assert "usage limit exceeded" in posted[0]["detail"] and posted[0]["model"] == "scripted/scripted-model"
     # The conversation hears it too, drawn inline with the same row.
@@ -160,7 +160,7 @@ async def test_with_the_fallback_off_a_deleted_summary_model_refuses_before_any_
     # Turned back on, the same deleted preset is skipped for the session's model, with a warning.
     manager.config.model.fallback_to_session = True
     posted.clear()
-    assert (await manager.compact(state.session.id)).startswith("## Goal")
+    assert (await manager.compact(state.session.id)).startswith("## Standing instructions")
     assert [p["outcome"] for p in posted] == ["fallback"] and "no longer among the models" in posted[0]["detail"]
     await manager.close()
 

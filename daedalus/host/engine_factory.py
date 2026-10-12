@@ -20,7 +20,7 @@ from protocore.runtime.tool_permission import (
     ToolPermissionOutcome,
 )
 
-from daedalus.config import ModeConfig, RuntimeConfig
+from daedalus.config import ModeConfig, RuntimeConfig, core_compaction_trigger
 from daedalus.host import prompts
 from daedalus.host.hooks import DaedalusHookManager
 from daedalus.providers.openai_compat import OpenAICompatibleProvider
@@ -123,11 +123,7 @@ def runtime_constants(config: RuntimeConfig, *, context_window: int, max_output_
         # One deadline for every summariser call the session makes, in-run and between runs.
         compaction_summary_timeout_seconds=config.compaction.call_timeout_seconds,
         # The host compacts the whole history between runs; the core's tiers only catch a run that grows past that.
-        # A server that reserves the output budget inside the window (vLLM) rejects a prompt above
-        # window − max output, so the trigger must sit below that cliff, not only below the window —
-        # and a whole turn below it: the check runs before a turn whose tool results add tens of
-        # thousands of tokens, and the estimate runs a little short of the provider's own count.
-        compaction_trigger_ratio=min(config.compaction.core_trigger_ratio, max(0.3, round(1 - output_cap / context_window - 0.15, 2))),
+        compaction_trigger_ratio=core_compaction_trigger(config.compaction, context_window, output_cap),
         # Long tasks are the point: no per-run tool-call cap; spend and iterations bound the run.
         leader_tool_call_soft_cap=0,
         compaction_protect_first_user_turn=True,

@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Any
 
 from protocore.contracts.types import COMPACTION_SUMMARY_METADATA_KEY, Message, MessageRole, TextBlock
 
+from daedalus.host import standing
 from daedalus.host.engine_factory import TENANT
 from daedalus.host.foreign_sessions import (
     HARNESS_ORDER,
@@ -52,7 +53,13 @@ from daedalus.host.foreign_sessions import (
     parse_time,
     plan_history,
 )
-from daedalus.host.session_runner import _forget_persisted, annotate_summary, identifier_index, operator_quotes
+from daedalus.host.session_runner import (
+    _forget_persisted,
+    annotate_summary,
+    identifier_index,
+    operator_quotes,
+    verbatim_tail,
+)
 from daedalus.stores.projects import FolderSpec, Project, ProjectError, ProjectFolder, ProjectSettings
 
 if TYPE_CHECKING:
@@ -581,10 +588,11 @@ class SessionImporter:
             if original is not None:
                 meta = await manager.blobs.put(TENANT, gzip.compress(original), content_type="application/gzip")
                 stored = {"stored": True, "ref": meta.ref, "bytes": len(original), "name": f"{request.harness}-{request.ext_id}.jsonl"}
+            instructions = await standing.store(manager, request.harness, await standing.fetch(manager, request.harness, request.ext_id))
             cursor = self._cursor(conversion, read)
             await self.store.record(request.harness, request.ext_id, sid, cwd, cursor)
             imported = dict(state.session.metadata.get("imported") or {})
-            imported.update(cursor=cursor, mode=plan.mode, history_messages=len(history), original=stored)
+            imported.update(cursor=cursor, mode=plan.mode, history_messages=len(history), original=stored, instructions=instructions)
             await self._set_imported(state, imported)
             await self._progress(job, "open", history=len(history))
             return sid
@@ -680,7 +688,9 @@ class SessionImporter:
             except Exception as exc:  # noqa: BLE001 — the import stands without our summary; the turns are in the transcript
                 logger.warning("import of %s: the turns before the kept tail could not be summarised: %s", sid, exc)
                 parts.append(f"[{len(gap)} earlier messages could not be summarised at import ({str(exc)[:200]}); HistoryExpand returns them]")
-            parts.append(operator_quotes(gap) + identifier_index(gap))
+            # ``operator_quotes`` leaves the last three passages to ``verbatim_tail``, as a compaction
+            # does; without it the operator's three latest words before the kept turns were quoted nowhere.
+            parts.append(operator_quotes(gap) + identifier_index(gap) + verbatim_tail(gap))
         note = f"\n\n[archived turns seq {archived[0]}–{archived[-1]}: HistoryExpand({archived[0]}, {archived[-1]}) returns them verbatim]" if archived else ""
         body = manager.redactor.redact("\n\n".join(p for p in parts if p.strip()).strip())
         kept = [entries[i].tail_history or entries[i].history for i in plan.kept]
@@ -737,6 +747,11 @@ class SessionImporter:
         state = await manager.get_state(session_id)
         if state is None:
             raise ImportRefused("missing", "no such session", status=404)
+        # The program's memory moves on while the operator works there; pulling in what is new
+        # brings it along, and the next run's prompt carries the files as they are now.
+        imported = dict(state.session.metadata.get("imported") or {})
+        imported["instructions"] = await standing.store(manager, row["harness"], await standing.fetch(manager, row["harness"], row["ext_id"]))
+        await self._set_imported(state, imported)
         if not fresh:
             await self.store.advance(row["harness"], row["ext_id"], {**cursor, "next": read.next})
             return {"session_id": session_id, "added": 0, "turns": 0, "masked": 0, "live": read.live}
@@ -809,7 +824,17 @@ def imported_view(metadata: dict[str, Any]) -> dict[str, Any] | None:
         "refreshed_at": imported.get("refreshed_at"), "masked": int(imported.get("masked") or 0), "counts": imported.get("counts") or {},
         "transcript_dropped": int(imported.get("transcript_dropped") or 0),
         "original": {"stored": bool(original.get("stored")), "bytes": original.get("bytes"), "name": original.get("name"), "reason": original.get("reason")},
+        "instructions": _instructions_view(imported.get("instructions")),
     }
+
+
+def _instructions_view(record: Any) -> dict[str, Any] | None:
+    """The carried instructions and memory as the app lists them: each file and its size, never the text."""
+    if not isinstance(record, dict):
+        return None
+    files = [{"path": f.get("path"), "kind": f.get("kind"), "bytes": f.get("bytes"), "truncated": bool(f.get("truncated")), "omitted": bool(f.get("omitted"))}
+             for f in record.get("files") or [] if isinstance(f, dict)]
+    return {"files": files, "read_at": record.get("read_at"), "problem": record.get("problem") or ""}
 
 
 def ordered_harnesses(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

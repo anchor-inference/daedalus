@@ -134,6 +134,10 @@ class HostBridge:
         """One page of a session of another program, normalised, or its raw bytes (``sessions.read``)."""
         return await self._sessions(lambda service: service.sessions_read(HOST, harness=harness, session=session, start=start, max_bytes=max_bytes, sidechains=sidechains, raw=raw))
 
+    async def sessions_instructions(self, harness: str, session: str) -> dict[str, Any]:
+        """The instructions and memory a program gives its model for one session (``sessions.instructions``)."""
+        return await self._sessions(lambda service: service.sessions_instructions(HOST, harness=harness, session=session))
+
     async def _sessions(self, call: Callable[[Terminals], Awaitable[_T]]) -> _T:
         """A ``sessions.*`` call: a daemon without it is ``HostDaemonOutdated``; down, missing and
         refused are as ``_side`` says."""

@@ -1414,7 +1414,7 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
             <TotalCaps s={s} save={save} />
             <div className="section-title">{t("settings.compaction")}</div>
             <div className="sub">{t("settings.compaction.sub")}</div>
-            <NumRow id="compaction-ratio" title={t("settings.compaction.ratio")} desc={t("settings.compaction.ratio.sub")} value={s.compaction?.auto_ratio ?? 0.5} min={0} max={1} step={0.05} onSave={(v) => save({ compaction: { ...s.compaction, auto_ratio: v } })} />
+            <NumRow id="compaction-ratio" title={t("settings.compaction.ratio")} desc={t("settings.compaction.ratio.sub")} value={s.compaction?.auto_ratio ?? 0.8} min={0} max={1} step={0.05} onSave={(v) => save({ compaction: { ...s.compaction, auto_ratio: v } })} />
             <NumRow id="compaction-keep" title={t("settings.compaction.keep")} value={s.compaction?.keep_recent_messages ?? 6} min={0} onSave={(v) => save({ compaction: { ...s.compaction, keep_recent_messages: v } })} />
             <NumRow id="compaction-words" title={t("settings.compaction.words")} unit={t("settings.unit.words")} value={s.compaction?.max_words ?? 1200} min={200} step={100} onSave={(v) => save({ compaction: { ...s.compaction, max_words: v } })} />
             <NumRow id="compaction-core" title={t("settings.compaction.core")} desc={t("settings.compaction.core.hint")} value={s.compaction?.core_trigger_ratio ?? 0.85} min={0.1} max={1} step={0.05} onSave={(v) => save({ compaction: { ...s.compaction, core_trigger_ratio: v } })} />

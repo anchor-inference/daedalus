@@ -887,8 +887,12 @@ class CompactionConfig(BaseModel):
     verbatim by code rather than paraphrased by the model, and an identifier list.
     """
 
-    auto_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
-    """Prompt size, as a share of the window, above which a finished run triggers compaction. 0 = manual only."""
+    auto_ratio: float = Field(default=0.8, ge=0.0, le=1.0)
+    """Prompt size, as a share of the window, above which a finished run triggers compaction; 0 = manual only.
+    It is the ceiling: a smaller window compacts earlier, leaving ``COMPACTION_HEADROOM_TOKENS`` free (see
+    :func:`compaction_ratio`). At 0.5 a 1M-token session compacted nine times in a day and a half, each
+    compaction a chance to lose something, where the program it was imported from compacted five times
+    in two weeks."""
     keep_recent_messages: int = Field(default=6, ge=0, le=60)
     """Messages at the end of the history kept as they are (cut at a turn boundary, never inside a tool exchange)."""
     max_words: int = Field(default=1200, ge=200, le=6000)
@@ -903,6 +907,42 @@ class CompactionConfig(BaseModel):
     """Where the core's own mid-run compaction starts; above the host's ratio so runs boundaries compact first."""
     preset: str = ""
     """Preset id the summariser runs on; empty = the session's own model. A cheaper model here saves on every long session."""
+
+
+COMPACTION_HEADROOM_TOKENS = 80_000
+"""What an automatic compaction leaves free of the window: the answer (output caps run to 64k) and a
+long run's tool output before the next check between runs. On 400k and more the ratio's ceiling
+decides; on 128k this gives the floor, 0.5."""
+COMPACTION_RATIO_FLOOR = 0.5
+CORE_TRIGGER_SLACK = 0.05
+"""How far below the cliff (the window less the output cap) the core's mid-run trigger sits. The core
+checks after each tool batch, with the batch already counted, so this covers only the estimate's
+error; it was 0.15 while the estimate ran 45% high, which made the core compact a 400k session at 200k."""
+CORE_TRIGGER_FLOOR = 0.3
+HOST_BELOW_CORE = 0.03
+"""The between-runs trigger stays this far under the core's, so a run boundary compacts first."""
+
+
+def core_compaction_trigger(cfg: CompactionConfig, window: int, output_cap: int) -> float:
+    """Where the core's own mid-run compaction starts, as a share of the window.
+
+    A server that reserves the output budget inside the window (vLLM) rejects a prompt above window −
+    max output, so the trigger sits below that cliff, not only below the window."""
+    if window <= 0:
+        return cfg.core_trigger_ratio
+    return min(cfg.core_trigger_ratio, max(CORE_TRIGGER_FLOOR, round(1 - output_cap / window - CORE_TRIGGER_SLACK, 2)))
+
+
+def compaction_ratio(cfg: CompactionConfig, window: int, output_cap: int = 0) -> float:
+    """The share of ``window`` at which a finished run compacts: ``auto_ratio`` on a large window, less on a small one.
+
+    A fixed share is wrong at both ends. Half of a million tokens throws away half a window nothing
+    needed, and four fifths of 128k leaves no room for one more run. Never at or above the core's own
+    trigger, which would otherwise compact in the middle of the run that crossed it."""
+    if cfg.auto_ratio <= 0 or window <= 0:
+        return cfg.auto_ratio
+    by_window = max(COMPACTION_RATIO_FLOOR, 1.0 - COMPACTION_HEADROOM_TOKENS / window)
+    return min(cfg.auto_ratio, by_window, core_compaction_trigger(cfg, window, output_cap) - HOST_BELOW_CORE)
 
 
 class SchedulerConfig(BaseModel):
@@ -1222,11 +1262,14 @@ not through a mode, so editing a mode cannot hand a staff member any of them."""
 STAFF_ONLY_TOOLS = ["Report", "AskOrchestrator"]
 """The tools that exist for staff alone; every other session is blocked from them."""
 
-SUBAGENT_BLOCKED_TOOLS = ["Notify", "SettingsChange"]
+SUBAGENT_BLOCKED_TOOLS = ["Notify", "SettingsChange", "AskUser", "AskPeer", "PeerList", "SubAgent", "SpawnAgent"]
 """What a subagent may not call, whoever its leader is. Its work reaches the operator through the
 agent that started it, which decides what is worth the operator's attention; a subagent that could
 notify on its own would put a dozen workers' progress on the operator's phone, and one that changed
-the settings would post its card in a chat the operator does not read. Enforced by the host
+the settings would post its card in a chat the operator does not read. It asks nobody but its
+leader, in its report: a subagent told to "notify the host when done" once found the peer list,
+asked a session of an unrelated project to forward a client's deployment details, and put them in
+that project's transcript. It starts no agents of its own, as its brief says. Enforced by the host
 beside the staff rule, so no mode or leader can hand it back."""
 
 ORCHESTRATOR_ONLY_TOOLS = [
@@ -1308,8 +1351,6 @@ class PeersConfig(BaseModel):
 
 
 class SubagentsConfig(BaseModel):
-    max_depth: int = Field(default=2, ge=1)
-    """How deep SubAgent may nest (a subagent starting a subagent …) before the call is refused."""
     max_active: int = Field(default=4, ge=1)
     """Running subagents one leader may have at a time."""
     wait_timeout_minutes: int = Field(default=30, ge=1)
@@ -2158,7 +2199,7 @@ def _seed_presets(raw: dict[str, Any]) -> bool:
     return True
 
 
-SEEDS = ("claude-subscription", "openai-anthropic-keys", "more-provider-endpoints", "opencode-go-subscription", "known-image-models")
+SEEDS = ("claude-subscription", "openai-anthropic-keys", "more-provider-endpoints", "opencode-go-subscription", "known-image-models", "compaction-ratio-by-window")
 """Every seed a config can have had applied, in the order they were introduced. The seeds that follow
 the setup wizard's environment (``voice-cloud``, ``local-model:<id>``) are not listed: a new file
 should get them, because the wizard's answers are about this installation."""
@@ -2438,9 +2479,27 @@ def _migrate_inbox_retention(raw: dict[str, Any]) -> bool:
     return True
 
 
+def _migrate_compaction_ratio(raw: dict[str, Any]) -> bool:
+    """The written-down old default of ``[compaction] auto_ratio`` becomes the new one.
+
+    Every default is persisted on the first save, so 0.5 in a file is the old default far more often
+    than a choice. Once, recorded in ``seeded``: a 0.5 the operator sets afterwards stays."""
+    seeded = raw.setdefault("seeded", [])
+    if not isinstance(seeded, list):
+        seeded = raw["seeded"] = []
+    if "compaction-ratio-by-window" in seeded:
+        return False
+    seeded.append("compaction-ratio-by-window")
+    compaction = raw.get("compaction")
+    if isinstance(compaction, dict) and compaction.get("auto_ratio") == 0.5:
+        compaction["auto_ratio"] = 0.8
+    return True
+
+
 def _migrate(raw: dict[str, Any]) -> bool:
     """Rewrite config shapes older versions wrote; returns True when something changed."""
     changed = _seed_presets(raw)
+    changed = _migrate_compaction_ratio(raw) or changed
     changed = _migrate_inbox_retention(raw) or changed
     changed = _migrate_keyproxy_base(raw) or changed
     changed = _seed_claude_subscription(raw) or changed
@@ -2516,6 +2575,8 @@ __all__ = [
     "STAFF_BLOCKED_TOOLS",
     "STAFF_ONLY_TOOLS",
     "SUBAGENT_BLOCKED_TOOLS",
+    "compaction_ratio",
+    "core_compaction_trigger",
     "ORCHESTRATOR_TOOLS",
     "ORCHESTRATOR_ONLY_TOOLS",
     "max_advertised_tools_for",
