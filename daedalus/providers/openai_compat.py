@@ -35,6 +35,7 @@ from protocore.contracts.llm import (
 from protocore.contracts.types import Message, MessageRole, StopReason, TextBlock
 
 from daedalus import __version__
+from daedalus.config import keyproxy_upstream
 from daedalus.providers.admission import InferenceAdmission
 from daedalus.providers.dsml import DsmlGuard
 from daedalus.providers.failure_evidence import FailureEvidence, failure_evidence
@@ -194,9 +195,61 @@ def message_shape(messages: list[dict[str, Any]]) -> str:
     for m in messages:
         role = str(m.get("role"))[0]
         if m.get("role") == "assistant":
-            role += ("t" if m.get("content") else "") + ("c" if m.get("tool_calls") else "") + ("r" if m.get("reasoning_content") else ("R" if "reasoning_content" in m else ""))
+            role += ("t" if m.get("content") else "") + ("c" if m.get("tool_calls") else "") + ("r" if m.get("reasoning_content") else ("R" if "reasoning_content" in m else "")) + ("e" if m.get("reasoning_details") else "")
         parts.append(role)
     return " ".join(parts)
+
+
+REASONING_ENVELOPE = "chat.reasoning_details"
+"""The ``format`` of the record this adapter keeps on an assistant message for a provider's
+``reasoning_details``: which endpoint and model produced them, and the entries as they arrived."""
+
+REASONING_REPLAY_UPSTREAMS = ("codex",)
+"""Key-proxy upstreams whose ``reasoning_details`` are kept and sent back.
+
+The Codex route turns the Responses API's encrypted reasoning into these entries and back, so a
+reasoning model keeps its thinking across tool steps the way it does under the Codex CLI. Nothing
+else is sent them: an OpenAI-compatible server that does not know the field may refuse a message
+carrying it, and OpenRouter, which defines the field, merges streamed fragments by rules this
+adapter has not been checked against."""
+
+CACHE_KEY_UPSTREAMS = ("codex", "openai")
+"""Key-proxy upstreams that take ``prompt_cache_key``: one per session, so the requests of one
+conversation reach the same prompt cache instead of whichever machine answers."""
+
+
+def replays_reasoning(endpoint: ProviderEndpoint) -> bool:
+    """Whether this endpoint's reasoning entries are kept on the message and sent back."""
+    return keyproxy_upstream(endpoint.base_url) in REASONING_REPLAY_UPSTREAMS
+
+
+def takes_cache_key(endpoint: ProviderEndpoint) -> bool:
+    """Whether a request to this endpoint carries ``prompt_cache_key``."""
+    host = (urlsplit(endpoint.base_url).hostname or "").lower()
+    return keyproxy_upstream(endpoint.base_url) in CACHE_KEY_UPSTREAMS or host == "api.openai.com"
+
+
+def reasoning_envelope(endpoint_id: str, model: str, details: list[dict[str, Any]], tokens: int) -> dict[str, Any]:
+    """The record kept on an assistant message for the ``reasoning_details`` its stream carried.
+
+    ``tokens`` is the provider's count of the reasoning, which is what sending the entries back
+    costs; the core's estimate reads it instead of the size of an encrypted blob.
+    """
+    return {"format": REASONING_ENVELOPE, "endpoint": endpoint_id, "model": model, "details": details, "tokens": max(0, int(tokens))}
+
+
+def replayed_details(message: Message, endpoint_id: str, model: str) -> list[dict[str, Any]]:
+    """The ``reasoning_details`` to send back with an assistant message, for this endpoint and model only.
+
+    Encrypted reasoning is readable only by the model it came from. A session that switched
+    model, or went through another endpoint, keeps the records on its earlier turns, and they go
+    back only if the session returns to the model that wrote them.
+    """
+    out: list[dict[str, Any]] = []
+    for item in message.reasoning_items or ():
+        if item.get("format") == REASONING_ENVELOPE and item.get("endpoint") == endpoint_id and item.get("model") == model:
+            out.extend(d for d in item.get("details") or [] if isinstance(d, dict))
+    return out
 
 
 DEEPSEEK_SHAPED = ("deepseek", "opencode")
@@ -349,6 +402,8 @@ class OpenAICompatibleProvider(ILLMProvider):
         open_tools: dict[int, dict[str, Any]] = {}
         finish_reason: str | None = None
         guard = DsmlGuard()
+        keep_reasoning = replays_reasoning(self.endpoint)
+        details: list[dict[str, Any]] = []
         try:
             async with self._client.stream(
                 "POST", self._url("/chat/completions"), json=body, headers=self._headers(request)
@@ -382,6 +437,9 @@ class OpenAICompatibleProvider(ILLMProvider):
                         reasoning = delta.get("reasoning_content") or delta.get("reasoning")
                         if reasoning:
                             yield ProviderDelta(kind=ProviderDeltaKind.thinking, content=reasoning)
+                        if keep_reasoning and isinstance(delta.get("reasoning_details"), list):
+                            # Whole entries, one per finished reasoning item: nothing to merge.
+                            details.extend(d for d in delta["reasoning_details"] if isinstance(d, dict))
                         content = delta.get("content")
                         if content:
                             shown = guard.feed(content)
@@ -392,7 +450,7 @@ class OpenAICompatibleProvider(ILLMProvider):
                                 yield out
                         if choice.get("finish_reason"):
                             finish_reason = choice["finish_reason"]
-                        spoke = spoke or bool(reasoning or content or delta.get("tool_calls") or choice.get("finish_reason"))
+                        spoke = spoke or bool(reasoning or content or delta.get("tool_calls") or delta.get("reasoning_details") or choice.get("finish_reason"))
                     if not spoke:
                         # A role-only or empty-delta chunk still resets the core's idle clock;
                         # without it a model that reasons silently was killed as a stalled stream.
@@ -419,7 +477,8 @@ class OpenAICompatibleProvider(ILLMProvider):
         normalized = normalize_usage(usage_raw or {})
         await self._record_usage(request, "stream", usage_raw or {}, normalized, started, reservation)
         yield ProviderDelta(kind=ProviderDeltaKind.usage, usage=normalized)
-        yield ProviderDelta(kind=ProviderDeltaKind.finish, finish_reason=_map_finish(resolved_finish))
+        kept = (reasoning_envelope(self.endpoint.id, request.model, details, normalized["reasoning_tokens"]),) if details else None
+        yield ProviderDelta(kind=ProviderDeltaKind.finish, finish_reason=_map_finish(resolved_finish), reasoning_items=kept)
 
     def _tool_call_chunk(
         self, open_tools: dict[int, dict[str, Any]], tc: dict[str, Any], started: float
@@ -539,8 +598,14 @@ class OpenAICompatibleProvider(ILLMProvider):
         model = request.model
         wire: list[dict[str, Any]] = []
         wire_index: list[int] = []  # core message index -> index of its LAST wire entry (a tool message fans out into several)
+        keep_reasoning = replays_reasoning(self.endpoint)
         for message in request.messages:
             entries = await messages_to_wire([message], image_loader=self._image_loader, supports_images=self.accepts_images(model))
+            if keep_reasoning and entries and message.reasoning_items:
+                # An assistant message is one wire entry; its reasoning goes back on it, in order.
+                details = replayed_details(message, self.endpoint.id, model)
+                if details:
+                    entries[-1]["reasoning_details"] = details
             wire.extend(entries)
             wire_index.append(len(wire) - 1 if entries else -1)  # -1: this message put nothing on the wire
         body: dict[str, Any] = {
@@ -588,6 +653,11 @@ class OpenAICompatibleProvider(ILLMProvider):
         breakpoints = extra.get("cache_breakpoints")
         if breakpoints and self.endpoint.kind == "openrouter":
             apply_cache_control(body["messages"], breakpoints, index_map=wire_index)
+        if takes_cache_key(self.endpoint):
+            obs = request.observability
+            cache_key = (obs.session_id if obs is not None else None) or (obs.run_id if obs is not None else None)
+            if cache_key:
+                body["prompt_cache_key"] = cache_key
         if self.endpoint.kind == "llamacpp":
             # llama.cpp owns one prompt cache per slot. Asking it to reuse the common prefix makes a
             # continuing conversation behave like hosted providers' automatic prefix caches; this

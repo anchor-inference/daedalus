@@ -67,7 +67,9 @@ from subscriptions import (
     collect_completion,
     grok_usage_view,
     opencode_usage_view,
+    refused_reasoning,
     responses_events_to_chunks,
+    without_reasoning,
 )
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s keyproxy %(levelname)s: %(message)s")
@@ -635,14 +637,27 @@ async def handle_codex(request: web.Request, rest: str) -> web.StreamResponse:
     model = str(body.get("model") or "")
     stream = bool(body.get("stream", False))
     sent = chat_to_responses(body)
-    upstream = client.build_request("POST", CODEX_BASE + "/codex/responses", json=sent, headers={**headers, "accept": "text/event-stream", "content-type": "application/json"})
-    try:
-        response = await client.send(upstream, stream=True)
-    except httpx.HTTPError as exc:
-        return web.json_response({"error": {"message": f"upstream unreachable: {type(exc).__name__}", "type": "proxy_error"}}, status=502)
-    if response.status_code >= 400:
+    request_headers = {**headers, "accept": "text/event-stream", "content-type": "application/json"}
+    if sent.get("prompt_cache_key"):
+        # The CLI names its conversation in this header as well as in the body's cache key.
+        request_headers["session_id"] = str(sent["prompt_cache_key"])
+    replayed = any(item.get("type") == "reasoning" for item in sent["input"])
+    while True:
+        upstream = client.build_request("POST", CODEX_BASE + "/codex/responses", json=sent, headers=request_headers)
+        try:
+            response = await client.send(upstream, stream=True)
+        except httpx.HTTPError as exc:
+            return web.json_response({"error": {"message": f"upstream unreachable: {type(exc).__name__}", "type": "proxy_error"}}, status=502)
+        if response.status_code < 400:
+            break
         raw = (await response.aread()).decode("utf-8", "replace")
         await response.aclose()
+        if replayed and refused_reasoning(response.status_code, raw):
+            # Reasoning the backend will not read back costs the model its earlier thinking, not
+            # the turn: ask once more without it, and say so, since it should not keep happening.
+            logger.warning("codex refused the replayed reasoning (%s); retrying without it", raw[:200])
+            sent, replayed = without_reasoning(sent), False
+            continue
         try:
             payload = json.loads(raw)
         except ValueError:
