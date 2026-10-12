@@ -56,6 +56,7 @@ from daedalus.config import (
     STAFF_BLOCKED_TOOLS,
     STAFF_ONLY_TOOLS,
     SUBAGENT_BLOCKED_TOOLS,
+    SUBAGENT_ONLY_TOOLS,
     VOICE_ONLY_TOOLS,
     VOICE_TOOLS,
     ModeConfig,
@@ -1600,9 +1601,11 @@ class SessionManager:
         return rows
 
     async def task_views(self, session_id: str) -> list[dict[str, Any]]:
-        """Every job and child session of a session, as one operator-facing list.
+        """Every background job of a session, as one operator-facing list.
 
-        A job's state comes from what the watcher last saw (it asks the host every few seconds), and its
+        Subagents are not listed here: they are sessions with a panel of their own
+        (``Subagents.views``), and listing them twice made a standing helper look like a job that never
+        ends. A job's state comes from what the watcher last saw (it asks the host every few seconds), and its
         records outlive a restart, so a job that ended or was lost while the bot was down is listed with
         that outcome rather than dropped. This is the one list the app shows: it used to show these beside
         a second list read out of the transcript, which named the same jobs again without their state.
@@ -1649,45 +1652,11 @@ class SessionManager:
                     "stop_supported": word is None,
                 }
             )
-        for row in await self.list_sessions(limit=10_000):
-            if row["metadata"].get("subagent_of") != session_id:
-                continue
-            state = "running" if row["status"] in ("running", "waiting", "compacting") else "failed" if row["status"] == "failed" else "done"
-            out.append(
-                {
-                    "id": f"agent:{row['id']}",
-                    "owner_session_id": session_id,
-                    "parent_run_id": None,
-                    "kind": "agent",
-                    "state": state,
-                    "outcome": None if state == "running" else "failed" if state == "failed" else "succeeded",
-                    "exit_code": None,
-                    "title": str(row["metadata"].get("subagent_name") or row["title"]),
-                    "command": None,
-                    "where": None,
-                    "started_at": row["created_at"],
-                    "last_activity_at": row["last_message_at"],
-                    "ended_at": None,
-                    "flag": None,
-                    "reported": state != "running",
-                    "progress": None,
-                    "child_session_id": row["id"],
-                    "result_ref": None,
-                    "stop_supported": state == "running",
-                }
-            )
         out.sort(key=lambda item: (item["state"] not in ("running", "waiting"), item["last_activity_at"], item["id"]))
         return out
 
     async def stop_task(self, session_id: str, task_id: str) -> bool:
         """Stop a task only when it belongs to the session named by the route."""
-        if task_id.startswith("agent:"):
-            child_id = task_id.removeprefix("agent:")
-            child = await self.get_state(child_id)
-            if child is None or child.metadata.get("subagent_of") != session_id:
-                return False
-            await self.stop(child_id)
-            return True
         job = self.jobs.get(session_id, {}).get(task_id)
         if job is None:
             return False
@@ -5174,6 +5143,11 @@ class SessionManager:
             blocked |= self._local_blocked_tools_for(current)
             parent_id = str(current.metadata.get("subagent_of") or "")
             current = self._states.get(parent_id) if parent_id else None
+        # The subagent-only tools are judged on this session alone, after the chain and not inside
+        # ``_local_blocked_tools_for``: the leader at the top of every chain has no leader, so a block
+        # there would be inherited down the chain and take the tool from the very subagents it is for.
+        if not state.metadata.get("subagent_of"):
+            blocked |= known & set(SUBAGENT_ONLY_TOOLS)
         return blocked
 
     async def _load_capability_ancestors(self, state: SessionState) -> None:

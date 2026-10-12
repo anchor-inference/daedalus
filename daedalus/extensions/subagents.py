@@ -13,6 +13,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -26,6 +29,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 POLL_SECONDS = 3.0
+SETTLE_WAIT_SECONDS = 60
+"""How long a reminder waits for its leader's finished run to be written down before it goes anyway."""
+TASK_KEPT_CHARS = 400
+TITLE_CHARS = 160
+REMINDER_ANSWER_CHARS = 200
 NO_ANSWER = "(the subagent's run ended without a final reply; see its session)"
 
 
@@ -61,7 +69,9 @@ BRIEF = (
     "(the leader reads the files you leave there), do not ask the operator questions, do not start "
     "subagents of your own, and end with a final reply that contains everything the leader needs. "
     "A background job you start is part of the task: wait for it (JobWait) before your final reply — "
-    "while one of yours is still running, your turn ending is not your report."
+    "while one of yours is still running, your turn ending is not your report. "
+    "When you are done, blocked, or have a finding the leader should act on before you finish, say so with "
+    "ReportToLeader(text) — it reaches the leader at once; your final reply still carries the full report."
 )
 
 WITHHELD = (
@@ -75,7 +85,16 @@ IDLE_BRIEF = (
     "for the leader's messages; each one arrives via SubAgentSend and is a job to do. Work in the shared "
     "workspace (the leader reads the files you leave there), do not ask the operator questions, do not "
     "start subagents of your own, and end every run with a final reply that contains everything the "
-    "leader needs — it is delivered to the leader verbatim."
+    "leader needs — it is delivered to the leader verbatim. When you are blocked, or have a finding the "
+    "leader should act on before you finish, say so with ReportToLeader(text) — it reaches the leader at "
+    "once; your final reply still carries the full report."
+)
+
+REPORT_HEADER = "[message from subagent {name!r} via ReportToLeader — it is still working; its final report comes when it finishes]\n\n"
+
+REMINDER_TAIL = (
+    "Delete the ones you no longer need with SubAgentDelete(name). Any you leave are taken as kept on purpose: "
+    "you will not be asked about them again. Answer in one short line."
 )
 
 FOLLOW_UP_HEADER = "[message from your leader session {leader} via SubAgentSend — act on it; your final reply is delivered to the leader verbatim]\n\n"
@@ -115,11 +134,60 @@ def contract_verdict(state: Any, answer: str) -> str:
     return ("[contract] " + "; ".join(notes) + "\n\n" + answer) if notes else answer
 
 
+def idle_words(seconds: float) -> str:
+    """A span as a person says it in a status line: "4 min", "3 h", "2 days"."""
+    seconds = max(0.0, seconds)
+    if seconds < 60:
+        return "under a minute"
+    if seconds < 3600:
+        return f"{int(seconds // 60)} min"
+    if seconds < 2 * 86400:
+        return f"{int(seconds // 3600)} h"
+    return f"{int(seconds // 86400)} days"
+
+
+def _timestamp(value: Any) -> float:
+    try:
+        return datetime.fromisoformat(str(value)).timestamp()
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def status_of(state: Any) -> str:
+    """The session's state in the word the session detail uses, compaction first.
+
+    Compaction between runs runs on a task of its own, and a helper reported as running while it
+    summarises reads as a run nobody started — the same order ``get_session`` keeps.
+    """
+    if state.compacting:
+        return "compacting"
+    if state.running:
+        return "running"
+    if state.pending is not None:
+        return "waiting"
+    return "failed" if state.last_error_kind else "idle"
+
+
+def run_started_at(state: Any) -> str | None:
+    """When the current run began driving the model, as wall-clock ISO time; ``None`` between runs.
+
+    The session keeps only a monotonic reading (the time cap counts from it), so it is carried over to
+    the wall clock here. A run resumed after a question counts from the resume, as the cap does.
+    """
+    if not state.run_active_since or not (state.running or state.pending is not None):
+        return None
+    began = time.time() - max(0.0, time.monotonic() - state.run_active_since)
+    return datetime.fromtimestamp(began, UTC).isoformat()
+
+
 class Subagents:
     def __init__(self, app: Application) -> None:
         self.app = app
         self._waited: set[str] = set()
         self._removals: set[asyncio.Task[None]] = set()
+        self._removing: set[str] = set()
+        """Subagents a removal was scheduled for: finished and on their way out, so never "lingering"."""
+        self._reminders: set[asyncio.Task[None]] = set()
 
     async def models(self) -> list[str]:
         """Preset ids a subagent can run on: those whose provider is configured."""
@@ -188,6 +256,9 @@ class Subagents:
             "subagent_keep": bool(keep) or idle,
             "subagent_expects": (expects or "").strip(),
             "subagent_deliverable": (deliverable or "").strip(),
+            # What the panel titles the helper with; the first part is enough, the task itself is in its transcript.
+            "subagent_task": task[:TASK_KEPT_CHARS],
+            "subagent_idle": idle,
             "brief": (IDLE_BRIEF if idle else BRIEF).format(leader=leader_id)
             + (WITHHELD.format(names=", ".join(withheld)) if withheld else "")
             + (f"\n\n[persona: {persona}]\n{persona_text}" if idle and persona_text else ""),
@@ -302,11 +373,7 @@ class Subagents:
         text = text.strip()
         if not text:
             raise ValueError("the message is empty")
-        children = await self.children(leader_id)
-        match = next((c for c in children if c["name"] == name.strip() or c["session_id"] == name.strip()), None)
-        if match is None:
-            known = ", ".join(str(c["name"]) for c in children) or "none"
-            raise ValueError(f"no subagent named {name!r}; yours: {known}. A subagent started without keep=true is removed when it finishes.")
+        match = await self._match(leader_id, name)
         cid = str(match["session_id"])
         state = await manager.get_state(cid)
         if state is None:
@@ -328,6 +395,7 @@ class Subagents:
         """Delete a finished subagent once its run has fully settled; its files stay, the workspace is the leader's."""
         manager = self.app.manager
         assert manager is not None
+        self._removing.add(cid)
 
         async def _remove() -> None:
             for _ in range(120):
@@ -345,17 +413,103 @@ class Subagents:
         task = asyncio.create_task(_remove(), name=f"subagent-remove:{cid}")
         self._removals.add(task)
         task.add_done_callback(self._removals.discard)
+        task.add_done_callback(lambda _: self._removing.discard(cid))
+
+    async def _child_rows(self, leader_id: str) -> list[dict[str, Any]]:
+        manager = self.app.manager
+        assert manager is not None
+        return [row for row in await manager.list_sessions(limit=500) if row.get("metadata", {}).get("subagent_of") == leader_id]
 
     async def children(self, leader_id: str) -> list[dict[str, Any]]:
         manager = self.app.manager
         assert manager is not None
         out = []
-        for row in await manager.list_sessions(limit=500):
-            if row.get("metadata", {}).get("subagent_of") != leader_id:
-                continue
+        for row in await self._child_rows(leader_id):
             state = await manager.get_state(row["id"])
             out.append({"session_id": row["id"], "name": row["metadata"].get("subagent_name"), "running": bool(state and state.running), "status": row["status"], "kept": bool(row["metadata"].get("subagent_keep"))})
         return out
+
+    async def views(self, leader_id: str, *, model_label: Callable[[Any], Awaitable[str]] | None = None) -> list[dict[str, Any]]:
+        """The leader's subagents as the app's Subagents panel draws them, the active ones first.
+
+        ``model_label`` names the model a session answers on; the API passes the label its session
+        detail uses, so the panel and the header never disagree. Without it the model is left empty.
+        """
+        manager = self.app.manager
+        assert manager is not None
+        out = []
+        for row in await self._child_rows(leader_id):
+            meta = row["metadata"]
+            state = await manager.get_state(row["id"])
+            task = str(meta.get("subagent_task") or "").strip()
+            out.append({
+                "session_id": row["id"],
+                "name": meta.get("subagent_name"),
+                "title": (task.splitlines()[0] if task else "")[:TITLE_CHARS],
+                "status": status_of(state) if state is not None else row["status"],
+                "running": bool(state and state.running),
+                "model": await model_label(state) if model_label is not None and state is not None else "",
+                "kept": bool(meta.get("subagent_keep")),
+                "idle_start": bool(meta.get("subagent_idle")),
+                "created_at": row["created_at"],
+                "last_activity_at": row["last_message_at"],
+                "run_started_at": run_started_at(state) if state is not None else None,
+            })
+        out.sort(key=lambda view: view["last_activity_at"] or "", reverse=True)
+        out.sort(key=lambda view: view["status"] not in ("running", "waiting"))
+        return out
+
+    async def _match(self, leader_id: str, name: str) -> dict[str, Any]:
+        """One of the leader's subagents by name or session id; the error lists the ones it has."""
+        children = await self.children(leader_id)
+        match = next((c for c in children if c["name"] == name.strip() or c["session_id"] == name.strip()), None)
+        if match is None:
+            known = ", ".join(str(c["name"]) for c in children) or "none"
+            raise ValueError(f"no subagent named {name!r}; yours: {known}. A subagent started without keep=true is removed when it finishes.")
+        return match
+
+    async def delete(self, *, leader_id: str, name: str) -> dict[str, Any]:
+        """Remove one of the leader's subagents; its files stay, the workspace is the leader's.
+
+        ``delete_session`` stops a run in flight itself, so a working helper is not refused: the leader
+        that deletes it has decided it is not needed, and making it wait for the end would only cost.
+        """
+        manager = self.app.manager
+        assert manager is not None
+        match = await self._match(leader_id, name)
+        cid = str(match["session_id"])
+        self._waited.discard(cid)
+        self._removing.add(cid)
+        try:
+            deleted = await manager.delete_session(cid, delete_workspace=False)
+        finally:
+            self._removing.discard(cid)
+        if not deleted:
+            raise ValueError(f"subagent {name!r} no longer exists")
+        return {"session_id": cid, "name": match["name"], "was_running": bool(match["running"])}
+
+    async def report(self, *, session_id: str, text: str) -> dict[str, Any]:
+        """A subagent's message to its leader before its run ends.
+
+        Submitted as a steer: a leader at work sees it before its next step, and an idle one starts a
+        run on it, the way a final report wakes it. Only the final reply ends the helper's work, so the
+        framing says it is still going — a leader taking this for the report would stop waiting.
+        """
+        manager = self.app.manager
+        assert manager is not None
+        text = text.strip()
+        if not text:
+            raise ValueError("the message is empty")
+        state = await manager.get_state(session_id)
+        leader_id = str(state.metadata.get("subagent_of") or "") if state is not None else ""
+        if not leader_id:
+            raise ValueError("this session is not a subagent: it has no leader to report to")
+        leader = await manager.get_state(leader_id)
+        if leader is None:
+            raise RuntimeError("your leader session no longer exists; nobody would read this message")
+        name = str(state.metadata.get("subagent_name") or session_id)  # type: ignore[union-attr]
+        await manager.submit(leader_id, REPORT_HEADER.format(name=name) + text, steer=True, as_answer=False, origin=f"subagent:{name}")
+        return {"leader_id": leader_id, "name": name, "delivered": "steer" if leader.running else "run"}
 
     async def answer(self, session_id: str) -> str | None:
         manager = self.app.manager
@@ -369,12 +523,23 @@ class Subagents:
         return None
 
     async def on_run_finished(self, session_id: str, run_id: str, status: str) -> None:
-        """Deliver a finished subagent's final reply to its leader."""
+        """Deliver a finished subagent's final reply to its leader, then look for helpers it left idle."""
         manager = self.app.manager
         assert manager is not None
         state = await manager.get_state(session_id)
-        if state is None or not state.metadata.get("subagent_of") or status == "awaiting":
+        if state is None:
             return
+        if state.metadata.get("subagent_of") and status != "awaiting":
+            await self._deliver_report(session_id, state, status)
+        if status == "completed":
+            try:
+                await self._remind_lingering(session_id, state)
+            except Exception:  # noqa: BLE001 — a reminder is a courtesy; the run is over either way
+                logger.exception("could not check the idle subagents of %s", session_id)
+
+    async def _deliver_report(self, session_id: str, state: Any, status: str) -> None:
+        manager = self.app.manager
+        assert manager is not None
         if session_id in self._waited:
             return  # the leader's tool call collects the answer itself
         if status == "completed" and unfinished_jobs(manager, session_id):
@@ -398,6 +563,80 @@ class Subagents:
         if not kept:
             self._remove_later(session_id)
 
+    async def _remind_lingering(self, leader_id: str, leader: Any) -> None:
+        """Ask the leader, once per helper, about subagents it left idle for a long while.
+
+        Kept and standing helpers outlive the work they were raised for, and a session collected them
+        for weeks: nothing ever asked. Each one is named in one reminder and never again — whatever the
+        leader leaves is taken as kept on purpose. The ids are written down before the note goes, so a
+        reminder's own run ending, or a restart, cannot ask a second time.
+        """
+        manager = self.app.manager
+        assert manager is not None
+        if manager.shutting_down or leader_id in self._removing:
+            return
+        reminded = {str(i) for i in (leader.metadata.get("subagents_reminded") or ())}
+        limit = 60.0 * self.app.config.subagents.linger_remind_minutes
+        now = time.time()
+        lingering: list[tuple[str, Any, float]] = []
+        for row in await self._child_rows(leader_id):
+            cid = row["id"]
+            if cid in reminded or cid in self._removing or cid in self._waited:
+                continue
+            child = await manager.get_state(cid)
+            if child is None or child.running or child.pending is not None or child.compacting or unfinished_jobs(manager, cid):
+                continue
+            idle = now - _timestamp(row["last_message_at"])
+            if idle < limit:
+                continue  # between jobs, not forgotten
+            lingering.append((cid, child, idle))
+        if not lingering:
+            return
+        marked = sorted(reminded | {cid for cid, _, _ in lingering})
+        leader.metadata["subagents_reminded"] = marked
+        leader.session.metadata["subagents_reminded"] = list(marked)
+        await manager.sessions.update_metadata(leader_id, leader.session.metadata)
+        lines = []
+        for cid, child, idle in lingering:
+            name = str(child.metadata.get("subagent_name") or cid)
+            word = "failed" if child.last_error_kind else "idle"
+            fate = "kept" if child.metadata.get("subagent_keep") else "not kept"
+            last = " ".join((await self.answer(cid) or "(no reply yet)").split())
+            if len(last) > REMINDER_ANSWER_CHARS:
+                last = last[:REMINDER_ANSWER_CHARS].rstrip() + "…"
+            lines.append(f"- {name} ({word}, {fate}, idle for {idle_words(idle)}): {last}")
+        count = len(lines)
+        text = (
+            f"[subagents: {count} of your helpers {'has' if count == 1 else 'have'} sat idle for a while]\n\n"
+            + "\n".join(lines) + "\n\n" + REMINDER_TAIL
+        )
+        task = asyncio.create_task(self._deliver_reminder(leader_id, text), name=f"subagent-remind:{leader_id}")
+        self._reminders.add(task)
+        task.add_done_callback(self._reminders.discard)
+
+    async def _deliver_reminder(self, leader_id: str, text: str) -> None:
+        """Hand the reminder over once the leader's finished run is written down.
+
+        The finished callbacks run before the session drains what queued up during the run; a note
+        submitted from inside one would race that drain. Waiting for the housekeeping to end puts the
+        note after it — as a short run of its own, or as a steer when the operator started one meanwhile.
+        """
+        manager = self.app.manager
+        assert manager is not None
+        for _ in range(SETTLE_WAIT_SECONDS):
+            state = await manager.get_state(leader_id)
+            if state is None:
+                return
+            if state.housekeeping is None or state.housekeeping.done():
+                break
+            await asyncio.sleep(1)
+        if manager.shutting_down:
+            return
+        try:
+            await manager.submit(leader_id, text, steer=True, as_answer=False, origin="subagents")
+        except Exception:  # noqa: BLE001
+            logger.exception("could not remind %s about its idle subagents", leader_id)
+
     async def service(self, op: str, **kwargs: Any) -> Any:
         if op == "spawn":
             return await self.spawn(**kwargs)
@@ -409,6 +648,12 @@ class Subagents:
             return await self.children(kwargs["leader_id"])
         if op == "send":
             return await self.send(**kwargs)
+        if op == "views":
+            return await self.views(kwargs["leader_id"])
+        if op == "delete":
+            return await self.delete(**kwargs)
+        if op == "report":
+            return await self.report(**kwargs)
         raise ValueError(op)
 
 

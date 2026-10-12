@@ -14,6 +14,7 @@ from daedalus.config import (
     DEFAULT_MODES,
     ORCHESTRATOR_ONLY_TOOLS,
     STAFF_ONLY_TOOLS,
+    SUBAGENT_ONLY_TOOLS,
     VOICE_ONLY_TOOLS,
     LimitsConfig,
     RuntimeConfig,
@@ -111,8 +112,8 @@ async def test_plan_mode_is_an_allow_list_that_a_settings_toggle_cannot_disarm(s
     try:
         state = await manager.create_session("plan")
         known = {t.name for t in manager.tools.list_all()}
-        # A working session is blocked from the concierge's, staff's and orchestrator's own tools and from nothing else.
-        others = set(VOICE_ONLY_TOOLS) | set(STAFF_ONLY_TOOLS) | (known & set(ORCHESTRATOR_ONLY_TOOLS))
+        # A working session is blocked from the concierge's, staff's, orchestrator's and subagents' own tools and from nothing else.
+        others = set(VOICE_ONLY_TOOLS) | set(STAFF_ONLY_TOOLS) | (known & set(ORCHESTRATOR_ONLY_TOOLS)) | set(SUBAGENT_ONLY_TOOLS)
         assert manager.blocked_tools_for(state) == others
         await manager.set_mode(state.session.id, "plan")
         blocked = manager.blocked_tools_for(state)
