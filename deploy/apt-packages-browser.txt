@@ -3,6 +3,8 @@
 # uses: no GTK, no X server libraries beyond the ones the binaries name, no CJK font set. The full
 # build links three the headless shell does not (cups, cairo, pango), about 4 MB.
 # libgbm1 brings mesa and LLVM with it (~190 MB) and cannot be left out: both link libgbm.so.1.
+# xvfb is the virtual display browserd starts for the headed mode the service runs by default: a
+# headed Chrome for Testing draws on it with the libraries above and needs no GTK (measured, 151).
 fonts-liberation
 libasound2t64
 libatk-bridge2.0-0t64
@@ -26,3 +28,4 @@ libxext6
 libxfixes3
 libxkbcommon0
 libxrandr2
+xvfb

@@ -58,6 +58,25 @@ const (
 	// both still silent at 20 s, the fixed budget this replaces. It stays under the 45 s the host
 	// gives browser.open, so the daemon's account of a browser that is really stuck arrives first.
 	ChromiumStart = 40 * time.Second
+
+	// DefaultScreenW and DefaultScreenH are the screen a browser reports (screen.width and height)
+	// and, headed, the virtual display it draws on. Larger than the default window with room for a
+	// pane the operator widened, so the window fits on its screen as a person's does: a page that
+	// finds a window wider than the screen it is on has found a browser nobody looks at.
+	DefaultScreenW = 2560
+	DefaultScreenH = 1440
+
+	// DefaultHumanBudget bounds what human-like input adds to one action: the pointer's travel, the
+	// pauses around a press, the wheel that brings the element into view and the delays between
+	// keys, together.
+	DefaultHumanBudget = 300 * time.Millisecond
+)
+
+// The two ways a browser runs. Headless needs nothing around it; headed draws real windows on a
+// display, its own virtual one (Xvfb) when none is given, which is what a site sees as Chrome.
+const (
+	ModeHeadless = "headless"
+	ModeHeaded   = "headed"
 )
 
 // Config is everything `browserd serve` runs with.
@@ -72,6 +91,35 @@ type Config struct {
 
 	Limits   Limits
 	Chromium Chromium
+	Input    Input
+}
+
+// Input is how the agent's actions move the pointer and type. The zero value is the default: human
+// input on, within DefaultHumanBudget, so a configuration that says nothing gets it.
+type Input struct {
+	// Plain turns human-like input off: the pointer jumps to the point, a press is let go at once,
+	// an element is scrolled into view instantly and text is inserted in one piece.
+	Plain bool
+	// Budget replaces DefaultHumanBudget when it is not zero.
+	Budget time.Duration
+	// ScreenFix is when the script that gives trusted mouse events their true screen position is
+	// put into pages: ScreenFixAuto (empty) where the browser was found to report a click's screen
+	// position as its position in the page, ScreenFixAlways or ScreenFixNever.
+	ScreenFix string
+}
+
+const (
+	ScreenFixAuto   = "auto"
+	ScreenFixAlways = "always"
+	ScreenFixNever  = "never"
+)
+
+// HumanBudget is the most human-like input may add to one action.
+func (i Input) HumanBudget() time.Duration {
+	if i.Budget > 0 {
+		return i.Budget
+	}
+	return DefaultHumanBudget
 }
 
 // Limits are the numbers a deployment may tune from the JSON file.
@@ -100,6 +148,21 @@ type Chromium struct {
 	NoSandbox bool
 	// StartTimeout replaces ChromiumStart when it is not zero; only a test sets it.
 	StartTimeout time.Duration
+	// Mode is ModeHeadless or ModeHeaded; empty is headless.
+	Mode string
+	// ScreenW and ScreenH replace the default screen when not zero.
+	ScreenW, ScreenH int
+}
+
+// Headed says whether browsers get real windows.
+func (c Chromium) Headed() bool { return c.Mode == ModeHeaded }
+
+// Screen is the screen browsers report and, headed, the display they draw on.
+func (c Chromium) Screen() (int, int) {
+	if c.ScreenW > 0 && c.ScreenH > 0 {
+		return c.ScreenW, c.ScreenH
+	}
+	return DefaultScreenW, DefaultScreenH
 }
 
 // DefaultLimits are the contract's defaults.
@@ -142,7 +205,15 @@ type file struct {
 		Path      string   `json:"path"`
 		Args      []string `json:"args"`
 		NoSandbox bool     `json:"no_sandbox"`
+		Mode      string   `json:"mode"`
+		// Screen is "<width>x<height>".
+		Screen string `json:"screen"`
 	} `json:"chromium"`
+	Input struct {
+		Human     *bool  `json:"human"`
+		BudgetMs  *int64 `json:"budget_ms"`
+		ScreenFix string `json:"screen_fix"`
+	} `json:"input"`
 }
 
 // Parse reads the arguments of `serve`.
@@ -150,12 +221,13 @@ func Parse(args []string) (*Config, error) {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	c := &Config{}
-	var chromium string
+	var chromium, mode string
 	fs.StringVar(&c.Env, "env", "", "environment name (container or host)")
 	fs.StringVar(&c.RunDir, "run-dir", "", "run directory: endpoint, token and socket")
 	fs.StringVar(&c.StateDir, "state-dir", "", "state directory: profiles, downloads, uploads")
 	fs.StringVar(&c.Listen, "listen", DefaultListen(runtime.GOOS), `"unix" or "tcp:127.0.0.1:<port>"`)
 	fs.StringVar(&chromium, "chromium", "", "the Chromium to run")
+	fs.StringVar(&mode, "mode", "", "headless or headed (default: the file's, else headless)")
 	fs.StringVar(&c.ConfigFile, "config", "", "JSON file with limits and the Chromium")
 	fs.StringVar(&c.LogFile, "log-file", "", "log file (default stderr)")
 	fs.StringVar(&c.LogLevel, "log-level", "info", "debug, info, warn or error")
@@ -191,6 +263,15 @@ func Parse(args []string) (*Config, error) {
 	// The flag wins over the file: it is what a person typed last.
 	if chromium != "" {
 		c.Chromium.Path = chromium
+	}
+	if mode != "" {
+		c.Chromium.Mode = mode
+	}
+	if c.Chromium.Mode == "" {
+		c.Chromium.Mode = ModeHeadless
+	}
+	if c.Chromium.Mode != ModeHeadless && c.Chromium.Mode != ModeHeaded {
+		return nil, fmt.Errorf("the mode (--mode or chromium.mode) must be headless or headed, not %q", c.Chromium.Mode)
 	}
 	return c, nil
 }
@@ -249,7 +330,29 @@ func (c *Config) load(path string) error {
 	if f.Chromium.Path != "" && !filepath.IsAbs(f.Chromium.Path) {
 		return fmt.Errorf("chromium.path %q is not an absolute path", f.Chromium.Path)
 	}
-	c.Chromium = Chromium{Path: f.Chromium.Path, Args: f.Chromium.Args, NoSandbox: f.Chromium.NoSandbox}
+	c.Chromium = Chromium{Path: f.Chromium.Path, Args: f.Chromium.Args, NoSandbox: f.Chromium.NoSandbox, Mode: f.Chromium.Mode}
+	if f.Chromium.Screen != "" {
+		var w, h int
+		if n, err := fmt.Sscanf(f.Chromium.Screen, "%dx%d", &w, &h); err != nil || n != 2 ||
+			w < MinViewport || h < MinViewport || w > 7680 || h > 4320 {
+			return fmt.Errorf("chromium.screen %q is not <width>x<height> within %d..7680 by %d..4320", f.Chromium.Screen, MinViewport, MinViewport)
+		}
+		c.Chromium.ScreenW, c.Chromium.ScreenH = w, h
+	}
+	if f.Input.Human != nil {
+		c.Input.Plain = !*f.Input.Human
+	}
+	var budget int64
+	if err := int64In("budget_ms", f.Input.BudgetMs, 0, 2000, &budget); err != nil {
+		return fmt.Errorf("input.%s", strings.TrimPrefix(err.Error(), "limits."))
+	}
+	c.Input.Budget = time.Duration(budget) * time.Millisecond
+	switch f.Input.ScreenFix {
+	case "", ScreenFixAuto, ScreenFixAlways, ScreenFixNever:
+		c.Input.ScreenFix = f.Input.ScreenFix
+	default:
+		return fmt.Errorf("input.screen_fix must be auto, always or never, not %q", f.Input.ScreenFix)
+	}
 	return nil
 }
 

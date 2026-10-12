@@ -25,7 +25,8 @@ browserd version
 | `--state-dir` | profiles, downloads, uploads, the daemon's log (required) |
 | `--listen` | `unix` (a socket in the run directory), or `tcp:127.0.0.1:<port>`; on Windows `tcp:127.0.0.1:0` |
 | `--chromium` | the browser to run; see Which Chromium |
-| `--config` | a JSON file: `{"limits": {…}, "chromium": {"path", "args": [], "no_sandbox"}}`; unknown keys are refused |
+| `--mode` | `headless` (the default) or `headed`: real windows, on `$DISPLAY` or, where there is none, on a virtual display (Xvfb) the daemon starts with its first headed browser; see Which Chromium |
+| `--config` | a JSON file: `{"limits": {…}, "chromium": {"path", "args": [], "no_sandbox", "mode", "screen": "<w>x<h>"}, "input": {"human", "budget_ms", "screen_fix"}}`; unknown keys are refused; a flag wins over the file |
 | `--log-file`, `--log-level` | the daemon's own JSON-lines log (stderr, `info`) |
 
 `SIGTERM` or `SIGINT` stops the daemon: the endpoint file is removed first, every browser is asked to
@@ -109,7 +110,7 @@ unknown field is `-32602`. Errors use the JSON-RPC codes plus:
 
 | Method | Params → result |
 |---|---|
-| `daemon.info` | → `{version, protocol, instance, env, os, arch, pid, started_at, uptime_s, chromium{path, version, kind: "bundled" \| "system" \| "none", error?}, capabilities{sandbox, headed: false, screencast: true}, limits{…}, counts{browsers, groups, tabs, viewers}, machine}` |
+| `daemon.info` | → `{version, protocol, instance, env, os, arch, pid, started_at, uptime_s, chromium{path, version, kind: "bundled" \| "system" \| "none", error?}, capabilities{sandbox, headed: true when `--mode headed`, screencast: true}, limits{…}, counts{browsers, groups, tabs, viewers}, machine}` |
 | `browser.open` | `{group_id, profile, labels?, viewport?{w, h}, url?}` → `{group: Group, tab: Tab, created}` |
 | `browser.list` | → `{browsers: [Browser]}` |
 | `browser.close` | `{browser_id}` → `{groups}`: ends the browser and forgets its groups |
@@ -171,7 +172,7 @@ unknown field is `-32602`. Errors use the JSON-RPC codes plus:
 - `viewport` is the page's size in CSS pixels, default 1280×800, each side 320–3840. The daemon sizes
   each page's window so that the page inside it is exactly that (`Browser.setWindowBounds`, with the
   window's own frame measured on the browser's first page: a 1280×800 window in `--headless=new`
-  holds a 1280×657 page). It does not emulate a size: the pinned Chromium's screencast shows the
+  holds a 1280×657 page, a headed Chrome for Testing's a 1280×713 one). It does not emulate a size: the pinned Chromium's screencast shows the
   window whatever `Emulation.setDeviceMetricsOverride` says, so an emulated viewport would put every
   click beside what the frame shows. It stays that size until `group.resize`.
 - No Chromium is `1007 {reason}`; a Chromium that cannot start its sandbox is `1007` with the reason
@@ -220,6 +221,30 @@ upload_ids?, x?, y?, allow_point?, dry_run?, origin?}`
   offset derived from the action id, never outside) with `Input.dispatchMouseEvent`; text goes in
   with `Input.insertText` and keys with `Input.dispatchKeyEvent`. Pages see trusted events
   (`isTrusted` is true, measured).
+- **Human-like input** (`input.human`, on unless the file says `false`). The input is what a hand
+  makes, within `input.budget_ms` (300) added to any one action, so an agent's task is not slowed
+  by more than that per step: an element of the page below or above the viewport is brought toward
+  its middle by the wheel, a notch of about 100 px at a time, where the pointer is (prepare's instant
+  scroll brings in whatever the wheel's share of the budget did not); the pointer travels from
+  where it last was — the operator's last move included — on an eased curve with a pixel of jitter
+  (a Fitts's-law time, at most half the budget left); it rests a moment before the press and holds
+  the button 40–90 ms; a text of up to 200 characters without line breaks or tabs is typed a key at
+  a time, Shift held for capitals and shifted symbols, the pauses between keys shrunk together to
+  fit the budget (a longer text, or one with a line break, goes in with `Input.insertText`); a
+  scroll is sent as a wheel's notches. With `input.human: false` every action is the instant one
+  described above. A dry run does not wheel.
+- **Where a click lands on the screen.** A person's click reports its screen position as its place
+  in the page plus the frame's place, the window's place on the screen and the browser's toolbar.
+  Some builds report a dispatched event's page position as its screen position instead
+  (`screenX == clientX`, crbug 40280325), which a challenge reads as a click no person made, the
+  operator's takeover clicks included. The daemon moves the mouse once on each browser's blank first
+  page, in a world of its own, and reads the event back: where the two positions are equal, every
+  page and every frame of another site (each through its own session, with its Page domain on) gets
+  a script before its first document that gives trusted events bearing that mark the position a
+  window would (the native getters wrapped, so their name and `toString` stay native; untrusted
+  events untouched). Chrome for Testing 151 and Debian's Chromium 155 report it right, headless and
+  headed, so they get no script: a fix that changes nothing still leaves a replaced getter a page
+  could find. `input.screen_fix` is `auto` (that), `always` or `never`.
 - **Secret fields.** `type`, `select`, and a `press` that would type a character into a password
   field, a field whose `autocomplete` is `current-password`, `new-password`, `one-time-code` or any
   `cc-*`, or a field the operator typed into while driving, fail `1105` and publish `needs_you
@@ -682,7 +707,10 @@ their content.
 ## Which Chromium
 
 In order: `--chromium`, `$BROWSERD_CHROMIUM`, the configuration's `chromium.path`, Playwright's pinned
-`chromium` under `$PLAYWRIGHT_BROWSERS_PATH`, then a system Chrome, Chromium or Edge.
+`chromium` under `$PLAYWRIGHT_BROWSERS_PATH`, then a system Chrome, Chromium or Edge. Google Chrome
+stable runs as any of them does (`/opt/google/chrome/chrome` named by path, or found as
+`google-chrome` when nothing pinned is installed); its own profile directory is what lets it be
+debugged at all.
 `daemon.info.chromium.kind` is `bundled` for Playwright's and `system` for the others;
 `chromium.version` is a running browser's own word, or, before any has run, what the executable
 printed for `--version` (asked once, in the background, when the daemon starts; Windows builds print
@@ -693,14 +721,34 @@ the default one) and never reaches the operator's own profile.
 It is started with:
 
 ```
---headless=new --remote-debugging-pipe --user-data-dir=<profile> --no-first-run --no-default-browser-check
---password-store=basic --disable-field-trial-config --disable-background-networking --disable-component-update
---disable-sync --disable-default-apps --disable-extensions --disable-breakpad --metrics-recording-only
---no-service-autorun --mute-audio --hide-scrollbars --disable-client-side-phishing-detection
---disable-domain-reliability --no-pings --webrtc-ip-handling-policy=disable_non_proxied_udp
+--remote-debugging-pipe --user-data-dir=<profile> --no-first-run --no-default-browser-check
+--password-store=basic --disable-field-trial-config --disable-background-networking --disable-sync
+--disable-breakpad --metrics-recording-only --no-service-autorun --disable-client-side-phishing-detection
+--disable-domain-reliability --mute-audio --webrtc-ip-handling-policy=disable_non_proxied_udp
 --disable-features=Translate,OptimizationHints,MediaRouter,AutofillServerCommunication,PasswordManagerOnboarding
 ```
 
+and, headless, `--headless=new --screen-info={<w>x<h>}`; headed, `--disable-infobars`. Every switch
+kept is about what the browser does on its own behalf, which a page cannot see: no welcome page, no
+calls home, no crash or metrics upload, no cast discovery on the local network, no Translate bubble
+over the page. Switches a page can notice are not passed: `--disable-extensions` (no PDF viewer, so
+`navigator.pdfViewerEnabled` is false and `navigator.plugins` empty), `--hide-scrollbars` (scrollbars
+of no width), `--disable-component-update` (no Widevine, no revocation lists),
+`--disable-default-apps`, `--no-pings`. Screenshots and the screencast show the page's scrollbars,
+as the operator's own browser would.
+
+- **Modes.** `headless` is the new headless: the whole browser, drawn off screen. `headed` gives
+  every page a real window (a tab opened by the daemon gets a window of its own, as headless pages
+  have, since a tab hidden behind another in one window draws nothing for the live view), on
+  `$DISPLAY` or on a virtual display the daemon runs itself (`Xvfb -displayfd`, a free display
+  number, `chromium.screen` at 24 bits, no TCP), started with the first headed browser and again if
+  it exits, ended when the daemon stops. Headed is what a site sees as Chrome; headless reports
+  `chromium.screen` as its screen through `--screen-info` (otherwise 800×600, smaller than any
+  window the daemon makes). `chromium.screen` is 2560×1440 unless set, larger than the default
+  window with room for a widened pane. A headed Chrome for Testing puts a strip across every window
+  saying it is for automated testing; `--disable-infobars` removes it (measured on 151). The
+  container runs headed (`--mode ${BROWSER_MODE:-headed}` in compose); on macOS and Windows a headed
+  browser opens the system's own windows.
 - `--password-store=basic` and `--disable-field-trial-config` together are what let a pinned
   Chromium on a desktop session load a page at all: without them its cookie store waits for a
   keyring that never answers, and every request hangs before it is sent (measured).

@@ -61,6 +61,13 @@ func fixture(t *testing.T) *httptest.Server {
 	page("/still", "Still", "<h1>Still</h1><p>"+strings.Repeat("Nothing moves on this page. ", 50)+"</p>")
 	page("/anim", "Anim", `<div style="position:fixed;inset:0;background:conic-gradient(red,yellow,lime,aqua,blue,magenta,red);animation:s 2s linear infinite"></div><style>@keyframes s{to{transform:rotate(360deg)}}</style>`)
 	page("/button", "Button", `<button id="b" style="position:absolute;left:100px;top:100px;width:200px;height:60px" onclick="document.title='clicked '+event.isTrusted">Press</button>`)
+	// What a hand does on the way to a press, counted (human_test.go): the moves, the wheel, each key.
+	page("/hand", "Hand", `<input id="name" aria-label="Name" style="position:absolute;left:100px;top:80px;width:300px;height:30px">`+
+		`<button id="far" style="position:absolute;left:600px;top:1500px;width:200px;height:50px" onclick="seen.clicked++">Far button</button>`+
+		`<div style="height:3000px"></div><script>window.seen = {moves: 0, wheels: 0, keys: 0, shifts: 0, clicked: 0, jumps: 0, last: 0};`+
+		`addEventListener("mousemove", e => seen.moves++); addEventListener("wheel", e => seen.wheels++, {passive: true});`+
+		`addEventListener("keydown", e => { seen.keys++; if (e.key === "Shift") seen.shifts++; });`+
+		`addEventListener("scroll", () => { if (Math.abs(scrollY - seen.last) > 450) seen.jumps++; seen.last = scrollY; });</script>`)
 	page("/popup", "Popup", `<a id="a" href="/still" target="_blank" style="position:absolute;left:100px;top:100px;width:200px;height:60px;display:block">open</a>`)
 	page("/confirm-writes", "Confirm", `<button onclick="if (confirm('Reset?')) document.getElementById('m').textContent = 'Filters reset.'">Reset</button><p id="m">Four filters.</p>`)
 	page("/dialog", "Dialog", `<button id="b" style="position:absolute;left:100px;top:100px;width:200px;height:60px" onclick="document.title=confirm('Leave?')?'yes':'no'">Ask</button>`)
@@ -127,6 +134,23 @@ func fixture(t *testing.T) *httptest.Server {
 		`<p><button id="save">Save</button></p><p id="m"></p>`+
 		`<script>document.getElementById('save').onclick = () => { document.getElementById('m').textContent = 'saved ' + document.querySelector('input:checked').value; };</script>`+
 		`</body></html>`)
+	// Where a click lands on the screen, in the page and in a frame of another site: every trusted
+	// click is logged with what the page can know of its window, and the frame says whether its
+	// screenX getter is the browser's own (screen_test.go).
+	whole("/xsite/screen", `<!doctype html><html><head><meta charset="utf-8"><title>Screen</title></head><body style="margin:0;height:2400px">`+
+		`<button id="b" style="position:absolute;left:120px;top:90px;width:180px;height:60px">Top button</button>`+
+		`<iframe id="f" src="http://pay.example/xsite/screenframe" title="Pay frame" style="position:absolute;left:420px;top:210px;width:360px;height:220px;border:0"></iframe>`+
+		`<button id="low" style="position:absolute;left:200px;top:1900px;width:160px;height:50px">Low button</button>`+
+		`<script>window.clicks = []; window.frameGetter = "";`+
+		`const getter = () => Function.prototype.toString.call(Object.getOwnPropertyDescriptor(MouseEvent.prototype, "screenX").get);`+
+		`const windowOf = () => ({wsx: screenX, wsy: screenY, ow: outerWidth, oh: outerHeight, iw: innerWidth, ih: innerHeight});`+
+		`addEventListener("click", e => { if (e.target.id) clicks.push(Object.assign({where: e.target.id, trusted: e.isTrusted, cx: e.clientX, cy: e.clientY, sx: e.screenX, sy: e.screenY, ox: 0, oy: 0}, windowOf())); });`+
+		`addEventListener("message", e => { if (e.data.getter !== undefined) { frameGetter = e.data.getter; return; } const r = document.getElementById("f").getBoundingClientRect(); clicks.push(Object.assign(e.data, {ox: r.left, oy: r.top}, windowOf())); });`+
+		`</script></body></html>`)
+	whole("/xsite/screenframe", `<!doctype html><html><head><meta charset="utf-8"><title>Pay frame</title></head><body style="margin:0">`+
+		`<button id="fb" style="position:absolute;left:40px;top:50px;width:200px;height:60px">Frame button</button>`+
+		`<script>parent.postMessage({getter: Function.prototype.toString.call(Object.getOwnPropertyDescriptor(MouseEvent.prototype, "screenX").get)}, "*");`+
+		`addEventListener("click", e => parent.postMessage({where: "frame", trusted: e.isTrusted, cx: e.clientX, cy: e.clientY, sx: e.screenX, sy: e.screenY}, "*"));</script></body></html>`)
 	xsite("/xsite/widget", `<title>Widget</title><button onclick="this.textContent='widget clicked'">Widget button</button>`)
 	// A text a pattern of nested repeats takes forever over, for the search's time limit.
 	page("/backtrack", "Backtrack", "<p>"+strings.Repeat("a", 40)+"!</p>")
@@ -163,12 +187,24 @@ func startWith(t *testing.T, edit func(*config.Limits), args []string) *harness 
 // fixture), for a test that needs names the wall judges as the internet.
 func startWall(t *testing.T, edit func(*config.Limits), args []string, makeWall func(site *httptest.Server, publish func(netwall.Egress)) *netwall.Browsers) *harness {
 	t.Helper()
+	return startFull(t, edit, args, makeWall, nil)
+}
+
+// startFull is startWall with the rest of the configuration the test's to change (the mode, the
+// input). BROWSERD_TEST_MODE=headed runs every test with windows, on a virtual display of the
+// daemon's own, which is how the container runs.
+func startFull(t *testing.T, edit func(*config.Limits), args []string, makeWall func(site *httptest.Server, publish func(netwall.Egress)) *netwall.Browsers,
+	configure func(*config.Config)) *harness {
+	t.Helper()
 	needChromium(t)
 	dir := t.TempDir()
 	cfg := &config.Config{Env: "test", RunDir: filepath.Join(dir, "run"), StateDir: filepath.Join(dir, "state"),
-		Listen: "unix", Limits: config.DefaultLimits(), Chromium: config.Chromium{Args: args}}
+		Listen: "unix", Limits: config.DefaultLimits(), Chromium: config.Chromium{Args: args, Mode: os.Getenv("BROWSERD_TEST_MODE")}}
 	if edit != nil {
 		edit(&cfg.Limits)
+	}
+	if configure != nil {
+		configure(cfg)
 	}
 	if err := os.MkdirAll(cfg.StateDir, 0o700); err != nil {
 		t.Fatal(err)

@@ -37,10 +37,10 @@ type cdpReply struct {
 // repeated here so the wall is tested under the browser the daemon actually starts.
 var baseSwitches = []string{
 	"--headless=new", "--remote-debugging-pipe", "--no-first-run", "--no-default-browser-check",
-	"--password-store=basic", "--disable-field-trial-config", "--disable-background-networking", "--disable-component-update",
-	"--disable-sync", "--disable-default-apps", "--disable-extensions", "--disable-breakpad", "--metrics-recording-only",
-	"--no-service-autorun", "--mute-audio", "--hide-scrollbars", "--disable-client-side-phishing-detection",
-	"--disable-domain-reliability", "--no-pings", "--webrtc-ip-handling-policy=disable_non_proxied_udp",
+	"--password-store=basic", "--disable-field-trial-config", "--disable-background-networking",
+	"--disable-sync", "--disable-breakpad", "--metrics-recording-only", "--no-service-autorun",
+	"--disable-client-side-phishing-detection", "--disable-domain-reliability", "--mute-audio",
+	"--webrtc-ip-handling-policy=disable_non_proxied_udp",
 	"--disable-features=Translate,OptimizationHints,MediaRouter,AutofillServerCommunication,PasswordManagerOnboarding",
 }
 

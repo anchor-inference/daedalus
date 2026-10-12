@@ -37,7 +37,8 @@ const usage = `usage:
 serve flags:
   --listen unix|tcp:127.0.0.1:<port>   where to listen (default unix: <run-dir>/browserd.sock)
   --chromium <path>                    the Chromium to run (default: found, see the contract)
-  --config <file>                      JSON file with limits and the Chromium
+  --mode headless|headed               windowless, or real windows (on Xvfb without a display)
+  --config <file>                      JSON file with limits, the Chromium and the input
   --log-file <file>, --log-level <lv>  the daemon's own log (default stderr, info)
 `
 

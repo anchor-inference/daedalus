@@ -219,12 +219,24 @@ ENTRYPOINT ["python3", "/opt/launcher/supervisor.py"]
 # ones, fetched by one `playwright install chromium`:
 #   - the headless shell, which the browser skills drive: Playwright's `launch(headless=True)` looks
 #     for exactly that build, and with only the full one installed it fails (measured, 1.62);
-#   - the full Chromium, which browserd runs in the `browser` compose service with --headless=new.
+#   - the full Chromium, which browserd runs in the `browser` compose service, headed on a virtual
+#     display (Xvfb, from apt-packages-browser.txt) unless the service is told --mode headless.
 #     The shell is Chromium's //content without the browser around it; the screencast, the
 #     accessibility tree and trusted input the agent's browser rests on were measured on the full
 #     build, and the full build is what a site sees as Chrome.
 # The browsers live outside the virtualenv so a re-sync of the environment never re-downloads them.
+#
+# Google Chrome itself is not in the image unless the build asks for it (GOOGLE_CHROME=1, amd64 only:
+# Google publishes no other Linux build of it). Three reasons it is not the default: its terms allow
+# installing and using it, not handing the binary on, and a published image hands it on; it is some
+# 350 MB more next to a Chromium that is already here; and the pinned build is the one the daemon's
+# tests run against. What it adds is what a site can tell from a branded Chrome — its own codecs and
+# Widevine, the build a challenge expects to meet — so an operator who builds the image locally and
+# meets challenges the pinned build fails can have it, and name it to the service with
+# BROWSER_CHROMIUM=/opt/google/chrome/chrome in .env.
 FROM runtime AS browser
+ARG GOOGLE_CHROME=0
+ARG TARGETARCH
 
 ENV DAEDALUS_VENV_EXTRAS=speech,browser
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
@@ -240,6 +252,14 @@ RUN apt-get update \
     && test -n "$shell" \
     && ln -s "$shell" /usr/local/bin/chromium \
     && test -n "$(find /opt/pw-browsers -path '*/chromium-*/chrome-linux*/chrome' -type f | head -1)"
+RUN if [ "$GOOGLE_CHROME" = 1 ]; then \
+        test "$TARGETARCH" = amd64 || { echo "Google Chrome has no Linux build for $TARGETARCH" >&2; exit 1; }; \
+        curl -fsSLo /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+        && apt-get update \
+        && apt-get install -y --no-install-recommends /tmp/google-chrome.deb \
+        && rm -rf /tmp/google-chrome.deb /var/lib/apt/lists/* /etc/apt/sources.list.d/google-chrome.list /etc/cron.daily/google-chrome \
+        && /opt/google/chrome/chrome --version; \
+    fi
 ENV CHROME_PATH=/usr/local/bin/chromium
 # The user the `browser` service runs browserd and Chromium as. Chromium's own sandbox gives every
 # renderer a user namespace of its own, which it can make as an ordinary user once the container's

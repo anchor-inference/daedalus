@@ -45,6 +45,11 @@ type Browser struct {
 	frameW       int // how much wider and taller a window is than the page it holds
 	frameH       int
 	frameKnown   bool
+	// Whether this browser's pages get the screen position fix (screen.go): asked once on its
+	// first page, screenKnown closed once answered.
+	screenAsked bool
+	screenFix   bool
+	screenKnown chan struct{}
 }
 
 type pageAttach struct {
@@ -451,6 +456,25 @@ type Tab struct {
 	auto     []AutoDialog // the dialogs the daemon answered by itself, the last few (dialogs.go)
 	autoSeq  int64
 	autoOpen bool // one of them is being answered, and its closing is not an agent's dialog closing
+
+	// Where the page last saw the mouse, from whoever moved it last, agent or operator: the agent's
+	// next travel starts there rather than from wherever its own last action left it.
+	pointerX, pointerY float64
+	pointerKnown       bool
+}
+
+// Pointer is the mouse's last position on the page, and whether there has been one.
+func (t *Tab) Pointer() (x, y float64, ok bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.pointerX, t.pointerY, t.pointerKnown
+}
+
+// SetPointer records where a mouse event just put the pointer.
+func (t *Tab) SetPointer(x, y float64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.pointerX, t.pointerY, t.pointerKnown = x, y, true
 }
 
 // Call sends a command to the tab's page.

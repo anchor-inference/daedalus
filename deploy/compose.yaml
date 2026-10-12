@@ -243,6 +243,8 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
       target: browser
+      args:
+        GOOGLE_CHROME: ${BROWSER_GOOGLE_CHROME:-0}
     image: daedalus:local-browser
     profiles: [browser]
     restart: unless-stopped
@@ -260,12 +262,18 @@ services:
     tmpfs:
       - /tmp:size=256m
     entrypoint: ["/usr/local/bin/browserd"]
+    # Headed by default: real windows on a virtual display browserd starts itself, which is what a
+    # site sees as Chrome and what the challenges an operator meets expect. BROWSER_MODE=headless in
+    # .env goes back to the windowless browser.
     command: ["serve", "--env", "container", "--run-dir", "/run/daedalus-browser",
-              "--state-dir", "/var/lib/browserd"]
+              "--state-dir", "/var/lib/browserd", "--mode", "${BROWSER_MODE:-headed}"]
     # browserd asks every browser to close and kills what is left three seconds later.
     stop_grace_period: 10s
     environment:
       HOME: /var/lib/browserd
+      # Empty runs the pinned Chromium; a path runs that browser instead (Google Chrome, when the
+      # image was built with BROWSER_GOOGLE_CHROME=1: /opt/google/chrome/chrome).
+      BROWSERD_CHROMIUM: ${BROWSER_CHROMIUM:-}
     # Two browsers with eight tabs each measured under 1.2 GB; the rest is room for heavy pages.
     mem_limit: ${BROWSER_MEMORY_LIMIT:-3g}
     # Chromium keeps rendered pages in shared memory, and Docker's 64 MB default crashes a tab on a

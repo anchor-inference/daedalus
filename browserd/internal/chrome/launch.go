@@ -16,34 +16,51 @@ import (
 	"github.com/ascorblack/daedalus/browserd/internal/netwall"
 )
 
-// Flags are the switches every browser starts with (the contract's Which Chromium explains each).
-// Two of them were found the hard way: without --password-store=basic and
-// --disable-field-trial-config a pinned Chromium on a desktop session never sends its first request,
-// because its cookie store waits for a keyring that does not answer; and WebRTC's UDP stays off the
-// network only with --webrtc-ip-handling-policy (the --force- spelling is not honoured).
+// Flags are the switches every browser starts with, headless or headed (the contract's Which
+// Chromium explains each). Each one is here for a reason a page cannot see: what the browser does
+// on its own behalf, never what it shows a page. Switches a page can notice were taken out —
+// --disable-extensions (no PDF viewer, so navigator.pdfViewerEnabled false and no plugins),
+// --hide-scrollbars (scrollbars of no width), --disable-component-update (no Widevine and no
+// certificate revocation lists), --disable-default-apps and --no-pings — because each made the
+// browser one no person runs, and the challenges an operator meets read exactly such things.
 var Flags = []string{
-	"--headless=new",
+	// The only control channel: no debugging port is ever open.
 	"--remote-debugging-pipe",
+	// No welcome page and no question about the default browser, either of which would take the
+	// first tab or a strip of every window.
 	"--no-first-run",
 	"--no-default-browser-check",
+	// Without these two a pinned Chromium on a desktop session never sends its first request: its
+	// cookie store waits for a keyring that does not answer.
 	"--password-store=basic",
 	"--disable-field-trial-config",
+	// The browser's own calls home (safe-browsing lists, variations, the sync and crash and metrics
+	// services, domain reliability reports, the phishing model): none of them is the page's
+	// business, and each would leave through the network wall as traffic nobody asked for.
 	"--disable-background-networking",
-	"--disable-component-update",
 	"--disable-sync",
-	"--disable-default-apps",
-	"--disable-extensions",
 	"--disable-breakpad",
 	"--metrics-recording-only",
 	"--no-service-autorun",
-	"--mute-audio",
-	"--hide-scrollbars",
 	"--disable-client-side-phishing-detection",
 	"--disable-domain-reliability",
-	"--no-pings",
+	// The agent's browser is never heard; a page still gets audio that plays, only silent.
+	"--mute-audio",
+	// WebRTC's UDP stays off the network only with this spelling (the --force- one is not honoured).
 	"--webrtc-ip-handling-policy=disable_non_proxied_udp",
+	// Translate and the password manager's onboarding put bubbles over the page; MediaRouter looks
+	// for cast devices on the local network; the other two are calls to Google about the page.
 	"--disable-features=Translate,OptimizationHints,MediaRouter,AutofillServerCommunication,PasswordManagerOnboarding",
 }
+
+// HeadlessFlags are added when the browser has no window: the new headless, which is the whole
+// browser drawn off screen, not the old shell.
+var HeadlessFlags = []string{"--headless=new"}
+
+// HeadedFlags are added when it has one. A pinned Chrome for Testing puts a strip across the top of
+// every window saying it is for automated testing; it is browser chrome, invisible to the page, but
+// it takes height from the window the daemon sizes. --disable-infobars removes it (measured on 151).
+var HeadedFlags = []string{"--disable-infobars"}
 
 // Options say how to start one browser.
 type Options struct {
@@ -55,6 +72,11 @@ type Options struct {
 	NoSandbox bool
 	// Env is the browser's environment; nil inherits the daemon's.
 	Env []string
+	// Headed starts the browser with windows, on the display Env names.
+	Headed bool
+	// ScreenW and ScreenH are the screen a headless browser reports; a headed one reports its
+	// display's. Zero leaves Chromium's own (800×600, smaller than any window the daemon makes).
+	ScreenW, ScreenH int
 }
 
 // Process is one running browser.
@@ -72,6 +94,14 @@ type Process struct {
 // Args returns the command line for opts, without the program.
 func Args(opts Options) []string {
 	a := append([]string{}, Flags...)
+	if opts.Headed {
+		a = append(a, HeadedFlags...)
+	} else {
+		a = append(a, HeadlessFlags...)
+		if opts.ScreenW > 0 && opts.ScreenH > 0 {
+			a = append(a, fmt.Sprintf("--screen-info={%dx%d}", opts.ScreenW, opts.ScreenH))
+		}
+	}
 	a = append(a, "--user-data-dir="+opts.ProfileDir)
 	if opts.Proxy != "" {
 		// The wall's own switches: the proxy, loopback and link-local sent through it too, no name
