@@ -835,6 +835,8 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return respond(route, {"entries": notifications_view(params.get("view", ["all"])[0]), "next_before": None, "summary": INBOX_SUMMARY})
     if rel == "/api/proposals":
         return respond(route, PROPOSALS)
+    if rel == "/api/proposals/p57/diff":
+        return respond(route, {"diff": "diff --git a/daedalus/search.py b/daedalus/search.py\n--- a/daedalus/search.py\n+++ b/daedalus/search.py\n@@ -41,2 +41,4 @@\n-    return await backend.search(query)\n+    try:\n+        return await backend.search(query)\n+    except TimeoutError:\n+        return await backend.search(query)\n"})
     if rel == "/api/schedules":
         return respond(route, SCHEDULES)
     if rel == "/api/recurring/proposals":
@@ -2061,7 +2063,31 @@ def run() -> int:
     main = run_main()
     browser = run_browser()
     imports = run_imports()
-    return run_focus() or notifications or phone or staff or harnesses or main or browser or imports
+    selfdev = run_selfdev()
+    details = run_details()
+    modes = run_modes()
+    voice = run_voice()
+    return run_focus() or notifications or phone or staff or harnesses or main or browser or imports or selfdev or details or modes or voice
+
+
+def run_selfdev() -> int:
+    """Capture the current Changes screen over the same invented proposal as the Inbox."""
+    def open_diff(page: Page) -> None:
+        page.locator(".proposal-sheet [role=tab]").nth(1).click()
+        page.wait_for_selector(".proposal-sheet pre.diff")
+
+    OUT.mkdir(parents=True, exist_ok=True)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM)
+        desk = browser.new_context(viewport=DESK, device_scale_factor=2, color_scheme="dark")
+        page = desk.new_page()
+        page.route("**/api/**", stub)
+        shot(page, "changes", "changes", wait=".proposal.erow")
+        shot(page, "changes-summary", "changes/p57", wait=".proposal-sheet")
+        shot(page, "changes-diff", "changes/p57", wait=".proposal-sheet", before=open_diff)
+        desk.close()
+        browser.close()
+    return UNHANDLED.report()
 
 
 def run_imports() -> int:
@@ -2258,8 +2284,16 @@ def run_browser() -> int:
 
 def open_modes(page: Page) -> None:
     """The composer's mode chip, opened: the modes, and the YAGNI switch under them."""
+    if not page.locator(".composer .composer-mode").is_visible():
+        open_phone_composer(page)
     page.locator(".composer .composer-mode").click()
     page.wait_for_selector(".mode-menu .mode-row, .mode-sheet .mode-row", timeout=5000)
+
+
+def open_phone_composer(page: Page) -> None:
+    # The phone hides its toolbar until there is a draft, so an empty field makes an invisible chip.
+    page.locator(".composer textarea").fill("Write the delivery page.")
+    page.wait_for_selector(".composer .composer-mode:visible")
 
 
 def queued_messages() -> list[dict]:
@@ -2286,13 +2320,13 @@ def run_modes() -> int:
             phone = browser.new_context(viewport=PHONE, device_scale_factor=3, color_scheme="dark", is_mobile=True, has_touch=True)
             page = phone.new_page()
             page.route("**/api/**", stub)
-            shot(page, "phone-composer-modes", f"agents/{S1}", wait=".composer .composer-mode", before=open_modes)
+            shot(page, "phone-composer-modes", f"agents/{S1}", wait=".composer textarea", before=open_modes)
             stub.running = True  # type: ignore[attr-defined]
-            shot(page, "phone-composer-yagni", f"agents/{S1}", wait=".composer .composer-mode.yagni")
+            shot(page, "phone-composer-yagni", f"agents/{S1}", wait=".composer textarea", before=open_phone_composer)
             # A message written during the run waits for the end of the turn as a card above the
             # composer, with Steer to hand it to the agent now; one already steered sits beside it.
             stub.queued = queued_messages()  # type: ignore[attr-defined]
-            shot(page, "phone-composer-queued", f"agents/{S1}", wait=".steers .steer .steer-now")
+            shot(page, "phone-composer-queued", f"agents/{S1}", wait=".steers .steer .steer-now", before=open_phone_composer)
             phone.close()
             desk = browser.new_context(viewport=DESK, device_scale_factor=2, color_scheme="dark")
             desk.add_init_script("try { localStorage.setItem('daedalus.session.panel', '0'); } catch (e) {}")
@@ -2307,7 +2341,7 @@ def run_modes() -> int:
             narrow = browser.new_context(viewport={"width": 360, "height": 780}, device_scale_factor=3, color_scheme="dark", is_mobile=True, has_touch=True)
             page = narrow.new_page()
             page.route("**/api/**", stub)
-            shot(page, "phone-composer-long-model", f"agents/{S1}", wait=".composer .model-select .model-effort")
+            shot(page, "phone-composer-long-model", f"agents/{S1}", wait=".composer textarea", before=open_phone_composer)
             narrow.close()
             browser.close()
     finally:
@@ -2322,4 +2356,4 @@ if __name__ == "__main__":
     # Before anything is driven: is the address the built app, or whatever else holds the port?
     expect_app(BASE)
     only = os.environ.get("ONLY")
-    sys.exit(run_pins() if only == "pins" else run_imports() if only == "imports" else run_modes() if only == "modes" else run_browser() if only == "browser" else run_harnesses() if only == "harnesses" else run_staff() if only == "staff" else run_details() if only == "details" else run_terminals() if only == "terminals" else run_focus() if only == "focus" else run_phone() if only == "phone" else run_main() if only == "main" else run_notifications() if only == "notifications" else run_composer() if only == "composer" else run_voice() if only == "voice" else agents_shots() if only == "agents" else run_workspace() if only == "workspace" else run())
+    sys.exit(run_pins() if only == "pins" else run_imports() if only == "imports" else run_modes() if only == "modes" else run_browser() if only == "browser" else run_harnesses() if only == "harnesses" else run_staff() if only == "staff" else run_details() if only == "details" else run_terminals() if only == "terminals" else run_focus() if only == "focus" else run_phone() if only == "phone" else run_main() if only == "main" else run_notifications() if only == "notifications" else run_composer() if only == "composer" else run_voice() if only == "voice" else run_selfdev() if only == "selfdev" else agents_shots() if only == "agents" else run_workspace() if only == "workspace" else run())

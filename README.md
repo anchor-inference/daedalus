@@ -20,12 +20,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.youtube.com/watch?v=z5rGA8SNroU"><img src="https://i.ytimg.com/vi/z5rGA8SNroU/maxresdefault.jpg" alt="Daedalus: The Task Board — a 3-minute film about the agent and its team of subagents. Watch in English on YouTube" width="100%" /></a>
-  <br/><sub><b>The film, 2:57</b> · ▶ <a href="https://www.youtube.com/watch?v=z5rGA8SNroU">English</a> · ▶ <a href="https://www.youtube.com/watch?v=IViNxnRmwkc">Русский (Russian)</a> · <a href="https://daedalus.anchorinference.com/en/">daedalus.anchorinference.com</a></sub>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/browser.gif" alt="The agent's own browser, live, with the actions it took: the operator takes control, leaves a note for the agent and gives the browser back" width="100%" />
+  <img src="docs/screenshots/browser.gif" alt="The agent's browser: live view, operator takeover, control returned to the agent, and replay" width="100%" />
 </p>
 
 > Built on [protocore](https://github.com/anchor-inference/protocore), an open agent core (ReAct loop, tools, context compaction, snapshots and resumable runs, memory, skills). The copy it runs on is [protocore-exp](https://github.com/anchor-inference/protocore-exp).
@@ -60,12 +55,12 @@ Each of these at full length: [docs/FEATURES.md](docs/FEATURES.md).
 
 <table>
 <tr>
-<td width="50%"><img src="docs/screenshots/orchestration.gif" alt="The main orchestrator's chat: a question answered in the Questions tab and sent; then a project whose goal line opens the work in hand, a result handed in opened on the board with its review and diff, and the reviewed branch sent to merge" /></td>
-<td width="50%"><img src="docs/screenshots/session.gif" alt="A session: the agent's answer with its checks and the files it sent, the steps it took, and the agent's browser live in the panel with the actions it takes" /></td>
+<td width="50%"><img src="docs/screenshots/orchestration.gif" alt="The main orchestrator's chat, a project's focus view and questions, and the task board" /></td>
+<td width="50%"><img src="docs/screenshots/session.gif" alt="A session with its answer, workspace files and preview, and the agent's browser" /></td>
 </tr>
 <tr>
-<td align="center"><sub>Orchestration — the main chat hands work to projects; a project's goal line leads to the result on its board, reviewed and sent to merge</sub></td>
-<td align="center"><sub>A session — the answer with its checks and files, the steps behind it, and the agent's browser beside it</sub></td>
+<td align="center"><sub>Orchestration — the main chat, a project's work and questions, and the board</sub></td>
+<td align="center"><sub>A session — the answer, workspace files and preview, and the agent's browser beside it</sub></td>
 </tr>
 <tr>
 <td><img src="docs/screenshots/session-tool-groups.png" alt="A session with the panel on its Details tab: the tool groups the agent has in front of it, loaded, always on, or on demand" /></td>
@@ -86,11 +81,11 @@ Each of these at full length: [docs/FEATURES.md](docs/FEATURES.md).
 </table>
 
 <p align="center">
-  <img src="docs/screenshots/phone.gif" width="100%" alt="Phone: the agents, a session with its answer and the agent's browser as a sheet; then a project with its own bar of Orchestrator, Board, Team and Terminals, and the More sheet" />
+  <img src="docs/screenshots/phone.gif" width="100%" alt="Phone: agents, a session answer, the agent's browser, a project, and the More sheet" />
 </p>
 <p align="center"><sub>The same app on a phone — inside Telegram as a Mini App, or in any browser</sub></p>
 
-<sub>The screenshots are taken over an invented installation by <code>tests/browser/screenshots.py</code>; rerun it after a change to the app. The animated ones are sped-up recordings of the same installation, listed in <a href="docs/screenshots/MEDIA.md">docs/screenshots/MEDIA.md</a>.</sub>
+<sub>The screenshots are taken over an invented installation by <code>tests/browser/screenshots.py</code>; rerun it after a change to the app. The animated tours use those captures and are built by <code>tests/browser/animated_shots.py</code>; their scenes are listed in <a href="docs/screenshots/MEDIA.md">docs/screenshots/MEDIA.md</a>.</sub>
 
 <sub>The app is bilingual — Russian and English, switched in Settings (the first row) or in the More sheet on a phone, and remembered by the browser. The same pictures in Russian: <code>docs/screenshots/ru/</code>.</sub>
 
@@ -117,7 +112,7 @@ What makes them survive: runs resume from snapshots after a restart; a run the p
 
 <p align="center"><img src="docs/diagrams/selfdev.png" alt="Self-development: worktree → edit → pull request → your approval in the chat → merge → rebuild → rollback on a failed preflight" width="100%" /></p>
 
-<p align="center"><img src="docs/screenshots/selfdev.gif" alt="Changes: a pull request the agent opened against its own code, its summary and diff, approved in the app, merged, and the rebuild started" width="100%" /></p>
+<p align="center"><img src="docs/screenshots/selfdev.gif" alt="Changes: a proposed change to the agent's code, its summary and diff, with the approval action available" width="100%" /></p>
 
 The PR text passes a public-text gate (nothing about your machine leaks into a public repository), the diff is checked for references it must not carry, and `GOVERNANCE.md` — the rules the agent always sees and can never edit — is mounted read-only. Approval is manual by default; `/approval auto` hands it over when you trust it.
 
