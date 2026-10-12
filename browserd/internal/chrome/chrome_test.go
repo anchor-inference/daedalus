@@ -31,6 +31,36 @@ func TestArgs(t *testing.T) {
 	}
 }
 
+// TestFlagsAPageCannotSee holds the switch list to what it is: the ones that made the browser one
+// no person runs stay out, and the two modes differ only in the headless switch and the strip.
+func TestFlagsAPageCannotSee(t *testing.T) {
+	for _, mode := range []Options{{ProfileDir: "/p"}, {ProfileDir: "/p", Headed: true}} {
+		a := Args(mode)
+		for _, gone := range []string{"--disable-extensions", "--hide-scrollbars", "--disable-component-update",
+			"--disable-default-apps", "--no-pings", "--enable-automation", "--disable-blink-features=AutomationControlled"} {
+			if slices.Contains(a, gone) {
+				t.Errorf("headed=%v: %s is back", mode.Headed, gone)
+			}
+		}
+	}
+	headless := Args(Options{ProfileDir: "/p", ScreenW: 2560, ScreenH: 1440})
+	if !slices.Contains(headless, "--headless=new") || !slices.Contains(headless, "--screen-info={2560x1440}") ||
+		slices.Contains(headless, "--disable-infobars") {
+		t.Fatalf("headless: %v", headless)
+	}
+	headed := Args(Options{ProfileDir: "/p", Headed: true, ScreenW: 2560, ScreenH: 1440})
+	headlessOnly := func(s string) bool {
+		return strings.HasPrefix(s, "--headless") || strings.HasPrefix(s, "--screen-info")
+	}
+	if slices.ContainsFunc(headed, headlessOnly) || !slices.Contains(headed, "--disable-infobars") {
+		t.Fatalf("headed: %v", headed)
+	}
+	// The same list otherwise, so a test of one mode speaks for the other.
+	if len(headed) != len(headless)-1 {
+		t.Fatalf("the modes differ by more than their own switches:\n%v\n%v", headless, headed)
+	}
+}
+
 func TestWritePreferencesKeepsWhatChromiumWrote(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "Default"), 0o700); err != nil {

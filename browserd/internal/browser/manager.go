@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -22,6 +23,7 @@ import (
 	"github.com/ascorblack/daedalus/browserd/internal/cdp"
 	"github.com/ascorblack/daedalus/browserd/internal/chrome"
 	"github.com/ascorblack/daedalus/browserd/internal/config"
+	"github.com/ascorblack/daedalus/browserd/internal/display"
 	"github.com/ascorblack/daedalus/ptyd/proto/events"
 	"github.com/ascorblack/daedalus/ptyd/proto/wire"
 )
@@ -93,6 +95,9 @@ type Manager struct {
 	probed    string // the version the found Chromium printed, before any browser ran
 	sandbox   string
 	closing   bool
+	// The virtual display headed browsers draw on when the daemon has none; started with the first
+	// such browser, and again if it ever exits.
+	display *display.Display
 }
 
 type goneGroup struct {
@@ -444,7 +449,8 @@ func (m *Manager) startBrowser(ctx context.Context, profile string) (*Browser, e
 	}
 	b := &Browser{ID: newID("b"), Profile: profile, Ephemeral: profile == EphemeralProfile, StartedAt: time.Now().UTC(),
 		groups: map[string]*Group{}, contexts: map[string]*Group{}, claims: map[string]chan *Tab{},
-		claimGroups: map[string]*Group{}, early: map[string]pageAttach{}, gone: make(chan struct{}), m: m}
+		claimGroups: map[string]*Group{}, early: map[string]pageAttach{}, gone: make(chan struct{}), m: m,
+		screenKnown: make(chan struct{})}
 	dir := m.ProfileDir(profile)
 	if b.Ephemeral {
 		dir = filepath.Join(m.deps.Config.StateDir, "ephemeral", b.ID)
@@ -462,8 +468,15 @@ func (m *Manager) startBrowser(ctx context.Context, profile string) (*Browser, e
 		}
 		proxy = addr
 	}
-	proc, err := chrome.Start(chrome.Options{Path: found.Path, ProfileDir: dir, Proxy: proxy,
-		Args: m.deps.Config.Chromium.Args, NoSandbox: m.deps.Config.Chromium.NoSandbox}, func(e cdp.Event) { m.onEvent(b, e) })
+	env, err := m.browserEnv()
+	if err != nil {
+		m.closeWall(b)
+		return nil, errWith(wire.CodeUnsupported, map[string]any{"reason": err.Error()}, "%v", err)
+	}
+	cc := m.deps.Config.Chromium
+	screenW, screenH := cc.Screen()
+	proc, err := chrome.Start(chrome.Options{Path: found.Path, ProfileDir: dir, Proxy: proxy, Args: cc.Args, NoSandbox: cc.NoSandbox,
+		Env: env, Headed: cc.Headed(), ScreenW: screenW, ScreenH: screenH}, func(e cdp.Event) { m.onEvent(b, e) })
 	if err != nil {
 		m.closeWall(b)
 		return nil, errWith(wire.CodeUnsupported, map[string]any{"reason": err.Error()}, "Chromium did not start: %v", err)
@@ -521,6 +534,36 @@ func (m *Manager) startBrowser(ctx context.Context, profile string) (*Browser, e
 		"first_answer_ms", took.Milliseconds())
 	return b, nil
 }
+
+// browserEnv is the environment a browser starts with: the daemon's own, and for a headed browser
+// where the daemon has no display, the virtual one, started if it is not running. nil inherits.
+func (m *Manager) browserEnv() ([]string, error) {
+	if !m.deps.Config.Chromium.Headed() || !needsX() || os.Getenv("DISPLAY") != "" {
+		return nil, nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.display == nil || !m.display.Alive() {
+		w, h := m.deps.Config.Chromium.Screen()
+		d, err := display.Start(w, h)
+		if err != nil {
+			return nil, err
+		}
+		m.log.Info("virtual display started", "display", d.Name, "screen", fmt.Sprintf("%dx%d", w, h))
+		m.display = d
+	}
+	env := []string{"DISPLAY=" + m.display.Name}
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "DISPLAY=") {
+			env = append(env, kv)
+		}
+	}
+	return env, nil
+}
+
+// needsX says whether a window here is an X window: on macOS and Windows a headed browser opens
+// the system's own windows and no display is started for it.
+func needsX() bool { return runtime.GOOS != "darwin" && runtime.GOOS != "windows" }
 
 // closeWall ends the proxy of a browser that exited or never started.
 func (m *Manager) closeWall(b *Browser) {
@@ -747,6 +790,13 @@ func (m *Manager) Shutdown() {
 		}()
 	}
 	wg.Wait()
+	m.mu.Lock()
+	d := m.display
+	m.display = nil
+	m.mu.Unlock()
+	if d != nil {
+		d.Close()
+	}
 }
 
 // RunMaintenance closes idle browsers and forgets old tombstones until stop is closed.
@@ -938,15 +988,24 @@ func (m *Manager) attachFrame(b *Browser, t *Tab, parent string, raw json.RawMes
 	m.frameTabs[p.SessionID] = t
 	m.mu.Unlock()
 	t.setFrame(p.TargetInfo.TargetID, p.SessionID)
-	var replies []<-chan error
-	for _, call := range []struct {
+	type call struct {
 		method string
 		params any
-	}{
+	}
+	calls := []call{
 		{"Target.setAutoAttach", map[string]any{"autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true}},
 		{"Emulation.setUserAgentOverride", map[string]any{"userAgent": b.userAgent, "userAgentMetadata": b.uaMetadata}},
-		{"Runtime.runIfWaitingForDebugger", nil},
-	} {
+	}
+	// A frame of another site is a document of its own, and the page's script does not reach it. The
+	// frame's session takes the script only with its Page domain on: without Page.enable the call
+	// succeeds and the frame's document never runs it (measured on 155).
+	if script := b.screenScript(ctx); script != "" {
+		calls = append(calls, call{"Page.enable", nil},
+			call{"Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": script}})
+	}
+	calls = append(calls, call{"Runtime.runIfWaitingForDebugger", nil})
+	var replies []<-chan error
+	for _, call := range calls {
 		replies = append(replies, b.conn.Send(ctx, p.SessionID, call.method, call.params))
 	}
 	for _, r := range replies {

@@ -120,7 +120,7 @@ func (d *Daemon) info(ctx context.Context, c *server.Conn, params json.RawMessag
 		"version": version.Version, "protocol": version.Protocol, "instance": d.Instance, "env": d.Config.Env,
 		"os": runtime.GOOS, "arch": runtime.GOARCH, "pid": os.Getpid(), "started_at": d.StartedAt,
 		"uptime_s": int64(time.Since(d.StartedAt).Seconds()), "chromium": chromium,
-		"capabilities": map[string]any{"sandbox": d.Manager.Sandbox(), "headed": false, "screencast": true},
+		"capabilities": map[string]any{"sandbox": d.Manager.Sandbox(), "headed": d.Config.Chromium.Headed(), "screencast": true},
 		"limits":       lim, "counts": counts, "machine": st.Machine,
 	}, nil
 }

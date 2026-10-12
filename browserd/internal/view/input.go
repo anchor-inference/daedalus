@@ -43,9 +43,11 @@ func (h *Hub) dispatch(ctx context.Context, t *browser.Tab, in wire.Input) error
 			p["buttons"] = buttonMask[button]
 		}
 		h.human(t, "mouse")
+		t.SetPointer(in.X, in.Y)
 		return t.Input(ctx, "Input.dispatchMouseEvent", p)
 	case "wheel":
 		h.human(t, "wheel")
+		t.SetPointer(in.X, in.Y)
 		return t.Input(ctx, "Input.dispatchMouseEvent", map[string]any{"type": "mouseWheel", "x": in.X, "y": in.Y,
 			"deltaX": in.DX, "deltaY": in.DY, "modifiers": in.Mods})
 	case "key":

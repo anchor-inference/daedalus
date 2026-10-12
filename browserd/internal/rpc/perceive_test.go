@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ascorblack/daedalus/browserd/internal/config"
 	"github.com/ascorblack/daedalus/browserd/internal/netwall"
 	"github.com/ascorblack/daedalus/browserd/internal/page"
 	"github.com/ascorblack/daedalus/browserd/internal/wire"
@@ -224,13 +225,18 @@ func TestPointClicks(t *testing.T) {
 // another site for a payment frame and a frame inside it, and a subdomain of the page's site (another
 // origin, the same site, so Chromium keeps it in the page's process).
 func crossSites(t *testing.T) *harness {
-	h := startWall(t, nil, nil, func(site *httptest.Server, publish func(netwall.Egress)) *netwall.Browsers {
+	return crossSitesWith(t, nil)
+}
+
+// crossSitesWith is crossSites with a configuration of the test's own.
+func crossSitesWith(t *testing.T, configure func(*config.Config)) *harness {
+	h := startFull(t, nil, nil, func(site *httptest.Server, publish func(netwall.Egress)) *netwall.Browsers {
 		w := netwall.New(netwall.Options{Events: publish, Resolver: publicNames{"shop.example": "93.184.216.34",
 			"pay.example": "93.184.216.35", "deep.example": "93.184.216.36", "cdn.shop.example": "93.184.216.37"}})
 		fixtureAddr := netip.MustParseAddrPort(site.Listener.Addr().String())
 		w.SetTestRedirect(func(netip.AddrPort) netip.AddrPort { return fixtureAddr })
 		return netwall.NewBrowsers(w)
-	})
+	}, configure)
 	h.must("net.configure", map[string]any{"services_ports": [][2]int{}, "local_sites": "services", "lan_allow": []string{}}, nil)
 	return h
 }

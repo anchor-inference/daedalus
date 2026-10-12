@@ -148,6 +148,16 @@ func (m *Manager) setupTab(g *Group, session string, info targetInfo, opener str
 		replies = append(replies, b.conn.Send(ctx, session, call.method, call.params))
 		methods = append(methods, call.method)
 	}
+	// The screen position fix, where this browser needs it, before the page's first document. The
+	// browser's first page is set up before anyone has asked; it is blank, and gets the script
+	// after the probe below, before it is ever navigated.
+	asked := b.screenAnswered()
+	if asked {
+		if script := b.screenScript(ctx); script != "" {
+			replies = append(replies, b.conn.Send(ctx, session, "Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": script}))
+			methods = append(methods, "Page.addScriptToEvaluateOnNewDocument")
+		}
+	}
 	// Before the page runs, so its first navigation (a popup's) meets the guard too.
 	guarded := false
 	if method, params, ok := m.guardSetup(); ok {
@@ -163,6 +173,14 @@ func (m *Manager) setupTab(g *Group, session string, info targetInfo, opener str
 		}
 	}
 	m.measureFrame(ctx, b, session, info.TargetID, g.ViewportNow())
+	if !asked {
+		m.probeScreen(ctx, b, t)
+		if script := b.screenScript(ctx); script != "" {
+			if err := b.conn.Call(ctx, session, "Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": script}, nil); err != nil {
+				m.log.Warn("page setup", "method", "Page.addScriptToEvaluateOnNewDocument", "error", err.Error())
+			}
+		}
+	}
 	m.mu.Lock()
 	if _, ok := m.groups[g.ID]; !ok {
 		m.mu.Unlock()
@@ -208,7 +226,10 @@ func (m *Manager) NewTab(ctx context.Context, g *Group, url string, checkCap boo
 		return m.afterNewTab(ctx, t, url)
 	}
 	m.mu.Unlock()
-	params := map[string]any{"url": "about:blank"}
+	// A window of its own for every tab. Headless that is how Chromium makes them anyway; headed, a
+	// tab beside another in one window is hidden while the other is shown, and a hidden page gives
+	// the operator's view no frames.
+	params := map[string]any{"url": "about:blank", "newWindow": true}
 	if g.ContextID != "" {
 		params["browserContextId"] = g.ContextID
 	}

@@ -25,6 +25,7 @@ specified in [`docs/architecture/browser.md`](../docs/architecture/browser.md).
 | `internal/config` | the flags, the JSON file, and every default as a named constant |
 | `internal/cdp` | the DevTools protocol over Chromium's pipe: calls, ordered sends, events |
 | `internal/chrome` | finding a Chromium, its switches and preferences, starting it on a profile, ending its tree; its private memory and sandbox state from `/proc` |
+| `internal/display` | the virtual X display (Xvfb) a headed browser draws on where the daemon has no display |
 | `internal/browser` | browsers, groups, tabs and control; following Chromium's targets; navigation; idle close; statistics and the memory limit |
 | `internal/view` | live views: one screencast per watched tab, its pacing, each client's mailbox and acknowledgements, thumbnails, a person's input |
 | `internal/page` | what the agent reads and does on a page: the outline with refs, the readable text and the search from `js/page.js` (run in an isolated world the page cannot reach, and in one of each frame of another site), masked screenshots, actions as real input, waiting, dialogs, downloads and uploads, and the moments the operator is needed |
@@ -48,6 +49,9 @@ docker run --rm --memory 6g --memory-swap 6g --security-opt seccomp=unconfined -
   browserd-toolchain sh -c 'test -z "$(gofmt -l cmd internal)" && go vet ./... && go test -race ./... &&
     GOOS=darwin go vet ./... && GOOS=windows go vet ./... && GOOS=windows GOARCH=arm64 go vet ./...'
 ```
+
+The same tests run headed, with windows on a virtual display the daemon starts, as the container
+runs them: add `-e BROWSERD_TEST_MODE=headed` (the image has Xvfb).
 
 The image's Chromium is Debian's. To run the same tests against the build a release pins, mount
 Playwright's `chromium-<revision>` directory and name it: `-v <dir>:/opt/pw:ro -e
