@@ -591,6 +591,9 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     reached(page, "/model", before, "the local preset", problems)
     if posts("/model")[-1][2] != {"preset": "local.model"}:
         problems.append("the local model was not chosen as a preset")
+    # A model picked over a draft is the operator's own choice: the send stays, and nothing asks
+    # them to confirm it (it once hid the circle behind "Use current target").
+    field(page).fill("a draft written before the pick")
     page.locator(".composer .model-select").click()
     page.wait_for_selector(".model-list")
     before = len(posts("/model"))
@@ -598,6 +601,12 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     page.locator(".model-list .model-row", has_text="DeepSeek Flash").click()
     reached(page, "/model", before, "the model pick", problems)
     page.wait_for_timeout(100)
+    send = page.locator(".composer .roundbtn.primary")
+    if not send.is_visible() or not send.is_enabled():
+        problems.append("a model pick over a draft hid or disabled the send button")
+    if page.locator(".composer [role=status]", has_text="folder").count():
+        problems.append("a model pick over a draft raised the moved-chat notice")
+    field(page).fill("")
     picked = posts("/model")
     print("picked:", picked)
     if not picked or picked[-1][2] != {"preset": "flash"}:

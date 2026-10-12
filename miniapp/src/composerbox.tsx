@@ -293,7 +293,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     const going = files;
     const handed = secrets.map((secret) => secret.name);
     if (sending || fileReadySession !== sessionId || (!text && going.length === 0 && handed.length === 0)) return;
-    if (needsReview) return;
     const queue = status === "running";
     if (text.startsWith("/") && going.length === 0 && commands.some((c) => c.name === text.slice(1).split(" ")[0].toLowerCase())) {
       await runCommand(text);
@@ -459,6 +458,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   // the field stays the one 48 px row the reader can answer in with words of their own.
   const shape = !phone ? undefined : focused || !empty || progress !== null || needsReview ? "open" : "idle";
   const useCurrent = () => { setSavedTarget(currentTarget); writeDraftTarget(sessionId, currentTarget); clearSendIntent(sessionId); };
+  const moved = draftChange(savedTarget, currentTarget);
 
   return (
     <div className="composer" data-primary={action} data-shape={shape} data-typed={phone && draft.trim() ? "" : undefined}
@@ -466,7 +466,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       onBlur={phone ? focus.onBlur : undefined}>
       {props.above}
       {phone && needsReview && (
-        <Banner tone="warn" icon="alert" sub={draftChange(savedTarget, currentTarget)} action={<button type="button" className="ph-btn sm" onClick={useCurrent}>{t("composer.draft.useCurrent")}</button>}>
+        <Banner tone="warn" icon="alert" sub={moved} action={<button type="button" className="ph-btn sm" onClick={useCurrent}>{t("composer.draft.useCurrent")}</button>}>
           {t("composer.draft.targetChanged")}
         </Banner>
       )}
@@ -566,7 +566,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         {progress !== null && <div className="sub upload-progress" role="status">{t("upload.progress", { percent: Math.floor(progress * 100) })}</div>}
         {!phone && fileStorageError && files.length > 0 && <div className="sub upload-progress" role="status">{t("composer.attachments.unsaved")}</div>}
         {fileReadySession !== sessionId && <div className="sub upload-progress" role="status">{t("composer.attachments.restoring")}</div>}
-        {!phone && needsReview && <div className="sub upload-progress" role="status">{t("composer.draft.targetChanged")} <button type="button" className="btn small" onClick={useCurrent}>{t("composer.draft.useCurrent")}</button></div>}
+        {!phone && needsReview && <div className="sub upload-progress" role="status">{t("composer.draft.targetChanged")}{moved ? ` ${moved}.` : ""} <button type="button" className="btn small" onClick={useCurrent}>{t("composer.draft.useCurrent")}</button></div>}
         {(files.length > 0 || secrets.length > 0) && !voiceBar && (
           <div className="attachments" aria-label={t("session.attachments")}>
             {files.map((f, i) => (
@@ -635,7 +635,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             {/* A written pill turns the circle into Queue, and Stop must not go with it: the run is
                 still on, and the shortcut alone is not a way to stop it on a phone. */}
             {action === "queue" && <button type="button" className="iconbtn flat stop-aside" onClick={onStop} aria-label={t("session.stop")} title={t("session.stop")}><Icon name="stop" size={16} /></button>}
-            <button type="button" className={`roundbtn primary ${action}`} onClick={primary} disabled={!enabled || fileReadySession !== sessionId || needsReview || (phone && offline && action !== "stop")} aria-label={primaryLabel} title={primaryLabel} data-action={action}>
+            <button type="button" className={`roundbtn primary ${action}`} onClick={primary} disabled={!enabled || fileReadySession !== sessionId || (phone && offline && action !== "stop")} aria-label={primaryLabel} title={primaryLabel} data-action={action}>
               <Icon name={action === "stop" ? "stop" : action === "reply" ? "send" : "up"} />
             </button>
           </div>
@@ -685,15 +685,11 @@ export function useComposerFocus(enabled: boolean) {
   return { focused, onFocus, onBlur };
 }
 
-/** What changed under a draft since it was written, in one line: "Model: A → B · workspace: C". */
+/** Where the chat works now, when that moved under a draft: "Now: research". */
 function draftChange(saved: DraftTarget | null, now: DraftTarget): string {
-  if (!saved) return "";
-  const parts: string[] = [];
-  if (saved.model !== now.model) parts.push(t("ph.draft.model", { from: saved.model || "—", to: now.model || "—" }));
-  if (saved.workspace !== now.workspace || saved.project !== now.project) parts.push(t("ph.draft.workspace", { name: now.workspace || now.project || "—" }));
-  if (saved.mode !== now.mode || saved.effort !== now.effort) parts.push(t("ph.draft.mode"));
-  if (saved.reply !== now.reply) parts.push(t("ph.draft.reply"));
-  return parts.join(" · ");
+  if (!saved || (saved.workspace === now.workspace && saved.project === now.project)) return "";
+  const where = now.workspace.split("/").filter(Boolean).pop() || now.project || "—";
+  return t("ph.draft.workspace", { name: where });
 }
 
 /**

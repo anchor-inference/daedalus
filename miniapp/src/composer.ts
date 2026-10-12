@@ -134,7 +134,7 @@ export function clearDraft(sessionId: string, storage: StorageLike | null = safe
 export type DraftTarget = { session: string; project: string; workspace: string; model: string; mode: string; effort: string; reply: string };
 const TARGET_PREFIX = "daedalus.draft-target.";
 
-/** Keep the settings the words were written for, so a later screen or model change asks for a decision. */
+/** Keep the settings the words were written for, so a later move of the chat can be pointed out. */
 export function readDraftTarget(sessionId: string, storage: StorageLike | null = safeStorage()): DraftTarget | null {
   try {
     const value = JSON.parse(storage?.getItem(`${TARGET_PREFIX}${sessionId}`) ?? "null") as DraftTarget | null;
@@ -149,8 +149,15 @@ export function writeDraftTarget(sessionId: string, target: DraftTarget | null, 
   } catch { /* the visible draft remains editable if storage is unavailable */ }
 }
 
+/**
+ * Whether the place a draft goes to moved since it was written: the chat was taken to another
+ * project or folder. Only that is worth a word, and the word never blocks the send. The model, the
+ * mode, the effort and the quoted reply are all in the composer next to the words, and changing
+ * them is the operator's own act; asking to confirm a model just picked hid the send button behind
+ * a notice nobody could make sense of.
+ */
 export function draftTargetChanged(saved: DraftTarget | null, current: DraftTarget): boolean {
-  return !!saved && (saved.session !== current.session || saved.project !== current.project || saved.workspace !== current.workspace || saved.model !== current.model || saved.mode !== current.mode || saved.effort !== current.effort || saved.reply !== current.reply);
+  return !!saved && (saved.session !== current.session || saved.project !== current.project || saved.workspace !== current.workspace);
 }
 
 type SendIntent = { fingerprint: string; id: string };

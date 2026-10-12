@@ -118,14 +118,15 @@ class MemoryStorage {
 }
 
 describe("the draft", () => {
-  it("keeps the exact target until an explicit review accepts changed settings", () => {
+  it("keeps the target and points out only a move of the chat, never a setting picked beside the draft", () => {
     const store = new MemoryStorage();
     const target = { session: "s1", project: "p1", workspace: "one", model: "m1", mode: "agent", effort: "high", reply: "12:answer" };
     writeDraftTarget("s1", target, store);
     expect(readDraftTarget("s1", store)).toEqual(target);
     expect(readDraftTarget("s2", store)).toBeNull();
-    expect(draftTargetChanged(target, { ...target, model: "m2" })).toBe(true);
-    expect(draftTargetChanged(target, { ...target, reply: "13:answer" })).toBe(true);
+    expect(draftTargetChanged(target, { ...target, workspace: "two" })).toBe(true);
+    expect(draftTargetChanged(target, { ...target, project: "p2" })).toBe(true);
+    expect(draftTargetChanged(target, { ...target, model: "m2", mode: "plan", effort: "low", reply: "13:answer" })).toBe(false);
     writeDraftTarget("s1", null, store);
     expect(readDraftTarget("s1", store)).toBeNull();
   });
