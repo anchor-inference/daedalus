@@ -257,8 +257,77 @@ def _user_content(content: Any) -> list[dict[str, Any]]:
     return out or [{"type": "input_text", "text": ""}]
 
 
+REASONING_FORMAT = "openai-responses-v1"
+"""The ``format`` of a ``reasoning_details`` entry that holds one Responses reasoning item.
+
+The name and the entry's shape are OpenRouter's convention for carrying a provider's reasoning
+through a chat completion and back; the bot keeps the entries on the assistant message and sends
+them again unchanged, so the proxy is the only party that reads inside one."""
+
+
+def reasoning_detail(item: dict[str, Any], index: int) -> dict[str, Any] | None:
+    """One finished Responses reasoning item → the ``reasoning_details`` entry the chat stream carries.
+
+    Only an item with its encrypted copy is worth keeping. With ``store`` off the backend keeps
+    nothing, so a reasoning item sent back without ``encrypted_content`` names reasoning that no
+    longer exists and the request is refused.
+    """
+    encrypted = item.get("encrypted_content")
+    if not isinstance(encrypted, str) or not encrypted:
+        return None
+    detail: dict[str, Any] = {"type": "reasoning.encrypted", "format": REASONING_FORMAT, "index": index, "data": encrypted, "summary": item.get("summary") or []}
+    if item.get("id"):
+        detail["id"] = str(item["id"])
+    if item.get("content"):
+        detail["content"] = item["content"]
+    return detail
+
+
+def reasoning_items_of(message: dict[str, Any]) -> list[dict[str, Any]]:
+    """The Responses reasoning items an assistant message's ``reasoning_details`` replay, in order.
+
+    Sent without the item ``id``, as the Codex CLI sends them: with ``store`` off an id points at
+    nothing the backend kept, and the encrypted copy is the whole of the item.
+    """
+    out: list[dict[str, Any]] = []
+    for detail in message.get("reasoning_details") or []:
+        if not isinstance(detail, dict) or detail.get("format") != REASONING_FORMAT or detail.get("type") != "reasoning.encrypted":
+            continue
+        if not isinstance(detail.get("data"), str) or not detail["data"]:
+            continue
+        item: dict[str, Any] = {"type": "reasoning", "summary": detail.get("summary") or [], "encrypted_content": detail["data"]}
+        if detail.get("content"):
+            item["content"] = detail["content"]
+        out.append(item)
+    return out
+
+
+def without_reasoning(sent: dict[str, Any]) -> dict[str, Any]:
+    """The same Responses body with every replayed reasoning item left out.
+
+    For the one retry after the backend refuses the encrypted reasoning it was handed (a copy made
+    for another model, or one it can no longer read): the model loses that reasoning, which is what
+    happened on every request before it was replayed, instead of the run failing.
+    """
+    return {**sent, "input": [item for item in sent.get("input") or [] if item.get("type") != "reasoning"]}
+
+
+def refused_reasoning(status: int, text: str) -> bool:
+    """Whether a refusal is about the replayed reasoning rather than anything else in the request."""
+    lowered = text.lower()
+    return status == 400 and ("encrypted" in lowered or "reasoning" in lowered)
+
+
 def chat_to_responses(body: dict[str, Any]) -> dict[str, Any]:
-    """An OpenAI chat-completions body → the Responses body the Codex backend takes."""
+    """An OpenAI chat-completions body → the Responses body the Codex backend takes.
+
+    With ``store`` off the backend forgets a response as soon as it has streamed it, so the model's
+    reasoning survives to the next request only if the client asks for the encrypted copy and hands
+    it back. Without that a reasoning model started every tool step from nothing — the Codex CLI
+    replays it on every request, and this does the same: ``include`` asks for it, and the reasoning
+    items an assistant turn carries in ``reasoning_details`` go back in front of that turn's output,
+    in the order the backend produced them.
+    """
     instructions: list[str] = []
     items: list[dict[str, Any]] = []
     for message in body.get("messages") or []:
@@ -268,6 +337,7 @@ def chat_to_responses(body: dict[str, Any]) -> dict[str, Any]:
         elif role == "user":
             items.append({"type": "message", "role": "user", "content": _user_content(message.get("content"))})
         elif role == "assistant":
+            items.extend(reasoning_items_of(message))
             text = _text_of(message.get("content"))
             if text:
                 items.append({"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": text}]})
@@ -283,7 +353,13 @@ def chat_to_responses(body: dict[str, Any]) -> dict[str, Any]:
         "store": False,
         "stream": True,
         "parallel_tool_calls": True,
+        "include": ["reasoning.encrypted_content"],
     }
+    cache_key = body.get("prompt_cache_key")
+    if isinstance(cache_key, str) and cache_key:
+        # The backend routes requests that share a key to the same cache; the CLI sends its
+        # conversation id here, and without one most requests of a long session missed the cache.
+        out["prompt_cache_key"] = cache_key
     tools = []
     for tool in body.get("tools") or []:
         fn = tool.get("function") or {}
@@ -331,6 +407,9 @@ KEEPALIVE = ": keepalive\n\n"
 async def responses_events_to_chunks(lines: AsyncIterator[str], *, model: str) -> AsyncIterator[str]:
     """Responses SSE lines → chat-completion chunks (text, reasoning summaries, tool calls, usage, finish).
 
+    A finished reasoning item with its encrypted copy becomes one ``reasoning_details`` entry
+    (:func:`reasoning_detail`), which the caller keeps on the assistant turn and sends back.
+
     Events with nothing to translate (created, in_progress, reasoning item boundaries) become a
     keepalive comment, so a long silent reasoning phase is not mistaken for a dead stream. These
     follow real upstream events, never a timer.
@@ -338,6 +417,7 @@ async def responses_events_to_chunks(lines: AsyncIterator[str], *, model: str) -
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     calls: dict[str, int] = {}
     arguments: dict[int, str] = {}
+    reasoning_items = 0
     finish = "stop"
     usage: dict[str, Any] | None = None
     failed: str | None = None
@@ -373,6 +453,13 @@ async def responses_events_to_chunks(lines: AsyncIterator[str], *, model: str) -
             arguments[index] = arguments.get(index, "") + event["delta"]
             spoke = True
             yield _chunk(completion_id, model, {"tool_calls": [{"index": index, "function": {"arguments": event["delta"]}}]})
+        elif kind == "response.output_item.done" and (event.get("item") or {}).get("type") == "reasoning":
+            # The finished reasoning item, encrypted: handed to the caller whole, to be sent back.
+            detail = reasoning_detail(event.get("item") or {}, reasoning_items)
+            if detail is not None:
+                reasoning_items += 1
+                spoke = True
+                yield _chunk(completion_id, model, {"reasoning_details": [detail]})
         elif kind in ("response.function_call_arguments.done", "response.output_item.done"):
             item = event.get("item") or {}
             if kind == "response.function_call_arguments.done" or item.get("type") == "function_call":
@@ -410,6 +497,7 @@ async def collect_completion(chunks: AsyncIterator[str], *, model: str) -> dict[
     """The non-streaming shape, assembled from the streamed chunks."""
     text_parts: list[str] = []
     reasoning: list[str] = []
+    details: list[dict[str, Any]] = []
     tool_calls: dict[int, dict[str, Any]] = {}
     finish = "stop"
     usage: dict[str, Any] | None = None
@@ -429,6 +517,7 @@ async def collect_completion(chunks: AsyncIterator[str], *, model: str) -> dict[
                 text_parts.append(delta["content"])
             if delta.get("reasoning_content"):
                 reasoning.append(delta["reasoning_content"])
+            details.extend(delta.get("reasoning_details") or [])
             for call in delta.get("tool_calls") or []:
                 slot = tool_calls.setdefault(int(call.get("index", 0)), {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
                 if call.get("id"):
@@ -444,6 +533,8 @@ async def collect_completion(chunks: AsyncIterator[str], *, model: str) -> dict[
     message: dict[str, Any] = {"role": "assistant", "content": "".join(text_parts) or None}
     if reasoning:
         message["reasoning_content"] = "".join(reasoning)
+    if details:
+        message["reasoning_details"] = details
     if tool_calls:
         message["tool_calls"] = [tool_calls[i] for i in sorted(tool_calls)]
     return {"id": f"chatcmpl-{uuid.uuid4().hex[:24]}", "object": "chat.completion", "created": int(time.time()), "model": model, "choices": [{"index": 0, "message": message, "finish_reason": finish}], "usage": usage or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}}
@@ -508,7 +599,12 @@ __all__ = [
     "collect_completion",
     "grok_usage_view",
     "KEEPALIVE",
+    "REASONING_FORMAT",
+    "reasoning_detail",
+    "reasoning_items_of",
+    "refused_reasoning",
     "responses_events_to_chunks",
+    "without_reasoning",
 ]
 
 

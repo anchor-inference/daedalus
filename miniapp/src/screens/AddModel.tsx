@@ -402,6 +402,9 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
   const [lookupError, setLookupError] = useState("");
   const [typed, setTyped] = useState("");
   const [preset, setPreset] = useState<Preset>(BLANK);
+  // The window is found by the host unless the operator types one; then it is theirs and kept.
+  const [windowTyped, setWindowTyped] = useState(false);
+  const [windowSource, setWindowSource] = useState<ModelEntry["context_source"] | null>(null);
   const [pricing, setPricing] = useState<ModelEntry["pricing"] | null>(null);
   const [priceDraft, setPriceDraft] = useState<PricingDraft | null>(null);
   const [priceError, setPriceError] = useState("");
@@ -448,6 +451,8 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
     setPriceError("");
     const adding = id === CUSTOM || id === LLAMACPP || id.startsWith(OPENCODE_NEW);
     setPreset({ ...BLANK, provider: adding ? "" : id });
+    setWindowTyped(false);
+    setWindowSource(null);
     if (!adding) void lookup(id);
   }
 
@@ -481,6 +486,7 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
     });
     setPriceError("");
     setPreset((p) => prefilled(entry, p));
+    setWindowSource(entry.context_source ?? null);
   }
 
   function typeModel(value: string) {
@@ -534,7 +540,7 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
         const priorEntry = previous && typeof previous === "object" && !Array.isArray(previous) ? previous as Record<string, unknown> : {};
         await api.put<Settings>(`/api/providers/${encodeURIComponent(provider)}`, { pricing: { ...current, [model]: { ...priorEntry, ...price } } });
       }
-      const next = await api.put<Settings>(`/api/presets/${encodeURIComponent(id)}`, { ...preset, provider, model });
+      const next = await api.put<Settings>(`/api/presets/${encodeURIComponent(id)}`, { ...preset, provider, model, context_window_source: windowTyped ? "manual" : "auto" });
       onSaved(id, next);
     } catch (e) {
       toast(errorText(e));
@@ -573,7 +579,10 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
           </label>
           <label className="mfield">
             <span>{t("add.window")}</span>
-            <input className="field num" type="number" min={8000} step={1000} value={preset.context_window} onChange={(e) => { const v = numInput(e.target.value); if (v !== null) setPreset({ ...preset, context_window: v }); }} />
+            <input className="field num" type="number" min={8000} step={1000} value={preset.context_window} onChange={(e) => { const v = numInput(e.target.value); if (v !== null) { setPreset({ ...preset, context_window: v }); setWindowTyped(true); } }} />
+            <span className="sub faint" data-testid="add-window-source">
+              {windowTyped ? t("window.typed") : windowSource ? t("window.found", { source: t(`window.by.${windowSource}`) }) : t("window.default")}
+            </span>
           </label>
           <label className="mfield">
             <span>{t("add.output")}</span>

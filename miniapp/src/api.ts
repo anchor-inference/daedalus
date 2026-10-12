@@ -1405,6 +1405,11 @@ export type ProviderConf = {
   billing?: "metered" | "subscription";
 };
 
+export type ContextWindowSource = "manual" | "provider" | "catalog" | "table" | "error" | "default";
+
+/** What each source knows about one preset's window; null where it knows nothing. */
+export type ContextWindowSources = { provider?: number | null; catalog?: number | null; table?: number | null; error?: number | null };
+
 export type Preset = {
   provider: string;
   model: string;
@@ -1414,6 +1419,8 @@ export type Preset = {
   images: boolean;
   free_only?: boolean;
   context_window: number;
+  /** Where the window came from: the operator (`manual`), or the resolver and which of its sources. */
+  context_window_source?: ContextWindowSource;
   max_output_tokens: number;
   /** Tool groups on demand held back for this model; absent or null follows what the model is known for. */
   on_demand_tool_groups?: boolean | null;
@@ -1425,6 +1432,8 @@ export type Settings = {
   presets: Record<string, Preset>;
   /** What each preset left to its model does with the tool groups on demand, as the host knows the model. */
   on_demand_defaults?: Record<string, boolean>;
+  /** Per preset, what every context-window source says, so the settings can explain the number. */
+  context_window_sources?: Record<string, ContextWindowSources>;
   providers: Record<string, ProviderConf>;
   provider_kinds?: string[];
   prompt: { rules: string; default_rules?: string };

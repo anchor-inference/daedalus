@@ -3,11 +3,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon, IconName } from "../icons";
 import { navigate, pathFor } from "../router";
 import { PageHeader, go, screenTitle, useMedia } from "../ui/index";
-import { announceProviderKeys, api, telegram, HeartbeatStatus, Preset, ProviderConf, SearchBackendInfo, SearchCheck, Settings } from "../api";
+import { announceProviderKeys, api, telegram, ContextWindowSource, ContextWindowSources, HeartbeatStatus, Preset, ProviderConf, SearchBackendInfo, SearchCheck, Settings } from "../api";
 import { confirmAsync, errorText, numInput } from "../ui";
 import * as passkeys from "../passkeys";
 import { timeAgo } from "../ui/components";
-import { shortDateTime } from "../format";
+import { shortDateTime, tokens } from "../format";
 import { useMoreBelow } from "../edgefade";
 import { SpeechModels } from "./Speech";
 import { TtsVoices } from "./Voices";
@@ -136,11 +136,27 @@ function ModelsMenu({ load, current, onPick }: { load: () => Promise<string[] | 
   );
 }
 
+/** Where a preset's window came from, what every source says, and the way back to automatic. */
+function WindowSource({ source, sources, onAuto, onRefresh }: { source: ContextWindowSource; sources?: ContextWindowSources; onAuto: () => void; onRefresh: () => void }) {
+  const said = (n: number | null | undefined) => (n ? tokens(n) : t("window.unknown"));
+  const detail = sources ? t("window.sources", { provider: said(sources.provider), catalog: said(sources.catalog), table: said(sources.table), error: said(sources.error) }) : undefined;
+  const text = source === "manual" ? t("window.manual") : source === "default" ? t("window.default") : t("window.found", { source: t(`window.by.${source}`) });
+  return (
+    <span className="sub faint window-source" title={detail} data-testid="window-source">
+      {text}{" "}
+      {source === "manual"
+        ? <button type="button" className="linkbtn" onClick={(e) => { e.preventDefault(); onAuto(); }}>{t("window.auto")}</button>
+        : <button type="button" className="linkbtn" onClick={(e) => { e.preventDefault(); onRefresh(); }}>{t("window.refresh")}</button>}
+    </span>
+  );
+}
+
 /** One model: a compact line to scan, an expanded panel to edit. */
-function PresetRow({ id, p, onDemandByModel, isDefault, inChain, providers, onDefault, onChain, onPatch, onDelete, onLookup }: {
+function PresetRow({ id, p, onDemandByModel, windowSources, isDefault, inChain, providers, onDefault, onChain, onPatch, onDelete, onLookup, onRefreshWindow }: {
   id: string;
   p: Preset;
   onDemandByModel?: boolean;
+  windowSources?: ContextWindowSources;
   isDefault: boolean;
   inChain: boolean;
   providers: string[];
@@ -149,6 +165,7 @@ function PresetRow({ id, p, onDemandByModel, isDefault, inChain, providers, onDe
   onPatch: (patch: Partial<Preset>) => void;
   onDelete: () => void;
   onLookup: (provider: string) => Promise<string[] | null>;
+  onRefreshWindow: () => void;
 }) {
   const [label, setLabel] = useState(p.label);
   const [model, setModel] = useState(p.model);
@@ -204,7 +221,9 @@ function PresetRow({ id, p, onDemandByModel, isDefault, inChain, providers, onDe
             </label>
             <label className="mfield">
               <span>{t("settings.preset.window")}</span>
-              <input className="field" type="number" min={8000} step={1000} defaultValue={p.context_window} onBlur={(e) => { const v = numInput(e.target.value); if (v !== null && v !== p.context_window) onPatch({ context_window: v }); }} />
+              {/* Keyed by the number so a window the host found replaces what the uncontrolled field shows. */}
+              <input key={p.context_window} className="field" type="number" min={8000} step={1000} defaultValue={p.context_window} onBlur={(e) => { const v = numInput(e.target.value); if (v !== null && v !== p.context_window) onPatch({ context_window: v }); }} />
+              <WindowSource source={p.context_window_source ?? "default"} sources={windowSources} onAuto={() => onPatch({ context_window_source: "auto" } as unknown as Partial<Preset>)} onRefresh={onRefreshWindow} />
             </label>
             <label className="mfield">
               <span>{t("settings.preset.output")}</span>
@@ -1181,6 +1200,15 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
       toast((e as Error).message);
     }
   }
+  async function refreshWindow(id: string) {
+    try {
+      await api.post(`/api/presets/${encodeURIComponent(id)}/context-window`, {});
+      const next = await api.get<Settings>("/api/settings");
+      setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) });
+    } catch (e) {
+      toast((e as Error).message);
+    }
+  }
   async function removePreset(id: string) {
     try {
       const next = await api.delete<Settings>(`/api/presets/${encodeURIComponent(id)}`);
@@ -1289,6 +1317,8 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
                     id={id}
                     p={p}
                     onDemandByModel={s.on_demand_defaults?.[id]}
+                    windowSources={s.context_window_sources?.[id]}
+                    onRefreshWindow={() => void refreshWindow(id)}
                     isDefault={s.model.preset === id}
                     inChain={(s.model.chain ?? []).includes(id)}
                     providers={providerIds}

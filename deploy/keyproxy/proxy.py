@@ -67,7 +67,9 @@ from subscriptions import (
     collect_completion,
     grok_usage_view,
     opencode_usage_view,
+    refused_reasoning,
     responses_events_to_chunks,
+    without_reasoning,
 )
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s keyproxy %(levelname)s: %(message)s")
@@ -561,13 +563,18 @@ async def handle_claude(request: web.Request, rest: str) -> web.StreamResponse:
         return web.json_response({"error": {"message": str(exc), "type": "subscription_error"}}, status=502)
     if tail == "models":
         models = list(CLAUDE_FALLBACK_MODELS)
+        limits: dict[str, dict[str, int]] = {}
         try:
-            response = await client.get(CLAUDE_API + "/v1/models", headers={**headers, "accept": "application/json"})
+            response = await client.get(CLAUDE_API + "/v1/models?limit=1000", headers={**headers, "accept": "application/json"})
             if response.status_code == 200:
-                models = sorted({str(m.get("id") or "") for m in (response.json().get("data") or []) if isinstance(m, dict) and m.get("id")} | set(models))
+                listed = [m for m in (response.json().get("data") or []) if isinstance(m, dict) and m.get("id")]
+                models = sorted({str(m["id"]) for m in listed} | set(models))
+                # The Models API states each model's window and output cap; passed on, so the bot need
+                # not guess them for a model added through the subscription.
+                limits = {str(m["id"]): {k: m[k] for k in ("max_input_tokens", "max_tokens") if type(m.get(k)) is int} for m in listed}
         except (httpx.HTTPError, ValueError, AttributeError):
             pass
-        return web.json_response({"object": "list", "data": [{"id": m, "object": "model", "owned_by": "anthropic"} for m in models if m]})
+        return web.json_response({"object": "list", "data": [{"id": m, "object": "model", "owned_by": "anthropic", **limits.get(m, {})} for m in models if m]})
     if tail != "chat/completions":
         return web.json_response({"error": {"message": f"claude serves chat/completions and models, not {tail!r}", "type": "invalid_request_error"}}, status=404)
     try:
@@ -625,7 +632,9 @@ async def handle_codex(request: web.Request, rest: str) -> web.StreamResponse:
             models = sorted(set(models) | set(usage.get("models") or []))  # the plan's usage table names only some of them
         except SubscriptionError:
             pass
-        return web.json_response({"object": "list", "data": [{"id": m, "object": "model", "owned_by": "openai"} for m in models]})
+        windows = codex_cached_windows(CODEX_AUTH.path.parent / "models_cache.json")
+        models = sorted(set(models) | {m for m, w in windows.items() if w.get("listed")})
+        return web.json_response({"object": "list", "data": [{"id": m, "object": "model", "owned_by": "openai", **{k: v for k, v in windows.get(m, {}).items() if k != "listed"}} for m in models]})
     if tail != "chat/completions":
         return web.json_response({"error": {"message": f"codex serves chat/completions and models, not {tail!r}", "type": "invalid_request_error"}}, status=404)
     try:
@@ -635,14 +644,27 @@ async def handle_codex(request: web.Request, rest: str) -> web.StreamResponse:
     model = str(body.get("model") or "")
     stream = bool(body.get("stream", False))
     sent = chat_to_responses(body)
-    upstream = client.build_request("POST", CODEX_BASE + "/codex/responses", json=sent, headers={**headers, "accept": "text/event-stream", "content-type": "application/json"})
-    try:
-        response = await client.send(upstream, stream=True)
-    except httpx.HTTPError as exc:
-        return web.json_response({"error": {"message": f"upstream unreachable: {type(exc).__name__}", "type": "proxy_error"}}, status=502)
-    if response.status_code >= 400:
+    request_headers = {**headers, "accept": "text/event-stream", "content-type": "application/json"}
+    if sent.get("prompt_cache_key"):
+        # The CLI names its conversation in this header as well as in the body's cache key.
+        request_headers["session_id"] = str(sent["prompt_cache_key"])
+    replayed = any(item.get("type") == "reasoning" for item in sent["input"])
+    while True:
+        upstream = client.build_request("POST", CODEX_BASE + "/codex/responses", json=sent, headers=request_headers)
+        try:
+            response = await client.send(upstream, stream=True)
+        except httpx.HTTPError as exc:
+            return web.json_response({"error": {"message": f"upstream unreachable: {type(exc).__name__}", "type": "proxy_error"}}, status=502)
+        if response.status_code < 400:
+            break
         raw = (await response.aread()).decode("utf-8", "replace")
         await response.aclose()
+        if replayed and refused_reasoning(response.status_code, raw):
+            # Reasoning the backend will not read back costs the model its earlier thinking, not
+            # the turn: ask once more without it, and say so, since it should not keep happening.
+            logger.warning("codex refused the replayed reasoning (%s); retrying without it", raw[:200])
+            sent, replayed = without_reasoning(sent), False
+            continue
         try:
             payload = json.loads(raw)
         except ValueError:
@@ -663,6 +685,29 @@ async def handle_codex(request: web.Request, rest: str) -> web.StreamResponse:
         return web.Response(status=499)
     finally:
         await response.aclose()
+
+
+def codex_cached_windows(path: Path) -> dict[str, dict[str, Any]]:
+    """The context windows the Codex CLI's own model catalogue states, by model slug.
+
+    The CLI keeps what the backend told it in ``models_cache.json`` beside its login, which is mounted
+    here for the login's sake: each model's ``context_window`` (the length the CLI runs it at) and
+    ``max_context_window`` (the most the backend accepts). Read rather than asked again, because it
+    is the CLI's request to make and this one would need to pass for the CLI to make it. ``listed`` says
+    the CLI offers the model in its picker. A file that is missing or unreadable is no windows.
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for row in (data.get("models") if isinstance(data, dict) else None) or []:
+        if not isinstance(row, dict) or not row.get("slug"):
+            continue
+        entry: dict[str, Any] = {k: row[k] for k in ("context_window", "max_context_window") if type(row.get(k)) is int and row[k] > 0}
+        entry["listed"] = row.get("visibility") == "list"
+        out[str(row["slug"])] = entry
+    return out
 
 
 async def _codex_usage(client: httpx.AsyncClient, headers: dict[str, str]) -> dict[str, Any]:

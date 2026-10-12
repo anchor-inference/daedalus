@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from typing import Any
 from urllib.parse import urlsplit
@@ -14,6 +14,7 @@ import httpx
 from daedalus.config import ProviderConfig, RuntimeConfig, Settings
 from daedalus.host.setting_refs import provider_key
 from daedalus.providers.admission import InferenceAdmission
+from daedalus.providers.context_window import windows_from_catalog
 from daedalus.providers.openai_compat import (
     ImageLoader,
     OpenAICompatibleProvider,
@@ -67,6 +68,10 @@ class ProviderRegistry:
         self._users: dict[OpenAICompatibleProvider, int] = {}
         self._fetched: dict[str, dict[str, ModelPricing]] = {}
         """Prices fetched from models.dev, by provider kind; under the operator's own entries."""
+        self.catalog_windows: dict[str, int] = {}
+        """Context windows from the same models.dev catalogue, by model id (see ``context_window``)."""
+        self.on_context_refusal: Callable[[str, str, int], None] | None = None
+        """Told of every refusal that states a model's real window; set by the context-window service."""
         self.reload(config)
 
     def _images_for(self, provider_id: str, model: str) -> bool:
@@ -74,6 +79,12 @@ class ProviderRegistry:
         if config is None:
             return False
         return any(p.provider == provider_id and p.model == model and p.images for p in config.presets.values())
+
+    def _context_refusal(self, provider_id: str, model: str, window: int) -> None:
+        # Looked up on every call rather than bound at construction: the service that listens is
+        # installed after the registry has built its adapters.
+        if self.on_context_refusal is not None:
+            self.on_context_refusal(provider_id, model, window)
 
     def reload(self, config: RuntimeConfig) -> None:
         fresh: dict[str, OpenAICompatibleProvider] = {}
@@ -96,6 +107,7 @@ class ProviderRegistry:
                 image_loader=self._image_loader,
                 images_for=lambda model, pid=provider_id: self._images_for(pid, model),
                 admission=self._admission,
+                context_refusal=self._context_refusal,
             )
         self._config = config
         self._retired.extend(p for pid, p in self._providers.items() if pid not in fresh)
@@ -174,9 +186,11 @@ class ProviderRegistry:
         cached = await db.kv_get(modelsdev.KV_KEY, None) if db is not None else None
         now = time.time()
         tables: dict[str, dict[str, ModelPricing]] = {}
-        fresh = isinstance(cached, dict) and now - float(cached.get("at") or 0) < modelsdev.REFRESH_SECONDS
+        # A cache written before the windows were kept beside the prices is as good as stale.
+        fresh = isinstance(cached, dict) and now - float(cached.get("at") or 0) < modelsdev.REFRESH_SECONDS and "windows" in cached
         if fresh and not force:
             tables = {kind: modelsdev.table_from_entries(entries) for kind, entries in (cached.get("tables") or {}).items() if isinstance(entries, dict)}
+            self.catalog_windows = modelsdev.windows_from_entries(cached.get("windows"))
         else:
             try:
                 catalog = await modelsdev.fetch_catalog()
@@ -184,10 +198,12 @@ class ProviderRegistry:
                 logger.warning("models.dev prices not refreshed: %s", exc)
                 if isinstance(cached, dict):
                     tables = {kind: modelsdev.table_from_entries(entries) for kind, entries in (cached.get("tables") or {}).items() if isinstance(entries, dict)}
+                    self.catalog_windows = modelsdev.windows_from_entries(cached.get("windows"))
             else:
                 tables = {kind: modelsdev.prices_from_catalog(catalog, ids) for kind, ids in modelsdev.SOURCES.items()}
+                self.catalog_windows = windows_from_catalog(catalog)
                 if db is not None:
-                    await db.kv_set(modelsdev.KV_KEY, {"at": now, "tables": {kind: modelsdev.entries_from_table(table) for kind, table in tables.items()}})
+                    await db.kv_set(modelsdev.KV_KEY, {"at": now, "tables": {kind: modelsdev.entries_from_table(table) for kind, table in tables.items()}, "windows": self.catalog_windows})
         if not tables:
             return 0
         self._fetched = tables

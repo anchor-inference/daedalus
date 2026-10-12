@@ -586,6 +586,10 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         # The shared centre is empty, so every entry a harness might answer is one the host no
         # longer has; a harness that invents entries answers this route itself.
         return 404, "application/json", json.dumps({"detail": "no such notification"})
+    if method.upper() == "POST" and path.startswith("/api/presets/") and path.endswith("/context-window"):
+        # Asking the sources again for a preset's window: the shared host finds what the settings
+        # pictures already say, so the screen does not move under a check that presses it.
+        return 200, "application/json", json.dumps({"window": 128000, "source": "default", "sources": {"provider": None, "catalog": None, "table": None, "error": None}})
     if path.startswith("/api/settings/changes/"):
         # The card under an agent's settings change; the shared host keeps none, and a harness that
         # draws one (check_settings_card.py) answers these itself.

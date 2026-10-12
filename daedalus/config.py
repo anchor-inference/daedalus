@@ -172,6 +172,7 @@ PROVIDER_KINDS: tuple[ProviderKind, ...] = ("deepseek", "openrouter", "opencode"
 """``opencode`` is the OpenCode Go / Zen gateway: OpenAI-compatible, wants a stable session id per conversation in
 ``x-opencode-session`` for routing and prompt caching, and passes DeepSeek's thinking fields through as they are."""
 ProviderBilling = Literal["metered", "subscription"]
+ContextWindowSource = Literal["manual", "provider", "catalog", "table", "error", "default"]
 
 
 class Settings(BaseSettings):
@@ -471,6 +472,12 @@ class ModelPresetConfig(BaseModel):
     """A free-catalog preset must stop on failure instead of entering the paid fallback chain."""
     context_window: int = Field(default=128_000, ge=8_000, le=4_000_000)
     """Tokens of history a run may hold before compaction; set below the model's real window to keep runs cheap."""
+    context_window_source: ContextWindowSource = "default"
+    """Where ``context_window`` came from. ``manual`` is the operator's number and nothing replaces it.
+    Every other value belongs to the resolver (:mod:`daedalus.providers.context_window`), which rewrites
+    the window when it learns better: ``provider`` (the endpoint's own model listing), ``catalog``
+    (models.dev), ``table`` (the bundled table of model families), ``error`` (the limit a refusal
+    stated) and ``default`` (nothing known yet; the number is the starting guess)."""
     max_output_tokens: int = Field(default=32_000, ge=1_024, le=1_000_000)
     """Cap on one reply (``max_tokens``); thinking tokens count against it."""
     on_demand_tool_groups: bool | None = None
@@ -2199,7 +2206,7 @@ def _seed_presets(raw: dict[str, Any]) -> bool:
     return True
 
 
-SEEDS = ("claude-subscription", "openai-anthropic-keys", "more-provider-endpoints", "opencode-go-subscription", "known-image-models", "compaction-ratio-by-window")
+SEEDS = ("claude-subscription", "openai-anthropic-keys", "more-provider-endpoints", "opencode-go-subscription", "known-image-models", "compaction-ratio-by-window", "context-window-source")
 """Every seed a config can have had applied, in the order they were introduced. The seeds that follow
 the setup wizard's environment (``voice-cloud``, ``local-model:<id>``) are not listed: a new file
 should get them, because the wizard's answers are about this installation."""
@@ -2229,9 +2236,9 @@ def _seed_claude_subscription(raw: dict[str, Any]) -> bool:
         }
         changed = True
     seeds = {
-        "claude.sonnet-5": {"provider": "claude", "model": "claude-sonnet-5", "label": "Claude Sonnet 5 (Claude Code subscription)", "thinking": True, "reasoning_effort": "high", "images": True, "context_window": 200_000},
-        "claude.opus-5": {"provider": "claude", "model": "claude-opus-5", "label": "Claude Opus 5 (Claude Code subscription)", "thinking": True, "reasoning_effort": "medium", "images": True, "context_window": 1_000_000},
-        "claude.fable-5.1": {"provider": "claude", "model": "claude-fable-5-1", "label": "Claude Fable 5.1 (Claude Code subscription)", "thinking": True, "reasoning_effort": "medium", "images": True, "context_window": 1_000_000},
+        "claude.sonnet-5": {"provider": "claude", "model": "claude-sonnet-5", "label": "Claude Sonnet 5 (Claude Code subscription)", "thinking": True, "reasoning_effort": "high", "images": True, "context_window": 200_000, "context_window_source": "manual"},
+        "claude.opus-5": {"provider": "claude", "model": "claude-opus-5", "label": "Claude Opus 5 (Claude Code subscription)", "thinking": True, "reasoning_effort": "medium", "images": True, "context_window": 1_000_000, "context_window_source": "manual"},
+        "claude.fable-5.1": {"provider": "claude", "model": "claude-fable-5-1", "label": "Claude Fable 5.1 (Claude Code subscription)", "thinking": True, "reasoning_effort": "medium", "images": True, "context_window": 1_000_000, "context_window_source": "manual"},
     }
     if isinstance(presets, dict):
         for pid, spec in seeds.items():
@@ -2414,6 +2421,36 @@ def _seed_known_image_models(raw: dict[str, Any]) -> bool:
     return True
 
 
+def _seed_context_window_source(raw: dict[str, Any]) -> bool:
+    """Say, once, where each existing preset's window came from, so the resolver knows which to leave alone.
+
+    Before the window could be found automatically every preset carried a number and nothing said
+    whether a person had chosen it. The 128K default is taken as nobody's choice, and so is a number
+    the bundled table gives for the model (the seeds and a prefilled form wrote those); anything else
+    was typed by someone and is kept as theirs. Once, recorded in ``seeded``.
+    """
+    seeded = raw.setdefault("seeded", [])
+    if not isinstance(seeded, list):
+        seeded = raw["seeded"] = []
+    if "context-window-source" in seeded:
+        return False
+    seeded.append("context-window-source")
+    # Lazy: the provider package imports this module.
+    from daedalus.providers.context_window import DEFAULT_WINDOW, table_window
+
+    for preset in (raw.get("presets") or {}).values():
+        if not isinstance(preset, dict) or preset.get("context_window_source"):
+            continue
+        tokens = preset.get("context_window")
+        if tokens is None or tokens == DEFAULT_WINDOW:
+            preset["context_window_source"] = "default"
+        elif table_window(str(preset.get("model") or "")) == tokens:
+            preset["context_window_source"] = "table"
+        else:
+            preset["context_window_source"] = "manual"
+    return True
+
+
 def _migrate_web_search(raw: dict[str, Any]) -> bool:
     """The DuckDuckGo-only fields of ``[tools.web]`` became the ``search`` section with a backend choice."""
     web = (raw.get("tools") or {}).get("web")
@@ -2507,6 +2544,7 @@ def _migrate(raw: dict[str, Any]) -> bool:
     changed = _seed_provider_endpoints(raw) or changed
     changed = _seed_opencode_go_subscription(raw) or changed
     changed = _seed_known_image_models(raw) or changed
+    changed = _seed_context_window_source(raw) or changed
     changed = _seed_from_setup(raw) or changed
     changed = _migrate_web_search(raw) or changed
     for provider in (raw.get("providers") or {}).values():
@@ -2540,6 +2578,7 @@ __all__ = [
     "PROVIDER_KINDS",
     "PromptConfig",
     "ProviderConfig",
+    "ContextWindowSource",
     "ProviderBilling",
     "ProviderKind",
     "ReasoningEffort",

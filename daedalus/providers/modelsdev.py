@@ -2,7 +2,8 @@
 
 OpenCode Zen answers ``/models`` with ids only; models.dev (the catalogue OpenCode itself reads) carries
 each model's USD per 1M tokens for input, output and cached input. The table is fetched once a day, kept in the
-database between starts, and overlaid under the operator's own ``pricing`` entries, which always win.
+database between starts, and overlaid under the operator's own ``pricing`` entries, which always win. The same
+download carries each model's context window (``limit.context``), kept beside the prices for the window resolver.
 """
 
 from __future__ import annotations
@@ -50,6 +51,13 @@ def table_from_entries(entries: dict[str, dict[str, Any]]) -> dict[str, ModelPri
     return {model: ModelPricing.from_entry(entry) for model, entry in entries.items() if isinstance(entry, dict)}
 
 
+def windows_from_entries(entries: Any) -> dict[str, int]:
+    """The context windows a cached catalogue entry kept (``model id → tokens``); empty for anything else."""
+    if not isinstance(entries, dict):
+        return {}
+    return {str(model): int(tokens) for model, tokens in entries.items() if type(tokens) is int and tokens > 0}
+
+
 async def fetch_catalog(client: httpx.AsyncClient | None = None, *, timeout: float = 15.0) -> dict[str, Any]:
     """The catalogue, or an error. Bounded end to end, closing the client included.
 
@@ -78,4 +86,4 @@ async def fetch_catalog(client: httpx.AsyncClient | None = None, *, timeout: flo
     return data
 
 
-__all__ = ["KV_KEY", "MODELS_DEV_URL", "REFRESH_SECONDS", "SOURCES", "entries_from_table", "fetch_catalog", "prices_from_catalog", "table_from_entries"]
+__all__ = ["KV_KEY", "MODELS_DEV_URL", "REFRESH_SECONDS", "SOURCES", "entries_from_table", "fetch_catalog", "prices_from_catalog", "table_from_entries", "windows_from_entries"]
