@@ -57,6 +57,7 @@ EXTENSIONS = (
     "daedalus.extensions.issue_sync",
     "daedalus.extensions.launcher_updates",
     "daedalus.extensions.calendar_reminders",
+    "daedalus.extensions.calendar_hooks",
     "daedalus.extensions.context_windows",
     "daedalus.extensions.api",
 )

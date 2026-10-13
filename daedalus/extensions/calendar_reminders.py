@@ -62,7 +62,7 @@ async def due(store: CalendarStore, planner: PlannerStore, moment: datetime, lan
     every = [row["id"] for row in await store.db.fetchall("SELECT id FROM calendars")]
     first = moment - GRACE - timedelta(days=1)
     last = moment + timedelta(minutes=lead) + timedelta(days=1)
-    for item in await store.occurrences(first.isoformat(), last.isoformat(), every) if every else []:
+    for item in await store.occurrences(first.isoformat(), last.isoformat(), every, include_hidden_groups=True) if every else []:
         if not item["reminders"]:
             continue
         start = datetime.fromisoformat(item["start_at"])

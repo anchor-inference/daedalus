@@ -15,7 +15,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from daedalus.extensions.calendar_sync import CalendarSync, describe
-from daedalus.stores.calendar import CalendarStore
+from daedalus.stores.calendar import OPERATOR, CalendarStore
 from daedalus.stores.planner import PlannerStore
 
 if TYPE_CHECKING:
@@ -48,6 +48,46 @@ class EventBody(BaseModel):
     version: int | None = None
     scope: Literal["all", "this"] = "all"
     occurrence_start: str | None = None
+    type: str | None = None
+    fields: dict[str, Any] | None = None
+    blocks: list[Any] | None = None
+    status: str | None = None
+    tags: list[str] | None = None
+    group_id: str | None = None
+    links: list[dict[str, Any]] | None = None
+
+
+class BulkBody(BaseModel):
+    events: list[dict[str, Any]]
+
+
+class BlocksBody(BaseModel):
+    ops: list[Any]
+    version: int | None = None
+
+
+class StatusBody(BaseModel):
+    status: str
+
+
+class GroupBody(BaseModel):
+    name: str | None = None
+    icon: str | None = None
+    color: str | None = None
+    description: str | None = None
+    blocks: list[Any] | None = None
+    archived: bool | None = None
+    hidden: bool | None = None
+    version: int | None = None
+
+
+class ShiftBody(BaseModel):
+    days: int
+
+
+class DuplicateBody(BaseModel):
+    offset_days: int
+    name: str | None = None
 
 
 class SettingsBody(BaseModel):
@@ -178,9 +218,22 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     # -- events ----------------------------------------------------------------------------------
 
     @api.get("/api/calendar/events")
-    async def events(start: str, end: str, calendars: str = "", _: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
+    async def events(
+        start: str, end: str, calendars: str = "", type: str | None = None, group_id: str | None = None, tag: str | None = None,
+        status: str | None = None, include_blocks: bool = False, _: dict[str, Any] = Depends(auth),
+    ) -> list[dict[str, Any]]:
         try:
-            return await calendar.occurrences(start, end, [item for item in calendars.split(",") if item] or None)
+            return await calendar.occurrences(
+                start, end, [item for item in calendars.split(",") if item] or None,
+                filters={"type": type, "group_id": group_id, "tag": tag, "status": status}, include_blocks=include_blocks,
+            )
+        except ValueError as exc:
+            raise refused(exc) from exc
+
+    @api.post("/api/calendar/events/bulk", status_code=201)
+    async def events_bulk(body: BulkBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            return {"events": await calendar.bulk_create(body.events, OPERATOR)}
         except ValueError as exc:
             raise refused(exc) from exc
 
@@ -198,15 +251,133 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     @api.post("/api/calendar/events", status_code=201)
     async def event_create(body: EventBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            return await calendar.create(body.model_dump(exclude_unset=True))
+            return await calendar.create(body.model_dump(exclude_unset=True), OPERATOR)
         except ValueError as exc:
             raise refused(exc) from exc
 
     @api.put("/api/calendar/events/{event_id}")
     async def event_update(event_id: str, body: EventBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            return await calendar.update(event_id, body.model_dump(exclude_unset=True))
+            return await calendar.update(event_id, body.model_dump(exclude_unset=True), OPERATOR)
         except (ValueError, KeyError, RuntimeError) as exc:
+            raise refused(exc) from exc
+
+    @api.patch("/api/calendar/events/{event_id}/blocks")
+    async def event_blocks(event_id: str, body: BlocksBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            return await calendar.patch_blocks(event_id, body.ops, body.version, OPERATOR)
+        except (ValueError, KeyError, RuntimeError) as exc:
+            raise refused(exc) from exc
+
+    @api.post("/api/calendar/events/{event_id}/status")
+    async def event_status(event_id: str, body: StatusBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            return await calendar.set_status(event_id, body.status, OPERATOR)
+        except (ValueError, KeyError) as exc:
+            raise refused(exc) from exc
+
+    @api.get("/api/calendar/events/{event_id}/history")
+    async def event_history(event_id: str, limit: int = Query(200, ge=1, le=500), _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            return {"entries": await calendar.history(event_id, limit)}
+        except (ValueError, KeyError) as exc:
+            raise refused(exc) from exc
+
+    @api.post("/api/calendar/events/{event_id}/blocks/{block_id}/run")
+    async def event_action(event_id: str, block_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        # The operator's press is the confirmation the spec asks for: the prompt the agent wrote
+        # into the block goes to the session it named, as the operator's own message, and nowhere else.
+        manager = getattr(app, "manager", None)
+        if manager is None:
+            raise HTTPException(503, "the agent is not running")
+        try:
+            block, text = await calendar.action(event_id, block_id, OPERATOR)
+        except (ValueError, KeyError) as exc:
+            raise refused(exc) from exc
+        try:
+            run_id = await manager.submit(str(block["session_id"]), text, as_answer=False, origin="operator", via="app")
+        except KeyError as exc:
+            raise HTTPException(404, "the session this action talks to no longer exists") from exc
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"ok": True, "session_id": block["session_id"], "run_id": run_id}
+
+    # -- types, aggregates and groups ------------------------------------------------------------
+
+    @api.get("/api/calendar/types")
+    async def types(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        return {"types": await calendar.type_list()}
+
+    @api.put("/api/calendar/types/{type_id}")
+    async def type_upsert(type_id: str, body: dict[str, Any], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            return await calendar.upsert_type(type_id, body, "user")
+        except ValueError as exc:
+            raise refused(exc) from exc
+
+    @api.delete("/api/calendar/types/{type_id}")
+    async def type_delete(type_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, bool]:
+        try:
+            await calendar.delete_type(type_id)
+        except KeyError as exc:
+            raise refused(exc) from exc
+        return {"ok": True}
+
+    @api.get("/api/calendar/aggregates")
+    async def aggregates(
+        start: str = Query(..., alias="from"), end: str = Query(..., alias="to"), type: str | None = None, group_id: str | None = None,
+        _: dict[str, Any] = Depends(auth),
+    ) -> dict[str, Any]:
+        try:
+            return await calendar.aggregates(start, end, type, group_id)
+        except ValueError as exc:
+            raise refused(exc) from exc
+
+    @api.get("/api/calendar/groups")
+    async def groups(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        return {"groups": await calendar.groups()}
+
+    @api.post("/api/calendar/groups", status_code=201)
+    async def group_create(body: GroupBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            return await calendar.create_group(body.model_dump(exclude_unset=True), OPERATOR)
+        except ValueError as exc:
+            raise refused(exc) from exc
+
+    @api.get("/api/calendar/groups/{group_id}")
+    async def group(group_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            return await calendar.group(group_id)
+        except KeyError as exc:
+            raise refused(exc) from exc
+
+    @api.patch("/api/calendar/groups/{group_id}")
+    async def group_update(group_id: str, body: GroupBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            return await calendar.update_group(group_id, body.model_dump(exclude_unset=True))
+        except (ValueError, KeyError, RuntimeError) as exc:
+            raise refused(exc) from exc
+
+    @api.delete("/api/calendar/groups/{group_id}")
+    async def group_delete(group_id: str, events: Literal["keep", "delete"] = Query("keep"), _: dict[str, Any] = Depends(auth)) -> dict[str, bool]:
+        try:
+            await calendar.delete_group(group_id, events, OPERATOR)
+        except (ValueError, KeyError, RuntimeError) as exc:
+            raise refused(exc) from exc
+        return {"ok": True}
+
+    @api.post("/api/calendar/groups/{group_id}/shift")
+    async def group_shift(group_id: str, body: ShiftBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            return await calendar.shift_group(group_id, body.days, OPERATOR)
+        except (ValueError, KeyError) as exc:
+            raise refused(exc) from exc
+
+    @api.post("/api/calendar/groups/{group_id}/duplicate", status_code=201)
+    async def group_duplicate(group_id: str, body: DuplicateBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            return await calendar.duplicate_group(group_id, body.offset_days, OPERATOR, body.name)
+        except (ValueError, KeyError) as exc:
             raise refused(exc) from exc
 
     @api.delete("/api/calendar/events/{event_id}")

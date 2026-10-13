@@ -30,8 +30,9 @@ from defusedxml import ElementTree as SafeXML
 from icalendar import Calendar, Event
 from icalendar.timezone.windows_to_olson import WINDOWS_TO_OLSON
 
+from daedalus.stores import calendar_blocks as entries
 from daedalus.stores import recurrence
-from daedalus.stores.calendar import SYNCING, CalendarStore, instant, now
+from daedalus.stores.calendar import SYNCING, CalendarStore, announce, instant, now
 
 logger = logging.getLogger(__name__)
 GOOGLE = "https://www.googleapis.com/calendar/v3/calendars/"
@@ -192,6 +193,41 @@ def _google_stamp(original: str, all_day: bool) -> str:
     return moment.strftime("%Y%m%d") if all_day else moment.strftime("%Y%m%dT%H%M%SZ")
 
 
+def exported(row: Any) -> str:
+    """The description a provider receives: the event's own text, then its blocks as plain text.
+
+    The blocks stay local and structured; the remote copy is a reading of them, so the operator
+    sees the list in Google or Outlook, and :func:`inbound_description` keeps that reading from
+    coming back as an edit.
+    """
+    blocks = json.loads(row["blocks_json"] or "[]") if "blocks_json" in row.keys() else []
+    if not blocks:
+        return row["description"]
+    return entries.compose(row["description"], blocks, json.loads(row["fields_json"] or "{}"))
+
+
+def inbound_description(row: Any, remote: str) -> tuple[str, str]:
+    """(description, blocks JSON) to keep when a provider sends ``remote`` for an event with blocks.
+
+    The copy it holds is the event's text followed by its exported blocks. Unchanged (it is what
+    was last sent or read), nothing changes. Edited only above the blocks, the edit is the new
+    text. Edited inside the blocks, the blocks are not parsed back (a tick typed into Google is not
+    worth the risk of a misread list): they stay as they are, and the remote text is kept whole in
+    a markdown block marked ``source: remote``, once, so nothing written there is lost and a second
+    sync does not add it again.
+    """
+    blocks = json.loads(row["blocks_json"] or "[]")
+    if not blocks or remote in (exported(row), row["synced_description"] or ""):
+        return (row["description"] if blocks else remote), row["blocks_json"]
+    tail = entries.blocks_text(blocks, json.loads(row["fields_json"] or "{}"))
+    head = remote.rstrip()
+    if tail and head.endswith(tail):
+        return head[: len(head) - len(tail)].rstrip(), row["blocks_json"]
+    if not any(block.get("kind") == "markdown" and block.get("source") == "remote" and block.get("text") == remote for block in blocks):
+        blocks.append({"id": entries.new_id("blk"), "kind": "markdown", "title": "", "text": remote[:100_000], "source": "remote"})
+    return row["description"], json.dumps(blocks, ensure_ascii=False)
+
+
 def _payload(provider: str, row: Any) -> dict[str, Any]:
     start = datetime.fromisoformat(row["start_at"])
     end = datetime.fromisoformat(row["end_at"])
@@ -201,12 +237,12 @@ def _payload(provider: str, row: Any) -> dict[str, Any]:
         dates = ({"date": start.date().isoformat()}, {"date": end.date().isoformat()}) if row["all_day"] else (
             {"dateTime": start.isoformat(), "timeZone": row["timezone"]}, {"dateTime": end.isoformat(), "timeZone": row["timezone"]},
         )
-        data = {"summary": row["title"], "description": row["description"], "start": dates[0], "end": dates[1], "location": row["location"]}
+        data = {"summary": row["title"], "description": exported(row), "start": dates[0], "end": dates[1], "location": row["location"]}
         if rule:
             data["recurrence"] = [rule, *_exdate_lines(exdates, bool(row["all_day"]))]
         return data
     data = {
-        "subject": row["title"], "body": {"contentType": "text", "content": row["description"]},
+        "subject": row["title"], "body": {"contentType": "text", "content": exported(row)},
         "start": {"dateTime": start.replace(tzinfo=None).isoformat(), "timeZone": "UTC"},
         "end": {"dateTime": end.replace(tzinfo=None).isoformat(), "timeZone": "UTC"},
         "isAllDay": bool(row["all_day"]), "location": {"displayName": row["location"]},
@@ -279,7 +315,7 @@ def _ical(master: Any, overrides: list[Any]) -> bytes:
         event = Event()
         event.add("uid", uid)
         event.add("summary", row["title"])
-        event.add("description", row["description"])
+        event.add("description", exported(row))
         event.add("location", row["location"])
         event.add("dtstart", local(row["start_at"]))
         event.add("dtend", local(row["end_at"]))
@@ -340,6 +376,8 @@ class CalendarSync:
                     (at.isoformat(), (at + timedelta(seconds=interval)).isoformat(), account_id),
                 )
                 conflicts = await self.db.fetchone("SELECT count(*) AS n FROM calendar_events WHERE account_id=? AND conflict!=''", (account_id,))
+                if changed:
+                    announce(self.db, {"change": "synced"})
                 return {"changed": changed, "last_sync_at": at.isoformat(), "conflicts": conflicts["n"] if conflicts else 0}
             except Exception as exc:
                 failures = int(account["failures"] or 0) + 1
@@ -401,10 +439,12 @@ class CalendarSync:
         meanwhile; only the pending flag depends on the version. Saving the id only when the version
         still matched lost it after an edit made during the request: the next sync then created the
         event a second time (or, for CalDAV, sent If-None-Match: * and met a false conflict)."""
+        # The text sent is what the provider now holds, whatever happened here meanwhile: a later
+        # read that finds it unchanged must not take the exported blocks for an edit.
         await self.db.execute(
-            "UPDATE calendar_events SET remote_id=COALESCE(?, remote_id), etag=?,"
+            "UPDATE calendar_events SET remote_id=COALESCE(?, remote_id), etag=?, synced_description=?,"
             " dirty=CASE WHEN version=? THEN '' WHEN dirty='delete' THEN 'delete' ELSE 'update' END WHERE id=?",
-            (remote_id, etag, row["version"], row["id"]),
+            (remote_id, etag, exported(row), row["version"], row["id"]),
         )
 
     async def _token(self, client: httpx.AsyncClient, account: Any) -> str:
@@ -437,22 +477,30 @@ class CalendarSync:
                 await self.db.execute("DELETE FROM calendar_events WHERE id=? AND version=? AND dirty=''", (row["id"], row["version"]))
             return None
         exdates = json.dumps(sorted(set(data.get("exdates") or [])))
-        columns = ("title", "description", "start_at", "end_at", "timezone", "all_day", "location", "recurrence", "etag")
-        values = (data["title"][:240], data["description"][:10000], data["start_at"], data["end_at"], data["timezone"], data["all_day"], data["location"][:500], data["recurrence"][:500], data["etag"])
+        remote_text = data["description"]
+        description, blocks_json = inbound_description(row, remote_text) if row is not None else (remote_text, "[]")
+        columns = ("title", "description", "start_at", "end_at", "timezone", "all_day", "location", "recurrence", "etag", "blocks_json", "synced_description")
+        values = (data["title"][:240], description[:10000], data["start_at"], data["end_at"], data["timezone"], data["all_day"], data["location"][:500], data["recurrence"][:500], data["etag"], blocks_json, remote_text)
         if row is not None:
             if all(row[key] == value for key, value in zip(columns, values, strict=True)) and row["exdates"] == exdates and row["remote_uid"] == (data.get("remote_uid") or ""):
                 return row
+            absorbed = blocks_json != row["blocks_json"]
             await self.db.execute(
-                "UPDATE calendar_events SET title=?,description=?,start_at=?,end_at=?,timezone=?,all_day=?,location=?,recurrence=?,etag=?,exdates=?,remote_uid=?,recurrence_end=?,updated_at=?,version=version+1"
-                " WHERE id=? AND version=? AND dirty=''",
+                "UPDATE calendar_events SET title=?,description=?,start_at=?,end_at=?,timezone=?,all_day=?,location=?,recurrence=?,etag=?,blocks_json=?,synced_description=?,"
+                "exdates=?,remote_uid=?,recurrence_end=?,updated_at=?,version=version+1 WHERE id=? AND version=? AND dirty=''",
                 (*values, exdates, data.get("remote_uid") or "", _series_end(data), now(), row["id"], row["version"]),
             )
+            if absorbed:
+                await self.db.execute(
+                    "INSERT INTO calendar_event_history(event_id, at, actor, action, summary) VALUES (?,?,?,?,?)",
+                    (row["id"], now(), "sync", "remote_edit", "the description was edited in the connected calendar; its text is kept as a block"),
+                )
             event_id = row["id"]
         else:
             event_id = uuid.uuid4().hex
             await self.db.execute(
-                "INSERT INTO calendar_events(id,calendar_id,account_id,remote_id,title,description,start_at,end_at,timezone,all_day,location,recurrence,etag,exdates,remote_uid,recurrence_end,dirty,updated_at)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'',?)",
+                "INSERT INTO calendar_events(id,calendar_id,account_id,remote_id,title,description,start_at,end_at,timezone,all_day,location,recurrence,etag,blocks_json,synced_description,"
+                "exdates,remote_uid,recurrence_end,dirty,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'',?)",
                 (event_id, await self._calendar_id(account_id), account_id, remote_id, *values, exdates, data.get("remote_uid") or "", _series_end(data), now()),
             )
         return await self.db.fetchone("SELECT * FROM calendar_events WHERE id=?", (event_id,))
@@ -525,7 +573,9 @@ class CalendarSync:
 
     async def _json_provider(self, client: httpx.AsyncClient, account: Any, token: str) -> int:
         provider, account_id = account["provider"], account["id"]
-        headers = {"Authorization": f"Bearer {token}", "Prefer": 'outlook.timezone="UTC"'}
+        # Bodies as text: Graph answers in HTML by default, and an exported list read back as HTML
+        # would never match what was sent, so every read would look like an edit made there.
+        headers = {"Authorization": f"Bearer {token}", "Prefer": 'outlook.timezone="UTC", outlook.body-content-type="text"'}
         base = GOOGLE + quote(account["remote_calendar_id"], safe="") + "/events" if provider == "google" else GRAPH + "calendars/" + quote(account["remote_calendar_id"], safe="") + "/events"
         if provider == "outlook" and account["remote_calendar_id"] == "primary":
             base = GRAPH + "events"
@@ -959,4 +1009,4 @@ async def sync_loop(store: CalendarStore, stopping: asyncio.Event) -> None:
             pass
 
 
-__all__ = ["CalendarSync", "CalendarSyncFailed", "backoff", "describe", "sync_due", "sync_loop"]
+__all__ = ["CalendarSync", "CalendarSyncFailed", "backoff", "describe", "exported", "inbound_description", "sync_due", "sync_loop"]
