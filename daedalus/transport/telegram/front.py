@@ -41,6 +41,7 @@ from protocore.runtime.events.types import EventType
 
 from daedalus.config import NO_MODEL_MESSAGE, NoModelConfigured, RuntimeConfig, Settings
 from daedalus.host.config_validation import ConfigConflict, patched
+from daedalus.host.depth import AUTO_MODE
 from daedalus.host.events import AppEvent, EventFilter
 from daedalus.host.prompts import DEFAULT_RULES, split_headline
 from daedalus.host.services import NO_CHAT_BOUND
@@ -586,7 +587,7 @@ class TelegramFront:
             # The chat's single session from before it held several: keep talking to that one.
             state = await self.manager.get_state(binding.session_id) if binding is not None else None
         if state is None:
-            state = await self.manager.create_session("direct")
+            state = await self.manager.create_session("direct", metadata={"mode": AUTO_MODE})
         await self.set_current_session(state.session.id)
         return state
 
@@ -951,7 +952,7 @@ class TelegramFront:
         if binding is not None:
             return await self.manager.get_state(binding.session_id)
         if message.chat.type == "private":
-            state, _ = await self.create_session_topic("direct", topic=False)
+            state, _ = await self.create_session_topic("direct", topic=False, metadata={"mode": AUTO_MODE})
             return state
         if message.is_topic_message and thread_id:
             # A topic the operator created by hand: adopt it as a new session.
@@ -959,7 +960,7 @@ class TelegramFront:
             if message.reply_to_message and message.reply_to_message.forum_topic_created:
                 title = message.reply_to_message.forum_topic_created.name
             title = title or f"topic {thread_id}"
-            state = await self.manager.create_session(title)
+            state = await self.manager.create_session(title, metadata={"mode": AUTO_MODE})
             await self.bind_topic(chat_id, thread_id, state.session.id, title)
             return state
         return None
@@ -1060,7 +1061,7 @@ class TelegramFront:
         # see there used to arrive as a message from the bot.
         if self.private_mode() and self.config.telegram.forum_chat_id:
             try:
-                state, _binding = await self.create_session_topic(title, chat_id=self.config.telegram.forum_chat_id, force_topic=True)
+                state, _binding = await self.create_session_topic(title, metadata={"mode": AUTO_MODE}, chat_id=self.config.telegram.forum_chat_id, force_topic=True)
             except (TelegramBusy, TelegramRefused) as exc:
                 if exc.session_id:
                     await self._keep_off_telegram(exc.session_id)
@@ -1069,7 +1070,7 @@ class TelegramFront:
             await message.answer(f"Created topic '{title}' (session {state.session.id}).")
             return
         if self.private_mode():
-            state, _ = await self.create_session_topic(title)
+            state, _ = await self.create_session_topic(title, metadata={"mode": AUTO_MODE})
             await self.set_current_session(state.session.id)
             await message.answer(f"New session '{title}' ({state.session.id}). You are writing to it; /sessions lists the others.")
             return
@@ -1081,7 +1082,7 @@ class TelegramFront:
             )
             return
         forum = self.config.telegram.forum_chat_id if message.chat.type == "private" else message.chat.id
-        state, binding = await self.create_session_topic(title, chat_id=forum)
+        state, binding = await self.create_session_topic(title, metadata={"mode": AUTO_MODE}, chat_id=forum)
         if message.chat.type == "private":
             await message.answer(f"Created topic '{title}' (session {state.session.id}).")
 
@@ -1627,7 +1628,7 @@ class TelegramFront:
         if not arg:
             current = state.metadata.get("mode") or "default"
             lines = [f"  {name} — {m.description or ''} (iterations {m.max_iterations or self.config.limits.max_iterations}, cap ${m.usd_per_run if m.usd_per_run is not None else self.config.limits.usd_per_run})" for name, m in modes.items()]
-            await message.answer(f"mode: {current}\navailable:\n" + "\n".join(lines) + "\nusage: /mode <name> · /mode default")
+            await message.answer(f"mode: {current}\navailable:\n" + "\n".join(lines) + f"\n  {AUTO_MODE} — each message sorted into quick, normal or deep work" + "\nusage: /mode <name> · /mode default")
             return
         try:
             chosen = await self.manager.set_mode(state.session.id, None if arg in ("default", "off", "reset") else arg)

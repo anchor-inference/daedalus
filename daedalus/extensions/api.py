@@ -130,6 +130,7 @@ from daedalus.host import capabilities, component_install, launcher_bridge
 from daedalus.host import components as component_list
 from daedalus.host.config_validation import UNKNOWN_REFERENCE_PATHS, ConfigConflict, config_revision, validate_candidate
 from daedalus.host.dependencies import DependencyPlanner
+from daedalus.host.depth import AUTO_MODE
 from daedalus.host.events import EventFilter, event_stream, streamed_types
 from daedalus.host.host_exec import BRIDGE_DOWN, HostExecBackend
 from daedalus.host.policy import sealed_root
@@ -675,7 +676,12 @@ class SessionCapBody(BaseModel):
 
 class ModeBody(BaseModel):
     mode: str | None = None
-    """A configured mode name; null or "" = default behaviour."""
+    """A configured mode name, or ``auto`` to have each message sorted; null or "" = default behaviour."""
+
+
+class DepthBody(BaseModel):
+    level: str | None = None
+    """``quick``, ``normal`` or ``long`` for the session's next message; null or "" sorts it again."""
 
 
 class YagniBody(BaseModel):
@@ -2170,6 +2176,10 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         # A session opened here is not a Telegram session. Without this, private-chat mode
         # delivers the agent's replies into the operator's direct messages.
         metadata["telegram_detached"] = True
+        if body.loop is None:
+            # A chat the operator opens sorts each message by depth until they pick a mode; a loop
+            # agent's wake-ups are not the operator's messages and keep the plain agent.
+            metadata["mode"] = AUTO_MODE
         title = body.title.strip()
         if body.autotitle:
             # The operator typed the message instead of a name. A clip stands in until the model
@@ -2373,6 +2383,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             # on its own instead of waiting for the session to be reopened.
             **manager.model_status(state),
             "mode": state.metadata.get("mode") or "",
+            "depth_next": state.metadata.get("depth_next") or "",
             "yagni": bool(state.metadata.get("yagni")),
             "usd_cap": state.metadata.get("usd_cap"),
             "brief": state.metadata.get("brief") or "",
@@ -3908,6 +3919,15 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             raise HTTPException(404, "no such session") from None
         except RuntimeError as exc:
             raise HTTPException(409, str(exc)) from exc
+
+    @api.post("/api/sessions/{session_id}/depth")
+    async def set_depth(session_id: str, body: DepthBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            return {"depth_next": await manager.set_next_depth(session_id, body.level)}
+        except KeyError:
+            raise HTTPException(404, "no such session") from None
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     @api.post("/api/sessions/{session_id}/mode")
     async def set_mode(session_id: str, body: ModeBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
