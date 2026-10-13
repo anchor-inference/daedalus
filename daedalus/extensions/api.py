@@ -704,6 +704,10 @@ class SettingsBody(BaseModel):
     scheduler: dict[str, Any] | None = None
     telegram: dict[str, Any] | None = None
     asr: dict[str, Any] | None = None
+    notifications: dict[str, Any] | None = None
+    """Where each kind of notification goes, quiet hours, the rate limits. The app saves it through
+    ``/api/notifications/preferences``; it is here as well so the agent's SettingsChange can reach it,
+    behind the operator's Apply like every section not in ``auto_apply``."""
     modes: dict[str, Any] | None = None
     webhooks: dict[str, Any] | None = None
     ops: dict[str, Any] | None = None

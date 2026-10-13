@@ -384,3 +384,70 @@ async def test_install_registers_the_tools_hooks_and_the_resolver(db: Database) 
     finally:
         for task in tasks:
             task.cancel()
+
+
+class Speech:
+    """The local speech models, as far as a settings change asks: which are downloaded."""
+
+    def __init__(self, *installed: str) -> None:
+        self.here = set(installed)
+
+    def installed(self, model_id: str) -> Any:
+        return SimpleNamespace(id=model_id) if model_id in self.here else None
+
+
+REPO = Path(__file__).resolve().parents[2]
+
+
+async def test_the_common_asks_reach_the_settings_they_name(db: Database) -> None:
+    """What the operator asks for in so many words — speech recognition in the chat with a given model,
+    another default model, quieter notifications, another language — is one SettingsChange each."""
+    from daedalus.config import ModelPresetConfig
+
+    config = RuntimeConfig()
+    config.presets["fast"] = ModelPresetConfig(provider="openrouter", model="vendor/fast")
+    config.presets["big"] = ModelPresetConfig(provider="openrouter", model="vendor/big")
+    config.model.preset = "fast"
+    app = make_app(db, config)
+    app.speech = Speech("gigaam-ru")
+    service = ext.SettingsChanges(app)
+
+    stt = await propose(service, {"asr": {"transcriber": "gigaam-ru"}}, call="c1")
+    assert stt["status"] == "pending" and [c["path"] for c in stt["changes"]] == ["asr.transcriber"]
+    await service.decide(stt["id"], "apply", via="app")
+    assert app.config.asr.transcriber == "gigaam-ru"
+
+    model = await propose(service, {"model": {"preset": "big"}}, call="c2")
+    await service.decide(model["id"], "apply", via="app")
+    assert app.config.model.preset == "big"
+
+    quiet = await propose(service, {"notifications": {"quiet_hours": "23:00-08:00"}}, call="c3")
+    assert quiet["status"] == "pending", "the agent does not silence the operator's notifications on its own"
+    await service.decide(quiet["id"], "apply", via="app")
+    assert app.config.notifications.quiet_hours == "23:00-08:00"
+
+    language = await propose(service, {"answer_language": "Russian"}, call="c4")
+    assert language["status"] == "applied" and app.config.answer_language == "Russian"
+
+
+async def test_a_speech_model_that_is_not_here_is_refused_with_the_way_to_get_it(db: Database) -> None:
+    app = make_app(db)
+    app.speech = Speech()
+    service = ext.SettingsChanges(app)
+    with pytest.raises(rules.ChangeRefused, match=r"not downloaded.*/app/settings/voice#stt\.models"):
+        await propose(service, {"asr": {"transcriber": "gigaam-ru"}})
+    with pytest.raises(rules.ChangeRefused, match="no speech recogniser.*gigaam-ru"):
+        await propose(service, {"asr": {"fallback": "whisper-huge"}})
+    assert app.config.asr.transcriber == "cloud" and app.saves == 0
+    # The endpoint needs no download, and an empty fallback is "nothing".
+    assert (await propose(service, {"asr": {"provider": "openrouter", "transcriber": "cloud", "model": "whisper-1"}}))["status"] == "pending"
+
+
+async def test_settings_get_gives_the_address_of_each_row_it_knows(db: Database) -> None:
+    app = make_app(db)
+    app.settings = SimpleNamespace(bot_repo_dir=REPO)
+    service = ext.SettingsChanges(app)
+    asr = await service.get("asr")
+    assert asr["fields"]["asr.transcriber"]["link"] == "/app/settings/voice#asr.transcriber"
+    listing = {s["name"]: s for s in (await service.get(None))["sections"]}
+    assert listing["asr"]["link"] == "/app/settings/voice" and listing["compaction"]["link"] == "/app/settings/limits"

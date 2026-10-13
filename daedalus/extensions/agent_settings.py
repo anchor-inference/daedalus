@@ -27,13 +27,18 @@ import logging
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from daedalus.config import RuntimeConfig
 from daedalus.extensions.notifications import Action, ActionConflict, ActionOutcome, ActionRefused, ActionRequest, Draft
 from daedalus.host import agent_settings as rules
 from daedalus.host.config_validation import ConfigConflict, config_revision, validate_candidate
+from daedalus.host.help_search import config_links
 from daedalus.host.notify_text import render
+from daedalus.host.setting_refs import SPEECH_MODELS
+from daedalus.speech import catalog as speech_catalog
+from daedalus.speech.service import CLOUD
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -69,6 +74,12 @@ def body_sections() -> dict[str, str]:
     return {name: docs.get(name, "") for name in SettingsBody.model_fields if name in stored}
 
 
+def _section_link(section: str, links: dict[str, str]) -> str | None:
+    """Where a configuration section is edited: the settings page of its first indexed field."""
+    found = next((link for path, link in links.items() if path == section or path.startswith(section + ".")), None)
+    return found.split("#", 1)[0] if found else None
+
+
 def masked_settings(config: Any) -> dict[str, Any]:
     """The configuration as ``GET /api/settings`` masks it, and then every credential it did not know of."""
     from daedalus.extensions.api import mask_provider_keys  # Lazy: the API module imports half the host.
@@ -88,22 +99,32 @@ class SettingsChanges:
     def sections(self) -> dict[str, str]:
         return body_sections()
 
+    def links(self) -> dict[str, str]:
+        """The address of the row that edits each field, from the settings index: the agent hands it to
+        the operator when the change is theirs to make, or when they want to see it."""
+        root = getattr(getattr(self.app, "settings", None), "bot_repo_dir", None)
+        return config_links(Path(root)) if root else {}
+
     async def get(self, section: str | None) -> dict[str, Any]:
         config = self.app.config
         sections = self.sections()
         auto = rules.auto_sections(config, sections)
         revision = config_revision(config)
+        links = self.links()
         if not section:
             return {
                 "revision": revision,
                 "sections": [
-                    {"name": name, "about": rules.section_summary(name, sections), "applies": "at once" if name in auto else "after the operator's Apply"}
+                    {
+                        "name": name, "about": rules.section_summary(name, sections), "applies": "at once" if name in auto else "after the operator's Apply",
+                        **({"link": where} if (where := _section_link(name, links)) else {}),
+                    }
                     for name in sorted(sections)
                 ],
             }
         if section not in sections:
             raise rules.ChangeRefused(f"no such settings section {section!r}; the sections are {', '.join(sorted(sections))}")
-        fields = rules.describe_section(section)
+        fields = {path: {**info, "link": links[path]} if path in links else info for path, info in rules.describe_section(section).items()}
         operator_only = sorted({path for path in fields if rules.never_reason(path) is not None} | {pattern for pattern in rules.NEVER if pattern.split(".", 1)[0] == section})
         return {
             "revision": revision,
@@ -115,6 +136,33 @@ class SettingsChanges:
         }
 
     # -- proposing -------------------------------------------------------------------------
+
+    def _speech_problems(self, diff: list[rules.Change]) -> list[str]:
+        """Why a chosen speech recogniser could not work, said before it is saved.
+
+        The configuration takes any string for ``asr.transcriber``: the settings screen only ever
+        offers the endpoint and the installed models, so nothing checked. The agent is not shown that
+        list, and asked to "turn on speech recognition with GigaAM" it saved the id of a model that was
+        never downloaded — every voice note then failed while the screen said the setting was made.
+        """
+        speech = getattr(self.app, "speech", None)
+        problems: list[str] = []
+        for change in diff:
+            if change.path not in ("asr.transcriber", "asr.fallback") or change.new in (None, "", CLOUD):
+                continue
+            try:
+                model = speech_catalog.get(str(change.new))
+            except KeyError:
+                choices = ", ".join(model.id for model in speech_catalog.MODELS)
+                problems.append(f"{change.path}: {change.new!r} is no speech recogniser; it is 'cloud' (the endpoint in [asr]) or a local model id: {choices}")
+                continue
+            if speech is not None and speech.installed(model.id) is None:
+                problems.append(
+                    f"{change.path}: the local model {model.id!r} is not downloaded on this machine, so nothing could hear with it. "
+                    f"The operator downloads it under Settings → Voice & speech ({SPEECH_MODELS.link()}); "
+                    "give them that link, and make this change once it is installed"
+                )
+        return problems
 
     async def change(self, *, session_id: str, tool_call_id: str, changes: Any, reason: str) -> dict[str, Any]:
         """Validate a change and apply it, or post it for the operator. Raises :class:`rules.ChangeRefused`."""
@@ -144,6 +192,9 @@ class SettingsChanges:
             diff = rules.diff(config, candidate, {c.path: c.apply_at for c in report.changes}, auto)
             if not diff:
                 raise rules.ChangeRefused("nothing would change: the settings already say that")
+            unusable = self._speech_problems(diff)
+            if unusable:
+                raise rules.ChangeRefused("; ".join(unusable) + ". Nothing was changed.")
             refused = [f"{c.path} ({rules.never_reason(c.path)})" for c in diff if c.kind == "never"]
             if refused:
                 raise rules.ChangeRefused(
