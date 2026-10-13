@@ -165,6 +165,9 @@ function upload<T>(path: string, form: FormData, onProgress?: (fraction: number)
   });
 }
 
+/** The auto mode's sort of one message: its level, the mode and effort that run got, and who decided. */
+export type TurnDepth = { level: "quick" | "normal" | "long"; mode: string; effort: string; source: "model" | "heuristic" | "override"; ms: number };
+
 export const api = {
   get: <T>(path: string) => call<T>("GET", path),
   getText: (path: string) => call<string>("GET", path, undefined, "text"),
@@ -820,6 +823,8 @@ export type MessageView = {
   outcome?: RunOutcome | null;
   /** The YAGNI switch this turn told the model about; the note itself is never shown. */
   yagni?: "on" | "off" | null;
+  /** The level the auto mode ran this message at; absent on a session with a fixed mode. */
+  depth?: TurnDepth | null;
   /** How an operator's message reached the model: placed into a turn under way (`steer`), opening the
    *  turn after the one it was written during (`drained`), or after it (`follow_up`). */
   delivery?: "steer" | "drained" | "follow_up" | null;
@@ -882,6 +887,8 @@ export type SessionDetail = {
   fallback?: ModelFallback | null;
   messages: MessageView[];
   mode?: string;
+  /** The level the operator chose from a turn's chip for the next message; empty sorts it. */
+  depth_next?: string;
   /** YAGNI mode: the host tells the model in the next turn, never in the system prompt. */
   yagni?: boolean;
   usd_cap?: number | null;
@@ -1499,6 +1506,8 @@ export type Settings = {
   action_rules?: ActionRulesSettings;
   /** The rail, its More menu and the phone drawer (navconfig.ts reads it). Missing on an older host. */
   navigation?: NavConfig;
+  /** The helpers around the operator's messages; absent from a host older than them. */
+  assist?: { predict: boolean; predict_preset?: string; predict_usd_per_day?: number; depth_preset?: string };
   telegram: {
     mode: "topics" | "private" | null;
     forum_chat_id: number;

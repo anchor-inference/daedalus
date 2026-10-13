@@ -89,7 +89,7 @@
 }
 
 /* The field owns the boundary; its toolbar reads as one row rather than separate boxed inputs. */
-.composer-box { padding:var(--space-3); gap:var(--space-2); border-radius:var(--radius-lg); }
+.composer-box { position:relative; padding:var(--space-3); gap:var(--space-2); border-radius:var(--radius-lg); }
 .composer-box textarea { padding:var(--space-1); min-height:40px; }
 .composer-row { gap:var(--space-2); }
 .composer-row > .iconbtn.plus { border:0; border-radius:var(--radius-sm); background:transparent; }

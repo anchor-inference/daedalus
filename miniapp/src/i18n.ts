@@ -7470,3 +7470,34 @@ Object.assign(DICT, {
   "cal.type.delete.title": { en: "Delete the type {name}?", ru: "Удалить тип «{name}»?" },
   "cal.type.delete.body": { en: "Its events become ordinary events and keep their fields and blocks.", ru: "Его события станут обычными и сохранят поля и блоки." },
 });
+
+// The auto mode: the level each message ran at, on its turn, and the correction for the next one.
+Object.assign(DICT, {
+  "composer.mode.name.auto": { en: "Auto", ru: "Авто" },
+  "composer.mode.hint.auto": { en: "Each message is sorted into quick, normal or deep work and run at that level", ru: "Каждое сообщение оценивается как быстрое, обычное или глубокое и выполняется на этом уровне" },
+  "add.effort.auto": { en: "auto", ru: "авто" },
+  "turn.depth.quick": { en: "Quick", ru: "Быстро" },
+  "turn.depth.normal": { en: "Normal", ru: "Обычно" },
+  "turn.depth.long": { en: "Deep", ru: "Глубоко" },
+  "turn.depth.quick.hint": { en: "Short answer, few tool calls, low effort", ru: "Короткий ответ, мало вызовов, низкое усилие" },
+  "turn.depth.normal.hint": { en: "The agent as configured, medium effort", ru: "Агент как настроен, среднее усилие" },
+  "turn.depth.long.hint": { en: "Long autonomous work, high effort", ru: "Долгая самостоятельная работа, высокое усилие" },
+  "turn.depth.source.model": { en: "the model", ru: "моделью" },
+  "turn.depth.source.heuristic": { en: "the message's words", ru: "по словам сообщения" },
+  "turn.depth.source.override": { en: "you", ru: "вами" },
+  "turn.depth.title": { en: "Ran as {level}, chosen by {how}. Click to set the level of the next message", ru: "Выполнено как «{level}», выбрано {how}. Нажмите, чтобы задать уровень следующего сообщения" },
+  "turn.depth.menu": { en: "Next message runs as", ru: "Следующее сообщение выполнить как" },
+  "turn.depth.next": { en: "The next message runs as {level}", ru: "Следующее сообщение выполнится как «{level}»" },
+  "usage.purpose.depth": { en: "depth sort", ru: "оценка глубины" },
+});
+
+// The guessed next message in the empty composer, and its switch in Settings → Chat.
+Object.assign(DICT, {
+  "composer.suggest.label": { en: "Suggested next message: {text}. Press Tab to take it", ru: "Предложенное сообщение: {text}. Нажмите Tab, чтобы взять его" },
+  "composer.suggest.accept": { en: "Take the suggested message (Tab)", ru: "Взять предложенное сообщение (Tab)" },
+  "composer.suggest.use": { en: "Use", ru: "Взять" },
+  "settings.chat.app": { en: "In the app", ru: "В приложении" },
+  "settings.chat.predict": { en: "Suggest the next message", ru: "Подсказывать следующее сообщение" },
+  "settings.chat.predict.sub": { en: "After an answer, the empty composer offers what you will likely write next. Tab takes it; nothing is sent by itself. A small model writes it, within a daily allowance shown in Usage", ru: "После ответа пустое поле предлагает, что вы, вероятно, напишете дальше. Tab принимает; само ничего не отправляется. Пишет небольшая модель, в пределах дневного лимита, видного в «Расходе»" },
+  "usage.purpose.next_message": { en: "next message", ru: "следующее сообщение" },
+});

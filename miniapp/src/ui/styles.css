@@ -317,6 +317,11 @@ button.more-item { border: 0; font-family: inherit; cursor: pointer; }
 .msg.user p + p { margin-top:6px; }
 .msg-origin { display:block; font-size:var(--fs-11); color:var(--fg-3); margin-bottom:2px; }
 .msg-origin.msg-yagni { display:flex; align-items:center; gap:var(--space-1); color:var(--accent); }
+/* The auto mode's level on the message: a word, quiet like the other origins, that opens the correction. */
+.msg-origin.msg-depth { display:inline-flex; align-items:center; background:none; border:0; padding:0; font:inherit; font-size:var(--fs-11); cursor:pointer; color:var(--fg-3); }
+.msg-origin.msg-depth:hover, .msg-origin.msg-depth[aria-expanded="true"] { color:var(--accent); }
+.msg-origin.msg-depth.long { color:var(--accent); }
+.msg-origin.msg-depth + .msg-text { margin-top:2px; }
 
 .thinking-head { align-self:flex-start; display:flex; align-items:center; gap:8px; max-width:100%; min-width:0; background:none; border:0; border-radius:var(--radius-xs); color:var(--fg-2); font-size:var(--fs-14); min-height:28px; padding:2px 0; cursor:pointer; text-align:left; }
 .thinking-head .worked, .thinking-head .steps { white-space:nowrap; flex:none; }
@@ -4943,3 +4948,10 @@ body:has(.context-menu) .rail-tip { visibility: hidden; }
 .settings-desktop-wayland { margin: var(--space-2) 0; }
 .settings-desktop-commands { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-1); }
 .settings-desktop-commands code { white-space: nowrap; }
+
+/* The guessed next message is the empty field's placeholder, set apart from the usual hint so it
+   reads as an offer rather than as an instruction; the key that takes it sits in the field's corner. */
+.composer-box textarea.ghost::placeholder { color:var(--fg-3); font-style:italic; opacity:1; }
+.composer-ghost-accept { position:absolute; top:var(--space-2); right:var(--space-2); display:inline-flex; align-items:center; gap:4px; padding:1px 6px; border:1px solid var(--line); border-radius:var(--radius-xs); background:var(--surface-1); color:var(--fg-3); font-size:var(--fs-11); cursor:pointer; }
+.composer-ghost-accept:hover { color:var(--accent); border-color:var(--accent); }
+.composer-ghost-accept kbd { font:inherit; }

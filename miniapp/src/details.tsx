@@ -18,6 +18,7 @@ import { plural, t } from "./i18n";
 import { SessionToolGroups } from "./toolgroupsview";
 import { HostMark } from "./runon";
 import { DiskUsage } from "./diskusage";
+import { AUTO_MODE, modeName } from "./modeselect";
 
 export type DetailsActions = {
   rename: (title: string) => void;
@@ -82,8 +83,8 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, modes,
         <label className="dt-control">
           <span className="dt-control-label">{t("session.mode")}</span>
           <select className="field grow" value={detail.mode || "default"} onChange={(e) => on.setMode(e.target.value)}>
-            {["default", ...modes].map((m) => (
-              <option key={m} value={m}>{m}</option>
+            {["default", AUTO_MODE, ...modes.filter((m) => m !== AUTO_MODE)].map((m) => (
+              <option key={m} value={m}>{m === "default" ? m : modeName(m)}</option>
             ))}
           </select>
         </label>

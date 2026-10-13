@@ -662,6 +662,13 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     if method.upper() == "POST" and len(parts) == 5 and parts[2] == "sessions" and parts[4] in ("mode", "yagni"):
         # The composer's mode chip: a harness that reads the switch back answers these itself.
         return 200, "application/json", "{}"
+    if method.upper() == "GET" and len(parts) == 5 and parts[2] == "sessions" and parts[4] == "suggestion":
+        # The guessed next message after an answer settles: none here; check_assist.py offers one.
+        return 200, "application/json", json.dumps({"text": "", "skipped": "off"})
+    if method.upper() == "POST" and len(parts) == 5 and parts[2] == "sessions" and parts[4] == "depth":
+        # The correction on a turn's auto-mode chip: the level is taken for the next message.
+        level = body.get("level") if isinstance(body, dict) else ""
+        return 200, "application/json", json.dumps({"depth_next": level or ""})
     if method.upper() == "GET" and len(parts) == 7 and parts[2] == "sessions" and parts[4:6] == ["policy", "similar"]:
         # The approval dock asks what "Allow similar" would grant; nothing a harness did not refuse has a family.
         return 200, "application/json", json.dumps({"similar": None})

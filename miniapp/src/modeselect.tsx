@@ -11,6 +11,9 @@ import { DICT, t } from "./i18n";
 
 export type ModeInfo = { name: string; description: string };
 
+/** The host's own mode that sorts each message into quick, normal or deep work; never one of the configured ones. */
+export const AUTO_MODE = "auto";
+
 export type ModeSelectProps = {
   /** The session's mode; empty is the plain agent. */
   mode: string;
@@ -59,7 +62,7 @@ export function ModeSelect({ mode, modes, yagni, onChooseMode, onYagni, sheet }:
   const list = (
     <div className="mode-list">
       <div className="menu-heading sub">{t("session.mode")}</div>
-      {[null, ...modes].map((m) => {
+      {[{ name:AUTO_MODE, description:"" }, null, ...modes.filter((m) => m.name !== AUTO_MODE)].map((m) => {
         const name = m?.name ?? "";
         const current = name === mode;
         return (

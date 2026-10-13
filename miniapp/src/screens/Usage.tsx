@@ -29,7 +29,9 @@ type UsageData = { daily: Daily[]; recent: Recent[]; sessions: BySession[]; subs
 type Balance = { balances: Record<string, number | null>; thresholds: number[] };
 
 const SUB_LABEL: Record<string, string> = { codex: "Codex · ChatGPT", claude: "Claude", opencode: "OpenCode Go", grok: "SuperGrok" };
-const PURPOSES = ["stream", "structured", "text"];
+// The call kinds of a run, then the helpers around the operator's messages, which the host books
+// under their own names so their cost can be read apart.
+export const PURPOSES = ["stream", "structured", "text", "depth", "next_message"];
 const purposeWord = (p: string) => (PURPOSES.includes(p) ? t(`usage.purpose.${p}`) : p);
 
 function level(used: number): string {
