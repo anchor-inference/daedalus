@@ -303,7 +303,7 @@ function LiveMeta({ s }: { s: SessionSummary }) {
   return <span className="ph-ell">{words}</span>;
 }
 
-type Chosen = { preset: string } | { provider: string; model: string } | { model: string };
+type Chosen = { preset: string } | { model: string };
 
 /** The model and effort of the chat about to start: held above the composer because a phone picks
  *  the model from the page's title, a desktop from the composer's own control, and both open one list. */
@@ -322,7 +322,7 @@ function useStartModel() {
     return item ? item.label || `${item.provider}/${item.model}` : id;
   };
   const label = chosen
-    ? "preset" in chosen ? labelOf(chosen.preset) : "provider" in chosen ? `${chosen.provider}/${chosen.model}` : chosen.model
+    ? "preset" in chosen ? labelOf(chosen.preset) : chosen.model
     : defaultId ? labelOf(defaultId) : t("newagent.model.default");
   // A model picked outside the presets keeps the thinking the session starts with, the default's.
   const presetId = chosen && "preset" in chosen ? chosen.preset : defaultId;
@@ -330,7 +330,6 @@ function useStartModel() {
   function choose(choice: ModelChoice) {
     if ("clear" in choice) setChosen(null);
     else if ("preset" in choice) setChosen({ preset: choice.preset });
-    else if ("provider" in choice) setChosen({ provider: choice.provider, model: choice.model });
     else setChosen({ model: choice.model });
   }
   return { chosen, label, effort, setEffort, shownEffort, choose, open, setOpen };
@@ -389,7 +388,7 @@ function StartComposer({ phone, project, toast, model, run }: { phone: boolean; 
       });
       // The model and the effort in one change, before the message: the first turn is the one
       // that has to think the way the operator asked.
-      const model = chosen && !("preset" in chosen) ? ("provider" in chosen ? { provider: chosen.provider, model: chosen.model } : { model: chosen.model }) : null;
+      const model = chosen && !("preset" in chosen) ? { model: chosen.model } : null;
       if (model || effort) {
         await api.post(`/api/sessions/${created.id}/model`, { ...model, ...(effort ? effortBody(effort) : {}) });
       }

@@ -29,8 +29,10 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, expect_app  # noqa: E402
-from screenshots import FRESH, SETTINGS, stub  # noqa: E402  the same invented installation the pictures are taken of
+from api_stub import DEFAULT_APP, expect_app, reveal_composer  # noqa: E402
+
+# The same invented installation the pictures are taken of.
+from screenshots import FRESH, S1, SETTINGS, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -79,6 +81,41 @@ def settings_tab(browser, failures: list[str]) -> None:  # type: ignore[no-untyp
     expected = ("/api/providers/opencode_zen", {"kind": "opencode", "name": "OpenCode Zen", "base_url": "http://keyproxy:3200/opencode_zen", "billing": "metered"})
     if added != [expected, expected]:
         failures.append(f"Settings did not add Zen on its route with its billing: {added}")
+
+
+def from_composer(browser, failures: list[str]) -> None:  # type: ignore[no-untyped-def]
+    """The composer's model picker has no field to type a model into: "Add model" opens the add sheet."""
+    for width in (1440, 390):
+        context = browser.new_context(viewport={"width": width, "height": 900})
+        page = context.new_page()
+        page.route("**/api/**", stub)
+        page.goto(f"{BASE}/agents/{S1}?token=t&lang=en")
+        page.wait_for_selector(".composer .model-select", state="attached", timeout=15000)
+        reveal_composer(page)
+        page.locator(".composer .model-select").first.click()
+        page.wait_for_selector(".model-list", timeout=5000)
+        if page.locator(".model-list input:not(.model-search)").count():
+            failures.append(f"{width}: the model picker still has a field to type a model into")
+        add = page.locator(".model-list .model-add")
+        if add.count() != 1 or "Add model" not in add.inner_text():
+            failures.append(f"{width}: the model picker has no Add model row")
+            context.close()
+            continue
+        add.click()
+        try:
+            page.wait_for_selector(".addmodel", timeout=10000)
+        except Exception:  # noqa: BLE001 - reported as a failure below
+            pass
+        if "/settings/models" not in page.url or "add=1" not in page.url or page.locator(".addmodel").count() == 0:
+            failures.append(f"{width}: Add model went to {page.url} without the add sheet open")
+        elif page.locator(".model-list").count():
+            failures.append(f"{width}: the picker stayed open over the add sheet")
+        else:
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(300)
+            if "add=1" in page.url:
+                failures.append(f"{width}: closing the add sheet left add=1 in the address: {page.url}")
+        context.close()
 
 
 def run() -> int:
@@ -153,6 +190,7 @@ def run() -> int:
         context.close()
         stub.fresh = False  # type: ignore[attr-defined]
         settings_tab(browser, failures)
+        from_composer(browser, failures)
         browser.close()
 
     if not sent:

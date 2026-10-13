@@ -4,22 +4,7 @@
 (function () {
   'use strict';
 
-  var STEPS = ['welcome', 'runs', 'model', 'limit', 'telegram', 'advanced', 'summary', 'start'];
-  var PROVIDERS = [
-    { id: 'deepseek', name: 'DeepSeek', prefix: 'sk-' },
-    { id: 'openrouter', name: 'OpenRouter', prefix: 'sk-or-' },
-    { id: 'opencode', name: 'OpenCode', prefix: '' },
-    { id: 'openai', name: 'OpenAI', prefix: 'sk-' },
-    { id: 'anthropic', name: 'Anthropic', prefix: 'sk-ant-' },
-    // Subscription plans are providers of their own: the plan's key only works on its own endpoint.
-    // No prefix is checked where the vendor's key format is not fixed.
-    { id: 'zai', name: 'Z.AI', prefix: '' },
-    { id: 'zai_coding', name: 'Z.AI Coding', prefix: '' },
-    { id: 'minimax', name: 'MiniMax', prefix: '' },
-    { id: 'minimax_plan', name: 'MiniMax Plan', prefix: '' },
-    { id: 'moonshot', name: 'Moonshot', prefix: 'sk-' },
-    { id: 'kimi_coding', name: 'Kimi Code', prefix: '' }
-  ];
+  var STEPS = ['welcome', 'runs', 'model', 'limit', 'telegram', 'speech', 'advanced', 'summary', 'start'];
   var CLIS = [
     { id: 'codex', name: 'Codex' },
     { id: 'claude', name: 'Claude Code' },
@@ -35,6 +20,10 @@
   }
   var WORDS = readJSON('setup-words') || { en: {}, ru: {} };
   var BOOT = readJSON('setup-boot') || {};
+  // The keys the model step offers come from the launcher's catalogue (desktop/setup_page.go), each
+  // marked as a balance billed per token or as a subscription plan's key, which is how the step
+  // groups them. The fallback is only for a page opened without its boot state.
+  var PROVIDERS = BOOT.providers && BOOT.providers.length ? BOOT.providers : [{ id: 'deepseek', name: 'DeepSeek API', prefix: 'sk-', plan: false }];
   var CSRF = (document.querySelector('meta[name=csrf]') || {}).content || '';
 
   var ICONS = {
@@ -69,7 +58,8 @@
 
   var params = new URLSearchParams(location.search);
   var navLang = (navigator.language || 'en').toLowerCase().indexOf('ru') === 0 ? 'ru' : 'en';
-  var B = BOOT, BA = BOOT.adv || {}, BL = BOOT.local || {}, BF = BOOT.free || {}, BT = BOOT.tg || {};
+  var B = BOOT, BA = BOOT.adv || {}, BL = BOOT.local || {}, BF = BOOT.free || {}, BT = BOOT.tg || {}, BS = BOOT.speech || {};
+  var SPEECH = BS.models || [];
   var S = {
     lang: B.lang === 'ru' || B.lang === 'en' ? B.lang : navLang,
     mode: B.mode === 'docker' ? 'docker' : 'native',
@@ -86,7 +76,10 @@
     free: { provider: BF.provider || 'kilo', model: BF.model || '', key: '', test: BF.model ? 'kept' : null, error: '', catalog: [], loading: false },
     limit: B.limit || '20',
     tg: { token: '', owner: BT.owner || '', apiid: BT.apiid || '', apihash: '', more: !!(BT.apiid || (B.kept && B.kept['tg.apihash'])), skip: false },
-    adv: { open: false, data: BA.data || '', portsAuto: BA.portsAuto !== false, port: BA.port || '8765', login: !!BA.login, browser: !!BA.browser, voice: BA.voice || 'off' },
+    adv: { open: false, data: BA.data || '', portsAuto: BA.portsAuto !== false, port: BA.port || '8765', login: !!BA.login, browser: !!BA.browser },
+    // speech: off, cloud, or a local model's id; all: the whole catalogue shown rather than the models
+    // for the wizard's language.
+    speech: { choice: BS.choice || 'off', all: false },
     reveal: {},
     launch: null,
     returnTo: null
@@ -201,11 +194,20 @@
       ], { cls: 'tabs', label: t('model.title') });
       var body = '';
       if (S.kind === 'cloud') {
-        var p = PROVIDERS.filter(function (x) { return x.id === S.provider; })[0];
-        body = '<div class="provs st" role="radiogroup" aria-label="Provider">' + PROVIDERS.map(function (x) {
-          return '<label class="prov" data-k="prov-' + x.id + '"><input type="radio" name="provider" value="' + x.id + '" data-bind="provider" data-refresh="panel" data-k="prov-' + x.id + '-in"' + (S.provider === x.id ? ' checked' : '') + '>' +
-            '<span class="prov-mark" aria-hidden="true">' + x.name.charAt(0) + '</span><span class="prov-name">' + x.name + '</span></label>';
-        }).join('') + '</div>' +
+        var p = provider();
+        // Two groups, because the two kinds of key are bought differently and a plan's key works
+        // only on that plan's endpoint: pasting one into its vendor's per-token tile fails, and the
+        // other way round, with nothing on the screen to say why.
+        var group = function (plan) {
+          var name = plan ? 'model.plan' : 'model.payg';
+          return '<div class="prov-group st" role="radiogroup" aria-labelledby="g-' + name + '" aria-describedby="d-' + name + '">' +
+            '<div class="prov-head"><span class="prov-title" id="g-' + name + '">' + esc(t(name)) + '</span><span class="prov-cap" id="d-' + name + '">' + esc(t(name + '.sub')) + '</span></div>' +
+            '<div class="provs">' + PROVIDERS.filter(function (x) { return !!x.plan === plan; }).map(function (x) {
+              return '<label class="prov" data-k="prov-' + x.id + '" title="' + esc(x.name) + '"><input type="radio" name="provider" value="' + esc(x.id) + '" data-bind="provider" data-refresh="panel" data-k="prov-' + x.id + '-in"' + (S.provider === x.id ? ' checked' : '') + '>' +
+                '<span class="prov-mark" aria-hidden="true"></span><span class="prov-name">' + esc(x.name) + '</span></label>';
+            }).join('') + '</div></div>';
+        };
+        body = group(false) + group(true) +
           field({ bind: 'keys.' + p.id, label: p.name + ' · ' + t('model.key'), secret: true, ph: p.prefix ? p.prefix + '…' : t('model.key.ph'), tip: 'tip.key' });
       } else if (S.kind === 'cli') {
         body = '<div class="clis st" role="radiogroup" aria-label="' + esc(t('model.cli')) + '">' + CLIS.map(function (c) {
@@ -267,11 +269,51 @@
         '<p class="err center" id="e-limit" data-err="limit" aria-live="polite"></p></div>';
     },
     telegram: function () {
-      return head('telegram', { tag: t('optional'), tip: 'tip.tg' }) + '<div class="s-body">' +
+      // The how-to sits above the fields it fills: the two answers come from two bots, and the
+      // field labels alone sent people looking for both.
+      var how = '<ol class="howto st" aria-label="' + esc(t('tg.how')) + '">' +
+        '<li>' + linked('tg.how.1', 'https://t.me/BotFather', '@BotFather') + '</li>' +
+        '<li>' + esc(t('tg.how.2')) + '</li>' +
+        '<li>' + linked('tg.how.3', 'https://t.me/userinfobot', '@userinfobot') + '</li>' +
+        '<li>' + esc(t('tg.how.4')) + '</li></ol>';
+      return head('telegram', { tag: t('optional'), tip: 'tip.tg' }) + '<div class="s-body">' + how +
         '<div class="grid2">' + field({ bind: 'tg.token', label: t('tg.token'), secret: true, ph: '123456:ABC…', badge: '@BotFather', icon: 'send' }) +
         field({ bind: 'tg.owner', label: t('tg.owner'), mode: 'numeric', ph: '12345678', badge: '@userinfobot' }) + '</div>' +
         '<button type="button" class="disclose st" data-act="tgmore" data-k="tgmore" aria-expanded="' + S.tg.more + '">' + icon('chevron') + '<span>' + esc(t('tg.more')) + '</span><span class="f-opt">' + esc(t('optional')) + '</span></button>' +
-        (S.tg.more ? '<div class="grid2 more">' + field({ bind: 'tg.apiid', label: t('tg.apiid'), mode: 'numeric' }) + field({ bind: 'tg.apihash', label: t('tg.apihash'), secret: true }) + '</div>' : '') +
+        (S.tg.more ? '<p class="howto-note more">' + linked('tg.how.api', 'https://my.telegram.org/apps', 'my.telegram.org') + '</p>' +
+          '<div class="grid2 more">' + field({ bind: 'tg.apiid', label: t('tg.apiid'), mode: 'numeric' }) + field({ bind: 'tg.apihash', label: t('tg.apihash'), secret: true }) + '</div>' : '') +
+        '</div>';
+    },
+    speech: function () {
+      var choice = S.speech.choice;
+      function opt(value, name, where, pro, extra) {
+        var on = choice === value;
+        return '<label class="sp-opt' + (on ? ' on' : '') + '" data-k="speech-' + value + '"><input type="radio" name="speech" value="' + esc(value) + '" data-bind="speech.choice" data-refresh="panel" data-k="speech-' + value + '-in"' + (on ? ' checked' : '') + '>' +
+          '<span class="sp-dot" aria-hidden="true"></span><span class="sp-text"><span class="sp-name">' + esc(name) + (where ? ' <span class="sp-where">' + esc(where) + '</span>' : '') + '</span>' +
+          '<span class="sp-pro">' + esc(pro) + '</span>' + (extra || '') + '</span></label>';
+      }
+      function bar(label, value) {
+        return '<span class="sp-bar"><span>' + esc(label) + '</span><i style="--v:' + Math.max(3, Math.min(100, value)) / 100 + '"></i></span>';
+      }
+      var shown = speechModels(S.speech.all);
+      var cloud = opt('cloud', t('speech.cloud'), t('speech.cloud.where'), t('speech.cloud.pro'));
+      // The key field appears under the choice that needs it while no key is stored. It is the same
+      // field as the model step's OpenAI tile, so a key typed there shows here already filled in.
+      var key = choice === 'cloud' && !S.kept['keys.openai'] ?
+        field({ bind: 'keys.openai', label: 'OpenAI API · ' + t('model.key'), secret: true, ph: 'sk-…' }) : '';
+      var local = shown.map(function (m) {
+        var rec = m.recommended_for.indexOf(S.lang) >= 0;
+        var facts = '<span class="sp-facts">' + esc(speechLanguages(m)) + ' · ' + esc(t('speech.facts', { size: modelSize(m.size_bytes), mem: m.memory_mb })) + '</span>' +
+          '<span class="sp-bars">' + bar(t('speech.quality'), m.accuracy) + bar(t('speech.speed'), m.speed) + '</span>';
+        return opt(m.id, m.label, rec ? t('speech.rec') : '', t('speech.m.' + m.id), facts);
+      }).join('');
+      var more = SPEECH.length > speechModels(false).length ?
+        '<button type="button" class="disclose st" data-act="speech-all" data-k="speech-all" aria-expanded="' + S.speech.all + '">' + icon('chevron') + '<span>' + esc(S.speech.all ? t('speech.fewer') : t('speech.all', { n: SPEECH.length })) + '</span></button>' : '';
+      return head('speech', { tag: t('optional') }) + '<div class="s-body">' +
+        '<div class="sp-list st" role="radiogroup" aria-label="' + esc(t('speech.title')) + '">' + cloud + '</div>' + key +
+        '<div class="sp-head st"><span class="prov-title">' + esc(t('speech.local')) + '</span><span class="prov-cap">' + esc(t('speech.local.sub')) + '</span></div>' +
+        '<div class="sp-list st" role="radiogroup" aria-label="' + esc(t('speech.local')) + '">' + local + '</div>' + more +
+        '<p class="howto-note st">' + esc(t('speech.later')) + '</p>' +
         '</div>';
     },
     advanced: function () {
@@ -284,8 +326,7 @@
           '<li>' + icon('plug') + '<span>' + esc(t('adv.ports')) + ' · ' + esc(A.portsAuto ? t('auto') + ' · ' + A.port : A.port) + '</span></li>' +
           '<li>' + icon('globe') + '<span>' + (S.lang === 'ru' ? 'Русский' : 'English') + '</span></li>' +
           '<li>' + icon('power') + '<span>' + esc(t('adv.login')) + ' · ' + esc(A.login ? t('on') : t('off')) + '</span></li>' +
-          '<li>' + icon('browser') + '<span>' + esc(t('adv.browser')) + ' · ' + esc(A.browser ? t('on') : t('off')) + '</span></li>' +
-          '<li>' + icon('mic') + '<span>' + esc(t('adv.voice')) + ' · ' + esc(t('voice.' + voiceValue())) + '</span></li></ul>';
+          '<li>' + icon('browser') + '<span>' + esc(t('adv.browser')) + ' · ' + esc(A.browser ? t('on') : t('off')) + '</span></li></ul>';
       } else {
         out += '<div class="adv">' +
           // The folder is where this launcher was started on, and moving it is the import
@@ -300,8 +341,6 @@
           '<div class="row st">' + icon('globe', 'row-ic') + '<span class="row-label">' + esc(t('adv.lang')) + '</span>' + seg('lang', [{ value: 'en', label: 'EN' }, { value: 'ru', label: 'RU' }], { cls: 'small', label: t('adv.lang') }) + '</div>' +
           toggle('adv.login', t('adv.login'), 'tip.login', 'power') +
           toggle('adv.browser', t('adv.browser'), 'tip.browser', 'browser') +
-          '<div class="row st">' + icon('mic', 'row-ic') + '<span class="row-label">' + esc(t('adv.voice')) + info('tip.voice') + '</span>' + seg('adv.voice', voiceOptions(), { cls: 'small', label: t('adv.voice') }) + '</div>' +
-          '<p class="err right" id="e-adv.voice" data-err="adv.voice" aria-live="polite"></p>' +
           '</div>';
       }
       return out + '</div>';
@@ -316,6 +355,7 @@
         row('model', S.kind === 'cloud' ? 'key' : S.kind === 'cli' ? 'term' : 'server', modelSummary()) +
         row('limit', 'coin', esc(t('sum.perday', { v: S.limit }))) +
         row('telegram', 'send', S.tg.skip || !(S.tg.token || S.kept['tg.token']) ? '<em>' + esc(t('sum.skipped')) + '</em>' : 'bot ' + (S.tg.token ? mask(S.tg.token) : esc(S.kept['tg.token'])) + ' · id ' + esc(S.tg.owner)) +
+        row('speech', 'mic', speechSummary()) +
         row('advanced', 'sliders', advChanged() ? esc(t('sum.changed', { n: advChanged() })) : '<em>' + esc(t('sum.defaults')) + '</em>') +
         '</ul></div>';
     },
@@ -338,18 +378,46 @@
     }
   };
 
-  // Local speech is a piece of the native runtime; a container has no such piece to install.
-  function voiceOptions() {
-    var out = [{ value: 'off', label: t('voice.off') }];
-    if (S.mode !== 'docker') out.push({ value: 'local', label: t('voice.local') });
-    out.push({ value: 'cloud', label: t('voice.cloud') });
-    return out;
+  // A link inside a translated line: the line is escaped and {link} becomes the anchor. A new tab
+  // in a browser; in the desktop window the shell hands every outside address to the system browser.
+  function linked(key, href, label) {
+    return esc(t(key)).split('{link}').join('<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + esc(label) + ' ↗</a>');
   }
-  function voiceValue() { return S.mode === 'docker' && S.adv.voice === 'local' ? 'off' : S.adv.voice; }
+  // The speech models worth showing first: the ones that hear the wizard's language, recommended
+  // first. The rest of the catalogue is a click away. Nothing is sorted by streaming: these models
+  // turn a finished voice note into text, where hearing words as they are said buys nothing.
+  function speechModels(all) {
+    var hears = SPEECH.filter(function (m) { return all || m.languages.indexOf(S.lang) >= 0 || m.id === S.speech.choice; });
+    var rec = function (m) { return m.recommended_for.indexOf(S.lang) >= 0 ? 0 : 1; };
+    return hears.map(function (m, i) { return { m: m, i: i }; }).sort(function (a, b) { return rec(a.m) - rec(b.m) || a.i - b.i; }).map(function (x) { return x.m; });
+  }
+  function speechLanguages(m) {
+    if (m.language_count > 1) return t('speech.langs', { n: m.language_count });
+    var code = m.languages[0] || '';
+    return WORDS.en['speech.lang.' + code] ? t('speech.lang.' + code) : code;
+  }
+  function modelSize(bytes) {
+    var mb = bytes / 1e6;
+    return mb >= 1000 ? t('speech.gb', { n: (mb / 1000).toFixed(1) }) : t('speech.mb', { n: String(Math.round(mb)) });
+  }
+  function speechModel(id) { return SPEECH.filter(function (m) { return m.id === id; })[0]; }
+  function speechSummary() {
+    var c = S.speech.choice;
+    if (c === 'cloud') return esc(t('speech.cloud'));
+    var m = speechModel(c);
+    return m ? esc(m.label) : '<em>' + esc(t('sum.skipped')) + '</em>';
+  }
+  // The answer as the launcher's form takes it: off, cloud, or local with the model.
+  function voiceValue() { var c = S.speech.choice; return c === 'cloud' ? 'cloud' : speechModel(c) ? 'local' : 'off'; }
+  // The chosen key's provider; one the catalogue no longer has falls back to its first entry
+  // rather than leaving the step with nothing to draw.
+  function provider() {
+    return PROVIDERS.filter(function (x) { return x.id === S.provider; })[0] || PROVIDERS[0];
+  }
   function numWidth(v) { return (Math.max(1, String(v).length) + .1).toFixed(1); }
   function modelSummary() {
     if (S.kind === 'cloud') {
-      var p = PROVIDERS.filter(function (x) { return x.id === S.provider; })[0];
+      var p = provider();
       return esc(p.name) + ' · ' + (S.keys[p.id] ? mask(S.keys[p.id]) : esc(S.kept['keys.' + p.id] || ''));
     }
     if (S.kind === 'cli') return esc(CLIS.filter(function (c) { return c.id === S.cli; })[0].name) + ' · CLI';
@@ -368,7 +436,7 @@
     var e = {};
     if (id === 'model') {
       if (S.kind === 'cloud') {
-        var p = PROVIDERS.filter(function (x) { return x.id === S.provider; })[0];
+        var p = provider();
         var k = (S.keys[p.id] || '').trim();
         if (!k) { if (!S.kept['keys.' + p.id]) e['keys.' + p.id] = t('err.required'); }
         else if (p.prefix && k.indexOf(p.prefix) !== 0) e['keys.' + p.id] = t('err.prefix', { p: p.prefix });
@@ -393,8 +461,8 @@
       if (!/^\d{3,15}$/.test(S.tg.owner.trim())) e['tg.owner'] = S.tg.owner.trim() ? t('err.digits') : t('err.required');
       if (S.tg.apiid && !/^\d+$/.test(S.tg.apiid.trim())) e['tg.apiid'] = t('err.digits');
     }
+    if (id === 'speech' && voiceValue() === 'cloud' && !S.keys.openai.trim() && !S.kept['keys.openai']) e['keys.openai'] = t('err.voice');
     if (id === 'advanced' && S.adv.open) {
-      if (voiceValue() === 'cloud' && !S.keys.openai.trim() && !S.kept['keys.openai']) e['adv.voice'] = t('err.voice');
       if (!S.adv.portsAuto) {
         var port = Number(S.adv.port);
         if (!(port >= 1024 && port <= 65535) || !/^\d+$/.test(S.adv.port)) e['adv.port'] = t('err.port');
@@ -523,12 +591,13 @@
     var next = foot.querySelector('[data-act=next]');
     back.hidden = cur === 0 || id === 'start';
     // Skipping is for a Telegram that is not set up; one that is stays as it is when left alone.
-    skip.hidden = id !== 'telegram' || !!S.returnTo || !!S.kept['tg.token'];
+    // Speech is skipped with "Not now", which leaves the chat without a microphone.
+    skip.hidden = id === 'telegram' ? !!S.returnTo || !!S.kept['tg.token'] : id !== 'speech';
     next.hidden = id === 'start';
     foot.hidden = id === 'start';
     root.classList.toggle('on-start', id === 'start');
     back.querySelector('span').textContent = t('nav.back');
-    skip.querySelector('span').textContent = t('nav.skip');
+    skip.querySelector('span').textContent = t(id === 'speech' ? 'nav.later' : 'nav.skip');
     var label = id === 'welcome' ? t('nav.begin') : id === 'summary' ? t('nav.start') : S.returnTo ? t('nav.summary') : t('nav.next');
     next.querySelector('span').textContent = label;
     next.classList.toggle('go', id === 'summary');
@@ -569,6 +638,13 @@
     go(cur - 1);
   }
   function skip() {
+    if (STEPS[cur] === 'speech') {
+      S.speech.choice = 'off';
+      attempted.speech = false;
+      if (S.returnTo) { S.returnTo = null; go(STEPS.indexOf('summary')); return; }
+      go(cur + 1);
+      return;
+    }
     if (STEPS[cur] !== 'telegram') return;
     S.tg.skip = true;
     S.tg.token = S.tg.owner = S.tg.apiid = S.tg.apihash = '';
@@ -671,6 +747,7 @@
     f.set('login', S.adv.login ? 'on' : 'off');
     f.set('browser', S.adv.browser ? 'on' : 'off');
     f.set('voice', voiceValue());
+    if (voiceValue() === 'local') f.set('stt_model', S.speech.choice);
     if (!S.adv.portsAuto) f.set('port', S.adv.port.trim());
     else if (BA.portsAuto === false) f.set('port', '');
     return f;
@@ -803,6 +880,7 @@
     else if (a === 'test-free') testFree();
     else if (a === 'rescan') rescan();
     else if (a === 'tgmore') { S.tg.more = !S.tg.more; refresh({ pop: '.more' }); }
+    else if (a === 'speech-all') { S.speech.all = !S.speech.all; refresh(); }
     else if (a === 'adv') { S.adv.open = !S.adv.open; refresh({ pop: S.adv.open ? '.adv' : '.defaults' }); if (hooks.onChange) hooks.onChange('adv.open', S); }
     else if (a === 'edit') { S.returnTo = 'summary'; go(STEPS.indexOf(act.getAttribute('data-step'))); }
     else if (a === 'open') openApp();

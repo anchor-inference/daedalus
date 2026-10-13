@@ -90,6 +90,7 @@ func mask(secret string) string {
 // as its mask, and the field it belongs to starts empty — an empty answer keeps what is stored.
 type setupBoot struct {
 	Lang        Lang              `json:"lang"`
+	Providers   []wizardProvider  `json:"providers"`
 	Reconfigure bool              `json:"reconfigure"`
 	Native      bool              `json:"native"`
 	Mode        string            `json:"mode"`
@@ -118,12 +119,47 @@ type setupBoot struct {
 		Port      string `json:"port"`
 		Login     bool   `json:"login"`
 		Browser   bool   `json:"browser"`
-		Voice     string `json:"voice"`
 	} `json:"adv"`
+	Speech struct {
+		Choice string        `json:"choice"`
+		Models []speechModel `json:"models"`
+	} `json:"speech"`
 }
 
-// setupProviders are the cloud keys the wizard offers, in its order, with the form field each one
-// travels in.
+// wizardProvider is one key the wizard's model step offers. The id is the form field the key
+// travels in and the provider id the app and the key proxy know it by; Plan says the key belongs to
+// a subscription or coding plan rather than to a balance billed per token, which is the group the
+// page puts it in.
+type wizardProvider struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Prefix string `json:"prefix"`
+	Plan   bool   `json:"plan"`
+}
+
+// wizardProviders is the model step's catalogue, in its order. The page draws its two groups from
+// Plan and has no list of its own. The names are the app's own (daedalus/config.py) so a provider
+// reads the same in the wizard and in Settings, and each vendor sold both ways is named for which
+// of the two the key is: the plans have their own endpoints and their keys work nowhere else
+// (deploy/keyproxy/proxy.py). OpenCode's key opens both Go and Zen; this entry is the Go route, the
+// prepaid plan, and Zen is offered on the Free tab and in Settings. No prefix is checked where the
+// vendor's key format is not fixed.
+var wizardProviders = []wizardProvider{
+	{"deepseek", "DeepSeek API", "sk-", false},
+	{"openrouter", "OpenRouter", "sk-or-", false},
+	{"openai", "OpenAI API", "sk-", false},
+	{"anthropic", "Anthropic API", "sk-ant-", false},
+	{"zai", "Z.AI API", "", false},
+	{"minimax", "MiniMax API", "", false},
+	{"moonshot", "Moonshot AI API", "sk-", false},
+	{"opencode", "OpenCode Go", "", true},
+	{"zai_coding", "Z.AI Coding Plan", "", true},
+	{"minimax_plan", "MiniMax Token Plan", "", true},
+	{"kimi_coding", "Kimi Code", "", true},
+}
+
+// setupProviders is every key the launcher stores, by the form field it travels in: the wizard's
+// own and the ones only the Free tab asks for. A stored one is shown back masked.
 var setupProviders = func() []string {
 	ids := []string{"deepseek", "openrouter", "opencode"}
 	for _, provider := range providerKeyVars {
@@ -131,6 +167,16 @@ var setupProviders = func() []string {
 	}
 	return ids
 }()
+
+// offeredProvider reports whether the model step has a tile for this id.
+func offeredProvider(id string) bool {
+	for _, provider := range wizardProviders {
+		if provider.ID == id {
+			return true
+		}
+	}
+	return false
+}
 
 func providerKey(s Setup, id string) string {
 	switch id {
@@ -176,10 +222,13 @@ func (s *Server) setupBoot(ctx context.Context, lang Lang, status Status, sugges
 	b.Kept = map[string]string{}
 	b.Kind, b.Provider = "cloud", "deepseek"
 	providerChosen := false
+	b.Providers = wizardProviders
 	for _, id := range setupProviders {
 		if key := providerKey(current, id); key != "" {
 			b.Kept["keys."+id] = mask(key)
-			if !providerChosen {
+			// Only a provider with a tile is chosen: a Zen key alone, stored by the Free tab, used
+			// to open the step on a provider the page had no tile for.
+			if !providerChosen && offeredProvider(id) {
 				b.Provider, providerChosen = id, true
 			}
 		}
@@ -231,7 +280,8 @@ func (s *Server) setupBoot(ctx context.Context, lang Lang, status Status, sugges
 	} else {
 		b.Adv.Browser = strings.Contains(","+env["COMPOSE_PROFILES"]+",", ",browser,")
 	}
-	b.Adv.Voice = firstSet(current.Voice, "off")
+	b.Speech.Choice = speechChoice(current)
+	b.Speech.Models = speechModels
 	return b
 }
 
@@ -319,10 +369,16 @@ func parseSetupForm(form url.Values) (Setup, map[string]string, *setupError) {
 		}
 	}
 	switch voice := get("voice"); voice {
-	case "", "off", "local", "cloud":
+	case "", "off", "cloud":
 		s.Voice = voice
+	case "local":
+		// Local is always one model now: the speech step chooses it, and the app downloads that.
+		s.Voice, s.SttModel = voice, get("stt_model")
+		if !knownSpeechModel(s.SttModel) {
+			return s, nil, &setupError{"speech", "choose a listed speech model"}
+		}
 	default:
-		return s, nil, &setupError{"adv.voice", "off, local or cloud"}
+		return s, nil, &setupError{"speech", "off, local or cloud"}
 	}
 	switch get("browser") {
 	case "on":
@@ -348,7 +404,7 @@ func parseSetupForm(form url.Values) (Setup, map[string]string, *setupError) {
 
 // wantedExtras is the runtime pieces the answers ask for that this installation installs itself:
 // only a native one, where they are parts of the runtime folder. A container has the browser in its
-// image (the compose profile the form wrote) and no local speech piece of its own.
+// image (the compose profile the form wrote) and the speech engine in every image.
 func wantedExtras(s Setup, native bool, paths Paths) []string {
 	if !native {
 		return nil

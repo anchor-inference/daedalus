@@ -810,9 +810,6 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .model-kind.thinking { color:var(--info); }
 .model-row-note { padding:4px 10px; }
 .model-row-note.attn { color:var(--warn); }
-.model-custom { padding:6px 10px 4px; display:flex; flex-direction:column; gap:6px; }
-.model-custom-row { display:flex; gap:6px; }
-.model-custom-row .field { flex:1; min-width:0; }
 
 .palette { background:var(--surface-2); border:1px solid var(--line-strong); border-radius:var(--radius-md); overflow:hidden; box-shadow:var(--shadow-pop); }
 .palette-item { display:flex; align-items:center; gap:10px; width:100%; background:none; border:0; border-bottom:1px solid var(--line); color:var(--fg); padding:4px 12px; min-height:var(--row-h-dense); font-size:var(--fs-13); cursor:pointer; text-align:left; }

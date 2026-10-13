@@ -116,7 +116,7 @@ func TestTheWizardsAnswersRoundTrip(t *testing.T) {
 		"local_url": {"http://127.0.0.1:11434/v1/"}, "local_key": {"local-secret-key-1234"}, "local_model": {"qwen-local"},
 		"usd_per_day": {"35"}, "bot_token": {"123456:ABCDEFGHIJKLMNOPQRSTUVWX"}, "owner_id": {"424242"},
 		"api_id": {"777"}, "api_hash": {"hash-0123456789abcdef"},
-		"login": {"on"}, "browser": {"on"}, "voice": {"local"}, "port": {"18765"},
+		"login": {"on"}, "browser": {"on"}, "voice": {"local"}, "stt_model": {"gigaam-ru"}, "port": {"18765"},
 	})
 	if code != http.StatusOK {
 		t.Fatalf("the wizard's post answered %d: %s", code, body)
@@ -133,7 +133,7 @@ func TestTheWizardsAnswersRoundTrip(t *testing.T) {
 	env := readEnv(readFile(paths.Env))
 	keys := readEnv(readFile(paths.KeyproxyEnv))
 	for name, want := range map[string]string{
-		"DAEDALUS_LOCAL_MODEL": "qwen-local", "DAEDALUS_VOICE": "local", "USD_PER_DAY": "35",
+		"DAEDALUS_LOCAL_MODEL": "qwen-local", "DAEDALUS_VOICE": "local", "DAEDALUS_STT_MODEL": "gigaam-ru", "USD_PER_DAY": "35",
 		"API_PORT": "18765", "DAEDALUS_FIXED_PORTS": "API_PORT", "OWNER_USER_ID": "424242",
 	} {
 		if env[name] != want {
@@ -175,7 +175,7 @@ func TestTheWizardsAnswersRoundTrip(t *testing.T) {
 	if boot.Kept["keys.deepseek"] != "••••6789" || boot.Kept["keys.anthropic"] != "••••abcd" || boot.Kept["tg.token"] != "••••UVWX" || boot.Kept["local.key"] != "••••1234" {
 		t.Errorf("the masks are %v", boot.Kept)
 	}
-	if boot.Limit != "35" || boot.TG.Owner != "424242" || boot.TG.APIID != "777" || boot.Adv.PortsAuto || boot.Adv.Port != "18765" || !boot.Adv.Login || boot.Adv.Voice != "local" {
+	if boot.Limit != "35" || boot.TG.Owner != "424242" || boot.TG.APIID != "777" || boot.Adv.PortsAuto || boot.Adv.Port != "18765" || !boot.Adv.Login || boot.Speech.Choice != "gigaam-ru" {
 		t.Errorf("the page does not show the answers back: %+v", boot)
 	}
 	if boot.Adv.Data != paths.Data || !boot.CLIs["codex"] || boot.CLIs["grok"] {
@@ -194,6 +194,85 @@ func TestTheWizardsAnswersRoundTrip(t *testing.T) {
 	if login.on {
 		t.Error("start at login was turned off and stayed on")
 	}
+	if env := readEnv(readFile(paths.Env)); env["DAEDALUS_STT_MODEL"] != "gigaam-ru" {
+		t.Errorf("a re-run that did not answer the speech step changed its model: %q", env["DAEDALUS_STT_MODEL"])
+	}
+
+	// Answering cloud takes the local model away with the local answer.
+	if code, body = postSetup(t, server, url.Values{"mode": {"native"}, "voice": {"cloud"}}); code != http.StatusOK {
+		t.Fatalf("the third post answered %d: %s", code, body)
+	}
+	if env := readEnv(readFile(paths.Env)); env["DAEDALUS_VOICE"] != "cloud" || env["DAEDALUS_STT_MODEL"] != "" {
+		t.Errorf("cloud left the local model in place: voice %q, model %q", env["DAEDALUS_VOICE"], env["DAEDALUS_STT_MODEL"])
+	}
+	if boot := bootOf(t, get(t, &http.Client{Timeout: 5 * time.Second}, server.URL()+"setup")); boot.Speech.Choice != "cloud" {
+		t.Errorf("the speech step opens on %q after cloud was chosen", boot.Speech.Choice)
+	}
+}
+
+// The model step draws its two groups from the catalogue the page is handed: every provider is in
+// exactly one, the plans are the four keys that only work with their plan, and every tile has a
+// field the launcher stores.
+func TestTheModelStepsProvidersComeInTwoGroups(t *testing.T) {
+	paths := setupTempInstall(t)
+	server := startedServer(t, paths)
+	boot := bootOf(t, get(t, &http.Client{Timeout: 5 * time.Second}, server.URL()+"setup"))
+	if len(boot.Providers) != len(wizardProviders) {
+		t.Fatalf("the page has %d providers of %d", len(boot.Providers), len(wizardProviders))
+	}
+	stored := map[string]bool{}
+	for _, id := range setupProviders {
+		stored[id] = true
+	}
+	var plans []string
+	seen := map[string]bool{}
+	for _, provider := range boot.Providers {
+		if seen[provider.ID] || seen[provider.Name] {
+			t.Errorf("%s is offered twice", provider.ID)
+		}
+		seen[provider.ID], seen[provider.Name] = true, true
+		if !stored[provider.ID] {
+			t.Errorf("%s has a tile and no field the launcher stores", provider.ID)
+		}
+		if provider.Plan {
+			plans = append(plans, provider.ID)
+		}
+	}
+	if got := strings.Join(plans, ","); got != "opencode,zai_coding,minimax_plan,kimi_coding" {
+		t.Errorf("the subscription plan group is %s", got)
+	}
+	// A Zen key alone, which only the Free tab stores, does not open the step on a tile it lacks.
+	if err := os.WriteFile(paths.KeyproxyEnv, []byte("KEYPROXY_KEY_OPENCODE_ZEN=zen-key-0123456789\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	boot = bootOf(t, get(t, &http.Client{Timeout: 5 * time.Second}, server.URL()+"setup"))
+	if boot.Provider != "deepseek" || boot.Kept["keys.opencode_zen"] == "" {
+		t.Errorf("a Zen key alone opens the step on %q with masks %v", boot.Provider, boot.Kept)
+	}
+}
+
+// The speech step's list is the app's catalogue, every entry with its line in both languages, and
+// a model the list does not have is refused rather than written down for the app to stumble on.
+func TestTheSpeechStepOffersTheCatalogue(t *testing.T) {
+	if len(speechModels) < 10 {
+		t.Fatalf("the speech step offers %d models", len(speechModels))
+	}
+	for _, model := range speechModels {
+		if model.ID == "" || model.Label == "" || model.SizeBytes <= 0 || model.LanguageCount < 1 || len(model.Languages) == 0 {
+			t.Errorf("an entry is missing what the step draws: %+v", model)
+		}
+		for _, lang := range []Lang{LangEN, LangRU} {
+			if messages[lang]["hero.speech.m."+model.ID] == "" {
+				t.Errorf("%s has no line in %s", model.ID, lang)
+			}
+		}
+	}
+	if _, _, refused := parseSetupForm(url.Values{"voice": {"local"}, "stt_model": {"no-such-model"}}); refused == nil || refused.Field != "speech" {
+		t.Errorf("an unknown speech model was accepted: %+v", refused)
+	}
+	if s, _, refused := parseSetupForm(url.Values{"voice": {"off"}, "stt_model": {"gigaam-ru"}}); refused != nil || s.SttModel != "" {
+		t.Errorf("a model posted with voice off was kept: %+v %+v", s, refused)
+	}
 }
 
 func TestTheWizardsPostIsCheckedAgain(t *testing.T) {
@@ -206,7 +285,8 @@ func TestTheWizardsPostIsCheckedAgain(t *testing.T) {
 		{"adv.port", url.Values{"port": {"80"}}},
 		{"local.url", url.Values{"kind": {"local"}, "local_url": {"ftp://127.0.0.1/"}, "local_model": {"m"}}},
 		{"local.model", url.Values{"kind": {"local"}, "local_url": {"http://127.0.0.1:1/v1"}}},
-		{"adv.voice", url.Values{"voice": {"loud"}}},
+		{"speech", url.Values{"voice": {"loud"}}},
+		{"speech", url.Values{"voice": {"local"}}},
 	} {
 		if _, _, refused := parseSetupForm(bad.form); refused == nil || refused.Field != bad.field {
 			t.Errorf("%v was accepted or refused for the wrong reason: %+v", bad.form, refused)

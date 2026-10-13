@@ -181,25 +181,6 @@ export function clearSendIntent(sessionId: string, storage: StorageLike | null =
   try { storage?.removeItem(`${SEND_PREFIX}${sessionId}`); } catch { /* storage can be unavailable */ }
 }
 
-/** The last custom model the operator typed, so the field opens with it. */
-const CUSTOM_MODEL_KEY = "daedalus.model.custom";
-
-export function readCustomModel(storage: StorageLike | null = safeStorage()): string {
-  try {
-    return storage?.getItem(CUSTOM_MODEL_KEY) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-export function rememberCustomModel(value: string, storage: StorageLike | null = safeStorage()): void {
-  try {
-    if (value.trim()) storage?.setItem(CUSTOM_MODEL_KEY, value.trim());
-  } catch {
-    /* ignore */
-  }
-}
-
 // ── the queue ────────────────────────────────────────────────────────────────────────────
 
 /** A message the host is holding for a running agent: a `steer` reaches it at the next model call,

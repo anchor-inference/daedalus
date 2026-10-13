@@ -3,7 +3,9 @@
    size depends on the window only, never on the step, so the handover always lands on the same box. */
 :root {
   --t-step: 1000;
-  --frame-w: min(540px, calc(52vw - 24px));
+  /* 660 rather than 540: the model step's four tabs and the provider tiles' full names fit on one
+     row at desktop width, where 540 cut "Вход через CLI" to "Вход через С…". */
+  --frame-w: min(660px, calc(56vw - 24px));
   --frame-h: min(560px, calc(100dvh - 96px));
   --dock-r: max(24px, 5vw);
 }

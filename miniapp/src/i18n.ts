@@ -387,7 +387,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "composer.model.free": { en: "Free", ru: "Бесплатные" },
   "composer.model.free.sub": { en: "Free models by provider", ru: "Бесплатные модели по провайдерам" },
   "composer.model.count": { en: "Models: {n}", ru: "Моделей: {n}" },
-  "composer.model.manual": { en: "Enter a model manually", ru: "Указать модель вручную" },
+  "composer.model.add": { en: "Add model", ru: "Добавить модель" },
   "composer.model.back": { en: "Back to providers", ru: "Назад к провайдерам" },
   "composer.model.search": { en: "Find a model or provider…", ru: "Найти модель или провайдера…" },
   "composer.model.forchat": { en: "For this chat · Models: {n}", ru: "Для этого чата · Моделей: {n}" },
@@ -4676,8 +4676,6 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "session.revert.action.menu": { en: "Revert to here…", ru: "Вернуться сюда…" },
   "session.model.picked": { en: "model: {model}", ru: "модель: {model}" },
   "session.effort.picked": { en: "reasoning: {effort}", ru: "рассуждение: {effort}" },
-  "session.model.custom": { en: "Or a specific model: provider/model-id", ru: "Или конкретная модель: клиент/идентификатор" },
-  "session.model.use": { en: "Use", ru: "Выбрать" },
 
   // A run does not always answer with the model it was set to: the provider chain steps down when an
   // endpoint refuses or stalls. What is said here is the difference between the two, never the chain.

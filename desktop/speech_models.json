@@ -1,0 +1,259 @@
+[
+ {
+  "id": "zipformer-en-small",
+  "label": "Zipformer English (small)",
+  "languages": [
+   "en"
+  ],
+  "language_count": 1,
+  "size_bytes": 57267600,
+  "memory_mb": 180,
+  "accuracy": 78,
+  "speed": 97,
+  "recommended_for": []
+ },
+ {
+  "id": "parakeet-unified-en",
+  "label": "Parakeet Unified English 0.6B",
+  "languages": [
+   "en"
+  ],
+  "language_count": 1,
+  "size_bytes": 501360769,
+  "memory_mb": 900,
+  "accuracy": 90,
+  "speed": 79,
+  "recommended_for": [
+   "en"
+  ]
+ },
+ {
+  "id": "moonshine-base-en",
+  "label": "Moonshine Base English",
+  "languages": [
+   "en"
+  ],
+  "language_count": 1,
+  "size_bytes": 250807309,
+  "memory_mb": 400,
+  "accuracy": 80,
+  "speed": 99,
+  "recommended_for": []
+ },
+ {
+  "id": "moonshine-tiny-en",
+  "label": "Moonshine Tiny English",
+  "languages": [
+   "en"
+  ],
+  "language_count": 1,
+  "size_bytes": 107600538,
+  "memory_mb": 220,
+  "accuracy": 74,
+  "speed": 100,
+  "recommended_for": []
+ },
+ {
+  "id": "nemotron-streaming-multi",
+  "label": "Nemotron 3.5 Streaming 0.6B",
+  "languages": [
+   "en",
+   "es",
+   "fr",
+   "it",
+   "pt",
+   "nl",
+   "de",
+   "tr",
+   "ru",
+   "ar",
+   "hi",
+   "ja",
+   "ko",
+   "vi",
+   "uk",
+   "pl",
+   "sv",
+   "cs",
+   "nb",
+   "da",
+   "bg",
+   "fi",
+   "hr",
+   "sk",
+   "zh",
+   "hu",
+   "ro",
+   "et"
+  ],
+  "language_count": 28,
+  "size_bytes": 475271763,
+  "memory_mb": 950,
+  "accuracy": 82,
+  "speed": 84,
+  "recommended_for": [
+   "multi"
+  ]
+ },
+ {
+  "id": "fast-conformer-multi",
+  "label": "Fast Conformer (10 languages)",
+  "languages": [
+   "be",
+   "de",
+   "en",
+   "es",
+   "fr",
+   "hr",
+   "it",
+   "pl",
+   "ru",
+   "uk"
+  ],
+  "language_count": 10,
+  "size_bytes": 106546673,
+  "memory_mb": 300,
+  "accuracy": 76,
+  "speed": 92,
+  "recommended_for": []
+ },
+ {
+  "id": "gigaam-ru",
+  "label": "GigaAM v3 Russian",
+  "languages": [
+   "ru"
+  ],
+  "language_count": 1,
+  "size_bytes": 170197019,
+  "memory_mb": 380,
+  "accuracy": 91,
+  "speed": 94,
+  "recommended_for": [
+   "ru"
+  ]
+ },
+ {
+  "id": "t-one-ru",
+  "label": "T-one Russian (streaming)",
+  "languages": [
+   "ru"
+  ],
+  "language_count": 1,
+  "size_bytes": 128468156,
+  "memory_mb": 320,
+  "accuracy": 83,
+  "speed": 95,
+  "recommended_for": []
+ },
+ {
+  "id": "zipformer-ru-small",
+  "label": "Zipformer Russian (small, streaming)",
+  "languages": [
+   "ru"
+  ],
+  "language_count": 1,
+  "size_bytes": 24110855,
+  "memory_mb": 140,
+  "accuracy": 72,
+  "speed": 98,
+  "recommended_for": []
+ },
+ {
+  "id": "whisper-small",
+  "label": "Whisper Small",
+  "languages": [
+   "en",
+   "ru",
+   "de",
+   "es",
+   "fr",
+   "it",
+   "pt",
+   "nl",
+   "pl",
+   "uk",
+   "tr",
+   "ar",
+   "zh",
+   "ja",
+   "ko",
+   "hi",
+   "he",
+   "cs",
+   "sv",
+   "da",
+   "fi",
+   "el",
+   "hu",
+   "ro",
+   "vi",
+   "th",
+   "id"
+  ],
+  "language_count": 99,
+  "size_bytes": 639387718,
+  "memory_mb": 1100,
+  "accuracy": 80,
+  "speed": 78,
+  "recommended_for": []
+ },
+ {
+  "id": "whisper-tiny",
+  "label": "Whisper Tiny",
+  "languages": [
+   "en",
+   "ru",
+   "de",
+   "es",
+   "fr",
+   "it",
+   "pt",
+   "nl",
+   "pl",
+   "uk",
+   "tr",
+   "ar",
+   "zh",
+   "ja",
+   "ko",
+   "hi",
+   "he",
+   "cs",
+   "sv",
+   "da",
+   "fi",
+   "el",
+   "hu",
+   "ro",
+   "vi",
+   "th",
+   "id"
+  ],
+  "language_count": 99,
+  "size_bytes": 116204861,
+  "memory_mb": 260,
+  "accuracy": 61,
+  "speed": 100,
+  "recommended_for": []
+ },
+ {
+  "id": "sense-voice",
+  "label": "SenseVoice Small",
+  "languages": [
+   "zh",
+   "en",
+   "ja",
+   "ko"
+  ],
+  "language_count": 4,
+  "size_bytes": 1047870769,
+  "memory_mb": 1200,
+  "accuracy": 81,
+  "speed": 98,
+  "recommended_for": [
+   "zh",
+   "ja",
+   "ko"
+  ]
+ }
+]

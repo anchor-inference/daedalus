@@ -45,8 +45,10 @@ type Setup struct {
 	ModelKind    string
 
 	// Voice is off, local or cloud; the app reads it at start (daedalus/config.py), and local is
-	// the speech extra the launcher installs after the start.
-	Voice string
+	// the speech extra the launcher installs after the start. SttModel is the local model the
+	// speech step chose, which the app makes the transcriber and downloads (speech_choice.go).
+	Voice    string
+	SttModel string
 	// Browser asks for the headless browser: the browser extra natively, the browser image's
 	// compose profile in a container. Nil leaves what is there alone.
 	Browser *bool
@@ -159,6 +161,15 @@ func envUpdates(p Paths, s Setup, current map[string]string, searxngSecret, home
 	if s.ModelKind != "" && s.ModelKind != "free" {
 		freeProvider, freeModel = "", ""
 	}
+	// The model goes with the voice answer: a run that answered off or cloud takes it away, and one
+	// that did not answer at all leaves it as it was.
+	sttModel := current["DAEDALUS_STT_MODEL"]
+	if voice := clean(s.Voice); voice != "" {
+		sttModel = ""
+		if voice == "local" {
+			sttModel = clean(s.SttModel)
+		}
+	}
 	return []envVar{
 		{"TELEGRAM_BOT_TOKEN", answer("TELEGRAM_BOT_TOKEN", "bot_token", s.BotToken)},
 		{"OWNER_USER_ID", answer("OWNER_USER_ID", "owner_id", s.OwnerID)},
@@ -169,6 +180,7 @@ func envUpdates(p Paths, s Setup, current map[string]string, searxngSecret, home
 		{"DAEDALUS_FREE_PROVIDER", freeProvider},
 		{"DAEDALUS_FREE_MODEL", freeModel},
 		{"DAEDALUS_VOICE", firstSet(clean(s.Voice), firstSet(current["DAEDALUS_VOICE"], "off"))},
+		{"DAEDALUS_STT_MODEL", sttModel},
 		{"SEARXNG_SECRET", searxngSecret},
 		// The public address is not on the setup page: an operator who set one by hand keeps it,
 		// and passkeys are enrolled against that host, so blanking it would invalidate them.
@@ -402,6 +414,7 @@ func CurrentSetup(p Paths) Setup {
 		FreeProvider:  env["DAEDALUS_FREE_PROVIDER"],
 		FreeModel:     env["DAEDALUS_FREE_MODEL"],
 		Voice:         env["DAEDALUS_VOICE"],
+		SttModel:      env["DAEDALUS_STT_MODEL"],
 		AppPort:       env["API_PORT"],
 		FixPort:       strings.Contains(","+env["DAEDALUS_FIXED_PORTS"]+",", ",API_PORT,"),
 	}
