@@ -57,9 +57,9 @@ export function RecordButton({ group, toast }: { group: string; toast: (text: st
   };
   return (
     <>
-      <button type="button" className="btn small bp-rec-btn" onClick={(e) => setAnchor(e.currentTarget)} aria-haspopup="dialog" title={t("browser.steps.record.title")}>
+      <button type="button" className="btn small bp-rec-btn" onClick={(e) => setAnchor(e.currentTarget)} aria-haspopup="dialog" aria-label={t("browser.steps.record")} title={t("browser.steps.record.title")}>
         <span className="bp-rec-dot" aria-hidden="true" />
-        {t("browser.steps.record")}
+        <span className="bp-rec-label">{t("browser.steps.record")}</span>
       </button>
       {anchor && (
         <Popover anchor={anchor} onClose={() => setAnchor(null)} align="right" className="bp-rec-start" label={t("browser.steps.start.head")}>

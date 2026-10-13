@@ -1,0 +1,27 @@
+/* The annotated snapshot: a layer over the whole window, the picture as large as it fits, and one bar of
+   tools over it. Above the panel's sheet and its popovers, as the media lightbox is: the picture is the
+   only thing the operator is looking at while it is open. */
+.annotate { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: var(--bg); color: var(--fg); }
+.annotate-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: max(var(--space-2), env(safe-area-inset-top)) var(--space-3) var(--space-2); border-bottom: 1px solid var(--line); background: var(--surface-1); }
+.annotate-group { display: flex; align-items: center; gap: var(--space-1); flex: none; }
+.annotate-end { margin-left: auto; gap: var(--space-2); }
+.annotate-tool.on { background: var(--surface-3); color: var(--accent); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.annotate-swatch { width: var(--chip-h-dense); height: var(--chip-h-dense); border-radius: 50%; border: 2px solid var(--surface-1); box-shadow: 0 0 0 1px var(--line-strong); padding: 0; cursor: pointer; flex: none; }
+.annotate-swatch.on { box-shadow: 0 0 0 2px var(--fg); }
+.annotate-where { flex: 1 1 120px; min-width: 0; color: var(--fg-3); font-size: var(--fs-12); font-family: var(--mono); }
+.annotate-attach { display: inline-flex; align-items: center; gap: var(--space-1); }
+.annotate-note { padding: var(--space-2) var(--space-3); font-size: var(--fs-13); color: var(--fg-2); background: var(--surface-2); border-bottom: 1px solid var(--line); }
+.annotate-stage { position: relative; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; margin: var(--space-3); overflow: hidden; }
+/* No browser gesture on the picture: a finger drawing a line must not scroll or zoom the window. */
+.annotate-canvas { display: block; touch-action: none; cursor: crosshair; border-radius: var(--radius-xs); box-shadow: 0 0 0 1px var(--line-strong); background: var(--surface-1); }
+.annotate[data-tool="text"] .annotate-canvas { cursor: text; }
+/* The field sits where the words will be drawn: the same top-left corner, no padding to shift them. */
+.annotate-text { position: absolute; min-width: 160px; padding: 0; margin: 0; border: 0; outline: 1px dashed currentColor; outline-offset: 2px; background: transparent; font-weight: 600; line-height: 1; }
+@media (max-width: 1023px) {
+  .annotate-bar { padding-left: var(--gutter); padding-right: var(--gutter); }
+  .annotate-where { order: 9; flex-basis: 100%; }
+  .annotate-stage { margin: var(--space-2) 0; }
+  .annotate-swatch { width: var(--chip-h); height: var(--chip-h); }
+}
+/* The phone browser's bar: the Snapshot button at its right edge, a round target like its Back. */
+.bp-phonebar-snap { width: var(--tap); height: var(--tap); margin-right: -10px; display: grid; place-items: center; flex: none; border: 0; border-radius: 50%; background: none; color: var(--fg); cursor: pointer; }

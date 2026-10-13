@@ -4452,7 +4452,10 @@ button.staff-row:hover { background: var(--surface-2); }
    as a window on the web rather than part of the conversation. */
 .panel-body.tab-browser { padding: 0; display: flex; flex-direction: column; overflow: hidden; }
 .bp { flex: 1; min-height: 0; display: flex; flex-direction: column; container-type: inline-size; background: var(--surface-1); }
-.bp-toolbar { gap: 4px; }
+.bp-toolbar { gap: 4px; container-type: inline-size; }
+/* A side panel at its narrowest has no room for Record's word beside the Snapshot button: the red dot
+   alone says it, and the button's name and title still do for a screen reader and a pointer. */
+@container (max-width: 520px) { .bp-rec-btn .bp-rec-label { display: none; } }
 .bp-address { flex: 1; min-width: 80px; display: flex; align-items: center; gap: 6px; height: var(--ctl-h-sm); margin: 0 4px; padding: 0 4px 0 10px; border: 1px solid transparent; border-radius: var(--radius-pill); background: var(--surface-2); position: relative; overflow: hidden; }
 .bp-address input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-12); text-overflow: ellipsis; }
 .bp-address input:focus { outline: none; }

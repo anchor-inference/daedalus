@@ -49,8 +49,9 @@ export type { Answer } from "./questions/ask";
 
 export type ComposerHandle = {
   focus: () => void;
-  /** Put text into the field, after whatever is there. */
-  insert: (text: string) => void;
+  /** Put text into the field, after whatever is there. `focus: false` leaves the keyboard where it is:
+   *  a phone's panel sheet covers the field, and focusing it there raised a keyboard under the sheet. */
+  insert: (text: string, focus?: boolean) => void;
   /** Attach files from outside the pill: a drop on the conversation. */
   addFiles: (files: Iterable<File>) => void;
   /** Open the model list, from wherever "change the model" is offered. */
@@ -240,9 +241,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     ref,
     () => ({
       focus: () => textarea.current?.focus(),
-      insert: (text) => {
+      insert: (text, focus = true) => {
         setDraft(draft.trim() ? `${draft.trimEnd()}\n\n${text}` : text);
-        textarea.current?.focus();
+        if (focus) textarea.current?.focus();
       },
       addFiles,
       openModel: () => setModelOpen(true),

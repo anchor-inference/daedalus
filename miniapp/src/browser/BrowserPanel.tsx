@@ -30,6 +30,8 @@ import { copyFromPage, pasteFromClipboard } from "./clipboard";
 import { Favicon } from "./favicon";
 import { attachBox } from "./geometry";
 import type { ViewerChord } from "./keys";
+import { SnapshotButton } from "../annotate/Annotate";
+import { liveSnapshot } from "../annotate/source";
 
 /** The tab's body: the session's groups, the busiest one shown (a session rarely has more than one). */
 export function BrowserTab({ groups, toast, phone }: { groups: BrowserGroup[]; toast: (text: string) => void; phone?: boolean }) {
@@ -353,7 +355,7 @@ export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = 
   return (
     <div className={`bp ${phone ? "phone" : ""} ${full ? "full" : ""} ${logOpen ? "log-open" : ""} ${phone && replaying ? "replaying" : ""}`} data-group={group.id} data-drive={drive}>
       {phone ? (
-        <PhoneBar group={group} url={url} tabs={tabs.length} drive={drive} state={snap.state.kind} onList={onList} />
+        <PhoneBar group={group} url={url} tabs={tabs.length} drive={drive} state={snap.state.kind} onList={onList} live={live} toast={toast} />
       ) : (
         <Toolbar group={group} groups={groups} onGroup={onGroup} live={live} snap={snap} url={url} tabs={tabs} viewing={viewing?.id ?? null} drive={drive} control={control} toast={toast} full={full} fit={fit} onFit={setFit}
           recording={recording.recording.frames} frames={frames} onReplay={() => setReplay(frames.length - 1)} recordable={drive === "you" && !steps} />
@@ -615,6 +617,7 @@ function Toolbar({ group, groups, onGroup, live, snap, url, tabs, viewing, drive
       <Address url={url} editable={driving} loading={tabs.find((x) => x.id === viewing)?.loading ?? false} onGo={(next) => live?.input({ t: "nav", action: "url", url: next })} />
       {tabs.length > 1 && <TabStrip tabs={tabs} viewing={viewing} active={snap.active} onPick={(id) => live?.view({ tab: id })} />}
       {recordable && <RecordButton group={group.id} toast={toast} />}
+      <SnapshotButton session={group.session_id} toast={toast} capture={() => liveSnapshot(live, url, (where) => t("annotate.page", { where }))} />
       <button type="button" className={`iconbtn small bp-fit ${fit ? "on" : ""}`} aria-pressed={fit} onClick={() => onFit(!fit)} aria-label={t("browser.fit")} title={t(fit ? "browser.fit.on" : "browser.fit.off")} data-fit={fit ? "on" : "off"}><Icon name="expand" size={16} /></button>
       <ControlButton control={control} />
       <OverflowMenu label={t("browser.menu")} small items={items} />
@@ -686,7 +689,7 @@ function TabStrip({ tabs, viewing, active, onPick }: { tabs: { id: string; url: 
 }
 
 /** The phone sheet's head: the site, and one line on what is happening there now. */
-function PhoneBar({ group, url, tabs, drive, state, onList }: { group: BrowserGroup; url: string; tabs: number; drive: DriveState; state: string; onList?: () => void }) {
+function PhoneBar({ group, url, tabs, drive, state, onList, live, toast }: { group: BrowserGroup; url: string; tabs: number; drive: DriveState; state: string; onList?: () => void; live: LiveView | null; toast: (text: string) => void }) {
   const active = group.tabs.find((x) => x.active) ?? group.tabs[0];
   const sub = state === "connecting" ? t("browser.ph.sub.connecting")
     : state === "reconnecting" || state === "proxy-blocked" ? t("browser.state.reconnecting")
@@ -700,6 +703,7 @@ function PhoneBar({ group, url, tabs, drive, state, onList }: { group: BrowserGr
         <span className="bp-phonebar-domain truncate">{domainOf(url) || t("browser.blank")}</span>
         <span className={`bp-phonebar-sub truncate ${drive}`}>{sub}{tabs > 1 ? ` · ${plural("browser.tabs.n", tabs)}` : ""}</span>
       </span>
+      <SnapshotButton className="bp-phonebar-snap" session={group.session_id} toast={toast} capture={() => liveSnapshot(live, url, (where) => t("annotate.page", { where }))}><Icon name="camera" size={20} /></SnapshotButton>
     </div>
   );
 }

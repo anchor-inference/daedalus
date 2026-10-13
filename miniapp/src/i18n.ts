@@ -7574,3 +7574,32 @@ Object.assign(DICT, {
   "cal.type.delete.title": { en: "Delete the type {name}?", ru: "Удалить тип «{name}»?" },
   "cal.type.delete.body": { en: "Its events become ordinary events and keep their fields and blocks.", ru: "Его события станут обычными и сохранят поля и блоки." },
 });
+
+// The annotated snapshot: the Snapshot button over a page, the overlay's tools, and what Attach says.
+Object.assign(DICT, {
+  "annotate.open": { en: "Snapshot with notes", ru: "Снимок с пометками" },
+  "annotate.title": { en: "Mark up the snapshot", ru: "Пометки на снимке" },
+  "annotate.tools": { en: "Tools", ru: "Инструменты" },
+  "annotate.tool.arrow": { en: "Arrow", ru: "Стрелка" },
+  "annotate.tool.box": { en: "Box", ru: "Рамка" },
+  "annotate.tool.pen": { en: "Pen", ru: "Карандаш" },
+  "annotate.tool.text": { en: "Text", ru: "Текст" },
+  "annotate.color": { en: "Colour", ru: "Цвет" },
+  "annotate.color.0": { en: "Red", ru: "Красный" },
+  "annotate.color.1": { en: "Yellow", ru: "Жёлтый" },
+  "annotate.color.2": { en: "Green", ru: "Зелёный" },
+  "annotate.color.3": { en: "Blue", ru: "Синий" },
+  "annotate.color.4": { en: "White", ru: "Белый" },
+  "annotate.color.5": { en: "Black", ru: "Чёрный" },
+  "annotate.undo": { en: "Undo", ru: "Отменить" },
+  "annotate.clear": { en: "Clear the marks", ru: "Стереть пометки" },
+  "annotate.attach": { en: "Attach", ru: "Прикрепить" },
+  "annotate.text": { en: "Type, then Enter", ru: "Введите текст и нажмите Enter" },
+  "annotate.failed": { en: "The picture could not be made", ru: "Не удалось собрать картинку" },
+  "annotate.nopicture": { en: "No picture of the page yet", ru: "Картинки страницы пока нет" },
+  "annotate.attached": { en: "Snapshot attached to the message", ru: "Снимок прикреплён к сообщению" },
+  "annotate.saved": { en: "Snapshot added to the chat's draft", ru: "Снимок добавлен в черновик чата" },
+  "annotate.page": { en: "Page: {where}", ru: "Страница: {where}" },
+  "annotate.file": { en: "File: {where}", ru: "Файл: {where}" },
+  "annotate.blank": { en: "A page in the preview cannot be photographed here: draw on a blank sheet the size of its frame.", ru: "Страницу в предпросмотре здесь не сфотографировать: рисуйте на чистом листе размером с её окно." },
+});
