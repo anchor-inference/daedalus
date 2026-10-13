@@ -85,6 +85,7 @@ from daedalus.extensions import (
     api_issue_sync,
     api_knowledge,
     api_lifecycle,
+    api_meetings,
     api_pages,
     api_plugins,
     api_project_start,
@@ -1716,6 +1717,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     if isinstance(getattr(app, "db", None), Database):
         # The calendar, its connected accounts and the planner's tasks.
         api_calendar.register(api, app, auth)
+        # Meeting notes from a recording, whose action items become a calendar entry.
+        api_meetings.register(api, app, auth)
         # The diagram editor: scenes, their history, previews and public links.
         api_diagrams.register(api, app, auth)
     # The agent's browser: its groups, the live view's ticket and socket, control, the audit.
