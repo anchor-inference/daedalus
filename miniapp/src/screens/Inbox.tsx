@@ -14,6 +14,7 @@ import { PushNudge } from "../pushui";
 import { errorText } from "../ui";
 import { plural, t } from "../i18n";
 import { PhoneInbox } from "./InboxPhone";
+import { NoticeLoginCard } from "../browser/login";
 
 type Filter = "all" | "unseen" | "problems" | "projects";
 
@@ -107,6 +108,7 @@ function DesktopInbox({ toast, onOpen }: { toast: (t: string) => void; onOpen: (
         <div className="inbox-body" onClick={(e) => e.stopPropagation()}>
           {entry.body && <pre className="inbox-text">{entry.body}</pre>}
           <ActionButtons entry={entry} />
+          <NoticeLoginCard entry={entry} toast={toast} />
           <div className="btnrow">
             {(entry.link || entry.session_id) && (
               <button className="btn small" onClick={() => (entry.session_id && !entry.link ? onOpen(entry.session_id) : navigate(entryPath(entry)))}>

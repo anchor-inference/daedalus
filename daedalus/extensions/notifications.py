@@ -1039,6 +1039,7 @@ class NotificationRouter:
         answered in the app: the link opens the owner's chat on its Browser tab."""
         p = event.payload
         group = str(p.get("group_id") or "")
+        login = p.get("login") if isinstance(p.get("login"), dict) else None
         body = "\n".join(part for part in (str(p.get("what") or "").strip(), str(p.get("url") or "").strip()) if part)
         if event.staff_id and event.project_id and not event.session_id:
             link = f"/app/project/{event.project_id}/staff/{event.staff_id}?panel=browser"
@@ -1049,14 +1050,18 @@ class NotificationRouter:
         front = self.service._front()
         bot = str(getattr(front, "username", "") or "")
         public = str(getattr(getattr(self.manager, "settings", None), "miniapp_public_url", "") or "").rstrip("/")
+        # A sign-in is asked for in the app's private form and nowhere else: Telegram, a lock screen and
+        # a push carry the request and the way to the form, never a field to type a password into.
+        opener = render("browser.login.open" if login else "browser.open", self._lang())
         if event.session_id and bot:
-            body += f"\n{render('browser.open', self._lang())}: https://t.me/{bot}?startapp=browser_{event.session_id}"
+            body += f"\n{opener}: https://t.me/{bot}?startapp=browser_{event.session_id}"
         elif public and link:
             base = public[: -len("/app")] if public.endswith("/app") else public
-            body += f"\n{render('browser.open', self._lang())}: {base}{link}"
+            body += f"\n{opener}: {base}{link}"
         ref = f"browser:{group}"
+        title = render("browser.login", self._lang(), title=str(p.get("title") or ""), site=str(login.get("site") or "")) if login else render("browser.needs_you", self._lang(), title=str(p.get("title") or ""))
         await self.service.post(Draft(
-            "question", render("browser.needs_you", self._lang(), title=str(p.get("title") or "")), body, kind="browser_needs_you", tone="warning", level="urgent",
+            "question", title, body, kind="browser_login" if login else "browser_needs_you", tone="warning", level="urgent",
             session_id=event.session_id, project_id=event.project_id, staff_id=event.staff_id, link=link,
             actions=(Action("open", render("open", self._lang()), "primary"),), request_ref=ref, dedupe_key=ref, source="browser",
         ))

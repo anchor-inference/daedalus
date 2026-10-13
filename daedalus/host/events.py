@@ -254,6 +254,15 @@ class BrowserOpened(TypedDict):
     """A throwaway context whose cookies go with it."""
 
 
+class BrowserLoginAsk(TypedDict):
+    """A request for the operator's private sign-in, as the event carries it: never a value."""
+
+    id: str
+    site: str
+    saved: bool
+    """A sign-in is saved for the site, and the form offers it."""
+
+
 class BrowserNeedsYou(TypedDict):
     """The agent handed the browser to the operator, or the page asked for what only a person gives: a
     password, a one-time code, a CAPTCHA, an HTTP sign-in."""
@@ -267,6 +276,8 @@ class BrowserNeedsYou(TypedDict):
     """Who asks, as a person reads it: the session's title or the staff member's name."""
     by: NotRequired[str]
     """``agent`` (a handoff) or ``daemon`` (a secret field, a CAPTCHA, an HTTP sign-in)."""
+    login: NotRequired[BrowserLoginAsk]
+    """The agent asked for the private sign-in (``BrowserLogin``): the app draws its form."""
 
 
 class BrowserReturned(TypedDict):

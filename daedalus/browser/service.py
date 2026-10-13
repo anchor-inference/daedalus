@@ -189,11 +189,12 @@ ACTOR_OF = {"take": "operator", "give": "operator", "pause": "operator", "downlo
 KIND_OF = {"act": "", "tab_new": "new_tab", "download_saved": "download"}
 ACTION_LOG = (
     "act", "navigate", "tab_new", "look", "dialog", "handoff", "download", "download_saved", "take", "give", "pause", "open", "close", "blocked", "watch", "monitor",
-    "extract", "note", "cookies",
+    "extract", "note", "cookies", "login",
 )
 """The audit's actions the app's action log shows: what the agent did in the browser, and what it
 read out of a page (``extract``), proposed to remember about a site (``note``) or loaded into the
-browser's identity (``cookies``, by site and count alone), which the operator reviews like the rest."""
+browser's identity (``cookies``, by site and count alone; ``login``, the private sign-in, by site
+alone), which the operator reviews like the rest."""
 
 
 def _action_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -218,6 +219,10 @@ def _action_row(row: dict[str, Any]) -> dict[str, Any]:
         out["text"] = row["typed"]
     if detail.get("sensitive"):
         out["sensitive"] = {"kinds": list(detail.get("sensitive") or []), "decision": str(detail.get("decision") or ("allowed_once" if detail.get("grant") else "allowed"))}
+    if action == "login":
+        out["kind"] = "login_declined" if detail.get("declined") else "login"
+        out["element"] = str(detail.get("site") or "")
+        out["ok"] = detail.get("signed_in") != "no"
     if action == "handoff":
         out["needs"] = {"reason": str(detail.get("reason") or ""), "what": str(detail.get("what") or "")}
     if action in ("download", "download_saved"):
@@ -264,6 +269,10 @@ class Browsers:
         """``group → (note, by)``: what the operator said when giving a browser back, kept for the
         control event that carries the give-back to the owner. The event, not the request, wakes the
         owner, so a give-back is told once however it happened — the button, or the hold running out."""
+        self._returns: dict[str, str] = {}
+        """``group → the words its owner is woken with``, in place of "the operator gave the browser back",
+        when the give-back answers something the operator did in the app (the private sign-in), so the
+        owner hears the outcome rather than a hand-over it never saw happen."""
         self._freed = asyncio.Event()
         self._waiting: list[Waiter] = []
         self._subscribers: list[Subscriber] = []
@@ -910,25 +919,50 @@ class Browsers:
             return {"w": w, "h": h}
         return {"w": int(viewport.get("w") or w), "h": int(viewport.get("h") or h)}
 
-    async def handoff(self, group: str, reason: str, what: str, *, actor: str) -> dict[str, Any]:
+    async def handoff(self, group: str, reason: str, what: str, *, actor: str, login: dict[str, Any] | None = None, url: str | None = None) -> dict[str, Any]:
         """The agent asks the operator to take over: the group is paused with the reason, and the
-        operator is told it needs them. Returns what the tool tells the agent about where it stopped."""
+        operator is told it needs them. Returns what the tool tells the agent about where it stopped.
+
+        ``login`` makes it a request for the private sign-in (``daedalus.browser.login``): the need
+        carries the request, and the app draws the form from it."""
         row = await self._row(group)
         if row["status"] != "open":
             raise BrowserGone(self._gone_text(row))
         await self._call(row["env"], "control.set", {"group_id": group, "owner": "paused", "reason": f"{reason}: {what}"[:300]}, what="handing the browser to the operator")
         await self.db.execute("UPDATE browser_groups SET control_owner = 'paused', control_reason = ? WHERE id = ?", (f"{reason}: {what}"[:300], group))
-        await self.audit(group, row["env"], actor, "handoff", {"reason": reason, "what": what[:500]})
-        await self._needs_you(row, reason, what, row["url"])
+        await self.audit(group, row["env"], actor, "handoff", {"reason": reason, "what": what[:500], **({"login": login.get("site", "")} if login else {})})
+        await self._needs_you(row, reason, what, url or row["url"], login=login)
         return {"url": row["url"], "title": row["title"]}
 
-    async def _needs_you(self, row: dict[str, Any], reason: str, what: str, url: str, *, by: str = "agent") -> None:
+    async def give_back(self, group: str, text: str, *, by: str = "operator") -> None:
+        """Hand the browser back to the agent once the operator answered a request in the app, and wake
+        its owner with ``text`` rather than with the usual words of a give-back."""
+        row = await self._row(group)
+        if row["status"] != "open":
+            raise BrowserGone(self._gone_text(row))
+        if row["control_owner"] == "agent":
+            # Nothing to give back, so no control event will wake the owner: tell it here.
+            await self.db.execute("UPDATE browser_groups SET needs_json = NULL WHERE id = ?", (group,))
+            await self._publish("browser.returned", {"group_id": group, "url": row["url"], "title": row["title"], "tabs": int(row["tabs"]), "by": by}, row)
+            if self.wake is not None:
+                await self.wake(self.owner_of(row), text)
+            return
+        self._returns[group] = text
+        self._notes.pop(group, None)
+        await self._call(row["env"], "control.set", {"group_id": group, "owner": "agent"}, what="giving the browser back")
+
+    async def _needs_you(self, row: dict[str, Any], reason: str, what: str, url: str, *, by: str = "agent", login: dict[str, Any] | None = None) -> None:
         """The operator is needed: kept on the group, so every list says so until the browser is
         taken, given back or closed, and announced."""
-        need = {"reason": reason, "what": what[:500], "url": url[:2000], "at": now_iso(), "by": by}
+        need: dict[str, Any] = {"reason": reason, "what": what[:500], "url": url[:2000], "at": now_iso(), "by": by}
+        if login:
+            need["login"] = login
         await self.db.execute("UPDATE browser_groups SET needs_json = ? WHERE id = ?", (json.dumps(need, ensure_ascii=False), row["id"]))
         label = await self.owners.label(self.owner_of(row))
-        await self._publish("browser.needs_you", {"group_id": row["id"], "reason": reason, "what": what[:500], "url": url[:2000], "title": label, "by": by}, row)
+        payload: dict[str, Any] = {"group_id": row["id"], "reason": reason, "what": what[:500], "url": url[:2000], "title": label, "by": by}
+        if login:
+            payload["login"] = {"id": login.get("id"), "site": login.get("site"), "saved": bool(login.get("saved"))}
+        await self._publish("browser.needs_you", payload, row)
 
     async def grant(self, group: str, host: str, port: int, *, ttl_ms: int | None = None, by: str = "operator") -> None:
         """Open one host and port for the group's browser past the network wall's ask: the operator's
@@ -1409,6 +1443,7 @@ class Browsers:
         if owner != "agent" or before == "agent" or row["status"] != "open":
             return
         note, by = self._notes.pop(row["id"], ("", "operator"))
+        told = self._returns.pop(row["id"], None)
         fresh = await self._row(row["id"])
         payload: dict[str, Any] = {"group_id": row["id"], "url": fresh["url"], "title": fresh["title"], "tabs": int(fresh["tabs"]), "by": by}
         if note:
@@ -1416,7 +1451,7 @@ class Browsers:
         await self._publish("browser.returned", payload, fresh)
         if self.wake is not None:
             where = f"{fresh['title']} — {fresh['url']}" if fresh["title"] else fresh["url"] or "a blank page"
-            text = f"[browser] The operator gave the browser back. Now on {where}." + (f" Their note: {note}" if note else "") + " Take a BrowserSnapshot before acting: the page may have changed."
+            text = told or f"[browser] The operator gave the browser back. Now on {where}." + (f" Their note: {note}" if note else "") + " Take a BrowserSnapshot before acting: the page may have changed."
             try:
                 await self.wake(self.owner_of(fresh), text)
             except Exception:  # noqa: BLE001 — the browser is given back whether or not the owner could be woken

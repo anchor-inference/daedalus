@@ -33,7 +33,7 @@ from daedalus.tools.vision import VisionUnavailable, look
 BROWSER_TOOLS = (
     "BrowserOpen", "BrowserNavigate", "BrowserSnapshot", "BrowserText", "BrowserLook", "BrowserAct",
     "BrowserTabs", "BrowserWait", "BrowserDialog", "BrowserHandoff", "BrowserClose", "BrowserDownload", "BrowserNote",
-    "BrowserLogs", "BrowserNetwork", "BrowserInspect", "BrowserCookies",
+    "BrowserLogs", "BrowserNetwork", "BrowserInspect", "BrowserCookies", "BrowserLogin",
 )
 READ_ONLY_TOOLS = ("BrowserSnapshot", "BrowserText", "BrowserLook", "BrowserTabs", "BrowserWait", "BrowserLogs", "BrowserNetwork", "BrowserInspect")
 """The tools that only read the page or wait on it: a command-line agent's own permission rules may
@@ -305,7 +305,7 @@ async def browser_look(context: ToolContext, question: str, tab: str | None = No
         "allows it. steps=[{action, ref, element, …}, …] does up to 5 actions planned from one snapshot, stopping at a "
         "navigation, a new tab, a dialog, a failure or a question. A purchase, a message sent, a deletion, terms "
         "accepted or an upload is held for the operator's approval when you try it (do not ask first); a password, code or payment field refuses you (use "
-        "BrowserHandoff). Returns what changed."
+        "BrowserLogin to sign in, BrowserHandoff for the rest). Returns what changed."
     ),
 )
 async def browser_act(
@@ -534,9 +534,29 @@ async def browser_cookies(context: ToolContext, action: str = "import", path: st
     return await _run(context, "BrowserCookies", {"action": action, "path": path, "text": text, "domain": domain})
 
 
+@tool_group("browser")
+@search_hint(
+    "sign in log in login password account credentials private form operator types username two factor code "
+    "войти вход залогиниться авторизоваться авторизация пароль логин учетная запись аккаунт код подтверждения"
+)
+@tool(
+    name="BrowserLogin",
+    description=(
+        "Get your browser signed in to a site without seeing the credentials: the operator types the username, password "
+        "and any one-time code into a private form of the app, and the browser fills the page's sign-in form and sends it. "
+        "url_or_domain is the sign-in page's address or the site (github.com); reason says what it is for (the operator "
+        "reads it). selectors ({username, password, otp, submit} as CSS) name fields the guess misses. End your turn "
+        "afterwards: a message says where the page is and whether the sign-in took (yes, no or unknown). A sign-in the "
+        "operator saved and allowed for this session is done at once and the result says so."
+    ),
+)
+async def browser_login(context: ToolContext, url_or_domain: str, reason: str, selectors: dict[str, str] | None = None) -> ToolResult:
+    return await _run(context, "BrowserLogin", {"url_or_domain": url_or_domain, "reason": reason, "selectors": selectors})
+
+
 TOOLS = [
     browser_open, browser_navigate, browser_snapshot, browser_text, browser_look, browser_act, browser_tabs, browser_wait, browser_dialog, browser_handoff, browser_close,
-    browser_download, browser_note, browser_logs, browser_network, browser_inspect, browser_cookies,
+    browser_download, browser_note, browser_logs, browser_network, browser_inspect, browser_cookies, browser_login,
 ]
 
 __all__ = ["BROWSER_TOOLS", "READ_ONLY_TOOLS", "TOOLS", "SessionFiles"]

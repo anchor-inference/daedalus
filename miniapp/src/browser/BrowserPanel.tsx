@@ -21,6 +21,7 @@ import { answerDialog, askTake, closeBrowser, consumeTake, importCookies, delete
 import { currentRecording, ProcedureEditor, RecordBar, RecordButton, RecordedCard, waitingRecording } from "./steps";
 import { frameOfRow, ReplayStage } from "./replay";
 import type { LiveSnapshot, LiveView } from "./live";
+import { BrowserLoginCard } from "./login";
 import { actionWords, agentName, domainOf, driveState, isOpenGroup, mergeActions, needsOf, needWords, rowOfEvent, secure, viewGone, type DriveState } from "./model";
 import type { ActionEvent } from "./protocol";
 import { BrowserViewer, focusViewer } from "./viewer";
@@ -303,6 +304,7 @@ export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = 
       {phone
         ? <PhoneNote drive={drive} needs={needs} state={snap.state.kind} viewers={snap.viewers} />
         : <Banner drive={drive} agent={agent} needs={needs} state={snap.state.kind} control={control} viewers={snap.viewers} />}
+      <BrowserLoginCard group={group} toast={toast} compact />
       {(snap.state.kind === "reconnecting" || snap.state.kind === "proxy-blocked" || snap.state.kind === "unavailable") && <OwnershipDisclosure groupId={group.id} />}
       {steps && <RecordBar group={group.id} recording={steps} tab={viewing?.id ?? null} toast={toast} />}
       {phone && !replaying && (

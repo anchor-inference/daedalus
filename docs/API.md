@@ -365,7 +365,10 @@ back. `GET /api/secrets` lists every one — `{"id", "name", "scope", "scope_tit
 the ones that chat may use, with the project it could file one under. `DELETE /api/secrets/{id}` takes
 one back at once. A message names the secrets it carries in `secrets` (a list on
 `/messages`, comma-separated on `/upload`); the model is told the name, the note and the placeholder
-`«secret:name»`, never the value.
+`«secret:name»`, never the value. The whole list also carries `logins`: the sign-ins saved from the
+browser's private form (`{"id", "site", "name": "login:<site>", "last_used_at", "uses", "readable"}`,
+never a username or a password), which `DELETE /api/secrets/logins/{id}` forgets; they are never the
+agent's to use (docs/architecture/browser.md, The private sign-in).
 
 **Custom pages.** `GET /api/pages` lists the published pages the navigation offers, `POST /api/pages`
 makes one, `PUT /api/pages/{slug}/draft/{path}` writes its files, `POST …/publish` and `…/rollback`

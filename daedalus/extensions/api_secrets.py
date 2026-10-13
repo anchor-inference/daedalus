@@ -50,7 +50,9 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             scope = {"project_id": project.id if project else None, "project_name": project.name if project else None}
         else:
             items = manager.secrets.listed()
-            scope = {}
+            # The sign-ins saved from the browser's private form: the operator's, never a chat's, so only
+            # the whole list carries them.
+            scope = {"logins": [login.public() for login in manager.secrets.saved_logins()]}
         listed = [{**s.public(), "scope_title": names.get((s.scope_kind, s.scope_id), "")} for s in items]
         return {"secrets": listed, **scope}
 
@@ -71,6 +73,13 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         except SecretError as exc:
             raise HTTPException(400, str(exc)) from exc
         return secret.public()
+
+    @api.delete("/api/secrets/logins/{login_id}")
+    async def forget_login(login_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Forget a sign-in saved from the browser's private form; the next request for its site asks for it again."""
+        if not await manager.secrets.forget_login(login_id):
+            raise HTTPException(404, "no such saved sign-in")
+        return {"ok": True}
 
     @api.delete("/api/secrets/{secret_id}")
     async def delete_secret(secret_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

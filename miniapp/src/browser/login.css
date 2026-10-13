@@ -1,0 +1,16 @@
+/* The private sign-in form (login.tsx): a card in the conversation, the Browser tab and the Inbox. */
+.login-card { display: flex; flex-direction: column; gap: var(--space-2); padding: 12px 16px; background: var(--surface-1); border: 1px solid var(--line-strong); border-radius: var(--radius-lg); min-width: 0; }
+.login-card.compact { padding: 10px 12px; }
+.login-head { display: flex; align-items: center; gap: 8px; color: var(--fg); }
+.login-title { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.login-reason { color: var(--fg-2); font-size: var(--fs-13); overflow-wrap: anywhere; }
+.login-label { color: var(--fg-3); font-size: var(--fs-12); }
+.login-private { color: var(--fg-3); }
+.login-saved { color: var(--fg-2); }
+.login-save { display: flex; align-items: center; gap: 8px; color: var(--fg-2); font-size: var(--fs-13); }
+.login-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; }
+.login-actions.end { justify-content: flex-end; margin-top: 0; }
+.login-actions .grow { flex: 1; }
+.login-problem { color: var(--bad); }
+.notice-login { margin-top: 8px; }
+.login-stack { display: flex; flex-direction: column; gap: var(--space-2); margin: 8px 0; }

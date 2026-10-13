@@ -196,7 +196,7 @@ async def test_secret_fields_refuse_the_agent_and_ask_for_the_operator(rig: Rig)
     text, failed = await rig.call(sid, "BrowserSnapshot")
     assert 'textbox "Password" [ref=e31] [secret]' in text
     text, failed = await rig.call(sid, "BrowserAct", action="type", ref="e31", element="the password field", text="hunter2")
-    assert failed and "BrowserHandoff(reason='login'" in text
+    assert failed and "BrowserLogin(url_or_domain, reason)" in text
     needs = await rig.events("browser.needs_you")
     assert needs and needs[-1].payload["reason"] == "field_forbidden" and needs[-1].session_id == sid
     text, failed = await rig.call(sid, "BrowserHandoff", reason="login", what="sign in to login.test")

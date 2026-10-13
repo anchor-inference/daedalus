@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import urlsplit
 
 from daedalus.browser import cookies as cookie_files
+from daedalus.browser.login import LoginDesk, bare_url, check_selectors, on_site, site_of
 from daedalus.browser.model import (
     HANDOFF_REASONS,
     Blocked,
@@ -509,7 +510,11 @@ def explain(exc: BrowserError) -> str:
         reason = str(exc.details.get("reason") or "").strip()
         return f"The operator paused you in this browser{f' ({reason})' if reason else ''}. Do not act on it; end your turn or do other work. You will get a message when they hand it back."
     if isinstance(exc, FieldForbidden):
-        return "This is a password, code or payment field, which only the operator types. Call BrowserHandoff(reason='login', what=…) and let them do it; end your turn afterwards."
+        return (
+            "This is a password, code or payment field, which only the operator types. For a sign-in call BrowserLogin(url_or_domain, reason): "
+            "they type into a private form and the browser fills the page. For a payment or anything else call BrowserHandoff(reason, what). "
+            "End your turn afterwards."
+        )
     if isinstance(exc, StaleRef):
         ref = str(exc.details.get("ref") or "")
         if re.fullmatch(r"f\d+", ref):
@@ -583,6 +588,8 @@ class BrowserAgent:
         """Pictures of the elements asked about, by approval key, for the app's permission card. In
         memory and bounded: the question outlives a restart, its picture need not."""
         self.hints = LoopHints()
+        self.logins = LoginDesk(service)
+        """The operator's private sign-in: the requests ``BrowserLogin`` makes and the form's answers."""
         self.collected: OrderedDict[str, Collected] = OrderedDict()
         """What each owner's extraction requests gathered, by owner and request, the newest last."""
         self.told: OrderedDict[str, set[str]] = OrderedDict()
@@ -1522,6 +1529,50 @@ class BrowserAgent:
         await self.service.handoff(group["id"], reason, what.strip()[:500], actor=caller.actor)
         return f"Asked the operator to {what.strip()[:300]}. End your turn now; you will get a message when they hand the browser back."
 
+    async def login(self, caller: Caller, *, url_or_domain: str, reason: str, selectors: Any = None) -> str:
+        """Ask the operator to sign the browser in through the app's private form (``daedalus.browser.login``).
+
+        The tab is brought to the site first (the address given, or the site's front page when the tab
+        is elsewhere), and the page is looked at for a sign-in form before anyone is troubled: an agent
+        on a page without one is told to open it. A session the operator let use a saved sign-in is
+        signed in at once."""
+        target = url_or_domain.strip()
+        if not target:
+            raise InvalidRequest("url_or_domain is required: the sign-in page's address, or the site (github.com)")
+        if not reason.strip():
+            raise InvalidRequest("reason is required: say what the sign-in is for; the operator reads it in the form")
+        chosen = check_selectors(selectors)
+        url = target if "://" in target else None
+        if url is not None and urlsplit(url).scheme.lower() not in ("http", "https"):
+            raise InvalidRequest("the address is http or https")
+        site = site_of(target)
+        if not site:
+            raise InvalidRequest(f"{target!r} names no site; give the sign-in page's address or the site (github.com)")
+        try:
+            group = await self._group(caller)
+        except NotFound:
+            await self.open(caller, url=url or f"https://{site}/", why=reason)
+            group = await self._group(caller)
+        current = await self._tab(group, None)
+        here = str(current.get("url") or "")
+        wanted = url if url is not None and bare_url(here) != bare_url(url) else (None if on_site(here, site) else f"https://{site}/")
+        if wanted is not None:
+            await self.navigate(caller, url=wanted, why=reason)
+            current = await self._tab(group, None)
+            here = str(current.get("url") or "")
+        if not on_site(here, site):
+            raise Forbidden(f"the tab went to {host_of(here) or 'a page with no address'}, not {site}; nothing was asked. Open the sign-in page of {site} and call BrowserLogin again.")
+        found = (await self.logins.probe(group, str(current["id"]), site, chosen)).get("found") or {}
+        if not any(found.get(k) for k in ("username", "password", "otp")):
+            raise NotFound(
+                f"no sign-in form on {bare_url(here)}: open the page that shows it (a Sign in link or button first) and call BrowserLogin again; "
+                "selectors= names fields the guess misses (CSS, as BrowserInspect shows them)"
+            )
+        done = await self.logins.at_once(group, session_id=caller.owner.session_id, site=site, tab_id=str(current["id"]), selectors=chosen, actor=caller.actor)
+        if done is not None:
+            return done
+        return await self.logins.ask(group, session_id=caller.owner.session_id, site=site, url=here, reason=reason.strip(), selectors=chosen, actor=caller.actor)
+
     async def close(self, caller: Caller, *, tab: str | None = None, all: bool = False) -> str:  # noqa: A002 — the tool's own argument name
         group = await self._group(caller)
         if all or not tab:
@@ -1733,6 +1784,8 @@ class BrowserAgent:
                 return await self.wait(caller, until=_str(a, "until") or "load", value=_str(a, "value"), timeout_s=float(a.get("timeout_s") or 10), tab=_str(a, "tab")), False
             if tool == "BrowserDialog":
                 return await self.dialog(caller, accept=bool(a.get("accept")), text=_str(a, "text"), tab=_str(a, "tab")), False
+            if tool == "BrowserLogin":
+                return await self.login(caller, url_or_domain=_str(a, "url_or_domain") or "", reason=_str(a, "reason") or "", selectors=a.get("selectors")), False
             if tool == "BrowserHandoff":
                 return await self.handoff(caller, reason=_str(a, "reason") or "", what=_str(a, "what") or ""), False
             if tool == "BrowserClose":

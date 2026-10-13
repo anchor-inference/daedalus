@@ -1918,6 +1918,86 @@
     return { value: "" };
   }
 
+  // loginFields finds the fields of a sign-in form for the operator's private login: the username,
+  // the password, a one-time code and the button that sends them, each as a ref, "" where there is
+  // none. A selector the agent gave wins over the guess for its field; one that matches nothing is an
+  // error, never a silent guess, since the agent named it because the guess fails on that site. It
+  // only finds: the values are typed by the daemon as input and never pass through this script.
+  const USER_WORDS = /user|login|e-?mail|account|identifier|phone|логин|почт|телефон|имя пользователя/i;
+  const CODE_WORDS = /otp|one.?time|2fa|totp|mfa|verif|code|token|pin|код/i;
+  const SUBMIT_WORDS = /sign ?in|log ?in|next|continue|submit|verify|confirm|войти|вход|далее|продолжить|подтвердить/i;
+
+  function usable(el) {
+    return el.isConnected && visible(el) && !el.disabled && !el.readOnly && box(el).w >= 1 && box(el).h >= 1;
+  }
+
+  function words(el) {
+    const labels = el.labels ? Array.from(el.labels).map((l) => l.textContent || "") : [];
+    return [el.name, el.id, el.getAttribute("placeholder"), el.getAttribute("aria-label"), ...labels].filter(Boolean).join(" ");
+  }
+
+  function textInput(el) {
+    return tag(el) === "input" && ["text", "email", "tel", "number", ""].includes(inputType(el));
+  }
+
+  function loginFields(sel) {
+    sel = sel || {};
+    const out = { username: "", password: "", otp: "", submit: "" };
+    const pick = (key) => {
+      if (!sel[key]) return undefined;
+      let el;
+      try {
+        el = document.querySelector(sel[key]);
+      } catch (e) {
+        return { error: "bad_selector", message: key + ": " + String(e.message || e) };
+      }
+      if (!el) return { error: "no_match", message: key + ": " + sel[key] };
+      return el;
+    };
+    const chosen = {};
+    for (const key of ["username", "password", "otp", "submit"]) {
+      const el = pick(key);
+      if (el && el.error) return el;
+      if (el) chosen[key] = el;
+    }
+    const inputs = Array.from(document.querySelectorAll("input")).filter(usable);
+    const passwords = inputs.filter((el) => inputType(el) === "password" && !/new-password/i.test(el.getAttribute("autocomplete") || ""));
+    const password = chosen.password || passwords.find((el) => /current-password/i.test(el.getAttribute("autocomplete") || "")) || passwords[0] || null;
+    const otp = chosen.otp || inputs.find((el) => el !== password && /one-time-code/i.test(el.getAttribute("autocomplete") || "")) ||
+      inputs.find((el) => el !== password && inputType(el) !== "password" && textInput(el) && CODE_WORDS.test(words(el)) && !USER_WORDS.test(words(el))) || null;
+    let user = chosen.username || inputs.find((el) => el !== otp && /(^|\s)(username|email|webauthn)(\s|$)/i.test(el.getAttribute("autocomplete") || "")) ||
+      inputs.find((el) => el !== otp && inputType(el) === "email") ||
+      inputs.find((el) => el !== otp && textInput(el) && USER_WORDS.test(words(el))) || null;
+    if (!user && password) {
+      // The text field just before the password, in its form: what a site that labels nothing has.
+      const before = inputs.filter((el) => el !== otp && textInput(el) && (!password.form || el.form === password.form) &&
+        (el.compareDocumentPosition(password) & Node.DOCUMENT_POSITION_FOLLOWING));
+      user = before[before.length - 1] || null;
+    }
+    const last = (otp && !password && !user) ? otp : (password || user || otp);
+    let submit = chosen.submit || null;
+    if (!submit && last) {
+      const scope = last.form || last.closest("form, [role=form], [role=dialog], main") || document;
+      const buttons = Array.from(scope.querySelectorAll("button, input[type=submit], input[type=image], [role=button]")).filter(usable);
+      submit = buttons.find((b) => (tag(b) === "input") || (tag(b) === "button" && (b.getAttribute("type") || "submit").toLowerCase() === "submit" && b.form)) ||
+        buttons.find((b) => SUBMIT_WORDS.test(collapse(b.textContent || b.value || b.getAttribute("aria-label") || ""))) || null;
+    }
+    if (user) out.username = ref(user);
+    if (password) out.password = ref(password);
+    if (otp) out.otp = ref(otp);
+    if (submit) out.submit = ref(submit);
+    return out;
+  }
+
+  // markSecret makes a field the login filled read as a secret from now on, as a field a person typed
+  // into does: the snapshot shows [secret] where the username was, so the model never reads it back.
+  function markSecret(r) {
+    const el = lookup(r);
+    if (!el) return { error: "stale", ref: r };
+    humanTyped.add(el);
+    return { marked: true };
+  }
+
   // headline is what a page says it is about, for a person's "this is what done looks like" with
   // nothing selected: its first heading, else its title.
   function headline() {
@@ -1930,6 +2010,7 @@
     snapshot, readable, prepare, measure, hit, hovered, focus, selectAll, selectOption, element, evidence, mask, markHumanTyped, selection,
     hasText, exists, captchas, ref, describe, focusedRef, region, find, elementAt, scrollInfo, scrollBy, scrollToText,
     route, frameElement, frameOrigin, prepareFrame, hitFrame, crossFrames, setPrefix, markListened, listenerRoot, inspect,
+    loginFields, markSecret,
     scrollState: () => {
       const st = scrollState();
       return { top: st.top, height: st.height, view: st.view, above: st.above, below: st.below, pane: st.el ? ref(st.el) : "" };
