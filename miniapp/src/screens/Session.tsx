@@ -1403,7 +1403,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   ] : [];
   // An idle session with jobs still running has not finished: say what it waits for rather than look done.
   const jobsPending = !busy && !saving && !compacting && status !== "failed" ? detail?.background_count ?? 0 : 0;
-  const effortWord = detail ? t(detail.thinking === false ? "add.effort.off" : `add.effort.${detail.reasoning_effort || "medium"}`) : "";
+  const effortWord = detail ? t(detail.thinking === false ? "add.effort.off" : detail.mode === AUTO_MODE ? "add.effort.auto" : `add.effort.${detail.reasoning_effort || "medium"}`) : "";
   const phoneSub = offline ? <StateSub tone="offline">{t("session.phone.reconnecting")}</StateSub>
     : compacting ? <StateSub tone="compacting">{t("session.compacting.bar")}</StateSub>
     : busy ? <LiveSub status={status} base={tail} live={live} />

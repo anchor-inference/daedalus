@@ -13,6 +13,7 @@ import { ModelChoice, ModelSelect } from "./modelselect";
 import { ModeInfo, ModeSelect } from "./modeselect";
 import { MicButton, VoiceBar, VoiceNoteFailed, useVoiceNote } from "./voicebar";
 import { landWords } from "./voicenote";
+import { MeetingCard, MeetingOffer, isAudio, useMeeting } from "./meeting";
 import { loadDraftFiles, saveDraftFiles } from "./project/draftfiles";
 import { useReply } from "./project/chat";
 import { AttachedSecret, SecretChip, SecretSheet } from "./secrets";
@@ -353,8 +354,19 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       }
     },
     onAttach: (file) => addFiles([file]),
+    // A long recording the operator turned into a meeting: notes, not dictation. On the start page
+    // there is no session to keep them in yet, so the recording is attached instead.
+    onMeeting: sessionId ? (file) => void meeting.start(file, false) : undefined,
     toast,
   });
+  const meeting = useMeeting(sessionId, toast);
+  // An audio file in the pill can be meeting notes instead of an attachment; the first one is offered.
+  const meetingFile = sessionId && !meeting.state ? files.find(isAudio) : undefined;
+  const startMeeting = (keep: boolean) => {
+    if (!meetingFile) return;
+    setFiles((current) => current.filter((file) => file !== meetingFile));
+    void meeting.start(meetingFile, keep);
+  };
   const voiceBar = note.state.phase === "recording" || note.state.phase === "transcribing";
 
   // The operator's likely next message, as the field's placeholder while it is empty and nothing
@@ -573,6 +585,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         </div>
       )}
       <VoiceNoteFailed note={note} />
+      <MeetingCard meeting={meeting} />
+      {meetingFile && !voiceBar && <MeetingOffer file={meetingFile} onStart={startMeeting} />}
       {/* A tap anywhere on the phone's pill that is not a control is a tap on its field: the field is
           36 px inside a 48 px pill, and the pill is the target the reader sees. */}
       <div className={`composer-box ${voiceBar ? "voicing" : ""}`} onClick={phone ? (e) => { if (e.target === e.currentTarget) textarea.current?.focus(); } : undefined}>

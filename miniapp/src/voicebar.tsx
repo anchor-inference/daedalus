@@ -29,7 +29,15 @@ export type VoiceNote = {
   retry: () => void;
   attach: () => void;
   discard: () => void;
+  /** Whether the recording becomes meeting notes when it stops; offered only where a session keeps them. */
+  meeting: boolean;
+  canMeet: boolean;
+  /** Turn the recording under way into a meeting: no dictation limit, and notes when it stops. */
+  toMeeting: () => void;
 };
+
+/** How long a recording runs before the bar offers to make it a meeting rather than dictation. */
+export const MEETING_AFTER_SECONDS = 60;
 
 /** Where a note is heard: its session's, or the host's own for the start page, which has none yet. */
 export function transcribeUrl(sessionId: string): string {
@@ -45,11 +53,15 @@ type Options = {
   onWords: (text: string, send: boolean) => void;
   /** The recording as a file in the pill, for when the operator gives up on the words. */
   onAttach: (file: File) => void;
+  /** The recording as a meeting to make notes from; absent where there is no session to keep them in. */
+  onMeeting?: (file: File) => void;
   toast: (text: string) => void;
 };
 
-export function useVoiceNote({ sessionId, asr, onWords, onAttach, toast }: Options): VoiceNote {
+export function useVoiceNote({ sessionId, asr, onWords, onAttach, onMeeting, toast }: Options): VoiceNote {
   const [state, dispatch] = useReducer(noteStep, IDLE);
+  const [meeting, setMeeting] = useState(false);
+  const meetingMode = useRef(false);
   const [startedAt, setStartedAt] = useState(0);
   const recorder = useRef<MediaRecorder | null>(null);
   const audio = useRef<Blob | null>(null);
@@ -61,8 +73,8 @@ export function useVoiceNote({ sessionId, asr, onWords, onAttach, toast }: Optio
   // Whether ↑ rather than ■ ended the recording; read when the recorder has delivered its last bytes.
   const sendOnStop = useRef(false);
   const meter = useRef<{ ctx: AudioContext; timer: number } | null>(null);
-  const live = useRef({ sessionId, onWords, onAttach, toast, autosend: !!asr?.autosend, maxSeconds: asr?.max_seconds ?? 0 });
-  live.current = { sessionId, onWords, onAttach, toast, autosend: !!asr?.autosend, maxSeconds: asr?.max_seconds ?? 0 };
+  const live = useRef({ sessionId, onWords, onAttach, onMeeting, toast, autosend: !!asr?.autosend, maxSeconds: asr?.max_seconds ?? 0 });
+  live.current = { sessionId, onWords, onAttach, onMeeting, toast, autosend: !!asr?.autosend, maxSeconds: asr?.max_seconds ?? 0 };
   const supported = typeof MediaRecorder !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
 
   const stopMeter = useCallback(() => {
@@ -162,6 +174,15 @@ export function useVoiceNote({ sessionId, asr, onWords, onAttach, toast }: Optio
       // Kept before anything is sent: whatever happens to the request, the recording outlives it.
       void keepNote(owner, { blob, error: "", kept: "", at: Date.now() });
       if (ending.current === "keep") return;
+      if (meetingMode.current && live.current.onMeeting) {
+        // A meeting goes to its notes, which upload the audio themselves; the note kept for dictation is let go.
+        meetingMode.current = false;
+        setMeeting(false);
+        void forgetNote(owner);
+        dispatch({ type: "cancel" });
+        live.current.onMeeting(new File([blob], recordingName(blob.type, new Date()), { type: blob.type || "audio/webm" }));
+        return;
+      }
       audio.current = blob;
       void transcribe(blob, "", sendOnStop.current, owner);
     };
@@ -201,14 +222,17 @@ export function useVoiceNote({ sessionId, asr, onWords, onAttach, toast }: Optio
     if (r.state !== "inactive") r.stop();
   }, []);
 
-  // The configured ceiling stops the recording and transcribes it; it used to throw it away.
+  // The configured ceiling stops the recording and transcribes it; it used to throw it away. A
+  // meeting has no such ceiling here: the host refuses one longer than its own limit, with the reason.
   useEffect(() => {
-    if (state.phase !== "recording" || !live.current.maxSeconds) return;
+    if (state.phase !== "recording" || !live.current.maxSeconds || meeting) return;
     const timer = window.setTimeout(() => stop(false), Math.max(0, startedAt + live.current.maxSeconds * 1000 - Date.now()));
     return () => window.clearTimeout(timer);
-  }, [state.phase, startedAt, stop]);
+  }, [state.phase, startedAt, stop, meeting]);
 
   const cancel = useCallback(() => {
+    meetingMode.current = false;
+    setMeeting(false);
     release("discard");
     audio.current = null;
     void forgetNote(live.current.sessionId);
@@ -238,7 +262,13 @@ export function useVoiceNote({ sessionId, asr, onWords, onAttach, toast }: Optio
 
   const discard = useCallback(() => letGo(state.kept), [letGo, state.kept]);
 
-  return { state, supported, startedAt, levels, start: () => void start(), stop, cancel, retry, attach, discard };
+  const toMeeting = useCallback(() => {
+    if (!live.current.onMeeting) return;
+    meetingMode.current = true;
+    setMeeting(true);
+  }, []);
+
+  return { state, supported, startedAt, levels, start: () => void start(), stop, cancel, retry, attach, discard, meeting, canMeet: !!onMeeting, toMeeting };
 }
 
 /** The microphone in the composer's row. It is there whether or not something is typed. */
@@ -270,6 +300,9 @@ export function VoiceBar({ note }: { note: VoiceNote }) {
         <div className="voicebar-busy" role="status"><span className="voicebar-spinner" aria-hidden />{t("voicenote.transcribing")}</div>
       )}
       {recording && <span className="voicebar-time" aria-label={t("voicenote.elapsed", { time: clock(seconds) })}>{clock(seconds)}</span>}
+      {recording && note.canMeet && (note.meeting
+        ? <span className="voicebar-meeting on" role="status">{t("meeting.recording")}</span>
+        : seconds >= MEETING_AFTER_SECONDS && <button type="button" className="btn small voicebar-meeting" onClick={note.toMeeting} title={t("meeting.turn.hint")}>{t("meeting.turn")}</button>)}
       <button type="button" className="roundbtn voicebar-stop" onClick={() => note.stop(false)} disabled={!recording} aria-label={t("voicenote.stop")} title={t("voicenote.stop")}>
         <Icon name="stop" size={16} />
       </button>

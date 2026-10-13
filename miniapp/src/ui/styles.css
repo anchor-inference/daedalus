@@ -4955,3 +4955,21 @@ body:has(.context-menu) .rail-tip { visibility: hidden; }
 .composer-ghost-accept { position:absolute; top:var(--space-2); right:var(--space-2); display:inline-flex; align-items:center; gap:4px; padding:1px 6px; border:1px solid var(--line); border-radius:var(--radius-xs); background:var(--surface-1); color:var(--fg-3); font-size:var(--fs-11); cursor:pointer; }
 .composer-ghost-accept:hover { color:var(--accent); border-color:var(--accent); }
 .composer-ghost-accept kbd { font:inherit; }
+
+/* Meeting notes above the field: the offer for an attached recording, the progress, the notes. */
+.meeting-card { display:flex; align-items:center; gap:var(--space-2); padding:var(--space-2) var(--space-3); margin-bottom:var(--space-2); border:1px solid var(--line); border-radius:var(--radius-md); background:var(--surface-1); font-size:var(--fs-13); min-width:0; }
+.meeting-card .meeting-text { display:flex; flex-direction:column; gap:2px; flex:1; min-width:0; }
+.meeting-card .meeting-title { font-weight:600; }
+.meeting-keep { display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+.meeting-bar { display:block; height:3px; border-radius:2px; background:var(--surface-3, var(--line)); overflow:hidden; margin-top:2px; }
+.meeting-bar i { display:block; height:100%; width:calc(var(--v) * 1%); background:var(--accent); transition:width .3s; }
+.meeting-failed { border-color:var(--bad, var(--line)); }
+.meeting-done { flex-direction:column; align-items:stretch; max-height:min(50vh, 420px); overflow:auto; }
+.meeting-head { display:flex; align-items:center; gap:var(--space-2); }
+.meeting-summary { margin:0; line-height:1.45; }
+.meeting-list ul { margin:2px 0 0; padding-left:1.2em; }
+.meeting-label { font-size:var(--fs-11); color:var(--fg-3); text-transform:uppercase; letter-spacing:.04em; }
+.meeting-actions { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2); justify-content:flex-end; }
+.meeting-added { display:inline-flex; align-items:center; gap:4px; }
+.voicebar-meeting { white-space:nowrap; }
+.voicebar-meeting.on { font-size:var(--fs-12); color:var(--accent); }

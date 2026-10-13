@@ -8,6 +8,9 @@ Once an answer settles, the app asks the host for the operator's likely next mes
 as the empty field's placeholder. Tab puts it in the field; nothing is sent by itself; and once it is
 taken (or the operator types) it is not offered again for that answer.
 
+An audio file attached to the composer is offered as meeting notes: the upload, the progress, then
+the notes with their action items, which go on the calendar on the chosen day with one click.
+
     APP_URL=http://127.0.0.1:8238/app python3 tests/browser/check_assist.py
 
 Exit 0 when every step holds.
@@ -17,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 
+from api_stub import meeting_job
 from check_composer import BASE, CHROMIUM, HOST, SESSION, UNHANDLED, message
 from check_composer import stub as composer_stub
 from playwright.sync_api import expect, sync_playwright
@@ -35,6 +39,17 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         data = json.loads(route.request.post_data or "{}")
         HOST.posted.append(("POST", rel, data))
         return route.fulfill(status=200, content_type="application/json", body=json.dumps({"depth_next": data.get("level") or ""}))
+    if rel.startswith(f"/api/sessions/{SESSION}/meeting"):
+        method = route.request.method
+        if method == "POST" and rel.endswith("/meeting"):
+            HOST.posted.append(("POST", rel, None))
+            return route.fulfill(status=200, content_type="application/json", body=json.dumps(meeting_job(SESSION, "transcribing")))
+        if method == "GET":
+            return route.fulfill(status=200, content_type="application/json", body=json.dumps(meeting_job(SESSION, "done")))
+        data = json.loads(route.request.post_data or "{}")
+        HOST.posted.append((method, rel, data))
+        answer = {"event_id": "evt-meeting", "day": data.get("day", "")} if rel.endswith("/calendar") else {"run_id": "r-meeting"}
+        return route.fulfill(status=200, content_type="application/json", body=json.dumps(answer))
     return composer_stub(route)
 
 
@@ -110,6 +125,27 @@ def main() -> None:
         field.focus()
         page.keyboard.press("Tab")
         expect(field).not_to_be_focused()
+
+        # An attached recording is offered as meeting notes, and its action items go on the calendar.
+        page.locator(".composer input[type=file]").first.set_input_files(files=[{"name": "standup.m4a", "mimeType": "audio/mp4", "buffer": b"\0" * 2048}])
+        offer = page.locator(".meeting-offer")
+        expect(offer).to_be_visible()
+        expect(offer).to_contain_text("standup.m4a")
+        offer.get_by_role("button", name="Make notes").click()
+        expect(offer).to_have_count(0)
+        assert any(p[1] == f"/api/sessions/{SESSION}/meeting" for p in HOST.posted), HOST.posted
+        notes = page.locator(".meeting-done")
+        expect(notes).to_be_visible(timeout=10000)
+        expect(notes).to_contain_text("Weekly standup")
+        expect(notes.locator(".meeting-list li")).to_have_count(3)
+        notes.locator("input[type=date]").fill("2026-10-20")
+        notes.locator("[data-action=calendar]").click()
+        expect(notes).to_contain_text("On the calendar")
+        assert ("POST", f"/api/sessions/{SESSION}/meeting/mtg1/calendar", {"day": "2026-10-20"}) in HOST.posted, HOST.posted
+        if os.environ.get("SHOTS"):
+            page.screenshot(path=f"{os.environ['SHOTS']}/assist-meeting.png")
+        # The recording did not stay in the pill as an attachment.
+        expect(page.locator(".composer .attachments")).to_have_count(0)
         browser.close()
     assert not UNHANDLED.report()
 
