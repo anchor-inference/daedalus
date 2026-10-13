@@ -48,7 +48,7 @@ from daedalus.host.session_runner import Attachment, SessionManager, SessionStat
 from daedalus.security.operator_secrets import SecretError
 from daedalus.speech.service import LocalSpeech, recogniser_available, transcribe_recording
 from daedalus.stores.sqlite import DeliveryLedger
-from daedalus.transport.telegram.markdown import markdown_to_html, split_message, strip_tags
+from daedalus.transport.telegram.markdown import app_links, markdown_to_html, split_message, strip_tags
 from daedalus.transport.telegram.render import Outbox, RunRenderer, RunView
 from daedalus.transport.telegram.voice import TranscriptionError, voice_note_text
 
@@ -262,8 +262,14 @@ class TelegramOutbox(Outbox):
     talking; in a topic, where the topic itself is the name, it stays empty.
     """
 
-    def __init__(self, bot: Bot, chat_id: int, thread_id: int | None, *, header: Callable[[], str] | None = None, on_sent: Callable[[int, int], None] | None = None) -> None:
+    def __init__(
+        self, bot: Bot, chat_id: int, thread_id: int | None, *, header: Callable[[], str] | None = None,
+        on_sent: Callable[[int, int], None] | None = None, app_base: str = "",
+    ) -> None:
         self.bot = bot
+        self.app_base = app_base
+        """The installation's public address, which turns an answer's ``/app/…`` links into ones a tap
+        opens; empty, they are said as text (:func:`app_links`)."""
         self.chat_id = chat_id
         self.thread_id = thread_id or None
         self.header = header
@@ -290,7 +296,7 @@ class TelegramOutbox(Outbox):
         return f"<p>{html.escape(head, quote=False)}</p>{text}" if head else text
 
     async def send_text(self, text: str, *, markdown: bool = True) -> int:
-        text = self.attributed(text)
+        text = self.attributed(app_links(text, self.app_base))
         if markdown:
             try:
                 msg = await tg_call(
@@ -551,6 +557,10 @@ class TelegramFront:
     def _is_owner(self, user_id: int | None) -> bool:
         return user_id is not None and user_id == self.settings.owner_user_id
 
+    def outbox_to(self, chat_id: int, thread_id: int | None, **options: Any) -> TelegramOutbox:
+        """An outbox to one chat or topic that writes the app's addresses as links a tap opens."""
+        return TelegramOutbox(self.bot, chat_id, thread_id, app_base=self.settings.miniapp_public_url, **options)
+
     def private_mode(self) -> bool:
         """True when every session lives in the operator's private chat rather than in its own topic."""
         return self.config.telegram.session_mode() == "private"
@@ -585,11 +595,11 @@ class TelegramFront:
         because they have no topic of their own.
         """
         if self.private_mode():
-            return TelegramOutbox(self.bot, self.settings.owner_user_id, None, header=header) if self.settings.owner_user_id else None
+            return self.outbox_to(self.settings.owner_user_id, None, header=header) if self.settings.owner_user_id else None
         chat_id = self.config.telegram.forum_chat_id or self.settings.owner_user_id
         if not chat_id:
             return None
-        return TelegramOutbox(self.bot, chat_id, self.config.telegram.general_topic_id or None, header=header)
+        return self.outbox_to(chat_id, self.config.telegram.general_topic_id or None, header=header)
 
     async def notify(self, text: str, *, markdown: bool = True) -> None:
         """Post to the operator channel (General topic or the private chat)."""
@@ -683,7 +693,7 @@ class TelegramFront:
 
     def outbox(self, chat_id: int, thread_id: int | None, *, header: Callable[[], str] | None = None) -> TelegramOutbox:
         """An outbox for a chat and thread chosen by the caller (a project's topic, or the private chat)."""
-        return TelegramOutbox(self.bot, chat_id, thread_id, header=header)
+        return self.outbox_to(chat_id, thread_id, header=header)
 
     async def post(self, outbox: TelegramOutbox, text: str, rows: list[list[tuple[str, str]]] | None = None) -> int:
         """Plain text, with inline buttons when ``rows`` has any; returns the message id."""
@@ -742,10 +752,10 @@ class TelegramFront:
     def _main_outbox(self, session_id: str) -> TelegramOutbox | None:
         """The main orchestrator's channel: General in a forum, the private chat (under its header) otherwise."""
         if not self.private_mode() and self.config.telegram.forum_chat_id:
-            return TelegramOutbox(self.bot, self.config.telegram.forum_chat_id, self.config.telegram.general_topic_id or None, on_sent=self.remember_post(session_id))
+            return self.outbox_to(self.config.telegram.forum_chat_id, self.config.telegram.general_topic_id or None, on_sent=self.remember_post(session_id))
         if not self.settings.owner_user_id:
             return None
-        return TelegramOutbox(self.bot, self.settings.owner_user_id, None, header=lambda: MAIN_HEADER, on_sent=self.remember_post(session_id))
+        return self.outbox_to(self.settings.owner_user_id, None, header=lambda: MAIN_HEADER, on_sent=self.remember_post(session_id))
 
     async def outbox_for_session(self, session_id: str) -> TelegramOutbox | None:
         """Where this session's output goes: the one place that tells the two modes apart."""
@@ -758,7 +768,7 @@ class TelegramFront:
             return self._main_outbox(session_id)
         binding = await self.binding_for_session(session_id)
         if binding is not None:
-            return TelegramOutbox(self.bot, binding.chat_id, binding.thread_id)
+            return self.outbox_to(binding.chat_id, binding.thread_id)
         # A mode change governs sessions without a destination. Existing topic bindings remain
         # authoritative; otherwise changing one session must not reroute every other session to DM.
         if self.private_mode():
@@ -770,7 +780,7 @@ class TelegramFront:
             # A session that outlived private mode, or one Telegram would not open a topic for yet.
             logger.warning("session %s has no topic: %s", session_id, exc)
         if binding is not None:
-            return TelegramOutbox(self.bot, binding.chat_id, binding.thread_id)
+            return self.outbox_to(binding.chat_id, binding.thread_id)
         general = self._general_outbox(header=lambda: f"{SESSION_HEADER} {title}")
         if general is not None:
             # It shares General with the main orchestrator; a reply to it must reach it, not the main one.
@@ -789,7 +799,7 @@ class TelegramFront:
             state = self.manager.live_state(session_id)
             return f"{SESSION_HEADER} {state.session.title if state is not None else session_id}"
 
-        return TelegramOutbox(self.bot, self.settings.owner_user_id, None, header=header, on_sent=self.remember_post(session_id))
+        return self.outbox_to(self.settings.owner_user_id, None, header=header, on_sent=self.remember_post(session_id))
 
     async def ensure_topic(self, session_id: str, title: str, *, chat_id: int | None = None) -> TopicBinding | None:
         """The session's own topic in the bound forum, opened now if it has none.
@@ -1233,7 +1243,7 @@ class TelegramFront:
         emoji = RUN_REACTIONS.get(kind)
         if ref is None or emoji is None:
             return
-        await TelegramOutbox(self.bot, ref[0], None).react(ref[1], emoji)
+        await self.outbox_to(ref[0], None).react(ref[1], emoji)
 
     async def cmd_compact(self, message: Message, command: CommandObject) -> None:
         if not self._is_owner(message.from_user.id if message.from_user else None):
@@ -1337,7 +1347,7 @@ class TelegramFront:
             return
         rules = self.config.prompt.rules.strip() or DEFAULT_RULES.strip()
         origin = "custom (config)" if self.config.prompt.rules.strip() else "built-in default"
-        outbox = TelegramOutbox(self.bot, message.chat.id, message.message_thread_id if message.is_topic_message else None)
+        outbox = self.outbox_to(message.chat.id, message.message_thread_id if message.is_topic_message else None)
         await outbox.send_html(f"<p><b>Working rules</b> — {origin}. Edit in the Mini App → Settings.</p><pre>{html.escape(rules)}</pre>")
 
     async def _ask_close(self, session_id: str, title: str, chat_id: int, thread_id: int | None) -> None:
@@ -1797,7 +1807,7 @@ class TelegramFront:
             return
         if await self._maybe_custom_answer(message, state):
             if self.config.telegram.reactions:
-                await TelegramOutbox(self.bot, message.chat.id, None).react(message.message_id, RUN_REACTIONS["received"])
+                await self.outbox_to(message.chat.id, None).react(message.message_id, RUN_REACTIONS["received"])
             return
         oversize = self._oversize(message)
         if oversize:
@@ -1807,7 +1817,7 @@ class TelegramFront:
         text = self._text_of(message)
         self._last_operator_message[state.session.id] = (message.chat.id, message.message_id)
         if self.config.telegram.reactions:
-            await TelegramOutbox(self.bot, message.chat.id, None).react(message.message_id, RUN_REACTIONS["received"])
+            await self.outbox_to(message.chat.id, None).react(message.message_id, RUN_REACTIONS["received"])
         attachment = await self._download(message, state)  # may take a while for big files
         if attachment is not None and (message.voice or (message.audio and (message.audio.mime_type or "") in SPEECH_MIME_TYPES)) and recogniser_available(self.speech, self.config):
             if await self._voice_to_text(message, state, attachment, text):

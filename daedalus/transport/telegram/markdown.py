@@ -18,6 +18,43 @@ _HEADER_RE = re.compile(r"^#{1,6}\s+(.*)$", re.MULTILINE)
 _BULLET_RE = re.compile(r"^(\s*)[-*]\s+", re.MULTILINE)
 
 
+_SEGMENT = r"[A-Za-z0-9_~-]+(?:\.[A-Za-z0-9_~-]+)*"
+_APP_PATH = rf"/app(?:/{_SEGMENT})*/?(?:\?[A-Za-z0-9_.~=%&-]*)?(?:#[A-Za-z0-9_~%*:.-]*[A-Za-z0-9_~%*-])?"
+_APP_LINK_RE = re.compile(rf"\[([^\]]+)\]\(({_APP_PATH})\)")
+_APP_CODE_RE = re.compile(rf"`({_APP_PATH})`")
+_APP_BARE_RE = re.compile(rf"(^|[\s(])({_APP_PATH})(?!\.?[\w/]|\.\.)", re.MULTILINE)
+
+
+def app_links(text: str, base: str) -> str:
+    """Addresses inside the app (``/app/settings/voice#asr.transcriber``) made usable outside it.
+
+    In the app such an address is a link the router opens; in Telegram a relative path is nothing to
+    tap. With the installation's public address (``MINIAPP_PUBLIC_URL``) each becomes a full link; without
+    one a Markdown link keeps only its words and a bare path stays as text — where to look, said
+    plainly, rather than a link that goes nowhere. Code blocks are left as they are.
+    """
+    root = base.strip().rstrip("/").removesuffix("/app")
+
+    def full(path: str) -> str:
+        return f"{root}{path}"
+
+    def outside_code(segment: str) -> str:
+        if root:
+            segment = _APP_LINK_RE.sub(lambda m: f"[{m.group(1)}]({full(m.group(2))})", segment)
+            segment = _APP_CODE_RE.sub(lambda m: full(m.group(1)), segment)
+            return _APP_BARE_RE.sub(lambda m: m.group(1) + full(m.group(2)), segment)
+        return _APP_LINK_RE.sub(lambda m: m.group(1), segment)
+
+    parts: list[str] = []
+    last = 0
+    for match in _FENCE_RE.finditer(text):
+        parts.append(outside_code(text[last : match.start()]))
+        parts.append(match.group(0))
+        last = match.end()
+    parts.append(outside_code(text[last:]))
+    return "".join(parts)
+
+
 def markdown_to_html(text: str) -> str:
     """Convert the subset of Markdown models actually emit into Telegram HTML."""
     parts: list[str] = []
