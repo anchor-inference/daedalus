@@ -483,3 +483,53 @@ async def test_the_operator_loads_a_cookie_file_and_hears_counts_alone(served: S
             assert refused.status_code == 400 and "FAKE-VALUE" not in refused.text
         actions = (await http.get(f"/api/browsers/{group}/actions", headers=H)).json()["actions"]
         assert [(a["actor"], a["kind"], a["element"]) for a in actions if a["kind"].startswith("cookies")] == [("operator", "cookies_import", "shop.test")] * 2
+
+
+async def test_the_private_sign_in_form_is_answered_by_its_own_routes(served: Served) -> None:
+    """The form's answer goes to the daemon and comes back as where the page ended; a stale request, a
+    refusal and the saved sign-ins' list never echo a value."""
+    password = "FAKE-PASSWORD-route-31"
+    served.daemon.page("https://acme.test/login", title="Sign in", elements={
+        "e40": Element("e40", "textbox", "Email", tag="input", type="email"),
+        "e41": Element("e41", "textbox", "Password", tag="input", type="password"),
+        "e42": Element("e42", "button", "Sign in", goes_to="https://acme.test/home"),
+    })
+    state = await served.app.manager.create_session("invoices")
+    owner = Owner("session", state.session.id, session_id=state.session.id)
+    await served.app.extensions["browser"].open(owner, url="https://acme.test/login", actor=f"agent:{state.session.id}")
+    async def allow(_ask: Any) -> tuple[bool, str]:
+        return True, ""
+
+    caller = Caller(owner=owner, actor=f"agent:{state.session.id}", gate=allow, files=None)  # type: ignore[arg-type]
+    agent = served.app.extensions["browser_agent"]
+    text, failed = await agent.run("BrowserLogin", {"url_or_domain": "acme.test", "reason": "invoices"}, caller)
+    assert not failed, text
+    group = f"s-{state.session.id}"
+    async with served.http() as http:
+        listed = (await http.get("/api/browsers", headers=H)).json()["groups"]
+        (need,) = [g["needs_you"] for g in listed if g["id"] == group]
+        login_id = need["login"]["id"]
+        assert need["reason"] == "login" and need["login"]["site"] == "acme.test" and need["login"]["saved"] is False
+        stale = await http.post(f"/api/browsers/{group}/login", json={"login_id": "nope", "password": password}, headers=H)
+        assert stale.status_code == 409 and password not in stale.text
+        empty = await http.post(f"/api/browsers/{group}/login", json={"login_id": login_id}, headers=H)
+        assert empty.status_code == 400
+        long = await http.post(f"/api/browsers/{group}/login", json={"login_id": login_id, "password": password * 200}, headers=H)
+        assert long.status_code == 400 and password not in long.text
+        done = await http.post(f"/api/browsers/{group}/login", json={"login_id": login_id, "username": "someone@example.com", "password": password, "save": True}, headers=H)
+        assert done.status_code == 200, done.text
+        assert done.json() == {"site": "acme.test", "url": "https://acme.test/home", "signed_in": "yes", "filled": ["username", "password"], "waiting": "", "saved": True}
+        assert password not in done.text
+        secrets_list = (await http.get("/api/secrets", headers=H)).json()
+        (saved,) = secrets_list["logins"]
+        assert saved["name"] == "login:acme.test" and password not in json.dumps(secrets_list) and "someone@example.com" not in json.dumps(secrets_list)
+        assert (await http.delete(f"/api/secrets/logins/{saved['id']}", headers=H)).json() == {"ok": True}
+        assert (await http.get("/api/secrets", headers=H)).json()["logins"] == []
+        # A request declined: the agent hears it, and the form is over.
+        await agent.run("BrowserNavigate", {"url": "https://acme.test/login"}, caller)
+        await agent.run("BrowserLogin", {"url_or_domain": "acme.test", "reason": "again"}, caller)
+        listed = (await http.get("/api/browsers", headers=H)).json()["groups"]
+        (need,) = [g["needs_you"] for g in listed if g["id"] == group]
+        declined = await http.post(f"/api/browsers/{group}/login/decline", json={"login_id": need["login"]["id"]}, headers=H)
+        assert declined.json() == {"ok": True}
+        assert (await http.post(f"/api/browsers/{group}/login/decline", json={"login_id": need["login"]["id"]}, headers=H)).status_code == 409

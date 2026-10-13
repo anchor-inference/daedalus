@@ -23,6 +23,7 @@ value copied onto another row does not open. The database alone gives nothing aw
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -132,6 +133,34 @@ class Secret:
         }
 
 
+def login_placeholder(site: str) -> str:
+    """What a saved sign-in's password reads as wherever a page or a command echoes it."""
+    return f"«login:{site}»"
+
+
+@dataclass(slots=True)
+class SavedLogin:
+    """A sign-in the operator saved from the private login form, for one site. Never the agent's: it
+    has no placeholder to write and no variable; only the daemon types it, after the operator's yes."""
+
+    id: str
+    site: str
+    created_at: str
+    updated_at: str
+    last_used_at: str | None = None
+    uses: int = 0
+    username: str | None = field(default=None, repr=False)
+    password: str | None = field(default=None, repr=False)
+    """Both None when the sealed value could not be opened."""
+
+    def public(self) -> dict[str, Any]:
+        """What the app lists: the site and when, never the username or the password."""
+        return {
+            "id": self.id, "site": self.site, "name": f"login:{self.site}", "created_at": self.created_at, "updated_at": self.updated_at,
+            "last_used_at": self.last_used_at, "uses": self.uses, "readable": self.password is not None,
+        }
+
+
 def load_key(path: Path) -> bytes:
     """The sealing key, made on first use. Written owner-only before a byte of it lands on disk."""
     try:
@@ -201,6 +230,8 @@ class OperatorSecrets:
         """Values of deleted secrets, still masked for the life of the process: deleting a secret takes it
         away from the agent, and must not also make it readable in what a command prints afterwards."""
         self._pending: set[asyncio.Task[Any]] = set()
+        self._logins: dict[str, SavedLogin] = {}
+        """Saved sign-ins by site."""
 
     def _cipher(self) -> AESGCM:
         if self._aead is None:
@@ -235,11 +266,20 @@ class OperatorSecrets:
         self._grants = {}
         for row in await self.db.fetchall("SELECT secret_id, staff_id FROM operator_secret_grants"):
             self._grants.setdefault(row["staff_id"], set()).add(row["secret_id"])
+        self._logins = {}
+        for row in await self.db.fetchall("SELECT * FROM saved_logins"):
+            login = SavedLogin(
+                id=row["id"], site=row["site"], created_at=row["created_at"], updated_at=row["updated_at"],
+                last_used_at=row["last_used_at"], uses=int(row["uses"] or 0),
+            )
+            login.username, login.password = self._open_login(login.id, login.site, bytes(row["sealed"]))
+            self._logins[login.site] = login
         self._refresh()
 
     def _refresh(self) -> None:
         """Teach the redactor the current values and rewrite the files commands read."""
         named = [(s.value, s.placeholder) for s in self._by_id.values() if s.value]
+        named.extend((login.password, login_placeholder(login.site)) for login in self._logins.values() if login.password)
         named.extend(self._retired.items())
         self.redactor.replace_named(named)
         if self.files_dir is not None:
@@ -489,6 +529,99 @@ class OperatorSecrets:
         except Exception:  # noqa: BLE001 — the audit line is a courtesy; the use already happened
             logger.warning("could not record the use of an operator secret", exc_info=True)
 
+    # -- saved sign-ins ------------------------------------------------------------------------
+
+    def _open_login(self, login_id: str, site: str, sealed: bytes) -> tuple[str | None, str | None]:
+        opened = self.open_sealed(login_id, "login", site, "login", sealed)
+        if opened is None:
+            return None, None
+        try:
+            value = json.loads(opened)
+        except ValueError:
+            return None, None
+        if not isinstance(value, dict):
+            return None, None
+        return str(value.get("username") or ""), str(value.get("password") or "")
+
+    async def save_login(self, site: str, username: str, password: str) -> SavedLogin:
+        """Keep a sign-in for a site; a second save for the same site replaces the first, which is how a
+        changed password is saved again."""
+        site = site.strip().lower()
+        if not site:
+            raise SecretError("a saved sign-in belongs to a site")
+        if not password:
+            raise SecretError("there is no password to save")
+        if len(username) > MAX_VALUE or len(password) > MAX_VALUE:
+            raise SecretError(f"a value is at most {MAX_VALUE} characters")
+        now = _now()
+        existing = self._logins.get(site)
+        login_id = existing.id if existing is not None else secrets.token_hex(8)
+        sealed = self.seal(login_id, "login", site, "login", json.dumps({"username": username, "password": password}, ensure_ascii=False))
+        if existing is not None:
+            if existing.password and existing.password != password:
+                self._retired[existing.password] = login_placeholder(site)
+            await self.db.execute("UPDATE saved_logins SET sealed = ?, updated_at = ? WHERE id = ?", (sealed, now, login_id))
+            existing.username, existing.password, existing.updated_at = username, password, now
+            login = existing
+        else:
+            await self.db.execute(
+                "INSERT INTO saved_logins(id, site, sealed, created_at, updated_at) VALUES (?, ?, ?, ?, ?)", (login_id, site, sealed, now, now),
+            )
+            login = SavedLogin(id=login_id, site=site, created_at=now, updated_at=now, username=username, password=password)
+            self._logins[site] = login
+        self._refresh()
+        return login
+
+    def saved_login(self, host: str) -> SavedLogin | None:
+        """The sign-in saved for a host or the nearest site above it (``accounts.example.com`` finds
+        ``example.com``); only one whose value opens."""
+        parts = host.strip().lower().strip(".").split(".")
+        for i in range(len(parts) - 1):
+            login = self._logins.get(".".join(parts[i:]))
+            if login is not None and login.password is not None:
+                return login
+        return None
+
+    def saved_logins(self) -> list[SavedLogin]:
+        return sorted(self._logins.values(), key=lambda login: login.site)
+
+    async def forget_login(self, login_id: str) -> bool:
+        login = next((item for item in self._logins.values() if item.id == login_id), None)
+        if login is None:
+            return False
+        await self.db.execute("DELETE FROM saved_logins WHERE id = ?", (login_id,))
+        del self._logins[login.site]
+        if login.password:
+            self._retired[login.password] = login_placeholder(login.site)
+        self._refresh()
+        return True
+
+    def login_used(self, login: SavedLogin) -> None:
+        """Note a saved sign-in was typed, without holding up the sign-in."""
+        now = _now()
+        login.last_used_at, login.uses = now, login.uses + 1
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        task = loop.create_task(self._write_login_use(login.id, now), name="operator-secrets:login-used")
+        self._pending.add(task)
+        task.add_done_callback(self._pending.discard)
+
+    async def _write_login_use(self, login_id: str, when: str) -> None:
+        try:
+            await self.db.execute("UPDATE saved_logins SET last_used_at = ?, uses = uses + 1 WHERE id = ?", (when, login_id))
+        except Exception:  # noqa: BLE001 — the audit line is a courtesy; the sign-in already happened
+            logger.warning("could not record the use of a saved sign-in", exc_info=True)
+
+    def mask(self, value: str, placeholder: str) -> None:
+        """Mask a value the operator typed for one use (a password not saved, a one-time code) for the
+        rest of the process, as a deleted secret's value is: a page that echoes it, or the request log
+        that carried it, reads the placeholder before the model, the transcript or the log sees it."""
+        if value and len(value.strip()) >= 4 and value not in self._retired:
+            self._retired[value] = placeholder
+            self._refresh()
+
     async def settle(self) -> None:
         """Wait for the audit writes in flight (tests, shutdown)."""
         if self._pending:
@@ -585,6 +718,6 @@ def shared() -> OperatorSecrets | None:
 
 
 __all__ = [
-    "ATTACHMENT_PREFIX", "ENV_PREFIX", "ENV_SCRIPT", "ENV_SCRIPT_FILE", "LAUNCH_FILE_PREFIX", "NAME_RE", "PLACEHOLDER_RE", "OperatorSecrets", "Secret", "SecretError", "attachment_text", "env_name",
-    "install", "load_key", "normalise_name", "placeholder", "prompt_section", "shared", "staff_section", "without_attachment_lines",
+    "ATTACHMENT_PREFIX", "ENV_PREFIX", "ENV_SCRIPT", "ENV_SCRIPT_FILE", "LAUNCH_FILE_PREFIX", "NAME_RE", "PLACEHOLDER_RE", "OperatorSecrets", "SavedLogin", "Secret", "SecretError", "attachment_text",
+    "env_name", "install", "load_key", "login_placeholder", "normalise_name", "placeholder", "prompt_section", "shared", "staff_section", "without_attachment_lines",
 ]

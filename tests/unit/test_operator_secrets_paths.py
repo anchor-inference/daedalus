@@ -164,7 +164,7 @@ async def test_the_browser_types_a_handed_over_secret_into_a_password_field(rig:
     other = await rig.session("elsewhere")
     await rig.call(other, "BrowserOpen", url="https://login.test/")
     text, failed = await rig.call(other, "BrowserAct", action="type", ref="e31", element="the password field", text=PLACEHOLDER)
-    assert failed and "BrowserHandoff(reason='login'" in text
+    assert failed and "BrowserLogin(url_or_domain, reason)" in text
 
 
 async def test_deleting_a_secret_takes_it_away_from_every_path(settings: Settings, db: Database) -> None:

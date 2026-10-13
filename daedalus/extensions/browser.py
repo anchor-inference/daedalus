@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 from protocore.contracts.llm import LLMObservabilityContext, LLMRequest
 from protocore.contracts.types import Message, MessageRole, TextBlock
 
+from daedalus.browser import login
 from daedalus.browser.agent import BrowserAgent
 from daedalus.browser.cli import TOOL_SET, StaffBrowser
 from daedalus.browser.model import Owner
@@ -164,6 +165,22 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     notes = SiteNotes(app.db)
     agent = BrowserAgent(service, InjectionMonitor(classify), extract=extract, notes=notes, on_note=noted)
     app.extensions["browser_notes"] = notes
+
+    async def trusted(session_id: str) -> set[str]:
+        state = await manager.get_state(session_id)
+        return {str(site) for site in (state.metadata.get(login.TRUST_KEY) or [])} if state is not None else set()
+
+    async def trust(session_id: str, site: str) -> None:
+        """The operator's "always for this session" for a saved sign-in: kept with the session, so a
+        restart keeps it and the session's end takes it away."""
+        state = await manager.get_state(session_id)
+        if state is None:
+            return
+        for meta in (state.metadata, state.session.metadata):
+            meta[login.TRUST_KEY] = [s for s in meta.get(login.TRUST_KEY) or [] if s != site][-49:] + [site]
+        await manager.sessions.update_metadata(session_id, state.session.metadata)
+
+    agent.logins.trusted, agent.logins.trust = trusted, trust
     async def lasting(project_id: str | None) -> str:
         """A procedure recorded in a chat's own throwaway project is kept for every agent, as an
         agent's site note from there is (``daedalus.tools.browser``)."""

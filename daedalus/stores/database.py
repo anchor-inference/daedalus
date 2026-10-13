@@ -2210,6 +2210,22 @@ CREATE TABLE IF NOT EXISTS calendar_hooks (
 CREATE INDEX IF NOT EXISTS calendar_hooks_pending ON calendar_hooks(id) WHERE delivered_at IS NULL;
 """, _calendar_entries))
 
+# Sign-ins the operator saved from the private login form, one per site: the username and password
+# sealed together as the operator's secrets are (same key, the row's identity as associated data). Apart
+# from ``operator_secrets`` because these are never the agent's to use: no placeholder, no variable, no
+# file, only the daemon's typing after the operator said yes.
+MIGRATIONS.append("""
+CREATE TABLE IF NOT EXISTS saved_logins (
+    id TEXT PRIMARY KEY,
+    site TEXT NOT NULL UNIQUE,
+    sealed BLOB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    last_used_at TEXT,
+    uses INTEGER NOT NULL DEFAULT 0
+);
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

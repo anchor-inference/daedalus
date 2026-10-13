@@ -30,6 +30,25 @@ if TYPE_CHECKING:
     from daedalus.browser.service import Browsers
 
 
+class LoginBody(BaseModel):
+    """The private sign-in form's answer. The values are plain strings with no bound here: a bound would
+    have the framework refuse a long one by echoing it back in its error, so the length is the desk's to
+    refuse, by name only."""
+
+    model_config = ConfigDict(extra="forbid")
+    login_id: str = Field(min_length=1, max_length=64)
+    username: str = ""
+    password: str = ""
+    otp: str = ""
+    save: bool = False
+    use_saved: Literal["once", "always"] | None = None
+
+
+class LoginDeclineBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    login_id: str = Field(min_length=1, max_length=64)
+
+
 class TicketBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     read_only: bool = False
@@ -367,6 +386,26 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         rejected = len(result.get("rejected") or [])
         await found.audit(group_id, row["env"], "operator", "cookies", {"action": "import", "element": ", ".join(sorted(parsed.domains()))[:500], "count": loaded, "rejected": rejected, "skipped": len(parsed.skipped), "format": parsed.format})
         return {"set": loaded, "rejected": rejected, "skipped": len(parsed.skipped), "sites": cookie_files.summary(parsed)}
+
+    def logins() -> Any:
+        found = agent()
+        if found is None:
+            raise HTTPException(404, "this installation has no browser")
+        return found.logins
+
+    @api.post("/api/browsers/{group_id}/login")
+    async def browsers_login(group_id: str, body: LoginBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The operator answers an agent's BrowserLogin from the private form: the values are typed into
+        the agent's page and go nowhere else. Answers where the page ended and whether it took."""
+        return cast("dict[str, Any]", await logins().submit(
+            group_id, body.login_id, username=body.username, password=body.password, otp=body.otp, save=body.save, use_saved=body.use_saved,
+        ))
+
+    @api.post("/api/browsers/{group_id}/login/decline")
+    async def browsers_login_decline(group_id: str, body: LoginDeclineBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The operator will not sign in: the agent is told and gets the browser back."""
+        await logins().decline(group_id, body.login_id)
+        return {"ok": True}
 
     @api.get("/api/browsers/{group_id}/actions")
     async def browsers_actions(group_id: str, limit: int = Query(default=100, ge=1, le=500), _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

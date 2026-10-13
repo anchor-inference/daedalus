@@ -73,10 +73,12 @@ class Element:
     """A click on it shows an alert with this message, which the daemon answers by itself."""
     logs: list[dict[str, Any]] = field(default_factory=list)
     """Console entries a click on it makes the page write (``{level, source, text}``)."""
+    marked: bool = False
+    """The operator's sign-in filled it: secret from then on, as the daemon marks it."""
 
     @property
     def secret(self) -> bool:
-        return self.type == "password" or self.autocomplete in SECRET_AUTOCOMPLETE or self.autocomplete.startswith("cc-")
+        return self.marked or self.type == "password" or self.autocomplete in SECRET_AUTOCOMPLETE or self.autocomplete.startswith("cc-")
 
     def field_kind(self) -> str:
         if self.autocomplete.startswith("cc-"):
@@ -791,6 +793,8 @@ class FakeBrowserd:
                 raise _Fail(-32602, "offset is not the size so far")
             upload["data"] += data
             return {"upload_id": upload_id, "size": len(upload["data"])}
+        if method == "page.login":
+            return await self._login(params)
         if method == "cookies.set":
             group = self._group(str(params.get("group_id")))
             await self._held_back(group, params)
@@ -922,6 +926,71 @@ class FakeBrowserd:
         self.emit("group.opened", {"group_id": gid, "browser_id": browser.id, "profile": profile, "labels": group.labels})
         tab = self._new_tab(group, str(params.get("url") or "about:blank"))
         return {"group": group.view(), "tab": tab.view(True), "created": True}
+
+    @staticmethod
+    def _login_fields(page: Page, selectors: dict[str, Any]) -> dict[str, str]:
+        """The sign-in fields of a page as the daemon's guess finds them, or as selectors name them
+        (``#e30`` names the element with ref e30 here)."""
+        elements = list(page.elements.values())
+
+        def chosen(key: str) -> str | None:
+            wanted = str(selectors.get(key) or "")
+            if not wanted:
+                return None
+            ref = wanted.lstrip("#")
+            if ref not in page.elements:
+                raise _Fail(-32602, f"the selector for {key}: {wanted}")
+            return ref
+
+        password = chosen("password") or next((e.ref for e in elements if e.type == "password"), "")
+        otp = chosen("otp") or next((e.ref for e in elements if e.autocomplete == "one-time-code"), "")
+        username = chosen("username") or next((e.ref for e in elements if e.tag == "input" and (e.type == "email" or e.autocomplete == "username" or "email" in e.name.lower() or "user" in e.name.lower())), "")
+        submit = chosen("submit") or next((e.ref for e in elements if e.role == "button" and e.goes_to), "")
+        return {"username": username, "password": password, "otp": otp, "submit": submit}
+
+    async def _login(self, params: dict[str, Any]) -> dict[str, Any]:
+        """``page.login``: the fields found and filled, the form sent by its button, and the guess at
+        the outcome from the page it led to, as the daemon answers; never a value."""
+        from urllib.parse import urlsplit  # noqa: PLC0415 — only a sign-in needs it
+
+        group, tab = self._tab(params)
+        await self._held_back(group, params)
+        self._page_call(tab)
+        selectors = dict(params.get("selectors") or {})
+        fields = self._login_fields(tab.page, selectors)
+        found = {k: bool(v) for k, v in fields.items()}
+        if params.get("probe"):
+            return {"url": tab.page.url, "title": tab.page.title, "signed_in": "unknown", "filled": [], "found": found}
+        site = str(params.get("site") or "").lower().lstrip(".")
+        host = (urlsplit(tab.page.url).hostname or "").lower()
+        if not site or not (host == site or host.endswith("." + site)):
+            raise _Fail(1004, f"the page is on {host or 'a page with no address'}, not {site}; nothing was typed")
+        if not (fields["username"] or fields["password"] or fields["otp"]):
+            raise _Fail(1001, "no sign-in form on this page; nothing was typed")
+        filled = []
+        for name in ("username", "password", "otp"):
+            value = str(params.get(name) or "")
+            if value and fields[name]:
+                element = tab.page.elements[fields[name]]
+                element.value, element.marked = value, True
+                filled.append(name)
+        start = tab.page.url
+        submit = tab.page.elements.get(fields["submit"]) if fields["submit"] else None
+        if submit is not None and submit.goes_to:
+            tab.history.append(tab.page)
+            tab.page = self._page_at(submit.goes_to)
+            self.emit("tab.updated", {"group_id": group.id, "tab_id": tab.id, "url": tab.page.url, "title": tab.page.title, "favicon_url": "", "loading": False})
+        after = self._login_fields(tab.page, {})
+        result: dict[str, Any] = {"url": tab.page.url, "title": tab.page.title, "filled": filled, "found": {k: bool(v) for k, v in after.items()}}
+        if after["password"] and params.get("password"):
+            result["signed_in"] = "no"
+        elif after["otp"] and not params.get("otp"):
+            result.update(signed_in="unknown", waiting="code")
+        elif not (after["username"] or after["password"] or after["otp"]) and tab.page.url != start:
+            result["signed_in"] = "yes"
+        else:
+            result["signed_in"] = "unknown"
+        return result
 
     def _sensitive(self, group: Group, tab: Tab, element: Element, action: str, keys: str = "") -> dict[str, Any]:
         kinds: list[str] = []
