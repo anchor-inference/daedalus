@@ -2088,6 +2088,10 @@ pre.diff .file { color: var(--fg); font-weight: 600; }
 /* Two lines before the ellipsis: held to one, most hints on a phone ended mid-word ("that run h…",
    "fetc…") and read as broken text rather than as a summary. */
 .settings-link-text .sub { font-size: var(--fs-12); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* A row a search found by one of its names, under its section: indented to the section's text so it reads as
+   part of it, and a link rather than a card because it goes to a place on the page, not to a page. */
+.settings-field-hit { display: block; margin: 2px 0 4px 42px; padding: 4px 8px; border-radius: var(--radius-xs); color: var(--accent); font-size: var(--fs-13); text-decoration: none; }
+.settings-field-hit:hover { background: var(--surface-2); }
 .settings-link .chev { color: var(--fg-3); font-size: var(--fs-18); line-height: 1; }
 .settings-link:hover { background: var(--surface-2); }
 .settings-link.active { background: var(--surface-2); border-color: var(--line-strong); }

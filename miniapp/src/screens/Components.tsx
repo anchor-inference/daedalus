@@ -259,7 +259,7 @@ export function ComponentsTab({ toast }: { toast: (t: string) => void }) {
 
   const busy = view.busy || view.components.find((c) => c.state === "installing")?.id || "";
   return (
-    <div className="card">
+    <div className="card" data-setting="components.catalogue">
       <div className="section-title" style={{ marginTop: 0 }}>
         {t("comp.title")}
       </div>

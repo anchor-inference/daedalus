@@ -42,7 +42,7 @@ export function TerminalCap({ s, save, onDraft }: { s: Settings; save: (patch: P
     <div className="card terminal-cap">
       <div className="section-title" style={{ marginTop: 0 }}>{t("settings.cap.title")}</div>
       <div className="sub">{t("settings.cap.sub")}</div>
-      <Row title={t("settings.cap.label")} htmlFor="terminal-cap" desc={load.data?.terminals ? plural("settings.cap.running", load.data.terminals.running) : undefined}>
+      <Row title={t("settings.cap.label")} htmlFor="terminal-cap" data-setting="terminals.running_cap" desc={load.data?.terminals ? plural("settings.cap.running", load.data.terminals.running) : undefined}>
         <span className="settings-num">
           <input
             id="terminal-cap"

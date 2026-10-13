@@ -185,7 +185,7 @@ export function SecretsCard({ toast, confirm, ago }: { toast: (text: string) => 
     }
   }
   return (
-    <div className="card secrets-card">
+    <div className="card secrets-card" data-setting="security.secrets">
       <div className="section-title" style={{ marginTop: 0 }}>{t("secret.list.title")}</div>
       <div className="sub">{t("secret.list.sub")}</div>
       {items === null && <div className="empty">{t("common.loading")}</div>}

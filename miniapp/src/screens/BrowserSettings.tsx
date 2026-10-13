@@ -192,7 +192,7 @@ function Limits({ b, set, onDraft }: { b: BrowserSettings; set: (patch: Partial<
     <div className="card bs-limits">
       <div className="section-title" style={{ marginTop: 0 }}>{t("bs.limits.title")}</div>
       <div className="sub">{t("bs.limits.sub")}</div>
-      <Row title={t("bs.limits.cap")} htmlFor="browser-cap" desc={load.data?.browsers ? plural("bs.limits.running", load.data.browsers.running) : undefined}>
+      <Row title={t("bs.limits.cap")} htmlFor="browser-cap" data-setting="browser.running_cap" desc={load.data?.browsers ? plural("bs.limits.running", load.data.browsers.running) : undefined}>
         <span className="settings-num">
           <input
             id="browser-cap"
@@ -211,7 +211,7 @@ function Limits({ b, set, onDraft }: { b: BrowserSettings; set: (patch: Partial<
         </span>
       </Row>
       {capValue === null && <div className="sub push-error">{t("bs.limits.cap.invalid")}</div>}
-      <Row title={t("bs.limits.idle")} htmlFor="browser-idle" desc={t("bs.limits.idle.sub")} stack>
+      <Row title={t("bs.limits.idle")} htmlFor="browser-idle" desc={t("bs.limits.idle.sub")} stack data-setting="browser.idle_close_minutes">
         <span className="settings-num">
           <input
             id="browser-idle"
@@ -252,7 +252,7 @@ function Profiles({ toast }: { toast: (text: string) => void }) {
     }
   }
   return (
-    <div className="card bs-profiles">
+    <div className="card bs-profiles" data-setting="browser.profiles">
       <div className="section-title" style={{ marginTop: 0 }}>{t("bs.profiles.title")}</div>
       <div className="sub">{t("bs.profiles.sub")}</div>
       {list.length === 0 ? (
@@ -302,19 +302,19 @@ function Recording({ b, set, toast }: { b: BrowserSettings; set: (patch: Partial
     <div className="card bs-recording">
       <div className="section-title" style={{ marginTop: 0 }}>{t("bs.rec.title")}</div>
       <div className="sub">{t("bs.rec.sub")}</div>
-      <Row title={t("bs.rec.default")} desc={t("bs.rec.default.sub")}>
+      <Row title={t("bs.rec.default")} desc={t("bs.rec.default.sub")} data-setting="browser.record_frames">
         <Switch checked={b.record_frames} onChange={(record_frames) => set({ record_frames })} label={t("bs.rec.default")} />
       </Row>
-      <Row title={t("bs.rec.takeover")} desc={t("bs.rec.takeover.sub")}>
+      <Row title={t("bs.rec.takeover")} desc={t("bs.rec.takeover.sub")} data-setting="browser.record_takeover">
         <Switch checked={b.record_takeover} onChange={(record_takeover) => set({ record_takeover })} label={t("bs.rec.takeover")} />
       </Row>
-      <Row title={t("bs.rec.days")} htmlFor="browser-rec-days" stack>
+      <Row title={t("bs.rec.days")} htmlFor="browser-rec-days" stack data-setting="browser.record_retention_days">
         <span className="settings-num">
           <input id="browser-rec-days" className="field" type="number" min={1} max={365} value={days} aria-invalid={daysValue === null} onChange={(e) => setDays(e.target.value)} onBlur={() => (daysValue === null ? setDays(String(b.record_retention_days)) : daysValue !== b.record_retention_days && set({ record_retention_days: daysValue }))} />
           <span className="settings-unit">{t("settings.unit.days")}</span>
         </span>
       </Row>
-      <Row title={t("bs.rec.mb")} htmlFor="browser-rec-mb" desc={plural("bs.rec.used", groups, { used: size(used), max: size(b.record_max_mb * 1024 * 1024) })} stack>
+      <Row title={t("bs.rec.mb")} htmlFor="browser-rec-mb" data-setting="browser.record_max_mb" desc={plural("bs.rec.used", groups, { used: size(used), max: size(b.record_max_mb * 1024 * 1024) })} stack>
         <span className="settings-num">
           <input id="browser-rec-mb" className="field" type="number" min={10} value={mb} aria-invalid={mbValue === null} onChange={(e) => setMb(e.target.value)} onBlur={() => (mbValue === null ? setMb(String(b.record_max_mb)) : mbValue !== b.record_max_mb && set({ record_max_mb: mbValue }))} />
           <span className="settings-unit">{t("settings.unit.mb")}</span>
@@ -336,11 +336,11 @@ function Watch({ b, set }: { b: BrowserSettings; set: (patch: Partial<BrowserSet
     <div className="card bs-watch">
       <div className="section-title" style={{ marginTop: 0 }}>{t("bs.watch.title")}</div>
       <div className="sub">{t("bs.watch.sub")}</div>
-      <Row title={t("bs.watch.mode")}>
+      <Row title={t("bs.watch.mode")} data-setting="browser.watch_mode">
         <Switch checked={b.watch_mode} onChange={(watch_mode) => set({ watch_mode })} label={t("bs.watch.mode")} />
       </Row>
       <label className="field" htmlFor="browser-watch">{t("bs.watch.domains")}</label>
-      <textarea id="browser-watch" className="field bs-list" rows={6} value={text} spellCheck={false} onChange={(e) => setText(e.target.value)} onBlur={() => {
+      <textarea id="browser-watch" data-setting="browser.watch_domains" className="field bs-list" rows={6} value={text} spellCheck={false} onChange={(e) => setText(e.target.value)} onBlur={() => {
         const next = lines(text);
         if (next.join("\n") !== b.watch_domains.join("\n")) set({ watch_domains: next });
       }} />
@@ -356,7 +356,7 @@ function Network({ b, set }: { b: BrowserSettings; set: (patch: Partial<BrowserS
     <div className="card bs-network">
       <div className="section-title" style={{ marginTop: 0 }}>{t("bs.local.title")}</div>
       <div className="sub">{t("bs.local.sub")}</div>
-      <Row title={t("bs.local.title")} stack>
+      <Row title={t("bs.local.title")} stack data-setting="browser.local_sites">
         <Dropdown id="browser-local-sites" label={t("bs.local.title")} value={b.local_sites} onChange={(local_sites) => set({ local_sites })} options={[
           { id: "services", label: t("bs.local.services") },
           { id: "ask", label: t("bs.local.ask") },
@@ -365,14 +365,14 @@ function Network({ b, set }: { b: BrowserSettings; set: (patch: Partial<BrowserS
       </Row>
       <div className="section-title">{t("bs.lan.title")}</div>
       <div className="sub">{t("bs.lan.sub")}</div>
-      <Row title={t("bs.lan.title")} stack>
+      <Row title={t("bs.lan.title")} stack data-setting="browser.lan_sites">
         <Dropdown id="browser-lan-sites" label={t("bs.lan.title")} value={b.lan_sites} onChange={(lan_sites) => set({ lan_sites })} options={[
           { id: "ask", label: t("bs.lan.ask") },
           { id: "listed", label: t("bs.lan.listed") },
         ]} />
       </Row>
       <label className="field" htmlFor="browser-lan">{t("bs.lan.label")}</label>
-      <textarea id="browser-lan" className="field bs-list" rows={3} value={text} spellCheck={false} placeholder="10.0.5.20" onChange={(e) => setText(e.target.value)} onBlur={() => {
+      <textarea id="browser-lan" data-setting="browser.lan_allow" className="field bs-list" rows={3} value={text} spellCheck={false} placeholder="10.0.5.20" onChange={(e) => setText(e.target.value)} onBlur={() => {
         const next = lines(text);
         if (next.join("\n") !== b.lan_allow.join("\n")) set({ lan_allow: next });
       }} />
@@ -385,10 +385,10 @@ function Monitor({ b, set, presets }: { b: BrowserSettings; set: (patch: Partial
     <div className="card bs-monitor">
       <div className="section-title" style={{ marginTop: 0 }}>{t("bs.monitor.title")}</div>
       <div className="sub">{t("bs.monitor.sub")}</div>
-      <Row title={t("bs.monitor.mode")}>
+      <Row title={t("bs.monitor.mode")} data-setting="browser.injection_monitor">
         <Switch checked={b.injection_monitor} onChange={(injection_monitor) => set({ injection_monitor })} label={t("bs.monitor.mode")} />
       </Row>
-      <Row title={t("bs.monitor.model")} stack>
+      <Row title={t("bs.monitor.model")} stack data-setting="browser.injection_monitor_preset">
         <Dropdown id="browser-monitor-model" label={t("bs.monitor.model")} value={b.injection_monitor_preset} onChange={(injection_monitor_preset) => set({ injection_monitor_preset })} options={[{ id: "", label: t("bs.monitor.model.auto") }, ...presets.map((p) => ({ id: p, label: p }))]} />
       </Row>
     </div>
@@ -400,10 +400,10 @@ function Reading({ b, set, presets }: { b: BrowserSettings; set: (patch: Partial
     <div className="card bs-reading">
       <div className="section-title" style={{ marginTop: 0 }}>{t("bs.agent.title")}</div>
       <div className="sub">{t("bs.agent.sub")}</div>
-      <Row title={t("bs.agent.extract")} stack>
+      <Row title={t("bs.agent.extract")} stack data-setting="browser.extract_preset">
         <Dropdown id="browser-extract-model" label={t("bs.agent.extract")} value={b.extract_preset} onChange={(extract_preset) => set({ extract_preset })} options={[{ id: "", label: t("bs.monitor.model.auto") }, ...presets.map((p) => ({ id: p, label: p }))]} />
       </Row>
-      <Row title={t("bs.agent.point")} desc={t("bs.agent.point.sub")}>
+      <Row title={t("bs.agent.point")} desc={t("bs.agent.point.sub")} data-setting="browser.point_clicks">
         <Switch checked={b.point_clicks} onChange={(point_clicks) => set({ point_clicks })} label={t("bs.agent.point")} />
       </Row>
     </div>
@@ -437,7 +437,7 @@ function SiteNotes({ toast }: { toast: (text: string) => void }) {
     }
   }
   return (
-    <div className="card bs-notes">
+    <div className="card bs-notes" data-setting="browser.notes">
       <div className="section-title" style={{ marginTop: 0 }}>{t("bs.notes.title")}</div>
       <div className="sub">{t("bs.notes.sub")}</div>
       {list.length === 0 ? (

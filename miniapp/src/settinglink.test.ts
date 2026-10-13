@@ -28,9 +28,9 @@ describe("the reference", () => {
   });
 
   it("becomes the section's address naming the row, with the providers tab for a key", () => {
-    expect(settingPath(SUMMARY)).toBe("/app/settings/limits?setting=compaction.preset");
-    expect(settingPath({ page: "models", key: "providers.opencode.api_key" })).toBe("/app/settings/models?setting=providers.opencode.api_key&tab=providers");
-    expect(settingPath({ page: "models", key: "vision.preset" })).toBe("/app/settings/models?setting=vision.preset");
+    expect(settingPath(SUMMARY)).toBe("/app/settings/limits#compaction.preset");
+    expect(settingPath({ page: "models", key: "providers.opencode.api_key" })).toBe("/app/settings/models?tab=providers#providers.opencode.api_key");
+    expect(settingPath({ page: "models", key: "vision.preset" })).toBe("/app/settings/models#vision.preset");
   });
 
   it("quotes a key in its selector, so a provider id cannot break out of it", () => {
@@ -125,7 +125,7 @@ describe("the toast of a setting", () => {
     const entry = localEntry(notice(7, "warning"));
     expect(entry.id).toBe(-7);
     expect(entry.setting).toEqual(SUMMARY);
-    expect(entry.link).toBe("/app/settings/limits?setting=compaction.preset");
+    expect(entry.link).toBe("/app/settings/limits#compaction.preset");
     expect(ToastQueue.duration(entry)).toBe(URGENT_MS);
   });
 

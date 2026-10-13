@@ -1445,6 +1445,8 @@ export type Preset = {
 
 export type Settings = {
   revision: string;
+  /** The language every answer is written in; "auto" answers in the operator's own. */
+  answer_language?: string;
   model: { preset: string; chain: string[]; auto_fallback: boolean; fallback_to_session?: boolean };
   presets: Record<string, Preset>;
   /** What each preset left to its model does with the tool groups on demand, as the host knows the model. */

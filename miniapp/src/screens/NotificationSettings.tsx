@@ -203,7 +203,7 @@ function QuietHours({ prefs, zone, change }: { prefs: NotificationPreferences; z
     <div className="card">
       <div className="section-title" style={{ marginTop: 0 }}>{t("nset.quiet.title")}</div>
       <div className="sub">{t("nset.quiet.sub")}</div>
-      <Row title={t("nset.quiet.toggle")} desc={<>{ends ? `${t("nset.quiet.urgent")} ` : ""}{zone ? t("nset.quiet.zone", { zone }) : t("nset.quiet.nozone")}</>}>
+      <Row title={t("nset.quiet.toggle")} data-setting="notifications.quiet_hours" desc={<>{ends ? `${t("nset.quiet.urgent")} ` : ""}{zone ? t("nset.quiet.zone", { zone }) : t("nset.quiet.nozone")}</>}>
         <Switch checked={!!ends} onChange={(on) => change((p) => ({ ...p, quiet_hours: on ? joinQuietHours(draft.from, draft.to) || `${QUIET_DEFAULT.from}-${QUIET_DEFAULT.to}` : "" }))} label={t("nset.quiet.toggle")} />
       </Row>
       {ends && (
@@ -220,7 +220,7 @@ function QuietHours({ prefs, zone, change }: { prefs: NotificationPreferences; z
           </span>
         </Row>
       )}
-      <Row title={t("nset.finished.label")} htmlFor="finished-after" desc={t("nset.finished.sub")} stack>
+      <Row title={t("nset.finished.label")} htmlFor="finished-after" desc={t("nset.finished.sub")} stack data-setting="notifications.finished_min_seconds">
         <NumInput id="finished-after" label={t("nset.finished.label")} value={prefs.finished_min_seconds} min={0} step={5} unit={t("nset.finished.unit")} onSave={(v) => Math.round(v) !== prefs.finished_min_seconds && change((p) => ({ ...p, finished_min_seconds: Math.round(v) }))} />
       </Row>
     </div>
@@ -231,10 +231,10 @@ function Answering({ prefs, change }: { prefs: NotificationPreferences; change: 
   return (
     <div className="card">
       <div className="section-title" style={{ marginTop: 0 }}>{t("nset.answer.title")}</div>
-      <Row title={t("nset.quick")} desc={t("nset.quick.sub")}>
+      <Row title={t("nset.quick")} desc={t("nset.quick.sub")} data-setting="notifications.quick_actions">
         <Switch checked={prefs.quick_actions} onChange={(quick_actions) => change((p) => ({ ...p, quick_actions }))} label={t("nset.quick")} />
       </Row>
-      <Row title={t("nset.cover")} desc={t("nset.cover.sub")}>
+      <Row title={t("nset.cover")} desc={t("nset.cover.sub")} data-setting="notifications.telegram_covers_push">
         <Switch checked={prefs.telegram_covers_push} onChange={(telegram_covers_push) => change((p) => ({ ...p, telegram_covers_push }))} label={t("nset.cover")} />
       </Row>
     </div>
@@ -248,7 +248,7 @@ function PopupsCard() {
   return (
     <div className="card" data-popups-card>
       <div className="section-title" style={{ marginTop: 0 }}>{t("nset.popups.title")}</div>
-      <Row title={t("nset.popups")} desc={t("nset.popups.sub")}>
+      <Row title={t("nset.popups")} desc={t("nset.popups.sub")} data-setting="notifications.popups">
         <Switch checked={on} onChange={setPopupsShown} label={t("nset.popups")} />
       </Row>
     </div>
@@ -270,7 +270,7 @@ function MutedProjects({ prefs, change }: { prefs: NotificationPreferences; chan
   }, []);
   const list = (projects.data ?? []).filter((p) => !p.system);
   return (
-    <div className="card">
+    <div className="card" data-setting="notifications.muted_projects">
       <div className="section-title" style={{ marginTop: 0 }}>{t("nset.mute.title")}</div>
       <div className="sub">{t("nset.mute.sub")}</div>
       {projects.data && list.length === 0 && <div className="sub" style={{ marginTop: 8 }}>{t("nset.mute.none")}</div>}
@@ -328,7 +328,7 @@ function Devices({ toast }: { toast: (text: string) => void }) {
   }
   const list = devices.data?.subscriptions ?? [];
   return (
-    <div className="card">
+    <div className="card" data-setting="notifications.devices">
       <div className="section-title" style={{ marginTop: 0 }}>{t("nset.devices.title")}</div>
       <div className="sub">{t("nset.devices.sub")}</div>
       {devices.error && <div className="sub push-error">{devices.error}</div>}
@@ -384,7 +384,7 @@ function TestCard({ toast }: { toast: (text: string) => void }) {
     }
   }
   return (
-    <div className="card">
+    <div className="card" data-setting="notifications.test">
       <div className="section-title" style={{ marginTop: 0 }}>{t("push.test")}</div>
       <div className="sub">{t("push.test.sub")}</div>
       <div className="btnrow">
@@ -407,7 +407,7 @@ export function NotificationSettings({ toast }: { toast: (text: string) => void 
       <PopupsCard />
       {view ? (
         <>
-          <div className="card nmatrix-card">
+          <div className="card nmatrix-card" data-setting="notifications.matrix">
             <div className="section-title" style={{ marginTop: 0 }}>{t("nset.matrix.title")}</div>
             <div className="sub">{t("nset.matrix.sub")}</div>
             <Matrix prefs={view.preferences} categories={view.categories} onCell={(category, channel, cell) => change((p) => withCell(p, category, channel, cell))} />

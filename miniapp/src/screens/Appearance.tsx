@@ -4,7 +4,7 @@ import { usePetModel, usePetPreference } from "../ui/pet";
 import { useState } from "react";
 import { FONT_CATALOG, FONT_ROLES, PROSE_MAX, PROSE_MIN, usualProse, FontRole, THEMES, ThemeId, fontUrlAllowed, readPrefs, resolvedTheme, resetColors, updatePrefs, type ColorKey, type Column, type Leading, type Prefs, type Radius, type Scale } from "../appearance";
 import { t } from "../i18n";
-import { Dropdown, Segmented, Switch } from "../ui/index";
+import { Dropdown, LangPicker, Segmented, Switch } from "../ui/index";
 import { Row } from "../settingsrow";
 import { type Settings } from "../api";
 import { useQuery } from "../store";
@@ -76,15 +76,18 @@ export function AppearancePanel() {
     <>
       <p className="sub">{t("theme.lead")}</p>
       <div className="card">
-        <Row title={t("pet.title")} desc={t("pet.hint")}><Switch checked={pet} onChange={setPet} label={t("pet.title")} /></Row>
-        {pet && <Row title={t("pet.model")} desc={t("pet.model.hint")}>
+        {/* Here as well as at the top of the list of sections: a link to the language has to land on a
+            row that a phone draws once the section is open, and the list is not drawn then. */}
+        <Row title={t("settings.sec.language")} desc={t("lang.hint")} data-setting="language"><LangPicker /></Row>
+        <Row title={t("pet.title")} desc={t("pet.hint")} data-setting="appearance.pet"><Switch checked={pet} onChange={setPet} label={t("pet.title")} /></Row>
+        {pet && <Row title={t("pet.model")} desc={t("pet.model.hint")} data-setting="appearance.pet_model">
           <select className="field" value={petModel} aria-label={t("pet.model")} onChange={(event) => setPetModel(event.target.value)}>
             <option value="">{t("pet.model.off")}</option>
             {Object.entries(petSettings.data?.presets ?? {}).map(([id, preset]) => <option key={id} value={id}>{preset.label || `${preset.provider}/${preset.model}`}</option>)}
           </select>
         </Row>}
       </div>
-      <div className="settings-themes" role="listbox" aria-label={t("settings.sec.appearance")}>
+      <div className="settings-themes" data-setting="appearance.theme" role="listbox" aria-label={t("settings.sec.appearance")}>
         {THEMES.map((item) => (
           <button key={item.id} type="button" className={resolved.id === item.id ? "on" : ""} aria-pressed={resolved.id === item.id} onClick={() => update({ follow: false, theme: item.id })}>
             <span className="settings-swatch" style={{ background: item.wash }} />
@@ -93,7 +96,7 @@ export function AppearancePanel() {
         ))}
       </div>
       <div className="card">
-        <Row title={t("theme.follow")} desc={t("theme.follow.sub", { dark: t(`theme.${prefs.dark}`), light: t(`theme.${prefs.light}`) })}>
+        <Row title={t("theme.follow")} data-setting="appearance.follow" desc={t("theme.follow.sub", { dark: t(`theme.${prefs.dark}`), light: t(`theme.${prefs.light}`) })}>
           <Switch checked={prefs.follow} onChange={(follow) => update({ follow })} label={t("theme.follow")} />
         </Row>
         {prefs.follow && (
@@ -110,7 +113,7 @@ export function AppearancePanel() {
 
       <div className="section-title">{t("theme.colors")}</div>
       <p className="sub">{t("theme.colors.lead")}</p>
-      <div className="card">
+      <div className="card" data-setting="appearance.colors">
         {(["bg", "surface", "fg", "fg2", "accent", "send"] as const).map((key) => {
           const fallback = key === "bg" ? resolved.side : key === "surface" ? resolved.surface : key === "fg" ? resolved.fg : key === "fg2" ? resolved.fg2 : key === "accent" ? resolved.accent : resolved.send.startsWith("#") ? resolved.send : resolved.accent;
           const value = color(key, fallback);
@@ -123,7 +126,7 @@ export function AppearancePanel() {
             </Row>
           );
         })}
-        <Row title={t("theme.wash")} desc={t("theme.wash.sub")}>
+        <Row title={t("theme.wash")} desc={t("theme.wash.sub")} data-setting="appearance.wash">
           <Switch checked={prefs.wash} onChange={(wash) => update({ wash })} label={t("theme.wash")} />
         </Row>
         <div className="btnrow">
@@ -133,7 +136,7 @@ export function AppearancePanel() {
 
       <div className="section-title">{t("theme.font")}</div>
       <p className="sub">{t("theme.font.lead")}</p>
-      <div className="card settings-font">
+      <div className="card settings-font" data-setting="appearance.font">
         <Segmented value={role} onChange={setRole} options={FONT_ROLES.map((id) => ({ id, label: t(`theme.font.${id}`) }))} />
         <div className="settings-font-preview">
           <h2 className="settings-specimen" style={{ fontFamily: familyOf(prefs, role) ? `"${familyOf(prefs, role)}"` : undefined }}>{t("theme.font.sample")}</h2>
@@ -176,20 +179,20 @@ export function AppearancePanel() {
       <div className="section-title">{t("theme.size")}</div>
       <p className="sub">{t("theme.size.lead")}</p>
       <div className="card">
-        <Row title={t("theme.size.step")}><Segmented value={prefs.scale} onChange={(scale: Scale) => update({ scale })} options={(["sm", "md", "lg", "xl"] as const).map((id) => ({ id, label: t(`theme.scale.${id}`) }))} /></Row>
-        <Row title={t("theme.prose")} desc={t("theme.prose.sub")} stack><ProseStepper prefs={prefs} update={update} /></Row>
-        <Row title={t("theme.leading")}><Segmented value={prefs.leading} onChange={(leading: Leading) => update({ leading })} options={(["tight", "normal", "open"] as const).map((id) => ({ id, label: t(`theme.leading.${id}`) }))} /></Row>
-        <Row title={t("theme.column")} desc={t("theme.column.sub")}><Segmented value={prefs.column} onChange={(column: Column) => update({ column })} options={(["narrow", "normal", "wide"] as const).map((id) => ({ id, label: t(`theme.column.${id}`) }))} /></Row>
+        <Row title={t("theme.size.step")} data-setting="appearance.scale"><Segmented value={prefs.scale} onChange={(scale: Scale) => update({ scale })} options={(["sm", "md", "lg", "xl"] as const).map((id) => ({ id, label: t(`theme.scale.${id}`) }))} /></Row>
+        <Row title={t("theme.prose")} desc={t("theme.prose.sub")} stack data-setting="appearance.prose"><ProseStepper prefs={prefs} update={update} /></Row>
+        <Row title={t("theme.leading")} data-setting="appearance.leading"><Segmented value={prefs.leading} onChange={(leading: Leading) => update({ leading })} options={(["tight", "normal", "open"] as const).map((id) => ({ id, label: t(`theme.leading.${id}`) }))} /></Row>
+        <Row title={t("theme.column")} desc={t("theme.column.sub")} data-setting="appearance.column"><Segmented value={prefs.column} onChange={(column: Column) => update({ column })} options={(["narrow", "normal", "wide"] as const).map((id) => ({ id, label: t(`theme.column.${id}`) }))} /></Row>
       </div>
 
       <div className="section-title">{t("theme.more")}</div>
       <div className="card">
-        <Row title={t("theme.radius")}><Segmented value={prefs.radius} onChange={(radius: Radius) => update({ radius })} options={(["sharp", "normal", "round"] as const).map((id) => ({ id, label: t(`theme.radius.${id}`) }))} /></Row>
-        <Row title={t("theme.motion")}><Segmented value={prefs.motion} onChange={(motion) => update({ motion })} options={([{ id: "full" as const, label: t("theme.motion.full") }, { id: "reduce" as const, label: t("theme.motion.reduce") }])} /></Row>
-        <Row title={t("theme.contrast")} desc={t("theme.contrast.sub")}><Segmented value={prefs.contrast} onChange={(contrast) => update({ contrast })} options={([{ id: "normal" as const, label: t("theme.contrast.normal") }, { id: "high" as const, label: t("theme.contrast.high") }])} /></Row>
-        <Row title={t("theme.code")} desc={t("theme.code.sub")}><Segmented value={prefs.code} onChange={(code) => update({ code })} options={([{ id: "theme" as const, label: t("theme.code.theme") }, { id: "dark" as const, label: t("theme.code.dark") }])} /></Row>
-        <Row title={t("theme.replies")} desc={t("theme.replies.sub")}><Segmented label={t("theme.replies")} value={prefs.replies} onChange={(replies) => update({ replies })} options={([{ id: "split" as const, label: t("theme.replies.split") }, { id: "merged" as const, label: t("theme.replies.merged") }])} /></Row>
-        <Row title={t("theme.bubble")}><Segmented value={prefs.bubble} onChange={(bubble) => update({ bubble })} options={([{ id: "card" as const, label: t("theme.bubble.card") }, { id: "plain" as const, label: t("theme.bubble.plain") }])} /></Row>
+        <Row title={t("theme.radius")} data-setting="appearance.radius"><Segmented value={prefs.radius} onChange={(radius: Radius) => update({ radius })} options={(["sharp", "normal", "round"] as const).map((id) => ({ id, label: t(`theme.radius.${id}`) }))} /></Row>
+        <Row title={t("theme.motion")} data-setting="appearance.motion"><Segmented value={prefs.motion} onChange={(motion) => update({ motion })} options={([{ id: "full" as const, label: t("theme.motion.full") }, { id: "reduce" as const, label: t("theme.motion.reduce") }])} /></Row>
+        <Row title={t("theme.contrast")} desc={t("theme.contrast.sub")} data-setting="appearance.contrast"><Segmented value={prefs.contrast} onChange={(contrast) => update({ contrast })} options={([{ id: "normal" as const, label: t("theme.contrast.normal") }, { id: "high" as const, label: t("theme.contrast.high") }])} /></Row>
+        <Row title={t("theme.code")} desc={t("theme.code.sub")} data-setting="appearance.code"><Segmented value={prefs.code} onChange={(code) => update({ code })} options={([{ id: "theme" as const, label: t("theme.code.theme") }, { id: "dark" as const, label: t("theme.code.dark") }])} /></Row>
+        <Row title={t("theme.replies")} desc={t("theme.replies.sub")} data-setting="appearance.replies"><Segmented label={t("theme.replies")} value={prefs.replies} onChange={(replies) => update({ replies })} options={([{ id: "split" as const, label: t("theme.replies.split") }, { id: "merged" as const, label: t("theme.replies.merged") }])} /></Row>
+        <Row title={t("theme.bubble")} data-setting="appearance.bubble"><Segmented value={prefs.bubble} onChange={(bubble) => update({ bubble })} options={([{ id: "card" as const, label: t("theme.bubble.card") }, { id: "plain" as const, label: t("theme.bubble.plain") }])} /></Row>
       </div>
     </>
   );

@@ -41,7 +41,7 @@ export function AsrSettingsCard({ s, save }: { s: Settings; save: (patch: { asr:
   // transcriber, the fallback's when only the fallback uses it.
   const cloudFields = (
     <div className="settings-disclosure asr-cloud">
-      <Row title={t("settings.asr.provider")} stack>
+      <Row title={t("settings.asr.provider")} stack data-setting="asr.provider">
         <Dropdown
           id="asr-provider"
           label={t("settings.asr.provider")}
@@ -55,19 +55,19 @@ export function AsrSettingsCard({ s, save }: { s: Settings; save: (patch: { asr:
       </Row>
       {!asr.provider && (
         <>
-          <TextBlock label={t("settings.asr.url")} value={asr.url} placeholder="https://api.openai.com/v1" onSave={(url) => put({ url })} />
-          <div className="settings-block">
+          <TextBlock setting="asr.url" label={t("settings.asr.url")} value={asr.url} placeholder="https://api.openai.com/v1" onSave={(url) => put({ url })} />
+          <div className="settings-block" data-setting="asr.api_key">
             <label className="field">{t(asr.api_key_set ? "settings.asr.key.set" : "settings.asr.key")}</label>
             <input className="field" type="password" defaultValue="" placeholder={asr.api_key_set ? "••••••" : ""} onBlur={(e) => e.target.value && save({ asr: { ...asr, api_key: e.target.value } })} />
           </div>
         </>
       )}
       <div className="grid2 settings-block">
-        <div>
+        <div data-setting="asr.model">
           <label className="field">{t("settings.asr.model")}</label>
           <input className="field" defaultValue={asr.model} placeholder={asr.provider === "openrouter" ? "openai/whisper-1" : "whisper-1"} onBlur={(e) => put({ model: e.target.value.trim() })} />
         </div>
-        <div>
+        <div data-setting="asr.language">
           <label className="field">{t("settings.asr.language")}</label>
           <input className="field" defaultValue={asr.language} onBlur={(e) => put({ language: e.target.value.trim() })} />
         </div>
@@ -83,11 +83,11 @@ export function AsrSettingsCard({ s, save }: { s: Settings; save: (patch: { asr:
         <Dropdown id="asr-transcriber" label={t("settings.asr.engine")} value={transcriber} invalid={primary.some((o) => o.missing && o.value === transcriber)} onChange={(next) => put({ transcriber: next, fallback: fallback === next ? "" : fallback })} options={primary.map((o) => ({ id: o.value, label: o.label }))} />
       </Row>
       {transcriber === CLOUD && cloudFields}
-      <Row title={t("settings.asr.fallback")} desc={t("settings.asr.fallback.sub")} stack>
+      <Row title={t("settings.asr.fallback")} desc={t("settings.asr.fallback.sub")} stack data-setting="asr.fallback">
         <Dropdown id="asr-fallback" label={t("settings.asr.fallback")} value={fallback} invalid={second.some((o) => o.missing && o.value === fallback)} onChange={(next) => put({ fallback: next })} options={[{ id: "", label: t("settings.asr.fallback.none") }, ...second.map((o) => ({ id: o.value, label: o.label }))]} />
       </Row>
       {transcriber !== CLOUD && fallback === CLOUD && cloudFields}
-      <Row title={t("settings.asr.autosend")} desc={t("settings.asr.autosend.sub")}>
+      <Row title={t("settings.asr.autosend")} desc={t("settings.asr.autosend.sub")} data-setting="asr.autosend">
         <Switch checked={asr.autosend} onChange={(autosend) => put({ autosend })} label={t("settings.asr.autosend")} />
       </Row>
     </div>

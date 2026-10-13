@@ -196,7 +196,7 @@ export function SpeechModels({ toast }: { toast: (t: string) => void }) {
   const autoDetects = view.models.find((m) => m.id === view.selected)?.detects_language ?? true;
 
   return (
-    <div className="card" id="speech-models">
+    <div className="card" id="speech-models" data-setting="stt.models">
       <div className="section-title" style={{ marginTop: 0 }}>{t("stt.title")}</div>
       <div className="sub">{t("stt.intro")}</div>
 
@@ -293,7 +293,7 @@ export function SpeechModels({ toast }: { toast: (t: string) => void }) {
 
       {view.selected && (
         <div className="catalogue-settings">
-          <Row title={t("stt.language")} stack>
+          <Row title={t("stt.language")} stack data-setting="stt.local_language">
             <Dropdown
               label={t("stt.language")}
               value={view.language}
@@ -301,7 +301,7 @@ export function SpeechModels({ toast }: { toast: (t: string) => void }) {
               options={[{ id: "auto", label: t(autoDetects ? "stt.language.auto" : "stt.language.auto.english") }, ...view.languages.map((code) => ({ id: code, label: name(code) }))]}
             />
           </Row>
-          <Row title={t("stt.threads")}>
+          <Row title={t("stt.threads")} data-setting="stt.local_threads">
             <NumInput label={t("stt.threads")} value={view.threads} min={1} max={16} onSave={(threads) => void postSttSelect({ threads }).then(take).catch((x) => setProblem(errorText(x)))} />
           </Row>
         </div>

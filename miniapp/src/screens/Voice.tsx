@@ -685,13 +685,14 @@ export function VoiceSettings({ toast }: { toast: (t: string) => void }) {
         ? t("voice.card.in.server")
         : t("voice.card.in.none");
   return (
-    <div className="card voice-card">
+    <div className="card voice-card" data-setting="voice.enabled">
       <div className="section-title" style={{ marginTop: 0 }}>{t("voice.card.title")}</div>
       <div className="sub">{t("voice.card.intro")}</div>
       <Row title={t("voice.card.enabled")}>
         <span className="settings-value">{t(data.enabled ? "voice.card.enabled.yes" : "voice.card.enabled.no")}</span>
       </Row>
       <Row
+        data-setting="voice.preset"
         title={t("voice.card.model")}
         desc={
           <>

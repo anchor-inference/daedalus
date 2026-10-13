@@ -128,7 +128,7 @@ export function DesktopAppCard({ toast }: { toast: (text: string) => void }) {
     if (state.checked_at) status = `${status} · ${t("update.status.checked", { when: relTimeLong(state.checked_at) })}`;
   }
   return (
-    <div className="card" data-desktop-app>
+    <div className="card" data-desktop-app data-setting="desktop.updates">
       <div className="section-title" style={{ marginTop: 0 }}>{t("update.card")}</div>
       <Row title={t("update.version")}>{value(state?.connected ? state.version || "—" : t("update.notconnected"))}</Row>
       {state?.connected && (

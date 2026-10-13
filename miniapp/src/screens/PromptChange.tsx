@@ -117,7 +117,7 @@ export function PromptChange({ onApplied }: { onApplied: (rules: string) => void
   const ready = proposal?.state === "ready";
   void clock;
   return <>
-    <div className="card prompt-change">
+    <div className="card prompt-change" data-setting="prompt.change">
       <div className="prompt-change-head">
         <span className="prompt-change-icon"><Icon name="bulb" size={18} /></span>
         <span><b>{t("settings.rules.assistant.title")}</b><span className="sub">{t("settings.rules.assistant.sub")}</span></span>

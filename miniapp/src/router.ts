@@ -254,7 +254,10 @@ export function migrateLegacyLocation(startParam?: string | null, mode?: "agents
     navigate(orchestrationHome + window.location.search, { replace: true });
     return;
   }
-  const hash = window.location.hash.replace(/^#/, "");
+  // Only the bare app address ever named a screen by its fragment. Read on any page, the fragment that
+  // names a row of Settings (`/app/settings/notifications#memory`, a field's anchor that happens to be
+  // a screen's name) took the reader to that screen instead of the row.
+  const hash = /^\/app\/?$/.test(window.location.pathname) ? window.location.hash.replace(/^#/, "") : "";
   if (hash && ((SCREENS as string[]).includes(hash) || ALIASES[hash])) {
     navigate(pathFor(ALIASES[hash] ?? (hash as Screen)), { replace: true });
     return;
