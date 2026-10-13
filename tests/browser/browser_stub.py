@@ -612,6 +612,11 @@ class BrowserStub:
                 return 404, {"detail": "not recording", "code": "not_found"}
             text = g.selection or self.scenes[self.active(g).scene].title
             return 200, {"step": self.record_step(g.id, action="expect", text=text)}
+        if action == "cookies" and method == "POST":
+            # The file is the app's to read and send; the host's answer is counts and sites alone.
+            if not str(body.get("text") or "").strip():
+                return 400, {"detail": "the file is empty"}
+            return 200, {"set": 2, "rejected": 0, "skipped": 0, "sites": "shop.example 2"}
         if action == "close" and method == "POST":
             g.status = "closed"
             self.drop(g.id, 4404)

@@ -180,6 +180,14 @@ export async function answerDialog(group: string, tab: string | null, accept: bo
   await api.post(`${BROWSERS_KEY}/${enc(group)}/dialog`, { accept, ...(tab ? { tab_id: tab } : {}), ...(text !== undefined ? { text } : {}) });
 }
 
+/** What loading a cookie file answered: counts and sites, never a value. */
+export type CookiesLoaded = { set: number; rejected: number; skipped: number; sites: string };
+
+/** Load a cookie file the operator picked into the group's profile; `domain` is the site a bare Cookie header is for. */
+export async function importCookies(group: string, text: string, domain: string): Promise<CookiesLoaded> {
+  return api.post<CookiesLoaded>(`${BROWSERS_KEY}/${enc(group)}/cookies`, { text, ...(domain ? { domain } : {}) });
+}
+
 export async function closeBrowser(group: string): Promise<void> {
   await api.post(`${BROWSERS_KEY}/${enc(group)}/close`, {});
   refreshLists();

@@ -119,6 +119,9 @@ unknown field is `-32602`. Errors use the JSON-RPC codes plus:
 | `group.resize` | `{group_id, viewport{w, h}}` → `{viewport{w, h}}`. Each side is 320–3840. Every page's window is sized the way `browser.open` sized it, and the group's viewport becomes that. The app calls it as the operator's picture changes size, so a tall pane is a tall page rather than a 1280×800 picture with an empty band under it. The agent's reads and actions are in that page's CSS pixels, so they follow |
 | `profile.list` | → `{profiles: [{id, size_bytes, last_used_at, running}]}` |
 | `profile.clear`, `profile.delete` | `{profile}` → `{}`; `1004` while its browser runs. Clear keeps the directory and removes cookies, storage and cache; delete removes it |
+| `cookies.set` | `{group_id, cookies: [CookieParam] ≤ 3000, origin?}` → `{set, rejected: [{name, domain, reason}]}`: `CookieParam` is the protocol's `Network.CookieParam` (`name, value, url? \| domain?, path?, secure?, httpOnly?, sameSite?, expires?`; no `expires` for a session cookie). Set through `Storage.setCookies` on the browser's session, in the group's context for a throwaway group, one at a time so one cookie the browser refuses is named rather than refusing the rest. They land in the profile's own cookie store on disk and outlive the browser, as a login made by hand does |
+| `cookies.list` | `{group_id, domain?}` → `{cookies: [{name, domain, path, expires, secure, http_only, same_site?}]}`: `expires` is 0 for a session cookie; `domain` keeps that site and its subdomains. Never a value: no method answers one |
+| `cookies.clear` | `{group_id, domain, origin?}` → `{cleared}`: the cookies of that site and its subdomains, deleted through the active tab (`Network.deleteCookies`); every site at once is `profile.clear`'s |
 | `tab.list` | `{group_id}` → `{tabs: [Tab], active_tab}` |
 | `tab.new` | `{group_id, url?, origin?}` → `Tab`; it becomes the active tab |
 | `tab.select` | `{tab_id, origin?}` → `Tab` |
@@ -856,8 +859,19 @@ load|idle|text|gone|url, value?, timeout_s ≤ 60, tab?)`, `BrowserDialog(accept
 `BrowserHandoff(reason: login|captcha|two_factor|payment|confirm|other, what)`, `BrowserClose(tab? |
 all)`, `BrowserDownload(name, to?)`, `BrowserNote(note, host?)` or `BrowserNote(read)`, `BrowserLogs(tab?, level?, all?)`,
 `BrowserNetwork(tab?, type?, host?, contains?, method?, failed?, all?, id?, body?, max_chars?)`,
-`BrowserInspect(ref? | selector?, tab?, html? = true, max_chars?)`.
+`BrowserInspect(ref? | selector?, tab?, html? = true, max_chars?)`, `BrowserCookies(action:
+import|list|clear = import, path? | text?, domain?)`.
 
+- **Cookies.** `BrowserCookies` loads a cookie file the operator handed over into the caller's
+  profile (`cookies.set`), starting its browser when none runs: a Netscape `cookies.txt` (with curl's
+  `#HttpOnly_` lines), a Cookie-Editor or EditThisCookie export, Playwright's `storageState`, the
+  protocol's own cookie list, or a `Cookie:` header given as `text` with the `domain` it is for
+  (`daedalus/browser/cookies.py`). A host-only cookie is set by address, never by domain, which the
+  browser would widen to every subdomain. The result, the audit row (`cookies`, in the action log)
+  and every refusal name sites, names, counts and line numbers, never a value. A file in the
+  session's walls needs no question of its own: the operator handed it over, and the profile is the
+  agent's. When an attachment is plainly a cookie export, its line in the message says so and names
+  the tool; the agent decides whether the browser or `curl` with the file serves the task.
 - **Reading.** `view` is passed to `page.snapshot`. `BrowserText(find=…, regex?)` is `page.find`
   (30 matches), fenced as the page's words. `BrowserText(query=…, schema?)` reads the page (`page.text`,
   up to 120 000 characters) in parts of about 12 000 at line ends, and hands each part, fenced as
@@ -994,6 +1008,7 @@ The shapes are the app's own types in `miniapp/src/api.ts`; a host test holds th
 | `POST /api/browsers/<group>/control {owner, client_id?, ttl_ms?, reason?, note?}` | the group's `Control` as it now is; `human` needs the view's `client_id` |
 | `POST /api/browsers/<group>/viewport {w, h}` | `{viewport{w, h}}`: the operator's picture asks the page to become that size (`group.resize`). Each side is 320–3840 |
 | `POST /api/browsers/<group>/dialog {accept, tab_id?, text?}` | the operator answers the page's dialog |
+| `POST /api/browsers/<group>/cookies {text, domain?}` | `{set, rejected, skipped, sites}`: the operator loads a cookie file into the group's profile (the Browser tab's menu, "Import cookies"), read as `BrowserCookies` reads one; `domain` is the site a bare `Cookie:` header is for |
 | `POST /api/browsers/<group>/close` | closes the group; the profile stays |
 | `GET /api/browsers/<group>/actions?limit` | `{actions: [BrowserActionRow]}`, newest first |
 | `GET /api/browsers/<group>/audit?limit` | `{entries: [{seq, at, env, actor, action, detail}]}`, newest first; never typed text |

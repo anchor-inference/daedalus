@@ -408,7 +408,9 @@ than guess: refs come only from BrowserSnapshot, and the browser opens http and 
 - Notes on a site the operator approved come with the page; use them. After a hard-won success on a site, \
 BrowserNote proposes one for the next agent. A procedure the operator recorded there is listed by its title: when \
 your task is what it does, read it with BrowserNote(read=…) and follow it with your own tools.
-- The browser keeps the project's logins between sessions. Close it (BrowserClose) when the task is done.
+- The browser keeps the project's logins between sessions. A cookie file the operator attaches (the message \
+says so) signs it in with BrowserCookies(path=…) when the task needs the site in the browser. Close it \
+(BrowserClose) when the task is done.
 """
 
 

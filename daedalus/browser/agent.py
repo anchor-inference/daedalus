@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import urlsplit
 
+from daedalus.browser import cookies as cookie_files
 from daedalus.browser.model import (
     HANDOFF_REASONS,
     Blocked,
@@ -63,6 +64,8 @@ NEEDS_REF = ("click", "double_click", "right_click", "hover", "type", "select", 
 WAIT_FOR = ("load", "idle", "text", "gone", "url")
 TAB_ACTIONS = ("list", "new", "select", "close")
 GO = ("back", "forward", "reload")
+COOKIE_ACTIONS = ("import", "list", "clear")
+COOKIES_SHOWN = 200
 TEXT_MAX = 10_000
 """What one ``type`` may carry, as the daemon allows."""
 WAIT_MAX_S = 60
@@ -1529,6 +1532,84 @@ class BrowserAgent:
         await self._audit(group, caller, "download_saved", {"id": download.get("id"), "name": download.get("name"), "size": len(data), "sha256": hashlib.sha256(data).hexdigest(), "to": told[:500]})
         return told
 
+    async def cookies(self, caller: Caller, *, action: str = "import", path: str | None = None, text: str | None = None, domain: str | None = None) -> str:
+        """Load cookies the operator handed over into the caller's browser, list what it holds, or
+        clear a site's. No value ever leaves: the parser, the daemon and this text name sites, names,
+        expiry and line numbers only."""
+        if action not in COOKIE_ACTIONS:
+            raise InvalidRequest(f"action is one of {', '.join(COOKIE_ACTIONS)}")
+        if action == "import":
+            return await self._import_cookies(caller, path=path, text=text, domain=domain)
+        group = await self._group(caller)
+        if action == "clear":
+            if not (domain or "").strip(" ."):
+                raise InvalidRequest("clear needs domain: the site whose cookies go (wolt.com)")
+            result = await self.service.call(group["id"], "cookies.clear", {"group_id": group["id"], "domain": domain, "origin": self._origin(caller)}, what="clearing cookies")
+            cleared = int(result.get("cleared") or 0)
+            await self._audit(group, caller, "cookies", {"action": "clear", "element": domain, "count": cleared})
+            return f"Cleared {cleared} cookie{'' if cleared == 1 else 's'} of {domain} from your browser."
+        params: dict[str, Any] = {"group_id": group["id"]}
+        if domain:
+            params["domain"] = domain
+        result = await self.service.call(group["id"], "cookies.list", params, what="listing cookies")
+        rows = [r for r in result.get("cookies") or [] if isinstance(r, dict)]
+        if not rows:
+            return f"Your browser holds no cookies{f' for {domain}' if domain else ''}."
+        by_site: dict[str, list[str]] = {}
+        for r in rows[:COOKIES_SHOWN]:
+            expires = float(r.get("expires") or 0)
+            until = time.strftime("%Y-%m-%d", time.gmtime(expires)) if expires else "session"
+            flags = "".join((", httpOnly" if r.get("http_only") else "", ", secure" if r.get("secure") else ""))
+            by_site.setdefault(str(r.get("domain") or ""), []).append(f"{r.get('name')} ({until}{flags})")
+        lines = [f"- {site} ({len(names)}): " + "; ".join(names) for site, names in by_site.items()]
+        more = f"\n… and {len(rows) - COOKIES_SHOWN} more; domain= narrows the list." if len(rows) > COOKIES_SHOWN else ""
+        return f"Cookies in your browser ({len(rows)}; names and expiry only, never values):\n" + "\n".join(lines) + more
+
+    async def _import_cookies(self, caller: Caller, *, path: str | None, text: str | None, domain: str | None) -> str:
+        if bool(path) == bool(text):
+            raise InvalidRequest("give path (the cookie file, e.g. the attachment in your inbox) or text (a Cookie header with domain), one of them")
+        source = "the text given"
+        if path:
+            name, data = await caller.files.read(path)
+            source = name
+            raw: bytes | str = data
+        else:
+            raw = text or ""
+        try:
+            parsed = cookie_files.parse(raw, domain=domain)
+        except cookie_files.CookieFileError as exc:
+            raise InvalidRequest(f"{source}: {exc}") from None
+        if domain and parsed.format != "header":
+            wanted = domain.strip().lstrip(".").lower()
+            parsed.cookies = [c for c in parsed.cookies if (site := cookie_files.cookie_site(c)) == wanted or site.endswith("." + wanted)]
+        if not parsed.cookies:
+            skipped = "; ".join(parsed.skipped[:10])
+            raise InvalidRequest(f"{source} holds no cookie that can be loaded{f' for {domain}' if domain else ''}" + (f" ({skipped})" if skipped else ""))
+        try:
+            group = await self._group(caller)
+        except NotFound:
+            # The cookies go into the profile, which is the browser's to write: start it, as BrowserOpen would.
+            await self.service.open(caller.owner, actor=caller.actor)
+            group = await self._group(caller)
+        result = await self.service.call(group["id"], "cookies.set", {"group_id": group["id"], "cookies": parsed.cookies, "origin": self._origin(caller)}, what="setting cookies", timeout=60.0)
+        set_count = int(result.get("set") or 0)
+        rejected = [r for r in result.get("rejected") or [] if isinstance(r, dict)]
+        sites = cookie_files.summary(parsed)
+        await self._audit(group, caller, "cookies", {"action": "import", "element": ", ".join(sorted(parsed.domains()))[:500], "count": set_count, "rejected": len(rejected), "skipped": len(parsed.skipped), "format": parsed.format, "source": source[:200]})
+        where = "a throwaway profile, wiped when it closes" if group.get("fresh") else ("the project's profile, kept between sessions" if caller.owner.project_id else "your own profile, kept between sessions")
+        lines = [f"Loaded {set_count} of {_count(len(parsed.cookies), 'cookie')} from {source} into your browser ({where}): {sites}."]
+        if rejected:
+            listed = "; ".join(f"{r.get('name')} on {r.get('domain')}: {r.get('reason')}" for r in rejected[:10])
+            lines.append(f"The browser refused {len(rejected)}: {listed}" + (" …" if len(rejected) > 10 else ""))
+        if parsed.skipped:
+            lines.append(f"Skipped {len(parsed.skipped)}: " + "; ".join(parsed.skipped[:10]) + (" …" if len(parsed.skipped) > 10 else ""))
+        session = sum(1 for c in parsed.cookies if "expires" not in c)
+        if session:
+            lines.append(f"{_count(session, 'is a session cookie', 'are session cookies')}: {'it lasts' if session == 1 else 'they last'} until the browser closes.")
+        lines.extend(parsed.notes)
+        lines.append("Next: BrowserNavigate to the site, and BrowserSnapshot shows whether it signed you in.")
+        return "\n".join(lines)
+
     async def read_procedure(self, caller: Caller, procedure_id: str) -> str:
         """A procedure the operator recorded and approved, whole: only one this caller is shown on its
         sites (its project's, or one made outside a project), never one still waiting."""
@@ -1644,6 +1725,8 @@ class BrowserAgent:
                 return await self.close(caller, tab=_str(a, "tab"), all=bool(a.get("all"))), False
             if tool == "BrowserDownload":
                 return await self.download(caller, name=_str(a, "name") or "", to=_str(a, "to")), False
+            if tool == "BrowserCookies":
+                return await self.cookies(caller, action=_str(a, "action") or "import", path=_str(a, "path"), text=_str(a, "text"), domain=_str(a, "domain")), False
             if tool == "BrowserNote":
                 if _str(a, "read"):
                     return await self.read_procedure(caller, _str(a, "read") or ""), False

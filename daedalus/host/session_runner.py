@@ -48,6 +48,7 @@ from protocore.runtime.tool_registry import ToolRegistry
 from protocore.tools.memory import build_memory_tools
 from protocore.tools.tool_search import TOOL_SEARCH_TOOL_NAME, ToolSearchTool
 
+from daedalus.browser import cookies as cookie_files
 from daedalus.config import (
     DISPATCHER_TOOLS,
     ORCHESTRATOR_ONLY_TOOLS,
@@ -3477,6 +3478,23 @@ class SessionManager:
         body = (text.strip() + "\n\n" if text.strip() else "") + "Attached files (kept by handle; " + how + "):\n" + "\n".join(lines)
         return body, image_refs
 
+    async def _cookie_hint(self, path: Path, mime: str, size: int) -> str:
+        """What the attachment line adds for a cookie file: the sites, and the tool that loads them.
+
+        Said, never done: the agent decides whether the task wants the cookies in its browser or the
+        file passed to curl. Only where there is a browser to load them into, and only for a file that
+        is plainly a cookie export (``cookies.sniff``), so an ordinary text file is never called one.
+        """
+        if self.service_hooks.get("browser") is None or size > cookie_files.MAX_BYTES:
+            return ""
+        if not (mime.startswith("text/") or "json" in mime or path.suffix.lower() in (".txt", ".json")):
+            return ""
+        try:
+            sites = await asyncio.to_thread(lambda: cookie_files.sniff(path.read_bytes()))
+        except OSError:
+            return ""
+        return f" — cookies for {', '.join(sites)}; BrowserCookies can load them into the browser" if sites else ""
+
     async def _ingest_attachments(
         self, state: SessionState, text: str, attachments: Sequence[Attachment]
     ) -> tuple[str, list[tuple[str, str]]]:
@@ -3518,7 +3536,8 @@ class SessionManager:
                 # file is passed on into the folder's inbox there and named by that path.
                 shown = state.services.workspace_dir / "inbox" / target.name
                 await backend.put_bytes(str(shown), await asyncio.to_thread(target.read_bytes))
-            lines.append(f"- {shown} ({attachment.mime_type}, {target.stat().st_size} bytes)")
+            size = target.stat().st_size
+            lines.append(f"- {shown} ({attachment.mime_type}, {size} bytes){await self._cookie_hint(target, attachment.mime_type, size)}")
             if attachment.mime_type.startswith("image/"):
                 meta = await self.blobs.put(TENANT, target.read_bytes(), content_type=attachment.mime_type)
                 attachment.image_ref = meta.ref

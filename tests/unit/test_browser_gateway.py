@@ -464,3 +464,22 @@ async def test_recorded_steps_go_through_the_routes_in_the_apps_shape(served: Se
         assert (await http.patch("/api/browsers/notes/nope", json={"text": "x"}, headers=H)).status_code == 404
         assert (await http.delete(f"/api/browsers/workflows/{stopped['id']}", headers=H)).status_code == 200
         assert (await http.get(f"/api/browsers/workflows/{stopped['id']}", headers=H)).status_code == 404
+
+
+async def test_the_operator_loads_a_cookie_file_and_hears_counts_alone(served: Served) -> None:
+    group = await served.group()
+    cookie_file = "# Netscape HTTP Cookie File\n.shop.test\tTRUE\t/\tTRUE\t0\tsid\tFAKE-VALUE-operator\n"
+    async with served.http() as http:
+        loaded = await http.post(f"/api/browsers/{group}/cookies", json={"text": cookie_file}, headers=H)
+        assert loaded.status_code == 200 and loaded.json() == {"set": 1, "rejected": 0, "skipped": 0, "sites": "shop.test 1"}
+        assert "FAKE-VALUE" not in loaded.text
+        (sent,) = [p for m, p in served.daemon.calls if m == "cookies.set"]
+        assert sent["origin"] == {"actor": "operator"} and sent["cookies"][0]["value"] == "FAKE-VALUE-operator"
+        # A bare header takes the page's site the app sends; without one it is refused, as is a letter.
+        header = await http.post(f"/api/browsers/{group}/cookies", json={"text": "a=FAKE-VALUE-1; b=2", "domain": "shop.test"}, headers=H)
+        assert header.status_code == 200 and header.json()["set"] == 2
+        for text in ("a=FAKE-VALUE-1", "dear operator,\nhello\n"):
+            refused = await http.post(f"/api/browsers/{group}/cookies", json={"text": text}, headers=H)
+            assert refused.status_code == 400 and "FAKE-VALUE" not in refused.text
+        actions = (await http.get(f"/api/browsers/{group}/actions", headers=H)).json()["actions"]
+        assert [(a["actor"], a["kind"], a["element"]) for a in actions if a["kind"].startswith("cookies")] == [("operator", "cookies_import", "shop.test")] * 2

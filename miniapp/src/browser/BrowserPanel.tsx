@@ -17,7 +17,7 @@ import { Icon, type IconName } from "../icons";
 import { navigate, pathFor } from "../router";
 import { useQuery } from "../store";
 import { confirmAsync, errorText, haptic } from "../ui";
-import { answerDialog, askTake, closeBrowser, consumeTake, deleteRecording, deviceSaving, recordingMoved, resizeViewport, setControl, setRecording, takeHandoff, useActions, useLiveSnapshot, useLiveView, useRecording, useWorkflows, workflowsMoved } from "./data";
+import { answerDialog, askTake, closeBrowser, consumeTake, importCookies, deleteRecording, deviceSaving, recordingMoved, resizeViewport, setControl, setRecording, takeHandoff, useActions, useLiveSnapshot, useLiveView, useRecording, useWorkflows, workflowsMoved } from "./data";
 import { currentRecording, ProcedureEditor, RecordBar, RecordButton, RecordedCard, waitingRecording } from "./steps";
 import { frameOfRow, ReplayStage } from "./replay";
 import type { LiveSnapshot, LiveView } from "./live";
@@ -511,6 +511,27 @@ function GiveBack({ anchor, onClose, onGive }: { anchor: HTMLElement; onClose: (
 
 // ── the toolbar ──────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Pick a cookie file (an extension's cookies.txt, a JSON export) and load it into the group's profile:
+ * the same path the agent's BrowserCookies takes, for an operator who would rather not ask.
+ */
+function pickCookies(group: string, domain: string, toast: (text: string) => void) {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".txt,.json,text/plain,application/json";
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+      const out = await importCookies(group, await file.text(), domain);
+      toast(t("browser.cookies.loaded", { n: out.set, sites: out.sites }) + (out.rejected + out.skipped ? " " + t("browser.cookies.skipped", { n: out.rejected + out.skipped }) : ""));
+    } catch (e) {
+      toast(errorText(e));
+    }
+  };
+  input.click();
+}
+
 function Toolbar({ group, groups, onGroup, live, snap, url, tabs, viewing, drive, control, toast, full, recording, frames, onReplay, recordable, fit, onFit }: {
   group: BrowserGroup;
   groups: BrowserGroup[];
@@ -568,6 +589,7 @@ function Toolbar({ group, groups, onGroup, live, snap, url, tabs, viewing, drive
         },
       },
     ] : []),
+    { label: t("browser.cookies.import"), icon: "import" as IconName, onSelect: () => void pickCookies(group.id, domainOf(url), toast) },
     ...(groups.length > 1 && onGroup ? ["-" as const, ...groups.map((g) => ({ label: `${domainOf(g.tabs.find((x) => x.active)?.url ?? "")} · ${g.profile}`, icon: "globe" as IconName, checked: g.id === group.id, onSelect: () => onGroup(g.id) }))] : []),
     "-",
     {

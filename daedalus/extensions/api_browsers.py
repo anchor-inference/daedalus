@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from daedalus import load as load_math
+from daedalus.browser import cookies as cookie_files
 from daedalus.browser.gateway import BrowserGateway
 from daedalus.browser.model import BrowserError, EnvUnavailable, InvalidRequest, NotFound
 from daedalus.browser.notes import SiteNotes
@@ -56,6 +57,13 @@ class ControlBody(BaseModel):
 class SaveBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     to: str = Field(default="", max_length=500)
+
+
+class CookiesBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(min_length=1, max_length=cookie_files.MAX_BYTES)
+    domain: str = Field(default="", max_length=253)
+    """The site a bare Cookie header is for: the app sends the page the operator is on."""
 
 
 class DialogBody(BaseModel):
@@ -341,6 +349,24 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         """The operator answers the page's alert, confirm or prompt (the tab's, or the active one's)."""
         await service().answer_dialog(group_id, accept=body.accept, tab_id=body.tab_id, text=body.text)
         return {"ok": True}
+
+    @api.post("/api/browsers/{group_id}/cookies")
+    async def browsers_cookies(group_id: str, body: CookiesBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The operator loads a cookie file into a browser's profile, as the agent's BrowserCookies does.
+        Answers counts and sites; a value is never sent back."""
+        try:
+            parsed = cookie_files.parse(body.text, domain=body.domain or None)
+        except cookie_files.CookieFileError as exc:
+            raise InvalidRequest(str(exc)) from None
+        if not parsed.cookies:
+            raise InvalidRequest("the file holds no cookie that can be loaded" + (f" ({'; '.join(parsed.skipped[:5])})" if parsed.skipped else ""))
+        found = service()
+        row = await found.get_row(group_id)
+        result = await found.call(group_id, "cookies.set", {"group_id": group_id, "cookies": parsed.cookies, "origin": {"actor": "operator"}}, what="setting cookies", timeout=60.0)
+        loaded = int(result.get("set") or 0)
+        rejected = len(result.get("rejected") or [])
+        await found.audit(group_id, row["env"], "operator", "cookies", {"action": "import", "element": ", ".join(sorted(parsed.domains()))[:500], "count": loaded, "rejected": rejected, "skipped": len(parsed.skipped), "format": parsed.format})
+        return {"set": loaded, "rejected": rejected, "skipped": len(parsed.skipped), "sites": cookie_files.summary(parsed)}
 
     @api.get("/api/browsers/{group_id}/actions")
     async def browsers_actions(group_id: str, limit: int = Query(default=100, ge=1, le=500), _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

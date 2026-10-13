@@ -189,11 +189,11 @@ ACTOR_OF = {"take": "operator", "give": "operator", "pause": "operator", "downlo
 KIND_OF = {"act": "", "tab_new": "new_tab", "download_saved": "download"}
 ACTION_LOG = (
     "act", "navigate", "tab_new", "look", "dialog", "handoff", "download", "download_saved", "take", "give", "pause", "open", "close", "blocked", "watch", "monitor",
-    "extract", "note",
+    "extract", "note", "cookies",
 )
 """The audit's actions the app's action log shows: what the agent did in the browser, and what it
-read out of a page (``extract``) or proposed to remember about a site (``note``), which the operator
-reviews like the rest."""
+read out of a page (``extract``), proposed to remember about a site (``note``) or loaded into the
+browser's identity (``cookies``, by site and count alone), which the operator reviews like the rest."""
 
 
 def _action_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -205,7 +205,7 @@ def _action_row(row: dict[str, Any]) -> dict[str, Any]:
         "id": str(row["seq"]),
         "at": row["at"],
         "actor": ACTOR_OF.get(action) or (actor if actor in ("operator", "system", "page") else "agent"),
-        "kind": str(detail.get("action") or "") if action == "act" else KIND_OF.get(action, action),
+        "kind": str(detail.get("action") or "") if action == "act" else f"cookies_{detail.get('action') or 'import'}" if action == "cookies" else KIND_OF.get(action, action),
         "element": str(detail.get("element") or ""),
         "name": str(detail.get("name") or ""),
         "tab": str(detail.get("tab") or ""),

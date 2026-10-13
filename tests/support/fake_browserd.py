@@ -233,6 +233,8 @@ class FakeBrowserd:
         """(browser, host, port) the host opened with ``net.grant``."""
         self.limits: dict[str, Any] = {}
         """What ``limits.set`` last set."""
+        self.cookies: dict[str, list[dict[str, Any]]] = {}
+        """Profile → the cookies ``cookies.set`` put in its jar, values and all, as the daemon keeps them."""
         self.recording: dict[str, dict[str, Any]] = {}
         """Group → its recording switch."""
         self.frames: dict[str, list[dict[str, Any]]] = {}
@@ -789,6 +791,36 @@ class FakeBrowserd:
                 raise _Fail(-32602, "offset is not the size so far")
             upload["data"] += data
             return {"upload_id": upload_id, "size": len(upload["data"])}
+        if method == "cookies.set":
+            group = self._group(str(params.get("group_id")))
+            await self._held_back(group, params)
+            jar = self.cookies.setdefault(group.profile, [])
+            rejected = []
+            for cookie in params.get("cookies") or []:
+                where = cookie.get("domain") or cookie.get("url") or ""
+                if cookie.get("name") == "refuse-me":
+                    rejected.append({"name": cookie["name"], "domain": where, "reason": "the browser refused it: Invalid cookie fields"})
+                    continue
+                domain = cookie.get("domain") or str(cookie.get("url") or "").split("//", 1)[-1].split("/", 1)[0]
+                jar[:] = [c for c in jar if (c["name"], c["domain"]) != (cookie["name"], domain)]
+                jar.append({**cookie, "domain": domain})
+            return {"set": len(params.get("cookies") or []) - len(rejected), "rejected": rejected}
+        if method == "cookies.list":
+            group = self._group(str(params.get("group_id")))
+            site = str(params.get("domain") or "").lstrip(".")
+            rows = [c for c in self.cookies.get(group.profile, []) if not site or c["domain"].lstrip(".") == site or c["domain"].endswith("." + site)]
+            return {"cookies": [{"name": c["name"], "domain": c["domain"], "path": c.get("path", "/"), "expires": c.get("expires", 0), "secure": bool(c.get("secure")),
+                                 "http_only": bool(c.get("httpOnly")), "same_site": c.get("sameSite", "")} for c in rows]}
+        if method == "cookies.clear":
+            group = self._group(str(params.get("group_id")))
+            await self._held_back(group, params)
+            site = str(params.get("domain") or "").strip(" .")
+            if not site:
+                raise _Fail(-32602, "domain is required: the site whose cookies go")
+            jar = self.cookies.get(group.profile, [])
+            kept = [c for c in jar if not (c["domain"].lstrip(".") == site or c["domain"].endswith("." + site))]
+            self.cookies[group.profile] = kept
+            return {"cleared": len(jar) - len(kept)}
         if method == "net.configure":
             self.wall = dict(params)
             return {}

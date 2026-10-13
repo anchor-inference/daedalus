@@ -33,7 +33,7 @@ from daedalus.tools.vision import VisionUnavailable, look
 BROWSER_TOOLS = (
     "BrowserOpen", "BrowserNavigate", "BrowserSnapshot", "BrowserText", "BrowserLook", "BrowserAct",
     "BrowserTabs", "BrowserWait", "BrowserDialog", "BrowserHandoff", "BrowserClose", "BrowserDownload", "BrowserNote",
-    "BrowserLogs", "BrowserNetwork", "BrowserInspect",
+    "BrowserLogs", "BrowserNetwork", "BrowserInspect", "BrowserCookies",
 )
 READ_ONLY_TOOLS = ("BrowserSnapshot", "BrowserText", "BrowserLook", "BrowserTabs", "BrowserWait", "BrowserLogs", "BrowserNetwork", "BrowserInspect")
 """The tools that only read the page or wait on it: a command-line agent's own permission rules may
@@ -510,9 +510,29 @@ async def browser_inspect(context: ToolContext, ref: str | None = None, selector
     return await _run(context, "BrowserInspect", {"ref": ref, "selector": selector, "tab": tab, "html": html, "max_chars": max_chars})
 
 
+@tool_group("browser")
+@search_hint(
+    "cookies import load cookie file cookies.txt netscape json export cookie editor storage state session login sign in "
+    "куки куки-файл импортировать импортируй загрузить загрузи кукисы сессия залогинить авторизация вход"
+)
+@tool(
+    name="BrowserCookies",
+    description=(
+        "Your browser's cookies. action='import' (the default) loads a cookie file the operator gave you into it, so "
+        "you are signed in where they are: path is the file (a cookies.txt from a browser extension, a Cookie-Editor, "
+        "EditThisCookie or Playwright storageState JSON); or text is a copied Cookie header with domain naming its "
+        "site. domain also narrows a file to one site. They go into your profile and stay with it. action='list' shows "
+        "the sites, names and expiry (domain= narrows it); action='clear' removes one site's (domain required). "
+        "Values are never shown. For scraping with curl the file itself may serve better."
+    ),
+)
+async def browser_cookies(context: ToolContext, action: str = "import", path: str | None = None, text: str | None = None, domain: str | None = None) -> ToolResult:
+    return await _run(context, "BrowserCookies", {"action": action, "path": path, "text": text, "domain": domain})
+
+
 TOOLS = [
     browser_open, browser_navigate, browser_snapshot, browser_text, browser_look, browser_act, browser_tabs, browser_wait, browser_dialog, browser_handoff, browser_close,
-    browser_download, browser_note, browser_logs, browser_network, browser_inspect,
+    browser_download, browser_note, browser_logs, browser_network, browser_inspect, browser_cookies,
 ]
 
 __all__ = ["BROWSER_TOOLS", "READ_ONLY_TOOLS", "TOOLS", "SessionFiles"]
