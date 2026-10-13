@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
-import secrets
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,7 +20,6 @@ from daedalus.extensions.api import (
     validate_login_widget,
     verify_session_cookie,
 )
-from daedalus.security import two_factor
 from daedalus.stores import pairing
 from daedalus.stores.database import Database
 
@@ -180,5 +177,3 @@ async def test_signing_out_everywhere_ends_every_session_but_reissues_this_one(c
     assert (await client.get("/api/auth/me", cookies={name: value})).status_code == 401
     client.cookies.set(name, revoked.headers["set-cookie"].split(";")[0].partition("=")[2])
     assert (await client.get("/api/auth/me")).json()["via"] == "cookie"
-
-

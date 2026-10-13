@@ -78,18 +78,27 @@ class Gate:
 
     def __init__(
         self,
-        store: TwoFactor,
+        store: Callable[[], TwoFactor],
         *,
         session_secret: Callable[[], Awaitable[bytes]],
         sign_in: Callable[[Response, Request], Awaitable[None]],
         over_https: Callable[[Request], bool],
     ) -> None:
-        self.store = store
+        self._make_store = store
+        self._store: TwoFactor | None = None
         self.session_secret = session_secret
         self.sign_in = sign_in
         self.over_https = over_https
         self.attempts = Attempts()
         self._wrong: dict[str, int] = {}
+
+    @property
+    def store(self) -> TwoFactor:
+        # Made on first use: the routes are built before a stand-in application (the tests' own,
+        # the auth tests' without a database) has everything a request will find on it.
+        if self._store is None:
+            self._store = self._make_store()
+        return self._store
 
     async def _key(self) -> bytes:
         # Its own key, derived from the session secret: a pending cookie and a session cookie can
@@ -157,7 +166,7 @@ def register(
 ) -> Gate:
     settings = app.settings
     gate = Gate(
-        TwoFactor(app.db, settings.secrets_dir / operator_secrets.KEY_FILE),
+        lambda: TwoFactor(app.db, lambda: operator_secrets.load_key(settings.secrets_dir / operator_secrets.KEY_FILE)),
         session_secret=session_secret, sign_in=sign_in, over_https=over_https,
     )
 

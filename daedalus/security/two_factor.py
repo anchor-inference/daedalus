@@ -26,15 +26,13 @@ import secrets
 import struct
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-
-from daedalus.security.operator_secrets import load_key
 
 ISSUER = "Daedalus"
 DIGITS = 6
@@ -173,15 +171,17 @@ class Status:
 class TwoFactor:
     """The installation's one TOTP secret, its recovery codes, and the check of a code against them."""
 
-    def __init__(self, db: Any, key_path: Path, *, clock: Any = time.time) -> None:
+    def __init__(self, db: Any, key: Callable[[], bytes], *, clock: Any = time.time) -> None:
+        """``key`` reads the sealing key when it is first needed: the operator secrets' own, handed in
+        rather than imported, since nothing in the security package depends on another of its modules."""
         self.db = db
-        self.key_path = key_path
+        self.key = key
         self.clock = clock
         self._aead: AESGCM | None = None
 
     def _cipher(self) -> AESGCM:
         if self._aead is None:
-            self._aead = AESGCM(load_key(self.key_path))
+            self._aead = AESGCM(self.key())
         return self._aead
 
     def _seal(self, secret: str) -> bytes:

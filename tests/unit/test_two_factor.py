@@ -89,7 +89,7 @@ def test_the_throttle_closes_after_five_failures_and_reopens() -> None:
 
 
 def _store(settings: Settings, db: Database, now: list[float]) -> TwoFactor:
-    return TwoFactor(db, settings.secrets_dir / operator_secrets.KEY_FILE, clock=lambda: now[0])
+    return TwoFactor(db, lambda: operator_secrets.load_key(settings.secrets_dir / operator_secrets.KEY_FILE), clock=lambda: now[0])
 
 
 async def test_the_secret_is_sealed_and_a_code_is_good_once(settings: Settings, db: Database) -> None:
