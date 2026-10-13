@@ -11,13 +11,17 @@ import { REASONING_EFFORTS, effortIndex } from "./models";
 import { Popover, Sheet } from "./ui/dialogs";
 import { Icon } from "./icons";
 import { shortModel, tokens } from "./format";
-import { readCustomModel, rememberCustomModel } from "./composer";
 import { DICT, num, t } from "./i18n";
 import { ProviderMark, providerName } from "./ui/provider-mark";
 import { EffortMenu } from "./effortselect";
-import { pathFor } from "./router";
+import { navigate, pathFor } from "./router";
 
-export type ModelChoice = { clear: true } | { preset: string } | { provider: string; model: string } | { model: string };
+export type ModelChoice = { clear: true } | { preset: string } | { model: string };
+
+/** Where "Add model" leads: Settings → Models & providers with its add sheet already open. A model
+ *  typed by hand into the picker used to stand in for this, and it ran a session on a provider/model
+ *  pair nothing had described, with no price, no context window and no way to pick it again. */
+export const ADD_MODEL_PATH = pathFor("settings", "models", { add: "1" });
 
 type Catalogue = { presets: Record<string, Preset>; providers: Record<string, ProviderConf>; global: string; globalId: string };
 
@@ -79,7 +83,7 @@ export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, she
   ) : shortModel(model, 22);
   const reason = fallback ? (DICT[`session.model.reason.${fallback.reason}`] ? t(`session.model.reason.${fallback.reason}`) : fallback.reason) : "";
   const title = fallback ? `${t("session.model.fallback.turn", { to: fallback.to, from: fallback.from })} — ${reason}` : t("composer.model.title");
-  const list = <ModelList cat={cat} failed={failed} model={model} fallback={fallback} onPick={pick} effort={effort} thinking={thinking} onChooseEffort={onChooseEffort ? (value) => { onChooseEffort(value); onOpenChange(false); } : undefined} sheet={sheet} />;
+  const list = <ModelList cat={cat} failed={failed} model={model} fallback={fallback} onPick={pick} onClose={() => onOpenChange(false)} effort={effort} thinking={thinking} onChooseEffort={onChooseEffort ? (value) => { onChooseEffort(value); onOpenChange(false); } : undefined} sheet={sheet} />;
   return (
     <>
       <ControlTrigger ref={trigger} type="button" className={`model-select ${fallback ? "attn" : ""} ${open ? "on" : ""}`} onClick={() => onOpenChange(!open)} title={title} aria-label={t("session.model.for")} aria-haspopup="menu" aria-expanded={open}>
@@ -105,16 +109,14 @@ export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, she
   );
 }
 
-function ModelList({ cat, failed, model, fallback, onPick, effort, thinking, onChooseEffort, sheet }: { cat: Catalogue | null; failed: string | null; model: string; fallback: ModelFallback | null; onPick: (c: ModelChoice) => void; effort?: string; thinking?: boolean; onChooseEffort?: (value: string) => void; sheet: boolean }) {
+function ModelList({ cat, failed, model, fallback, onPick, onClose, effort, thinking, onChooseEffort, sheet }: { cat: Catalogue | null; failed: string | null; model: string; fallback: ModelFallback | null; onPick: (c: ModelChoice) => void; onClose: () => void; effort?: string; thinking?: boolean; onChooseEffort?: (value: string) => void; sheet: boolean }) {
   const [query, setQuery] = useState("");
   const [provider, setProvider] = useState<string | null>(null);
   const [freeGroup, setFreeGroup] = useState(false);
-  const [customOpen, setCustomOpen] = useState(false);
   const list = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (provider !== null) list.current?.querySelector<HTMLButtonElement>(".provider-back")?.focus({ preventScroll:true });
   }, [provider]);
-  const [custom, setCustom] = useState(() => readCustomModel());
   if (failed) return <div className="sub model-row-note">{failed}</div>;
   if (!cat) return <div className="sub model-row-note">{t("common.loading")}</div>;
   const entries = Object.entries(cat.presets);
@@ -130,21 +132,21 @@ function ModelList({ cat, failed, model, fallback, onPick, effort, thinking, onC
   };
   // The way back from a fallback: the configured model, named first, as the preset it is or as itself.
   const configured = fallback ? (entries.find(([id, p]) => isCurrent(id, p, fallback.from)) ?? null) : null;
-  const useCustom = () => {
-    const value = custom.trim();
-    if (!value) return;
-    rememberCustomModel(value);
-    const [prov, ...rest] = value.split("/");
-    const m = rest.join("/");
-    onPick(m ? { provider: prov, model: m } : { model: prov });
+  // The picker closes first: the settings screen replaces the conversation it was opened from.
+  const addModel = () => {
+    onClose();
+    navigate(ADD_MODEL_PATH);
   };
+  // The configured default as a choice of its own wherever it cannot be reached through its
+  // provider: inside that provider, or at the top when the default is not one of the presets.
+  const showGlobal = (provider !== null && cat.presets[cat.globalId]?.provider === provider) || (browsing && !freeGroup && !!cat.globalId && !cat.presets[cat.globalId]);
   if (sheet) return (
     <PhoneModelList
       listRef={list} cat={cat} model={model} fallback={fallback} configured={configured} onPick={onPick}
       query={query} setQuery={setQuery} provider={provider} setProvider={setProvider} freeGroup={freeGroup} setFreeGroup={setFreeGroup}
       browsing={browsing} matched={matched} providers={providers} entries={entries} back={back}
       effort={effort} thinking={thinking} onChooseEffort={onChooseEffort}
-      customOpen={customOpen} setCustomOpen={setCustomOpen} custom={custom} setCustom={setCustom} useCustom={useCustom}
+      showGlobal={showGlobal} addModel={addModel}
     />
   );
   return (
@@ -172,7 +174,7 @@ function ModelList({ cat, failed, model, fallback, onPick, effort, thinking, onC
           <div className="menu-sep" />
         </>
       )}
-      {(provider !== null && cat.presets[cat.globalId]?.provider === provider || customOpen && !cat.presets[cat.globalId]) && <button type="button" role="menuitem" className="model-row" onClick={() => onPick({ clear: true })}>
+      {showGlobal && <button type="button" role="menuitem" className="model-row" onClick={() => onPick({ clear: true })}>
         <Icon name="model" size={16} />
         <span className="model-text grow">
           <span>{t("session.model.global")}</span>
@@ -213,26 +215,7 @@ function ModelList({ cat, failed, model, fallback, onPick, effort, thinking, onC
       })}
       <div className="menu-sep" />
       {onChooseEffort && <EffortMenu effort={effort} thinking={thinking} onChoose={onChooseEffort} inline={sheet} />}
-      <button type="button" role="menuitem" className="model-row" aria-expanded={customOpen} onClick={() => setCustomOpen(!customOpen)}><Icon name="pen" size={16} /><span className="grow">{t("composer.model.manual")}</span><Icon name="chevron" size={14} /></button>
-      {customOpen && <div className="model-custom">
-        <div className="sub">{t("session.model.custom")}</div>
-        <div className="model-custom-row">
-          <input
-            className="field"
-            placeholder="vllm/Qwen3.6"
-            value={custom}
-            onChange={(e) => setCustom(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                useCustom();
-              }
-            }}
-            aria-label={t("session.model.custom")}
-          />
-          <button type="button" className="btn small primary" disabled={!custom.trim()} onClick={useCustom}>{t("session.model.use")}</button>
-        </div>
-      </div>}
+      <button type="button" role="menuitem" className="model-row model-add" onClick={addModel}><Icon name="plus" size={16} /><span className="grow">{t("composer.model.add")}</span><Icon name="chevron" size={14} /></button>
     </div>
   );
 }
@@ -242,7 +225,7 @@ type PhoneListProps = {
   query: string; setQuery: (q: string) => void; provider: string | null; setProvider: (p: string | null) => void; freeGroup: boolean; setFreeGroup: (on: boolean) => void;
   browsing: boolean; matched: [string, Preset][]; providers: string[]; entries: [string, Preset][]; back: () => void;
   effort?: string; thinking?: boolean; onChooseEffort?: (value: string) => void;
-  customOpen: boolean; setCustomOpen: (open: boolean) => void; custom: string; setCustom: (value: string) => void; useCustom: () => void;
+  showGlobal: boolean; addModel: () => void;
 };
 
 /** What a provider needs before it answers, in the words of its row: a key that is there or not. */
@@ -256,7 +239,7 @@ function keyState(conf: ProviderConf | undefined): string {
 /**
  * The phone's model sheet, in the order the design gives it: search, the way back from a stand-in,
  * effort as one row of choices, the models of the provider in use, then the other providers and
- * manual entry. The same choices, class names and drill-down as the desktop's list, so a provider
+ * the way to add a model. The same choices, class names and drill-down as the desktop's list, so a provider
  * opens the same way and the keyboard behaves the same; only the layout is the phone's.
  */
 function PhoneModelList(p: PhoneListProps) {
@@ -322,7 +305,7 @@ function PhoneModelList(p: PhoneListProps) {
           {homeModels.map(row)}
         </>
       )}
-      {(p.provider !== null && cat.presets[cat.globalId]?.provider === p.provider || p.customOpen && !cat.presets[cat.globalId]) && <button type="button" role="menuitem" className="model-row" onClick={() => onPick({ clear: true })}>
+      {p.showGlobal && <button type="button" role="menuitem" className="model-row" onClick={() => onPick({ clear: true })}>
         <span className="model-text grow">
           <span>{t("session.model.global")}</span>
           <span className="sub">{cat.global}</span>
@@ -348,15 +331,7 @@ function PhoneModelList(p: PhoneListProps) {
       {p.browsing && p.freeGroup && p.providers.length === 0 && <div className="model-row-note sub"><a href={pathFor("settings", "models", { tab: "free" })}>{t("free.chat.add")}</a></div>}
       {!p.browsing && p.matched.length === 0 && <div className="model-row-note sub" role="status">{t("shell.search.nomatch")}</div>}
       {!p.browsing && p.matched.map(row)}
-      <button type="button" role="menuitem" className="model-row" aria-expanded={p.customOpen} onClick={() => p.setCustomOpen(!p.customOpen)}><Icon name="pen" size={18} /><span className="grow">{t("composer.model.manual")}</span><Icon name="chevron" size={16} /></button>
-      {p.customOpen && <div className="model-custom">
-        <div className="sub">{t("session.model.custom")}</div>
-        <div className="ph-tray-answer">
-          <input className="ph-field" placeholder="vllm/Qwen3.6" value={p.custom} onChange={(e) => p.setCustom(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); p.useCustom(); } }} aria-label={t("session.model.custom")} />
-          <button type="button" className="ph-btn primary" disabled={!p.custom.trim()} onClick={p.useCustom}>{t("session.model.use")}</button>
-        </div>
-      </div>}
+      <button type="button" role="menuitem" className="model-row model-add" onClick={p.addModel}><Icon name="plus" size={18} /><span className="grow">{t("composer.model.add")}</span><Icon name="chevron" size={16} /></button>
     </div>
   );
 }

@@ -1104,7 +1104,9 @@ const MOVED: Record<string, { to: Section; anchor?: string }> = {
 export function SettingsScreen({ toast, section }: { toast: (t: string) => void; section?: string | null }) {
   const caps = useQuery<Capabilities>("/api/capabilities", { staleMs: 20000 });
   const [s, setS] = useState<Settings | null>(null);
-  const [adding, setAdding] = useState(false);
+  // `?add=1` on the models section opens the add sheet straight away: the composer's model picker
+  // sends the operator here to add a model, and landing on the list would leave one more click to find.
+  const [adding, setAdding] = useState(() => section === "models" && new URLSearchParams(window.location.search).get("add") === "1");
   const [modelsTab, setModelsTab] = useState<"my" | "free" | "providers">(() => {
     const tab = new URLSearchParams(window.location.search).get("tab");
     return tab === "free" || tab === "providers" ? tab : "my";
@@ -1572,14 +1574,24 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
     }
   };
 
+  // Closing the sheet takes `add` out of the address, so a reload or the back button does not open it again.
+  const stopAdding = () => {
+    setAdding(false);
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("add")) {
+      params.delete("add");
+      const rest = params.toString();
+      navigate(window.location.pathname + (rest ? `?${rest}` : ""), { replace: true });
+    }
+  };
   const addSheet = adding && (
-    <Sheet title={t("settings.models.add")} size="wide" onClose={() => setAdding(false)}>
+    <Sheet title={t("settings.models.add")} size="wide" onClose={stopAdding}>
       <AddModel
         toast={toast}
-        onCancel={() => setAdding(false)}
+        onCancel={stopAdding}
         onSaved={(id, next) => {
           setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) });
-          setAdding(false);
+          stopAdding();
           toast(t("settings.added", { id }));
         }}
       />

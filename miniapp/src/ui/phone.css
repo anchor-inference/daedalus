@@ -1110,10 +1110,6 @@
   .ph-tray-actions { display: flex; flex-direction: column; gap: var(--space-2); margin-top: 4px; }
   .ph-tray-actions .ph-btn { width: 100%; min-width: 0; }
   .ph-btn.ph-deny { background: none; color: var(--bad); }
-  .ph-tray-answer { display: flex; gap: var(--space-2); }
-  .ph-tray-answer .ph-field { flex: 1; min-width: 0; height: var(--tap); }
-  .ph-tray-answer .ph-btn { flex: none; }
-  .ph-tray-answer .ph-btn:only-child { flex: 1; }
 
   /* The session's sheet (details, files, jobs, browser…): the chat's title and a line over a strip of
      44 px tabs, raised from the bottom with the bar still showing above it, the way every sheet is. */
@@ -1198,7 +1194,6 @@
   .ph-model-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .ph-model-tag { flex: none; height: 20px; padding: 0 6px; border-radius: var(--radius-xs); background: var(--surface-2); color: var(--fg-2); font-size: var(--fs-12); line-height: 20px; }
   .ph-model-tag.on { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
-  .ph-model-list .model-custom { padding: var(--space-2) 0; display: flex; flex-direction: column; gap: var(--space-2); font-size: var(--fs-13); }
   /* The Secret form in the phone's dress: the labels and fields of the other phone forms, and 16 px in the
      fields so Safari does not zoom into them. */
   .secret-sheet label.field, .secret-sheet .secret-heading { margin: var(--space-4) 4px var(--space-2); font-size: var(--fs-13); color: var(--fg-2); }

@@ -101,7 +101,6 @@ function useModelLabel(value: string): string {
 function choiceValue(choice: ModelChoice): string {
   if ("clear" in choice) return "";
   if ("preset" in choice) return choice.preset;
-  if ("provider" in choice) return `${choice.provider}/${choice.model}`;
   return choice.model;
 }
 
