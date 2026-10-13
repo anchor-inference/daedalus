@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 from protocore.contracts.llm import LLMObservabilityContext, LLMRequest
 from protocore.contracts.types import Message, MessageRole, TextBlock
 
+from daedalus.extensions.api_calendar import zone_hint
 from daedalus.host.engine_factory import TENANT
 from daedalus.speech.chunks import join_transcripts, split_pcm, wav_bytes
 from daedalus.speech.service import (
@@ -39,6 +40,7 @@ from daedalus.speech.service import (
     recogniser_available,
     transcribe_recording,
 )
+from daedalus.stores.calendar import OPERATOR, CalendarStore
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -288,9 +290,6 @@ class MeetingService:
 
     async def add_to_calendar(self, job: MeetingJob, day: date) -> dict[str, Any]:
         """The action items as one entry with a checklist on ``day``."""
-        from daedalus.extensions.api_calendar import zone_hint  # Lazy: the routes module imports this one
-        from daedalus.stores.calendar import OPERATOR, CalendarStore
-
         if job.status != "done":
             raise RuntimeError("the notes are not written yet")
         event = await CalendarStore(self.app.db, zone_hint(self.app)).create(calendar_body(job.notes, day, file=job.file), OPERATOR)

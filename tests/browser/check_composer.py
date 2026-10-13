@@ -895,7 +895,8 @@ def modes(browser) -> list[str]:  # type: ignore[no-untyped-def]
     chip.click()
     page.wait_for_selector(".mode-menu")
     names = page.locator(".mode-menu [role='menuitemradio'] .truncate").all_inner_texts()
-    if names != ["Agent", "Plan", "Quick", "Deep", "Careful"]:
+    # Auto is the host's own mode, offered first whatever the configured ones are.
+    if names != ["Auto", "Agent", "Plan", "Quick", "Deep", "Careful"]:
         problems.append(f"the mode menu lists {names}")
     before = len(posts("/mode"))
     page.locator(".mode-menu [role='menuitemradio']", has_text="Plan").click()

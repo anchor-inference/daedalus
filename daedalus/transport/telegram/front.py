@@ -1948,10 +1948,10 @@ class TelegramFront:
             if job.status != "done":
                 await message.reply(f"📝 The meeting notes failed: {job.error}")
                 return
-            from daedalus.extensions.meetings import notes_markdown  # Lazy: the extension imports this module
-
             self._forget_expired(self._meeting_done, 2)
             self._meeting_done[token] = (session_id, job.id, time.monotonic())
+            from daedalus.extensions.meetings import notes_markdown  # Lazy: the extensions package imports this module
+
             # The app's link is made whole where the public address is known, as every message's is.
             text = notes_markdown(job.notes)[:3500] + f"\n\nThe transcript is in {job.file}. The session: /app/agents/{session_id}"
             outbox = self.outbox_to(message.chat.id, message.message_thread_id)
