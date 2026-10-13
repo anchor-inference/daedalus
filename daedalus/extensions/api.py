@@ -42,7 +42,6 @@ from fastapi.responses import (
 )
 from fastapi.staticfiles import StaticFiles
 from protocore.contracts.llm import LLMError, LLMObservabilityContext, LLMRateLimitError, LLMRequest
-from protocore.contracts.memory import MemoryScope
 from protocore.contracts.types import Message, MessageRole, TextBlock, ToolResultBlock, ToolUseBlock
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -86,6 +85,7 @@ from daedalus.extensions import (
     api_knowledge,
     api_lifecycle,
     api_meetings,
+    api_memory,
     api_pages,
     api_plugins,
     api_project_start,
@@ -564,22 +564,6 @@ class ToolGroupLoadBody(BaseModel):
     configuration and ignores it."""
 
 
-class MemoryBody(BaseModel):
-    text: str = Field(min_length=1)
-    kind: str = "fact"
-    scope: str = "global"
-    scope_key: str = ""
-
-
-class MemoryPatch(BaseModel):
-    text: str | None = None
-    kind: str | None = None
-
-
-class MemoryDeleteBody(BaseModel):
-    ids: list[str] = Field(min_length=1, max_length=500)
-
-
 class ShareBody(BaseModel):
     mode: str = Field(pattern="^(local|public|key)$")
     rotate_key: bool = False
@@ -753,6 +737,8 @@ class SettingsBody(BaseModel):
     action_rules: dict[str, Any] | None = None
     """The levels per action category, which of them are reviewed and the review's model."""
     compaction: dict[str, Any] | None = None
+    memory: dict[str, Any] | None = None
+    """Settings → Memory: the sensitive subjects Remember may keep, the classifier's model, the tidying."""
     orchestrator: dict[str, Any] | None = None
     """The project orchestrator's defaults: its model preset, its wake-up batching and its limits."""
     dispatcher: dict[str, Any] | None = None
@@ -1631,6 +1617,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_knowledge.register(api, app, auth)
     api_recurring.register(api, app, auth)
     api_resource_profiles.register(api, app, auth)
+    # The Memory screen: records by category and topic, merges, the tidying's suggestions, undo.
+    api_memory.register(api, app, auth)
     api_runtime.register(api, app, auth)
     api_runtime_handoff.register(api, app, auth)
     api_secrets.register(api, app, auth)
@@ -5307,69 +5295,6 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if not await manager.drop_queued_input(session_id, msg_id):
             raise HTTPException(409, "that message has already reached the agent")
         return {"deleted": True}
-
-    # -- memory: what the agent remembered, per session and globally ----------------------
-
-    def _memory_view(record: Any) -> dict[str, Any]:
-        return {
-            "id": record.id,
-            "scope": record.scope.value,
-            "scope_key": record.scope_key,
-            "kind": record.kind,
-            "text": record.text,
-            "salience": record.salience,
-            "version": record.version,
-            "created_at": record.created_at.isoformat() if record.created_at else None,
-            "last_accessed_at": record.last_accessed_at.isoformat() if getattr(record, "last_accessed_at", None) else None,
-        }
-
-    @api.get("/api/memory")
-    async def memory_list(scope: str = "", scope_key: str = "", _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        """Every memory record (or one scope's), with the titles of the sessions the session-scoped ones belong to."""
-        try:
-            wanted = MemoryScope(scope) if scope else None
-        except ValueError as exc:
-            raise HTTPException(422, f"unknown scope {scope!r}") from exc
-        records = manager.memory.records(TENANT, scope=wanted, scope_key=scope_key or None)
-        titles = {row["id"]: row["title"] for row in await app.db.fetchall("SELECT id, title FROM sessions")}
-        buckets: dict[str, dict[str, Any]] = {}
-        for rec in manager.memory.records(TENANT):
-            key = f"{rec.scope.value}:{rec.scope_key}"
-            b = buckets.setdefault(key, {"scope": rec.scope.value, "scope_key": rec.scope_key, "title": titles.get(rec.scope_key) if rec.scope is MemoryScope.session else None, "count": 0})
-            b["count"] += 1
-        return {"records": [_memory_view(r) for r in records], "buckets": sorted(buckets.values(), key=lambda b: (b["scope"] != "global", -b["count"])), "sessions": titles}
-
-    @api.post("/api/memory")
-    async def memory_add(body: MemoryBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        try:
-            scope = MemoryScope(body.scope)
-        except ValueError as exc:
-            raise HTTPException(422, f"unknown scope {body.scope!r}") from exc
-        if scope is not MemoryScope.global_ and not body.scope_key:
-            raise HTTPException(422, "scope_key is required for a non-global scope")
-        try:
-            result = await manager.memory.write(TENANT, scope, body.scope_key, body.text.strip(), kind=body.kind.strip() or "fact", metadata={"source": "operator"})
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
-        return {"decision": result.decision.value if hasattr(result.decision, "value") else str(result.decision), "record": _memory_view(result.record)}
-
-    @api.patch("/api/memory/{memory_id}")
-    async def memory_edit(memory_id: str, body: MemoryPatch, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        try:
-            return _memory_view(await manager.memory.update(TENANT, memory_id, text=body.text, kind=body.kind))
-        except KeyError as exc:
-            raise HTTPException(404, "no such memory") from exc
-
-    @api.delete("/api/memory/{memory_id}")
-    async def memory_delete(memory_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        return {"deleted": await manager.memory.delete(TENANT, memory_id)}
-
-    @api.post("/api/memory/delete")
-    async def memory_delete_many(body: MemoryDeleteBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        deleted = 0
-        for memory_id in body.ids:
-            deleted += int(await manager.memory.delete(TENANT, memory_id))
-        return {"deleted": deleted}
 
     # -- usage / balance / status ---------------------------------------------------
 

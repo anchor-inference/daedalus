@@ -16,6 +16,7 @@ from typing import Any
 import aiosqlite
 
 from daedalus.config import native_mode
+from daedalus.memory.taxonomy import CATEGORIES, corpus_vocabulary, guess_category, infer_topics, normalise_topics
 from daedalus.stores.attempt_fault_schema import MIGRATION as ATTEMPT_FAULT_MIGRATION
 from daedalus.stores.calendar_diagram_schema import migration as CALENDAR_DIAGRAM_MIGRATION
 from daedalus.stores.capacity_schema import MIGRATION as CAPACITY_MIGRATION
@@ -2313,6 +2314,71 @@ async def _workflow_skill(conn: aiosqlite.Connection) -> None:
 # already became one; "" for one that has not.
 MIGRATIONS.append(DataMigration("", _workflow_skill))
 
+
+
+async def _memory_categories(conn: aiosqlite.Connection) -> None:
+    """Every memory record gets a category in its ``kind`` and topics in its metadata.
+
+    The categories come from the old kind where it names one (a preference stays a preference, a
+    skill or a lesson becomes a procedure, a decision a project) and from cue words otherwise; the
+    topics from the words the records share, so records about one thing land under one heading.
+    Word lists only — a migration may not wait on a model. A record that already has a category
+    and topics is left as it is, which is what makes a second run change nothing."""
+    rows = await (await conn.execute("SELECT tenant_id, id, record FROM memory_records")).fetchall()
+    parsed: list[tuple[str, str, dict[str, Any]]] = []
+    for tenant_id, memory_id, raw in rows:
+        try:
+            record = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(record, dict):
+            parsed.append((tenant_id, memory_id, record))
+    vocabulary = corpus_vocabulary(str(record.get("text") or "") for _, _, record in parsed)
+    for tenant_id, memory_id, record in parsed:
+        metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+        kind = str(record.get("kind") or "")
+        if kind in CATEGORIES and normalise_topics(metadata.get("topics")):
+            continue
+        text = str(record.get("text") or "")
+        record["kind"] = kind if kind in CATEGORIES and kind != "fact" else guess_category(text, kind)
+        record["metadata"] = {**metadata, "topics": normalise_topics(metadata.get("topics")) or infer_topics(text, vocabulary)}
+        await conn.execute("UPDATE memory_records SET record = ? WHERE tenant_id = ? AND id = ?", (json.dumps(record, ensure_ascii=False), tenant_id, memory_id))
+
+
+# Memory gains categories and topics (written into each record by the step), the journal of the
+# changes made to it — merges, edits, automatic tidying — holding the records as they were so each
+# can be undone, and the suggestions the background tidying was not sure enough to apply. The
+# fingerprint names a suggestion's records and their texts: a dismissed one is not offered again
+# until one of its records says something new.
+MIGRATIONS.append(DataMigration("""
+CREATE TABLE IF NOT EXISTS memory_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL,
+    at TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    action TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    before_json TEXT NOT NULL,
+    after_json TEXT NOT NULL DEFAULT '[]',
+    undone_at TEXT
+);
+CREATE INDEX IF NOT EXISTS memory_history_recent ON memory_history(tenant_id, id);
+CREATE TABLE IF NOT EXISTS memory_suggestions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('duplicate', 'contradiction')),
+    memory_ids TEXT NOT NULL,
+    fingerprint TEXT NOT NULL UNIQUE,
+    keep_id TEXT NOT NULL,
+    proposed_text TEXT NOT NULL,
+    score REAL NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'applied', 'dismissed', 'stale')),
+    created_at TEXT NOT NULL,
+    decided_at TEXT
+);
+CREATE INDEX IF NOT EXISTS memory_suggestions_open ON memory_suggestions(tenant_id, status);
+""", _memory_categories))
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session

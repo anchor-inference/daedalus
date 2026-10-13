@@ -32,6 +32,7 @@ from companion_stub import CompanionStub
 from folder_stub import DEFAULT as FOLDERS
 from import_stub import DEFAULT as IMPORTS
 from import_stub import ImportStub
+from memory_stub import MemoryStub
 from pages_stub import PagesStub
 
 # Outside services_port_range (8100-8119), the range this product hands to an agent's own preview
@@ -401,6 +402,11 @@ COMPANION = CompanionStub("companion-1")
 """The companion every harness shares: its page, the faces in the lists, Quick Chat's target, the tray's Pause."""
 
 
+MEMORY = MemoryStub()
+"""An empty memory for the harnesses that pass the Memory screen by; screenshots.py and
+check_memory_topics.py keep one with records of their own."""
+
+
 SHARED_WRITES: dict[tuple[str, str], tuple[int, str, str]] = {
     # Every signed-in window reports what it shows, whatever screen a harness drives; the host
     # answers with no content.
@@ -666,6 +672,10 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     if path.startswith("/api/companion"):
         # The companion's page and every list that draws its face; check_companion.py reads its writes back.
         answered = COMPANION.answer(method, path, query, body if isinstance(body, dict) else None)
+        if answered is not None:
+            return answered[0], "application/json", json.dumps(answered[1])
+    if path.startswith("/api/memory"):
+        answered = MEMORY.answer(method.upper(), path, body if isinstance(body, dict) else None)
         if answered is not None:
             return answered[0], "application/json", json.dumps(answered[1])
     if path in GATES:
@@ -990,7 +1000,7 @@ def ask_turn(seq: int, call_id: str, questions: list[dict], answers: list[dict] 
     return rows
 
 
-__all__ = ["ASK_KINDS", "ask_turn", "CALENDAR", "CalendarStub", "VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "IMPORTS", "ImportStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "SAMPLE_PAGE", "TOOL_GROUP_CATALOGUE", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tasks", "session_tool_groups", "terminal_load"]
+__all__ = ["ASK_KINDS", "ask_turn", "CALENDAR", "CalendarStub", "MEMORY", "MemoryStub", "VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "IMPORTS", "ImportStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "SAMPLE_PAGE", "TOOL_GROUP_CATALOGUE", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tasks", "session_tool_groups", "terminal_load"]
 
 # What the harness manager reports for the container: Claude Code installed and signed in, Codex
 # installed but signed out, the rest absent. Enough for the hiring form to show one command-line agent

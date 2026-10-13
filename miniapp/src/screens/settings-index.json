@@ -55,6 +55,12 @@
       "synonyms": ["budget", "limit", "spend", "cost", "бюджет", "лимит", "траты", "расходы"]
     },
     {
+      "id": "memory", "group": "work", "icon": "bulb",
+      "title": { "en": "Memory", "ru": "Память" },
+      "about": { "en": "What the agent may remember: the sensitive subjects it refuses, the model that sorts notes into categories and topics, and the background tidying of duplicates.", "ru": "Что агенту можно запоминать: чувствительные темы, которые он не сохраняет, модель, раскладывающая заметки по категориям и темам, и фоновая уборка дубликатов." },
+      "synonyms": ["memory", "remember", "notes", "categories", "topics", "sensitive", "память", "запоминать", "заметки", "категории", "темы", "чувствительное"]
+    },
+    {
       "id": "tools", "group": "work", "icon": "wrench",
       "title": { "en": "Tools & search", "ru": "Инструменты и поиск" },
       "about": { "en": "Tool groups loaded on demand, the web search backend, page fetching, command execution and MCP servers.", "ru": "Группы инструментов по запросу, движок веб-поиска, загрузка страниц, запуск команд и серверы MCP." },
@@ -955,6 +961,30 @@
       "title": { "en": "Two-factor authentication", "ru": "Двухфакторная аутентификация" },
       "about": { "en": "A six-digit code from an authenticator app, asked after signing in from a browser; set up by scanning a QR code, with one-time recovery codes. Not offered in the desktop window, which signs in through its launcher.", "ru": "Шестизначный код из приложения-аутентификатора, который спрашивается после входа из браузера; подключается сканированием QR-кода, с одноразовыми резервными кодами. В окне настольного приложения не предлагается: оно входит через лаунчер." },
       "synonyms": ["2FA", "two-factor", "TOTP", "authenticator", "Google Authenticator", "one-time code", "QR code", "recovery codes", "двухфакторная", "двухэтапная проверка", "аутентификатор", "одноразовый код", "резервные коды"]
+    },
+    {
+      "section": "memory", "anchor": "memory.sensitive_allowed", "config": "memory.sensitive_allowed",
+      "title": { "en": "Sensitive subjects", "ru": "Чувствительные темы" },
+      "about": { "en": "Health, finances, intimate life, identity documents and precise location are refused by Remember unless allowed here.", "ru": "Здоровье, финансы, интимная жизнь, документы и точное местоположение агент не запоминает, пока это не разрешено здесь." },
+      "synonyms": ["sensitive", "privacy", "health", "finances", "what it remembers", "чувствительное", "приватность", "здоровье", "финансы", "что запоминает"]
+    },
+    {
+      "section": "memory", "anchor": "memory.classify_preset", "config": "memory.classify_preset",
+      "title": { "en": "Memory sorting model", "ru": "Модель сортировки памяти" },
+      "about": { "en": "The cheap model that picks a note's category and topics when the agent leaves them out; empty sorts by word lists.", "ru": "Дешёвая модель, которая подбирает заметке категорию и темы, если агент их не указал; пусто — сортировка по спискам слов." },
+      "synonyms": ["categories", "topics", "classify", "категории", "темы", "классификация"]
+    },
+    {
+      "section": "memory", "anchor": "memory.consolidate", "config": "memory.consolidate",
+      "title": { "en": "Tidy memory in the background", "ru": "Фоновая уборка памяти" },
+      "about": { "en": "Finds duplicate and contradicting notes after a change and proposes merging them.", "ru": "После изменений находит повторяющиеся и противоречащие заметки и предлагает их объединить." },
+      "synonyms": ["duplicates", "consolidate", "tidy", "merge", "дубликаты", "уборка", "объединить"]
+    },
+    {
+      "section": "memory", "anchor": "memory.auto_merge", "config": "memory.auto_merge",
+      "title": { "en": "Merge sure duplicates by itself", "ru": "Сливать явные дубликаты самому" },
+      "about": { "en": "Duplicates and a newer value for the same statement are merged without asking; every merge can be undone from the history.", "ru": "Дубликаты и более новое значение того же утверждения объединяются без вопроса; любое слияние отменяется из истории." },
+      "synonyms": ["auto merge", "duplicates", "автослияние", "дубликаты"]
     },
     {
       "section": "about", "anchor": "logout", "config": null,

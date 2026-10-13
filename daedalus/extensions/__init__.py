@@ -27,6 +27,7 @@ EXTENSIONS = (
     "daedalus.extensions.scheduler",
     "daedalus.extensions.heartbeat",
     "daedalus.extensions.learning",
+    "daedalus.extensions.memory",
     "daedalus.extensions.inbound",
     "daedalus.extensions.board",
     "daedalus.extensions.peers",
