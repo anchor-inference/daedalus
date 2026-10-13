@@ -516,7 +516,7 @@ class ProviderConfig(BaseModel):
     ``{"model": {"input", "output", "cache_hit"[, "*_off_peak", "peak_utc", "peak_weekdays_only"]}}``.
     A model with no price anywhere is recorded with an unknown cost."""
     billing: ProviderBilling = "metered"
-    """``subscription`` is a prepaid plan (OpenCode Go): its calls are recorded at $0, never count against a
+    """``subscription`` is a prepaid plan (OpenCode Go, Z.AI Coding Plan, MiniMax Token Plan, Kimi Code): its calls are recorded at $0, never count against a
     dollar cap, and the plan's own allowance is what limits them, read from the key proxy beside the other
     subscriptions. Any per-token price for it is ignored, so a list price cannot become a charge. ``metered``
     is everything billed per token, priced or not."""
@@ -2019,11 +2019,11 @@ class RuntimeConfig(BaseModel):
             "openai": ProviderConfig(kind="openai_compat", name="OpenAI API", base_url=keyproxy_base() + "/openai"),
             "anthropic": ProviderConfig(kind="openai_compat", base_url=keyproxy_base() + "/anthropic"),
             "zai": ProviderConfig(name="Z.AI API", base_url=keyproxy_base() + "/zai"),
-            "zai_coding": ProviderConfig(name="Z.AI Coding Plan", base_url=keyproxy_base() + "/zai_coding"),
+            "zai_coding": ProviderConfig(name="Z.AI Coding Plan", base_url=keyproxy_base() + "/zai_coding", billing="subscription"),
             "minimax": ProviderConfig(name="MiniMax API", base_url=keyproxy_base() + "/minimax"),
-            "minimax_plan": ProviderConfig(name="MiniMax Token Plan", base_url=keyproxy_base() + "/minimax_plan"),
+            "minimax_plan": ProviderConfig(name="MiniMax Token Plan", base_url=keyproxy_base() + "/minimax_plan", billing="subscription"),
             "moonshot": ProviderConfig(name="Moonshot AI API", base_url=keyproxy_base() + "/moonshot"),
-            "kimi_coding": ProviderConfig(name="Kimi Code", base_url=keyproxy_base() + "/kimi_coding"),
+            "kimi_coding": ProviderConfig(name="Kimi Code", base_url=keyproxy_base() + "/kimi_coding", billing="subscription"),
         }
     )
     prompt: PromptConfig = Field(default_factory=PromptConfig)
@@ -2282,7 +2282,7 @@ def _seed_presets(raw: dict[str, Any]) -> bool:
     return True
 
 
-SEEDS = ("claude-subscription", "openai-anthropic-keys", "more-provider-endpoints", "opencode-go-subscription", "known-image-models", "compaction-ratio-by-window", "context-window-source")
+SEEDS = ("claude-subscription", "openai-anthropic-keys", "more-provider-endpoints", "opencode-go-subscription", "known-image-models", "compaction-ratio-by-window", "context-window-source", "coding-plan-subscriptions")
 """Every seed a config can have had applied, in the order they were introduced. The seeds that follow
 the setup wizard's environment (``voice-cloud``, ``local-model:<id>``) are not listed: a new file
 should get them, because the wizard's answers are about this installation."""
@@ -2493,6 +2493,37 @@ def _seed_opencode_go_subscription(raw: dict[str, Any]) -> bool:
     return True
 
 
+CODING_PLAN_ROUTES = ("zai_coding", "minimax_plan", "kimi_coding")
+"""The key proxy's routes for the coding plans: a key issued by a monthly plan, not by a pay-per-token
+balance, so each is a subscription the way OpenCode Go is."""
+
+
+def _seed_coding_plan_subscriptions(raw: dict[str, Any]) -> bool:
+    """Make the coding-plan endpoints the subscriptions they are, once.
+
+    They were seeded metered, so every call was priced against the operator's dollar caps although the
+    plan is prepaid; the setup wizard files their keys under "subscription plan key", and the app's
+    labels followed the host's word, not the wizard's.
+    """
+    seeded = raw.setdefault("seeded", [])
+    if not isinstance(seeded, list):
+        seeded = raw["seeded"] = []
+    if "coding-plan-subscriptions" in seeded:
+        return False
+    seeded.append("coding-plan-subscriptions")
+    providers = raw.get("providers")
+    if not isinstance(providers, dict):
+        return True
+    for provider_id, provider in providers.items():
+        if not isinstance(provider, dict):
+            continue
+        route = str(provider.get("base_url") or "").rstrip("/").rsplit("/", 1)[-1]
+        if provider_id in CODING_PLAN_ROUTES or route in CODING_PLAN_ROUTES:
+            provider["billing"] = "subscription"
+            provider.pop("pricing", None)
+    return True
+
+
 def _seed_known_image_models(raw: dict[str, Any]) -> bool:
     """Turn Images on, once, for presets whose model is known to read pictures.
 
@@ -2639,6 +2670,7 @@ def _migrate(raw: dict[str, Any]) -> bool:
     changed = _seed_openai_anthropic_keys(raw) or changed
     changed = _seed_provider_endpoints(raw) or changed
     changed = _seed_opencode_go_subscription(raw) or changed
+    changed = _seed_coding_plan_subscriptions(raw) or changed
     changed = _seed_known_image_models(raw) or changed
     changed = _seed_context_window_source(raw) or changed
     changed = _seed_from_setup(raw) or changed

@@ -279,3 +279,31 @@ def test_a_fresh_config_has_go_as_a_subscription_and_zen_metered(tmp_path: Path)
     assert config.providers["opencode"].billing == "subscription" and config.providers["opencode"].pricing == {}
     assert config.providers["opencode_zen"].billing == "metered"
     assert "opencode-go-subscription" in config.seeded
+
+
+def test_the_coding_plans_become_subscriptions_once(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    raw = {"providers": {
+        "zai_coding": {"name": "Z.AI Coding Plan", "base_url": "http://keyproxy:3200/zai_coding", "pricing": {"glm": {"input": 1.0, "output": 2.0, "cache_hit": 0.1}}},
+        "kimi": {"name": "Kimi", "base_url": "http://keyproxy:3200/kimi_coding/"},
+        "zai": {"name": "Z.AI API", "base_url": "http://keyproxy:3200/zai"},
+    }}
+    with path.open("wb") as fh:
+        tomli_w.dump(raw, fh)
+    config = RuntimeConfig.load(path)
+    assert config.providers["zai_coding"].billing == "subscription" and config.providers["zai_coding"].pricing == {}
+    assert config.providers["kimi"].billing == "subscription"
+    assert config.providers["zai"].billing == "metered"
+    assert "coding-plan-subscriptions" in config.seeded
+
+    # Once: an operator who sets a plan back to metered keeps it that way.
+    config.providers["kimi"].billing = "metered"
+    config.save(path)
+    assert RuntimeConfig.load(path).providers["kimi"].billing == "metered"
+
+
+def test_a_fresh_config_has_the_coding_plans_as_subscriptions(tmp_path: Path) -> None:
+    config = RuntimeConfig.load(tmp_path / "config.toml")
+    for provider_id in ("zai_coding", "minimax_plan", "kimi_coding"):
+        assert config.providers[provider_id].billing == "subscription", provider_id
+    assert config.providers["minimax"].billing == "metered"
