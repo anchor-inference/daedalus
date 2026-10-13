@@ -408,8 +408,18 @@ func TestAStalledClientNeverHoldsTheProgram(t *testing.T) {
 	ended.Store(true)
 	t.Logf("%d bytes through the PTY in %s with a stalled client attached", term.OutputHead(), time.Since(began))
 	<-fastAcks
-	if _, data, n := stream(t, fast.all()); n != 1 || int64(len(data)) != term.OutputHead() {
-		t.Fatalf("the client that kept up holds %d of %d bytes after %d snapshots", len(data), term.OutputHead(), n)
+	// The daemon counts a frame as sent just before it hands the frame over, so the acknowledging
+	// loop can see everything sent while the last frame is still on its way into the sink. Reading
+	// the sink at that moment once found 48597 bytes missing on the Linux runner; wait for them.
+	head := term.OutputHead()
+	for deadline := time.Now().Add(10 * time.Second); ; {
+		if _, data, _ := stream(t, fast.all()); int64(len(data)) >= head || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if _, data, n := stream(t, fast.all()); n != 1 || int64(len(data)) != head {
+		t.Fatalf("the client that kept up holds %d of %d bytes after %d snapshots", len(data), head, n)
 	}
 
 	_, data, _ := stream(t, slow.all())

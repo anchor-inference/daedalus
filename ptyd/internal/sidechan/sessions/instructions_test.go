@@ -35,7 +35,9 @@ func TestClaudeInstructionsAreTheFilesItPutsInTheModelsPrompt(t *testing.T) {
 	if strings.Join(got, " ") != want {
 		t.Fatalf("files\n got %s\nwant %s", strings.Join(got, " "), want)
 	}
-	if reply.Cwd != proj {
+	// The reply names paths the way every session reply does, with forward slashes; on Windows the
+	// test's own path has backslashes, and comparing the two failed only there.
+	if reply.Cwd != NormPath(proj) {
 		t.Fatalf("cwd %q", reply.Cwd)
 	}
 	project := reply.Files[2]
