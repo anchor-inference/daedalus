@@ -217,6 +217,12 @@ module.exports = function startDesk({ app, dir, getMain, showMain, getStrings, g
     tray.setContextMenu(Menu.buildFromTemplate(desk.trayTemplate(view, strings, settings, actions)));
   }
 
+  // A tray that may draw nothing (plain GNOME) is no tray to hide the window into: the window would
+  // vanish with no icon to bring it back from, and the operator would take it for a quit.
+  function trayShown() {
+    return Boolean(tray) && desk.trayNote(process.platform, env) === '';
+  }
+
   function info(errors) {
     return {
       settings,
@@ -225,7 +231,7 @@ module.exports = function startDesk({ app, dir, getMain, showMain, getStrings, g
       errors: errors || {},
       platform: process.platform,
       wayland: process.platform === 'linux' && desk.waylandSession(env),
-      tray: { ready: Boolean(tray), note: desk.trayNote(process.platform, env) },
+      tray: { ready: trayShown(), note: desk.trayNote(process.platform, env) },
       screen: appshot.screenAccess(deps),
     };
   }
@@ -303,6 +309,6 @@ module.exports = function startDesk({ app, dir, getMain, showMain, getStrings, g
   return {
     noteAddress,
     run: (name) => (actions[name] ? actions[name]() : undefined),
-    keepOnClose: (quitting) => desk.hideOnClose({ hideToTray: settings.hideToTray, trayReady: Boolean(tray), quitting }),
+    keepOnClose: (quitting) => desk.hideOnClose({ hideToTray: settings.hideToTray, trayReady: trayShown(), quitting }),
   };
 };

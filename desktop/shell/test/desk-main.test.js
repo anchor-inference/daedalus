@@ -14,6 +14,7 @@ const policy = require('../policy');
 // The tray is made only where a Linux session has a bus to show it on; these tests are about what
 // the tray says, so there is always one.
 process.env.DBUS_SESSION_BUS_ADDRESS = process.env.DBUS_SESSION_BUS_ADDRESS || 'unix:path=/run/user/1000/bus';
+process.env.XDG_CURRENT_DESKTOP = 'KDE';
 
 function fakeElectron() {
   const handlers = new Map();
@@ -201,6 +202,8 @@ test('settings change only from the main window, are saved, and re-register the 
   electron.shortcuts.get('Alt+Space')();
   const quick = electron.windows.find((w) => w.options.frame === false);
   const set = electron.handlers.get('desk:set-settings');
+  assert.equal(desk.keepOnClose(false), true, 'closing hides the window by default');
+  assert.equal(desk.keepOnClose(true), false, 'but not while quitting');
   assert.equal(await set(from(quick.webContents), { quickChat: 'Ctrl+Shift+K' }), null);
   const answer = await set(from(main.webContents), { quickChat: 'Ctrl+Shift+K', hideToTray: false });
   assert.equal(answer.settings.quickChat, 'Ctrl+Shift+K');
@@ -238,4 +241,14 @@ test('the appshot shortcut hands its picture to Quick Chat once, when it asks', 
   assert.equal(first.length, 1);
   assert.equal(first[0].error, 'cancelled');
   assert.deepEqual(await pending(from(quick.webContents)), []);
+});
+
+test('on plain GNOME, where the icon may draw nothing, closing the window quits', () => {
+  process.env.XDG_CURRENT_DESKTOP = 'GNOME';
+  try {
+    const { desk } = start();
+    assert.equal(desk.keepOnClose(false), process.platform !== 'linux');
+  } finally {
+    process.env.XDG_CURRENT_DESKTOP = 'KDE';
+  }
 });
