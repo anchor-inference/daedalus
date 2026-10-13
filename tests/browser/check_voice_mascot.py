@@ -10,7 +10,7 @@ from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
-from screenshots import UNHANDLED, stub  # noqa: E402
+from screenshots import UNHANDLED, stage, stub  # noqa: E402
 
 
 def main() -> None:
@@ -24,7 +24,8 @@ def main() -> None:
             errors: list[str] = []
             page.on("pageerror", lambda error, sink=errors: sink.append(str(error)))
             page.route("**/api/**", stub)
-            page.goto(base + "/voice?token=t&scheme=dark&lang=en")
+            page.goto(base + "/companion?token=t&scheme=dark&lang=en")
+            stage(page)
             page.locator(".voice-mascot .pet-canvas").wait_for(timeout=20000)
             page.wait_for_function("document.querySelector('.voice-mascot canvas')?.width > 0")
             assert page.locator(".pet-host").count() == 0
@@ -47,6 +48,7 @@ def main() -> None:
             assert page.locator(".voice-orb").count() == 1
             assert page.locator(".voice-mascot").count() == 0
             page.reload()
+            stage(page)
             page.locator(".voice-orb").wait_for()
             page.get_by_role("button", name="Mascot", exact=True).click()
             page.locator(".voice-mascot canvas").wait_for()

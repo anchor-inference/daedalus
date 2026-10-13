@@ -34,12 +34,12 @@ BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 PID = "b4k3ry20f0c5"
 
-ORDER = ["home", "agents", "orchestration", "inbox", "board", "calendar", "diagrams", "changes", "terminals", "voice", "schedules", "menu", "settings"]
+ORDER = ["home", "agents", "orchestration", "inbox", "board", "calendar", "diagrams", "changes", "terminals", "companion", "schedules", "menu", "settings"]
 WORDS = {
     "en": {"home": "Home", "agents": "Agents", "orchestration": "Orchestration", "terminals": "Terminals", "board": "Board", "inbox": "Inbox",
-           "calendar": "Calendar", "diagrams": "Diagrams", "changes": "Changes", "voice": "Voice", "schedules": "Schedules", "services": "Services", "menu": "Menu", "settings": "Settings", "account": "Account", "toggle": "Toggle sidebar", "unfold": "Chats", "unfold.projects": "Projects", "more": "More"},
+           "calendar": "Calendar", "diagrams": "Diagrams", "changes": "Changes", "companion": "Companion", "schedules": "Schedules", "services": "Services", "menu": "Menu", "settings": "Settings", "account": "Account", "toggle": "Toggle sidebar", "unfold": "Chats", "unfold.projects": "Projects", "more": "More"},
     "ru": {"home": "Главная", "agents": "Агенты", "orchestration": "Оркестрация", "terminals": "Терминалы", "board": "Доска", "inbox": "Входящие",
-           "calendar": "Календарь", "diagrams": "Схемы", "changes": "Изменения", "voice": "Голос", "schedules": "Расписания", "services": "Сервисы", "menu": "Меню", "settings": "Настройки", "account": "Аккаунт", "toggle": "Показать боковую панель", "unfold": "Чаты", "unfold.projects": "Проекты", "more": "Ещё"},
+           "calendar": "Календарь", "diagrams": "Схемы", "changes": "Изменения", "companion": "Компаньон", "schedules": "Расписания", "services": "Сервисы", "menu": "Меню", "settings": "Настройки", "account": "Аккаунт", "toggle": "Показать боковую панель", "unfold": "Чаты", "unfold.projects": "Проекты", "more": "Ещё"},
 }
 # The unseen notifications the bell and the Inbox count, and what waits in orchestration: Bakery's one
 # request and the main chat's own confirmation (the mirrored questions are Bakery's, counted there).
@@ -232,7 +232,7 @@ def phone(page: Page, lang: str) -> None:
     expect(seg.nth(0)).to_have_attribute("aria-checked", "true")
     expect(seg.nth(1).locator("[data-waiting]")).to_have_text(WAITING)
     order = drawer.locator(".ph-nrow").evaluate_all("els => els.map(e => e.dataset.screen || e.dataset.nav)")
-    assert order == ["chats", "inbox", "terminals", "board", "voice", "usage", "more"], f"{lang} phone: the drawer lists {order}"
+    assert order == ["chats", "inbox", "terminals", "board", "companion", "usage", "more"], f"{lang} phone: the drawer lists {order}"
     for label in drawer.locator(".ph-nrow-l").all():
         assert label.evaluate("e => e.scrollWidth <= e.clientWidth + 1"), f"{lang} phone: a destination's name does not fit: {label.inner_text()}"
     inbox = drawer.locator("[data-screen='inbox']")

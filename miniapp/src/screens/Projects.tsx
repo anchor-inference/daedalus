@@ -4,6 +4,7 @@
 // anything last happened. The projects with an orchestrator are not here: they live in orchestration
 // mode, and a note at the foot says how many and goes there.
 
+import { CompanionFace } from "../companionavatar";
 import { useEffect, useMemo, useState } from "react";
 import { api, Project, ProjectFolder, SessionList } from "../api";
 import { ProjectSettingsSheet, useProjects } from "../projects";
@@ -189,7 +190,7 @@ function ProjectRow({ project: p, folder, live, onStart, onSettings, menu }: { p
     <div className="projects-row" role="row" data-project={p.id} tabIndex={0} onClick={onStart}
       onKeyDown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === "Enter") { e.preventDefault(); onStart(); } }}>
       <span className="projects-name" role="cell">
-        <span className="projects-tile"><Icon name={p.system === "voice" ? "mic" : "folder"} size={16} />{dot && <span className={`dot ${dot}`} aria-hidden />}</span>
+        <span className="projects-tile">{p.system === "companion" ? <CompanionFace size={16} /> : <Icon name="folder" size={16} />}{dot && <span className={`dot ${dot}`} aria-hidden />}</span>
         <span className="projects-text">
           <b className="truncate">{p.name}</b>
           <span className="mono truncate">{p.system ? t("project.system.badge") : projectPath(p)}</span>

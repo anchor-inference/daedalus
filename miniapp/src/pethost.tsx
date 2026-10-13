@@ -25,7 +25,7 @@ const mobile = () => window.matchMedia("(max-width: 700px)").matches;
 const storageKey = () => `daedalus.pet.position.${mobile() ? "mobile" : "desktop"}`;
 const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(value, high));
 const dimensions = (activity: string, scale: number) => ({ width: (mobile() ? 130 : activity === "settings" ? 180 : 264) * scale, height: (mobile() ? 170 : activity === "settings" ? 220 : 310) * scale });
-const edgeLimit = (activity: string) => mobile() && activity !== "voice" ? 55 : 8;
+const edgeLimit = (activity: string) => mobile() && activity !== "companion" ? 55 : 8;
 function savedScale(): number {
   try {
     const value = Number(localStorage.getItem("daedalus.pet.scale"));
@@ -58,7 +58,7 @@ function placePopup(popup: HTMLElement | null, anchor: HTMLElement | null, fallb
   if (!popup || !fallback) return;
   const hostRect = fallback.getBoundingClientRect();
   // Voice has no floating canvas, so keep its text near the saved mascot position.
-  const voicePoint = hostRect.top + dimensions("voice", scale).height - 50 * scale;
+  const voicePoint = hostRect.top + dimensions("companion", scale).height - 50 * scale;
   const rect = anchor ? anchor.getBoundingClientRect() : { left: hostRect.left, right: hostRect.right, width: hostRect.width, top: voicePoint, bottom: voicePoint, height: 0 };
   const width = popup.offsetWidth, height = popup.offsetHeight, gap = 10, margin = 8;
   const hostTop = hostRect.top;
@@ -249,11 +249,11 @@ export function PetHost({ needsReply, activity }: { needsReply: boolean; activit
     }
   };
   if (!enabled) return null;
-  return <div ref={hostRef} className={`pet-host ${activity === "settings" ? "in-settings" : ""} ${activity === "voice" ? "in-voice" : ""}`} style={{ left: position.x, top: position.y, "--pet-scale": scale } as React.CSSProperties} aria-label={t("pet.title")}>
+  return <div ref={hostRef} className={`pet-host ${activity === "settings" ? "in-settings" : ""} ${activity === "companion" ? "in-voice" : ""}`} style={{ left: position.x, top: position.y, "--pet-scale": scale } as React.CSSProperties} aria-label={t("pet.title")}>
     {line && <button ref={bubbleRef} className="pet-bubble" role="status" onClick={() => { if (notice) navigate(pathFor("inbox")); else setLine(""); }}>
       {line}{notice?.body && <small>{notice.body}</small>}
     </button>}
-    {activity !== "voice" && <div ref={figureRef} className="pet-figure" role="button" tabIndex={0} aria-label={t("pet.title")}
+    {activity !== "companion" && <div ref={figureRef} className="pet-figure" role="button" tabIndex={0} aria-label={t("pet.title")}
       onContextMenu={(event) => { event.preventDefault(); setMenu(true); }}
       onKeyDown={(event) => { if (event.key === "Enter" || event.key === "ContextMenu" || event.shiftKey && event.key === "F10") { event.preventDefault(); setMenu(true); } }}
       onPointerDown={startDrag}
@@ -262,7 +262,7 @@ export function PetHost({ needsReply, activity }: { needsReply: boolean; activit
       onPointerCancel={endDrag}>
       <Suspense fallback={null}><PetStage pose={pose} speaking={speaking} /></Suspense>
     </div>}
-    {menu && activity !== "voice" && <div ref={menuRef} className="pet-menu" role="dialog" aria-label={t("pet.title")}>
+    {menu && activity !== "companion" && <div ref={menuRef} className="pet-menu" role="dialog" aria-label={t("pet.title")}>
       <div className="pet-menu-head"><strong>{t("pet.title")}</strong><button className="pet-menu-close" onClick={() => setMenu(false)} aria-label={t("common.close")}>×</button></div>
       <div className="pet-menu-fields">
       <label>{t("pet.emotion")}<select value={pose.emotion} onChange={(event) => setPose({ ...pose, emotion: event.target.value })}>{EMOTIONS.map((id) => <option key={id} value={id}>{id}</option>)}</select></label>

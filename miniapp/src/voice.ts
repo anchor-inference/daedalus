@@ -447,7 +447,7 @@ function joined(head: Uint8Array<ArrayBuffer>, tail: Uint8Array): Uint8Array<Arr
 /**
  * One queue, one player, and an answer that starts before it has been made.
  *
- * A local voice answers `/api/voice/tts` with its sentences as they are synthesised rather than with
+ * A local voice answers `/api/companion/tts` with its sentences as they are synthesised rather than with
  * one finished file, so the clip for the first sentence is turned into audio and played while the
  * third is still being rendered on the server. That is the difference between hearing an answer begin
  * half a second after asking and waiting out the whole paragraph in silence. An endpoint answers with
@@ -670,7 +670,7 @@ export function createSpeaker(opts: {
     const forTurn = turn;
     let response: Response;
     try {
-      response = await fetch("/api/voice/tts", {
+      response = await fetch("/api/companion/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...api.authHeaders() },
         // The turn goes with the sentence so the server can time the wait the operator felt — from
@@ -913,7 +913,7 @@ export async function sendUtterance(blob: Blob): Promise<string> {
   const wav = await blobToWav(blob);
   const form = new FormData();
   form.append("audio", wav, "utterance.wav");
-  const response = await fetch("/api/voice/audio", { method: "POST", headers: api.authHeaders(), body: form });
+  const response = await fetch("/api/companion/audio", { method: "POST", headers: api.authHeaders(), body: form });
   if (!response.ok) throw new Error(response.status === 413 ? t("voice.error.recording.long") : t("voice.error.recording", { status: response.status }));
   return String(((await response.json()) as { transcript?: string }).transcript ?? "");
 }
@@ -959,7 +959,7 @@ export function agentNote(a: AgentNews): AgentNote {
 
 // ── which model the concierge answers with ─────────────────────────────────────────────────
 
-/** One model preset as `/api/voice` lists it; `fast` is the server's judgement, not the page's. */
+/** One model preset as `/api/companion/voice` lists it; `fast` is the server's judgement, not the page's. */
 export type VoicePreset = {
   id: string;
   label: string;
@@ -974,7 +974,7 @@ export type VoicePreset = {
 export type ModelChoice = { id: string; label: string; detail: string; slow: boolean };
 
 /**
- * The Model row, worked out once from what `/api/voice` said.
+ * The Model row, worked out once from what `/api/companion/voice` said.
  *
  * `slow` on a choice, and `warn` on the row, are the same question asked of a candidate and of the
  * model actually in use: a thinking model, or one allowed to write at length, answers a spoken
@@ -1038,7 +1038,7 @@ export function centerSession(center: VoiceCenter, voiceSessionId: string): stri
   return "";
 }
 
-/** Where the local recogniser's weights are, as `/api/voice` and the progress stream report them. */
+/** Where the local recogniser's weights are, as `/api/companion/voice` and the progress stream report them. */
 export type EngineState = { state: string; model: string; loadedInMs: number; error: string };
 
 export type VoiceUi = {
@@ -1061,7 +1061,7 @@ export type VoiceUi = {
   problem: string;
   agents: AgentNews[];
   engine: EngineState;
-  /** Where the chosen local voice is in its loading, as `/api/voice` and `/api/tts/progress` report it. */
+  /** Where the chosen local voice is in its loading, as `/api/companion/voice` and `/api/tts/progress` report it. */
   voice: EngineState;
   /** How long the last answer took between its first sentence arriving and its first sound, in this page. */
   firstAudioMs: number;

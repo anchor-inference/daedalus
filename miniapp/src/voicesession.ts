@@ -1,4 +1,4 @@
-// The voice session: the half of the voice page that must not notice what is on the screen.
+// The voice session: the half of the companion's call that must not notice what is on the screen.
 //
 // A conversation held out loud has four long-lived things in it — a recogniser with the microphone
 // open, a speaker with a queue of clips, the concierge's event stream, and the two watchers that
@@ -38,14 +38,14 @@ import {
 export const ECHO_TAIL_MS = 400;
 
 /**
- * What `/api/voice` has told the page about who listens and who speaks.
+ * What `/api/companion/voice` has told the page about who listens and who speaks.
  *
  * The session is handed this rather than reading it: the reading is a query the component already
  * holds, it changes while the session runs, and the session's only interest in it is which engine
  * reads the next answer and which listener to build when the microphone is opened.
  */
 export type VoiceReading = {
-  /** Whether `/api/voice` has answered at all. Before it has, a sentence waits rather than being spoken. */
+  /** Whether `/api/companion/voice` has answered at all. Before it has, a sentence waits rather than being spoken. */
   known: boolean;
   /** The server produces the audio: a voice on this machine and a speech endpoint both do. */
   serverTts: boolean;
@@ -66,11 +66,14 @@ export type VoiceSession = {
   dispatch: (event: VoiceEvent) => void;
   /** The microphone's loudness as the listener last reported it, read by the orb's animation frame. */
   level: () => number;
-  /** What `/api/voice` says, folded in whenever the component's query answers again. */
+  /** What `/api/companion/voice` says, folded in whenever the component's query answers again. */
   reading: (reading: VoiceReading) => void;
   startMic: () => Promise<void>;
   stopMic: () => void;
+  /** A spoken utterance, already in words: answered by the voice model and read aloud. */
   send: (text: string) => Promise<void>;
+  /** A typed message: a text turn, answered by the background model and read aloud only on a call. */
+  type: (text: string) => Promise<void>;
   /** A new conversation: the microphone closes, the answer stops, the captions clear. */
   clear: () => Promise<void>;
   /** A tap. Buys the right to make a sound in a browser that wants one before it will speak. */
@@ -156,11 +159,11 @@ export function createVoiceSession(given?: Partial<VoiceDeps>): VoiceSession {
   let deafUntil = 0;
   let speakingSince = 0;
   let rawLevel = 0;
-  // Sentences that arrived before `/api/voice` had said which of the three speaks. Committing an
+  // Sentences that arrived before `/api/companion/voice` had said which of the three speaks. Committing an
   // answer to the browser's synthesiser on a machine that has a voice of its own is a worse mistake
   // than holding its first sentence for the tenth of a second the reading takes.
   let held: [string, string][] = [];
-  /** Told when an answer ends. The page re-reads `/api/voice` for the server's half of the timing. */
+  /** Told when an answer ends. The page re-reads `/api/companion/voice` for the server's half of the timing. */
   const answered = new Set<() => void>();
 
   const emit = () => {
@@ -179,7 +182,7 @@ export function createVoiceSession(given?: Partial<VoiceDeps>): VoiceSession {
   //
   // Built once, on the first sentence that needs it, and never rebuilt: which engine reads an answer
   // is a question asked of `read` at the start of each answer rather than baked into the object, so
-  // a new reading of `/api/voice` changes the next answer without disturbing the one being spoken.
+  // a new reading of `/api/companion/voice` changes the next answer without disturbing the one being spoken.
   const ensureSpeaker = (): Speaker => {
     if (speaker) return speaker;
     counts.speakers += 1;
@@ -232,7 +235,7 @@ export function createVoiceSession(given?: Partial<VoiceDeps>): VoiceSession {
       let backoff = 1000;
       while (!stopped) {
         try {
-          const response = await deps.fetch("/api/voice/stream", { headers: deps.authHeaders(), signal: stream.signal });
+          const response = await deps.fetch("/api/companion/stream", { headers: deps.authHeaders(), signal: stream.signal });
           // One bodiless answer from a proxy is a dropped connection, not the end of the session:
           // fall through to the backoff below rather than leaving the loop for good.
           if (!response.body) throw new Error("no stream");
@@ -271,7 +274,11 @@ export function createVoiceSession(given?: Partial<VoiceDeps>): VoiceSession {
     if (event === "partial") dispatch({ type: "partial", text: String(p.text ?? "") });
     else if (event === "say") {
       dispatch({ type: "say", text: String(p.text ?? "") });
-      say(String(p.text ?? ""), String(p.turn ?? ""));
+      // Read aloud only on a call: the microphone open, or the orb in the middle of the page, which is
+      // the call's own view. The companion is a conversation in text as much as in voice, and an
+      // answer to a typed message read out while its transcript is being read is a page that talks
+      // at somebody unasked.
+      if (ui.micOn || ui.center.view === "orb") say(String(p.text ?? ""), String(p.turn ?? ""));
     } else if (event === "agents") dispatch({ type: "agents", agents: (p.agents ?? []) as VoiceUi["agents"] });
     else if (event === "error") dispatch({ type: "problem", message: String(p.message ?? "the concierge stopped") });
     else if (event === "done") {
@@ -422,8 +429,11 @@ export function createVoiceSession(given?: Partial<VoiceDeps>): VoiceSession {
       }
       dispatch({ type: "mic", on: true });
       deps.haptic("medium");
+      // The server answers agents' reports with the voice model while a call is open.
+      void deps.post("/api/companion/call", { on: true }).catch(() => undefined);
     },
     stopMic: () => {
+      if (listener) void deps.post("/api/companion/call", { on: false }).catch(() => undefined);
       listener?.stop();
       listener = null;
       meter?.stop();
@@ -439,7 +449,18 @@ export function createVoiceSession(given?: Partial<VoiceDeps>): VoiceSession {
       speaker?.cancel();
       dispatch({ type: "asked", text: body });
       try {
-        await deps.post("/api/voice/say", { text: body });
+        await deps.post("/api/companion/say", { text: body });
+      } catch (e) {
+        dispatch({ type: "problem", message: errorText(e) });
+      }
+    },
+    type: async (text: string) => {
+      const body = text.trim();
+      if (!body) return;
+      speaker?.cancel();
+      dispatch({ type: "asked", text: body });
+      try {
+        await deps.post("/api/companion/message", { text: body, source: "app" });
       } catch (e) {
         dispatch({ type: "problem", message: errorText(e) });
       }
@@ -449,13 +470,14 @@ export function createVoiceSession(given?: Partial<VoiceDeps>): VoiceSession {
       speaker?.cancel();
       dispatch({ type: "cleared" });
       try {
-        await deps.post("/api/voice/new", {});
+        await deps.post("/api/companion/new", {});
       } catch (e) {
         dispatch({ type: "problem", message: errorText(e) });
       }
     },
     unlock: () => ensureSpeaker().unlock(),
     stop: () => {
+      if (listener) void deps.post("/api/companion/call", { on: false }).catch(() => undefined);
       stopped = true;
       stream.abort();
       loads.abort();
@@ -477,7 +499,7 @@ export function createVoiceSession(given?: Partial<VoiceDeps>): VoiceSession {
     dispatch({ type: "barge" });
     // The tail the speaker leaves behind is for its own echo. The operator is talking *now*.
     deafUntil = 0;
-    void deps.post("/api/voice/interrupt", {}).catch(() => undefined);
+    void deps.post("/api/companion/interrupt", {}).catch(() => undefined);
   }
 
   return session;

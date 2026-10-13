@@ -2309,7 +2309,7 @@ h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500;
 /* The page takes the height it is given as well as the width: on a 1300 px tall window the stage
    used to stop two thirds of the way down and leave the rest of the glass empty under it. */
 .screen.voice { width: min(100%, 2160px); }
-.voice-grid { display: grid; grid-template-columns: minmax(0, 1fr) clamp(300px, 24vw, 480px); gap: 16px; align-items: stretch; min-height: calc(100dvh - 132px); }
+.voice-grid { display: grid; grid-template-columns: minmax(0, 1fr) clamp(300px, 24vw, 480px); gap: 16px; align-items: stretch; min-height: calc(100dvh - 196px); }
 .voice-stage {
   position: relative; overflow: hidden; display: flex; flex-direction: column; align-items: center;
   gap: 16px; padding: clamp(28px, 5vh, 64px) 20px 22px; min-height: min(72vh, 660px);
@@ -4932,3 +4932,49 @@ button.staff-row:hover { background: var(--surface-2); }
    overlapped; the menu is the answer to that click, so the tip steps aside. */
 body:has(.context-menu) .rail-tip { visibility: hidden; }
 .start-where-menu .project-pick-tile { background: var(--surface-3); }
+
+/* The companion's page: a face and a name over tabs for what it owns. The conversation tab is the
+   voice grid above; the rest are lists read one tab at a time. */
+.companion-title { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+.companion-sub { display: inline-flex; align-items: center; gap: 8px; }
+.companion-state.thinking, .companion-state.listening { color: var(--accent); }
+.companion-state.paused { color: var(--muted); }
+.companion-call.on { background: var(--accent); color: var(--bg, #000); }
+.companion-tabs { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; margin-top: 8px; }
+.companion-tabs button { flex: none; border: 0; background: none; color: var(--muted); padding: 6px 10px; border-radius: var(--radius-xs); font-size: var(--fs-13); cursor: pointer; }
+.companion-tabs button.on { background: var(--card-2); color: var(--fg); }
+.companion-toolbar { display: flex; align-items: center; gap: 8px; padding: 0 16px 8px; min-width: 0; }
+.companion-toolbar > .sub { flex: 1; min-width: 0; }
+.companion-pane { display: flex; flex-direction: column; gap: 10px; }
+.companion-list { display: flex; flex-direction: column; gap: 8px; }
+.companion-row { display: flex; align-items: center; gap: 10px; }
+.companion-intro { margin: 4px 0; }
+.companion-goal-form { display: flex; flex-direction: column; gap: 8px; }
+.companion-goal-row { display: flex; gap: 8px; align-items: center; }
+.companion-goal-row .field { flex: 1; min-width: 0; }
+.companion-goal { display: flex; flex-direction: column; gap: 6px; }
+.companion-goal.done, .companion-goal.dropped { opacity: .7; }
+.companion-goal-top { display: flex; align-items: center; gap: 8px; }
+.companion-goal-report { border-left: 2px solid var(--line); padding-left: 10px; font-size: var(--fs-13); }
+.companion-closed { display: inline-flex; gap: 6px; align-items: center; font-size: var(--fs-13); color: var(--muted); }
+.companion-activity { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.companion-event { display: grid; grid-template-columns: 88px auto minmax(0, 1fr); gap: 4px 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.companion-event-body { grid-column: 3; }
+.companion-computer { padding: 0; overflow: hidden; }
+.companion-editor { display: flex; flex-direction: column; gap: 12px; }
+.companion-editor-face { display: flex; justify-content: center; padding: 8px 0; }
+.companion-field { display: flex; flex-direction: column; gap: 4px; }
+.companion-swatches { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.companion-swatch { width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+.companion-swatch.on { border-color: var(--fg); }
+.companion-avatar { flex: none; overflow: visible; }
+.companion-avatar.state-thinking { animation: companion-bob 1.6s ease-in-out infinite; }
+.companion-avatar.state-listening { animation: companion-breathe 2.4s ease-in-out infinite; }
+.companion-avatar.state-paused { filter: grayscale(.8); opacity: .75; }
+@keyframes companion-bob { 50% { transform: translateY(-2px); } }
+@keyframes companion-breathe { 50% { transform: scale(1.05); } }
+@media (max-width: 1023px) {
+  .companion-event { grid-template-columns: auto minmax(0, 1fr); }
+  .companion-event-when { grid-column: 1 / -1; }
+  .companion-event-body { grid-column: 1 / -1; }
+}

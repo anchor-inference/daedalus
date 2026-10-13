@@ -14,7 +14,7 @@ import { go } from "./shell";
 import { usePetPreference } from "./ui/pet";
 import { KEYS } from "./rail";
 
-const BETA: Screen[] = ["voice"];
+const BETA: Screen[] = [];
 
 /** `current` is the id of the item the route stands on (navconfig's `currentId`). */
 export function NavMenu({ current, nav, selfdev, onClose, opener, onSearch }: { current: string; nav: ResolvedNav; selfdev: SelfDevMode; onClose: () => void; opener?: HTMLElement | null; onSearch?: () => void }) {

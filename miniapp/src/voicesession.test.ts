@@ -78,7 +78,7 @@ function make(over: Record<string, unknown> = {}): Made {
   const listeners: number[] = [];
   const posted: string[] = [];
   const session = createVoiceSession({
-    fetch: ((url: string) => Promise.resolve(url.includes("/api/voice/stream") ? stream.response() : loads.response())) as unknown as typeof fetch,
+    fetch: ((url: string) => Promise.resolve(url.includes("/api/companion/stream") ? stream.response() : loads.response())) as unknown as typeof fetch,
     authHeaders: () => ({}),
     post: (path: string) => {
       posted.push(path);
@@ -135,6 +135,7 @@ describe("the voice session across a change of view", () => {
 
   it("goes on speaking the answer that was being spoken when the view changed", async () => {
     const { session, stream, built } = make();
+    await session.startMic();
     stream.push("status", { state: "thinking", turn: "run-1" });
     stream.push("say", { text: "All eleven went out.", turn: "run-1" });
     await settle();
@@ -163,14 +164,40 @@ describe("the voice session across a change of view", () => {
 
   it("holds a sentence that arrives before the page knows what speaks, and speaks it after", async () => {
     const { session, stream, built } = make();
+    await session.startMic();
     session.reading({ known: false, serverTts: false, ttsLoading: false, localStt: false });
     stream.push("say", { text: "Nobody knows who reads this yet.", turn: "run-1" });
     await settle();
-    expect(built).toHaveLength(0);
+    expect(built[0].said).toHaveLength(0);
 
     session.reading({ known: true, serverTts: true, ttsLoading: false, localStt: true });
     expect(built).toHaveLength(1);
     expect(built[0].said[0][0]).toBe("Nobody knows who reads this yet.");
+    session.stop();
+  });
+
+  it("reads an answer aloud only on a call or on its stage, and tells the server when a call opens and closes", async () => {
+    const { session, stream, built, posted } = make();
+    session.dispatch({ type: "center", center: { view: "transcript" } });
+    stream.push("say", { text: "An answer to something typed.", turn: "run-1" });
+    await settle();
+    expect(built).toHaveLength(0);
+    expect(session.state().spoken).toEqual(["An answer to something typed."]);
+
+    await session.startMic();
+    stream.push("say", { text: "An answer on the call.", turn: "run-2" });
+    await settle();
+    expect(built[0].said.map(([text]) => text)).toEqual(["An answer on the call."]);
+    session.stopMic();
+    expect(posted.filter((p) => p === "/api/companion/call")).toHaveLength(2);
+    session.stop();
+  });
+
+  it("sends a typed message as a text turn and an utterance as a spoken one", async () => {
+    const { session, posted } = make();
+    await session.type("what is on today");
+    await session.send("and tomorrow");
+    expect(posted).toEqual(["/api/companion/message", "/api/companion/say"]);
     session.stop();
   });
 

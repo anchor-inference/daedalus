@@ -13,7 +13,7 @@ import type { Screen } from "./router";
 
 export type Counts = { inbox?: number; changes?: number; services?: number; agents?: number };
 
-export const ICONS: Record<Screen, IconName> = { agents: "bots", voice: "mic", inbox: "inbox", board: "board", terminals: "terminal", harnesses: "wrench", changes: "changes", schedules: "clock", calendar: "calendar", diagrams: "pen", services: "globe", memory: "bulb", usage: "chart", health: "check", settings: "settings", orchestration: "compass", browser: "globe", page: "file" };
+export const ICONS: Record<Screen, IconName> = { agents: "bots", companion: "mic", inbox: "inbox", board: "board", terminals: "terminal", harnesses: "wrench", changes: "changes", schedules: "clock", calendar: "calendar", diagrams: "pen", services: "globe", memory: "bulb", usage: "chart", health: "check", settings: "settings", orchestration: "compass", browser: "globe", page: "file" };
 
 /** A destination's name, in the reader's language. */
 export function screenTitle(s: Screen): string {
@@ -28,12 +28,12 @@ export function countFor(s: Screen, counts: Counts): number {
 }
 
 /** The desktop rail as it ships, under the two modes. */
-export const DESKTOP_RAIL: Screen[] = ["inbox", "board", "calendar", "diagrams", "changes", "terminals", "voice", "schedules"];
+export const DESKTOP_RAIL: Screen[] = ["inbox", "board", "calendar", "diagrams", "changes", "terminals", "companion", "schedules"];
 
 /** Every destination the operator may place, grouped as the More menu heads them (`nav.group.*`).
  *  The two modes and Settings are not here: they are the frame of the rail, not items on it. */
 export const MENU_GROUPS: { key: string; items: Screen[] }[] = [
-  { key: "work", items: ["voice", "inbox", "board", "calendar", "diagrams", "terminals", "harnesses"] },
+  { key: "work", items: ["companion", "inbox", "board", "calendar", "diagrams", "terminals", "harnesses"] },
   { key: "autonomy", items: ["changes", "schedules", "services"] },
   { key: "knowledge", items: ["memory"] },
   { key: "observe", items: ["usage", "health"] },
@@ -44,7 +44,7 @@ export const PAGES_GROUP = "pages";
 export const NAV_SCREENS: Screen[] = MENU_GROUPS.flatMap((g) => g.items);
 
 /** The phone drawer's places as they ship, per mode; the phone's More sheet holds `PHONE_MORE`. */
-export const PHONE_AGENTS: Screen[] = ["inbox", "terminals", "board", "voice", "usage"];
+export const PHONE_AGENTS: Screen[] = ["inbox", "terminals", "board", "companion", "usage"];
 export const PHONE_ORCHESTRATION: Screen[] = ["inbox", "terminals", "usage"];
 export const PHONE_MORE: Screen[] = ["calendar", "diagrams", "changes", "schedules", "services", "memory", "harnesses", "health"];
 
@@ -185,7 +185,7 @@ export function resolveNav(input: { config?: NavConfig | null; pages?: PageInfo[
     .filter((g) => g.items.length > 0);
 
   // Phone. A drawer list that was set is the whole drawer, for both modes; until then each mode
-  // keeps the drawer it ships with, and orchestration's leaves the board and the voice page out.
+  // keeps the drawer it ships with, and orchestration's leaves the board and the companion page out.
   let agents: NavItem[];
   let orchestration: NavItem[];
   if (drawer.length) {

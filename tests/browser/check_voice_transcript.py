@@ -79,12 +79,12 @@ class Wire:
         rel = rel[rel.index("/api/") :]
         if request.method != "GET":
             self.posted.append(f"{request.method} {rel}")
-        if rel == "/api/voice/stream":
+        if rel == "/api/companion/stream":
             self.streams += 1
             if self.streams > 1:
                 return  # left open for good: no body, no end, no reconnection
             return route.fulfill(status=200, body="event: hello\ndata: {}\n\n" + ANSWER, headers={"content-type": "text/event-stream"})
-        if rel == "/api/voice/tts":
+        if rel == "/api/companion/tts":
             return route.fulfill(
                 status=200,
                 body=self.clips,
@@ -115,7 +115,8 @@ def open_page(browser, wire: Wire, viewport: dict, visual: str = "mascot"):  # t
         context.add_init_script("localStorage.setItem('daedalus.voice.mascot', 'off')")
     page = context.new_page()
     page.route("**/api/**", wire.route)
-    page.goto(f"{BASE}/voice?token=t&scheme=dark&lang=en")
+    page.goto(f"{BASE}/companion?token=t&scheme=dark&lang=en")
+    shots.stage(page)
     return context, page
 
 
@@ -168,7 +169,7 @@ def check_through_the_switch(browser, check, visual: str) -> None:  # type: igno
     check(page.locator(".voice-read.own .composer").count() == 0 or not page.locator(".voice-read.own .composer").first.is_visible(), "the session's own composer gives way to the voice field")
     check(page.locator(".voice-read .voice-compose").count() == 1, "and the voice field is there to type into instead")
 
-    page.get_by_role("button", name="Back to voice").first.click()
+    page.get_by_role("button", name="Back to the call").first.click()
     page.wait_for_selector(".voice-stage", timeout=15000)
     page.wait_for_timeout(400)
     after = playing(page)

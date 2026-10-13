@@ -108,7 +108,7 @@ function PaletteHint({ hint }: { hint: string }) {
   return <span className={`sub truncate ${path ? "tail" : ""}`} title={hint}>{path ? `\u200e${hint}\u200e` : hint}</span>;
 }
 
-const GO_KEYS: Record<string, Screen> = { a: "agents", o: "orchestration", v: "voice", i: "inbox", b: "board", t: "terminals", c: "changes", m: "memory", u: "usage", s: "settings" };
+const GO_KEYS: Record<string, Screen> = { a: "agents", o: "orchestration", v: "companion", i: "inbox", b: "board", t: "terminals", c: "changes", m: "memory", u: "usage", s: "settings" };
 
 /** Keyboard on a desktop: Ctrl/⌘ K opens the palette, `g` then a letter goes to a screen. Never inside a text field. */
 export function useShortcuts(onPalette: () => void, selfdev: SelfDevMode) {

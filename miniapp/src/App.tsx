@@ -56,7 +56,7 @@ function isChunkError(message: string): boolean {
 const StartScreen = lazy(retried(() => import("./screens/Start"), (m) => ({ default: m.StartScreen })));
 const InboxScreen = lazy(retried(() => import("./screens/Inbox"), (m) => ({ default: m.InboxScreen })));
 const BoardScreen = lazy(retried(() => import("./screens/Board"), (m) => ({ default: m.BoardScreen })));
-const VoiceScreen = lazy(retried(() => import("./screens/Voice"), (m) => ({ default: m.VoiceScreen })));
+const CompanionScreen = lazy(retried(() => import("./screens/Companion"), (m) => ({ default: m.CompanionScreen })));
 const ProposalsScreen = lazy(retried(() => import("./screens/Proposals"), (m) => ({ default: m.ProposalsScreen })));
 const SchedulesScreen = lazy(retried(() => import("./screens/Schedules"), (m) => ({ default: m.SchedulesScreen })));
 const CalendarScreen = lazy(retried(() => import("./calendar/Calendar"), (m) => ({ default: m.CalendarScreen })));
@@ -434,7 +434,7 @@ export function App() {
   // Orchestration's list is the mode's top on a phone, as the start screen is Agents'; on a desktop the
   // main chat is, with the list in the column beside it.
   // A page's slug is its address, not a detail under a list: it is a top-level destination.
-  const inDetail = !!route.session || (!!route.detail && !orchestrationList && route.screen !== "page") || !!focusProject || (mainChat && !wide);
+  const inDetail = !!route.session || (!!route.detail && !orchestrationList && route.screen !== "page" && route.screen !== "companion") || !!focusProject || (mainChat && !wide);
   useEffect(() => {
     const tg = telegram();
     if (!tg?.initData || !tg.BackButton) return;
@@ -597,7 +597,7 @@ export function App() {
     content = (
       <ErrorBoundary key={route.screen}>
         {route.screen === "agents" && <StartScreen onOpen={open} toast={showToast} project={project} projects={agentProjects} onPickProject={pickProject} />}
-        {route.screen === "voice" && <VoiceScreen onOpen={open} toast={showToast} />}
+        {route.screen === "companion" && <CompanionScreen tab={route.detail} onOpen={open} toast={showToast} />}
         {route.screen === "inbox" && <InboxScreen onOpen={open} toast={showToast} />}
         {route.screen === "board" && <BoardScreen onOpen={open} toast={showToast} selected={route.detail} project={projectList.find((p) => p.id === project) ?? null} />}
         {route.screen === "changes" &&
