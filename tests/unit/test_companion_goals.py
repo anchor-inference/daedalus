@@ -47,7 +47,8 @@ async def app(settings: Settings, db: Database) -> Any:
 def _capture(manager: SessionManager) -> list[dict[str, Any]]:
     submitted: list[dict[str, Any]] = []
 
-    async def fake_submit(session_id: str, text: str, attachments=(), *, steer=False, as_answer=True, origin="operator", via="app") -> str:  # type: ignore[no-untyped-def]
+    async def fake_submit(session_id: str, text: str, attachments=(), *, steer=False, as_answer=True, origin="operator", via="app", **_: Any) -> str:  # type: ignore[no-untyped-def]
+        # The attachment files are deleted when the request ends; their names are what is kept.
         submitted.append({"session_id": session_id, "text": text, "origin": origin, "via": via, "attachments": list(attachments)})
         return "run-x"
 
@@ -310,6 +311,8 @@ async def test_the_profile_is_the_shape_every_client_codes_against(client: Any) 
 
     paused = (await client.post("/api/companion/pause", json={"paused": True}, headers=HEADERS)).json()
     assert paused["paused"] is True
+    resumed = (await client.patch("/api/companion", json={"paused": False}, headers=HEADERS)).json()
+    assert resumed["paused"] is False and {"session_id", "name", "avatar", "state", "running_agents"} <= set(resumed)
     assert (await client.post("/api/companion/call", json={"on": True}, headers=HEADERS)).json() == {"call": False}, "no page is listening"
 
 
@@ -330,6 +333,20 @@ async def test_a_message_with_an_attachment_is_a_text_turn_in_the_companions_ses
     assert (await client.post("/api/companion/message", json={"text": "x", "attachments": ["../../etc"]}, headers=HEADERS)).status_code == 400
     assert (await client.post("/api/companion/message", json={"text": "  "}, headers=HEADERS)).status_code == 400
     assert (await client.post("/api/companion/message", json={"text": "hi", "source": "carrier pigeon"}, headers=HEADERS)).status_code == 422
+
+
+async def test_a_file_uploaded_into_the_companions_session_is_one_of_its_text_turns(client: Any) -> None:
+    """The desktop's quick chat sends a picture by the session upload route, past /api/companion/message."""
+    submitted = _capture(client.app.manager)
+    client.app.config.companion.background_preset = FALLBACK_PRESET
+    session_id = await client.companion.session_id()
+    await client.app.manager.set_model(session_id, preset=client.app.config.companion.preset)
+    answer = await client.post(f"/api/sessions/{session_id}/upload", data={"text": "what is this?"}, files=[("files", ("shot.png", b"\x89PNG....", "image/png"))], headers=HEADERS)
+    assert answer.status_code == 200
+    assert submitted[-1]["text"] == "what is this?" and [a.name for a in submitted[-1]["attachments"]] == ["shot.png"]
+    assert (await client.app.manager.live.load(session_id))["preset"] == FALLBACK_PRESET
+    state = client.app.manager.live_state(session_id)
+    assert "Channel: text" in (await client.companion.turn_notes(state) or "")
 
 
 async def test_goals_are_edited_from_the_page_too(client: Any) -> None:

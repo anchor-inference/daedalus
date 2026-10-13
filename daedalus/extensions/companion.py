@@ -709,6 +709,21 @@ class Companion:
         await self.emit("status", {"state": "thinking"})
         return await manager.submit(session_id, body or "File attached.", attachments, via=via)
 
+    async def before_session_turn(self, session_id: str) -> bool:
+        """Ready a message that reaches the companion's session by the ordinary session routes.
+
+        The session screen's composer and its file upload — which is how the desktop's quick chat sends
+        a picture — submit straight to the session, past :meth:`message`. Without this such a turn ran
+        on whichever preset the last turn left on the session (the voice one, after a call) and its
+        turn context said the wrong channel. Answers whether the session is the companion's at all.
+        """
+        if not self._id or session_id != self._id:
+            return False
+        await self._point_at(session_id, preset=self._preset_for("text"))
+        self._channel = "text"
+        await self.emit("status", {"state": "thinking"})
+        return True
+
     async def interrupt(self) -> bool:
         """Barge-in: the operator started talking over the answer, so the answer stops."""
         manager = self.app.manager

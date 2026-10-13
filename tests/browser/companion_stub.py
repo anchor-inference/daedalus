@@ -69,6 +69,8 @@ class CompanionStub:
         method = method.upper()
         body = body or {}
         if path == "/api/companion":
+            if method == "PATCH" and "paused" in body:
+                self.profile["paused"] = bool(body["paused"])
             if method == "PUT":
                 if "name" in body:
                     self.profile["name"] = str(body["name"]).strip() or self.profile["name"]

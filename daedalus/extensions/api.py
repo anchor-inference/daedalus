@@ -2743,6 +2743,12 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             headers={"Cache-Control": "private, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff"},
         )
 
+    async def companion_turn(session_id: str) -> None:
+        """A message into the companion's own session by the ordinary routes is one of its text turns."""
+        extension = app.extensions.get("companion")
+        if extension is not None:
+            await extension.before_session_turn(session_id)
+
     @api.post("/api/sessions/{session_id}/messages")
     async def send_message(session_id: str, body: SendMessageBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         text, reply = body.text, None
@@ -2757,6 +2763,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             reply = {"seq": body.reply_to.seq, "excerpt": excerpt}
             text = f"[In reply to: «{excerpt}»]\n{body.text}"
         try:
+            await companion_turn(session_id)
             run_id = await manager.submit(
                 session_id,
                 text,
@@ -2818,6 +2825,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             if not text.strip() and not attachments:
                 raise HTTPException(400, "nothing to send")
             body = text.strip() or ("Files attached." if len(attachments) > 1 else "File attached.")
+            await companion_turn(session_id)
             run_id = await manager.submit(
                 session_id,
                 body,
@@ -3070,6 +3078,11 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         except ValidationError as exc:
             raise HTTPException(400, "; ".join(str(e.get("msg") or "") for e in exc.errors())) from exc
         return {**profile, "enabled": app.config.companion.enabled}
+
+    @api.patch("/api/companion")
+    async def companion_patch(body: CompanionPauseBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Pause or resume, for clients that write the profile rather than press a button (the desktop's tray)."""
+        return {**await voice().pause(body.paused), "enabled": app.config.companion.enabled}
 
     @api.post("/api/companion/pause")
     async def companion_pause(body: CompanionPauseBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

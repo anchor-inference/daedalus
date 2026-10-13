@@ -99,10 +99,12 @@ to the next turn with no restart. An installation that had a `[voice]` section h
 
 `GET /api/companion` answers `{session_id, name, avatar: {shape, color, eyes, accessory}, paused,
 state, running_agents}`, where `state` is `idle`, `listening`, `thinking` or `working`.
+`PATCH /api/companion` with `{paused}` pauses or resumes it and answers the same shape.
 `POST /api/companion/message` with `{text, attachments?, source?}` is a text turn in the companion's
-conversation; an attachment is first staged with `POST /api/companion/attachments` (a multipart
-`file`), whose answer carries the `id` the message names. `source` is `app`, `quick_chat`, `voice` or
-`telegram`.
+conversation; `source` is `app`, `quick_chat`, `voice` or `telegram`. A file can go two ways: staged
+with `POST /api/companion/attachments` (a multipart `file`), whose answer carries the `id` the message
+names, or uploaded into the companion's session with the ordinary `POST /api/sessions/{id}/upload`,
+which is a text turn of the companion like a typed message.
 
 ## Talking to it
 
