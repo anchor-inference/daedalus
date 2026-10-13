@@ -2024,11 +2024,26 @@ pre.diff .file { color: var(--fg); font-weight: 600; }
 .memory-card .memory-text { white-space: pre-wrap; word-break: break-word; line-height: 1.45; font-size: var(--fs-14); }
 .memory-card .linkbtn.more { color: var(--fg-2); font-size: var(--fs-13); margin-top: 2px; align-self: flex-start; }
 .memory-card .chip { padding: 1px 8px; font-size: var(--fs-11); }
-.chip.kind-decision { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
-.chip.kind-preference { color: var(--info); border-color: color-mix(in srgb, var(--info) 40%, transparent); }
-.chip.kind-reflection { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
-.chip.kind-skill, .chip.kind-howto { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
-.chip.kind-identifier { font-family: var(--mono); }
+.chip.cat-project { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.chip.cat-preference { color: var(--info); border-color: color-mix(in srgb, var(--info) 40%, transparent); }
+.chip.cat-person { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+.chip.cat-procedure { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+/* Topics are links into the by-topic filter, drawn small and quiet under the text so a card with
+   three of them still reads as its text first. */
+.memory-topics { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 4px; }
+.topic-tag { background: none; border: 0; padding: 0; color: var(--fg-2); font-size: var(--fs-12); cursor: pointer; }
+.topic-tag:hover, .topic-tag.on { color: var(--accent); }
+.memory-view { margin: 0 0 6px; }
+.memory-filter { margin: 0 0 6px; }
+.memory-group + .memory-group { margin-top: 14px; }
+.memory-group-head { display: flex; align-items: center; gap: 8px; min-height: var(--ctl-h-sm); padding: 2px 2px 4px; font-weight: 600; }
+.memory-group-head .faint { font-weight: 400; }
+.memory-suggest-banner { display: flex; align-items: center; gap: 8px; width: 100%; margin: 0 0 10px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--info) 40%, var(--line)); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--info) 8%, var(--surface-1)); color: var(--fg); text-align: left; cursor: pointer; }
+.memory-suggestion .memory-suggestion-record { padding: 6px 0; border-top: 1px solid var(--line); }
+.memory-suggestion .memory-text, .memory-history-entry .memory-text { white-space: pre-wrap; word-break: break-word; line-height: 1.45; font-size: var(--fs-14); }
+.memory-suggestion .row-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.memory-history-entry.undone { opacity: 0.6; }
+.memory-history-before summary { cursor: pointer; color: var(--fg-2); font-size: var(--fs-13); margin-top: 4px; }
 /* The scope picker sits under the filter chips and is drawn as one of them: a pill on the chips'
    surface with a drawn caret. As the plain field with the browser's own arrow it read as an older
    control dropped into the row. The caret is two gradients so it takes the theme's colour. */

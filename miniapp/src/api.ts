@@ -937,9 +937,18 @@ export type SessionCheckpoints = {
   keep_last: number;
 };
 
-export type MemoryRecord = { id: string; scope: string; scope_key: string; kind: string; text: string; salience: number; version: number; created_at: string | null; last_accessed_at: string | null };
+export const MEMORY_CATEGORIES = ["person", "project", "preference", "fact", "procedure", "other"] as const;
+export type MemoryCategory = (typeof MEMORY_CATEGORIES)[number];
+export const SENSITIVE_SUBJECTS = ["health", "finances", "intimate", "identity_documents", "precise_location"] as const;
+export type MemoryRecord = { id: string; scope: string; scope_key: string; category: string; topics: string[]; text: string; salience: number; version: number; created_at: string | null; updated_at: string | null; last_accessed_at: string | null };
 export type MemoryBucket = { scope: string; scope_key: string; title: string | null; count: number };
-export type MemoryListing = { records: MemoryRecord[]; buckets: MemoryBucket[]; sessions: Record<string, string> };
+export type MemoryListing = { records: MemoryRecord[]; buckets: MemoryBucket[]; sessions: Record<string, string>; topics: { topic: string; count: number }[]; categories: Record<string, number>; suggestions: number };
+/** A finding of the background tidying it was not sure enough to apply. */
+export type MemorySuggestion = { id: number; kind: "duplicate" | "contradiction"; memory_ids: string[]; keep_id: string; text: string; score: number; reason: string; created_at: string };
+export type MemorySuggestions = { suggestions: MemorySuggestion[]; records: Record<string, MemoryRecord> };
+export type MemoryHistoryRecord = { id: string; text: string; kind: string; topics: string[] };
+/** One change to memory, with the records as they were before it: what Undo puts back. */
+export type MemoryHistoryEntry = { id: number; at: string; actor: "auto" | "operator" | string; action: "merge" | "replace" | "edit" | "recategorise" | "topic" | string; summary: string; undone_at: string | null; before: MemoryHistoryRecord[]; after: MemoryHistoryRecord[] };
 
 /** A folder a session's file pane may open, and whether the session may write there. */
 export type SessionFolder = {
@@ -1492,6 +1501,7 @@ export type Settings = {
   balance: { enabled: boolean; poll_seconds: number; thresholds_usd: number[] };
   scheduler: { topic_mode: string; catch_up_missed: boolean };
   compaction: { auto_ratio: number; keep_recent_messages: number; max_words: number; chunk_tokens: number; min_messages: number; call_timeout_seconds: number; core_trigger_ratio: number; preset: string };
+  memory?: { extract_after_run: boolean; extract_min_messages: number; extract_preset: string; classify_preset: string; sensitive_allowed: string[]; consolidate: boolean; auto_merge: boolean };
   terminals?: { running_cap: number };
   browser?: BrowserSettings;
   action_rules?: ActionRulesSettings;
