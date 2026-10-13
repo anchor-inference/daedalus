@@ -37,8 +37,9 @@ def main() -> None:
                 page.locator(".pet-bubble").get_by_text("A task finished").wait_for()
                 page.evaluate("localStorage.setItem('daedalus.pet', 'off'); window.dispatchEvent(new Event('daedalus:pet-preference'))")
             if mobile:
-                ratio = page.locator(".voice-mascot canvas").evaluate("canvas => canvas.width / canvas.getBoundingClientRect().width")
-                assert ratio >= 2, ratio
+                # The canvas takes the screen's density once its renderer has measured it, which on a
+                # loaded machine is after the first frame; a ratio read at once caught it at 1.
+                page.wait_for_function("(() => { const c = document.querySelector('.voice-mascot canvas'); return c && c.width / c.getBoundingClientRect().width >= 2; })()", timeout=10000)
             page.get_by_role("button", name="Head", exact=True).click()
             page.locator(".voice-mascot canvas").wait_for()
             page.wait_for_function("document.querySelector('.voice-mascot canvas')?.width >= document.querySelector('.voice-mascot canvas')?.getBoundingClientRect().width * .95")
