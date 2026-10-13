@@ -101,6 +101,16 @@ export function revealSetting(key: string, opts: { root?: ParentNode; tries?: nu
       row.classList.add(FLASH_CLASS);
       const reduced = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       row.scrollIntoView?.({ block: "center", behavior: reduced ? "auto" : "smooth" });
+      // A card above the row that answers its own request later (the companion's, on the voice
+      // section) grows after the scroll and pushes the row out of sight; for a moment after the
+      // scroll the row is put back whenever the section moves it.
+      const until = performance.now() + 1500;
+      const keep = () => {
+        const box = row.getBoundingClientRect();
+        if (box.top < 0 || box.bottom > window.innerHeight) row.scrollIntoView?.({ block: "center" });
+        if (performance.now() < until) window.setTimeout(keep, 120);
+      };
+      window.setTimeout(keep, 250);
       window.setTimeout(() => row.classList.remove(FLASH_CLASS), opts.flashMs ?? FLASH_MS);
       resolve(true);
     };
