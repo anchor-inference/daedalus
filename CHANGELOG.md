@@ -2,6 +2,16 @@
 
 Notable changes, newest first. The repository's `main` is the released version.
 
+## 2026-10-13 — desktop-v0.18.0
+
+- **Imported sessions keep what they knew.** A session brought in from Claude Code or Codex carries that program's standing instructions and memory notes (`CLAUDE.md`, `AGENTS.md`, the memory folder) into its prompt, where compaction never touches them. Compaction now summarises the whole history on top of the previous summary, keeps one section per open task and a section of standing facts, and waits until 80% of a large context window.
+- **Reasoning models keep their train of thought.** GPT models over the Codex subscription get their encrypted reasoning back on every step and a per-session cache key. A model's context window is found automatically from the provider, a public model catalogue or a refusal, and Settings shows where the number came from.
+- **Subagents beside their leader.** A Subagents tab in the right panel lists them and shows each one's conversation live; the left column folds them under their session. A subagent can report to its leader mid-task, can no longer reach agents of other projects, and a leader is reminded once about helpers left idle.
+- **Every reply stays visible.** Text the agent writes between tool calls reads as a reply and splits the steps into their own blocks; the old single block remains an appearance option. Forks work during a run and leave nothing behind on failure; Ctrl/Cmd+J opens the terminal; changing the model under a draft no longer blocks sending.
+- **Clearer navigation.** New chats can be started in any project from a picker, sessions are imported from the New chat button, right-click menus offer only what belongs to the item, the rail is easier to see, and lists update the moment a chat or job changes.
+- **Structured calendar entries.** Events can hold checklists, tables with totals, recipe steps with timers and action buttons; types with fields and daily totals; plans that move or repeat as a whole; an agenda view, swipes and filters. Ticks are made in the event's view and reach the agent at once.
+- **A browser that behaves like one.** The agent's browser runs with a window on a virtual screen in the container, without the flags that mark automation, and moves, clicks and types at a human pace. Cookies attached to a chat, or imported from the Browser tab, load into its profile without their values ever being shown.
+
 ## 2026-10-12 — desktop-v0.17.1
 
 - **Desktop upgrades complete after the window closes.** On Windows, the application starts the upgrade as an independent process and waits for it to start before exiting. A Windows release check now downloads a signed update, installs it from the application, watches the progress page and verifies the new version.
