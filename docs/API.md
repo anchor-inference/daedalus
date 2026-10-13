@@ -53,7 +53,12 @@ any client: `POST /api/sessions/{id}/policy/grant` or `…/policy/refuse` with `
 stream carries `permission.pending` and `permission.resolved` for it. `GET …/policy/similar/{key}`
 says what "Allow similar" would grant for an open request (the same tool and rule, with its command
 prefix, folder or host, as `label`), or `null`; `POST …/policy/grant-similar` with `{"key"}` grants
-that family until the session ends and answers every open request it covers.
+that family until the session ends and answers every open request it covers. An action the
+operator's rules hand back (`docs/POLICY.md`, *Action rules*) arrives as `permission.pending` with
+`kind: "handoff"` and is closed with `POST /api/sessions/{id}/handoffs/{key}/done`; it cannot be
+granted. `GET /api/action-rules` answers `{"categories", "levels", "defaults", "log"}` for Settings →
+Rules: the categories and levels the host knows, in order, and the auto-review's latest decisions
+(`limit=`, newest first); the levels themselves are the `action_rules` section of `/api/settings`.
 
 **Notifications.** Everything that wants your attention — a failed run, a scheduled task's result, a
 loop that needs an answer, a service that did not come back — is one row of the notification centre

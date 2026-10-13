@@ -58,6 +58,15 @@ pattern = "\\bpip install\\b(?!.*--user)"
 action = "deny"              # deny | ask; an allow only lifts an ask, never a built-in denial
 note = "no global installs"
 
+[action_rules]               # how much of what it does in the world the agent decides alone (docs/POLICY.md)
+levels = { message = "auto", publish = "auto", payment = "ask", delete = "auto", external_write = "auto", self_change = "auto" }
+                             # auto | on_command | ask | handoff; only ever tightens the policy
+review = ["message", "publish", "payment"]  # reviewed by a small model before they run at auto;
+                             # on_command is always reviewed; a review that cannot answer asks you
+review_preset = ""           # empty = a middle preset of the table
+review_timeout_seconds = 20.0
+injection_model = false      # also ask a small model whether a fetched page talks to the agent
+
 [hooks]                      # operator scripts: JSON on stdin, exit 2 refuses (pre_tool), JSON on stdout rewrites
 pre_tool = ""
 post_tool = ""
@@ -100,7 +109,7 @@ icons = { terminals = "bolt" }  # a built-in icon name in place of the item's ow
 auto_apply = ["navigation", "answer_language", "compaction"]
                              # every other section waits for your Apply on a card in the chat and in
                              # the notifications; this section itself always does. Credentials, policy,
-                             # self_change, ops, webhooks, the sandbox and the browser's network wall are
+                             # action_rules, self_change, ops, webhooks, the sandbox and the browser's network wall are
                              # never the agent's to change (daedalus/host/agent_settings.py)
 proposal_hours = 24          # a change nobody answered expires and the agent is told
 

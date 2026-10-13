@@ -189,6 +189,15 @@ egress_allow = []
 # action = "deny"           # deny | ask; "allow" only lifts an ask, never a built-in denial
 # note = "no global installs"
 
+[action_rules]
+# How much of what it does in the world the agent decides alone: auto | on_command | ask | handoff.
+# They only ever tighten the policy above; see docs/POLICY.md.
+# levels = { message = "auto", publish = "auto", payment = "ask", delete = "auto", external_write = "auto", self_change = "auto" }
+# review = ["message", "publish", "payment"]   # a small model checks these against your request before they run
+# review_preset = ""                           # empty = a middle preset of the table
+# review_timeout_seconds = 20.0                # past it the review asks you rather than saying yes
+# injection_model = false                      # also ask a small model whether a fetched page talks to the agent
+
 [hooks]
 # Operator scripts around the agent's actions: JSON on stdin; pre_tool exits 2 to refuse, prints JSON with "arguments" to rewrite.
 pre_tool = ""
