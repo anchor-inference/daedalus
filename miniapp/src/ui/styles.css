@@ -4932,3 +4932,13 @@ button.staff-row:hover { background: var(--surface-2); }
    overlapped; the menu is the answer to that click, so the tip steps aside. */
 body:has(.context-menu) .rail-tip { visibility: hidden; }
 .start-where-menu .project-pick-tile { background: var(--surface-3); }
+
+/* Settings → Desktop app: a shortcut shown as its keys, with its buttons beside it. */
+.settings-desktop-shortcut { display: inline-flex; align-items: center; gap: var(--space-1); flex-wrap: wrap; justify-content: flex-end; }
+.settings-desktop-shortcut kbd { font-family: var(--font); font-size: var(--fs-12); color: var(--fg); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); padding: 2px 6px; white-space: nowrap; }
+.settings-desktop-shortcut kbd.recording { color: var(--accent); border-color: var(--accent); }
+.settings-desktop-note.bad { color: var(--bad); }
+.settings-desktop-note.ok { color: var(--ok); }
+.settings-desktop-wayland { margin: var(--space-2) 0; }
+.settings-desktop-commands { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-1); }
+.settings-desktop-commands code { white-space: nowrap; }

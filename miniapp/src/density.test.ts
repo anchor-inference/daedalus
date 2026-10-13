@@ -33,10 +33,11 @@ import browserPhone from "./browser/phone.css?raw";
 import newProject from "./project/newproject.css?raw";
 import imports from "./imports/imports.css?raw";
 import ask from "./questions/ask.css?raw";
+import quick from "./quick/quick.css?raw";
 import petHost from "./pethost.tsx?raw";
-// The browser's phone sheet, the session import and the agent's question card keep their looks beside
-// their components; they answer to the same scale.
-const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop + "\n" + phone + "\n" + browserPhone + "\n" + newProject + "\n" + imports + "\n" + ask;
+// The browser's phone sheet, the session import, the agent's question card and the desktop's Quick
+// Chat keep their looks beside their components; they answer to the same scale.
+const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop + "\n" + phone + "\n" + browserPhone + "\n" + newProject + "\n" + imports + "\n" + ask + "\n" + quick;
 
 type Rule = { selector: string; media: string; body: string };
 

@@ -24,6 +24,7 @@ import { plural, t } from "../i18n";
 import { describeIntegration, type IntegrationRow } from "../integrationHealth";
 import { Dropdown, LangPicker, MultiDropdown, Segmented, Switch } from "../ui/index";
 import { NumInput, NumRow, Row, TextBlock } from "../settingsrow";
+import { DesktopPanel } from "./DesktopSettings";
 import { AppearancePanel } from "./Appearance";
 import { NavigationSettings } from "./NavigationSettings";
 import { modeHome, storedMode } from "../mode";
@@ -1065,7 +1066,7 @@ function SecurityTab({ toast }: { toast: (t: string) => void }) {
   );
 }
 
-type Section = "appearance" | "navigation" | "models" | "rules" | "limits" | "environments" | "tools" | "voice" | "components" | "dependencies" | "chat" | "notifications" | "security" | "heartbeat" | "about";
+type Section = "appearance" | "desktop" | "navigation" | "models" | "rules" | "limits" | "environments" | "tools" | "voice" | "components" | "dependencies" | "chat" | "notifications" | "security" | "heartbeat" | "about";
 /** The sections, grouped the way the page lists them. The words come from the table, not from here. */
 const GROUPS: { id: "you" | "work" | "system"; sections: { id: Section; icon: IconName }[] }[] = [
   { id: "you", sections: [
@@ -1073,6 +1074,7 @@ const GROUPS: { id: "you" | "work" | "system"; sections: { id: Section; icon: Ic
     { id: "navigation", icon: "sliders" },
     { id: "notifications", icon: "bell" },
     { id: "voice", icon: "mic" },
+    { id: "desktop", icon: "apps" },
     { id: "security", icon: "key" },
   ] },
   { id: "work", sections: [
@@ -1261,7 +1263,8 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
         </div>
       )}
       {GROUPS.map((group) => {
-        const items = group.sections.filter((sec) => matches(sec.id));
+        // The desktop application's own settings are listed only in its window.
+        const items = group.sections.filter((sec) => matches(sec.id) && (sec.id !== "desktop" || !!window.daedalus?.desk));
         if (!items.length) return null;
         return (
           <div key={group.id}>
@@ -1290,6 +1293,7 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
 
   const body = (sec: Section) => {
     if (sec === "appearance") return <AppearancePanel />;
+    if (sec === "desktop") return <DesktopPanel />;
     if (!s) return <div className="empty">{t("common.loading")}</div>;
     const kinds = s.provider_kinds ?? DEFAULT_KINDS;
     const providerIds = Object.keys(s.providers ?? {});

@@ -1,0 +1,182 @@
+/* Quick Chat: the whole page is the box, in a frameless window the desktop sizes to fit it
+   (desktop/shell/desk-main.js). The top row is where the window is dragged from. */
+
+html:has(.quick), body:has(.quick) { background: var(--surface-1); overflow: hidden; }
+body:has(.quick) #root { min-height: 0; }
+
+.quick {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  box-sizing: border-box;
+  width: 100%;
+  background: var(--surface-1);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: var(--fs-14);
+  line-height: var(--lh-ui);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+}
+
+.quick-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  -webkit-app-region: drag;
+  min-height: var(--ctl-h-sm);
+}
+.quick-top button { -webkit-app-region: no-drag; }
+
+.quick-target {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 60%;
+  height: var(--ctl-h-sm);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--fs-12);
+  cursor: pointer;
+}
+.quick-target:hover { background: var(--surface-3); }
+.quick-target-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.quick-paused { font-size: var(--fs-12); color: var(--warn); }
+.quick-hint { margin-left: auto; font-size: var(--fs-11); color: var(--fg-3); white-space: nowrap; }
+
+.quick-box {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+.quick-box:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, var(--line-strong)); }
+.quick-box .voicebar { flex: 1; }
+
+.quick-field {
+  flex: 1;
+  min-height: var(--ctl-h);
+  max-height: 160px;
+  padding: 6px var(--space-1);
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--fs-14);
+  line-height: var(--lh-ui);
+}
+.quick-field::placeholder { color: var(--fg-3); }
+/* The box around it shows the focus; the app's own ring on a focused field would draw a second one. */
+.quick .quick-field:focus, .quick .quick-field:focus-visible { border: 0; outline: 0; box-shadow: none; }
+
+.quick-actions { display: flex; align-items: center; gap: var(--space-1); }
+
+.quick-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.quick-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  height: var(--chip-h-dense);
+  padding: 0 var(--space-1) 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--surface-3);
+  color: var(--fg-2);
+  font-size: var(--fs-12);
+}
+.quick-chip.skill { color: var(--accent); }
+.quick-chip.image { height: auto; padding: 2px var(--space-1) 2px 2px; border-radius: var(--radius-sm); }
+.quick-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
+.quick-chip button {
+  display: inline-grid;
+  place-items: center;
+  padding: 2px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.quick-chip button:hover { background: var(--surface-4); }
+.quick-thumb img { display: block; width: 58px; height: 36px; object-fit: cover; border-radius: var(--radius-xs); }
+
+.quick-preview { padding: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); cursor: zoom-out; }
+.quick-preview img { display: block; width: 100%; max-height: 240px; object-fit: contain; }
+
+.quick-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: var(--space-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.quick-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--row-h-dense);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--fs-13);
+  text-align: left;
+  cursor: pointer;
+}
+.quick-option.on, .quick-option:hover { background: var(--surface-3); }
+.quick-option-kind { flex: none; color: var(--fg-2); font-size: var(--fs-12); }
+.quick-option-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.quick-windows {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--space-2);
+  max-height: 300px;
+  overflow-y: auto;
+}
+.quick-window {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--fg-2);
+  font: inherit;
+  font-size: var(--fs-12);
+  cursor: pointer;
+}
+.quick-window:hover { border-color: var(--accent); }
+.quick-window img { width: 100%; aspect-ratio: 16 / 10; object-fit: contain; background: var(--bg); border-radius: var(--radius-xs); }
+.quick-window span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.quick-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--ctl-h-sm);
+  font-size: var(--fs-13);
+  color: var(--fg-2);
+}
+.quick-status svg { color: var(--ok); flex: none; }
+.quick-status.bad { color: var(--bad); }
+.quick-status-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+
+.quick-signedout { display: flex; align-items: center; gap: var(--space-3); justify-content: space-between; color: var(--fg-2); font-size: var(--fs-13); }
