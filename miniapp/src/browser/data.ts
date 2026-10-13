@@ -5,7 +5,7 @@
 // is down, as for every other list.
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { api, telegram, type BrowserActionRow, type BrowserControl, type BrowserDraft, type BrowserGroup, type BrowserList, type BrowserLoginResult, type BrowserRecording, type BrowserSiteNote, type BrowserStep, type BrowserWorkflow, type BrowserWorkflows } from "../api";
+import { api, telegram, type BrowserActionRow, type BrowserControl, type BrowserDraft, type BrowserGroup, type BrowserList, type BrowserLoginResult, type BrowserRecording, type BrowserSiteNote, type BrowserSkillSaved, type BrowserSkillStep, type BrowserStep, type BrowserWorkflow, type BrowserWorkflows } from "../api";
 import { useEvent, useStreamUp } from "../events";
 import { invalidate, useQuery } from "../store";
 import { LiveView, type LiveSnapshot } from "./live";
@@ -125,6 +125,13 @@ export async function draftWorkflow(group: string, id: string, goal: string): Pr
   const out = await api.post<BrowserDraft>(`${BROWSERS_KEY}/workflows/${enc(id)}/draft`, { goal });
   workflowsMoved(group);
   invalidate(NOTES_KEY);
+  return out;
+}
+
+/** Save a finished recording, as the operator edited it, as a skill the agent replays (BrowserReplay). */
+export async function saveWorkflowSkill(group: string, id: string, body: { name: string; description: string; steps: BrowserSkillStep[] }): Promise<BrowserSkillSaved> {
+  const out = await api.post<BrowserSkillSaved>(`${BROWSERS_KEY}/workflows/${enc(id)}/skill`, body);
+  workflowsMoved(group);
   return out;
 }
 

@@ -1061,6 +1061,7 @@ The shapes are the app's own types in `miniapp/src/api.ts`; a host test holds th
 | `PATCH /api/browsers/notes/<id> {text, title?}` | the operator's own words for a note or a procedure, waiting or approved; `{note}` |
 | `GET /api/browsers/<group>/workflow` · `POST … {values?}` · `POST …/workflow/stop` · `POST …/workflow/mark {tab_id?}` | `{workflow: BrowserWorkflow \| null, recent: [BrowserWorkflow]}`: the recording of the operator's steps on now and the group's finished ones; start (a person must hold the browser), stop, and mark what done looks like (`{step}`) |
 | `GET /api/browsers/workflows/<id>` · `POST …/<id>/draft {goal?}` · `DELETE …/<id>` | one recording; draft a procedure from it (`{note, drafted_by: "model" \| "steps", why}`), which waits in the site notes; discard it |
+| `POST /api/browsers/workflows/<id>/skill {name, description, steps: [{n, text?, option?, to?, signin?, secrets?}]}` | save a stopped recording, as the operator edited it in the step editor, as a recorded skill (Replaying a recording): `{skill, path, params, steps, valid, errors}` |
 | `GET /api/browsers/<group>/recording?after&limit` · `POST … {frames, human?}` · `DELETE …` | the group's recording switch and keyframes; the operator's switch; delete its keyframes |
 | `GET /api/browsers/<group>/frames/<no>` | one keyframe's JPEG |
 | `GET /api/browsers/recordings` | the recordings on disk per environment, against their size and age |
@@ -1361,6 +1362,18 @@ ordinary one and the action is the agent's own `page.act`, through the same wall
 questions. A step found other than by its selector is said in the result, so a stale selector is seen;
 a step found by nothing stops the replay there and the model is told which step it was, to go on with
 its own tools.
+
+The script comes from the app's step editor: the operator keeps or deletes each recorded step (a switch
+of tabs is never kept), may turn what was typed or chosen into a parameter (`{month}`), may change an
+address only to another on the same site, and says how each sign-in is done — by them when the replay
+reaches it (the replay pauses with a `BrowserHandoff` and says how to go on with `from_step`), with the
+sign-in they saved for the site (`BrowserLogin`), or from operator secrets, one `«secret:name»` per
+recorded field, which the agent types as it types any placeholder. Nothing but a placeholder is
+accepted in a sign-in's field. The host writes it as a skill draft (`skill-drafts/<name>/` under the
+state directory, by the same code as `SkillDraft`): `SKILL.md` with the steps in words, `requires:
+browser`, `tools: BrowserReplay` and `params`, and `replay.json`. `BrowserReplay` reads a skill of that
+name from the skills directory first, then from the drafts, and without a name lists them. The
+recording's row keeps the skill it became (`skill`), and the audit has `workflow_skill`.
 
 ## Measured
 

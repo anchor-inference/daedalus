@@ -15,7 +15,7 @@ function step(n: number, over: Partial<BrowserStep> = {}): BrowserStep {
 function flow(over: Partial<BrowserWorkflow> = {}): BrowserWorkflow {
   return {
     id: "w1", group_id: "g1", env: "container", project_id: null, session_id: "s1", staff_id: null, state: "stopped", values: "slots", reason: "operator",
-    start_url: "https://shop.example/", start_title: "Shop", started_at: "2026-09-30T10:00:00.000Z", stopped_at: "2026-09-30T10:05:00.000Z", steps: [step(1)], note_id: "", ...over,
+    start_url: "https://shop.example/", start_title: "Shop", started_at: "2026-09-30T10:00:00.000Z", stopped_at: "2026-09-30T10:05:00.000Z", steps: [step(1)], note_id: "", skill: "", ...over,
   };
 }
 
@@ -80,5 +80,7 @@ describe("the recording on the socket", () => {
     const waiting = flow({ id: "w1" });
     expect(waitingRecording([empty, drafted, waiting])?.id).toBe("w1");
     expect(waitingRecording([drafted])).toBeNull();
+    // One already saved as a skill is done with, as a drafted one is.
+    expect(waitingRecording([flow({ id: "w4", skill: "monthly-report" })])).toBeNull();
   });
 });

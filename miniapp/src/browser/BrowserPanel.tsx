@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { BrowserActionRow, BrowserDraft, BrowserFrame, BrowserGroup } from "../api";
+import type { BrowserActionRow, BrowserDraft, BrowserFrame, BrowserGroup, BrowserWorkflow } from "../api";
 import { OverflowMenu, Popover, toast as statusToast, type MenuItem } from "../ui/dialogs";
 import { clock } from "../format";
 import { plural, t } from "../i18n";
@@ -19,6 +19,7 @@ import { useQuery } from "../store";
 import { confirmAsync, errorText, haptic } from "../ui";
 import { answerDialog, askTake, closeBrowser, consumeTake, importCookies, deleteRecording, deviceSaving, recordingMoved, resizeViewport, setControl, setRecording, takeHandoff, useActions, useLiveSnapshot, useLiveView, useRecording, useWorkflows, workflowsMoved } from "./data";
 import { currentRecording, ProcedureEditor, RecordBar, RecordButton, RecordedCard, waitingRecording } from "./steps";
+import { SkillEditor } from "./skilleditor";
 import { frameOfRow, ReplayStage } from "./replay";
 import type { LiveSnapshot, LiveView } from "./live";
 import { BrowserLoginCard } from "./login";
@@ -241,6 +242,7 @@ export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = 
   const flows = useWorkflows(group.id);
   const steps = currentRecording(snap.workflow, flows.workflow);
   const [draft, setDraft] = useState<BrowserDraft | null>(null);
+  const [editing, setEditing] = useState<BrowserWorkflow | null>(null);
   const waiting = steps ? null : waitingRecording(flows.recent);
   const liveState = snap.workflow ? `${snap.workflow.id}:${snap.workflow.recording}` : "";
   useEffect(() => {
@@ -344,10 +346,12 @@ export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = 
       {replaying && (
         <ReplayStage group={group.id} viewportW={group.viewport.w} frames={frames} index={replay} rows={rows} agent={agent} onIndex={setReplay} onLive={() => setReplay(null)} phone={phone} />
       )}
-      {draft ? (
+      {editing ? (
+        <section className="bp-rec" data-state="skill"><SkillEditor key={editing.id} group={group.id} recording={editing} toast={toast} onDone={() => setEditing(null)} /></section>
+      ) : draft ? (
         <section className="bp-rec" data-state="draft"><ProcedureEditor draft={draft} toast={toast} onDone={() => setDraft(null)} /></section>
       ) : waiting ? (
-        <RecordedCard key={waiting.id} group={group.id} recording={waiting} toast={toast} onDraft={setDraft} />
+        <RecordedCard key={waiting.id} group={group.id} recording={waiting} toast={toast} onDraft={setDraft} onSkill={setEditing} />
       ) : null}
     </div>
   );

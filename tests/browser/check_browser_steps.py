@@ -155,7 +155,7 @@ def panel(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ign
     card.wait_for(timeout=5000)
     if page.locator(f"{ROOT} .bp-recbar").count():
         say("the bar stayed after the give-back")
-    card.locator(".bp-rec-foot .btn:not(.primary)").click()
+    card.locator(".bp-rec-foot .bp-rec-discard").click()
     page.wait_for_selector(".dialog", timeout=5000)
     page.locator(".dialog .btn.danger, .dialog .btn.primary").last.click()
     page.wait_for_selector(f"{ROOT} .bp-rec", state="detached", timeout=5000)
