@@ -6,7 +6,18 @@
 // has already confined in the system's file manager. signIn asks the launcher for a link
 // that signs the window's app in, which is how its login screen gets past itself. The launcher's status page reads
 // shell to offer the update button. The shell's own message page uses openLog and retry.
+//
+// desk is the app's side of Quick Chat, the appshot and the tray (desk-main.js): the settings page
+// reads and changes their settings, and the app in the main window reports what runs for the tray and
+// hears its menu's commands. quick is Quick Chat's own page: hide, grow, open a conversation in the
+// main window, take a picture. The main process answers each only from the window it belongs to.
 const { contextBridge, ipcRenderer } = require('electron');
+
+function listen(channel, callback) {
+  const listener = (_event, value) => callback(value);
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
+}
 
 contextBridge.exposeInMainWorld('daedalus', {
   window: true,
@@ -20,4 +31,21 @@ contextBridge.exposeInMainWorld('daedalus', {
   onSignInFailed: (callback) => { const listener = (_event, message) => callback(String(message || '')); ipcRenderer.on('daedalus:sign-in-failed', listener); return () => ipcRenderer.removeListener('daedalus:sign-in-failed', listener); },
   openLog: (file) => ipcRenderer.send('daedalus:open-log', String(file || '')),
   retry: () => ipcRenderer.send('daedalus:retry'),
+  desk: {
+    settings: () => ipcRenderer.invoke('desk:settings'),
+    setSettings: (patch) => ipcRenderer.invoke('desk:set-settings', patch),
+    status: (status) => ipcRenderer.send('desk:status', status),
+    openScreenSettings: () => ipcRenderer.send('desk:screen-settings'),
+    onAction: (callback) => listen('desk:action', (name) => callback(String(name || ''))),
+    onNavigate: (callback) => listen('desk:navigate', (where) => callback(String(where || ''))),
+  },
+  quick: {
+    hide: () => ipcRenderer.send('quick:hide'),
+    resize: (height) => ipcRenderer.send('quick:resize', Number(height) || 0),
+    open: (where) => ipcRenderer.send('quick:open', String(where || '')),
+    pending: () => ipcRenderer.invoke('quick:pending'),
+    windows: () => ipcRenderer.invoke('quick:windows'),
+    capture: (windowId) => ipcRenderer.invoke('quick:capture', windowId ? String(windowId) : ''),
+    onShown: (callback) => listen('quick:shown', (detail) => callback(detail || {})),
+  },
 });

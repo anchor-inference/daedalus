@@ -15,6 +15,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const readline = require('node:readline');
 const policy = require('./policy');
+const desk = require('./desk');
 
 const scheme = 'daedalus';
 const isWindows = process.platform === 'win32';
@@ -26,6 +27,13 @@ const isWindows = process.platform === 'win32';
 // link that leaves this machine opens in the system's browser instead.
 if (process.platform === 'linux' && policy.sandboxUnavailable(process.env, readFirstLine, helperIsSetuid, process.execPath)) {
   app.commandLine.appendSwitch('no-sandbox');
+}
+
+// Global shortcuts on a Wayland desktop go through its portal, which Chromium asks only with this
+// feature on. Without it Quick Chat's shortcut registers under XWayland and is heard only while a
+// window of this application has focus — which is no global shortcut at all.
+if (process.platform === 'linux' && desk.waylandSession(process.env)) {
+  app.commandLine.appendSwitch('enable-features', 'GlobalShortcutsPortal');
 }
 
 // Where Electron keeps the window's own state (its caches, where the window was, shell.log). Not its
@@ -45,6 +53,8 @@ const engineExe = process.env.DAEDALUS_ENGINE || path.join(path.dirname(process.
 
 let win = null;
 let hideCompanion = null;
+// Quick Chat, the appshot and the tray (desk-main.js), once the application is ready.
+let quickDesk = null;
 let engine = null;
 let quitting = false;
 let upgrading = false;
@@ -77,6 +87,13 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', (_event, argv) => {
+    // `daedalus --quick-chat` and `--appshot` are what a system shortcut runs where the desktop
+    // refuses this application one of its own (a Wayland portal that says no).
+    const action = desk.actionFrom(argv);
+    if (action && quickDesk) {
+      quickDesk.run(action);
+      return;
+    }
     const link = policy.linkFrom(argv);
     showWindow();
     send({ command: 'focus', link: link || '' });
@@ -128,6 +145,7 @@ function start() {
   });
   hideCompanion = require('./pet-window')(() => win, showWindow, app.getLocale());
   createWindow();
+  quickDesk = require('./desk-main')({ app, dir: __dirname, getMain: () => win, showMain: showWindow, getStrings: () => strings, guard, language: app.getLocale() });
   win.loadFile(path.join(__dirname, 'pages', 'starting.html'), { query: { text: strings.starting } });
   startEngine();
 }
@@ -187,6 +205,7 @@ function send(command) {
 let lastFatal = null;
 
 function handle(event) {
+  if (quickDesk && event.url) quickDesk.noteAddress(event.url);
   switch (event.event) {
     case 'show':
       showWindow();
@@ -320,6 +339,11 @@ app.on('before-quit', (event) => {
 
 app.on('window-all-closed', () => app.quit());
 
+// The Dock's icon on a Mac brings back a window that closing only hid.
+app.on('activate', () => {
+  if (engine || lastFatal) showWindow();
+});
+
 function windowStateFile() {
   return path.join(app.getPath('userData'), 'window.json');
 }
@@ -344,8 +368,23 @@ function createWindow() {
   if (windowState.maximized) win.maximize();
   win.once('ready-to-show', () => win.show());
   guard(win.webContents);
-  win.on('close', saveWindowState);
-  win.on('closed', () => { win = null; hideCompanion?.(); });
+  // The pairing link lands on the app by a redirect the launcher never sees: the address the window
+  // ends up at is where Quick Chat's page is loaded from.
+  win.webContents.on('did-navigate', (_event, url) => quickDesk?.noteAddress(url));
+  win.on('close', (event) => {
+    saveWindowState();
+    if (quickDesk && quickDesk.keepOnClose(quitting || upgrading)) {
+      event.preventDefault();
+      win.hide();
+    }
+  });
+  // Quick Chat's window, hidden, still counts as a window, so the last one closing is not what ends
+  // the application any more: the main one closing for real is.
+  win.on('closed', () => {
+    win = null;
+    hideCompanion?.();
+    if (!quitting && !upgrading) app.quit();
+  });
 }
 
 // guard keeps every page in this window on this machine. The launcher's pages and the app are on

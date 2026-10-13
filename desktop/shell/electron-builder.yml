@@ -15,6 +15,10 @@ files:
   - policy.js
   - preload.js
   - pet-window.js
+  - desk.js
+  - desk-main.js
+  - appshot.js
+  - tray/**
   - pet/**
   - pages/**
   - package.json
