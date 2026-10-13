@@ -140,6 +140,7 @@ unknown field is `-32602`. Errors use the JSON-RPC codes plus:
 | `page.network` | `{tab_id, after? = 0, types?, host?, method?, contains?, failed?, limit? ≤ 200 = 50, origin?}` → `{url, requests: [Request], last, skipped, dropped, total}` |
 | `page.request` | `{tab_id, id, body?, max_chars? 100–200000 = 20000, origin?}` → `{request: Request with its headers, body?, truncated?, body_error?}` |
 | `page.inspect` | `{tab_id, ref \| selector, max_chars? 200–50000 = 4000, origin?}` → `{ref, tag, role, name, visible, clickable, reasons[], where, box, page, viewport, styles{}, state{}, panes[], html, html_truncated, html_length, shadow, children, text_length, frame?, matches?}` |
+| `page.locate` | `{tab_id, selector?, role?, name?, text?, origin?}` → `{ref, by: "selector" \| "role" \| "text", matches, selector_matches?}`: finds again an element a recording acted on, in the tab's own document (Replaying a recording, below); `1001` when nothing matches |
 | `download.list` | `{group_id}` → `{downloads: [Download]}` |
 | `download.read` | `{id, offset, max? ≤ 512 KiB}` → `{data_b64, offset, size, eof}` |
 | `download.delete` | `{id}` → `{}` |
@@ -1291,14 +1292,20 @@ url, action, …}`, `url` being the page it was taken on; by `action`:
 | `select` | `element`, `option` | a list's choice changed (the arrows, typing, Enter) |
 | `press` | `keys`, `count?` | a key that is not typing: Enter where nothing was typed, Escape, arrows outside a field, a chord; repeats counted |
 | `scroll` | `direction`, `count?` | the wheel or a swipe; turns one way counted as one step |
-| `handoff` | `reason: login \| two_factor \| payment`, `element` | a secret field or a sign-in (below): the operator's to do |
+| `handoff` | `reason: login \| two_factor \| payment`, `element`, `fields?` | a secret field or a sign-in (below): the operator's to do |
 | `dialog` | `kind`, `text`, `accept` | their answer to a page's dialog (`dialog.answer` with an operator's origin) |
 | `download` | `text` (the file's name) | a download started |
 | `tab` | `to`, `title` | their input moved to another tab |
 | `expect` | `text` or `title` | `workflow.mark`: what done looks like |
 
-`element` is `{role, name, place?}` as the snapshot names it, `place` being the dialog, the named form
-or the heading it is under. Each input is read **before** it is dispatched, while the page is as the
+`element` is `{role, name, place?, selector?, text?}` as the snapshot names it, `place` being the
+dialog, the named form or the heading it is under. `selector` is a CSS selector that finds it again in
+the tab's own document — a test id, an id, a field's `name`, `aria-label` or `placeholder` when one is
+unique and does not look generated, else a short path of tags from the nearest ancestor with a stable
+id; never an address, and none for an element of a frame or a shadow root — and `text` a control's
+visible words (never a field's: those are what was typed). A handoff's `fields` are the fields of the
+sign-in in the order they were reached, each an `element` with `secret: password | one_time_code |
+payment | name`, so a replay can fill each from the operator's secret it was bound to. Each input is read **before** it is dispatched, while the page is as the
 person saw it: the element at the point (as an action at a point finds it, through frames of other
 sites), or the focused one, described and classified in the daemon's world (`recordInfo`). A press
 the classifier would ask the agent about keeps its kinds in `asks`. Reading costs the input at most
@@ -1343,6 +1350,17 @@ the kind `procedure`, filed under the recording's project (or for every agent, f
 project), waiting for the operator (Procedures, above). A procedure grants nothing: an agent follows
 it through the same tools, wall, watch mode, classifier and questions; where watch mode covers its
 site, the draft says so.
+
+### Replaying a recording
+
+A recording the operator edited into a skill carries a replay script (`replay.json`, written by the
+host); `BrowserReplay` follows it in the agent's browser. For each step that acts on an element the
+host asks `page.locate` with what the recording read: the selector when it matches exactly one shown
+element, else the role and name, else the visible words, the control holding them. The ref found is an
+ordinary one and the action is the agent's own `page.act`, through the same wall, classifier and
+questions. A step found other than by its selector is said in the result, so a stale selector is seen;
+a step found by nothing stops the replay there and the model is told which step it was, to go on with
+its own tools.
 
 ## Measured
 

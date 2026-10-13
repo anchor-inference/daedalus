@@ -30,6 +30,7 @@ func (d *Daemon) registerPage(s *server.Server) {
 		"page.request":    d.request,
 		"page.inspect":    d.inspect,
 		"page.login":      d.login,
+		"page.locate":     d.locate,
 	} {
 		s.Handle(name, h)
 	}
@@ -313,4 +314,23 @@ func (d *Daemon) inspect(ctx context.Context, c *server.Conn, params json.RawMes
 		return nil, err
 	}
 	return d.Page.Inspect(ctx, t, p.Ref, p.Selector, p.MaxChars)
+}
+
+func (d *Daemon) locate(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p struct {
+		TabID    string          `json:"tab_id"`
+		Selector string          `json:"selector,omitempty"`
+		Role     string          `json:"role,omitempty"`
+		Name     string          `json:"name,omitempty"`
+		Text     string          `json:"text,omitempty"`
+		Origin   *browser.Origin `json:"origin,omitempty"`
+	}
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	t, err := d.gatedTab(ctx, p.TabID, p.Origin)
+	if err != nil {
+		return nil, err
+	}
+	return d.Page.Locate(ctx, t, p.Selector, p.Role, p.Name, p.Text)
 }

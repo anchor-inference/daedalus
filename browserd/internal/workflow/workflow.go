@@ -46,6 +46,14 @@ type Element struct {
 	Role  string `json:"role"`
 	Name  string `json:"name"`
 	Place string `json:"place,omitempty"`
+	// Selector and Text are what a replay finds the element by before its role and name: a CSS
+	// selector of the tab's own document and a control's visible words.
+	Selector string `json:"selector,omitempty"`
+	Text     string `json:"text,omitempty"`
+	// Secret is, for a field of a handoff, the kind of secret it holds (password, one_time_code,
+	// payment) or "name" for the name typed beside a password: what the operator binds it to when the
+	// recording becomes a skill. Nothing of what was typed is kept.
+	Secret string `json:"secret,omitempty"`
 }
 
 // Step is one thing the person did, in the vocabulary of the agent's tools. The fields a step has
@@ -73,6 +81,9 @@ type Step struct {
 	Accept    *bool    `json:"accept,omitempty"`
 	Asks      []string `json:"asks,omitempty"`
 	Point     []int    `json:"point,omitempty"`
+	// Fields are a handoff's fields, in the order the person reached them, so a replay can fill each
+	// from the operator's secret it was bound to.
+	Fields []Element `json:"fields,omitempty"`
 
 	key string // the element's identity in its document, to fold a click into the typing after it
 }
@@ -304,6 +315,12 @@ func (r *Recorder) add(s *session, t *browser.Tab, st Step) {
 			r.stepped(s, *last, len(s.wf.Steps))
 			return
 		case same && st.Action == "handoff" && last.Reason == st.Reason && last.URL == st.URL:
+			for _, f := range st.Fields {
+				if !hasField(last.Fields, f) {
+					last.Fields = append(last.Fields, f)
+					r.stepped(s, *last, len(s.wf.Steps))
+				}
+			}
 			return
 		}
 	}
@@ -313,6 +330,25 @@ func (r *Recorder) add(s *session, t *browser.Tab, st Step) {
 	if len(s.wf.Steps) >= MaxSteps {
 		r.finish(s, "full")
 	}
+}
+
+func hasField(fields []Element, f Element) bool {
+	for _, x := range fields {
+		if x.Selector == f.Selector && x.Name == f.Name && x.Role == f.Role {
+			return true
+		}
+	}
+	return false
+}
+
+// handoffStep is the step of a field or press that is the operator's to do, with the field among its
+// fields.
+func handoffStep(reason string, tg *page.Target) Step {
+	st := Step{Action: "handoff", Reason: reason, Element: element(tg)}
+	if f := secretField(tg); f != nil {
+		st.Fields = []Element{*f}
+	}
+	return st
 }
 
 // replaceLast puts st in place of the last step (a click into a field, now the typing it began).
@@ -329,7 +365,24 @@ func (r *Recorder) replaceLast(s *session, t *browser.Tab, st Step) {
 
 func element(tg *page.Target) *Element {
 	f := tg.Field
-	return &Element{Role: clip(f.Role, 40), Name: words(f.Name, maxName), Place: words(f.Place, maxPlace)}
+	return &Element{Role: clip(f.Role, 40), Name: words(f.Name, maxName), Place: words(f.Place, maxPlace),
+		Selector: clip(f.Selector, page.MaxLocateSelector), Text: words(f.VisText, maxName)}
+}
+
+// secretField is a field of a handoff as the step keeps it: what it is and how to find it, with the
+// kind of secret it holds. A button is no field: its press is the handoff's end.
+func secretField(tg *page.Target) *Element {
+	f := tg.Field
+	if !f.Text && !f.Select {
+		return nil
+	}
+	el := element(tg)
+	el.Text = ""
+	el.Secret = f.Secret
+	if el.Secret == "" {
+		el.Secret = "name"
+	}
+	return el
 }
 
 // handoff is the reason a target is the operator's to fill, or "": a secret field by its nature, a
@@ -486,7 +539,7 @@ func (r *Recorder) Before(t *browser.Tab, in wire.Input) {
 // press records a click on tg. s.mu is held.
 func (r *Recorder) press(ctx context.Context, s *session, t *browser.Tab, tg *page.Target, action string) {
 	if reason := handoff(tg); reason != "" {
-		r.add(s, t, Step{Action: "handoff", Reason: reason, Element: element(tg)})
+		r.add(s, t, handoffStep(reason, tg))
 		if tg.Field.Text || tg.Field.Select {
 			s.field = &watch{tg: tg, secret: true}
 		}
@@ -523,7 +576,7 @@ func (r *Recorder) typing(ctx context.Context, s *session, t *browser.Tab) bool 
 		return false
 	}
 	if reason := handoff(tg); reason != "" {
-		r.add(s, t, Step{Action: "handoff", Reason: reason, Element: element(tg)})
+		r.add(s, t, handoffStep(reason, tg))
 		s.field = &watch{tg: tg, secret: true}
 		return true
 	}
