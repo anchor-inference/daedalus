@@ -2,7 +2,8 @@
 
 The wizard runs before this program exists, so it can only write its choice down
 (``DAEDALUS_STT_MODEL``, which :func:`daedalus.config._seed_from_setup` turns into the voice-note
-transcriber). The model itself is downloaded here, by the same :class:`~daedalus.speech.models.Downloads`
+transcriber and records as ``stt-model:<id>`` in ``seeded``; the environment is read there and only
+there). The model itself is downloaded here, by the same :class:`~daedalus.speech.models.Downloads`
 that Settings → Voice & speech drives, so its card there shows the bar moving and a failure in the
 words it always uses.
 
@@ -15,14 +16,11 @@ operator deletes stays deleted, and one they replaced with another transcriber i
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 from daedalus.speech import catalog
 
 logger = logging.getLogger(__name__)
-
-ENV = "DAEDALUS_STT_MODEL"
 
 GIVEN_UP = frozenset({"queued", "failed", "cancelled", "deleted"})
 """Progress states after which waiting longer is pointless. ``queued`` is a refusal — another model is
@@ -36,12 +34,10 @@ def marker(model_id: str) -> str:
 
 def wanted(config: Any) -> str:
     """The model to fetch now, or empty: chosen in the wizard, still the transcriber, never fetched."""
-    model_id = os.environ.get(ENV, "").strip()
-    if not model_id or model_id not in catalog.BY_ID:
+    model_id = config.asr.transcriber
+    if model_id not in catalog.BY_ID or f"stt-model:{model_id}" not in config.seeded:
         return ""
-    if config.asr.transcriber != model_id or marker(model_id) in config.seeded:
-        return ""
-    return model_id
+    return "" if marker(model_id) in config.seeded else model_id
 
 
 async def fetch_setup_model(app: Any) -> None:
