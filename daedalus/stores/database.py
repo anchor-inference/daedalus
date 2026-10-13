@@ -2210,6 +2210,28 @@ CREATE TABLE IF NOT EXISTS calendar_hooks (
 CREATE INDEX IF NOT EXISTS calendar_hooks_pending ON calendar_hooks(id) WHERE delivered_at IS NULL;
 """, _calendar_entries))
 
+# The auto-review's decisions (``daedalus/host/action_rules.py``): what was reviewed, the verdict and
+# why, for Settings → Rules. No foreign key to the session: the log outlives a deleted session, which
+# is when "what did it send, and who let it" is asked.
+MIGRATIONS.append("""
+CREATE TABLE IF NOT EXISTS action_reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    run_id TEXT NOT NULL DEFAULT '',
+    tool TEXT NOT NULL,
+    category TEXT NOT NULL,
+    level TEXT NOT NULL,
+    verdict TEXT NOT NULL CHECK (verdict IN ('allow', 'block', 'ask')),
+    reason TEXT NOT NULL DEFAULT '',
+    failed INTEGER NOT NULL DEFAULT 0,
+    summary TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    elapsed_ms INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS action_reviews_at ON action_reviews(at);
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

@@ -439,6 +439,8 @@ class TelegramOutbox(Outbox):
 
 
 APPROVAL_KEY_RE = re.compile(r"Approval key: ([0-9a-f]{12})")
+HANDOFF_MARK = "Handed to the operator:"
+"""How :func:`daedalus.host.action_rules.handoff_text` begins: the refusal of an action the operator keeps."""
 """How a policy refusal names its key in the tool result; the button under it grants exactly that call."""
 
 
@@ -2353,7 +2355,16 @@ class TelegramFront:
         if event.type is EventType.TOOL_RESULT and event.payload.get("is_error"):
             content = str(event.payload.get("content") or "")
             match = APPROVAL_KEY_RE.search(content)
-            if match:
+            if content.startswith(HANDOFF_MARK):
+                # The operator's rules keep the action for the operator: nothing to allow, so no
+                # buttons; the agent's own question follows with what to do.
+                outbox = await self.outbox_for_session(session_id)
+                if outbox is not None:
+                    try:
+                        await outbox.send_text("🙋 " + content.split(". Do not try", 1)[0], markdown=False)
+                    except Exception:  # noqa: BLE001
+                        logger.warning("could not post the handoff", exc_info=True)
+            elif match:
                 outbox = await self.outbox_for_session(session_id)
                 state = await self.manager.get_state(session_id)
                 pending = (state.metadata.get("policy_pending") or {}).get(match.group(1)) if state is not None else None

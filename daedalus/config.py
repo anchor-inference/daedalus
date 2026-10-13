@@ -859,6 +859,73 @@ class PolicyConfig(BaseModel):
     """Hosts the agent may reach without asking (``example.com`` or ``*.example.com``). Empty = every host, logged."""
 
 
+ACTION_CATEGORIES = ("message", "publish", "payment", "delete", "external_write", "self_change")
+"""What an action does in the world, as the operator's rules name it (``daedalus/host/action_rules.py``
+maps tool calls onto them): sending to people, making something public, paying, destroying,
+writing to an outside service, changing the agent's own code or settings."""
+ACTION_LEVELS = ("auto", "on_command", "ask", "handoff")
+"""How far the agent may go with a category on its own, least to most restrictive: do it; do it only
+when the operator's request asked for it; ask first; hand it to the operator to do themselves."""
+ActionLevel = Literal["auto", "on_command", "ask", "handoff"]
+DEFAULT_ACTION_LEVELS: dict[str, str] = {
+    "message": "auto",
+    "publish": "auto",
+    "payment": "ask",
+    "delete": "auto",
+    "external_write": "auto",
+    "self_change": "auto",
+}
+"""What an installation starts with: everything the agent did before these rules existed it still
+does, except paying, which the browser already asked about; the review stands behind the three
+categories whose mistakes reach other people or money."""
+
+
+class ActionRulesConfig(BaseModel):
+    """The operator's levels for what the agent does in the world, and the review before it does it.
+
+    Policy (``[policy]``) decides what a call may touch; these rules decide how much of what it does
+    in the world the agent decides alone. They only ever tighten: a call the policy refuses or asks
+    about is refused or asked about whatever level its category has.
+    """
+
+    levels: dict[str, ActionLevel] = Field(default_factory=lambda: dict(DEFAULT_ACTION_LEVELS))
+    """Category → level. A category left out keeps its default."""
+    review: list[str] = Field(default_factory=lambda: ["message", "publish", "payment"])
+    """Categories a small model reviews before an action at ``auto`` runs: it reads the operator's
+    request and the action and answers allow, block or ask. ``on_command`` is always reviewed — the
+    review is what checks that the operator asked — and is asked about when no review can be had."""
+    review_preset: str = ""
+    """The model preset the review asks; empty = a middle one of the table. A fast, cheap model: it
+    answers one word and a sentence, and the action waits for it."""
+    review_timeout_seconds: float = Field(default=20.0, gt=0, le=120)
+    """How long an action waits for the review. A review that does not answer in time asks the
+    operator: a check that cannot be made has not said yes."""
+    injection_model: bool = False
+    """Whether WebFetch also asks a small model whether a page talks to the agent, beyond the
+    patterns every fetched or browsed page is scanned for. Off by default: a model call per fetch."""
+    injection_preset: str = ""
+    """The model preset that check asks; empty = a middle one of the table."""
+
+    @field_validator("levels")
+    @classmethod
+    def _known_levels(cls, value: dict[str, str]) -> dict[str, str]:
+        unknown = sorted(set(value) - set(ACTION_CATEGORIES))
+        if unknown:
+            raise ValueError(f"unknown action categories {unknown}; known: {', '.join(ACTION_CATEGORIES)}")
+        return {**DEFAULT_ACTION_LEVELS, **value}
+
+    @field_validator("review")
+    @classmethod
+    def _known_review(cls, value: list[str]) -> list[str]:
+        unknown = sorted(set(value) - set(ACTION_CATEGORIES))
+        if unknown:
+            raise ValueError(f"unknown action categories {unknown}; known: {', '.join(ACTION_CATEGORIES)}")
+        return [c for c in ACTION_CATEGORIES if c in value]
+
+    def level(self, category: str) -> str:
+        return self.levels.get(category) or DEFAULT_ACTION_LEVELS.get(category, "auto")
+
+
 class HooksConfig(BaseModel):
     """Operator scripts around the agent's actions: JSON on stdin, verdict by exit code.
 
@@ -1971,6 +2038,7 @@ class RuntimeConfig(BaseModel):
     compaction: CompactionConfig = Field(default_factory=CompactionConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     policy: PolicyConfig = Field(default_factory=PolicyConfig)
+    action_rules: ActionRulesConfig = Field(default_factory=ActionRulesConfig)
     hooks: HooksConfig = Field(default_factory=HooksConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
     ops: OpsConfig = Field(default_factory=OpsConfig)

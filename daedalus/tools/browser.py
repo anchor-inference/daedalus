@@ -166,6 +166,10 @@ def _caller(context: ToolContext) -> Caller | None:
         allowed, why = manager.browser_gate(context.session_id, ask)
         return bool(allowed), str(why)
 
+    async def rules(ask: SensitiveAsk) -> SensitiveAsk:
+        action_rules = getattr(manager, "action_rules", None)
+        return await action_rules.browser(context.session_id, ask) if action_rules is not None else ask
+
     async def looked(data: bytes, mime: str, question: str) -> str:
         try:
             answer, _ = await look(services.extra.get("vision"), manager, data, mime, question, instruction=LOOK_INSTRUCTION, session_id=context.session_id)
@@ -174,7 +178,7 @@ def _caller(context: ToolContext) -> Caller | None:
         return answer
 
     budget = max(4000, output_limit(context) - FRAME_CHARS - 600)
-    return Caller(owner=owner, actor=f"agent:{context.session_id}", gate=gate, files=SessionFiles(services, manager, owner), look=looked, budget=budget, note_scope=lasting)
+    return Caller(owner=owner, actor=f"agent:{context.session_id}", gate=gate, files=SessionFiles(services, manager, owner), look=looked, budget=budget, note_scope=lasting, rules=rules)
 
 
 async def _run(context: ToolContext, name: str, arguments: dict[str, Any]) -> ToolResult:

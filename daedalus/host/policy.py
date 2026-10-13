@@ -27,6 +27,10 @@ from typing import Any
 from urllib.parse import urlsplit
 
 ALLOW, ASK, DENY = "allow", "ask", "deny"
+HANDOFF = "handoff"
+"""Not the policy's own answer but the operator's rules' (:mod:`daedalus.host.action_rules`): the call is
+not made and the agent asks the operator to make it themselves. Final like a denial, and not grantable:
+the operator keeps the action, so there is nothing for them to lift."""
 PATTERN_MAX_CHARS = 200
 PATTERN_TEXT_CHARS = 20_000
 """An operator's regular expression runs on the event loop: a bounded pattern over a bounded text."""
@@ -114,6 +118,12 @@ class Decision:
     """The approval key of an ``ask`` decision; a grant for it lets the same call through once."""
     hosts: list[str] = field(default_factory=list)
     """Network hosts the call reaches, for the egress log."""
+    told: str = ""
+    """The whole text the agent is told, when the rule that decided writes its own (a handoff, a
+    review's block); empty leaves the refusal's usual wording around ``reason``."""
+    review: Any = None
+    """The operator's rules' ruling on an allowed call that a review stands before
+    (:class:`daedalus.host.action_rules.Ruling`); ``None`` when nothing does."""
 
 
 SHELL_TOOLS = ("Exec", "Verify", "ServiceStart")
@@ -1027,12 +1037,14 @@ def browser_sensitive(*, tool: str, group: str, host: str, page_origin: str, kin
         if getattr(rule, "action", "") == ALLOW:
             lifted |= set(getattr(rule, "kinds", None) or wanted)
     remaining = [k for k in wanted if k not in lifted - NEVER_ALLOWED_KINDS]
-    if not remaining:
-        return Decision(ALLOW, f"allowed by the operator's rule for {host}", "browser.rule")
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest() if text else ""
     key = approval_key(tool, {"group": group, "origin": page_origin, "name": name, "action": action, "text_sha256": digest})
+    if not remaining:
+        # The key rides along: the operator's action rules may still ask about what a site rule let
+        # through, and the question must be the one this exact action is granted by.
+        return Decision(ALLOW, f"allowed by the operator's rule for {host}", "browser.rule", key=key)
     words = " and ".join(SENSITIVE_WORDS[k] for k in remaining)
     return Decision(ASK, f"this would {words} on {host or page_origin}", "browser.sensitive", key=key)
 
 
-__all__ = ["ALLOW", "ASK", "BROWSER_NAV_TOOLS", "DENY", "SENSITIVE_KINDS", "SHELL_TOOLS", "browser_sensitive", "Decision", "Policy", "Rule", "approval_key", "argument_paths", "canonical", "expand_home", "host_allowed", "hosts_in", "mentions_sealed", "path_operands", "real_path", "real_under", "sealed_root", "shell_assignments", "shell_segments"]
+__all__ = ["ALLOW", "ASK", "BROWSER_NAV_TOOLS", "DENY", "HANDOFF", "SENSITIVE_KINDS", "SHELL_TOOLS", "browser_sensitive", "Decision", "Policy", "Rule", "approval_key", "argument_paths", "canonical", "expand_home", "host_allowed", "hosts_in", "mentions_sealed", "path_operands", "real_path", "real_under", "sealed_root", "shell_assignments", "shell_segments"]

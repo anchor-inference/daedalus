@@ -58,11 +58,16 @@ class EngineDeps:
 class PolicyAdapter:
     """The host policy as the core's safety policy: every tool, every class; deny with the reason."""
 
-    def __init__(self, decide: Callable[[str, dict[str, Any]], Any], *, ask_hint: Callable[[], str | None] | None = None) -> None:
+    def __init__(self, decide: Callable[[str, dict[str, Any]], Any], *, ask_hint: Callable[[], str | None] | None = None,
+                 review_due: Callable[[str, str, dict[str, Any], Any], None] | None = None) -> None:
         self.decide = decide
         self.ask_hint = ask_hint
         """What to say instead of "ask the operator" when the session asks someone else (a staff
         member's orchestrator); ``None`` from it keeps the ordinary text."""
+        self.review_due = review_due
+        """``(run_id, tool, arguments, ruling)``: told of an allowed call the operator's rules want
+        reviewed before it runs. The review is a model call and this stage cannot wait for one, so it
+        is left for the pre-tool hook, which can, keyed by the run this stage saw the call in."""
 
     def applies_to(self, side_effect_class: str) -> bool:
         return True
@@ -70,18 +75,30 @@ class PolicyAdapter:
     def evaluate(self, tool: Any, arguments: dict[str, Any], ctx: Any) -> ToolPermissionDecision:
         decision = self.decide(tool.name, dict(arguments or {}))
         if decision.action == "allow":
+            if decision.review is not None and self.review_due is not None:
+                self.review_due(str(getattr(ctx, "run_id", "") or ""), tool.name, dict(arguments or {}), decision.review)
             return ToolPermissionDecision(outcome=ToolPermissionOutcome.allow)
         hint = self.ask_hint() if self.ask_hint is not None and decision.action == "ask" else None
-        if hint:
-            reason = f"needs approval: {decision.reason} (rule {decision.rule}). Approval key: {decision.key}. {hint}"
-        elif decision.action == "ask":
-            reason = (
-                f"needs the operator's approval: {decision.reason} (rule {decision.rule}). Approval key: {decision.key}. "
-                "Ask the operator with AskUser, quoting the key; once they grant it (/allow <key>, or the Mini App), the same call passes."
-            )
-        else:
-            reason = f"refused by policy: {decision.reason} (rule {decision.rule}). This is not a question for the operator; do the task another way."
-        return ToolPermissionDecision(outcome=ToolPermissionOutcome.deny, reason=reason, stage=PermissionStage.safety_policy)
+        return ToolPermissionDecision(outcome=ToolPermissionOutcome.deny, reason=refusal_text(decision, hint), stage=PermissionStage.safety_policy)
+
+
+def refusal_text(decision: Any, hint: str | None = None) -> str:
+    """What the agent is told of a call the policy or the operator's rules did not let through.
+
+    ``hint`` replaces "ask the operator" for a session that asks someone else. One function for the
+    policy's refusals and the review's questions, so the app's approval dock and the chat's buttons,
+    which find the key in this text, find it in both.
+    """
+    if decision.told:
+        return str(decision.told)
+    if hint and decision.action == "ask":
+        return f"needs approval: {decision.reason} (rule {decision.rule}). Approval key: {decision.key}. {hint}"
+    if decision.action == "ask":
+        return (
+            f"needs the operator's approval: {decision.reason} (rule {decision.rule}). Approval key: {decision.key}. "
+            "Ask the operator with AskUser, quoting the key; once they grant it (/allow <key>, or the Mini App), the same call passes."
+        )
+    return f"refused by policy: {decision.reason} (rule {decision.rule}). This is not a question for the operator; do the task another way."
 
 
 def runtime_constants(config: RuntimeConfig, *, context_window: int, max_output_tokens: int, thinking: bool, mode: ModeConfig | None = None, max_advertised_tools: int = 0) -> Any:
@@ -297,4 +314,4 @@ def build_engine(
     return engine
 
 
-__all__ = ["TENANT", "EngineDeps", "Role", "admitted_tools", "advertised_tools", "build_engine", "runtime_constants"]
+__all__ = ["TENANT", "EngineDeps", "PolicyAdapter", "Role", "admitted_tools", "advertised_tools", "build_engine", "refusal_text", "runtime_constants"]

@@ -49,7 +49,7 @@ from daedalus.browser.model import (
 )
 from daedalus.browser.monitor import InjectionMonitor
 from daedalus.browser.notes import ACTIVE, NOTE, PROCEDURE, SiteNotes
-from daedalus.host.policy import ALLOW, ASK, Decision, approval_key, browser_sensitive, host_allowed
+from daedalus.host.policy import ALLOW, ASK, DENY, Decision, approval_key, browser_sensitive, host_allowed
 from daedalus.security import operator_secrets
 from daedalus.security.untrusted import fenced as untrusted
 from daedalus.security.untrusted import origin_of
@@ -454,6 +454,12 @@ class Gate(Protocol):
         ...
 
 
+class Rules(Protocol):
+    async def __call__(self, ask: SensitiveAsk) -> SensitiveAsk:
+        """The same ask with the operator's action rules applied to its decision."""
+        ...
+
+
 class Files(Protocol):
     """Where the caller's files are: read under its walls, written under its walls."""
 
@@ -485,6 +491,10 @@ class Caller:
     note_scope: str | None = None
     """The project site notes are filed under and read from for this caller; ``""`` for none (a chat
     in a project made for it alone, which goes with its last session). ``None``: the owner's project."""
+    rules: Rules | None = None
+    """The operator's action rules over a sensitive action (:meth:`daedalus.host.rules_gate.RulesGate.browser`):
+    the same ask back with its decision tightened — a question, a handoff, a review's block. ``None``
+    for a caller the rules do not cover (a staff member's command-line browser asks its gate as before)."""
 
     @property
     def scope(self) -> str:
@@ -1118,11 +1128,15 @@ class BrowserAgent:
                     tool="BrowserAct", group=group["id"], host=host_of(url), page_origin=origin_of(url), kinds=kinds, action=action, name=name, text=typed, rules=self.service.config().rules,
                 )
                 decided = "allowed"
+                if caller.rules is not None and decision.action != DENY:
+                    ruled = await caller.rules(SensitiveAsk(decision, "BrowserAct", group["id"], action, kinds, origin_of(url), element.strip()[:300], name, len(text or ""), ""))
+                    decision = ruled.decision
                 if decision.action != ALLOW:
                     thumbnail = await self._thumbnail(group, current, ref, decision.key) if decision.action == ASK and ref else ""
                     ask = SensitiveAsk(decision, "BrowserAct", group["id"], action, kinds, origin_of(url), element.strip()[:300], name, len(text or ""), thumbnail)
                     if decision.action != ASK:
-                        message = f"refused by policy: {decision.reason} (rule {decision.rule}). This is not a question for the operator; do the task another way."
+                        # A handoff or a review's block writes its own words; the policy's refusal says it is final.
+                        message = decision.told or f"refused by policy: {decision.reason} (rule {decision.rule}). This is not a question for the operator; do the task another way."
                         await refused(message, decision="denied")
                         raise Forbidden(message)
                     allowed, why = await caller.gate(ask)
@@ -1893,6 +1907,6 @@ def _size(n: int) -> str:
 
 
 __all__ = [
-    "ACTIONS", "PAGE_CLOSE", "STEPS_MAX", "BrowserAgent", "Caller", "Files", "Gate", "LoopHints", "Look", "SensitiveAsk", "Step", "chunks", "explain", "fenced", "host_of",
+    "ACTIONS", "PAGE_CLOSE", "STEPS_MAX", "BrowserAgent", "Caller", "Files", "Gate", "LoopHints", "Look", "Rules", "SensitiveAsk", "Step", "chunks", "explain", "fenced", "host_of",
     "merge_diffs", "origin_of", "page_open", "parse_extracted",
 ]

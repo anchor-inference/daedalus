@@ -714,7 +714,7 @@ class NotificationService:
                 logger.warning("notify.resolved for %s was not announced", request_ref, exc_info=True)
         return len(rows)
 
-    async def resolve_session(self, session_id: str, resolution: str, *, via: str, prefixes: Iterable[str] = ("ask", "policy")) -> int:
+    async def resolve_session(self, session_id: str, resolution: str, *, via: str, prefixes: Iterable[str] = ("ask", "policy", "handoff")) -> int:
         """Close a session's open requests of the given kinds (its run ended, it was deleted)."""
         rows = await self.db.fetchall(
             "SELECT DISTINCT request_ref FROM notifications WHERE session_id = ? AND request_ref IS NOT NULL AND resolved_at IS NULL", (session_id,),
@@ -997,6 +997,9 @@ class NotificationRouter:
         lang = self._lang()
         text = str(p.get("text") or "")
         tool = str(p.get("tool") or "")
+        if p.get("kind") == "handoff":
+            await self._handoff_pending(event)
+            return
         actions = (
             Action("allow", render("allow", lang), "primary", quick=quick),
             Action("deny", render("deny", lang), "default", quick=quick),
@@ -1009,6 +1012,23 @@ class NotificationRouter:
             session_id=event.session_id, project_id=event.project_id, staff_id=event.staff_id, terminal_id=event.terminal_id,
             link=await self.service.link_for(ref, self._session_link(event.session_id)), actions=actions, request_ref=ref, dedupe_key=ref,
             source=str(p.get("kind") or "policy"), handled=self._telegram_handled(p),
+        ))
+
+    async def _handoff_pending(self, event: AppEvent) -> None:
+        """An action the operator's rules keep for the operator: nothing to allow, something to do.
+        Answered with Done, which only closes it; the agent waits on its own question in the chat."""
+        p = event.payload
+        lang = self._lang()
+        text = str(p.get("text") or "")
+        tool = str(p.get("tool") or "")
+        ref = str(p["request_ref"])
+        await self.service.post(Draft(
+            "question", render("handoff", lang, title=str(p.get("title") or "")), f"{tool}: {text}" if tool else text,
+            kind="handoff", tone="warning", level="urgent",
+            session_id=event.session_id, project_id=event.project_id, staff_id=event.staff_id,
+            link=await self.service.link_for(ref, self._session_link(event.session_id)),
+            actions=(Action("done", render("handoff.done", lang), "primary", quick=True), Action("open", render("open", lang), "ghost")),
+            request_ref=ref, dedupe_key=ref, source="handoff", handled=self._telegram_handled(p),
         ))
 
     async def _permission_resolved(self, event: AppEvent) -> None:
@@ -1119,6 +1139,35 @@ def _ask_resolver(manager: SessionManager) -> Resolver:
         return ActionOutcome("answered")
 
     return resolve
+
+
+def _handoff_resolver(manager: SessionManager) -> Resolver:
+    async def resolve(req: ActionRequest) -> ActionOutcome:
+        if req.action != "done":
+            raise ActionRefused(f"a handoff is not answered with {req.action!r}; the operator does it themselves")
+        try:
+            await manager.action_rules.handoff_done(req.scope, req.target, via=req.via)
+        except KeyError as exc:
+            raise ActionConflict("withdrawn") from exc
+        except LookupError as exc:
+            raise ActionConflict("answered") from exc
+        return ActionOutcome("done")
+
+    return resolve
+
+
+def rules_draft(payload: Mapping[str, Any], lang: str) -> Draft:
+    """The Inbox entry for an action the auto-review blocked: what it was, and the review's reason."""
+    session_id = str(payload.get("session_id") or "") or None
+    tool = str(payload.get("tool") or "")
+    text = str(payload.get("text") or "")
+    body = (f"{tool}: {text}" if tool else text) + f"\n\n{payload.get('reason') or ''}"
+    return Draft(
+        "system", render("rules.blocked", lang, title=str(payload.get("title") or session_id or "")), body.strip()[:BODY_MAX], kind="rules_block",
+        tone="warning", session_id=session_id, project_id=str(payload.get("project_id") or "") or None,
+        link=f"/app/agents/{session_id}" if session_id else "/app/settings/rules",
+        dedupe_key=f"review:{session_id}:{payload.get('key') or ''}", source="rules",
+    )
 
 
 def _policy_resolver(manager: SessionManager) -> Resolver:
@@ -1399,6 +1448,7 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     manager.add_sink(service.on_event)
     service.register_resolver("ask", _ask_resolver(manager))
     service.register_resolver("policy", _policy_resolver(manager))
+    service.register_resolver("handoff", _handoff_resolver(manager))
     router = NotificationRouter(service, manager)
 
     async def on_delete(session_id: str) -> None:
@@ -1419,6 +1469,11 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
         await service.post(setting_draft(payload, service.language()))
 
     manager.service_hooks["setting_notice"] = setting_notice
+
+    async def rules_notice(payload: Mapping[str, Any]) -> None:
+        await service.post(rules_draft(payload, service.language()))
+
+    manager.service_hooks["rules_notice"] = rules_notice
     tasks = [
         manager.bus.on(EventFilter(types=ROUTED_EVENTS), router.handle, name="notifications"),
         asyncio.create_task(service.keep_holds(), name="notification-holds"),

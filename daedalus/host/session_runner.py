@@ -82,6 +82,7 @@ from daedalus.host.inference_admission import HostInferenceAdmission
 from daedalus.host.policy import Decision, Policy, Rule, canonical, similar_covers, similar_grant
 from daedalus.host.presence import Presence
 from daedalus.host.request_manifests import RequestManifestStore
+from daedalus.host.rules_gate import RulesGate
 from daedalus.host.run_outcome import outcome_message, run_outcome
 from daedalus.host.services import SessionServices, locator, session_scratch_dir
 from daedalus.host.setting_refs import (
@@ -653,6 +654,9 @@ class SessionManager:
         self.secrets.staff_of = self._staff_of
         self._tool_rules_key: bytes | None = None
         self.hooks = DaedalusHookManager(self.redactor, hooks_config=lambda: self.config.hooks)
+        self.action_rules = RulesGate(self)
+        """The operator's action rules over this host's sessions: levels in the policy gate, the review in the hook."""
+        self.hooks.reviewer = self.action_rules.pre_tool
         self.bus = EventBus(db, redactor=self.redactor, queue_size=config.ops.event_subscriber_queue, replay_max=config.ops.event_replay_max)
         """What happens to sessions, terminals and staff, for whoever subscribes: the app's stream,
         the notifications, an orchestrator. Persisted before it is delivered, so a subscriber resumes
@@ -5745,23 +5749,13 @@ class SessionManager:
             grants = {k for k, until in (state.metadata.get("policy_grants") or {}).items() if float(until) > now} if state is not None else set()
             similar = list(state.metadata.get("policy_similar") or []) if state is not None else []
             decision = policy.evaluate(tool, arguments, grants=grants, similar=similar)
+            # The operator's action rules, on top: they turn an allowed call into a question, a
+            # handoff or a call a review stands before, and never loosen what the policy said.
+            decision = self.action_rules.apply(state, tool, arguments, decision, grants, similar)
             if decision.key and decision.action == "allow" and state is not None:
                 self._consume_grant(state, decision.key)
-            elif decision.key and state is not None:
-                # The refusal's preimage, so an operator granting the key from chat sees what they approve.
-                pending = dict(state.metadata.get("policy_pending") or {})
-                fresh = decision.key not in pending
-                pending[decision.key] = {"tool": tool, "text": self.redactor.redact(canonical(tool, arguments))[:300], "at": datetime.now(UTC).isoformat()}
-                # The family "Allow similar" would grant, worked out now: the arguments are gone by the
-                # time the operator answers, and the pending entry keeps only a redacted preview.
-                family = similar_grant(tool, arguments, decision.rule)
-                if family is not None:
-                    pending[decision.key]["similar"] = {**family, "label": self.redactor.redact(family["label"])[:200]}
-                for meta in (state.metadata, state.session.metadata):
-                    meta["policy_pending"] = dict(list(pending.items())[-20:])
-                if fresh:
-                    # Once per request: the agent retrying the same refused call is the same request.
-                    self._publish_soon(state, "permission.pending", self._permission_payload(state, decision, pending[decision.key]))
+            elif decision.key and decision.action == "ask" and state is not None:
+                self.record_question(state, decision, tool, arguments)
             if decision.hosts:
                 self._record_egress(session_id, run_id, tool, decision.hosts, decision.action)
             if decision.action != "allow":
@@ -5774,7 +5768,30 @@ class SessionManager:
             state = self._states.get(session_id)
             return prompts.STAFF_POLICY_HINT if state is not None and self.is_staff(state) else None
 
-        return PolicyAdapter(decide, ask_hint=ask_hint)
+        def review_due(run: str, tool: str, arguments: dict[str, Any], ruled: Any) -> None:
+            self.action_rules.due(session_id, run, tool, arguments, ruled)
+
+        return PolicyAdapter(decide, ask_hint=ask_hint, review_due=review_due)
+
+    def record_question(self, state: SessionState, decision: Decision, tool: str, arguments: dict[str, Any]) -> None:
+        """An ``ask`` the operator is to answer: kept open on the session and announced once.
+
+        The policy's questions and the operator's rules' — a level of ``ask``, a review that could
+        not decide — are one kind of request: the same key, grant, card and buttons."""
+        # The refusal's preimage, so an operator granting the key from chat sees what they approve.
+        pending = dict(state.metadata.get("policy_pending") or {})
+        fresh = decision.key not in pending
+        pending[decision.key] = {"tool": tool, "text": self.redactor.redact(canonical(tool, arguments))[:300], "at": datetime.now(UTC).isoformat()}
+        # The family "Allow similar" would grant, worked out now: the arguments are gone by the
+        # time the operator answers, and the pending entry keeps only a redacted preview.
+        family = similar_grant(tool, arguments, decision.rule)
+        if family is not None:
+            pending[decision.key]["similar"] = {**family, "label": self.redactor.redact(family["label"])[:200]}
+        for meta in (state.metadata, state.session.metadata):
+            meta["policy_pending"] = dict(list(pending.items())[-20:])
+        if fresh:
+            # Once per request: the agent retrying the same refused call is the same request.
+            self._publish_soon(state, "permission.pending", self._permission_payload(state, decision, pending[decision.key]))
 
     def browser_gate(self, session_id: str, ask: Any) -> tuple[bool, str]:
         """A sensitive browser action of this session, asked about the way the policy asks.

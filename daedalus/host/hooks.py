@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 from protocore.contracts.hooks import HookActionKind, HookResult, HookSpec, IHookManager
@@ -43,6 +43,10 @@ class DaedalusHookManager(IHookManager):
         self._specs: dict[str, HookSpec] = {}
         self._hooks_config = hooks_config
         self._detached: set[asyncio.Task[Any]] = set()
+        self.reviewer: Callable[[dict[str, Any]], Awaitable[HookResult | None]] | None = None
+        """The operator's action rules' review (:meth:`daedalus.host.rules_gate.RulesGate.pre_tool`):
+        asked first at ``pre_tool_use``, and a verdict from it is final. Unlike a script it fails
+        closed, on its own side: a review that cannot answer comes back as a question, not as nothing."""
 
     def _script(self, event: HookEvent) -> tuple[str, float]:
         cfg = self._hooks_config() if self._hooks_config is not None else None
@@ -87,6 +91,13 @@ class DaedalusHookManager(IHookManager):
                 task.add_done_callback(self._detached.discard)
             return HookResult(action=HookActionKind.ALLOW)
         if event is HookEvent.pre_tool_use:
+            if self.reviewer is not None:
+                # Before the operator's script: the review judges the call the agent asked for, and a
+                # script that rewrites it afterwards is the operator's own doing. A review that raises
+                # reaches the core, which refuses the call: closed, as the review itself fails.
+                verdict = await self.reviewer(payload)
+                if verdict is not None:
+                    return verdict
             if not script:
                 return HookResult(action=HookActionKind.ALLOW)
             answer = await self._run_script(script, {"event": "pre_tool", **payload}, timeout)

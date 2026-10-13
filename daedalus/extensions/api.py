@@ -65,6 +65,7 @@ from daedalus.config import (
 )
 from daedalus.doctor import DoctorContext, render_text, run_checks, summarize
 from daedalus.extensions import (
+    api_action_rules,
     api_attempt_diagnostics,
     api_board,
     api_browsers,
@@ -709,6 +710,8 @@ class SettingsBody(BaseModel):
     ops: dict[str, Any] | None = None
     disk: dict[str, Any] | None = None
     """The disk guard's limits: the per-workspace soft limit, the free-disk floor, the throwaway sweep."""
+    action_rules: dict[str, Any] | None = None
+    """The levels per action category, which of them are reviewed and the review's model."""
     compaction: dict[str, Any] | None = None
     orchestrator: dict[str, Any] | None = None
     """The project orchestrator's defaults: its model preset, its wake-up batching and its limits."""
@@ -1651,6 +1654,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     )
 
     install_routes(api, app, auth)
+    # Settings → Rules: the action categories, their levels and the review's decision log.
+    api_action_rules.register(api, app, auth)
     api_attempt_diagnostics.register(api, app, auth)
     api_board.register(api, app, auth)
     api_capacity.register(api, app, auth)

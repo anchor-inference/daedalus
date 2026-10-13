@@ -153,7 +153,8 @@ class PermissionPending(TypedDict):
     request_id: str
     request_ref: str
     kind: str
-    """policy · harness · …"""
+    """policy · harness · handoff (the operator's rules keep the action for the operator to do) · …
+    A front that does not know a kind draws it as a plain question."""
     title: str
     tool: str
     text: str
@@ -167,7 +168,8 @@ class PermissionPending(TypedDict):
 class PermissionResolved(TypedDict):
     request_id: str
     request_ref: str
-    decision: Literal["allow", "deny", "expired"]
+    decision: Literal["allow", "deny", "expired", "done"]
+    """``done``: a handoff the operator did themselves (or put aside)."""
     via: str
     by: NotRequired[str]
 

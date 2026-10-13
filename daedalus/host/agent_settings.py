@@ -45,6 +45,7 @@ NEVER: dict[str, str] = {
     "ops": "the boot guard, retention and retry machinery the installation's recovery depends on",
     "webhooks": "doors into the agent from outside; a webhook's secret and scheme are its only lock",
     "policy": "the operator's rules over the agent's tools",
+    "action_rules": "the operator's levels for what the agent does in the world on its own, and the review before it; the agent must not loosen its own leash",
     "hooks": "the operator's scripts that run around every tool call and can refuse or rewrite one",
     "providers": "model endpoints and their keys",
     "mcp.servers.*.env": "credentials handed to an MCP server",

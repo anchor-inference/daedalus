@@ -226,7 +226,7 @@ async def test_install_wires_the_router_the_resolvers_and_the_run_cap(settings: 
     try:
         service = app.notifications
         assert isinstance(service, NotificationService) and app.extensions["notifications"] is service
-        assert set(service._resolvers) == {"ask", "policy"} and len(manager.delete_hooks) == 1
+        assert set(service._resolvers) == {"ask", "policy", "handoff"} and len(manager.delete_hooks) == 1
         await service.on_event("s1", TurnEvent(type=EventType.ERROR, run_id="r3", payload={"kind": "run_cap", "message": "spent $2"}))
         [entry] = (await service.list("all"))["entries"]
         assert (entry["kind"], entry["category"], entry["tone"], entry["run_id"]) == ("run_cap", "run_failed", "warning", "r3")
