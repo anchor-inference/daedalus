@@ -131,6 +131,12 @@ class RunView:
     delivery_failed: bool = False
     draft_id: int = 0
     draft_sent: str = ""
+    session_id: str = ""
+    widget_calls: dict[str, str] = field(default_factory=dict)
+    """Widget calls whose result has not come back yet, by call id, with their titles."""
+    widgets: list[str] = field(default_factory=list)
+    """The titles of the widgets the run drew: Telegram cannot run one, so each is said under the
+    answer with a link to the conversation in the app, where it is drawn."""
     fallback_from: str = ""
     """The model the run was set to answer with, while another one is answering instead.
 
@@ -200,9 +206,14 @@ class RunRenderer:
             v.tools.append(f"{_TOOL_ICONS.get(name, '•')} {name} {_args_summary(name, args)}")
             if name in ("Write", "Edit") and args.get("path"):
                 v.changed_files.add(str(args["path"]))
+            if name == "Widget" and isinstance(args, dict):
+                v.widget_calls[call_id] = " ".join(str(args.get("title") or "").split())[:120]
             self._mark()
         elif t is EventType.TOOL_RESULT:
             call_id = str(p.get("tool_call_id"))
+            drawn = v.widget_calls.pop(call_id, None)
+            if drawn is not None and not p.get("is_error"):
+                v.widgets.append(drawn)
             started = v.tool_started.pop(call_id, None)
             line = v.tool_lines.pop(call_id, None)
             if started is not None and line is not None and line < len(v.tools):
@@ -453,6 +464,8 @@ class RunRenderer:
                 v.draft_sent = ""
         elif not final and status == "completed" and not v.tools:
             await self.outbox.send_text("(the agent finished without a reply)", markdown=False)
+        if v.widgets and not quiet:
+            await self._say_widgets()
         summary = self.render_status_html(cost)
         v.dirty = False
         if v.status_message_id is not None:
@@ -497,6 +510,19 @@ class RunRenderer:
             + redact(failures[-1][:300] if failures else "unknown error")
             + "). It is saved as answer.md in the workspace and visible in the Mini App."
         )
+
+    async def _say_widgets(self) -> None:
+        """One message naming the run's widgets, each a link into the app, which turns the relative
+        address into a full one when the installation has a public address and into plain words when
+        it has none."""
+        v = self.view
+        link = f"/app/agents/{v.session_id}" if v.session_id else "/app"
+        titles = [redact(title) or "Widget" for title in v.widgets]
+        v.widgets = []
+        try:
+            await self.outbox.send_text("\n".join(f"🧩 **{title}** — interactive; [open it in the app]({link})" for title in titles))
+        except Exception:  # noqa: BLE001 — the answer itself is out; a lost line about a widget is no reason to fail the run
+            await self._say("\n".join(f"🧩 {title} — interactive; open it in the app" for title in titles))
 
     async def _say(self, text: str) -> None:
         try:

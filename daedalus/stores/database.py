@@ -2252,7 +2252,6 @@ CREATE TABLE IF NOT EXISTS saved_logins (
 # The companion: its goals, its activity log, and the voice concierge's rows renamed to it.
 MIGRATIONS.append(COMPANION_MIGRATION)
 
-
 async def _window_pairing(conn: aiosqlite.Connection) -> None:
     """Mark the pairing codes the desktop launcher mints for its own window.
 
@@ -2285,6 +2284,19 @@ CREATE TABLE IF NOT EXISTS two_factor_recovery (
 );
 """, _window_pairing))
 
+# What the operator entered into a widget an agent put into an answer (``daedalus/host/widgets.py``):
+# per session and per widget, the widget being the tool call that drew it. The session takes its
+# widgets' values with it; the page a widget was promoted to keeps a copy of its own.
+MIGRATIONS.append("""
+CREATE TABLE IF NOT EXISTS widget_storage (
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    widget_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (session_id, widget_id, key)
+);
+""")
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session

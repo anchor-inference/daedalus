@@ -2321,7 +2321,7 @@ class TelegramFront:
         verbosity = mode.verbosity if mode is not None and mode.verbosity is not None else self.config.telegram.verbosity
         renderer = RunRenderer(
             outbox,
-            RunView(run_id=run_id, model=model, verbosity=verbosity),
+            RunView(run_id=run_id, model=model, verbosity=verbosity, session_id=session_id),
             edit_interval=self.config.telegram.status_edit_interval_seconds,
             edit_tiers=self.config.telegram.status_edit_tiers,
             slow_tool_seconds=self.config.telegram.slow_tool_seconds,

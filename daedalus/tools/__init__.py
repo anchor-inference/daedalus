@@ -183,6 +183,11 @@ TOOL_GROUPS: dict[str, ToolGroupSpec] = {
         "PageEmit, PageStorage). Not an HTML file sent in the chat, not a change to the app's own code",
         "lazy",
     ),
+    "widgets": ToolGroupSpec(
+        "An interactive element inside the answer when interaction genuinely helps: a calculator, a comparison with "
+        "sliders, a small chart, a checklist (Widget). Not for text, tables or code, and not a screen of its own (pages)",
+        "auto",
+    ),
     "self_development": ToolGroupSpec(
         "Any change to yourself, your code, prompts or skills (repositories 'bot' and 'core'): a worktree "
         "(SelfWorkspace), then a pull request (SelfPropose) or an applied change, a rebuild, a rollback. Never git "

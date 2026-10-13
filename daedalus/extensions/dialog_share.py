@@ -118,12 +118,26 @@ def _media(raw: Any, slug: str) -> list[dict[str, Any]]:
     return out
 
 
-def published_message(view: dict[str, Any], slug: str) -> dict[str, Any] | None:
+def _widgets(calls: list[dict[str, Any]], failed: frozenset[str]) -> list[str]:
+    """The titles of the widgets a message drew. A widget cannot run on a page a stranger opens (its
+    stored values are the operator's), so the page names it and links to the app instead."""
+    titles: list[str] = []
+    for call in calls:
+        if call.get("name") != "Widget" or str(call.get("id") or "") in failed:
+            continue
+        args = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
+        title = " ".join(str(args.get("title") or "").split())[:120]
+        titles.append(redact.redact(title) if title else "")
+    return titles
+
+
+def published_message(view: dict[str, Any], slug: str, failed: frozenset[str] = frozenset()) -> dict[str, Any] | None:
     """One transcript row as the shared page may show it, or None when the row is not the dialog.
 
     An assistant message that also called a tool is the note beside that call, which the
     conversation keeps folded. It is omitted, unless the message is where a picture was
-    attached: the picture is part of the dialog and the text around it comes with it.
+    attached: the picture is part of the dialog and the text around it comes with it. A widget
+    the message drew is kept as its title alone (``failed`` names the calls that were refused).
     """
     role = view.get("role")
     if role == "user":
@@ -134,21 +148,23 @@ def published_message(view: dict[str, Any], slug: str) -> dict[str, Any] | None:
             return None
         origin = str(view.get("origin") or "")
         via = origin[len("inbound:") :] if origin.startswith("inbound:") else ""
-        return {"role": "user", "text": text, "at": str(view.get("created_at") or ""), "via": via[:80], "media": []}
+        return {"role": "user", "text": text, "at": str(view.get("created_at") or ""), "via": via[:80], "media": [], "widgets": []}
     if role != "assistant" or view.get("internal") or view.get("summary"):
         return None
     media = _media(view.get("media"), slug)
     calls = view.get("tool_calls") or []
-    if calls and not media:
+    widgets = _widgets(calls, failed)
+    if calls and not media and not widgets:
         return None
-    text = visible_text(str(view.get("text") or ""))
-    if not text and not media:
+    text = visible_text(str(view.get("text") or "")) if media or not calls else ""
+    if not text and not media and not widgets:
         return None
-    return {"role": "assistant", "text": text, "at": str(view.get("created_at") or ""), "via": "", "media": media}
+    return {"role": "assistant", "text": text, "at": str(view.get("created_at") or ""), "via": "", "media": media, "widgets": widgets}
 
 
 def public_messages(views: list[dict[str, Any]], slug: str) -> list[dict[str, Any]]:
-    return [item for view in views if (item := published_message(view, slug)) is not None]
+    failed = frozenset(str(result.get("id") or "") for view in views for result in view.get("tool_results") or [] if result.get("is_error"))
+    return [item for view in views if (item := published_message(view, slug, failed)) is not None]
 
 
 class DialogShares:
@@ -232,6 +248,8 @@ class DialogShares:
             "title": redact.redact(state.session.title or ""),
             "older": bool(first and oldest and int(first) > int(oldest)),
             "messages": public_messages(views, slug),
+            # Where a widget's "open in the app" leads: the conversation, behind the app's sign-in.
+            "app_path": f"/app/agents/{session_id}",
         }
 
     async def media(self, session_id: str, presentation_id: str, item_id: str) -> tuple[str, str] | None:

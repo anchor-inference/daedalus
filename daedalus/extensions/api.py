@@ -103,6 +103,7 @@ from daedalus.extensions import (
     api_staff_reports,
     api_two_factor,
     api_update_drains,
+    api_widgets,
     api_workflows,
     api_workspace_archive,
     api_worktrees,
@@ -1646,6 +1647,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_files.register(api, app, auth)
     # The operator's custom pages: their list and management, their storage, and the pages at /pages/<slug>/.
     api_pages.register(api, app, auth, sign_in=sign_in, owner_cookie=owner_cookie, session_cookie=SESSION_COOKIE)
+    # The widgets agents put into answers: the values each keeps, and a widget made a custom page.
+    api_widgets.register(api, app, auth)
     # The operator's own file manager on a folder or a file of the agent's, natively and on this machine only.
     api_reveal.register(api, app, auth)
     if isinstance(getattr(app, "db", None), Database):
