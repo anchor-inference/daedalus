@@ -199,9 +199,9 @@ async def doctor(i: Install) -> str:
 
 
 async def voice_concierge(i: Install) -> str:
-    from daedalus.extensions.voice import Voice
+    from daedalus.extensions.companion import Companion
 
-    extension = Voice(i.app)
+    extension = Companion(i.app)
     with pytest.raises(NoModelConfigured) as raised:
         await extension.say("what is on today")
     return str(raised.value)

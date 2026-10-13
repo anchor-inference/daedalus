@@ -101,7 +101,7 @@ class LocalTts:
 
     @property
     def settings(self) -> TtsConfig:
-        return self.config.voice.tts
+        return self.config.companion.tts
 
     def selected(self) -> TtsVoice | None:
         """The chosen voice, or None. An id that is no longer in the catalog counts as no choice."""

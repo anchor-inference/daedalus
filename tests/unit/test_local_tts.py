@@ -937,7 +937,7 @@ def test_the_picker_is_served_with_everything_the_page_needs(client: TestClient)
 def test_a_voice_that_is_not_downloaded_cannot_be_chosen(client: TestClient) -> None:
     refused = client.post("/api/tts/select", json={"voice": "ru-dmitri"}, headers=HEAD)
     assert refused.status_code == 409 and "not downloaded" in refused.json()["detail"]
-    assert client.app_state.config.voice.tts.local_voice == ""  # type: ignore[attr-defined]
+    assert client.app_state.config.companion.tts.local_voice == ""  # type: ignore[attr-defined]
 
 
 def test_downloading_something_that_is_not_a_voice_is_a_404(client: TestClient) -> None:
@@ -959,7 +959,7 @@ def test_choosing_a_voice_saves_it_and_warms_it(client: TestClient, monkeypatch:
     body = client.post("/api/tts/select", json={"voice": "ru-dmitri"}, headers=HEAD).json()
     assert body["selected"] == "ru-dmitri" and warmed == [1], "the voice loads when it is chosen, not mid-answer"
     assert body["load"]["state"] == "loading", "and the answer says the load has started, so the page can wait for it"
-    assert app.config.voice.tts.local_voice == "ru-dmitri"
+    assert app.config.companion.tts.local_voice == "ru-dmitri"
 
 
 def test_the_speed_and_the_threads_are_saved_on_their_own(client: TestClient) -> None:
@@ -975,10 +975,10 @@ def test_a_speaker_does_not_survive_a_change_of_voice(client: TestClient) -> Non
     pretend_installed(app, "en-kokoro")
     client.post("/api/tts/select", json={"voice": "en-kokoro"}, headers=HEAD)
     client.post("/api/tts/select", json={"speaker": "af_sarah"}, headers=HEAD)
-    assert app.config.voice.tts.local_speaker == "af_sarah"
+    assert app.config.companion.tts.local_speaker == "af_sarah"
     pretend_installed(app, "ru-dmitri")
     client.post("/api/tts/select", json={"voice": "ru-dmitri"}, headers=HEAD)
-    assert app.config.voice.tts.local_speaker == ""
+    assert app.config.companion.tts.local_speaker == ""
 
 
 def test_deleting_the_voice_in_use_stops_using_it(client: TestClient) -> None:
@@ -987,7 +987,7 @@ def test_deleting_the_voice_in_use_stops_using_it(client: TestClient) -> None:
     client.post("/api/tts/select", json={"voice": "ru-dmitri"}, headers=HEAD)
     body = client.delete("/api/tts/voices/ru-dmitri", headers=HEAD).json()
     assert body["deleted"] is True and body["selected"] == ""
-    assert app.config.voice.tts.local_voice == "" and not app.tts.downloads.is_installed("ru-dmitri")
+    assert app.config.companion.tts.local_voice == "" and not app.tts.downloads.is_installed("ru-dmitri")
 
 
 def test_a_sample_of_a_voice_that_is_not_here_is_refused_rather_than_downloaded(client: TestClient) -> None:
@@ -1050,7 +1050,7 @@ def test_downloading_the_chosen_voice_again_clears_a_load_that_failed(client: Te
     archive stayed "error" until the operator re-selected it.
     """
     app = client.app_state  # type: ignore[attr-defined]
-    app.config.voice.tts.local_voice = "ru-irina"
+    app.config.companion.tts.local_voice = "ru-irina"
     forgotten: list[str] = []
     original = app.tts.forget
     app.tts.forget = lambda: (forgotten.append("ru-irina"), original())[1]  # type: ignore[method-assign]
@@ -1079,7 +1079,7 @@ def with_voice_page(app: FakeApp, spoken_here: list[str], timed: list[dict[str, 
         async def interrupt(self) -> bool:
             return True
 
-        async def state(self) -> dict[str, Any]:
+        async def voice_state(self) -> dict[str, Any]:
             return {"enabled": True, "session_id": "", "model": "", "tts": {"configured": True, "reason": ""},
                     "stt": {"configured": False}, "agents": [], "listening": False}
 
@@ -1089,7 +1089,7 @@ def with_voice_page(app: FakeApp, spoken_here: list[str], timed: list[dict[str, 
         def last_turn(self) -> dict[str, Any]:
             return timed[-1] if timed else {"turn": "", "first_audio_ms": 0, "clip_ms": 0, "load_ms": 0}
 
-    app.extensions["voice"] = Extension()
+    app.extensions["companion"] = Extension()
 
 
 def clips_of(body: bytes) -> list[bytes]:
@@ -1105,8 +1105,8 @@ def clips_of(body: bytes) -> list[bytes]:
 
 def test_with_nothing_configured_the_browser_is_told_to_speak(client: TestClient) -> None:
     with_voice_page(client.app_state, [])  # type: ignore[attr-defined]
-    client.app_state.config.voice.tts.url = ""  # type: ignore[attr-defined]
-    answer = client.post("/api/voice/tts", json={"text": "a sentence"}, headers=HEAD)
+    client.app_state.config.companion.tts.url = ""  # type: ignore[attr-defined]
+    answer = client.post("/api/companion/tts", json={"text": "a sentence"}, headers=HEAD)
     assert answer.status_code == 404 and "browser" in answer.json()["detail"]
 
 
@@ -1114,8 +1114,8 @@ def test_an_endpoint_speaks_where_no_voice_is_downloaded(client: TestClient) -> 
     app = client.app_state  # type: ignore[attr-defined]
     sent: list[str] = []
     with_voice_page(app, sent)
-    app.config.voice.tts.url = "http://speech.invalid/v1"
-    answer = client.post("/api/voice/tts", json={"text": "a sentence"}, headers=HEAD)
+    app.config.companion.tts.url = "http://speech.invalid/v1"
+    answer = client.post("/api/companion/tts", json={"text": "a sentence"}, headers=HEAD)
     assert answer.status_code == 200 and answer.content == b"from-the-endpoint" and sent == ["a sentence"]
 
 
@@ -1123,13 +1123,13 @@ def test_a_downloaded_voice_speaks_ahead_of_the_endpoint(client: TestClient, mon
     app = client.app_state  # type: ignore[attr-defined]
     sent: list[str] = []
     with_voice_page(app, sent)
-    app.config.voice.tts.url = "http://speech.invalid/v1"
+    app.config.companion.tts.url = "http://speech.invalid/v1"
     pretend_installed(app)
     client.post("/api/tts/select", json={"voice": "ru-dmitri"}, headers=HEAD)
     monkeypatch.setitem(sys.modules, "sherpa_onnx", FakeSherpa)
     monkeypatch.setattr("daedalus.speech.tts_service.encoder_present", lambda: False)
     app.tts.forget()
-    answer = client.post("/api/voice/tts", json={"text": "One sentence here. Another one there."}, headers=HEAD)
+    answer = client.post("/api/companion/tts", json={"text": "One sentence here. Another one there."}, headers=HEAD)
     assert answer.status_code == 200 and answer.headers["content-type"].startswith(SEQUENCE_TYPE)
     assert answer.headers[MEDIA_TYPE_HEADER] == "audio/wav"
     clips = clips_of(answer.content)
@@ -1212,7 +1212,7 @@ async def test_hearing_another_voice_puts_the_chosen_one_back(
 def test_the_barge_in_endpoint_stops_the_run_and_the_reading(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     app = ready_to_speak(client, monkeypatch)
     before = app.tts._speaking
-    assert client.post("/api/voice/interrupt", json={}, headers=HEAD).json() == {"stopped": True}
+    assert client.post("/api/companion/interrupt", json={}, headers=HEAD).json() == {"stopped": True}
     assert app.tts._speaking != before, "the endpoint stopped the run but left the synthesiser reading"
 
 
@@ -1221,7 +1221,7 @@ def test_a_local_voice_that_fails_is_not_replaced_by_a_metered_endpoint(client: 
     app = client.app_state  # type: ignore[attr-defined]
     sent: list[str] = []
     with_voice_page(app, sent)
-    app.config.voice.tts.url = "http://speech.invalid/v1"
+    app.config.companion.tts.url = "http://speech.invalid/v1"
     pretend_installed(app)
     client.post("/api/tts/select", json={"voice": "ru-dmitri"}, headers=HEAD)
 
@@ -1234,7 +1234,7 @@ def test_a_local_voice_that_fails_is_not_replaced_by_a_metered_endpoint(client: 
 
     monkeypatch.setattr(app.tts, "audio", refuse)
     monkeypatch.setattr(app.tts, "clips", refuse_clips)
-    answer = client.post("/api/voice/tts", json={"text": "a sentence"}, headers=HEAD)
+    answer = client.post("/api/companion/tts", json={"text": "a sentence"}, headers=HEAD)
     assert answer.status_code == 503 and "would not load" in answer.json()["detail"]
     assert sent == []
 
@@ -1246,7 +1246,7 @@ def test_a_voice_that_breaks_in_a_way_nobody_expected_still_says_why(
     app = client.app_state  # type: ignore[attr-defined]
     sent: list[str] = []
     with_voice_page(app, sent)
-    app.config.voice.tts.url = "http://speech.invalid/v1"
+    app.config.companion.tts.url = "http://speech.invalid/v1"
     pretend_installed(app)
     client.post("/api/tts/select", json={"voice": "ru-dmitri"}, headers=HEAD)
 
@@ -1255,7 +1255,7 @@ def test_a_voice_that_breaks_in_a_way_nobody_expected_still_says_why(
         yield b""  # pragma: no cover - the raise above is the whole of it
 
     monkeypatch.setattr(app.tts, "clips", explode)
-    answer = client.post("/api/voice/tts", json={"text": "a sentence"}, headers=HEAD)
+    answer = client.post("/api/companion/tts", json={"text": "a sentence"}, headers=HEAD)
     assert answer.status_code == 503 and "another processor" in answer.json()["detail"]
     assert sent == []
 
@@ -1265,18 +1265,18 @@ def test_an_oversized_sentence_is_refused_before_anything_is_synthesised(client:
     with_voice_page(app, [])
     pretend_installed(app)
     client.post("/api/tts/select", json={"voice": "ru-dmitri"}, headers=HEAD)
-    assert client.post("/api/voice/tts", json={"text": "x" * 4000}, headers=HEAD).status_code == 413
-    assert client.post("/api/voice/tts", json={"text": "  "}, headers=HEAD).status_code == 400
+    assert client.post("/api/companion/tts", json={"text": "x" * 4000}, headers=HEAD).status_code == 413
+    assert client.post("/api/companion/tts", json={"text": "  "}, headers=HEAD).status_code == 400
 
 
 def test_the_page_is_told_which_of_the_three_is_speaking(client: TestClient) -> None:
     app = client.app_state  # type: ignore[attr-defined]
     with_voice_page(app, [])
-    body = client.get("/api/voice", headers=HEAD).json()
+    body = client.get("/api/companion/voice", headers=HEAD).json()
     assert body["tts"]["kind"] == "endpoint" and body["tts"]["state"] == "ready"
     pretend_installed(app)
     client.post("/api/tts/select", json={"voice": "ru-dmitri"}, headers=HEAD)
-    body = client.get("/api/voice", headers=HEAD).json()
+    body = client.get("/api/companion/voice", headers=HEAD).json()
     assert body["tts"]["kind"] == "local" and body["tts"]["voice"] == "Dmitri (Russian)"
     assert body["tts"]["state"] in ("loading", "ready", "error")
     assert body["tts"]["local"]["installed"] is True
@@ -1369,7 +1369,7 @@ def test_the_voice_page_and_the_picker_are_told_where_the_load_is(client: TestCl
     assert body["load"]["state"] in ("loading", "ready", "error")
     picker = client.get("/api/tts", headers=HEAD).json()
     assert set(picker["load"]) == {"state", "voice", "loaded_in_ms", "error"}
-    page = client.get("/api/voice", headers=HEAD).json()
+    page = client.get("/api/companion/voice", headers=HEAD).json()
     assert page["tts"]["kind"] == "local"
     assert page["tts"]["state"] in ("loading", "ready", "error")
     assert "loaded_in_ms" in page["tts"] and "last_turn" in page["tts"]
@@ -1403,7 +1403,7 @@ def test_nothing_is_warmed_where_no_voice_was_ever_chosen(tmp_path: Path) -> Non
 
 def test_a_voice_the_catalog_no_longer_has_is_ignored_rather_than_crashing(tmp_path: Path) -> None:
     config = RuntimeConfig()
-    config.voice.tts.local_voice = "a-voice-that-was-removed"
+    config.companion.tts.local_voice = "a-voice-that-was-removed"
     local = LocalTts(tmp_path, config)
     assert local.selected() is None and local.available() is False
     # The page is told nothing local speaks and why; the doctor says the same in a sentence.
@@ -1490,8 +1490,8 @@ def test_a_real_voice_starts_talking_long_before_it_has_finished_reading(tmp_pat
     into.parent.mkdir(parents=True, exist_ok=True)
     into.symlink_to(directory)
     config = RuntimeConfig()
-    config.voice.tts.local_voice = voice.id
-    config.voice.tts.local_threads = 2
+    config.companion.tts.local_voice = voice.id
+    config.companion.tts.local_threads = 2
     tts = LocalTts(state, config)
     tts.downloads._write_manifest({voice.id: Installed(id=voice.id, archive=voice.archive, sha256=voice.sha256, disk_bytes=1)})
     assert tts.available()

@@ -299,7 +299,7 @@ class Registry:
         entries = {cid: self.status(cid) for cid in ORDER}
         missing = [cid for cid, entry in entries.items() if entry.state == "missing"]
         needed: list[str] = []
-        if entries[SPEECH].state == "missing" and (self.config.stt.local_model or self.config.voice.tts.local_voice):
+        if entries[SPEECH].state == "missing" and (self.config.stt.local_model or self.config.companion.tts.local_voice):
             needed.append(SPEECH)
         if entries[OPUS].state == "missing" and self.settings.telegram_bot_token:
             needed.append(OPUS)

@@ -8,7 +8,7 @@ test has to work around. ``tests/unit/test_no_model.py`` is the one that asks fo
 
 from __future__ import annotations
 
-from daedalus.config import ModelConfig, ModelPresetConfig, RuntimeConfig, VisionConfig, VoiceConfig
+from daedalus.config import CompanionConfig, ModelConfig, ModelPresetConfig, RuntimeConfig, VisionConfig
 
 DEFAULT_PRESET = "deepseek.deepseek-v4-flash"
 FALLBACK_PRESET = "openrouter.deepseek-v4-flash"
@@ -16,7 +16,7 @@ VISION_PRESET = "openrouter.qwen-qwen3.7-flash"
 
 
 def presets() -> dict[str, ModelPresetConfig]:
-    """A default, a fallback behind it, and a fast image-capable one for the vision and voice slots."""
+    """A default, a fallback behind it, and a fast image-capable one for the vision and companion voice slots."""
     return {
         DEFAULT_PRESET: ModelPresetConfig(provider="deepseek", model="deepseek-flash"),
         FALLBACK_PRESET: ModelPresetConfig(provider="openrouter", model="deepseek/deepseek-v4-flash", images=True),
@@ -32,6 +32,6 @@ def model_config(**overrides: object) -> RuntimeConfig:
         model=ModelConfig(preset=DEFAULT_PRESET, chain=[FALLBACK_PRESET], auto_fallback=True),
         presets=presets(),
         vision=VisionConfig(preset=VISION_PRESET),
-        voice=VoiceConfig(preset=VISION_PRESET),
+        companion=CompanionConfig(preset=VISION_PRESET),
         **overrides,  # type: ignore[arg-type]
     )

@@ -44,7 +44,7 @@ MAX_SESSIONS = 4
 MAX_TERMINALS = 8
 MAX_PROJECTS = 4
 MAX_ID_LENGTH = 64
-"""What one report may name. A window shows at most a split view of two sessions plus the voice
+"""What one report may name. A window shows at most a split view of two sessions plus the companion
 screen's own; anything larger is not a window describing itself."""
 
 

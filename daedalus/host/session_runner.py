@@ -50,6 +50,8 @@ from protocore.tools.tool_search import TOOL_SEARCH_TOOL_NAME, ToolSearchTool
 
 from daedalus.browser import cookies as cookie_files
 from daedalus.config import (
+    COMPANION_ONLY_TOOLS,
+    COMPANION_TOOLS,
     DISPATCHER_TOOLS,
     ORCHESTRATOR_ONLY_TOOLS,
     ORCHESTRATOR_TOOLS,
@@ -58,8 +60,6 @@ from daedalus.config import (
     STAFF_ONLY_TOOLS,
     SUBAGENT_BLOCKED_TOOLS,
     SUBAGENT_ONLY_TOOLS,
-    VOICE_ONLY_TOOLS,
-    VOICE_TOOLS,
     ModeConfig,
     NoModelConfigured,
     RuntimeConfig,
@@ -356,7 +356,7 @@ class SessionState:
     """Bumped by every history rewrite (manual compaction); a persist captured before the bump is dropped."""
     configured_model: str = ""
     """``provider:model`` the session is set to answer with: the first rung of the chain this run was built on.
-    A live override (a preset chosen for the session, the voice concierge pointing at its own) is part of it —
+    A live override (a preset chosen for the session, the companion pointing at its own) is part of it —
     what the operator chose is never a fallback, however far it is from the global default."""
     effective_model: str = ""
     """``provider:model`` that actually answered last, as the core reported it at the message it started."""
@@ -1447,7 +1447,7 @@ class SessionManager:
         """The project a session works in, for anything that makes a child of it.
 
         Every path that creates a session from another one — a subagent, a spawned agent, a fork, a
-        scheduled task, the voice concierge's delegate — asks this and passes the answer on. A child
+        scheduled task, the companion's delegate — asks this and passes the answer on. A child
         that did not would carry the parent's directory without the parent's wall, which is the whole
         of the boundary gone through the commonest way of making a new worker.
         """
@@ -2686,7 +2686,7 @@ class SessionManager:
         known_paths.update(Path(r["workspace"]).resolve() for r in sched)
         known_paths.add((self.settings.workspaces_dir / "heartbeat").resolve())
         # A system project's folder lives under the workspaces root and is not a workspace nobody
-        # refers to: the concierge's agents work in it, and a sweep would take their files with it.
+        # refers to: the companion's agents work in it, and a sweep would take their files with it.
         for project in await self.projects.list():
             for folder in project.folders:
                 with suppress(OSError):
@@ -2858,7 +2858,7 @@ class SessionManager:
             send_file=_bind(hooks.get("send_file"), state.session.id),
             attach_media=lambda items, layout: self.media.stage(state.session.id, state.run_id or "", items, layout=layout),
             spawn_agent=_bind(hooks.get("spawn_agent"), state.session.id),
-            schedule=hooks.get("schedule"),
+            schedule=_own_schedules(hooks.get("schedule"), state.session.id) if self.is_companion(state) else hooks.get("schedule"),
             self_propose=hooks.get("self_propose"),
             self_apply=hooks.get("self_apply"),
             self_rebuild=hooks.get("self_rebuild"),
@@ -3169,7 +3169,7 @@ class SessionManager:
         async with state.submit_lock:
             if not self.config.has_model:
                 # The one place every way in converges: chat, the API, a schedule, a subagent, the
-                # voice concierge. None of them can start a run without a model, and all of them
+                # companion. None of them can start a run without a model, and all of them
                 # already turn a RuntimeError here into a message the operator reads.
                 raise NoModelConfigured
             if self.shutting_down:
@@ -3889,7 +3889,7 @@ class SessionManager:
             max_output_tokens=preset.max_output_tokens,
             extra_notes=self.notes_for(state, window=int(state.context_window or preset.context_window or 0)),
             tool_visibility_policy=self.tool_policy_for(state),
-            role="voice" if self.is_voice(state) else "orchestrator" if self.is_orchestrator(state) else "dispatcher" if self.is_dispatcher(state) else "agent",
+            role="companion" if self.is_companion(state) else "orchestrator" if self.is_orchestrator(state) else "dispatcher" if self.is_dispatcher(state) else "agent",
             max_advertised_tools=self.advertised_tools_limit(rungs),
             discovered_tools=self.discovered_tools_for(state),
             loaded_tool_groups=self.loaded_groups_for(state),
@@ -4438,7 +4438,7 @@ class SessionManager:
             # The announcement goes out before the task is made, and the task before this function
             # returns: a created task does not run until the loop gets the turn back, which is after
             # ``_drive`` has ended and the session reads as idle. A run-finished callback that starts
-            # the next run — the voice concierge answering, a leader collecting a subagent — would
+            # the next run — the companion answering, a leader collecting a subagent — would
             # otherwise be told the run is over while this one is still technically going.
             # An interrupted run is not a settled one: it is parked. Its snapshot stays where it is,
             # ``resume_unfinished()`` drives it on after the restart, and nothing is announced —
@@ -5159,9 +5159,9 @@ class SessionManager:
         return {str(n) for n in (state.metadata.get("tools_off") or ()) if str(n) in known}
 
     @staticmethod
-    def is_voice(state: SessionState) -> bool:
-        """Whether this is the voice session: the operator's spoken conversation with the concierge."""
-        return bool(state.metadata.get("voice"))
+    def is_companion(state: SessionState) -> bool:
+        """Whether this is the companion: the operator's standing personal agent, by text and by voice."""
+        return bool(state.metadata.get("companion"))
 
     @staticmethod
     def is_staff(state: SessionState) -> bool:
@@ -5193,13 +5193,13 @@ class SessionManager:
         """Restrictions selected directly for this session, before its parent narrows them."""
         known = {t.name for t in self.tools.list_all()}
         blocked = blocked_for(self.mcp, self.mcp_enabled(state)) | self.tools_off(state)
-        # The concierge talks and hands work over; it may not read, write or run anything itself, and the
-        # tools that hand work over are its alone. Neither rule goes through a mode, so editing one cannot
-        # give a session being spoken to a shell, nor give a working agent a second way to spawn one.
-        blocked |= (known - set(VOICE_TOOLS)) if self.is_voice(state) else (known & set(VOICE_ONLY_TOOLS))
+        # The companion talks, owns goals and hands work over; it may not read, write or run anything
+        # itself, and the tools that hand work over are its alone. Neither rule goes through a mode, so
+        # editing one cannot give the companion a shell, nor give a working agent a second way to spawn one.
+        blocked |= (known - set(COMPANION_TOOLS)) if self.is_companion(state) else (known & set(COMPANION_ONLY_TOOLS))
         # A staff member asks the orchestrator rather than the operator and works on its task rather
         # than starting agents, schedules or loops; its two reporting tools are its alone. Beside the
-        # voice rule and for the same reason: no mode edit can hand either side the other's tools.
+        # companion rule and for the same reason: no mode edit can hand either side the other's tools.
         blocked |= (known & set(STAFF_BLOCKED_TOOLS)) if self.is_staff(state) else (known & set(STAFF_ONLY_TOOLS))
         # A subagent reaches the operator through its leader, never past it. Its descendants inherit
         # this through the parent chain below, and a staff member's subagents through both rules.
@@ -5412,7 +5412,14 @@ class SessionManager:
         return chosen
 
     def tool_group_loads_for(self, state: SessionState) -> dict[str, str]:
-        """How each host group reaches this session's next run: the settings, its model, then its own choice."""
+        """How each host group reaches this session's next run: the settings, its model, then its own choice.
+
+        The companion has every group eager: it has no ToolSearch to load one with, and what it is
+        allowed of each group (its schedules, the calendar's reading half) is a handful of tools the
+        policy has already cut every group down to.
+        """
+        if self.is_companion(state):
+            return {name: "eager" for name in tool_groups.configured_loads(self.config)}
         return tool_groups.resolved_loads(self.config, state.metadata, on_demand=state.on_demand_groups)
 
     async def refresh_on_demand_groups(self, state: SessionState) -> None:
@@ -6673,6 +6680,25 @@ def _bind(fn: Callable[..., Awaitable[Any]] | None, session_id: str) -> Callable
         return await fn(session_id, *args, **kwargs)
 
     return bound
+
+
+def _own_schedules(fn: Callable[..., Awaitable[Any]] | None, session_id: str) -> Callable[..., Awaitable[Any]] | None:
+    """The schedule service as the companion sees it: the list holds only what it proposed itself.
+
+    Every other session's ScheduleList shows every schedule, which is how an agent avoids proposing
+    a second copy of one. The companion is the operator's personal agent and its schedules are its
+    own; reading the operator's whole timetable back to them is not what "your schedules" means.
+    """
+    if fn is None:
+        return None
+
+    async def scoped(op: str, **kwargs: Any) -> Any:
+        result = await fn(op, **kwargs)
+        if op != "list":
+            return result
+        return [row for row in result if session_id in (row.get("created_by_session"), row.get("source_session_id"))]
+
+    return scoped
 
 
 __all__ = ["HOME_KEY", "Attachment", "HostUnreachable", "PendingQuestion", "SessionManager", "SessionState", "WorkspaceUnreachable", "annotate_summary", "home_of", "host_home_name", "verbatim_tail"]

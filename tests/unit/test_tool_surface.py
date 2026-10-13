@@ -112,7 +112,7 @@ async def test_no_session_pins_a_tool_and_the_refusals_are_what_they_were(settin
             await manager.create_session("child", metadata={"subagent_of": ordinary.session.id}),
             await manager.create_session("staff", metadata={"staff_session_id": "ss1", "staff_id": "st1"}),
             await manager.create_session("orchestrator", metadata={"orchestrator_of": "p1"}),
-            await manager.create_session("voice", metadata={"voice": True}),
+            await manager.create_session("voice", metadata={"companion": True}),
             await manager.create_session("main", metadata={"dispatcher": True}),
         ]
         for state in states:

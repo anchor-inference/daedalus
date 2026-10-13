@@ -28,7 +28,7 @@ from protocore.contracts.types import MessageRole, TextBlock
 
 from daedalus.config import RuntimeConfig, Settings
 from daedalus.extensions.api import build_app
-from daedalus.extensions.voice import PROJECT_DIR, PROJECT_KIND, Voice
+from daedalus.extensions.companion import PROJECT_DIR, PROJECT_KIND, TITLE, Companion
 from daedalus.host.session_runner import SessionManager
 from daedalus.stores.database import MIGRATIONS, Database
 from daedalus.stores.projects import ProjectError, ProjectStore
@@ -117,7 +117,8 @@ async def test_the_duplicate_system_projects_an_installation_already_has_are_mer
     try:
         store = ProjectStore(db)
         projects = await store.list()
-        assert [p.name for p in projects] == ["Bakery", "Voice"], "one Voice folder is left, and the operator's is untouched"
+        # The voice concierge's folder became the companion's (migration 111) on the way up.
+        assert [p.name for p in projects] == ["Bakery", "Companion"], "one Voice folder is left, and the operator's is untouched"
         voice = next(p for p in projects if p.settings.system == PROJECT_KIND)
         assert voice.id == "v0", "the oldest is the one that is kept"
         rows = await db.fetchall("SELECT id, project_id FROM sessions ORDER BY id")
@@ -152,10 +153,10 @@ async def test_unreadable_project_settings_do_not_prevent_migration(tmp_path: Pa
         await db.open()
         try:
             rows = await db.fetchall("SELECT id, settings, system FROM projects ORDER BY id")
-            assert [(row["id"], row["system"]) for row in rows] == [("p", ""), ("v", "voice")]
+            assert [(row["id"], row["system"]) for row in rows] == [("p", ""), ("v", "companion")]
             # Unreadable settings are read as none at all, and the keys every project now has are added.
             loaded = {row["id"]: json.loads(row["settings"]) for row in rows}
-            assert loaded["v"]["system"] == "voice" and "system" not in loaded["p"]
+            assert loaded["v"]["system"] == "companion" and "system" not in loaded["p"]
             assert all(value["ephemeral"] is False and value["orchestrator"]["enabled"] is False for value in loaded.values())
             rows = await db.fetchall("SELECT project_id FROM sessions WHERE id = 's'")
             assert rows[0]["project_id"] == "p"
@@ -194,7 +195,7 @@ async def test_the_listing_answers_rows_and_project_folders(settings: Settings, 
     manager = SessionManager(settings, config, db=db)
     await manager.start()
     app = _app(settings, config, db, manager)
-    voice = Voice(app)
+    voice = Companion(app)
     root = tmp_path / "bakery"
     root.mkdir()
     try:
@@ -208,11 +209,11 @@ async def test_the_listing_answers_rows_and_project_folders(settings: Settings, 
             voice_id = await voice.session_id()
             listing = (await client.get("/api/sessions", headers=HEADERS)).json()
             folders = {p["name"]: p for p in listing["projects"]}
-            assert folders["Voice"]["system"] == PROJECT_KIND and folders["Voice"]["total"] == 1
+            assert folders[TITLE]["system"] == PROJECT_KIND and folders[TITLE]["total"] == 1
             assert folders["Bakery"]["total"] == 1 and folders["Bakery"]["system"] == ""
             assert "free" not in listing
             rows = {r["id"]: r for r in listing["sessions"]}
-            assert rows[voice_id]["project_id"] == folders["Voice"]["id"]
+            assert rows[voice_id]["project_id"] == folders[TITLE]["id"]
             assert rows[automatic]["project_id"] and rows[automatic]["workspace_own"] is False
             assert (await client.get("/api/workspaces", headers=HEADERS)).status_code == 404
     finally:
@@ -309,7 +310,7 @@ def _no_runs(manager: SessionManager) -> list[tuple[str, str]]:
 
 async def test_a_delegated_agent_shares_the_concierges_folder_unless_it_asks_for_its_own(voice_app: Any) -> None:
     manager: SessionManager = voice_app.manager
-    voice = Voice(voice_app)
+    voice = Companion(voice_app)
     _no_runs(manager)
     project = await voice.project()
 
@@ -318,7 +319,7 @@ async def test_a_delegated_agent_shares_the_concierges_folder_unless_it_asks_for
     mine = await voice.delegate(title="Errand", task="unrelated", workspace="own")
 
     for result in (shared, other):
-        assert result["workspace"] == "shared" and result["project"] == "Voice"
+        assert result["workspace"] == "shared" and result["project"] == TITLE
         assert manager.live_state(result["session_id"]).workspace == project.primary.path  # type: ignore[union-attr]
     # Two agents on one errand see the same files; a third one sees none of them.
     assert manager.live_state(mine["session_id"]).workspace.parent.parent == project.primary.path  # type: ignore[union-attr]
@@ -336,7 +337,7 @@ async def test_a_delegated_agent_shares_the_concierges_folder_unless_it_asks_for
 
 async def test_an_agent_can_be_started_in_a_project_the_operator_named_and_nowhere_else(voice_app: Any, tmp_path: Path) -> None:
     manager: SessionManager = voice_app.manager
-    voice = Voice(voice_app)
+    voice = Companion(voice_app)
     _no_runs(manager)
     root = tmp_path / "bakery"
     root.mkdir()
@@ -363,7 +364,7 @@ async def test_an_agent_can_be_started_in_a_project_the_operator_named_and_nowhe
 
 
 async def test_steering_an_agent_names_no_folder_and_no_project(voice_app: Any) -> None:
-    voice = Voice(voice_app)
+    voice = Companion(voice_app)
     manager: SessionManager = voice_app.manager
     _no_runs(manager)
     started = await voice.delegate(title="Invoices", task="read them")
@@ -374,9 +375,9 @@ async def test_steering_an_agent_names_no_folder_and_no_project(voice_app: Any) 
 async def test_a_voice_session_from_before_the_project_existed_is_taken_into_it(voice_app: Any) -> None:
     """The concierge session of an installation that had one before this: it joins, it does not restart."""
     manager: SessionManager = voice_app.manager
-    voice = Voice(voice_app)
-    legacy = await manager.create_session("Voice", metadata={"voice": True})
-    await voice_app.db.kv_set("voice_session", legacy.session.id)
+    voice = Companion(voice_app)
+    legacy = await manager.create_session("Voice", metadata={"companion": True})
+    await voice_app.db.kv_set("companion_session", legacy.session.id)
     assert legacy.project is not None and not legacy.project.settings.system
 
     assert await voice.session_id() == legacy.session.id
@@ -387,10 +388,10 @@ async def test_a_voice_session_from_before_the_project_existed_is_taken_into_it(
 # -- steering, through a real engine ----------------------------------------------------------
 
 
-async def _voice_over(settings: Settings, db: Database, provider: ScriptedProvider) -> tuple[SessionManager, Voice]:
+async def _voice_over(settings: Settings, db: Database, provider: ScriptedProvider) -> tuple[SessionManager, Companion]:
     manager = await _manager(settings, db, provider)
     app = _app(settings, manager.config, db, manager)
-    return manager, Voice(app)
+    return manager, Companion(app)
 
 
 async def test_what_the_concierge_says_to_a_running_agent_reaches_its_next_model_call(settings: Settings, db: Database) -> None:

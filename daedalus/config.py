@@ -1161,18 +1161,53 @@ class TtsConfig(BaseModel):
     timeout_seconds: float = Field(default=60.0, ge=5)
 
 
-class VoiceConfig(BaseModel):
-    """The voice page: a small fast model the operator talks to, which hands real work to agent sessions.
+AVATAR_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 
-    ``preset`` should name a model that answers in a second or two — a conversation stalls where a
-    thinking model would merely be slow. Empty falls back to the default preset.
+
+class AvatarConfig(BaseModel):
+    """The companion's face: four parameters a small SVG is drawn from, in the app and on the desktop.
+
+    Parameters rather than a picture, so every place that shows it — the page header, the Agents
+    list, the desktop's tray — draws the same face at its own size from forty bytes of settings.
+    """
+
+    shape: Literal["orb", "drop", "square", "star", "cloud"] = "orb"
+    color: str = "#7c6cf0"
+    eyes: Literal["dots", "wide", "sleepy", "happy", "visor"] = "dots"
+    accessory: Literal["none", "antenna", "halo", "hat", "glasses", "bow"] = "none"
+
+    @field_validator("color")
+    @classmethod
+    def _color(cls, value: str) -> str:
+        value = value.strip()
+        if not AVATAR_COLOR.match(value):
+            raise ValueError("the colour is a #rrggbb hex value")
+        return value.lower()
+
+
+class CompanionConfig(BaseModel):
+    """The companion: the operator's standing personal agent, talked to by text and by voice.
+
+    It owns goals over time, hands real work to agent sessions and reports back. It never reads,
+    writes or runs anything itself; that is enforced by the host, not by this section.
+
+    Two models, because the two kinds of turn want different things. ``preset`` answers a live voice
+    turn and should name a model that answers in a second or two — a conversation stalls where a
+    thinking model would merely be slow; empty falls back to the default preset when that is fast
+    enough. ``background_preset`` answers typed messages, agent reports and goal checks, which nobody
+    is waiting on out loud; empty is the default preset.
     """
 
     enabled: bool = True
+    name: str = Field(default="Daedalus", min_length=1, max_length=40)
+    """What the companion is called, in the app and in its own brief."""
+    avatar: AvatarConfig = Field(default_factory=AvatarConfig)
     preset: str = ""
-    """The concierge's model preset; pick a fast one (no thinking, or low effort). Empty = the default preset."""
+    """The model for live voice turns; pick a fast one (no thinking, or low effort). Empty = the default preset."""
+    background_preset: str = ""
+    """The model for typed messages, agent reports and goal checks. Empty = the default preset."""
     progress: bool = True
-    """Whether an agent's mid-run words are relayed to the concierge at all. Off leaves the final answer
+    """Whether an agent's mid-run words are relayed to the companion at all. Off leaves the final answer
     and the questions, which is the quieter conversation and the cheaper one."""
     progress_window_seconds: float = Field(default=20.0, ge=0)
     """How long an agent's newest interim waits before it is relayed. An agent writes a line, calls a tool,
@@ -1184,9 +1219,12 @@ class VoiceConfig(BaseModel):
     progress_max_per_minute: int = Field(default=3, ge=0)
     """Interims relayed in any one minute across *all* the agents together. The gap above is per agent, and
     twenty agents each obeying it is still twenty spoken turns a minute — twenty model calls, each one
-    growing the concierge's context. Past this cap the line is dropped rather than queued: an interim is
+    growing the companion's context. Past this cap the line is dropped rather than queued: an interim is
     superseded by the agent's next paragraph and by its final answer, so a late one is worth nothing.
     ``0`` relays no interims at all, which is what ``progress = false`` says more plainly."""
+    goal_min_interval_minutes: int = Field(default=15, ge=1)
+    """The shortest cadence a goal may be checked at. Every check is a model turn; a goal checked every
+    minute is a bill, not a goal."""
     tts: TtsConfig = Field(default_factory=TtsConfig)
 
 
@@ -1231,12 +1269,28 @@ DEFAULT_MODES: dict[str, ModeConfig] = {
 }
 
 
-VOICE_TOOLS = ["Delegate", "Agents", "AgentResult", "StopAgent", "Projects", "WebSearch"]
-"""Everything the concierge may call: hand work to an agent, look at the agents, stop one, and answer a
-quick factual question itself. Nothing that reads, writes or runs anything — that is what the agents are for."""
+COMPANION_ONLY_TOOLS = ["Delegate", "Agents", "AgentResult", "StopAgent", "Projects", "GoalCreate", "GoalUpdate", "GoalList", "GoalReport"]
+"""The tools that exist for the companion alone; every other session is blocked from them (it has SpawnAgent)."""
 
-VOICE_ONLY_TOOLS = ["Delegate", "Agents", "AgentResult", "StopAgent", "Projects"]
-"""The tools that exist for the concierge alone; every other session is blocked from them (it has SpawnAgent)."""
+COMPANION_TOOLS = [
+    *COMPANION_ONLY_TOOLS,
+    "WebSearch",
+    "Remember",
+    "Recall",
+    "Forget",
+    "ScheduleCreate",
+    "ScheduleList",
+    "ScheduleDelete",
+    "Notify",
+    "CalendarEvents",
+    "CalendarList",
+    "CalendarFindTime",
+]
+"""Everything the companion may call: hand work to an agent and follow it, own goals, keep its own notes and
+schedules, tell the operator something, read the calendar and answer a quick factual question itself. Nothing
+that reads or writes a file, runs a command or drives a browser — that is what its agents are for. The
+schedule tools are scoped to the session that proposes them and every schedule waits for the operator's
+approval; the calendar is read, never written."""
 
 STAFF_BLOCKED_TOOLS = [
     "AskUser",
@@ -1263,7 +1317,7 @@ STAFF_BLOCKED_TOOLS = [
 """What a staff member of a project may not call. It asks the orchestrator, not the operator
 (``AskOrchestrator``), reports to the orchestrator rather than notifying the operator itself, works
 on the task it was given rather than starting agents, schedules, loops or intents of its own, and
-never changes the installation. Enforced by the host beside the voice rule,
+never changes the installation. Enforced by the host beside the companion rule,
 not through a mode, so editing a mode cannot hand a staff member any of them."""
 
 STAFF_ONLY_TOOLS = ["Report", "AskOrchestrator"]
@@ -1328,7 +1382,7 @@ DISPATCHER_TOOLS = ["Projects", "Delegate", "Progress", "Cancel", "CreateProject
 """Everything the main orchestrator may call. It routes the operator's words to projects and follows
 what it handed over; it never touches files, staff or a board itself, and it never blocks on a
 question (no AskUser: a main orchestrator paused on a question could not hear its projects report).
-Its own tools share names with other roles' tools (the voice concierge's Delegate and Projects, the
+Its own tools share names with other roles' tools (the companion's Delegate and Projects, the
 project orchestrator's Answer), so they live in a registry of their own and this list is the whole of it."""
 
 
@@ -1977,7 +2031,7 @@ class RuntimeConfig(BaseModel):
     disk: DiskConfig = Field(default_factory=DiskConfig)
     asr: AsrConfig = Field(default_factory=AsrConfig)
     stt: SttConfig = Field(default_factory=SttConfig)
-    voice: VoiceConfig = Field(default_factory=VoiceConfig)
+    companion: CompanionConfig = Field(default_factory=CompanionConfig)
     board: BoardConfig = Field(default_factory=BoardConfig)
     peers: PeersConfig = Field(default_factory=PeersConfig)
     subagents: SubagentsConfig = Field(default_factory=SubagentsConfig)
@@ -2543,6 +2597,37 @@ def _migrate_compaction_ratio(raw: dict[str, Any]) -> bool:
     return True
 
 
+def _migrate_voice_to_companion(raw: dict[str, Any]) -> bool:
+    """``[voice]`` became ``[companion]`` when the voice concierge became the standing companion.
+
+    Every key carries over as it was — the model, the relay limits and the whole ``tts`` table — and
+    the navigation's ``voice`` entry becomes ``companion`` wherever the operator placed it, so the
+    page keeps its spot on the rail rather than falling back to where a new screen ships.
+    """
+    changed = False
+    voice = raw.pop("voice", None)
+    if isinstance(voice, dict):
+        companion = raw.get("companion")
+        if not isinstance(companion, dict):
+            companion = raw["companion"] = {}
+        for key, value in voice.items():
+            companion.setdefault(key, value)
+        changed = True
+    navigation = raw.get("navigation")
+    if isinstance(navigation, dict):
+        for field in ("rail", "more", "drawer", "hidden"):
+            items = navigation.get(field)
+            if isinstance(items, list) and "voice" in items:
+                renamed = ["companion" if item == "voice" else item for item in items]
+                navigation[field] = list(dict.fromkeys(renamed))
+                changed = True
+        icons = navigation.get("icons")
+        if isinstance(icons, dict) and "voice" in icons:
+            icons.setdefault("companion", icons.pop("voice"))
+            changed = True
+    return changed
+
+
 def _migrate(raw: dict[str, Any]) -> bool:
     """Rewrite config shapes older versions wrote; returns True when something changed."""
     changed = _seed_presets(raw)
@@ -2557,6 +2642,7 @@ def _migrate(raw: dict[str, Any]) -> bool:
     changed = _seed_context_window_source(raw) or changed
     changed = _seed_from_setup(raw) or changed
     changed = _migrate_web_search(raw) or changed
+    changed = _migrate_voice_to_companion(raw) or changed
     for provider in (raw.get("providers") or {}).values():
         pricing = provider.get("pricing") if isinstance(provider, dict) else None
         if not isinstance(pricing, dict):
@@ -2617,10 +2703,11 @@ __all__ = [
     "DiskConfig",
     "WebhookConfig",
     "VisionConfig",
-    "VoiceConfig",
+    "AvatarConfig",
+    "CompanionConfig",
     "TtsConfig",
-    "VOICE_TOOLS",
-    "VOICE_ONLY_TOOLS",
+    "COMPANION_TOOLS",
+    "COMPANION_ONLY_TOOLS",
     "STAFF_BLOCKED_TOOLS",
     "STAFF_ONLY_TOOLS",
     "SUBAGENT_BLOCKED_TOOLS",

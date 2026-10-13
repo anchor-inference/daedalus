@@ -17,7 +17,7 @@ def test_an_empty_section_is_the_shipped_layout_and_survives_the_file(tmp_path) 
     assert config.navigation == NavigationConfig()
     assert config.navigation.model_dump() == {"rail": [], "more": [], "drawer": [], "hidden": [], "icons": {}}
     path = tmp_path / "config.toml"
-    laid_out = config.model_copy(update={"navigation": NavigationConfig(rail=["board", "page:dosing"], hidden=["voice"], icons={"board": "flag"})})
+    laid_out = config.model_copy(update={"navigation": NavigationConfig(rail=["board", "page:dosing"], hidden=["harnesses"], icons={"board": "flag"})})
     laid_out.save(path)
     assert RuntimeConfig.load(path).navigation == laid_out.navigation
 
@@ -53,7 +53,7 @@ def test_settings_save_the_section_and_a_field_sent_replaces_it_whole(tmp_path) 
 
         saved = client.put("/api/settings", headers=HEAD, json={
             "base_revision": view["revision"],
-            "navigation": {"rail": ["terminals", "inbox"], "hidden": ["voice"], "icons": {"terminals": "bolt", "inbox": "bell"}},
+            "navigation": {"rail": ["terminals", "inbox"], "hidden": ["harnesses"], "icons": {"terminals": "bolt", "inbox": "bell"}},
         })
         assert saved.status_code == 200, saved.text
         assert app.config.navigation.rail == ["terminals", "inbox"]
@@ -64,7 +64,7 @@ def test_settings_save_the_section_and_a_field_sent_replaces_it_whole(tmp_path) 
         assert again.status_code == 200, again.text
         assert app.config.navigation.icons == {"inbox": "bell"}
         # A field left out is kept.
-        assert app.config.navigation.rail == ["terminals", "inbox"] and app.config.navigation.hidden == ["voice"]
+        assert app.config.navigation.rail == ["terminals", "inbox"] and app.config.navigation.hidden == ["harnesses"]
 
         refused = client.put("/api/settings", headers=HEAD, json={"base_revision": again.json()["revision"], "navigation": {"rail": ["no spaces allowed"]}})
         assert refused.status_code == 400
