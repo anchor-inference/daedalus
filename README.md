@@ -225,14 +225,15 @@ and the two-line summary section 8 asks for. Never paste keys or tokens back int
 ```
 
 Whichever way you install it, the app opens on *Add a model* until one exists: the installation ships
-with no model picked for you. With no Telegram bot and no passkey yet, the first start writes a one-time
-**pairing link** to `pairing-url` in the state directory; a fresh one:
+with no model picked for you. With no Telegram bot, every start writes a one-time **pairing link** to
+`pairing-url` in the state directory; a fresh one:
 
 ```bash
 docker compose -f deploy/compose.yaml exec daedalus python -m daedalus auth pair
 ```
 
-Then add a passkey in Settings → Security.
+Then, if you like, switch on two-factor sign-in in Settings → Security: after the link or Telegram,
+the login screen also asks for the six digits from an authenticator app.
 
 More in [docs/INSTALL.md](docs/INSTALL.md): [terminals](docs/INSTALL.md#terminals),
 [the agent's browser](docs/INSTALL.md#the-agents-browser),

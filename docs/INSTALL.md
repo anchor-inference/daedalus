@@ -218,21 +218,43 @@ Nothing here is a tier: it is the same program, and each row is a real consequen
 ## Signing in without Telegram
 
 <p align="center">
-  <img src="screenshots/login.png" alt="The login screen: a passkey, or the one-time pairing link, with the language picker in the corner of the card" width="70%" />
+  <img src="screenshots/login.png" alt="The login screen: the one-time pairing link, with the language picker in the corner of the card" width="70%" />
 </p>
 
-A start with no other way in (no bot, no passkey yet) writes a one-time **pairing link** to `pairing-url` in the
-state directory, readable by its owner only. Open it once and this browser is signed in; it expires after 30
+A start with no Telegram bot writes a one-time **pairing link** to `pairing-url` in the state directory, readable by its owner only. Open it once and this browser is signed in; it expires after 30
 minutes, is spent on first use, and using one revokes the rest. A fresh one:
 
 ```bash
 docker compose -f deploy/compose.yaml exec daedalus python -m daedalus auth pair
 ```
 
-Then add a **passkey** in Settings → Security: the key stays in the device (or its password manager) and signs
-you in from the login screen with no link and no password. A passkey belongs to the address it was made at, so
-set `MINIAPP_PUBLIC_URL` before enrolling one; on the machine itself, open the app at `http://localhost:8765`
-rather than at the IP, which is not a name a key can belong to.
+### Two-factor sign-in
+
+<p align="center">
+  <img src="screenshots/settings-security.png" alt="Settings → Security: two-factor authentication on, with the recovery codes left and the buttons for new codes and turning it off" width="70%" />
+</p>
+
+Settings → Security → **Two-factor authentication** adds a second step to every sign-in in a browser: after the
+pairing link or Telegram's widget, the login screen asks for the six digits an authenticator app shows
+(Google Authenticator, Aegis, 1Password, Bitwarden — any app that reads an `otpauth://` QR code; SHA-1, six
+digits, thirty seconds). Scan the QR code or type the key under it, and type the first code to switch it on.
+Ten **recovery codes** are shown once: each signs in once in place of the six digits, for a lost phone, so
+keep them somewhere that is not the phone. Turning it off or making new recovery codes asks for a code.
+
+<p align="center">
+  <img src="screenshots/login-code.png" alt="The login screen's second step: the field for the six-digit code or a recovery code" width="70%" />
+</p>
+
+The secret is sealed with the key of the operator's secrets and the recovery codes are stored as digests, so the
+database alone holds nothing usable. A code is good once; one step of clock drift either way is accepted. Five
+wrong codes in five minutes pause every attempt until the oldest ages out, and one sign-in gets five tries before
+it has to start again from the link.
+
+What it does not cover, on purpose: Telegram's Mini App (Telegram vouches for each request, and the bot's chat
+already gives the agent's whole power with no code), the API token (a script's credential that could switch
+two-factor off anyway), and the desktop window, which signs in through its launcher with a short-lived link of
+its own (`daedalus auth pair --window`) and offers no enrolment. Minting such a link means running a command
+inside the installation, which is more than the code would guard.
 
 ## With Telegram
 
