@@ -48,7 +48,9 @@ export function DesktopPanel() {
   if (!info) return <div className="empty">{t("common.loading")}</div>;
   const mac = info.platform === "darwin";
 
-  const shortcut = (name: ShortcutName, title: string, desc: string) => {
+  // The anchor is spelled out at each call, not built from the name, so the settings index test finds
+  // the row its link points at by reading this file.
+  const shortcut = ({ name, setting }: { name: ShortcutName; setting: string }, title: string, desc: string) => {
     const value = info.settings[name];
     const report = info.report[name];
     const refused = info.errors[name];
@@ -58,7 +60,7 @@ export function DesktopPanel() {
         {desc}
         {problem ? <span className="settings-desktop-note bad" role="alert"> {problem}</span>
           : report?.ok ? <span className="settings-desktop-note ok"> {t("settings.desktop.shortcut.ok")}</span> : null}
-      </>} data-setting={`desktop.${name}`}>
+      </>} data-setting={setting}>
         <span className="settings-desktop-shortcut">
           <kbd className={recording === name ? "recording" : ""}>{recording === name ? t("settings.desktop.shortcut.record") : value ? showAccelerator(value, mac) : t("settings.desktop.shortcut.none")}</kbd>
           <button type="button" className="btn small" onClick={() => setRecording(recording === name ? null : name)}>{t("settings.desktop.shortcut.change")}</button>
@@ -73,8 +75,8 @@ export function DesktopPanel() {
   return (
     <div className="card settings-desktop">
       <div className="section-title" style={{ marginTop: 0 }}>{t("settings.sec.desktop")}</div>
-      {shortcut("quickChat", t("settings.desktop.quick.title"), t("settings.desktop.quick.desc"))}
-      {shortcut("appshot", t("settings.desktop.appshot.title"), t("settings.desktop.appshot.desc"))}
+      {shortcut({ name: "quickChat", setting: "desktop.quickChat" }, t("settings.desktop.quick.title"), t("settings.desktop.quick.desc"))}
+      {shortcut({ name: "appshot", setting: "desktop.appshot" }, t("settings.desktop.appshot.title"), t("settings.desktop.appshot.desc"))}
       {info.wayland && (
         <div className="sub settings-desktop-wayland" role="note">
           {t("settings.desktop.wayland")}

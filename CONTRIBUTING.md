@@ -17,7 +17,10 @@ the agent gets.
 - `daedalus/host/` — the session runner, the engine factory, prompts, skills, the policy.
 - `daedalus/tools/` — every tool the agent can call; a new tool is a module with a `TOOLS` list.
 - `daedalus/extensions/` — subsystems installed at start-up, named in `EXTENSIONS`.
-- `miniapp/` — the app (Vite + React + TypeScript).
+- `miniapp/` — the app (Vite + React + TypeScript). A row added to Settings gets an entry in
+  `miniapp/src/screens/settings-index.json` (titles in both languages, the words people use for it, its
+  configuration path, its anchor): the page's sections and search and the agent's `DocsSearch` read it, and
+  the agent answers "where do I turn this on" with the row's address.
 - `skills/` — skills (`<id>/SKILL.md`); `personas/` — stances a subagent can take.
 - `bench/` — recorded tasks for `daedalus bench`; `daedalus/bench/harbor.py` — the Harbor adapter.
 - `launcher/` — the supervisor; it is outside the agent's reach in the container.

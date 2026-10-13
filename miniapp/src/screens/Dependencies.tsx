@@ -116,13 +116,13 @@ export function DependenciesTab() {
         <DependencyProgress value={view.job} active={installing} installation />
       </section>}
     {view && <>
-      {!installing && <div className="card deps-request-card">
+      {!installing && <div className="card deps-request-card" data-setting="dependencies.request">
       <div className="section-title">{t("deps.add.title")}</div><p className="sub">{t("deps.add.sub")}</p>
       <label className="deps-label" htmlFor="dependency-request">{t("deps.request")}</label>
       <textarea id="dependency-request" className="field" rows={3} maxLength={2000} value={request} disabled={blocked} onChange={(event) => setRequest(event.target.value)} placeholder={t("deps.placeholder")} />
       {/* The planner's model is a setting of the request, so it is a row like every other choice; the
           actions follow on their own line. */}
-      <Row title={t("deps.model")} stack>
+      <Row title={t("deps.model")} stack data-setting="dependencies.model">
         <Dropdown id="dependency-model" label={t("deps.model")} value={preset} disabled={blocked || !view.models.length} onChange={setPreset} options={view.models.length ? view.models.map((model) => ({ id: model.id, label: model.label })) : [{ id: "", label: t("deps.noModels") }]} />
       </Row>
       <div className="deps-request-actions"><div className="btnrow">
@@ -133,7 +133,7 @@ export function DependenciesTab() {
       {proposal?.state === "failed" && <p className="sub attn" role="alert">{proposal.error}</p>}
       {proposal && <DependencyProgress value={proposal} active={planning} />}
       </div>}
-      <div className="card deps-environment">
+      <div className="card deps-environment" data-setting="dependencies.environment">
         <div className="deps-environment-head"><span><b>{t("deps.environment")}</b><span className="sub">{[plural("deps.environment.available", available.length), t("deps.environment.missing", { n: String(missing.length) }), plural("deps.environment.python", view.packages.length)].join(" · ")}</span></span>{view.job?.state === "completed" && <span className="chip"><Icon name="check" size={13} />{t("deps.current")}</span>}</div>
         {/* The missing ones are named beside the present ones: the summary counted them and nothing on
             the card said which they were. */}

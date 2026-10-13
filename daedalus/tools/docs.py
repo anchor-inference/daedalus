@@ -11,15 +11,13 @@ from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
+from daedalus.host.help_search import EXCLUDED_DOCS, ROOT_PAGES, describe, help_index, parse_query
 from daedalus.tools import search_hint, tool_group
 from daedalus.tools._common import error, ok, services_for
 
 MAX_RESULTS = 20
 MAX_CHUNK = 16 * 1024
-ROOT_PAGES = ("README.md", "CHANGELOG.md", "CONTRIBUTING.md", "GOVERNANCE.md", "SECURITY.md")
-EXCLUDED_DOCS = frozenset({"PLAN.md", "RESEARCH.md"})
 HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
-WORD = re.compile(r"[\w-]+", re.UNICODE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,34 +87,31 @@ def _utf8_chunk(text: str, start: int, end: int, byte_limit: int) -> str:
 
 @tool_group("docs")
 @search_hint(
-    "documentation manual how to configure reference guide help docs how does it work "
-    "документация доки мануал справка руководство как настроить инструкция поискать поищи как правильно как работает"
+    "documentation manual how to configure where is the setting enable turn on reference guide help docs how does it work "
+    "документация доки мануал справка руководство как настроить где настройка как включить инструкция поискать поищи как правильно как работает"
 )
 @tool(
     name="DocsSearch",
-    description="Search the public documentation shipped with this installed Daedalus version. Returns page ids and headings; read a result with DocsRead.",
+    description=(
+        "Search how Daedalus itself works and is configured: the index of every Settings section and field, then the "
+        "documentation shipped with this installed version. Ask in the operator's own words, any language. A settings "
+        "hit carries a link to the exact row (/app/settings/<section>#<field>) and its config path: answer a question "
+        "about configuring Daedalus with that link as a Markdown link, and offer to change it with SettingsChange. A "
+        "page hit names a page and section to read with DocsRead."
+    ),
 )
-async def docs_search(context: ToolContext, query: str, limit: int = 10) -> ToolResult:
-    index = _index(context)
-    if index is None:
+async def docs_search(context: ToolContext, query: str, limit: int = 8) -> ToolResult:
+    root = _root(context)
+    if root is None or not root.is_dir():
         return error(context, "installed documentation is unavailable")
-    pages, version = index
-    terms = [word.casefold() for word in WORD.findall(query)]
-    if not terms:
+    index = help_index(root)
+    if not parse_query(query).terms:
         return error(context, "query has no searchable words")
-    found: list[tuple[int, Page, str]] = []
-    for page in pages:
-        haystack = f"{page.title}\n{page.text}".casefold()
-        if not all(term in haystack for term in terms):
-            continue
-        score = sum(page.title.casefold().count(term) * 8 + haystack.count(term) for term in terms)
-        at = min((haystack.find(term) for term in terms if term in haystack), default=0)
-        snippet = re.sub(r"\s+", " ", page.text[max(0, at - 80) : at + 240]).strip()
-        found.append((score, page, snippet))
-    found.sort(key=lambda item: (-item[0], item[1].id))
-    capped = found[: max(1, min(int(limit), MAX_RESULTS))]
-    body = "\n".join(f"- {page.id} — {page.title}: {snippet}" for _, page, snippet in capped)
-    return ok(context, body or f"no installed documentation matches {query!r}", version=version, count=len(capped))
+    hits = index.search(query, max(1, min(int(limit), MAX_RESULTS)))
+    russian = parse_query(query).russian
+    body = "\n".join(describe(hit, russian) for hit in hits)
+    settings = sum(1 for hit in hits if hit.entry.kind != "page")
+    return ok(context, body or f"nothing in the settings or the installed documentation matches {query!r}", version=index.version, count=len(hits), settings=settings)
 
 
 @tool_group("docs")

@@ -37,13 +37,25 @@ function evidenceChip(kind: string, raw: string): string | null {
 // binary to git, and a source file nobody can read a diff of is its own defect.
 const STASH = "\uE000";
 
+// An address inside the app: /app, its segments, a query of plain characters (`&` arrives escaped)
+// and a fragment that names a message or a settings row. Neither a segment nor the fragment ends in
+// punctuation, so the full stop after an address in a sentence stays in the sentence.
+const SEGMENT = "[A-Za-z0-9_~-]+(?:\\.[A-Za-z0-9_~-]+)*";
+const APP_PATH = `/app(?:/${SEGMENT})*/?(?:\\?(?:[A-Za-z0-9_.~=%-]|&amp;)*)?(?:#[A-Za-z0-9_~%*:.-]*[A-Za-z0-9_~%*-])?`;
+const APP_LINK = new RegExp(`\\[([^\\]]+)\\]\\((${APP_PATH})\\)`, "g");
+const APP_BARE = new RegExp(`(^|[\\s(])(${APP_PATH})(?!\\.?[\\w/]|\\.\\.)`, "g");
+const APP_PATH_WHOLE = new RegExp(`^${APP_PATH.replace("&amp;", "&")}$`);
+
 function inline(s: string): string {
   const codes: string[] = [];
   // The sentinel is a private-use character nothing legitimately writes; text that carries it
   // could otherwise address a stashed element by number, so it is dropped before stashing.
   s = s.split(STASH).join("");
-  s = s.replace(/`([^`\n]+)`/g, (_, c) => {
-    codes.push(`<code>${escape(c)}</code>`);
+  s = s.replace(/`([^`\n]+)`/g, (_, c: string) => {
+    // A place in the app quoted as code is still a place: models put paths in backticks by habit,
+    // and a setting's address the reader cannot click is half an answer.
+    const place = APP_PATH_WHOLE.test(c) ? c : null;
+    codes.push(place ? `<a href="${escape(place)}" data-app-link><code>${escape(c)}</code></a>` : `<code>${escape(c)}</code>`);
     return ` ${STASH}${codes.length - 1}${STASH} `;
   });
   // After the code stash, so a tag quoted in backticks stays quoted, and before the escape, so the
@@ -63,12 +75,14 @@ function inline(s: string): string {
   s = s.replace(/(^|[^\w_])_(?!\s)([^_\n]*?[^\s_])_(?![\w_])/g, "$1<i>$2</i>");
   s = s.replace(/~~(.+?)~~/g, "<s>$1</s>");
   s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
-  // Only known app routes are accepted as relative links; arbitrary relative paths could
-  // turn model text into a request to an authenticated API endpoint.
-  s = s.replace(/\[([^\]]+)\]\((\/app\/diagrams\/[a-f0-9]{32})\)/g, '<a href="$2">$1</a>');
-  // A custom page an agent built: its screen, and nothing past the slug but the draft's question.
-  s = s.replace(/\[([^\]]+)\]\((\/app\/p\/[a-z0-9][a-z0-9-]{0,62}(?:\?draft=1)?)\)/g, '<a href="$2">$1</a>');
+  // Only addresses inside the app are accepted as relative links, and opened by the app's own router:
+  // an arbitrary relative path could turn model text into a request to an authenticated API endpoint,
+  // and everything under /app is a screen, never the API. A segment cannot start with a dot, so no
+  // `..` climbs out of it.
+  s = s.replace(APP_LINK, (_, label: string, path: string) => `<a href="${path}" data-app-link>${label}</a>`);
   s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, '$1<a href="$2" target="_blank" rel="noreferrer">$2</a>');
+  // A bare address in the text — "open /app/settings/voice#asr.transcriber" — is a link as well.
+  s = s.replace(APP_BARE, (_, before: string, path: string) => `${before}<a href="${path}" data-app-link>${path}</a>`);
   return s.replace(/ \uE000(\d+)\uE000 /g, (_, i) => codes[Number(i)]);
 }
 
@@ -241,7 +255,7 @@ export type EvidenceRequest = { kind: "file"; path: string; lines?: string } | {
 
 export const EVIDENCE_EVENT = "daedalus:evidence";
 
-// Copy buttons and evidence chips inside rendered markdown: one delegated handler for the whole app.
+// Copy buttons, evidence chips and places in the app inside rendered markdown: one delegated handler for the whole app.
 if (typeof document !== "undefined") {
   document.addEventListener("click", (e) => {
     const target = e.target as HTMLElement | null;
@@ -255,6 +269,18 @@ if (typeof document !== "undefined") {
             ? { kind: "run", id: chip.dataset.run }
             : null;
       if (detail) document.dispatchEvent(new CustomEvent<EvidenceRequest>(EVIDENCE_EVENT, { detail }));
+      return;
+    }
+    // A place in the app goes through the router, so the app stays open and Back returns to the
+    // answer; a modified click is the reader asking for a new tab, and the browser does that itself.
+    const place = target?.closest?.("a[data-app-link]") as HTMLAnchorElement | null;
+    if (place) {
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+      e.preventDefault();
+      // Imported when first needed: this module also renders where there is no window (the tests,
+      // a worker), and the router reads the history the moment it loads.
+      const href = place.getAttribute("href") ?? "/app";
+      void import("./router").then(({ navigate }) => navigate(href));
       return;
     }
     const button = target?.closest?.("button[data-copy]") as HTMLButtonElement | null;

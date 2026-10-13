@@ -5,7 +5,9 @@
 // the card and the row. The host now names the row: a `setting` of `{page, key}` beside the `detail`
 // of an HTTP error, in a `setting_notice` session event, and in a notification (read from its link).
 // `page` is the Settings section; `key` is the configuration path the row edits, and the row carries
-// it as `data-setting`. This module turns that reference into an address, finds the row once the page
+// it as `data-setting`. The address is `/app/settings/<page>#<key>`: the fragment is the part of the
+// page, the same address the agent's documentation search gives out, so a link in an answer and the
+// button on an error land on the row the same way. This module turns that reference into an address, finds the row once the page
 // has drawn it, scrolls it into view and makes it blink; and it raises a notice — a toast in the
 // corner, and a line in the conversation it came from — with a button that goes there.
 
@@ -20,8 +22,6 @@ export type SettingRef = { page: string; key: string };
 /** How long a row found by a link stays highlighted: two blinks, long enough to be seen after the scroll. */
 export const FLASH_MS = 2400;
 export const FLASH_CLASS = "setting-flash";
-/** The query parameter a settings address names its row with. */
-export const SETTING_PARAM = "setting";
 
 /** A `{page, key}` from anything the host sent, or null when it is not one. */
 export function settingRef(value: unknown): SettingRef | null {
@@ -39,7 +39,30 @@ export function settingOfError(error: unknown): SettingRef | null {
  *  tab of their own, and a provider's key is only on the page while that tab is open. */
 export function settingPath(ref: SettingRef): string {
   const tab = ref.page === "models" && ref.key.startsWith("providers.") ? "providers" : null;
-  return pathFor("settings", ref.page, { [SETTING_PARAM]: ref.key, tab });
+  return `${pathFor("settings", ref.page, { tab })}#${encodeURIComponent(ref.key).replace(/%2E/gi, ".")}`;
+}
+
+/** The row the address names: its fragment, or null. A message anchor (`#m12`) is not a row. */
+export function settingTarget(hash = window.location.hash): string | null {
+  const raw = hash.replace(/^#/, "");
+  if (!raw) return null;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+/** Takes the row's name out of the address once it has been shown, so a reload does not blink it
+ *  again and the next press of the same link is a change the page sees. */
+export function clearSettingTarget(): void {
+  // Straight to the history rather than through `navigate`, which takes an address without a fragment
+  // to be the page already open and does nothing; and nobody needs telling, the page is already here.
+  try {
+    window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search);
+  } catch {
+    /* a sandboxed frame */
+  }
 }
 
 export function goToSetting(ref: SettingRef): void {

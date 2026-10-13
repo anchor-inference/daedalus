@@ -94,9 +94,9 @@ export function NumRow({ title, desc, unit, setting, ...input }: { title: string
 
 /** Free text a line long or more, label above and the whole width below: an address, a key, a
  *  list of engines. The one shape that genuinely needs the width, saved when the field is left. */
-export function TextBlock({ label, value, placeholder, onSave, hint, id, type }: { label: string; value: string; placeholder?: string; onSave: (v: string) => void; hint?: string; id?: string; type?: string }) {
+export function TextBlock({ label, value, placeholder, onSave, hint, id, type, setting }: { label: string; value: string; placeholder?: string; onSave: (v: string) => void; hint?: string; id?: string; type?: string; setting?: string }) {
   return (
-    <div className="settings-block">
+    <div className="settings-block" data-setting={setting}>
       <label className="field" htmlFor={id}>{label}</label>
       <input id={id} className="field" type={type} defaultValue={value} placeholder={placeholder} onBlur={(e) => e.target.value.trim() !== value && onSave(e.target.value.trim())} />
       {hint && <div className="sub">{hint}</div>}

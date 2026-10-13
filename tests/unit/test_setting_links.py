@@ -50,7 +50,7 @@ def test_a_reference_survives_being_re_raised_and_rides_a_link_both_ways() -> No
         assert setting_of(outer) == COMPACTION_MODEL
     assert setting_of(ValueError("nothing named")) is None
     link = COMPACTION_MODEL.link()
-    assert link == "/app/settings/limits?setting=compaction.preset"
+    assert link == "/app/settings/limits#compaction.preset"
     assert setting_from_link(link) == COMPACTION_MODEL
     assert setting_from_link("/app/agents/abc") is None
     missing = ProviderUnavailable("opencode", ["local"])

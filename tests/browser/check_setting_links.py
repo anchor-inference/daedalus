@@ -130,8 +130,8 @@ def run(browser, lang: str, viewport: dict, problems: list[str], **context) -> N
     if not state.get("path", "").endswith("/settings/limits"):
         say(f"the button opened {state.get('path')}")
     page.wait_for_timeout(600)
-    if "setting=" in page.evaluate("location.search"):
-        say(f"the address still names the row: {page.evaluate('location.search')}")
+    if page.evaluate("location.hash"):
+        say(f"the address still names the row: {page.evaluate('location.hash')}")
     if page.locator(".notice-toast.tone-error").count():
         say("the toast stayed after its button was pressed")
 

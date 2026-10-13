@@ -10,7 +10,7 @@ import { go, useMedia } from "./shell";
 export function PushCard() {
   const { state, busy, error, enable, disable } = usePush();
   return (
-    <div className="card push-card" data-push-state={state ?? "loading"}>
+    <div className="card push-card" data-push-state={state ?? "loading"} data-setting="notifications.push">
       <div className="section-title" style={{ marginTop: 0 }}>{t("push.device")}</div>
       <div className="sub">{state === null ? t("common.loading") : t(`push.state.${state}`)}</div>
       {state === "needs-home-screen" && <ol className="push-steps"><li>{t("push.ios.share")}</li><li>{t("push.ios.add")}</li><li>{t("push.ios.open")}</li></ol>}

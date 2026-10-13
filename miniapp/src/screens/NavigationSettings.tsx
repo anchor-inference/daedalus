@@ -181,7 +181,7 @@ export function NavigationSettings({ s, save, selfdev }: { s: Settings; save: (p
 
   return (
     <>
-      <div className="card nav-cfg">
+      <div className="card nav-cfg" data-setting="navigation.rail">
         <div className="section-title" style={{ marginTop: 0 }}>{t("nav.cfg.desktop")}</div>
         <div className="sub">{t("nav.cfg.desktop.sub")}</div>
         {PLACES.map((p) => (
@@ -192,7 +192,7 @@ export function NavigationSettings({ s, save, selfdev }: { s: Settings; save: (p
           </div>
         ))}
       </div>
-      <div className="card nav-cfg">
+      <div className="card nav-cfg" data-setting="navigation.drawer">
         <div className="section-title" style={{ marginTop: 0 }}>{t("nav.cfg.phone")}</div>
         <div className="sub">{t("nav.cfg.phone.sub")}</div>
         <div className="nav-cfg-list" data-drawer-list="on" onDragOver={(e) => allowDrop(e, "phone")} onDrop={(e) => drop(e, "phone", (id) => setDrawer([...drawerOn.map((x) => x.id).filter((x) => x !== id), id]))}>
@@ -206,7 +206,7 @@ export function NavigationSettings({ s, save, selfdev }: { s: Settings; save: (p
         </div>
       </div>
       <div className="btnrow">
-        <button type="button" className="btn" data-nav="reset" onClick={() => void write({ ...EMPTY })}>{t("nav.cfg.reset")}</button>
+        <button type="button" className="btn" data-nav="reset" data-setting="navigation.reset" onClick={() => void write({ ...EMPTY })}>{t("nav.cfg.reset")}</button>
       </div>
       {picking && (
         <Sheet title={t("nav.cfg.icon", { name: picking.title })} onClose={() => setPicking(null)} size="narrow">

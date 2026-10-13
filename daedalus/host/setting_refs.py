@@ -14,7 +14,7 @@ anchors reads the same keys.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from urllib.parse import parse_qs, quote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 SETTINGS_PATH = "/app/settings"
 
@@ -30,8 +30,11 @@ class SettingRef:
         return {"page": self.page, "key": self.key}
 
     def link(self) -> str:
-        """The app address that opens the section, scrolls to the row and highlights it."""
-        return f"{SETTINGS_PATH}/{quote(self.page)}?setting={quote(self.key, safe='')}"
+        """The app address that opens the section, scrolls to the row and highlights it.
+
+        The row is the fragment (``/app/settings/limits#compaction.preset``), the same form the
+        settings index gives the agent, so every way to a row is one address the app reads one way."""
+        return f"{SETTINGS_PATH}/{quote(self.page)}#{quote(self.key, safe='.')}"
 
 
 COMPACTION_MODEL = SettingRef("limits", "compaction.preset")
@@ -40,6 +43,8 @@ VISION_OUTPUT = SettingRef("models", "vision.max_output_tokens")
 AUXILIARY_FALLBACK = SettingRef("models", "model.fallback_to_session")
 SPEECH_RECOGNITION = SettingRef("voice", "asr.transcriber")
 LOCAL_SPEECH_MODEL = SettingRef("voice", "stt.local_model")
+SPEECH_MODELS = SettingRef("voice", "stt.models")
+"""The catalogue of local speech models, where one is downloaded."""
 SPEND_CAP = SettingRef("limits", "limits.usd_total")
 RUN_SPEND_CAP = SettingRef("limits", "limits.usd_per_run")
 WEB_SEARCH = SettingRef("tools", "tools.web.search.backend")
@@ -92,7 +97,7 @@ def setting_from_link(link: str | None) -> SettingRef | None:
         return None
     parts = urlsplit(link)
     page = parts.path[len(SETTINGS_PATH) + 1:].strip("/")
-    key = (parse_qs(parts.query).get("setting") or [""])[0]
+    key = unquote(parts.fragment)
     return SettingRef(page, key) if page and key else None
 
 
@@ -101,6 +106,7 @@ __all__ = [
     "COMPACTION_MODEL",
     "LOCAL_SPEECH_MODEL",
     "RUN_SPEND_CAP",
+    "SPEECH_MODELS",
     "SPEECH_RECOGNITION",
     "SPEND_CAP",
     "VISION_MODEL",
