@@ -25,6 +25,7 @@ from daedalus.host.session_runner import SessionManager, SessionState
 from daedalus.providers.llamacpp import describe_discovery, discover_llamacpp
 from daedalus.search.service import ConversationSearch
 from daedalus.speech.service import LocalSpeech
+from daedalus.speech.setup_model import fetch_setup_model
 from daedalus.speech.tts_service import LocalTts
 from daedalus.stores.database import Database
 from daedalus.stores.executions import ExecutionStore
@@ -134,6 +135,9 @@ class Application:
         # It costs a second or two of a start that is already doing several, and it is the difference
         # between an answer that is read out as it is written and one that is read out after it.
         self.tts.warm()
+        # The speech model the setup wizard chose arrives in the background, on the same downloads
+        # Settings shows; nothing about the start waits for half a gigabyte.
+        self.background.append(asyncio.create_task(fetch_setup_model(self), name="setup-speech-model"))
         await self._report_startup()
         if self.guard.skip_recovery:
             note = (

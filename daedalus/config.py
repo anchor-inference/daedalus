@@ -2281,8 +2281,10 @@ def _seed_from_setup(raw: dict[str, Any]) -> bool:
 
     ``DAEDALUS_LOCAL_MODEL``: a model served by the endpoint the wizard registered with the key proxy
     as ``local``. ``DAEDALUS_VOICE``: ``cloud`` transcribes through the ``openai`` provider; ``local``
-    needs nothing here (the launcher installs the speech extra and the Voice page's own model is used
-    when no endpoint is configured), and ``off`` is the empty default.
+    needs nothing here (the launcher installs the speech extra natively; a container has it in its
+    image), and ``off`` is the empty default. ``DAEDALUS_STT_MODEL``: the local model the wizard's
+    speech step chose, made the voice-note transcriber exactly as Settings → Voice & speech makes
+    it; :func:`daedalus.speech.setup_model.fetch_setup_model` downloads it once the app is up.
 
     Each answer is applied once and recorded in ``seeded``: deleting the preset or clearing the ASR
     provider afterwards sticks, while choosing another model in a later setup run adds that one.
@@ -2345,6 +2347,22 @@ def _seed_from_setup(raw: dict[str, Any]) -> bool:
             asr = raw["asr"] = {}
         if not asr.get("provider") and not asr.get("url"):
             asr["provider"] = "openai"
+    stt_model = os.environ.get("DAEDALUS_STT_MODEL", "").strip()
+    stt_marker = f"stt-model:{stt_model}"
+    if stt_model and stt_marker not in seeded:
+        from daedalus.speech.catalog import BY_ID as SPEECH_MODELS  # Lazy: the catalog is only read here
+
+        if stt_model in SPEECH_MODELS:
+            seeded.append(stt_marker)
+            changed = True
+            asr = raw.get("asr")
+            if not isinstance(asr, dict):
+                asr = raw["asr"] = {}
+            # The two fields the Settings card writes for a local transcriber, and nothing else: the
+            # endpoint stays configured for whoever switches back to it.
+            asr["transcriber"] = stt_model
+            if asr.get("fallback") == stt_model:
+                asr["fallback"] = ""
     return changed
 
 

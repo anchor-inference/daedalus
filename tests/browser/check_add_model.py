@@ -30,7 +30,9 @@ from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app, reveal_composer  # noqa: E402
-from screenshots import FRESH, S1, SETTINGS, stub  # noqa: E402  the same invented installation the pictures are taken of
+
+# The same invented installation the pictures are taken of.
+from screenshots import FRESH, S1, SETTINGS, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")

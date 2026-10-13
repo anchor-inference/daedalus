@@ -109,6 +109,7 @@ def _no_setup_answers(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DAEDALUS_FREE_PROVIDER", raising=False)
     monkeypatch.delenv("DAEDALUS_FREE_MODEL", raising=False)
     monkeypatch.delenv("DAEDALUS_VOICE", raising=False)
+    monkeypatch.delenv("DAEDALUS_STT_MODEL", raising=False)
 
 
 def test_a_fresh_config_has_the_openai_and_anthropic_providers(tmp_path: Path) -> None:

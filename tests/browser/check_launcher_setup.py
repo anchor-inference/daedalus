@@ -7,9 +7,13 @@ launcher's own test call; the CLI detection finds the one login this file leaves
 home. Only the start is played back: the status the page follows is answered from this file, because
 a real start brings a whole installation up.
 
-Every combination of language and window (1200×800 and 390×844) must get through all eight steps
-without a console error, a page error, a horizontal scroll or a frame that leaves the window. The
-last walk posts its answers to the launcher for real, and the files it writes are read back.
+Every combination of language and window (1200×800 and 390×844) must get through all nine steps
+without a console error, a page error, a horizontal scroll or a frame that leaves the window. On the
+way it checks what the steps promise: the model tabs' labels are whole, the keys come in a
+pay-as-you-go group and a subscription plan group, the Telegram how-to links to the two bots in a new
+tab, and the speech step leads with the model recommended for the language. The English walks say
+"Not now" to speech and the Russian ones choose that model. The last walk posts its answers to the
+launcher for real, and the files it writes are read back.
 
     CHROMIUM=... python tests/browser/check_launcher_setup.py
 
@@ -134,6 +138,36 @@ def check_fit(page, where: str, problems: list[str]) -> None:
         problems.append(f"{where}: the frame leaves the window {fit}")
 
 
+RECOMMENDED = {"en": "parakeet-unified-en", "ru": "gigaam-ru"}
+"""The speech model the step puts first for each language: the catalog's recommendation."""
+
+
+def check_model_step(page, tag: str, problems: list[str]) -> None:
+    cut = page.evaluate("() => Array.from(document.querySelectorAll('.seg.tabs button span')).filter(s => s.scrollWidth > s.clientWidth + 1).map(s => s.textContent)")
+    if cut:
+        problems.append(f"{tag}: the model tabs cut their labels: {cut}")
+    groups = page.evaluate("""() => Array.from(document.querySelectorAll('.prov-group')).map(g => ({
+        title: g.querySelector('.prov-title').textContent, caption: g.querySelector('.prov-cap').textContent,
+        ids: Array.from(g.querySelectorAll('input[name=provider]')).map(i => i.value)}))""")
+    ids = [i for g in groups for i in g["ids"]]
+    if len(groups) != 2 or not all(g["title"] and g["caption"] for g in groups) or len(ids) != len(set(ids)) or len(ids) < 10:
+        problems.append(f"{tag}: the keys are not in two titled groups, each once: {groups}")
+    elif groups[1]["ids"] != ["opencode", "zai_coding", "minimax_plan", "kimi_coding"]:
+        problems.append(f"{tag}: the subscription plan group holds {groups[1]['ids']}")
+    names = page.evaluate("() => Array.from(document.querySelectorAll('.prov-name')).filter(n => n.scrollWidth > n.clientWidth + 1).map(n => n.textContent)")
+    if names:
+        problems.append(f"{tag}: provider names are cut: {names}")
+
+
+def check_telegram_step(page, tag: str, problems: list[str]) -> None:
+    links = page.evaluate("() => Array.from(document.querySelectorAll('.howto a')).map(a => [a.href, a.target, a.rel])")
+    hrefs = [link[0] for link in links]
+    if hrefs != ["https://t.me/BotFather", "https://t.me/userinfobot"] or any(link[1] != "_blank" or "noopener" not in link[2] for link in links):
+        problems.append(f"{tag}: the Telegram how-to links are {links}")
+    if page.locator(".howto li").count() != 4:
+        problems.append(f"{tag}: the Telegram how-to has {page.locator('.howto li').count()} steps")
+
+
 def walk(browser, base: str, lang: str, size: tuple[int, int], endpoint: str, real_post: bool) -> list[str]:
     problems: list[str] = []
     context = browser.new_context(viewport={"width": size[0], "height": size[1]}, locale="ru-RU" if lang == "ru" else "en-US")
@@ -180,6 +214,7 @@ def walk(browser, base: str, lang: str, size: tuple[int, int], endpoint: str, re
             problems.append(f"{tag}: the Docker badge is empty")
         next_step()
         step("model")
+        check_model_step(page, tag, problems)
         page.click("[data-k=kind-cli]")
         settled(page)
         signed = page.evaluate("() => Array.from(document.querySelectorAll('label.cli')).map(l => [l.dataset.k, !l.classList.contains('missing')])")
@@ -199,7 +234,28 @@ def walk(browser, base: str, lang: str, size: tuple[int, int], endpoint: str, re
         page.click("[data-k=preset-50]")
         next_step()
         step("telegram")
+        check_telegram_step(page, tag, problems)
         page.click(".f-foot [data-act=skip]")
+        step("speech")
+        first = page.evaluate("() => document.querySelectorAll('.sp-list')[1].querySelector('input').value")
+        if first != RECOMMENDED[lang]:
+            problems.append(f"{tag}: the speech step leads with {first}, not {RECOMMENDED[lang]}")
+        later = page.text_content(".f-foot [data-act=skip]") or ""
+        if page.is_hidden(".f-foot [data-act=skip]") or not later.strip():
+            problems.append(f"{tag}: the speech step has no Not now")
+        page.click("label.sp-opt[data-k=speech-cloud]")
+        settled(page)
+        if page.locator("#f-keys\\.openai").count() != 1:
+            problems.append(f"{tag}: choosing Whisper does not ask for the OpenAI key")
+        if lang == "en":
+            page.click(".f-foot [data-act=skip]")
+        else:
+            page.click(f"label.sp-opt[data-k=speech-{RECOMMENDED[lang]}]")
+            settled(page)
+            page.click("[data-act=speech-all]")
+            settled(page)
+            step("speech-all")
+            next_step()
         step("advanced")
         page.click("[data-act=adv]")
         settled(page)
@@ -208,6 +264,9 @@ def walk(browser, base: str, lang: str, size: tuple[int, int], endpoint: str, re
         step("advanced-open")
         next_step()
         step("summary")
+        spoken = (page.text_content("[data-k=edit-speech] .sum-v") or "").strip()
+        if spoken != ("Skipped" if lang == "en" else "GigaAM v3 Russian"):
+            problems.append(f"{tag}: the summary says {spoken!r} for speech")
         next_step()
         page.wait_for_function("() => window.Wizard.state.launch && window.Wizard.state.launch.done", timeout=30000)
         step("start")
@@ -248,7 +307,9 @@ def main() -> int:
         env = (work / "data" / ".env").read_text() if (work / "data" / ".env").exists() else ""
         keys_file = work / "data" / "daedalus-secrets" / "keyproxy.env"
         keys = keys_file.read_text() if keys_file.exists() else ""
-        for want, text in ((f"DAEDALUS_LOCAL_MODEL={MODEL}", env), ("USD_PER_DAY=50", env), (f"KEYPROXY_UPSTREAM_LOCAL={endpoint}/v1", keys)):
+        spoken = RECOMMENDED[LANGS[-1]]
+        speech = ("DAEDALUS_VOICE=local", f"DAEDALUS_STT_MODEL={spoken}") if LANGS[-1] == "ru" else ("DAEDALUS_VOICE=off", "DAEDALUS_STT_MODEL=")
+        for want, text in ((f"DAEDALUS_LOCAL_MODEL={MODEL}", env), ("USD_PER_DAY=50", env), (f"KEYPROXY_UPSTREAM_LOCAL={endpoint}/v1", keys), *((line, env) for line in speech)):
             if want not in text:
                 problems.append(f"the posted answers did not reach the files: {want!r} missing")
     finally:

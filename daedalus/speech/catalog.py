@@ -23,6 +23,7 @@ Scores are the same two 0-100 bars the operator sees: ``accuracy`` is how well i
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 
 ZOO = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models"
@@ -395,4 +396,28 @@ def as_json(model: SpeechModel) -> dict[str, object]:
     }
 
 
-__all__ = ["BY_ID", "MODELS", "STREAMING_KINDS", "ZOO", "SpeechModel", "as_json", "get", "languages", "recommended"]
+def wizard_json() -> str:
+    """The catalog as the launcher's setup wizard carries it, byte for byte: ``desktop/speech_models.json``.
+
+    The wizard runs before this program is installed, so it cannot ask for the list; it carries a
+    copy, and ``tests/unit/test_speech_setup_model.py`` holds the copy to this table. Only what the
+    wizard draws is in it — no archive names or digests, which are this side's business.
+    """
+    rows = [
+        {
+            "id": model.id,
+            "label": model.label,
+            "languages": [code for code in model.languages if code != "*"],
+            "language_count": model.languages_shown,
+            "size_bytes": model.size_bytes,
+            "memory_mb": model.memory_mb,
+            "accuracy": model.accuracy,
+            "speed": model.speed,
+            "recommended_for": list(model.recommended_for),
+        }
+        for model in MODELS
+    ]
+    return json.dumps(rows, indent=1, ensure_ascii=False) + "\n"
+
+
+__all__ = ["BY_ID", "MODELS", "STREAMING_KINDS", "ZOO", "SpeechModel", "as_json", "get", "languages", "recommended", "wizard_json"]
