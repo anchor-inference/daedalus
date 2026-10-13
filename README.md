@@ -47,7 +47,7 @@ It is built to run for weeks: sessions survive restarts, runs resume from snapsh
 - **🧬 Self-development** — the agent changes its own code in a worktree and a pull request you approve in the chat, and a bad build is rolled back on its own.
 - **🔐 Keys it never sees** — provider keys live in a key proxy that stops paying once the daily budget is spent; ChatGPT, Claude Code and SuperGrok logins work as providers too.
 - **🧾 Evidence you can open** — an answer cites files and checks as chips that open at the lines it named; a change to the agent's own code needs a receipt that covers it.
-- **🎙️ Voice (beta)** — a fast concierge that answers out loud and hands anything substantial to an agent while you keep talking.
+- **🫧 Companion** — your standing personal agent, by text and by voice: it hands work to agents, owns goals it checks on a cadence, and reports back when you are away.
 
 Each of these at full length: [docs/FEATURES.md](docs/FEATURES.md).
 
@@ -278,7 +278,7 @@ Every session command also works from the app's composer with the same `/` palet
 | [docs/SELF-DEVELOPMENT.md](docs/SELF-DEVELOPMENT.md) | the three self-development modes in full |
 | [docs/ORCHESTRATION.md](docs/ORCHESTRATION.md) | a project from its goal to an accepted result: autonomy, review, the team, host folders |
 | [docs/API.md](docs/API.md) | the HTTP API: files, steers, the event stream, notifications, projects, orchestration, push |
-| [docs/VOICE.md](docs/VOICE.md) | voice mode (beta): hearing you, speaking back, the local voices |
+| [docs/COMPANION.md](docs/COMPANION.md) | the companion: goals, its tools, the two models, hearing you, speaking back |
 | [docs/PAGES.md](docs/PAGES.md) | custom pages: your own screens inside the app, the kit, the bridge, the API |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | the repository's layout, and benchmark runs |
 | [docs/architecture/](docs/architecture/) | the browser, the terminals, conversation search |
