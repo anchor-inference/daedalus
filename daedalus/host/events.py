@@ -586,6 +586,15 @@ class PagesEmit(TypedDict):
     ``Daedalus.on(event)`` unchanged."""
 
 
+class CalendarChanged(TypedDict):
+    change: str
+    """``created`` · ``updated`` · ``deleted`` · ``blocks`` · ``status`` · ``type`` · ``group`` · ``synced``."""
+    event_id: NotRequired[str]
+    event_ids: NotRequired[list[str]]
+    group_id: NotRequired[str]
+    type_id: NotRequired[str]
+
+
 @dataclass(frozen=True, slots=True)
 class EventSpec:
     payload: type
@@ -663,6 +672,8 @@ REGISTRY: dict[str, EventSpec] = {
     # Live only: a page opened later reads lasting state from its storage, and a replay after a
     # reconnect would hand an open page an instruction ("reload the model") that is long stale.
     "pages.emit": EventSpec(PagesEmit, persist=False),
+    # Live only: it tells an open calendar to read again, and a calendar opened later reads anyway.
+    "calendar.changed": EventSpec(CalendarChanged, persist=False),
 }
 
 GAP = "bus.gap"

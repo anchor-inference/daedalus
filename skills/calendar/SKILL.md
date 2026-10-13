@@ -1,6 +1,6 @@
 ---
 name: calendar
-description: Plan the operator's time - read, create, move or cancel calendar events (one-off and recurring), find free time, and keep their personal to-do tasks with CalendarEvents, CalendarFindTime, CalendarCreate, CalendarUpdate, CalendarDelete, CalendarList and the Planner tools.
+description: Plan the operator's time - events (one-off and recurring), free time, structured plans (meal plans, shopping lists, workouts) with typed events, checklists, tables and groups via CalendarBulkCreate and CalendarBlockPatch, and their personal to-do tasks with the Planner tools.
 ---
 # Calendar and planner
 
@@ -51,3 +51,52 @@ description: Plan the operator's time - read, create, move or cancel calendar ev
   shows `pending_sync` until its provider confirms it. When it shows `conflict`, the provider changed it
   too: tell the operator what differs and let them choose in the app; do not overwrite it yourself.
 - Completing a repeating task with `PlannerTaskComplete` records it as done and moves it to the next date.
+
+## Structured entries: types, blocks, groups
+
+An event can carry more than a description. Use the structure whenever the content is a list, a table,
+steps or numbers: the operator ticks items in the app, the totals are computed, and you can read back what
+they marked. Never paste a 40-line list into `description`.
+
+- **Blocks** are the body of an event, in order: `markdown {text}`, `checklist {items: [{text, checked}]}`,
+  `table {columns: [{key, label, type: text|number|money|checkbox|link|date, unit?, aggregate?: sum|avg|count}],
+  rows: [{cells: {...}}]}`, `steps {items: [{text, duration_min?}]}`, `fields {items: [{label, value, unit?}]}`,
+  `link {url, label}`, `action {action: url, label, url}` or `action {action: agent, label, prompt}`.
+  A shopping basket is a table with a `checkbox` column ("bought") and a `money` column with `aggregate: sum`.
+  Ids are generated for blocks, items and rows you leave without one.
+- **Types** (`CalendarTypeUpsert`) describe a kind of event once: `fields_schema` (kcal, protein_g, meal…),
+  `default_blocks` (what a new event of the type starts with), `display.chip` (`"{meal} · {kcal} kcal"`, the
+  short label in the calendar) and `aggregates` (`[{field: "kcal", op: "sum", per: "day", label, target:
+  [1900, 2100]}]`, shown under each day). Look at `CalendarTypeList` first and reuse a type that fits;
+  starters exist for `todo-list`, `shopping`, `appointment` and `routine`. A field value that does not fit
+  the schema is kept and shown in `field_issues`; fix it rather than ignore it.
+- **Groups** (`CalendarGroupCreate`) hold the events of one plan ("Menu 14-20 October"). The whole plan can
+  then be moved (`CalendarGroupShift`), repeated next week (`CalendarGroupDuplicate`, ticks cleared),
+  hidden, archived or deleted at once. `CalendarList` lists the groups.
+- **Status** is `planned`, `done`, `skipped` or `cancelled`; set it with `CalendarUpdate`.
+
+### Making a plan (a week of meals, a training block)
+
+1. `CalendarTypeList`; if nothing fits, one `CalendarTypeUpsert` (for meals: `meal` with `kcal`, `protein_g`,
+   an enum `meal`, `default_blocks` of a `checklist` "Products" and `steps` "Recipe", a chip and a daily kcal
+   aggregate).
+2. One `CalendarGroupCreate` for the plan.
+3. One `CalendarBulkCreate` with every event (`type` and `group_id` once at the top level), each with its
+   `fields` and blocks. Thirty-five meals are one call, not thirty-five.
+4. Shopping orders are events of type `shopping` in the same group, their basket a table.
+
+### Reading back and following up
+
+- `CalendarEvents` lists events with `progress` and `chip` but without block bodies; pass
+  `include_blocks=true` (or `event_id`) when you need the items and their ids.
+- Tick or edit a few items with `CalendarBlockPatch` (`set_checked`, `add_item`, `update_cell`…); ticks need
+  no version. Replace the whole body with `CalendarUpdate(blocks=...)` only when rewriting it.
+- `CalendarEventHistory` shows who ticked what and when (`operator` or `agent:<session>`).
+- To act when the operator finishes something, register a standing intent: the calendar announces
+  `calendar checklist.completed: "<event>" block "<block>" n/n …`, `calendar event.status_changed: … planned -> done`
+  and `calendar group.completed: group "<name>" …`, each once per transition. For example
+  `IntentCreate(pattern="calendar checklist.completed.*Basket", action="build the next order without the bought items")`.
+- An `action` block with `action: agent` puts a button on the event; pressing it sends its `prompt` with the
+  event's current state to `session_id` as the operator's message. Leave `session_id` out to mean this session.
+- In a connected Google, Outlook or CalDAV calendar the blocks appear as plain text after the description
+  (`☐/☑` items, table rows). They stay structured here; an edit made there is kept as a separate text block.

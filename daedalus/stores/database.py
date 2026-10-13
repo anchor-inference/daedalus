@@ -9,6 +9,7 @@ import os
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -2111,6 +2112,103 @@ CREATE TABLE IF NOT EXISTS page_storage (
     PRIMARY KEY (slug, key)
 );
 """)
+
+CALENDAR_ENTRY_COLUMNS = (
+    ("type_id", "TEXT"),
+    ("type_version", "INTEGER"),
+    ("fields_json", "TEXT NOT NULL DEFAULT '{}'"),
+    ("blocks_json", "TEXT NOT NULL DEFAULT '[]'"),
+    ("status", "TEXT NOT NULL DEFAULT 'planned' CHECK (status IN ('planned', 'done', 'skipped', 'cancelled'))"),
+    ("tags_json", "TEXT NOT NULL DEFAULT '[]'"),
+    ("group_id", "TEXT REFERENCES calendar_groups(id) ON DELETE SET NULL"),
+    ("links_json", "TEXT NOT NULL DEFAULT '[]'"),
+    ("synced_description", "TEXT"),
+)
+
+
+async def _calendar_entries(conn: aiosqlite.Connection) -> None:
+    """Add the entry columns that are missing and seed the starter types.
+
+    Column by column, because a database rolled back to an earlier schema version (as the
+    migration tests do, and as a restore over a newer file would) runs this again over columns
+    it already has, and a bare ADD COLUMN would then fail the whole start.
+    """
+    from daedalus.stores.calendar_blocks import STARTER_TYPES, check_type  # Lazy: no store logic at import.
+
+    present = {row[1] for row in await (await conn.execute("PRAGMA table_info(calendar_events)")).fetchall()}
+    for name, declaration in CALENDAR_ENTRY_COLUMNS:
+        if name not in present:
+            await conn.execute(f"ALTER TABLE calendar_events ADD COLUMN {name} {declaration}")
+    await conn.execute("CREATE INDEX IF NOT EXISTS calendar_events_group ON calendar_events(group_id) WHERE group_id IS NOT NULL")
+    await conn.execute("CREATE INDEX IF NOT EXISTS calendar_events_type ON calendar_events(type_id) WHERE type_id IS NOT NULL")
+    if "synced_description" not in present:
+        await conn.execute("UPDATE calendar_events SET synced_description = description WHERE account_id IS NOT NULL AND remote_id IS NOT NULL")
+    stamp = datetime.now(UTC).isoformat()
+    for type_id, body in STARTER_TYPES.items():
+        definition = check_type(body, type_id)
+        await conn.execute(
+            "INSERT OR IGNORE INTO calendar_types(id, name, version, owner, definition_json, created_at, updated_at) VALUES (?, ?, 1, 'user', ?, ?, ?)",
+            (type_id, definition["name"], json.dumps(definition, ensure_ascii=False), stamp, stamp),
+        )
+
+
+# Structured calendar entries. An event gains a type (a row of ``calendar_types``, made by the operator
+# or an agent), typed field values, an ordered list of blocks (checklists, tables, steps…), a status,
+# tags, links and a group that plans of several events share. Each JSON column is the event's own
+# copy: a type deleted or changed later leaves the values recorded under it in place. A group that is
+# deleted with ``keep`` lets its events go (``ON DELETE SET NULL``). The history is the journal of who
+# changed what (the operator or an agent's session), and ``calendar_hooks`` is the outbox of
+# transitions (a checklist finished, a status changed, a plan done) written in the same transaction as
+# the change, so a transition is recorded exactly once whatever happens to the process after it.
+# ``synced_description`` is the description as a connected calendar last held it: a remote copy that
+# still reads the same has not been edited there, so the blocks written into it are not read back.
+MIGRATIONS.append(DataMigration("""
+CREATE TABLE IF NOT EXISTS calendar_types (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    owner TEXT NOT NULL DEFAULT 'user',
+    definition_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS calendar_groups (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    icon TEXT NOT NULL DEFAULT '',
+    color TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    blocks_json TEXT NOT NULL DEFAULT '[]',
+    created_by TEXT NOT NULL DEFAULT 'operator',
+    archived INTEGER NOT NULL DEFAULT 0,
+    hidden INTEGER NOT NULL DEFAULT 0,
+    completed_at TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS calendar_event_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT NOT NULL REFERENCES calendar_events(id) ON DELETE CASCADE,
+    at TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    action TEXT NOT NULL,
+    block_id TEXT,
+    item_id TEXT,
+    summary TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS calendar_event_history_event ON calendar_event_history(event_id, id);
+CREATE TABLE IF NOT EXISTS calendar_hooks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL CHECK (kind IN ('checklist.completed', 'event.status_changed', 'group.completed')),
+    event_id TEXT,
+    group_id TEXT,
+    detail_json TEXT NOT NULL DEFAULT '{}',
+    at TEXT NOT NULL,
+    delivered_at TEXT
+);
+CREATE INDEX IF NOT EXISTS calendar_hooks_pending ON calendar_hooks(id) WHERE delivered_at IS NULL;
+""", _calendar_entries))
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
