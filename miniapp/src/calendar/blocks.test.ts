@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { setLang } from "../i18n";
 import {
-  aggregateParts, aggregateText, applyOps, blockProgress, cellText, columnTotal, diffBlocks, eventAsText, eventProgress, inverseCheck, isKnown, linesToItems, renderChip, statusFlow, swipeActions, tableCards, typedFields,
+  aggregateParts, groupDays, aggregateText, applyOps, blockProgress, cellText, columnTotal, diffBlocks, eventAsText, eventProgress, inverseCheck, isKnown, linesToItems, renderChip, statusFlow, swipeActions, tableCards, typedFields,
   type Block, type ChecklistBlock, type Column, type StepsBlock, type TableBlock, type TypeDef,
 } from "./blocks";
 import { eventItem } from "./items";
@@ -231,5 +231,20 @@ describe("a type's fields", () => {
     expect(swipeActions(meal)).toEqual({ right: "done", left: null });
     expect(swipeActions(undefined)).toEqual({ right: "done", left: "skipped" });
     expect(statusFlow({ ...meal, status_flow: ["done", "skipped"] })).toEqual(["planned", "done", "skipped"]);
+  });
+});
+
+describe("groupDays", () => {
+  it("reads the host's instants as local days, the end exclusive", () => {
+    // Breakfast on the 14th at 09:00 in Almaty is 04:00 UTC; the last dinner ends 20:30 on the 20th.
+    expect(groupDays({ from: "2026-10-14T04:00:00+00:00", to: "2026-10-20T15:30:00+00:00" }, "Asia/Almaty")).toEqual({ from: "2026-10-14", to: "2026-10-20" });
+  });
+  it("puts an end at local midnight on the day before", () => {
+    expect(groupDays({ from: "2026-10-14T04:00:00Z", to: "2026-10-20T19:00:00Z" }, "Asia/Almaty")).toEqual({ from: "2026-10-14", to: "2026-10-20" });
+  });
+  it("takes plain dates as they are and refuses what is not a date", () => {
+    expect(groupDays({ from: "2026-10-14T04:00:00Z", to: "2026-11-30" }, "Asia/Almaty")).toEqual({ from: "2026-10-14", to: "2026-11-30" });
+    expect(groupDays({ from: "soon", to: "later" }, "Asia/Almaty")).toBeNull();
+    expect(groupDays(null, "Asia/Almaty")).toBeNull();
   });
 });

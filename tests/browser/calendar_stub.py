@@ -743,19 +743,14 @@ class CalendarStub:
             return self._say("remove_row", self._row_name(block, row)), block["id"], row["id"]
         raise Refusal(400, f"unknown block operation {name}")
 
-    def _local_days(self, row: dict) -> tuple[str, str]:
-        """The first and last local day an event covers, the last inclusive."""
-        if row.get("all_day") and row.get("start_date"):
-            return row["start_date"], str(date.fromisoformat(row["end_date"]) - timedelta(days=1))
-        first = parse(row["start_at"]).astimezone(self.zone).date()
-        last = (parse(row["end_at"]) - timedelta(seconds=1)).astimezone(self.zone).date()
-        return str(first), str(max(first, last))
-
     def _group_view(self, group: dict) -> dict:
         members = [e for e in self.events if e.get("group_id") == group["id"]]
-        spans = [self._local_days(e) for e in members]
+        # Instants, as the host sends them: the first start and the last (exclusive) end, in UTC.
+        # The stub once sent local dates, and the plan's page that read them broke on the real host.
+        timed = [e for e in members if e.get("start_at") and e.get("end_at")]
+        span = {"from": iso(min(parse(e["start_at"]) for e in timed)), "to": iso(max(parse(e["end_at"]) for e in timed))} if timed else None
         return {**group, "event_count": len(members), "progress": {"done": sum(1 for e in members if e.get("status") == "done"), "total": len(members)},
-                "range": {"from": min(s[0] for s in spans), "to": max(s[1] for s in spans)} if spans else None}
+                "range": span}
 
     def _shift(self, row: dict, days: int) -> None:
         """Moves an event by whole days on the wall clock of the zone, so a meal at eight stays at

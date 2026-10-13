@@ -6,6 +6,8 @@
 // list of steps, and what it holds is the agent's business; the screen draws the shapes.
 
 import { locale, num, t } from "../i18n";
+import type { Day } from "./dates";
+import { toWall } from "./zone";
 
 export type EventStatus = "planned" | "done" | "skipped" | "cancelled";
 export const STATUSES: EventStatus[] = ["planned", "done", "skipped", "cancelled"];
@@ -73,6 +75,24 @@ export type Group = {
 };
 
 export type Progress = { done: number; total: number };
+
+/** The local days a group spans, both ends included. The host reports its range as instants: the
+ *  first event's start and the last one's end, which is exclusive, so an end at midnight belongs to
+ *  the day before. A plain date (a repeating event's last day) is taken as it is. Reading the
+ *  instants as dates once broke the plan's page with "Invalid date". */
+export function groupDays(range: { from: string; to: string } | null | undefined, zone: string): { from: Day; to: Day } | null {
+  if (!range?.from || !range.to) return null;
+  const day = (value: string, end: boolean): Day | null => {
+    if (!value.includes("T")) return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+    const at = Date.parse(value);
+    if (Number.isNaN(at)) return null;
+    return toWall(end ? at - 1 : at, zone).day;
+  };
+  const from = day(range.from, false);
+  const to = day(range.to, true);
+  if (!from || !to) return null;
+  return to < from ? { from, to: from } : { from, to };
+}
 export type BlockSummary = { id: string; kind: string; title?: string; done?: number | null; total?: number | null };
 export type AggregateItem = { type: string; field: string; op: string; label?: string; value: number; unit?: string; target?: [number, number]; ok?: boolean };
 export type AggregateDay = { date: string; items: AggregateItem[] };

@@ -10,7 +10,7 @@ import { invalidate, prime, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
 import { OverflowMenu, Sheet } from "../ui/dialogs";
 import { AgendaView } from "./Agenda";
-import type { AggregateDay, EventStatus, Group, TypeDef } from "./blocks";
+import { groupDays, type AggregateDay, type EventStatus, type Group, type TypeDef } from "./blocks";
 import { addDays, dayLabel, type Day } from "./dates";
 import { GROUPS, aggregatesKey, deleteGroup, duplicateGroup, eventsKey, patchGroup, refreshPlanner, shiftGroup } from "./data";
 import { eventItem } from "./items";
@@ -81,7 +81,7 @@ export function GroupPage({ groupId, groups, types, calendars, zone, today, now,
   const listed = groups.find((g) => g.id === groupId);
   const read = useQuery<Group>(`${GROUPS}/${encodeURIComponent(groupId)}`, { staleMs: 5000 });
   const group = read.data ?? listed;
-  const range = group?.range ?? null;
+  const range = groupDays(group?.range, zone);
   const from = range?.from ?? today;
   const to = range ? addDays(range.to, 1) : addDays(today, 7);
   const days: Day[] = [];
