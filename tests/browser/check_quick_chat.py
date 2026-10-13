@@ -158,7 +158,7 @@ def run() -> int:
         assert body == {"text": "hello there", "source": "quick_chat"}, body
         page.screenshot(path=str(SHOTS / "quick-sent.png"))
         page.locator(".quick-status").get_by_role("button", name="Open").click()
-        assert calls(page, "open")[-1] == ["open", f"/app/agents/{COMPANION['session_id']}"], calls(page, "open")
+        assert calls(page, "open")[-1] == ["open", f"/app/agents/{COMPANION.profile['session_id']}"], calls(page, "open")
 
         # A skill by $.
         field.press_sequentially("$web")
@@ -218,7 +218,7 @@ def run() -> int:
         field.fill("what is wrong here?")
         field.press("Enter")
         expect(page.locator(".quick-status")).to_contain_text("Sent to Daedalus.")
-        _, body = api.last(f"/api/sessions/{COMPANION['session_id']}/upload")
+        _, body = api.last(f"/api/sessions/{COMPANION.profile['session_id']}/upload")
         assert "what is wrong here?" in str(body) and "appshot-screen.png" in str(body) and "appshot-window.png" in str(body), str(body)[:300]
         expect(chip).to_have_count(0)
 
