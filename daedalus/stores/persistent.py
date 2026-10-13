@@ -12,17 +12,20 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections import Counter
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from protocore.contracts.memory import MemoryHit, MemoryRecord, MemoryScope, MemoryWriteResult
+from protocore.contracts.memory import MemoryHit, MemoryRecord, MemoryScope, MemoryWriteDecision, MemoryWriteResult
 from protocore.contracts.workspace import WorkspaceUnit, WorkspaceWriteOutcome
 from protocore.tests_support.adapters import InMemoryMemory, InMemoryWorkspace
 
+from daedalus.memory.taxonomy import normalise_topics, record_topics
 from daedalus.stores.database import Database
 
 _WORD = re.compile(r"[\w][\w'-]*", re.UNICODE)
+_MEMORY_ID = re.compile(r"^mem-(\d+)$")
 
 
 def _tokens(text: str) -> list[str]:
@@ -39,7 +42,10 @@ class PersistentMemory(InMemoryMemory):
         for row in rows:
             record = MemoryRecord.model_validate(json.loads(row["record"]))
             self._store[(row["tenant_id"], row["id"])] = record
-        self._counter = len(rows)
+        # The next id continues after the highest one, not after the count: with a record forgotten,
+        # the count pointed at an id still in use and the next write replaced that record silently
+        # (52 records numbered up to 63 meant the 53rd write overwrote mem-000053).
+        self._counter = max((int(m.group(1)) for row in rows if (m := _MEMORY_ID.match(row["id"]))), default=0)
 
     async def _persist(self, record: MemoryRecord) -> None:
         await self._db.execute(
@@ -49,7 +55,20 @@ class PersistentMemory(InMemoryMemory):
         )
 
     async def write(self, tenant_id: str, scope: MemoryScope, scope_key: str, text: str, **kwargs: Any) -> MemoryWriteResult:  # type: ignore[override]
+        metadata = dict(kwargs.get("metadata") or {})
+        if "topics" in metadata:
+            metadata["topics"] = normalise_topics(metadata["topics"])
+            kwargs["metadata"] = metadata
+        before = dict(self._store)
         result = await super().write(tenant_id, scope, scope_key, text, **kwargs)
+        previous = before.get((tenant_id, result.record.id))
+        if result.decision is MemoryWriteDecision.merged and previous is not None:
+            # The reference store merges metadata by replacing keys, so a merge dropped the topics
+            # the record had; a fact said again is still about everything it was about before.
+            topics = normalise_topics([*record_topics(previous.metadata), *record_topics(result.record.metadata)])
+            merged = result.record.model_copy(update={"metadata": {**result.record.metadata, "topics": topics}})
+            self._store[(tenant_id, merged.id)] = merged
+            result = result.model_copy(update={"record": merged})
         await self._persist(result.record)
         return result
 
@@ -71,36 +90,70 @@ class PersistentMemory(InMemoryMemory):
         out.sort(key=lambda r: (r.created_at.isoformat() if r.created_at else "", r.id), reverse=True)
         return out
 
-    async def update(self, tenant_id: str, memory_id: str, *, text: str | None = None, kind: str | None = None) -> MemoryRecord:
+    def get_record(self, tenant_id: str, memory_id: str) -> MemoryRecord | None:
+        return self._store.get((tenant_id, memory_id))
+
+    def vocabulary(self, tenant_id: str) -> Counter[str]:
+        """The topics in use and how many records carry each: what a new record's topics reuse."""
+        counts: Counter[str] = Counter()
+        for (t, _), rec in self._store.items():
+            if t == tenant_id:
+                counts.update(record_topics(rec.metadata))
+        return counts
+
+    async def update(
+        self,
+        tenant_id: str,
+        memory_id: str,
+        *,
+        text: str | None = None,
+        kind: str | None = None,
+        topics: list[str] | None = None,
+    ) -> MemoryRecord:
         """Rewrite a record in place (the operator's edit): its id, scope and history stay, the version steps."""
         record = self._store.get((tenant_id, memory_id))
         if record is None:
             raise KeyError(memory_id)
         changes: dict[str, Any] = {}
-        if text is not None and text.strip():
+        if text is not None and text.strip() and text.strip() != record.text:
             changes["text"] = text.strip()
-        if kind is not None and kind.strip():
+        if kind is not None and kind.strip() and kind.strip() != record.kind:
             changes["kind"] = kind.strip()
+        if topics is not None and normalise_topics(topics) != record_topics(record.metadata):
+            changes["metadata"] = {**record.metadata, "topics": normalise_topics(topics)}
         if not changes:
             return record
-        updated = record.model_copy(update={**changes, "version": record.version + 1})
+        updated = record.model_copy(update={**changes, "version": record.version + 1, "updated_at": datetime.now(UTC)})
         self._store[(tenant_id, memory_id)] = updated
         await self._persist(updated)
         return updated
 
+    async def restore(self, record: MemoryRecord) -> None:
+        """Put a record back exactly as it was, id and all: what an undone merge or edit returns to."""
+        self._store[(record.tenant_id, record.id)] = record
+        await self._persist(record)
+
     async def recall(self, tenant_id: str, query: str, **kwargs: Any):  # type: ignore[override]
-        hits = await super().recall(tenant_id, query, **kwargs)
+        return await self.search(tenant_id, query, **{"limit": 10, **kwargs})
+
+    async def search(  # type: ignore[override]
+        self,
+        tenant_id: str,
+        query: str,
+        *,
+        scopes: Sequence[MemoryScope] | None = None,
+        scope_keys: dict[MemoryScope, str] | None = None,
+        kinds: Sequence[str] | None = None,
+        topics: Sequence[str] | None = None,
+        limit: int = 20,
+    ) -> list[MemoryHit]:
+        """Ranked records, as the core's search, narrowed to the records carrying any of ``topics``."""
+        hits = self._rank(tenant_id, query, scopes, scope_keys, kinds, limit, topics=topics)
         for hit in hits:
             await self._persist(hit.record)
         return hits
 
-    async def search(self, tenant_id: str, query: str, **kwargs: Any):  # type: ignore[override]
-        hits = await super().search(tenant_id, query, **kwargs)
-        for hit in hits:
-            await self._persist(hit.record)
-        return hits
-
-    def _rank(self, tenant_id: str, query: str, scopes: Any, scope_keys: Any, kinds: Any, limit: int) -> list[MemoryHit]:  # type: ignore[override]
+    def _rank(self, tenant_id: str, query: str, scopes: Any, scope_keys: Any, kinds: Any, limit: int, *, topics: Sequence[str] | None = None) -> list[MemoryHit]:  # type: ignore[override]
         """Ranked recall: BM25 over the record texts, a bonus for the phrase itself, a tie-break on recency
         and on how often the record was useful before. The reference store scores by token overlap alone,
         which ranks a long note that shares two common words above a short one that names the thing."""
@@ -112,9 +165,12 @@ class PersistentMemory(InMemoryMemory):
         eff_scopes = tuple(scopes) if scopes else DEFAULT_RECALL_SCOPES
         keys = scope_keys or {}
         kind_set = set(kinds) if kinds else None
+        topic_set = set(normalise_topics(list(topics))) if topics else None
         pool: list[MemoryRecord] = []
         for (t, _), rec in self._store.items():
             if t != tenant_id or rec.scope not in eff_scopes or (kind_set is not None and rec.kind not in kind_set):
+                continue
+            if topic_set is not None and not topic_set & set(record_topics(rec.metadata)):
                 continue
             if rec.scope is not MemoryScope.global_ and keys.get(rec.scope) != rec.scope_key:
                 continue

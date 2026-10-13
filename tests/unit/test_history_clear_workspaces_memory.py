@@ -105,10 +105,11 @@ H = {"X-Daedalus-Token": "tok"}
 
 
 async def test_memory_api_round_trip(client: httpx.AsyncClient) -> None:
-    r = await client.post("/api/memory", json={"scope": "global", "text": "  remember this  ", "kind": "note"}, headers=H)
+    r = await client.post("/api/memory", json={"scope": "global", "text": "  remember this  ", "category": "procedure"}, headers=H)
     assert r.status_code == 200, r.text
     rid = r.json()["record"]["id"]
-    assert r.json()["record"]["text"] == "remember this"
+    assert r.json()["record"]["text"] == "remember this" and r.json()["record"]["category"] == "procedure"
+    assert (await client.post("/api/memory", json={"scope": "global", "text": "x", "category": "gossip"}, headers=H)).status_code == 422
     assert (await client.post("/api/memory", json={"scope": "session", "text": "x"}, headers=H)).status_code == 422
     assert (await client.post("/api/memory", json={"scope": "planet", "text": "x"}, headers=H)).status_code == 422
     listing = (await client.get("/api/memory", headers=H)).json()

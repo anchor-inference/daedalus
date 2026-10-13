@@ -950,6 +950,18 @@ class MemoryConfig(BaseModel):
     extract_min_messages: int = Field(default=12, ge=2)
     extract_preset: str = ""
     """Preset id for the extraction call; empty = the session's own model."""
+    classify_preset: str = ""
+    """Preset id of the model that names a memory's category and topics when Remember was given
+    none, and double-checks it for sensitive subjects; empty = word lists only, which cost nothing
+    and are right most of the time. One short call per such Remember."""
+    sensitive_allowed: list[Literal["health", "finances", "intimate", "identity_documents", "precise_location"]] = Field(default_factory=list)
+    """Sensitive subjects Remember may store. Everything not listed is refused, and the refusal tells
+    the model why, so a diagnosis, a card number or a home address is never kept by accident."""
+    consolidate: bool = True
+    """Tidy memory in the background: find near-duplicates and records a newer one contradicts."""
+    auto_merge: bool = True
+    """Apply the tidying the comparison is sure of (each change can be undone from the Memory screen);
+    off, every finding waits as a suggestion."""
 
 
 class CompactionConfig(BaseModel):

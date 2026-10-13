@@ -45,7 +45,6 @@ from protocore.runtime.loop_state import LoopState
 from protocore.runtime.query_engine import QueryEngine
 from protocore.runtime.soft_stop import CAUSE_MODEL_NO_PROGRESS, CAUSE_PROVIDER_ERROR
 from protocore.runtime.tool_registry import ToolRegistry
-from protocore.tools.memory import build_memory_tools
 from protocore.tools.tool_search import TOOL_SEARCH_TOOL_NAME, ToolSearchTool
 
 from daedalus.browser import cookies as cookie_files
@@ -98,6 +97,7 @@ from daedalus.host.skills import DirectorySkillStore
 from daedalus.host.transcript_view import TranscriptViewBuilder, message_view
 from daedalus.host.worktrees import append_exclude, exclude_lines
 from daedalus.mcp.manager import McpManager, blocked_for, mcp_tool_prefix
+from daedalus.memory.tools import build_memory_tools
 from daedalus.processes import end_tree
 from daedalus.providers.chain import build_chain
 from daedalus.providers.free_catalog import approved_endpoint
@@ -179,6 +179,8 @@ WORKSPACE_NOTES_CHARS = 6000
 """The least room the workspace's notes files get, on a window too small for their share."""
 WORKSPACE_NOTES_WINDOW_SHARE = 0.04
 """The share of the window the workspace's AGENTS.md, CLAUDE.md and memory index may take: 40k tokens on a million."""
+MEMORY_CLASSIFY_TIMEOUT_SECONDS = 15
+"""A classifier slower than this leaves Remember to the word lists rather than holding the turn."""
 MEMORY_INDEX = ".agents/memory/MEMORY.md"
 """The project's memory index, where agents of every program working in the folder keep their notes."""
 MCP_EXAMPLE_NAMES = 5
@@ -777,7 +779,7 @@ class SessionManager:
             if tool.name in disabled or (not browser and tool.name.startswith(capabilities.BROWSER_TOOL_PREFIX)):
                 continue
             self.tools.register(tool)
-        for tool in build_memory_tools(self.memory):
+        for tool in build_memory_tools(self.memory, tenant_allowed=lambda: self.config.memory.sensitive_allowed, classifier=self.memory_classifier):
             self.tools.register(tool)
         for group, spec in TOOL_GROUPS.items():
             instructions = prompts.group_instructions(group, selfdev_mode=self.capabilities.selfdev.mode)
@@ -1032,6 +1034,28 @@ class SessionManager:
     def on_pending_restored(self, callback: Callable[[str, PendingQuestion], Awaitable[None]]) -> None:
         """Called after a restart for every session still waiting on a question."""
         self._pending_restored.append(callback)
+
+    def memory_classifier(self) -> Callable[[str], Awaitable[str]] | None:
+        """The call Remember asks for a category and topics, on the preset Settings → Memory names;
+        ``None`` without one, and the word lists answer alone."""
+        preset = self.config.memory.classify_preset
+        if not preset or preset not in self.config.presets:
+            return None
+
+        async def ask(prompt: str) -> str:
+            provider, model = self.providers.rungs_for(self.config, preset)[0]
+            request = LLMRequest(
+                model=model,
+                messages=[Message(role=MessageRole.user, content_blocks=[TextBlock(text=prompt)])],
+                max_tokens=200,
+                temperature=0.0,
+                extra={"enable_thinking": False},
+                observability=LLMObservabilityContext(tenant_id=TENANT, call_purpose="memory_classify", call_category="memory"),
+            )
+            response = await asyncio.wait_for(provider.complete_text(request), timeout=MEMORY_CLASSIFY_TIMEOUT_SECONDS)
+            return "".join(b.text for b in response.message.content_blocks if isinstance(b, TextBlock))
+
+        return ask
 
     def _configure_redactor(self, settings: Settings, config: RuntimeConfig) -> None:
         """Every credential this process holds is a value the redactor masks wherever it shows up."""
