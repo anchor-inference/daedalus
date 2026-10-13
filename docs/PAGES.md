@@ -291,6 +291,45 @@ Daedalus.on("scene.updated", ({ file }) => viewer.load(file));   // the agent: P
 The `split` template is this wired up: a tool pane that shows the state the agent keeps in the page's
 storage, and a strip that talks to the agent.
 
+## Widgets in an answer
+
+A widget is the small cousin of a page: an interactive element the agent puts straight into its
+answer with the `Widget` tool when interaction helps more than words — a loan calculator, a
+comparison with sliders, a small chart, a checklist to tick. It is one HTML document with its CSS and
+JavaScript inline (at most 128 KB) and optional JSON data (at most 64 KB), drawn right after the step
+that made it, outside the folded steps, so it can be used while the agent goes on.
+
+Where a page is the operator's own program, a widget is something an agent wrote into a conversation
+without being asked for a screen, so it runs boxed in:
+
+- **A sandboxed frame** (`sandbox="allow-scripts"`, no same origin): it cannot read the app's
+  cookies, storage or DOM.
+- **No network.** The document carries a policy that refuses every connection (`connect-src 'none'`,
+  `default-src 'none'`); scripts, styles and images are inline or `data:` URLs. A link does not
+  navigate the frame. The tool's answer tells the agent when its document wants a CDN or a fetch.
+- **Its height follows its content**, up to 1400 px, past which it scrolls inside.
+- **The theme** arrives as the app's CSS variables (`--bg`, `--surface-1`, `--fg`, `--accent`, …) and
+  follows every change of the app's look without a reload.
+
+In its scripts a global `widget` offers:
+
+| | |
+|---|---|
+| `widget.data` | the JSON the agent passed |
+| `widget.storage.get(key)`, `.set(key, value)`, `.delete(key)`, `.keys()` | values kept on the host per session and widget (64 KB a value, 200 keys, 256 KB in all), handed to the widget whole when it opens; they leave with the session |
+| `widget.ask(text)` | puts a follow-up into the composer for the operator to read and send; only in answer to the operator's own click in the widget, and it never sends anything itself |
+| `widget.theme`, `widget.onTheme(fn)` | the scheme and the tokens, and a call when they change |
+| `widget.title`, `widget.lang`, `widget.page` | the title, the app's language, and whether it runs as a page |
+
+**Open as page** (the button beside the title) makes the widget a published custom page whose agent is
+the conversation's session: the same document with a shim that answers `widget` through the bridge
+(`storage` is the page's storage, with the widget's values copied in; `ask` asks for a yes and then
+goes to the page's agent). From then on it is a page like any other, with no sandbox and no cap.
+
+Telegram cannot run a widget: a run that drew one ends with a line naming each, linked to the
+conversation in the app. A shared link (`/c/<slug>`) shows the widget's title and the same link, and
+never its document.
+
 ## Settings
 
 ```toml

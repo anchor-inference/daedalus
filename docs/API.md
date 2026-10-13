@@ -374,4 +374,6 @@ agent's to use (docs/architecture/browser.md, The private sign-in).
 makes one, `PUT /api/pages/{slug}/draft/{path}` writes its files, `POST …/publish` and `…/rollback`
 switch the live version, and `/api/pages/{slug}/storage/{key}` keeps the page's own values. The pages
 themselves are served at `/pages/{slug}/`. Everything about them, with the kit and the bridge a page
-may use, is in [PAGES.md](PAGES.md).
+may use, is in [PAGES.md](PAGES.md). A widget an agent drew in a conversation keeps its values at
+`/api/sessions/{id}/widgets/{call}/storage` (`GET` all of them, `PUT` or `DELETE` one key), and
+`POST /api/sessions/{id}/widgets/{call}/page` makes it a published page.
