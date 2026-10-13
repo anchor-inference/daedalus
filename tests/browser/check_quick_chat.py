@@ -35,8 +35,9 @@ from pathlib import Path
 from playwright.sync_api import expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import screenshots  # noqa: E402
 from api_stub import COMPANION, DEFAULT_APP, expect_app  # noqa: E402
-from screenshots import INBOX_SUMMARY, SESSIONS as KNOWN, respond, stub  # noqa: E402
+from screenshots import INBOX_SUMMARY, respond, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -50,7 +51,7 @@ window.__calls = [];
 window.__shown = null;
 window.__action = null;
 window.__navigate = null;
-const png = Uint8Array.from(atob('%s'), (c) => c.charCodeAt(0));
+const png = Uint8Array.from(atob('__PNG__'), (c) => c.charCodeAt(0));
 const shot = (name) => ({ ok: true, name, type: 'image/png', bytes: png, width: 160, height: 100 });
 window.__desk = { settings: { quickChat: 'Alt+Space', appshot: 'Alt+Shift+Space', hideToTray: true } };
 window.daedalus = {
@@ -61,7 +62,7 @@ window.daedalus = {
     resize: (h) => window.__calls.push(['resize', h]),
     open: (path) => window.__calls.push(['open', path]),
     pending: async () => [],
-    windows: async () => { window.__calls.push(['windows']); return { ok: true, windows: [{ id: 'window:7:0', name: 'Editor', thumbnail: 'data:image/png;base64,%s' }] }; },
+    windows: async () => { window.__calls.push(['windows']); return { ok: true, windows: [{ id: 'window:7:0', name: 'Editor', thumbnail: 'data:image/png;base64,__PNG__' }] }; },
     capture: async (id) => { window.__calls.push(['capture', id || '']); return shot(id ? 'appshot-window.png' : 'appshot-screen.png'); },
     onShown: (cb) => { window.__shown = cb; return () => {}; },
   },
@@ -79,7 +80,7 @@ function info(errors) {
     report: { quickChat: { accelerator: window.__desk.settings.quickChat, ok: true, reason: '' }, appshot: { accelerator: window.__desk.settings.appshot, ok: false, reason: 'taken' } },
     errors, platform: 'linux', wayland: true, tray: { ready: true, note: '' }, screen: 'granted' };
 }
-""" % (PNG, PNG)
+""".replace("__PNG__", PNG)
 
 SESSIONS = {
     "sessions": [
@@ -278,7 +279,7 @@ def run() -> int:
         main.wait_for_timeout(300)
         assert api.last("/api/companion") == ("PATCH", {"paused": True})
         # A conversation the stub can draw, so the move lands on a screen rather than an error.
-        known = KNOWN[0]["id"]
+        known = screenshots.SESSIONS[0]["id"]
         main.evaluate(f"window.__navigate('/app/agents/{known}')")
         main.wait_for_url(f"**/app/agents/{known}*")
 
