@@ -85,6 +85,7 @@ from daedalus.extensions import (
     api_issue_sync,
     api_knowledge,
     api_lifecycle,
+    api_meetings,
     api_pages,
     api_plugins,
     api_project_start,
@@ -132,9 +133,11 @@ from daedalus.host import capabilities, component_install, launcher_bridge
 from daedalus.host import components as component_list
 from daedalus.host.config_validation import UNKNOWN_REFERENCE_PATHS, ConfigConflict, config_revision, validate_candidate
 from daedalus.host.dependencies import DependencyPlanner
+from daedalus.host.depth import AUTO_MODE
 from daedalus.host.events import EventFilter, event_stream, streamed_types
 from daedalus.host.host_exec import BRIDGE_DOWN, HostExecBackend
 from daedalus.host.policy import sealed_root
+from daedalus.host.predict import Predictor
 from daedalus.host.presence import MAX_ID_LENGTH, MAX_PROJECTS, MAX_SESSIONS, MAX_TERMINALS, PresenceReport
 from daedalus.host.prompt_changes import PromptChangePlanner
 from daedalus.host.prompts import DEFAULT_RULES, without_turn_context
@@ -701,7 +704,12 @@ class SessionCapBody(BaseModel):
 
 class ModeBody(BaseModel):
     mode: str | None = None
-    """A configured mode name; null or "" = default behaviour."""
+    """A configured mode name, or ``auto`` to have each message sorted; null or "" = default behaviour."""
+
+
+class DepthBody(BaseModel):
+    level: str | None = None
+    """``quick``, ``normal`` or ``long`` for the session's next message; null or "" sorts it again."""
 
 
 class YagniBody(BaseModel):
@@ -731,6 +739,8 @@ class SettingsBody(BaseModel):
     scheduler: dict[str, Any] | None = None
     telegram: dict[str, Any] | None = None
     asr: dict[str, Any] | None = None
+    assist: dict[str, Any] | None = None
+    """The helpers around the operator's messages: the depth sort's model, the next-message guess and its allowance."""
     notifications: dict[str, Any] | None = None
     """Where each kind of notification goes, quiet hours, the rate limits. The app saves it through
     ``/api/notifications/preferences``; it is here as well so the agent's SettingsChange can reach it,
@@ -1654,6 +1664,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     if isinstance(getattr(app, "db", None), Database):
         # The calendar, its connected accounts and the planner's tasks.
         api_calendar.register(api, app, auth)
+        # Meeting notes from a recording, whose action items become a calendar entry.
+        api_meetings.register(api, app, auth)
         # The diagram editor: scenes, their history, previews and public links.
         api_diagrams.register(api, app, auth)
     # The agent's browser: its groups, the live view's ticket and socket, control, the audit.
@@ -2117,6 +2129,10 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         # A session opened here is not a Telegram session. Without this, private-chat mode
         # delivers the agent's replies into the operator's direct messages.
         metadata["telegram_detached"] = True
+        if body.loop is None:
+            # A chat the operator opens sorts each message by depth until they pick a mode; a loop
+            # agent's wake-ups are not the operator's messages and keep the plain agent.
+            metadata["mode"] = AUTO_MODE
         title = body.title.strip()
         if body.autotitle:
             # The operator typed the message instead of a name. A clip stands in until the model
@@ -2320,6 +2336,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             # on its own instead of waiting for the session to be reopened.
             **manager.model_status(state),
             "mode": state.metadata.get("mode") or "",
+            "depth_next": state.metadata.get("depth_next") or "",
             "yagni": bool(state.metadata.get("yagni")),
             "usd_cap": state.metadata.get("usd_cap"),
             "brief": state.metadata.get("brief") or "",
@@ -4001,6 +4018,25 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             raise HTTPException(404, "no such session") from None
         except RuntimeError as exc:
             raise HTTPException(409, str(exc)) from exc
+
+    predictor = Predictor(manager)
+
+    @api.get("/api/sessions/{session_id}/suggestion")
+    async def next_message(session_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, str]:
+        """The operator's likely next message, for the empty composer to show as ghost text."""
+        try:
+            return await predictor.suggest(session_id)
+        except KeyError:
+            raise HTTPException(404, "no such session") from None
+
+    @api.post("/api/sessions/{session_id}/depth")
+    async def set_depth(session_id: str, body: DepthBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            return {"depth_next": await manager.set_next_depth(session_id, body.level)}
+        except KeyError:
+            raise HTTPException(404, "no such session") from None
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     @api.post("/api/sessions/{session_id}/mode")
     async def set_mode(session_id: str, body: ModeBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

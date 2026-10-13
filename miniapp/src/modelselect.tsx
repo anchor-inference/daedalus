@@ -91,7 +91,7 @@ export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, she
         {/* The effort is its own span so a long model name is what gives way: in one span the
             ellipsis ate the effort first and the pill read "DeepSeek Flash · l…". */}
         <span className={`model-label truncate ${fallback ? "model-fallback" : ""}`}>{label}</span>
-        {onChooseEffort && <span className="model-effort">{t(thinking ? `add.effort.${effort || "medium"}` : "add.effort.off")}</span>}
+        {onChooseEffort && <span className="model-effort">{t(effort === "auto" ? "add.effort.auto" : thinking ? `add.effort.${effort || "medium"}` : "add.effort.off")}</span>}
 
       </ControlTrigger>
       {open && sheet && (

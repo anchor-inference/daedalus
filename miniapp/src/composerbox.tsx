@@ -13,6 +13,7 @@ import { ModelChoice, ModelSelect } from "./modelselect";
 import { ModeInfo, ModeSelect } from "./modeselect";
 import { MicButton, VoiceBar, VoiceNoteFailed, useVoiceNote } from "./voicebar";
 import { landWords } from "./voicenote";
+import { MeetingCard, MeetingOffer, isAudio, useMeeting } from "./meeting";
 import { loadDraftFiles, saveDraftFiles } from "./project/draftfiles";
 import { useReply } from "./project/chat";
 import { AttachedSecret, SecretChip, SecretSheet } from "./secrets";
@@ -76,6 +77,10 @@ export type ComposerProps = {
   thinking?: boolean;
   reasoningEffort?: string;
   onChooseEffort?: (effort: string) => void;
+  /** The operator's likely next message, shown in the empty field and taken with Tab; empty for none. */
+  suggestion?: string;
+  /** The suggestion went into the field: the screen stops offering it. */
+  onSuggestionUsed?: () => void;
   /** The session's mode (empty: the plain agent), the configured ones, and the YAGNI switch. */
   mode?: string;
   modes?: ModeInfo[];
@@ -350,15 +355,43 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       }
     },
     onAttach: (file) => addFiles([file]),
+    // A long recording the operator turned into a meeting: notes, not dictation. On the start page
+    // there is no session to keep them in yet, so the recording is attached instead.
+    onMeeting: sessionId ? (file) => void meeting.start(file, false) : undefined,
     toast,
   });
+  const meeting = useMeeting(sessionId, toast);
+  // An audio file in the pill can be meeting notes instead of an attachment; the first one is offered.
+  const meetingFile = sessionId && !meeting.state ? files.find(isAudio) : undefined;
+  const startMeeting = (keep: boolean) => {
+    if (!meetingFile) return;
+    setFiles((current) => current.filter((file) => file !== meetingFile));
+    void meeting.start(meetingFile, keep);
+  };
   const voiceBar = note.state.phase === "recording" || note.state.phase === "transcribing";
+
+  // The operator's likely next message, as the field's placeholder while it is empty and nothing
+  // else is asked of them. Never sent by itself: Tab (or the hint, on a phone) puts it in the field,
+  // and typing anything replaces it.
+  const ghost = props.suggestion && draft === "" && files.length === 0 && !voiceBar && !asking && !props.approval && (status === "idle" || status === "done" || status === "failed") ? props.suggestion : "";
+  const acceptGhost = () => {
+    if (!ghost) return;
+    setDraft(ghost);
+    props.onSuggestionUsed?.();
+    requestAnimationFrame(() => {
+      const field = textarea.current;
+      if (field) { field.focus({ preventScroll:true }); field.setSelectionRange(ghost.length, ghost.length); }
+    });
+  };
 
   // ── keys ──
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
-    const intent = composerKey(e, { enterSends: enterSends(), paletteOpen: paletteItems.length + skillItems.length > 0 });
-    if (intent === "complete") {
+    const intent = composerKey(e, { enterSends: enterSends(), paletteOpen: paletteItems.length + skillItems.length > 0, ghost: !!ghost });
+    if (intent === "accept") {
+      e.preventDefault();
+      acceptGhost();
+    } else if (intent === "complete") {
       e.preventDefault();
       if (paletteItems.length) pickCommand(paletteItems[0]);
       else pickSkill(skillItems[0]);
@@ -553,6 +586,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         </div>
       )}
       <VoiceNoteFailed note={note} />
+      <MeetingCard meeting={meeting} />
+      {meetingFile && !voiceBar && <MeetingOffer file={meetingFile} onStart={startMeeting} />}
       {/* A tap anywhere on the phone's pill that is not a control is a tap on its field: the field is
           36 px inside a 48 px pill, and the pill is the target the reader sees. */}
       <div className={`composer-box ${voiceBar ? "voicing" : ""}`} onClick={phone ? (e) => { if (e.target === e.currentTarget) textarea.current?.focus(); } : undefined}>
@@ -578,16 +613,21 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         )}
         <textarea
           hidden={voiceBar}
+          className={ghost ? "ghost" : undefined}
+          data-suggestion={ghost || undefined}
           ref={textarea}
           value={draft}
           disabled={sending || fileReadySession !== sessionId}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder={phone && approval ? t("composer.tray.instead") : props.idlePlaceholder && placeholderKey(status, asking) === "session.composer.idle" ? props.idlePlaceholder : t(placeholderKey(status, asking))}
+          placeholder={ghost ? ghost : phone && approval ? t("composer.tray.instead") : props.idlePlaceholder && placeholderKey(status, asking) === "session.composer.idle" ? props.idlePlaceholder : t(placeholderKey(status, asking))}
           rows={1}
           onPaste={onPaste}
           onKeyDown={onKeyDown}
-          aria-label={props.idlePlaceholder && placeholderKey(status, asking) === "session.composer.idle" ? props.idlePlaceholder : t(placeholderKey(status, asking))}
+          aria-label={ghost ? t("composer.suggest.label", { text:ghost }) : props.idlePlaceholder && placeholderKey(status, asking) === "session.composer.idle" ? props.idlePlaceholder : t(placeholderKey(status, asking))}
         />
+        {ghost && <button type="button" className="composer-ghost-accept" onClick={acceptGhost} title={t("composer.suggest.accept")}>
+          {phone ? t("composer.suggest.use") : <kbd>Tab</kbd>}
+        </button>}
         <div className="composer-row" hidden={voiceBar}>
           <input ref={fileInput} type="file" multiple hidden onChange={(e) => { addFiles(e.target.files ?? []); e.target.value = ""; }} />
           <input ref={photoInput} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { addFiles(e.target.files ?? []); e.target.value = ""; }} />

@@ -29,7 +29,8 @@ import { conversationMedia, galleryFor, toolSource, viewerSource, type HostSourc
 import { Answer, Composer, ComposerHandle } from "../composerbox";
 import { Approval, QueuedMessage, pendingApproval, queuedAfter, questionsKey, readQueued } from "../composer";
 import { ModelChoice } from "../modelselect";
-import { ModeInfo, modeName } from "../modeselect";
+import { AUTO_MODE, ModeInfo, modeName } from "../modeselect";
+import { DepthChip } from "../depthchip";
 import { MoveSessionSheet } from "../projects";
 import { panelShortcut } from "../panel";
 import { Panel, usePanel, usePanelWidth } from "../panelhost";
@@ -220,6 +221,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // The phone's sheets: the ⋮ menu and the three it leads to that the desktop shows in place.
   const [phoneSheet, setPhoneSheet] = useState<"menu" | "search" | "rename" | null>(null);
   const [modes, setModes] = useState<ModeInfo[]>([]);
+  // The guessed next message the composer offers once an answer has settled; empty when there is none.
+  const [suggestion, setSuggestion] = useState("");
+  useEffect(() => setSuggestion(""), [id]);
   const [commands, setCommands] = useState<SlashCommand[]>([]);
   const [skills, setSkills] = useState<SkillEntry[]>([]);
   const [commandResult, setCommandResult] = useState<{ line: string; text: string } | null>(null);
@@ -668,6 +672,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       if (event === "run_settled" && p.run_id && activeRun && p.run_id !== activeRun) return;
       live.update((s) => liveAfter(s, event, p));
       if (event === "message_start") {
+        setSuggestion("");
         // The queue the last run left behind starts the next one without anybody pressing send:
         // the chip says so as the first token arrives, not at the next read.
         // A run that starts also clears the last one's failure: it is being answered, not explained.
@@ -709,6 +714,11 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         // triggers: the read says the same thing a round trip later.
         setDetail((prev) => (prev ? { ...prev, status: p.status === "awaiting" ? "waiting" : p.status === "failed" ? "failed" : "idle", housekeeping: !!p.housekeeping } : prev));
         refreshSoon("tail");
+        // The answer has settled: ask once for the operator's likely next message. The host keeps one
+        // guess per answer, so the second settle of the same run costs nothing.
+        if (p.status === "completed" && !p.housekeeping) {
+          void api.get<{ text?: string }>(`/api/sessions/${id}/suggestion`).then((r) => setSuggestion(r.text ?? "")).catch(() => setSuggestion(""));
+        }
       } else if (event === "history_cut") {
         cutMessages(Number(p.seq), Number(p.through));
         live.reset();
@@ -1094,6 +1104,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     // Submission can wait behind a busy run for several seconds. Show the operator's words
     // immediately, then let the durable transcript replace this temporary bubble.
     setSendingMessages((current) => [...current, { id: pendingId, text: pendingText }]);
+    setSuggestion("");
     stick.current = true;
     try {
       if (files.length > 0) {
@@ -1193,6 +1204,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
 
   async function chooseEffort(effort: string) {
     try {
+      // A fixed effort is a choice the auto mode would overrule on the next message, so it leaves it.
+      if (detail?.mode === AUTO_MODE) await api.post(`/api/sessions/${id}/mode`, { mode:null });
       const r = await api.post<{ reasoning_effort?: string }>(`/api/sessions/${id}/model`, effort === "off" ? { thinking: false } : { thinking: true, reasoning_effort: effort });
       toast(t("session.effort.picked", { effort: t(`add.effort.${effort === "off" ? "off" : r.reasoning_effort || effort}`) }));
       load();
@@ -1411,7 +1424,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   ] : [];
   // An idle session with jobs still running has not finished: say what it waits for rather than look done.
   const jobsPending = !busy && !saving && !compacting && status !== "failed" ? detail?.background_count ?? 0 : 0;
-  const effortWord = detail ? t(detail.thinking === false ? "add.effort.off" : `add.effort.${detail.reasoning_effort || "medium"}`) : "";
+  const effortWord = detail ? t(detail.thinking === false ? "add.effort.off" : detail.mode === AUTO_MODE ? "add.effort.auto" : `add.effort.${detail.reasoning_effort || "medium"}`) : "";
   const phoneSub = offline ? <StateSub tone="offline">{t("session.phone.reconnecting")}</StateSub>
     : compacting ? <StateSub tone="compacting">{t("session.compacting.bar")}</StateSub>
     : busy ? <LiveSub status={status} base={tail} live={live} />
@@ -1650,8 +1663,10 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             fallback={detail?.fallback ?? null}
             onChooseModel={chooseModel}
             thinking={detail?.thinking}
-            reasoningEffort={detail?.reasoning_effort}
+            reasoningEffort={detail?.mode === AUTO_MODE ? "auto" : detail?.reasoning_effort}
             onChooseEffort={chooseEffort}
+            suggestion={suggestion}
+            onSuggestionUsed={() => setSuggestion("")}
             mode={detail?.mode ?? ""}
             modes={modes}
             yagni={!!detail?.yagni}
@@ -2014,6 +2029,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
             {inbound && <span className="msg-origin">{t("turn.origin.inbound", { source: inbound })}</span>}
             {fromPage && <span className="msg-origin" data-from-page={fromPage}>{t("turn.origin.page", { slug: fromPage })}</span>}
             {turn.user.yagni && <span className="msg-origin msg-yagni" title={t("turn.yagni.title")}>{t(turn.user.yagni === "on" ? "turn.yagni.on" : "turn.yagni.off")}</span>}
+            {turn.user.depth && <DepthChip depth={turn.user.depth} sessionId={sessionId} toast={toast} />}
             {turn.user.reply_to && <ReplyQuote reply={turn.user.reply_to} />}
             <Md className="msg-text" text={withoutAttachedList(turn.user.text)} cacheKey={live ? undefined : `u${seq ?? turn.key}`} />
             {turn.user.secrets?.length ? <div className="msg-secrets">{turn.user.secrets.map((secret) => <SecretChip key={secret.name} name={secret.name} scope={secret.scope} />)}</div> : null}

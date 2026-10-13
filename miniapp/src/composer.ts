@@ -46,7 +46,7 @@ export function placeholderKey(status: ComposerStatus, asking: boolean): string 
 
 // ── keys ─────────────────────────────────────────────────────────────────────────────────
 
-export type KeyIntent = "send" | "newline" | "complete" | "escape" | "model" | "stop" | null;
+export type KeyIntent = "send" | "newline" | "complete" | "accept" | "escape" | "model" | "stop" | null;
 
 type KeyLike = Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey"> & { isComposing?: boolean; keyCode?: number };
 
@@ -55,12 +55,14 @@ type KeyLike = Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "alt
  * name fallback for embedded browsers that omit it, so
  * ⌘M opens the model list whichever alphabet the keyboard is on.
  */
-export function composerKey(e: KeyLike, opts: { enterSends: boolean; paletteOpen: boolean }): KeyIntent {
+export function composerKey(e: KeyLike, opts: { enterSends: boolean; paletteOpen: boolean; ghost?: boolean }): KeyIntent {
   if (e.isComposing || e.key === "Process" || e.keyCode === 229) return null;
   const mod = e.metaKey || e.ctrlKey;
   if (mod && !e.altKey && e.shiftKey && e.code === "KeyS") return "stop";
   if (mod && !e.altKey && !e.shiftKey && e.code === "KeyM") return "model";
   if (e.key === "Tab" && opts.paletteOpen && !e.shiftKey) return "complete";
+  // The guessed next message in an empty field: Tab takes it. Without one Tab moves the focus on, as it should.
+  if (e.key === "Tab" && opts.ghost && !e.shiftKey && !mod && !e.altKey) return "accept";
   if (e.key === "Escape") return "escape";
   if (e.code !== "Enter" && e.code !== "NumpadEnter" && e.key !== "Enter") return null;
   if (mod) return "send";

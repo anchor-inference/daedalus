@@ -19,11 +19,14 @@ export type EffortOptionsProps = {
  */
 export function EffortOptions({ effort, thinking, onChoose }: EffortOptionsProps) {
   const name = useId();
+  // "auto": the session's mode picks the effort per message, so no fixed one is checked; choosing
+  // one here leaves the auto mode (Session.chooseEffort).
+  const auto = effort === "auto";
   const current = REASONING_EFFORTS[effortIndex(effort)];
   return <fieldset className="effort-options">
     <legend className="menu-heading sub">{t("composer.effort.heading")}</legend>
     {["off", ...REASONING_EFFORTS].map((value) => {
-      const checked = value === "off" ? !thinking : !!thinking && value === current;
+      const checked = !auto && (value === "off" ? !thinking : !!thinking && value === current);
       return <label key={value} className={`model-row mode-row effort-option ${checked ? "on" : ""}`}>
         <input type="radio" name={name} value={value} checked={checked} onChange={() => onChoose(value)} onClick={() => { if (checked) onChoose(value); }} />
         <span className="grow model-text">
@@ -53,7 +56,7 @@ export function EffortMenu({ effort, thinking, onChoose, inline }: EffortOptions
     <button ref={trigger} type="button" role="menuitem" className={`model-row effort-entry ${open ? "on" : ""}`} aria-haspopup="dialog" aria-expanded={open}
       onClick={() => setOpen(!open)} onKeyDown={(e) => { if (e.key === "ArrowRight") { e.preventDefault(); setOpen(true); } }}>
       <span className="grow">{t("composer.effort.short")}</span>
-      <span className="sub">{t(thinking ? `add.effort.${current}` : "add.effort.off")}</span><Icon name="chevron" size={14} />
+      <span className="sub">{t(effort === "auto" ? "add.effort.auto" : thinking ? `add.effort.${current}` : "add.effort.off")}</span><Icon name="chevron" size={14} />
     </button>
     {open && <EffortPanel anchor={trigger.current} inline={inline} onClose={close} effort={effort} thinking={thinking} onChoose={onChoose} />}
   </div>;

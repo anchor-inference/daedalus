@@ -68,7 +68,7 @@ from daedalus.config import (
     max_advertised_tools_for,
     on_demand_tool_groups_for,
 )
-from daedalus.host import capabilities, launcher_bridge, prompts, standing, summaries, tool_groups
+from daedalus.host import capabilities, depth, launcher_bridge, prompts, standing, summaries, tool_groups
 from daedalus.host.checkpoint_retention import CheckpointRetention, RetentionBounds, RetentionReport
 from daedalus.host.checkpoints import DIR_NAME as CHECKPOINT_DIR_NAME
 from daedalus.host.checkpoints import CheckpointError, Checkpoints, scan_workspace
@@ -272,6 +272,10 @@ class SessionState:
     """Per-session override; ``None`` follows the configured model window."""
     extra_notes: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
+    turn_depth: dict[str, Any] | None = None
+    """The level the ``auto`` mode chose for the current run (``depth.Depth.metadata``): its mode is
+    what :meth:`SessionManager.mode_for` answers while the run lasts. Not stored: after a restart a
+    resumed run is the plain agent until the next message is sorted."""
     run_origin: str = "operator"
     """Who started the current run (``operator``, ``schedule``, ``reminder``, ``subagent:…``): StaySilent and the reply routing read it."""
     last_error_kind: str = ""
@@ -3404,6 +3408,8 @@ class SessionManager:
                     content_blocks=[TextBlock(text=body)],
                     metadata={"daedalus.origin": origin, **words, **({"daedalus.client_message_id": client_message_id} if client_message_id else {}), **_image_refs_metadata(image_refs)},
                 )
+                if origin == "operator" and _provider_resume is None and state.metadata.get("mode") == depth.AUTO_MODE:
+                    message.metadata["daedalus.depth"] = (await self.sort_depth(state, text)).metadata()
                 if _provider_resume is not None:
                     message.metadata["daedalus.provider_resume"] = {
                         "failed_run_id": _provider_resume[0], "provider_id": _provider_resume[1],
@@ -3605,7 +3611,7 @@ class SessionManager:
         if state is None:
             raise KeyError(session_id)
         name = (mode or "").strip()
-        if name and name not in self.config.modes:
+        if name and name != depth.AUTO_MODE and name not in self.config.modes:
             raise ValueError(f"no such mode {name!r}; configured: {', '.join(self.config.modes) or 'none'}")
         if name:
             state.metadata["mode"] = name
@@ -3616,6 +3622,71 @@ class SessionManager:
         await self.sessions.update_metadata(session_id, state.session.metadata)
         self._apply_tool_visibility_all()  # a running child also inherits a parent's narrower mode from the next call on
         return name
+
+    async def set_next_depth(self, session_id: str, level: str | None) -> str:
+        """The level the session's next message runs at, whatever the sort would say; empty sorts it again.
+
+        The operator's correction of a turn's chip: it re-runs nothing, and it is spent by the next
+        message, so a wrong guess costs one click and not a mode switched on and forgotten.
+        """
+        state = await self.get_state(session_id)
+        if state is None:
+            raise KeyError(session_id)
+        chosen = (level or "").strip()
+        if chosen and chosen not in depth.LEVELS:
+            raise ValueError(f"level must be one of {', '.join(depth.LEVELS)}")
+        for meta in (state.metadata, state.session.metadata):
+            if chosen:
+                meta["depth_next"] = chosen
+            else:
+                meta.pop("depth_next", None)
+        await self.sessions.update_metadata(session_id, state.session.metadata)
+        return chosen
+
+    async def sort_depth(self, state: SessionState, text: str) -> depth.Depth:
+        """The level one operator message of an ``auto`` session runs at.
+
+        The operator's correction wins and is spent; otherwise the small model sorts it within the
+        configured timeout when one is configured, and the heuristic when none is, it is slow, or
+        the day's budget is spent on a paid one.
+        """
+        chosen = str(state.metadata.get("depth_next") or "")
+        if chosen in depth.LEVELS:
+            for meta in (state.metadata, state.session.metadata):
+                meta.pop("depth_next", None)
+            await self.sessions.update_metadata(state.session.id, state.session.metadata)
+            return depth.Depth(chosen, "override", 0)  # type: ignore[arg-type]
+        settings = self.config.assist
+        ask = None
+        if settings.depth_preset in self.config.presets:
+
+            async def ask(prompt: str) -> str:
+                return await self.small_model(prompt, settings.depth_preset, purpose="depth", session_id=state.session.id, max_tokens=8)
+
+        sorted_as = await depth.classify(text, ask, timeout=float(settings.depth_timeout_seconds))
+        logger.info("session %s: message sorted %s by the %s in %d ms", state.session.id, sorted_as.level, sorted_as.source, sorted_as.milliseconds)
+        return sorted_as
+
+    async def small_model(self, prompt: str, preset: str, *, purpose: str, session_id: str | None = None, max_tokens: int = 200, temperature: float = 0.0) -> str:
+        """One short request to a preset for a helper around the operator's messages.
+
+        ``purpose`` is the label the call's cost is booked under in Usage (``call_category="assist"``
+        is what tells the usage record to keep it), so what the helpers spend is visible apart from
+        the runs. Refused when the day's budget is spent and the model is a paid one.
+        """
+        provider, model = self.providers.rungs_for(self.config, preset or None)[0]
+        if self.budget_exceeded() and not self.provider_costs_nothing(provider.endpoint.id, model):
+            raise RuntimeError("daily inference budget exceeded")
+        request = LLMRequest(
+            model=model,
+            messages=[Message(role=MessageRole.user, content_blocks=[TextBlock(text=prompt)])],
+            max_tokens=max_tokens,
+            temperature=temperature,
+            extra={"enable_thinking": False},
+            observability=LLMObservabilityContext(tenant_id=TENANT, session_id=session_id, call_purpose=purpose, call_category="assist"),
+        )
+        response = await provider.complete_text(request)
+        return "".join(block.text for block in response.message.content_blocks if isinstance(block, TextBlock))
 
     async def set_yagni(self, session_id: str, on: bool) -> bool:
         """Switch YAGNI mode for a session; the next run's opening turn tells the model.
@@ -3657,6 +3728,11 @@ class SessionManager:
 
     def mode_for(self, state: SessionState) -> Any:
         name = str(state.metadata.get("mode") or "")
+        if name == depth.AUTO_MODE:
+            # The session leaves the mode to each message; the run in progress has the one its
+            # message was sorted into, and between runs it is the plain agent.
+            chosen = str((state.turn_depth or {}).get("mode") or "")
+            return self.config.modes.get(chosen) if chosen else None
         if name:
             return self.config.modes.get(name)
         if self.is_orchestrator(state):
@@ -3761,6 +3837,16 @@ class SessionManager:
         self, state: SessionState, run_id: str, *, message: Message | None = None,
     ) -> QueryEngine:
         overrides = await self.live.load(state.session.id)
+        if state.metadata.get("mode") == depth.AUTO_MODE:
+            if message is not None:
+                # A run opened by anything but a sorted message (a wake-up, a queued follow-up) is the
+                # plain agent, not whatever the last sorted message happened to be.
+                sorted_as = message.metadata.get("daedalus.depth")
+                state.turn_depth = sorted_as if isinstance(sorted_as, dict) else None
+            if state.turn_depth and state.turn_depth.get("effort"):
+                # For this run only: the operator's own effort in the live controls is untouched, and
+                # the next message is sorted afresh.
+                overrides = {**overrides, "reasoning_effort": state.turn_depth["effort"]}
         for hook in self.preset_hooks:
             chosen = hook(state)
             if chosen:
@@ -3847,6 +3933,8 @@ class SessionManager:
             tool_rules_key=self.tool_rules_key(),
         )
         mode = self.mode_for(state)
+        if mode is not None and state.metadata.get("mode") == depth.AUTO_MODE:
+            mode = mode.model_copy(update={"prompt": ""})  # in the turn context instead; see _with_turn_context
         enabled = self.mcp_enabled(state)
         if enabled:
             # Re-establish connections for servers this session left enabled (e.g. after a
@@ -4305,6 +4393,12 @@ class SessionManager:
         yagni = await self._yagni_note(state)
         if yagni:
             volatile.append("\n- " + yagni)
+        sorted_as = message.metadata.get("daedalus.depth")
+        if isinstance(sorted_as, dict) and (chosen := self.config.modes.get(str(sorted_as.get("mode") or ""))) is not None and chosen.prompt.strip():
+            # The ``auto`` mode's rules for this run ride in the turn context, not the system prompt:
+            # the level changes from message to message, and the system prompt is what every later
+            # call is cached on.
+            volatile.append("\n- " + chosen.prompt.strip())
         if waiting := self._running_jobs_note(state.session.id):
             volatile.append("\n" + waiting)
         if handed := operator_secrets.prompt_section(self.secrets.available(state.session.id)):

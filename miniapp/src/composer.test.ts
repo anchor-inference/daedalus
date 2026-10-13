@@ -85,6 +85,10 @@ describe("keys in the field", () => {
   it("completes a slash command on Tab only while the palette is open", () => {
     expect(composerKey(key({ key: "Tab" }), { enterSends: true, paletteOpen: true })).toBe("complete");
     expect(composerKey(key({ key: "Tab" }), { enterSends: true, paletteOpen: false })).toBeNull();
+    // A guessed next message is taken by Tab; the palette still wins, and Shift+Tab still moves the focus back.
+    expect(composerKey(key({ key: "Tab" }), { enterSends: true, paletteOpen: false, ghost: true })).toBe("accept");
+    expect(composerKey(key({ key: "Tab" }), { enterSends: true, paletteOpen: true, ghost: true })).toBe("complete");
+    expect(composerKey(key({ key: "Tab", shiftKey: true }), { enterSends: true, paletteOpen: false, ghost: true })).toBeNull();
     expect(composerKey(key({ key: "Escape" }), { enterSends: true, paletteOpen: true })).toBe("escape");
   });
 

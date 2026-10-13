@@ -819,6 +819,12 @@
       "synonyms": ["site notes", "procedures", "recorded steps", "approve notes", "заметки о сайтах", "процедуры", "записанные шаги"]
     },
     {
+      "section": "chat", "anchor": "assist.predict", "config": "assist.predict",
+      "title": { "en": "Suggest the next message", "ru": "Подсказывать следующее сообщение" },
+      "about": { "en": "After an answer, the empty composer offers what you will likely write next; Tab takes it, nothing is sent by itself.", "ru": "После ответа пустое поле ввода предлагает, что вы, вероятно, напишете дальше; Tab принимает, само ничего не отправляется." },
+      "synonyms": ["next message", "suggestion", "ghost text", "autocomplete", "prediction", "следующее сообщение", "подсказка", "автодополнение", "предсказание"]
+    },
+    {
       "section": "chat", "anchor": "telegram.mode", "config": "telegram.mode",
       "title": { "en": "Where sessions live", "ru": "Где живут сессии" },
       "about": { "en": "All sessions in one private chat with the bot, or a forum topic per session.", "ru": "Все сессии в одном личном чате с ботом или по теме форума на сессию." },

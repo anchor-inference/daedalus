@@ -853,6 +853,11 @@ class OpenAICompatibleProvider(ILLMProvider):
         normalized["cost_usd"] = cost
         if self._usage_sink is not None:
             obs = request.observability
+            if obs is not None and obs.call_category == "assist" and obs.call_purpose:
+                # A helper around the operator's messages (the depth sort, the next-message guess,
+                # meeting notes) is booked under its own name, so Usage shows what each one costs
+                # apart from the runs, and a helper's daily cap can be summed from the ledger.
+                purpose = obs.call_purpose
             await self._usage_sink.record(
                 UsageRecord(
                     provider_id=self.endpoint.id,

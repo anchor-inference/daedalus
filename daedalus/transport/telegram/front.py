@@ -13,7 +13,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +41,7 @@ from protocore.runtime.events.types import EventType
 
 from daedalus.config import NO_MODEL_MESSAGE, NoModelConfigured, RuntimeConfig, Settings
 from daedalus.host.config_validation import ConfigConflict, patched
+from daedalus.host.depth import AUTO_MODE
 from daedalus.host.events import AppEvent, EventFilter
 from daedalus.host.prompts import DEFAULT_RULES, split_headline
 from daedalus.host.services import NO_CHAT_BOUND
@@ -501,6 +502,14 @@ class TelegramFront:
         self._stale_counts: dict[tuple[int, int], int] = {}
         self._voice_pending: dict[str, tuple[str, str, Attachment, int, int, float]] = {}
         """Transcripts awaiting the operator's ✓/✗, by token; entries expire (VOICE_PENDING_TTL_SECONDS) and the dict is capped."""
+        self._meeting_pending: dict[str, tuple[str, Attachment, Message, str, float]] = {}
+        """Audio files awaiting the operator's choice — meeting notes, a transcript, or the file as it is — by token,
+        and finished notes awaiting a calendar day; expiring and capped as the transcripts are."""
+        self._meeting_done: dict[str, tuple[str, str, float]] = {}
+        """Token → (session, meeting job, when): the notes a calendar button adds."""
+        self._meeting_reports: set[asyncio.Task[None]] = set()
+        self.meetings: Any = None
+        """The meeting notes service (``daedalus.extensions.meetings``), set when it is installed."""
         self.ledger = DeliveryLedger(manager.db, max_attempts=config.ops.delivery_max_attempts, max_age_hours=config.ops.delivery_max_age_hours, keep_days=config.ops.delivery_keep_days)
         self._stale_notices: dict[tuple[int, int], asyncio.Task[None]] = {}
         self.operator_hooks: dict[str, Callable[..., Awaitable[str]]] = {}
@@ -586,7 +595,7 @@ class TelegramFront:
             # The chat's single session from before it held several: keep talking to that one.
             state = await self.manager.get_state(binding.session_id) if binding is not None else None
         if state is None:
-            state = await self.manager.create_session("direct")
+            state = await self.manager.create_session("direct", metadata={"mode": AUTO_MODE})
         await self.set_current_session(state.session.id)
         return state
 
@@ -951,7 +960,7 @@ class TelegramFront:
         if binding is not None:
             return await self.manager.get_state(binding.session_id)
         if message.chat.type == "private":
-            state, _ = await self.create_session_topic("direct", topic=False)
+            state, _ = await self.create_session_topic("direct", topic=False, metadata={"mode": AUTO_MODE})
             return state
         if message.is_topic_message and thread_id:
             # A topic the operator created by hand: adopt it as a new session.
@@ -959,7 +968,7 @@ class TelegramFront:
             if message.reply_to_message and message.reply_to_message.forum_topic_created:
                 title = message.reply_to_message.forum_topic_created.name
             title = title or f"topic {thread_id}"
-            state = await self.manager.create_session(title)
+            state = await self.manager.create_session(title, metadata={"mode": AUTO_MODE})
             await self.bind_topic(chat_id, thread_id, state.session.id, title)
             return state
         return None
@@ -1060,7 +1069,7 @@ class TelegramFront:
         # see there used to arrive as a message from the bot.
         if self.private_mode() and self.config.telegram.forum_chat_id:
             try:
-                state, _binding = await self.create_session_topic(title, chat_id=self.config.telegram.forum_chat_id, force_topic=True)
+                state, _binding = await self.create_session_topic(title, metadata={"mode": AUTO_MODE}, chat_id=self.config.telegram.forum_chat_id, force_topic=True)
             except (TelegramBusy, TelegramRefused) as exc:
                 if exc.session_id:
                     await self._keep_off_telegram(exc.session_id)
@@ -1069,7 +1078,7 @@ class TelegramFront:
             await message.answer(f"Created topic '{title}' (session {state.session.id}).")
             return
         if self.private_mode():
-            state, _ = await self.create_session_topic(title)
+            state, _ = await self.create_session_topic(title, metadata={"mode": AUTO_MODE})
             await self.set_current_session(state.session.id)
             await message.answer(f"New session '{title}' ({state.session.id}). You are writing to it; /sessions lists the others.")
             return
@@ -1081,7 +1090,7 @@ class TelegramFront:
             )
             return
         forum = self.config.telegram.forum_chat_id if message.chat.type == "private" else message.chat.id
-        state, binding = await self.create_session_topic(title, chat_id=forum)
+        state, binding = await self.create_session_topic(title, metadata={"mode": AUTO_MODE}, chat_id=forum)
         if message.chat.type == "private":
             await message.answer(f"Created topic '{title}' (session {state.session.id}).")
 
@@ -1627,7 +1636,7 @@ class TelegramFront:
         if not arg:
             current = state.metadata.get("mode") or "default"
             lines = [f"  {name} — {m.description or ''} (iterations {m.max_iterations or self.config.limits.max_iterations}, cap ${m.usd_per_run if m.usd_per_run is not None else self.config.limits.usd_per_run})" for name, m in modes.items()]
-            await message.answer(f"mode: {current}\navailable:\n" + "\n".join(lines) + "\nusage: /mode <name> · /mode default")
+            await message.answer(f"mode: {current}\navailable:\n" + "\n".join(lines) + f"\n  {AUTO_MODE} — each message sorted into quick, normal or deep work" + "\nusage: /mode <name> · /mode default")
             return
         try:
             chosen = await self.manager.set_mode(state.session.id, None if arg in ("default", "off", "reset") else arg)
@@ -1821,6 +1830,9 @@ class TelegramFront:
         if self.config.telegram.reactions:
             await self.outbox_to(message.chat.id, None).react(message.message_id, RUN_REACTIONS["received"])
         attachment = await self._download(message, state)  # may take a while for big files
+        if attachment is not None and self.meetings is not None and self._meeting_audio(message) and recogniser_available(self.speech, self.config):
+            await self._offer_meeting(message, state, attachment, text)
+            return
         if attachment is not None and (message.voice or (message.audio and (message.audio.mime_type or "") in SPEECH_MIME_TYPES)) and recogniser_available(self.speech, self.config):
             if await self._voice_to_text(message, state, attachment, text):
                 return
@@ -1865,6 +1877,127 @@ class TelegramFront:
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✓ Send to the agent", callback_data=f"vc:{token}:go"), InlineKeyboardButton(text="✗ Discard", callback_data=f"vc:{token}:no")]])
         await message.reply(f"🎙 I heard:\n\n{transcript[:3500]}", reply_markup=keyboard)
         return True
+
+    def _meeting_audio(self, message: Message) -> bool:
+        """An audio file, or a voice note too long to be dictation: what a meeting arrives as."""
+        if message.audio is not None:
+            return True
+        if message.document is not None and (message.document.mime_type or "").startswith("audio/"):
+            return True
+        return message.voice is not None and int(message.voice.duration or 0) > self.config.asr.max_seconds
+
+    @staticmethod
+    def _forget_expired(pending: dict[str, Any], at: int) -> None:
+        now = time.monotonic()
+        for stale in [k for k, v in pending.items() if now - v[at] > VOICE_PENDING_TTL_SECONDS]:
+            pending.pop(stale, None)
+        while len(pending) >= VOICE_PENDING_MAX:
+            pending.pop(next(iter(pending)), None)
+
+    async def _offer_meeting(self, message: Message, state: SessionState, attachment: Attachment, caption: str) -> None:
+        """Ask what the audio is for before anything is done with it: notes, words, or the file itself."""
+        self._forget_expired(self._meeting_pending, 4)
+        token = uuid.uuid4().hex[:8]
+        self._meeting_pending[token] = (state.session.id, attachment, message, caption, time.monotonic())
+        rows = [[InlineKeyboardButton(text="📝 Meeting notes", callback_data=f"mt:{token}:go")]]
+        speech = message.voice is not None or (message.audio is not None and (message.audio.mime_type or "") in SPEECH_MIME_TYPES)
+        if speech and int(getattr(message.voice or message.audio, "duration", 0) or 0) <= self.config.asr.max_seconds:
+            rows.append([InlineKeyboardButton(text="🎙 Transcribe", callback_data=f"mt:{token}:tx")])
+        rows.append([InlineKeyboardButton(text="📎 Send the file as it is", callback_data=f"mt:{token}:as")])
+        await message.reply(
+            "🎧 What should I do with this recording? Meeting notes: a transcript, a summary, the decisions and the action items.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        )
+
+    async def on_meeting_callback(self, query: CallbackQuery, data: list[str]) -> None:
+        """The buttons of a meeting: what to do with the audio, then the day its action items go on."""
+        if len(data) != 3:
+            await query.answer("stale button")
+            return
+        _, token, action = data
+        if action in ("d0", "d1"):
+            await self._meeting_to_calendar(query, token, 0 if action == "d0" else 1)
+            return
+        pending = self._meeting_pending.pop(token, None)
+        if pending is None:
+            await query.answer("This recording is no longer waiting; it is in the session inbox.", show_alert=True)
+            return
+        session_id, attachment, message, caption, _ = pending
+        if query.message is not None:
+            with suppress(Exception):
+                await query.message.edit_reply_markup(reply_markup=None)
+        state = await self.manager.get_state(session_id)
+        if state is None:
+            await query.answer("the session is gone")
+            return
+        if action == "tx":
+            await query.answer()
+            if not await self._voice_to_text(message, state, attachment, caption):
+                await self._enqueue_text(state, message, caption, attachment)
+            return
+        if action != "go" or self.meetings is None:
+            await query.answer("sent as it is")
+            await self._enqueue_text(state, message, caption, attachment)
+            return
+        await query.answer("making the notes")
+        progress = await message.reply("📝 Transcribing the recording; the notes follow when it is done.")
+
+        async def done(job: Any) -> None:
+            with suppress(Exception):
+                await progress.delete()
+            if job.status != "done":
+                await message.reply(f"📝 The meeting notes failed: {job.error}")
+                return
+            self._forget_expired(self._meeting_done, 2)
+            self._meeting_done[token] = (session_id, job.id, time.monotonic())
+            from daedalus.extensions.meetings import notes_markdown  # Lazy: the extensions package imports this module
+
+            # The app's link is made whole where the public address is known, as every message's is.
+            text = notes_markdown(job.notes)[:3500] + f"\n\nThe transcript is in {job.file}. The session: /app/agents/{session_id}"
+            outbox = self.outbox_to(message.chat.id, message.message_thread_id)
+            if job.notes.get("actions"):
+                await self.send_choice(outbox, app_links(text, self.settings.miniapp_public_url),
+                                       [[("📅 Action items today", f"mt:{token}:d0"), ("📅 Tomorrow", f"mt:{token}:d1")]])
+            else:
+                await outbox.send_text(text)
+
+        # The job owns the file now and deletes it once its words are in.
+        job = self.meetings.start(session_id, attachment.path, name=attachment.name or attachment.path.name, keep=False, on_done=done)
+
+        async def report() -> None:
+            # The message says how far along it is, at a pace Telegram's edit limits are nowhere near.
+            said = ""
+            while job.status in ("queued", "transcribing", "writing"):
+                await asyncio.sleep(15)
+                now = (f"📝 Transcribing: piece {job.done} of {job.total}." if job.status == "transcribing" and job.total
+                       else "📝 Writing the notes." if job.status == "writing" else "")
+                if now and now != said:
+                    with suppress(Exception):
+                        await progress.edit_text(now)
+                    said = now
+
+        task = asyncio.create_task(report(), name=f"meeting-progress:{job.id}")
+        self._meeting_reports.add(task)
+        task.add_done_callback(self._meeting_reports.discard)
+
+    async def _meeting_to_calendar(self, query: CallbackQuery, token: str, offset: int) -> None:
+        finished = self._meeting_done.get(token)
+        if finished is None or self.meetings is None:
+            await query.answer("These notes are no longer open; add the entry from the app.", show_alert=True)
+            return
+        session_id, job_id, _ = finished
+        try:
+            job = self.meetings.get(job_id, session_id)
+            day = datetime.now(UTC).astimezone().date() + timedelta(days=offset)
+            await self.meetings.add_to_calendar(job, day)
+        except Exception as exc:  # noqa: BLE001 — the reason is the answer
+            await query.answer(f"could not add it: {exc}"[:190], show_alert=True)
+            return
+        self._meeting_done.pop(token, None)
+        await query.answer(f"added to the calendar on {day.isoformat()}")
+        if query.message is not None:
+            with suppress(Exception):
+                await query.message.edit_reply_markup(reply_markup=None)
 
     @staticmethod
     def _discard_audio(state: SessionState | None, attachment: Attachment) -> None:

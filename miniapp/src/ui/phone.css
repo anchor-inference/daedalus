@@ -639,6 +639,8 @@
   .composer[data-shape] .composer-box:focus-within { border-color: transparent; }
   .composer[data-shape] .composer-box textarea { min-height: 34px; padding: 6px 6px; font-size: var(--fs-16); line-height: 22px; }
   .composer[data-shape] .composer-box textarea::placeholder { color: var(--fg-2); }
+  /* In the pill the hint is a word in the row after the field, not a corner over the send button. */
+  .composer[data-shape] .composer-ghost-accept { position: static; order: 1; flex: none; align-self: center; }
   .composer[data-shape] .composer-row { gap: 4px; align-items: center; }
   .composer[data-shape] .composer-tools { gap: 4px; }
   /* At rest: [+] [the field] [mic] [Send, greyed while empty], one row. The toolbar's other controls wait. */

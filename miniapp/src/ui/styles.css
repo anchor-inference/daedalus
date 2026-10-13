@@ -317,6 +317,11 @@ button.more-item { border: 0; font-family: inherit; cursor: pointer; }
 .msg.user p + p { margin-top:6px; }
 .msg-origin { display:block; font-size:var(--fs-11); color:var(--fg-3); margin-bottom:2px; }
 .msg-origin.msg-yagni { display:flex; align-items:center; gap:var(--space-1); color:var(--accent); }
+/* The auto mode's level on the message: a word, quiet like the other origins, that opens the correction. */
+.msg-origin.msg-depth { display:inline-flex; align-items:center; background:none; border:0; padding:0; font:inherit; font-size:var(--fs-11); cursor:pointer; color:var(--fg-3); }
+.msg-origin.msg-depth:hover, .msg-origin.msg-depth[aria-expanded="true"] { color:var(--accent); }
+.msg-origin.msg-depth.long { color:var(--accent); }
+.msg-origin.msg-depth + .msg-text { margin-top:2px; }
 
 .thinking-head { align-self:flex-start; display:flex; align-items:center; gap:8px; max-width:100%; min-width:0; background:none; border:0; border-radius:var(--radius-xs); color:var(--fg-2); font-size:var(--fs-14); min-height:28px; padding:2px 0; cursor:pointer; text-align:left; }
 .thinking-head .worked, .thinking-head .steps { white-space:nowrap; flex:none; }
@@ -5022,3 +5027,28 @@ body:has(.context-menu) .rail-tip { visibility: hidden; }
   .companion-event-when { grid-column: 1 / -1; }
   .companion-event-body { grid-column: 1 / -1; }
 }
+
+/* The guessed next message is the empty field's placeholder, set apart from the usual hint so it
+   reads as an offer rather than as an instruction; the key that takes it sits in the field's corner. */
+.composer-box textarea.ghost::placeholder { color:var(--fg-3); font-style:italic; opacity:1; }
+.composer-ghost-accept { position:absolute; top:var(--space-2); right:var(--space-2); display:inline-flex; align-items:center; gap:4px; padding:1px 6px; border:1px solid var(--line); border-radius:var(--radius-xs); background:var(--surface-1); color:var(--fg-3); font-size:var(--fs-11); cursor:pointer; }
+.composer-ghost-accept:hover { color:var(--accent); border-color:var(--accent); }
+.composer-ghost-accept kbd { font:inherit; }
+
+/* Meeting notes above the field: the offer for an attached recording, the progress, the notes. */
+.meeting-card { display:flex; align-items:center; gap:var(--space-2); padding:var(--space-2) var(--space-3); margin-bottom:var(--space-2); border:1px solid var(--line); border-radius:var(--radius-md); background:var(--surface-1); font-size:var(--fs-13); min-width:0; }
+.meeting-card .meeting-text { display:flex; flex-direction:column; gap:2px; flex:1; min-width:0; }
+.meeting-card .meeting-title { font-weight:600; }
+.meeting-keep { display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+.meeting-bar { display:block; height:3px; border-radius:2px; background:var(--surface-3, var(--line)); overflow:hidden; margin-top:2px; }
+.meeting-bar i { display:block; height:100%; width:calc(var(--v) * 1%); background:var(--accent); transition:width .3s; }
+.meeting-failed { border-color:var(--bad, var(--line)); }
+.meeting-done { flex-direction:column; align-items:stretch; max-height:min(50vh, 420px); overflow:auto; }
+.meeting-head { display:flex; align-items:center; gap:var(--space-2); }
+.meeting-summary { margin:0; line-height:1.45; }
+.meeting-list ul { margin:2px 0 0; padding-left:1.2em; }
+.meeting-label { font-size:var(--fs-11); color:var(--fg-3); text-transform:uppercase; letter-spacing:.04em; }
+.meeting-actions { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2); justify-content:flex-end; }
+.meeting-added { display:inline-flex; align-items:center; gap:4px; }
+.voicebar-meeting { white-space:nowrap; }
+.voicebar-meeting.on { font-size:var(--fs-12); color:var(--accent); }

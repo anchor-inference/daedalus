@@ -1295,6 +1295,33 @@ class CompanionConfig(BaseModel):
     tts: TtsConfig = Field(default_factory=TtsConfig)
 
 
+class AssistConfig(BaseModel):
+    """The small helpers around the operator's own messages: the depth a message is run at in the
+    ``auto`` mode, the next message guessed after an answer, and notes made from a meeting's audio."""
+
+    depth_preset: str = ""
+    """The model preset that sorts a message into quick, normal or long; empty = the heuristic alone,
+    which costs nothing and answers at once. A preset here is a quality knob: the heuristic still
+    decides whenever the model is slow or fails."""
+    depth_timeout_seconds: float = Field(default=0.9, gt=0, le=5)
+    """How long the operator's message waits for that model before the heuristic decides. The run
+    is held behind it, so it stays under a second."""
+    predict: bool = True
+    """Whether the composer offers the operator's likely next message after an answer settles."""
+    predict_preset: str = ""
+    """The model preset that guesses it; empty = a middle one of the table, as the action review uses."""
+    predict_max_messages: int = Field(default=400, ge=10)
+    """A session with more messages than this gets no guess: the context the guess would be sent is
+    the whole conversation's tail, and a long session is where it is least needed and most costly."""
+    predict_usd_per_day: float = Field(default=0.2, ge=0)
+    """What the guesses may cost in a day, summed from Usage under their own label. Reached, the
+    composer stays empty until tomorrow; ``0`` turns the guesses off for paid models."""
+    meeting_max_seconds: int = Field(default=3 * 3600, ge=60)
+    """The longest recording made into meeting notes. Longer than a voice note's limit, since a
+    meeting is the reason the feature exists, and still bounded so one upload cannot occupy the
+    transcriber for a day."""
+
+
 class ModeConfig(BaseModel):
     """A named bundle of run limits and behaviour a session can switch to."""
 
@@ -2100,6 +2127,7 @@ class RuntimeConfig(BaseModel):
     asr: AsrConfig = Field(default_factory=AsrConfig)
     stt: SttConfig = Field(default_factory=SttConfig)
     companion: CompanionConfig = Field(default_factory=CompanionConfig)
+    assist: AssistConfig = Field(default_factory=AssistConfig)
     board: BoardConfig = Field(default_factory=BoardConfig)
     peers: PeersConfig = Field(default_factory=PeersConfig)
     subagents: SubagentsConfig = Field(default_factory=SubagentsConfig)

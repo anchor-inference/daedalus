@@ -602,6 +602,17 @@ def session_tasks(session_id: str) -> dict:
     return {"tasks": tasks, "background_count": sum(task["state"] == "running" for task in tasks)}
 
 
+def meeting_job(session_id: str, status: str) -> dict:
+    """One meeting-notes job as the host reports it: under way, or done with its notes."""
+    done = status == "done"
+    return {
+        "id": "mtg1", "session_id": session_id, "name": "standup.m4a", "status": status, "done": 4 if done else 1, "total": 4, "seconds": 1260,
+        "notes": {"title": "Weekly standup", "summary": "The release moves to Friday; the calendar sync is the one open risk.",
+                  "decisions": ["Ship on Friday"], "actions": ["Write the changelog by Thursday", "Re-run the sync on the staging calendar"]} if done else {},
+        "file": "inbox/meeting-20261014-101500.md" if done else "", "kept": "", "error": "", "calendar_event": "",
+    }
+
+
 def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str, str | bytes] | None:
     """The answer every harness gives the same way: ``(status, content type, body)``, or ``None``.
 
@@ -689,6 +700,23 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     if method.upper() == "POST" and len(parts) == 5 and parts[2] == "sessions" and parts[4] in ("mode", "yagni"):
         # The composer's mode chip: a harness that reads the switch back answers these itself.
         return 200, "application/json", "{}"
+    if len(parts) >= 5 and parts[2] == "sessions" and parts[4] == "meeting":
+        # Meeting notes from a recording: the stub's job is done at once, with notes to show.
+        if method.upper() == "POST" and len(parts) == 5:
+            return 200, "application/json", json.dumps(meeting_job(parts[3], "transcribing"))
+        if method.upper() == "GET" and len(parts) == 6:
+            return 200, "application/json", json.dumps(meeting_job(parts[3], "done"))
+        if method.upper() == "POST" and len(parts) == 7 and parts[6] == "calendar":
+            return 200, "application/json", json.dumps({"event_id": "evt-meeting", "day": (body or {}).get("day", "") if isinstance(body, dict) else ""})
+        if method.upper() == "POST" and len(parts) == 7 and parts[6] == "send":
+            return 200, "application/json", json.dumps({"run_id": "r-meeting"})
+    if method.upper() == "GET" and len(parts) == 5 and parts[2] == "sessions" and parts[4] == "suggestion":
+        # The guessed next message after an answer settles: none here; check_assist.py offers one.
+        return 200, "application/json", json.dumps({"text": "", "skipped": "off"})
+    if method.upper() == "POST" and len(parts) == 5 and parts[2] == "sessions" and parts[4] == "depth":
+        # The correction on a turn's auto-mode chip: the level is taken for the next message.
+        level = body.get("level") if isinstance(body, dict) else ""
+        return 200, "application/json", json.dumps({"depth_next": level or ""})
     if method.upper() == "GET" and len(parts) == 7 and parts[2] == "sessions" and parts[4:6] == ["policy", "similar"]:
         # The approval dock asks what "Allow similar" would grant; nothing a harness did not refuse has a family.
         return 200, "application/json", json.dumps({"similar": None})

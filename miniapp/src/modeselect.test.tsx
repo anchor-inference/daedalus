@@ -64,11 +64,22 @@ describe("the chip and its menu", () => {
     await act(async () => chip().click());
     expect(document.querySelector(".mode-menu")).not.toBeNull();
     const radios = rows().filter((r) => r.getAttribute("role") === "menuitemradio");
-    expect(radios.map((r) => r.querySelector(".truncate")?.textContent)).toEqual(["Agent", "Plan", "review"]);
-    expect(radios.map((r) => r.getAttribute("aria-checked"))).toEqual(["false", "true", "false"]);
-    await act(async () => radios[0].click());
+    // Auto is the host's own and always offered first, whatever the configured modes are.
+    expect(radios.map((r) => r.querySelector(".truncate")?.textContent)).toEqual(["Auto", "Agent", "Plan", "review"]);
+    expect(radios.map((r) => r.getAttribute("aria-checked"))).toEqual(["false", "false", "true", "false"]);
+    await act(async () => radios[1].click());
     expect(onChooseMode).toHaveBeenCalledWith("");
     expect(document.querySelector(".mode-menu")).toBeNull();
+  });
+
+  it("names the auto mode on the chip and picks it", async () => {
+    const onChooseMode = vi.fn();
+    await act(async () => root.render(<ModeSelect mode="" modes={MODES} yagni={false} onChooseMode={onChooseMode} onYagni={() => {}} sheet={false} />));
+    await act(async () => chip().click());
+    await act(async () => rows()[0].click());
+    expect(onChooseMode).toHaveBeenCalledWith("auto");
+    await act(async () => root.render(<ModeSelect mode="auto" modes={MODES} yagni={false} onChooseMode={onChooseMode} onYagni={() => {}} sheet={false} />));
+    expect(chip().textContent).toBe("Auto");
   });
 
   it("switches YAGNI on at once, keeps the menu open, and marks the chip", async () => {
