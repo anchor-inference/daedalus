@@ -321,7 +321,7 @@ async def replay(agent: BrowserAgent, caller: Caller, script: dict[str, Any], pa
 
     It stops at a sign-in the operator does (``paused``, not failed: the report says how to go on), and at
     the first step that cannot be done, which it names with the steps left, for the model to finish."""
-    from daedalus.browser.agent import explain  # the agent module imports this one
+    from daedalus.browser.agent import explain  # Lazy: the agent module imports this one at its top
 
     name = str(script.get("name") or "")
     given = {str(k): str(v) for k, v in (params or {}).items()}
@@ -419,7 +419,7 @@ FOUND_BY = {
 
 
 async def _do(agent: BrowserAgent, caller: Caller, group: dict[str, Any], step: dict[str, Any], params: dict[str, str], why: str) -> str:
-    from daedalus.browser.agent import Step  # the agent module imports this one
+    from daedalus.browser.agent import Step  # Lazy: the agent module imports this one at its top
 
     action = step["action"]
     if action == "navigate":
@@ -471,7 +471,7 @@ async def _do(agent: BrowserAgent, caller: Caller, group: dict[str, Any], step: 
 
 
 async def _sign_in(agent: BrowserAgent, caller: Caller, group: dict[str, Any], tab: dict[str, Any], step: dict[str, Any], why: str) -> str:
-    from daedalus.browser.agent import Step  # the agent module imports this one
+    from daedalus.browser.agent import Step  # Lazy: the agent module imports this one at its top
 
     mode = str(step.get("signin") or "operator")
     reason = str(step.get("reason") or "login")

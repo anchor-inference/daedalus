@@ -17,6 +17,7 @@ from daedalus.host.session_runner import SessionManager, _own_schedules
 from daedalus.speech.service import LocalSpeech
 from daedalus.speech.tts_service import LocalTts
 from daedalus.stores.companion import Cadence, CompanionStore, GoalError, parse_cadence
+from daedalus.stores.companion_schema import MIGRATION as COMPANION_MIGRATION
 from daedalus.stores.database import MIGRATIONS, Database
 from tests.support.models import FALLBACK_PRESET, model_config
 
@@ -400,7 +401,8 @@ async def test_the_migration_carries_the_concierges_rows_to_the_companion(settin
         await db.execute("INSERT INTO sessions(id, tenant_id, title, created_at, last_message_at, metadata, project_id) VALUES ('sa', 't', 'Agent', '', '', '{\"voice_parent\":\"sv\",\"brief\":\"x\"}', 'pv')")
         await db.execute("INSERT INTO sessions(id, tenant_id, title, created_at, last_message_at, metadata, project_id) VALUES ('so', 't', 'Other', '', '', '{\"workspace\":\"/w\"}', 'pv')")
         await db.kv_set("voice_session", "sv")
-        await db.execute("UPDATE schema_version SET version = ?", (len(MIGRATIONS) - 1,))
+        # By its place, not as the last: migrations after it, rerun over this database, are harmless.
+        await db.execute("UPDATE schema_version SET version = ?", (MIGRATIONS.index(COMPANION_MIGRATION),))
     finally:
         await db.close()
     for _ in range(2):

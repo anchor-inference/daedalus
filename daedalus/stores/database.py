@@ -2252,11 +2252,20 @@ CREATE TABLE IF NOT EXISTS saved_logins (
 # The companion: its goals, its activity log, and the voice concierge's rows renamed to it.
 MIGRATIONS.append(COMPANION_MIGRATION)
 
+async def _workflow_skill(conn: aiosqlite.Connection) -> None:
+    """Add the column only where it is missing: a test that replays the migrations from an earlier
+    version runs this one again over a table that already has it, and SQLite has no ADD COLUMN IF NOT
+    EXISTS to say so in SQL."""
+    cursor = await conn.execute("PRAGMA table_info(browser_workflows)")
+    columns = {row[1] for row in await cursor.fetchall()}
+    await cursor.close()
+    if "skill" not in columns:
+        await conn.execute("ALTER TABLE browser_workflows ADD COLUMN skill TEXT NOT NULL DEFAULT ''")
+
+
 # The skill a recording of the operator's steps was saved as, so the app stops offering a recording that
 # already became one; "" for one that has not.
-MIGRATIONS.append("""
-ALTER TABLE browser_workflows ADD COLUMN skill TEXT NOT NULL DEFAULT '';
-""")
+MIGRATIONS.append(DataMigration("", _workflow_skill))
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
