@@ -1,0 +1,44 @@
+/* Settings → Rules: the categories × levels grid. A grid of radio buttons on a wide screen, a name with
+   its four choices under it on a phone; the review's switch sits at the end of each row either way. */
+.ar-grid { display:grid; margin-top:var(--space-3); border-top:1px solid var(--line); }
+.ar-row { display:grid; grid-template-columns:minmax(150px, 1.3fr) minmax(0, 4fr) minmax(120px, 0.9fr); align-items:center; gap:var(--space-3); padding:10px 0; border-bottom:1px solid var(--line); min-width:0; }
+.ar-row.ar-head { padding:6px 0; color:var(--fg-3); font-size:var(--fs-12); }
+.ar-head .ar-level-head, .ar-head .ar-name, .ar-head .ar-review-head { min-width:0; }
+/* The level headings sit in the same four-column grid as the cells, so each heads its column. */
+.ar-head .ar-level-head { text-align:center; }
+.ar-name { display:grid; gap:2px; min-width:0; }
+.ar-name b { font-size:var(--fs-14); font-weight:600; }
+.ar-levels { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:var(--space-1); min-width:0; }
+.ar-cell { display:flex; align-items:center; justify-content:center; gap:6px; min-height:36px; padding:0 6px; border:1px solid transparent; border-radius:var(--radius-sm); background:transparent; color:var(--fg-2); cursor:pointer; font:inherit; min-width:0; }
+.ar-cell:hover { background:var(--surface-2); }
+.ar-cell:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.ar-cell.on { border-color:color-mix(in srgb, var(--accent) 50%, var(--line)); background:color-mix(in srgb, var(--accent) 10%, transparent); color:var(--fg); }
+.ar-dot { flex:none; width:14px; height:14px; border-radius:50%; border:1.5px solid var(--fg-3); }
+.ar-cell.on .ar-dot { border-color:var(--accent); background:radial-gradient(circle, var(--accent) 0 3.5px, transparent 4px); }
+/* On a wide screen the column heading names the level; the cell says it again only on a phone. */
+.ar-cell-label { display:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--fs-13); }
+.ar-review { display:flex; align-items:center; gap:var(--space-2); min-width:0; }
+.ar-review-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ar-legend { margin-top:var(--space-2); }
+@media (max-width: 720px) {
+  .ar-head { display:none; }
+  .ar-row { grid-template-columns:minmax(0, 1fr) auto; grid-template-areas:"name review" "levels levels"; row-gap:var(--space-2); }
+  .ar-row .ar-name { grid-area:name; }
+  .ar-row .ar-levels { grid-area:levels; grid-template-columns:repeat(2, minmax(0, 1fr)); }
+  .ar-row .ar-review { grid-area:review; }
+  .ar-review-label { display:none; }
+  .ar-cell { justify-content:flex-start; min-height:40px; border-color:var(--line); }
+  .ar-cell-label { display:inline; }
+}
+.ar-log-list { list-style:none; margin:var(--space-2) 0 0; padding:0; display:grid; }
+.ar-log-entry { display:grid; gap:4px; padding:10px 0; border-top:1px solid var(--line); min-width:0; }
+.ar-log-head { display:flex; align-items:baseline; gap:var(--space-2); flex-wrap:wrap; min-width:0; }
+.ar-log-head time { margin-left:auto; }
+.ar-log-tool { color:var(--fg-3); font-size:var(--fs-12); overflow-wrap:anywhere; }
+.ar-log-summary { font-size:var(--fs-12); color:var(--fg-2); overflow-wrap:anywhere; white-space:pre-wrap; max-height:4.5em; overflow:hidden; }
+.ar-log-reason { overflow-wrap:anywhere; }
+.ar-verdict { display:inline-flex; align-items:center; min-height:22px; padding:0 8px; border-radius:99px; font-size:var(--fs-12); font-weight:600; }
+.ar-verdict.allow { color:var(--ok); background:color-mix(in srgb, var(--ok) 12%, transparent); }
+.ar-verdict.block { color:var(--bad); background:color-mix(in srgb, var(--bad) 12%, transparent); }
+.ar-verdict.ask { color:var(--warn); background:color-mix(in srgb, var(--warn) 12%, transparent); }
+.ar-log-link { justify-self:start; }

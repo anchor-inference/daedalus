@@ -1443,6 +1443,16 @@ export type Preset = {
   on_demand_tool_groups?: boolean | null;
 };
 
+/** The operator's levels for what the agent does in the world (`[action_rules]`). */
+export type ActionRulesSettings = {
+  levels: Record<string, string>;
+  review: string[];
+  review_preset: string;
+  review_timeout_seconds: number;
+  injection_model: boolean;
+  injection_preset: string;
+};
+
 export type Settings = {
   revision: string;
   model: { preset: string; chain: string[]; auto_fallback: boolean; fallback_to_session?: boolean };
@@ -1471,6 +1481,7 @@ export type Settings = {
   compaction: { auto_ratio: number; keep_recent_messages: number; max_words: number; chunk_tokens: number; min_messages: number; call_timeout_seconds: number; core_trigger_ratio: number; preset: string };
   terminals?: { running_cap: number };
   browser?: BrowserSettings;
+  action_rules?: ActionRulesSettings;
   /** The rail, its More menu and the phone drawer (navconfig.ts reads it). Missing on an older host. */
   navigation?: NavConfig;
   telegram: {

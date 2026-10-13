@@ -463,6 +463,8 @@ def usage_data() -> dict:
 SETTINGS = {
     # Settings → Navigation: the layout the app ships with.
     "navigation": {"rail": [], "more": [], "drawer": [], "hidden": [], "icons": {}},
+    # Settings → Rules: the shipped levels with publishing raised to a question, so the grid shows a choice moved.
+    "action_rules": {"levels": {"message": "auto", "publish": "ask", "payment": "ask", "delete": "auto", "external_write": "auto", "self_change": "auto"}, "review": ["message", "publish", "payment"], "review_preset": "", "review_timeout_seconds": 20.0, "injection_model": False, "injection_preset": ""},
     "model": {"preset": "deepseek-flash", "chain": ["deepseek-flash", "gpt-5.6-luna"], "auto_fallback": False, "fallback_to_session": True},
     "presets": {
         "deepseek-flash": {"provider": "deepseek", "model": "deepseek-flash", "label": "DeepSeek Flash", "thinking": True, "reasoning_effort": "medium", "images": False, "context_window": 128000, "context_window_source": "table", "max_output_tokens": 16384},
@@ -1149,6 +1151,11 @@ def open_more(page: Page) -> None:
     page.locator(".ph-drawer-root.open [data-nav='more']").click()
     page.wait_for_selector(".ph-more-sheet", timeout=5000)
     page.wait_for_timeout(300)
+
+
+def scroll_to_action_rules(page: Page) -> None:
+    """The levels grid is under the working rules' editor; the picture is about the grid and its log."""
+    page.locator(".action-rules").evaluate("(card) => card.scrollIntoView({ block: 'start' })")
 
 
 def scroll_to_voices(page: Page) -> None:
@@ -2064,6 +2071,7 @@ def run() -> int:
         # Terminals and the browser are one Environments page; the picture keeps its name for the docs.
         shot(page, "settings-terminals", "settings/environments", wait=".loadbar-track", settle=600)
         shot(page, "settings-tools", "settings/tools", wait=".tgroups .tgroup", settle=500)
+        shot(page, "settings-rules", "settings/rules", wait=".action-rules .ar-row[data-category]", before=scroll_to_action_rules, settle=600)
         shot(page, "session-tool-groups", f"agents/{S1}", wait=".chat-scroll .timeline", before=open_tool_groups, settle=300)
         # And the same install where the owner met its absence: under the two lines on the voice card
         # that say the browser is doing the listening and the speaking.

@@ -118,6 +118,21 @@ def _group(name: str, description: str, tools: list[str], tokens: int, default: 
     return {"name": name, "description": description, "tools": tools, "tokens": tokens, "default": default, "load": load or default, "usage": {"sessions": sessions, "runs": runs, "calls": calls}}
 
 
+ACTION_RULES: dict[str, object] = {
+    "categories": ["message", "publish", "payment", "delete", "external_write", "self_change"],
+    "levels": ["auto", "on_command", "ask", "handoff"],
+    "defaults": {"message": "auto", "publish": "auto", "payment": "ask", "delete": "auto", "external_write": "auto", "self_change": "auto"},
+    "log": [
+        {"id": 2, "at": "2026-10-13T09:12:00Z", "session_id": "s-mail", "tool": "Mcp_Gmail_send_email", "category": "message", "level": "auto", "verdict": "block",
+         "reason": "The operator asked to send the report to the accountant, not to an address the page listed.", "failed": False,
+         "summary": '{"to": "billing@unknown.example", "subject": "Quarterly report"}', "model": "deepseek-flash", "elapsed_ms": 1180},
+        {"id": 1, "at": "2026-10-13T08:40:00Z", "session_id": "s-site", "tool": "Exec", "category": "publish", "level": "auto", "verdict": "allow",
+         "reason": "The operator asked to push the fixed landing page.", "failed": False, "summary": "git push origin main", "model": "deepseek-flash", "elapsed_ms": 820},
+    ],
+}
+"""Settings → Rules: what ``GET /api/action-rules`` answers, with one blocked and one allowed review."""
+
+
 TOOL_GROUP_CATALOGUE: dict[str, object] = {
     "days": 30,
     "sessions": 151,
@@ -320,6 +335,8 @@ GATES: dict[str, object] = {
     "/api/browsers/profiles": {"profiles": []},
     "/api/browsers/recordings": {"envs": []},
     "/api/browsers/notes": {"notes": []},
+    # Settings → Rules: the categories and levels the host knows, and two review decisions to list.
+    "/api/action-rules": ACTION_RULES,
     # Remote identity is optional and empty until a real host is paired.
     "/api/runtime/hosts": {"items": [], "collection_revision": 1},
     # Without a browser installed, the workloads are the terminals alone: their own bar.

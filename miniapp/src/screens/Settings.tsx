@@ -30,6 +30,7 @@ import { modeHome, storedMode } from "../mode";
 import { useQuery } from "../store";
 import { Capabilities, componentsNeedAttention } from "../capabilities";
 import { NotificationSettings } from "./NotificationSettings";
+import { ActionRules } from "../actionrules";
 import { EnvironmentsTab } from "./Environments";
 import { ToolGroupsSettings } from "../toolgroupsview";
 import { CompactionModelSelect } from "../compactionmodel";
@@ -1419,6 +1420,7 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
           <>
             <PromptChange onApplied={(rules) => setS({ ...s, prompt: { ...s.prompt, rules } })} />
             <RulesEditor rules={s.prompt.rules} fallback={s.prompt.default_rules ?? ""} onSave={(rules) => save({ prompt: { rules } })} />
+            <ActionRules s={s} save={save} />
             <div className="card">
               <div className="section-title" style={{ marginTop: 0 }}>{t("settings.selfchange")}</div>
               <div className="sub">{t("settings.selfchange.sub")}</div>
