@@ -83,3 +83,13 @@ delegated agent that stops to ask a question is reported to you but is answered 
 not by voice; reports arriving while no page is open are held and delivered together at the next
 connect, so a long silence can start with a summary of several agents at once. On iOS, audio plays
 only after the first tap on the page — take the mic once and it works for the session.
+
+## Speech recognition in the chat is not voice mode
+
+Dictating into the composer and the voice notes you send in the chat or in Telegram are turned into text
+by the speech recognition set in **Settings → Voice & speech → Speech recognition for the chat**
+([/app/settings/voice#asr.transcriber](/app/settings/voice#asr.transcriber)), the `[asr]` section: a
+local model downloaded under the same section (no key, nothing leaves the machine), or an
+OpenAI-compatible `/audio/transcriptions` endpoint. Nothing on the voice-mode page changes it. The
+agent can switch it for you with `SettingsChange` — `{"asr": {"transcriber": "gigaam-ru"}}` for a
+downloaded local model, `"cloud"` for the endpoint — once the model is installed.
