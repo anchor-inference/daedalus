@@ -232,6 +232,12 @@ SAMPLE_PAGE: dict[str, object] = {
 """A published page as ``GET /api/pages`` lists it, with a glyph of its own."""
 
 
+COMPANION = {"session_id": "companion-1", "name": "Daedalus", "avatar": {"shape": "round", "color": "teal", "eyes": "dots", "accessory": "none"},
+             "paused": False, "state": "idle", "running_agents": 0}
+"""``GET /api/companion``: the operator's standing companion, as the companion's contract gives it. The
+desktop's Quick Chat sends to it and its tray offers to pause it; an installation without one answers
+404, which a harness that checks that case answers itself."""
+
 GATES: dict[str, object] = {
     "/api/terminals/envs": {"envs": [
         {"env": "container", "available": True, "sandbox": "ok", "containment": {"kind": "cgroup_v2", "available": True}},
@@ -290,6 +296,7 @@ GATES: dict[str, object] = {
         "careful": {"description": "ask before anything irreversible"},
     },
     "/api/commands": [],
+    "/api/companion": COMPANION,
     # The composer's palette offers these next to the slash commands.
     "/api/skills": [{"id": "web-design-reviewer", "name": "web-design-reviewer", "description": "Review a page's layout and accessibility"}],
     "/api/asr": {"configured": False, "reason": "", "provider": "", "model": "", "max_seconds": 120, "autosend": False},
@@ -364,6 +371,9 @@ SHARED_WRITES: dict[tuple[str, str], tuple[int, str, str]] = {
     ("POST", "/api/pet/react"): (200, "application/json", json.dumps({"line": "I'm here.", "emotion": "joy", "action": "wave", "prop": ""})),
     # The session cookie a custom page's frame needs; the stub's frames need none.
     ("POST", "/api/pages/_signin"): (200, "application/json", json.dumps({"ok": True})),
+    # A turn for the companion from Quick Chat, and the tray's Pause.
+    ("POST", "/api/companion/message"): (200, "application/json", json.dumps({"ok": True, "session_id": COMPANION["session_id"]})),
+    ("PATCH", "/api/companion"): (200, "application/json", json.dumps({**COMPANION, "paused": True})),
 }
 
 
