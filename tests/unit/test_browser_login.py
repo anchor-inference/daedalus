@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from daedalus.browser.login import LoginConflict, outcome, site_of
-from daedalus.config import VOICE_TOOLS, Settings
+from daedalus.config import COMPANION_TOOLS, Settings
 from daedalus.extensions import browser as browser_extension
 from daedalus.host import prompts
 from daedalus.host.session_runner import SessionManager
@@ -97,9 +97,9 @@ def desk(rig: Rig) -> Any:
 async def test_the_tool_is_registered_as_a_change_and_taught() -> None:
     assert "BrowserLogin" in BROWSER_TOOLS and "BrowserLogin" not in READ_ONLY_TOOLS
     assert "BrowserLogin(url_or_domain, reason)" in prompts.BROWSER
-    # The voice concierge (the companion to be) has no browser, so it never asks for a sign-in; the
+    # The companion has no browser, so it never asks for a sign-in; the
     # agents it delegates to do.
-    assert "BrowserLogin" not in VOICE_TOOLS
+    assert "BrowserLogin" not in COMPANION_TOOLS
     assert site_of("https://www.Acme.test/login?next=/") == "acme.test" and site_of("acme.test") == "acme.test" and site_of("www.test") == "www.test"
     said = outcome("acme.test", {"url": "https://acme.test/home?token=abc#x", "signed_in": "yes", "filled": ["username", "password"]})
     assert said == "Sign-in to acme.test: submitted; now at https://acme.test/home; signed in: yes."
