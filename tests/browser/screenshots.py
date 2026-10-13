@@ -41,6 +41,7 @@ from api_stub import (  # noqa: E402
     FocusStub,
     HarnessesStub,
     MainStub,
+    MemoryStub,
     TeamStub,
     Unhandled,
     expect_app,
@@ -344,18 +345,22 @@ Lighthouse (mobile preset), 3 runs, median:
 Links: 41 checked, 0 broken. Menu items: 27, matching `data/menu.csv`.
 """
 
-MEMORY = {
-    "records": [
-        {"id": "m1", "scope": "global", "scope_key": "", "kind": "preference", "text": "The operator writes in English and wants answers under 200 words unless asked for a report.", "salience": 0.9, "version": 1, "created_at": ago(days=6), "last_accessed_at": ago(hours=2)},
-        {"id": "m2", "scope": "global", "scope_key": "", "kind": "fact", "text": "Deploys go through the `deploy` script in each project; never rsync by hand.", "salience": 0.8, "version": 2, "created_at": ago(days=5), "last_accessed_at": ago(days=1)},
-        {"id": "m3", "scope": "session", "scope_key": S1, "kind": "fact", "text": "The bakery owner edits data files over SFTP; markup changes must not be required of them.", "salience": 0.85, "version": 1, "created_at": ago(days=3), "last_accessed_at": ago(minutes=9)},
-        {"id": "m4", "scope": "session", "scope_key": S1, "kind": "fact", "text": "Images are capped at 60 KB and 1600 px; the shop's phone is on 3G.", "salience": 0.7, "version": 1, "created_at": ago(days=2), "last_accessed_at": ago(minutes=7)},
-        {"id": "m5", "scope": "session", "scope_key": S3, "kind": "howto", "text": "Refund questions are answered with the template in templates/refund.md and put on the board for the operator.", "salience": 0.75, "version": 1, "created_at": ago(days=4), "last_accessed_at": ago(minutes=52)},
-        {"id": "m6", "scope": "session", "scope_key": S4, "kind": "preference", "text": "The digest goes out on Friday at 09:00; eight items, newest first.", "salience": 0.8, "version": 1, "created_at": ago(days=7), "last_accessed_at": ago(minutes=4)},
-    ],
-    "buckets": [{"scope": "global", "scope_key": "", "title": None, "count": 2}, {"scope": "session", "scope_key": S1, "title": "Bakery site", "count": 2}, {"scope": "session", "scope_key": S3, "title": "Support inbox", "count": 1}, {"scope": "session", "scope_key": S4, "title": "Weekly digest", "count": 1}],
-    "sessions": {S1: "Bakery site", S3: "Support inbox", S4: "Weekly digest"},
-}
+MEMORY_RECORDS = [
+    {"id": "m1", "scope": "global", "scope_key": "", "category": "preference", "topics": ["answers"], "text": "The operator writes in English and wants answers under 200 words unless asked for a report.", "salience": 0.9, "version": 1, "created_at": ago(days=6), "updated_at": ago(days=6), "last_accessed_at": ago(hours=2)},
+    {"id": "m2", "scope": "global", "scope_key": "", "category": "procedure", "topics": ["deploy"], "text": "Deploys go through the `deploy` script in each project; never rsync by hand.", "salience": 0.8, "version": 2, "created_at": ago(days=5), "updated_at": ago(days=1), "last_accessed_at": ago(days=1)},
+    {"id": "m3", "scope": "session", "scope_key": S1, "category": "person", "topics": ["bakery", "owner"], "text": "The bakery owner edits data files over SFTP; markup changes must not be required of them.", "salience": 0.85, "version": 1, "created_at": ago(days=3), "updated_at": ago(days=3), "last_accessed_at": ago(minutes=9)},
+    {"id": "m4", "scope": "session", "scope_key": S1, "category": "project", "topics": ["bakery", "images"], "text": "Images are capped at 60 KB and 1600 px; the shop's phone is on 3G.", "salience": 0.7, "version": 1, "created_at": ago(days=2), "updated_at": ago(days=2), "last_accessed_at": ago(minutes=7)},
+    {"id": "m5", "scope": "session", "scope_key": S3, "category": "procedure", "topics": ["refunds", "support"], "text": "Refund questions are answered with the template in templates/refund.md and put on the board for the operator.", "salience": 0.75, "version": 1, "created_at": ago(days=4), "updated_at": ago(days=4), "last_accessed_at": ago(minutes=52)},
+    {"id": "m6", "scope": "session", "scope_key": S4, "category": "preference", "topics": ["digest"], "text": "The digest goes out on Friday at 09:00; eight items, newest first.", "salience": 0.8, "version": 1, "created_at": ago(days=7), "updated_at": ago(days=7), "last_accessed_at": ago(minutes=4)},
+    {"id": "m7", "scope": "session", "scope_key": S1, "category": "project", "topics": ["bakery", "images"], "text": "Images for the shop are capped at 60 KB; its phone is on a slow line.", "salience": 0.6, "version": 1, "created_at": ago(hours=5), "updated_at": ago(hours=5), "last_accessed_at": None},
+    {"id": "m8", "scope": "global", "scope_key": "", "category": "fact", "topics": [], "text": "The courier's rates change on the first of the month.", "salience": 0.5, "version": 1, "created_at": ago(hours=9), "updated_at": ago(hours=9), "last_accessed_at": None},
+]
+MEMORY_SESSIONS = {S1: "Bakery site", S3: "Support inbox", S4: "Weekly digest"}
+MEMORY_SUGGESTIONS = [
+    {"id": 1, "kind": "duplicate", "memory_ids": ["m4", "m7"], "keep_id": "m7", "text": "Images are capped at 60 KB and 1600 px; the shop's phone is on 3G.", "score": 0.71, "reason": "nearly the same words", "created_at": ago(hours=1)},
+]
+MEMORY = MemoryStub(MEMORY_RECORDS, MEMORY_SESSIONS, MEMORY_SUGGESTIONS)
+"""What the agent remembered, by category and topic, with one suggestion the tidying was unsure of."""
 
 BOARD = [
     {"id": "7f2a1c", "title": "Order form posts to the owner's sheet", "status": "doing", "priority": 2, "acceptance": "A test order appears as a row in the sheet within a minute; the form says so.", "checklist": [{"text": "sheet API token in the key proxy", "done": True}, {"text": "form → POST /order", "done": True}, {"text": "confirmation page", "done": False}], "depends_on": [], "session_id": S1, "origin_session_id": S1, "notes": "", "created_at": ago(hours=2), "updated_at": ago(minutes=20)},
@@ -877,8 +882,11 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return respond(route, usage_data())
     if rel == "/api/balance":
         return respond(route, {"balances": {"deepseek": 4.62, "openrouter": 11.08}, "thresholds": [5, 2, 0.5]})
-    if rel == "/api/memory":
-        return respond(route, MEMORY)
+    if rel.startswith("/api/memory"):
+        posted = json.loads(request.post_data or "{}") if request.method in ("POST", "PUT", "PATCH") and request.post_data else None
+        answered = MEMORY.answer(request.method, rel, posted)
+        if answered is not None:
+            return respond(route, answered[1], status=answered[0])
     if rel == "/api/board":
         return respond(route, BOARD)
     if rel == "/api/notifications/summary":
