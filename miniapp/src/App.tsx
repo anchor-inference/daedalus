@@ -3,9 +3,7 @@ import { openPathOf } from "./subagents";
 import { api, SessionList, telegram, TerminalList } from "./api";
 import { ConfirmHost, ToastHost, toast as showToast } from "./ui/dialogs";
 import { SessionPicker } from "./sessionpicker";
-import type { AuthConfig } from "./screens/Login";
 import type { OnboardingState } from "./screens/AddModel";
-import * as passkeys from "./passkeys";
 import { ORCHESTRATION, ORCHESTRATION_LIST, PROJECTS_PAGE, back, migrateLegacyLocation, navigate, pathFor, projectHome, projectPagePath, projectSessionPath, recallScroll, rememberScroll, sessionPath, useRoute } from "./router";
 import { Counts, Palette, PaletteItem, go, screenTitle, useMedia, useShortcuts } from "./shell";
 import { AppDrawer } from "./drawer";
@@ -701,7 +699,6 @@ export function App() {
         <MaintenanceNotice />
         {offline && <div className="offline-strip" role="status">{t("app.offline")}</div>}
         <ChangeStrip caps={caps} />
-        <PasskeyNudge />
         <Suspense fallback={<div className="empty">{t("common.loading")}</div>}>{content}</Suspense>
       </div>
       {palette && <Palette items={paletteItems()} onClose={() => setPalette(false)} />}
@@ -738,39 +735,6 @@ function useAppBadge(unseen: number): void {
     const done = unseen > 0 ? nav.setAppBadge?.(unseen) : nav.clearAppBadge?.();
     done?.catch(() => undefined);
   }, [unseen]);
-}
-
-/** After a pairing link, the browser is signed in but holds nothing of its own: offer it a passkey, once. */
-function PasskeyNudge() {
-  const [show, setShow] = useState(false);
-  useEffect(() => {
-    if (telegram()?.initData || !passkeys.supported()) return;
-    try {
-      if (localStorage.getItem("daedalus.passkeyNudge") === "off") return;
-    } catch {
-      /* private mode */
-    }
-    api
-      .get<AuthConfig>("/api/auth/config")
-      .then((c) => setShow(c.passkeys === 0))
-      .catch(() => setShow(false));
-  }, []);
-  if (!show) return null;
-  const dismiss = () => {
-    try {
-      localStorage.setItem("daedalus.passkeyNudge", "off");
-    } catch {
-      /* private mode */
-    }
-    setShow(false);
-  };
-  return (
-    <div className="nudge-strip" role="status">
-      <span>{t("app.passkey.nudge")}</span>
-      <a href={pathFor("settings", "security")} onClick={(e) => (go(e, pathFor("settings", "security")), dismiss())}>{t("app.passkey.add")}</a>
-      <button className="linkbtn" onClick={dismiss}>{t("app.passkey.later")}</button>
-    </div>
-  );
 }
 
 /** Whether the layout is the wide one (the rail and the sidebar beside the screen): the same breakpoint as the stylesheet. */

@@ -33,8 +33,8 @@
     {
       "id": "security", "group": "you", "icon": "key",
       "title": { "en": "Security", "ru": "Безопасность" },
-      "about": { "en": "How this app signs in, the secrets the agent may use, and signing out everywhere.", "ru": "Как входит это приложение, секреты, доступные агенту, и выход на всех устройствах." },
-      "synonyms": ["login", "sign in", "secrets", "вход", "секреты", "пароль"]
+      "about": { "en": "How this app signs in, two-factor codes, the secrets the agent may use, and signing out everywhere.", "ru": "Как входит это приложение, двухфакторные коды, секреты, доступные агенту, и выход на всех устройствах." },
+      "synonyms": ["login", "sign in", "secrets", "2FA", "two-factor", "вход", "секреты", "пароль", "двухфакторная"]
     },
     {
       "id": "models", "group": "work", "icon": "model",
@@ -945,9 +945,15 @@
       "synonyms": ["update", "update the desktop app", "launcher", "new version", "check for updates", "обновление", "обновить приложение", "лаунчер", "новая версия"]
     },
     {
+      "section": "security", "anchor": "two_factor", "config": null,
+      "title": { "en": "Two-factor authentication", "ru": "Двухфакторная аутентификация" },
+      "about": { "en": "A six-digit code from an authenticator app, asked after signing in from a browser; set up by scanning a QR code, with one-time recovery codes. Not offered in the desktop window, which signs in through its launcher.", "ru": "Шестизначный код из приложения-аутентификатора, который спрашивается после входа из браузера; подключается сканированием QR-кода, с одноразовыми резервными кодами. В окне настольного приложения не предлагается: оно входит через лаунчер." },
+      "synonyms": ["2FA", "two-factor", "TOTP", "authenticator", "Google Authenticator", "one-time code", "QR code", "recovery codes", "двухфакторная", "двухэтапная проверка", "аутентификатор", "одноразовый код", "резервные коды"]
+    },
+    {
       "section": "about", "anchor": "logout", "config": null,
       "title": { "en": "Log out of this browser", "ru": "Выйти из этого браузера" },
-      "about": { "en": "Sign this browser out; it signs in again with a passkey or a pairing link.", "ru": "Выйти в этом браузере; войти снова можно по ключу доступа или ссылке привязки." },
+      "about": { "en": "Sign this browser out; it signs in again through Telegram or a pairing link, then the two-factor code if it is on.", "ru": "Выйти в этом браузере; войти снова можно через Telegram или по ссылке привязки, затем кодом двухфакторной защиты, если она включена." },
       "synonyms": ["log out", "sign out", "logout", "выйти", "разлогиниться", "выход"]
     },
     {

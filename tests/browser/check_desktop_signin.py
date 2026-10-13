@@ -10,7 +10,8 @@ whose API answers "signed out":
 - reloaded within a minute — the link came back here without signing in — it does not ask again on
   its own, so a link that fails cannot spin the window round; the button still asks;
 - a failure the launcher reports is shown;
-- in a plain browser the screen is unchanged: the code field is there and nothing is asked.
+- in a plain browser the screen is unchanged: the code field is there and nothing is asked;
+- with two-factor on and the code owed, the window still goes through its launcher and asks for no code.
 
     cd miniapp && npm run build
     mkdir -p /tmp/app-root && ln -s "$PWD/dist" /tmp/app-root/app
@@ -83,9 +84,25 @@ def run() -> int:
             page.wait_for_selector(".login #pairing")
             assert page.locator(".login").get_by_role("button", name="Sign in", exact=True).count() == 0, "a plain browser was offered the launcher's sign-in"
             plain.close()
+
+            # Two-factor on, and the window arrived by the start's link, which owes the code: the
+            # window still asks its launcher (whose own link is not asked for the code) and shows no
+            # code field it has no way to fill from this computer.
+            stub.second_factor = True  # type: ignore[attr-defined]
+            owed = browser.new_context(viewport={"width": 1180, "height": 820})
+            owed.add_init_script(BRIDGE)
+            page = owed.new_page()
+            page.route("**/api/**", stub)
+            page.goto(f"{BASE}/agents?lang=en")
+            page.wait_for_selector(".login")
+            page.wait_for_timeout(300)
+            assert page.evaluate("window.__asked") == 1, "with the code owed, the window did not ask its launcher"
+            assert page.locator("#login-code").count() == 0, "the desktop window asks for the two-factor code"
+            owed.close()
             browser.close()
     finally:
         stub.signedout = False  # type: ignore[attr-defined]
+        stub.second_factor = False  # type: ignore[attr-defined]
     print("desktop sign-in: asks once, does not loop, reports a failure; a browser is unchanged")
     return 0
 

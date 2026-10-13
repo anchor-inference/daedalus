@@ -132,6 +132,8 @@ async def test_every_project_keeps_its_folder_and_every_session_its_directory(tm
     after = tables(path)
     # A later migration reshapes the inbox into notifications, rows kept; the count moves with it.
     counts["notifications"] = counts.pop("inbox")
+    # Two-factor sign-in replaced passkeys, and their table went with them.
+    counts.pop("passkeys")
     assert {name: after[name] for name in counts if name != "schema_version"} == {name: n for name, n in counts.items() if name != "schema_version"}
     new = set(after) - set(counts)
     # The migrations after this one run as well and add tables of their own; this one's are these.
@@ -168,6 +170,7 @@ async def test_every_project_keeps_its_folder_and_every_session_its_directory(tm
         "operator_secrets", "operator_secret_grants", "session_imports", "project_pins", "page_storage",
         "calendar_types", "calendar_groups", "calendar_event_history", "calendar_hooks", "action_reviews",
         "saved_logins", "companion_goals", "companion_activity",
+        "two_factor", "two_factor_recovery",
     })
     assert new - later == {"project_folders", "project_briefs", "project_journal", "staff", "staff_sessions", "staff_messages", "asks", "watches"}
     assert after["project_folders"] == counts["projects"]

@@ -111,8 +111,8 @@ expected.
 
 ## 3. Log the operator in
 
-The app is at `http://127.0.0.1:8765/app` on the server. When there is no other way in (no Telegram, no
-passkey yet) the server writes a one-time **pairing link** to the state volume at start (the log says
+The app is at `http://127.0.0.1:8765/app` on the server. When there is no Telegram bot the server writes
+a one-time **pairing link** to the state volume at every start (the log says
 `pairing link written to …`; the link itself is never logged):
 
 ```bash
@@ -121,10 +121,9 @@ docker exec deploy-daedalus-1 cat /srv/state/pairing-url
 docker exec deploy-daedalus-1 /srv/venv/bin/python -m daedalus auth pair
 ```
 
-Give that link to the operator (it works once, for 30 minutes). Opening it signs the browser in. Then tell
-them to add a **passkey** in the app (Settings → Security → Add a passkey) so the next login is Face ID /
-Touch ID / a security key and needs no link. With Telegram configured, the login page also offers
-"Log in with Telegram".
+Give that link to the operator (it works once, for 30 minutes). Opening it signs the browser in. Tell them
+that Settings → Security → Two-factor authentication adds a code from an authenticator app to every later
+sign-in, if they want one. With Telegram configured, the login page also offers "Log in with Telegram".
 
 If there is no public address, the operator reaches the app through a tunnel:
 `ssh -L 8765:127.0.0.1:8765 <server>` and then `http://127.0.0.1:8765/app` on their machine; the pairing
@@ -325,7 +324,7 @@ whether this installation is finished. The lines worth reading back to the opera
 
 ## 8. What to report back
 
-Tell the operator: the app address, how to log in (the pairing link, then a passkey), that the app will
+Tell the operator: the app address, how to log in (the pairing link, and two-factor sign-in if they want it), that the app will
 ask them for a model before anything else and which providers are ready for one, the daily cap, and
 whether Telegram is on. Do not paste tokens or keys into
 the chat.

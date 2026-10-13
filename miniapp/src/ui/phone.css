@@ -529,7 +529,7 @@
   .main .settings-col .card > :is(.settings-row, .settings-block):not(:is(.settings-row, .settings-block) + *) { margin-top: 0; border-top-left-radius: var(--radius-xl); border-top-right-radius: var(--radius-xl); }
   .main .settings-col .card > :is(.settings-row, .settings-block):not(:has(+ :is(.settings-row, .settings-block))) { border-bottom-left-radius: var(--radius-xl); border-bottom-right-radius: var(--radius-xl); }
   .main .settings-col .card > :not(.section-title):not(.sub):not(.settings-row):not(.settings-block):not(.btnrow):not(details):not(label):not(.field) { border-radius: var(--radius-xl); }
-  .main .settings-col .card > :is(.loadbar, .integrations-list, .passkeys, .tgroups, ul) { padding: 12px var(--space-4); background: var(--surface-1); }
+  .main .settings-col .card > :is(.loadbar, .integrations-list, .tgroups, ul) { padding: 12px var(--space-4); background: var(--surface-1); }
   .main .settings-col .card > .btnrow { margin: var(--space-2) 0 0; padding: 0; border: 0; }
   /* The lists inside a card (models, keys, devices, the kinds of notification) are runs of tiles too. */
   .main .settings-col .card :is(.mlist, .nrows) { display: flex; flex-direction: column; gap: 2px; margin-top: 0; border: 0; }

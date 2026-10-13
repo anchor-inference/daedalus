@@ -101,6 +101,7 @@ from daedalus.extensions import (
     api_skill_quality,
     api_staff,
     api_staff_reports,
+    api_two_factor,
     api_update_drains,
     api_workflows,
     api_workspace_archive,
@@ -163,7 +164,7 @@ from daedalus.speech.tts_engine import MAX_SPEED, MIN_SPEED, TtsError
 from daedalus.speech.tts_service import MEDIA_TYPE_HEADER, SEQUENCE_TYPE
 from daedalus.speech.tts_service import frame as speech_frame
 from daedalus.staff_runtime import LiveSession
-from daedalus.stores import pairing, passkeys
+from daedalus.stores import pairing
 from daedalus.stores.calendar import CalendarStore
 from daedalus.stores.control import ControlConflict, ControlDenied, Principal
 from daedalus.stores.database import Database
@@ -326,20 +327,6 @@ def validate_init_data(init_data: str, bot_token: str, *, max_age: int = INIT_DA
     if "user" in pairs:
         pairs["user"] = json.loads(pairs["user"])
     return pairs
-
-
-class PasskeyRegisterBody(BaseModel):
-    credential: dict[str, Any]
-    """What ``navigator.credentials.create`` returned, serialised as the browser gives it."""
-    name: str = Field(default="", max_length=80)
-    ceremony: str = Field(default="", max_length=64)
-    """The id the matching ``begin`` call answered with: it names the challenge this response signs."""
-
-
-class PasskeyLoginBody(BaseModel):
-    credential: dict[str, Any]
-    """What ``navigator.credentials.get`` returned, serialised as the browser gives it."""
-    ceremony: str = Field(default="", max_length=64)
 
 
 class ReplyTo(BaseModel):
@@ -1524,7 +1511,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             token = request.query_params.get("token")  # browser navigation cannot set headers
         if token and secrets.compare_digest(token, api_token):
             return {"user_id": settings.owner_user_id, "via": "token"}
-        # A browser that paired, signed in with a passkey or used Telegram's widget holds a signed cookie.
+        # A browser that paired or used Telegram's widget (and gave the two-factor code, when that is on) holds a signed cookie.
         cookie = request.cookies.get(SESSION_COOKIE)
         if cookie and verify_session_cookie(await session_secret(), cookie) == settings.owner_user_id:
             return {"user_id": settings.owner_user_id, "via": "cookie"}
@@ -1549,40 +1536,17 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         bot_username["name"] = str(me.username or "")
         return bot_username["name"] or None
 
-    def _relying_party() -> passkeys.RelyingParty:
-        return passkeys.relying_party(settings.miniapp_public_url, settings.api_port)
-
-    # Both ceremonies are a pair of calls, and the challenge of the first has to survive until the
-    # second. Each begin names its ceremony, so two browsers (or a stranger polling the public login
-    # endpoint) cannot spend each other's challenge; the table stays small by dropping what expired.
-    CEREMONY_TTL, CEREMONY_MAX = 300.0, 64
-    challenges: dict[str, tuple[str, bytes, float]] = {}
-
-    def _hold_challenge(kind: str, options: dict[str, Any]) -> str:
-        now = time.time()
-        for key in [k for k, (_, _, until) in challenges.items() if until < now]:
-            challenges.pop(key, None)
-        while len(challenges) >= CEREMONY_MAX:
-            challenges.pop(next(iter(challenges)))  # the oldest goes; a flood cannot grow the table
-        ceremony = secrets.token_urlsafe(16)
-        challenge = base64.urlsafe_b64decode(options["challenge"] + "=" * (-len(options["challenge"]) % 4))
-        challenges[ceremony] = (kind, challenge, now + CEREMONY_TTL)
-        return ceremony
-
-    def _take_challenge(kind: str, ceremony: str) -> bytes:
-        held = challenges.pop(ceremony, None) if ceremony else None
-        if held is None or held[0] != kind or held[2] < time.time():
-            raise HTTPException(400, "the request expired; start again")
-        return held[1]
+    gate = api_two_factor.register(api, app, auth, session_secret=session_secret, sign_in=sign_in, over_https=over_https)
 
     @api.get("/api/auth/config")
-    async def auth_config() -> dict[str, Any]:
-        """What the login page needs: which ways in this installation actually has."""
+    async def auth_config(request: Request) -> dict[str, Any]:
+        """What the login page needs: which ways in this installation actually has, and whether this
+        browser is past the first of them and owes the two-factor code."""
         username = await _bot_username()
         return {
             "telegram": {"bot_username": username} if username else None,
-            "passkeys": await passkeys.count(app.db),
             "pairing": await pairing.outstanding(app.db) > 0,
+            "second_factor": await gate.pending(request) is not None and await gate.store.enabled(),
         }
 
     @api.post("/api/auth/telegram")
@@ -1596,81 +1560,22 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             raise HTTPException(401, f"login refused: {exc}") from exc
         if int(fields.get("id", 0)) != settings.owner_user_id:
             raise HTTPException(403, "not the owner")
-        await sign_in(response, request)
+        if not await gate.admit(response, request):
+            return {"ok": True, "second_factor": True}
         return {"ok": True, "user_id": settings.owner_user_id, "name": fields.get("first_name")}
 
     @api.get("/api/auth/pair")
     async def auth_pair(code: str, request: Request) -> RedirectResponse:
         """A pairing link: spend the code, hand the browser a session cookie and open the app."""
-        if not await pairing.redeem(app.db, code, state_dir=settings.state_dir):
+        redeemed = await pairing.redeem(app.db, code, state_dir=settings.state_dir)
+        if redeemed is None:
             # A spent link still lands on the app: a browser that paired with it earlier is signed in
             # already, and one that is not sees the login page say why.
             return RedirectResponse("/app/?pairing=spent", status_code=303)
         response = RedirectResponse("/app/", status_code=303)
-        await sign_in(response, request)
+        # Either way the app opens: signed in, or on the login page asking for the code.
+        await gate.admit(response, request, exempt=redeemed.for_window)
         return response
-
-    @api.post("/api/auth/passkeys/register/begin")
-    async def passkey_register_begin(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        options = await passkeys.registration_options(app.db, _relying_party())
-        return {**options, "ceremony": _hold_challenge("register", options)}
-
-    @api.post("/api/auth/passkeys/register/finish")
-    async def passkey_register_finish(body: PasskeyRegisterBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        try:
-            verified = passkeys.verify_registration(body.credential, challenge=_take_challenge("register", body.ceremony), rp=_relying_party())
-        except Exception as exc:  # noqa: BLE001 — every failure here is the same answer: this key is not accepted
-            raise HTTPException(400, f"the passkey was not accepted: {exc}") from exc
-        if passkeys.declined_resident_key(body.credential):
-            # Login offers no list of credentials (no username to type), so a key the authenticator
-            # did not make discoverable could be enrolled and then never offered at sign-in.
-            raise HTTPException(400, "this authenticator did not make the passkey discoverable, so it could not sign you in later; use a device or key that stores passkeys")
-        transports = list(body.credential.get("response", {}).get("transports") or [])
-        await passkeys.store(
-            app.db,
-            credential_id=verified.credential_id,
-            public_key=verified.credential_public_key,
-            sign_count=int(verified.sign_count),
-            transports=[str(x) for x in transports],
-            name=body.name.strip() or "This device",
-        )
-        return {"ok": True, "passkeys": await passkeys.listing(app.db)}
-
-    @api.post("/api/auth/passkeys/login/begin")
-    async def passkey_login_begin() -> dict[str, Any]:
-        if await passkeys.count(app.db) == 0:
-            raise HTTPException(404, "no passkey is enrolled")
-        options = await passkeys.authentication_options(app.db, _relying_party())
-        return {**options, "ceremony": _hold_challenge("login", options)}
-
-    @api.post("/api/auth/passkeys/login/finish")
-    async def passkey_login_finish(body: PasskeyLoginBody, request: Request, response: JSONResponse) -> dict[str, Any]:
-        stored = await passkeys.find(app.db, str(body.credential.get("id") or ""))
-        if stored is None:
-            raise HTTPException(403, "this passkey is not enrolled here")
-        try:
-            verified = passkeys.verify_authentication(
-                body.credential,
-                challenge=_take_challenge("login", body.ceremony),
-                rp=_relying_party(),
-                public_key=base64.urlsafe_b64decode(stored["public_key"] + "=" * (-len(stored["public_key"]) % 4)),
-                sign_count=int(stored["sign_count"]),
-            )
-        except Exception as exc:  # noqa: BLE001 — a refused signature is a refused login, whatever went wrong
-            raise HTTPException(403, f"the passkey was refused: {exc}") from exc
-        await passkeys.used(app.db, stored["credential_id"], int(verified.new_sign_count))
-        await sign_in(response, request)
-        return {"ok": True, "user_id": settings.owner_user_id}
-
-    @api.get("/api/auth/passkeys")
-    async def passkey_list(_: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
-        return await passkeys.listing(app.db)
-
-    @api.delete("/api/auth/passkeys/{passkey_id}")
-    async def passkey_delete(passkey_id: int, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        if not await passkeys.remove(app.db, passkey_id):
-            raise HTTPException(404, "no such passkey")
-        return {"ok": True, "passkeys": await passkeys.listing(app.db)}
 
     @api.post("/api/auth/sessions/revoke")
     async def auth_revoke(request: Request, response: JSONResponse, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -1687,6 +1592,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     @api.post("/api/auth/logout")
     async def auth_logout(response: JSONResponse) -> dict[str, Any]:
         response.delete_cookie(SESSION_COOKIE, path="/")
+        response.delete_cookie(api_two_factor.PENDING_COOKIE, path="/")
         return {"ok": True}
 
     # The projects, their folders, brief and journal: their own module, which the features built
@@ -6492,9 +6398,8 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     base = app.settings.miniapp_public_url or f"http://127.0.0.1:{app.settings.api_port}"
     # An installation with no other way in gets one at start: a link in a file only the operator can
     # read (never in the log, which is copied around and which the agent's own tools can read).
-    # Anything else — a bot, an enrolled passkey — is a way in already; a fresh link is one
-    # `daedalus auth pair` away.
-    if not app.settings.telegram_bot_token and await passkeys.count(app.db) == 0:
+    # A bot is a way in already; a fresh link is one `daedalus auth pair` away.
+    if not app.settings.telegram_bot_token:
         await pairing.announce(app.db, app.settings.state_dir, base)
         logger.warning("pairing link written to %s (opens once; `daedalus auth pair` makes another)", app.settings.state_dir / pairing.URL_FILE)
     else:

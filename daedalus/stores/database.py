@@ -2252,6 +2252,40 @@ CREATE TABLE IF NOT EXISTS saved_logins (
 # The companion: its goals, its activity log, and the voice concierge's rows renamed to it.
 MIGRATIONS.append(COMPANION_MIGRATION)
 
+
+async def _window_pairing(conn: aiosqlite.Connection) -> None:
+    """Mark the pairing codes the desktop launcher mints for its own window.
+
+    Checked first because a database restored over a newer file runs this again over a column it
+    already has, and a bare ADD COLUMN would then fail the whole start."""
+    present = {row[1] for row in await (await conn.execute("PRAGMA table_info(pairing_codes)")).fetchall()}
+    if "for_window" not in present:
+        await conn.execute("ALTER TABLE pairing_codes ADD COLUMN for_window INTEGER NOT NULL DEFAULT 0")
+
+
+# Two-factor sign-in replaces passkeys. The secret is sealed with the operator secrets' key (the
+# database alone opens nothing), recovery codes are digests, and ``last_step`` is the step of the last
+# code accepted, so no code is good twice. ``enabled_at`` is NULL while an enrolment waits for its
+# first code. A pairing code marked ``for_window`` was minted by the desktop launcher for the window it
+# runs beside, and is not asked for the second factor: whoever can mint one already runs commands
+# inside the installation, where a code would protect nothing.
+MIGRATIONS.append(DataMigration("""
+DROP TABLE IF EXISTS passkeys;
+CREATE TABLE IF NOT EXISTS two_factor (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    sealed BLOB NOT NULL,
+    enabled_at TEXT,
+    last_step INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS two_factor_recovery (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_hash TEXT NOT NULL UNIQUE,
+    used_at TEXT
+);
+""", _window_pairing))
+
+
 async def _workflow_skill(conn: aiosqlite.Connection) -> None:
     """Add the column only where it is missing: a test that replays the migrations from an earlier
     version runs this one again over a table that already has it, and SQLite has no ADD COLUMN IF NOT
@@ -2266,6 +2300,7 @@ async def _workflow_skill(conn: aiosqlite.Connection) -> None:
 # The skill a recording of the operator's steps was saved as, so the app stops offering a recording that
 # already became one; "" for one that has not.
 MIGRATIONS.append(DataMigration("", _workflow_skill))
+
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session

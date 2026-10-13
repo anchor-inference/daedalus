@@ -152,7 +152,7 @@ else
   say "  docker exec deploy-daedalus-1 cat /srv/state/pairing-url"
   say "  docker exec deploy-daedalus-1 /srv/venv/bin/python -m daedalus auth pair"
   say "A fresh link: docker compose -f deploy/compose.yaml exec daedalus python -m daedalus auth pair"
-  say "Add a passkey in Settings → Security once you are in, and the link is never needed again."
+  say "Two-factor sign-in (a code from an authenticator app) can be switched on in Settings → Security."
   say "The app opens on \"Add a model\": pick a provider, pick a model from its own list, save. Until one exists, nothing can run."
 fi
 say "Provider keys can be added later in $SECRETS_FILE; models are added in the app (Settings → Models → Add a model)."
