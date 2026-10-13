@@ -121,7 +121,8 @@ TOOL_GROUPS: dict[str, ToolGroupSpec] = {
     "browser": ToolGroupSpec(
         "A real browser you drive, for sites that need JavaScript or a login: open pages, click and type, look at "
         "how a page looks (BrowserLook), downloads (BrowserDownload), cookies from a file the operator attached "
-        "(BrowserCookies), a sign-in the operator types into a private form (BrowserLogin), hand-over to the "
+        "(BrowserCookies), a sign-in the operator types into a private form (BrowserLogin), a task the operator "
+        "recorded, replayed step by step (BrowserReplay), hand-over to the "
         "operator for a CAPTCHA or a payment, and a developer's view of a site "
         "you build or debug: its console errors (BrowserLogs), its requests and API responses (BrowserNetwork), why "
         "an element is hidden (BrowserInspect). Not a Puppeteer or Playwright MCP server, not a headless browser in "

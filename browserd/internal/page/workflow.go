@@ -27,6 +27,11 @@ type Field struct {
 	Check    bool   `json:"checkable"`
 	Checked  bool   `json:"checked"`
 	Select   bool   `json:"select"`
+	// Selector and Text are how a replay of the recording finds the element again: a CSS selector of
+	// the tab's own document ("" for an element of a frame or a shadow root) and a control's visible
+	// words (never a field's, which are what was typed).
+	Selector string `json:"selector,omitempty"`
+	VisText  string `json:"text,omitempty"`
 }
 
 // Target is an element a person acted on, as the recording keeps it: described, classified as an
@@ -133,4 +138,40 @@ func (p *Model) Headline(ctx context.Context, t *browser.Tab) (string, error) {
 	var s string
 	err = json.Unmarshal(raw, &s)
 	return s, err
+}
+
+// Located is an element a replay found again: its ref, and which of the recorded descriptions found
+// it (selector, role, text). Matches is how many elements that description fits; the first is taken.
+type Located struct {
+	Ref             string `json:"ref"`
+	By              string `json:"by"`
+	Matches         int    `json:"matches"`
+	SelectorMatches int    `json:"selector_matches,omitempty"`
+}
+
+// MaxLocateSelector bounds a recorded selector; one longer than this was not written by selectorOf.
+const MaxLocateSelector = 500
+
+// Locate finds an element a recording acted on in the tab's own document, for a replay of it: by the
+// selector when it matches one shown element, else by role and name, else by visible text. The ref it
+// returns is an ordinary one, so the replay's action goes through page.act like the agent's own.
+func (p *Model) Locate(ctx context.Context, t *browser.Tab, selector, role, name, text string) (*Located, error) {
+	if len(selector) > MaxLocateSelector || len(name) > MaxFindQuery || len(text) > MaxFindQuery || len(role) > 40 {
+		return nil, wire.Errorf(wire.CodeInvalidParams, "selector is at most %d bytes, name and text %d", MaxLocateSelector, MaxFindQuery)
+	}
+	if selector == "" && name == "" && text == "" {
+		return nil, wire.Errorf(wire.CodeInvalidParams, "give a selector, a name or a text to look for")
+	}
+	raw, err := p.call(ctx, t, "locate", selector, role, name, text)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkScript(raw); err != nil {
+		return nil, err
+	}
+	var l Located
+	if err := json.Unmarshal(raw, &l); err != nil {
+		return nil, fmt.Errorf("the page script located something that is not an element: %w", err)
+	}
+	return &l, nil
 }

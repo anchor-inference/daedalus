@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from protocore.contracts.skills import SkillNotFoundError
@@ -11,7 +10,7 @@ from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
 from daedalus.host.services import locator
-from daedalus.host.skills import assess
+from daedalus.host.skills import save_skill_draft
 from daedalus.host.toolchain import status as toolchain_status
 from daedalus.tools import search_hint, tool_group
 from daedalus.tools._common import error, ok
@@ -108,23 +107,10 @@ async def skill_draft(context: ToolContext, name: str, description: str, body: s
     manager = services.extra.get("manager")
     if manager is None:
         return error(context, "skill drafts are not available in this session")
-    slug = re.sub(r"[^a-z0-9-]+", "-", name.strip().lower()).strip("-")
-    if not slug or len(slug) > 48:
-        return error(context, "name must be 1–48 characters of lowercase letters, digits and hyphens")
-    description = " ".join(description.split())
-    if not (20 <= len(description) <= 320):
-        return error(context, "description must be one line of 20–320 characters saying when to use the skill")
-    if len(body.strip()) < 80:
-        return error(context, "the body is too short to be a skill; write the procedure, not a note")
-    directory = manager.settings.state_dir / "skill-drafts" / slug
-    directory.mkdir(parents=True, exist_ok=True)
-    front = f"---\nname: {slug}\ndescription: {description}\n" + (f"params: {params.strip()}\n" if params and params.strip() else "") + "---\n"
-    body = manager.redactor.redact(body.strip())  # a draft may become public through a pull request: no secrets in it
-    markdown = front + body + "\n"
-    (directory / "SKILL.md").write_text(markdown, encoding="utf-8")
-    # The same check a skill must pass to be activated, said now while the session still knows the
-    # procedure; the draft is kept either way, since a draft is allowed to be unfinished.
-    verdict = assess(slug, markdown, [])
+    try:
+        directory, slug, verdict = save_skill_draft(manager.settings.state_dir, manager.redactor.redact, name, description, body, params=params)
+    except ValueError as exc:
+        return error(context, str(exc))
     gaps = "" if verdict["valid"] else " Before it can become a skill: " + "; ".join(verdict["errors"]) + "."
     return ok(context, f"draft saved at {directory}/SKILL.md (session {context.session_id}).{gaps} {_how_to_ship(manager, slug)}",
               path=str(directory), valid=verdict["valid"])

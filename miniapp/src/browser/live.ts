@@ -114,6 +114,22 @@ export class LiveView {
     if (canvas && this.lastBitmap) this.paint(this.lastBitmap);
   }
 
+  /**
+   * The picture on screen now, copied onto a canvas of its own, for an annotated snapshot; null before
+   * the first frame. A copy, because the bitmap itself is closed the moment the next frame replaces it,
+   * and a closed bitmap draws nothing.
+   */
+  still(): HTMLCanvasElement | null {
+    const bitmap = this.lastBitmap;
+    if (!bitmap) return null;
+    const canvas = document.createElement("canvas");
+    canvas.width = "naturalWidth" in bitmap ? bitmap.naturalWidth : bitmap.width;
+    canvas.height = "naturalHeight" in bitmap ? bitmap.naturalHeight : bitmap.height;
+    if (!canvas.width || !canvas.height) return null;
+    canvas.getContext("2d")?.drawImage(bitmap, 0, 0);
+    return canvas;
+  }
+
   input(message: InputMessage): boolean {
     return this.connection.input(message);
   }

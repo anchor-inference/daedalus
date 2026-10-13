@@ -209,6 +209,10 @@ func TestARecordingIsTheOperatorsStepsInTheAgentsWordsAndNoSecret(t *testing.T) 
 	if wf.Steps[0].Action != "type" {
 		t.Fatalf("the click into the search box was not folded into its typing: %+v", wf.Steps[0])
 	}
+	// How a replay finds the search box again: its own id first.
+	if search.Element.Selector != "#q" {
+		t.Fatalf("the search box's selector: %q", search.Element.Selector)
+	}
 	comment := types[1]
 	if comment.Slot != "comment" || comment.Value != nil {
 		t.Fatalf("the comment step kept its telephone number: %+v", comment)
@@ -227,6 +231,16 @@ func TestARecordingIsTheOperatorsStepsInTheAgentsWordsAndNoSecret(t *testing.T) 
 	if strings.Join(reasons, ",") != "login,payment,two_factor" {
 		t.Fatalf("handoffs %v: %+v", reasons, handoffs)
 	}
+	// The sign-in's fields, each with how to find it and what kind of secret it is, for a replay to
+	// fill from the operator's secrets; never anything typed.
+	login := handoffs[0]
+	var fields []string
+	for _, f := range login.Fields {
+		fields = append(fields, f.Name+"="+f.Secret+"@"+f.Selector)
+	}
+	if strings.Join(fields, ",") != "Email=name@#email,Password=password@#pw" {
+		t.Fatalf("the sign-in's fields: %v", fields)
+	}
 	clicks := stepsOf(t, wf, "click")
 	names := []string{}
 	for _, c := range clicks {
@@ -237,6 +251,9 @@ func TestARecordingIsTheOperatorsStepsInTheAgentsWordsAndNoSecret(t *testing.T) 
 	}
 	if strings.Join(names, ",") != "Show,Place order,Export CSV" {
 		t.Fatalf("clicks: %v", names)
+	}
+	if show := clicks[0]; show.Element.Text != "Show" || show.Element.Selector == "" {
+		t.Fatalf("the Show button's way back: %+v", show.Element)
 	}
 	order := clicks[1]
 	if len(order.Asks) == 0 || order.Asks[0] != "purchase" {
@@ -413,5 +430,47 @@ func TestAPersonalChoiceIsABlankEvenWithValuesKept(t *testing.T) {
 	raw, _ := json.Marshal(wf)
 	if strings.Contains(string(raw), "1981") {
 		t.Fatalf("the recording kept the year: %s", raw)
+	}
+}
+
+// A replay finds what a recording pressed by its selector, by its role and name when the selector no
+// longer matches, and by its words when neither does; it says which, and that nothing matched.
+func TestLocateFindsARecordedElementBySelectorThenRoleThenText(t *testing.T) {
+	h := start(t, nil)
+	o := h.open("g1", "project-a", "/site/steps.html")
+	op := map[string]any{"actor": "operator"}
+	type located struct {
+		Ref     string `json:"ref"`
+		By      string `json:"by"`
+		Matches int    `json:"matches"`
+	}
+	find := func(params map[string]any) located {
+		t.Helper()
+		params["tab_id"], params["origin"] = o.Tab.ID, op
+		var l located
+		h.must("page.locate", params, &l)
+		if l.Ref == "" {
+			t.Fatalf("located no ref: %+v", l)
+		}
+		return l
+	}
+	if l := find(map[string]any{"selector": "#q", "role": "textbox", "name": "Search"}); l.By != "selector" {
+		t.Fatalf("by the selector: %+v", l)
+	}
+	l := find(map[string]any{"selector": "#gone", "role": "textbox", "name": "Search"})
+	if l.By != "role" {
+		t.Fatalf("by role and name: %+v", l)
+	}
+	// The ref is an ordinary one: the replay's action goes through page.act.
+	h.mustAct(o.Tab.ID, map[string]any{"action": "type", "ref": l.Ref, "element": "Search", "text": "red", "origin": op})
+	if l := find(map[string]any{"selector": "main > nav > button", "role": "button", "name": "Order now", "text": "Place order"}); l.By != "text" {
+		t.Fatalf("by the words: %+v", l)
+	}
+	err := h.call("page.locate", map[string]any{"tab_id": o.Tab.ID, "origin": op, "selector": "#gone", "role": "button", "name": "Nowhere"}, nil)
+	if code(err) != 1001 {
+		t.Fatalf("nothing to find: %v", err)
+	}
+	if err := h.call("page.locate", map[string]any{"tab_id": o.Tab.ID, "origin": op}, nil); code(err) != -32602 {
+		t.Fatalf("nothing to look for: %v", err)
 	}
 }

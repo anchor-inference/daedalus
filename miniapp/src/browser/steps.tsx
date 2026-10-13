@@ -57,9 +57,9 @@ export function RecordButton({ group, toast }: { group: string; toast: (text: st
   };
   return (
     <>
-      <button type="button" className="btn small bp-rec-btn" onClick={(e) => setAnchor(e.currentTarget)} aria-haspopup="dialog" title={t("browser.steps.record.title")}>
+      <button type="button" className="btn small bp-rec-btn" onClick={(e) => setAnchor(e.currentTarget)} aria-haspopup="dialog" aria-label={t("browser.steps.record")} title={t("browser.steps.record.title")}>
         <span className="bp-rec-dot" aria-hidden="true" />
-        {t("browser.steps.record")}
+        <span className="bp-rec-label">{t("browser.steps.record")}</span>
       </button>
       {anchor && (
         <Popover anchor={anchor} onClose={() => setAnchor(null)} align="right" className="bp-rec-start" label={t("browser.steps.start.head")}>
@@ -126,7 +126,7 @@ export function RecordBar({ group, recording, tab, toast }: { group: string; rec
 /** A finished recording, under the picture: its steps, the operator's goal for it, and the button
  *  that drafts it. The panel then shows the draft in its place (`onDraft`), and the recording, drafted,
  *  leaves this card. */
-export function RecordedCard({ group, recording, toast, onDraft }: { group: string; recording: BrowserWorkflow; toast: (text: string) => void; onDraft: (draft: BrowserDraft) => void }) {
+export function RecordedCard({ group, recording, toast, onDraft, onSkill }: { group: string; recording: BrowserWorkflow; toast: (text: string) => void; onDraft: (draft: BrowserDraft) => void; onSkill: (recording: BrowserWorkflow) => void }) {
   const [open, setOpen] = useState(false);
   const [goal, setGoal] = useState("");
   const [busy, setBusy] = useState(false);
@@ -163,7 +163,8 @@ export function RecordedCard({ group, recording, toast, onDraft }: { group: stri
       <form className="bp-rec-foot" onSubmit={(e) => { e.preventDefault(); void make(); }}>
         <input className="bp-rec-goal" value={goal} maxLength={300} onChange={(e) => setGoal(e.target.value)} aria-label={t("browser.steps.goal")} placeholder={t("browser.steps.goal.placeholder")} />
         <button type="submit" className="btn small primary" disabled={busy}>{t(busy ? "browser.steps.drafting" : "browser.steps.draft")}</button>
-        <button type="button" className="btn small" disabled={busy} onClick={() => void discard()}>{t("browser.steps.discard")}</button>
+        <button type="button" className="btn small bp-rec-skill" disabled={busy} title={t("browser.skill.open.title")} onClick={() => onSkill(recording)}>{t("browser.skill.open")}</button>
+        <button type="button" className="btn small bp-rec-discard" disabled={busy} onClick={() => void discard()}>{t("browser.steps.discard")}</button>
       </form>
     </section>
   );
@@ -172,7 +173,7 @@ export function RecordedCard({ group, recording, toast, onDraft }: { group: stri
 /** The newest finished recording still waiting for the operator's decision: not drafted, and with a
  *  step that does something (one that only watched the page scroll is not worth a card). */
 export function waitingRecording(recent: BrowserWorkflow[]): BrowserWorkflow | null {
-  return recent.find((w) => w.state === "stopped" && !w.note_id && doingSteps(w.steps) > 0) ?? null;
+  return recent.find((w) => w.state === "stopped" && !w.note_id && !w.skill && doingSteps(w.steps) > 0) ?? null;
 }
 
 export function StepList({ steps }: { steps: BrowserStep[] }) {

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import struct
 import threading
 import time
@@ -381,7 +382,7 @@ class BrowserStub:
         return {"id": w["id"], "group_id": g.id, "env": "container", "project_id": g.project_id, "session_id": g.owner_id if g.owner_kind == "session" else None,
                 "staff_id": g.owner_id if g.owner_kind == "staff" else None, "state": w["state"], "values": w["values"], "reason": w.get("reason", ""),
                 "start_url": w["start_url"], "start_title": w["start_title"], "started_at": iso(w["started"]), "stopped_at": iso(w["stopped"]) if w.get("stopped") else None,
-                "steps": list(w["steps"]), "note_id": w.get("note_id", "")}
+                "steps": list(w["steps"]), "note_id": w.get("note_id", ""), "skill": w.get("skill", "")}
 
     def record_step(self, group_id: str, **step: Any) -> dict[str, Any]:
         """The operator took a step: the daemon records it and tells the live views, as it does."""
@@ -419,6 +420,22 @@ class BrowserStub:
         self.notes.append(note)
         w["note_id"] = note["id"]
         return 200, {"note": note, "drafted_by": "steps", "why": ""}
+
+    def save_skill(self, w: dict[str, Any], body: dict[str, Any]) -> tuple[int, Any]:
+        """The step editor's save, held to what the host holds it to: the recording's own steps only, and
+        a sign-in's fields bound to secrets' placeholders, never values."""
+        known = {s["n"] for s in w["steps"]}
+        params: list[str] = []
+        for step in body.get("steps") or []:
+            if step.get("n") not in known:
+                return 400, {"detail": f"step {step.get('n')} is not a step of this recording"}
+            if any(not re.fullmatch(r"«secret:[a-z][a-z0-9_]{0,47}»", s) for s in step.get("secrets") or []):
+                return 400, {"detail": "a sign-in's field takes an operator secret as «secret:name», never a value"}
+            for name in re.findall(r"\{([a-z][a-z0-9_]{0,39})\}", str(step.get("text") or "") + str(step.get("option") or "")):
+                if name not in params:
+                    params.append(name)
+        w["skill"] = body.get("name") or ""
+        return 200, {"skill": w["skill"], "path": f"/state/skill-drafts/{w['skill']}", "params": params, "steps": len(body.get("steps") or []), "valid": True, "errors": []}
 
     def needs_you(self, group_id: str, reason: str, what: str, by: str = "agent") -> None:
         """A request for the operator: the agent's handoff, or (``by="daemon"``) one the daemon raised
@@ -682,6 +699,8 @@ class BrowserStub:
                 return 200, {"workflow": self.workflow_view(g, w)}
             if method == "POST" and parts[-1] == "draft":
                 return self.draft(w["id"], str((body or {}).get("goal") or ""))
+            if method == "POST" and parts[-1] == "skill":
+                return self.save_skill(w, body or {})
             if method == "DELETE":
                 g.workflows = [x for x in g.workflows if x is not w]
                 return 200, {"ok": True}

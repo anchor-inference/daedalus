@@ -140,6 +140,7 @@ unknown field is `-32602`. Errors use the JSON-RPC codes plus:
 | `page.network` | `{tab_id, after? = 0, types?, host?, method?, contains?, failed?, limit? ≤ 200 = 50, origin?}` → `{url, requests: [Request], last, skipped, dropped, total}` |
 | `page.request` | `{tab_id, id, body?, max_chars? 100–200000 = 20000, origin?}` → `{request: Request with its headers, body?, truncated?, body_error?}` |
 | `page.inspect` | `{tab_id, ref \| selector, max_chars? 200–50000 = 4000, origin?}` → `{ref, tag, role, name, visible, clickable, reasons[], where, box, page, viewport, styles{}, state{}, panes[], html, html_truncated, html_length, shadow, children, text_length, frame?, matches?}` |
+| `page.locate` | `{tab_id, selector?, role?, name?, text?, origin?}` → `{ref, by: "selector" \| "role" \| "text", matches, selector_matches?}`: finds again an element a recording acted on, in the tab's own document (Replaying a recording, below); `1001` when nothing matches |
 | `download.list` | `{group_id}` → `{downloads: [Download]}` |
 | `download.read` | `{id, offset, max? ≤ 512 KiB}` → `{data_b64, offset, size, eof}` |
 | `download.delete` | `{id}` → `{}` |
@@ -1060,6 +1061,7 @@ The shapes are the app's own types in `miniapp/src/api.ts`; a host test holds th
 | `PATCH /api/browsers/notes/<id> {text, title?}` | the operator's own words for a note or a procedure, waiting or approved; `{note}` |
 | `GET /api/browsers/<group>/workflow` · `POST … {values?}` · `POST …/workflow/stop` · `POST …/workflow/mark {tab_id?}` | `{workflow: BrowserWorkflow \| null, recent: [BrowserWorkflow]}`: the recording of the operator's steps on now and the group's finished ones; start (a person must hold the browser), stop, and mark what done looks like (`{step}`) |
 | `GET /api/browsers/workflows/<id>` · `POST …/<id>/draft {goal?}` · `DELETE …/<id>` | one recording; draft a procedure from it (`{note, drafted_by: "model" \| "steps", why}`), which waits in the site notes; discard it |
+| `POST /api/browsers/workflows/<id>/skill {name, description, steps: [{n, text?, option?, to?, signin?, secrets?}]}` | save a stopped recording, as the operator edited it in the step editor, as a recorded skill (Replaying a recording): `{skill, path, params, steps, valid, errors}` |
 | `GET /api/browsers/<group>/recording?after&limit` · `POST … {frames, human?}` · `DELETE …` | the group's recording switch and keyframes; the operator's switch; delete its keyframes |
 | `GET /api/browsers/<group>/frames/<no>` | one keyframe's JPEG |
 | `GET /api/browsers/recordings` | the recordings on disk per environment, against their size and age |
@@ -1291,14 +1293,20 @@ url, action, …}`, `url` being the page it was taken on; by `action`:
 | `select` | `element`, `option` | a list's choice changed (the arrows, typing, Enter) |
 | `press` | `keys`, `count?` | a key that is not typing: Enter where nothing was typed, Escape, arrows outside a field, a chord; repeats counted |
 | `scroll` | `direction`, `count?` | the wheel or a swipe; turns one way counted as one step |
-| `handoff` | `reason: login \| two_factor \| payment`, `element` | a secret field or a sign-in (below): the operator's to do |
+| `handoff` | `reason: login \| two_factor \| payment`, `element`, `fields?` | a secret field or a sign-in (below): the operator's to do |
 | `dialog` | `kind`, `text`, `accept` | their answer to a page's dialog (`dialog.answer` with an operator's origin) |
 | `download` | `text` (the file's name) | a download started |
 | `tab` | `to`, `title` | their input moved to another tab |
 | `expect` | `text` or `title` | `workflow.mark`: what done looks like |
 
-`element` is `{role, name, place?}` as the snapshot names it, `place` being the dialog, the named form
-or the heading it is under. Each input is read **before** it is dispatched, while the page is as the
+`element` is `{role, name, place?, selector?, text?}` as the snapshot names it, `place` being the
+dialog, the named form or the heading it is under. `selector` is a CSS selector that finds it again in
+the tab's own document — a test id, an id, a field's `name`, `aria-label` or `placeholder` when one is
+unique and does not look generated, else a short path of tags from the nearest ancestor with a stable
+id; never an address, and none for an element of a frame or a shadow root — and `text` a control's
+visible words (never a field's: those are what was typed). A handoff's `fields` are the fields of the
+sign-in in the order they were reached, each an `element` with `secret: password | one_time_code |
+payment | name`, so a replay can fill each from the operator's secret it was bound to. Each input is read **before** it is dispatched, while the page is as the
 person saw it: the element at the point (as an action at a point finds it, through frames of other
 sites), or the focused one, described and classified in the daemon's world (`recordInfo`). A press
 the classifier would ask the agent about keeps its kinds in `asks`. Reading costs the input at most
@@ -1343,6 +1351,29 @@ the kind `procedure`, filed under the recording's project (or for every agent, f
 project), waiting for the operator (Procedures, above). A procedure grants nothing: an agent follows
 it through the same tools, wall, watch mode, classifier and questions; where watch mode covers its
 site, the draft says so.
+
+### Replaying a recording
+
+A recording the operator edited into a skill carries a replay script (`replay.json`, written by the
+host); `BrowserReplay` follows it in the agent's browser. For each step that acts on an element the
+host asks `page.locate` with what the recording read: the selector when it matches exactly one shown
+element, else the role and name, else the visible words, the control holding them. The ref found is an
+ordinary one and the action is the agent's own `page.act`, through the same wall, classifier and
+questions. A step found other than by its selector is said in the result, so a stale selector is seen;
+a step found by nothing stops the replay there and the model is told which step it was, to go on with
+its own tools.
+
+The script comes from the app's step editor: the operator keeps or deletes each recorded step (a switch
+of tabs is never kept), may turn what was typed or chosen into a parameter (`{month}`), may change an
+address only to another on the same site, and says how each sign-in is done — by them when the replay
+reaches it (the replay pauses with a `BrowserHandoff` and says how to go on with `from_step`), with the
+sign-in they saved for the site (`BrowserLogin`), or from operator secrets, one `«secret:name»` per
+recorded field, which the agent types as it types any placeholder. Nothing but a placeholder is
+accepted in a sign-in's field. The host writes it as a skill draft (`skill-drafts/<name>/` under the
+state directory, by the same code as `SkillDraft`): `SKILL.md` with the steps in words, `requires:
+browser`, `tools: BrowserReplay` and `params`, and `replay.json`. `BrowserReplay` reads a skill of that
+name from the skills directory first, then from the drafts, and without a name lists them. The
+recording's row keeps the skill it became (`skill`), and the audit has `workflow_skill`.
 
 ## Measured
 

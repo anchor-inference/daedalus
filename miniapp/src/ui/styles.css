@@ -4463,7 +4463,10 @@ button.staff-row:hover { background: var(--surface-2); }
    as a window on the web rather than part of the conversation. */
 .panel-body.tab-browser { padding: 0; display: flex; flex-direction: column; overflow: hidden; }
 .bp { flex: 1; min-height: 0; display: flex; flex-direction: column; container-type: inline-size; background: var(--surface-1); }
-.bp-toolbar { gap: 4px; }
+.bp-toolbar { gap: 4px; container-type: inline-size; }
+/* A side panel at its narrowest has no room for Record's word beside the Snapshot button: the red dot
+   alone says it, and the button's name and title still do for a screen reader and a pointer. */
+@container (max-width: 520px) { .bp-rec-btn .bp-rec-label { display: none; } }
 .bp-address { flex: 1; min-width: 80px; display: flex; align-items: center; gap: 6px; height: var(--ctl-h-sm); margin: 0 4px; padding: 0 4px 0 10px; border: 1px solid transparent; border-radius: var(--radius-pill); background: var(--surface-2); position: relative; overflow: hidden; }
 .bp-address input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-12); text-overflow: ellipsis; }
 .bp-address input:focus { outline: none; }
@@ -4651,6 +4654,26 @@ button.staff-row:hover { background: var(--surface-2); }
 .bp-proc-title { height: var(--ctl-h-sm); padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--bg); color: var(--fg); font: inherit; font-size: var(--fs-13); }
 .bp-proc-text { padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--bg); color: var(--fg); font-family: var(--mono); font-size: var(--fs-12); line-height: 1.5; resize: vertical; }
 .bp-proc-foot { display: flex; flex-wrap: wrap; gap: 6px; }
+.bp-skill { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.bp-skill-lead { margin: 0; font-size: var(--fs-12); line-height: 1.4; }
+.bp-skill-slug { font-size: var(--fs-12); }
+.bp-skill-steps { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 0; padding: 0 0 0 22px; font-size: var(--fs-12); color: var(--fg); }
+.bp-skill-step { display: flex; flex-direction: column; gap: 4px; padding: 2px 0; }
+.bp-skill-step.quiet .bp-skill-step-words { color: var(--fg-3); }
+.bp-skill-step.gone .bp-skill-step-words { color: var(--fg-3); text-decoration: line-through; }
+.bp-skill-step-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.bp-skill-step-head > .ic { flex: none; color: var(--ok); }
+.bp-skill-step-words { flex: 1; min-width: 0; }
+.bp-skill-drop { flex: none; width: var(--ctl-h-sm); height: var(--ctl-h-sm); color: var(--fg-3); }
+.bp-skill-drop:hover { color: var(--fg); }
+.bp-skill-field, .bp-skill-signin { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.bp-skill-input, .bp-skill-mode { min-width: 0; flex: 1 1 180px; height: var(--ctl-h-sm); padding: 0 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--bg); color: var(--fg); font-size: var(--fs-12); }
+.bp-skill-input:focus, .bp-skill-mode:focus { outline: none; border-color: var(--accent); }
+.bp-skill-input.bad { border-color: var(--bad); }
+.bp-skill-secret { display: grid; grid-template-columns: minmax(60px, 120px) minmax(0, 1fr); align-items: center; gap: 6px; flex: 1 1 100%; }
+.bp-skill-params { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: var(--fs-12); }
+.bp-skill-param { padding: 1px 6px; border-radius: var(--radius-sm); background: var(--surface-2); font-family: var(--mono); font-size: var(--fs-12); }
+.bp-skill-why { font-size: var(--fs-12); }
 .panel-tab .tab-mark { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .panel-tab .tab-mark.busy { animation: dotpulse 1.4s ease-in-out infinite; }
 .panel-tab .tab-mark.attn { background: var(--warn); }

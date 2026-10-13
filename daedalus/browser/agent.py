@@ -50,6 +50,8 @@ from daedalus.browser.model import (
 )
 from daedalus.browser.monitor import InjectionMonitor
 from daedalus.browser.notes import ACTIVE, NOTE, PROCEDURE, SiteNotes
+from daedalus.browser.replay import RecordedSkills
+from daedalus.browser.replay import replay as run_replay
 from daedalus.host.policy import ALLOW, ASK, DENY, Decision, approval_key, browser_sensitive, host_allowed
 from daedalus.security import operator_secrets
 from daedalus.security.untrusted import fenced as untrusted
@@ -588,6 +590,8 @@ class BrowserAgent:
         """Pictures of the elements asked about, by approval key, for the app's permission card. In
         memory and bounded: the question outlives a restart, its picture need not."""
         self.hints = LoopHints()
+        self.recorded: RecordedSkills | None = None
+        """Where the operator's recorded skills are, for ``BrowserReplay``; ``None`` where there are none."""
         self.logins = LoginDesk(service)
         """The operator's private sign-in: the requests ``BrowserLogin`` makes and the form's answers."""
         self.collected: OrderedDict[str, Collected] = OrderedDict()
@@ -1724,6 +1728,21 @@ class BrowserAgent:
             "approve it, agents on that site are shown it. Nothing else to do; carry on."
         )
 
+    async def replay(self, caller: Caller, *, skill: str | None, params: Any = None, from_step: int = 1) -> tuple[str, bool]:
+        """Run a skill the operator recorded (``daedalus.browser.replay``); without a skill, list them."""
+        if self.recorded is None:
+            raise EnvUnavailable("recorded skills are not kept on this installation")
+        if not skill:
+            listed = self.recorded.listing()
+            if not listed:
+                return "The operator has recorded no skills yet.", False
+            lines = [f"- {r['skill']}: {r['description']}" + (f" (params: {', '.join(r['params'])})" if r["params"] else "") for r in listed]
+            return "Recorded skills (BrowserReplay(skill, params) runs one):\n" + "\n".join(lines), False
+        if params is not None and not isinstance(params, dict):
+            raise InvalidRequest("params is an object of the skill's parameters ({\"month\": \"October\"})")
+        script = self.recorded.load(skill)
+        return await run_replay(self, caller, script, params or {}, from_step=max(1, from_step))
+
     # -- one entry for every caller --------------------------------------------------------------
 
     async def run(self, tool: str, arguments: dict[str, Any], caller: Caller) -> tuple[str, bool]:
@@ -1805,6 +1824,8 @@ class BrowserAgent:
                     caller, tab=_str(a, "tab"), id=_str(a, "id"), body=bool(a.get("body")), type=_str(a, "type"), host=_str(a, "host"), contains=_str(a, "contains"),
                     method=_str(a, "method"), failed=bool(a.get("failed")), all=bool(a.get("all")), max_chars=_int(a, "max_chars"),
                 ), False
+            if tool == "BrowserReplay":
+                return await self.replay(caller, skill=_str(a, "skill"), params=a.get("params"), from_step=_int(a, "from_step") or 1)
             if tool == "BrowserInspect":
                 return await self.inspect(caller, ref=_str(a, "ref"), selector=_str(a, "selector"), tab=_str(a, "tab"), html=a.get("html") is not False, max_chars=_int(a, "max_chars")), False
         except OverCap as exc:

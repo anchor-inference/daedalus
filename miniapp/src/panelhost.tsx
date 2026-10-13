@@ -4,7 +4,7 @@
 // The state is a value (panel.ts); this file draws it and wires the pointer and the keys.
 
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
-import { Sheet, useLayer } from "./ui/dialogs";
+import { Sheet, toast as statusToast, useLayer } from "./ui/dialogs";
 import { useEdgeFade, useMoreBelow } from "./edgefade";
 import { Icon, IconName } from "./icons";
 import {
@@ -44,6 +44,8 @@ import { HtmlNavigation } from "./htmlpreview";
 import { SPLIT_MIN, TREE_W, TREE_W_MIN, TREE_W_MAX } from "./explorer";
 import { PaneHandle, clampWidth, pixelDrag, usePaneWidth, type PaneDrag } from "./layout";
 import { t } from "./i18n";
+import { SnapshotButton } from "./annotate/Annotate";
+import { previewSnapshot } from "./annotate/source";
 
 export type PanelHostProps = {
   state: PanelState;
@@ -227,6 +229,12 @@ function Toolbar({ state, onBack, onForward, onTab, root, downloadUrl, sheet, lo
       </div>
       {entry && (
         <a className="iconbtn small" href={html ? downloadUrl({ ...entry, path: html.path.split("#")[0] }) : downloadUrl(entry)} target="_blank" rel="noreferrer" aria-label={t("panel.opennew")} title={t("panel.opennew")}><Icon name="external" size={16} /></a>
+      )}
+      {entry && (local.info?.kind === "html" || local.info?.kind === "image") && !local.info.loading && (
+        <SnapshotButton toast={statusToast} capture={() => previewSnapshot({
+          kind: local.info?.kind ?? "", url: local.info?.url ?? null, base: entry.base, path: html ? html.path.split("#")[0] : entry.path,
+          frame: document.getElementById(`${local.ids}-body`)?.querySelector(".html-frame")?.getBoundingClientRect() ?? null,
+        })} />
       )}
       {entry && <a className="iconbtn small" href={downloadUrl(html ? { ...entry, path: html.path.split("#")[0] } : entry)} download={entry.path.split("/").pop()} aria-label={t("common.download")} title={t("common.download")}><Icon name="download" size={16} /></a>}
       {!sheet && (

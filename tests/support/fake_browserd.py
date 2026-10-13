@@ -75,6 +75,8 @@ class Element:
     """Console entries a click on it makes the page write (``{level, source, text}``)."""
     marked: bool = False
     """The operator's sign-in filled it: secret from then on, as the daemon marks it."""
+    selector: str = ""
+    """The CSS selector ``page.locate`` finds it by, as a recording keeps it."""
 
     @property
     def secret(self) -> bool:
@@ -767,6 +769,19 @@ class FakeBrowserd:
                     raise _Fail(1001, f"no element of the page matches {key}")
                 raise _Fail(1103, f"{key} is not on the page any more", {"ref": key})
             return {"ref": key, **tab.page.inspected[key]}
+        if method == "page.locate":
+            # As the daemon's: the selector when it matches, else role and name, else the words.
+            group, tab = self._tab(params)
+            await self._held_back(group, params)
+            self._page_call(tab)
+            elements = list(tab.page.elements.values())
+            by_selector = [e for e in elements if params.get("selector") and e.selector == params["selector"]]
+            by_role = [e for e in elements if params.get("name") and e.name == params["name"] and (not params.get("role") or e.role == params["role"])]
+            by_text = [e for e in elements if (params.get("text") or params.get("name")) and e.name == (params.get("text") or params.get("name"))]
+            for how, found in (("selector", by_selector), ("role", by_role), ("text", by_text)):
+                if found:
+                    return {"ref": found[0].ref, "by": how, "matches": len(found)}
+            raise _Fail(1001, f"no element of the page matches {params.get('selector') or params.get('name') or params.get('text')}")
         if method == "download.list":
             gid = str(params.get("group_id"))
             return {"downloads": [dict(d) for d in self.downloads.values() if d["group_id"] == gid]}

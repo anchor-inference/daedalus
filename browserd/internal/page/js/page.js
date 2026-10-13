@@ -1896,6 +1896,10 @@
       select: t === "select",
     };
     if (!out.name && !textField) out.name = clip(textOf(el, 0), 100);
+    // How a replay finds it again. The visible words are a control's label, never a field's: what a
+    // text field shows is what was typed into it.
+    out.selector = selectorOf(el);
+    if (!textField && !out.secret_kind) out.text = clip(collapse(el.innerText || el.textContent || ""), 100);
     if (el.href && t === "a") out.href = el.href;
     return out;
   }
@@ -1916,6 +1920,127 @@
     if (t === "input" || t === "textarea") return { value: String(el.value || "").slice(0, 10000) };
     if (el.isContentEditable) return { value: String(el.innerText || "").slice(0, 10000) };
     return { value: "" };
+  }
+
+  // A selector built on what a page generates rather than writes (React's ":r1:", a build's hash, a
+  // counter) matches nothing on the next visit, so it is never a replay's first guess.
+  const GENERATED = /\d{4,}|[0-9a-f]{8,}|^(:r|ember|ng-|mui-|radix-|headlessui-|react-)|__/i;
+  const TEST_ATTRIBUTES = ["data-testid", "data-test", "data-qa", "data-cy"];
+
+  function uniqueIn(sel, el) {
+    try {
+      const all = document.querySelectorAll(sel);
+      return all.length === 1 && all[0] === el;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // selectorOf is a CSS selector that finds el again on a later visit to the page, for a recording's
+  // replay: the attributes a site keeps stable on purpose first (a test id, an id, a field's name, its
+  // label), then a short path of tags from the nearest ancestor that has a stable id. Only the tab's own
+  // document is addressed: an element of a frame or of a shadow root gets "", and the replay finds it
+  // by its role and name instead. An address is never part of it, since links carry session tokens.
+  function selectorOf(el) {
+    if (prefix || !el || el.nodeType !== Node.ELEMENT_NODE || el.ownerDocument !== document || el.getRootNode() !== document) return "";
+    const t = tag(el);
+    const attr = (name, value) => "[" + name + "=\"" + CSS.escape(value) + "\"]";
+    for (const name of TEST_ATTRIBUTES) {
+      const v = el.getAttribute(name);
+      if (v && uniqueIn(attr(name, v), el)) return attr(name, v);
+    }
+    if (el.id && !GENERATED.test(el.id) && uniqueIn("#" + CSS.escape(el.id), el)) return "#" + CSS.escape(el.id);
+    for (const name of ["name", "aria-label", "placeholder"]) {
+      const v = el.getAttribute(name);
+      if (v && v.length <= 80 && !GENERATED.test(v) && uniqueIn(t + attr(name, v), el)) return t + attr(name, v);
+    }
+    const parts = [];
+    for (let n = el, depth = 0; n && n.nodeType === Node.ELEMENT_NODE && depth < 8; n = n.parentElement, depth++) {
+      if (n !== el && n.id && !GENERATED.test(n.id) && uniqueIn("#" + CSS.escape(n.id), n)) {
+        parts.unshift("#" + CSS.escape(n.id));
+        const s = parts.join(" > ");
+        return uniqueIn(s, el) ? s : "";
+      }
+      let part = tag(n);
+      const parent = n.parentElement;
+      if (parent) {
+        const same = Array.from(parent.children).filter((c) => c.tagName === n.tagName);
+        if (same.length > 1) part += ":nth-of-type(" + (same.indexOf(n) + 1) + ")";
+      }
+      parts.unshift(part);
+      if (tag(n) === "body") break;
+      const s = parts.join(" > ");
+      if (uniqueIn(s, el)) return s;
+    }
+    return "";
+  }
+
+  // The most elements locate weighs by role and name: past it the page is a feed, and the selector or
+  // the text has to do.
+  const LOCATE_ELEMENTS = 20000;
+
+  function sameWords(a, b) {
+    return collapse(a).toLowerCase() === collapse(b).toLowerCase();
+  }
+
+  // locate finds again an element a recording acted on, for its replay, in the tab's own document: by
+  // the recorded selector when it matches exactly one shown element, else by the role and name the
+  // recording read, else by its visible text (the control that holds it). It says which way it found
+  // it, so the replay can tell the operator a selector has gone stale; nothing found is "no_match".
+  function locate(selector, wantRole, wantName, wantText) {
+    let tried = 0;
+    if (selector) {
+      let all = null;
+      try {
+        all = document.querySelectorAll(selector);
+      } catch (e) {
+        all = null;
+      }
+      if (all) {
+        const shown = Array.from(all).filter(visible);
+        tried = shown.length;
+        if (shown.length === 1) return { ref: ref(shown[0]), by: "selector", matches: 1 };
+      }
+    }
+    const loose = (r) => (r === "searchbox" ? "textbox" : r);
+    if (wantName) {
+      const found = [];
+      let seen = 0;
+      for (const el of document.querySelectorAll(CONTROLS + ",label,h1,h2,h3,h4,h5,h6,[role],img")) {
+        if (++seen > LOCATE_ELEMENTS) break;
+        if (!visible(el)) continue;
+        const w = who(el);
+        const r = role(w) || (tag(w) === "a" ? "link" : "generic");
+        if (wantRole && loose(r) !== loose(wantRole)) continue;
+        if (!sameWords(accessibleName(w, r) || textOf(w, 0), wantName)) continue;
+        if (!found.includes(w)) found.push(w);
+      }
+      if (found.length) return { ref: ref(found[0]), by: "role", matches: found.length, selector_matches: tried };
+    }
+    const words = collapse(wantText || wantName || "");
+    if (words) {
+      const hits = [];
+      for (const el of blocksWith(words)) {
+        const c = controlOf(el) || el;
+        if (!hits.includes(c)) hits.push(c);
+      }
+      if (hits.length) return { ref: ref(hits[0]), by: "text", matches: hits.length, selector_matches: tried };
+    }
+    return { error: "no_match", message: selector || wantName || wantText || "(nothing to look for)" };
+  }
+
+  // blocksWith is the shown elements whose own text is exactly these words, the innermost first: the
+  // <span> of a button rather than the toolbar around it.
+  function blocksWith(words) {
+    const out = [];
+    const walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT);
+    let seen = 0;
+    for (let n = walker.nextNode(); n && out.length < 20 && seen < LOCATE_ELEMENTS; n = walker.nextNode(), seen++) {
+      const el = n.parentElement;
+      if (!el || SKIP.has(tag(el)) || !visible(el)) continue;
+      if (sameWords(el.innerText || el.textContent || "", words) && !out.includes(el)) out.push(el);
+    }
+    return out;
   }
 
   // loginFields finds the fields of a sign-in form for the operator's private login: the username,
@@ -2010,7 +2135,7 @@
     snapshot, readable, prepare, measure, hit, hovered, focus, selectAll, selectOption, element, evidence, mask, markHumanTyped, selection,
     hasText, exists, captchas, ref, describe, focusedRef, region, find, elementAt, scrollInfo, scrollBy, scrollToText,
     route, frameElement, frameOrigin, prepareFrame, hitFrame, crossFrames, setPrefix, markListened, listenerRoot, inspect,
-    loginFields, markSecret,
+    loginFields, markSecret, locate,
     scrollState: () => {
       const st = scrollState();
       return { top: st.top, height: st.height, view: st.view, above: st.above, below: st.below, pane: st.el ? ref(st.el) : "" };

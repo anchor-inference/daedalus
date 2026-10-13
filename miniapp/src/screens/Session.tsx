@@ -75,6 +75,7 @@ import { SecretChip } from "../secrets";
 import { RawHtml } from "../rawhtml";
 import { RenameSheet, SearchSheet, SessionMenuSheet, SessionTopBar, StateSub, type SessionRow, type SessionTile } from "./SessionPhone";
 import { SubagentsTab, subagentIdFor } from "../subagents";
+import { COMPOSE_EVENT, ComposeTarget, type ComposeRequest } from "../annotate/compose";
 import { noticeFromEvent, raiseFromError, raiseSettingNotice, SettingNoticeLines, settingRef } from "../settinglink";
 
 /**
@@ -1347,6 +1348,19 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     document.addEventListener(EVIDENCE_EVENT, on);
     return () => document.removeEventListener(EVIDENCE_EVENT, on);
   }, [id, detail?.workspace, toast, openPreview, openFromChat]);
+  // A snapshot from the panel, for this conversation's composer: the picture as an attachment and its
+  // address as a line of the draft. The field is not focused on a phone, where the sheet covers it.
+  useEffect(() => {
+    const on = (e: Event) => {
+      const asked = (e as CustomEvent<ComposeRequest>).detail;
+      if (!asked || asked.taken || asked.sessionId !== id || !composer.current) return;
+      asked.taken = true;
+      composer.current.addFiles(asked.files);
+      if (asked.text) composer.current.insert(asked.text, !phone);
+    };
+    window.addEventListener(COMPOSE_EVENT, on);
+    return () => window.removeEventListener(COMPOSE_EVENT, on);
+  }, [id, phone]);
   const staffId = focus && detail?.staff ? detail.staff.id : null;
   const hasDetails = panelTabs.includes("details");
   const focusPlaceholder = placeholder ?? (orchestrating ? t("focus.composer") : staffName ? t("focus.composer.staff", { name: staffName }) : undefined);
@@ -1413,6 +1427,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       : null;
   return (
     <FocusChatContext.Provider value={focusChat}>
+    <ComposeTarget.Provider value={id}>
     <div className={`chat ${pane ? `pane pane-${pane}` : ""} ${focus ? `in-project ${focus.kind}` : ""}`} onDragEnter={(e) => { if (e.dataTransfer?.types.includes("Files")) setDragging((d) => d + 1); }} onDragLeave={() => setDragging((d) => Math.max(0, d - 1))} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
       {dragging > 0 && <div className="dropzone"><Icon name="attach" size={28} /> {t("session.drop")}</div>}
       {phone && !pane ? <>
@@ -1767,6 +1782,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       {phoneSheet === "rename" && <RenameSheet title={detail?.title ?? ""} onSave={(title) => { setPhoneSheet(null); void rename(title); }} onClose={() => setPhoneSheet(null)} />}
 
     </div>
+    </ComposeTarget.Provider>
     </FocusChatContext.Provider>
   );
 }

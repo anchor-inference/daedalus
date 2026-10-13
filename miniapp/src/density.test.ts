@@ -35,11 +35,12 @@ import imports from "./imports/imports.css?raw";
 import ask from "./questions/ask.css?raw";
 import quick from "./quick/quick.css?raw";
 import widget from "./widget.css?raw";
+import annotate from "./annotate/annotate.css?raw";
 import petHost from "./pethost.tsx?raw";
 // The browser's phone sheet, the session import, the agent's question card, the desktop's Quick
-// Chat and the widgets in an answer keep their looks beside their components; they answer to the
-// same scale.
-const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop + "\n" + phone + "\n" + browserPhone + "\n" + newProject + "\n" + imports + "\n" + ask + "\n" + quick + "\n" + widget;
+// Chat, the widgets in an answer and the annotated snapshot keep their looks beside their
+// components; they answer to the same scale.
+const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop + "\n" + phone + "\n" + browserPhone + "\n" + newProject + "\n" + imports + "\n" + ask + "\n" + quick + "\n" + widget + "\n" + annotate;
 
 type Rule = { selector: string; media: string; body: string };
 
