@@ -62,6 +62,12 @@ STORED = """async ([session, probe]) => {
 }"""
 
 
+# Encoding the frame-sized PNG is the slow part of Attach: on a loaded machine, under headless
+# Chromium's software canvas, it was measured taking close to seven seconds, and a five-second wait failed
+# a run whose attachment arrived intact a moment later.
+ATTACH_MS = 20000
+
+
 def drag(page, box, start: tuple[float, float], end: tuple[float, float], steps: int = 8) -> None:  # type: ignore[no-untyped-def]
     """A mouse drag between two fractions of the picture's box."""
     page.mouse.move(box["x"] + box["width"] * start[0], box["y"] + box["height"] * start[1])
@@ -134,7 +140,7 @@ def desktop(browser, scenes, problems: list[str]) -> None:  # type: ignore[no-un
     keep(page, "annotate-desktop")
 
     page.locator(".annotate-attach").click()
-    page.wait_for_selector(".annotate", state="detached", timeout=5000)
+    page.wait_for_selector(".annotate", state="detached", timeout=ATTACH_MS)
     page.wait_for_function("() => document.querySelectorAll('.composer-box .attachments > *').length >= 1", timeout=5000)
     text = draft_text(page)
     print(f"[en] desktop draft: {text!r}")
@@ -201,7 +207,7 @@ def phone(browser, scenes, problems: list[str]) -> None:  # type: ignore[no-unty
     canvas = page.locator(".annotate-canvas").bounding_box()
     drag(page, canvas, (0.2, 0.2), (0.6, 0.5))
     page.locator(".annotate-attach").tap()
-    page.wait_for_selector(".annotate", state="detached", timeout=5000)
+    page.wait_for_selector(".annotate", state="detached", timeout=ATTACH_MS)
     page.wait_for_timeout(300)
     text = draft_text(page)
     print(f"[ru] phone draft: {text!r}")
@@ -218,8 +224,17 @@ def preview(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-de
     context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
     page = context.new_page()
     page.route("**/api/**", stub)
+    logged: list[str] = []
+    page.on("console", lambda m: logged.append(f"{m.type}: {m.text}"))
+    page.on("requestfailed", lambda r: logged.append(f"failed: {r.url}"))
     page.goto(f"{BASE}/agents/{S1}?token=t&scheme=dark&lang=en&panel=preview&path=site/index.html")
-    page.wait_for_selector(".html-frame", timeout=20000)
+    try:
+        page.wait_for_selector(".html-frame", timeout=20000)
+    except Exception:
+        shown = page.evaluate("() => (document.querySelector('.panel') || document.body).innerText.slice(0, 300)")
+        say(f"the HTML preview never showed its frame: {shown!r}; console {logged[-8:]}")
+        context.close()
+        return
     button = page.locator(".panel-toolbar .annotate-open")
     try:
         button.wait_for(timeout=5000)
@@ -236,7 +251,7 @@ def preview(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-de
     drag(page, canvas, (0.2, 0.2), (0.5, 0.5))
     keep(page, "annotate-preview")
     page.locator(".annotate-attach").click()
-    page.wait_for_selector(".annotate", state="detached", timeout=5000)
+    page.wait_for_selector(".annotate", state="detached", timeout=ATTACH_MS)
     page.wait_for_function("() => document.querySelectorAll('.composer-box .attachments > *').length >= 1", timeout=5000)
     text = draft_text(page)
     print(f"[en] preview draft: {text!r}")
