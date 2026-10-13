@@ -9,13 +9,27 @@ describe("renderMarkdown", () => {
     expect(html).not.toContain('href="javascript');
     expect(html).toContain("<code>&lt;b&gt;</code>");
   });
-  it("opens an internal diagram link without accepting arbitrary app paths", () => {
+  it("opens a place in the app through the router without accepting arbitrary paths", () => {
     const id = "0123456789abcdef0123456789abcdef";
-    expect(renderMarkdown(`[Open diagram](/app/diagrams/${id})`)).toContain(`<a href="/app/diagrams/${id}">Open diagram</a>`);
-    expect(renderMarkdown("[Orders](/app/p/orders)")).toContain('<a href="/app/p/orders">Orders</a>');
-    expect(renderMarkdown("[Draft](/app/p/orders?draft=1)")).toContain('<a href="/app/p/orders?draft=1">Draft</a>');
+    expect(renderMarkdown(`[Open diagram](/app/diagrams/${id})`)).toContain(`<a href="/app/diagrams/${id}" data-app-link>Open diagram</a>`);
+    expect(renderMarkdown("[Orders](/app/p/orders)")).toContain('<a href="/app/p/orders" data-app-link>Orders</a>');
+    expect(renderMarkdown("[Draft](/app/p/orders?draft=1)")).toContain('<a href="/app/p/orders?draft=1" data-app-link>Draft</a>');
     expect(renderMarkdown("[Bad](/app/p/../api/settings)")).not.toContain("<a");
     expect(renderMarkdown("[bad](/api/settings)")).not.toContain('<a href=');
+    expect(renderMarkdown('[x](/app/settings" onclick="alert(1))')).not.toContain("onclick=\"");
+  });
+  it("links a settings row however the answer writes its address", () => {
+    const row = '<a href="/app/settings/voice#asr.transcriber" data-app-link>';
+    expect(renderMarkdown("[Распознавание речи](/app/settings/voice#asr.transcriber)")).toContain(`${row}Распознавание речи</a>`);
+    // Bare in a sentence: the full stop after it is the sentence's, not the fragment's.
+    const bare = renderMarkdown("Open /app/settings/voice#asr.transcriber.");
+    expect(bare).toContain(`${row}/app/settings/voice#asr.transcriber</a>.`);
+    // In backticks, as models like to write paths.
+    expect(renderMarkdown("Settings: `/app/settings/voice#asr.transcriber`")).toContain(`${row}<code>/app/settings/voice#asr.transcriber</code></a>`);
+    expect(renderMarkdown("[Keys](/app/settings/models?tab=providers#providers.openrouter.api_key)")).toContain('href="/app/settings/models?tab=providers#providers.openrouter.api_key"');
+    // A path that only looks like one stays text.
+    expect(renderMarkdown("see /application/x and `/api/settings`")).not.toContain("data-app-link");
+    expect(renderMarkdown("a full https://example.com/app/settings link")).not.toContain("data-app-link");
   });
   it("survives a header row followed by a bare rule", () => {
     expect(() => renderMarkdown("| a | b |\n---\nrest")).not.toThrow();
