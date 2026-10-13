@@ -166,7 +166,7 @@ async def test_every_project_keeps_its_folder_and_every_session_its_directory(tm
         "calendar_accounts", "calendar_events", "diagrams", "diagram_revisions", "calendars",
         "calendar_remote_instances", "calendar_reminders_sent", "planner_lists", "planner_tasks",
         "operator_secrets", "operator_secret_grants", "session_imports", "project_pins", "page_storage",
-        "calendar_types", "calendar_groups", "calendar_event_history", "calendar_hooks",
+        "calendar_types", "calendar_groups", "calendar_event_history", "calendar_hooks", "saved_logins",
     })
     assert new - later == {"project_folders", "project_briefs", "project_journal", "staff", "staff_sessions", "staff_messages", "asks", "watches"}
     assert after["project_folders"] == counts["projects"]
