@@ -5,7 +5,7 @@ import { navigate, pathFor } from "../router";
 import { PageHeader, go, screenTitle, useMedia } from "../ui/index";
 import { announceProviderKeys, api, telegram, ContextWindowSource, ContextWindowSources, HeartbeatStatus, Preset, ProviderConf, SearchBackendInfo, SearchCheck, Settings } from "../api";
 import { confirmAsync, errorText, numInput } from "../ui";
-import * as passkeys from "../passkeys";
+import { TwoFactorCard } from "../twofactor";
 import { timeAgo } from "../ui/components";
 import { shortDateTime, tokens } from "../format";
 import { useMoreBelow } from "../edgefade";
@@ -975,45 +975,12 @@ export function HealthScreen({ toast }: { toast: (t: string) => void }) {
   );
 }
 
-/** Security: the passkeys that sign the owner in with no Telegram, no password and no pairing link. */
+/** Security: each concern its own card — two-factor sign-in, the operator's secrets, signing out everywhere. */
 function SecurityTab({ toast }: { toast: (t: string) => void }) {
-  const [keys, setKeys] = useState<passkeys.PasskeyView[] | null>(null);
-  const [name, setName] = useState("");
-  const [busy, setBusy] = useState(false);
-  const can = passkeys.supported();
-  useEffect(() => {
-    passkeys
-      .list()
-      .then(setKeys)
-      .catch((e) => toast(errorText(e)));
-  }, [toast]);
-
-  async function add() {
-    setBusy(true);
-    try {
-      setKeys(await passkeys.enrol(name.trim() || t("settings.security.thisdevice")));
-      setName("");
-      toast(t("settings.security.addedtoast"));
-    } catch (e) {
-      toast(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function remove(key: passkeys.PasskeyView) {
-    if (!(await confirmAsync(t("settings.security.remove.title", { name: key.name }), { body: t("settings.security.remove.body"), action: t("common.remove") }))) return;
-    try {
-      setKeys((await passkeys.forget(key.id)).passkeys);
-    } catch (e) {
-      toast(errorText(e));
-    }
-  }
-
   const signOutEverywhere = async () => {
     if (!(await confirmAsync(t("settings.security.signoutall.title"), { body: t("settings.security.signoutall.body"), action: t("settings.security.signoutall") }))) return;
     try {
-      await passkeys.signOutEverywhere();
+      await api.post("/api/auth/sessions/revoke");
       toast(t("settings.security.signedout"));
     } catch (e) {
       toast(errorText(e));
@@ -1022,39 +989,7 @@ function SecurityTab({ toast }: { toast: (t: string) => void }) {
 
   return (
     <>
-      <div className="card">
-        <div className="section-title" style={{ marginTop: 0 }}>{t("settings.security.title")}</div>
-        <div className="sub">{t("settings.security.sub")}</div>
-        {keys === null && <div className="empty">{t("common.loading")}</div>}
-        {keys !== null && keys.length === 0 && <div className="sub" style={{ marginTop: 8 }}>{t("settings.security.none")}</div>}
-        {keys !== null && keys.length > 0 && (
-          <div className="mlist">
-            {keys.map((k) => (
-              <div key={k.id} className="mrow">
-                <div className="mline noradio">
-                  <div className="mmain">
-                    <span className="mtitle">{k.name}</span>
-                    <span className="mmeta">
-                      {t("settings.security.added", { t: timeAgo(k.created_at) })} · {k.last_used_at ? t("settings.security.lastused", { t: timeAgo(k.last_used_at) }) : t("settings.security.neverused")}
-                    </span>
-                  </div>
-                  <div className="mactions">
-                    <button className="btn small" onClick={() => void remove(k)}>{t("common.remove")}</button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-        {/* The name and the button that uses it are one row: stacked, the button read as a separate
-            action under a field it had nothing to do with. */}
-        <Row title={t("settings.security.new")} desc={can ? t("settings.security.new.sub") : t("settings.security.cannot")} stack>
-          <input className="field settings-name-field" placeholder={t("settings.security.thisdevice")} aria-label={t("settings.security.name")} value={name} onChange={(e) => setName(e.target.value)} />
-          <button className="btn primary small" disabled={busy || !can} onClick={() => void add()}>
-            {t(busy ? "settings.security.waiting" : "settings.security.add")}
-          </button>
-        </Row>
-      </div>
+      <TwoFactorCard toast={toast} />
       <SecretsCard toast={toast} ago={timeAgo} confirm={(title, body) => confirmAsync(title, { body, action: t("common.remove") })} />
       <div className="card">
         <Row title={t("settings.security.signoutall")} desc={t("settings.security.signoutall.sub")}>

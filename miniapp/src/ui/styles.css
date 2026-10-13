@@ -1433,6 +1433,17 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .login-pair .share-field .field { flex: 1; min-width: 0; }
 .login-pair .sub.small { margin: 2px 0 0; }
 .login-error { color: var(--bad); font-size: var(--fs-14); }
+.login-code .linkbtn { align-self: flex-start; }
+/* Two-factor enrolment. The code is drawn black on white in either theme: a scanner reads dark on
+   light, and an inverted code is one many authenticator apps refuse. */
+.totp-setup { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.totp-qr { width: 200px; max-width: 100%; aspect-ratio: 1; border-radius: var(--radius-sm); }
+.totp-secret { align-self: flex-start; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--surface-2); font-size: var(--fs-14); letter-spacing: 0.04em; user-select: all; overflow-wrap: anywhere; }
+.totp-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.totp-actions .field.totp-code { width: 12ch; flex: none; }
+.totp-codes-box { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.totp-codes { display: grid; grid-template-columns: repeat(auto-fill, minmax(17ch, 1fr)); gap: 4px 16px; margin: 0; padding-left: 2.2em; font-size: var(--fs-14); user-select: all; }
+.totp-error { margin-top: 8px; }
 .login-foot { margin-top: 8px; color: var(--fg-3); }
 
 /* rows in the Details and Jobs tabs */

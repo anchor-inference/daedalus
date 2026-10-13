@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import * as passkeys from "../passkeys";
+import { twoFactor } from "../twofactor";
+import { ApiError } from "../api";
 import { Icon } from "../icons";
 import { errorText } from "../ui";
 import { t, useLang } from "../i18n";
@@ -15,10 +16,10 @@ declare global {
 export type AuthConfig = {
   /** The bot whose Login Widget vouches for the operator; null on an installation without Telegram. */
   telegram: { bot_username: string } | null;
-  /** How many passkeys are enrolled: one is enough to sign in with nothing else. */
-  passkeys: number;
   /** Whether a pairing link the server printed is still open. */
   pairing: boolean;
+  /** This browser is past the first way in and owes the two-factor code. */
+  second_factor: boolean;
 };
 
 /** When the window last asked its launcher for a link, so a link that does not sign in cannot loop. */
@@ -41,7 +42,8 @@ function noteAsked() {
   }
 }
 
-/** The site outside Telegram: a passkey, Telegram's Login Widget, or the link the server printed.
+/** The site outside Telegram: Telegram's Login Widget or the link the server printed, then the
+ * two-factor code when that is on.
  *
  * Inside the desktop application the launcher beside the window mints that link itself, so the
  * window asks it for one instead of asking the operator for a code it shows nowhere. */
@@ -74,12 +76,15 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
     return off;
   }, [desktop]);
 
-  useEffect(() => {
+  const [code, setCode] = useState("");
+  const [owesCode, setOwesCode] = useState(false);
+  function loadConfig() {
     api
       .get<AuthConfig>("/api/auth/config")
-      .then(setConf)
+      .then((c) => (setConf(c), setOwesCode(c.second_factor)))
       .catch((e) => setError(errorText(e)));
-  }, []);
+  }
+  useEffect(loadConfig, []);
 
   const bot = conf?.telegram?.bot_username ?? null;
   useEffect(() => {
@@ -88,7 +93,12 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
       setBusy(true);
       setError(null);
       try {
-        await api.post("/api/auth/telegram", user);
+        const answer = await api.post<{ second_factor?: boolean }>("/api/auth/telegram", user);
+        if (answer.second_factor) {
+          setOwesCode(true);
+          setBusy(false);
+          return;
+        }
         onDone();
       } catch (e) {
         setError(errorText(e));
@@ -108,22 +118,30 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
     return () => {
       window.onTelegramAuth = undefined;
     };
-  }, [bot, onDone]);
+  }, [bot, onDone, owesCode]);
 
-  async function withPasskey() {
+  async function withCode(e: FormEvent) {
+    e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      await passkeys.signIn();
+      await twoFactor.verify(code.trim());
       onDone();
-    } catch (e) {
-      setError(errorText(e));
+    } catch (err) {
+      setError(errorText(err));
       setBusy(false);
+      setCode("");
+      // A sign-in that used up its guesses, or waited past its five minutes, starts again from the first step.
+      if (err instanceof ApiError && err.status === 401) setOwesCode(false);
     }
   }
 
-  const canPasskey = passkeys.supported();
-  const hasPasskeys = (conf?.passkeys ?? 0) > 0 && canPasskey;
+  async function startOver() {
+    setCode("");
+    setError(null);
+    await api.post("/api/auth/logout").catch(() => undefined);
+    setOwesCode(false);
+  }
   const [pairing, setPairing] = useState("");
   function withPairing(e: FormEvent) {
     e.preventDefault();
@@ -133,7 +151,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
     if (!code) return;
     window.location.assign(`/api/auth/pair?code=${encodeURIComponent(code)}`);
   }
-  const methods = (hasPasskeys ? 1 : 0) + (bot ? 1 : 0);
+  const methods = bot ? 1 : 0;
   return (
     <div className="gate">
       <div className="login" role="main" aria-labelledby="login-title">
@@ -150,19 +168,22 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
             <p className="sub small">{t("login.desktop.hint")}</p>
           </div>
         )}
-        {conf !== null && !desktop && (
+        {conf !== null && !desktop && owesCode && (
+          <form className="login-pair login-code" onSubmit={(e) => void withCode(e)}>
+            <div className="settings-row-title">{t("login.code.title")}</div>
+            <p className="sub small">{t("login.code.sub")}</p>
+            <label className="field" htmlFor="login-code">{t("login.code.label")}</label>
+            <div className="share-field">
+              <input id="login-code" className="field mono" value={code} onChange={(e) => setCode(e.target.value)} placeholder={t("login.code.placeholder")}
+                autoComplete="one-time-code" inputMode="text" maxLength={20} spellCheck={false} autoFocus />
+              <button className="btn primary" type="submit" disabled={!code.trim() || busy}>{t("login.code.submit")}</button>
+            </div>
+            <button className="linkbtn" type="button" onClick={() => void startOver()}>{t("login.code.restart")}</button>
+          </form>
+        )}
+        {conf !== null && !desktop && !owesCode && (
           <div className="login-methods">
-            {hasPasskeys && (
-              <button className="btn primary big" disabled={busy} onClick={() => void withPasskey()}>
-                <Icon name="key" size={16} /> {t("login.passkey")}
-              </button>
-            )}
-            {bot && (
-              <>
-                {hasPasskeys && <div className="login-or">{t("login.or")}</div>}
-                <div ref={slot} className="login-widget" />
-              </>
-            )}
+            {bot && <div ref={slot} className="login-widget" />}
             {methods > 0 && <div className="login-or">{t("login.or")}</div>}
             <form className="login-pair" onSubmit={withPairing}>
               <label className="field" htmlFor="pairing">{t("login.pairing.label")}</label>
@@ -172,9 +193,6 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
               </div>
               <p className="sub small">{t("login.pairing.hint")}</p>
             </form>
-            {canPasskey && !hasPasskeys && (
-              <p className="sub small">{t("login.nopasskey")}</p>
-            )}
           </div>
         )}
         {busy && <div className="sub">{t("login.busy")}</div>}

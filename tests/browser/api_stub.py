@@ -266,9 +266,10 @@ GATES: dict[str, object] = {
     "/api/dependencies": {"capability": {"mode": "docker", "python": True, "system": True, "manager": "apt", "reason": ""}, "tools": [{"name": "python", "available": True, "version": "Python 3.12"}, {"name": "gcc", "available": False, "version": ""}], "packages": [], "recipe": {"python": [], "system": []}, "models": [{"id": "default", "label": "Test model"}], "proposal": None, "job": None},
     "/api/prompt-change": {"models": [{"id": "default", "label": "Test model"}], "proposal": None},
     "/api/auth/me": {"user": "operator"},
-    "/api/auth/config": {"passkeys": 1},
-    # The rail's account item opens Settings' security section, which lists the passkeys.
-    "/api/auth/passkeys": [{"id": 1, "name": "Laptop", "created_at": "2026-09-01T10:00:00Z", "last_used_at": "2026-09-25T08:00:00Z", "transports": ["internal"]}],
+    "/api/auth/config": {"telegram": None, "pairing": False, "second_factor": False},
+    # The rail's account item opens Settings' security section, whose first card is two-factor
+    # sign-in: off here. check_two_factor.py keeps a host of its own that enrols.
+    "/api/auth/totp": {"enabled": False, "enrolling": False, "recovery_left": 0, "enabled_at": None},
     "/api/status": {"ok": True},
     # The desktop application beside the server, up to date: the rail has no update button.
     "/api/system/launcher": launcher_state(),

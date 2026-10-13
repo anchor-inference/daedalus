@@ -819,7 +819,10 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
             return respond(route, {"detail": "not signed in"}, status=401)
         return respond(route, {"user_id": 1, "via": "token"})
     if rel == "/api/auth/config":
-        return respond(route, {"telegram": None, "passkeys": 1, "pairing": True})
+        return respond(route, {"telegram": None, "pairing": True, "second_factor": bool(getattr(stub, "second_factor", False))})
+    if rel == "/api/auth/totp":
+        # On, with two recovery codes spent: the state the Security picture is of.
+        return respond(route, {"enabled": True, "enrolling": False, "recovery_left": 8, "enabled_at": "2026-10-01T09:30:00+00:00"})
     if rel == "/api/sessions":
         return respond(route, listing(params.get("view", ["all"])[0]))
     if rel == "/api/doctor":
@@ -2073,8 +2076,13 @@ def run() -> int:
         stub.fresh = True  # type: ignore[attr-defined]
         shot(page, "add-model", "agents", wait=".addmodel", before=pick_a_model, settle=600)
         stub.fresh = False  # type: ignore[attr-defined]
+        shot(page, "settings-security", "settings/security", wait=".totp-card[data-totp='on']", settle=500)
         stub.signedout = True  # type: ignore[attr-defined]
         shot(page, "login", "agents", wait=".login", settle=500)
+        # The second step, after a pairing link, with two-factor sign-in on.
+        stub.second_factor = True  # type: ignore[attr-defined]
+        shot(page, "login-code", "agents", wait=".login #login-code", settle=500)
+        stub.second_factor = False  # type: ignore[attr-defined]
         stub.signedout = False  # type: ignore[attr-defined]
         desk.close()
 
