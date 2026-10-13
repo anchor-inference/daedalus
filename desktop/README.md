@@ -526,9 +526,16 @@ change the daily cap does not blank the provider keys, and the public address se
 
 The first start opens the app through a one-time link the stack writes when it comes up, and the
 launcher offers that link once, while it belongs to that start. Afterwards `open` goes to the app
-itself, whose login screen takes a passkey, Telegram, or a pairing link. `daedalus-desktop pair`
-prints a fresh link whenever a browser needs one — a new machine, a cleared cookie jar, or a session
-that has expired. Each link opens once and expires after thirty minutes.
+itself, whose login screen takes Telegram or a pairing link. `daedalus-desktop pair` prints a fresh
+link whenever a browser needs one — a new machine, a cleared cookie jar, or a session that has
+expired. Each link opens once and expires after thirty minutes.
+
+With two-factor sign-in on (Settings → Security, in a browser), a browser is asked for the code from
+the authenticator app after the link. The desktop window is not: when its session ends it asks the
+launcher for a link of its own (`auth pair --window`), which lives two minutes, is never written to a
+file, and signs the window straight in. Minting one takes running a command inside the installation,
+which is more than the code would guard. The window does not offer to set two-factor up, for the same
+reason.
 
 Settings that are not on the setup page — a GitHub token for self-development, a public address for
 the app, extra providers and the search APIs — are edited in `data/.env` and

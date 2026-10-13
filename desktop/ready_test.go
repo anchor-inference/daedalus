@@ -56,6 +56,17 @@ func TestAMintedLinkIsReadOffTheFirstLine(t *testing.T) {
 	}
 }
 
+// Only the link the window asks for is marked for it: the server skips the two-factor code for that
+// kind alone, so a link `daedalus-desktop pair` prints for any browser must not carry the mark.
+func TestOnlyTheWindowsLinkIsMarkedForTheWindow(t *testing.T) {
+	if got := strings.Join(pairArgs(true), " "); got != "-m daedalus auth pair --window" {
+		t.Fatalf("got %q", got)
+	}
+	if got := strings.Join(pairArgs(false), " "); got != "-m daedalus auth pair" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestWaitReadyPollsUntilTheAppAnswers(t *testing.T) {
 	var hits atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

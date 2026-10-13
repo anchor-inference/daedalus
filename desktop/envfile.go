@@ -171,7 +171,8 @@ func envUpdates(p Paths, s Setup, current map[string]string, searxngSecret, home
 		{"DAEDALUS_VOICE", firstSet(clean(s.Voice), firstSet(current["DAEDALUS_VOICE"], "off"))},
 		{"SEARXNG_SECRET", searxngSecret},
 		// The public address is not on the setup page: an operator who set one by hand keeps it,
-		// and passkeys are enrolled against that host, so blanking it would invalidate them.
+		// and pairing links and the authenticator's entry name that host, so blanking it would
+		// send every link the stack prints to an address the operator never opens.
 		{"MINIAPP_PUBLIC_URL", current["MINIAPP_PUBLIC_URL"]},
 		// The ports are written once and then kept: rewriting them on every save would take back a
 		// change made by hand in the file. A first setup chooses free ones (WriteSetup), and a start
