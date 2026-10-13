@@ -200,10 +200,17 @@ def desktop(browser, backend: Backend, errors: list[str]) -> None:  # type: igno
     block = page.locator(".cal-block", has_text="Live standup")
     expect(block).to_be_visible()
     block.click()
+    # A tap opens the event to be read; the pencil in its head opens the editor, and saving goes
+    # back to the event as it is read.
+    view = page.locator(".sheet.cal-view")
+    view.get_by_role("button", name="Edit event").click()
     editor = page.get_by_role("dialog", name="Edit event")
     editor.get_by_label("Repeat").select_option("weekly")
     editor.get_by_role("button", name="Save").click()
     expect(editor).to_be_hidden()
+    expect(view).to_be_visible()
+    page.keyboard.press("Escape")
+    expect(view).to_be_hidden()
     master = wait_for(page, "the rule stored", lambda: (lambda e: e if "FREQ=WEEKLY" in (e.get("recurrence") or "") else None)(backend.get(f"/api/calendar/events/{stored['event_id']}")))
     assert "FREQ=WEEKLY" in master["recurrence"], master
     next_week = [e for e in events(backend, week_start + timedelta(days=7), 7) if e["title"] == "Live standup"]
@@ -242,8 +249,8 @@ def desktop(browser, backend: Backend, errors: list[str]) -> None:  # type: igno
     # Delete the whole series from this week's event: nothing is left in the next three weeks.
     scroll_hours(page, 6)
     page.locator(".cal-block", has_text="Live standup").click()
-    editor = page.get_by_role("dialog", name="Edit event")
-    editor.get_by_role("button", name="Delete").click()
+    page.locator(".sheet.cal-view").get_by_role("button", name="Event actions").click()
+    page.get_by_role("menuitem", name="Delete").click()
     ask = page.get_by_role("alertdialog")
     expect(ask).to_be_visible()
     ask.get_by_role("button", name="All events").click()

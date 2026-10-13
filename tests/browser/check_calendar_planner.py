@@ -8,11 +8,14 @@ What it holds the screen to:
   the event moves it, a drag on its lower edge resizes it, and Undo puts it back. A repeating event
   asks "this event or all events" before anything is sent, and sends the answer.
 - A task is ticked off in the list, and a task dragged onto the grid is given that time.
-- Search finds an event and opens it; `/app/calendar?event=` and `?task=` open the item they name.
+- Search finds an event and opens it to be read, its editor one tap further; `/app/calendar?event=`
+  and `?task=` open the item they name.
 - Connections offer the two versions of a conflicted event as buttons; the settings change the week.
-- On a 390 px phone nothing scrolls sideways, the header's targets are 44 px, the add button makes
-  an event through a bottom sheet, a swipe changes the period, and day, three days, month and agenda
-  all show words, not just marks.
+- On a 390 px phone the agenda comes first, nothing scrolls sideways, the header's targets are 44 px,
+  the add button makes an event through a bottom sheet, a swipe changes the period, and day, three
+  days, month and agenda all show words, not just marks.
+- The week holds no meal plan here (``plan=False``): this is the planner's mechanics, and the
+  structured entries have a check of their own (check_calendar_blocks.py).
 - Both languages, and with SHOTS set, pictures of every view in both themes.
 """
 
@@ -105,7 +108,7 @@ def drag(page: Page, start: tuple[float, float], end: tuple[float, float]) -> No
 
 def desktop(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-untyped-def]
     en = lang == "en"
-    stub = CalendarStub(lang=lang)
+    stub = CalendarStub(lang=lang, plan=False)
     zone = ZoneInfo(ZONE)
     today = datetime.now(zone).date()
     context = browser.new_context(viewport={"width": 1440, "height": 900}, timezone_id=ZONE, locale="en-GB" if en else "ru-RU", color_scheme="dark")
@@ -263,18 +266,27 @@ def desktop(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-u
     search.fill("dentist")
     expect(page.locator(".cal-search-item").first).to_contain_text("Dentist")
     search.press("Enter")
+    # A found event opens to be read; its editor is the pencil in the view's head.
+    view = page.locator(".sheet.cal-view")
+    expect(view.locator(".cal-view-title")).to_have_text("Dentist")
+    view.get_by_role("button", name="Edit event").click()
     editor = page.get_by_role("dialog", name="Edit event")
     expect(editor.get_by_label("Title")).to_have_value("Dentist")
     expect(editor.get_by_label("Add a place")).to_have_value("12 Garden Street")
     shot(page, "desk-en-dark-editor")
     page.keyboard.press("Escape")
     expect(editor).to_be_hidden()
+    # Cancelling the editor goes back to the event as it is read, and Escape again closes that.
+    expect(view).to_be_visible()
+    page.keyboard.press("Escape")
+    expect(view).to_be_hidden()
 
     # The editor sends a repeat preset as an RRULE. The search took the view to the dentist's day.
     page.keyboard.press("t")
     page.keyboard.press("d")
     scroll_hours(page, 9)
     page.locator(".cal-block", has_text="Focus time").click()
+    page.locator(".sheet.cal-view").get_by_role("button", name="Edit event").click()
     editor = page.get_by_role("dialog", name="Edit event")
     editor.get_by_label("Repeat").select_option("weekdays")
     editor.get_by_role("button", name="Save").click()
@@ -283,16 +295,16 @@ def desktop(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-u
 
     # The conflicted event says so in its editor and offers both versions.
     page.goto(f"{BASE}/calendar?token=t&lang=en&event=ev-planning")
-    editor = page.get_by_role("dialog", name="Edit event")
-    expect(editor.get_by_label("Title")).to_have_value("Quarterly planning")
-    expect(editor.get_by_role("alert")).to_contain_text("Changed in two places")
-    expect(editor.get_by_role("button", name="Use theirs")).to_be_visible()
+    view = page.locator(".sheet.cal-view")
+    expect(view.locator(".cal-view-title")).to_have_text("Quarterly planning")
+    expect(view.get_by_role("alert")).to_contain_text("Changed in two places")
+    expect(view.get_by_role("button", name="Use theirs")).to_be_visible()
     page.keyboard.press("Escape")
     expect(page.get_by_role("dialog")).to_have_count(0)
 
     # Deep links: an occurrence of a series, and a task.
     page.goto(f"{BASE}/calendar?token=t&lang=en&event=ev-sync:{occurrence}")
-    expect(page.get_by_role("dialog", name="Edit event").get_by_label("Title")).to_have_value("Weekly team sync")
+    expect(page.locator(".sheet.cal-view .cal-view-title")).to_have_text("Weekly team sync")
     page.keyboard.press("Escape")
     expect(page.get_by_role("dialog")).to_have_count(0)
     page.goto(f"{BASE}/calendar?token=t&lang=en&task=task-grandma")
@@ -362,7 +374,7 @@ def swipe(page: Page, selector: str, dx: int) -> None:
 
 def phone(browser, lang: str, scheme: str, errors: list[str]) -> None:  # type: ignore[no-untyped-def]
     en = lang == "en"
-    stub = CalendarStub(lang=lang)
+    stub = CalendarStub(lang=lang, plan=False)
     context = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, timezone_id=ZONE, locale="en-GB" if en else "ru-RU", color_scheme=scheme)
     page = context.new_page()
     PAGE.append(page)
@@ -371,7 +383,15 @@ def phone(browser, lang: str, scheme: str, errors: list[str]) -> None:  # type: 
     open_calendar(page, lang)
     tag = f"phone-{lang}-{scheme}"
 
-    # A week does not fit; the phone shows three days, with the week strip above.
+    # The views, each readable: words on screen, not only coloured marks.
+    def pick(view: str) -> None:
+        page.locator(".cal-view-pick").click()
+        page.get_by_role("menuitem", name=view, exact=True).click()
+
+    # The phone opens on the agenda; a week does not fit, so three days stand where a desktop's week
+    # does, with the week strip above.
+    expect(page.locator(".cal-agenda")).to_be_visible()
+    pick("3 days" if en else "3 дня")
     expect(page.locator(".cal-tg-head")).to_have_count(3)
     expect(page.locator(".cal-strip")).to_be_visible()
     no_sideways(page, f"{lang} phone three days")
@@ -388,11 +408,6 @@ def phone(browser, lang: str, scheme: str, errors: list[str]) -> None:  # type: 
     assert box["y"] + box["height"] <= page.viewport_size["height"] - 8, f"the add button runs off the screen: {box}"
     expect(page.locator(".cal-head .ph-menu")).to_be_visible()
     shot(page, f"{tag}-3day")
-
-    # The views, each readable: words on screen, not only coloured marks.
-    def pick(view: str) -> None:
-        page.locator(".cal-view-pick").click()
-        page.get_by_role("menuitem", name=view, exact=True).click()
 
     pick("Day" if en else "День")
     expect(page.locator(".cal-tg-col")).to_have_count(1)
@@ -473,7 +488,7 @@ def answer(stub: CalendarStub):  # type: ignore[no-untyped-def]
 def light_pictures(browser) -> None:  # type: ignore[no-untyped-def]
     """The desktop views in the light theme and in Russian, for looking at."""
     for lang in ("en", "ru"):
-        stub = CalendarStub(lang=lang)
+        stub = CalendarStub(lang=lang, plan=False)
         context = browser.new_context(viewport={"width": 1440, "height": 900}, timezone_id=ZONE, locale="en-GB" if lang == "en" else "ru-RU", color_scheme="light")
         page = context.new_page()
         page.route("**/api/**", answer(stub))
@@ -483,7 +498,7 @@ def light_pictures(browser) -> None:  # type: ignore[no-untyped-def]
             shot(page, f"desk-{lang}-light-{view}")
         context.close()
     for lang, scheme in (("en", "light"), ("ru", "dark")):
-        stub = CalendarStub(lang=lang)
+        stub = CalendarStub(lang=lang, plan=False)
         context = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, timezone_id=ZONE, locale="en-GB", color_scheme=scheme)
         page = context.new_page()
         page.route("**/api/**", answer(stub))
