@@ -77,6 +77,15 @@ func fixture(t *testing.T) *httptest.Server {
 		w.Header().Set("Content-Disposition", `attachment; filename="report.txt"`)
 		fmt.Fprint(w, "the quarterly report\n")
 	})
+	// The names of the cookies a request carried, never their values (cookies_test.go).
+	mux.HandleFunc("/cookie-names", func(w http.ResponseWriter, r *http.Request) {
+		names := []string{}
+		for _, c := range r.Cookies() {
+			names = append(names, c.Name)
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintf(w, "<!doctype html><title>%s</title>", html.EscapeString(strings.Join(names, ",")))
+	})
 	mux.HandleFunc("/private", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("WWW-Authenticate", `Basic realm="fixture"`)
 		w.WriteHeader(http.StatusUnauthorized)
