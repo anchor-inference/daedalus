@@ -76,7 +76,7 @@ def check_streamed(browser, check) -> None:  # type: ignore[no-untyped-def]
     def stub(route) -> None:  # type: ignore[no-untyped-def]
         rel = route.request.url.split("?", 1)[0]
         rel = rel[rel.index("/api/") :]
-        if rel == "/api/voice/tts":
+        if rel == "/api/companion/tts":
             return route.fulfill(
                 status=200,
                 body=clips,
@@ -89,7 +89,8 @@ def check_streamed(browser, check) -> None:  # type: ignore[no-untyped-def]
     page = context.new_page()
     page.route("**/api/**", stub)
     shots.stub.voice_frames = SPEAKING  # type: ignore[attr-defined]
-    page.goto(f"{BASE}/voice?token=t&scheme=dark&lang=en")
+    page.goto(f"{BASE}/companion?token=t&scheme=dark&lang=en")
+    shots.stage(page)
     page.wait_for_selector(".voice-stage.phase-speaking", timeout=15000)
     page.wait_for_timeout(2500)
     played = page.evaluate("window.__played")
@@ -130,13 +131,13 @@ def check_no_backlog(browser, check) -> None:  # type: ignore[no-untyped-def]
     def stub(route) -> None:  # type: ignore[no-untyped-def]
         rel = route.request.url.split("?", 1)[0]
         rel = rel[rel.index("/api/") :]
-        if rel == "/api/voice/stream":
+        if rel == "/api/companion/stream":
             # The canned stream is a finite body, so the page reconnects to it. The conversation
             # happens once; every reconnection after it is an open stream with nothing on it.
             opened.append(1)
             frames = BACKLOG if len(opened) == 1 else ""
             return route.fulfill(status=200, body="event: hello\ndata: {}\n\n" + frames, headers={"content-type": "text/event-stream"})
-        if rel == "/api/voice/tts":
+        if rel == "/api/companion/tts":
             body = json.loads(route.request.post_data or "{}")
             asked.append(str(body.get("turn") or ""))
             return route.fulfill(
@@ -151,7 +152,8 @@ def check_no_backlog(browser, check) -> None:  # type: ignore[no-untyped-def]
     page = context.new_page()
     page.route("**/api/**", stub)
     shots.stub.voice_frames = BACKLOG  # type: ignore[attr-defined]
-    page.goto(f"{BASE}/voice?token=t&scheme=dark&lang=en")
+    page.goto(f"{BASE}/companion?token=t&scheme=dark&lang=en")
+    shots.stage(page)
     # Wait for the thing being asserted rather than for a while: the answer the operator is waiting
     # for is the only one that may be heard at all, so the first clip that plays is its first clip.
     page.wait_for_function("window.__played.length > 0", timeout=15000)
@@ -179,8 +181,10 @@ const fetched = window.fetch;
 window.fetch = function (input, init) {
   const url = String(typeof input === "string" ? input : input.url || "");
   return fetched.apply(this, arguments).then((response) => {
-    // The canned stream is a finite body, so the page reconnects; the first one is the one timed.
-    if (url.includes("/api/voice/stream") && !window.__streamAt) window.__streamAt = performance.now();
+    // The canned stream is a finite body, so the page reconnects. The connection timed is the last one
+    // before the first sentence was spoken: the page opens on its transcript, where nothing is read
+    // aloud, and the sentences that count arrive on the connection after the orb is put up.
+    if (url.includes("/api/companion/stream") && !window.__spoke.length) window.__streamAt = performance.now();
     return response;
   });
 };
@@ -225,7 +229,7 @@ def check_prompt(browser, check) -> None:  # type: ignore[no-untyped-def]
     def stub(route) -> None:  # type: ignore[no-untyped-def]
         rel = route.request.url.split("?", 1)[0]
         rel = rel[rel.index("/api/") :]
-        if rel == "/api/voice":
+        if rel == "/api/companion/voice":
             # The browser's own synthesiser, which is what the operator is on: no endpoint, no
             # downloaded voice, and therefore the path with no audio element in it at all.
             body = json.loads(json.dumps(shots.VOICE))
@@ -238,7 +242,8 @@ def check_prompt(browser, check) -> None:  # type: ignore[no-untyped-def]
     page = context.new_page()
     page.route("**/api/**", stub)
     shots.stub.voice_frames = SPOKEN_NOW  # type: ignore[attr-defined]
-    page.goto(f"{BASE}/voice?token=t&scheme=dark&lang=en")
+    page.goto(f"{BASE}/companion?token=t&scheme=dark&lang=en")
+    shots.stage(page)
     page.wait_for_function("window.__spoke.length > 0", timeout=15000)
     timings = page.evaluate("({ stream: window.__streamAt, shown: window.__shownAt, spoke: window.__spoke })")
     shown = timings["shown"] - timings["stream"]
@@ -287,7 +292,8 @@ def main() -> int:
         page = context.new_page()
         page.route("**/api/**", stub)
         shots.stub.voice_frames = SPEAKING  # type: ignore[attr-defined]
-        page.goto(f"{BASE}/voice?token=t&scheme=dark&lang=en")
+        page.goto(f"{BASE}/companion?token=t&scheme=dark&lang=en")
+        shots.stage(page)
         page.wait_for_selector(".voice-orb", timeout=15000)
         page.locator(".voice-orb").click()
         # Opening the microphone in the middle of an answer does not end the answer: the page is
@@ -296,15 +302,15 @@ def main() -> int:
         check(True, "the page reaches the speaking phase with the microphone open")
 
         check(
-            "POST /api/voice/interrupt" not in seen,
+            "POST /api/companion/interrupt" not in seen,
             "nothing is interrupted while the operator has said nothing",
         )
         talking["on"] = True
         for _ in range(150):
-            if "POST /api/voice/interrupt" in seen:
+            if "POST /api/companion/interrupt" in seen:
                 break
             page.wait_for_timeout(100)
-        check("POST /api/voice/interrupt" in seen, "talking over the answer calls the interrupt")
+        check("POST /api/companion/interrupt" in seen, "talking over the answer calls the interrupt")
         page.wait_for_timeout(200)
         check("phase-listening" in page.evaluate("window.__phases"), "the page goes back to listening")
         check(page.evaluate("document.querySelectorAll('audio').length >= 0"), "the page is still alive after the barge-in")

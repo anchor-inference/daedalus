@@ -103,7 +103,7 @@ class Application:
                 # A different model, language or thread count is a different recogniser; the loaded one
                 # is now the wrong one and holds most of a gigabyte while being it.
                 self.speech.forget()
-            spoke, now = old.voice.tts, config.voice.tts
+            spoke, now = old.companion.tts, config.companion.tts
             if (spoke.local_voice, spoke.local_threads) != (now.local_voice, now.local_threads):
                 # A different voice or thread count is a different synthesiser. The speaker inside a
                 # multi-voice model is not, and neither is the speed: both are arguments to every call,

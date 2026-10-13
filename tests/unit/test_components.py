@@ -165,7 +165,7 @@ def test_a_chosen_voice_with_no_runtime_to_speak_it_is_what_the_summary_calls_ne
     monkeypatch.setattr(toolchain, "status", lambda name: "not here")
     present(monkeypatch, {"uv"})
     config = RuntimeConfig()
-    config.voice.tts.local_voice = "ru-dmitri"
+    config.companion.tts.local_voice = "ru-dmitri"
     summary = components.Registry(settings_for(tmp_path, native=True), config).summary()
     assert components.SPEECH in summary["needed"]  # type: ignore[operator]
     # Nothing configured wants the browser here, so it is missing without being needed: a mark beside

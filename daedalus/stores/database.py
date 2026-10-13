@@ -20,6 +20,7 @@ from daedalus.stores.attempt_fault_schema import MIGRATION as ATTEMPT_FAULT_MIGR
 from daedalus.stores.calendar_diagram_schema import migration as CALENDAR_DIAGRAM_MIGRATION
 from daedalus.stores.capacity_schema import MIGRATION as CAPACITY_MIGRATION
 from daedalus.stores.ci_schema import MIGRATION as CI_MIGRATION
+from daedalus.stores.companion_schema import MIGRATION as COMPANION_MIGRATION
 from daedalus.stores.comparison_funding_schema import MIGRATION as COMPARISON_FUNDING_MIGRATION
 from daedalus.stores.comparison_schema import MIGRATION as COMPARISON_MIGRATION
 from daedalus.stores.contract_change_schema import MIGRATION as CONTRACT_CHANGE_MIGRATION
@@ -2247,6 +2248,9 @@ CREATE TABLE IF NOT EXISTS saved_logins (
     uses INTEGER NOT NULL DEFAULT 0
 );
 """)
+
+# The companion: its goals, its activity log, and the voice concierge's rows renamed to it.
+MIGRATIONS.append(COMPANION_MIGRATION)
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session

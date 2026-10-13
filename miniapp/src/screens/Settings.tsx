@@ -11,7 +11,7 @@ import { shortDateTime, tokens } from "../format";
 import { useMoreBelow } from "../edgefade";
 import { SpeechModels } from "./Speech";
 import { TtsVoices } from "./Voices";
-import { VoiceSettings } from "./Voice";
+import { VoiceSettings } from "./Companion";
 import { ComponentsTab } from "./Components";
 import { DependenciesTab } from "./Dependencies";
 import { PromptChange } from "./PromptChange";

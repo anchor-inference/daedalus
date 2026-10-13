@@ -2,7 +2,7 @@
 project, pass on an answer the operator gave in words, and read its own files.
 
 They are not ``TOOLS`` of this package: three of them share a name with another role's tool (the
-voice concierge's ``Delegate`` and ``Projects``, the project orchestrator's ``Answer``), so they are
+companion's ``Delegate`` and ``Projects``, the project orchestrator's ``Answer``), so they are
 registered in the main orchestrator's own registry (:func:`build`), which no other session is shown.
 Each goes through the dispatcher extension, which first checks that the calling session still holds
 the office.

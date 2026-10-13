@@ -1006,7 +1006,7 @@ export type Project = {
   settings: { snapshots: boolean; system?: string; ephemeral?: boolean; default_env?: "container" | "host"; setup_command?: string; orchestrator?: OrchestratorSettings;
     /** Put away by the operator: hidden from the lists and its coordinator not woken, nothing deleted. */
     archived?: boolean };
-  /** Non-empty on a project the installation made for itself: "voice" is the concierge's. It cannot be moved or removed. */
+  /** Non-empty on a project the installation made for itself: "companion" is the companion's. It cannot be moved or removed. */
   system?: string;
   /** In order; the first is the primary folder, where an agent works unless it is given another. */
   folders: ProjectDir[];

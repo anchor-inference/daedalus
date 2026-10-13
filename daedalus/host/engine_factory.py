@@ -167,7 +167,7 @@ def runtime_constants(config: RuntimeConfig, *, context_window: int, max_output_
     )
 
 
-Role = Literal["agent", "voice", "orchestrator", "dispatcher"]
+Role = Literal["agent", "companion", "orchestrator", "dispatcher"]
 
 
 def _agent_sections(deps: EngineDeps, config: RuntimeConfig, *, mode: ModeConfig | None, workspace: Path, session_title: str, model: str, extra_notes: str, project: str, advertised: Collection[str], admitted: Collection[str]) -> tuple[str, ...]:
@@ -243,8 +243,8 @@ def build_engine(
     tool_group_loads: Mapping[str, str] | None = None,
     trimmed_tool_result_ids: Collection[str] = (),
 ) -> QueryEngine:
-    """``role`` picks the system prompt: an agent that works in a folder, the voice concierge that
-    only talks and hands over, a project's orchestrator that only runs a team, or the main
+    """``role`` picks the system prompt: an agent that works in a folder, the companion that talks,
+    owns goals and hands work over, a project's orchestrator that only runs a team, or the main
     orchestrator that only hands work to projects and follows it.
 
     ``max_advertised_tools`` is the lowest cap on tools among the run's providers (0 for none);
@@ -256,8 +256,8 @@ def build_engine(
     this run, the settings and the session's own choice over the defaults the groups were declared with."""
     primary_provider, primary_model = rungs[0]
     model = model_name or primary_model
-    if role == "voice":
-        sections: tuple[str, ...] = prompts.concierge_sections(answer_language=config.answer_language, agents=extra_notes)
+    if role == "companion":
+        sections: tuple[str, ...] = prompts.companion_sections(name=config.companion.name, answer_language=config.answer_language, agents=extra_notes)
     elif role == "orchestrator":
         sections = prompts.orchestrator_sections(answer_language=config.answer_language, governance=prompts.governance_section(deps.governance_path))
     elif role == "dispatcher":

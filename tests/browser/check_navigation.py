@@ -33,7 +33,7 @@ BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 LANG = os.environ.get("LANG_UI", "")
 
-SHIPPED = ["inbox", "board", "calendar", "diagrams", "changes", "terminals", "voice", "schedules"]
+SHIPPED = ["inbox", "board", "calendar", "diagrams", "changes", "terminals", "companion", "schedules"]
 EMPTY = {"rail": [], "more": [], "drawer": [], "hidden": [], "icons": {}}
 WORDS = {
     "en": {"page": "Dosing calculator", "pages": "Pages", "customise": "Customise…", "reset": "Reset to default", "rail": "Rail"},
@@ -120,7 +120,7 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
     # once the operator leaves.
     page.locator("[data-nav-row='terminals']").get_by_role("button", name="Move Terminals up" if lang == "en" else "Выше: Терминалы").click()
     page.wait_for_timeout(600)
-    moved = ["inbox", "board", "calendar", "diagrams", "terminals", "changes", "voice", "schedules"]
+    moved = ["inbox", "board", "calendar", "diagrams", "terminals", "changes", "companion", "schedules"]
     last = host.puts[-1] if host.puts else {}
     print(f"[{lang}] after the arrow: {last.get('navigation', {}).get('rail')} at {last.get('base_revision')}")
     if last.get("navigation", {}).get("rail") != moved or last.get("base_revision") != "s1":
@@ -150,7 +150,7 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
 
     page.locator(".settings-back").click()
     page.wait_for_selector(".rail .rail-places [data-rail]", timeout=10000)
-    want = ["inbox", "calendar", "diagrams", "terminals", "changes", "voice", "schedules", "page:dosing"]
+    want = ["inbox", "calendar", "diagrams", "terminals", "changes", "companion", "schedules", "page:dosing"]
     wait_rail(page, want, say, "after the changes")
     if page.locator(".rail [data-rail='inbox'] svg").get_attribute("class") != "ic ic-bolt":
         say("the inbox's new icon is not drawn on the rail")

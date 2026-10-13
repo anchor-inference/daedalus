@@ -114,6 +114,7 @@ from daedalus.extensions.artifact_headers import artifact_headers
 from daedalus.extensions.calendar_sync import sync_loop
 from daedalus.extensions.ci_observations import record_signed_delivery
 from daedalus.extensions.ci_wake import CiFailures, ci_link
+from daedalus.extensions.companion import model_options, tts_configured
 from daedalus.extensions.heartbeat import TEMPLATE as HEARTBEAT_TEMPLATE
 from daedalus.extensions.inbound import PAYLOAD_MAX_CHARS, flatten_payload, verify_signature
 from daedalus.extensions.notifications import ActionConflict, ActionRefused, Draft, NotificationService
@@ -124,7 +125,6 @@ from daedalus.extensions.pet import normalize_reaction
 from daedalus.extensions.push import PushRefused, PushService
 from daedalus.extensions.review import ReviewRefused
 from daedalus.extensions.services import SHARE_COOKIE_PREFIX, SHARE_MODES, pid_alive
-from daedalus.extensions.voice import model_options, tts_configured
 from daedalus.harness.capabilities import CAPABILITIES
 from daedalus.host import capabilities, component_install, launcher_bridge
 from daedalus.host import components as component_list
@@ -371,10 +371,48 @@ class VoiceSpeakBody(BaseModel):
     without one is still spoken, it is simply not timed."""
 
 
-class VoiceModelBody(BaseModel):
-    """Which model preset the concierge answers with; empty means the default one."""
+class CompanionModelBody(BaseModel):
+    """Which model presets the companion answers with; empty means the default one, missing means unchanged."""
 
-    preset: str = ""
+    preset: str | None = None
+    background_preset: str | None = None
+
+
+class CompanionProfileBody(BaseModel):
+    """The companion's name and face; what is left out stays as it is."""
+
+    name: str | None = Field(default=None, max_length=40)
+    avatar: dict[str, str] | None = None
+
+
+class CompanionPauseBody(BaseModel):
+    paused: bool
+
+
+class CompanionCallBody(BaseModel):
+    on: bool
+
+
+class CompanionMessageBody(BaseModel):
+    """A text turn for the companion, from any client: the app, the desktop's quick chat, a relay."""
+
+    text: str = Field(default="", max_length=20000)
+    attachments: list[str] = Field(default_factory=list, max_length=10)
+    """Ids from ``POST /api/companion/attachments``."""
+    source: Literal["quick_chat", "app", "voice", "telegram"] = "app"
+
+
+class CompanionGoalBody(BaseModel):
+    title: str = Field(max_length=200)
+    brief: str = Field(default="", max_length=4000)
+    cadence: str = Field(default="", max_length=120)
+
+
+class CompanionGoalPatch(BaseModel):
+    title: str | None = Field(default=None, max_length=200)
+    brief: str | None = Field(default=None, max_length=4000)
+    status: str | None = None
+    cadence: str | None = Field(default=None, max_length=120)
 
 
 class AnswerBody(BaseModel):
@@ -2714,6 +2752,12 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             headers={"Cache-Control": "private, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff"},
         )
 
+    async def companion_turn(session_id: str) -> None:
+        """A message into the companion's own session by the ordinary routes is one of its text turns."""
+        extension = app.extensions.get("companion")
+        if extension is not None:
+            await extension.before_session_turn(session_id)
+
     @api.post("/api/sessions/{session_id}/messages")
     async def send_message(session_id: str, body: SendMessageBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         text, reply = body.text, None
@@ -2728,6 +2772,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             reply = {"seq": body.reply_to.seq, "excerpt": excerpt}
             text = f"[In reply to: «{excerpt}»]\n{body.text}"
         try:
+            await companion_turn(session_id)
             run_id = await manager.submit(
                 session_id,
                 text,
@@ -2789,6 +2834,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             if not text.strip() and not attachments:
                 raise HTTPException(400, "nothing to send")
             body = text.strip() or ("Files attached." if len(attachments) > 1 else "File attached.")
+            await companion_turn(session_id)
             run_id = await manager.submit(
                 session_id,
                 body,
@@ -2932,15 +2978,15 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         """Let go of a recording kept for the start page's composer."""
         return forget_kept(new_chat_recordings(), recording)
 
-    # -- voice: the concierge page ---------------------------------------------------
+    # -- the companion: its profile, its turns, its call, its tabs ---------------------
 
     def voice() -> Any:
-        """The voice extension, or a plain refusal: the page is optional and can be switched off."""
-        extension = app.extensions.get("voice")
+        """The companion extension, or a plain refusal: it is optional and can be switched off."""
+        extension = app.extensions.get("companion")
         if extension is None:
-            raise HTTPException(503, "the voice page is not installed")
-        if not app.config.voice.enabled:
-            raise HTTPException(503, "the voice page is switched off in the configuration")
+            raise HTTPException(503, "the companion is not installed")
+        if not app.config.companion.enabled:
+            raise HTTPException(503, "the companion is switched off in the configuration")
         return extension
 
     async def voice_view() -> dict[str, Any]:
@@ -2949,27 +2995,30 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         Both the page's poll and the model change answer with this, so a change is shown by the same
         reading that a reload would produce rather than by what the app hoped it had just done.
         """
-        extension = app.extensions.get("voice")
-        if extension is None or not app.config.voice.enabled:
+        extension = app.extensions.get("companion")
+        if extension is None or not app.config.companion.enabled:
             # The model is still named and still choosable with the page switched off: which model a
-            # concierge would answer with is a decision the operator can make before switching it on.
+            # companion would answer with is a decision the operator can make before switching it on.
             # Validated here as well as on the enabled path: a preset id that names nothing would
             # reach the picker as a value no option carries, and a select given one silently shows
             # its first entry instead — so the page would draw a choice the file does not hold.
-            preset = app.config.voice.preset if app.config.voice.preset in app.config.presets else ""
+            preset = app.config.companion.preset if app.config.companion.preset in app.config.presets else ""
+            background = app.config.companion.background_preset if app.config.companion.background_preset in app.config.presets else ""
             return {
                 "enabled": False,
                 "session_id": "",
                 "preset": preset,
                 "using": "",
                 "model": "",
+                "background_preset": background,
+                "background_model": "",
                 "presets": model_options(app.config),
                 "tts": {"configured": False},
                 "stt": {"configured": False},
                 "agents": [],
                 "listening": False,
             }
-        state = await extension.state()
+        state = await extension.voice_state()
         # Which recogniser the page should use is decided here rather than in the extension: the
         # extension knows about endpoints, and a local model is not one.
         spoken = app.tts.state()
@@ -3022,23 +3071,158 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         state["stt"] = stt
         return state
 
-    @api.get("/api/voice")
+    @api.get("/api/companion")
+    async def companion_profile(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Who the companion is and what it is doing. Every client — the page, the desktop's tray and
+        quick chat — codes against this shape, so it changes only by adding fields."""
+        extension = app.extensions.get("companion")
+        if extension is None:
+            raise HTTPException(503, "the companion is not installed")
+        return {**await extension.profile(), "enabled": app.config.companion.enabled}
+
+    @api.put("/api/companion")
+    async def companion_save(body: CompanionProfileBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            profile = await voice().save_profile(name=body.name, avatar=body.avatar)
+        except ValidationError as exc:
+            raise HTTPException(400, "; ".join(str(e.get("msg") or "") for e in exc.errors())) from exc
+        return {**profile, "enabled": app.config.companion.enabled}
+
+    @api.patch("/api/companion")
+    async def companion_patch(body: CompanionPauseBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Pause or resume, for clients that write the profile rather than press a button (the desktop's tray)."""
+        return {**await voice().pause(body.paused), "enabled": app.config.companion.enabled}
+
+    @api.post("/api/companion/pause")
+    async def companion_pause(body: CompanionPauseBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        return {**await voice().pause(body.paused), "enabled": app.config.companion.enabled}
+
+    def companion_staging() -> Path:
+        return settings.state_dir / "upload-staging" / "companion"
+
+    @api.post("/api/companion/attachments")
+    async def companion_attach(file: UploadFile = File(...), _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Stage a file for a companion message and return its id, which the message names.
+
+        A two-step send rather than the session upload's one form: a client that is not a browser
+        page — the desktop's quick chat with a screenshot — sends a message as JSON, and the id is
+        what lets that JSON carry a file. A staged file is used once and deleted; one nobody sent is
+        swept with the staging folder's other leftovers.
+        """
+        voice()
+        name = PureWindowsPath(file.filename or "file").name or "file"
+        staged = companion_staging()
+        staged.mkdir(parents=True, exist_ok=True)
+        attachment_id = secrets.token_hex(12)
+        target = staged / attachment_id
+        size = 0
+        with target.open("wb") as fh:
+            while chunk := await file.read(1 << 20):
+                size += len(chunk)
+                if size > VOICE_NOTE_MAX:
+                    fh.close()
+                    target.unlink(missing_ok=True)
+                    raise HTTPException(413, f"an attachment may be up to {VOICE_NOTE_MAX >> 20} MB")
+                fh.write(chunk)
+        mime = file.content_type or mimetypes.guess_type(name)[0] or "application/octet-stream"
+        (staged / f"{attachment_id}.json").write_text(json.dumps({"name": name, "mime_type": mime}), encoding="utf-8")
+        return {"id": attachment_id, "name": name, "mime_type": mime, "size": size}
+
+    @api.post("/api/companion/message")
+    async def companion_message(body: CompanionMessageBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """A text turn in the companion's conversation, from any client."""
+        extension = voice()
+        staged = companion_staging()
+        attachments: list[Attachment] = []
+        for attachment_id in body.attachments:
+            if not re.fullmatch(r"[0-9a-f]{24}", attachment_id):
+                raise HTTPException(400, f"{attachment_id!r} is not an attachment id")
+            path, meta = staged / attachment_id, staged / f"{attachment_id}.json"
+            if not path.is_file() or not meta.is_file():
+                raise HTTPException(404, f"no staged attachment {attachment_id}; upload it again")
+            info = json.loads(meta.read_text(encoding="utf-8"))
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            attachments.append(Attachment(path=path, name=str(info.get("name") or "file"), content_sha256=digest, mime_type=str(info.get("mime_type") or "application/octet-stream")))
+        try:
+            await extension.message(body.text, attachments, source=body.source)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        finally:
+            for attachment in attachments:
+                attachment.path.unlink(missing_ok=True)
+                attachment.path.with_name(attachment.path.name + ".json").unlink(missing_ok=True)
+        return {"ok": True, "session_id": await extension.session_id(create=False)}
+
+    @api.post("/api/companion/call")
+    async def companion_call(body: CompanionCallBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """A page opened or closed a call: while one is open, agents' reports are answered out loud."""
+        return {"call": await voice().call(body.on)}
+
+    @api.get("/api/companion/goals")
+    async def companion_goals(closed: bool = False, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        return {"goals": await voice().goal_list(include_closed=closed)}
+
+    @api.post("/api/companion/goals")
+    async def companion_goal_add(body: CompanionGoalBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            return await voice().goal_create(title=body.title, brief=body.brief, cadence=body.cadence)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @api.patch("/api/companion/goals/{goal_id}")
+    async def companion_goal_edit(goal_id: str, body: CompanionGoalPatch, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            return await voice().goal_update(goal_id=goal_id, title=body.title, brief=body.brief, status=body.status, cadence=body.cadence)
+        except KeyError as exc:
+            raise HTTPException(404, "no such goal") from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @api.delete("/api/companion/goals/{goal_id}")
+    async def companion_goal_delete(goal_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        extension = voice()
+        deleted = await extension.store.delete_goal(goal_id)
+        await extension.emit("goals", {})
+        return {"deleted": deleted}
+
+    @api.get("/api/companion/activity")
+    async def companion_activity(before: int | None = None, limit: int = Query(default=100, ge=1, le=200), _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        return {"items": await voice().activity(limit=limit, before=before)}
+
+    @api.get("/api/companion/schedules")
+    async def companion_schedules(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        return await voice().schedules()
+
+    @api.get("/api/companion/computer")
+    async def companion_computer(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        return await voice().computer()
+
+    @api.get("/api/companion/tools")
+    async def companion_tools(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        return voice().tools()
+
+    @api.get("/api/companion/voice")
     async def voice_status(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         return await voice_view()
 
-    @api.put("/api/voice/model")
-    async def voice_model(body: VoiceModelBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        """Choose the model the concierge answers with, from the app rather than from the file.
+    @api.put("/api/companion/model")
+    async def voice_model(body: CompanionModelBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Choose the models the companion answers with, from the app rather than from the file.
 
         An unknown preset is refused rather than written: an id that names nothing would be read back
         as "the default", and the operator would be looking at a choice the installation had quietly
         declined to make. Empty is the one id that means that on purpose.
         """
-        preset = body.preset.strip()
-        if preset and preset not in app.config.presets:
-            raise HTTPException(400, f"no such model preset {preset!r}")
         raw = app.config.model_dump(mode="json")
-        raw["voice"]["preset"] = preset
+        for field, value in (("preset", body.preset), ("background_preset", body.background_preset)):
+            if value is None:
+                continue
+            chosen = value.strip()
+            if chosen and chosen not in app.config.presets:
+                raise HTTPException(400, f"no such model preset {chosen!r}")
+            raw["companion"][field] = chosen
         try:
             new_config = type(app.config).model_validate(raw)
         except Exception as exc:  # noqa: BLE001
@@ -3046,16 +3230,16 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         await app.save_config(new_config)
         if app.front is not None:
             app.front.config = new_config
-        extension = app.extensions.get("voice")
+        extension = app.extensions.get("companion")
         if extension is not None:
-            # The standing conversation is pointed at the new model now, so the next thing said into
-            # the microphone is answered by it — no restart, no new conversation.
+            # The standing conversation is pointed at the new model now, so the next thing said to
+            # it is answered by it — no restart, no new conversation.
             await extension.apply_model()  # type: ignore[attr-defined]
         return await voice_view()
 
-    @api.get("/api/voice/stream")
+    @api.get("/api/companion/stream")
     async def voice_stream(request: Request, _: dict[str, Any] = Depends(auth)) -> StreamingResponse:
-        """The concierge's half of the conversation: a status chip, the answer as it is written, a sentence at a time to speak."""
+        """The companion's half of the conversation: a status chip, the answer as it is written, a sentence at a time to speak."""
         extension = voice()
 
         async def gen():  # type: ignore[no-untyped-def]
@@ -3073,7 +3257,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
         return StreamingResponse(gen(), media_type="text/event-stream")
 
-    @api.post("/api/voice/say")
+    @api.post("/api/companion/say")
     async def voice_say(body: VoiceSayBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """One utterance the browser already turned into words."""
         if len(body.text) > VOICE_SAY_MAX_CHARS:
@@ -3086,7 +3270,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             raise HTTPException(409, str(exc)) from exc
         return {"run_id": run_id}
 
-    @api.post("/api/voice/audio")
+    @api.post("/api/companion/audio")
     async def voice_audio(audio: UploadFile = File(...), _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """One utterance as a recording, for a browser with no speech recognition of its own."""
         extension = voice()
@@ -3117,7 +3301,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             raise HTTPException(409, str(exc)) from exc
         return {"transcript": transcript, "run_id": run_id}
 
-    @api.post("/api/voice/interrupt")
+    @api.post("/api/companion/interrupt")
     async def voice_interrupt(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """Barge-in: the operator talked over the answer, so the answer stops.
 
@@ -3128,12 +3312,12 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         app.tts.interrupt()
         return {"stopped": await voice().interrupt()}
 
-    @api.post("/api/voice/new")
+    @api.post("/api/companion/new")
     async def voice_new(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """Start the conversation over; the previous one stays as a session of its own."""
         return {"session_id": await voice().new_session()}
 
-    @api.post("/api/voice/tts")
+    @api.post("/api/companion/tts")
     async def voice_tts(request: Request, body: VoiceSpeakBody, _: dict[str, Any] = Depends(auth)) -> Response:
         """One answer read aloud: a downloaded voice, then the configured endpoint, then 404.
 
@@ -3191,7 +3375,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                     await clips.aclose()
 
             return StreamingResponse(spoken(), media_type=SEQUENCE_TYPE, headers={MEDIA_TYPE_HEADER: media_type})
-        if not tts_configured(app.config.voice.tts):
+        if not tts_configured(app.config.companion.tts):
             raise HTTPException(404, "nothing here speaks; the browser says this one itself")
         began = time.monotonic()
         try:
@@ -3215,7 +3399,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         """The picker's whole state. Three endpoints answer with it, so it is built in one place."""
         view = speech_models.view(
             app.tts.downloads,
-            selected=app.config.voice.tts.local_voice,
+            selected=app.config.companion.tts.local_voice,
             entries=tts_catalog.VOICES,
             to_json=tts_catalog.as_json,
             all_languages=tts_catalog.languages,
@@ -3264,9 +3448,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             removed = await app.tts.downloads.delete(voice_id)
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
-        if app.config.voice.tts.local_voice == voice_id:
-            await app.save_config(app.config.model_copy(update={"voice": app.config.voice.model_copy(
-                update={"tts": app.config.voice.tts.model_copy(update={"local_voice": "", "local_speaker": ""})})}))
+        if app.config.companion.tts.local_voice == voice_id:
+            await app.save_config(app.config.model_copy(update={"companion": app.config.companion.model_copy(
+                update={"tts": app.config.companion.tts.model_copy(update={"local_voice": "", "local_speaker": ""})})}))
         app.tts.forget()
         return {"deleted": removed, **_tts_view()}
 
@@ -3293,9 +3477,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if body.threads is not None:
             patch["local_threads"] = body.threads
         if patch:
-            voice_config = app.config.voice
-            await app.save_config(app.config.model_copy(update={"voice": voice_config.model_copy(
-                update={"tts": voice_config.tts.model_copy(update=patch)})}))
+            companion_config = app.config.companion
+            await app.save_config(app.config.model_copy(update={"companion": companion_config.model_copy(
+                update={"tts": companion_config.tts.model_copy(update=patch)})}))
         # The answer carries the load this call started rather than a reading taken before it: the
         # page draws "loading the voice" off the same response that chose the voice, and a view built
         # a moment earlier would tell it the voice is idle.
@@ -6247,9 +6431,11 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         raw["model"]["chain"] = [c for c in raw["model"].get("chain", []) if c != preset_id]
         # Removing the last model is allowed: an installation with none is a state the app knows —
         # it asks for one — and refusing would leave a wrong entry no one can take out.
-        for section in ("model", "vision", "voice", "orchestrator", "dispatcher"):
+        for section in ("model", "vision", "companion", "orchestrator", "dispatcher"):
             if raw[section].get("preset") == preset_id:
                 raw[section]["preset"] = ""
+        if raw["companion"].get("background_preset") == preset_id:
+            raw["companion"]["background_preset"] = ""
         return await _save_provider_config(type(app.config).model_validate(raw))
 
     # -- static mini app ------------------------------------------------------------

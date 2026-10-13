@@ -267,11 +267,16 @@ async def test_the_tool_and_its_prompt_are_for_leaders_only(settings: Settings, 
         child = await manager.create_session("child", metadata={"subagent_of": ordinary.session.id})
         grandchild = await manager.create_session("grandchild", metadata={"subagent_of": child.session.id})
         staff = await manager.create_session("staff", metadata={"staff_session_id": "ss1", "staff_id": "st1"})
-        voice = await manager.create_session("voice", metadata={"voice": True})
-        for state, allowed in ((ordinary, True), (beat, True), (child, False), (grandchild, False), (staff, False), (voice, False)):
+        companion = await manager.create_session("companion", metadata={"companion": True})
+        for state, allowed in ((ordinary, True), (beat, True), (child, False), (grandchild, False), (staff, False)):
             assert ("Notify" not in manager.blocked_tools_for(state)) is allowed, state.session.title
             engine = await manager._build_engine(state, f"run-{state.session.title}")
             assert (prompts.NOTIFY in engine.config.system_prompt_sections) is allowed, state.session.title
+        # The companion is a leader and may notify, but its own brief says when; the agents' section is not its.
+        assert "Notify" not in manager.blocked_tools_for(companion)
+        engine = await manager._build_engine(companion, "run-companion")
+        assert prompts.NOTIFY not in engine.config.system_prompt_sections
+        assert "Notify reaches the operator" in engine.config.system_prompt_sections[0]
         # A project's orchestrator keeps it within its allowlist, and its own brief says when to use it.
         orchestrator = await manager.create_session("orchestrator", metadata={"orchestrator_of": "p1"})
         assert "Notify" not in manager.blocked_tools_for(orchestrator)

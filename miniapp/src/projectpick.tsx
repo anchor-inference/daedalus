@@ -46,7 +46,7 @@ export function ProjectPickList({ projects, target, onPick }: { projects: Projec
       </label>
       <div className="project-pick-list" role="group" aria-label={t("start.where.label")}>
         {!query.trim() && row("", t("start.pick.none"), t("start.pick.none.sub"), "bots", false, "", false)}
-        {shown.map((p) => row(p.id, p.name, projectPath(p), p.system === "voice" ? "mic" : "folder", !projectReachable(p), projectReachable(p) ? "" : t("project.notmounted")))}
+        {shown.map((p) => row(p.id, p.name, projectPath(p), p.system === "companion" ? "mic" : "folder", !projectReachable(p), projectReachable(p) ? "" : t("project.notmounted")))}
         {query.trim() && shown.length === 0 && <div className="project-pick-empty sub">{t("common.nothing")}</div>}
       </div>
     </div>

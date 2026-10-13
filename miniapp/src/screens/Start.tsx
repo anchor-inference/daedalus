@@ -142,7 +142,7 @@ function StartWhere({ projects, all, target, onPick }: { projects: Project[]; al
     <div className="start-where" role="group" aria-label={t("start.where.label")}>
       <span className="start-where-word">{t("start.where")}</span>
       {chip("", t("start.where.chat"), "bots")}
-      {shown.map((p) => chip(p.id, p.name, p.system === "voice" ? "mic" : "folder"))}
+      {shown.map((p) => chip(p.id, p.name, p.system === "companion" ? "mic" : "folder"))}
       <button ref={more} type="button" className="start-where-chip more start-where-pick" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}
         title={hidden.length ? t("start.where.more", { n: hidden.length }) : undefined}>
         <Icon name="search" size={12} />{t("start.pick")}{hidden.length > 0 && <span className="start-where-n num">{hidden.length}</span>}<Icon name="chevron" size={12} />
@@ -261,7 +261,7 @@ function PhoneHome({ onOpen, toast, project, projects, model }: { onOpen: (id: s
           <Icon name="logo" size={36} />
           <h1>{t("start.greeting")}</h1>
           <button type="button" className="ph-btn sm ph-where" onClick={() => setPicking(true)} aria-haspopup="dialog" aria-label={`${t("start.where.label")}: ${picked ? picked.name : t("start.pick.none")}`}>
-            <Icon name={picked ? (picked.system === "voice" ? "mic" : "folder") : "bots"} size={16} />
+            <Icon name={picked ? (picked.system === "companion" ? "mic" : "folder") : "bots"} size={16} />
             <span className="truncate">{picked ? picked.name : t("start.pick.none")}</span>
             <Icon name="chevron" size={14} />
           </button>

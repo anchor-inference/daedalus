@@ -5,8 +5,8 @@ import type { Screen } from "./router";
 
 // Written out rather than imported: router.ts reads window.history the moment it loads, and these
 // are pure functions over a list of names.
-const SCREENS: Screen[] = ["agents", "voice", "inbox", "board", "changes", "schedules", "services", "memory", "usage", "health", "settings"];
-const BETA: Screen[] = ["voice"];
+const SCREENS: Screen[] = ["agents", "companion", "inbox", "board", "changes", "schedules", "services", "memory", "usage", "health", "settings"];
+const BETA: Screen[] = ["harnesses"];
 
 describe("visibleScreens", () => {
   it("drops Changes where the installation cannot change its own code", () => {
@@ -29,7 +29,7 @@ describe("screenTag", () => {
     expect(screenTag("changes", "server", BETA)).toBe("");
   });
   it("still marks what is in beta", () => {
-    expect(screenTag("voice", "server", BETA)).toBe("nav.tag.beta");
+    expect(screenTag("harnesses", "server", BETA)).toBe("nav.tag.beta");
     expect(screenTag("inbox", "server", BETA)).toBe("");
   });
 });

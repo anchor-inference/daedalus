@@ -1,6 +1,6 @@
-"""The Voice project in the sidebar: a project like the others, and still one step from the voice page.
+"""The companion's project in the sidebar: a project like the others, and still one step from its page.
 
-The sidebar draws every project as one row with a square tile, and Voice with a mic on its tile. The
+The sidebar draws every project as one row with a square tile, and the companion's with its face on its tile. The
 row opens the list of voice conversations where it stands, as every project row does; the voice page
 itself is the first thing the row's menu (and its right click) offers after a new chat, and the rail's
 mic is the other way there. With one voice conversation the row still opens to show it.
@@ -47,8 +47,8 @@ def check_the_row(browser, check, where: str, scope: str, viewport: dict, route:
     context, page = open_list(browser, viewport, route, single)
     voice = page.locator(f"{scope} .sb-project.system").first
     head = voice.locator(".sb-prow")
-    check(head.locator(".sb-tile .ic-mic").count() == 1, f"{where}: the Voice row carries the mic on its square tile")
-    check(head.get_attribute("aria-expanded") is not None and "Voice" in (head.get_attribute("aria-label") or ""), f"{where}: the row says what it opens and whether it is open")
+    check(head.locator(".sb-tile .companion-avatar").count() == 1, f"{where}: the companion's row carries its face on its square tile")
+    check(head.get_attribute("aria-expanded") is not None and "Companion" in (head.get_attribute("aria-label") or ""), f"{where}: the row says what it opens and whether it is open")
     plain = page.locator(f"{scope} .sb-project:not(.system) .sb-prow").first
     check(plain.get_attribute("aria-expanded") is not None, f"{where}: an ordinary project's row is the same kind of control")
 
@@ -71,16 +71,16 @@ def check_the_row(browser, check, where: str, scope: str, viewport: dict, route:
         page.wait_for_selector(f"{scope} .sb-project.system")
 
     page.locator(f"{scope} .sb-project.system .sb-prow").first.click(button="right")
-    item = page.locator(".context-menu").get_by_role("menuitem", name="Open the voice screen")
+    item = page.locator(".context-menu").get_by_role("menuitem", name="Open the companion")
     # The menu draws a frame after the click; counting at once raced it.
     try:
         item.wait_for(timeout=5000)
     except Exception:  # noqa: BLE001 — the check below reports it
         pass
-    check(item.count() == 1, f"{where}: the row's menu offers the voice page")
+    check(item.count() == 1, f"{where}: the row's menu offers the companion page")
     item.click()
     page.wait_for_selector(".voice-stage, .voice-grid", timeout=15000)
-    check(page.evaluate("location.pathname").endswith("/voice"), f"{where}: and it opens the voice page ({page.evaluate('location.pathname')})")
+    check(page.evaluate("location.pathname").endswith("/companion"), f"{where}: and it opens the companion page ({page.evaluate('location.pathname')})")
     context.close()
 
 

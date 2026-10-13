@@ -16,6 +16,7 @@
 // (left and right fold and unfold a project), Enter opens, Ctrl+Enter opens beside, F2 renames, E
 // archives, P pins or unpins, and Delete deletes after the same confirmation the menu asks for.
 
+import { CompanionFace } from "../companionavatar";
 import { useContextActions } from "../ui/context-menu";
 import { type ReactNode, memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { api, Project, SessionList, SessionSummary, Settings } from "../api";
@@ -480,7 +481,7 @@ const ProjectGroup = memo(function ProjectGroup({ folder, onOpen, current, filte
   const items: MenuItem[] = [
     { label: t("side.project.new", { name: folder.name }), icon: "compose", onSelect: newIn },
     pinCommand(folder.key, pinned, { key: true }),
-    ...(folder.system ? [{ label: t("agents.folder.tovoice"), icon: "mic" as const, onSelect: () => navigate(pathFor("voice")) }] : []),
+    ...(folder.system ? [{ label: t("agents.folder.tocompanion"), icon: "mic" as const, onSelect: () => navigate(pathFor("companion")) }] : []),
     { label: t("project.settings.for", { name: folder.name }), icon: "settings", onSelect: editProject },
     ...(revealer ? [{ label: revealer.label, icon: "external" as const, onSelect: () => void revealer.reveal({ project_id: folder.key }) }] : []),
     { label: t(showing ? "agents.folder.hide" : "agents.folder.show", { name: folder.name }), icon: "chevron", onSelect: () => toggle() },
@@ -512,7 +513,7 @@ const ProjectGroup = memo(function ProjectGroup({ folder, onOpen, current, filte
       <div ref={head} className="sb-row sb-prow" data-nav="project" data-project-head="" role="button" tabIndex={0} aria-expanded={showing}
         aria-label={t(showing ? "agents.folder.hide" : "agents.folder.show", { name: folder.name })} title={projectPath(folder.project)}
         onClick={() => toggle()} onKeyDown={onKey}>
-        <span className="sb-tile"><Icon name={folder.system ? "mic" : "folder"} size={14} />{state && <span className={`sb-st ${state}`} />}</span>
+        <span className="sb-tile">{folder.system ? <CompanionFace size={14} /> : <Icon name="folder" size={14} />}{state && <span className={`sb-st ${state}`} />}</span>
         <span className="sb-main"><span className="sb-t">{folder.name}</span></span>
         <span className="sb-ptrail">
           {showing ? <span className="sb-chev" aria-hidden><Icon name="chevron" size={14} /></span> : <span className="sb-pcount num" title={plural("agents.count", folder.total)}>{folder.total}</span>}

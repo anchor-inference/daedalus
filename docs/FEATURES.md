@@ -44,8 +44,8 @@ Provider keys live in a key proxy — a second container in Docker mode, a secon
 <tr>
 <td valign="top">
 
-**🎙️ Voice (beta)**<br/>
-Talk to a small fast model that answers out loud in a second, hands anything substantial to an agent session while you keep talking, and tells you when one finishes. See [Voice mode](VOICE.md).
+**🫧 Companion**<br/>
+Your standing personal agent, by text and by voice: it answers out loud on a call, hands anything substantial to agent sessions, owns goals it checks on a cadence, and reports to your Inbox when you are away. See [The companion](COMPANION.md).
 
 </td>
 <td valign="top">

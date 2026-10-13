@@ -58,8 +58,8 @@ QUESTIONS: list[tuple[str, str]] = [
     ("как добавить сервер MCP", "setting:mcp.servers"),
     ("как включить тёмную тему", "setting:appearance.theme"),
     ("Telegram topics instead of the private chat", "setting:telegram.mode"),
-    ("change the voice that reads answers aloud", "setting:voice.tts.local_voice"),
-    ("модель для голосового режима консьержа", "setting:voice.preset"),
+    ("change the voice that reads answers aloud", "setting:companion.tts.local_voice"),
+    ("модель для голосового режима консьержа", "setting:companion.preset"),
     ("как поменять порядок пунктов в боковой панели", "setting:navigation.rail"),
     ("разрешить агенту менять свой код без моего подтверждения", "setting:self_change.approval"),
     ("how many browsers can run at once", "setting:browser.running_cap"),
@@ -72,7 +72,7 @@ QUESTIONS: list[tuple[str, str]] = [
     ("record what the browser does", "setting:browser.record_frames"),
     ("сбросить счётчик потраченных денег", "setting:limits.total_since"),
     ("как выйти из аккаунта на этом браузере", "setting:logout"),
-    ("how does voice mode work", "docs:voice"),
+    ("how does voice mode work", "docs:companion"),
     # The documentation.
     # Two pages answer this one: the operator's guide, and the one written for an agent doing it for them.
     ("how to install Daedalus on a server", "docs:install|docs:agent-setup"),

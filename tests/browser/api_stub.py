@@ -28,6 +28,7 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import unquote, unquote_plus
 
 from calendar_stub import CalendarStub
+from companion_stub import CompanionStub
 from folder_stub import DEFAULT as FOLDERS
 from import_stub import DEFAULT as IMPORTS
 from import_stub import ImportStub
@@ -330,8 +331,6 @@ GATES: dict[str, object] = {
     "/api/projects": [],
     # The folder form asks where a folder may live before it offers the environment choice.
     "/api/project-environments": ENVIRONMENTS,
-    # The composer offers the voice page only where the installation has one; a harness has none.
-    "/api/voice": {"enabled": False},
     # The browsers of whichever session or staff member a screen shows: none, on an installation that
     # has a browser. A harness that opens one installs `browser_stub.BrowserStub`, which answers the rest
     # of `/api/browsers*` and the live view's WebSocket.
@@ -376,6 +375,7 @@ PAGES = PagesStub()
 
 
 CALENDAR = CalendarStub()
+COMPANION = CompanionStub()
 """The calendar and planner every harness shares: calendars, a week of events, tasks and connections."""
 
 
@@ -630,6 +630,11 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         # write's body goes through: a block patch, a status or a new group means nothing without it.
         status, payload = CALENDAR.answer(method.upper(), path, query, body if isinstance(body, dict) else None)  # type: ignore[misc]
         return status, "application/json", json.dumps(payload)
+    if path.startswith("/api/companion"):
+        # The companion's page and every list that draws its face; check_companion.py reads its writes back.
+        answered = COMPANION.answer(method, path, query, body if isinstance(body, dict) else None)
+        if answered is not None:
+            return answered[0], "application/json", json.dumps(answered[1])
     if path in GATES:
         return 200, "application/json", json.dumps(GATES[path])
     if method.upper() == "GET" and path.startswith("/api/pages/"):
@@ -769,7 +774,7 @@ def fulfil_shared(route) -> bool:  # type: ignore[no-untyped-def]
     """:func:`answer_shared` for a Playwright route: ``True`` when it answered."""
     request = route.request
     try:
-        body = request.post_data_json if request.method in ("POST", "PUT") and request.post_data else None
+        body = request.post_data_json if request.method in ("POST", "PUT", "PATCH") and request.post_data else None
     except (ValueError, UnicodeDecodeError):
         body = None  # an upload or a form: no route here answers by what such a body says
     shared = answer_shared(request.method, request.url, body)

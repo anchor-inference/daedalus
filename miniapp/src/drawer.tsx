@@ -31,7 +31,7 @@ function chatsIn(project: string): string {
 
 /** The daily destinations of each mode and what waits in More come from navconfig.ts, which knows
  *  the shipped drawer and the operator's own order. */
-const BETA: Screen[] = ["voice"];
+const BETA: Screen[] = [];
 const PROJECTS = 5;
 
 /** Initials for a project's avatar: the first letters of its first two words. */

@@ -1175,7 +1175,7 @@ async def test_a_real_streaming_model_hears_its_own_test_recording() -> None:
 class FakeVoice:
     """The voice extension as the API reads it, with nothing of the concierge behind it."""
 
-    async def state(self) -> dict[str, Any]:
+    async def voice_state(self) -> dict[str, Any]:
         return {
             "enabled": True,
             "session_id": "s1",
@@ -1215,7 +1215,7 @@ def warm_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.setattr("daedalus.speech.engine.Engine", LoadedEngine)
     CACHE.drop()
     app = FakeApp(tmp_path)
-    app.extensions["voice"] = FakeVoice()
+    app.extensions["companion"] = FakeVoice()
     _install_fake_model(app)
     with TestClient(build_app(app, "tok")) as c:  # type: ignore[arg-type]
         c.app_state = app  # type: ignore[attr-defined]
@@ -1279,25 +1279,25 @@ def test_a_load_that_fails_says_so_and_is_not_tried_again_on_every_poll(warm_cli
     assert "not a model" in load["error"]
     for _ in range(3):
         warm_client.post("/api/stt/engine/warm", headers=HEAD)
-        warm_client.get("/api/voice", headers=HEAD)
+        warm_client.get("/api/companion/voice", headers=HEAD)
     assert len(attempts) == 1
 
 
 def test_the_voice_page_is_told_which_recogniser_listens_and_where_its_weights_are(warm_client: TestClient) -> None:
-    stt = warm_client.get("/api/voice", headers=HEAD).json()["stt"]
+    stt = warm_client.get("/api/companion/voice", headers=HEAD).json()["stt"]
     assert stt["kind"] == "local" and stt["local"]["model"] == "gigaam-ru"
     # Opening the page is the second free moment to load the model, so asking for the page starts it.
     assert stt["state"] in ("loading", "ready")
     _until_loaded(warm_client)
-    after = warm_client.get("/api/voice", headers=HEAD).json()["stt"]
+    after = warm_client.get("/api/companion/voice", headers=HEAD).json()["stt"]
     assert after["state"] == "ready" and after["error"] == ""
 
 
 def test_a_page_with_no_local_model_never_waits_for_one(tmp_path: Path) -> None:
     app = FakeApp(tmp_path)
-    app.extensions["voice"] = FakeVoice()
+    app.extensions["companion"] = FakeVoice()
     with TestClient(build_app(app, "tok")) as client:  # type: ignore[arg-type]
-        stt = client.get("/api/voice", headers=HEAD).json()["stt"]
+        stt = client.get("/api/companion/voice", headers=HEAD).json()["stt"]
     # An endpoint and the browser's own recogniser answer the moment they are asked; only a local
     # model has weights to wait for, and the page must not draw a loading state for something that
     # never loads.

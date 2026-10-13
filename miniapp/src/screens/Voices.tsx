@@ -192,7 +192,7 @@ export function TtsVoices({ toast }: { toast: (message: string) => void }) {
   const chosen = view.models.find((m) => m.id === view.selected);
 
   return (
-    <div className="card" data-setting="voice.tts.local_voice">
+    <div className="card" data-setting="companion.tts.local_voice">
       <div className="section-title" style={{ marginTop: 0 }}>{t("tts.title")}</div>
       <div className="sub">{t("tts.intro")}</div>
 
@@ -298,14 +298,14 @@ export function TtsVoices({ toast }: { toast: (message: string) => void }) {
       {chosen && (
         <div className="catalogue-settings">
           {chosen.speakers.length > 1 && (
-            <Row title={t("tts.speaker")} stack data-setting="voice.tts.local_speaker">
+            <Row title={t("tts.speaker")} stack data-setting="companion.tts.local_speaker">
               <Dropdown label={t("tts.speaker")} value={view.state.speaker} onChange={(speaker) => void settings({ speaker })} options={[{ id: "", label: t("tts.speaker.first") }, ...chosen.speakers.map((who) => ({ id: who, label: who }))]} />
             </Row>
           )}
           {/* The number beside the thumb follows the drag; the configuration file is written when the
               drag ends. Saving on every change was a POST and a full rewrite of the operator's TOML
               per pixel — about thirty of each for one pull from 1.0 to 2.0. */}
-          <Row title={t("tts.speed.title")} stack data-setting="voice.tts.local_speed">
+          <Row title={t("tts.speed.title")} stack data-setting="companion.tts.local_speed">
             <span className="settings-range">
               <input
                 type="range"
@@ -322,7 +322,7 @@ export function TtsVoices({ toast }: { toast: (message: string) => void }) {
               <span className="settings-unit">{(dragging ?? view.state.speed).toFixed(2)}×</span>
             </span>
           </Row>
-          <Row title={t("tts.threads")} data-setting="voice.tts.local_threads">
+          <Row title={t("tts.threads")} data-setting="companion.tts.local_threads">
             <NumInput label={t("tts.threads")} value={view.state.threads} min={1} max={16} onSave={(threads) => void settings({ threads })} />
           </Row>
         </div>

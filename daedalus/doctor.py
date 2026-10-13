@@ -261,7 +261,7 @@ def _voice_load_note() -> str:
         return "; loading now"
     if state.state == "error":
         return f"; the last load failed: {state.error[:120]}"
-    return "; not loaded yet — it is loaded when the app starts and when the voice page opens"
+    return "; not loaded yet — it is loaded when the app starts and when the companion page opens"
 
 
 def _load_note() -> str:
@@ -280,7 +280,7 @@ def _load_note() -> str:
         return "; loading now"
     if state.state == "error":
         return f"; the last load failed: {state.error[:120]}"
-    return "; not loaded yet — the voice page loads it when it opens"
+    return "; not loaded yet — the companion page loads it when it opens"
 
 
 def _local_voice(ctx: DoctorContext) -> Check:
@@ -294,9 +294,9 @@ def _local_voice(ctx: DoctorContext) -> Check:
     from daedalus.speech import tts_catalog  # Lazy: the doctor must load on an install that never chose a voice
     from daedalus.speech.models import Downloads  # Lazy: same
 
-    chosen = ctx.config.voice.tts.local_voice
+    chosen = ctx.config.companion.tts.local_voice
     if not chosen:
-        endpoint = bool(ctx.config.voice.tts.provider or ctx.config.voice.tts.url)
+        endpoint = bool(ctx.config.companion.tts.provider or ctx.config.companion.tts.url)
         return Check("local voice", True,
                      "none: a speech endpoint speaks" if endpoint else "none: the browser's own synthesiser speaks",
                      "ok", "pick a voice in Settings → Voice → Voice (speech synthesis) to speak on this machine")

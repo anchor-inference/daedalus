@@ -21,7 +21,7 @@
     {
       "id": "voice", "group": "you", "icon": "mic",
       "title": { "en": "Voice & speech", "ru": "Голос и речь" },
-      "about": { "en": "The concierge, speech recognition for voice notes and dictation in the chat, and the speech models that run on this machine.", "ru": "Консьерж, распознавание речи для голосовых сообщений и диктовки в чате, речевые модели этой установки." },
+      "about": { "en": "The companion, speech recognition for voice notes and dictation in the chat, and the speech models that run on this machine.", "ru": "Компаньон, распознавание речи для голосовых сообщений и диктовки в чате, речевые модели этой установки." },
       "synonyms": ["speech", "voice", "STT", "TTS", "ASR", "речь", "голос", "озвучка"]
     },
     {
@@ -285,16 +285,16 @@
       "synonyms": ["test notification", "test push", "send test", "check notifications", "тест уведомлений", "проверить пуш", "тестовое уведомление"]
     },
     {
-      "section": "voice", "anchor": "voice.enabled", "config": "voice.enabled",
-      "title": { "en": "Concierge", "ru": "Консьерж" },
-      "about": { "en": "The voice mode: you talk to a small fast model that answers out loud and hands real work to agents; the card shows what it runs on.", "ru": "Голосовой режим: вы говорите с небольшой быстрой моделью, она отвечает вслух и передаёт работу агентам; карточка показывает, на чём он работает." },
-      "synonyms": ["concierge", "voice mode", "talk to the agent", "voice chat", "voice assistant", "консьерж", "голосовой режим", "поговорить голосом", "голосовой ассистент", "разговор голосом"]
+      "section": "voice", "anchor": "companion.enabled", "config": "companion.enabled",
+      "title": { "en": "Companion", "ru": "Компаньон" },
+      "about": { "en": "Your standing personal agent: you talk to it by text or voice, it owns goals, checks them on a schedule and hands real work to agents; the card shows what it runs on.", "ru": "Ваш постоянный личный агент: с ним говорят текстом или голосом, он ведёт цели, проверяет их по расписанию и передаёт работу агентам; карточка показывает, на чём он работает." },
+      "synonyms": ["companion", "concierge", "voice mode", "talk to the agent", "voice chat", "voice assistant", "personal agent", "goals", "компаньон", "консьерж", "голосовой режим", "поговорить голосом", "голосовой ассистент", "разговор голосом", "личный агент", "цели"]
     },
     {
-      "section": "voice", "anchor": "voice.preset", "config": "voice.preset",
-      "title": { "en": "Concierge model", "ru": "Модель консьержа" },
-      "about": { "en": "The model the concierge answers with; pick a fast one without thinking, since you wait for it out loud.", "ru": "Модель, которой отвечает консьерж; выберите быструю без рассуждений — вы ждёте её ответа вслух." },
-      "synonyms": ["concierge model", "voice mode model", "fast model", "модель консьержа", "модель голосового режима", "быстрая модель"]
+      "section": "voice", "anchor": "companion.preset", "config": "companion.preset",
+      "title": { "en": "Companion voice model", "ru": "Голосовая модель компаньона" },
+      "about": { "en": "The model the companion answers spoken turns with; pick a fast one without thinking, since you wait for it out loud. Typed turns and goal checks use the background model.", "ru": "Модель, которой компаньон отвечает на голосовые реплики; выберите быструю без рассуждений — вы ждёте её ответа вслух. Текст и проверки целей идут на фоновой модели." },
+      "synonyms": ["companion model", "concierge model", "voice mode model", "fast model", "модель компаньона", "модель консьержа", "модель голосового режима", "быстрая модель"]
     },
     {
       "section": "voice", "anchor": "asr.transcriber", "config": "asr.transcriber",
@@ -369,25 +369,25 @@
       "synonyms": ["threads", "CPU threads", "recognition speed", "потоки", "ядра процессора", "скорость распознавания"]
     },
     {
-      "section": "voice", "anchor": "voice.tts.local_voice", "config": "voice.tts.local_voice",
+      "section": "voice", "anchor": "companion.tts.local_voice", "config": "companion.tts.local_voice",
       "title": { "en": "Voice (speech synthesis)", "ru": "Голос (синтез речи)" },
-      "about": { "en": "The local voices to download and the one that reads answers aloud on the voice page.", "ru": "Локальные голоса для скачивания и тот, которым читаются ответы на голосовой странице." },
+      "about": { "en": "The local voices to download and the one that reads the companion's answers aloud.", "ru": "Локальные голоса для скачивания и тот, которым компаньон читает ответы вслух." },
       "synonyms": ["TTS", "text to speech", "speech synthesis", "voice", "read aloud", "narrator", "синтез речи", "озвучка", "голос", "читать вслух", "озвучивание"]
     },
     {
-      "section": "voice", "anchor": "voice.tts.local_speaker", "config": "voice.tts.local_speaker",
+      "section": "voice", "anchor": "companion.tts.local_speaker", "config": "companion.tts.local_speaker",
       "title": { "en": "Voice inside this model", "ru": "Голос внутри модели" },
       "about": { "en": "Which speaker of a multi-voice model reads the answers.", "ru": "Какой диктор многоголосой модели читает ответы." },
       "synonyms": ["speaker", "TTS speaker", "voice variant", "диктор", "спикер", "вариант голоса"]
     },
     {
-      "section": "voice", "anchor": "voice.tts.local_speed", "config": "voice.tts.local_speed",
+      "section": "voice", "anchor": "companion.tts.local_speed", "config": "companion.tts.local_speed",
       "title": { "en": "Speaking speed", "ru": "Скорость речи" },
       "about": { "en": "How fast the local voice reads, from half to twice the usual speed.", "ru": "Как быстро читает локальный голос, от половины до двойной обычной скорости." },
       "synonyms": ["speech rate", "TTS speed", "talk faster", "talk slower", "скорость озвучки", "говорить быстрее", "говорить медленнее"]
     },
     {
-      "section": "voice", "anchor": "voice.tts.local_threads", "config": "voice.tts.local_threads",
+      "section": "voice", "anchor": "companion.tts.local_threads", "config": "companion.tts.local_threads",
       "title": { "en": "Synthesis threads", "ru": "Потоки синтеза" },
       "about": { "en": "How many processor threads the local voice uses to speak.", "ru": "Сколько потоков процессора тратит локальный голос на синтез." },
       "synonyms": ["TTS threads", "CPU threads", "потоки озвучки", "ядра процессора"]

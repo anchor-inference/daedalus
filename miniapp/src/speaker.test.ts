@@ -377,7 +377,7 @@ describe("which engine reads an answer", () => {
     expect(asked.length).toBe(2);
     expect(fake.spoken.length).toBe(2);
     expect(posted.length).toBe(1);
-    expect(posted[0].url).toContain("/api/voice/tts");
+    expect(posted[0].url).toContain("/api/companion/tts");
     expect(posted[0].body).toEqual({ text: "The second answer, read by the voice.", turn: "run-2" });
   });
 

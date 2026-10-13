@@ -1,19 +1,13 @@
-// Voice: the operator talks, a small fast model answers out loud, and the work goes to agents.
+// The companion: the operator's standing agent, talked to by text and by voice on one page.
 //
-// The page is a conversation, not a transcript reader. One thing is in the middle of it — an orb that
-// breathes when nothing is happening, swells with the operator's own voice while it listens, turns
-// and brightens while the concierge thinks, and ripples in time with the answer while it is spoken.
-// Under it are the words: what was asked, what is being heard, and the reply a sentence at a time.
-// Beside it are the agents the concierge started, each one a tap away from its own session.
+// A profile header — its face, its name, what it is doing, Pause and Call — over tabs for what it owns:
+// the conversation, its goals, what runs on its clock, what it did, its agents' browsers, its tools and
+// its notes. The conversation tab is the old voice page grown a text half: the transcript is what it
+// opens on, typed messages go in at the bottom, and Call turns the middle into the orb and opens the
+// microphone. The call outlives the tabs: switching to Goals in the middle of one changes what is drawn
+// and touches nothing else, for the same reason the transcript view never did (see `voicesession.ts`).
 //
-// The middle of the page is a view, though, and the conversation is not. Reading the transcript of
-// what has been said — the concierge's, or any agent's — swaps what is drawn there and touches
-// nothing else: the microphone stays open, the answer goes on being read out, the stream is not
-// reconnected and not a word of what was being recognised is lost. That is why none of those things
-// is in this file any more. They are in `voicesession.ts`, which outlives every view here, and this
-// component subscribes to it the way it would to any other store.
-//
-// The motion is not decoration. There is no other signal on this page: the microphone is open or it
+// The motion is not decoration. There is no other signal on a call: the microphone is open or it
 // is not, the model is loaded or it is loading, the answer is being written or being read out, and a
 // person who is talking rather than reading has to know which from the corner of their eye. Where the
 // reader asked for less of it — `prefers-reduced-motion` — the colours and the words still say all
@@ -26,9 +20,9 @@ import { Dropdown, StatusLabel, timeAgo } from "../ui/components";
 import { Row } from "../settingsrow";
 import { t, useLang } from "../i18n";
 import { Icon } from "../icons";
-import { pathFor, sessionPath } from "../router";
-import { PageHeader, go, screenTitle } from "../ui/index";
-import { useQuery } from "../store";
+import { navigate, pathFor, sessionPath } from "../router";
+import { PageHeader, go } from "../ui/index";
+import { prime, useQuery } from "../store";
 import { errorText, haptic } from "../ui";
 import { localListenSupported } from "../stt";
 import { SpeechRuntimeNotice } from "./Components";
@@ -38,11 +32,12 @@ import { holdVoiceSession, voiceSession } from "../voicesession";
 import { usePresenceScope } from "../presence";
 import { useVoiceMascot } from "../ui/pet";
 import type { PetPose } from "../petstage";
+import { CompanionAvatar, avatarOf } from "../companionavatar";
+import { CompanionEditor, CompanionTab, TABS, type CompanionProfile, type CompanionTabId } from "./CompanionTabs";
 
 // The session view is most of the app's weight — the timeline, the markdown, the windowing, the
-// composer — and the voice page is a page that has to be on the screen before the first sentence of
-// an answer arrives. Loaded when a transcript is first opened, which is the first moment it is worth
-// anything, and never on the way to the orb.
+// composer — and a call has to be on the screen before the first sentence of an answer arrives.
+// Loaded when a transcript is first drawn, and never on the way to the orb.
 const SessionScreen = lazy(retried(() => import("./Session"), (m) => ({ default: m.SessionScreen })));
 const PetStage = lazy(retried(() => import("../petstage"), (m) => ({ default: m.PetStage })));
 
@@ -55,6 +50,9 @@ type VoiceState = {
   /** The preset the operator chose; "" is "whatever the default is", which `using` resolves. */
   preset?: string;
   using?: string;
+  /** The model for typed messages, reports and goal checks; "" is the default preset. */
+  background_preset?: string;
+  background_model?: string;
   presets?: VoicePreset[];
   tts?: {
     configured: boolean;
@@ -86,14 +84,98 @@ type VoiceState = {
   listening: boolean;
 };
 
-export function VoiceScreen({ onOpen, toast }: { onOpen: (id: string) => void; toast: (t: string) => void }) {
-  const { data: state, refresh } = useQuery<VoiceState>("/api/voice", { staleMs: 10000, pollMs: 60000 });
+export function CompanionScreen({ tab, onOpen, toast }: { tab?: string | null; onOpen: (id: string) => void; toast: (t: string) => void }) {
+  const { data: profile, refresh: refreshProfile } = useQuery<CompanionProfile>("/api/companion", { staleMs: 2000, pollMs: 5000 });
+  const session = useMemo(() => voiceSession(), []);
+  // Held here, above the tabs, so a call goes on while another tab is open.
+  useEffect(() => holdVoiceSession(), []);
+  const ui = useSyncExternalStore(session.subscribe, session.state);
+  const [editing, setEditing] = useState(false);
+  useLang();
+  const current: CompanionTabId = (TABS as readonly string[]).includes(tab ?? "") ? (tab as CompanionTabId) : "conversation";
+  const name = profile?.name || "";
+  const avatar = avatarOf(profile?.avatar);
+  const word = profile?.paused ? t("companion.state.paused") : t(`companion.state.${ui.micOn && profile?.state === "idle" ? "listening" : profile?.state ?? "idle"}`);
+  // A state change on the stream is the moment the header's word is stale; the poll is only the floor.
+  useEffect(() => session.onAnswered(() => void refreshProfile()), [session, refreshProfile]);
+  useEffect(() => { void refreshProfile(); }, [ui.phase, refreshProfile]);
+
+  async function pause() {
+    try {
+      // The answer is the profile as it now is: put in the cache directly, because a poll already on
+      // its way would answer from before the pause and the header would say the opposite for a while.
+      prime("/api/companion", await api.post<CompanionProfile>("/api/companion/pause", { paused: !profile?.paused }));
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
+  function call() {
+    if (ui.micOn) {
+      session.stopMic();
+      session.dispatch({ type: "center", center: { view: "transcript" } });
+      return;
+    }
+    if (current !== "conversation") navigate(pathFor("companion"));
+    session.dispatch({ type: "center", center: { view: "orb" } });
+    void session.startMic();
+  }
+  const pick = (id: CompanionTabId) => navigate(id === "conversation" ? pathFor("companion") : pathFor("companion", id));
+  return (
+    <>
+      <PageHeader
+        title={
+          <span className="companion-title">
+            <CompanionAvatar avatar={avatar} size={28} state={profile?.paused ? "paused" : profile?.state} name={name} />
+            <span className="truncate">{name || "…"}</span>
+          </span>
+        }
+        subtitle={
+          <span className="companion-sub">
+            <span className={`chip companion-state ${profile?.paused ? "paused" : profile?.state ?? "idle"}`}>{word}</span>
+            {!!profile?.running_agents && <span className="sub">{t("companion.running", { n: profile.running_agents })}</span>}
+          </span>
+        }
+        actions={
+          <>
+            <button className="btn ghost small" onClick={() => setEditing(true)} title={t("companion.edit")} aria-label={t("companion.edit")}>
+              <Icon name="settings" size={16} />
+            </button>
+            <button className={`btn ghost small${profile?.paused ? " on" : ""}`} onClick={() => void pause()} title={t("companion.pause.hint")} aria-pressed={!!profile?.paused}>
+              {t(profile?.paused ? "companion.resume" : "companion.pause")}
+            </button>
+            <button className={`btn small companion-call${ui.micOn ? " on" : ""}`} onClick={call} aria-pressed={ui.micOn}>
+              <Icon name="mic" size={16} /> {t(ui.micOn ? "companion.hangup" : "companion.call")}
+            </button>
+          </>
+        }
+      >
+        <div className="companion-tabs" role="tablist" aria-label={t("companion.tabs")}>
+          {TABS.map((id) => (
+            <button key={id} role="tab" aria-selected={current === id} className={current === id ? "on" : ""} onClick={() => pick(id)}>
+              {t(`companion.tab.${id}`)}
+            </button>
+          ))}
+        </div>
+      </PageHeader>
+      {editing && profile && <CompanionEditor profile={profile} onClose={() => setEditing(false)} onSaved={(next) => prime("/api/companion", next)} toast={toast} />}
+      {/* Kept mounted under the other tabs, so a call goes on while Goals is open. `contents` rather than
+          a box: the conversation's grid sizes itself against the page, and a wrapper box in between
+          let the transcript grow the page instead of scrolling inside it. */}
+      <div className="companion-conversation" style={{ display: current === "conversation" ? "contents" : "none" }}>
+        <CompanionConversation onOpen={onOpen} toast={toast} name={name} />
+      </div>
+      {current !== "conversation" && <CompanionTab tab={current} profile={profile ?? null} toast={toast} onOpen={onOpen} />}
+    </>
+  );
+}
+
+function CompanionConversation({ onOpen, toast, name }: { onOpen: (id: string) => void; toast: (t: string) => void; name: string }) {
+  const { data: state, refresh } = useQuery<VoiceState>("/api/companion/voice", { staleMs: 10000, pollMs: 60000 });
   // The concierge's own session is what this page shows, whether or not its transcript is open.
   usePresenceScope({ session: state?.session_id || undefined });
-  // The conversation. Not built here and not torn down here: this component is one of the things
-  // that can be drawn over it, and it holds the session only for as long as it is on the screen.
+  // The conversation. Not built here and not torn down here: the page holds it, above the tabs, and
+  // this component is one of the things that can be drawn over it.
   const session = useMemo(() => voiceSession(), []);
-  useEffect(() => holdVoiceSession(), []);
   const ui = useSyncExternalStore(session.subscribe, session.state);
   const [voiceMascot, setVoiceMascot] = useVoiceMascot();
   const [typed, setTyped] = useState("");
@@ -102,7 +184,7 @@ export function VoiceScreen({ onOpen, toast }: { onOpen: (id: string) => void; t
   const [panel, setPanel] = useState(false);
   useLang();
   // The server produces the audio for both of the first two: a voice on this machine and a speech
-  // endpoint both answer /api/voice/tts, and only the browser's own synthesiser does not.
+  // endpoint both answer /api/companion/tts, and only the browser's own synthesiser does not.
   const serverTts = !!state?.tts?.configured;
   // A voice that runs on this machine is not ready the moment it is chosen: it is a second or two of
   // building a synthesiser, and the process warms it when it starts, when it is chosen and when this
@@ -147,7 +229,7 @@ export function VoiceScreen({ onOpen, toast }: { onOpen: (id: string) => void; t
   }, [session, state]);
 
   // The server's half of the timing — how long the first clip took and how much of that was the
-  // voice being built — is on /api/voice, and it is only worth reading once an answer has been said.
+  // voice being built — is on /api/companion/voice, and it is only worth reading once an answer has been said.
   useEffect(() => session.onAnswered(() => void refresh()), [session, refresh]);
 
   useEffect(() => {
@@ -191,6 +273,15 @@ export function VoiceScreen({ onOpen, toast }: { onOpen: (id: string) => void; t
     if (reading) backToVoice();
     else openTranscript();
   }, [backToVoice, openTranscript, reading]);
+  // The conversation opens on its transcript: the companion is talked to in text as often as out
+  // loud, and the orb is what Call puts in the middle. Once, when the session is first known, so a
+  // view the operator chose is never taken away from them by a poll.
+  const opened = useRef(false);
+  useEffect(() => {
+    if (opened.current || !state?.session_id) return;
+    opened.current = true;
+    if (!ui.micOn && ui.center.view === "orb") setCenter({ view: "transcript" });
+  }, [state?.session_id, ui.micOn, ui.center.view, setCenter]);
 
   // One key for the thing the owner asked to reach without stopping the conversation, and Escape to
   // come back. Read from the physical key rather than the character it produces, so the shortcut is
@@ -277,7 +368,7 @@ export function VoiceScreen({ onOpen, toast }: { onOpen: (id: string) => void; t
 
   const send = useCallback(
     (text: string) => {
-      void session.send(text);
+      void session.type(text);
     },
     [session],
   );
@@ -297,15 +388,12 @@ export function VoiceScreen({ onOpen, toast }: { onOpen: (id: string) => void; t
 
   if (state && !state.enabled) {
     return (
-      <>
-        <PageHeader title={<VoiceTitle />} />
-        <div className="screen wide">
-          <div className="empty">
-            <b>{t("voice.off.title")}</b>
-            <div>{t("voice.off.body")}</div>
-          </div>
+      <div className="screen wide">
+        <div className="empty">
+          <b>{t("voice.off.title")}</b>
+          <div>{t("voice.off.body")}</div>
         </div>
-      </>
+      </div>
     );
   }
 
@@ -344,7 +432,7 @@ export function VoiceScreen({ onOpen, toast }: { onOpen: (id: string) => void; t
         send(text);
       }}
     >
-      <input className="field" placeholder={t("voice.compose")} value={typed} onChange={(e) => setTyped(e.target.value)} aria-label={t("voice.compose.label")} />
+      <input className="field" placeholder={t("voice.compose", { name })} value={typed} onChange={(e) => setTyped(e.target.value)} aria-label={t("voice.compose.label")} />
       <button className="btn ghost" type="submit" disabled={!typed.trim()} aria-label={t("voice.compose.label")}>
         <Icon name="send" size={16} />
       </button>
@@ -353,22 +441,17 @@ export function VoiceScreen({ onOpen, toast }: { onOpen: (id: string) => void; t
   const agentTitle = center.view === "agent" ? center.title : "";
   return (
     <>
-      <PageHeader
-        title={<VoiceTitle />}
-        subtitle={state ? `${state.model} · ${spokenBy}` : "…"}
-        actions={
-          <>
-            {state?.session_id && (
-              <button className={`btn ghost small${reading ? " on" : ""}`} onClick={toggleTranscript} aria-pressed={reading} title={t("voice.transcript.key")}>
-                {t(reading ? "voice.transcript.back" : "voice.transcript")}
-              </button>
-            )}
-            <button className="btn small" onClick={() => void newConversation()}>
-              {t("voice.new")}
-            </button>
-          </>
-        }
-      />
+      <div className="companion-toolbar">
+        <span className="sub truncate">{state ? `${state.model} · ${spokenBy}` : "…"}</span>
+        {state?.session_id && (
+          <button className={`btn ghost small${reading ? " on" : ""}`} onClick={toggleTranscript} aria-pressed={reading} title={t("voice.transcript.key")}>
+            {t(reading ? "voice.transcript.back" : "voice.transcript")}
+          </button>
+        )}
+        <button className="btn ghost small" onClick={() => void newConversation()}>
+          {t("voice.new")}
+        </button>
+      </div>
       <div className="screen wide voice">
         <div className={`voice-grid${reading ? " reading" : ""}${panel ? " panel-open" : ""}`}>
           {/* One area, two things that can be in it. The key is what makes the swap a cross-fade
@@ -468,7 +551,7 @@ export function VoiceScreen({ onOpen, toast }: { onOpen: (id: string) => void; t
                     </button>
                     <nav className="voice-crumb" aria-label={t("voice.crumb.label")}>
                       <button className="link" onClick={backToVoice}>
-                        {screenTitle("voice")}
+                        {name}
                       </button>
                       <span aria-hidden>›</span>
                       <b className="truncate">{center.view === "agent" ? agentTitle : t("voice.crumb.own")}</b>
@@ -638,15 +721,7 @@ function SpokenTiming({ ms, turn }: { ms: number; turn?: { first_audio_ms: numbe
   );
 }
 
-function VoiceTitle() {
-  return (
-    <>
-      {screenTitle("voice")} <span className="chip accent voice-beta">{t("voice.beta")}</span>
-    </>
-  );
-}
-
-/** Which of the three speaks, in one line: the same order /api/voice decides and the chip follows. */
+/** Which of the three speaks, in one line: the same order /api/companion/voice decides and the chip follows. */
 function spokenLine(data: VoiceState): string {
   const tts = data.tts;
   if (tts?.kind === "local") return t("voice.card.out.local", { voice: tts.voice || "" });
@@ -656,17 +731,17 @@ function spokenLine(data: VoiceState): string {
 
 /** The Settings card: what the page runs on and what it can and cannot do here. */
 export function VoiceSettings({ toast }: { toast: (t: string) => void }) {
-  const { data, refresh } = useQuery<VoiceState>("/api/voice", { staleMs: 10000 });
+  const { data, refresh } = useQuery<VoiceState>("/api/companion/voice", { staleMs: 10000 });
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState("");
   // The model is chosen here because this is where the operator came looking for it. It is the one
   // thing on this card that is written rather than reported, and the reading that follows the write
   // is the server's, not the app's guess at what it did.
-  const pick = async (preset: string) => {
+  const pick = async (choice: { preset?: string; background_preset?: string }) => {
     setSaving(true);
     setProblem("");
     try {
-      await api.put("/api/voice/model", { preset });
+      await api.put("/api/companion/model", choice);
       await refresh();
     } catch (e) {
       setProblem(errorText(e));
@@ -685,14 +760,14 @@ export function VoiceSettings({ toast }: { toast: (t: string) => void }) {
         ? t("voice.card.in.server")
         : t("voice.card.in.none");
   return (
-    <div className="card voice-card" data-setting="voice.enabled">
+    <div className="card voice-card" data-setting="companion.enabled">
       <div className="section-title" style={{ marginTop: 0 }}>{t("voice.card.title")}</div>
       <div className="sub">{t("voice.card.intro")}</div>
       <Row title={t("voice.card.enabled")}>
         <span className="settings-value">{t(data.enabled ? "voice.card.enabled.yes" : "voice.card.enabled.no")}</span>
       </Row>
       <Row
-        data-setting="voice.preset"
+        data-setting="companion.preset"
         title={t("voice.card.model")}
         desc={
           <>
@@ -712,10 +787,22 @@ export function VoiceSettings({ toast }: { toast: (t: string) => void }) {
           label={t("voice.card.model")}
           value={row.value}
           disabled={saving}
-          onChange={(preset) => void pick(preset)}
+          onChange={(preset) => void pick({ preset })}
           options={[
             { id: "", label: row.fallback ? t("voice.card.model.default.named", { model: row.fallback }) : t("voice.card.model.default") },
             ...row.choices.map((c) => ({ id: c.id, label: c.label, hint: c.slow ? t("voice.card.model.option.slow", { detail: c.detail }) : c.detail })),
+          ]}
+        />
+      </Row>
+      <Row title={t("voice.card.background")} desc={t("voice.card.background.hint")} stack>
+        <Dropdown
+          label={t("voice.card.background")}
+          value={data.background_preset ?? ""}
+          disabled={saving}
+          onChange={(background_preset) => void pick({ background_preset })}
+          options={[
+            { id: "", label: t("voice.card.model.default") },
+            ...(data.presets ?? []).map((p) => ({ id: p.id, label: p.label })),
           ]}
         />
       </Row>
@@ -742,7 +829,7 @@ export function VoiceSettings({ toast }: { toast: (t: string) => void }) {
           offer to install it belongs directly under them rather than on another page. */}
       <SpeechRuntimeNotice toast={toast} onInstalled={refresh} />
       <div className="btnrow">
-        <a className="btn small" href={pathFor("voice")} onClick={(e) => go(e, pathFor("voice"))}>
+        <a className="btn small" href={pathFor("companion")} onClick={(e) => go(e, pathFor("companion"))}>
           {t("voice.card.open")}
         </a>
       </div>

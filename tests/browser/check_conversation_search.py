@@ -17,7 +17,7 @@ CHROMIUM = os.environ.get('CHROMIUM', '/usr/local/bin/chromium')
 def run() -> int:
     projects = [
         dict(id='garden', name='Garden', total=1, members=1, last_message_at='2026-09-19T00:00:00Z'),
-        dict(id='voice', name='Voice', total=1, members=1, last_message_at='2026-09-17T00:00:00Z', system='voice'),
+        dict(id='voice', name='Voice', total=1, members=1, last_message_at='2026-09-17T00:00:00Z', system='companion'),
         dict(id='empty', name='Empty', total=0, members=0, last_message_at=''),
     ]
     for p in projects:

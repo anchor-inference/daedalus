@@ -5,6 +5,7 @@
 // is a block above everything, the same block the desktop's sidebar draws. The desktop keeps
 // Sessions.tsx; both read the same listing and the same commands (useSessionCommands).
 
+import { CompanionFace } from "../companionavatar";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type Project, type SessionList, type SessionSummary } from "../api";
 import { relTime, shortModel, untilShort } from "../format";
@@ -157,7 +158,7 @@ function ProjectSection({ folder, rows, toast, onOpen, filtered }: { folder: Fol
       {menu && <ActionSheet preview={{ title: folder.name, meta: plural("agents.count", folder.total) }} onClose={() => setMenu(false)} items={[
         { label: t("ph.newchat.in", { name: folder.name }), icon: "compose", onSelect: () => setAdding(true) },
         pinCommand(folder.key, false),
-        ...(folder.system ? [{ label: t("agents.folder.tovoice"), icon: "mic" as const, onSelect: () => navigate(pathFor("voice")) }] : [{ label: t("project.settings.for", { name: folder.name }), icon: "settings" as const, onSelect: () => setEditing(true) }]),
+        ...(folder.system ? [{ label: t("agents.folder.tocompanion"), icon: "mic" as const, onSelect: () => navigate(pathFor("companion")) }] : [{ label: t("project.settings.for", { name: folder.name }), icon: "settings" as const, onSelect: () => setEditing(true) }]),
         { label: t(shown ? "agents.folder.hide" : "agents.folder.show", { name: folder.name }), icon: shown ? "chevron" : "forward", onSelect: toggle },
       ]} />}
       {shown && <div className="ph-list">{lines(rows).map(({ row, fork }) => <ChatRow key={row.s.id} row={row} fork={fork} projectName={folder.name} toast={toast} onOpen={onOpen} onNewIn={() => setAdding(true)} />)}</div>}
@@ -196,7 +197,7 @@ function PinnedProject({ folder, toast, onOpen, filtered }: { folder: Folder; to
   const actions: MenuItem[] = [
     { label: t("ph.newchat.in", { name: folder.name }), icon: "compose", onSelect: () => setAdding(true) },
     pinCommand(folder.key, true),
-    ...(folder.system ? [{ label: t("agents.folder.tovoice"), icon: "mic" as const, onSelect: () => navigate(pathFor("voice")) }] : [{ label: t("project.settings.for", { name: folder.name }), icon: "settings" as const, onSelect: () => setEditing(true) }]),
+    ...(folder.system ? [{ label: t("agents.folder.tocompanion"), icon: "mic" as const, onSelect: () => navigate(pathFor("companion")) }] : [{ label: t("project.settings.for", { name: folder.name }), icon: "settings" as const, onSelect: () => setEditing(true) }]),
     { label: t(shown ? "agents.folder.hide" : "agents.folder.show", { name: folder.name }), icon: shown ? "chevron" : "forward", onSelect: toggle },
   ];
   return (
@@ -205,7 +206,7 @@ function PinnedProject({ folder, toast, onOpen, filtered }: { folder: Folder; to
         data={{ "project-head": folder.key }}
         title={folder.name}
         meta={<span className="ph-ell">{plural("agents.count", folder.total)}</span>}
-        lead={<span className="ph-sicon"><Icon name={folder.system ? "mic" : "folder"} size={18} /></span>}
+        lead={<span className="ph-sicon">{folder.system ? <CompanionFace size={18} /> : <Icon name="folder" size={18} />}</span>}
         trail={<span className={`ph-pinchev ${shown ? "open" : ""}`} aria-hidden><Icon name={shown ? "chevron" : "forward"} size={16} /></span>}
         label={t(shown ? "agents.folder.hide" : "agents.folder.show", { name: folder.name })}
         onOpen={toggle}

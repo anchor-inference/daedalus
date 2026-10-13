@@ -91,7 +91,7 @@ PROJECTS = [
     # A folder added but not mounted yet: in Docker that is a restart away, and the app says so.
     {"id": "5a8d1c0b6e22", "name": "Courier rates", "folders": folders("/home/operator/documents/courier", reachable=False), "created_at": ago(hours=2), "settings": {"snapshots": False}, "sessions": []},
     # The installation's own: the concierge and what it started by being spoken to.
-    {"id": PV, "name": "Voice", "folders": folders("/home/operator/.daedalus/workspaces/voice"), "created_at": ago(days=12), "settings": {"snapshots": False, "system": "voice"}, "system": "voice", "sessions": []},
+    {"id": PV, "name": "Companion", "folders": folders("/home/operator/.daedalus/workspaces/voice"), "created_at": ago(days=12), "settings": {"snapshots": False, "system": "companion"}, "system": "companion", "sessions": []},
 ]
 
 
@@ -132,8 +132,8 @@ SESSIONS = [
     session(S6, "Expense tracker", "Local Qwen3.8", last=ago(days=1), project=P2),
     # Started by talking: the concierge itself, one agent in the folder they share and one with its own.
     session(S9, "Voice", "Qwen 3.7 Flash", last=ago(minutes=3), project=PV, own=False),
-    session(S10, "Invoice run", "Claude Opus 5", status="running", last=ago(seconds=20), project=PV, own=False, meta={"voice_parent": S9}),
-    session(S11, "Courier quotes", "DeepSeek Flash", last=ago(minutes=26), project=PV, own=True, meta={"voice_parent": S9}),
+    session(S10, "Invoice run", "Claude Opus 5", status="running", last=ago(seconds=20), project=PV, own=False, meta={"companion_parent": S9}),
+    session(S11, "Courier quotes", "DeepSeek Flash", last=ago(minutes=26), project=PV, own=True, meta={"companion_parent": S9}),
 ]
 
 # Counted over the whole table by the API: the folder header says how many agents are in it whatever
@@ -760,7 +760,7 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return respond(route, search)
     if rel == "/api/providers/lookup-models":
         return respond(route, {"base_url": "http://keyproxy:3200/openrouter/v1", "models": [e["id"] for e in CATALOGUE], "entries": CATALOGUE})
-    if rel == "/api/voice/tts":
+    if rel == "/api/companion/tts":
         return respond(route, SILENCE, content_type="audio/wav")
     if rel.startswith("/api/harnesses"):
         posted = json.loads(request.post_data or "{}") if request.method in ("POST", "PUT") and request.post_data else None
@@ -792,6 +792,10 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         else:
             PINS.pop(pid, None)
         return respond(route, {"project_id": pid, "pinned_at": PINS.get(pid, "")})
+    if rel.startswith("/api/companion") and rel not in ("/api/companion/stream", "/api/companion/tts", "/api/companion/voice") and fulfil_shared(route):
+        # The companion's writes answer with what they changed (the profile, a goal), so they go to
+        # the shared host, which keeps them, rather than to the blanket "ok" below.
+        return None
     if request.method != "GET":
         return respond(route, {"ok": True})
     if rel == "/api/events" and getattr(stub, "events", ""):
@@ -800,7 +804,7 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return respond(route, stub.events, content_type="text/event-stream")  # type: ignore[attr-defined]
     if rel == "/api/stt/progress":
         # The voice page opens this to hear the engine finish loading; the picker opens it for the
-        # download bars. Neither needs anything to happen here — what is true now is on /api/voice.
+        # download bars. Neither needs anything to happen here — what is true now is on /api/companion/voice.
         over = getattr(stub, "voice_over", None) or {}
         load = {"kind": "engine", "state": over.get("state", VOICE["stt"]["state"]), "model": VOICE["stt"]["local"]["model"], "loaded_in_ms": over.get("loaded_in_ms", VOICE["stt"]["loaded_in_ms"]), "error": ""}
         return respond(route, f"data: {json.dumps(load)}\n\n", content_type="text/event-stream")
@@ -810,7 +814,7 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         over = getattr(stub, "voice_tts", None) or {}
         load = {"kind": "engine", "state": over.get("state", VOICE["tts"]["state"]), "voice": "ru-dmitri", "loaded_in_ms": over.get("loaded_in_ms", VOICE["tts"]["loaded_in_ms"]), "error": ""}
         return respond(route, f"data: {json.dumps(load)}\n\n", content_type="text/event-stream")
-    if rel == "/api/voice/stream":
+    if rel == "/api/companion/stream":
         # The concierge's half of the conversation, canned: the page has no other way into its
         # thinking, delegating and speaking states, and those are three of the five worth a picture.
         return respond(route, "event: hello\ndata: {}\n\n" + getattr(stub, "voice_frames", ""), content_type="text/event-stream")
@@ -908,7 +912,12 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return respond(route, [])
     if rel == "/api/skills":
         return respond(route, GATES["/api/skills"])
-    if rel == "/api/voice":
+    if rel == "/api/voice/listen/open":
+        # A call opens the local recogniser's stream; the pictures hear nothing in it.
+        return respond(route, {"stream": "s-picture", "rate": 16000})
+    if rel in ("/api/voice/listen", "/api/voice/listen/close"):
+        return respond(route, {"text": "", "final": False, "closed": True})
+    if rel == "/api/companion/voice":
         over = getattr(stub, "voice_over", None)
         spoken = getattr(stub, "voice_tts", None)
         body = dict(VOICE)
@@ -1060,6 +1069,59 @@ def shot(page: Page, name: str, route: str, *, wait: str = ".screen, .chat, .ph-
     page.wait_for_timeout(settle)
     page.screenshot(path=str(OUT / f"{name}.png"), full_page=full)
     print("wrote", name)
+
+
+SILENT_MIC = """
+(() => {
+  const devices = navigator.mediaDevices;
+  if (!devices) return;
+  devices.getUserMedia = async () => {
+    const audio = new AudioContext();
+    const sink = audio.createMediaStreamDestination();
+    const tone = audio.createOscillator();
+    const mute = audio.createGain();
+    mute.gain.value = 0;
+    tone.connect(mute).connect(sink);
+    tone.start();
+    return sink.stream;
+  };
+})();
+"""
+"""A microphone that hears nothing. The fake capture device beeps, and on a call a beep while an
+answer is being read out is the operator talking over it: a check of playback opens the call on this
+instead, so what it measures is the speaker and not a barge-in it did not ask for."""
+
+
+def call(page: Page) -> None:
+    """Start a call on the companion's page: the orb in the middle and the microphone open.
+
+    The page opens on its transcript and reads answers aloud only on a call, so every picture and
+    check of the voice half starts by pressing Call, as the operator does."""
+    page.wait_for_selector(".companion-call", timeout=15000)
+    if page.locator(".companion-call.on").count() == 0:
+        page.locator(".companion-call").click()
+    page.wait_for_selector(".voice-stage", timeout=15000)
+
+
+def stage(page: Page) -> None:
+    """Put the orb in the middle without starting a call: the view a picture of the stage wants."""
+    # The page opens on its transcript once it knows the conversation's session, which can be a
+    # moment after the orb was first drawn: waited for, so the orb is not clicked away by that switch.
+    try:
+        page.wait_for_selector(".voice-read", timeout=8000)
+    except Exception:  # noqa: BLE001 — an installation with no conversation yet opens on the orb
+        pass
+    # Pressed again if the first press is swallowed by a render in flight, which a loaded machine
+    # showed once in a full run: the toggle is the same button whichever view it leaves.
+    for _ in range(3):
+        if page.locator(".voice-read").count() == 0:
+            break
+        page.locator(".companion-toolbar button[aria-pressed]").click()
+        try:
+            page.wait_for_selector(".voice-stage", timeout=5000)
+        except Exception:  # noqa: BLE001 — tried again, and the wait below reports a page that never switches
+            continue
+    page.wait_for_selector(".voice-stage", timeout=15000)
 
 
 def expand_steps(page: Page) -> None:
@@ -1323,12 +1385,12 @@ def voice_shots(page: Page, prefix: str) -> None:
         stub.voice_tts = plan.get("tts")  # type: ignore[attr-defined]
         stub.voice_frames = plan["frames"]  # type: ignore[attr-defined]
         before = talking if plan["ask"] else listening if plan["mic"] else None
-        shot(page, f"{prefix}{name}", "voice", settle=1000, before=before)
+        shot(page, f"{prefix}{name}", "companion", settle=1000, before=before)
     stub.voice_over = {}  # type: ignore[attr-defined]
     stub.voice_tts = None  # type: ignore[attr-defined]
     stub.voice_frames = VOICE_STATES["speaking"]["frames"]  # type: ignore[attr-defined]
     for name, before in VOICE_VIEWS.items():
-        shot(page, f"{prefix}{name}", "voice", settle=1200, before=before)
+        shot(page, f"{prefix}{name}", "companion", settle=1200, before=before)
     stub.voice_over = None  # type: ignore[attr-defined]
     stub.voice_tts = None  # type: ignore[attr-defined]
     stub.voice_frames = ""  # type: ignore[attr-defined]
@@ -1452,10 +1514,10 @@ def run_composer() -> int:
             page = context.new_page()
             page.route("**/api/**", stub)
             if prefix != "voice-wide":
-                shot(page, "phone-voice" if mobile else "voice", "voice")
+                shot(page, "phone-voice" if mobile else "voice", "companion")
             stub.voice_frames = VOICE_STATES["speaking"]["frames"]  # type: ignore[attr-defined]
             for name, before in VOICE_VIEWS.items():
-                shot(page, f"{prefix}-{name}", "voice", settle=1200, before=before)
+                shot(page, f"{prefix}-{name}", "companion", settle=1200, before=before)
             stub.voice_frames = ""  # type: ignore[attr-defined]
             context.close()
         browser.close()
@@ -2054,7 +2116,7 @@ def run() -> int:
         # way, and the switcher opens from the sidebar it unfolds.
         shot(page, "projects", "agents", wait=".rail", before=open_projects)
         shot(page, "new-project", "agents", wait=".rail", before=open_new_project, settle=600)
-        shot(page, "voice", "voice")
+        shot(page, "voice", "companion")
         shot(page, "voice-settings", "settings/voice", wait=".stt-list .stt-card", before=scroll_to_voices, settle=700)
         shot(page, "board", "board")
         shot(page, "inbox", "inbox")
@@ -2095,7 +2157,7 @@ def run() -> int:
         shot(page, "phone-session-panel", f"agents/{S1}", wait=".chat-scroll .timeline", before=open_phone_panel, settle=600)
         dock_shots(phone, "phone-")
         terminals_shots(phone, "phone-")
-        shot(page, "phone-voice", "voice")
+        shot(page, "phone-voice", "companion")
         shot(page, "phone-memory", "memory")
         shot(page, "phone-health", "health", settle=900)
         shot(page, "phone-more", "agents", before=open_more)
