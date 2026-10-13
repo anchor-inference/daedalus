@@ -181,8 +181,10 @@ const fetched = window.fetch;
 window.fetch = function (input, init) {
   const url = String(typeof input === "string" ? input : input.url || "");
   return fetched.apply(this, arguments).then((response) => {
-    // The canned stream is a finite body, so the page reconnects; the first one is the one timed.
-    if (url.includes("/api/companion/stream") && !window.__streamAt) window.__streamAt = performance.now();
+    // The canned stream is a finite body, so the page reconnects. The connection timed is the last one
+    // before the first sentence was spoken: the page opens on its transcript, where nothing is read
+    // aloud, and the sentences that count arrive on the connection after the orb is put up.
+    if (url.includes("/api/companion/stream") && !window.__spoke.length) window.__streamAt = performance.now();
     return response;
   });
 };

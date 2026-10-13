@@ -1109,8 +1109,16 @@ def stage(page: Page) -> None:
         page.wait_for_selector(".voice-read", timeout=8000)
     except Exception:  # noqa: BLE001 — an installation with no conversation yet opens on the orb
         pass
-    if page.locator(".voice-read").count():
+    # Pressed again if the first press is swallowed by a render in flight, which a loaded machine
+    # showed once in a full run: the toggle is the same button whichever view it leaves.
+    for _ in range(3):
+        if page.locator(".voice-read").count() == 0:
+            break
         page.locator(".companion-toolbar button[aria-pressed]").click()
+        try:
+            page.wait_for_selector(".voice-stage", timeout=5000)
+        except Exception:  # noqa: BLE001 — tried again, and the wait below reports a page that never switches
+            continue
     page.wait_for_selector(".voice-stage", timeout=15000)
 
 

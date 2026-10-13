@@ -87,7 +87,7 @@ def desktop(browser, lang: str, check) -> None:  # type: ignore[no-untyped-def]
     more.click()
     check(page.locator(f".start-live-row[data-session='{shots.S3}']").count() == 1, f"{where}: Show all brings the loop in")
     meta = page.locator(f".start-live-row[data-session='{shots.S10}'] .start-live-meta").inner_text()
-    check("Voice" in meta, f"{where}: a chat's meta names its project ({meta!r})")
+    check("Companion" in meta, f"{where}: a chat's meta names its project ({meta!r})")
 
     # The circle is Send, and nothing in an ordinary composer opens Voice mode: that is a beta with a
     # chat of its own, and the button that led there from every empty field is gone.
