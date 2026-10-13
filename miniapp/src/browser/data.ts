@@ -5,7 +5,7 @@
 // is down, as for every other list.
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { api, telegram, type BrowserActionRow, type BrowserControl, type BrowserDraft, type BrowserGroup, type BrowserList, type BrowserRecording, type BrowserSiteNote, type BrowserStep, type BrowserWorkflow, type BrowserWorkflows } from "../api";
+import { api, telegram, type BrowserActionRow, type BrowserControl, type BrowserDraft, type BrowserGroup, type BrowserList, type BrowserLoginResult, type BrowserRecording, type BrowserSiteNote, type BrowserStep, type BrowserWorkflow, type BrowserWorkflows } from "../api";
 import { useEvent, useStreamUp } from "../events";
 import { invalidate, useQuery } from "../store";
 import { LiveView, type LiveSnapshot } from "./live";
@@ -186,6 +186,19 @@ export type CookiesLoaded = { set: number; rejected: number; skipped: number; si
 /** Load a cookie file the operator picked into the group's profile; `domain` is the site a bare Cookie header is for. */
 export async function importCookies(group: string, text: string, domain: string): Promise<CookiesLoaded> {
   return api.post<CookiesLoaded>(`${BROWSERS_KEY}/${enc(group)}/cookies`, { text, ...(domain ? { domain } : {}) });
+}
+
+/** The private sign-in form's answer: typed values, or the saved sign-in (`use_saved`), sent once and
+ *  never kept by the app. */
+export async function submitLogin(group: string, body: { login_id: string; username?: string; password?: string; otp?: string; save?: boolean; use_saved?: "once" | "always" }): Promise<BrowserLoginResult> {
+  const result = await api.post<BrowserLoginResult>(`${BROWSERS_KEY}/${enc(group)}/login`, body);
+  refreshLists();
+  return result;
+}
+
+export async function declineLogin(group: string, loginId: string): Promise<void> {
+  await api.post(`${BROWSERS_KEY}/${enc(group)}/login/decline`, { login_id: loginId });
+  refreshLists();
 }
 
 export async function closeBrowser(group: string): Promise<void> {

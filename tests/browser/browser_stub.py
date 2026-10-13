@@ -432,6 +432,13 @@ class BrowserStub:
             self.broadcast(group_id, {"type": "needs_you", "reason": reason, "what": what, "url": url, "by": by})
             self.broadcast(group_id, per_client=lambda c: {"type": "control", "group": g.id, **self.control_for(c)})
 
+    def login_ask(self, group_id: str, site: str, *, saved: bool = False, reason: str = "read the invoices", login_id: str = "l1") -> None:
+        """The agent's BrowserLogin: a "needs you" with the request the app draws its private form from."""
+        self.needs_you(group_id, "login", f"sign in to {site}: {reason}")
+        with self.lock:
+            g = self.groups[group_id]
+            g.needs = {**(g.needs or {}), "login": {"id": login_id, "site": site, "saved": saved, "reason": reason, "session_id": g.owner_id}}
+
     def open_dialog(self, group_id: str, message: str, kind: str = "confirm") -> None:
         with self.lock:
             g = self.groups[group_id]
@@ -617,6 +624,25 @@ class BrowserStub:
             if not str(body.get("text") or "").strip():
                 return 400, {"detail": "the file is empty"}
             return 200, {"set": 2, "rejected": 0, "skipped": 0, "sites": "shop.example 2"}
+        if action == "login" and method == "POST":
+            # The private sign-in: the values reach the daemon and never come back. The request is
+            # over once answered, and a second answer to it is refused as the host refuses it.
+            login = (g.needs or {}).get("login") or {}
+            if len(segments) == 5 and segments[4] == "decline":
+                if login.get("id") != body.get("login_id"):
+                    return 409, {"detail": "this sign-in request is over", "code": "conflict"}
+                g.needs = None
+                self.set_control(g.id, "agent")
+                return 200, {"ok": True}
+            if login.get("id") != body.get("login_id"):
+                return 409, {"detail": "this sign-in request is over", "code": "conflict"}
+            if not (body.get("use_saved") or body.get("username") or body.get("password") or body.get("otp")):
+                return 400, {"detail": "type a username, a password or a code"}
+            g.needs = None
+            self.set_control(g.id, "agent")
+            filled = [k for k in ("username", "password", "otp") if body.get(k)] or ["username", "password"]
+            return 200, {"site": login.get("site", ""), "url": f"https://{login.get('site', '')}/home", "signed_in": "yes", "filled": filled, "waiting": "",
+                         "saved": bool(body.get("save")) and not body.get("use_saved")}
         if action == "close" and method == "POST":
             g.status = "closed"
             self.drop(g.id, 4404)

@@ -189,11 +189,12 @@ ACTOR_OF = {"take": "operator", "give": "operator", "pause": "operator", "downlo
 KIND_OF = {"act": "", "tab_new": "new_tab", "download_saved": "download"}
 ACTION_LOG = (
     "act", "navigate", "tab_new", "look", "dialog", "handoff", "download", "download_saved", "take", "give", "pause", "open", "close", "blocked", "watch", "monitor",
-    "extract", "note", "cookies",
+    "extract", "note", "cookies", "login",
 )
 """The audit's actions the app's action log shows: what the agent did in the browser, and what it
 read out of a page (``extract``), proposed to remember about a site (``note``) or loaded into the
-browser's identity (``cookies``, by site and count alone), which the operator reviews like the rest."""
+browser's identity (``cookies``, by site and count alone; ``login``, the private sign-in, by site
+alone), which the operator reviews like the rest."""
 
 
 def _action_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -218,6 +219,10 @@ def _action_row(row: dict[str, Any]) -> dict[str, Any]:
         out["text"] = row["typed"]
     if detail.get("sensitive"):
         out["sensitive"] = {"kinds": list(detail.get("sensitive") or []), "decision": str(detail.get("decision") or ("allowed_once" if detail.get("grant") else "allowed"))}
+    if action == "login":
+        out["kind"] = "login_declined" if detail.get("declined") else "login"
+        out["element"] = str(detail.get("site") or "")
+        out["ok"] = detail.get("signed_in") != "no"
     if action == "handoff":
         out["needs"] = {"reason": str(detail.get("reason") or ""), "what": str(detail.get("what") or "")}
     if action in ("download", "download_saved"):

@@ -133,6 +133,9 @@ export function actionWords(row: Pick<BrowserActionRow, "kind" | "element" | "na
     case "cookies_import":
     case "cookies_clear":
       return { key: `browser.act.${row.kind}`, vars: { where: what } };
+    case "login":
+    case "login_declined":
+      return { key: `browser.act.${row.kind}`, vars: { where: what } };
     case "monitor":
       return { key: row.ok === false ? "browser.act.monitor.hit" : "browser.act.monitor.clean", vars: { where: domainOf(row.url ?? "") || row.url || "" } };
     default:

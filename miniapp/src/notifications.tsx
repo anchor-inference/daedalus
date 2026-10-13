@@ -17,6 +17,7 @@ import { SUMMARY_KEY, streamUp, useStreamUp } from "./events";
 import { toast } from "./ui/dialogs";
 import { t } from "./i18n";
 import { errorText } from "./ui";
+import { NoticeLoginCard } from "./browser/login";
 
 /** The host's categories, as `daedalus/extensions/notifications.py` names them; each has a word. */
 export const NOTICE_CATEGORIES = ["run_finished", "question", "permission", "run_failed", "staff_turn", "staff_review", "orchestrator_report", "agent_notify", "reminder", "spend", "system"] as const;
@@ -45,7 +46,7 @@ export function useNotifications(view: NoticeView, project?: string | null, limi
   return useQuery<NotificationPage>(listKey(view, project, limit), { pollMs: live ? 0 : 15000, staleMs: 5000 });
 }
 
-const KIND_ICON: Record<string, IconName> = { rebuild: "wrench", run_cap: "stop", schedule: "clock", schedule_run: "clock", service: "globe", loop: "loop", loop_paused: "pause", heartbeat: "dot", inbound: "inbox", board_stale: "board", webhook_failed: "globe", learning_digest: "bulb", boot_guard: "wrench", change_proposal: "changes", terminal: "terminal", balance: "chart", budget: "chart", browser: "globe", browser_needs_you: "globe", setting: "settings", setting_compaction: "settings", setting_vision: "settings", setting_search: "settings" };
+const KIND_ICON: Record<string, IconName> = { rebuild: "wrench", run_cap: "stop", schedule: "clock", schedule_run: "clock", service: "globe", loop: "loop", loop_paused: "pause", heartbeat: "dot", inbound: "inbox", board_stale: "board", webhook_failed: "globe", learning_digest: "bulb", boot_guard: "wrench", change_proposal: "changes", terminal: "terminal", balance: "chart", budget: "chart", browser: "globe", browser_needs_you: "globe", browser_login: "lock", setting: "settings", setting_compaction: "settings", setting_vision: "settings", setting_search: "settings" };
 const CATEGORY_ICON: Record<string, IconName> = { run_finished: "check", question: "question", permission: "key", run_failed: "stop", staff_turn: "bots", staff_review: "board", orchestrator_report: "spawn", agent_notify: "bolt", reminder: "clock", spend: "chart", system: "inbox" };
 
 /** The kind names the producer's own sub-kind when it has a better picture than the category's. */
@@ -294,6 +295,7 @@ export function NeedsYou({ names, onOpened, card, limit = 20, empty }: { names: 
       {entries.map((entry) => (
         <NotificationRow key={entry.id} entry={entry} names={names} card={card} showBody onActivate={() => { openEntry(entry); onOpened?.(); }}>
           <ActionButtons entry={entry} onDone={(r) => { if (!r.resolution) onOpened?.(); }} />
+          <NoticeLoginCard entry={entry} toast={toast} />
         </NotificationRow>
       ))}
     </section>

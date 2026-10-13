@@ -135,7 +135,10 @@ async def test_a_sign_in_goes_from_the_form_to_the_page_and_nowhere_else(rig: Ri
     audit = await rig.app.extensions["browser"].audit_log(f"s-{sid}")
     (done,) = [e["detail"] for e in audit if e["action"] == "login"]
     assert done == {"site": "acme.test", "filled": ["username", "password"], "signed_in": "yes", "url": "https://acme.test/home", "saved": False, "how": "typed"}
-    nowhere(json.dumps(audit) + json.dumps([t for _, t in rig.submitted]) + json.dumps(result))
+    # The operator's action log says it by site alone.
+    rows = await rig.app.extensions["browser"].actions(f"s-{sid}")
+    assert [(r["actor"], r["kind"], r["element"], r["ok"]) for r in rows if r["kind"].startswith("login")] == [("operator", "login", "acme.test", True)]
+    nowhere(json.dumps(audit) + json.dumps(rows) + json.dumps([t for _, t in rig.submitted]) + json.dumps(result))
     nowhere(await every_stored_text(rig.app.db))
     nowhere(caplog.text)
     # The password is masked from here on wherever it is echoed.

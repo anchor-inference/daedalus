@@ -285,8 +285,16 @@ export type BrowserControl = { owner: "agent" | "human" | "paused"; holder: stri
 
 export type BrowserTabView = { id: string; url: string; title: string; favicon_url: string; loading: boolean; active: boolean };
 
-/** What the agent asked the operator for (`BrowserHandoff`, or the daemon on its own). */
-export type BrowserNeed = { reason: "login" | "captcha" | "two_factor" | "payment" | "confirm" | "field_forbidden" | "basic_auth" | "other" | string; what: string; url: string; at: string; by?: "daemon" | "agent" };
+/** What the agent asked the operator for (`BrowserHandoff`, or the daemon on its own). `login` is a
+ *  request for the private sign-in (`BrowserLogin`): the app draws its form from it. */
+export type BrowserNeed = { reason: "login" | "captcha" | "two_factor" | "payment" | "confirm" | "field_forbidden" | "basic_auth" | "other" | string; what: string; url: string; at: string; by?: "daemon" | "agent"; login?: BrowserLoginAsk };
+
+/** A request for the private sign-in: the site, the agent's reason, and whether a sign-in is saved for
+ *  the site. Never a value: the app sends the values on their own request and never gets them back. */
+export type BrowserLoginAsk = { id: string; site: string; saved: boolean; reason?: string; session_id?: string };
+
+/** Where the page ended after the operator's sign-in, and whether it took (`yes`, `no`, `unknown`). */
+export type BrowserLoginResult = { site: string; url: string; signed_in: "yes" | "no" | "unknown"; filled: string[]; waiting: string; saved: boolean };
 
 /**
  * One agent owner's tabs in one browser (`GET /api/browsers?session=…` or `?staff=…`). `acting` is true

@@ -61,6 +61,7 @@ import { deviceSaving, useBrowsers } from "../browser/data";
 import { BrowserTab } from "../browser/BrowserPanel";
 import { BrowserPip } from "../browser/pip";
 import { BrowserHeadButton, BrowserNeedsRow, useFirstOpenToast } from "../browser/phone";
+import { BrowserLoginCard, loginAsk } from "../browser/login";
 import { pipGroup } from "../browser/model";
 import { orchestrationPathOf } from "../mode";
 import { FullResult, ToolResultView } from "../toolresult";
@@ -1574,7 +1575,12 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               {flow}
               {/* The agent waiting in its browser is said in the conversation too, with Open, so the
                   request is not only a chip in the bar. */}
-              {phone && !pane && panel.state.tab !== "browser" && <BrowserNeedsRow groups={browsers.groups} onOpen={openBrowser} />}
+              {phone && !pane && panel.state.tab !== "browser" && !browsers.groups.some(loginAsk) && <BrowserNeedsRow groups={browsers.groups} onOpen={openBrowser} />}
+              {/* The agent's request to be signed in is answered here, in the conversation that made
+                  it; the Browser tab draws the same card, so it is left out while that tab is open. */}
+              {panel.state.tab !== "browser" && browsers.groups.some(loginAsk) && (
+                <div className="login-stack">{browsers.groups.filter(loginAsk).map((g) => <BrowserLoginCard key={g.id} group={g} toast={toast} />)}</div>
+              )}
               {/* Not while the Questions tab is the one open: the cards are already beside the chat,
                   and an "Open" that opens what is on screen had people clicking and waiting for
                   something new to appear. */}

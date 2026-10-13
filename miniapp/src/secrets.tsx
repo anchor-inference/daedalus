@@ -34,7 +34,10 @@ export type SecretView = {
  *  then takes it back, as nothing else asked for it). */
 export type AttachedSecret = { id: string; name: string; scope: SecretScope; fresh: boolean };
 
-export type SecretsList = { secrets: SecretView[]; project_id?: string | null; project_name?: string | null };
+/** A sign-in saved from the browser's private form: the site and when, never the username or password. */
+export type SavedLoginView = { id: string; site: string; name: string; created_at: string; updated_at: string; last_used_at: string | null; uses: number; readable: boolean };
+
+export type SecretsList = { secrets: SecretView[]; logins?: SavedLoginView[]; project_id?: string | null; project_name?: string | null };
 
 /** The name as the host will keep it, shown while typing so the placeholder is no surprise. */
 export function secretName(raw: string): string {
@@ -172,9 +175,19 @@ export function SecretChip({ name, scope, onRemove }: { name: string; scope: Sec
 /** Settings → Security: every secret handed over, where it belongs, who used it last; each can be taken back. */
 export function SecretsCard({ toast, confirm, ago }: { toast: (text: string) => void; confirm: (title: string, body: string) => Promise<boolean>; ago: (iso: string) => string }) {
   const [items, setItems] = useState<SecretView[] | null>(null);
+  const [logins, setLogins] = useState<SavedLoginView[]>([]);
   useEffect(() => {
-    api.get<SecretsList>("/api/secrets").then((list) => setItems(list.secrets)).catch((e) => { setItems([]); toast(errorText(e)); });
+    api.get<SecretsList>("/api/secrets").then((list) => { setItems(list.secrets); setLogins(list.logins ?? []); }).catch((e) => { setItems([]); toast(errorText(e)); });
   }, [toast]);
+  async function forget(login: SavedLoginView) {
+    if (!(await confirm(t("secret.logins.remove.title", { site: login.site }), t("secret.logins.remove.body")))) return;
+    try {
+      await api.delete(`/api/secrets/logins/${login.id}`);
+      setLogins((list) => list.filter((l) => l.id !== login.id));
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
   async function remove(secret: SecretView) {
     if (!(await confirm(t("secret.remove.title", { name: secret.name }), t("secret.remove.body")))) return;
     try {
@@ -212,6 +225,30 @@ export function SecretsCard({ toast, confirm, ago }: { toast: (text: string) => 
             </div>
           ))}
         </div>
+      )}
+      {logins.length > 0 && (
+        <>
+          <div className="section-title">{t("secret.logins.title")}</div>
+          <div className="sub">{t("secret.logins.sub")}</div>
+          <div className="mlist">
+            {logins.map((l) => (
+              <div key={l.id} className="mrow" data-login={l.site}>
+                <div className="mline noradio">
+                  <div className="mmain">
+                    <span className="mtitle"><Icon name="key" size={12} /> {l.name}</span>
+                    <span className="mmeta">
+                      {l.last_used_at ? t("secret.logins.used", { t: ago(l.last_used_at) }) : t("secret.list.unused")}
+                      {!l.readable && <> · {t("secret.list.unreadable")}</>}
+                    </span>
+                  </div>
+                  <div className="mactions">
+                    <button className="btn small" onClick={() => void forget(l)}>{t("common.remove")}</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

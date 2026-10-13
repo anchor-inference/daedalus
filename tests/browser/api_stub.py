@@ -244,7 +244,7 @@ GATES: dict[str, object] = {
     "/api/maintenance": {"notice": None},
     # Settings → Security lists the secrets handed to the agent, and the composer's Secret form reads the
     # chat's; none here. check_secrets.py keeps a host of its own that stores them.
-    "/api/secrets": {"secrets": [], "project_id": None, "project_name": None},
+    "/api/secrets": {"secrets": [], "logins": [], "project_id": None, "project_name": None},
     "/api/conversation-search/settings": {"mode": "off", "paused": False, "reason": "off", "busy": False, "indexed": 0, "pending": 0, "label": "Multilingual E5 Small", "size_bytes": 135429554, "licence": "MIT", "installed": False},
     # Drawn before any screen: no model means the whole app is the "Add a model" flow.
     "/api/onboarding": {"has_model": True, "presets": 1, "default_preset": "p", "providers": [], "keyproxy_base": "", "needs": [], "message": ""},
@@ -721,6 +721,9 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
                                                       "state": "disabled", "limits": None,
                                                       "min_free_disk_bytes": 0,
                                                       "disk_quota_supported": False})
+    if method.upper() == "DELETE" and len(parts) == 5 and parts[2:4] == ["secrets", "logins"]:
+        # Forgetting a sign-in saved from the browser's private form; none is listed here.
+        return 404, "application/json", json.dumps({"detail": "no such saved sign-in"})
     if path == "/api/disk" and method.upper() == "GET":
         return 200, "application/json", json.dumps(disk_overview())
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "disk" and parts[3] in ("session", "project"):
