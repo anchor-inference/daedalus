@@ -122,6 +122,7 @@ unknown field is `-32602`. Errors use the JSON-RPC codes plus:
 | `cookies.set` | `{group_id, cookies: [CookieParam] ≤ 3000, origin?}` → `{set, rejected: [{name, domain, reason}]}`: `CookieParam` is the protocol's `Network.CookieParam` (`name, value, url? \| domain?, path?, secure?, httpOnly?, sameSite?, expires?`; no `expires` for a session cookie). Set through `Storage.setCookies` on the browser's session, in the group's context for a throwaway group, one at a time so one cookie the browser refuses is named rather than refusing the rest. They land in the profile's own cookie store on disk and outlive the browser, as a login made by hand does |
 | `cookies.list` | `{group_id, domain?}` → `{cookies: [{name, domain, path, expires, secure, http_only, same_site?}]}`: `expires` is 0 for a session cookie; `domain` keeps that site and its subdomains. Never a value: no method answers one |
 | `cookies.clear` | `{group_id, domain, origin?}` → `{cleared}`: the cookies of that site and its subdomains, deleted through the active tab (`Network.deleteCookies`); every site at once is `profile.clear`'s |
+| `page.login` | `{tab_id, site, username?, password?, otp?, selectors?{username?, password?, otp?, submit?}, probe?, origin?}` → `{url, title, signed_in: yes \| no \| unknown, filled: [username \| password \| otp], found{username, password, otp, submit}, waiting?: "code", stopped?}`: the operator's private sign-in (The host side, The private sign-in). The page script finds the fields (or the CSS selectors name them; one that matches nothing is `-32602`), and the values are typed as key presses, never passed to a script; each filled field is then marked secret, so the outline shows the username as `[secret]`. The form is sent by its button, else Enter, and a value whose field is not on the page yet is waited for on the page the submit led to (ten seconds a step, three steps: the password after the address, the code after the password). Nothing is typed while the tab is off `site` (the host, or a host under it; an address only as itself): `1004` before the first value, `stopped` between steps. `signed_in` is a guess from the page after the last submit: a password field still asked for is `no`, a code asked for that was not given is `unknown` with `waiting: "code"`, no sign-in field left on another address is `yes`. `probe` only finds, typing nothing. No value reaches the reply, an event, the log or the recording; the operator's origin passes a pause |
 | `tab.list` | `{group_id}` → `{tabs: [Tab], active_tab}` |
 | `tab.new` | `{group_id, url?, origin?}` → `Tab`; it becomes the active tab |
 | `tab.select` | `{tab_id, origin?}` → `Tab` |
@@ -860,7 +861,7 @@ load|idle|text|gone|url, value?, timeout_s ≤ 60, tab?)`, `BrowserDialog(accept
 all)`, `BrowserDownload(name, to?)`, `BrowserNote(note, host?)` or `BrowserNote(read)`, `BrowserLogs(tab?, level?, all?)`,
 `BrowserNetwork(tab?, type?, host?, contains?, method?, failed?, all?, id?, body?, max_chars?)`,
 `BrowserInspect(ref? | selector?, tab?, html? = true, max_chars?)`, `BrowserCookies(action:
-import|list|clear = import, path? | text?, domain?)`.
+import|list|clear = import, path? | text?, domain?)`, `BrowserLogin(url_or_domain, reason, selectors?)`.
 
 - **Cookies.** `BrowserCookies` loads a cookie file the operator handed over into the caller's
   profile (`cookies.set`), starting its browser when none runs: a Netscape `cookies.txt` (with curl's
@@ -941,8 +942,8 @@ import|list|clear = import, path? | text?, domain?)`.
   operator, never the orchestrator**, whatever the project's autonomy. `[[browser.rules]] {domain,
   kinds, action}` refuses kinds on a site, or lets them through; a rule never lets `credentials`
   through.
-- **Secret fields** refuse the agent (`1105`) with advice to call `BrowserHandoff`; the daemon
-  raises `needs_you` itself.
+- **Secret fields** refuse the agent (`1105`) with advice to call `BrowserLogin` for a sign-in and
+  `BrowserHandoff` for the rest; the daemon raises `needs_you` itself.
 - **While a person drives** the agent's reads and actions wait `[browser] control_wait_seconds` (20)
   and are refused; a pause refuses at once.
 - **Files** cross only through the host. `BrowserDownload` writes into the session's workspace under
@@ -982,12 +983,45 @@ with a line that opens the Mini App on that Browser tab (`https://t.me/<bot>?sta
 once the bot's name is known, else the app's own address under `MINIAPP_PUBLIC_URL`), which is what a
 Telegram message or a lock screen can act on.
 
+### The private sign-in
+
+`BrowserLogin(url_or_domain, reason, selectors?)` gets the agent's browser signed in without the model
+ever holding a credential (`daedalus/browser/login.py`). The tab is brought to the site (the address
+given, or `https://<site>/` when the tab is elsewhere; a browser not yet open is opened), and the page
+is probed (`page.login {probe}`) for a sign-in form before anyone is troubled: no form is a refusal
+that tells the agent to open the page that shows one. Otherwise the group is paused as a handoff with
+reason `login`, and its "needs you" carries the request: `login: {id, site, saved, reason, selectors?,
+session_id}` (`site` is the host without `www.`). The agent is told to end its turn.
+
+The operator answers in a form the app draws from that request — under the conversation of the
+session that asked, on its Browser tab and in the Inbox entry — with a username, a masked password
+and an optional one-time code, none of which the browser offers to remember. `POST
+/api/browsers/<group>/login` hands the values to one `page.login` with the operator's origin, which
+passes the pause; the browser is then given back with the words the owner is woken with in place of
+"the operator gave the browser back": `[browser] Sign-in to <site>: submitted; now at <url without
+query or fragment>; signed in: yes|no|unknown.`, and, when the page asks for a code, a line saying to
+call `BrowserLogin` again. The values reach nothing else: not the tool result, the wake, an event,
+the audit (`login`: the site, the fields filled, the outcome, how), the log or a stored row. A typed
+password is taught to the shared redactor for the life of the process (`«login:<site>»`), so a page
+or a request log that echoes it is masked. A request is over once answered, declined (`…/login/decline`,
+the agent told not to ask again for the task), replaced by a newer one, or ended by the operator
+taking the browser by hand, which remains the way to sign in on a page the form cannot fill.
+
+"Save" keeps the username and password for the site in `saved_logins`, sealed as the operator's
+secrets are (same key, the row's identity as associated data) and apart from them: a saved sign-in is
+never one of the agent's secrets, has no placeholder and no variable, and is listed (`login:<site>`,
+never its values) and forgotten under Settings → Security. A later request for the site, or a site
+under it, offers it first: **once**, or **always for this session** (kept in the session's metadata
+as `browser_login_trust`); in a session allowed it, `BrowserLogin` signs in at once and its result is
+the outcome. The Telegram and push copies of the Inbox entry (`kind: browser_login`) name the site and
+link to the app; Telegram never shows a form.
+
 ### Events on the bus
 
 | Type | Payload (ids as columns: `project_id`, `session_id`, `staff_id`) |
 |---|---|
 | `browser.opened` | `{group_id, env, profile, owner_kind, owner_id, url, fresh}` — a group opened, or opened again after its browser closed |
-| `browser.needs_you` | `{group_id, reason, what, url, title, by}` — `title` is the owner as a person reads it; `by` is `agent` or `daemon` |
+| `browser.needs_you` | `{group_id, reason, what, url, title, by, login?{id, site, saved}}` — `title` is the owner as a person reads it; `by` is `agent` or `daemon`; `login` makes it a request for the private sign-in |
 | `browser.returned` | `{group_id, url, title, tabs, by, note?}` |
 | `browser.closed` | `{group_id, reason: closed \| idle \| crashed \| memory \| shutdown \| lost \| owner_gone, by}` |
 | `browser.control` | `{group_id, owner, reason}` — live only, never stored |
@@ -1009,6 +1043,8 @@ The shapes are the app's own types in `miniapp/src/api.ts`; a host test holds th
 | `POST /api/browsers/<group>/viewport {w, h}` | `{viewport{w, h}}`: the operator's picture asks the page to become that size (`group.resize`). Each side is 320–3840 |
 | `POST /api/browsers/<group>/dialog {accept, tab_id?, text?}` | the operator answers the page's dialog |
 | `POST /api/browsers/<group>/cookies {text, domain?}` | `{set, rejected, skipped, sites}`: the operator loads a cookie file into the group's profile (the Browser tab's menu, "Import cookies"), read as `BrowserCookies` reads one; `domain` is the site a bare `Cookie:` header is for |
+| `POST /api/browsers/<group>/login {login_id, username?, password?, otp?, save?, use_saved?: once \| always}` | `{site, url, signed_in, filled, waiting, saved}`: the operator's answer to a `BrowserLogin` (The private sign-in). `409` when the request is over; a value past 4096 characters is refused by name |
+| `POST /api/browsers/<group>/login/decline {login_id}` | `{ok}`: the operator will not sign in; the agent is told and gets the browser back |
 | `POST /api/browsers/<group>/close` | closes the group; the profile stays |
 | `GET /api/browsers/<group>/actions?limit` | `{actions: [BrowserActionRow]}`, newest first |
 | `GET /api/browsers/<group>/audit?limit` | `{entries: [{seq, at, env, actor, action, detail}]}`, newest first; never typed text |
