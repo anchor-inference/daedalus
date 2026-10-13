@@ -43,6 +43,7 @@ import { Rail } from "./rail";
 import { useNav } from "./usenav";
 import { currentId } from "./navconfig";
 import { SessionScreen, chunk, chunkVerdict, mayReload, retried, whenIdle } from "./chunks";
+import { useDeskBridge } from "./quick/deskbridge";
 
 /** A chunk that would not load: the build moved under an open page, or its download dropped. */
 function isChunkError(message: string): boolean {
@@ -242,6 +243,7 @@ export function App() {
       .catch(() => setOnboarding({ has_model: true } as OnboardingState)); // an older bot has no such route: let the app through
   }, [authed]);
   const notifications = useSummary(!!authed);
+  useDeskBridge(!!authed, notifications, showToast);
   useEffect(() => {
     // A desktop window opened by the former Pet switch can survive a web reload. Close it when
     // the signed-in in-app companion takes over, so the operator never gets two mascots.

@@ -433,9 +433,10 @@ ever shown in your browser: the launcher's pages and the app are on loopback and
 a link that leaves this machine opens in your browser; a page cannot open files, custom schemes or
 anything else through the system.
 
-The window remembers its size and place, and opens on a screen that is still there. Closing it quits
-Daedalus: in native mode the launcher stops the agent first, as below; in Docker mode the containers
-keep running. The menu is the standard one on macOS — without an Edit menu ⌘C and ⌘V would do
+The window remembers its size and place, and opens on a screen that is still there. Closing it hides
+it into the tray (below) when there is a tray to bring it back from; with that switched off, or where
+the desktop shows no tray, closing it quits Daedalus: in native mode the launcher stops the agent
+first, as below; in Docker mode the containers keep running. The menu is the standard one on macOS — without an Edit menu ⌘C and ⌘V would do
 nothing — and hidden on Windows and Linux (Alt shows it), with the same edit, zoom and reload
 commands and their shortcuts.
 
@@ -455,6 +456,36 @@ opens the application beside it instead of starting a second launcher. Run it wi
 command line. A launcher built from source, with no application beside it, shows its pages in a
 browser window with nothing around it (`--app` in Chrome, Edge, Brave or Chromium) or in the
 default browser, as the launcher always did before there was an application.
+
+### Quick Chat, the appshot and the tray
+
+**Quick Chat** opens over whatever program is in front with a global shortcut — Alt+Space, which is
+Option+Space on a Mac — as a small box on the screen the pointer is on: Enter sends, Esc hides it and
+keeps the draft. The chip at its top picks where the words go: the companion (when the installation
+has one), the conversation you were last in, or a new one; the confirmation line under the box has
+an **Open** button that shows that conversation in the window. `@` attaches a conversation, a project
+or a file from the last conversation's folder as context; `$` asks for a skill; the microphone uses
+the same speech recognition as the composer. The box is the app's own page (`/app/quick`), signed in
+by the window's session, so nothing new on the host serves it.
+
+The **appshot** — a button in Quick Chat, and its own shortcut, Alt+Shift+Space — photographs the
+screen under the pointer and attaches the picture; the button beside it offers the other programs'
+windows as thumbnails to pick one instead. macOS asks once for permission to record the screen
+(System Settings → Privacy & Security → Screen Recording); until it is given an appshot says so
+instead of attaching an empty picture.
+
+The **tray** icon shows what is running and what waits for you (a dot, amber while agents work, red
+while a question or an approval waits; on a Mac the number beside it), and its menu has Open, Quick
+Chat, Appshot, Pause or Resume the companion when there is one, and Quit. On Linux the icon needs a
+desktop that shows StatusNotifierItem icons: KDE, Ubuntu's GNOME and most others do; plain GNOME
+needs the AppIndicator extension, and there closing the window quits rather than hiding it.
+
+Both shortcuts, and closing into the tray, are set in the app under **Settings → Desktop app**, which
+records a shortcut from the keys you press and says when another program already holds it. They are
+kept per computer, in the application's own `desk.json`. On a Wayland desktop a program may grab a
+key for the whole desktop only through the desktop's portal, which some desktops refuse; there, bind
+a system shortcut to `daedalus --quick-chat` or `daedalus --appshot` instead — a second start with
+either does what the shortcut would.
 
 ### Links
 

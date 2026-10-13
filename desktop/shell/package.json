@@ -9,7 +9,7 @@
   "homepage": "https://github.com/anchor-inference/daedalus",
   "main": "main.js",
   "scripts": {
-    "test": "node --test test/policy.test.js",
+    "test": "node --test test/policy.test.js test/desk.test.js test/appshot.test.js test/desk-main.test.js",
     "start": "electron ."
   },
   "devDependencies": {

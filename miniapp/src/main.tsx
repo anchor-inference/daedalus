@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { ContextMenuHost } from "./ui/context-menu";
 import { App } from "./App";
+import { QuickChat } from "./quick/QuickChat";
 import "./ui/styles.css";
 import "./ui/desktop.css";
 import "./ui/phone.css";
@@ -14,11 +15,12 @@ if ("serviceWorker" in navigator && window.location.protocol === "https:") {
 }
 
 const root = createRoot(document.getElementById("root")!);
+// The desktop's Quick Chat window loads /app/quick: the box alone, without the app around it.
+const quick = window.location.pathname.replace(/\/+$/, "") === "/app/quick";
 const render = () =>
   root.render(
     <React.StrictMode>
-      <App />
-      <ContextMenuHost />
+      {quick ? <QuickChat /> : <><App /><ContextMenuHost /></>}
     </React.StrictMode>,
   );
 

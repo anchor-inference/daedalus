@@ -2,6 +2,7 @@
 // inside Telegram, or with ?token=... for a browser session.
 
 import type { ImportedOrigin, MessageImport } from "./imports/model";
+import type { DeskBridge, QuickBridge } from "./quick/bridge";
 import type { NavConfig } from "./navconfig";
 
 declare global {
@@ -47,6 +48,10 @@ declare global {
       reveal?: (path: string) => Promise<string>;
       /** Set by the desktop launcher's own window, so the page can say which kind of window it is in. */
       window?: boolean;
+      /** Quick Chat's settings and the tray's status, for the app in the main window. */
+      desk?: DeskBridge;
+      /** Quick Chat's own window: hide, grow, open a conversation in the main window, take an appshot. */
+      quick?: QuickBridge;
     };
   }
 }
