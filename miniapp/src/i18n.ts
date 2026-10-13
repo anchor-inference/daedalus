@@ -7724,6 +7724,8 @@ Object.assign(DICT, {
   "annotate.page": { en: "Page: {where}", ru: "Страница: {where}" },
   "annotate.file": { en: "File: {where}", ru: "Файл: {where}" },
   "annotate.blank": { en: "A page in the preview cannot be photographed here: draw on a blank sheet the size of its frame.", ru: "Страницу в предпросмотре здесь не сфотографировать: рисуйте на чистом листе размером с её окно." },
+});
+
 // The auto mode: the level each message ran at, on its turn, and the correction for the next one.
 Object.assign(DICT, {
   "composer.mode.name.auto": { en: "Auto", ru: "Авто" },
