@@ -134,6 +134,7 @@ from daedalus.host.depth import AUTO_MODE
 from daedalus.host.events import EventFilter, event_stream, streamed_types
 from daedalus.host.host_exec import BRIDGE_DOWN, HostExecBackend
 from daedalus.host.policy import sealed_root
+from daedalus.host.predict import Predictor
 from daedalus.host.presence import MAX_ID_LENGTH, MAX_PROJECTS, MAX_SESSIONS, MAX_TERMINALS, PresenceReport
 from daedalus.host.prompt_changes import PromptChangePlanner
 from daedalus.host.prompts import DEFAULT_RULES, without_turn_context
@@ -711,6 +712,8 @@ class SettingsBody(BaseModel):
     scheduler: dict[str, Any] | None = None
     telegram: dict[str, Any] | None = None
     asr: dict[str, Any] | None = None
+    assist: dict[str, Any] | None = None
+    """The helpers around the operator's messages: the depth sort's model, the next-message guess and its allowance."""
     notifications: dict[str, Any] | None = None
     """Where each kind of notification goes, quiet hours, the rate limits. The app saves it through
     ``/api/notifications/preferences``; it is here as well so the agent's SettingsChange can reach it,
@@ -3919,6 +3922,16 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             raise HTTPException(404, "no such session") from None
         except RuntimeError as exc:
             raise HTTPException(409, str(exc)) from exc
+
+    predictor = Predictor(manager)
+
+    @api.get("/api/sessions/{session_id}/suggestion")
+    async def next_message(session_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, str]:
+        """The operator's likely next message, for the empty composer to show as ghost text."""
+        try:
+            return await predictor.suggest(session_id)
+        except KeyError:
+            raise HTTPException(404, "no such session") from None
 
     @api.post("/api/sessions/{session_id}/depth")
     async def set_depth(session_id: str, body: DepthBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
