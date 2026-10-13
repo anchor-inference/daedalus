@@ -277,4 +277,48 @@ def assess(skill_id: str, markdown: str, dependencies: list[dict[str, str]]) -> 
     return {"valid": not errors, "errors": errors, "digest": hashlib.sha256(markdown.encode()).hexdigest()}
 
 
-__all__ = ["DirectorySkillStore", "assess", "parse_skill_markdown", "render_skill_markdown", "skill_declarations"]
+DRAFTS_DIR = "skill-drafts"
+"""Where drafts are written, under the state directory: a draft is not a skill of the repository until
+someone copies it there, and a recorded one, full of the operator's own sites, usually never is."""
+SLUG = re.compile(r"[^a-z0-9-]+")
+
+
+def draft_slug(name: str) -> str:
+    """A skill's directory name from what someone called it; "" when nothing usable is left."""
+    slug = SLUG.sub("-", name.strip().lower()).strip("-")
+    return slug if len(slug) <= 48 else ""
+
+
+def save_skill_draft(
+    state_dir: Path, redact: Any, name: str, description: str, body: str, *,
+    params: str | None = None, front: dict[str, str] | None = None, files: dict[str, str] | None = None,
+) -> tuple[Path, str, dict[str, Any]]:
+    """Write a skill draft: ``SKILL.md`` and any supporting files, every text through the redactor,
+    since a draft may become public through a pull request. ``(directory, slug, verdict)``, the verdict
+    being the check a skill must pass to be activated; a draft is kept either way, since a draft is
+    allowed to be unfinished. ``ValueError`` says what is wrong with the name, description or body.
+    This is the one writer of drafts: the agent's ``SkillDraft`` and a recording the operator saves
+    both come here, so the two cannot drift apart in where or how they write."""
+    slug = draft_slug(name)
+    if not slug:
+        raise ValueError("name must be 1–48 characters of lowercase letters, digits and hyphens")
+    description = " ".join(description.split())
+    if not (20 <= len(description) <= 320):
+        raise ValueError("description must be one line of 20–320 characters saying when to use the skill")
+    if len(body.strip()) < 80:
+        raise ValueError("the body is too short to be a skill; write the procedure, not a note")
+    for path in files or {}:
+        if path == ENTRY or "/" in path or path.startswith(".") or not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", path):
+            raise ValueError(f"{path!r} is not a supporting file's name")
+    directory = state_dir / DRAFTS_DIR / slug
+    directory.mkdir(parents=True, exist_ok=True)
+    head = f"---\nname: {slug}\ndescription: {description}\n" + (f"params: {params.strip()}\n" if params and params.strip() else "")
+    head += "".join(f"{key}: {value}\n" for key, value in (front or {}).items() if value)
+    markdown = head + "---\n" + redact(body.strip()) + "\n"
+    (directory / ENTRY).write_text(markdown, encoding="utf-8")
+    for path, text in (files or {}).items():
+        (directory / path).write_text(redact(text), encoding="utf-8")
+    return directory, slug, assess(slug, markdown, [])
+
+
+__all__ = ["DRAFTS_DIR", "DirectorySkillStore", "assess", "draft_slug", "save_skill_draft", "parse_skill_markdown", "render_skill_markdown", "skill_declarations"]

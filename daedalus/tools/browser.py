@@ -33,7 +33,7 @@ from daedalus.tools.vision import VisionUnavailable, look
 BROWSER_TOOLS = (
     "BrowserOpen", "BrowserNavigate", "BrowserSnapshot", "BrowserText", "BrowserLook", "BrowserAct",
     "BrowserTabs", "BrowserWait", "BrowserDialog", "BrowserHandoff", "BrowserClose", "BrowserDownload", "BrowserNote",
-    "BrowserLogs", "BrowserNetwork", "BrowserInspect", "BrowserCookies", "BrowserLogin",
+    "BrowserLogs", "BrowserNetwork", "BrowserInspect", "BrowserCookies", "BrowserLogin", "BrowserReplay",
 )
 READ_ONLY_TOOLS = ("BrowserSnapshot", "BrowserText", "BrowserLook", "BrowserTabs", "BrowserWait", "BrowserLogs", "BrowserNetwork", "BrowserInspect")
 """The tools that only read the page or wait on it: a command-line agent's own permission rules may
@@ -554,9 +554,28 @@ async def browser_login(context: ToolContext, url_or_domain: str, reason: str, s
     return await _run(context, "BrowserLogin", {"url_or_domain": url_or_domain, "reason": reason, "selectors": selectors})
 
 
+@tool_group("browser")
+@search_hint(
+    "replay recorded skill steps operator demonstrated macro repeat workflow automation "
+    "повторить повтори запись записанный навык макрос шаги оператора воспроизвести"
+)
+@tool(
+    name="BrowserReplay",
+    description=(
+        "Run a skill the operator recorded in the browser: the steps they did, replayed in your browser with the "
+        "parameters you give (params={name: value}). Without skill it lists the recorded skills and their parameters. "
+        "Each step is your own action through the usual checks. When a step's element is no longer on the page the "
+        "replay stops and names the step and what was left: finish from there with BrowserSnapshot and BrowserAct. "
+        "At a sign-in the operator does, it pauses; from_step goes on after it."
+    ),
+)
+async def browser_replay(context: ToolContext, skill: str | None = None, params: dict[str, str] | None = None, from_step: int | None = None) -> ToolResult:
+    return await _run(context, "BrowserReplay", {"skill": skill, "params": params, "from_step": from_step})
+
+
 TOOLS = [
     browser_open, browser_navigate, browser_snapshot, browser_text, browser_look, browser_act, browser_tabs, browser_wait, browser_dialog, browser_handoff, browser_close,
-    browser_download, browser_note, browser_logs, browser_network, browser_inspect, browser_cookies, browser_login,
+    browser_download, browser_note, browser_logs, browser_network, browser_inspect, browser_cookies, browser_login, browser_replay,
 ]
 
 __all__ = ["BROWSER_TOOLS", "READ_ONLY_TOOLS", "TOOLS", "SessionFiles"]

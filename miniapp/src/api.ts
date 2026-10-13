@@ -435,13 +435,21 @@ export type BrowserStepAction = "navigate" | "arrive" | "click" | "double_click"
  *  and it looked like nothing personal. A secret field is a `handoff`, with nothing of what was typed. */
 export type BrowserStep = {
   n: number; at: number; tab: string; url: string; action: BrowserStepAction;
-  element?: { role: string; name: string; place?: string };
+  element?: { role: string; name: string; place?: string; selector?: string; text?: string };
+  /** A sign-in's fields, with the kind of secret each holds: what the operator binds to their secrets. */
+  fields?: { role: string; name: string; selector?: string; secret?: string }[];
   slot?: string; value?: string; submit?: boolean; option?: string; keys?: string; count?: number; direction?: string;
   reason?: string; to?: string; go?: string; title?: string; text?: string; kind?: string; accept?: boolean; asks?: string[]; point?: number[];
 };
 
 /** A recording of the operator's steps: the one on now, or a finished one the host keeps. */
-export type BrowserWorkflow = { id: string; group_id: string; env: string; project_id: string | null; session_id: string | null; staff_id: string | null; state: "recording" | "stopped"; values: "slots" | "literal"; reason: string; start_url: string; start_title: string; started_at: string | null; stopped_at: string | null; steps: BrowserStep[]; note_id: string };
+export type BrowserWorkflow = { id: string; group_id: string; env: string; project_id: string | null; session_id: string | null; staff_id: string | null; state: "recording" | "stopped"; values: "slots" | "literal"; reason: string; start_url: string; start_title: string; started_at: string | null; stopped_at: string | null; steps: BrowserStep[]; note_id: string; skill: string };
+
+/** One step of a recording as the operator edited it in the step editor, by its recorded number. */
+export type BrowserSkillStep = { n: number; text?: string; option?: string; to?: string; signin?: "operator" | "saved" | "secrets"; secrets?: string[] };
+
+/** `POST /api/browsers/workflows/{id}/skill`: the recorded skill written, and whether it passes as a skill. */
+export type BrowserSkillSaved = { skill: string; path: string; params: string[]; steps: number; valid: boolean; errors: string[] };
 
 /** `GET /api/browsers/{group}/workflow`: the recording on now, and the group's finished ones, newest first. */
 export type BrowserWorkflows = { workflow: BrowserWorkflow | null; recent: BrowserWorkflow[] };

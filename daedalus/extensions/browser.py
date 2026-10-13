@@ -28,6 +28,7 @@ from daedalus.browser.model import Owner
 from daedalus.browser.monitor import TIMEOUT_SECONDS, InjectionMonitor
 from daedalus.browser.notes import SiteNotes
 from daedalus.browser.owners import DatabaseOwners
+from daedalus.browser.replay import RecordedSkills
 from daedalus.browser.service import Browsers
 from daedalus.browser.workflows import DRAFT_TIMEOUT_SECONDS, Workflows
 from daedalus.config import keyproxy_base
@@ -181,6 +182,7 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
         await manager.sessions.update_metadata(session_id, state.session.metadata)
 
     agent.logins.trusted, agent.logins.trust = trusted, trust
+    agent.recorded = RecordedSkills(manager.settings.state_dir, manager.settings.skills_dir, manager.redactor.redact)
     async def lasting(project_id: str | None) -> str:
         """A procedure recorded in a chat's own throwaway project is kept for every agent, as an
         agent's site note from there is (``daedalus.tools.browser``)."""

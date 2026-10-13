@@ -117,6 +117,26 @@ class DraftBody(BaseModel):
     """What the recorded steps do, in the operator's words: the procedure's title."""
 
 
+class SkillStepBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    n: int = Field(ge=1, le=10_000)
+    text: str | None = Field(default=None, max_length=2000)
+    option: str | None = Field(default=None, max_length=300)
+    to: str | None = Field(default=None, max_length=2000)
+    signin: str | None = Field(default=None, max_length=20)
+    secrets: list[str] | None = Field(default=None, max_length=8)
+
+
+class SkillBody(BaseModel):
+    """A recording as the operator edited it in the step editor: the steps kept, each by its number with
+    what they changed, and the skill's name and when to use it."""
+
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=48)
+    description: str = Field(min_length=1, max_length=320)
+    steps: list[SkillStepBody] = Field(max_length=200)
+
+
 class NoteEditBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     text: str = Field(max_length=8000)
@@ -304,6 +324,16 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         """Draft a procedure from a finished recording; it waits in the site notes for approval."""
         drafted = await workflows().draft(workflow_id, goal=(body.goal if body else ""))
         return {**drafted, "note": await named(drafted["note"])}
+
+    @api.post("/api/browsers/workflows/{workflow_id}/skill")
+    async def browsers_workflow_skill(workflow_id: str, body: SkillBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Save a finished recording as a recorded skill the agent replays with BrowserReplay."""
+        agent = app.extensions.get("browser_agent")
+        skills = getattr(agent, "recorded", None)
+        if skills is None:
+            raise HTTPException(404, "this installation keeps no recorded skills")
+        edits = [step.model_dump(exclude_none=True) for step in body.steps]
+        return await workflows().make_skill(workflow_id, skills, edits, name=body.name, description=body.description)
 
     @api.delete("/api/browsers/workflows/{workflow_id}")
     async def browsers_workflow_delete(workflow_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

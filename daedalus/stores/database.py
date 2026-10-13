@@ -2252,6 +2252,12 @@ CREATE TABLE IF NOT EXISTS saved_logins (
 # The companion: its goals, its activity log, and the voice concierge's rows renamed to it.
 MIGRATIONS.append(COMPANION_MIGRATION)
 
+# The skill a recording of the operator's steps was saved as, so the app stops offering a recording that
+# already became one; "" for one that has not.
+MIGRATIONS.append("""
+ALTER TABLE browser_workflows ADD COLUMN skill TEXT NOT NULL DEFAULT '';
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

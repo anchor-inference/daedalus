@@ -32,6 +32,7 @@ from daedalus.host.policy import host_allowed
 from daedalus.terminals.service import now_iso
 
 if TYPE_CHECKING:
+    from daedalus.browser.replay import RecordedSkills
     from daedalus.browser.service import Browsers
 
 logger = logging.getLogger(__name__)
@@ -263,7 +264,7 @@ def _view(row: dict[str, Any]) -> dict[str, Any]:
         "id": row["id"], "group_id": row["group_id"], "env": row["env"], "project_id": row["project_id"], "session_id": row["session_id"],
         "staff_id": row["staff_id"], "state": row["status"], "values": row["values_mode"], "reason": row["stop_reason"],
         "start_url": row["start_url"], "start_title": row["start_title"], "started_at": row["started_at"], "stopped_at": row["stopped_at"],
-        "steps": steps if isinstance(steps, list) else [], "note_id": row["note_id"],
+        "steps": steps if isinstance(steps, list) else [], "note_id": row["note_id"], "skill": row["skill"],
     }
 
 
@@ -395,7 +396,7 @@ class Workflows:
             "id": str(live.get("id") or ""), "group_id": group, "env": row["env"], "project_id": row["project_id"], "session_id": row["session_id"],
             "staff_id": row["staff_id"], "state": "recording", "values": live.get("values") if live.get("values") in VALUES else "slots", "reason": "",
             "start_url": str(live.get("start_url") or ""), "start_title": str(live.get("start_title") or ""), "started_at": _ms_iso(live.get("started_at")),
-            "stopped_at": None, "steps": steps, "note_id": "",
+            "stopped_at": None, "steps": steps, "note_id": "", "skill": "",
         }
 
     # -- the recordings kept ---------------------------------------------------------------------------
@@ -415,6 +416,17 @@ class Workflows:
         await self.db.execute("DELETE FROM browser_workflows WHERE id = ?", (workflow_id,))
         await self.service.audit(found["group_id"], found["env"], "operator", "workflow_delete", {"id": workflow_id})
         await self._announce({"id": found["group_id"], "project_id": found["project_id"], "session_id": found["session_id"], "staff_id": found["staff_id"]}, workflow_id, "deleted")
+
+    async def make_skill(self, workflow_id: str, skills: RecordedSkills, edits: list[dict[str, Any]], *, name: str, description: str) -> dict[str, Any]:
+        """Save a stopped recording, as the operator edited it in the step editor, as a recorded skill
+        (``daedalus.browser.replay``) and mark the recording as made into one."""
+        workflow = await self.get(workflow_id)
+        saved = skills.save(workflow, edits, name=name, description=description)
+        await self.db.execute("UPDATE browser_workflows SET skill = ? WHERE id = ?", (saved["skill"], workflow_id))
+        await self.service.audit(workflow["group_id"], workflow["env"], "operator", "workflow_skill", {"id": workflow_id, "skill": saved["skill"], "steps": saved["steps"]})
+        row = {"id": workflow["group_id"], "project_id": workflow["project_id"], "session_id": workflow["session_id"], "staff_id": workflow["staff_id"]}
+        await self._announce(row, workflow_id, "skill")
+        return saved
 
     async def draft(self, workflow_id: str, *, goal: str = "") -> dict[str, Any]:
         """Draft a procedure from a stopped recording and put it before the operator. ``drafted_by`` is
