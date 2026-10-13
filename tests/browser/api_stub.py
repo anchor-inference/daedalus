@@ -599,8 +599,9 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         return 200, "application/json", json.dumps({"started": True})
     if path.startswith(("/api/calendar", "/api/planner")):
         # The planner's week, the same for every harness that opens the calendar without inventing
-        # one; check_calendar_planner.py keeps a CalendarStub of its own to read its writes back.
-        status, payload = CALENDAR.answer(method.upper(), path, query, None)  # type: ignore[misc]
+        # one; check_calendar_planner.py keeps a CalendarStub of its own to read its writes back. The
+        # write's body goes through: a block patch, a status or a new group means nothing without it.
+        status, payload = CALENDAR.answer(method.upper(), path, query, body if isinstance(body, dict) else None)  # type: ignore[misc]
         return status, "application/json", json.dumps(payload)
     if path in GATES:
         return 200, "application/json", json.dumps(GATES[path])

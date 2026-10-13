@@ -348,7 +348,7 @@ function Block({ item, zone, day, style, height, past, ghost, continuesBefore, c
   const time = itemTime(item, zone, day);
   const short = height < 34;
   const task = item.task;
-  const label = `${item.title || t("cal.untitled")}, ${time}${item.location ? `, ${item.location}` : ""}`;
+  const label = `${item.title || t("cal.untitled")}${item.chip ? `, ${item.chip}` : ""}, ${time}${item.location ? `, ${item.location}` : ""}`;
   return (
     <div className={`cal-block ${item.kind} ${short ? "short" : ""} ${past ? "past" : ""} ${ghost ? "ghost" : ""} ${item.done ? "done" : ""} ${item.event?.pending_sync ? "pending" : ""} ${continuesBefore ? "cut-start" : ""} ${continuesAfter ? "cut-end" : ""}`}
       style={style} data-key={item.key} onPointerDown={(e) => onPointerDown(e, false)} onClick={onOpen}>
@@ -362,9 +362,12 @@ function Block({ item, zone, day, style, height, past, ghost, continuesBefore, c
       )}
       <span className="cal-block-text">
         {/* As many lines of title as the block has room for under its time, never a half-cut line. */}
-        <span className="cal-block-title" style={short ? undefined : { WebkitLineClamp: Math.max(1, Math.floor((height - 8) / 15) - 1) }}>{item.title || t("cal.untitled")}{short && <span className="cal-block-time inline">{time.split(" – ")[0]}</span>}</span>
-        {!short && <span className="cal-block-time">{time}</span>}
-        {!short && height > 64 && item.location && <span className="cal-block-place">{item.location}</span>}
+        {/* A typed event leads with its type's chip ("Завтрак · 518 ккал"); its own title follows
+            where the block has room, and is always in the label and the view sheet. */}
+        <span className="cal-block-title" style={short ? undefined : { WebkitLineClamp: Math.max(1, Math.floor((height - 8) / 15) - (item.chip ? 2 : 1)) }}>{item.chip || item.title || t("cal.untitled")}{short && <span className="cal-block-time inline">{time.split(" – ")[0]}</span>}</span>
+        {!short && <span className="cal-block-time">{time}{item.event?.progress?.total ? <span className="cal-block-progress"> · {item.event.progress.done}/{item.event.progress.total}</span> : null}</span>}
+        {!short && height > 48 && item.chip && item.title && <span className="cal-block-place">{item.title}</span>}
+        {!short && height > 64 && !item.chip && item.location && <span className="cal-block-place">{item.location}</span>}
       </span>
       {item.event?.recurring && height > 40 && <span className="cal-block-icon" aria-hidden="true"><Icon name="loop" size={12} /></span>}
       {item.event?.conflict && <span className="cal-block-icon warn" aria-hidden="true"><Icon name="alert" size={12} /></span>}
@@ -378,7 +381,7 @@ function Block({ item, zone, day, style, height, past, ghost, continuesBefore, c
 export function ItemChip({ item, zone, className = "", style, onOpen, onToggleTask, showTime }: { item: Item; zone: string; className?: string; style?: CSSProperties; onOpen: (item: Item) => void; onToggleTask: (task: Task) => void; showTime?: boolean }) {
   const task = item.task;
   const time = showTime && !item.allDay ? itemTime(item, zone).split(" – ")[0] : "";
-  const label = `${item.title || t("cal.untitled")}${item.allDay ? "" : `, ${itemTime(item, zone)}`}`;
+  const label = `${item.title || t("cal.untitled")}${item.chip ? `, ${item.chip}` : ""}${item.allDay ? "" : `, ${itemTime(item, zone)}`}`;
   return (
     <div className={`cal-chip ${item.kind} ${item.allDay ? "solid" : "timed"} ${item.done ? "done" : ""} ${className}`} style={{ ...style, "--c": item.color } as CSSProperties}>
       {task && (
@@ -389,7 +392,8 @@ export function ItemChip({ item, zone, className = "", style, onOpen, onToggleTa
       <button type="button" className="cal-chip-open" onClick={(e) => { e.stopPropagation(); onOpen(item); }} aria-label={label} title={label}>
         {!item.allDay && !task && <span className="cal-chip-dot" aria-hidden="true" />}
         {time && <span className="cal-chip-time">{time}</span>}
-        <span className="cal-chip-title">{item.title || t("cal.untitled")}</span>
+        <span className="cal-chip-title">{item.chip || item.title || t("cal.untitled")}</span>
+        {item.event?.progress?.total ? <span className="cal-chip-progress">{item.event.progress.done}/{item.event.progress.total}</span> : null}
       </button>
     </div>
   );

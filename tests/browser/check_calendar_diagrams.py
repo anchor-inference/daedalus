@@ -69,7 +69,8 @@ def run() -> int:
         mobile.on("pageerror", lambda error: errors.append(str(error)))
         mobile.route("**/api/**", stub)
         mobile.goto(f"{BASE}/calendar?token=t&lang=ru")
-        expect(mobile.locator(".cal-tg")).to_be_visible()
+        # A phone opens on the agenda.
+        expect(mobile.locator(".cal-agenda")).to_be_visible()
         assert mobile.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
         assert not errors, errors
         phone.close()

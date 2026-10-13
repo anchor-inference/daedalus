@@ -1,6 +1,7 @@
 // The shapes the calendar and planner API answer with. The host owns them; these mirror what the
 // screen reads, and a field the host adds later is simply not read here.
 
+import type { Structured } from "./blocks";
 import type { Day, View } from "./dates";
 
 export type CalendarKind = "local" | "google" | "outlook" | "caldav" | "ics";
@@ -22,7 +23,7 @@ export type CalendarRow = {
 /** One occurrence: a single event, or one instance of a recurring series (`id` is then
  *  `event_id:occurrence_start`). Times are UTC instants; an all-day event also has its dates, the end
  *  exclusive. */
-export type Occurrence = {
+export type Occurrence = Structured & {
   id: string;
   event_id: string;
   calendar_id: string;
@@ -130,4 +131,9 @@ export type Item = {
   task?: Task;
   done?: boolean;
   location?: string;
+  /** The event's type's colour and icon, when it has a type: the mark a phone's month draws. */
+  typeColor?: string;
+  typeIcon?: string;
+  /** The type's chip text, or null: what a cell in the week or the month shows instead of the title. */
+  chip?: string | null;
 };

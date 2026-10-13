@@ -5,9 +5,19 @@ export type IconName =
   | "question" | "skill" | "spawn" | "bulb" | "wrench" | "clock" | "calendar" | "plug" | "dot" | "compact"
   | "folder" | "settings" | "bots" | "inbox" | "board" | "changes" | "chart" | "loop" | "pause" | "play" | "trash" | "check" | "close" | "send"
   | "download" | "share" | "split" | "key" | "link" | "unlink" | "down" | "copy" | "paste" | "columns" | "eye" | "mic" | "fork" | "undo" | "phone" | "expand" | "external" | "reload" | "forward" | "panel" | "chevron" | "bolt" | "volume" | "mute" | "lock" | "bell" | "shield" | "conductor" | "journal" | "alert" | "compass" | "user" | "ask" | "archive" | "braces" | "sidebar" | "reply" | "flag" | "menu" | "pin" | "pushpin"
-  | "compose" | "grid" | "vdots" | "camera" | "offline" | "logo" | "sliders" | "apps" | "import" | "eyeoff";
+  | "compose" | "grid" | "vdots" | "camera" | "offline" | "logo" | "sliders" | "apps" | "import" | "eyeoff"
+  | "utensils" | "cart" | "dumbbell" | "plane" | "home" | "list" | "heart" | "book";
 
 const PATHS: Record<IconName, string> = {
+  // The calendar's type icons: an agent names one of these for a type it makes (or an emoji).
+  utensils: "M7 3v8M5 3v5a2 2 0 0 0 4 0V3M7 11v10M17 3c-1.7 1-3 3.3-3 6v4h3M17 3v18",
+  cart: "M3 4h2l2.4 11.2a1 1 0 0 0 1 .8h9.2a1 1 0 0 0 1-.8L20 8H6M9 20h.01M17 20h.01",
+  dumbbell: "M6 7v10M3 9v6M18 7v10M21 9v6M6 12h12",
+  plane: "M17.8 19.2L16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z",
+  home: "M3 11l9-7 9 7M5 10v10h14V10M10 20v-6h4v6",
+  list: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
+  heart: "M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7z",
+  book: "M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5v14zM4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5",
   back: "M15 18l-6-6 6-6",
   more: "M5 12h.01M12 12h.01M19 12h.01",
   plus: "M12 5v14M5 12h14",

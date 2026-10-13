@@ -430,6 +430,9 @@ export function wireCache(to: { on: typeof onEvent; prime: typeof prime; invalid
     to.on(["project.changed"], (event) => { if (event.payload.change === "pinned") sessionsSoon(); }),
     // A page published, rolled back or removed anywhere: the navigation's list of pages is read again.
     to.on(["pages.changed"], () => to.invalidate("/api/pages")),
+    // An event, a block, a type or a plan changed anywhere (a tick on another device, an agent's
+    // edit): the calendar's open reads, the view sheet's among them, fetch again.
+    to.on(["calendar.changed"], () => to.invalidate("/api/calendar")),
     // Whatever the stream could not replay, every mounted read fetches again.
     to.on(["resync"], () => to.invalidate("")),
   ];

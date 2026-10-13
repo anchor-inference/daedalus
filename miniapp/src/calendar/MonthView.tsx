@@ -64,14 +64,16 @@ export function MonthView(props: Props) {
         <div key={week[0]} className="cal-month-week" role="row">
           {week.map((day) => {
             const mine = sorted.filter((item) => onDay(item, day));
-            const colours = mine.slice(0, 4);
+            // A mark per kind of thing, not per thing: a day of four meals and an order is two dots,
+            // a meal's colour and an order's, where five marks used to run out of the cell.
+            const colours = mine.filter((item, i) => mine.findIndex((other) => (other.typeColor ?? other.color) === (item.typeColor ?? item.color) && other.kind === item.kind && !!other.allDay === !!item.allDay) === i).slice(0, 4);
             return (
               <button key={day} type="button" role="gridcell" className={`cal-month-cell ${day.slice(0, 7) !== props.month ? "outside" : ""} ${day === today ? "today" : ""} ${day === props.selected ? "selected" : ""}`}
                 aria-selected={day === props.selected} aria-label={`${dayLabel(day, locale(), { weekday: "long", day: "numeric", month: "long" })}${mine.length ? `, ${t("cal.items.count", { n: mine.length })}` : ""}`}
                 onClick={() => props.onPickDay(day)}>
                 <span className="cal-month-num">{Number(day.slice(8, 10))}</span>
                 <span className="cal-month-marks" aria-hidden="true">
-                  {colours.map((item) => <span key={item.key} className={`cal-mark ${item.kind} ${item.allDay ? "bar" : ""}`} style={{ "--c": item.color } as CSSProperties} />)}
+                  {colours.map((item) => <span key={item.key} className={`cal-mark ${item.kind} ${item.allDay ? "bar" : ""} ${item.typeColor ? "typed" : ""} ${item.done && mine.every((other) => (other.typeColor ?? other.color) !== (item.typeColor ?? item.color) || other.done) ? "done" : ""}`} style={{ "--c": item.typeColor ?? item.color } as CSSProperties} />)}
                 </span>
               </button>
             );

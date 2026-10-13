@@ -1,17 +1,21 @@
 // The full event editor: a sheet on a desktop, a sheet from the bottom on a phone. Times are shown on
 // the event's own time zone's clock, which is the settings' zone unless the event names another.
 
-import { useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
+import { useQuery } from "../store";
 import { locale, t } from "../i18n";
 import { Icon } from "../icons";
 import { Sheet } from "../ui/dialogs";
 import { Switch } from "../ui/components";
 import { addDays, dayLabel, diffDays, type Day } from "./dates";
-import { allDayTimes, type EventFields } from "./data";
+import { allDayTimes, eventKey, type EventFields } from "./data";
 import { CalendarPicker, ColorPicker, Reminders, TimeSelect, ZonePicker } from "./fields";
 import { BYDAY, buildRule, dayCode, presetOf, presetRule, ruleOrDefault, type ByDay, type Freq, type Preset, type Rule } from "./rrule";
 import type { CalendarRow, Occurrence } from "./types";
 import { ruleText } from "./words";
+import { BlocksEditor, TypeFieldsForm } from "./BlockEditor";
+import { blocksFromType, type Block, type EventStatus, type Group, type TypeDef } from "./blocks";
+import { TypeIcon } from "./structured";
 import { fromWall, toWall, validZone } from "./zone";
 
 export type EventDraft = {
@@ -30,6 +34,14 @@ export type EventDraft = {
   recurrence: string;
   reminders: number[];
   color: string | null;
+  type?: string | null;
+  fields?: Record<string, unknown>;
+  /** Undefined while the event's body has not been read: the editor then leaves the blocks alone
+   *  rather than saving an empty list over them. */
+  blocks?: Block[];
+  tags?: string[];
+  group_id?: string | null;
+  status?: EventStatus;
 };
 
 /** The editor's draft of an occurrence. The host sends an occurrence's colour already resolved, so a
@@ -38,7 +50,10 @@ export type EventDraft = {
 export function draftFromOccurrence(o: Occurrence, viewZone: string, calendarColor?: string): EventDraft {
   const zone = o.timezone && validZone(o.timezone) ? o.timezone : viewZone;
   const own = calendarColor && o.color && o.color.toLowerCase() !== calendarColor.toLowerCase() ? o.color : null;
-  const base = { occurrence: o, calendar_id: o.calendar_id, title: o.title, description: o.description ?? "", location: o.location ?? "", timezone: zone, recurrence: o.recurrence ?? "", reminders: o.reminders ?? [], color: own };
+  const base = {
+    occurrence: o, calendar_id: o.calendar_id, title: o.title, description: o.description ?? "", location: o.location ?? "", timezone: zone, recurrence: o.recurrence ?? "", reminders: o.reminders ?? [], color: own,
+    type: o.type ?? null, fields: o.fields ?? {}, blocks: o.blocks ? o.blocks : o.block_summary?.length ? undefined : [], tags: o.tags ?? [], group_id: o.group_id ?? null, status: o.status,
+  };
   if (o.all_day) {
     const first = o.start_date || o.start_at.slice(0, 10);
     const end = o.end_date || o.end_at.slice(0, 10);
@@ -52,7 +67,8 @@ export function draftFromOccurrence(o: Occurrence, viewZone: string, calendarCol
 }
 
 export function fieldsFromDraft(d: EventDraft): EventFields | null {
-  const common = { calendar_id: d.calendar_id, title: d.title.trim(), description: d.description, location: d.location.trim(), timezone: d.timezone, recurrence: d.recurrence, reminders: d.reminders, color: d.color };
+  const structured = { type: d.type ?? null, fields: d.fields ?? {}, tags: d.tags ?? [], group_id: d.group_id ?? null, ...(d.occurrence ? {} : { blocks: d.blocks ?? [] }) };
+  const common = { calendar_id: d.calendar_id, title: d.title.trim(), description: d.description, location: d.location.trim(), timezone: d.timezone, recurrence: d.recurrence, reminders: d.reminders, color: d.color, ...structured };
   if (d.allDay) {
     if (d.endDay < d.startDay) return null;
     return { ...common, all_day: true, ...allDayTimes(d.startDay, d.endDay) };
@@ -66,6 +82,8 @@ export function fieldsFromDraft(d: EventDraft): EventFields | null {
 type Props = {
   draft: EventDraft;
   calendars: CalendarRow[];
+  types: TypeDef[];
+  groups: Group[];
   phone: boolean;
   busy: boolean;
   onClose: () => void;
@@ -74,11 +92,18 @@ type Props = {
   onResolve: (occurrence: Occurrence, choice: "local" | "remote") => void;
 };
 
-export function EventEditor({ draft: initial, calendars, busy, onClose, onSave, onDelete, onResolve }: Props) {
-  const [d, setD] = useState<EventDraft>(initial);
+export function EventEditor({ draft: initial, calendars, types, groups, busy, onClose, onSave, onDelete, onResolve }: Props) {
+  const [d, setD] = useState<EventDraft>(() => (initial.occurrence || initial.blocks ? initial : { ...initial, blocks: [] }));
+  // An event opened before its body was read reads it here, so its blocks can be edited at all.
+  const body = useQuery<Occurrence>(d.blocks === undefined && initial.occurrence ? eventKey(initial.occurrence.event_id) : null);
+  useEffect(() => {
+    if (d.blocks === undefined && body.data) setD((cur) => ({ ...cur, blocks: body.data!.blocks ?? [], fields: { ...(body.data!.fields ?? {}), ...(cur.fields ?? {}) } }));
+  }, [body.data]); // eslint-disable-line react-hooks/exhaustive-deps
   const [preset, setPreset] = useState<Preset>(presetOf(initial.recurrence, initial.startDay));
   const [rule, setRule] = useState<Rule>(ruleOrDefault(initial.recurrence, initial.startDay));
   const [more, setMore] = useState(!!(initial.description || initial.location || initial.color));
+  const [tagText, setTagText] = useState((initial.tags ?? []).join(", "));
+  const type = d.type ? types.find((x) => x.id === d.type) : undefined;
   const [endDate, setEndDate] = useState(false);
   const calendar = calendars.find((c) => c.id === d.calendar_id);
   const readOnly = !!initial.occurrence && (!initial.occurrence.writable || calendar?.writable === false);
@@ -94,6 +119,13 @@ export function EventEditor({ draft: initial, calendars, busy, onClose, onSave, 
     const endTotal = minutes + Math.max(length, 15);
     set({ startDay: day, startMin: minutes, endDay: addDays(day, Math.floor((endTotal - 1) / 1440)), endMin: endTotal - Math.floor((endTotal - 1) / 1440) * 1440 });
     if (preset !== "none" && preset !== "custom") set({ recurrence: presetRule(preset, day) });
+  }
+
+  /** A type picked for an event with no blocks yet brings the type's template; an event that has
+   *  blocks keeps them, since a type changed by mistake must not wipe a list. */
+  function pickType(id: string) {
+    const next = id ? types.find((x) => x.id === id) : undefined;
+    set({ type: id || null, ...(next && d.blocks !== undefined && d.blocks.length === 0 ? { blocks: blocksFromType(next) } : {}) });
   }
 
   function pickPreset(next: Preset) {
@@ -142,6 +174,30 @@ export function EventEditor({ draft: initial, calendars, busy, onClose, onSave, 
         {readOnly && <div className="cal-note"><Icon name="lock" size={14} /> {t("cal.readonly")}</div>}
         <input className="field cal-title-input" autoFocus={!initial.occurrence} required maxLength={240} value={d.title} onChange={(e) => set({ title: e.target.value })} placeholder={t("cal.field.title")} aria-label={t("cal.field.title")} disabled={readOnly} />
         <fieldset className="cal-fieldset" disabled={readOnly}>
+          {(types.length > 0 || d.type) && (
+            <div className="cal-line">
+              <TypeIcon icon={type?.icon} color={type?.color} size={16} />
+              <div className="cal-grow cal-type-row">
+                <select className="field" value={d.type ?? ""} aria-label={t("cal.field.type")} onChange={(e) => pickType(e.target.value)}>
+                  <option value="">{t("cal.type.none")}</option>
+                  {types.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                  {d.type && !type && <option value={d.type}>{d.type}</option>}
+                </select>
+                {(groups.length > 0 || d.group_id) && (
+                  <select className="field" value={d.group_id ?? ""} aria-label={t("cal.field.group")} onChange={(e) => set({ group_id: e.target.value || null })}>
+                    <option value="">{t("cal.group.none")}</option>
+                    {groups.filter((g) => !g.archived || g.id === d.group_id).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                  </select>
+                )}
+              </div>
+            </div>
+          )}
+          {type && Object.keys(type.fields_schema ?? {}).length > 0 && (
+            <div className="cal-line top">
+              <Icon name="sliders" size={16} />
+              <TypeFieldsForm type={type} fields={d.fields ?? {}} onChange={(fields) => set({ fields })} />
+            </div>
+          )}
           <div className="cal-line">
             <Icon name="clock" size={16} />
             <div className="cal-when">
@@ -219,6 +275,18 @@ export function EventEditor({ draft: initial, calendars, busy, onClose, onSave, 
           <div className="cal-line">
             <Icon name="bell" size={16} />
             <div className="cal-grow"><Reminders value={d.reminders} onChange={(reminders) => set({ reminders })} /></div>
+          </div>
+          <div className="cal-line top">
+            <Icon name="list" size={16} />
+            <div className="cal-grow">
+              <div className="cal-section-label">{t("cal.blocks")}</div>
+              {d.blocks === undefined ? <div className="cal-hint">{t("common.loading")}</div> : <BlocksEditor blocks={d.blocks} onChange={(blocks) => set({ blocks })} />}
+            </div>
+          </div>
+          <div className="cal-line">
+            <span className="cal-hash" aria-hidden="true">#</span>
+            <input className="field cal-grow" value={tagText} maxLength={300} placeholder={t("cal.field.tags")} aria-label={t("cal.field.tags")}
+              onChange={(e) => { setTagText(e.target.value); set({ tags: e.target.value.split(",").map((x) => x.trim().replace(/^#/, "")).filter(Boolean) }); }} />
           </div>
           {more ? (
             <>
