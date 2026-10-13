@@ -3,24 +3,32 @@
 // grid, cut at midnight into one piece per day it touches. A task with a time block is a block like
 // an event; a task with only a due date is a line in the all-day row of its day.
 
+import { renderChip, type TypeDef } from "./blocks";
 import { addDays, diffDays, type Day } from "./dates";
 import type { Item, Occurrence, Task } from "./types";
 import { toWall } from "./zone";
 
 const DAY_MS = 86400000;
 
-export function eventItem(event: Occurrence, zone: string): Item {
+/** An event as the views draw it. With its type, the item carries the type's colour and icon for
+ *  the marks of a phone's month, and the chip the host rendered (or the type's template filled here,
+ *  for a host that sent none) for the cells too small for a title. */
+export function eventItem(event: Occurrence, zone: string, type?: TypeDef): Item {
+  // A typed event is drawn in its type's colour, so a week's meals read as one thing across the grid
+  // whatever calendar they were put in.
+  const typed = type ? { typeColor: type.color, typeIcon: type.icon, color: type.color || event.color, chip: event.chip ?? renderChip(type.display?.chip, event.title, event.fields) } : event.chip ? { chip: event.chip } : {};
+  const done = event.status === "done" ? { done: true } : {};
   if (event.all_day) {
     const first = event.start_date || event.start_at.slice(0, 10);
     const end = event.end_date || event.end_at.slice(0, 10);
     const last = end > first ? addDays(end, -1) : first;
-    return { key: `e:${event.id}`, kind: "event", title: event.title, color: event.color, start: Date.parse(`${first}T00:00:00Z`), end: Date.parse(`${end}T00:00:00Z`), allDay: true, firstDay: first, lastDay: last, event, location: event.location };
+    return { key: `e:${event.id}`, kind: "event", title: event.title, color: event.color, start: Date.parse(`${first}T00:00:00Z`), end: Date.parse(`${end}T00:00:00Z`), allDay: true, firstDay: first, lastDay: last, event, location: event.location, ...typed, ...done };
   }
   const start = Date.parse(event.start_at);
   const end = Math.max(Date.parse(event.end_at), start);
   const firstDay = toWall(start, zone).day;
   const lastDay = end > start ? toWall(end - 1, zone).day : firstDay;
-  return { key: `e:${event.id}`, kind: "event", title: event.title, color: event.color, start, end, allDay: end - start >= DAY_MS, firstDay, lastDay, event, location: event.location };
+  return { key: `e:${event.id}`, kind: "event", title: event.title, color: event.color, start, end, allDay: end - start >= DAY_MS, firstDay, lastDay, event, location: event.location, ...typed, ...done };
 }
 
 /** Whether a task is done: the host says so in a flag, and with the time it was done. */

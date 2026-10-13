@@ -355,6 +355,13 @@ describe("the cache", () => {
     unwire();
   });
 
+  it("reads the calendar again when an event, a block or a plan changed elsewhere", () => {
+    const { invalidated, send, unwire } = wired();
+    send(event(9, new Date().toISOString(), "calendar.changed"));
+    expect(invalidated).toEqual(["/api/calendar"]);
+    unwire();
+  });
+
   it("reads the session lists once for a burst of run events, within the debounce", async () => {
     const { invalidated, send, unwire } = wired();
     const now = new Date().toISOString();

@@ -13,14 +13,20 @@ import { MenuButton } from "../ui/phone";
 import { navigate, pathFor } from "../router";
 import { hold, invalidate, peek, prime, release, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
-import { OverflowMenu, Sheet, toast as showToast } from "../ui/dialogs";
+import { OverflowMenu, Sheet, deleteWithUndo, toast as showToast } from "../ui/dialogs";
 import { AgendaView, DayList } from "./Agenda";
 import { ConnectionsSheet } from "./Connections";
 import { addDays, dayLabel, rangeTitle, startOfWeek, step, visibleRange, weekdayNames, type Day, type View } from "./dates";
 import {
-  CALENDARS, LISTS, SETTINGS, completeTask, createEvent, createTask, deleteEvent, deleteTask, eventsKey, refreshPlanner, timesOf, tasksRangeKey, updateEvent, updateTask,
+  CALENDARS, LISTS, SETTINGS, aggregatesKey, completeTask, createEvent, createTask, deleteEvent, deleteTask, eventKey, eventsKey, patchBlocks, refreshPlanner, setStatus, timesOf, tasksRangeKey, updateEvent, updateTask,
   type EventFields,
 } from "./data";
+import { diffBlocks, type AggregateDay, type AggregateItem, type EventStatus } from "./blocks";
+import { EventView } from "./EventView";
+import { FilterSheet, filterCount, passes, storeFilters, storedFilters, type Filters } from "./Filters";
+import { GroupPage, GroupsSection } from "./Groups";
+import { statusLabel, useGroups, useTypes } from "./structured";
+import { TypesSheet } from "./TypeEditor";
 import { EventEditor, draftFromOccurrence, fieldsFromDraft, type EventDraft } from "./EventEditor";
 import { eventItem, isDone, taskItem } from "./items";
 import { MiniMonth } from "./MiniMonth";
@@ -35,12 +41,14 @@ import { TimeGrid, type Slot } from "./TimeGrid";
 import { DEFAULT_SETTINGS, type CalendarRow, type CalendarSettings, type Item, type Occurrence, type Scope, type Task, type TaskList, type TaskView } from "./types";
 import { browserZone, fromWall, toWall, todayIn, validZone } from "./zone";
 import "./calendar.css";
+import "./blocks.css";
 
 const VIEW_KEY = "daedalus.calendar.view";
 const PHONE_VIEW_KEY = "daedalus.calendar.view.phone";
 const WORKWEEK_KEY = "daedalus.calendar.workweek";
 const SIDE_KEY = "daedalus.calendar.side";
 const TASKS_KEY = "daedalus.calendar.tasks";
+const DENSE_KEY = "daedalus.calendar.dense";
 const DESK_VIEWS: View[] = ["day", "week", "month", "agenda"];
 const PHONE_VIEWS: View[] = ["day", "3day", "month", "agenda"];
 
@@ -58,7 +66,8 @@ function fitView(view: View, phone: boolean): View {
   return view === "3day" ? "week" : view;
 }
 
-type Editor = { kind: "event"; draft: EventDraft } | { kind: "task"; draft: TaskDraft };
+/** What is open over the view: an event as it is read (what a tap opens), its editor, or a task's. */
+type Editor = { kind: "view"; occurrence: Occurrence } | { kind: "event"; draft: EventDraft } | { kind: "task"; draft: TaskDraft };
 
 export function CalendarScreen({ toast, query }: { toast: (message: string) => void; query?: URLSearchParams }) {
   useLang();
@@ -89,7 +98,9 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
   const nowMinutes = toWall(now, zone).minutes;
 
   const [chosen, setChosen] = useState<View | null>(() => (stored(phone ? PHONE_VIEW_KEY : VIEW_KEY) as View | null) || null);
-  const view = fitView(chosen ?? settings.default_view, phone);
+  // A phone opens on the agenda until another view is picked there: a list of the days ahead reads on
+  // a narrow screen, where three columns of hours hold a word or two of each title.
+  const view = fitView(chosen ?? (phone ? "agenda" : settings.default_view), phone);
   const [workWeek, setWorkWeek] = useState(() => stored(WORKWEEK_KEY) === "1");
   const [anchor, setAnchor] = useState<Day>(() => todayIn(browserZone()));
   const [scrollToken, setScrollToken] = useState(0);
@@ -98,7 +109,14 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
 
   const [editor, setEditor] = useState<Editor | null>(null);
   const [quick, setQuick] = useState<{ draft: QuickDraft; anchor: DOMRect | null } | null>(null);
-  const [sheet, setSheet] = useState<"settings" | "connections" | "drawer" | "search" | "keys" | null>(null);
+  const [sheet, setSheet] = useState<"settings" | "connections" | "drawer" | "search" | "keys" | "filters" | "types" | null>(null);
+  const [filters, setFiltersState] = useState<Filters>(storedFilters);
+  const setFilters = (next: Filters) => { setFiltersState(next); storeFilters(next); };
+  const [dense, setDenseState] = useState(() => stored(DENSE_KEY) === "1");
+  const setDense = (next: boolean) => { setDenseState(next); store(DENSE_KEY, next ? "1" : "0"); };
+  const [groupOpen, setGroupOpen] = useState<string | null>(null);
+  const types = useTypes();
+  const groups = useGroups();
   const [busy, setBusy] = useState(false);
   const [dragTask, setDragTask] = useState<Task | null>(null);
   const [scopeDialog, askScope] = useScopeQuestion();
@@ -124,15 +142,26 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
 
   const items = useMemo(() => {
     const hidden = new Set(calendars.filter((c) => !c.visible).map((c) => c.id));
+    // A hidden group's events are left out by the host; this keeps a just-hidden one out before the
+    // list is read again.
+    const hiddenGroups = new Set(groups.filter((g) => g.hidden).map((g) => g.id));
     const result: Item[] = [];
-    for (const o of events.data ?? lastEvents.current) if (!hidden.has(o.calendar_id)) result.push(eventItem(o, zone));
+    for (const o of events.data ?? lastEvents.current) {
+      if (hidden.has(o.calendar_id) || (o.group_id && hiddenGroups.has(o.group_id))) continue;
+      const item = eventItem(o, zone, o.type ? types.find((x) => x.id === o.type) : undefined);
+      if (passes(item, filters)) result.push(item);
+    }
     for (const task of rangeTasks.data ?? lastTasks.current) {
       const list = lists.find((l) => l.id === task.list_id);
       const item = taskItem(task, zone, list && !list.is_default ? list.color : "var(--accent)");
-      if (item) result.push(item);
+      if (item && passes(item, filters)) result.push(item);
     }
     return result;
-  }, [events.data, rangeTasks.data, calendars, lists, zone]);
+  }, [events.data, rangeTasks.data, calendars, lists, zone, types, groups, filters]);
+  const tags = useMemo(() => [...new Set((events.data ?? lastEvents.current).flatMap((o) => o.tags ?? []))].sort(), [events.data]);
+  const wantsTotals = view === "agenda" || (view === "month" && phone);
+  const totalsQuery = useQuery<{ days: AggregateDay[] }>(wantsTotals ? aggregatesKey(range.start, range.end) : null, { pollMs: 60000, staleMs: 5000 });
+  const aggregates = useMemo((): Map<Day, AggregateItem[]> => new Map((totalsQuery.data?.days ?? []).map((d) => [d.date, d.items])), [totalsQuery.data]);
 
   const defaultCalendar = calendars.find((c) => c.kind === "local" && c.writable && c.visible) ?? calendars.find((c) => c.writable);
   const defaultList = lists.find((l) => l.is_default) ?? lists[0];
@@ -207,7 +236,7 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
   useEffect(() => {
     if (!pendingEvent || !events.data) return;
     const found = events.data.find((o) => o.id === pendingEvent) ?? events.data.find((o) => o.event_id === pendingEvent);
-    if (found) setEditor({ kind: "event", draft: draftFromOccurrence(found, zone, colorOf(found.calendar_id)) });
+    if (found) setEditor({ kind: "view", occurrence: found });
     else toast(t("cal.event.missing"));
     setPendingEvent(null);
   }, [pendingEvent, events.data]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -284,9 +313,21 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
     }
     setBusy(true);
     try {
-      if (draft.occurrence) await updateEvent(draft.occurrence, fields, scope);
-      else await createEvent(fields);
-      setEditor(null);
+      if (draft.occurrence) {
+        const answer = await updateEvent(draft.occurrence, fields, scope);
+        // The blocks go as point changes against the version just written, never as the whole body:
+        // a tick made on another device meanwhile stays, and a block this app cannot draw is never
+        // rewritten. A draft whose body was never read changes no block.
+        const ops = draft.blocks && draft.occurrence.blocks ? diffBlocks(draft.occurrence.blocks, draft.blocks) : [];
+        if (ops.length) {
+          const saved = await patchBlocks(draft.occurrence.event_id, ops, answer?.version);
+          if (saved && typeof saved === "object" && Array.isArray(saved.blocks)) prime(eventKey(draft.occurrence.event_id), saved);
+        }
+        setEditor({ kind: "view", occurrence: draft.occurrence });
+      } else {
+        await createEvent(fields);
+        setEditor(null);
+      }
       refreshPlanner();
       toast(t("cal.event.saved"));
     } catch (exc) { toast(errorText(exc)); }
@@ -299,7 +340,19 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
       const answer = await askScope("delete");
       if (!answer) return;
       scope = answer;
-    } else if (!(await confirmAsync(t("cal.event.delete.title", { title: occurrence.title || t("cal.untitled") }), { action: t("common.delete") }))) return;
+    } else {
+      // A single event goes at once and can be had back: it leaves the view now, the toast offers
+      // Undo for as long as the request is held back, and the request goes only if nobody took it.
+      const before = peek<Occurrence[]>(eventsPath);
+      if (before) prime(eventsPath, before.filter((o) => o.event_id !== occurrence.event_id));
+      hold(eventsPath);
+      setEditor(null);
+      deleteWithUndo(t("cal.event.deleted"), async () => {
+        try { await deleteEvent(occurrence, "all"); }
+        finally { release(eventsPath); refreshPlanner(); }
+      }, () => { release(eventsPath); if (before) prime(eventsPath, before); refreshPlanner(); }, (exc) => toast(errorText(exc)));
+      return;
+    }
     setBusy(true);
     try {
       await deleteEvent(occurrence, scope);
@@ -453,7 +506,7 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
   }
 
   function openItem(item: Item) {
-    if (item.event) setEditor({ kind: "event", draft: draftFromOccurrence(item.event, zone, colorOf(item.event.calendar_id)) });
+    if (item.event) setEditor({ kind: "view", occurrence: item.event });
     else if (item.task) setEditor({ kind: "task", draft: taskDraft(item.task) });
   }
 
@@ -461,7 +514,34 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
     const day = found.all_day ? (found.start_date || found.start_at.slice(0, 10)) : toWall(found.start_at, zone).day;
     setAnchor(day);
     setScrollToken((n) => n + 1);
-    setEditor({ kind: "event", draft: draftFromOccurrence(found, zone, colorOf(found.calendar_id)) });
+    setEditor({ kind: "view", occurrence: found });
+  }
+
+  /** An event named by its id (a reference block's card): read, then opened as it is read. */
+  function openEventById(eventId: string) {
+    api.get<Occurrence>(eventKey(eventId)).then((found) => setEditor({ kind: "view", occurrence: { ...found, event_id: found.event_id ?? found.id } }), (exc) => toast(errorText(exc)));
+  }
+
+  /** A status from a swipe on a row or the group's page: shown at once, sent after, offered back. */
+  async function changeStatus(item: Item, status: EventStatus) {
+    const occurrence = item.event;
+    if (!occurrence) return;
+    const before = occurrence.status ?? "planned";
+    const list = peek<Occurrence[]>(eventsPath);
+    if (list) prime(eventsPath, list.map((o) => (o.event_id === occurrence.event_id ? { ...o, status } : o)));
+    hold(eventsPath);
+    try {
+      await setStatus(occurrence.event_id, status);
+      showToast(t("cal.status.changed.named", { title: item.chip || item.title || t("cal.untitled"), status: statusLabel(status) }), {
+        undo: () => { void setStatus(occurrence.event_id, before).then(refreshPlanner, (exc) => toast(errorText(exc))); },
+      });
+    } catch (exc) {
+      if (list) prime(eventsPath, list);
+      toast(errorText(exc));
+    } finally {
+      release(eventsPath);
+      refreshPlanner();
+    }
   }
 
   function colorOf(calendarId: string): string | undefined {
@@ -545,6 +625,7 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
     <>
       <MiniMonth anchor={anchor} today={today} weekStart={settings.week_start} rangeStart={range.start} rangeEnd={range.end} busy={busyDays} onPick={(day) => { setAnchor(day); if (sheet === "drawer") setSheet(null); }} />
       <CalendarsSection calendars={calendars} onConnections={() => setSheet("connections")} toast={toast} />
+      <GroupsSection groups={groups} onOpen={(id) => { if (sheet === "drawer") setSheet(null); setGroupOpen(id); }} toast={toast} />
       <TasksPanel today={today} zone={zone} lists={lists} view={taskView} onView={(v) => { setTaskView(v); store(TASKS_KEY, v); }} onAdd={addTask} onToggle={(task) => void toggleTask(task)}
         onOpen={(task) => { setSheet(null); setEditor({ kind: "task", draft: taskDraft(task) }); }} onDragTask={setDragTask} draggable={!phone && sheet !== "drawer"} />
     </>
@@ -565,7 +646,7 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
           onPickDay={setAnchor} onMore={openDay} onCreate={(day) => startQuick(day, 540, 600, false, null)} onOpen={openItem} onToggleTask={(task) => void toggleTask(task)} onDropTask={() => undefined} />
         <div className="cal-month-day">
           <h2 className="cal-month-day-title">{dayLabel(anchor, locale(), { weekday: "long", day: "numeric", month: "long" })}</h2>
-          <DayList day={anchor} items={items} zone={zone} today={today} now={now} calendars={calendars} onOpen={openItem} onToggleTask={(task) => void toggleTask(task)} />
+          <DayList day={anchor} items={items} zone={zone} today={today} now={now} calendars={calendars} types={types} aggregates={aggregates} dense={dense} onOpen={openItem} onToggleTask={(task) => void toggleTask(task)} onStatus={(item, status) => void changeStatus(item, status)} />
         </div>
       </div>
     ) : (
@@ -574,7 +655,7 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
         onOpen={openItem} onToggleTask={(task) => void toggleTask(task)} onDropTask={(task, day) => void dropTask(task, day, null)} />
     )
   ) : (
-    <AgendaView days={range.days} items={items} zone={zone} today={today} now={now} calendars={calendars} onOpen={openItem} onToggleTask={(task) => void toggleTask(task)} onCreate={newEvent} />
+    <AgendaView days={range.days} items={items} zone={zone} today={today} now={now} calendars={calendars} types={types} aggregates={aggregates} dense={dense} onOpen={openItem} onToggleTask={(task) => void toggleTask(task)} onStatus={(item, status) => void changeStatus(item, status)} onCreate={newEvent} />
   );
 
   return (
@@ -614,11 +695,19 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
             </button>
           </>
         )}
+        {/* On a phone the header has no room for a sixth glyph: the filters live in its menu, and the
+            button comes back only while a filter is on, so a narrowed view never looks complete. */}
+        {(!phone || filterCount(filters) > 0) && <button type="button" className={`iconbtn cal-filter-btn ${filterCount(filters) ? "on" : ""}`} onClick={() => setSheet("filters")} aria-label={filterCount(filters) ? t("cal.filters.on", { n: filterCount(filters) }) : t("cal.filters")} title={t("cal.filters")}>
+          <Icon name="sliders" />
+          {filterCount(filters) > 0 && <span className="cal-filter-count" aria-hidden="true">{filterCount(filters)}</span>}
+        </button>}
         {!phone && <button type="button" className="iconbtn" onClick={() => setSheet("settings")} aria-label={t("cal.settings")} title={t("cal.settings")}><Icon name="settings" /></button>}
         <OverflowMenu label={t("cal.menu")} items={[
           ...(!phone ? [{ label: t("cal.view.workweek.toggle"), checked: workWeek, onSelect: toggleWorkWeek }, "-" as const] : []),
-          ...(phone ? [{ label: t("cal.settings"), icon: "settings" as const, onSelect: () => setSheet("settings") }] : []),
+          ...(phone ? [{ label: t("cal.filters"), icon: "sliders" as const, onSelect: () => setSheet("filters") }, { label: t("cal.settings"), icon: "settings" as const, onSelect: () => setSheet("settings") }] : []),
           { label: t("cal.connections"), icon: "plug", onSelect: () => setSheet("connections") },
+          { label: t("cal.types"), icon: "list", onSelect: () => setSheet("types") },
+          { label: t("cal.density.compact"), checked: dense, onSelect: () => setDense(!dense) },
           ...(!phone ? [{ label: t("cal.keys"), icon: "question" as const, hint: "?", onSelect: () => setSheet("keys") }] : []),
         ]} />
         {!phone && <button type="button" className="btn primary cal-new" onClick={newEvent} title={`${t("cal.new")} (C)`}><Icon name="plus" size={16} /> {t("cal.new.short")}</button>}
@@ -648,7 +737,13 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
       {sheet === "search" && <SearchSheet zone={zone} onPick={(o) => void openFound(o)} onClose={() => setSheet(null)} />}
       {sheet === "keys" && <KeysSheet onClose={() => setSheet(null)} />}
       {quick && <QuickCreate draft={quick.draft} calendars={calendars} anchor={quick.anchor} phone={phone} busy={busy} onChange={(draft) => setQuick({ ...quick, draft })} onSave={(q) => void saveQuick(q)} onMore={moreQuick} onClose={() => setQuick(null)} />}
-      {editor?.kind === "event" && <EventEditor key={editor.draft.occurrence?.id ?? "new"} draft={editor.draft} calendars={calendars} phone={phone} busy={busy} onClose={() => setEditor(null)} onSave={(d) => void saveEvent(d)} onDelete={(o) => void removeEvent(o)} onResolve={(o, c) => void resolveConflict(o, c)} />}
+      {sheet === "filters" && <FilterSheet filters={filters} calendars={calendars} types={types} groups={groups} tags={tags} dense={dense} onDense={setDense} onChange={setFilters} onClose={() => setSheet(null)} />}
+      {sheet === "types" && <TypesSheet types={types} onClose={() => setSheet(null)} toast={toast} />}
+      {groupOpen && <GroupPage groupId={groupOpen} groups={groups} types={types} calendars={calendars} zone={zone} today={today} now={now} phone={phone} dense={dense} onClose={() => setGroupOpen(null)} onOpen={openItem} onStatus={(item, status) => void changeStatus(item, status)} toast={toast} />}
+      {editor?.kind === "view" && <EventView key={editor.occurrence.id} occurrence={editor.occurrence} calendars={calendars} types={types} groups={groups} zone={zone} phone={phone} busy={busy}
+        onClose={() => setEditor(null)} onEdit={(full) => setEditor({ kind: "event", draft: draftFromOccurrence(full, zone, colorOf(full.calendar_id)) })} onDelete={(o) => void removeEvent(o)} onResolve={(o, c) => void resolveConflict(o, c)}
+        onOpenGroup={(id) => { setEditor(null); setGroupOpen(id); }} onOpenEvent={openEventById} />}
+      {editor?.kind === "event" && <EventEditor key={editor.draft.occurrence?.id ?? "new"} draft={editor.draft} calendars={calendars} types={types} groups={groups} phone={phone} busy={busy} onClose={() => setEditor(editor.draft.occurrence ? { kind: "view", occurrence: editor.draft.occurrence } : null)} onSave={(d) => void saveEvent(d)} onDelete={(o) => void removeEvent(o)} onResolve={(o, c) => void resolveConflict(o, c)} />}
       {editor?.kind === "task" && <TaskEditor key={editor.draft.task?.id ?? "new"} draft={editor.draft} lists={lists} zone={zone} today={today} busy={busy} onClose={() => setEditor(null)} onSave={(d) => void saveTask(d)} onDelete={(task) => void removeTask(task)}
         onToggle={(task) => { void toggleTask(task); setEditor(null); }} />}
       {scopeDialog}

@@ -4,6 +4,7 @@
 import { api } from "../api";
 import { invalidate } from "../store";
 import { addDays, type Day } from "./dates";
+import type { Block, BlockOp, EventLink, EventStatus, Group, HistoryEntry, TypeDef } from "./blocks";
 import type { Occurrence, Scope, Task } from "./types";
 import { fromWall } from "./zone";
 
@@ -11,6 +12,8 @@ export const CALENDARS = "/api/calendar/calendars";
 export const SETTINGS = "/api/calendar/settings";
 export const ACCOUNTS = "/api/calendar/accounts";
 export const LISTS = "/api/planner/lists";
+export const TYPES = "/api/calendar/types";
+export const GROUPS = "/api/calendar/groups";
 
 export function eventsKey(start: Day, end: Day, zone: string): string {
   return `/api/calendar/events?start=${encodeURIComponent(fromWall(start, 0, zone))}&end=${encodeURIComponent(fromWall(end, 0, zone))}`;
@@ -25,9 +28,21 @@ export function tasksViewKey(view: string): string {
   return `/api/planner/tasks?view=${view}`;
 }
 
-/** After any write: every event range and task list on screen reads again. */
+/** The aggregates of the types over a range of days, `to` exclusive, for the totals under each day. */
+export function aggregatesKey(from: Day, to: Day, groupId?: string): string {
+  return `/api/calendar/aggregates?from=${from}&to=${to}${groupId ? `&group_id=${encodeURIComponent(groupId)}` : ""}`;
+}
+
+export function eventKey(eventId: string): string {
+  return `/api/calendar/events/${encodeURIComponent(eventId)}`;
+}
+
+/** After any write: every event range and task list on screen reads again, and with them the days'
+ *  totals and the groups' progress, which a tick or a moved meal changes as well. */
 export function refreshPlanner(): void {
   invalidate("/api/calendar/events");
+  invalidate("/api/calendar/aggregates");
+  invalidate(GROUPS);
   invalidate("/api/planner/tasks");
 }
 
@@ -49,6 +64,14 @@ export type EventFields = {
   reminders: number[];
   /** The event's own colour, or null for its calendar's. */
   color: string | null;
+  /** The structured part; sent only by the editors that change it, so a drag leaves it alone. */
+  type?: string | null;
+  fields?: Record<string, unknown>;
+  blocks?: Block[];
+  status?: EventStatus;
+  tags?: string[];
+  group_id?: string | null;
+  links?: EventLink[];
 };
 
 export type EventTimes = Pick<EventFields, "start_at" | "end_at" | "all_day" | "start_date" | "end_date">;
@@ -86,6 +109,53 @@ export function deleteEvent(occurrence: Occurrence, scope: Scope): Promise<unkno
   const query = new URLSearchParams({ version: String(occurrence.version), scope });
   if (scope === "this" && occurrence.occurrence_start) query.set("occurrence_start", occurrence.occurrence_start);
   return api.delete(`/api/calendar/events/${encodeURIComponent(occurrence.event_id)}?${query}`);
+}
+
+/** Point changes to an event's blocks. A tick sends no version (the last tick of an item wins); a
+ *  structural change sends the one it was made against, so it never lands on a body it did not see. */
+export function patchBlocks(eventId: string, ops: BlockOp[], version?: number): Promise<Occurrence> {
+  return api.patch<Occurrence>(`${eventKey(eventId)}/blocks`, version === undefined ? { ops } : { ops, version });
+}
+
+export function setStatus(eventId: string, status: EventStatus): Promise<Occurrence> {
+  return api.post<Occurrence>(`${eventKey(eventId)}/status`, { status });
+}
+
+export function eventHistory(eventId: string): Promise<{ entries: HistoryEntry[] }> {
+  return api.get<{ entries: HistoryEntry[] }>(`${eventKey(eventId)}/history`);
+}
+
+/** Sends an action block's prompt to its session, with the event's state as context. */
+export function runAction(eventId: string, blockId: string): Promise<unknown> {
+  return api.post(`${eventKey(eventId)}/blocks/${encodeURIComponent(blockId)}/run`, {});
+}
+
+export function saveType(type: TypeDef): Promise<TypeDef> {
+  return api.put<TypeDef>(`${TYPES}/${encodeURIComponent(type.id)}`, type);
+}
+
+export function deleteType(id: string): Promise<unknown> {
+  return api.delete(`${TYPES}/${encodeURIComponent(id)}`);
+}
+
+export function groupKey(id: string): string {
+  return `${GROUPS}/${encodeURIComponent(id)}`;
+}
+
+export function patchGroup(id: string, patch: Partial<Group>): Promise<Group> {
+  return api.patch<Group>(groupKey(id), patch);
+}
+
+export function shiftGroup(id: string, days: number): Promise<Group> {
+  return api.post<Group>(`${groupKey(id)}/shift`, { days });
+}
+
+export function duplicateGroup(id: string, offsetDays: number): Promise<Group> {
+  return api.post<Group>(`${groupKey(id)}/duplicate`, { offset_days: offsetDays });
+}
+
+export function deleteGroup(id: string, events: "keep" | "delete"): Promise<unknown> {
+  return api.delete(`${groupKey(id)}?events=${events}`);
 }
 
 export type TaskFields = Partial<Omit<Task, "id" | "version" | "done_at" | "done">>;
