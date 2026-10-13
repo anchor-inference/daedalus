@@ -1,6 +1,7 @@
 package rpc_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -15,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -166,6 +168,7 @@ func fixture(t *testing.T) *httptest.Server {
 	mux.HandleFunc("/after-login", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "<title>Signed in</title>signed in")
 	})
+	loginPages(mux)
 	devtoolsPages(mux)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -179,6 +182,25 @@ type harness struct {
 	site    *httptest.Server
 	stop    chan struct{}
 	evlog   *events.Log
+	logged  *lockedBuffer
+}
+
+// lockedBuffer is the daemon's log, written from many goroutines.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // start runs the daemon in this process on a temporary run directory, with limits changed by edit.
@@ -222,10 +244,13 @@ func startFull(t *testing.T, edit func(*config.Limits), args []string, makeWall 
 	if err != nil {
 		t.Fatal(err)
 	}
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	// Everything the daemon logs is kept, so a test can show a secret never reached the log.
+	logged := &lockedBuffer{}
+	var logTo io.Writer = logged
 	if os.Getenv("BROWSERD_TEST_LOG") != "" {
-		log = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		logTo = io.MultiWriter(logged, os.Stderr)
 	}
+	log := slog.New(slog.NewTextHandler(logTo, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	evlog := events.NewLog(config.EventRingSize)
 	deb := events.NewDebouncer(evlog, map[string]events.Policy{"tab.updated": {Window: 250 * time.Millisecond, Coalesce: true}})
 	var hub *view.Hub
@@ -269,7 +294,7 @@ func startFull(t *testing.T, edit func(*config.Limits), args []string, makeWall 
 	d := &rpc.Daemon{Config: cfg, Instance: "test", StartedAt: time.Now(), Manager: m, Hub: hub, Page: model, Events: evlog, Log: log, Net: wall, Record: recorder, Workflow: steps}
 	srv := server.New(ep.Token, log, d.Hello)
 	d.Register(srv)
-	h := &harness{t: t, manager: m, site: site, stop: make(chan struct{}), evlog: evlog}
+	h := &harness{t: t, manager: m, site: site, stop: make(chan struct{}), evlog: evlog, logged: logged}
 	go hub.Run(h.stop)
 	go m.RunTitles(h.stop)
 	go recorder.Run(h.stop)

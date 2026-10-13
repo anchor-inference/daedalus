@@ -29,6 +29,7 @@ func (d *Daemon) registerPage(s *server.Server) {
 		"page.network":    d.network,
 		"page.request":    d.request,
 		"page.inspect":    d.inspect,
+		"page.login":      d.login,
 	} {
 		s.Handle(name, h)
 	}
@@ -110,6 +111,20 @@ func (d *Daemon) act(ctx context.Context, c *server.Conn, params json.RawMessage
 		return nil, err
 	}
 	return d.Page.Act(ctx, t, p)
+}
+
+// login fills the sign-in form of a tab with what the operator typed into the app's private form. The
+// operator's call passes a pause, which is how the host holds the agent off while the form is open.
+func (d *Daemon) login(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p page.LoginParams
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	t, err := d.gatedTab(ctx, p.TabID, p.Origin)
+	if err != nil {
+		return nil, err
+	}
+	return d.Page.Login(ctx, t, p)
 }
 
 func (d *Daemon) wait(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
