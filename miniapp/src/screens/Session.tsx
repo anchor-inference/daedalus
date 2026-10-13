@@ -20,6 +20,8 @@ import { looksLikeDiff } from "../diff";
 import { KeptFiles, TurnFiles } from "../artifact";
 import { placeOf, turnFiles, turnPages } from "../turnfiles";
 import { PageCards } from "../pagecard";
+import { WidgetFrames } from "../widgetframe";
+import { drawnWidgets } from "../widget";
 import { useReveal } from "../reveal";
 import { withoutAttachedList } from "../keptfiles";
 import { FileGallery, InlineMedia, mediaCopyText, splitMediaAnswer } from "../media";
@@ -1317,6 +1319,11 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       toast,
       link,
       asking: questionsKey(detail?.pending?.questions ?? null),
+      compose: (text: string) => {
+        if (!composer.current) return false;
+        composer.current.insert(text);
+        return true;
+      },
     }),
     [id, detail?.workspace, detail?.folders, openFromChat, panel.open, toast, link, detail?.pending?.questions],
   );
@@ -1922,7 +1929,7 @@ function SystemNoteRow({ note, cacheKey, run }: { note: SystemNote; cacheKey?: s
 }
 
 const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Turn; live: boolean; onTurnAction?: (kind: "revert" | "fork" | "retry", seq: number) => void }) {
-  const { id: sessionId, workspace, folders, preview, toast, link } = useContext(SessionContext);
+  const { id: sessionId, workspace, folders, preview, toast, link, compose } = useContext(SessionContext);
   const focusChat = useFocusChat();
   const [folded, setFolded] = useDisclosed(`${sessionId}:run:${turn.key}`, false);
   const split = useReplies() === "split";
@@ -2012,8 +2019,8 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
         </div>
       )}
       {segments.map((segment, index) => segment.kind === "work" ? (
+        <Fragment key={`w${index}`}>
         <WorkBlock
-          key={`w${index}`}
           disclosure={index === 0 ? `${sessionId}:turn:${turn.key}` : `${sessionId}:turn:${turn.key}:${index}`}
           items={segment.items}
           live={live && index === lastWork}
@@ -2024,6 +2031,10 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
           orchestrator={!!focusChat?.orchestrator}
           onRetry={!live && onTurnAction ? (retrySeq) => onTurnAction("retry", retrySeq) : undefined}
         />
+        {/* Outside the folded steps, right after the step that drew it: a widget is part of the answer,
+            and it is drawn as soon as its call returns so the operator can use it while the agent goes on. */}
+        <WidgetFrames sessionId={sessionId} widgets={drawnWidgets(segment.items)} toast={toast} compose={compose} />
+        </Fragment>
       ) : (
         <Fragment key={`t${index}`}>
           <Md className="answer interim" text={segment.text} cacheKey={live ? undefined : `r${turn.key}-${index}`} />
@@ -2489,6 +2500,8 @@ function describe(item: ToolItem, workspace?: string): { verb: string; family: s
       return { verb: verb("WebFetch", r), family: "WebFetch", detail: str("url").replace(/^https?:\/\//, "").slice(0, 60), icon: "globe" };
     case "SendFile":
       return { verb: verb("SendFile", r), family: "SendFile", detail: base(str("path")), icon: "attach" };
+    case "Widget":
+      return { verb: verb("Widget", r), family: "Widget", detail: str("title"), icon: "sliders" };
     case "ImageView":
       return { verb: verb("ImageView", r), family: "ImageView", detail: `${base(str("path"))}${str("task") ? " · " + str("task").slice(0, 60) : ""}`, icon: "image" };
     case "AttachMedia":
@@ -2880,7 +2893,9 @@ const NO_FOLDERS: SessionFolder[] = [];
 
 /** `asking`: the key of the questions the session waits on (empty: none), so the transcript's AskUser
  *  call that asked them reads as waiting and an older unanswered one does not. */
-const SessionContext = createContext<{ id: string; workspace: string; folders: SessionFolder[]; preview: (src: PreviewSource) => void; openJobs: () => void; toast: (text: string) => void; link: string; asking: string }>({
+/** `compose`: put text into the conversation's composer for the operator to send (a widget's ask);
+ *  absent where the transcript has no composer of its own. */
+const SessionContext = createContext<{ id: string; workspace: string; folders: SessionFolder[]; preview: (src: PreviewSource) => void; openJobs: () => void; toast: (text: string) => void; link: string; asking: string; compose?: (text: string) => boolean }>({
   id: "",
   workspace: "",
   folders: NO_FOLDERS,

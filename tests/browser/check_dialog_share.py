@@ -38,6 +38,8 @@ WORDS = {
         "kicker": "Shared conversation",
         "gone": "This conversation is not shared.",
         "chip": "Public",
+        "widget": "Interactive widget · works in the app",
+        "open": "Open in the app",
     },
     "ru": {
         "actions": "Действия с сессией",
@@ -50,6 +52,8 @@ WORDS = {
         "kicker": "Общий диалог",
         "gone": "Этот диалог не открыт.",
         "chip": "Публично",
+        "widget": "Интерактивный виджет · работает в приложении",
+        "open": "Открыть в приложении",
     },
 }
 
@@ -134,6 +138,17 @@ def check_page(page: Page, words: dict[str, str], width: int) -> None:
     expect(page.get_by_text("It opens when the slug is known.")).to_be_visible()
     expect(page.locator(".composer")).to_have_count(0)
     expect(page.locator("nav.sidebar, nav.rail")).to_have_count(0)
+    # A widget is named, never run: no frame, its title, and the way to the conversation in the app.
+    widget = page.locator("[data-widget-static]")
+    expect(widget).to_have_count(1)
+    expect(page.locator("iframe")).to_have_count(0)
+    expect(widget.locator(".widget-static-title")).to_have_text("Loan calculator")
+    expect(widget.locator(".widget-static-meta")).to_have_text(words["widget"])
+    expect(widget.locator("a")).to_have_text(words["open"])
+    expect(widget.locator("a")).to_have_attribute("href", f"/app/agents/{S1}")
+    box = widget.bounding_box()
+    assert box and box["x"] >= 0 and box["x"] + box["width"] <= width
+    assert page.evaluate("document.documentElement.scrollWidth - window.innerWidth") <= 0
     user = page.locator(".msg.user").bounding_box()
     answer = page.locator(".answer").bounding_box()
     assert user and answer
@@ -151,7 +166,9 @@ TRANSCRIPT = {
     "messages": [
         {"role": "user", "text": "How does the gate work?", "at": "2026-09-27T10:00:00Z", "via": "", "media": []},
         {"role": "assistant", "text": "It opens when the slug is known.", "at": "2026-09-27T10:00:05Z", "via": "", "media": []},
+        {"role": "assistant", "text": "", "at": "2026-09-27T10:00:09Z", "via": "", "media": [], "widgets": ["Loan calculator"]},
     ],
+    "app_path": f"/app/agents/{S1}",
 }
 
 

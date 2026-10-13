@@ -796,6 +796,10 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         # The companion's writes answer with what they changed (the profile, a goal), so they go to
         # the shared host, which keeps them, rather than to the blanket "ok" below.
         return None
+    if "/widgets/" in rel and rel.startswith("/api/sessions/") and fulfil_shared(route):
+        # A widget's writes are kept, so a reload finds what it stored, and its page answers with the
+        # address the app then opens.
+        return None
     if request.method != "GET":
         return respond(route, {"ok": True})
     if rel == "/api/events" and getattr(stub, "events", ""):
@@ -875,7 +879,7 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
             return respond(route, [])
         if tail.startswith("tool-groups"):
             return respond(route, session_tool_groups())
-        if tail.startswith("tool-results/") and fulfil_shared(route):
+        if tail.startswith(("tool-results/", "widgets/")) and fulfil_shared(route):
             return None
         return respond(route, {})
     if rel.startswith("/api/usage/provider/"):

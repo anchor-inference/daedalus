@@ -10,10 +10,12 @@ import { t, useLang } from "../i18n";
 import { renderMarkdown } from "../md";
 import { RawHtml } from "../rawhtml";
 import { splitMediaAnswer, type AnswerPart } from "../mediaformat";
+import "../widget.css";
 
-type SharedMessage = { role: "user" | "assistant"; text: string; at: string; via?: string; media?: MediaPresentation[] };
+type SharedMessage = { role: "user" | "assistant"; text: string; at: string; via?: string; media?: MediaPresentation[]; widgets?: string[] };
 
-type SharedPage = { title: string; older: boolean; messages: SharedMessage[] };
+/** `app_path`: the conversation in the app, where a widget the page can only name is drawn. */
+type SharedPage = { title: string; older: boolean; messages: SharedMessage[]; app_path?: string };
 
 const REFRESH_MS = 20_000;
 
@@ -55,6 +57,21 @@ function Answer({ message }: { message: SharedMessage }) {
       {parts.map((part: AnswerPart, index) =>
         part.kind === "text" ? <Md key={`text-${index}`} text={part.text} /> : <Pictures key={part.presentation.id} presentation={part.presentation} />,
       )}
+    </div>
+  );
+}
+
+/** A widget the agent drew, which this page cannot run: what it holds is the operator's, and a guest
+ *  is not signed in. Its title, and the way to the conversation where it works. */
+function StaticWidget({ title, appPath }: { title: string; appPath: string }) {
+  return (
+    <div className="widget-static" data-widget-static>
+      <span className="artifact-glyph" aria-hidden><Icon name="sliders" size={18} /></span>
+      <span className="widget-static-text">
+        <span className="widget-static-title truncate">{title || t("widget.untitled")}</span>
+        <span className="widget-static-meta">{t("widget.static.meta")}</span>
+      </span>
+      <a className="btn small" href={appPath}>{t("widget.static.open")}</a>
     </div>
   );
 }
@@ -161,7 +178,8 @@ export function SharedDialog({ slug }: { slug: string }) {
                 </div>
               ) : (
                 <>
-                  <Answer message={message} />
+                  {(message.text || message.media?.length) ? <Answer message={message} /> : null}
+                  {message.widgets?.map((title, n) => <StaticWidget key={n} title={title} appPath={page.app_path || "/app/"} />)}
                   {message.at ? <time className="shared-time" dateTime={message.at}>{timeAgo(message.at)}</time> : null}
                 </>
               )}

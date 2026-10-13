@@ -1,0 +1,19 @@
+/* A widget in the conversation: a card as wide as the answer, its title over the frame. The frame's
+   own background is transparent, so the card's surface is what the widget is drawn on. */
+.widgets { display:flex; flex-direction:column; gap:8px; margin:6px 0; }
+.widget-card { display:flex; flex-direction:column; min-width:0; background:var(--surface-1); border:1px solid var(--line); border-radius:var(--radius-md); overflow:hidden; }
+.widget-head { display:flex; align-items:center; gap:8px; min-height:var(--row-h-dense); padding:2px 4px 2px 10px; border-bottom:1px solid var(--line); }
+.widget-glyph { display:inline-flex; color:var(--fg-2); flex:none; }
+.widget-title { flex:1 1 auto; min-width:0; font-size:var(--fs-13); font-weight:500; color:var(--fg); }
+.widget-head .iconbtn.small { background:transparent; color:var(--fg-2); }
+.widget-frame { display:block; width:100%; border:0; background:transparent; color-scheme:normal; }
+.widget-loading { background:var(--surface-1); }
+/* A widget the shared page and an unknown host cannot run: its title and where to open it. */
+.widget-static { display:flex; align-items:center; gap:10px; min-height:var(--row-h); padding:8px 12px; background:var(--surface-1); border:1px solid var(--line); border-radius:var(--radius-md); }
+.widget-static-text { display:flex; flex-direction:column; min-width:0; gap:1px; }
+.widget-static-title { font-size:var(--fs-14); font-weight:500; }
+.widget-static-meta { font-size:var(--fs-12); color:var(--fg-2); }
+@media (max-width: 1023px) {
+  .widget-head { min-height:var(--row-h-touch); }
+  .widget-head .iconbtn.small { min-width:var(--tap); min-height:var(--tap); }
+}

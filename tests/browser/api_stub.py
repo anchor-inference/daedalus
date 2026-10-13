@@ -367,6 +367,33 @@ GATES: dict[str, object] = {
 PAGES = PagesStub()
 """The custom page a shown-page card reads (``GET /api/pages/orders``)."""
 
+WIDGET_VALUES: dict[tuple[str, str], dict[str, object]] = {}
+"""What the widgets in a conversation keep, by session and call, for as long as the harness runs:
+a reload of the app finds the values a widget wrote before it, as the host would."""
+WIDGET_PAGES: list[dict[str, object]] = []
+"""The widgets made pages, as the bodies the app sent, for a harness to read back."""
+
+
+def answer_widget(method: str, parts: list[str], body: object) -> tuple[int, str, str] | None:
+    """``/api/sessions/<id>/widgets/<call>/storage[/<key>]`` and ``…/page``, or None for any other path."""
+    if len(parts) < 7 or parts[2] != "sessions" or parts[4] != "widgets":
+        return None
+    values = WIDGET_VALUES.setdefault((parts[3], parts[5]), {})
+    if parts[6] == "storage" and len(parts) == 7 and method == "GET":
+        return 200, "application/json", json.dumps({"values": values})
+    if parts[6] == "storage" and len(parts) > 7:
+        key = unquote("/".join(parts[7:]))
+        if method == "PUT":
+            values[key] = body.get("value") if isinstance(body, dict) else None
+            return 200, "application/json", json.dumps({"key": key, "updated_at": datetime.now(UTC).isoformat()})
+        if method == "DELETE":
+            found = values.pop(key, None) is not None
+            return (200 if found else 404), "application/json", json.dumps({"deleted": True} if found else {"detail": "nothing is stored under that key"})
+    if parts[6] == "page" and len(parts) == 7 and method == "POST":
+        WIDGET_PAGES.append(body if isinstance(body, dict) else {})
+        return 200, "application/json", json.dumps({"slug": "orders", "title": "Orders", "path": "/app/p/orders", "version": 1})
+    return None
+
 
 CALENDAR = CalendarStub()
 """The calendar and planner every harness shares: calendars, a week of events, tasks and connections."""
@@ -595,6 +622,9 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     write = SHARED_WRITES.get((method.upper(), path))
     if write is not None:
         return write
+    widget = answer_widget(method.upper(), parts, body)
+    if widget is not None:
+        return widget
     if method.upper() == "PUT" and path.startswith("/api/projects/") and path.endswith("/pin"):
         # A pin answers with the time it holds, empty once unpinned; a harness that draws the block
         # keeps the pins itself (screenshots.PINS).
