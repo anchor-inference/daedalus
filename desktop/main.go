@@ -318,7 +318,7 @@ func run(argv []string) error {
 		fmt.Println("opened", url)
 		return nil
 	case "pair":
-		url, err := app.Pair(ctx)
+		url, err := app.Pair(ctx, false)
 		if err != nil {
 			return err
 		}
@@ -447,7 +447,7 @@ func startCommand(ctx context.Context, app *App, opts options) error {
 			// code the desktop application shows nowhere. The launcher can mint one, so it does,
 			// and the window goes straight through it instead of asking the operator for it.
 			go func() {
-				url, err := app.Pair(ctx)
+				url, err := app.Pair(ctx, true)
 				if err != nil {
 					shell.emit(shellEvent{Event: "sign-in-failed", Message: err.Error()})
 					return

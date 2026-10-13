@@ -1,22 +1,16 @@
-"""Signing in on the site: with Telegram's Login Widget, with a pairing link, or with a passkey."""
+"""Signing in on the site: with Telegram's Login Widget or a pairing link, then the two-factor code when that is on."""
 
 from __future__ import annotations
 
 import hashlib
 import hmac
-import json
-import secrets
 import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-import cbor2
 import httpx
 import pytest
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import ec
-from webauthn.helpers import bytes_to_base64url
 
 from daedalus.config import RuntimeConfig, Settings
 from daedalus.extensions.api import (
@@ -26,7 +20,7 @@ from daedalus.extensions.api import (
     validate_login_widget,
     verify_session_cookie,
 )
-from daedalus.stores import pairing, passkeys
+from daedalus.stores import pairing
 from daedalus.stores.database import Database
 
 TOKEN = "123456:ABC-DEF"
@@ -62,7 +56,7 @@ def test_session_cookie_round_trip_and_forgery() -> None:
     assert verify_session_cookie(secret, session_cookie_value(secret, 0)) == 0  # the owner of an installation with no Telegram
 
 
-# -- pairing links and passkeys: signing in with no Telegram at all -----------------------------
+# -- pairing links: signing in with no Telegram at all -----------------------------
 
 
 class _Bot:
@@ -93,11 +87,11 @@ H = {"X-Daedalus-Token": "tok"}
 async def test_auth_config_names_the_ways_in_and_never_needs_a_bot(settings: Settings, db: Database) -> None:
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=build_app(_app(settings, db), "tok")), base_url="http://test") as c:  # type: ignore[arg-type]
         body = (await c.get("/api/auth/config")).json()
-    assert body == {"telegram": None, "passkeys": 0, "pairing": False}
+    assert body == {"telegram": None, "pairing": False, "second_factor": False}
     await pairing.mint(db)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=build_app(_app(settings, db, bot="daedalus_bot"), "tok")), base_url="http://test") as c:  # type: ignore[arg-type]
         body = (await c.get("/api/auth/config")).json()
-    assert body == {"telegram": {"bot_username": "daedalus_bot"}, "passkeys": 0, "pairing": True}
+    assert body == {"telegram": {"bot_username": "daedalus_bot"}, "pairing": True, "second_factor": False}
 
 
 async def test_a_pairing_link_opens_the_app_once(client: httpx.AsyncClient, db: Database) -> None:
@@ -120,7 +114,7 @@ async def test_an_installation_with_no_telegram_account_still_holds_a_session(se
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=build_app(_app(settings, db), "tok")), base_url="http://test") as c:  # type: ignore[arg-type]
         assert (await c.get("/api/auth/pair", params={"code": await pairing.mint(db)})).status_code == 303
         assert (await c.get("/api/auth/me")).json() == {"user_id": 0, "via": "cookie"}
-        assert (await c.post("/api/auth/passkeys/register/begin")).status_code == 200
+        assert (await c.post("/api/auth/totp/setup")).status_code == 200
 
 
 async def test_using_a_link_revokes_the_ones_still_outstanding(db: Database) -> None:
@@ -171,144 +165,6 @@ async def test_the_cookie_secret_survives_the_bot_token_and_changes_with_the_api
     assert await db.kv_get("session_secret")
 
 
-class SoftAuthenticator:
-    """What a security key does to a challenge, in a few lines and with no hardware.
-
-    It is the only way to exercise both halves of a ceremony: the options the server generates are
-    meaningless until something signs them and the server accepts the signature.
-    """
-
-    def __init__(self, rp_id: str, origin: str) -> None:
-        self.rp_id = rp_id
-        self.origin = origin
-        self.key = ec.generate_private_key(ec.SECP256R1())
-        self.credential_id = secrets.token_bytes(32)
-        self.sign_count = 0
-
-    def _client_data(self, kind: str, challenge: str) -> bytes:
-        return json.dumps({"type": kind, "challenge": challenge, "origin": self.origin, "crossOrigin": False}).encode()
-
-    def _authenticator_data(self, flags: int, attested: bytes = b"") -> bytes:
-        return hashlib.sha256(self.rp_id.encode()).digest() + bytes([flags]) + self.sign_count.to_bytes(4, "big") + attested
-
-    def create(self, options: dict[str, Any]) -> dict[str, Any]:
-        client_data = self._client_data("webauthn.create", options["challenge"])
-        numbers = self.key.public_key().public_numbers()
-        cose = cbor2.dumps({1: 2, 3: -7, -1: 1, -2: numbers.x.to_bytes(32, "big"), -3: numbers.y.to_bytes(32, "big")})
-        attested = bytes(16) + len(self.credential_id).to_bytes(2, "big") + self.credential_id + cose
-        attestation = cbor2.dumps({"fmt": "none", "attStmt": {}, "authData": self._authenticator_data(0x45, attested)})
-        return {
-            "id": bytes_to_base64url(self.credential_id),
-            "rawId": bytes_to_base64url(self.credential_id),
-            "type": "public-key",
-            "response": {"clientDataJSON": bytes_to_base64url(client_data), "attestationObject": bytes_to_base64url(attestation), "transports": ["internal"]},
-        }
-
-    def get(self, options: dict[str, Any]) -> dict[str, Any]:
-        self.sign_count += 1
-        client_data = self._client_data("webauthn.get", options["challenge"])
-        authenticator_data = self._authenticator_data(0x05)
-        signature = self.key.sign(authenticator_data + hashlib.sha256(client_data).digest(), ec.ECDSA(hashes.SHA256()))
-        return {
-            "id": bytes_to_base64url(self.credential_id),
-            "rawId": bytes_to_base64url(self.credential_id),
-            "type": "public-key",
-            "response": {
-                "clientDataJSON": bytes_to_base64url(client_data),
-                "authenticatorData": bytes_to_base64url(authenticator_data),
-                "signature": bytes_to_base64url(signature),
-                "userHandle": bytes_to_base64url(b"owner"),
-            },
-        }
-
-
-def _soft(settings: Settings) -> SoftAuthenticator:
-    rp = passkeys.relying_party(settings.miniapp_public_url, settings.api_port)
-    return SoftAuthenticator(rp.rp_id, rp.origins[0])
-
-
-def test_the_relying_party_follows_the_public_address() -> None:
-    assert passkeys.relying_party("https://agent.example.org/app/", 8765) == passkeys.RelyingParty("agent.example.org", ("https://agent.example.org",))
-    # No public address: the app is opened on the machine itself, where only "localhost" is a name a key can belong to.
-    local = passkeys.relying_party("", 8765)
-    assert local.rp_id == "localhost" and local.origins == ("http://localhost:8765", "http://127.0.0.1:8765")
-
-
-async def test_a_passkey_is_enrolled_and_then_signs_the_browser_in(client: httpx.AsyncClient, settings: Settings) -> None:
-    soft = _soft(settings)
-    options = (await client.post("/api/auth/passkeys/register/begin", headers=H)).json()
-    assert options["rp"]["id"] == "localhost" and options["authenticatorSelection"]["residentKey"] == "required"
-    enrolled = await client.post("/api/auth/passkeys/register/finish", json={"credential": soft.create(options), "name": "a laptop", "ceremony": options["ceremony"]}, headers=H)
-    assert enrolled.status_code == 200, enrolled.text
-    assert [k["name"] for k in enrolled.json()["passkeys"]] == ["a laptop"]
-    assert (await client.get("/api/auth/config")).json()["passkeys"] == 1
-
-    # A login needs no username: the options carry no allow-list, and the key says which one it is.
-    options = (await client.post("/api/auth/passkeys/login/begin")).json()
-    assert not options.get("allowCredentials")
-    done = await client.post("/api/auth/passkeys/login/finish", json={"credential": soft.get(options), "ceremony": options["ceremony"]})
-    assert done.status_code == 200, done.text
-    assert (await client.get("/api/auth/me")).json() == {"user_id": 1, "via": "cookie"}
-    listed = (await client.get("/api/auth/passkeys", headers=H)).json()
-    assert listed[0]["last_used_at"] and listed[0]["transports"] == ["internal"]
-
-    assert (await client.delete(f"/api/auth/passkeys/{listed[0]['id']}", headers=H)).json()["passkeys"] == []
-    assert (await client.delete(f"/api/auth/passkeys/{listed[0]['id']}", headers=H)).status_code == 404
-
-
-async def test_a_signature_over_the_wrong_challenge_is_refused(client: httpx.AsyncClient, settings: Settings) -> None:
-    soft = _soft(settings)
-    options = (await client.post("/api/auth/passkeys/register/begin", headers=H)).json()
-    await client.post("/api/auth/passkeys/register/finish", json={"credential": soft.create(options), "name": "a laptop", "ceremony": options["ceremony"]}, headers=H)
-    begun = (await client.post("/api/auth/passkeys/login/begin")).json()
-    forged = soft.get({"challenge": bytes_to_base64url(b"a challenge nobody issued")})
-    refused = await client.post("/api/auth/passkeys/login/finish", json={"credential": forged, "ceremony": begun["ceremony"]})
-    assert refused.status_code == 403 and "refused" in refused.json()["detail"]
-    assert (await client.get("/api/auth/me")).status_code == 401
-
-
-async def test_a_passkey_this_installation_never_saw_is_refused(client: httpx.AsyncClient, settings: Settings) -> None:
-    soft = _soft(settings)
-    other = _soft(settings)
-    options = (await client.post("/api/auth/passkeys/register/begin", headers=H)).json()
-    await client.post("/api/auth/passkeys/register/finish", json={"credential": soft.create(options), "name": "a laptop", "ceremony": options["ceremony"]}, headers=H)
-    options = (await client.post("/api/auth/passkeys/login/begin")).json()
-    assert (await client.post("/api/auth/passkeys/login/finish", json={"credential": other.get(options), "ceremony": options["ceremony"]})).status_code == 403
-
-
-async def test_a_finish_without_a_begin_has_nothing_to_check_against(client: httpx.AsyncClient, settings: Settings) -> None:
-    soft = _soft(settings)
-    options = (await client.post("/api/auth/passkeys/register/begin", headers=H)).json()
-    assert (await client.post("/api/auth/passkeys/register/finish", json={"credential": soft.create(options), "ceremony": options["ceremony"]}, headers=H)).status_code == 200
-    # The challenge is spent with the call that used it; replaying the same credential finds none.
-    assert (await client.post("/api/auth/passkeys/register/finish", json={"credential": soft.create(options), "ceremony": options["ceremony"]}, headers=H)).status_code == 400
-    # A finish that names no ceremony, or another browser's, has nothing to check against either.
-    options = (await client.post("/api/auth/passkeys/register/begin", headers=H)).json()
-    assert (await client.post("/api/auth/passkeys/register/finish", json={"credential": soft.create(options)}, headers=H)).status_code == 400
-    assert (await client.post("/api/auth/passkeys/register/finish", json={"credential": soft.create(options), "ceremony": "someone-elses"}, headers=H)).status_code == 400
-
-
-async def test_two_browsers_may_begin_at_once_and_each_finishes_its_own(client: httpx.AsyncClient, settings: Settings) -> None:
-    """A stranger polling begin cannot spend the owner's challenge: each ceremony is its own."""
-    soft = _soft(settings)
-    options = (await client.post("/api/auth/passkeys/register/begin", headers=H)).json()
-    await client.post("/api/auth/passkeys/register/finish", json={"credential": soft.create(options), "name": "a laptop", "ceremony": options["ceremony"]}, headers=H)
-    mine = (await client.post("/api/auth/passkeys/login/begin")).json()
-    for _ in range(5):
-        await client.post("/api/auth/passkeys/login/begin")  # the stranger, again and again
-    done = await client.post("/api/auth/passkeys/login/finish", json={"credential": soft.get(mine), "ceremony": mine["ceremony"]})
-    assert done.status_code == 200, done.text
-
-
-async def test_a_key_the_authenticator_kept_non_discoverable_is_refused(client: httpx.AsyncClient, settings: Settings) -> None:
-    soft = _soft(settings)
-    options = (await client.post("/api/auth/passkeys/register/begin", headers=H)).json()
-    credential = {**soft.create(options), "clientExtensionResults": {"credProps": {"rk": False}}}
-    refused = await client.post("/api/auth/passkeys/register/finish", json={"credential": credential, "ceremony": options["ceremony"]}, headers=H)
-    assert refused.status_code == 400 and "discoverable" in refused.json()["detail"]
-    assert (await client.get("/api/auth/config")).json()["passkeys"] == 0
-
-
 async def test_signing_out_everywhere_ends_every_session_but_reissues_this_one(client: httpx.AsyncClient, db: Database) -> None:
     first = await client.get("/api/auth/pair", params={"code": await pairing.mint(db)})
     old_cookie = first.headers["set-cookie"].split(";")[0]
@@ -321,10 +177,3 @@ async def test_signing_out_everywhere_ends_every_session_but_reissues_this_one(c
     assert (await client.get("/api/auth/me", cookies={name: value})).status_code == 401
     client.cookies.set(name, revoked.headers["set-cookie"].split(";")[0].partition("=")[2])
     assert (await client.get("/api/auth/me")).json()["via"] == "cookie"
-
-
-async def test_registering_and_listing_need_a_signed_in_browser(client: httpx.AsyncClient) -> None:
-    assert (await client.post("/api/auth/passkeys/register/begin")).status_code == 401
-    assert (await client.get("/api/auth/passkeys")).status_code == 401
-    assert (await client.delete("/api/auth/passkeys/1")).status_code == 401
-    assert (await client.post("/api/auth/passkeys/login/begin")).status_code == 404  # public, but nothing is enrolled

@@ -178,13 +178,24 @@ func NativePairingURL(p Paths, after time.Time) string {
 // MintPairing asks the container for a fresh link. This is the only other way the launcher comes by
 // one: the server does not put the link anywhere a log reader could pick it up, and a launcher that
 // harvested logs would be teaching the operator that a log file is a place to find a credential.
-func MintPairing(ctx context.Context, p Paths, telegram bool) (string, error) {
-	out, err := composeQuiet(ctx, p, telegram, "exec", "-T", "daedalus",
-		containerPython, "-m", "daedalus", "auth", "pair")
+// A link for the launcher's own window (window true) is the kind the server does not ask the
+// two-factor code for; one that may end up in any browser is not.
+func MintPairing(ctx context.Context, p Paths, telegram, window bool) (string, error) {
+	out, err := composeQuiet(ctx, p, telegram, append([]string{"exec", "-T", "daedalus",
+		containerPython}, pairArgs(window)...)...)
 	if err != nil {
 		return "", err
 	}
 	return firstPairingURL(out), nil
+}
+
+// pairArgs is the command that mints a pairing link, marked for the window when it is for the window.
+func pairArgs(window bool) []string {
+	args := []string{"-m", "daedalus", "auth", "pair"}
+	if window {
+		args = append(args, "--window")
+	}
+	return args
 }
 
 // SupervisorRestart asks the supervisor to apply what the checkout holds. The socket it listens on

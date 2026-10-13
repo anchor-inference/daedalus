@@ -347,20 +347,17 @@ async def _telegram(ctx: DoctorContext) -> list[Check]:
 
 async def _sign_in(ctx: DoctorContext) -> Check:
     """Whether a browser can get in at all, and with what."""
-    from daedalus.stores import pairing, passkeys  # Lazy: doctor runs in processes that never serve the API
+    from daedalus.stores import pairing  # Lazy: doctor runs in processes that never serve the API
 
     ways = []
     if ctx.settings.telegram_bot_token:
         ways.append("telegram login")
-    enrolled = await passkeys.count(ctx.db) if ctx.db is not None else 0
-    if enrolled:
-        ways.append(f"{enrolled} passkey" + ("s" if enrolled != 1 else ""))
     if ctx.db is not None and await pairing.outstanding(ctx.db):
         ways.append(f"a pairing link ({ctx.settings.state_dir / pairing.URL_FILE})")
     return Check(
         "sign-in",
         bool(ways),
-        ", ".join(ways) if ways else "no way into the app: no bot, no passkey, no live pairing link",
+        ", ".join(ways) if ways else "no way into the app: no bot and no live pairing link",
         "ok" if ways else "warn",
         "mint one with `python -m daedalus auth pair`",
     )

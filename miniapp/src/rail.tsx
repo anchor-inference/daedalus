@@ -32,7 +32,7 @@ import { errorText } from "./ui";
 const MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 export const KEYS = { sidebar: MAC ? "⌘ \\" : "Ctrl \\", menu: MAC ? "⌘ ⇧ M" : "Ctrl ⇧ M", search: MAC ? "⌘ K" : "Ctrl K" };
 
-/** The account is Settings' security section: the passkeys that sign this browser in, and signing
+/** The account is Settings' security section: two-factor sign-in, the operator's secrets, and signing
  *  every browser out. There is one operator, so there is no profile beyond it. */
 const ACCOUNT = "security";
 

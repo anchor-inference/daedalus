@@ -132,7 +132,7 @@ func TestWriteSetupLeavesAloneWhatTheFormDidNotCarry(t *testing.T) {
 	if err := WriteSetup(paths, full, ModeDocker); err != nil {
 		t.Fatal(err)
 	}
-	// A public address is not on the setup page at all; passkeys are enrolled against that host.
+	// A public address is not on the setup page at all; the links the stack prints name that host.
 	if err := os.WriteFile(paths.Env, []byte(readFile(paths.Env)+"MINIAPP_PUBLIC_URL=https://example.test\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

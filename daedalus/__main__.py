@@ -144,12 +144,18 @@ async def cmd_auth(args: argparse.Namespace) -> int:
     await db.open()
     try:
         base = settings.miniapp_public_url or f"http://127.0.0.1:{settings.api_port}"
-        # The state directory is the bot's, so this works the same run from a shell inside the container.
-        url = await pairing.announce(db, settings.state_dir, base, note="cli")
+        if getattr(args, "window", False):
+            # The launcher's link for its own window: printed for the launcher to open at once, and
+            # left out of the link file, where the next start of the launcher would find it.
+            url = pairing.pairing_url(base, await pairing.mint(db, note="desktop window", ttl_minutes=pairing.WINDOW_TTL_MINUTES, for_window=True))
+        else:
+            # The state directory is the bot's, so this works the same run from a shell inside the container.
+            url = await pairing.announce(db, settings.state_dir, base, note="cli")
     finally:
         await db.close()
     print(url)
-    print(f"Opens once, within {pairing.TTL_MINUTES} minutes; using it revokes every other pairing link.")
+    ttl = pairing.WINDOW_TTL_MINUTES if getattr(args, "window", False) else pairing.TTL_MINUTES
+    print(f"Opens once, within {ttl} minutes; using it revokes every other pairing link.")
     return 0
 
 
@@ -239,7 +245,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("serve", help="run the bot")
     auth = sub.add_parser("auth", help="ways into the app that need no Telegram")
     auth_sub = auth.add_subparsers(dest="auth_command", required=True)
-    auth_sub.add_parser("pair", help="mint a one-time pairing link and print it")
+    pair = auth_sub.add_parser("pair", help="mint a one-time pairing link and print it")
+    pair.add_argument("--window", action="store_true", help="a link for the desktop launcher's own window: short-lived, not asked for the two-factor code")
     itself = sub.add_parser("self", help="the agent's own code")
     itself_sub = itself.add_subparsers(dest="self_command", required=True)
     restart = itself_sub.add_parser("restart", help="preflight what the checkout holds and restart onto it if it passes")

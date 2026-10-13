@@ -729,7 +729,7 @@ func (a *App) OpenURL(ctx context.Context) string {
 	if a.Native() {
 		url = NativePairingURL(a.paths, started)
 		if url == "" {
-			url, _ = a.Pair(ctx)
+			url, _ = a.Pair(ctx, false)
 		}
 	} else {
 		// Every compose call reads the override, and `open` on its own has not written it yet.
@@ -739,7 +739,7 @@ func (a *App) OpenURL(ctx context.Context) string {
 		telegram := a.Telegram()
 		url = PairingURL(ctx, a.paths, telegram, started)
 		if url == "" {
-			url, _ = MintPairing(ctx, a.paths, telegram)
+			url, _ = MintPairing(ctx, a.paths, telegram, false)
 		}
 	}
 	if url == "" {
@@ -751,12 +751,14 @@ func (a *App) OpenURL(ctx context.Context) string {
 	return url
 }
 
-// Pair mints a fresh link that signs the operator in, for a browser that holds no session and has
-// no passkey enrolled yet. The link opens once and expires; the stack has to be running, because it
-// is the container that mints it.
-func (a *App) Pair(ctx context.Context) (string, error) {
+// Pair mints a fresh link that signs the operator in, for a browser that holds no session. The link
+// opens once and expires; the stack has to be running, because it is the container that mints it.
+// A link for the window beside the launcher (window true) is not asked for the two-factor code: the
+// window has nowhere to show where the code comes from, and minting the link already took running a
+// command inside the installation. A link printed for the operator to open anywhere is asked for it.
+func (a *App) Pair(ctx context.Context, window bool) (string, error) {
 	if a.Native() {
-		out, err := a.native.RunPython(ctx, "-m", "daedalus", "auth", "pair")
+		out, err := a.native.RunPython(ctx, pairArgs(window)...)
 		if err != nil {
 			return "", err
 		}
@@ -771,7 +773,7 @@ func (a *App) Pair(ctx context.Context) (string, error) {
 	if err := WriteOverride(a.paths); err != nil {
 		return "", err
 	}
-	url, err := MintPairing(ctx, a.paths, a.Telegram())
+	url, err := MintPairing(ctx, a.paths, a.Telegram(), window)
 	if err != nil {
 		return "", err
 	}
