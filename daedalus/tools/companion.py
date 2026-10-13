@@ -230,7 +230,7 @@ async def goal_update(context: ToolContext, goal_id: str, title: str | None = No
 
 @search_hint(
     "goals list my goals what am I tracking objectives status "
-    "цели список целей какие цели что отслеживаю"
+    "цели список целей какие цели что отслеживаю мои задачи наблюдаю веду показать покажи"
 )
 @tool(
     name="GoalList",
@@ -248,7 +248,7 @@ async def goal_list(context: ToolContext, include_closed: bool = False) -> ToolR
 
 @search_hint(
     "goal report progress status update what changed finding result "
-    "отчёт по цели прогресс что изменилось результат"
+    "отчёт по цели прогресс что изменилось результат доложить доложи итог проверки записать запиши"
 )
 @tool(
     name="GoalReport",

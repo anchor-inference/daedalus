@@ -554,7 +554,7 @@ class Companion:
             return
         from protocore.contracts.memory import MemoryScope  # Lazy: only a new conversation needs it
 
-        from daedalus.host.engine_factory import TENANT
+        from daedalus.host.engine_factory import TENANT  # Lazy: the engine factory imports half the host
 
         for record in memory.records(TENANT, scope=MemoryScope.session, scope_key=old):
             try:
@@ -585,8 +585,10 @@ class Companion:
         """
         manager = self.app.manager
         session_id = await self.session_id(create=False) if manager is not None else ""
-        agents = await self.agents()
-        running = sum(1 for a in agents if a["status"] == "running")
+        # Counted from the session list alone: every client polls this, and ``agents()`` reads each
+        # agent's transcript for its last answer, which a count has no use for.
+        rows = await manager.list_sessions(limit=200) if manager is not None and session_id else []
+        running = sum(1 for row in rows if row.get("metadata", {}).get(PARENT) == session_id and row.get("status") == "running")
         live = manager.live_state(session_id) if manager is not None and session_id else None
         if live is not None and live.running:
             state = "thinking"

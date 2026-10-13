@@ -162,8 +162,9 @@ async def test_voice_agents_keep_their_directories(tmp_path: Path, existing: boo
         await db.open()
         rows = await db.fetchall("SELECT s.id, s.metadata, f.path AS root, p.system FROM sessions s JOIN projects p ON p.id = s.project_id JOIN project_folders f ON f.project_id = p.id AND f.position = 0")
         assert {r["id"]: Path(r["root"]) / json.loads(r["metadata"]).get("directory", "") for r in rows} == expected
-        assert {r["id"] for r in rows if r["system"] == "voice"} == {"voice-first", "delegate", "voice-nested"}
+        # The voice project that migration made is the companion's by the latest one.
+        assert {r["id"] for r in rows if r["system"] == "companion"} == {"voice-first", "delegate", "voice-nested"}
         assert all("workspace" not in json.loads(r["metadata"]) and "own_workspace" not in json.loads(r["metadata"]) for r in rows)
-        assert len(await db.fetchall("SELECT id FROM projects WHERE system = 'voice'")) == 1
+        assert len(await db.fetchall("SELECT id FROM projects WHERE system = 'companion'")) == 1
     finally:
         await db.close()
