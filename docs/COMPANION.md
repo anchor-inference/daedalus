@@ -1,6 +1,6 @@
 # The companion
 
-`/app/companion` is your standing personal agent: one agent you talk to by text and by voice, which
+`/app/companion` is your standing personal agent — and the voice mode: one agent you talk to by text and by voice, which
 keeps hold of what you care about between conversations and hands the real work to agent sessions. It
 is not the agent that does the work — it is the manager who stays on the line while the engineers
 work. Small talk, quick facts and "what is running?" it answers itself. Anything substantial it hands
