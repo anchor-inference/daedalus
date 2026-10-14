@@ -3,7 +3,7 @@
 # Secrets: provider keys do NOT belong in .env — .env sits inside the checkout, which is bind-mounted
 # into the agent container. Put them in ../../daedalus-secrets/keyproxy.env (outside every mount, chmod 600):
 #   DEEPSEEK_API_KEY=…  OPENROUTER_API_KEY=…  OPENCODE_API_KEY=…  OPENAI_API_KEY=…  KEYPROXY_UPSTREAM_<NAME>=…  KEYPROXY_KEY_<NAME>=…
-#   Search APIs (Serper, Keenable, Tavily, Exa, Perplexity) are upstreams too: see deploy/keyproxy.env.example.
+#   Search APIs (Serper, Keenable, Tavily, Exa, Perplexity) are built-in upstreams; their keys are set in Settings.
 #   KEYPROXY_USD_PER_DAY=20   (the proxy's own daily cap, read from the database; independent of the supervisor's flag)
 # What the key proxy does and does not buy: the agent process never holds a provider key, so a leak through a
 # log line, a header echo or a careless tool result cannot happen. It is not a wall against a deliberate

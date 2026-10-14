@@ -1015,6 +1015,30 @@
       "title": { "en": "Action review model", "ru": "Модель проверки действий" },
       "about": { "en": "The cheap model that checks an outgoing action (a message, a publish, a payment) against what you asked for before it runs.", "ru": "Дешёвая модель, которая перед выполнением сверяет внешнее действие (сообщение, публикацию, оплату) с вашей просьбой." },
       "synonyms": ["auto-review", "review", "reviewer", "review model", "action rules", "permissions", "git push", "автопроверка", "правила действий", "разрешения", "проверка действий", "ревью", "ревьюер", "модель ревью"]
+    },
+    {
+      "section": "models", "anchor": "keyproxy.upstreams", "config": null, "tab": "providers",
+      "title": { "en": "Key proxy: keys and addresses", "ru": "Key proxy: ключи и адреса" },
+      "about": { "en": "Every key the key proxy holds — model providers, web search (Keenable, Serper, Tavily, Exa, Perplexity) and your own upstreams — with its address and key header; applied without a restart.", "ru": "Все ключи key proxy — провайдеры моделей, веб-поиск (Keenable, Serper, Tavily, Exa, Perplexity) и свои upstream — с адресом и заголовком ключа; применяются без перезапуска." },
+      "synonyms": ["keyproxy", "key proxy", "keyproxy.env", "api key", "API ключ", "ключ", "ключи", "keenable", "serper", "tavily", "exa", "perplexity", "upstream", "ключ поиска"]
+    },
+    {
+      "section": "models", "anchor": "keyproxy.add", "config": null, "tab": "providers",
+      "title": { "en": "Add a key proxy upstream", "ru": "Добавить upstream в key proxy" },
+      "about": { "en": "Any HTTP API the agent should call without seeing its key: a name, an address and an optional key.", "ru": "Любой HTTP API, который агент вызывает, не видя ключа: имя, адрес и, если нужно, ключ." },
+      "synonyms": ["KEYPROXY_UPSTREAM", "custom upstream", "свой upstream", "свой API", "добавить API"]
+    },
+    {
+      "section": "models", "anchor": "keyproxy.usd_per_day", "config": null, "tab": "providers",
+      "title": { "en": "Key proxy daily cap", "ru": "Дневной лимит key proxy" },
+      "about": { "en": "The dollar cap the key proxy itself enforces on paid model calls each day; 0 turns it off.", "ru": "Дневной лимит в долларах, который key proxy сам соблюдает для платных вызовов моделей; 0 выключает его." },
+      "synonyms": ["KEYPROXY_USD_PER_DAY", "daily budget", "budget", "лимит в день", "бюджет", "дневной бюджет"]
+    },
+    {
+      "section": "tools", "anchor": "tools.web.search.keys", "config": null,
+      "title": { "en": "Search keys", "ru": "Ключи поиска" },
+      "about": { "en": "The API keys of the search backends that need one — Keenable, Serper, Tavily, Exa, Perplexity — saved in the key proxy.", "ru": "API-ключи поисковиков, которым он нужен — Keenable, Serper, Tavily, Exa, Perplexity, — сохраняются в key proxy." },
+      "synonyms": ["keenable", "serper", "tavily", "exa", "perplexity", "search api key", "ключ поиска", "ключ keenable", "websearch key"]
     }
   ]
 }

@@ -33,6 +33,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import secrets
 import sqlite3
 import sys
@@ -89,17 +90,27 @@ DEFAULT_UPSTREAMS = {
     "moonshot": ("https://api.moonshot.ai/v1", "MOONSHOT_API_KEY"),
     "kimi_coding": ("https://api.kimi.ai/coding/v1", "KIMI_CODING_API_KEY"),
 }
+SEARCH_UPSTREAMS = {
+    "serper": ("https://google.serper.dev", "KEYPROXY_KEY_SERPER"),
+    "keenable": ("https://api.keenable.ai/v1", "KEYPROXY_KEY_KEENABLE"),
+    "tavily": ("https://api.tavily.com", "KEYPROXY_KEY_TAVILY"),
+    "exa": ("https://api.exa.ai", "KEYPROXY_KEY_EXA"),
+    "perplexity": ("https://api.perplexity.ai", "KEYPROXY_KEY_PERPLEXITY"),
+}
+"""The WebSearch backends, built in like the model vendors. They used to be extra upstreams the operator
+declared by hand in keyproxy.env (address, key and header), so a key typed into Settings had no
+upstream to go to: the proxy answered "unknown upstream" and the only way in was editing the file."""
+DEFAULT_UPSTREAMS.update(SEARCH_UPSTREAMS)
 PREPAID_UPSTREAMS = ("opencode",)
 """Keyed upstreams that are prepaid plans (OpenCode Go): a call spends the plan's allowance, not money, so the daily
 dollar flag does not refuse it, the way it never refuses the subscriptions served through a CLI's login."""
-DEFAULT_AUTH_SCHEMES = {"anthropic": "x-api-key"}
+DEFAULT_AUTH_SCHEMES = {"anthropic": "x-api-key", "serper": "X-API-KEY", "keenable": "X-API-Key", "exa": "x-api-key"}
 """Upstreams whose key is not an ``Authorization: Bearer`` one; ``KEYPROXY_AUTH_<NAME>`` still overrides."""
 ANTHROPIC_VERSION = "2023-06-01"
 """Anthropic refuses a request without this header, ``/models`` included, and a client written for
 the OpenAI shape never sends it."""
 BUDGET_FLAG = Path(os.environ.get("KEYPROXY_BUDGET_FLAG", "/srv/state/BUDGET_EXCEEDED"))
 BUDGET_DB = Path(os.environ.get("KEYPROXY_BUDGET_DB", "/srv/state/daedalus.sqlite"))
-BUDGET_USD_PER_DAY = float(os.environ.get("KEYPROXY_USD_PER_DAY", "0") or 0)
 BUDGET_CACHE_SECONDS = 30.0
 BUDGET_EXEMPT_TAILS = (("user", "balance"), ("credits",), ("models",))
 """Reading a balance or the model list spends nothing; only completions are refused over budget.
@@ -116,7 +127,8 @@ COMPLETION_TAILS = (("chat", "completions"), ("completions",), ("responses",), (
 CAPTURE_LIMIT = 8 * 1024 * 1024
 CODEX_AUTH = CodexAuth(Path(os.environ.get("KEYPROXY_CODEX_AUTH", os.path.expanduser("~/.codex/auth.json"))))
 GROK_AUTH = GrokAuth(Path(os.environ.get("KEYPROXY_GROK_AUTH", os.path.expanduser("~/.grok/auth.json"))))
-OPENCODE_AUTH = OpencodeAuth()
+# Looked up through settings() at call time, so a key saved from the app shows its allowance at once.
+OPENCODE_AUTH = OpencodeAuth(lookup=lambda var: settings().get(var, ""))
 CLAUDE_AUTH = ClaudeAuth(Path(os.environ.get("KEYPROXY_CLAUDE_AUTH", os.path.expanduser("~/.claude/.credentials.json"))))
 """The operator's subscriptions: served as ``/codex/v1``, ``/grok/v1`` and ``/claude/v1`` with the CLIs' own logins."""
 _usage_cache: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -365,6 +377,126 @@ async def handle_set_key(request: web.Request) -> web.Response:
     return web.json_response({"upstream": name, **key_status().get(name, {"configured": bool(key), "kind": API_KEY})})
 
 
+def budget_usd_per_day() -> float:
+    """The proxy's own daily cap, read through the keys file so a change in Settings holds from the next call."""
+    try:
+        return max(0.0, float(settings().get("KEYPROXY_USD_PER_DAY", "0") or 0))
+    except ValueError:
+        return 0.0
+
+
+SETTING_NAME = re.compile(r"KEYPROXY_(UPSTREAM|KEY|AUTH)_[A-Z][A-Z0-9_]*")
+SECRET_VARS = {env_key for _base, env_key in DEFAULT_UPSTREAMS.values()}
+"""Every key variable; a value under one of these names never leaves the proxy, only whether it is set."""
+
+
+def setting_writable(var: str) -> bool:
+    """The variables the app may set: every key, every upstream's address and header, and the daily cap.
+
+    Nothing else in the environment — the proxy's port, the paths it reads logins and the budget
+    from — is reachable this way, so a request through the bot cannot point the proxy elsewhere.
+    """
+    return var in SECRET_VARS or var == "KEYPROXY_USD_PER_DAY" or bool(SETTING_NAME.fullmatch(var))
+
+
+def setting_secret(var: str) -> bool:
+    return var in SECRET_VARS or var.startswith("KEYPROXY_KEY_")
+
+
+def settings_view() -> dict[str, Any]:
+    """Every value the operator can set here, grouped as the Settings screen shows it. Never a key.
+
+    Built-in upstreams are listed whether or not anything is written for them, because "no key" is
+    the fact the operator came to change; an extra upstream is listed once its address is written.
+    """
+    env = settings()
+    written = file_settings()
+
+    def entry(var: str, default: str = "") -> dict[str, Any]:
+        value = env.get(var, "")
+        row: dict[str, Any] = {"name": var, "secret": setting_secret(var), "set": bool(value), "source": "file" if var in written else "environment" if var in os.environ else "default"}
+        if not row["secret"]:
+            row["value"] = value
+            row["default"] = default
+        return row
+
+    upstream_rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for name, (base, _env_key) in DEFAULT_UPSTREAMS.items():
+        group = "search" if name in SEARCH_UPSTREAMS else "model"
+        key_var = upstream_key(name, env)
+        upstream_rows.append({
+            "upstream": name,
+            "group": group,
+            "builtin": True,
+            # OpenCode Go and Zen share one key: the second one names the first rather than a key of its own.
+            "shares_key_with": next((other for other, (_b, other_key) in DEFAULT_UPSTREAMS.items() if other_key == key_var and other != name and other in seen), ""),
+            "key": entry(key_var),
+            "address": entry(f"KEYPROXY_UPSTREAM_{name.upper()}", base),
+            "header": entry(f"KEYPROXY_AUTH_{name.upper()}", DEFAULT_AUTH_SCHEMES.get(name, "")),
+        })
+        seen.add(name)
+    for name in sorted(extra_upstreams(env)):
+        if name in DEFAULT_UPSTREAMS:
+            continue
+        upstream_rows.append({
+            "upstream": name,
+            "group": "extra",
+            "builtin": False,
+            "shares_key_with": "",
+            "key": entry(upstream_key(name, env)),
+            "address": entry(f"KEYPROXY_UPSTREAM_{name.upper()}"),
+            "header": entry(f"KEYPROXY_AUTH_{name.upper()}"),
+        })
+    logins = [{"upstream": name, "configured": credential_readable(auth)} for name, auth in (("codex", CODEX_AUTH), ("grok", GROK_AUTH), ("claude", CLAUDE_AUTH))]
+    return {"writable": bool(KEYS_FILE), "upstreams": upstream_rows, "cli_logins": logins, "budget": entry("KEYPROXY_USD_PER_DAY", "0")}
+
+
+async def handle_settings(request: web.Request) -> web.Response:
+    """Every settable value, for the bot alone: addresses and headers in full, keys only as set or not."""
+    if not agent_call(request):
+        return web.json_response({"error": "this endpoint answers the agent only"}, status=403)
+    return web.json_response(settings_view())
+
+
+async def handle_set_setting(request: web.Request) -> web.Response:
+    """Write one variable of the keys file, for the bot alone; an empty value clears it.
+
+    The file is read again on every call, so what is written here holds from the next request: an
+    address, a header, a key or the daily cap, with no restart of anything.
+    """
+    if not agent_call(request):
+        return web.json_response({"error": "this endpoint answers the agent only"}, status=403)
+    var = request.match_info["name"].upper()
+    if not setting_writable(var):
+        return web.json_response({"error": f"{var} is not a setting of the key proxy"}, status=404)
+    if not KEYS_FILE:
+        return web.json_response({"error": "this key proxy reads its keys from its environment only; put the value in keyproxy.env"}, status=409)
+    try:
+        body = await request.json()
+    except (ValueError, UnicodeDecodeError):
+        body = None
+    value = str(body.get("value") or "") if isinstance(body, dict) else ""
+    # A newline would end the line and turn the rest into a variable of its own.
+    value = value.replace("\r", "").replace("\n", "").strip()
+    if value and var.startswith("KEYPROXY_UPSTREAM_") and not value.startswith(("http://", "https://")):
+        return web.json_response({"error": "an upstream address starts with http:// or https://"}, status=400)
+    if value and var.startswith("KEYPROXY_AUTH_") and not re.fullmatch(r"[A-Za-z0-9-]+", value):
+        return web.json_response({"error": "a header name is letters, digits and dashes"}, status=400)
+    if value and var == "KEYPROXY_USD_PER_DAY":
+        try:
+            if float(value) < 0:
+                raise ValueError
+        except ValueError:
+            return web.json_response({"error": "the daily cap is a number of dollars, 0 for none"}, status=400)
+    try:
+        write_env_value(KEYS_FILE, var, value)
+    except OSError as exc:
+        logger.warning("could not write the keys file: %s", type(exc).__name__)
+        return web.json_response({"error": f"the key proxy could not write its keys file ({type(exc).__name__})"}, status=500)
+    return web.json_response(settings_view())
+
+
 def auth_scheme(name: str) -> str:
     """How an upstream takes its key: ``bearer`` (``Authorization: Bearer <key>``) or the name of a header that carries the bare key."""
     scheme = settings().get(f"KEYPROXY_AUTH_{name.upper()}", "").strip() or DEFAULT_AUTH_SCHEMES.get(name, "")
@@ -491,7 +623,8 @@ async def report_direct_usage(client: httpx.AsyncClient, provider_id: str, reque
 def budget_exceeded() -> bool:
     if BUDGET_FLAG.exists():
         return True
-    return BUDGET_USD_PER_DAY > 0 and spent_today() > BUDGET_USD_PER_DAY
+    cap = budget_usd_per_day()
+    return cap > 0 and spent_today() > cap
 
 
 def budget_exempt(rest: str) -> bool:
@@ -893,7 +1026,7 @@ async def handle(request: web.Request) -> web.StreamResponse:
 
 
 async def health(_: web.Request) -> web.Response:
-    return web.json_response({"ok": True, "upstreams": sorted(upstreams()), "subscriptions": subscriptions_status(), "budget_exceeded": budget_exceeded(), "spent_today_usd": round(spent_today(), 4) if BUDGET_USD_PER_DAY > 0 else None})
+    return web.json_response({"ok": True, "upstreams": sorted(upstreams()), "subscriptions": subscriptions_status(), "budget_exceeded": budget_exceeded(), "spent_today_usd": round(spent_today(), 4) if budget_usd_per_day() > 0 else None})
 
 
 def make_app() -> web.Application:
@@ -903,6 +1036,8 @@ def make_app() -> web.Application:
     app.router.add_get("/keys", handle_keys)
     app.router.add_put("/keys/{upstream}", handle_set_key)
     app.router.add_delete("/keys/{upstream}", handle_set_key)
+    app.router.add_get("/settings", handle_settings)
+    app.router.add_put("/settings/{name}", handle_set_setting)
     app.router.add_get("/subscriptions/usage", handle_subscriptions_usage)
     app.router.add_route("*", "/{upstream}/{rest:.*}", handle)
 

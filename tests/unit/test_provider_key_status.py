@@ -567,3 +567,107 @@ async def test_a_key_an_older_version_left_in_the_configuration_moves_to_the_pro
             assert len(fake.writes) == 1 and len(saved) == 1, "the move ran again"
     finally:
         await manager.close()
+
+
+# -- every value of the key proxy is set from the app, with no restart -------------------------------
+#
+# The reported fault: an operator with a Keenable key could not use it without editing keyproxy.env by
+# hand and restarting, because the search backends were extra upstreams that had to be declared in
+# the file first; a key had nowhere to go. The same was true of every other value in that file.
+
+
+async def test_a_search_key_saved_from_the_app_signs_the_next_search_in_its_own_header(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    for var in ("KEYPROXY_UPSTREAM_KEENABLE", "KEYPROXY_KEY_KEENABLE", "KEYPROXY_AUTH_KEENABLE"):
+        monkeypatch.delenv(var, raising=False)
+    _keys_file(monkeypatch, tmp_path)
+    monkeypatch.setattr(proxy, "agent_api_token", lambda: "tok")
+    monkeypatch.setattr(proxy, "budget_exceeded", lambda: False)
+    monkeypatch.setattr(proxy, "AGENT_API", "")
+    seen: list[httpx.Request] = []
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"results": []})
+
+    assert proxy.key_status()["keenable"] == {"configured": False, "kind": "api_key"}, "a built-in search backend was not listed"
+    app = proxy.make_app()
+    async with TestClient(TestServer(app)) as client:
+        await app["client"].aclose()
+        app["client"] = REAL_CLIENT(transport=httpx.MockTransport(upstream))
+        assert (await client.post("/keenable/search", json={"query": "x"})).status == 503, "no key yet"
+        assert (await client.put("/keys/keenable", json={"key": "kn-key"}, headers={"x-daedalus-token": "tok"})).status == 200
+        assert (await client.post("/keenable/search", json={"query": "x"})).status == 200
+    assert str(seen[0].url) == "https://api.keenable.ai/v1/search"
+    assert seen[0].headers["x-api-key"] == "kn-key" and "authorization" not in seen[0].headers
+
+
+async def test_every_value_of_the_keys_file_is_listed_and_written_without_a_restart(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    for var in ("KEYPROXY_USD_PER_DAY", "KEYPROXY_UPSTREAM_MYLLM", "KEYPROXY_KEY_MYLLM", "KEYPROXY_KEY_EXA"):
+        monkeypatch.delenv(var, raising=False)
+    path = _keys_file(monkeypatch, tmp_path, "KEYPROXY_KEY_EXA=exa-secret\nKEYPROXY_USD_PER_DAY=20\n")
+    monkeypatch.setattr(proxy, "agent_api_token", lambda: "tok")
+    token = {"x-daedalus-token": "tok"}
+    async with TestClient(TestServer(proxy.make_app())) as client:
+        assert (await client.get("/settings")).status == 403
+        view = await (await client.get("/settings", headers=token)).json()
+        assert "exa-secret" not in json.dumps(view), "a key left the proxy"
+        rows = {row["upstream"]: row for row in view["upstreams"]}
+        assert {"deepseek", "openrouter", "keenable", "serper", "tavily", "exa", "perplexity"} <= set(rows)
+        assert rows["exa"]["group"] == "search" and rows["exa"]["key"] == {"name": "KEYPROXY_KEY_EXA", "secret": True, "set": True, "source": "file"}
+        assert rows["keenable"]["header"]["default"] == "X-API-Key" and rows["keenable"]["address"]["default"] == "https://api.keenable.ai/v1"
+        assert rows["opencode_zen"]["shares_key_with"] == "opencode"
+        assert view["budget"]["value"] == "20" and view["writable"] is True
+
+        # The daily cap holds from the next call.
+        assert proxy.budget_usd_per_day() == 20
+        assert (await client.put("/settings/KEYPROXY_USD_PER_DAY", json={"value": "7.5"}, headers=token)).status == 200
+        assert proxy.budget_usd_per_day() == 7.5
+
+        # An upstream of the operator's own, added and then keyed, is served at once.
+        assert (await client.put("/settings/KEYPROXY_UPSTREAM_MYLLM", json={"value": "https://llm.example/v1"}, headers=token)).status == 200
+        assert (await client.put("/settings/KEYPROXY_KEY_MYLLM", json={"value": "my-key"}, headers=token)).status == 200
+        assert proxy.upstreams()["myllm"] == ("https://llm.example/v1", "my-key")
+        listed = await (await client.get("/settings", headers=token)).json()
+        assert next(row for row in listed["upstreams"] if row["upstream"] == "myllm")["group"] == "extra"
+
+        # Nothing outside keys, addresses, headers and the cap can be reached, and nonsense is refused.
+        for name in ("KEYPROXY_PORT", "KEYPROXY_KEYS_FILE", "KEYPROXY_AGENT_API", "PATH"):
+            assert (await client.put(f"/settings/{name}", json={"value": "x"}, headers=token)).status == 404, name
+        assert (await client.put("/settings/KEYPROXY_UPSTREAM_MYLLM", json={"value": "file:///etc/passwd"}, headers=token)).status == 400
+        assert (await client.put("/settings/KEYPROXY_AUTH_MYLLM", json={"value": "X Bad: header"}, headers=token)).status == 400
+        assert (await client.put("/settings/KEYPROXY_USD_PER_DAY", json={"value": "-1"}, headers=token)).status == 400
+        text = path.read_text(encoding="utf-8")
+        assert "KEYPROXY_PORT" not in text and "file://" not in text and "KEYPROXY_USD_PER_DAY=7.5" in text
+
+
+def test_the_opencode_allowance_sees_a_key_saved_from_the_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("OPENCODE_API_KEY", raising=False)
+    _keys_file(monkeypatch, tmp_path, "OPENCODE_API_KEY=oc-key\n")
+    assert proxy.OPENCODE_AUTH.available(), "the allowance read the environment and missed the file"
+
+
+async def test_the_app_lists_and_writes_key_proxy_values_through_its_own_api(client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    written: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.headers.get("x-daedalus-token") != "tok":
+            return httpx.Response(403, json={"error": "no"})
+        if request.url.path == "/settings":
+            return httpx.Response(200, json={"writable": True, "upstreams": [], "cli_logins": [], "budget": {"name": "KEYPROXY_USD_PER_DAY", "value": "0"}})
+        if request.url.path.startswith("/settings/"):
+            name = request.url.path[len("/settings/"):]
+            if name == "KEYPROXY_PORT":
+                return httpx.Response(404, json={"error": "KEYPROXY_PORT is not a setting of the key proxy"})
+            written.append((name, json.loads(request.content)["value"]))
+            return httpx.Response(200, json={"writable": True, "upstreams": [], "cli_logins": [], "budget": {}})
+        return httpx.Response(404, json={"error": "not here"})
+
+    _answering(monkeypatch, handler)
+    listed = (await client.get("/api/keyproxy", headers=H)).json()
+    assert listed["reachable"] is True and listed["writable"] is True
+    saved = await client.put("/api/keyproxy/KEYPROXY_KEY_KEENABLE", json={"value": "kn"}, headers=H)
+    assert saved.status_code == 200 and written == [("KEYPROXY_KEY_KEENABLE", "kn")]
+    assert "kn" not in saved.text
+    refused = await client.put("/api/keyproxy/KEYPROXY_PORT", json={"value": "1"}, headers=H)
+    assert refused.status_code == 404 and "not a setting" in refused.json()["detail"]
+    assert (await client.put("/api/keyproxy/..%2Fkeys", json={"value": "1"}, headers=H)).status_code in (400, 404)

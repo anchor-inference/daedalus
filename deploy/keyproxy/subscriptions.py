@@ -19,7 +19,7 @@ import os
 import re
 import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
 
@@ -612,16 +612,22 @@ OPENCODE_GO_BASE = "https://opencode.ai/zen/go/v1"
 
 
 class OpencodeAuth:
-    """OpenCode Go: a plain API key from the environment, no login to refresh."""
+    """OpenCode Go: a plain API key, no login to refresh.
 
-    def __init__(self, env_var: str = "OPENCODE_API_KEY") -> None:
+    ``lookup`` reads the key at each call. The proxy passes one that sees its keys file, because a key
+    saved from the app lands there and never in this process's environment: read from the environment,
+    the allowance stayed "not connected" until a restart.
+    """
+
+    def __init__(self, env_var: str = "OPENCODE_API_KEY", lookup: Callable[[str], str] | None = None) -> None:
         self.env_var = env_var
+        self.lookup = lookup or (lambda var: os.environ.get(var, ""))
 
     def available(self) -> bool:
-        return bool(os.environ.get(self.env_var, ""))
+        return bool(self.lookup(self.env_var))
 
     async def headers(self, client: httpx.AsyncClient) -> dict[str, str]:
-        return {"authorization": f"Bearer {os.environ.get(self.env_var, '')}"}
+        return {"authorization": f"Bearer {self.lookup(self.env_var)}"}
 
 
 def opencode_usage_view(data: dict[str, Any]) -> dict[str, Any]:
