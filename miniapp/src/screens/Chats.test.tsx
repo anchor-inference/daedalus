@@ -88,7 +88,7 @@ describe("ChatsScreen", () => {
     await act(async () => host.querySelector<HTMLButtonElement>(".ph-row-more")!.click());
     const words = Array.from(document.querySelectorAll(".ph-mrow")).map((b) => b.textContent ?? "");
     expect(words).toEqual(expect.arrayContaining([
-      "New chat in Bakery site", expect.stringContaining("review"), "Rename", "Move…", "Settings for Bakery site", "Archive", "Delete",
+      "New chat in Bakery site", expect.stringContaining("review"), "Rename", "Move to a project…", "Settings for Bakery site", "Archive", "Delete",
     ]));
     expect(words[words.length - 1]).toBe("Delete");
   });

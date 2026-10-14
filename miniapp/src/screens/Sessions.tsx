@@ -19,7 +19,7 @@
 import { CompanionFace } from "../companionavatar";
 import { useContextActions } from "../ui/context-menu";
 import { type ReactNode, memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { api, Project, SessionList, SessionSummary, Settings } from "../api";
+import { api, Project, type ProjectRef, SessionList, SessionSummary, Settings } from "../api";
 import { agentFolders, folderName, offersFolderChoice, projectPath, projectReachable } from "../folders";
 import { Skeleton, ToolPicker, fmtInterval, statusWord } from "../ui/components";
 import { type MenuItem, OverflowMenu, Sheet, confirmDialog, toast } from "../ui/dialogs";
@@ -27,6 +27,7 @@ import { relTime, shortModel, untilShort } from "../format";
 import { type Folder, type Row as RowModel, type SidebarDay, agentName, arrange, folderOpen, kindOf, liveRow, rememberFolder, sidebarSections } from "../grouping";
 import { Icon, type IconName } from "../icons";
 import { MoveSessionSheet, ProjectSettingsSheet, useProjects } from "../projects";
+import { MakeProjectSheet, asChatCommand, dropChat, endChatDrag, makeProjectCommand, startChatDrag, takesDrop } from "../chatproject";
 import { openNewProject } from "../project/NewProject";
 import { openImport } from "../imports/ImportExplorer";
 import { PlateMark, importedHarness } from "../imports/ImportedChat";
@@ -130,6 +131,9 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
     [listing, project, searching, view],
   );
   const filtered = searching || view !== "all";
+  // A chat's own project by its id, for "Make a project" on the chat's row: the day groups draw rows,
+  // and a row has no other way to the project it would become.
+  const chatProjects = useMemo(() => new Map(arranged.folders.filter((f) => f.chat).map((f) => [f.key, f.project])), [arranged]);
   // The archive is a list of what was put away, where nothing is lifted out of its order.
   const sections = useMemo(() => sidebarSections(arranged.folders, { filtered, pins: view !== "archive" }), [arranged, filtered, view]);
   const counts = useMemo(() => {
@@ -318,7 +322,7 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
                 </span>
               )}
             </div>
-            {sections.days.map((d) => <DayGroup key={d.day} day={d.day} rows={d.rows} onOpen={onOpen} current={current} />)}
+            {sections.days.map((d) => <DayGroup key={d.day} day={d.day} rows={d.rows} onOpen={onOpen} current={current} chatProjects={chatProjects} />)}
           </>
         )}
         {!searching && next && <button ref={more} className="btn ghost load-more" disabled={paging} onClick={() => void loadMore()}>{t(paging ? "agents.loading" : "agents.more")}</button>}
@@ -414,7 +418,7 @@ function folderState(rows: RowModel[]): "waiting" | "running" | "" {
 }
 
 /** One day of the chats section. Windowed: a long history is the same few rows in the DOM. */
-function DayGroup({ day, rows, onOpen, current }: { day: SidebarDay; rows: RowModel[]; onOpen: (id: string) => void; current?: string }) {
+function DayGroup({ day, rows, onOpen, current, chatProjects }: { day: SidebarDay; rows: RowModel[]; onOpen: (id: string) => void; current?: string; chatProjects: Map<string, ProjectRef> }) {
   const host = useRef<HTMLDivElement>(null);
   const unfolded = useSubsShown();
   const shown = useMemo(() => withSubs(lines(rows), unfolded), [rows, unfolded]);
@@ -425,7 +429,7 @@ function DayGroup({ day, rows, onOpen, current }: { day: SidebarDay; rows: RowMo
       <WindowedRows keys={keys} host={host} rowSelector=":scope > .sb-row" estimate={44} render={(i) => shown[i].sub ? (
         <SubagentRow kid={shown[i].sub!} leader={shown[i].row.s} last={!!shown[i].last} />
       ) : (
-        <ChatRow row={shown[i].row} fork={shown[i].fork} onOpen={onOpen} current={current} projectName={shown[i].row.s.project} pin={shown[i].fork ? undefined : "off"} subsOpen={unfolded(shown[i].row)} />
+        <ChatRow row={shown[i].row} fork={shown[i].fork} onOpen={onOpen} current={current} projectName={shown[i].row.s.project} pin={shown[i].fork ? undefined : "off"} subsOpen={unfolded(shown[i].row)} chat={shown[i].fork ? undefined : chatProjects.get(shown[i].row.s.project_id)} />
       )} />
     </div>
   );
@@ -438,7 +442,7 @@ function PinnedChat({ folder, onOpen, current }: { folder: Folder; onOpen: (id: 
   const shown = useMemo(() => withSubs(lines(folder.rows), unfolded), [folder.rows, unfolded]);
   return <>{shown.map((l) => l.sub
     ? <SubagentRow key={lineKey(l)} kid={l.sub} leader={l.row.s} last={!!l.last} />
-    : <ChatRow key={lineKey(l)} row={l.row} fork={l.fork} onOpen={onOpen} current={current} projectName={l.row.s.project} pin={l.fork ? undefined : "on"} subsOpen={unfolded(l.row)} />)}</>;
+    : <ChatRow key={lineKey(l)} row={l.row} fork={l.fork} onOpen={onOpen} current={current} projectName={l.row.s.project} pin={l.fork ? undefined : "on"} subsOpen={unfolded(l.row)} chat={l.fork ? undefined : folder.project} />)}</>;
 }
 
 type GroupProps = { folder: Folder; onOpen: (id: string) => void; current?: string; filtered: boolean; toast: (text: string) => void };
@@ -450,7 +454,7 @@ function sameGroup(a: GroupProps, b: GroupProps): boolean {
   const l = a.folder, r = b.folder;
   if (a.filtered !== b.filtered || a.current !== b.current || a.onOpen !== b.onOpen || a.toast !== b.toast) return false;
   if (l.key !== r.key || l.name !== r.name || l.total !== r.total || l.system !== r.system || l.last_message_at !== r.last_message_at || l.pinned_at !== r.pinned_at) return false;
-  if (projectPath(l.project) !== projectPath(r.project)) return false;
+  if (projectPath(l.project) !== projectPath(r.project) || l.project.entity_revision !== r.project.entity_revision) return false;
   return l.sig === r.sig;
 }
 
@@ -478,11 +482,14 @@ const ProjectGroup = memo(function ProjectGroup({ folder, onOpen, current, filte
   const newIn = useCallback(() => setAdding(true), []);
   const revealer = useReveal();
   const pinned = !!folder.pinned_at;
+  const backToChat = asChatCommand(folder);
+  const [dropping, setDropping] = useState(false);
   const items: MenuItem[] = [
     { label: t("side.project.new", { name: folder.name }), icon: "compose", onSelect: newIn },
     pinCommand(folder.key, pinned, { key: true }),
     ...(folder.system ? [{ label: t("agents.folder.tocompanion"), icon: "mic" as const, onSelect: () => navigate(pathFor("companion")) }] : []),
     { label: t("project.settings.for", { name: folder.name }), icon: "settings", onSelect: editProject },
+    ...(backToChat ? [backToChat] : []),
     ...(revealer ? [{ label: revealer.label, icon: "external" as const, onSelect: () => void revealer.reveal({ project_id: folder.key }) }] : []),
     { label: t(showing ? "agents.folder.hide" : "agents.folder.show", { name: folder.name }), icon: "chevron", onSelect: () => toggle() },
   ];
@@ -510,9 +517,13 @@ const ProjectGroup = memo(function ProjectGroup({ folder, onOpen, current, filte
   };
   return (
     <section ref={section} data-project={folder.key} className={`sb-project ${showing ? "open" : ""} ${folder.system ? "system" : ""}`}>
-      <div ref={head} className="sb-row sb-prow" data-nav="project" data-project-head="" role="button" tabIndex={0} aria-expanded={showing}
+      {/* A chat dragged onto the row moves into the project; the keyboard and the phone use Move. */}
+      <div ref={head} className={`sb-row sb-prow ${dropping ? "drop" : ""}`} data-nav="project" data-project-head="" role="button" tabIndex={0} aria-expanded={showing}
         aria-label={t(showing ? "agents.folder.hide" : "agents.folder.show", { name: folder.name })} title={projectPath(folder.project)}
-        onClick={() => toggle()} onKeyDown={onKey}>
+        onClick={() => toggle()} onKeyDown={onKey}
+        onDragOver={(e) => { if (!takesDrop(e, folder)) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (!dropping) setDropping(true); }}
+        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false); }}
+        onDrop={(e) => { setDropping(false); if (!takesDrop(e, folder)) return; e.preventDefault(); toggle(true); void dropChat(folder); }}>
         <span className="sb-tile">{folder.system ? <CompanionFace size={14} /> : <Icon name="folder" size={14} />}{state && <span className={`sb-st ${state}`} />}</span>
         <span className="sb-main"><span className="sb-t">{folder.name}</span></span>
         <span className="sb-ptrail">
@@ -573,6 +584,8 @@ type RowProps = {
   pin?: "on" | "off";
   /** Whether the chat's subagents are unfolded under it. */
   subsOpen?: boolean;
+  /** The chat's own project, on the row of a chat that is not in a project: "Make a project" settles it. */
+  chat?: ProjectRef;
 };
 
 /** What a row actually draws, so a fresh read of the list does not reconcile a row that did not
@@ -585,6 +598,7 @@ function sameRow(a: RowProps, b: RowProps): boolean {
   if (a.projectName !== b.projectName || a.onNewIn !== b.onNewIn || a.onOpen !== b.onOpen) return false;
   if ((a.current === l.id || a.row.kids.some((k) => k.id === a.current)) !== (b.current === r.id || b.row.kids.some((k) => k.id === b.current))) return false;
   if (a.nested !== b.nested || a.system !== b.system || a.fork?.seq !== b.fork?.seq || a.fork?.of !== b.fork?.of || a.pin !== b.pin || !!a.subsOpen !== !!b.subsOpen) return false;
+  if (a.chat?.id !== b.chat?.id || a.chat?.entity_revision !== b.chat?.entity_revision || !!a.chat?.settings.ephemeral !== !!b.chat?.settings.ephemeral) return false;
   if (JSON.stringify(l.metadata?.loop ?? null) !== JSON.stringify(r.metadata?.loop ?? null)) return false;
   const lk = a.row.kids, rk = b.row.kids;
   return lk.length === rk.length && lk.every((k, i) => k.id === rk[i].id && k.status === rk[i].status && k.title === rk[i].title);
@@ -603,12 +617,13 @@ function rowState(s: SessionSummary, kids: SessionSummary[]): "waiting" | "runni
  * meta line under it. Hovering or focusing it shows "Open beside" and the menu; the right click opens
  * the same menu, with the commands of the phone's sheet.
  */
-const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, projectName, system, onNewIn, onParent, pin, subsOpen }: RowProps) {
+const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, projectName, system, onNewIn, onParent, pin, subsOpen, chat }: RowProps) {
   const s = row.s;
   const kids = row.kids;
   // The project's own settings are the project row's to offer; in a chat's menu they were one more
-  // entry about something other than the chat clicked.
-  const { items, layers, run } = useSessionCommands(s, { projectName });
+  // entry about something other than the chat clicked. A chat made a project is opened, so the
+  // project it now heads unfolds around it, selected.
+  const { items, layers, run } = useSessionCommands(s, { projectName, chat, onMadeProject: () => onOpen(s.id) });
   const here = current === s.id || kids.some((k) => k.id === current);
   const unread = !!s.unread_result;
   const state = rowState(s, kids);
@@ -620,13 +635,14 @@ const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, proj
     if (route.session && route.session !== s.id) navigate(sessionPath(route.session, s.id));
     else open();
   };
+  // No entry per subagent: a chat with many helpers made the menu taller than the screen, and the
+  // helpers are one click away already, on the plate that folds them out under the row.
   const menu: MenuItem[] = [
     { label: t("common.open"), hint: t("side.key.open"), onSelect: open },
     { label: t("side.beside"), icon: "columns", hint: t("side.key.beside"), onSelect: beside },
     { label: t("rail.ctx.newtab"), icon: "external", onSelect: () => void window.open(new URL(sessionPath(s.id), location.href).href, "_blank", "noopener") },
     ...(pin ? [pinCommand(s.project_id, pin === "on", { key: true })] : []),
     ...(onNewIn ? [{ label: t("side.project.new", { name: projectName }), icon: "compose" as const, onSelect: onNewIn }] : []),
-    ...kids.map((kid) => ({ label: t("agents.sub.open", { name: agentName(kid) }), icon: "bots" as const, hint: statusWord(kid.status), onSelect: () => onOpen(kid.id) })),
     "-",
     ...items.map((item): MenuItem => {
       if (item === "-") return item;
@@ -657,7 +673,8 @@ const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, proj
   ].filter(Boolean).join(" · ");
   return (
     <div data-session={s.id} data-nav="chat" className={`sb-row sb-chat ${here ? "current" : ""} ${unread ? "unread" : ""} ${nested ? "nested" : ""} ${fork ? "fork" : ""}`}
-      title={s.model ? `${s.model} · ${s.id}` : s.id} role="link" aria-current={here ? "page" : undefined} tabIndex={0} onClick={open} onKeyDown={onKey}>
+      title={s.model ? `${s.model} · ${s.id}` : s.id} role="link" aria-current={here ? "page" : undefined} tabIndex={0} onClick={open} onKeyDown={onKey}
+      draggable onDragStart={(e) => startChatDrag(e, s)} onDragEnd={endChatDrag}>
       {kids.length ? (
         // The left of a leader's row folds its helpers: the plate turns into the disclosure, with
         // their number on it, so the row says it has them without a word in its meta line.
@@ -743,9 +760,13 @@ const SubagentRow = memo(function SubagentRow({ kid, leader, last, nested }: { k
  * long-press sheet list the same items and open the same sheets, so a command added here reaches both.
  * `layers` are the sheets the commands open, to be rendered beside whatever shows the items.
  */
-export function useSessionCommands(session: SessionSummary, opts: { onProject?: () => void; projectName?: string } = {}): { items: MenuItem[]; layers: ReactNode; run: { rename: () => void; archive: () => Promise<void>; remove: () => Promise<void> } } {
+export function useSessionCommands(session: SessionSummary, opts: { onProject?: () => void; projectName?: string; chat?: ProjectRef | null; onMadeProject?: () => void } = {}): { items: MenuItem[]; layers: ReactNode; run: { rename: () => void; archive: () => Promise<void>; remove: () => Promise<void> } } {
   const [editing, setEditing] = useState(false);
   const [moving, setMoving] = useState(false);
+  const [promoting, setPromoting] = useState(false);
+  // Offered beside Move, the other way out of being a lone chat: `chat` is the session's own project
+  // while it is still a chat's, passed only for a chat's own row (a fork's row shares the project).
+  const makeProject = makeProjectCommand(opts.chat, () => setPromoting(true));
   const [title, setTitle] = useState(session.title);
   const [saving, setSaving] = useState(false);
   async function rename() {
@@ -778,12 +799,14 @@ export function useSessionCommands(session: SessionSummary, opts: { onProject?: 
   const items: MenuItem[] = [
     { label: t("session.rename"), icon: "pen", onSelect: startRename },
     { label: t("session.project.move"), icon: "folder", onSelect: () => setMoving(true) },
+    ...(makeProject ? [makeProject] : []),
     ...(opts.onProject ? [{ label: t("project.settings.for", { name: opts.projectName ?? session.project }), icon: "settings" as const, onSelect: opts.onProject }] : []),
     { label: t(session.archived ? "agents.restore" : "agents.archive"), icon: "archive", onSelect: () => void archive() },
     { label: t("common.delete"), icon: "trash", danger: true, onSelect: () => void remove() },
   ];
   const layers = <>
     {moving && <MoveSessionSheet sessionId={session.id} current={session.project_id} currentOwn={!!session.workspace_own} onClose={() => setMoving(false)} onMoved={() => invalidate("/api/sessions")} toast={toast} />}
+    {promoting && opts.chat && <MakeProjectSheet project={opts.chat} title={session.title} onClose={() => setPromoting(false)} onMade={opts.onMadeProject} />}
     {editing && <Sheet title={t("session.rename")} onClose={() => setEditing(false)} size="narrow">
       <form onSubmit={(event) => { event.preventDefault(); void rename(); }}>
         <input className="field" aria-label={t("session.rename")} autoFocus value={title} maxLength={128} onChange={(event) => setTitle(event.target.value)} />

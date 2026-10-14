@@ -1192,6 +1192,8 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
   .sb-acts .iconbtn.small:hover { background: var(--surface-3); }
   .sb-prow { min-height: var(--row-h); }
   .sb-prow .sb-t { font-weight: 500; }
+  /* A project row a dragged chat would move into: the accent ring, so the drop target is unmistakable. */
+  .sb-prow.drop, .sb-prow.drop:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); box-shadow: inset 0 0 0 2px var(--accent); }
   .sb-ptrail { flex: none; display: flex; align-items: center; gap: 6px; }
   .sb-pcount { font-size: var(--fs-11); color: var(--fg-3); }
   .sb-chev { display: grid; color: var(--fg-3); }

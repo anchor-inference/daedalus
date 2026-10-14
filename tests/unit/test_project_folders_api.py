@@ -219,11 +219,11 @@ async def test_a_chat_project_is_kept_and_its_settings_edited(running: Any, db: 
     listing = {p["id"]: p for p in (await client.get("/api/projects", headers=HEADERS)).json()}
     assert listing[pid]["settings"]["ephemeral"] is True and listing[pid]["sessions"] == [{"id": sid, "title": "Plain", "running": False}]
 
-    assert (await _write(client, "PATCH", f"/api/projects/{pid}", {"keep": False})).status_code == 422
-    kept = await _write(client, "PATCH", f"/api/projects/{pid}", {"keep": True, "name": "Plain project", "snapshots": False, "default_env": "container"})
+    kept = await _write(client, "POST", f"/api/projects/{pid}/as-project", {"name": "Plain project"})
     assert kept.status_code == 200
-    settings = kept.json()["settings"]
-    assert settings["ephemeral"] is False and settings["snapshots"] is False and kept.json()["name"] == "Plain project"
+    edited = await _write(client, "PATCH", f"/api/projects/{pid}", {"snapshots": False, "default_env": "container"})
+    settings = edited.json()["settings"]
+    assert settings["ephemeral"] is False and settings["snapshots"] is False and edited.json()["name"] == "Plain project"
     assert "kept" in await _events(db, pid)
     assert (await _write(client, "PATCH", "/api/projects/nope", {"name": "x"})).status_code == 404
 

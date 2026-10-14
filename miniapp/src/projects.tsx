@@ -422,7 +422,8 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
   async function keep() {
     if (!writes.ready || busy) return;
     setBusy(true);
-    await writes.write("PATCH", path, { keep: true }, t("project.kept", { name: project.name }));
+    // The same command as "Make a project" on the chat's row, under the name it has now.
+    await writes.write("POST", `${path}/as-project`, { name: project.name }, t("project.kept", { name: project.name }));
     setBusy(false);
   }
   const archivable = !project.system && !project.settings.system && !project.settings.ephemeral;
@@ -534,7 +535,9 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
  * Nothing on disk moves. A private choice creates a child in the destination project; the shared
  * choice uses its root. Files in the old directory stay where they were.
  * The installation's own folders are not offered as a destination — the concierge's Projects tool
- * hides the Voice project for the same reason — unless the session is already in one.
+ * hides the Voice project for the same reason — unless the session is already in one. Nor is a chat's
+ * own project with no chat left in it: a chat moved out leaves its old project behind, and listed by
+ * the moved chat's title it read as a project that does not exist.
  */
 export function MoveSessionSheet({ sessionId, current, currentOwn, onClose, onMoved, toast }: { sessionId: string; current: string; currentOwn: boolean; onClose: () => void; onMoved: () => void; toast: (t: string) => void }) {
   const projects = useProjects();
@@ -563,7 +566,7 @@ export function MoveSessionSheet({ sessionId, current, currentOwn, onClose, onMo
       <label className="field" htmlFor="move-project">{t("move.where")}</label>
       <select id="move-project" className="field" value={target} onChange={(e) => { setTarget(e.target.value); setOwnDirectory(false); }}>
         <option value="" disabled>{t("move.choose")}</option>
-        {(projects.data ?? []).filter((p) => !p.system || p.id === current).map((p) => (
+        {(projects.data ?? []).filter((p) => (!p.system && !(p.settings.ephemeral && p.sessions.length === 0)) || p.id === current).map((p) => (
           <option key={p.id} value={p.id}>{p.name} · {projectPath(p)}</option>
         ))}
       </select>

@@ -11,7 +11,7 @@ import aiosqlite
 
 from daedalus.host.events import AppEvent, EventBus
 from daedalus.stores.control import ControlConflict, ControlStore, Entity, Mutation, Principal, Scope, now, one
-from daedalus.stores.projects import ENVIRONMENTS, ProjectError, ProjectStore, normalise_root
+from daedalus.stores.projects import ENVIRONMENTS, ProjectError, ProjectStore, normalise_root, why_not_a_chat
 
 if TYPE_CHECKING:
     from daedalus.stores.database import Database
@@ -79,9 +79,9 @@ class ProjectCommands:
     async def settings(self, principal: Principal, project_id: str, *,
                        client_operation_id: str, expected_entity_revision: int,
                        name: str | None = None, snapshots: bool | None = None,
-                       default_env: str | None = None, keep: bool = False,
+                       default_env: str | None = None,
                        setup_command: str | None = None, archived: bool | None = None) -> dict[str, Any]:
-        payload = {"name": name, "snapshots": snapshots, "default_env": default_env, "keep": keep,
+        payload = {"name": name, "snapshots": snapshots, "default_env": default_env,
                    "setup_command": setup_command, "archived": archived}
 
         async def effect(conn: aiosqlite.Connection, _: Mutation) -> dict[str, Any]:
@@ -119,8 +119,6 @@ class ProjectCommands:
                 if "\n" in setup_command.strip():
                     raise ProjectError("the setup command is one line; join commands with &&")
                 settings_patch["setup_command"] = setup_command.strip()
-            if keep:
-                settings_patch["ephemeral"] = False
             await conn.execute(
                 "UPDATE projects SET name = ?,settings = json_patch(CASE WHEN json_valid(settings)"
                 " THEN settings ELSE '{}' END,?) WHERE id = ?",
@@ -128,9 +126,79 @@ class ProjectCommands:
             )
             return {}
 
-        change = "kept" if keep else "archived" if archived else "restored" if archived is False else "settings"
+        change = "archived" if archived else "restored" if archived is False else "settings"
         return await self._mutate(principal, project_id, "project.settings", client_operation_id,
                                   expected_entity_revision, payload, effect, change)
+
+    async def as_project(self, principal: Principal, project_id: str, *,
+                         client_operation_id: str, expected_entity_revision: int, name: str) -> dict[str, Any]:
+        """Make a chat's own project a project under the name given, in place: the same row, folders
+        and chat, so nothing on disk moves and the chat goes on working where it was.
+
+        One write for the name and the flag, so the sidebar never shows a project still called after
+        the chat's first message, nor a renamed chat. Already a project, it is renamed and nothing
+        else: the operator who pressed it twice, or on two screens, asked for the same result. The
+        installation's own and an orchestrated project are refused rather than renamed, because the
+        command is about a chat and they never were one.
+        """
+        label = (name or "").strip()
+
+        async def effect(conn: aiosqlite.Connection, _: Mutation) -> dict[str, Any]:
+            if not label:
+                raise ProjectError("a project needs a name")
+            current = await one(conn, "SELECT settings,system FROM projects WHERE id = ?", (project_id,))
+            assert current is not None
+            try:
+                stored = json.loads(current["settings"] or "{}")
+            except ValueError:
+                stored = {}
+            stored = stored if isinstance(stored, dict) else {}
+            if current["system"] or stored.get("system"):
+                raise ProjectError("the installation's own project is not a chat's and cannot be made one")
+            orchestrator = stored.get("orchestrator") if isinstance(stored.get("orchestrator"), dict) else {}
+            if orchestrator.get("enabled"):
+                raise ProjectError("an orchestrated project is a project already")
+            await conn.execute(
+                "UPDATE projects SET name = ?,settings = json_set(CASE WHEN json_valid(settings) THEN settings ELSE '{}' END,"
+                " '$.ephemeral', json('false')) WHERE id = ?",
+                (label, project_id),
+            )
+            return {}
+
+        return await self._mutate(principal, project_id, "project.as_project", client_operation_id,
+                                  expected_entity_revision, {"name": label}, effect, "kept")
+
+    async def as_chat(self, principal: Principal, project_id: str, *,
+                      client_operation_id: str, expected_entity_revision: int) -> dict[str, Any]:
+        """Make a project with one chat that chat's own project again: listed as the chat, and removed
+        with it when it is deleted (its folders stay on disk, as any chat's do).
+
+        Refused with the reason whenever the chat's later removal would lose or trip over something
+        (:func:`why_not_a_chat`); the check and the write share the command's transaction, so a
+        second chat moved in meanwhile cannot slip between them. A chat's project already is a no-op.
+        """
+
+        async def effect(conn: aiosqlite.Connection, _: Mutation) -> dict[str, Any]:
+            current = await one(conn, "SELECT settings FROM projects WHERE id = ?", (project_id,))
+            assert current is not None
+            try:
+                stored = json.loads(current["settings"] or "{}")
+            except ValueError:
+                stored = {}
+            if isinstance(stored, dict) and stored.get("ephemeral"):
+                return {}
+            reason = await why_not_a_chat(conn, project_id)
+            if reason:
+                raise ProjectError(reason)
+            await conn.execute(
+                "UPDATE projects SET settings = json_set(CASE WHEN json_valid(settings) THEN settings ELSE '{}' END,"
+                " '$.ephemeral', json('true')) WHERE id = ?",
+                (project_id,),
+            )
+            return {}
+
+        return await self._mutate(principal, project_id, "project.as_chat", client_operation_id,
+                                  expected_entity_revision, {}, effect, "chat")
 
     async def add_folder(self, principal: Principal, project_id: str, *,
                          client_operation_id: str, expected_entity_revision: int,

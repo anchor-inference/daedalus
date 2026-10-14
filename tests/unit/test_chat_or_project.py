@@ -1,16 +1,23 @@
 """One chat is a chat, two are a project.
 
 A new chat makes a scratch project of its own, marked ephemeral, and the app lists that project as
-a chat. A second top-level session started in it, or moved into it, makes it a project for good:
-the flag is cleared on the server and never comes back. Forks and subagents are drawn inside the
-chat they came from and change nothing. A folder a chat is started in (Telegram, a schedule) is
-adopted the same way, and deleting its only chat removes the record but never the folder. The
-migration marks the projects an installation already has by the same rule, once.
+a chat. A second top-level session started in it, or moved into it, makes it a project, and nothing
+automatic ever makes it a chat again. Forks and subagents are drawn inside the chat they came from
+and change nothing. A folder a chat is started in (Telegram, a schedule) is adopted the same way,
+and deleting its only chat removes the record but never the folder. The migration marks the
+projects an installation already has by the same rule, once.
+
+The operator can do both by hand: "Make a project" turns a chat into a project under a name, in
+place, and "Turn back into a chat" turns a project with one chat back into that chat — refused,
+with the reason, whenever the chat's later removal would lose or trip over the project's work.
 """
 
 from __future__ import annotations
 
 import json
+import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -264,3 +271,203 @@ async def test_the_migration_marks_chats_and_projects_once(tmp_path: Path) -> No
         assert int((await db.fetchone("SELECT version FROM schema_version"))["version"]) == len(MIGRATIONS)
     finally:
         await db.close()
+
+
+# -- by hand: a chat made a project, and a project turned back into its chat ----------------
+
+
+@asynccontextmanager
+async def _api(settings: Settings, config: RuntimeConfig, db: Database) -> AsyncIterator[tuple[SessionManager, httpx.AsyncClient]]:
+    manager = await _started(settings, config, db)
+    app = SimpleNamespace(settings=settings, config=config, db=db, manager=manager, front=None, extensions={}, guard=None)
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=build_app(app, "tok")), base_url="http://test") as client:  # type: ignore[arg-type]
+            yield manager, client
+    finally:
+        await manager.close()
+
+
+async def _revision(client: httpx.AsyncClient, project_id: str) -> int:
+    listed = {p["id"]: p for p in (await client.get("/api/projects", headers=HEADERS)).json()}
+    return int(listed[project_id]["entity_revision"])
+
+
+async def _command(client: httpx.AsyncClient, project_id: str, what: str, body: dict[str, Any] | None = None, *, operation: str = "") -> httpx.Response:
+    """POST ``as-project`` or ``as-chat`` the way the app does: against the revision it last read."""
+    payload = {**(body or {}), "expected_entity_revision": await _revision(client, project_id),
+               "client_operation_id": operation or f"test-{uuid.uuid4().hex}"}
+    return await client.post(f"/api/projects/{project_id}/{what}", headers=HEADERS, json=payload)
+
+
+async def _sidebar(client: httpx.AsyncClient, project_id: str) -> dict[str, Any]:
+    """The project as the sidebar's listing carries it, with its count of top-level chats."""
+    listing = (await client.get("/api/sessions", headers=HEADERS)).json()
+    return next(p for p in listing["projects"] if p["id"] == project_id)
+
+
+async def test_a_chat_is_made_a_project_in_place_under_its_new_name(settings: Settings, config: RuntimeConfig, db: Database) -> None:
+    async with _api(settings, config, db) as (manager, client):
+        chat = await manager.create_session("Plan the garden")
+        pid = chat.project.id  # type: ignore[union-attr]
+        workspace = chat.workspace
+        assert (await _sidebar(client, pid))["settings"]["ephemeral"] is True
+
+        made = await _command(client, pid, "as-project", {"name": "  Garden  "})
+        assert made.status_code == 200, made.text
+        assert made.json()["change"] == "kept"
+        listed = await _sidebar(client, pid)
+        assert listed["settings"]["ephemeral"] is False and listed["name"] == "Garden" and listed["total"] == 1
+        # In place: the same project, the same chat in it, and its files where they were.
+        moved = manager.live_state(chat.session.id)
+        assert moved is not None and moved.project is not None
+        assert moved.project.id == pid and moved.project.settings.ephemeral is False and moved.workspace == workspace
+        assert (await client.get(f"/api/sessions/{chat.session.id}", headers=HEADERS)).json()["title"] == "Plan the garden"
+        events = await db.fetchall("SELECT payload_json FROM app_events WHERE type = 'project.changed' AND project_id = ?", (pid,))
+        assert "kept" in [json.loads(e["payload_json"])["change"] for e in events]
+
+
+async def test_making_a_project_twice_is_the_same_result(settings: Settings, config: RuntimeConfig, db: Database) -> None:
+    async with _api(settings, config, db) as (manager, client):
+        chat = await manager.create_session("Notes")
+        pid = chat.project.id  # type: ignore[union-attr]
+        first = await _command(client, pid, "as-project", {"name": "Notes"}, operation="make-once")
+        assert first.status_code == 200
+        # The same command sent again (a retry after a dropped answer) is answered from its receipt.
+        payload = {"name": "Notes", "expected_entity_revision": first.json()["entity_revision"] - 1, "client_operation_id": "make-once"}
+        replay = await client.post(f"/api/projects/{pid}/as-project", headers=HEADERS, json=payload)
+        assert replay.status_code == 200 and replay.json()["receipt_id"] == first.json()["receipt_id"]
+        # Pressed again from another screen: still a project, renamed, nothing else.
+        again = await _command(client, pid, "as-project", {"name": "Notebook"})
+        assert again.status_code == 200
+        listed = await _sidebar(client, pid)
+        assert listed["settings"]["ephemeral"] is False and listed["name"] == "Notebook"
+        # A stale revision is a conflict, never a silent overwrite.
+        stale = await client.post(f"/api/projects/{pid}/as-project", headers=HEADERS,
+                                  json={"name": "Old", "expected_entity_revision": 1, "client_operation_id": "stale"})
+        assert stale.status_code == 409
+
+
+async def test_making_a_project_refuses_the_installations_own_and_an_orchestrated_one(settings: Settings, config: RuntimeConfig, db: Database, tmp_path: Path) -> None:
+    async with _api(settings, config, db) as (manager, client):
+        voice = await manager.projects.ensure_system("voice", name="Voice", root=tmp_path / "workspaces" / "voice")
+        refused = await _command(client, voice.id, "as-project", {"name": "Mine now"})
+        assert refused.status_code == 400 and "installation's own" in refused.json()["detail"]
+        assert (await manager.projects.get(voice.id)).name == "Voice"  # type: ignore[union-attr]
+
+        made = (await client.post("/api/projects", headers=HEADERS, json={"name": "Bakery", "folders": [{"path": str(tmp_path / "bakery")}]})).json()
+        await manager.projects.update_orchestrator(made["id"], enabled=True)
+        refused = await _command(client, made["id"], "as-project", {"name": "Renamed"})
+        assert refused.status_code == 400 and "orchestrated" in refused.json()["detail"]
+        assert (await manager.projects.get(made["id"])).name == "Bakery"  # type: ignore[union-attr]
+
+        chat = await manager.create_session("x")
+        blank = await _command(client, chat.project.id, "as-project", {"name": "   "})  # type: ignore[union-attr]
+        assert blank.status_code == 400
+        assert (await _command(client, chat.project.id, "as-project", {"name": ""})).status_code == 422  # type: ignore[union-attr]
+        assert (await client.post("/api/projects/nope/as-project", headers=HEADERS,
+                                  json={"name": "x", "expected_entity_revision": 1, "client_operation_id": "x"})).status_code == 404
+
+
+async def test_the_settings_write_no_longer_keeps_a_chat(settings: Settings, config: RuntimeConfig, db: Database) -> None:
+    async with _api(settings, config, db) as (manager, client):
+        chat = await manager.create_session("x")
+        pid = chat.project.id  # type: ignore[union-attr]
+        payload = {"keep": True, "expected_entity_revision": await _revision(client, pid), "client_operation_id": "keep"}
+        assert (await client.patch(f"/api/projects/{pid}", headers=HEADERS, json=payload)).status_code == 422
+        assert await _ephemeral(db, pid)
+
+
+async def test_a_project_with_one_chat_turns_back_into_it(settings: Settings, config: RuntimeConfig, db: Database) -> None:
+    async with _api(settings, config, db) as (manager, client):
+        chat = await manager.create_session("Trip")
+        pid = chat.project.id  # type: ignore[union-attr]
+        # A fork and a helper hang inside the chat; they do not make it two.
+        await manager.create_session("Trip (fork @3)", metadata={"forked_from": {"session_id": chat.session.id, "seq": 3}}, project_id=pid)
+        await manager.create_session("helper", metadata={"subagent_of": chat.session.id, "subagent_name": "helper"}, project_id=pid)
+        assert (await _command(client, pid, "as-project", {"name": "Trip to Porto"})).status_code == 200
+
+        back = await _command(client, pid, "as-chat")
+        assert back.status_code == 200, back.text
+        assert back.json()["change"] == "chat"
+        assert (await _sidebar(client, pid))["settings"]["ephemeral"] is True
+        assert manager.live_state(chat.session.id).project.settings.ephemeral is True  # type: ignore[union-attr]
+        # Already a chat: nothing to do, and nothing refused.
+        assert (await _command(client, pid, "as-chat")).status_code == 200
+
+        # A chat again, so a second chat moved in makes it a project by the usual rule.
+        guest = await manager.create_session("guest")
+        moved = await client.post(f"/api/sessions/{guest.session.id}/project", headers=HEADERS, json={"project_id": pid})
+        assert moved.status_code == 200
+        assert not await _ephemeral(db, pid)
+        assert (await _sidebar(client, pid))["total"] == 2
+
+
+async def test_a_chat_again_goes_with_its_chat_and_leaves_the_folder(settings: Settings, config: RuntimeConfig, db: Database, tmp_path: Path) -> None:
+    folder = tmp_path / "operator-folder"
+    folder.mkdir()
+    (folder / "notes.md").write_text("mine", encoding="utf-8")
+    async with _api(settings, config, db) as (manager, client):
+        # A project the operator made on purpose, around a folder of their own, with one chat.
+        made = (await client.post("/api/projects", headers=HEADERS, json={"name": "Mine", "folders": [{"path": str(folder)}]})).json()
+        chat = await manager.create_session("only", project_id=made["id"])
+        assert (await _command(client, made["id"], "as-chat")).status_code == 200
+        await manager.delete_session(chat.session.id, delete_workspace=True)
+        assert await manager.projects.get(made["id"]) is None
+        assert (folder / "notes.md").read_text(encoding="utf-8") == "mine"
+
+
+async def test_turning_back_into_a_chat_is_refused_with_the_reason(settings: Settings, config: RuntimeConfig, db: Database, tmp_path: Path) -> None:
+    async with _api(settings, config, db) as (manager, client):
+        empty = (await client.post("/api/projects", headers=HEADERS, json={"name": "Empty"})).json()
+        refused = await _command(client, empty["id"], "as-chat")
+        assert refused.status_code == 409 and "exactly one chat" in refused.json()["detail"] and "has 0" in refused.json()["detail"]
+
+        two = (await client.post("/api/projects", headers=HEADERS, json={"name": "Two"})).json()
+        await manager.create_session("one", project_id=two["id"])
+        await manager.create_session("two", project_id=two["id"])
+        refused = await _command(client, two["id"], "as-chat")
+        assert refused.status_code == 409 and "has 2" in refused.json()["detail"]
+        assert not await _ephemeral(db, two["id"])
+
+        voice = await manager.projects.ensure_system("voice", name="Voice", root=tmp_path / "workspaces" / "voice")
+        await manager.create_session("talk", project_id=voice.id)
+        refused = await _command(client, voice.id, "as-chat")
+        assert refused.status_code == 409 and "installation's own" in refused.json()["detail"]
+
+        orchestrated = (await client.post("/api/projects", headers=HEADERS, json={"name": "Bakery"})).json()
+        await manager.create_session("one", project_id=orchestrated["id"])
+        await manager.projects.update_orchestrator(orchestrated["id"], enabled=True)
+        refused = await _command(client, orchestrated["id"], "as-chat")
+        assert refused.status_code == 409 and "orchestrat" in refused.json()["detail"]
+
+        archived = (await client.post("/api/projects", headers=HEADERS, json={"name": "Old"})).json()
+        await manager.create_session("one", project_id=archived["id"])
+        await db.execute("UPDATE projects SET settings = json_set(settings, '$.archived', json('true')) WHERE id = ?", (archived["id"],))
+        refused = await _command(client, archived["id"], "as-chat")
+        assert refused.status_code == 409 and "archived" in refused.json()["detail"]
+
+
+async def test_turning_back_into_a_chat_is_refused_while_the_project_holds_work(settings: Settings, config: RuntimeConfig, db: Database) -> None:
+    async with _api(settings, config, db) as (manager, client):
+        # A schedule's key does not cascade: the chat's removal would fail, and with it the deletion.
+        scheduled = (await client.post("/api/projects", headers=HEADERS, json={"name": "Digest"})).json()
+        await manager.create_session("one", project_id=scheduled["id"])
+        await db.execute("INSERT INTO schedules(id, name, prompt, workspace, created_at, project_id) VALUES ('sch1', 'daily', 'go', '/w', '2026-01-01', ?)", (scheduled["id"],))
+        refused = await _command(client, scheduled["id"], "as-chat")
+        assert refused.status_code == 409 and "automation history" in refused.json()["detail"]
+        assert not await _ephemeral(db, scheduled["id"])
+
+        # A brief would cascade away with the chat, unseen.
+        briefed = (await client.post("/api/projects", headers=HEADERS, json={"name": "Shop"})).json()
+        await manager.create_session("one", project_id=briefed["id"])
+        await manager.projects.set_brief(briefed["id"], "notes", "Sell bread online", "operator")
+        refused = await _command(client, briefed["id"], "as-chat")
+        assert refused.status_code == 409 and "a brief" in refused.json()["detail"]
+
+        # The journal and the pin are a chat's as much as a project's, and stay.
+        plain = (await client.post("/api/projects", headers=HEADERS, json={"name": "Plain"})).json()
+        await manager.create_session("one", project_id=plain["id"])
+        await manager.projects.pin(plain["id"], True)
+        await client.post(f"/api/projects/{plain['id']}/journal", headers=HEADERS, json={"text": "started"})
+        assert (await _command(client, plain["id"], "as-chat")).status_code == 200
+        assert (await manager.projects.pins()).get(plain["id"])

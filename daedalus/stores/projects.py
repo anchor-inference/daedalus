@@ -161,8 +161,10 @@ class ProjectSettings:
     ephemeral: bool = False
     """Made implicitly by a new chat, with a scratch folder of the installation's own or a folder it
     was started in, and its record removed with its last session (an operator's folder stays on
-    disk). "Keep as a project" clears it, and so does a second top-level session (:meth:`ProjectStore.settle`);
-    once cleared it never comes back."""
+    disk). "Make a project" clears it, and so does a second top-level session (:meth:`ProjectStore.settle`).
+    Only the operator sets it again, on a project with one chat and nothing a chat could not carry
+    (:func:`why_not_a_chat`); nothing automatic ever does, since a project the operator has seen
+    listed must not turn into a chat behind their back."""
     default_env: str = ""
     """Where a new agent of this project runs when nothing names a folder; empty until the store
     fills it with the environment this process runs in."""
@@ -383,6 +385,78 @@ def top_level_sessions(rows: Iterable[tuple[str, str | None, Any]]) -> dict[str,
     known = {session_id for session_id, _, _ in parsed}
     return {session_id: project_id for session_id, project_id, metadata in parsed
             if project_id and not _nested_under(session_id, metadata, known)}
+
+
+CHAT_CARRIES = frozenset({"sessions", "project_folders", "project_pins", "project_journal", "operation_receipts"})
+"""The tables whose rows a chat's project may hold as well as a project: its chat (counted on its
+own), its folders, its pin, the log of what was done to it, and the receipts of the operator's own
+commands. A row anywhere else is work only a project keeps."""
+
+_BORN_WITH = {
+    "project_goal_revisions": "NOT (goal_revision = 1 AND body = '')",
+    "planning_budgets": "used_tokens > 0",
+    "project_briefs": "body != ''",
+}
+"""What a row of these tables must be to count as work. Every project is made with a first, empty
+goal revision and a planning budget (``_insert``), a chat's as well, and a brief section can be
+written back to empty; such rows are no more the project's work than its name is."""
+
+_HELD = {
+    "staff": "a team", "board_tasks": "tasks on the board", "schedules": "automation history",
+    "recurring_cycles": "automation history", "project_briefs": "a brief", "watches": "watches",
+    "asks": "questions", "knowledge_fact_versions": "project knowledge", "actor_grants": "granted authority",
+    "planning_budgets": "a budget", "project_goal_budgets": "a budget", "project_goal_revisions": "a goal", "resource_profile_versions": "a resource profile",
+}
+
+
+async def why_not_a_chat(conn: Any, project_id: str) -> str:
+    """Why this project cannot become a chat's project again, or "" when it can; read inside the
+    caller's transaction so the answer still holds when the flag is written.
+
+    A chat's project is removed with its last chat (``delete_session``), so what a chat cannot carry
+    is decided by that removal. A row that cascades with it would be lost without a word — a team,
+    a board, a brief — and a row whose foreign key does not cascade (a schedule, a budget) would make
+    the removal fail, and with it the deletion of the chat. Both are refused here, where the operator
+    can still be told, by asking the schema rather than a list: a table added later that points at
+    projects is covered without anyone remembering this function. :meth:`ProjectStore.delete` refuses
+    automation history for the second reason.
+    """
+    project = await (await conn.execute("SELECT name, settings, system, setup_by FROM projects WHERE id = ?", (project_id,))).fetchone()
+    if project is None:
+        raise KeyError(project_id)
+    try:
+        settings = json.loads(project["settings"] or "{}")
+    except ValueError:
+        settings = {}
+    settings = settings if isinstance(settings, dict) else {}
+    name = project["name"]
+    if project["system"] or settings.get("system"):
+        return f"{name} is the installation's own project and never a chat"
+    orchestrator = settings.get("orchestrator") if isinstance(settings.get("orchestrator"), dict) else {}
+    if orchestrator.get("enabled") or orchestrator.get("session_id"):
+        return f"{name} has had an orchestrator; an orchestrated project stays a project"
+    if settings.get("archived"):
+        return f"{name} is archived; restore it first"
+    if project["setup_by"]:
+        return f"{name} is being set up by the main orchestrator"
+    sessions = await (await conn.execute("SELECT id, project_id, metadata FROM sessions")).fetchall()
+    chats = sum(1 for owner in top_level_sessions((r["id"], r["project_id"], r["metadata"]) for r in sessions).values() if owner == project_id)
+    if chats != 1:
+        return f"only a project with exactly one chat can become a chat; {name} has {chats}"
+    held: list[str] = []
+    tables = await (await conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")).fetchall()
+    for table in (row["name"] for row in tables):
+        if table in CHAT_CARRIES:
+            continue
+        keys = await (await conn.execute(f'PRAGMA foreign_key_list("{table}")')).fetchall()
+        for column in sorted({key["from"] for key in keys if key["table"] == "projects"}):
+            worth = f" AND {_BORN_WITH[table]}" if table in _BORN_WITH else ""
+            found = await (await conn.execute(f'SELECT 1 FROM "{table}" WHERE "{column}" = ?{worth} LIMIT 1', (project_id,))).fetchone()
+            if found is not None:
+                held.append(_HELD.get(table, "records only a project keeps"))
+    if held:
+        return f"{name} holds {', '.join(dict.fromkeys(held))}, which a chat's project cannot keep"
+    return ""
 
 
 def _detect_git(path: Path) -> bool:
@@ -953,9 +1027,9 @@ class ProjectStore:
 
         The operator's rule is "one chat is a chat, two are a project": a second chat started in, or
         moved into, a scratch project means the folder is shared work now. Forks and subagents are
-        drawn inside the chat they came from and do not count. The change is one way, like "Keep as
-        a project": deleting back down to one chat leaves it a project, since by then the operator
-        has seen it listed as one. A system project is never ephemeral and is left alone.
+        drawn inside the chat they came from and do not count. Deleting back down to one chat leaves
+        it a project, since by then the operator has seen it listed as one; only their own "Turn back
+        into a chat" makes it a chat again. A system project is never ephemeral and is left alone.
         """
         async with self._db.transaction() as conn:
             row = await (await conn.execute(
@@ -1426,6 +1500,7 @@ class ProjectStore:
 
 __all__ = [
     "BRIEF_SECTIONS",
+    "CHAT_CARRIES",
     "FOLDER_NAME_MAX",
     "BriefSection",
     "FolderSpec",
@@ -1444,4 +1519,5 @@ __all__ = [
     "folder_name",
     "normalise_root",
     "top_level_sessions",
+    "why_not_a_chat",
 ]

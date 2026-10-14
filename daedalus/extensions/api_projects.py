@@ -137,11 +137,13 @@ class ProjectPatch(MutationBody):
     snapshots: bool | None = None
     default_env: Env | None = None
     setup_command: str | None = Field(default=None, max_length=2000)
-    keep: Literal[True] | None = None
-    """Keep a chat's scratch project as a project of its own. There is no way back: an ephemeral
-    project is one made implicitly, and nothing the operator does makes one."""
     archived: bool | None = None
     """Archive (true) or restore (false): hidden from the lists and never woken, nothing deleted."""
+
+
+class AsProjectBody(MutationBody):
+    name: str = Field(min_length=1, max_length=200)
+    """What the project is called from now on; the dialog offers the chat's title."""
 
 
 class PinBody(BaseModel):
@@ -377,7 +379,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             response = await project_commands().settings(
                 Principal.operator(who), project_id, client_operation_id=body.client_operation_id,
                 expected_entity_revision=body.expected_entity_revision, name=body.name,
-                snapshots=body.snapshots, default_env=body.default_env, keep=bool(body.keep),
+                snapshots=body.snapshots, default_env=body.default_env,
                 setup_command=body.setup_command, archived=body.archived,
             )
         except ControlConflict as exc:
@@ -387,6 +389,40 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         except ProjectError as exc:
             raise HTTPException(400, str(exc)) from exc
         return response
+
+    @api.post("/api/projects/{project_id}/as-project")
+    async def as_project(project_id: str, body: AsProjectBody, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Make a chat a project of its own, in place and under a name: the chat's own project is
+        settled and renamed, and the chat stays in it with its files where they are."""
+        await existing(project_id)
+        try:
+            return await project_commands().as_project(
+                Principal.operator(who), project_id, client_operation_id=body.client_operation_id,
+                expected_entity_revision=body.expected_entity_revision, name=body.name,
+            )
+        except ControlConflict as exc:
+            raise conflict(exc) from exc
+        except ControlDenied as exc:
+            raise HTTPException(403, str(exc)) from exc
+        except ProjectError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @api.post("/api/projects/{project_id}/as-chat")
+    async def as_chat(project_id: str, body: MutationBody, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Turn a project with one chat back into that chat. A 409 says why it cannot: more chats, an
+        orchestrator, or work a chat's project does not keep."""
+        await existing(project_id)
+        try:
+            return await project_commands().as_chat(
+                Principal.operator(who), project_id, client_operation_id=body.client_operation_id,
+                expected_entity_revision=body.expected_entity_revision,
+            )
+        except ControlConflict as exc:
+            raise conflict(exc) from exc
+        except ControlDenied as exc:
+            raise HTTPException(403, str(exc)) from exc
+        except ProjectError as exc:
+            raise HTTPException(409, str(exc)) from exc
 
     @api.put("/api/projects/{project_id}/pin")
     async def pin_project(project_id: str, body: PinBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

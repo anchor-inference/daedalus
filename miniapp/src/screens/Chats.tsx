@@ -23,6 +23,7 @@ import { fmtInterval, statusWord } from "../ui/components";
 import type { MenuItem } from "../ui/dialogs";
 import { ActionSheet, Banner, Chip, ChipBar, EmptyState, IconButton, ListRow, NewChatPill, SectionHeader, TopBar } from "../ui/phone";
 import { NewAgentSheet, useSessionCommands } from "./Sessions";
+import { asChatCommand } from "../chatproject";
 
 type View = "all" | "attention" | "working" | "loops" | "archive";
 type SearchList = SessionList & { semantic: boolean; reason: string; partial: boolean; indexing: boolean };
@@ -101,7 +102,7 @@ function ChatRow({ row, fork, projectName, toast, onOpen, onNewIn, pin }: { row:
   const [projectOpen, setProjectOpen] = useState(false);
   const projects = useProjects();
   const project = (projects.data ?? []).find((p) => p.id === s.project_id) ?? null;
-  const { items, layers } = useSessionCommands(s, { onProject: project ? () => setProjectOpen(true) : undefined, projectName });
+  const { items, layers } = useSessionCommands(s, { onProject: project ? () => setProjectOpen(true) : undefined, projectName, chat: fork ? null : project });
   const actions: MenuItem[] = [
     { label: t("ph.newchat.in", { name: projectName }), icon: "compose", onSelect: onNewIn },
     ...(pin ? [pinCommand(s.project_id, pin === "on")] : []),
@@ -149,6 +150,7 @@ function ProjectSection({ folder, rows, toast, onOpen, filtered }: { folder: Fol
   const [menu, setMenu] = useState(false);
   const shown = !closed || filtered;
   const toggle = () => { setClosed(!closed); rememberSection(folder.key, !closed); };
+  const backToChat = asChatCommand(folder);
   return (
     <section data-project={folder.key}>
       <SectionHeader count={folder.total} action={<>
@@ -159,6 +161,7 @@ function ProjectSection({ folder, rows, toast, onOpen, filtered }: { folder: Fol
         { label: t("ph.newchat.in", { name: folder.name }), icon: "compose", onSelect: () => setAdding(true) },
         pinCommand(folder.key, false),
         ...(folder.system ? [{ label: t("agents.folder.tocompanion"), icon: "mic" as const, onSelect: () => navigate(pathFor("companion")) }] : [{ label: t("project.settings.for", { name: folder.name }), icon: "settings" as const, onSelect: () => setEditing(true) }]),
+        ...(backToChat ? [backToChat] : []),
         { label: t(shown ? "agents.folder.hide" : "agents.folder.show", { name: folder.name }), icon: shown ? "chevron" : "forward", onSelect: toggle },
       ]} />}
       {shown && <div className="ph-list">{lines(rows).map(({ row, fork }) => <ChatRow key={row.s.id} row={row} fork={fork} projectName={folder.name} toast={toast} onOpen={onOpen} onNewIn={() => setAdding(true)} />)}</div>}
@@ -194,10 +197,12 @@ function PinnedProject({ folder, toast, onOpen, filtered }: { folder: Folder; to
   const toggle = () => { setClosed(!closed); rememberSection(folder.key, !closed); };
   const all = lines(folder.rows);
   const visible = shown ? all : all.filter(({ row }) => liveRow(row));
+  const backToChat = asChatCommand(folder);
   const actions: MenuItem[] = [
     { label: t("ph.newchat.in", { name: folder.name }), icon: "compose", onSelect: () => setAdding(true) },
     pinCommand(folder.key, true),
     ...(folder.system ? [{ label: t("agents.folder.tocompanion"), icon: "mic" as const, onSelect: () => navigate(pathFor("companion")) }] : [{ label: t("project.settings.for", { name: folder.name }), icon: "settings" as const, onSelect: () => setEditing(true) }]),
+    ...(backToChat ? [backToChat] : []),
     { label: t(shown ? "agents.folder.hide" : "agents.folder.show", { name: folder.name }), icon: shown ? "chevron" : "forward", onSelect: toggle },
   ];
   return (

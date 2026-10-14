@@ -1542,6 +1542,14 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "project.ephemeral": { en: "A chat's own scratch project: it goes away with its last chat.", ru: "Черновой проект одного чата: он исчезнет вместе с последним чатом." },
   "project.keep": { en: "Keep as a project", ru: "Оставить как проект" },
   "project.kept": { en: "{name} is kept as a project", ru: "{name}: проект сохранён" },
+  "chat.toproject": { en: "Make a project", ru: "Сделать проектом" },
+  "chat.toproject.name": { en: "Project name", ru: "Название проекта" },
+  "chat.toproject.hint": { en: "The chat stays as it is and its files stay in their folder; it becomes the project's first chat.", ru: "Чат остаётся как есть, его файлы — в той же папке; он станет первым чатом проекта." },
+  "chat.toproject.action": { en: "Make a project", ru: "Сделать проектом" },
+  "chat.toproject.done": { en: "{name} is a project now", ru: "«{name}» теперь проект" },
+  "project.tochat": { en: "Turn back into a chat", ru: "Снова сделать чатом" },
+  "project.tochat.one": { en: "Only with one chat in it", ru: "Только когда в проекте один чат" },
+  "project.tochat.done": { en: "{name} is a chat again", ru: "«{name}» снова чат" },
 
   // ── the folders of a project ───────────────────────────────────────────────────────────
   "folder.primary": { en: "primary", ru: "основная" },
@@ -4815,7 +4823,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "session.workspace": { en: "Working directory", ru: "Рабочая папка" },
   "session.path.copied": { en: "path copied", ru: "путь скопирован" },
   "session.project": { en: "Project", ru: "Проект" },
-  "session.project.move": { en: "Move…", ru: "Перенести…" },
+  "session.project.move": { en: "Move to a project…", ru: "Перенести в проект…" },
   "move.title": { en: "Move this agent", ru: "Перенести агента" },
   "move.where": { en: "Where it belongs", ru: "Куда отнести" },
   "move.choose": { en: "Choose a project", ru: "Выберите проект" },
