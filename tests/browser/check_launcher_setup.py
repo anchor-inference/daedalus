@@ -7,11 +7,12 @@ launcher's own test call; the CLI detection finds the one login this file leaves
 home. Only the start is played back: the status the page follows is answered from this file, because
 a real start brings a whole installation up.
 
-Every combination of language and window (1200×800 and 390×844) must get through all nine steps
+Every combination of language and window (1200×800 and 390×844) must get through all ten steps
 without a console error, a page error, a horizontal scroll or a frame that leaves the window. On the
 way it checks what the steps promise: the model tabs' labels are whole, the keys come in a
 pay-as-you-go group and a subscription plan group, the Telegram how-to links to the two bots in a new
-tab, and the speech step leads with the model recommended for the language. The English walks say
+tab, the speech step leads with the model recommended for the language, and the search step
+opens on SearXNG with Keenable recommended and its sign-up links. The English walks say
 "Not now" to speech and the Russian ones choose that model. The last walk posts its answers to the
 launcher for real, and the files it writes are read back.
 
@@ -168,6 +169,31 @@ def check_telegram_step(page, tag: str, problems: list[str]) -> None:
         problems.append(f"{tag}: the Telegram how-to has {page.locator('.howto li').count()} steps")
 
 
+def check_search_step(page, tag: str, lang: str, problems: list[str]) -> None:
+    """SearXNG on by default, Keenable recommended with its free allowance and links that leave for
+    the browser, the other APIs folded away, and an order line that follows a key as it is typed."""
+    if not page.is_checked("[data-k=search-searxng-in]"):
+        problems.append(f"{tag}: the search step does not open with SearXNG on")
+    head = page.text_content(".step-search .sp-head") or ""
+    if "Keenable" not in head or ("100,000" not in head and "100 000" not in head):
+        problems.append(f"{tag}: the search step does not recommend Keenable with its free allowance: {head!r}")
+    links = page.evaluate("() => Array.from(document.querySelectorAll('.step-search .howto-note a')).map(a => [a.href, a.target, a.rel])")
+    hrefs = [link[0] for link in links]
+    if hrefs[:2] != ["https://app.keenable.ai/signup", "https://app.keenable.ai/console"] or any(link[1] != "_blank" or "noopener" not in link[2] for link in links):
+        problems.append(f"{tag}: the Keenable links are {links}")
+    if page.locator("#f-search\\.keys\\.serper").count() != 0:
+        problems.append(f"{tag}: the other search APIs are not folded away")
+    order = page.text_content("[data-k=search-order]") or ""
+    if "SearXNG → DuckDuckGo" not in order:
+        problems.append(f"{tag}: the order line reads {order!r}")
+    page.fill("#f-search\\.keys\\.keenable", "kn-test-0123456789")
+    order = page.text_content("[data-k=search-order]") or ""
+    if "SearXNG → Keenable → DuckDuckGo" not in order:
+        problems.append(f"{tag}: typing a key did not move the order line: {order!r}")
+    if not page.is_visible(".f-foot [data-act=skip]"):
+        problems.append(f"{tag}: the search step has no Not now")
+
+
 def walk(browser, base: str, lang: str, size: tuple[int, int], endpoint: str, real_post: bool) -> list[str]:
     problems: list[str] = []
     context = browser.new_context(viewport={"width": size[0], "height": size[1]}, locale="ru-RU" if lang == "ru" else "en-US")
@@ -256,6 +282,14 @@ def walk(browser, base: str, lang: str, size: tuple[int, int], endpoint: str, re
             settled(page)
             step("speech-all")
             next_step()
+        step("search")
+        check_search_step(page, tag, lang, problems)
+        page.click("[data-act=search-more]")
+        settled(page)
+        if page.locator("#f-search\\.keys\\.serper").count() != 1 or page.locator("#f-search\\.keys\\.perplexity").count() != 1:
+            problems.append(f"{tag}: the other search APIs did not unfold")
+        step("search-more")
+        next_step()
         step("advanced")
         page.click("[data-act=adv]")
         settled(page)
@@ -267,6 +301,9 @@ def walk(browser, base: str, lang: str, size: tuple[int, int], endpoint: str, re
         spoken = (page.text_content("[data-k=edit-speech] .sum-v") or "").strip()
         if spoken != ("Skipped" if lang == "en" else "GigaAM v3 Russian"):
             problems.append(f"{tag}: the summary says {spoken!r} for speech")
+        searched = (page.text_content("[data-k=edit-search] .sum-v") or "").strip()
+        if searched != "SearXNG → Keenable → DuckDuckGo":
+            problems.append(f"{tag}: the summary says {searched!r} for search")
         next_step()
         page.wait_for_function("() => window.Wizard.state.launch && window.Wizard.state.launch.done", timeout=30000)
         step("start")
@@ -309,7 +346,10 @@ def main() -> int:
         keys = keys_file.read_text() if keys_file.exists() else ""
         spoken = RECOMMENDED[LANGS[-1]]
         speech = ("DAEDALUS_VOICE=local", f"DAEDALUS_STT_MODEL={spoken}") if LANGS[-1] == "ru" else ("DAEDALUS_VOICE=off", "DAEDALUS_STT_MODEL=")
-        for want, text in ((f"DAEDALUS_LOCAL_MODEL={MODEL}", env), ("USD_PER_DAY=50", env), (f"KEYPROXY_UPSTREAM_LOCAL={endpoint}/v1", keys), *((line, env) for line in speech)):
+        searched = (("DAEDALUS_SEARCH_BACKEND=searxng", env), ("DAEDALUS_SEARCH_FALLBACK=keenable,duckduckgo", env), ("KEYPROXY_KEY_KEENABLE=kn-test-0123456789", keys))
+        if "kn-test-0123456789" in env:
+            problems.append("the Keenable key reached the app's environment")
+        for want, text in ((f"DAEDALUS_LOCAL_MODEL={MODEL}", env), ("USD_PER_DAY=50", env), (f"KEYPROXY_UPSTREAM_LOCAL={endpoint}/v1", keys), *((line, env) for line in speech), *searched):
             if want not in text:
                 problems.append(f"the posted answers did not reach the files: {want!r} missing")
     finally:

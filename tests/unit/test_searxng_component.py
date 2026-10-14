@@ -460,3 +460,24 @@ async def test_the_installer_installs_searxng_itself_and_tells_the_application(t
     monkeypatch.setattr(searxng, "remove", removed)
     await installer.remove(components.SEARXNG)
     assert changes[-1] == (components.SEARXNG, False)
+
+
+def test_the_launcher_can_install_searxng_from_a_terminal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """``daedalus components install searxng`` is how the setup wizard's choice is carried out natively."""
+    from daedalus.__main__ import main
+
+    monkeypatch.setenv("STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("WORKSPACES_DIR", str(tmp_path / "workspaces"))
+    monkeypatch.setenv("DAEDALUS_RUNTIME", str(tmp_path / "runtime"))
+    installs: list[Path] = []
+
+    async def run(self: searxng.Install) -> str:
+        installs.append(self.root)
+        mark_installed(self.root)
+        return ""
+
+    monkeypatch.setattr(searxng.Install, "run", run)
+    assert main(["components", "install", "searxng"]) == 0
+    assert installs == [tmp_path / "runtime" / "searxng"]
+    assert "starts with the supervisor" in capsys.readouterr().out
+    assert main(["components", "install", "searxng"]) == 0 and len(installs) == 1, "an installed SearXNG is not installed again"

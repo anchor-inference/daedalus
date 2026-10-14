@@ -41,7 +41,7 @@ mkdir -p "$SECRETS_DIR" && chmod 700 "$SECRETS_DIR"
 [ -f "$SECRETS_FILE" ] || cp deploy/keyproxy.env.example "$SECRETS_FILE"
 chmod 600 "$SECRETS_FILE"
 
-say "1/5 Telegram — optional. Leave the token empty to run on the app alone; you will sign in with a pairing link the bot writes at startup."
+say "1/6 Telegram — optional. Leave the token empty to run on the app alone; you will sign in with a pairing link the bot writes at startup."
 say "(https://t.me/BotFather for the token; @userinfobot for your numeric id; https://my.telegram.org/apps for the API pair)"
 ask TELEGRAM_BOT_TOKEN "Bot token (empty = no Telegram)" secret
 if [ -n "$(current TELEGRAM_BOT_TOKEN "$ENV_FILE")" ]; then
@@ -50,7 +50,7 @@ if [ -n "$(current TELEGRAM_BOT_TOKEN "$ENV_FILE")" ]; then
   ask TELEGRAM_API_HASH "Telegram API hash" secret
 fi
 
-say "2/5 Provider keys (stored in $SECRETS_FILE, never inside the checkout)."
+say "2/6 Provider keys (stored in $SECRETS_FILE, never inside the checkout)."
 say "A key is an address, not a model: you pick the model itself in the app at the end, and it is the only step that cannot be skipped."
 say "API: 1 DeepSeek · 2 OpenRouter · 3 OpenAI · 4 Z.AI · 5 MiniMax · 6 Moonshot AI"
 say "Subscription: 7 OpenCode Go · 8 Z.AI Coding Plan · 9 MiniMax Token Plan · 10 Kimi Code"
@@ -75,7 +75,49 @@ done
 ask KEYPROXY_USD_PER_DAY "Daily spend cap for the key proxy, USD" "" "$SECRETS_FILE"
 say "Calls with no known model price do not count toward a USD cap; subscriptions also have their own provider quotas."
 
-say "3/5 GitHub and the app"
+say "3/6 Web search — optional. DuckDuckGo always answers last, with nothing to set up."
+say "Recommended: SearXNG, a free metasearch that runs as a container of its own beside the agent (about 380 MB),"
+say "and Keenable, a search API with 100,000 free requests a month: sign up at https://app.keenable.ai/signup"
+say "and copy the key from https://app.keenable.ai/console. The keys go to $SECRETS_FILE, never to the agent."
+# On by default the first time; on a re-run, whatever the stack runs now.
+searx_default=Y
+if [ -n "$(current DAEDALUS_SEARCH_BACKEND "$ENV_FILE")" ]; then
+  case ",$(current COMPOSE_PROFILES "$ENV_FILE")," in *,search,*) ;; *) searx_default=N ;; esac
+fi
+if [ "$searx_default" = Y ]; then read -r -p "Run SearXNG with the stack? [Y/n]: " answer; else read -r -p "Run SearXNG with the stack? [y/N]: " answer; fi
+case "${answer:-$searx_default}" in [Nn]*) searx=off ;; *) searx=on ;; esac
+ask KEYPROXY_KEY_KEENABLE "Keenable API key (empty = none)" secret "$SECRETS_FILE"
+say "Other search APIs: 1 Serper (https://serper.dev/api-keys) · 2 Tavily (https://app.tavily.com)"
+say "3 Exa (https://dashboard.exa.ai/api-keys) · 4 Perplexity (https://console.perplexity.ai)"
+while true; do
+  read -r -p "Search API number (Enter to finish): " choice
+  case "$choice" in
+    "") break ;;
+    1) ask KEYPROXY_KEY_SERPER "Serper API key" secret "$SECRETS_FILE" ;;
+    2) ask KEYPROXY_KEY_TAVILY "Tavily API key" secret "$SECRETS_FILE" ;;
+    3) ask KEYPROXY_KEY_EXA "Exa API key" secret "$SECRETS_FILE" ;;
+    4) ask KEYPROXY_KEY_PERPLEXITY "Perplexity API key" secret "$SECRETS_FILE" ;;
+    *) say "Choose 1–4, or Enter to finish." ;;
+  esac
+done
+# The order WebSearch tries: SearXNG when it runs, every search API with a key, DuckDuckGo last —
+# the same rule as the desktop wizard's (desktop/envfile.go, searchOrder). The agent applies it at
+# its next start, once per distinct answer.
+python3 - "$ENV_FILE" "$SECRETS_FILE" "$searx" <<'PY'
+import sys, pathlib, re
+env_path, secrets_path, searx = sys.argv[1], sys.argv[2], sys.argv[3] == "on"
+keys = dict(line.split("=", 1) for line in pathlib.Path(secrets_path).read_text().splitlines() if "=" in line and not line.startswith("#"))
+order = (["searxng"] if searx else []) + [name for name in ("keenable", "serper", "tavily", "exa", "perplexity") if keys.get(f"KEYPROXY_KEY_{name.upper()}", "").strip()] + ["duckduckgo"]
+p = pathlib.Path(env_path); text = p.read_text()
+profiles = re.search(r"^COMPOSE_PROFILES=(.*)$", text, re.M)
+listed = [item.strip() for item in (profiles.group(1) if profiles else "").split(",") if item.strip() and item.strip() != "search"] + (["search"] if searx else [])
+for var, value in (("DAEDALUS_SEARCH_BACKEND", order[0]), ("DAEDALUS_SEARCH_FALLBACK", ",".join(order[1:])), ("COMPOSE_PROFILES", ",".join(listed))):
+    text = re.sub(rf"^{var}=.*$", lambda m: f"{var}={value}", text, count=1, flags=re.M) if re.search(rf"^{var}=", text, re.M) else text.rstrip("\n") + f"\n{var}={value}\n"
+p.write_text(text)
+print("WebSearch will ask, in order: " + " → ".join(order))
+PY
+
+say "4/6 GitHub and the app"
 ask GITHUB_TOKEN "Fine-grained GitHub token for the two agent repositories (pull requests + contents); empty disables self-development" secret
 ask MINIAPP_PUBLIC_URL "Public HTTPS address of the app (a reverse proxy in front of port 8765); empty for LAN only"
 ask USD_PER_DAY "Daily spend cap enforced by the supervisor, USD"
@@ -107,7 +149,7 @@ if ! bash deploy/host-terminal.sh prepare-dir; then
   esac
 fi
 
-say "4/5 Starting the stack (the first build takes a few minutes)."
+say "5/6 Starting the stack (the first build takes a few minutes)."
 PROFILE=()
 [ -n "$(current TELEGRAM_BOT_TOKEN "$ENV_FILE")" ] && PROFILE=(--profile telegram)  # the local Bot API server is only for a bot
 STATE_COMPOSE=()
@@ -133,7 +175,7 @@ fi
 docker compose -f deploy/compose.yaml "${STATE_COMPOSE[@]}" --env-file "$ENV_FILE" "${PROFILE[@]}" up -d --build
 say "Done. Logs: docker logs -f deploy-daedalus-1"
 
-say "5/5 Host terminal — optional."
+say "6/6 Host terminal — optional."
 if systemctl --user cat daedalus-ptyd.service >/dev/null 2>&1; then
   say "The host terminal is installed. Updating it copies this build's daemon to the server and restarts it, which ends every open host terminal."
   read -r -p "Update the host terminal? [y/N]: " answer

@@ -229,6 +229,30 @@ async def cmd_serve(args: argparse.Namespace) -> int:
     return await serve(settings)
 
 
+async def cmd_components(args: argparse.Namespace) -> int:
+    """Install a component from a terminal — the launcher's way in, after its setup wizard asked for one.
+
+    Only SearXNG: it is the one component this process puts in place by itself. The supervisor that
+    is running the installation sees the finished install and starts it; nothing here waits on that
+    for long, because a wizard's start should not hang on a search engine's first boot.
+    """
+    from daedalus.host import searxng  # Lazy: each subcommand imports only what it runs
+
+    settings = _settings(args)
+    root = searxng.root_for(settings.state_dir, settings.runtime_dir)
+    if searxng.runtime.installed(root) is not None:
+        print(f"SearXNG is already installed in {root}")
+        return 0
+    install = searxng.Install(root, Path(settings.bot_repo_dir) / "deploy" / "searxng" / "settings.yml", print, start_wait=30.0)
+    try:
+        url = await install.run()
+    except searxng.InstallFailed as exc:
+        print(f"SearXNG could not be installed: {exc}", file=sys.stderr)
+        return 1
+    print(f"SearXNG is installed in {root}" + (f" and answers at {url}" if url else "; it starts with the supervisor"))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="daedalus")
     parser.add_argument("--state-dir", default=None)
@@ -255,6 +279,10 @@ def build_parser() -> argparse.ArgumentParser:
     database_sub = database.add_subparsers(dest="db_command", required=True)
     database_sub.add_parser("vacuum", help="rewrite the file, reclaiming free pages and switching it to incremental auto-vacuum")
     database_sub.add_parser("checkpoints-prune", help="apply the checkpoint retention bounds now: drop old snapshots and pack the stores")
+    component = sub.add_parser("components", help="the optional pieces of this installation")
+    component_sub = component.add_subparsers(dest="components_command", required=True)
+    component_install = component_sub.add_parser("install", help="install one component into this installation's own folder")
+    component_install.add_argument("component", choices=["searxng"])
     bench = sub.add_parser("bench", help="run a task manifest headless and record pass/turns/tokens/cost per task")
     bench.add_argument("manifest", help="JSON manifest: {name, tasks: [{id, prompt, setup, check, files, timeout_minutes, tags}], tools_off}")
     bench.add_argument("--preset", default=None, help="model preset id for every task (default: the configured default)")
@@ -325,7 +353,7 @@ def main(argv: list[str] | None = None) -> int:
         handler_.addFilter(_DiagFilter())
     install_logging_filter(shared())
     _install_task_dump()
-    handler = {"check": cmd_check, "run": cmd_run, "serve": cmd_serve, "doctor": cmd_doctor, "bench": cmd_bench, "auth": cmd_auth, "db": cmd_db, "self": cmd_self}[args.command]
+    handler = {"check": cmd_check, "run": cmd_run, "serve": cmd_serve, "doctor": cmd_doctor, "bench": cmd_bench, "auth": cmd_auth, "db": cmd_db, "self": cmd_self, "components": cmd_components}[args.command]
     return asyncio.run(handler(args))
 
 

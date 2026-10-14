@@ -4,7 +4,7 @@
 (function () {
   'use strict';
 
-  var STEPS = ['welcome', 'runs', 'model', 'limit', 'telegram', 'speech', 'advanced', 'summary', 'start'];
+  var STEPS = ['welcome', 'runs', 'model', 'limit', 'telegram', 'speech', 'search', 'advanced', 'summary', 'start'];
   var CLIS = [
     { id: 'codex', name: 'Codex' },
     { id: 'claude', name: 'Claude Code' },
@@ -58,7 +58,10 @@
 
   var params = new URLSearchParams(location.search);
   var navLang = (navigator.language || 'en').toLowerCase().indexOf('ru') === 0 ? 'ru' : 'en';
-  var B = BOOT, BA = BOOT.adv || {}, BL = BOOT.local || {}, BF = BOOT.free || {}, BT = BOOT.tg || {}, BS = BOOT.speech || {};
+  var B = BOOT, BA = BOOT.adv || {}, BL = BOOT.local || {}, BF = BOOT.free || {}, BT = BOOT.tg || {}, BS = BOOT.speech || {}, BW = BOOT.search || {};
+  // The search APIs the search step offers, each with where to sign up and where its key is; the
+  // launcher's catalogue (desktop/setup_page.go), so the page carries no list of its own.
+  var SEARCH = BW.providers || [];
   var SPEECH = BS.models || [];
   var S = {
     lang: B.lang === 'ru' || B.lang === 'en' ? B.lang : navLang,
@@ -80,6 +83,9 @@
     // speech: off, cloud, or a local model's id; all: the whole catalogue shown rather than the models
     // for the wizard's language.
     speech: { choice: BS.choice || 'off', all: false },
+    // search: SearXNG on or off, a key per search API (empty keeps a stored one), the other APIs
+    // shown or folded away, and skip — the step left alone, which changes nothing.
+    search: { searxng: BW.searxng !== false, keys: SEARCH.reduce(function (keys, p) { keys[p.id] = ''; return keys; }, {}), more: false, skip: false },
     reveal: {},
     launch: null,
     returnTo: null
@@ -316,6 +322,33 @@
         '<p class="howto-note st">' + esc(t('speech.later')) + '</p>' +
         '</div>';
     },
+    search: function () {
+      var W = S.search;
+      function keyField(p) {
+        return field({ bind: 'search.keys.' + p.id, label: p.name + ' · ' + t('search.key'), secret: true, optional: true, icon: 'key' });
+      }
+      function signup(p) {
+        return '<p class="howto-note st">' + linked('search.signup', p.signup, hostOf(p.signup)).split('{keys}').join('<a href="' + esc(p.keys) + '" target="_blank" rel="noopener noreferrer">' + esc(t('search.keypage')) + ' ↗</a>') + '</p>';
+      }
+      var lead = SEARCH.filter(function (p) { return p.recommended; });
+      var rest = SEARCH.filter(function (p) { return !p.recommended; });
+      // SearXNG first and on by default: free, private and keyless, and the agent installs it
+      // itself after the start. The recommended API comes next with its free allowance spelled out.
+      var searx = '<div class="sp-list st"><label class="sp-opt' + (W.searxng ? ' on' : '') + '" data-k="search-searxng">' +
+        '<input type="checkbox" data-bind="search.searxng" data-refresh="panel" data-k="search-searxng-in"' + (W.searxng ? ' checked' : '') + '>' +
+        '<span class="sp-dot sq" aria-hidden="true"></span><span class="sp-text"><span class="sp-name">SearXNG <span class="sp-where">' + esc(t('search.rec')) + '</span></span>' +
+        '<span class="sp-pro">' + esc(t(S.mode === 'docker' ? 'search.searxng.docker' : 'search.searxng.pro')) + '</span></span></label></div>';
+      var keyed = lead.map(function (p) {
+        return '<div class="sp-head st"><span class="prov-title">' + esc(p.name) + ' <span class="sp-where">' + esc(t('search.rec')) + '</span></span>' +
+          '<span class="prov-cap">' + esc(t('search.' + p.id + '.pro')) + '</span></div>' + signup(p) + keyField(p);
+      }).join('');
+      var more = '<button type="button" class="disclose st" data-act="search-more" data-k="search-more" aria-expanded="' + W.more + '">' + icon('chevron') + '<span>' + esc(t('search.more')) + '</span><span class="f-opt">' + esc(t('optional')) + '</span></button>' +
+        (W.more ? rest.map(function (p) { return '<div class="more">' + signup(p) + keyField(p) + '</div>'; }).join('') : '');
+      return head('search', { tag: t('optional') }) + '<div class="s-body">' + searx + keyed + more +
+        '<p class="howto-note st" data-k="search-order">' + esc(t('search.order', { order: searchOrder().join(' → ') })) + '</p>' +
+        '<p class="howto-note st">' + esc(t('search.ddg')) + '</p>' +
+        '</div>';
+    },
     advanced: function () {
       var A = S.adv;
       var out = head('advanced') + '<div class="s-body">' +
@@ -356,6 +389,7 @@
         row('limit', 'coin', esc(t('sum.perday', { v: S.limit }))) +
         row('telegram', 'send', S.tg.skip || !(S.tg.token || S.kept['tg.token']) ? '<em>' + esc(t('sum.skipped')) + '</em>' : 'bot ' + (S.tg.token ? mask(S.tg.token) : esc(S.kept['tg.token'])) + ' · id ' + esc(S.tg.owner)) +
         row('speech', 'mic', speechSummary()) +
+        row('search', 'globe', S.search.skip ? '<em>' + esc(t('sum.skipped')) + '</em>' : esc(searchOrder().join(' → '))) +
         row('advanced', 'sliders', advChanged() ? esc(t('sum.changed', { n: advChanged() })) : '<em>' + esc(t('sum.defaults')) + '</em>') +
         '</ul></div>';
     },
@@ -408,6 +442,14 @@
     return m ? esc(m.label) : '<em>' + esc(t('sum.skipped')) + '</em>';
   }
   // The answer as the launcher's form takes it: off, cloud, or local with the model.
+  // The order WebSearch will try, as the launcher works it out (desktop/envfile.go, searchOrder):
+  // SearXNG when chosen, every search API with a key typed or kept, and DuckDuckGo last.
+  function searchOrder() {
+    var order = S.search.searxng ? ['SearXNG'] : [];
+    SEARCH.forEach(function (p) { if (S.search.keys[p.id].trim() || S.kept['search.keys.' + p.id]) order.push(p.name); });
+    order.push('DuckDuckGo');
+    return order;
+  }
   function voiceValue() { var c = S.speech.choice; return c === 'cloud' ? 'cloud' : speechModel(c) ? 'local' : 'off'; }
   // The chosen key's provider; one the catalogue no longer has falls back to its first entry
   // rather than leaving the step with nothing to draw.
@@ -461,6 +503,7 @@
       if (!/^\d{3,15}$/.test(S.tg.owner.trim())) e['tg.owner'] = S.tg.owner.trim() ? t('err.digits') : t('err.required');
       if (S.tg.apiid && !/^\d+$/.test(S.tg.apiid.trim())) e['tg.apiid'] = t('err.digits');
     }
+    if (id === 'search') SEARCH.forEach(function (p) { if (/\s/.test(S.search.keys[p.id].trim())) e['search.keys.' + p.id] = t('err.searchkey'); });
     if (id === 'speech' && voiceValue() === 'cloud' && !S.keys.openai.trim() && !S.kept['keys.openai']) e['keys.openai'] = t('err.voice');
     if (id === 'advanced' && S.adv.open) {
       if (!S.adv.portsAuto) {
@@ -592,12 +635,12 @@
     back.hidden = cur === 0 || id === 'start';
     // Skipping is for a Telegram that is not set up; one that is stays as it is when left alone.
     // Speech is skipped with "Not now", which leaves the chat without a microphone.
-    skip.hidden = id === 'telegram' ? !!S.returnTo || !!S.kept['tg.token'] : id !== 'speech';
+    skip.hidden = id === 'telegram' ? !!S.returnTo || !!S.kept['tg.token'] : id !== 'speech' && id !== 'search';
     next.hidden = id === 'start';
     foot.hidden = id === 'start';
     root.classList.toggle('on-start', id === 'start');
     back.querySelector('span').textContent = t('nav.back');
-    skip.querySelector('span').textContent = t(id === 'speech' ? 'nav.later' : 'nav.skip');
+    skip.querySelector('span').textContent = t(id === 'speech' || id === 'search' ? 'nav.later' : 'nav.skip');
     var label = id === 'welcome' ? t('nav.begin') : id === 'summary' ? t('nav.start') : S.returnTo ? t('nav.summary') : t('nav.next');
     next.querySelector('span').textContent = label;
     next.classList.toggle('go', id === 'summary');
@@ -625,6 +668,7 @@
       return;
     }
     if (id === 'telegram') S.tg.skip = tgEmpty();
+    if (id === 'search') S.search.skip = false;
     if (S.returnTo && id !== 'summary') {
       S.returnTo = null;
       go(STEPS.indexOf('summary'));
@@ -638,6 +682,14 @@
     go(cur - 1);
   }
   function skip() {
+    if (STEPS[cur] === 'search') {
+      // Not now leaves search as the installation has it: nothing about it is sent.
+      S.search.skip = true;
+      attempted.search = false;
+      if (S.returnTo) { S.returnTo = null; go(STEPS.indexOf('summary')); return; }
+      go(cur + 1);
+      return;
+    }
     if (STEPS[cur] === 'speech') {
       S.speech.choice = 'off';
       attempted.speech = false;
@@ -747,6 +799,11 @@
     f.set('login', S.adv.login ? 'on' : 'off');
     f.set('browser', S.adv.browser ? 'on' : 'off');
     f.set('voice', voiceValue());
+    if (!S.search.skip) {
+      f.set('search', 'on');
+      f.set('searxng', S.search.searxng ? 'on' : 'off');
+      SEARCH.forEach(function (p) { var k = S.search.keys[p.id].trim(); if (k) f.set('search_' + p.id, k); });
+    }
     if (voiceValue() === 'local') f.set('stt_model', S.speech.choice);
     if (!S.adv.portsAuto) f.set('port', S.adv.port.trim());
     else if (BA.portsAuto === false) f.set('port', '');
@@ -881,6 +938,7 @@
     else if (a === 'rescan') rescan();
     else if (a === 'tgmore') { S.tg.more = !S.tg.more; refresh({ pop: '.more' }); }
     else if (a === 'speech-all') { S.speech.all = !S.speech.all; refresh(); }
+    else if (a === 'search-more') { S.search.more = !S.search.more; refresh({ pop: '.more' }); }
     else if (a === 'adv') { S.adv.open = !S.adv.open; refresh({ pop: S.adv.open ? '.adv' : '.defaults' }); if (hooks.onChange) hooks.onChange('adv.open', S); }
     else if (a === 'edit') { S.returnTo = 'summary'; go(STEPS.indexOf(act.getAttribute('data-step'))); }
     else if (a === 'open') openApp();
@@ -897,6 +955,11 @@
     if (path === 'kind' && v === 'free' && !S.free.loading && !S.free.catalog.length) loadFreeCatalog();
     if (path === 'free.provider') { S.free.model = ''; S.free.key = ''; S.free.test = null; }
     if (path === 'free.model' || path === 'free.key') S.free.test = null;
+    if (path.indexOf('search.keys.') === 0) {
+      // The order line follows the keys as they are typed, without redrawing the field under the cursor.
+      var line = currentEl().querySelector('[data-k=search-order]');
+      if (line) line.textContent = t('search.order', { order: searchOrder().join(' → ') });
+    }
     if (path === 'limit') {
       var step = currentEl();
       var n = Number(String(v).replace(',', '.'));

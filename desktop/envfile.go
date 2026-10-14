@@ -52,12 +52,21 @@ type Setup struct {
 	// Browser asks for the headless browser: the browser extra natively, the browser image's
 	// compose profile in a container. Nil leaves what is there alone.
 	Browser *bool
+	// Search is the web search step's answer, nil when the step was skipped: SearXNG on or off, and
+	// the search APIs' keys by provider id, which go to the key proxy's file like every other key.
+	Search *SearchAnswer
 	// AppPort fixes the app's port when set; empty hands it back to the automatic choice.
 	// FixPort says the form had an answer for it at all.
 	AppPort string
 	FixPort bool
 
 	Clear map[string]bool
+}
+
+// SearchAnswer is what the web search step was given. Keys left empty keep what is stored.
+type SearchAnswer struct {
+	Searxng bool
+	Keys    map[string]string
 }
 
 // Telegram reports whether the Telegram side of the stack should run. Without a token the bot is
@@ -181,6 +190,9 @@ func envUpdates(p Paths, s Setup, current map[string]string, searxngSecret, home
 		{"DAEDALUS_FREE_MODEL", freeModel},
 		{"DAEDALUS_VOICE", firstSet(clean(s.Voice), firstSet(current["DAEDALUS_VOICE"], "off"))},
 		{"DAEDALUS_STT_MODEL", sttModel},
+		// The search step's order; written by writeSetup when the step was answered, kept otherwise.
+		{"DAEDALUS_SEARCH_BACKEND", current["DAEDALUS_SEARCH_BACKEND"]},
+		{"DAEDALUS_SEARCH_FALLBACK", current["DAEDALUS_SEARCH_FALLBACK"]},
 		{"SEARXNG_SECRET", searxngSecret},
 		// The public address is not on the setup page: an operator who set one by hand keeps it,
 		// and pairing links and the authenticator's entry name that host, so blanking it would
@@ -244,6 +256,34 @@ var providerKeyVars = [][2]string{
 	{"kimi_coding", "KIMI_CODING_API_KEY"},
 }
 
+// searchKeyVars are the search APIs the wizard offers, in the order WebSearch tries them after
+// SearXNG, with the variable the key proxy reads each key from (deploy/keyproxy/proxy.py,
+// SEARCH_UPSTREAMS). Keenable leads: it gives a hundred thousand requests a month without paying.
+var searchKeyVars = [][2]string{
+	{"keenable", "KEYPROXY_KEY_KEENABLE"},
+	{"serper", "KEYPROXY_KEY_SERPER"},
+	{"tavily", "KEYPROXY_KEY_TAVILY"},
+	{"exa", "KEYPROXY_KEY_EXA"},
+	{"perplexity", "KEYPROXY_KEY_PERPLEXITY"},
+}
+
+// searchOrder is the backend and the fallbacks the search step's answer comes to, given the keys
+// the key proxy will hold once it is written: SearXNG first when it was chosen, then every search
+// API with a key, and DuckDuckGo last, which needs nothing and is always there.
+func searchOrder(searxng bool, keys map[string]string) (string, []string) {
+	var order []string
+	if searxng {
+		order = append(order, "searxng")
+	}
+	for _, provider := range searchKeyVars {
+		if strings.TrimSpace(keys[provider[1]]) != "" {
+			order = append(order, provider[0])
+		}
+	}
+	order = append(order, "duckduckgo")
+	return order[0], order[1:]
+}
+
 // keyproxyUpdates is everything the launcher sets in daedalus-secrets/keyproxy.env. Provider keys
 // live only here: the file is outside every mount the agent container gets, so the agent process
 // never holds a key even when it edits its own code.
@@ -256,6 +296,13 @@ func keyproxyUpdates(s Setup, current map[string]string) []envVar {
 	}
 	for _, provider := range providerKeyVars {
 		updates = append(updates, envVar{provider[1], answer(provider[1], provider[0], s.ProviderKeys[provider[0]])})
+	}
+	var searchKeys map[string]string
+	if s.Search != nil {
+		searchKeys = s.Search.Keys
+	}
+	for _, provider := range searchKeyVars {
+		updates = append(updates, envVar{provider[1], answer(provider[1], "search.keys."+provider[0], searchKeys[provider[0]])})
 	}
 	updates = append(updates,
 		envVar{"KEYPROXY_UPSTREAM_LOCAL", answer("KEYPROXY_UPSTREAM_LOCAL", "local_url", s.LocalURL)},
@@ -327,8 +374,31 @@ func writeSetup(p Paths, s Setup, mode Mode, log func(string, ...any)) error {
 	}
 	fresh := strings.TrimSpace(current["API_PORT"]) == ""
 	updates := envUpdates(p, s, current, secret, home)
+	profiles := current["COMPOSE_PROFILES"]
 	if s.Browser != nil && mode == ModeDocker {
-		updates = withValues(updates, []envVar{{"COMPOSE_PROFILES", withProfile(current["COMPOSE_PROFILES"], "browser", *s.Browser)}})
+		profiles = withProfile(profiles, "browser", *s.Browser)
+	}
+	keys := readEnv(readFile(p.KeyproxyEnv))
+	if mode == ModeDocker && clean(s.LocalURL) != "" {
+		s.LocalURL = containerReachable(clean(s.LocalURL))
+	}
+	keyUpdates := keyproxyUpdates(s, keys)
+	if s.Search != nil {
+		// The order is worked out from the keys as they will be once this run is written, so a key
+		// kept from an earlier run counts and a key cleared on purpose does not.
+		after := map[string]string{}
+		for _, update := range keyUpdates {
+			after[update.Key] = update.Value
+		}
+		backend, fallback := searchOrder(s.Search.Searxng, after)
+		updates = withValues(updates, []envVar{{"DAEDALUS_SEARCH_BACKEND", backend}, {"DAEDALUS_SEARCH_FALLBACK", strings.Join(fallback, ",")}})
+		if mode == ModeDocker {
+			// In a container SearXNG is the stack's own service, behind its compose profile.
+			profiles = withProfile(profiles, "search", s.Search.Searxng)
+		}
+	}
+	if profiles != current["COMPOSE_PROFILES"] {
+		updates = withValues(updates, []envVar{{"COMPOSE_PROFILES", profiles}})
 	}
 	if s.FixPort {
 		// A fixed port is written as the app's port and named in DAEDALUS_FIXED_PORTS, which is
@@ -356,11 +426,7 @@ func writeSetup(p Paths, s Setup, mode Mode, log func(string, ...any)) error {
 	if err := os.WriteFile(p.Env, []byte(mergeEnv(readFile(p.Env), updates)), 0o600); err != nil {
 		return err
 	}
-	keys := readEnv(readFile(p.KeyproxyEnv))
-	if mode == ModeDocker && clean(s.LocalURL) != "" {
-		s.LocalURL = containerReachable(clean(s.LocalURL))
-	}
-	if err := os.WriteFile(p.KeyproxyEnv, []byte(mergeEnv(readFile(p.KeyproxyEnv), keyproxyUpdates(s, keys))), 0o600); err != nil {
+	if err := os.WriteFile(p.KeyproxyEnv, []byte(mergeEnv(readFile(p.KeyproxyEnv), keyUpdates)), 0o600); err != nil {
 		return err
 	}
 	return SyncBotEnv(p, mode)
@@ -399,6 +465,22 @@ func CurrentSetup(p Paths) Setup {
 	if len(providerKeys) == 0 {
 		providerKeys = nil
 	}
+	// The search step's answer as it stands, or nil where it was never given and no key is stored.
+	var search *SearchAnswer
+	for _, provider := range searchKeyVars {
+		if value := keys[provider[1]]; value != "" {
+			if search == nil {
+				search = &SearchAnswer{Keys: map[string]string{}}
+			}
+			search.Keys[provider[0]] = value
+		}
+	}
+	if backend := env["DAEDALUS_SEARCH_BACKEND"]; backend != "" {
+		if search == nil {
+			search = &SearchAnswer{Keys: map[string]string{}}
+		}
+		search.Searxng = backend == "searxng"
+	}
 	return Setup{
 		DeepseekKey:   keys["DEEPSEEK_API_KEY"],
 		OpenrouterKey: keys["OPENROUTER_API_KEY"],
@@ -416,6 +498,7 @@ func CurrentSetup(p Paths) Setup {
 		FreeModel:     env["DAEDALUS_FREE_MODEL"],
 		Voice:         env["DAEDALUS_VOICE"],
 		SttModel:      env["DAEDALUS_STT_MODEL"],
+		Search:        search,
 		AppPort:       env["API_PORT"],
 		FixPort:       strings.Contains(","+env["DAEDALUS_FIXED_PORTS"]+",", ",API_PORT,"),
 	}

@@ -1156,7 +1156,7 @@ func (n *Native) SupervisorReachable() bool {
 
 // InstallExtra fetches one of the optional pieces: node, for the four skills that shell out to npx
 // and for rebuilding the Mini App, the browsers the agent and the browser skills drive, or the engine that
-// recognises speech on this machine. None of the three is part of a first run, because an
+// recognises speech on this machine, or SearXNG for web search. None of them is part of a first run, because an
 // installation that never uses them should never pay for them.
 func (n *Native) InstallExtra(ctx context.Context, name string) error {
 	switch name {
@@ -1182,8 +1182,16 @@ func (n *Native) InstallExtra(ctx context.Context, name string) error {
 		return nil
 	case "speech":
 		return n.InstallSpeech(ctx)
+	case "searxng":
+		// The agent's own installer, run from a terminal: the same download, digest check and
+		// environment as the Components page, and the running supervisor starts it once it is in.
+		n.log("installing SearXNG (about 40 MB to download)")
+		if out, err := n.RunPython(ctx, "-m", "daedalus", "components", "install", "searxng"); err != nil {
+			return fmt.Errorf("SearXNG could not be installed: %s", out)
+		}
+		return nil
 	default:
-		return fmt.Errorf("no such runtime extra: %s (node, browser, speech)", name)
+		return fmt.Errorf("no such runtime extra: %s (node, browser, speech, searxng)", name)
 	}
 }
 

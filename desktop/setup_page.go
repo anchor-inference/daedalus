@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -124,6 +125,32 @@ type setupBoot struct {
 		Choice string        `json:"choice"`
 		Models []speechModel `json:"models"`
 	} `json:"speech"`
+	Search struct {
+		// Searxng is whether the step opens with SearXNG on: on for a first setup, which is the
+		// recommendation, and afterwards whatever the installation has.
+		Searxng   bool             `json:"searxng"`
+		Providers []searchProvider `json:"providers"`
+	} `json:"search"`
+}
+
+// searchProvider is one search API the web search step offers a key field for, with where to sign
+// up and where the key is then found. Recommended marks the one the step puts first and explains.
+type searchProvider struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	SignUp      string `json:"signup"`
+	KeyPage     string `json:"keys"`
+	Recommended bool   `json:"recommended"`
+}
+
+// searchProviders is the search step's catalogue, in searchKeyVars' order. The addresses were
+// checked when they were written down; a vendor that moves its console breaks only the link.
+var searchProviders = []searchProvider{
+	{"keenable", "Keenable", "https://app.keenable.ai/signup", "https://app.keenable.ai/console", true},
+	{"serper", "Serper", "https://serper.dev/signup", "https://serper.dev/api-keys", false},
+	{"tavily", "Tavily", "https://app.tavily.com", "https://app.tavily.com/home", false},
+	{"exa", "Exa", "https://dashboard.exa.ai", "https://dashboard.exa.ai/api-keys", false},
+	{"perplexity", "Perplexity", "https://console.perplexity.ai", "https://console.perplexity.ai", false},
 }
 
 // wizardProvider is one key the wizard's model step offers. The id is the form field the key
@@ -282,6 +309,20 @@ func (s *Server) setupBoot(ctx context.Context, lang Lang, status Status, sugges
 	}
 	b.Speech.Choice = speechChoice(current)
 	b.Speech.Models = speechModels
+	b.Search.Providers = searchProviders
+	if current.Search != nil {
+		for id, key := range current.Search.Keys {
+			b.Kept["search.keys."+id] = mask(key)
+		}
+	}
+	switch {
+	case !b.Reconfigure:
+		b.Search.Searxng = true
+	case s.app.Native():
+		b.Search.Searxng = searxngInstalled(s.app.paths)
+	default:
+		b.Search.Searxng = strings.Contains(","+env["COMPOSE_PROFILES"]+",", ",search,")
+	}
 	return b
 }
 
@@ -388,6 +429,24 @@ func parseSetupForm(form url.Values) (Setup, map[string]string, *setupError) {
 		off := false
 		s.Browser = &off
 	}
+	switch get("search") {
+	case "":
+		// The step was skipped: what the installation searches with stays as it was.
+	case "on":
+		s.Search = &SearchAnswer{Searxng: get("searxng") == "on", Keys: map[string]string{}}
+		for _, provider := range searchKeyVars {
+			key := get("search_" + provider[0])
+			if key == "" {
+				continue
+			}
+			if len(key) > 512 || strings.ContainsAny(key, " \t\r\n") {
+				return s, nil, &setupError{"search." + provider[0], "paste the key as it was given"}
+			}
+			s.Search.Keys[provider[0]] = key
+		}
+	default:
+		return s, nil, &setupError{"search", "on, or nothing"}
+	}
 	if _, ok := form["port"]; ok {
 		s.FixPort = true
 		if port := get("port"); port != "" {
@@ -416,8 +475,22 @@ func wantedExtras(s Setup, native bool, paths Paths) []string {
 	if s.Voice == "local" {
 		out = append(out, "speech")
 	}
+	if s.Search != nil && s.Search.Searxng && !searxngInstalled(paths) {
+		out = append(out, "searxng")
+	}
 	return out
 }
+
+// searxngInstalled reports whether the agent has put SearXNG into the runtime folder: the marker
+// its install writes last (launcher/searxng.py), which is also what the supervisor starts it by.
+func searxngInstalled(paths Paths) bool {
+	return exists(filepath.Join(paths.Runtime, "searxng", "installed.json"))
+}
+
+// restartsFor reports whether an installed extra needs the agent started again to be found. The
+// browser and the speech engine are reached through the environment the supervisor was given;
+// SearXNG is picked up by the running supervisor by itself.
+func restartsFor(name string) bool { return name != "searxng" }
 
 // applyLogin turns start at login on or off as the form said. An empty answer leaves it alone, and
 // a machine where it cannot be done says so in the log rather than failing the whole setup: the
@@ -547,7 +620,7 @@ func (s *Server) AfterStart(ctx context.Context) {
 	}
 	installed := false
 	for _, name := range extras {
-		if err := s.app.InstallExtra(ctx, name); err == nil {
+		if err := s.app.InstallExtra(ctx, name); err == nil && restartsFor(name) {
 			installed = true
 		}
 	}

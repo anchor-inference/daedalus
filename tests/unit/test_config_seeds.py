@@ -110,6 +110,8 @@ def _no_setup_answers(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DAEDALUS_FREE_MODEL", raising=False)
     monkeypatch.delenv("DAEDALUS_VOICE", raising=False)
     monkeypatch.delenv("DAEDALUS_STT_MODEL", raising=False)
+    monkeypatch.delenv("DAEDALUS_SEARCH_BACKEND", raising=False)
+    monkeypatch.delenv("DAEDALUS_SEARCH_FALLBACK", raising=False)
 
 
 def test_a_fresh_config_has_the_openai_and_anthropic_providers(tmp_path: Path) -> None:
@@ -307,3 +309,28 @@ def test_a_fresh_config_has_the_coding_plans_as_subscriptions(tmp_path: Path) ->
     for provider_id in ("zai_coding", "minimax_plan", "kimi_coding"):
         assert config.providers[provider_id].billing == "subscription", provider_id
     assert config.providers["minimax"].billing == "metered"
+
+
+def test_the_wizards_search_order_is_applied_once_and_a_later_change_in_settings_sticks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DAEDALUS_SEARCH_BACKEND", "searxng")
+    monkeypatch.setenv("DAEDALUS_SEARCH_FALLBACK", "keenable,duckduckgo")
+    path = tmp_path / "config.toml"
+    config = RuntimeConfig.load(path)
+    assert config.tools.web.search.backend == "searxng"
+    assert config.tools.web.search.fallback == ["keenable", "duckduckgo"]
+    # The operator picks another backend in Settings; the same answer at the next start does not undo it.
+    config.tools.web.search.backend = "tavily"
+    config.save(path)
+    assert RuntimeConfig.load(path).tools.web.search.backend == "tavily"
+    # A different answer from a later wizard run is applied.
+    monkeypatch.setenv("DAEDALUS_SEARCH_BACKEND", "keenable")
+    monkeypatch.setenv("DAEDALUS_SEARCH_FALLBACK", "duckduckgo")
+    again = RuntimeConfig.load(path).tools.web.search
+    assert again.backend == "keenable" and again.fallback == ["duckduckgo"]
+
+
+def test_a_search_backend_the_wizard_cannot_name_is_ignored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DAEDALUS_SEARCH_BACKEND", "bing")
+    monkeypatch.setenv("DAEDALUS_SEARCH_FALLBACK", "duckduckgo")
+    config = RuntimeConfig.load(tmp_path / "config.toml")
+    assert config.tools.web.search.backend == "duckduckgo" and config.tools.web.search.fallback == ["searxng"]

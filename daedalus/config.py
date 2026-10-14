@@ -2539,7 +2539,39 @@ def _seed_from_setup(raw: dict[str, Any]) -> bool:
             asr["transcriber"] = stt_model
             if asr.get("fallback") == stt_model:
                 asr["fallback"] = ""
+    changed = _seed_search(raw, seeded) or changed
     return changed
+
+
+SETUP_SEARCH_BACKENDS = ("searxng", "duckduckgo", "keenable", "serper", "tavily", "exa", "perplexity")
+"""The backends the wizard's search step can name. Anything else in the environment is ignored rather
+than written into the configuration, where it would only fail at the first search."""
+
+
+def _seed_search(raw: dict[str, Any], seeded: list[Any]) -> bool:
+    """The wizard's search step: ``DAEDALUS_SEARCH_BACKEND`` and ``DAEDALUS_SEARCH_FALLBACK``.
+
+    The launcher derives both from what the step was given — SearXNG first when it was chosen, then
+    every search API with a key, then DuckDuckGo — and the keys themselves stay in the key proxy's
+    file. Applied once per distinct answer, so a backend changed in Settings afterwards sticks until
+    the wizard is run again with a different answer.
+    """
+    backend = os.environ.get("DAEDALUS_SEARCH_BACKEND", "").strip()
+    fallback = [name.strip() for name in os.environ.get("DAEDALUS_SEARCH_FALLBACK", "").split(",") if name.strip()]
+    if backend not in SETUP_SEARCH_BACKENDS or any(name not in SETUP_SEARCH_BACKENDS for name in fallback):
+        return False
+    marker = f"search:{backend}:{','.join(fallback)}"
+    if marker in seeded:
+        return False
+    seeded.append(marker)
+    tools = raw.setdefault("tools", {})
+    web = tools.setdefault("web", {}) if isinstance(tools, dict) else None
+    search = web.setdefault("search", {}) if isinstance(web, dict) else None
+    if not isinstance(search, dict):
+        return True
+    search["backend"] = backend
+    search["fallback"] = [name for name in fallback if name != backend]
+    return True
 
 
 def _seed_provider_endpoints(raw: dict[str, Any]) -> bool:

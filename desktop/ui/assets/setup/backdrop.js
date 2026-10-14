@@ -11,6 +11,7 @@ const ACCENTS = {
   limit:    { cone: 0xe6c08a, coneK: 0.95, dust: 0xd9a869, dustK: 1.00, floor: 0xb8864b },
   telegram: { cone: 0x7fdcf0, coneK: 1.05, dust: 0x8be4e8, dustK: 1.05, floor: 0x6fd0d8 },
   speech:   { cone: 0x6fe0cc, coneK: 1.00, dust: 0x7fe6d2, dustK: 1.00, floor: 0x5ccfbc },
+  search:   { cone: 0x66d6e8, coneK: 1.00, dust: 0x76dcec, dustK: 1.00, floor: 0x58c8d8 },
   advanced: { cone: 0xd9a869, coneK: 0.90, dust: 0xb8864b, dustK: 0.95, floor: 0xb8864b },
   summary:  { cone: 0x5ee2c4, coneK: 1.10, dust: 0x5ee2c4, dustK: 1.05, floor: 0x5ee2c4 },
   start:    { cone: 0x8ff5dc, coneK: 1.60, dust: 0x9ff7e2, dustK: 1.40, floor: 0x7eeed2 },

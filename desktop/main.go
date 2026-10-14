@@ -81,8 +81,9 @@ commands:
   install X   native mode only: fetch a runtime extra — "node" for the skills that
               shell out to npx and for rebuilding the app, "browser" for the Chromium
               the agent's browser and the browser skills drive, "speech" for the engine that runs a
-              speech model on this machine. None of the three is part of a first run,
-              and Settings → Components in the app installs them without a terminal.
+              speech model on this machine, "searxng" for the metasearch WebSearch asks first.
+              None of them is part of a first run, and Settings → Components in the app
+              installs them without a terminal.
   restart     native mode only: stop the agent and start it again, so a component
               installed since it started is in force.
 

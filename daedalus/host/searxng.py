@@ -216,8 +216,9 @@ class Install:
     """
 
     def __init__(self, root: Path, template: Path, report: Callable[[str], None], *,
-                 client: Callable[[], httpx.AsyncClient] | None = None) -> None:
+                 client: Callable[[], httpx.AsyncClient] | None = None, start_wait: float = START_WAIT) -> None:
         self.root = root
+        self.start_wait = start_wait
         self.template = template
         self.report = report
         self.client = client or (lambda: httpx.AsyncClient(follow_redirects=True, timeout=httpx.Timeout(60.0, connect=20.0)))
@@ -319,12 +320,13 @@ class Install:
         if process.returncode:
             raise InstallFailed(f"SearXNG could not be installed: {' / '.join(tail[-4:])[:400]}")
 
-    async def wait_running(self, *, start_wait: float = START_WAIT, silence: float = SUPERVISOR_SILENCE, interval: float = 1.0) -> str:
+    async def wait_running(self, *, start_wait: float | None = None, silence: float = SUPERVISOR_SILENCE, interval: float = 1.0) -> str:
         """Watch the supervisor pick the install up, and come back with where it answers.
 
         A failed start is reported as the failure it is: the page would otherwise say installed with
         a toast to match, over an instance that is not there.
         """
+        start_wait = self.start_wait if start_wait is None else start_wait
         began = time.monotonic()
         since = time.time() - 1
         self.report("starting SearXNG")

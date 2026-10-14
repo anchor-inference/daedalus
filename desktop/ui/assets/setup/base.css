@@ -304,6 +304,7 @@ button:disabled { cursor: default; }
 .sp-opt:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: -2px; }
 .sp-dot { flex: none; width: 16px; height: 16px; margin-top: 2px; border-radius: 50%; border: 1.5px solid var(--line-2); transition: border-color .3s, background .3s; }
 .sp-opt.on .sp-dot { border: 5px solid var(--accent); background: var(--on-accent); }
+.sp-dot.sq { border-radius: 5px; }
 .sp-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
 .sp-name { font-size: 14px; font-weight: 600; color: var(--ink); }
 .sp-where { margin-left: 6px; font: 500 11px/1 var(--mono); color: var(--accent); padding: 2px 6px; border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); border-radius: 6px; vertical-align: 1px; }

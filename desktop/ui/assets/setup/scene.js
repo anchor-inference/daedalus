@@ -107,7 +107,7 @@ let portrait = false, current = "welcome";
 const acts = makeActs({ THREE, stage, guide, GROUND, isPortrait: () => portrait });
 
 // A per-step accent in the light: the rim takes a slightly different colour on every step.
-const RIM = { welcome: 0x8ff0d6, runs: 0x7fe0e6, model: 0x9fd8ff, limit: 0xffcf9a, telegram: 0xa8ecff, speech: 0xb4f0e0, advanced: 0xe8b47a, summary: 0x8ff0d6, start: 0xbfffee };
+const RIM = { welcome: 0x8ff0d6, runs: 0x7fe0e6, model: 0x9fd8ff, limit: 0xffcf9a, telegram: 0xa8ecff, speech: 0xb4f0e0, search: 0x9fe4f2, advanced: 0xe8b47a, summary: 0x8ff0d6, start: 0xbfffee };
 const rimFrom = new THREE.Color(), rimTo = new THREE.Color();
 function accent(id) {
   backdrop.setAccent(id);
@@ -116,7 +116,7 @@ function accent(id) {
 }
 
 // ---- camera: still, a few degrees of drift per step, and a hint of parallax with the cursor ----
-const INDEX = { welcome: 0, runs: 1, model: 2, limit: 3, telegram: 4, speech: 5, advanced: 6, summary: 7, start: 8 };
+const INDEX = { welcome: 0, runs: 1, model: 2, limit: 3, telegram: 4, speech: 5, search: 6, advanced: 7, summary: 8, start: 9 };
 const ptr = { x: 0, y: 0, sx: 0, sy: 0 };
 window.addEventListener("pointermove", (e) => { ptr.x = (e.clientX / window.innerWidth) * 2 - 1; ptr.y = (e.clientY / window.innerHeight) * 2 - 1; backdrop.pointer(ptr.x, ptr.y); }, { passive: true });
 function aimCamera(id, snap, push) {
