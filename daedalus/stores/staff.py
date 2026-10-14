@@ -1233,6 +1233,22 @@ class AsksStore:
             await cursor.close()
         return changed == 1
 
+    async def reopen(self, ask_id: str) -> bool:
+        """Open a closed request again, its answer forgotten: for an answer that could not be handed
+        to its asker, so the question waits again rather than be lost. False when another open request
+        drew the same short id meanwhile, and this one then stays closed."""
+        try:
+            async with self._db.transaction() as conn:
+                cursor = await conn.execute(
+                    "UPDATE asks SET resolved_at = NULL, resolved_by = NULL, resolution_json = '{}', answered_contract_revision = NULL WHERE id = ? AND resolved_at IS NOT NULL",
+                    (ask_id,),
+                )
+                changed = cursor.rowcount
+                await cursor.close()
+        except sqlite3.IntegrityError:
+            return False
+        return changed == 1
+
     async def revise(self, ask_id: str, *, title: str, text: str, detail: dict[str, Any]) -> bool:
         """Change an open request's words in place: the same row, the same id, so an answer the operator
         has started to write stays with it. False when it was answered or withdrawn meanwhile."""

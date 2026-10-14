@@ -226,18 +226,21 @@ def delivery_text(answered: Sequence[tuple[Ask, Sequence[str]]]) -> str:
 async def deliver(app: Application, session_id: str, answered: Sequence[tuple[Ask, Sequence[str]]], attachments: Sequence[Attachment]) -> str:
     """Hand a batch of answers to the session that asked: a steer while it works, a turn when idle.
 
-    Returns the error text when it could not be delivered (no model, a read-only folder for the
-    files); the answers stay recorded either way, and the caller shows the error on each card."""
+    Returns the error text when it could not be delivered (no model, the daily budget spent, a
+    read-only folder for the files). The questions are then opened again, so an answer that never
+    reached the agent is asked for again rather than lost behind a closed row; the caller shows the
+    error on each card."""
     manager = _manager(app)
-    failed = ""
     try:
         await manager.submit(session_id, delivery_text(answered), list(attachments), steer=True, as_answer=False, origin=ORIGIN)
     except (RuntimeError, KeyError, OSError) as exc:
         logger.warning("could not hand the side answers to %s", session_id, exc_info=True)
-        failed = str(exc) or type(exc).__name__
-    # Announced either way: the questions are closed, and every window lets them go.
+        reopened = [a.id for a, _ in answered if await manager.asks.reopen(a.id)]
+        if reopened:
+            await _announce(manager, session_id, "opened", reopened)
+        return f"{exc or type(exc).__name__}; the question waits again"
     await _announce(manager, session_id, "answered", [a.id for a, _ in answered])
-    return failed
+    return ""
 
 
 async def _announce(manager: SessionManager, session_id: str, change: str, ask_ids: list[str], *, reason: str = "") -> None:

@@ -217,6 +217,25 @@ async def test_answers_steer_a_running_session_and_queue_behind_a_blocking_quest
         state.task.cancel()
 
 
+async def test_an_answer_that_cannot_reach_the_session_leaves_its_question_waiting(app: Any) -> None:
+    manager: SessionManager = app.manager
+    sid = (await manager.create_session("over budget")).session.id
+    await ask(app, sid, "Keep the old logo?")
+    [logo] = await manager.asks.of_session(sid)
+
+    async def refuse(*_: Any, **__: Any) -> str:
+        raise RuntimeError("daily budget exceeded")
+
+    manager.submit = refuse  # type: ignore[method-assign]
+    [result] = (await questions.answer(app, [{"ask_id": logo.id, "text": "Keep it"}], project_id=None, via="app", session_id=sid))["results"]
+    assert result["state"] == "answered" and result["delivered"] is False
+    assert result["error"] == "daily budget exceeded; the question waits again"
+    again = await manager.asks.get(logo.id)
+    assert again is not None and again.open and again.resolution == {}
+    assert [q["id"] for q in await questions.waiting(app, session_id=sid)] == [logo.id]
+    assert (await side_events(manager, sid))[-1] == {"change": "opened", "ask_ids": [logo.id]}
+
+
 async def test_a_list_answers_only_its_own_session_and_the_operator_can_put_one_aside(app: Any) -> None:
     manager: SessionManager = app.manager
     mine = (await manager.create_session("mine")).session.id
