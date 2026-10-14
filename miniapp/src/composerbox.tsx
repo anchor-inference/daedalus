@@ -57,6 +57,8 @@ export type ComposerHandle = {
   addFiles: (files: Iterable<File>) => void;
   /** Open the model list, from wherever "change the model" is offered. */
   openModel: () => void;
+  /** Put text in the field instead of whatever is there: the prompt coach's prompt replaces the draft it improved. */
+  replace: (text: string) => void;
 };
 
 export type ComposerProps = {
@@ -118,6 +120,8 @@ export type ComposerProps = {
    *  goal line, the quote a message answers): inside the composer so they take the field's width at
    *  every size instead of copying its padding rule by rule. */
   above?: ReactNode;
+  /** Open the prompt coach with the draft as it stands; absent where there is no coach (inside one). */
+  onCoach?: (draft: string) => void;
 };
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(props, ref) {
@@ -252,6 +256,10 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       },
       addFiles,
       openModel: () => setModelOpen(true),
+      replace: (text) => {
+        setDraft(text);
+        textarea.current?.focus();
+      },
     }),
     [draft, setDraft, addFiles],
   );
@@ -644,6 +652,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               onRecord={props.asr?.configured && note.supported && note.state.phase === "idle" ? () => void note.start() : undefined}
               onCommands={commands.length || props.skills?.length ? () => { setDraft("/"); window.setTimeout(() => textarea.current?.focus(), 0); } : undefined}
               onSecret={() => setSecretOpen(true)}
+              onCoach={props.onCoach ? () => props.onCoach!(draft) : undefined}
               commandsHint={commands.length || props.skills?.length ? t("ph.plus.commands.hint", { n: commands.length + (props.skills?.length ?? 0) }) : undefined}
               place={place.map((chip) => chip.name).join(" · ") || undefined} />
           )}
@@ -655,6 +664,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               <button type="button" role="menuitem" onClick={() => void pasteFromClipboard()}><Icon name="copy" size={16} />{t("composer.paste")}</button>
               <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); setSecretOpen(true); }}><Icon name="lock" size={16} />{t("composer.secret")}</button>
             </Popover>
+          )}
+          {/* The coach is one tap from the field on a desktop; a phone's row has no room for it, and
+              it waits in the + sheet there instead. */}
+          {!phone && props.onCoach && (
+            <button type="button" className="iconbtn flat coach-open" onClick={() => props.onCoach!(draft)} aria-label={t("coach.open")} title={t("coach.open")}>
+              <Icon name="wand" />
+            </button>
           )}
           {secretOpen && <SecretSheet sessionId={sessionId} phone={phone} attached={secrets.map((secret) => secret.name)} onClose={() => setSecretOpen(false)}
             onAttach={(secret) => setSecrets((list) => [...list.filter((other) => other.name !== secret.name), secret])} />}
@@ -737,9 +753,9 @@ function draftChange(saved: DraftTarget | null, now: DraftTarget): string {
  * The composer's "+" on a phone: three tiles for what is attached most (a photo now, a picture from the
  * gallery, a file) and rows for the rest. Each command is offered only where the composer has it.
  */
-export function PlusSheet({ onClose, onPhoto, onPhotos, onFiles, onPaste, onRecord, onCommands, commandsHint, onSecret, place, extra }: {
+export function PlusSheet({ onClose, onPhoto, onPhotos, onFiles, onPaste, onRecord, onCommands, commandsHint, onSecret, onCoach, place, extra }: {
   onClose: () => void; onPhoto: () => void; onPhotos?: () => void; onFiles: () => void; onPaste?: () => void; onRecord?: () => void;
-  onCommands?: () => void; commandsHint?: string; onSecret?: () => void; place?: string; extra?: ReactNode;
+  onCommands?: () => void; commandsHint?: string; onSecret?: () => void; onCoach?: () => void; place?: string; extra?: ReactNode;
 }) {
   const run = (fn: () => void) => () => { onClose(); fn(); };
   return (
@@ -753,6 +769,7 @@ export function PlusSheet({ onClose, onPhoto, onPhotos, onFiles, onPaste, onReco
       {onRecord && <SheetRow icon="mic" label={t("session.mic")} onClick={run(onRecord)} />}
       {onCommands && <SheetRow icon="bolt" label={t("ph.plus.commands")} hint={commandsHint} chevron onClick={run(onCommands)} />}
       {onSecret && <SheetRow icon="lock" label={t("composer.secret")} hint={t("composer.secret.hint")} onClick={run(onSecret)} />}
+      {onCoach && <SheetRow icon="wand" label={t("coach.open")} hint={t("coach.open.hint")} onClick={run(onCoach)} data={{ action: "coach" }} />}
       {place && <SheetRow icon="folder" label={t("ph.plus.place")} hint={t("ph.plus.place.hint")} value={place} />}
       {extra}
     </BottomSheet>

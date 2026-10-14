@@ -1114,6 +1114,12 @@
   /* The session's sheet (details, files, jobs, browser…): the chat's title and a line over a strip of
      44 px tabs, raised from the bottom with the bar still showing above it, the way every sheet is. */
   .sheet.full.panel-sheet { height: calc(100% - var(--top-h) - env(safe-area-inset-top) + 2px); border-radius: var(--radius-xl) var(--radius-xl) 0 0; padding-top: 0; }
+  /* The prompt coach: as tall as the session's sheet, its conversation and composer filling it to the
+     bottom edge (the composer keeps its own room for the home indicator). */
+  .sheet.full.coach-sheet { height: calc(100% - var(--top-h) - env(safe-area-inset-top) + 2px); border-radius: var(--radius-xl) var(--radius-xl) 0 0; padding-top: 0; padding-bottom: 0; }
+  .coach-sheet .sheet-head { margin: 0; padding: 0 var(--space-2) 0 var(--gutter); border-bottom: 1px solid var(--line); }
+  .coach-sheet .sheet-head h3 { flex: 1; min-width: 0; }
+  .coach-sheet .coach-result-actions .btn { flex: 1; justify-content: center; }
   .panel-sheet .sheet-head { flex-wrap: wrap; align-items: center; margin: 0 -16px; padding: 0 var(--space-2) 0 var(--gutter); gap: 0; border-bottom: 1px solid var(--line); }
   .panel-sheet-title { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 2px 0 4px; }
   .panel-sheet-title b { font-size: var(--fs-16); font-weight: 600; color: var(--fg); }

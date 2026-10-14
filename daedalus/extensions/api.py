@@ -90,6 +90,7 @@ from daedalus.extensions import (
     api_plugins,
     api_project_start,
     api_projects,
+    api_prompt_coach,
     api_provider_holds,
     api_recurring,
     api_resource_profiles,
@@ -1612,6 +1613,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_project_start.register(api, app, auth)
     api_folder_browser.register(api, app, auth)
     api_session_import.register(api, app, auth)
+    # A chat's prompt coach: the window the composer opens, and the prompt it saved.
+    api_prompt_coach.register(api, app, auth)
     api_goal_budget.register(api, app, auth)
     api_provider_holds.register(api, app, auth)
     api_knowledge.register(api, app, auth)
@@ -2334,6 +2337,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             "services": await app.extensions["services"].list(session_id) if "services" in app.extensions else [],
             "subagent_of": state.metadata.get("subagent_of"),
             "subagent_name": state.metadata.get("subagent_name"),
+            # A prompt coach opened by its own address (a notification's link) offers no coach of its own.
+            "prompt_coach_of": state.metadata.get("prompt_coach_of"),
             # Where an imported session came from, for the banner and the "Origin" block of its details.
             "imported": imported_view(state.metadata),
             # What the session is to its project: its orchestrator (current or retired), or the session
