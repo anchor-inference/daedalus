@@ -6,7 +6,7 @@ export type IconName =
   | "folder" | "settings" | "bots" | "inbox" | "board" | "changes" | "chart" | "loop" | "pause" | "play" | "trash" | "check" | "close" | "send"
   | "download" | "share" | "split" | "key" | "link" | "unlink" | "down" | "copy" | "paste" | "columns" | "eye" | "mic" | "fork" | "undo" | "phone" | "expand" | "external" | "reload" | "forward" | "panel" | "chevron" | "bolt" | "volume" | "mute" | "lock" | "bell" | "shield" | "conductor" | "journal" | "alert" | "compass" | "user" | "ask" | "archive" | "braces" | "sidebar" | "reply" | "flag" | "menu" | "pin" | "pushpin"
   | "compose" | "grid" | "vdots" | "camera" | "offline" | "logo" | "sliders" | "apps" | "import" | "eyeoff"
-  | "utensils" | "cart" | "dumbbell" | "plane" | "home" | "list" | "heart" | "book";
+  | "utensils" | "cart" | "dumbbell" | "plane" | "home" | "list" | "heart" | "book" | "wand";
 
 const PATHS: Record<IconName, string> = {
   // The calendar's type icons: an agent names one of these for a type it makes (or an emoji).
@@ -37,6 +37,8 @@ const PATHS: Record<IconName, string> = {
   skill: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z",
   spawn: "M12 3v6M12 15v6M3 12h6M15 12h6",
   bulb: "M9 18h6M10 21h4M12 3a6 6 0 0 0-3 11v1h6v-1a6 6 0 0 0-3-11z",
+  // The prompt coach: a wand and the sparks it leaves, for "make this better" rather than "write".
+  wand: "M4 20L15 9M13 7l4 4M18 3v3M16.5 4.5h3M20 9v2M19 10h2M10 3v2M9 4h2",
   wrench: "M14 4a5 5 0 0 0 6 6l-9 9-3-3 9-9a5 5 0 0 0-3-3z",
   clock: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2",
   calendar: "M4 5h16v16H4zM4 9h16M8 3v4M16 3v4M8 13h3M14 13h3M8 17h3",

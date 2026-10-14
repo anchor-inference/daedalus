@@ -907,6 +907,8 @@ export type SessionDetail = {
   services?: ServiceView[];
   subagent_of?: string | null;
   subagent_name?: string | null;
+  /** The chat this session is the prompt coach of: it has no coach of its own. */
+  prompt_coach_of?: string | null;
   /** The project this session is the orchestrator of (current or retired). */
   orchestrator_of?: string | null;
   /** The staff member this session is the work of. */

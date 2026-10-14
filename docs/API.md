@@ -377,3 +377,12 @@ themselves are served at `/pages/{slug}/`. Everything about them, with the kit a
 may use, is in [PAGES.md](PAGES.md). A widget an agent drew in a conversation keeps its values at
 `/api/sessions/{id}/widgets/{call}/storage` (`GET` all of them, `PUT` or `DELETE` one key), and
 `POST /api/sessions/{id}/widgets/{call}/page` makes it a published page.
+
+**The prompt coach.** `POST /api/sessions/{id}/coach` with `{"message", "fresh"}` opens the chat's prompt
+coach — the small agent the composer's wand starts, which asks a few questions and writes a better
+prompt — or resumes the one still unfinished; `message` is its first turn when a new one starts, and
+`fresh` replaces it even when unfinished. `GET` on the same address answers `{"coach": null}` or
+`{"coach": {"session_id", "parent_id", "finished", "result"}}`, where `result` is `{"title", "prompt",
+"path", "at"}` once the coach has saved the prompt to `prompts/<date>-<title>.md` in the chat's
+workspace. The coach reads the chat's files and writes none of its own; no session list shows it, and
+it is deleted with its chat.

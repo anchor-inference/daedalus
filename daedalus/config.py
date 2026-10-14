@@ -1398,6 +1398,16 @@ that reads or writes a file, runs a command or drives a browser — that is what
 schedule tools are scoped to the session that proposes them and every schedule waits for the operator's
 approval; the calendar is read, never written."""
 
+PROMPT_COACH_ONLY_TOOLS = ["SavePrompt"]
+"""The tool that exists for a prompt coach alone; every other session is blocked from it. It writes into
+another session's workspace, which no ordinary agent should be able to do by a second route."""
+
+PROMPT_COACH_TOOLS = [*PROMPT_COACH_ONLY_TOOLS, "AskUser", "Read", "Find", "Search"]
+"""Everything a prompt coach may call: ask the operator (the blocking question card), look at the main
+session's project to tailor the prompt to it, and save the result. Nothing that writes a file of its own
+choosing, runs a command, browses or hands work to another agent: a coach that could would stop being a
+quiet helper beside the chat and become a second agent working in the operator's folder."""
+
 STAFF_BLOCKED_TOOLS = [
     "AskUser",
     "SpawnAgent",

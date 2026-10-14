@@ -54,6 +54,8 @@ from daedalus.config import (
     DISPATCHER_TOOLS,
     ORCHESTRATOR_ONLY_TOOLS,
     ORCHESTRATOR_TOOLS,
+    PROMPT_COACH_ONLY_TOOLS,
+    PROMPT_COACH_TOOLS,
     REASONING_EFFORTS,
     STAFF_BLOCKED_TOOLS,
     STAFF_ONLY_TOOLS,
@@ -67,7 +69,7 @@ from daedalus.config import (
     max_advertised_tools_for,
     on_demand_tool_groups_for,
 )
-from daedalus.host import capabilities, depth, launcher_bridge, prompts, standing, summaries, tool_groups
+from daedalus.host import capabilities, depth, launcher_bridge, prompt_coach, prompts, standing, summaries, tool_groups
 from daedalus.host.checkpoint_retention import CheckpointRetention, RetentionBounds, RetentionReport
 from daedalus.host.checkpoints import DIR_NAME as CHECKPOINT_DIR_NAME
 from daedalus.host.checkpoints import CheckpointError, Checkpoints, scan_workspace
@@ -424,8 +426,10 @@ OPERATOR_ORIGINS = ("operator", "core")
 """Run origins that answer the operator: their own message, or the host continuing their work after
 an outage. A schedule, a heartbeat, a loop or a subagent's task answers nobody who is waiting."""
 
-NOT_OPERATOR_FACING = ("subagent_of", "unattended", "heartbeat", "staff_id")
-"""Session metadata that marks a session nobody reads as a conversation, whatever started the run."""
+NOT_OPERATOR_FACING = ("subagent_of", "unattended", "heartbeat", "staff_id", prompt_coach.COACH_KEY)
+"""Session metadata that marks a session nobody reads as a conversation, whatever started the run. A prompt
+coach is read, but only in its window over its chat: an unread dot or a "finished" notice would point at a
+session no list shows."""
 
 SUMMARY_CHARS = 200
 """How much of the answer a finished-run event carries: enough for a notification's line, not the answer."""
@@ -1358,10 +1362,13 @@ class SessionManager:
         own_directory: bool = False,
         folder_id: str | None = None,
         on_host: bool = False,
+        directory: str | None = None,
     ) -> SessionState:
         """Make a session. ``on_host`` starts a chat that names no project on the host from the
         container: its scratch project's one folder is on the host, so every command and file tool
-        of it runs there through the terminal daemon, as in any host folder."""
+        of it runs there through the terminal daemon, as in any host folder. ``directory`` is another
+        session's own directory in the folder, shared rather than made: a prompt coach reads where its
+        chat works."""
         sid = session_id or uuid.uuid4().hex[:12]
         project = await self.projects.get(project_id) if project_id else None
         if project_id and project is None:
@@ -1398,6 +1405,8 @@ class SessionManager:
             )
         if own_directory:
             meta["directory"] = f".agents/{sid}"
+        elif directory:
+            meta["directory"] = directory
         else:
             meta.pop("directory", None)
         host_folder = self.host_folder_of(sid, meta, project)
@@ -1598,6 +1607,10 @@ class SessionManager:
         projects = await self.projects.by_session()
         out: list[dict[str, Any]] = []
         for session in rows:
+            if prompt_coach.hidden(session.metadata):
+                # A prompt coach lives in a window over its chat. Left out here, it is out of the sidebar,
+                # the inbox, search results, Telegram's list and every agent that lists sessions at once.
+                continue
             state = self._states.get(session.id)
             status = _status_word(state) if state is not None else "idle"
             out.append(
@@ -1809,6 +1822,8 @@ class SessionManager:
         if (
             delete_workspace
             and state.metadata.get("directory")
+            # A coach's directory is its chat's, which it only read.
+            and not self.is_prompt_coach(state)
             and state.workspace.exists()
             and state.project is not None
             and any(state.workspace.is_relative_to(folder.path) for folder in state.project.folders)
@@ -1830,7 +1845,9 @@ class SessionManager:
             except (ValueError, AttributeError):
                 metadata = {}
             project = projects.get(row["project_id"])
-            if project is None:
+            if project is None or prompt_coach.hidden(metadata):
+                # A coach only reads its chat's workspace: listed, it would show a hidden session under
+                # the chat and keep a deleted chat's directory alive for a reader that goes with it.
                 continue
             path = self.workspace_of(row["id"], metadata, project)
             if path.resolve() == target:
@@ -2778,6 +2795,10 @@ class SessionManager:
         state = await self.get_state(session_id)
         if state is None:
             raise KeyError(session_id)
+        for coach_id in await prompt_coach.coaches_of(self, session_id):
+            # A prompt coach reads where its chat works; left behind it would read the old place, and
+            # keep a chat's scratch project alive that the move has emptied.
+            await self.delete_session(coach_id, delete_workspace=False)
         metadata = dict(state.session.metadata)
         if own_directory:
             metadata["directory"] = f".agents/{session_id}"
@@ -2933,7 +2954,7 @@ class SessionManager:
         services.walls = None
         services.writable = []
         services.log_root = None
-        services.remote_readonly = folder.readonly or str(metadata.get("staff_isolation") or "") == "readonly"
+        services.remote_readonly = folder.readonly or str(metadata.get("staff_isolation") or "") == "readonly" or self.is_prompt_coach(state)
 
     def walls_of(self, state: SessionState) -> Walls | None:
         """The walls of a loaded session, from its project, its folder and its own directory."""
@@ -2943,6 +2964,10 @@ class SessionManager:
         # A staff member is walled by its isolation: its own worktree (and what a commit there
         # writes) instead of the checkout it was made from, or nothing writable at all.
         isolation = str(metadata.get("staff_isolation") or "shared")
+        if self.is_prompt_coach(state):
+            # It reads its chat's files to tailor the prompt and writes nothing: the saved prompt is
+            # written by the host on the chat's terms (``prompt_coach.save_prompt``), not through these walls.
+            isolation = "readonly"
         worktree = str(metadata.get("worktree") or "").strip()
         home = home_of(metadata)
         return walls_for(
@@ -4005,7 +4030,7 @@ class SessionManager:
             max_output_tokens=preset.max_output_tokens,
             extra_notes=self.notes_for(state, window=int(state.context_window or preset.context_window or 0)),
             tool_visibility_policy=self.tool_policy_for(state),
-            role="companion" if self.is_companion(state) else "orchestrator" if self.is_orchestrator(state) else "dispatcher" if self.is_dispatcher(state) else "agent",
+            role="companion" if self.is_companion(state) else "coach" if self.is_prompt_coach(state) else "orchestrator" if self.is_orchestrator(state) else "dispatcher" if self.is_dispatcher(state) else "agent",
             max_advertised_tools=self.advertised_tools_limit(rungs),
             discovered_tools=self.discovered_tools_for(state),
             loaded_tool_groups=self.loaded_groups_for(state),
@@ -5286,6 +5311,11 @@ class SessionManager:
         return bool(state.metadata.get("companion"))
 
     @staticmethod
+    def is_prompt_coach(state: SessionState) -> bool:
+        """Whether this session is a prompt coach, beside the chat whose id it carries."""
+        return bool(prompt_coach.coach_of(state.metadata))
+
+    @staticmethod
     def is_staff(state: SessionState) -> bool:
         """Whether this session is a staff member's, working on a task of its project's team."""
         return bool(state.metadata.get("staff_session_id"))
@@ -5319,6 +5349,10 @@ class SessionManager:
         # itself, and the tools that hand work over are its alone. Neither rule goes through a mode, so
         # editing one cannot give the companion a shell, nor give a working agent a second way to spawn one.
         blocked |= (known - set(COMPANION_TOOLS)) if self.is_companion(state) else (known & set(COMPANION_ONLY_TOOLS))
+        # A prompt coach asks, reads its chat's project and saves the prompt; its saving tool, which writes
+        # into another session's workspace, is nobody else's. For the companion's reason: no mode edit
+        # can give the coach a shell or an ordinary agent that second way into a folder.
+        blocked |= (known - set(PROMPT_COACH_TOOLS)) if self.is_prompt_coach(state) else (known & set(PROMPT_COACH_ONLY_TOOLS))
         # A staff member asks the orchestrator rather than the operator and works on its task rather
         # than starting agents, schedules or loops; its two reporting tools are its alone. Beside the
         # companion rule and for the same reason: no mode edit can hand either side the other's tools.
@@ -5538,9 +5572,9 @@ class SessionManager:
 
         The companion has every group eager: it has no ToolSearch to load one with, and what it is
         allowed of each group (its schedules, the calendar's reading half) is a handful of tools the
-        policy has already cut every group down to.
+        policy has already cut every group down to. A prompt coach likewise.
         """
-        if self.is_companion(state):
+        if self.is_companion(state) or self.is_prompt_coach(state):
             return {name: "eager" for name in tool_groups.configured_loads(self.config)}
         return tool_groups.resolved_loads(self.config, state.metadata, on_demand=state.on_demand_groups)
 

@@ -76,6 +76,7 @@ import { SecretChip } from "../secrets";
 import { RawHtml } from "../rawhtml";
 import { RenameSheet, SearchSheet, SessionMenuSheet, SessionTopBar, StateSub, type SessionRow, type SessionTile } from "./SessionPhone";
 import { SubagentsTab, subagentIdFor } from "../subagents";
+import { PromptCoach } from "../coach/PromptCoach";
 import { COMPOSE_EVENT, ComposeTarget, type ComposeRequest } from "../annotate/compose";
 import { noticeFromEvent, raiseFromError, raiseSettingNotice, SettingNoticeLines, settingRef } from "../settinglink";
 
@@ -137,9 +138,12 @@ export type SessionScreenProps = {
   /** Drawn inside another page (the companion's): the side panel starts closed whatever was last
    *  open elsewhere, and never writes the address, which belongs to the page around it. */
   embedded?: boolean;
+  /** Drawn inside a small window that has a title bar of its own (the prompt coach's): no header, no
+   *  terminals, no panel, and none of the chat's own tools in the composer — only the conversation. */
+  bare?: boolean;
 };
 
-export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus, banner, flow, placeholder, main = false, leaveForOrchestration = false, embedded = false }: SessionScreenProps) {
+export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus, banner, flow, placeholder, main = false, leaveForOrchestration = false, embedded = false, bare = false }: SessionScreenProps) {
   // Each pane says which session it shows, so a split view reports both and the voice screen's
   // embedded session reports itself, without anybody reading the address.
   usePresenceScope({ session: id || undefined });
@@ -174,7 +178,11 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       : undefined),
     [focus?.projectId, focus?.kind, id, main],
   );
-  const panel = usePanel(id, sessionBase(id), { route: pane === "right" || embedded ? null : route.query, beside: pane === "left" ? route.with : null, pane, context: panelContext, at: panelAt, closed: embedded });
+  const panel = usePanel(id, sessionBase(id), { route: pane === "right" || embedded || bare ? null : route.query, beside: pane === "left" ? route.with : null, pane, context: panelContext, at: panelAt, closed: embedded || bare });
+  // The prompt coach's window over this chat, with the draft it was opened on; `raise` brings an open
+  // window back up when the button is pressed again. It belongs to this chat and closes when the chat changes.
+  const [coach, setCoach] = useState<{ draft: string; raise: number } | null>(null);
+  useEffect(() => setCoach(null), [id]);
   const panelTabs = tabsFor(panelContext, { browser: hasBrowser || panel.state.tab === "browser", preview: panel.state.stack.length > 0, subagents: (detail?.subagents?.length ?? 0) > 0 || panel.state.tab === "subagents" });
   const browserShown = pipGroup(browsers.groups);
   const runningSubagents = detail?.subagents?.filter((child) => child.running).length ?? 0;
@@ -1446,7 +1454,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     <ComposeTarget.Provider value={id}>
     <div className={`chat ${pane ? `pane pane-${pane}` : ""} ${focus ? `in-project ${focus.kind}` : ""}`} onDragEnter={(e) => { if (e.dataTransfer?.types.includes("Files")) setDragging((d) => d + 1); }} onDragLeave={() => setDragging((d) => Math.max(0, d - 1))} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
       {dragging > 0 && <div className="dropzone"><Icon name="attach" size={28} /> {t("session.drop")}</div>}
-      {phone && !pane ? <>
+      {bare ? null : phone && !pane ? <>
         <SessionTopBar
           title={detail?.title ?? "…"}
           sub={phoneSub}
@@ -1673,8 +1681,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             mode={detail?.mode ?? ""}
             modes={modes}
             yagni={!!detail?.yagni}
-            onChooseMode={setMode}
-            onYagni={setYagni}
+            onChooseMode={bare ? undefined : setMode}
+            onYagni={bare ? undefined : setYagni}
+            onCoach={bare || embedded || main || orchestrating || detail?.prompt_coach_of ? undefined : (draft) => setCoach((open) => ({ draft: open?.draft ?? draft, raise: (open?.raise ?? 0) + 1 }))}
             place={{ project: detail?.project?.name, workspace: detail?.workspace_name || detail?.workspace, system: !!(detail?.project?.system || detail?.project?.settings.system) }}
             targetProject={detail?.project?.id}
             targetWorkspace={detail?.workspace}
@@ -1696,7 +1705,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             phone={phone}
             toast={toast}
           />}
-          {!phone && <TerminalDock dock={terminalDock} workspace={detail?.workspace} fileOpener={openTerminalFile} />}
+          {!phone && !bare && <TerminalDock dock={terminalDock} workspace={detail?.workspace} fileOpener={openTerminalFile} />}
         </div>
         {detail && (
           <Panel
@@ -1798,6 +1807,13 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       {phoneSheet === "menu" && <SessionMenuSheet tiles={phoneTiles} rows={phoneRows} onClose={() => setPhoneSheet(null)} />}
       {phoneSheet === "search" && <SearchSheet sessionId={id} onPick={openMessage} onClose={() => setPhoneSheet(null)} />}
       {phoneSheet === "rename" && <RenameSheet title={detail?.title ?? ""} onSave={(title) => { setPhoneSheet(null); void rename(title); }} onClose={() => setPhoneSheet(null)} />}
+
+      {coach && (
+        <PromptCoach parentId={id} draft={coach.draft} raise={coach.raise} phone={phone} toast={toast} onClose={() => setCoach(null)}
+          onInsert={(prompt) => composer.current?.replace(prompt)}
+          onOpenFile={hasDetails && panelTabs.includes("files") ? (path) => openPreview({ base: sessionBase(id), path }) : undefined}
+          chat={(coachId) => <SessionScreen key={coachId} id={coachId} onBack={() => setCoach(null)} toast={toast} bare />} />
+      )}
 
     </div>
     </ComposeTarget.Provider>
@@ -2570,6 +2586,8 @@ function describe(item: ToolItem, workspace?: string): { verb: string; family: s
       return { verb: verb("AskPeer", r), family: "AskPeer", detail: str("name"), icon: "question" };
     case "StaySilent":
       return { verb: t("tool.StaySilent"), family: "StaySilent", detail: str("note").slice(0, 60), icon: "dot" };
+    case "SavePrompt":
+      return { verb: verb("SavePrompt", r), family: "SavePrompt", detail: str("title"), icon: "wand" };
     case "HistorySearch":
       return { verb: verb("HistorySearch", r), family: "search", detail: str("query"), icon: "search" };
     case "ToolSearch": {

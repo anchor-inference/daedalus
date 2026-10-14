@@ -636,6 +636,11 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         return 200, "application/json", json.dumps(session_tasks(parts[3]))
     if len(parts) == 7 and parts[2] == "sessions" and parts[4] == "tasks" and parts[6] == "stop" and method.upper() == "POST":
         return 200, "application/json", json.dumps({"stopped": True})
+    if len(parts) == 5 and parts[2] == "sessions" and parts[4] == "coach":
+        # The chat's prompt coach: none until the window opens one, and then the coach's own session,
+        # unfinished. A harness that draws the window (check_prompt_coach.py) answers these itself.
+        coach = {"session_id": f"coach-{parts[3]}", "parent_id": parts[3], "finished": False, "result": None}
+        return 200, "application/json", json.dumps({"coach": {**coach, "created": True} if method.upper() == "POST" else None})
     write = SHARED_WRITES.get((method.upper(), path))
     if write is not None:
         return write

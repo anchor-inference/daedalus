@@ -17,6 +17,7 @@ from daedalus.config import (
     COMPANION_ONLY_TOOLS,
     COMPANION_TOOLS,
     ORCHESTRATOR_ONLY_TOOLS,
+    PROMPT_COACH_ONLY_TOOLS,
     STAFF_ONLY_TOOLS,
     SUBAGENT_ONLY_TOOLS,
     CompanionConfig,
@@ -106,9 +107,9 @@ async def test_the_concierge_gets_its_four_tools_and_nothing_else(app: Any) -> N
     for name in COMPANION_TOOLS:
         assert name not in blocked
     # And the delegation tools are the concierge's alone, as the reporting tools are staff's and the
-    # control tools the orchestrator's and the report to a leader a subagent's: a working session reaches none of them.
+    # control tools the orchestrator's, the report to a leader a subagent's and the saved prompt a coach's: a working session reaches none of them.
     worker = await manager.create_session("work")
-    assert manager.blocked_tools_for(worker) == set(COMPANION_ONLY_TOOLS) | set(STAFF_ONLY_TOOLS) | (known & set(ORCHESTRATOR_ONLY_TOOLS)) | set(SUBAGENT_ONLY_TOOLS)
+    assert manager.blocked_tools_for(worker) == set(COMPANION_ONLY_TOOLS) | set(STAFF_ONLY_TOOLS) | (known & set(ORCHESTRATOR_ONLY_TOOLS)) | set(SUBAGENT_ONLY_TOOLS) | set(PROMPT_COACH_ONLY_TOOLS)
 
 
 async def test_a_mode_cannot_give_a_voice_session_a_shell(app: Any) -> None:

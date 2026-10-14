@@ -61,6 +61,7 @@ EXTENSIONS = (
     "daedalus.extensions.calendar_hooks",
     "daedalus.extensions.context_windows",
     "daedalus.extensions.meetings",
+    "daedalus.extensions.prompt_coach",
     "daedalus.extensions.api",
 )
 
