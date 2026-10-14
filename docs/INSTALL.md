@@ -61,6 +61,11 @@ By hand instead: clone `protocore-exp` next to this repository, copy `deploy/env
 `deploy/keyproxy.env.example` to `../daedalus-secrets/keyproxy.env` (provider keys go there, outside the
 checkout, `chmod 600`), then `docker compose -f deploy/compose.yaml --env-file .env up -d --build`.
 
+Once the stack runs, nothing in that file needs editing by hand: Settings → Models → Providers → *Key proxy*
+sets every key, upstream address, key header and the proxy's daily cap, and Settings → Tools → *Search keys*
+holds the keys of the paid search backends (Keenable, Serper, Tavily, Exa, Perplexity). The proxy reads the file
+again on each call, so a saved value holds from the next request with no restart.
+
 | `--profile` | What it starts | Cost |
 |---|---|---|
 | `telegram` | the local Bot API server: files up to 2 GB instead of 20 MB (it needs `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` from https://my.telegram.org/apps) | ~66 MB |

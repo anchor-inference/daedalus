@@ -407,6 +407,12 @@ class CompanionGoalPatch(BaseModel):
     cadence: str | None = Field(default=None, max_length=120)
 
 
+class KeyproxySettingBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    value: str = Field(default="", max_length=4096)
+
+
 class AnswerBody(BaseModel):
     answers: list[dict[str, Any]]
 
@@ -5885,6 +5891,53 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             for pid in moved:
                 raw["providers"][pid]["api_key"] = ""
             await _apply_config(type(app.config).model_validate(raw))
+
+    @api.get("/api/keyproxy")
+    async def get_keyproxy_settings(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Everything the key proxy lets the operator set: keys only as held or not, addresses and headers in full.
+
+        ``reachable`` false is a proxy that could not be asked, which the screen says instead of
+        showing an empty list that reads as "nothing to configure".
+        """
+        origin = _keyproxy_origin()
+        if not origin:
+            return {"reachable": False, "state": "none"}
+        try:
+            response = await keyproxy_client().get(origin + "/settings", headers={"x-daedalus-token": api_token})
+            data = response.json() if response.status_code == 200 else None
+        except (httpx.HTTPError, ValueError):
+            return {"reachable": False, "state": "unreachable"}
+        if not isinstance(data, dict):
+            return {"reachable": False, "state": "refused" if response.status_code == 403 else "unreachable"}
+        return {"reachable": True, "state": "ok", **data}
+
+    @api.put("/api/keyproxy/{name}")
+    async def put_keyproxy_setting(name: str, body: KeyproxySettingBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Write one value of the key proxy's file; the proxy reads it again on its next call, so nothing restarts."""
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name):
+            # The name goes into the proxy's path; a dot or a slash could reach another of its routes.
+            raise HTTPException(400, "a key proxy setting is a variable name")
+        origin = _keyproxy_origin()
+        if not origin:
+            raise HTTPException(409, "this installation has no key proxy to configure")
+        try:
+            response = await keyproxy_client().put(f"{origin}/settings/{name}", headers={"x-daedalus-token": api_token}, json={"value": body.value})
+        except httpx.HTTPError as exc:
+            raise HTTPException(502, "the key proxy is not reachable, so nothing was saved") from exc
+        # What the proxy holds changed: the next settings read asks again rather than answering from before.
+        upstreams_cache["at"] = 0.0
+        try:
+            data = response.json()
+        except ValueError:
+            data = {}
+        if response.status_code == 200 and isinstance(data, dict):
+            return {"reachable": True, "state": "ok", **data}
+        reason = str(data.get("error") or "") if isinstance(data, dict) else ""
+        if response.status_code == 403:
+            raise HTTPException(502, "the key proxy refused this installation's token, so nothing was saved")
+        if response.status_code in (400, 404, 409):
+            raise HTTPException(response.status_code, reason or f"the key proxy refused {name}")
+        raise HTTPException(502, reason or f"the key proxy answered {response.status_code}")
 
     async def keyproxy_upstreams() -> list[str] | None:
         """The upstream names the proxy holds a credential for; None when it cannot be asked."""

@@ -2211,15 +2211,15 @@ h1.settings-title { margin: 0 0 16px; font-size: 28px; font-weight: 650; letter-
 @media (max-width: 599px) {
   .settings-row { gap: 8px 16px; }
   .settings-row.stack,
-  .settings-row:not(.tgroup):has(> .settings-row-ctl > :is(.dropdown, .settings-num, input.field, textarea)) { grid-template-columns: minmax(0, 1fr); }
-  .settings-row:not(.tgroup):has(> .settings-row-ctl > :is(.dropdown, .settings-num, input.field, textarea)) > .settings-row-ctl { justify-self: stretch; justify-content: stretch; }
+  .settings-row:not(.tgroup):has(> .settings-row-ctl > :is(.dropdown, .settings-num, input.field, textarea, .keyproxy-key)) { grid-template-columns: minmax(0, 1fr); }
+  .settings-row:not(.tgroup):has(> .settings-row-ctl > :is(.dropdown, .settings-num, input.field, textarea, .keyproxy-key)) > .settings-row-ctl { justify-self: stretch; justify-content: stretch; }
   .settings-row-ctl { flex-wrap: wrap; }
   .settings-row-ctl > .dropdown { flex: 1 1 100%; max-width: 100%; }
   .settings-row-ctl > .dropdown > .dropdown-btn { width: 100%; max-width: none; justify-content: space-between; }
   .settings-row-ctl > .dropdown > .dropdown-btn > .dropdown-value { flex: 1; text-align: left; }
   /* The list is as wide as its control, which is as wide as the row: it cannot overhang either edge. */
   .settings-row-ctl > .dropdown > .dropdown-list { left: 0; right: 0; width: auto; min-width: 0; max-width: none; }
-  .settings-row-ctl > input.field, .settings-row-ctl > textarea { flex: 1 1 100%; width: 100%; }
+  .settings-row-ctl > input.field, .settings-row-ctl > textarea, .settings-row-ctl > .keyproxy-key { flex: 1 1 100%; width: 100%; }
   /* A number and its unit are one box across the row, the unit inside it after the digits: fields
      with and without a unit then share both edges. */
   .settings-row-ctl > .settings-num { flex: 1 1 100%; gap: 0; min-height: var(--ctl-h-sm); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card-2); }

@@ -249,6 +249,40 @@ SAMPLE_PAGE: dict[str, object] = {
 """A published page as ``GET /api/pages`` lists it, with a glyph of its own."""
 
 
+def keyproxy_var(name: str, value: str = "", default: str = "", secret: bool = False, written: bool = False) -> dict[str, object]:
+    row: dict[str, object] = {"name": name, "secret": secret, "set": bool(value), "source": "file" if written else "default"}
+    if not secret:
+        row.update(value=value, default=default)
+    return row
+
+
+def keyproxy_upstream(name: str, group: str, address: str, key_var: str, header: str = "", key_set: bool = False) -> dict[str, object]:
+    upper = name.upper()
+    return {
+        "upstream": name, "group": group, "builtin": group != "extra", "shares_key_with": "",
+        "key": keyproxy_var(key_var, "set" if key_set else "", secret=True, written=key_set),
+        "address": keyproxy_var(f"KEYPROXY_UPSTREAM_{upper}", default=address),
+        "header": keyproxy_var(f"KEYPROXY_AUTH_{upper}", default=header),
+    }
+
+
+KEYPROXY_VIEW: dict[str, object] = {
+    "reachable": True, "state": "ok", "writable": True,
+    "upstreams": [
+        keyproxy_upstream("deepseek", "model", "https://api.deepseek.com", "DEEPSEEK_API_KEY", key_set=True),
+        keyproxy_upstream("openrouter", "model", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"),
+        keyproxy_upstream("serper", "search", "https://google.serper.dev", "KEYPROXY_KEY_SERPER", "X-API-KEY"),
+        keyproxy_upstream("keenable", "search", "https://api.keenable.ai/v1", "KEYPROXY_KEY_KEENABLE", "X-API-Key"),
+        keyproxy_upstream("tavily", "search", "https://api.tavily.com", "KEYPROXY_KEY_TAVILY"),
+        keyproxy_upstream("exa", "search", "https://api.exa.ai", "KEYPROXY_KEY_EXA", "x-api-key"),
+        keyproxy_upstream("perplexity", "search", "https://api.perplexity.ai", "KEYPROXY_KEY_PERPLEXITY"),
+    ],
+    "cli_logins": [{"upstream": "codex", "configured": True}, {"upstream": "grok", "configured": False}, {"upstream": "claude", "configured": False}],
+    "budget": keyproxy_var("KEYPROXY_USD_PER_DAY", "20", "0", written=True),
+}
+"""What the key proxy holds, as /api/keyproxy answers it: keys only as set or not."""
+
+
 GATES: dict[str, object] = {
     "/api/terminals/envs": {"envs": [
         {"env": "container", "available": True, "sandbox": "ok", "containment": {"kind": "cgroup_v2", "available": True}},
@@ -266,6 +300,9 @@ GATES: dict[str, object] = {
     # Drawn before any screen: no model means the whole app is the "Add a model" flow.
     "/api/onboarding": {"has_model": True, "presets": 1, "default_preset": "p", "providers": [], "keyproxy_base": "", "needs": [], "message": ""},
     "/api/providers/free-catalog": {"providers": [], "updated_at": None, "stale": False},
+    # Settings → Models → Providers and Settings → Tools → Search keys read what the key proxy holds.
+    # check_keyproxy.py keeps a proxy of its own that stores what is written.
+    "/api/keyproxy": KEYPROXY_VIEW,
     # Where the rail, its More menu and the phone drawer put each destination: nothing configured, the
     # layout the app ships with. check_navigation.py answers it itself to move things about.
     "/api/navigation": {"rail": [], "more": [], "drawer": [], "hidden": [], "icons": {}},
@@ -647,6 +684,9 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     widget = answer_widget(method.upper(), parts, body)
     if widget is not None:
         return widget
+    if method.upper() == "PUT" and path.startswith("/api/keyproxy/"):
+        # A value written is answered with the proxy as it stood; check_keyproxy.py keeps what is written.
+        return 200, "application/json", json.dumps(KEYPROXY_VIEW)
     if method.upper() == "PUT" and path.startswith("/api/projects/") and path.endswith("/pin"):
         # A pin answers with the time it holds, empty once unpinned; a harness that draws the block
         # keeps the pins itself (screenshots.PINS).

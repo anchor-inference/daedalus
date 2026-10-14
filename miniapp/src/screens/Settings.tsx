@@ -42,6 +42,7 @@ import { DesktopAppCard } from "../updatedialog";
 import { ProviderLimit } from "./ProviderLimit";
 import { OPENCODE_KEY_URL, missingPlans, opencodePlanOf, opencodeProvider } from "../opencode";
 import { SecretsCard } from "../secrets";
+import { KeyproxyCard, SearchKeys } from "../keyproxy";
 import { revealSetting, settingTarget, clearSettingTarget } from "../settinglink";
 import { SECTION_GROUPS, fieldPath, matchFields, type SectionGroup } from "./settingsindex";
 
@@ -577,7 +578,7 @@ function TotalCaps({ s, save }: { s: Settings; save: (patch: any) => Promise<voi
   );
 }
 
-function SearchBlock({ s, save }: { s: Settings; save: (patch: any) => Promise<void> }) {
+function SearchBlock({ s, save, toast, reload }: { s: Settings; save: (patch: any) => Promise<void>; toast: (t: string) => void; reload: () => void }) {
   const search = s.tools.web.search;
   const backends = s.search_backends ?? [];
   const [check, setCheck] = useState<SearchCheck | null>(null);
@@ -677,6 +678,7 @@ function SearchBlock({ s, save }: { s: Settings; save: (patch: any) => Promise<v
           </Row>
         </>
       ) : null}
+      <SearchKeys toast={toast} onChanged={reload} />
       <div className="btnrow search-check">
         <button className="btn small primary" disabled={checking} onClick={() => runCheck("")}>{t(checking ? "settings.search.checking" : "settings.search.check")}</button>
         <button className="btn small" disabled={checking || !info(search.backend)} onClick={() => runCheck(search.backend)}>{t("settings.search.checkone", { name: info(search.backend)?.label ?? search.backend })}</button>
@@ -706,6 +708,8 @@ function SearchBlock({ s, save }: { s: Settings; save: (patch: any) => Promise<v
  *  image model to Models & providers, where the operator goes looking for a model. */
 function ToolsTab({ s, save, toast, onSettings }: { s: Settings; save: (patch: any) => Promise<void>; toast: (t: string) => void; onSettings: (next: Settings) => void }) {
   const web = s.tools.web;
+  // Read again after a search key is saved: which backends can be picked depends on it.
+  const reread = () => { api.get<Settings>("/api/settings").then(onSettings).catch(() => undefined); };
   return (
     <>
       <ToolGroupsSettings toast={toast} revision={s.revision} onSettings={onSettings} />
@@ -718,7 +722,7 @@ function ToolsTab({ s, save, toast, onSettings }: { s: Settings; save: (patch: a
         <TextBlock setting="tools.web.user_agent" label={t("settings.web.ua")} value={web.user_agent} onSave={(v) => save({ tools: { web: { user_agent: v } } })} />
       </div>
 
-      <SearchBlock s={s} save={save} />
+      <SearchBlock s={s} save={save} toast={toast} reload={reread} />
 
       <div className="card">
         <div className="section-title" style={{ marginTop: 0 }}>{t("settings.exec.title")}</div>
@@ -1085,6 +1089,11 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
     api.get("/api/status").then(setStatus).catch(() => setStatus(null));
   }, [toast]);
 
+  // After a key proxy value changes, provider readiness and the search backends are read again.
+  function rereadSettings() {
+    api.get<Settings>("/api/settings").then((next) => setS((current) => ({ ...next, providers_available: next.providers_available ?? (current?.providers_available ?? []) }))).catch(() => undefined);
+  }
+
   async function save(patch: Partial<Settings>) {
     if (!s?.revision) return;
     try {
@@ -1363,6 +1372,7 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
               <AddOpencodeRow providers={s.providers ?? {}} keyproxyBase={s.keyproxy_base ?? ""} onAdd={(pid, patch) => void patchProvider(pid, patch)} />
               <AddProviderRow kinds={kinds} toast={toast} onAdd={(pid, base, kind) => void patchProvider(pid, { kind, base_url: base })} />
             </div>}
+            {modelsTab === "providers" && <KeyproxyCard toast={toast} onChanged={rereadSettings} />}
           </>
         );
       case "rules":
