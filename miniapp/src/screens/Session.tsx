@@ -335,8 +335,13 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           const noSnapshots = detail?.project?.settings.snapshots === false;
           const body = t(noSnapshots ? "session.revert.body.nosnapshots" : "session.revert.body");
           if (!(await confirmAsync(t("session.revert.title"), { body, action: t("session.revert.action"), danger: true }))) return;
+          // Read before the cut removes it: the reverted message goes back into the composer, so
+          // undoing a turn to reword it does not mean typing it again from memory.
+          const reverted = msgs.current.find((m) => m.seq === seq && m.role === "user");
           const r = await api.post<{ seq: number; through: number; dropped: number; workspace_restored: boolean; untouched: string[] }>(`/api/sessions/${id}/revert`, { seq });
           cutMessages(r.seq, r.through);
+          const words = reverted ? withoutAttachedList(reverted.text).trim() : "";
+          if (words) composer.current?.insert(words, !phone);
           const ws = r.workspace_restored
             ? r.untouched.length
               ? t("session.reverted.ws.nested", { n: r.untouched.length })
@@ -354,7 +359,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [id, toast, readSnapshots, detail?.project?.settings.snapshots],
+    [id, toast, readSnapshots, detail?.project?.settings.snapshots, phone],
   );
 
   const [offline, setOffline] = useState(false);

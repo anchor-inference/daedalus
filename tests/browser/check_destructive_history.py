@@ -30,6 +30,10 @@ def run() -> None:
             page.get_by_role("alertdialog").get_by_role("button", name="Revert", exact=True).click()
             expect(page.locator(".msg.user")).to_have_count(0, timeout=3000)
             expect(page.locator(".answer")).to_have_count(0)
+            # The reverted message comes back into the composer to be reworded and sent again.
+            reveal_composer(page)
+            expect(page.locator(".composer textarea")).to_have_value("Original request")
+            page.locator(".composer textarea").fill("")
             page.reload()
             page.wait_for_selector(".composer")
             expect(page.locator(".answer")).to_have_count(0)
