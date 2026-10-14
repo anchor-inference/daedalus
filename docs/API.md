@@ -216,7 +216,18 @@ Send carries them together: `GET /api/questions?project=<id>` is the list, `POST
 "always"?}]` and answers each item on its own (a request answered elsewhere first comes back as a
 `conflict`), and the answers that won wake the orchestrator once, together. The main chat's tab is the
 same list for every orchestrated project, grouped by project (`GET /api/questions`, `POST
-/api/asks/answer`).
+/api/asks/answer`). An answer to a question may bring files: send the batch as multipart/form-data with
+the list as `items` and the files as `files` parts, each item naming its own by their places
+(`"files": [0, 1]`). They reach the orchestrator the way an upload into its chat does, kept by handle.
+
+Every working session has the same list for its **side questions**: what its agent would like to ask
+but need not wait for (`SideQuestion`; AskUser is for what it cannot continue without). The agent
+takes one back the moment it settles it itself (`DropSideQuestion`), and a few at most wait at once.
+`GET /api/questions?session=<id>` is the list, `POST /api/sessions/{id}/asks/answer` answers them in
+a batch (JSON, or multipart with files as above) and hands the answers to the session as one message —
+a steer while it works, a new turn when it is idle — with the files in its inbox; `POST
+/api/sessions/{id}/asks/{ask_id}/dismiss` puts one aside without waking it. An `ask.side` event
+(`change`: opened, answered, withdrawn — with the agent's `reason` — or dismissed) redraws the list.
 It sets its own alarms with `WakeMe` (in some minutes, at a moment, or on a cron at most every ten
 minutes) and is woken with the note, even mid-turn; you can leave it one too. `GET|POST
 /api/projects/{id}/wakeups` (`{"note", "in_minutes" | "at" | "cron"}`) and `DELETE …/wakeups/{id}` are

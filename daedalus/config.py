@@ -1352,7 +1352,7 @@ class ModeConfig(BaseModel):
     description: str = ""
 
 
-PLAN_MODE_TOOLS_ONLY = ["Read", "Find", "Search", "WebFetch", "WebSearch", "HistorySearch", "HistoryExpand", "Recall", "Remember", "Skill", "ImageView", "BoardList", "BoardGet", "ScheduleList", "LoopStatus", "JobOutput", "JobList", "ServiceList", "ServiceLogs", "TerminalRead", "McpList", "PeerList", "SubAgentList", "IntentList", "LearningReport", "AskUser", "StaySilent", "ToolSearch"]
+PLAN_MODE_TOOLS_ONLY = ["Read", "Find", "Search", "WebFetch", "WebSearch", "HistorySearch", "HistoryExpand", "Recall", "Remember", "Skill", "ImageView", "BoardList", "BoardGet", "ScheduleList", "LoopStatus", "JobOutput", "JobList", "ServiceList", "ServiceLogs", "TerminalRead", "McpList", "PeerList", "SubAgentList", "IntentList", "LearningReport", "AskUser", "SideQuestion", "DropSideQuestion", "StaySilent", "ToolSearch"]
 """What a plan may do: read, search, look, remember and ask. Everything else — files, commands, Verify, sending,
 starting, peers, MCP tools — is off until the operator switches the mode."""
 
@@ -1400,6 +1400,8 @@ approval; the calendar is read, never written."""
 
 STAFF_BLOCKED_TOOLS = [
     "AskUser",
+    "SideQuestion",
+    "DropSideQuestion",
     "SpawnAgent",
     "ScheduleCreate",
     "ScheduleList",
@@ -1423,18 +1425,19 @@ STAFF_BLOCKED_TOOLS = [
 """What a staff member of a project may not call. It asks the orchestrator, not the operator
 (``AskOrchestrator``), reports to the orchestrator rather than notifying the operator itself, works
 on the task it was given rather than starting agents, schedules, loops or intents of its own, and
-never changes the installation. Enforced by the host beside the companion rule,
+never changes the installation. Its questions for later go in its reports, not the operator's panel. Enforced by the host beside the companion rule,
 not through a mode, so editing a mode cannot hand a staff member any of them."""
 
 STAFF_ONLY_TOOLS = ["Report", "AskOrchestrator"]
 """The tools that exist for staff alone; every other session is blocked from them."""
 
-SUBAGENT_BLOCKED_TOOLS = ["Notify", "SettingsChange", "AskUser", "AskPeer", "PeerList", "SubAgent", "SpawnAgent"]
+SUBAGENT_BLOCKED_TOOLS = ["Notify", "SettingsChange", "AskUser", "SideQuestion", "DropSideQuestion", "AskPeer", "PeerList", "SubAgent", "SpawnAgent"]
 """What a subagent may not call, whoever its leader is. Its work reaches the operator through the
 agent that started it, which decides what is worth the operator's attention; a subagent that could
 notify on its own would put a dozen workers' progress on the operator's phone, and one that changed
 the settings would post its card in a chat the operator does not read. It asks nobody but its
-leader, in its report: a subagent told to "notify the host when done" once found the peer list,
+leader, in its report — a question that can wait included, which its leader may leave in the operator's
+panel if it is worth their time: a subagent told to "notify the host when done" once found the peer list,
 asked a session of an unrelated project to forward a client's deployment details, and put them in
 that project's transcript. It starts no agents of its own, as its brief says. Enforced by the host
 beside the staff rule, so no mode or leader can hand it back."""

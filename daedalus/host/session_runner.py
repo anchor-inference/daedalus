@@ -4384,6 +4384,21 @@ class SessionManager:
         more = f" and {len(running) - 6} more" if len(running) > 6 else ""
         return f"- Background jobs still running: {named}{more}. Each wakes you with its outcome when it ends; there is nothing to poll."
 
+    async def _side_questions_note(self, session_id: str) -> str:
+        """The side questions this session still has waiting, as a turn-context line.
+
+        In the turn context because the model forgets what it asked: past a compaction it would ask
+        again, or never take back what it has since settled. ``""`` when none waits."""
+        try:
+            open_now = await self.asks.of_session(session_id)
+        except Exception:  # noqa: BLE001 — a turn starts without the line rather than not at all
+            logger.warning("could not read the side questions of %s", session_id, exc_info=True)
+            return ""
+        if not open_now:
+            return ""
+        listed = "; ".join(f"[{ask.short_id}] {ask.heading}" for ask in open_now)
+        return f"- Your side questions still waiting for the operator: {listed}. Drop any you have settled yourself with DropSideQuestion."
+
     async def _with_turn_context(self, state: SessionState, message: Message) -> Message:
         """The run's opening message with the turn context as its last block.
 
@@ -4425,6 +4440,8 @@ class SessionManager:
             volatile.append("\n- " + chosen.prompt.strip())
         if waiting := self._running_jobs_note(state.session.id):
             volatile.append("\n" + waiting)
+        if asked := await self._side_questions_note(state.session.id):
+            volatile.append("\n" + asked)
         if handed := operator_secrets.prompt_section(self.secrets.available(state.session.id)):
             # In the turn context rather than the system prompt: the set changes whenever the operator adds
             # one, and the system prompt is the part every later call is cached on.

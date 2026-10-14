@@ -7,15 +7,20 @@ module may import the HTTP framework; nothing below the extensions may.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import mimetypes
+import secrets
 from collections.abc import Callable
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, Any, Literal
 
-from fastapi import Depends, FastAPI, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import Depends, FastAPI, HTTPException, Request
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+from starlette.datastructures import UploadFile
 
-from daedalus.extensions import questions, wakeups
+from daedalus.extensions import questions, side_questions, wakeups
 from daedalus.extensions.coordinator_handoff import CoordinatorHandoff
 from daedalus.extensions.project_commands import ProjectCommands
 from daedalus.extensions.project_usage import ProjectUsage
@@ -23,6 +28,7 @@ from daedalus.extensions.watch_authority import status as watch_authority_status
 from daedalus.extensions.watch_commands import WatchCommands
 from daedalus.extensions.watches import WatchRefused
 from daedalus.host import prompts
+from daedalus.host.session_runner import Attachment
 from daedalus.stores.control import ControlConflict, ControlDenied, ControlStore, Entity, Principal, Scope
 from daedalus.stores.projects import RULE_KIND, FolderSpec, Project, ProjectError, ProjectFolder, ProjectSettings
 
@@ -236,6 +242,15 @@ class AnswerItem(BaseModel):
     # "Always" for every tool of the asked tool's MCP server. The Questions list sends it with the
     # server-wide choice, and a model without it refused the whole send as extra input.
     server: bool = False
+    # The places, in the batch's uploaded files, of the files that go with this answer: a batch sent
+    # as multipart/form-data carries ``items`` (this list, as JSON) and the files as ``files`` parts.
+    files: list[int] = Field(default_factory=list, max_length=questions.FILES_MAX)
+
+
+ANSWER_ITEMS = TypeAdapter(list[AnswerItem])
+ANSWER_FILES_MAX = 20
+"""Files in one send of the list. Each answer has its own smaller bound; this one keeps a whole send
+to what a person attaches by hand."""
 
 
 def host_bridge(settings: Any, terminals: Any = None) -> bool:
@@ -846,33 +861,101 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             raise HTTPException(409, str(exc)) from exc
         return dict(done.view())
 
+    async def existing_session(session_id: str) -> None:
+        if await manager.get_state(session_id) is None:
+            raise HTTPException(404, "no such session")
+
     @api.get("/api/questions")
-    async def list_questions(project: str | None = None, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        """What waits for the operator: one project's requests, or every orchestrated project's and the
-        main orchestrator's own when no project is named. Oldest first."""
+    async def list_questions(project: str | None = None, session: str | None = None, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """What waits for the operator: one session's side questions, one project's requests, or every
+        orchestrated project's and the main orchestrator's own when neither is named. Oldest first."""
+        if session is not None:
+            await existing_session(session)
+            return {"questions": await questions.waiting(app, session_id=session)}
         if project is not None:
             await existing(project)
         return {"questions": await questions.waiting(app, project)}
 
-    async def answer_batch(items: list[AnswerItem], project_id: str | None, via: str) -> dict[str, Any]:
+    async def read_batch(request: Request, staged: list[Attachment]) -> list[AnswerItem]:
+        """The answers of one send: a JSON list, or — when files come with them — multipart/form-data
+        with the same list as ``items`` and the files as ``files``. The files are staged here the way
+        a chat upload is; the caller removes them once the batch has been handed on."""
         try:
-            return await questions.answer(app, [i.model_dump(exclude_none=True) for i in items], project_id=project_id, via=via)
+            if not request.headers.get("content-type", "").startswith("multipart/form-data"):
+                return ANSWER_ITEMS.validate_python(await request.json())
+            form = await request.form(max_files=ANSWER_FILES_MAX, max_fields=8)
+            items = ANSWER_ITEMS.validate_python(json.loads(str(form.get("items") or "[]")))
+        except ValidationError as exc:
+            raise HTTPException(422, exc.errors(include_url=False, include_context=False, include_input=False)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, "the answers are a JSON list") from exc
+        try:
+            await stage_parts(form.getlist("files"), staged)
+        finally:
+            await form.close()
+        return items
+
+    async def stage_parts(parts: list[Any], staged: list[Attachment]) -> None:
+        staging = manager.settings.state_dir / "upload-staging"
+        staging.mkdir(parents=True, exist_ok=True)
+        for part in parts:
+            if not isinstance(part, UploadFile):
+                raise HTTPException(422, "files are file parts")
+            # Either separator ends a directory, as in a chat upload: a pasted file may be named by its
+            # whole Windows clipboard path.
+            name = PureWindowsPath(part.filename or "file").name or "file"
+            target = staging / f"{secrets.token_hex(16)}.part"
+            digest = hashlib.sha256()
+            with target.open("wb") as fh:
+                while chunk := await part.read(1 << 20):
+                    digest.update(chunk)
+                    fh.write(chunk)
+            staged.append(Attachment(path=target, name=name, content_sha256=digest.hexdigest(),
+                                     mime_type=part.content_type or mimetypes.guess_type(name)[0] or "application/octet-stream"))
+
+    async def answer_batch(request: Request, *, project_id: str | None, via: str, session_id: str | None = None) -> dict[str, Any]:
+        staged: list[Attachment] = []
+        try:
+            items = await read_batch(request, staged)
+            return await questions.answer(app, [i.model_dump(exclude_none=True) for i in items], project_id=project_id, via=via,
+                                          session_id=session_id, uploads=staged)
         except questions.Unanswerable as exc:
             raise HTTPException(400, str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(503, str(exc)) from exc
+        finally:
+            for attachment in staged:
+                attachment.path.unlink(missing_ok=True)
 
     @api.post("/api/projects/{project_id}/asks/answer")
-    async def answer_project_asks(project_id: str, body: list[AnswerItem], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+    async def answer_project_asks(project_id: str, request: Request, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """Several answers from a project's list, sent together. Each has its own outcome; a request
         answered elsewhere first is a ``conflict`` item, never a failure of the whole send."""
         await existing(project_id)
-        return await answer_batch(body, project_id, "project")
+        return await answer_batch(request, project_id=project_id, via="project")
 
     @api.post("/api/asks/answer")
-    async def answer_asks(body: list[AnswerItem], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+    async def answer_asks(request: Request, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """The same from the main chat's list, where the requests of every project wait together."""
-        return await answer_batch(body, None, "main")
+        return await answer_batch(request, project_id=None, via="main")
+
+    @api.post("/api/sessions/{session_id}/asks/answer")
+    async def answer_side_questions(session_id: str, request: Request, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Answers to one session's side questions, sent together; they reach the session as one message."""
+        await existing_session(session_id)
+        return await answer_batch(request, project_id=None, via="app", session_id=session_id)
+
+    @api.post("/api/sessions/{session_id}/asks/{ask_id}/dismiss")
+    async def dismiss_side_question(session_id: str, ask_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Put a side question aside unanswered. The session is not woken for it."""
+        await existing_session(session_id)
+        try:
+            closed = await side_questions.dismiss(app, session_id=session_id, ask_id=ask_id)
+        except KeyError as exc:
+            raise HTTPException(404, "no such side question in this session") from exc
+        except side_questions.Refused as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"ask": closed.view()}
 
     @api.post("/api/projects/{project_id}/setup/finish")
     async def finish_setup(project_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
