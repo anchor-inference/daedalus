@@ -2175,8 +2175,10 @@ class Ingress:
                                         idle_timeout_seconds=self.manager.config.harness.no_signal_after_s)
                 except ControlDenied:
                     return
-                if kind == "turn_completed":
-                    await clocks.close(conn, identity)
+                # Settled at the first output, as a native run's clock is: an idle deadline renewed
+                # only by events would stop a member whose one long build or test run says nothing
+                # for minutes. A terminal that truly falls silent is the silence watch's to report.
+                await clocks.close(conn, identity)
             elif kind in ("turn_completed", "turn_failed", "turn_cancelled", "session_ended", "process_exited"):
                 await clocks.close(conn, identity)
             else:

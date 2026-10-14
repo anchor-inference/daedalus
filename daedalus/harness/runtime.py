@@ -79,6 +79,20 @@ from daedalus.terminals.service import Terminals
 logger = logging.getLogger(__name__)
 
 
+def _model_acted(event: StaffEvent) -> bool:
+    """Whether the event proves the model itself answered, which is what the first-output wait is for.
+
+    Only a completed turn with a message used to count. A member set a real task works through tools
+    for many minutes before its first turn ends, so the host stopped two healthy Claude Code members
+    at the 300 s first-output deadline while their terminals were busy. A tool call, a permission
+    request or a question is the model acting; a prompt acknowledgement or a redraw is the CLI only.
+    """
+    if event.kind is EventKind.TURN_COMPLETED:
+        return bool(event.payload.get("last_message"))
+    return event.kind in (EventKind.TOOL_STARTED, EventKind.TOOL_FINISHED,
+                          EventKind.PERMISSION_REQUESTED, EventKind.QUESTION_ASKED)
+
+
 class ToolSet(Protocol):
     """A set of Daedalus's own tools a CLI reaches through ``ptyd tools-mcp`` (the browser's): what the
     launch is given, and how one call is answered for a live session.
@@ -893,8 +907,7 @@ class CliStaffRuntime:
         step = next_state(current, event, context)
         phase_event = getattr(self.ingress, "phase_event", None)
         if phase_event is not None and step.signal:
-            await phase_event(live, kind.value,
-                              meaningful_output=kind is EventKind.TURN_COMPLETED and bool(event.payload.get("last_message")))
+            await phase_event(live, kind.value, meaningful_output=_model_acted(event))
         if kind in (EventKind.PROMPT_ACKNOWLEDGED, EventKind.TURN_STARTED, EventKind.TOOL_STARTED):
             session.first_prompt_pending = False
         if step.signal:

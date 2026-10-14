@@ -83,3 +83,39 @@ async def test_late_output_keeps_expired_wait_and_does_not_break_ingress(db: Dat
         assert (await db.fetchone("SELECT count(*) FROM attempt_phase_clocks WHERE phase = 'idle'"))[0] == 0
     finally:
         app.executions.release()
+
+
+async def test_cli_tool_call_settles_the_first_output_wait(db: Database) -> None:
+    # A member set a real task worked through tools past the 300 s first-output deadline before its
+    # first turn ended, and the deadline sweep stopped it while it was busy.
+    app, member, task, session = await launch_fixture(db)
+    try:
+        identity = await prepare_attempt(app, OPERATOR, member, task, session,
+                                         fence_token=secrets.token_urlsafe(32))
+        async with db.transaction() as conn:
+            await PhaseClocks(app.executions).advance(conn, identity, from_phase="prepare", to_phase="spawn")
+        team = SimpleNamespace(app=app, manager=SimpleNamespace(config=SimpleNamespace(harness=HarnessConfig())))
+        ingress = Ingress(team)
+        live = SimpleNamespace(id=session.id)
+        await ingress.phase_event(live, "ready")
+        await ingress.phase_event(live, "tool_started", meaningful_output=True)
+        assert await db.fetchone("SELECT 1 FROM attempt_phase_clocks WHERE outcome = 'active'") is None
+        first = await db.fetchone("SELECT outcome,last_progress_at FROM attempt_phase_clocks WHERE phase = 'first_output'")
+        assert first["outcome"] == "completed" and first["last_progress_at"] is not None
+    finally:
+        app.executions.release()
+
+
+def test_only_the_model_acting_counts_as_output() -> None:
+    from daedalus.harness.contract import EventKind, StaffEvent
+    from daedalus.harness.runtime import _model_acted
+
+    def acted(kind: EventKind, **payload: object) -> bool:
+        return _model_acted(StaffEvent(kind=kind, at="", payload=payload))
+
+    assert acted(EventKind.TOOL_STARTED) and acted(EventKind.TOOL_FINISHED)
+    assert acted(EventKind.PERMISSION_REQUESTED) and acted(EventKind.QUESTION_ASKED)
+    assert acted(EventKind.TURN_COMPLETED, last_message="done")
+    assert not acted(EventKind.TURN_COMPLETED)
+    assert not acted(EventKind.PROMPT_ACKNOWLEDGED) and not acted(EventKind.TURN_STARTED)
+    assert not acted(EventKind.ACTIVITY) and not acted(EventKind.NOTIFICATION)
