@@ -83,13 +83,18 @@ function readFirstLine(file) {
 
 // One application per user. A second start — a second click on the icon, a daedalus:// link —
 // brings this window forward and hands it the link; it never starts a second launcher.
-if (!app.requestSingleInstanceLock()) {
+// `--quit` with nothing running has nothing to end, and must not start the application to do it.
+if (!app.requestSingleInstanceLock() || desk.actionFrom(process.argv) === 'quit') {
   app.quit();
 } else {
   app.on('second-instance', (_event, argv) => {
     // `daedalus --quick-chat` and `--appshot` are what a system shortcut runs where the desktop
     // refuses this application one of its own (a Wayland portal that says no).
     const action = desk.actionFrom(argv);
+    if (action === 'quit') {
+      app.quit();
+      return;
+    }
     if (action && quickDesk) {
       quickDesk.run(action);
       return;

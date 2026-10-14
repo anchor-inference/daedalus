@@ -202,6 +202,9 @@ function actionFrom(argv) {
   const args = (argv || []).filter((arg) => typeof arg === 'string');
   if (args.includes('--quick-chat')) return 'quickChat';
   if (args.includes('--appshot')) return 'appshot';
+  // The tray's Quit, for a script or an uninstaller: with closing the window only hiding it, there
+  // was no way left to end the application but the tray's own menu.
+  if (args.includes('--quit')) return 'quit';
   return null;
 }
 

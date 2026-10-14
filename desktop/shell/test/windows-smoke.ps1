@@ -1,8 +1,8 @@
 # The Windows installer on a throwaway machine (the release workflow's runner): a silent install,
 # what the operator would find — the program, the Start menu and desktop shortcuts, the entry in
-# Apps & features — the application started until its window shows the launcher's own page, closed
-# again with nothing of it left running, then two uninstalls: the default one keeps the data, the
-# one asked to delete it deletes it.
+# Apps & features — the application started until its window shows the launcher's own page, its
+# window closed into the tray, then ended with `Daedalus.exe --quit` and nothing of it left running,
+# then two uninstalls: the default one keeps the data, the one asked to delete it deletes it.
 #
 #   powershell -File windows-smoke.ps1 -Installer Daedalus-Setup-x64.exe
 #
@@ -85,8 +85,18 @@ if ($process.MainWindowHandle -ne 0) {
     # what the launcher must notice by itself.
     Stop-Process -Id $main.ProcessId
 }
+# Closing the window hides it into the tray where there is one, and the application goes on: that is
+# the setting's default. Where it is still running a few seconds later, its window must be gone and
+# the tray's Quit, given on the command line, must end it.
+for ($i = 0; $i -lt 8 -and (Running).Count -gt 0; $i++) { Start-Sleep 1 }
+if ((Running).Count -gt 0) {
+    $shown = @(Get-Process -Name Daedalus -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle })
+    if ($shown.Count -gt 0) { Fail "the window is still on the screen after it was closed: $($shown[0].MainWindowTitle)" }
+    Write-Host 'the window went into the tray; quitting from the command line'
+    Start-Process -FilePath (Join-Path $app 'Daedalus.exe') -ArgumentList '--quit' | Out-Null
+}
 for ($i = 0; $i -lt 60 -and (Running).Count -gt 0; $i++) { Start-Sleep 1 }
-if ((Running).Count -gt 0) { Fail "still running after the window closed: $((Running | ForEach-Object Name) -join ', ')" }
+if ((Running).Count -gt 0) { Fail "still running after Quit: $((Running | ForEach-Object Name) -join ', ')" }
 Write-Host "closed; nothing of the installation runs ($i s)"
 
 Write-Host '--- uninstall, keeping the data'

@@ -137,6 +137,7 @@ test('every word of the tray is in both dictionaries', () => {
 test('a second start can ask for Quick Chat or an appshot', () => {
   assert.equal(desk.actionFrom(['daedalus', '--quick-chat']), 'quickChat');
   assert.equal(desk.actionFrom(['Daedalus.exe', '--appshot']), 'appshot');
+  assert.equal(desk.actionFrom(['Daedalus.exe', '--quit']), 'quit');
   assert.equal(desk.actionFrom(['daedalus', 'daedalus://open/x']), null);
 });
 
