@@ -366,9 +366,9 @@ def _nested_under(session_id: str, metadata: dict[str, Any], known: set[str]) ->
     stops describing the list under it: a subagent hangs under its leader, a fork under the session
     it was taken from, and one whose leader or origin no longer exists hangs under nothing.
     """
-    if metadata.get("prompt_coach_of"):
-        # A prompt coach is drawn nowhere at all (it lives in its chat's window), whether or not its
-        # chat still exists: counted, it would make a chat with a coach a project of two chats.
+    if metadata.get("prompt_coach_of") or metadata.get("btw_of"):
+        # A prompt coach or a side question is drawn nowhere at all (it lives in its chat's window),
+        # whether or not its chat still exists: counted, it would make a chat with a coach a project of two chats.
         return True
     leader = metadata.get("subagent_of")
     if isinstance(leader, str) and leader in known:
@@ -969,7 +969,7 @@ class ProjectStore:
             parsed.append((row, metadata if isinstance(metadata, dict) else {}))
         known = {row["id"] for row, _ in parsed}
         for row, metadata in parsed:
-            if metadata.get("prompt_coach_of"):
+            if metadata.get("prompt_coach_of") or metadata.get("btw_of"):
                 continue  # not a session of the project's but a helper of one chat's; its turns are not the project's activity
             bucket = out.setdefault(str(row["project_id"]), {"total": 0, "active": 0, "loops": 0, "last_message_at": ""})
             last = str(row["last_message_at"] or "")

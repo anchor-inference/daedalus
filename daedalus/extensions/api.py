@@ -68,6 +68,7 @@ from daedalus.extensions import (
     api_attempt_diagnostics,
     api_board,
     api_browsers,
+    api_btw,
     api_calendar,
     api_capacity,
     api_ci,
@@ -1621,6 +1622,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_session_import.register(api, app, auth)
     # A chat's prompt coach: the window the composer opens, and the prompt it saved.
     api_prompt_coach.register(api, app, auth)
+    # A chat's side question (/btw): asked from the composer, answered in a window beside the chat.
+    api_btw.register(api, app, auth)
     api_goal_budget.register(api, app, auth)
     api_provider_holds.register(api, app, auth)
     api_knowledge.register(api, app, auth)
@@ -2348,6 +2351,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             "subagent_name": state.metadata.get("subagent_name"),
             # A prompt coach opened by its own address (a notification's link) offers no coach of its own.
             "prompt_coach_of": state.metadata.get("prompt_coach_of"),
+            # A side question likewise offers neither a coach nor a side question of its own.
+            "btw_of": state.metadata.get("btw_of"),
             # Where an imported session came from, for the banner and the "Origin" block of its details.
             "imported": imported_view(state.metadata),
             # What the session is to its project: its orchestrator (current or retired), or the session

@@ -33,6 +33,12 @@ from daedalus.stores.inference_budget import InferenceBudget
 from daedalus.stores.projects import ProjectSettings
 from daedalus.stores.update_drains import assert_admission_open_in
 
+LENT_KEY = "daedalus.lent_from"
+"""Message metadata: the id of the session this message was copied from as context for a side question
+(:mod:`daedalus.host.btw`). The side question's model reads it in its working history; its transcript —
+what the app draws — never holds it, so the window shows the question and its answers, not a second copy
+of the conversation they are about."""
+
 UNFINISHED_RUN_STATUSES = ", ".join(f"'{status.value}'" for status in (RunStatus.queued, RunStatus.running, RunStatus.paused))
 """The statuses of a run that is not over. Its events are what the live view reads and what a resume
 replays, so nothing sweeps them by age."""
@@ -232,6 +238,9 @@ class SqliteSessionStore(ISessionStore):
         there that the host did not tag as the operator's was injected by the core (a nudge,
         a budget notice) and is recorded as such so the UI can hide it.
         """
+        # Context lent to a side question stays out on every path at once — a round's hand-over, a
+        # compaction, the seeding of an empty transcript — rather than at each caller.
+        messages = [m for m in messages if not m.metadata.get(LENT_KEY)]
         if not messages:
             return 0
         if from_history:

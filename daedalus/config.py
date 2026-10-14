@@ -1409,6 +1409,11 @@ session's project to tailor the prompt to it, and save the result. Nothing that 
 choosing, runs a command, browses or hands work to another agent: a coach that could would stop being a
 quiet helper beside the chat and become a second agent working in the operator's folder."""
 
+BTW_TOOLS = ["Read", "Find", "Search"]
+"""Everything a side question (``/btw``) may call: look at its chat's project when the conversation it was
+handed does not settle the answer. Nothing that writes, runs, browses, asks a blocking question or reaches
+anyone: a side question is answered beside the work and must leave no mark on it."""
+
 STAFF_BLOCKED_TOOLS = [
     "AskUser",
     "SideQuestion",

@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from daedalus.host.btw import BTW_KEY
 from daedalus.host.filesystem import LocalFS
 from daedalus.host.services import PathOutsideProject
 
@@ -142,19 +143,24 @@ async def open_coach(manager: SessionManager, parent_id: str, message: str, *, f
     folder_id = str(source.get("folder_id") or "").strip() or None
     state = await manager.create_session(f"{TITLE} · {parent.session.title}"[:200], metadata=metadata, project_id=parent.project.id, folder_id=folder_id, directory=directory)
     coach_id = state.session.id
-    # The model the chat answers on, which the operator chose for this work; nothing chosen is the default.
+    await inherit_model(manager, parent_id, coach_id)
+    await manager.submit(coach_id, text)
+    return {**view(state), "created": True}
+
+
+async def inherit_model(manager: SessionManager, parent_id: str, child_id: str) -> None:
+    """Put a window's session on the model its chat answers on, which the operator chose for this work;
+    nothing chosen is the default."""
     overrides = await manager.live.load(parent_id)
     if overrides.get("preset") or (overrides.get("provider") and overrides.get("model_name")):
         await manager.live.set_model(
-            coach_id,
+            child_id,
             model_name=overrides.get("model_name"),
             provider=overrides.get("provider"),
             preset=overrides.get("preset"),
             thinking_enabled=overrides.get("thinking_enabled"),
             reasoning_effort=overrides.get("reasoning_effort"),
         )
-    await manager.submit(coach_id, text)
-    return {**view(state), "created": True}
 
 
 async def save_prompt(manager: SessionManager, coach_id: str, title: str, prompt: str) -> dict[str, Any]:
@@ -226,13 +232,14 @@ async def _create_new(fs: Any, target: Path, body: str) -> bool:
 
 
 def hidden(metadata: Any) -> bool:
-    """Whether no list shows this session: a coach lives in its chat's window. Takes stored JSON text too."""
+    """Whether no list shows this session: a coach, or a side question, lives in its chat's window. Takes
+    stored JSON text too."""
     if isinstance(metadata, str):
         try:
             metadata = json.loads(metadata or "{}")
         except ValueError:
             return False
-    return isinstance(metadata, dict) and bool(metadata.get(COACH_KEY))
+    return isinstance(metadata, dict) and bool(metadata.get(COACH_KEY) or metadata.get(BTW_KEY))
 
 
 __all__ = [
@@ -245,6 +252,7 @@ __all__ = [
     "coach_of",
     "coaches_of",
     "hidden",
+    "inherit_model",
     "latest",
     "open_coach",
     "prompt_slug",

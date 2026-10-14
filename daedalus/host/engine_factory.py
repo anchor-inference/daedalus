@@ -167,7 +167,7 @@ def runtime_constants(config: RuntimeConfig, *, context_window: int, max_output_
     )
 
 
-Role = Literal["agent", "companion", "coach", "orchestrator", "dispatcher"]
+Role = Literal["agent", "companion", "coach", "btw", "orchestrator", "dispatcher"]
 
 
 def _agent_sections(deps: EngineDeps, config: RuntimeConfig, *, mode: ModeConfig | None, workspace: Path, session_title: str, model: str, extra_notes: str, project: str, advertised: Collection[str], admitted: Collection[str]) -> tuple[str, ...]:
@@ -244,7 +244,8 @@ def build_engine(
     trimmed_tool_result_ids: Collection[str] = (),
 ) -> QueryEngine:
     """``role`` picks the system prompt: an agent that works in a folder, the companion that talks,
-    owns goals and hands work over, a prompt coach that only improves a prompt, a project's orchestrator
+    owns goals and hands work over, a prompt coach that only improves a prompt, a side question that only
+    answers one about a chat, a project's orchestrator
     that only runs a team, or the main
     orchestrator that only hands work to projects and follows it.
 
@@ -261,6 +262,8 @@ def build_engine(
         sections: tuple[str, ...] = prompts.companion_sections(name=config.companion.name, answer_language=config.answer_language, agents=extra_notes)
     elif role == "coach":
         sections = prompts.coach_sections(answer_language=config.answer_language, workspace=str(workspace))
+    elif role == "btw":
+        sections = prompts.btw_sections(answer_language=config.answer_language, workspace=str(workspace))
     elif role == "orchestrator":
         sections = prompts.orchestrator_sections(answer_language=config.answer_language, governance=prompts.governance_section(deps.governance_path))
     elif role == "dispatcher":

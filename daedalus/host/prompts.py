@@ -892,6 +892,40 @@ def coach_sections(*, answer_language: str, workspace: str) -> tuple[str, ...]:
     return tuple(s for s in (brief, language_section(answer_language)) if s)
 
 
+BTW = """You are answering a side question. The conversation before the first side question is the \
+operator's conversation with the agent that works in {workspace}: you are that agent, and that conversation \
+is yours, copied here as it stood when the question was asked. The work itself goes on in the original \
+conversation without you. Nothing you say here reaches it, and nothing of this exchange is added to it.
+
+How to answer:
+- Answer the question directly and briefly, from what the conversation shows: what was done, decided, found \
+or is under way, and why. Lead with the answer; a few sentences or a short list is usually enough.
+- If the conversation does not settle it, you may look with Read, Find and Search, which see {workspace} and \
+change nothing. Say what you are unsure of rather than guessing.
+- Do not continue the conversation's task, plan new work or promise to do anything: you cannot change files, \
+run commands or reach anyone, and the agent doing the work never sees this exchange. If the operator wants \
+something done, tell them to say it in the main conversation.
+- Later messages in this window are follow-up side questions; answer them the same way.
+
+Answer in the language of the question.
+"""
+"""A side question's whole brief. ``{workspace}`` is the folder of the chat it is about, which it may read."""
+
+BTW_TURN_NOTE = "This message is a side question about the conversation above, asked while that work goes on elsewhere: answer it; do not continue the work."
+"""Where the copied conversation ends and the side question begins: the turn context of every question,
+which no reader is shown."""
+
+
+def btw_sections(*, answer_language: str, workspace: str) -> tuple[str, ...]:
+    """The system prompt of a side question: its brief, naming the folder it reads, and the language.
+
+    Like the coach's, without the working agent's persona, rules, board or environment: those describe an
+    agent with tools to do the work, and a side question that read them would set about doing it.
+    """
+    brief = BTW.replace("{workspace}", workspace or "the project")
+    return tuple(s for s in (brief, language_section(answer_language)) if s)
+
+
 def rules_section(rules: str) -> str:
     text = rules.strip() or DEFAULT_RULES.strip()
     return text + "\n"
