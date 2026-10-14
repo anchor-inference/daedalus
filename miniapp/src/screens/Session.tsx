@@ -32,6 +32,7 @@ import { ModelChoice } from "../modelselect";
 import { AUTO_MODE, ModeInfo, modeName } from "../modeselect";
 import { DepthChip } from "../depthchip";
 import { MoveSessionSheet } from "../projects";
+import { MakeProjectSheet, makeProjectCommand } from "../chatproject";
 import { panelShortcut } from "../panel";
 import { Panel, usePanel, usePanelWidth } from "../panelhost";
 import { SessionDetails } from "../details";
@@ -156,6 +157,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   if (!liveRef.current) liveRef.current = createLiveStore();
   const live = liveRef.current;
   const [moving, setMoving] = useState(false);
+  const [promoting, setPromoting] = useState(false);
   const [sharing, setSharing] = useState(false);
   const composer = useRef<ComposerHandle>(null);
   // The right panel: the route carries the open tab and the previewed file for the pane the URL
@@ -1427,9 +1429,12 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     ...(sessionDiagrams?.length ? [{ id: "diagrams", icon: "pen" as IconName, label: t("session.phone.diagrams"), count: sessionDiagrams.length, onSelect: () => navigate(pathFor("diagrams", null, { session: id })) }] : []),
   ] : [];
   const contextPct = detail?.context?.window ? Math.round((100 * detail.context.tokens) / detail.context.window) : null;
+  // A chat that is still alone in a project of its own can become a project from its own menu too.
+  const makeProject = makeProjectCommand(detail?.project, () => setPromoting(true));
   const phoneRows: SessionRow[] = phone && !pane ? [
     { icon: "pen", label: t("session.rename"), onSelect: () => setPhoneSheet("rename") },
     ...(focus ? [] : [{ icon: "folder" as IconName, label: t("session.project.move"), value: detail?.project?.name, onSelect: () => setMoving(true) }]),
+    ...(!focus && makeProject ? [{ icon: makeProject.icon!, label: makeProject.label, onSelect: makeProject.onSelect }] : []),
     // A helper's own chat leads back to its leader; a leader's helpers are a tile of the panel above.
     ...(detail?.subagent_of ? [{ icon: "back" as IconName, label: t("session.leader.word"), value: detail.leader_title ?? undefined, onSelect: () => onOpen?.(detail.subagent_of!) }] : []),
     ...(lastSeq !== null && !main && !orchestrating ? [{ icon: "fork" as IconName, label: t("session.phone.fork"), onSelect: () => void turnAction("fork", lastSeq) }] : []),
@@ -1556,6 +1561,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               // A session in a project's focus mode stays in its project; the orchestrator's chat has no
               // files or jobs of its own to show.
               ...(focus ? [] : [{ label: t("session.project.move"), icon: "folder" as IconName, onSelect: () => setMoving(true) }]),
+              ...(!focus && makeProject ? [makeProject] : []),
               "-",
               ...(hasDetails
                 ? [
@@ -1803,6 +1809,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         </div></Overlay>
       )}
 
+      {promoting && detail && <MakeProjectSheet project={detail.project} title={detail.title} onClose={() => setPromoting(false)} onMade={() => load(true)} />}
       {moving && detail && <MoveSessionSheet sessionId={id} current={detail.project.id} currentOwn={!!detail.workspace_own} onClose={() => setMoving(false)} onMoved={() => load(true)} toast={toast} />}
 
       {sharing && <ShareSheet sessionId={id} share={detail?.share} onClose={() => setSharing(false)} onChanged={(share) => setDetail((current) => (current ? { ...current, share } : current))} toast={toast} />}

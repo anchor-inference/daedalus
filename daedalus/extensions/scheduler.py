@@ -230,8 +230,9 @@ class Scheduler:
         return {str(r["id"]) for r in rows}
 
     async def _maintain_database(self, now: datetime) -> None:
-        """The database's own housekeeping, on the tick that already runs: sweep old events, reclaim
-        pages, and bring the workspace snapshot stores back inside their bounds.
+        """The database's own housekeeping, on the tick that already runs: sweep old events and the
+        empty projects moved chats left behind, reclaim pages, and bring the workspace snapshot stores
+        back inside their bounds. The first tick after a start runs it at once.
 
         Per-run trimming bounds a run and nothing bounded the table; and with auto_vacuum
         incremental, freed pages are handed back only when something asks for them. The checkpoint
@@ -247,9 +248,12 @@ class Scheduler:
             dropped = await self.app.manager.events.prune(keep_days=ops.events_keep_days, max_rows=ops.events_max_rows)
             dropped += await self.app.manager.bus.prune(keep_days=ops.app_events_keep_days, max_rows=ops.app_events_max_rows)
             abandoned_media = await self.app.manager.media.prune_staged()
+            # The projects chats left behind when they were moved out, once the move's Undo is long past.
+            leftovers = await self.app.manager.projects.sweep_leftovers()
             pages = await self.app.db.reclaim()
-            if dropped or abandoned_media or pages:
-                logger.warning("database maintenance: %d event rows and %d abandoned media dropped, %d pages reclaimed", dropped, abandoned_media, pages)
+            if dropped or abandoned_media or pages or leftovers:
+                logger.warning("database maintenance: %d event rows, %d abandoned media and %d empty chat projects dropped, %d pages reclaimed",
+                               dropped, abandoned_media, len(leftovers), pages)
             self._start_retention()
         except Exception:  # noqa: BLE001 — housekeeping must never take the tick down
             logger.exception("database maintenance failed")

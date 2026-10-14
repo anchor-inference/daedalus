@@ -652,6 +652,12 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         # keeps the pins itself (screenshots.PINS).
         pinned = bool(body.get("pinned")) if isinstance(body, dict) else False
         return 200, "application/json", json.dumps({"project_id": path.split("/")[3], "pinned_at": datetime.now(UTC).isoformat() if pinned else ""})
+    if method.upper() == "POST" and path.startswith("/api/projects/") and path.endswith(("/as-project", "/as-chat")):
+        # A chat made a project, or a project turned back into its chat: the receipt of a revisioned
+        # project command. A harness that draws the change (check_chat_project.py) keeps the flag itself.
+        revision = int(body.get("expected_entity_revision") or 1) if isinstance(body, dict) else 1
+        change = "kept" if path.endswith("/as-project") else "chat"
+        return 200, "application/json", json.dumps({"project_id": path.split("/")[3], "change": change, "receipt_id": f"receipt-{revision}", "entity_revision": revision + 1})
     if method.upper() == "POST" and path.startswith("/api/notifications/") and path.endswith("/act"):
         # The shared centre is empty, so every entry a harness might answer is one the host no
         # longer has; a harness that invents entries answers this route itself.

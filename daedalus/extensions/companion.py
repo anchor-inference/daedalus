@@ -910,7 +910,8 @@ class Companion:
         return [
             {"id": p.id, "name": p.name, "root": str(p.primary.path), "reachable": p.primary.reachable, "agents": counts.get(p.id, {}).get("total", 0)}
             for p in await manager.projects.list()
-            if not p.settings.system
+            # Nor a chat's project a moved chat left empty: kept only for the move's Undo.
+            if not p.settings.system and not (p.settings.ephemeral and p.id not in counts)
         ]
 
     async def result(self, session_id: str) -> dict[str, Any]:

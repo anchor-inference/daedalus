@@ -422,7 +422,8 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
   async function keep() {
     if (!writes.ready || busy) return;
     setBusy(true);
-    await writes.write("PATCH", path, { keep: true }, t("project.kept", { name: project.name }));
+    // The same command as "Make a project" on the chat's row, under the name it has now.
+    await writes.write("POST", `${path}/as-project`, { name: project.name }, t("project.kept", { name: project.name }));
     setBusy(false);
   }
   const archivable = !project.system && !project.settings.system && !project.settings.ephemeral;
@@ -534,7 +535,8 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
  * Nothing on disk moves. A private choice creates a child in the destination project; the shared
  * choice uses its root. Files in the old directory stay where they were.
  * The installation's own folders are not offered as a destination — the concierge's Projects tool
- * hides the Voice project for the same reason — unless the session is already in one.
+ * hides the Voice project for the same reason — unless the session is already in one. The project a
+ * moved chat left empty is not listed by the server at all, here or in any other picker.
  */
 export function MoveSessionSheet({ sessionId, current, currentOwn, onClose, onMoved, toast }: { sessionId: string; current: string; currentOwn: boolean; onClose: () => void; onMoved: () => void; toast: (t: string) => void }) {
   const projects = useProjects();

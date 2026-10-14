@@ -208,8 +208,59 @@ describe("the sidebar", () => {
     await render();
     await act(async () => host.querySelector<HTMLButtonElement>('[data-session="c1"] .sb-acts button[aria-haspopup="menu"]')!.click());
     const words = Array.from(document.querySelectorAll('[role="menuitem"]')).map((b) => b.textContent ?? "");
-    expect(words).toEqual(expect.arrayContaining(["Open beside", "Rename", "Move…", "Archive", "Delete"]));
+    expect(words).toEqual(expect.arrayContaining(["Open beside", "Rename", "Move to a project…", "Archive", "Delete"]));
     expect(words[words.length - 1]).toBe("Delete");
+  });
+
+  it("makes a chat a project from its row, and offers the way back only on a project with one chat", async () => {
+    listing.data.projects = listing.data.projects.map((p) => (p.id === "c1" ? { ...p, entity_revision: 3 } : p));
+    const post = vi.spyOn(api, "post").mockResolvedValue({ receipt_id: "r", entity_revision: 4 });
+    await render();
+    const menuOf = async (selector: string) => {
+      await act(async () => host.querySelector<HTMLButtonElement>(`${selector} .sb-acts button[aria-haspopup="menu"]`)!.click());
+      return Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+    };
+    const close = async () => { await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))); };
+
+    const chatItems = await menuOf('[data-session="c1"]');
+    const make = chatItems.find((b) => b.textContent === "Make a project")!;
+    expect(make).toBeTruthy();
+    await act(async () => make.click());
+    const name = document.querySelector<HTMLInputElement>("#make-project-name")!;
+    expect(name.value).toBe("Bank statement");
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(name, "Bank"); name.dispatchEvent(new Event("input", { bubbles: true })); });
+    await act(async () => name.form!.requestSubmit());
+    expect(post).toHaveBeenCalledWith("/api/projects/c1/as-project", expect.objectContaining({ name: "Bank", expected_entity_revision: 3 }));
+    // The project it became is opened with the chat inside, selected.
+    expect(onOpen).toHaveBeenCalledWith("c1");
+    expect(localStorage.getItem("daedalus.folder.c1")).toBe("1");
+
+    // One chat: the way back is there. Two: shown, disabled, and saying why. The installation's own: absent.
+    const lone = (await menuOf('[data-project="esp"] .sb-prow')).find((b) => b.textContent === "Turn back into a chat")!;
+    expect(lone.disabled).toBe(false);
+    await act(async () => lone.click());
+    expect(post).toHaveBeenCalledWith("/api/projects/esp/as-chat", expect.objectContaining({ client_operation_id: expect.any(String) }));
+    const busy = (await menuOf('[data-project="home"] .sb-prow')).find((b) => b.textContent === "Turn back into a chat")!;
+    expect(busy.disabled).toBe(true);
+    expect(busy.title).toBe("Only with one chat in it");
+    await close();
+    const voice = await menuOf('[data-project="voice"] .sb-prow');
+    expect(voice.some((b) => b.textContent === "Turn back into a chat")).toBe(false);
+    await close();
+    // A chat inside a project is moved, not made a project.
+    await act(async () => projectRow("home").click());
+    expect((await menuOf('[data-session="h2"]')).some((b) => b.textContent === "Make a project")).toBe(false);
+  });
+
+  it("lists no subagents in a chat's menu: the plate folds them out instead", async () => {
+    listing.data.sessions = [...listing.data.sessions,
+      chat("k1", "c2", 30, { title: "[sub] lint", metadata: { subagent_of: "c2", subagent_name: "lint" } }),
+      chat("k2", "c2", 30, { title: "[sub] build", metadata: { subagent_of: "c2", subagent_name: "build" } })];
+    await render();
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-session="c2"] .sb-acts button[aria-haspopup="menu"]')!.click());
+    const words = Array.from(document.querySelectorAll('[role="menuitem"]')).map((b) => b.textContent ?? "");
+    expect(words.some((w) => w.includes("lint") || w.includes("build"))).toBe(false);
+    expect(host.querySelector('[data-session="c2"] .sb-subs')).not.toBeNull();
   });
 
   it("lists what is pinned in a block above both sections, and not again below it", async () => {
