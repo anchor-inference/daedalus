@@ -2,6 +2,17 @@
 
 Notable changes, newest first. The repository's `main` is the released version.
 
+## 2026-10-14 — desktop-v0.19.0
+
+- **A companion instead of the voice page.** One standing agent, talked to by text or out loud on one page. It owns goals and checks them on a schedule, hands work to agents and reports back, and pauses when asked. On a phone the page is four tabs, one menu and one microphone at the end of the field.
+- **Rules for what the agent does in the world.** Each kind of action — a message to people, a publish, a payment, a deletion, a write elsewhere, a change to itself — runs on its own, only when you asked for it, after asking you, or is handed to you. A small model reviews outgoing actions against your request, your answers to the agent's questions included; it is chosen on the models page.
+- **Questions that don't stop the work.** Any agent can leave side questions in the right panel and keep going, and withdraws one when it finds the answer itself; your answers reach it mid-turn or start a turn. Answers in the Questions tab take pasted screenshots and files.
+- **A prompt coach.** A button in the composer opens a window with a small agent that asks a few questions, writes the prompt, and saves it in the chat's `prompts/` folder; *Insert into message* puts it in the field.
+- **Chats and projects.** A chat becomes a project from its menu, and turns back into a chat while it is the project's only one; a chat dragged onto a project moves there. Subagents left the chat's menu.
+- **The desktop app.** Quick Chat (Alt+Space), a screenshot into a chat (Alt+Shift+Space) and a tray icon. The setup wizard groups providers, keeps subscription-plan keys apart from pay-as-you-go ones, offers speech as an optional step and explains Telegram with links. The desktop window signs in without the two-factor code.
+- **Two-factor sign-in with an authenticator code.** A standard TOTP code set up from a QR code replaces passkeys.
+- **And more.** Widgets in replies; browser actions recorded into a skill and replayed; notes drawn on a page snapshot; an Auto mode that picks quick, normal or deep work per message; meeting notes from audio; a suggested next message; memory sorted by topic, sensitive subjects refused and duplicates merged with undo; settings search answers with a link to the exact field; *Add model* in the composer; coding-plan subscriptions no longer count against the dollar limit; private sign-ins in the agent's browser that the agent never sees.
+
 ## 2026-10-13 — desktop-v0.18.0
 
 - **Imported sessions keep what they knew.** A session brought in from Claude Code or Codex carries that program's standing instructions and memory notes (`CLAUDE.md`, `AGENTS.md`, the memory folder) into its prompt, where compaction never touches them. Compaction now summarises the whole history on top of the previous summary, keeps one section per open task and a section of standing facts, and waits until 80% of a large context window.
