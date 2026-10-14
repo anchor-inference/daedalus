@@ -269,8 +269,8 @@ async def test_the_migration_categorises_the_records_kept_before(settings: Setti
                       "source_refs": [], "salience": 0.0, "embedding": None, "version": 1, "created_at": stamp, "updated_at": stamp,
                       "last_accessed_at": None, "access_count": 0}
             await db.execute("INSERT INTO memory_records(tenant_id, id, record) VALUES (?, ?, ?)", (T, memory_id, json.dumps(record)))
-        step = MIGRATIONS[-1]
-        assert isinstance(step, DataMigration) and "memory_history" in step.sql
+        # Found by what it creates, not by its place: later migrations are appended after it.
+        step = next(m for m in MIGRATIONS if isinstance(m, DataMigration) and "memory_history" in m.sql)
         for _ in range(2):  # the second run changes nothing
             async with db.transaction() as conn:
                 await step.step(conn)
