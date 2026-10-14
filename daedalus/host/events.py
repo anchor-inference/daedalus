@@ -705,6 +705,10 @@ GAP = "bus.gap"
 """The synthetic item a subscription yields when its cursor is older than what retention kept.
 It is never published and never stored; its payload is :class:`BusGap`."""
 
+_HELD = "SELECT event_seq FROM staff_report_records"
+"""The events retention keeps past its window: each is the announcement an immutable report record
+points at."""
+
 MAX_PAYLOAD_BYTES = 64 * 1024
 """Events are lifecycle-sized. A payload past this is a producer shipping content through the bus
 (a transcript, a screen) that belongs in its own store, and every subscriber and every client
@@ -978,7 +982,9 @@ class EventBus:
         # AUTOINCREMENT remembers, not what happens to be left.
         row = await self.db.fetchone("SELECT seq FROM sqlite_sequence WHERE name = 'app_events'")
         self._head = int(row["seq"]) if row else 0
-        row = await self.db.fetchone("SELECT min(seq) AS oldest FROM app_events")
+        # Measured over the events retention may take: one a report still holds is an island below
+        # the run of history a replay can trust, and counting it would hide the gap above it.
+        row = await self.db.fetchone(f"SELECT min(seq) AS oldest FROM app_events WHERE seq NOT IN ({_HELD})")
         self._oldest = int(row["oldest"]) if row and row["oldest"] is not None else self._head + 1
 
     @asynccontextmanager
@@ -1178,9 +1184,13 @@ class EventBus:
         """Drop events older than ``keep_days`` and then all but the newest ``max_rows``; returns how many."""
         cutoff = _stamp((now or datetime.now(UTC)) - timedelta(days=keep_days))
         before = await self.db.fetchone("SELECT count(*) AS n FROM app_events")
-        await self.db.execute("DELETE FROM app_events WHERE at < ?", (cutoff,))
+        # A member's report record is immutable and points at the event that announced it; deleting
+        # that event failed the foreign key, and the whole hourly maintenance with it, from the day
+        # the first report grew older than the retention window.
+        await self.db.execute(f"DELETE FROM app_events WHERE at < ? AND seq NOT IN ({_HELD})", (cutoff,))
         await self.db.execute(
-            "DELETE FROM app_events WHERE seq <= (SELECT seq FROM app_events ORDER BY seq DESC LIMIT 1 OFFSET ?)",
+            "DELETE FROM app_events WHERE seq <= (SELECT seq FROM app_events ORDER BY seq DESC LIMIT 1 OFFSET ?)"
+            f" AND seq NOT IN ({_HELD})",
             (max(0, max_rows),),
         )
         after = await self.db.fetchone("SELECT count(*) AS n FROM app_events")

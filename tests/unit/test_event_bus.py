@@ -353,3 +353,23 @@ async def test_prune_by_age_and_by_row_count(bus: EventBus, db: Database) -> Non
     assert await bus.prune(keep_days=7, max_rows=3) == 1
     assert [r["seq"] for r in await _rows(db)] == [4, 5, 6] and bus.oldest == 4
     assert bus.head == 6
+
+
+async def test_prune_keeps_an_event_a_report_record_holds(bus: EventBus, db: Database) -> None:
+    # The hourly maintenance failed on the foreign key once the first report outlived the window.
+    for i in range(4):
+        await bus.publish("terminal.title", title(str(i)))
+    old = (datetime.now(UTC) - timedelta(days=10)).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    await db.execute("UPDATE app_events SET at = ? WHERE seq <= 3", (old,))
+    await db.execute("PRAGMA foreign_keys = OFF")
+    await db.execute("INSERT INTO staff_report_records(id,operation_receipt_id,project_id,task_id,attempt_id,"
+                     "staff_session_id,client_call_id,kind,request_digest,request_meta_json,original_text,"
+                     "original_digest,original_size_bytes,event_seq,created_at)"
+                     " VALUES ('r','o','p','t','a','s','c','checkpoint',?,'{}','x',?,1,2,?)", ("0" * 64, "0" * 64, old))
+    await db.execute("PRAGMA foreign_keys = ON")
+    assert await bus.prune(keep_days=7, max_rows=1000) == 2
+    assert [r["seq"] for r in await _rows(db)] == [2, 4]
+    # The held island does not stand for history: a replay from before it still sees the gap.
+    assert bus.oldest == 4
+    assert await bus.prune(keep_days=7, max_rows=0) == 1
+    assert [r["seq"] for r in await _rows(db)] == [2] and bus.oldest == bus.head + 1
