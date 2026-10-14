@@ -79,8 +79,15 @@ export function ContextMenuHost() {
   const close = useCallback(() => setRequest(null), []);
   useEffect(() => {
     const receive = (event: Event) => setRequest((event as RequestEvent).detail);
+    // A long press with a finger also arrives as contextmenu. Taking it over in a text field hid the
+    // phone's own selection handles and Paste, and our menu then closed at once (the press's release
+    // and the keyboard resizing the viewport both dismiss it), so a reader whose keyboard has no
+    // Paste key could neither paste nor select. A touch press is left to the platform entirely.
+    let touch = false;
+    const press = (event: PointerEvent) => { touch = event.pointerType === "touch" || event.pointerType === "pen"; };
     const fallback = (event: MouseEvent | KeyboardEvent) => {
       if (event.defaultPrevented) return;
+      if (event.type === "contextmenu" && (touch || ("pointerType" in event && ((event as PointerEvent).pointerType === "touch" || (event as PointerEvent).pointerType === "pen")))) return;
       if (event instanceof KeyboardEvent && event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
       const target = event.target as HTMLElement;
       const popup = target.closest<HTMLButtonElement>("button[aria-haspopup]");
@@ -123,9 +130,10 @@ export function ContextMenuHost() {
       setRequest({ x:event instanceof MouseEvent ? event.clientX : rect.left, y:event instanceof MouseEvent ? event.clientY : rect.bottom, items, owner });
     };
     document.addEventListener(EVENT, receive);
+    document.addEventListener("pointerdown", press, true);
     document.addEventListener("contextmenu", fallback);
     document.addEventListener("keydown", fallback);
-    return () => { document.removeEventListener(EVENT, receive); document.removeEventListener("contextmenu", fallback); document.removeEventListener("keydown", fallback); };
+    return () => { document.removeEventListener(EVENT, receive); document.removeEventListener("pointerdown", press, true); document.removeEventListener("contextmenu", fallback); document.removeEventListener("keydown", fallback); };
   }, []);
   return request && <Menu request={request} close={close} />;
 }

@@ -50,3 +50,23 @@ it("text selection gets editing commands while password selection never gets cop
   expect(labels()).not.toContain(t("context.cut"));
   expect(labels()).toContain(t("context.paste"));
 });
+
+it("a finger's long press in a field leaves the phone its own selection and paste menu", () => {
+  act(() => root.render(<><textarea defaultValue="draft" /><ContextMenuHost /></>));
+  const field = mount.querySelector("textarea")!;
+  field.setSelectionRange(0, 5);
+  const down = new MouseEvent("pointerdown", { bubbles:true });
+  Object.defineProperty(down, "pointerType", { value:"touch" });
+  fire(field, down);
+  const press = new MouseEvent("contextmenu", { bubbles:true, cancelable:true });
+  fire(field, press);
+  expect(press.defaultPrevented).toBe(false);
+  expect(document.querySelector('[role="menu"]')).toBeNull();
+  const mouse = new MouseEvent("pointerdown", { bubbles:true });
+  Object.defineProperty(mouse, "pointerType", { value:"mouse" });
+  fire(field, mouse);
+  const right = new MouseEvent("contextmenu", { bubbles:true, cancelable:true });
+  fire(field, right);
+  expect(right.defaultPrevented).toBe(true);
+  expect(document.querySelector('[role="menu"]')).not.toBeNull();
+});
