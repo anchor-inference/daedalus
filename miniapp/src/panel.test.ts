@@ -233,6 +233,15 @@ describe("a file opened beside the orchestrator", () => {
   });
 });
 
+describe("the Questions tab of an ordinary session", () => {
+  it("is there only while side questions wait, first, and a link to it always opens it", () => {
+    expect(tabsFor("session")).not.toContain("questions");
+    expect(tabsFor("session", { questions: true })).toEqual(["questions", "details", "files", "preview", "jobs"]);
+    expect(tabsFor("member", { questions: true })).not.toContain("questions");
+    expect(routeTabsFor("session")).toContain("questions");
+  });
+});
+
 describe("the Browser tab", () => {
   it("is offered only to a session that has had a browser, after the agent's own tabs", () => {
     expect(tabsFor("session")).not.toContain("browser");

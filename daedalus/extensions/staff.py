@@ -1489,6 +1489,10 @@ class Team:
             raise KeyError(ref)
         if not ask.open:
             raise AlreadyAnswered(f"request {ask.short_id} was already answered by the {ask.resolved_by}")
+        if ask.origin == "session":
+            # A side question has no team behind it: its answer goes back into the session that asked,
+            # which only the side questions' own path knows how to do.
+            raise StaffError(f"{ask.short_id} is a side question; answer it from its session's list")
         if ask.origin == "dispatcher":
             # The main orchestrator's own confirmation belongs to no project yet; it settles it itself.
             if self.dispatcher_requests is None:

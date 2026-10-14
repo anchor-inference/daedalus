@@ -5,6 +5,7 @@
 // tested without a browser.
 
 import type { WaitingQuestion, QuestionAnswer, QuestionOutcome } from "../api";
+import type { QuestionScope } from "./routes";
 
 /** A permission's answers. "because" is a refusal with the operator's reason, which the member reads;
  *  "server" is "always" for every tool of the asked tool's MCP server, offered only where the host
@@ -22,7 +23,7 @@ export function permissionChoices(q: Pick<WaitingQuestion, "always" | "always_se
 
 /** What the operator has done to one card so far. `text` is the free answer while no option is chosen
  *  and the note once one is — the same field, read by what else is chosen. */
-export type Draft = { selected: string[]; text: string; choice?: PermissionChoice; at: number; project?: string | null };
+export type Draft = { selected: string[]; text: string; choice?: PermissionChoice; at: number; project?: string | null; session?: string | null };
 
 export type Drafts = Record<string, Draft>;
 
@@ -74,9 +75,16 @@ export function isBlank(d: Draft | undefined): boolean {
   return !d || (d.selected.length === 0 && !d.text.trim() && !d.choice);
 }
 
+/** Whether a card takes files with its answer: a question whose asker the host can hand them to. */
+export function takesFiles(q: Pick<WaitingQuestion, "kind" | "files">): boolean {
+  return q.kind === "question" && !!q.files;
+}
+
 /** Whether a card's draft is an answer the host will take. A note alone, or "No, because…" without the
- *  because, is not; words where only an option will do are not. */
-export function isReady(q: WaitingQuestion, d: Draft | undefined): boolean {
+ *  because, is not; words where only an option will do are not. Files alone are an answer to a question
+ *  that takes them — a screenshot is often the whole of it. */
+export function isReady(q: WaitingQuestion, d: Draft | undefined, files = 0): boolean {
+  if (files > 0 && takesFiles(q)) return true;
   if (!d) return false;
   if (isPermission(q)) return !!d.choice && (d.choice !== "because" || !!d.text.trim());
   if (q.kind === "folder" || q.kind === "project") return d.selected.length === 1;
@@ -97,8 +105,29 @@ export function answerOf(q: WaitingQuestion, d: Draft): QuestionAnswer {
 }
 
 /** The answers a press of Send carries: every ready draft of a card still on the list, in list order. */
-export function batchOf(questions: WaitingQuestion[], drafts: Drafts): QuestionAnswer[] {
-  return questions.filter((q) => isReady(q, drafts[q.id])).map((q) => answerOf(q, drafts[q.id]));
+export function batchOf(questions: WaitingQuestion[], drafts: Drafts, files: Record<string, File[]> = {}): QuestionAnswer[] {
+  return questions.filter((q) => isReady(q, drafts[q.id], files[q.id]?.length ?? 0)).map((q) => answerOf(q, drafts[q.id] ?? EMPTY));
+}
+
+/** A batch with its files: each answer names its own by their places among the uploads, which is how
+ *  the host matches them in one multipart send. `uploads` is empty when no card carries a file, and the
+ *  batch then goes as plain JSON. */
+export function withFiles(batch: QuestionAnswer[], files: Record<string, File[]>): { items: QuestionAnswer[]; uploads: File[] } {
+  const uploads: File[] = [];
+  const items = batch.map((item) => {
+    const own = files[item.ask_id] ?? [];
+    if (!own.length) return item;
+    const places = own.map((f) => uploads.push(f) - 1);
+    return { ...item, files: places };
+  });
+  return { items, uploads };
+}
+
+/** Whether a draft belongs to this list, so the list may drop it once its question is gone. */
+export function draftOf(scope: QuestionScope, d: Draft): boolean {
+  if (scope === "all") return !d.session;
+  if ("sessionId" in scope) return d.session === scope.sessionId;
+  return !d.session && d.project === scope.projectId;
 }
 
 /** Staff waiting on a permission or an escalated question come first: a member is stopped until the
@@ -162,8 +191,9 @@ export type CardFate =
   | { kind: "sent"; failed?: string }
   | { kind: "stale" }
   | { kind: "conflict"; by: string; line: string }
-  | { kind: "withdrawn"; reason: string; hadDraft: boolean }
+  | { kind: "withdrawn"; reason: string; hadDraft: boolean; agent?: boolean }
   | { kind: "elsewhere" }
+  | { kind: "aside" }
   | { kind: "refused"; error: string };
 
 /** How a card leaves or stays once the host answered its item. */
@@ -181,7 +211,7 @@ export function fateOf(outcome: QuestionOutcome, line: (ask: NonNullable<Questio
 /** Whether a fate takes the card off the list after its moment on screen. A conflict and a refusal
  *  stay: the one says who answered first and with what, the other what to fix. */
 export function leaves(fate: CardFate | undefined): boolean {
-  return !!fate && (fate.kind === "sent" || fate.kind === "stale" || fate.kind === "withdrawn" || fate.kind === "elsewhere");
+  return !!fate && (fate.kind === "sent" || fate.kind === "stale" || fate.kind === "withdrawn" || fate.kind === "elsewhere" || fate.kind === "aside");
 }
 
 /** How long a leaving card stays: long enough to read its word, longer when a draft went with it. */
@@ -222,7 +252,8 @@ export function loadDrafts(storage: Store | null = safeStorage(), now = Date.now
       if (now - at > DRAFT_KEEP_MS) continue;
       const choice = (PERMISSION_CHOICES as string[]).includes(String(d.choice)) ? (d.choice as PermissionChoice) : undefined;
       const project = typeof d.project === "string" ? d.project : null;
-      out[id] = { selected: d.selected.filter((s): s is string => typeof s === "string"), text: d.text, at, project, ...(choice ? { choice } : {}) };
+      const session = typeof d.session === "string" ? d.session : null;
+      out[id] = { selected: d.selected.filter((s): s is string => typeof s === "string"), text: d.text, at, project, ...(session ? { session } : {}), ...(choice ? { choice } : {}) };
     }
     return out;
   } catch {

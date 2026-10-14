@@ -243,6 +243,15 @@ a small budget of notifications; a refused one says when the next is possible.
 """
 
 
+SIDE_QUESTIONS = """Two ways to ask the operator. AskUser stops the run until they answer: only for what you cannot \
+continue without. SideQuestion(question, why?, options?) does not stop anything: for what can wait — a preference, \
+a name, whether something may go — leave it, carry on with a sensible assumption, and the answer arrives later as a \
+message of its own. Before asking either, look for the answer yourself; never ask what is already waiting (the turn \
+context lists your open side questions). The moment you settle one yourself, take it back with \
+DropSideQuestion(ids, reason) so the operator does not answer it for nothing.
+"""
+
+
 STAFF_BRIEF = """You are {name}, a member of the team of the project {project}.{role} You take tasks from \
 the project's orchestrator (or from the operator directly) and do them in the project's files. Your identity \
 outlives this session: what you write with Report(remember=…) is kept in your notes and read at the start of \
@@ -815,7 +824,8 @@ def tool_sections(advertised: Collection[str], *, admitted: Collection[str] | No
 
     The browser's, self-development's, scheduling's, the loop's and the settings' are the rules of their groups
     (:func:`group_instructions`) and reach the model through the core. Of what is left, a section
-    that carries RULES — Notify's (only what cannot wait; urgent breaks quiet hours) — is shown
+    that carries RULES — Notify's (only what cannot wait; urgent breaks quiet hours), the side questions'
+    (which way of asking stops the run) — is shown
     wherever the session's policy ADMITS the tool, ``admitted``. A section that only TEACHES — history
     search, the board, subagents, services, terminals, peers — follows ``advertised``, what the first
     request puts in ``tools``: a paragraph that teaches a tool the session may not call is an
@@ -827,6 +837,7 @@ def tool_sections(advertised: Collection[str], *, admitted: Collection[str] | No
         _parts(HISTORY_HEADER, HISTORY_PARTS, advertised),
         _parts(BOARD_HEADER, BOARD_PARTS, advertised),
         NOTIFY if "Notify" in allowed else "",
+        SIDE_QUESTIONS if "SideQuestion" in allowed else "",
     )
 
 
@@ -1073,4 +1084,4 @@ def governance_section(path: Path) -> str:
     return ""
 
 
-__all__ = ["BOARD_HEADER", "BOARD_PARTS", "BOARD_PEERS", "BOARD_SERVICES", "BOARD_SUBAGENT", "BOARD_TASKS", "BOARD_TERMINALS", "BOARD_TWO_WAYS", "BOARD_WAKES", "COMPANION", "DEFAULT_RULES", "DISPATCHER", "DISPATCHER_COMPACTION", "HEADLINE_RE", "HISTORY_HEADER", "HISTORY_HEADLINE", "HISTORY_PARTS", "HISTORY_SEARCH", "LOOP", "NOTIFY", "ORCHESTRATOR", "ORCHESTRATOR_COMPACTION", "PERSONA", "SCHEDULING", "SELF_DEVELOPMENT", "SELF_DEVELOPMENT_LOCAL", "YAGNI_OFF", "YAGNI_ON", "YAGNI_RULES", "group_instructions", "companion_sections", "dispatcher_sections", "environment_section", "governance_section", "language_section", "orchestrator_sections", "page_note", "rules_section", "self_development_section", "split_headline", "tool_sections", "turn_context", "without_turn_context", "yagni_note"]
+__all__ = ["BOARD_HEADER", "BOARD_PARTS", "BOARD_PEERS", "BOARD_SERVICES", "BOARD_SUBAGENT", "BOARD_TASKS", "BOARD_TERMINALS", "BOARD_TWO_WAYS", "BOARD_WAKES", "COMPANION", "DEFAULT_RULES", "DISPATCHER", "DISPATCHER_COMPACTION", "HEADLINE_RE", "HISTORY_HEADER", "HISTORY_HEADLINE", "HISTORY_PARTS", "HISTORY_SEARCH", "LOOP", "NOTIFY", "ORCHESTRATOR", "ORCHESTRATOR_COMPACTION", "PERSONA", "SCHEDULING", "SELF_DEVELOPMENT", "SELF_DEVELOPMENT_LOCAL", "SIDE_QUESTIONS", "YAGNI_OFF", "YAGNI_ON", "YAGNI_RULES", "group_instructions", "companion_sections", "dispatcher_sections", "environment_section", "governance_section", "language_section", "orchestrator_sections", "page_note", "rules_section", "self_development_section", "split_headline", "tool_sections", "turn_context", "without_turn_context", "yagni_note"]

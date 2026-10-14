@@ -3,6 +3,7 @@
 
 import { forwardRef, type ReactNode, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, AsrStatus, ModelFallback, Question, SkillEntry, SlashCommand } from "./api";
+import { clipboardImages, nameIncoming, pastedFiles } from "./attachfiles";
 import { Popover } from "./ui/dialogs";
 import { Banner, BottomSheet, SheetRow } from "./ui/phone";
 import { useOffline } from "./store";
@@ -233,13 +234,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   }
 
   const addFiles = useCallback((incoming: Iterable<File>) => {
-    const named = Array.from(incoming).map((f) => {
-      // A pasted screenshot arrives as "image.png" every time: give each one a name of its own.
-      if (!/^(image|blob|file)(\.[a-z0-9]+)?$/i.test(f.name)) return f;
-      const ext = f.name.includes(".") ? f.name.slice(f.name.lastIndexOf(".")) : f.type.startsWith("image/") ? `.${f.type.slice(6).replace("jpeg", "jpg")}` : "";
-      const stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, "").replace("T", "-");
-      return new File([f], `${f.type.startsWith("image/") ? "screenshot" : "pasted"}-${stamp}${ext}`, { type: f.type, lastModified: f.lastModified });
-    });
+    const named = nameIncoming(incoming);
     if (named.length) {
       rememberTarget();
       setFiles((p) => [...p, ...named]);
@@ -454,8 +449,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   // ── paste and the + menu ──
   function onPaste(e: React.ClipboardEvent) {
-    const items = Array.from(e.clipboardData?.items ?? []);
-    const pasted = items.filter((it) => it.kind === "file").map((it) => it.getAsFile()).filter((f): f is File => !!f);
+    const pasted = pastedFiles(e.clipboardData);
     if (!pasted.length) return;
     // Text pasted alongside (rich-text editors add an HTML rendering of the image) is not wanted.
     e.preventDefault();
@@ -465,14 +459,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   async function pasteFromClipboard() {
     setPlusOpen(false);
     try {
-      const items = navigator.clipboard.read ? await navigator.clipboard.read() : [];
-      const got: File[] = [];
-      for (const item of items) {
-        const type = item.types.find((x) => x.startsWith("image/"));
-        if (!type) continue;
-        const blob = await item.getType(type);
-        got.push(new File([blob], `image.${type.slice(6).replace("jpeg", "jpg")}`, { type }));
-      }
+      const got = await clipboardImages();
       if (got.length) {
         addFiles(got);
         return;
@@ -789,7 +776,7 @@ function Ring({ pct }: { pct: number }) {
   );
 }
 
-export function AttachmentCard({ file, onOpen, onRemove }: { file: File; onOpen: () => void; onRemove: () => void }) {
+export function AttachmentCard({ file, onOpen, onRemove }: { file: File; onOpen?: () => void; onRemove: () => void }) {
   const isImage = file.type.startsWith("image/") || previewKind(file.name) === "image";
   // A video shows its first frame, as a picture does itself: a clapperboard glyph said only "video".
   const isVideo = file.type.startsWith("video/");

@@ -4333,10 +4333,12 @@ button.staff-row:hover { background: var(--surface-2); }
   100% { box-shadow: 0 0 0 3px transparent; }
 }
 /* A card that has left the list stays long enough to read why, then fades. */
-.q-card.s-sent, .q-card.s-withdrawn, .q-card.s-elsewhere { animation: q-leave var(--q-leave, 1.6s) var(--ease-in) forwards; }
+.q-card.s-sent, .q-card.s-withdrawn, .q-card.s-elsewhere, .q-card.s-aside { animation: q-leave var(--q-leave, 1.6s) var(--ease-in) forwards; }
 @keyframes q-leave { 0%, 72% { opacity: 1; transform: none; } 100% { opacity: 0; transform: scale(0.98); } }
 .q-card.s-sent { border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); background: color-mix(in srgb, var(--ok) 5%, var(--surface-1)); }
-.q-card.s-withdrawn, .q-card.s-elsewhere { border-style: dashed; background: transparent; }
+.q-card.s-withdrawn, .q-card.s-elsewhere, .q-card.s-aside { border-style: dashed; background: transparent; }
+/* A file held over a card that takes files: the card is where it lands. */
+.q-card.dropping { border-color: var(--accent); border-style: dashed; background: color-mix(in srgb, var(--accent) 6%, var(--surface-1)); }
 .q-card.s-withdrawn .q-title { color: var(--fg-2); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--fg-3) 70%, transparent); }
 .q-card.s-conflict { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
 .q-card.s-refused { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
@@ -4349,6 +4351,8 @@ button.staff-row:hover { background: var(--surface-2); }
 .q-title { margin: 0; font-size: var(--fs-14); font-weight: 600; line-height: var(--lh-ui); color: var(--fg); overflow-wrap: anywhere; }
 .q-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; min-width: 0; font-size: var(--fs-12); color: var(--fg-3); }
 .q-short { flex: none; margin-top: 2px; font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-3); }
+.q-aside { width: var(--ctl-h-sm); height: var(--ctl-h-sm); margin: -2px -4px 0 -4px; border-radius: 50%; background: transparent; color: var(--fg-3); }
+.q-aside:hover { color: var(--fg); }
 .q-flag { display: inline-flex; align-items: center; gap: 3px; padding: 0 6px; border-radius: var(--radius-pill); font-size: var(--fs-11); font-weight: 600; line-height: 16px; }
 .q-flag.urgent { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
 .q-flag.updated { background: color-mix(in srgb, var(--info) 14%, transparent); color: var(--info); font-weight: 500; }
@@ -4385,6 +4389,11 @@ button.staff-row:hover { background: var(--surface-2); }
 .q-field { display: block; min-height: var(--ctl-h); margin: 0; padding: 6px 10px; resize: none; overflow-y: auto; font: inherit; font-size: var(--fs-13); line-height: 1.45; color: var(--fg); background: var(--bg); transition: border-color var(--t-fast); }
 .q-field:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
 .q-field.role-note { border-style: dashed; }
+/* The files of an answer: the paperclip first, then each file as the composer shows it. */
+.q-files { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.q-attach { width: var(--ctl-h-sm); height: var(--ctl-h-sm); border-radius: 50%; color: var(--fg-2); }
+.q-files-hint { min-width: 0; font-size: var(--fs-12); color: var(--fg-3); }
+.q-files .attachment-open { max-width: min(220px, 100%); }
 .q-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; min-width: 0; font-size: var(--fs-12); }
 .q-foot:empty { display: none; }
 .q-state { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }

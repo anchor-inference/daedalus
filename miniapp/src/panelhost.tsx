@@ -298,8 +298,8 @@ export type PanelControls = {
  *  `context` decides the tabs (`tabsFor`) and where the last one is remembered; `at` is the address
  *  the pane lives at, for a pane that is not an agent's own page — a project's focus mode writes the
  *  panel into its own route, or opening a tab would leave the project. */
-export function usePanel(sessionId: string, base: string, opts: { route: URLSearchParams | null; beside?: string | null; pane?: "left" | "right"; context?: PanelContext; at?: (query: Record<string, string | null>) => string; closed?: boolean }): PanelControls {
-  const { route, beside, pane, context = "session", at, closed } = opts;
+export function usePanel(sessionId: string, base: string, opts: { route: URLSearchParams | null; beside?: string | null; pane?: "left" | "right"; context?: PanelContext; at?: (query: Record<string, string | null>) => string; closed?: boolean; shown?: () => PanelTab[] }): PanelControls {
+  const { route, beside, pane, context = "session", at, closed, shown } = opts;
   // What the route may name, the Browser tab included; what a panel opens on by itself is `first`.
   const tabs = routeTabsFor(context);
   const first = tabsFor(context)[0];
@@ -314,6 +314,14 @@ export function usePanel(sessionId: string, base: string, opts: { route: URLSear
   });
   const last = useRef<PanelTab | null>(state.tab);
   if (state.tab) last.current = state.tab;
+  // The tab the panel reopens on: the last one, unless it is a tab the panel no longer offers — a
+  // session's Questions once its side questions are all answered — which would reopen on an empty page.
+  const shownRef = useRef(shown);
+  shownRef.current = shown;
+  const reopen = useCallback((): PanelTab => {
+    const tab = last.current;
+    return tab && (!shownRef.current || shownRef.current().includes(tab)) ? tab : first;
+  }, [first]);
   // What this pane last wrote into the URL, so a route change it caused is not applied back to it.
   const written = useRef<string>(route ? routeKey(route, base, tabs) : "");
   const atRef = useRef(at);
@@ -372,8 +380,8 @@ export function usePanel(sessionId: string, base: string, opts: { route: URLSear
     toggle: useCallback(() => {
       const s = stateRef.current;
       if (s.tab === null) announce();
-      commit(togglePanel(s, last.current, first), s.tab === null);
-    }, [commit, announce, first]),
+      commit(togglePanel(s, reopen(), first), s.tab === null);
+    }, [commit, announce, first, reopen]),
     expand: useCallback(() => {
       const s = stateRef.current;
       if (s.tab !== null) {
@@ -381,8 +389,8 @@ export function usePanel(sessionId: string, base: string, opts: { route: URLSear
         return;
       }
       announce();
-      commit({ ...openTab(s, last.current ?? first), expanded: true }, true);
-    }, [commit, announce, first]),
+      commit({ ...openTab(s, reopen()), expanded: true }, true);
+    }, [commit, announce, first, reopen]),
     back: useCallback(() => commit(goBack(stateRef.current)), [commit]),
     forward: useCallback(() => commit(goForward(stateRef.current)), [commit]),
     openFile: useCallback(

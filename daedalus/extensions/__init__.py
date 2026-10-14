@@ -31,6 +31,7 @@ EXTENSIONS = (
     "daedalus.extensions.inbound",
     "daedalus.extensions.board",
     "daedalus.extensions.peers",
+    "daedalus.extensions.side_questions",
     "daedalus.extensions.subagents",
     "daedalus.extensions.jobs",
     "daedalus.extensions.disk_guard",

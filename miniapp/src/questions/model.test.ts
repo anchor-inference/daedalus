@@ -6,6 +6,7 @@ import {
   answerOf,
   batchOf,
   choosePermission,
+  draftOf,
   fateOf,
   fitDraft,
   fitDrafts,
@@ -23,11 +24,14 @@ import {
   sections,
   setText,
   stepOption,
+  takesFiles,
   takesText,
   textRole,
   toggleOption,
+  withFiles,
   type Drafts,
 } from "./model";
+import { answerPath, concerns, dismissPath, questionsKey } from "./routes";
 
 function question(over: Partial<WaitingQuestion> = {}): WaitingQuestion {
   return {
@@ -230,5 +234,64 @@ describe("a question reworded in place", () => {
   it("leaves a permission's choice alone, since it has no options to lose", () => {
     const d = { selected: [], text: "", at: 1, choice: "allow" as const };
     expect(fitDraft(perm, d)).toBe(d);
+  });
+});
+
+describe("side questions and files with an answer", () => {
+  const side = (over: Partial<WaitingQuestion> = {}) => question({ id: "ask-port", short_id: "qport", project_id: null, origin: "session", session_id: "s1", files: true, options: [], ...over });
+  const png = () => new File(["x"], "screenshot.png", { type: "image/png" });
+
+  it("takes files only for a question an agent asked, and files alone are an answer", () => {
+    expect(takesFiles(side())).toBe(true);
+    expect(takesFiles(question({ kind: "permission", files: false }))).toBe(false);
+    expect(takesFiles(question({ files: undefined }))).toBe(false);
+    expect(isReady(side(), undefined, 1)).toBe(true);
+    expect(isReady(side(), undefined, 0)).toBe(false);
+    expect(isReady(question({ kind: "permission", files: true }), undefined, 1)).toBe(false);
+  });
+
+  it("sends a card with only files, and numbers each answer's files among the batch's uploads", () => {
+    const shot = png();
+    const doc = new File(["y"], "notes.txt", { type: "text/plain" });
+    const other = side({ id: "ask-font", short_id: "qfont" });
+    const drafts: Drafts = { "ask-font": { ...EMPTY, text: "Inter", at: 1 } };
+    const batch = batchOf([side(), other], drafts, { "ask-port": [shot, doc] });
+    expect(batch).toEqual([{ ask_id: "ask-port", text: "" }, { ask_id: "ask-font", text: "Inter" }]);
+    const { items, uploads } = withFiles(batch, { "ask-port": [shot, doc], "ask-font": [png()] });
+    expect(items).toEqual([{ ask_id: "ask-port", text: "", files: [0, 1] }, { ask_id: "ask-font", text: "Inter", files: [2] }]);
+    expect(uploads.map((f) => f.name)).toEqual(["screenshot.png", "notes.txt", "screenshot.png"]);
+    expect(withFiles(batch, {}).uploads).toEqual([]);
+  });
+
+  it("keeps each list's drafts to itself: a session's, a project's and the main chat's", () => {
+    const sessionDraft = { ...EMPTY, text: "x", project: null, session: "s1" };
+    const projectDraft = { ...EMPTY, text: "y", project: "p1" };
+    expect(draftOf({ sessionId: "s1" }, sessionDraft)).toBe(true);
+    expect(draftOf({ sessionId: "s2" }, sessionDraft)).toBe(false);
+    expect(draftOf("all", sessionDraft)).toBe(false);
+    expect(draftOf("all", projectDraft)).toBe(true);
+    expect(draftOf({ projectId: "p1" }, projectDraft)).toBe(true);
+    expect(draftOf({ projectId: "p1" }, { ...sessionDraft, project: "p1" })).toBe(false);
+    const store = new Map<string, string>();
+    const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) };
+    saveDrafts({ a: { ...sessionDraft, at: Date.now() } }, storage);
+    expect(loadDrafts(storage).a.session).toBe("s1");
+  });
+
+  it("reads, answers and puts aside a session's list at its own routes, and redraws only on its own events", () => {
+    expect(questionsKey({ sessionId: "s 1" })).toBe("/api/questions?session=s%201");
+    expect(answerPath({ sessionId: "s1" })).toBe("/api/sessions/s1/asks/answer");
+    expect(dismissPath({ sessionId: "s1" }, "ask-1")).toBe("/api/sessions/s1/asks/ask-1/dismiss");
+    expect(dismissPath({ projectId: "p1" }, "ask-1")).toBeNull();
+    expect(concerns({ sessionId: "s1" }, { type: "ask.side", session_id: "s1" })).toBe(true);
+    expect(concerns({ sessionId: "s1" }, { type: "ask.side", session_id: "s2" })).toBe(false);
+    expect(concerns({ sessionId: "s1" }, { type: "ask.pending", project_id: "p1" })).toBe(false);
+    expect(concerns({ projectId: "p1" }, { type: "ask.side", session_id: "s1" })).toBe(false);
+    expect(concerns({ projectId: "p1" }, { type: "ask.pending", project_id: "p1" })).toBe(true);
+    expect(concerns("all", { type: "ask.batch", project_id: "p2" })).toBe(true);
+  });
+
+  it("lets a card put aside leave the list like one answered elsewhere", () => {
+    expect(leaves({ kind: "aside" })).toBe(true);
   });
 });

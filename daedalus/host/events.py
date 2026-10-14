@@ -417,6 +417,17 @@ class AskUpdated(TypedDict):
     routed_to: NotRequired[str]
 
 
+class AskSide(TypedDict):
+    """A session's side questions changed: one was left, answered, taken back by the agent or put
+    aside by the operator. Its own event rather than ``ask.pending`` / ``ask.answered``, which wake
+    orchestrators and notify the operator; a side question does neither, it only redraws the list."""
+
+    change: Literal["opened", "answered", "withdrawn", "dismissed"]
+    ask_ids: list[str]
+    reason: NotRequired[str]
+    """The agent's few words when it took a question back ("found it in the README")."""
+
+
 class OpenResults(TypedDict):
     """The team's results no decision of the orchestrator has followed: said to it once, when a turn
     of its ended with them still open (see :mod:`daedalus.extensions.orchestrator_loops`)."""
@@ -631,6 +642,7 @@ REGISTRY: dict[str, EventSpec] = {
     "ask.routed": EventSpec(AskRouted),
     "ask.batch": EventSpec(AskBatch),
     "ask.updated": EventSpec(AskUpdated),
+    "ask.side": EventSpec(AskSide),
     "permission.pending": EventSpec(PermissionPending),
     "permission.resolved": EventSpec(PermissionResolved),
     "terminal.created": EventSpec(TerminalCreated),

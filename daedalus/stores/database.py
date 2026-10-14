@@ -2380,6 +2380,52 @@ CREATE TABLE IF NOT EXISTS memory_suggestions (
 CREATE INDEX IF NOT EXISTS memory_suggestions_open ON memory_suggestions(tenant_id, status);
 """, _memory_categories))
 
+# Side questions: any working session may leave the operator a question that does not stop it, and
+# it waits in the same list as an orchestrator's. Such a row belongs to the session that asked
+# (``session_id``) and to no project, so no project's list, count or orchestrator ever reads it; it
+# goes when its session is deleted. The table is rebuilt because SQLite cannot widen the origin's
+# CHECK in place.
+MIGRATIONS.append(("""
+CREATE TABLE asks_rebuilt (
+    id TEXT PRIMARY KEY,
+    short_id TEXT NOT NULL,
+    project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+    origin TEXT NOT NULL CHECK (origin IN ('staff', 'orchestrator', 'dispatcher', 'session')),
+    kind TEXT NOT NULL CHECK (kind IN ('question', 'permission', 'folder', 'project')),
+    staff_id TEXT REFERENCES staff(id) ON DELETE CASCADE,
+    staff_session_id TEXT REFERENCES staff_sessions(id) ON DELETE SET NULL,
+    task_id TEXT REFERENCES board_tasks(id) ON DELETE SET NULL,
+    request_ref TEXT NOT NULL DEFAULT '',
+    text TEXT NOT NULL,
+    detail_json TEXT NOT NULL DEFAULT '{}',
+    routed_to TEXT NOT NULL CHECK (routed_to IN ('orchestrator', 'operator')),
+    suggestion TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    routed_at TEXT NOT NULL,
+    resolved_at TEXT,
+    resolved_by TEXT CHECK (resolved_by IN ('orchestrator', 'operator', 'staff', 'system')),
+    resolution_json TEXT NOT NULL DEFAULT '{}',
+    dispatch_id TEXT REFERENCES dispatches(id) ON DELETE SET NULL,
+    title TEXT NOT NULL DEFAULT '',
+    origin_contract_revision INTEGER,
+    answered_contract_revision INTEGER,
+    session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE
+);
+INSERT INTO asks_rebuilt(id, short_id, project_id, origin, kind, staff_id, staff_session_id, task_id, request_ref, text, detail_json,
+                         routed_to, suggestion, created_at, routed_at, resolved_at, resolved_by, resolution_json, dispatch_id, title,
+                         origin_contract_revision, answered_contract_revision)
+SELECT id, short_id, project_id, origin, kind, staff_id, staff_session_id, task_id, request_ref, text, detail_json,
+       routed_to, suggestion, created_at, routed_at, resolved_at, resolved_by, resolution_json, dispatch_id, title,
+       origin_contract_revision, answered_contract_revision
+FROM asks;
+DROP TABLE asks;
+ALTER TABLE asks_rebuilt RENAME TO asks;
+CREATE INDEX asks_open ON asks(project_id, resolved_at, routed_to);
+CREATE UNIQUE INDEX asks_short_id_open ON asks(short_id) WHERE resolved_at IS NULL;
+CREATE INDEX asks_by_dispatch ON asks(dispatch_id) WHERE dispatch_id IS NOT NULL;
+CREATE INDEX asks_by_session ON asks(session_id, resolved_at) WHERE session_id IS NOT NULL;
+""", True))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

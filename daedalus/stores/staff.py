@@ -51,7 +51,9 @@ MESSAGE_MODES = ("now", "after_turn", "interrupt")
 MESSAGE_STATES = ("queued", "written", "submitted", "acknowledged", "failed")
 _MESSAGE_RANK = {"queued": 0, "written": 1, "submitted": 2, "acknowledged": 3}
 
-ASK_ORIGINS = ("staff", "orchestrator", "dispatcher")
+ASK_ORIGINS = ("staff", "orchestrator", "dispatcher", "session")
+"""``session`` is a side question: one an ordinary agent session left the operator without stopping
+for it. It belongs to that session and to no project."""
 ASK_KINDS = ("question", "permission", "folder", "project")
 """``project`` is the main orchestrator's confirmation before it creates a project: the one request
 that belongs to no project yet, because nothing exists until it is answered."""
@@ -322,6 +324,8 @@ class Ask:
     title: str = ""
     """A few words naming the decision; empty on requests made before titles existed and on staff
     requests, which are shown by :attr:`heading`."""
+    session_id: str | None = None
+    """The session that asked a side question (origin ``session``); ``None`` for every other request."""
 
     @property
     def open(self) -> bool:
@@ -358,6 +362,7 @@ class Ask:
             "dispatch_id": self.dispatch_id,
             "title": self.title,
             "heading": self.heading,
+            "session_id": self.session_id,
         }
 
 
@@ -451,6 +456,7 @@ def _ask(row: Any) -> Ask:
         resolution=_json(row["resolution_json"]),
         dispatch_id=row["dispatch_id"],
         title=row["title"],
+        session_id=row["session_id"],
     )
 
 
@@ -1144,6 +1150,7 @@ class AsksStore:
         suggestion: str = "",
         dispatch_id: str | None = None,
         title: str = "",
+        session_id: str | None = None,
     ) -> Ask:
         """A new request, with a short id nobody else waiting holds.
 
@@ -1152,8 +1159,12 @@ class AsksStore:
         is written in the same insert, before anyone announces the request, so every window that
         shows it learns where it belongs from the row itself.
         """
-        if project_id is None and kind != "project":
-            raise StaffError("only the confirmation of a new project belongs to no project")
+        if (origin == "session") != bool(session_id):
+            raise StaffError("a side question, and only a side question, names the session that asked it")
+        if project_id is None and kind != "project" and origin != "session":
+            raise StaffError("only the confirmation of a new project and a side question belong to no project")
+        if origin == "session" and (project_id is not None or kind != "question" or routed_to != "operator"):
+            raise StaffError("a side question is a question for the operator and belongs to no project")
         if dispatch_id is None and project_id is not None and self.default_dispatch is not None:
             dispatch_id = await self.default_dispatch(project_id)
         if origin not in ASK_ORIGINS:
@@ -1175,10 +1186,10 @@ class AsksStore:
             short = self._short_id()
             try:
                 await self._db.execute(
-                    "INSERT INTO asks(id, short_id, project_id, origin, kind, staff_id, staff_session_id, task_id, request_ref, text, detail_json, routed_to, suggestion, created_at, routed_at, dispatch_id, title, origin_contract_revision) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
+                    "INSERT INTO asks(id, short_id, project_id, origin, kind, staff_id, staff_session_id, task_id, request_ref, text, detail_json, routed_to, suggestion, created_at, routed_at, dispatch_id, title, session_id, origin_contract_revision) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
                     " (SELECT contract_revision FROM board_tasks WHERE id = ?))",
-                    (ask_id, short, project_id, origin, kind, staff_id, staff_session_id, task_id, _plain(request_ref, "the request reference", 500), body, details, routed_to, _plain(suggestion, "the suggestion", TEXT_MAX, multiline=True), at, at, dispatch_id or None, heading, task_id),
+                    (ask_id, short, project_id, origin, kind, staff_id, staff_session_id, task_id, _plain(request_ref, "the request reference", 500), body, details, routed_to, _plain(suggestion, "the suggestion", TEXT_MAX, multiline=True), at, at, dispatch_id or None, heading, session_id or None, task_id),
                 )
             except sqlite3.IntegrityError:
                 if await self._db.fetchone("SELECT 1 FROM asks WHERE short_id = ? AND resolved_at IS NULL", (short,)) is None:
@@ -1220,6 +1231,22 @@ class AsksStore:
             )
             changed = cursor.rowcount
             await cursor.close()
+        return changed == 1
+
+    async def reopen(self, ask_id: str) -> bool:
+        """Open a closed request again, its answer forgotten: for an answer that could not be handed
+        to its asker, so the question waits again rather than be lost. False when another open request
+        drew the same short id meanwhile, and this one then stays closed."""
+        try:
+            async with self._db.transaction() as conn:
+                cursor = await conn.execute(
+                    "UPDATE asks SET resolved_at = NULL, resolved_by = NULL, resolution_json = '{}', answered_contract_revision = NULL WHERE id = ? AND resolved_at IS NOT NULL",
+                    (ask_id,),
+                )
+                changed = cursor.rowcount
+                await cursor.close()
+        except sqlite3.IntegrityError:
+            return False
         return changed == 1
 
     async def revise(self, ask_id: str, *, title: str, text: str, detail: dict[str, Any]) -> bool:
@@ -1275,6 +1302,12 @@ class AsksStore:
         """Requests of one origin, newest first: the main orchestrator's own confirmations."""
         clause = " AND resolved_at IS NULL" if open_only else ""
         rows = await self._db.fetchall(f"SELECT * FROM asks WHERE origin = ?{clause} ORDER BY created_at DESC, rowid DESC LIMIT ?", (origin, limit))  # noqa: S608 — a fixed clause
+        return [_ask(r) for r in rows]
+
+    async def of_session(self, session_id: str, *, open_only: bool = True) -> list[Ask]:
+        """A session's side questions, oldest first."""
+        clause = " AND resolved_at IS NULL" if open_only else ""
+        rows = await self._db.fetchall(f"SELECT * FROM asks WHERE session_id = ?{clause} ORDER BY created_at, rowid", (session_id,))  # noqa: S608 — a fixed clause
         return [_ask(r) for r in rows]
 
     async def open_counts(self, routed_to: str) -> dict[str, int]:

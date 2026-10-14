@@ -201,6 +201,48 @@ async def test_a_batch_of_answers_wakes_the_orchestrator_once(settings: Settings
         await r.manager.close()
 
 
+async def test_files_with_an_answer_reach_the_orchestrator_by_handle_and_never_a_member(settings: Settings, db: Database, tmp_path: Path) -> None:
+    from daedalus.host.session_runner import Attachment
+
+    r = await rig(settings, db, tmp_path, [{"text": "Got the mock-up."}, {"text": "Noted."}, {"text": "Nothing more."}])
+    try:
+        sid = (await r.orch.enable(r.project.id)).settings.orchestrator.session_id
+        database, providers, launch = await ask_three(r, sid)
+        ada = await r.manager.staff.hire(r.project.id, name="Ada")
+        staff_ask = await r.manager.asks.open(r.project.id, origin="staff", kind="question", text="Which font?", routed_to="operator", staff_id=ada.id)
+        mockup = tmp_path / "staged-1.part"
+        mockup.write_bytes(b"\x89PNG\r\n\x1a\nnot really")
+        notes = tmp_path / "staged-2.part"
+        notes.write_text("open on Monday")
+        uploads = [Attachment(path=mockup, name="mockup.png", mime_type="image/png"), Attachment(path=notes, name="notes.txt", mime_type="text/plain")]
+        result = await questions.answer(r.team.app, [  # type: ignore[arg-type]
+            {"ask_id": launch.id, "files": [0]},
+            {"ask_id": staff_ask.id, "text": "Inter", "files": [1]},
+        ], project_id=r.project.id, via="project", uploads=uploads)
+        launched, member = result["results"]
+        assert launched["state"] == "answered" and launched["error"] == ""
+        assert member["state"] == "refused" and "files go only with an answer to a question of an agent" in member["error"]
+        assert (await r.manager.asks.get(staff_ask.id)).open  # type: ignore[union-attr]
+        answered = await r.manager.asks.get(launch.id)
+        assert answered is not None and answered.resolution["text"] == questions.FILES_ONLY and answered.resolution["files"] == ["mockup.png"]
+
+        async def handed() -> list[str]:
+            return [
+                "".join(b.text for b in m.content_blocks if hasattr(b, "text"))
+                for m in await r.manager.sessions.list_transcript(sid) if m.metadata.get("daedalus.origin") == "operator"
+            ]
+
+        await until_await(handed, "the files reached the orchestrator")
+        [text] = await handed()
+        assert f"[{launch.short_id}] Launch day: mockup.png" in text and "att:" in text and "Attached files (kept by handle" in text
+        assert [f.name for f in await r.manager.files.listing(r.project.id)] == ["mockup.png"]
+        with pytest.raises(questions.Unanswerable, match="each attached file belongs to one answer"):
+            await questions.answer(r.team.app, [{"ask_id": database.id, "text": "x", "files": [0]}, {"ask_id": providers.id, "selected": ["Cash"], "files": [0]}],  # type: ignore[arg-type]
+                                   project_id=r.project.id, via="project", uploads=uploads[:1])
+    finally:
+        await r.manager.close()
+
+
 async def test_answer_to_an_old_task_contract_is_recorded_but_not_applied(
     settings: Settings, db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

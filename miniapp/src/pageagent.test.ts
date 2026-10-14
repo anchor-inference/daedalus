@@ -218,5 +218,7 @@ describe("a page's message in the chat", () => {
   it("is the operator's bubble when they asked, a note when the page reported", () => {
     expect(systemNote({ role: "user", text: "Optimise the mesh", origin: "page:cad", silent: false })).toBeNull();
     expect(systemNote({ role: "user", text: "Selected part 12", origin: "page:cad", silent: true })).toEqual({ kind: "page", origin: "cad", body: "Selected part 12" });
+    // The operator's answers to side questions, carried into the session as one message, fold into a line.
+    expect(systemNote({ role: "user", text: "Answers to your side questions", origin: "side_questions" })).toEqual({ kind: "answers", origin: "side_questions", body: "Answers to your side questions" });
   });
 });

@@ -4,9 +4,15 @@
 // Send carries every ready one at once, and the host answers each on its own — sent, answered
 // elsewhere first, or refused with what to fix. What the orchestrator adds appears at once; what it
 // takes back leaves with a word, and says so when a draft of the operator's went with it.
+//
+// A session's own side questions are the same list beside an ordinary chat. An answer to a question
+// an agent asked may bring files — pasted into the field, picked with the paperclip, or dropped on the
+// card; they are this device's only until Send, and go with the batch as one multipart request.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { api, type QuestionOutcome, type WaitingQuestion } from "../api";
+import { nameIncoming, pastedFiles } from "../attachfiles";
+import { AttachmentCard } from "../composerbox";
 import { useEvent } from "../events";
 import { absTime, relTime } from "../format";
 import { plural, t } from "../i18n";
@@ -19,11 +25,12 @@ import { go } from "../shell";
 import { invalidate } from "../store";
 import { isMac } from "../terminal/keys";
 import { errorText } from "../ui";
-import { QUESTIONS_KEY, answerPath, useQuestions, type QuestionScope } from "./data";
+import { QUESTIONS_KEY, answerPath, dismissPath, useQuestions, type QuestionScope } from "./data";
 import {
   EMPTY,
   batchOf,
   choosePermission,
+  draftOf,
   fateOf,
   fitDrafts,
   folds,
@@ -41,9 +48,11 @@ import {
   sections,
   setText,
   stepOption,
+  takesFiles,
   takesText,
   textRole,
   toggleOption,
+  withFiles,
   type CardFate,
   type Draft,
   type Drafts,
@@ -66,11 +75,16 @@ export function QuestionsPanel({ scope, toast }: { scope: QuestionScope; toast: 
   const [ghosts, setGhosts] = useState<Record<string, WaitingQuestion>>({});
   const [fresh, setFresh] = useState<Set<string>>(() => new Set());
   const [sending, setSending] = useState(false);
+  // What the operator attached to each answer so far. Files cannot be kept with the drafts on this
+  // device, so a reload loses them; the words of the draft stay.
+  const [files, setFiles] = useState<Record<string, File[]>>({});
   const withdrawn = useRef(new Map<string, string>());
   const sent = useRef(new Set<string>());
   const seen = useRef<Map<string, WaitingQuestion> | null>(null);
   const draftsRef = useRef(drafts);
   draftsRef.current = drafts;
+  const filesRef = useRef(files);
+  filesRef.current = files;
   const root = useRef<HTMLDivElement>(null);
 
   useEffect(() => saveDrafts(drafts), [drafts]);
@@ -86,6 +100,7 @@ export function QuestionsPanel({ scope, toast }: { scope: QuestionScope; toast: 
       delete next[q.id];
       return next;
     });
+    setFiles((f) => (q.id in f ? Object.fromEntries(Object.entries(f).filter(([k]) => k !== q.id)) : f));
   }, []);
 
   useEffect(() => {
@@ -98,23 +113,27 @@ export function QuestionsPanel({ scope, toast }: { scope: QuestionScope; toast: 
       for (const [id, q] of before) {
         if (now.has(id) || sent.current.has(id)) continue;
         const reason = withdrawn.current.get(id);
-        const hadDraft = !isBlank(draftsRef.current[id]);
-        depart(q, reason !== undefined ? { kind: "withdrawn", reason, hadDraft } : { kind: "elsewhere" });
+        const hadDraft = !isBlank(draftsRef.current[id]) || !!filesRef.current[id]?.length;
+        depart(q, reason !== undefined ? { kind: "withdrawn", reason, hadDraft, agent: q.origin === "session" } : { kind: "elsewhere" });
       }
     }
     seen.current = now;
     // A draft of a question this list no longer holds is dropped — but only a draft of this list's
-    // own questions: the main chat's list must not lose a project's drafts, nor the reverse.
-    setDrafts((d) => fitDrafts(pruneDrafts(d, now.keys(), (draft) => scope === "all" || draft.project === scope.projectId), questions));
+    // own questions: the main chat's list must not lose a project's drafts, nor a session's, nor the reverse.
+    setDrafts((d) => fitDrafts(pruneDrafts(d, now.keys(), (draft) => draftOf(scope, draft)), questions));
   }, [questions, depart, scope]);
 
-  // Taken back by the orchestrator: the event carries its reason, which the card then shows.
-  useEvent(["ask.answered"], (event) => {
+  // Taken back by the orchestrator, or by the agent that left a side question: the event carries the
+  // reason, which the card then shows.
+  useEvent(["ask.answered", "ask.side"], (event) => {
     const p = event.payload ?? {};
-    if (p.via !== "withdrawn" || typeof p.request_id !== "string") return;
-    withdrawn.current.set(p.request_id, String(p.reason ?? ""));
-    const q = seen.current?.get(p.request_id);
-    if (q) depart(q, { kind: "withdrawn", reason: String(p.reason ?? ""), hadDraft: !isBlank(draftsRef.current[q.id]) });
+    const ids = event.type === "ask.side" ? (p.change === "withdrawn" && Array.isArray(p.ask_ids) ? p.ask_ids.map(String) : [])
+      : p.via === "withdrawn" && typeof p.request_id === "string" ? [p.request_id] : [];
+    for (const id of ids) {
+      withdrawn.current.set(id, String(p.reason ?? ""));
+      const q = seen.current?.get(id);
+      if (q) depart(q, { kind: "withdrawn", reason: String(p.reason ?? ""), hadDraft: !isBlank(draftsRef.current[q.id]) || !!filesRef.current[q.id]?.length, agent: q.origin === "session" });
+    }
   });
 
   // A card that left is taken off after its moment on screen.
@@ -151,12 +170,12 @@ export function QuestionsPanel({ scope, toast }: { scope: QuestionScope; toast: 
     return [...byId.values()];
   }, [questions, ghosts]);
   const answerable = shown.filter((q) => !fates[q.id] || fates[q.id].kind === "refused");
-  const batch = batchOf(answerable, drafts);
+  const batch = batchOf(answerable, drafts, files);
   const waiting = (questions ?? []).length;
 
   const change = useCallback((q: WaitingQuestion, update: (d: Draft) => Draft) => {
     const id = q.id;
-    setDrafts((d) => ({ ...d, [id]: { ...update(d[id] ?? EMPTY), project: q.project_id } }));
+    setDrafts((d) => ({ ...d, [id]: { ...update(d[id] ?? EMPTY), project: q.project_id, session: q.session_id ?? null } }));
     // Editing a refused answer is fixing it: the refusal has said what it had to.
     setFates((f) => (f[id]?.kind === "refused" ? Object.fromEntries(Object.entries(f).filter(([k]) => k !== id)) : f));
   }, []);
@@ -167,7 +186,41 @@ export function QuestionsPanel({ scope, toast }: { scope: QuestionScope; toast: 
       delete next[id];
       return next;
     });
+    setFiles((f) => Object.fromEntries(Object.entries(f).filter(([k]) => k !== id)));
   }, []);
+
+  const attach = useCallback((q: WaitingQuestion, incoming: Iterable<File>) => {
+    const named = nameIncoming(incoming);
+    if (!named.length || !takesFiles(q)) return;
+    setFiles((f) => ({ ...f, [q.id]: [...(f[q.id] ?? []), ...named] }));
+    setFates((f) => (f[q.id]?.kind === "refused" ? Object.fromEntries(Object.entries(f).filter(([k]) => k !== q.id)) : f));
+  }, []);
+
+  const unattach = useCallback((id: string, index: number) => {
+    setFiles((f) => {
+      const left = (f[id] ?? []).filter((_, i) => i !== index);
+      const next = { ...f };
+      if (left.length) next[id] = left;
+      else delete next[id];
+      return next;
+    });
+  }, []);
+
+  // The operator puts a side question aside: it leaves the list, and the agent is not woken for it.
+  const putAside = useCallback(async (q: WaitingQuestion) => {
+    const path = dismissPath(scope, q.id);
+    if (!path) return;
+    sent.current.add(q.id);
+    try {
+      await api.post(path);
+      depart(q, { kind: "aside" });
+    } catch (e) {
+      sent.current.delete(q.id);
+      toast(errorText(e));
+    } finally {
+      invalidate(QUESTIONS_KEY);
+    }
+  }, [scope, depart, toast]);
 
   const dismiss = useCallback((id: string) => {
     setGhosts((g) => Object.fromEntries(Object.entries(g).filter(([k]) => k !== id)));
@@ -180,7 +233,16 @@ export function QuestionsPanel({ scope, toast }: { scope: QuestionScope; toast: 
     const byId = new Map(shown.map((q) => [q.id, q]));
     for (const item of batch) sent.current.add(item.ask_id);
     try {
-      const result = await api.post<{ results: QuestionOutcome[] }>(answerPath(scope), batch);
+      const { items, uploads } = withFiles(batch, files);
+      let result: { results: QuestionOutcome[] };
+      if (uploads.length) {
+        const form = new FormData();
+        form.append("items", JSON.stringify(items));
+        for (const file of uploads) form.append("files", file, file.name);
+        result = await api.upload<{ results: QuestionOutcome[] }>(answerPath(scope), form);
+      } else {
+        result = await api.post<{ results: QuestionOutcome[] }>(answerPath(scope), items);
+      }
       const outcomes = Array.isArray(result?.results) ? result.results : [];
       let answered = 0;
       let stale = 0;
@@ -200,6 +262,7 @@ export function QuestionsPanel({ scope, toast }: { scope: QuestionScope; toast: 
       setGhosts((g) => ({ ...g, ...Object.fromEntries(gone.map((id) => [id, byId.get(id)!]).filter(([, q]) => q)) }));
       setFates((f) => ({ ...f, ...nextFates }));
       setDrafts((d) => Object.fromEntries(Object.entries(d).filter(([id]) => !gone.includes(id))));
+      setFiles((f) => Object.fromEntries(Object.entries(f).filter(([id]) => !gone.includes(id))));
       toast(stale ? t("questions.fate.stale") : failed.length ? t("focus.ask.failed", { reason: failed[0] }) : lost ? t("questions.sent.some", { n: answered, lost }) : plural("questions.sent", answered));
     } catch (e) {
       for (const item of batch) sent.current.delete(item.ask_id);
@@ -229,9 +292,13 @@ export function QuestionsPanel({ scope, toast }: { scope: QuestionScope; toast: 
       draft={drafts[q.id]}
       fate={fates[q.id]}
       fresh={fresh.has(q.id)}
+      files={files[q.id] ?? []}
       onChange={(update) => change(q, update)}
       onClear={() => clear(q.id)}
       onDismiss={() => dismiss(q.id)}
+      onAttach={(incoming) => attach(q, incoming)}
+      onUnattach={(index) => unattach(q.id, index)}
+      onPutAside={q.origin === "session" ? () => void putAside(q) : undefined}
     />
   );
 
@@ -242,7 +309,7 @@ export function QuestionsPanel({ scope, toast }: { scope: QuestionScope; toast: 
           <div className="questions-empty">
             <span className="questions-empty-mark"><Icon name="check" size={18} /></span>
             <b>{t("questions.empty")}</b>
-            <span>{t(scope === "all" ? "questions.empty.all" : "questions.empty.sub")}</span>
+            <span>{t(scope === "all" ? "questions.empty.all" : "sessionId" in scope ? "questions.empty.session" : "questions.empty.sub")}</span>
           </div>
         ) : scope === "all" ? (
           projectGroups(shown).map((group) => (
@@ -292,14 +359,20 @@ type CardProps = {
   draft: Draft | undefined;
   fate: CardFate | undefined;
   fresh: boolean;
+  files: File[];
   onChange: (update: (d: Draft) => Draft) => void;
   onClear: () => void;
   onDismiss: () => void;
+  onAttach: (files: Iterable<File>) => void;
+  onUnattach: (index: number) => void;
+  /** Put a side question aside unanswered; absent for every other request. */
+  onPutAside?: () => void;
 };
 
 /** Who asks, in a few words: a member by name and what they want, or the orchestrator. */
 function askerWords(q: WaitingQuestion): string {
   if (q.origin === "dispatcher") return t("questions.asker.main");
+  if (q.origin === "session") return t("questions.asker.agent");
   if (q.origin === "orchestrator") return t(q.kind === "folder" ? "questions.asker.folder" : "questions.asker.orchestrator");
   return t(q.kind === "permission" ? "questions.asker.permission" : "questions.asker.staff", { name: q.asker });
 }
@@ -315,14 +388,17 @@ function bodyOf(q: WaitingQuestion): string {
   return lines.slice(first + 1).join("\n").trim();
 }
 
-function QuestionCard({ q, draft, fate, fresh, onChange, onClear, onDismiss }: CardProps) {
+function QuestionCard({ q, draft, fate, fresh, files, onChange, onClear, onDismiss, onAttach, onUnattach, onPutAside }: CardProps) {
   const d = draft ?? EMPTY;
+  const filesOk = takesFiles(q);
+  const picker = useRef<HTMLInputElement>(null);
+  const [dropping, setDropping] = useState(false);
   const body = bodyOf(q);
   const long = folds(body);
   const [open, setOpen] = useState(false);
   const html = useMemo(() => (body ? renderMarkdown(body) : ""), [body]);
-  const ready = isReady(q, draft);
-  const blank = isBlank(draft);
+  const ready = isReady(q, draft, files.length);
+  const blank = isBlank(draft) && files.length === 0;
   const gone = !!fate && fate.kind !== "refused";
   const field = useRef<HTMLTextAreaElement>(null);
   const permission = isPermission(q);
@@ -363,7 +439,7 @@ function QuestionCard({ q, draft, fate, fresh, onChange, onClear, onDismiss }: C
 
   return (
     <article
-      className={`q-card k-${q.kind} s-${state} ${fresh ? "fresh" : ""} ${q.host ? "host" : ""} ${q.urgent ? "urgent" : ""}`}
+      className={`q-card k-${q.kind} s-${state} ${fresh ? "fresh" : ""} ${q.host ? "host" : ""} ${q.urgent ? "urgent" : ""} ${dropping ? "dropping" : ""}`}
       data-ask={q.short_id}
       data-state={state}
       aria-label={q.heading ?? q.title ?? q.short_id}
@@ -371,6 +447,11 @@ function QuestionCard({ q, draft, fate, fresh, onChange, onClear, onDismiss }: C
       // Dismiss, which is all that is left to do with it.
       inert={(fate && leaves(fate)) || undefined}
       style={fate && leaves(fate) ? ({ ["--q-leave" as string]: `${leaveMs(fate)}ms` }) : undefined}
+      // A file dropped on a card that takes files is that answer's; the chat around the panel would
+      // otherwise take it for the composer.
+      onDragOver={filesOk && !gone ? (e) => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); e.stopPropagation(); setDropping(true); } } : undefined}
+      onDragLeave={filesOk ? () => setDropping(false) : undefined}
+      onDrop={filesOk && !gone ? (e) => { if (!e.dataTransfer?.files?.length) return; e.preventDefault(); e.stopPropagation(); setDropping(false); onAttach(e.dataTransfer.files); } : undefined}
     >
       <header className="q-head">
         <span className={`q-kind k-${q.kind}`} aria-hidden><Icon name={KIND_ICON[q.kind] ?? "question"} size={14} /></span>
@@ -390,6 +471,11 @@ function QuestionCard({ q, draft, fate, fresh, onChange, onClear, onDismiss }: C
           </div>
         </div>
         <code className="q-short">{q.short_id}</code>
+        {onPutAside && !gone && (
+          <button type="button" className="iconbtn q-aside" onClick={onPutAside} aria-label={t("questions.aside")} title={t("questions.aside.title")}>
+            <Icon name="close" size={14} />
+          </button>
+        )}
       </header>
       {body && (
         <>
@@ -439,7 +525,24 @@ function QuestionCard({ q, draft, fate, fresh, onChange, onClear, onDismiss }: C
           placeholder={t(`questions.field.${role}`)}
           aria-label={t(`questions.field.${role}`)}
           onChange={(e) => onChange((x) => setText(x, e.target.value))}
+          onPaste={filesOk ? (e) => {
+            const pasted = pastedFiles(e.clipboardData);
+            if (!pasted.length) return;
+            // The text a rich editor puts beside a pasted image is not part of the answer.
+            e.preventDefault();
+            onAttach(pasted);
+          } : undefined}
         />
+      )}
+      {!gone && filesOk && (
+        <div className="q-files">
+          <button type="button" className="iconbtn q-attach" onClick={() => picker.current?.click()} aria-label={t("questions.attach")} title={t("questions.attach.title")}>
+            <Icon name="attach" size={16} />
+          </button>
+          <input ref={picker} type="file" multiple hidden onChange={(e) => { onAttach(e.target.files ?? []); e.target.value = ""; }} />
+          {files.length === 0 && <span className="q-files-hint">{t("questions.attach.hint")}</span>}
+          {files.map((f, i) => <AttachmentCard key={`${f.name}-${f.size}-${f.lastModified}-${i}`} file={f} onRemove={() => onUnattach(i)} />)}
+        </div>
       )}
       <footer className="q-foot" aria-live="polite">
         {fate ? (
@@ -478,12 +581,13 @@ function FateLine({ fate, onDismiss }: { fate: CardFate; onDismiss: () => void }
     return (
       <span className="q-fate faint">
         <Icon name="undo" size={13} />
-        {t(fate.hadDraft ? "questions.fate.withdrawn.draft" : "questions.fate.withdrawn")}
+        {t(`questions.fate.withdrawn${fate.agent ? ".agent" : ""}${fate.hadDraft ? ".draft" : ""}`)}
         {fate.reason && <span className="q-reason">{fate.reason}</span>}
       </span>
     );
   }
   if (fate.kind === "elsewhere") return <span className="q-fate faint"><Icon name="check" size={13} />{t("questions.fate.elsewhere")}</span>;
+  if (fate.kind === "aside") return <span className="q-fate faint"><Icon name="close" size={13} />{t("questions.fate.aside")}</span>;
   if (fate.kind === "conflict") {
     return (
       <>
