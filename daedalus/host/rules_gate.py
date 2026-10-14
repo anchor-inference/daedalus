@@ -166,13 +166,16 @@ class RulesGate:
         return replace(ask, decision=Decision(ASK, f"the auto-review asks: {verdict.reason}", f"review.{ruled.category}", key=decision.key))
 
     async def _review(self, state: Any, ruled: rules.Ruling, summary: str) -> rules.Verdict:
+        # The one reading of who said what that knows an answer to the agent's question is the operator's.
+        from daedalus.host.session_runner import operator_passages  # Lazy: the session runner imports this module
+
         engine = getattr(state, "engine", None) if state is not None else None
         history = list(getattr(engine, "history", None) or ()) if engine is not None else []
         metadata = state.metadata if state is not None else {}
         prompt = rules.build_prompt(
             title=str(getattr(getattr(state, "session", None), "title", "") or ""),
             brief=str(metadata.get("brief") or ""),
-            request=rules.operator_request(history),
+            request=rules.operator_request(text for _, text in operator_passages(history)),
             category=ruled.category, level=ruled.level, action=summary, redact=self.manager.redactor.redact,
         )
         return await rules.review(self._ask_model, prompt, preset=self.config.review_preset, timeout=float(self.config.review_timeout_seconds))

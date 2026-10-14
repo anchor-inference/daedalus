@@ -1011,10 +1011,10 @@
       "synonyms": ["tray", "close to tray", "minimize", "трей", "свернуть"]
     },
     {
-      "section": "rules", "anchor": "action_rules.review_preset", "config": "action_rules.review_preset",
+      "section": "models", "anchor": "action_rules.review_preset", "config": "action_rules.review_preset",
       "title": { "en": "Action review model", "ru": "Модель проверки действий" },
       "about": { "en": "The cheap model that checks an outgoing action (a message, a publish, a payment) against what you asked for before it runs.", "ru": "Дешёвая модель, которая перед выполнением сверяет внешнее действие (сообщение, публикацию, оплату) с вашей просьбой." },
-      "synonyms": ["auto-review", "review", "action rules", "permissions", "автопроверка", "правила действий", "разрешения", "проверка действий"]
+      "synonyms": ["auto-review", "review", "reviewer", "review model", "action rules", "permissions", "git push", "автопроверка", "правила действий", "разрешения", "проверка действий", "ревью", "ревьюер", "модель ревью"]
     }
   ]
 }

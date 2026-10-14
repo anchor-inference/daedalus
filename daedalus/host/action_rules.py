@@ -269,16 +269,34 @@ class Verdict:
     model: str = ""
 
 
-def operator_request(history: Iterable[Any]) -> list[str]:
-    """The operator's last few messages of a history: the user turns' text, newest kept."""
-    texts: list[str] = []
-    for message in history:
-        if str(getattr(getattr(message, "role", ""), "value", getattr(message, "role", ""))) != "user":
-            continue
-        text = "".join(str(getattr(b, "text", "")) for b in getattr(message, "content_blocks", ()) or () if getattr(b, "type", "") in ("text", "TextBlock") or type(b).__name__ == "TextBlock").strip()
-        if text:
-            texts.append(text[:1500])
+def operator_request(passages: Iterable[str]) -> list[str]:
+    """The last few of the operator's passages, as the reviewer reads them.
+
+    The passages come from the session's own reading of who said what (``operator_passages``), not
+    from the user turns: the answer to a question the agent asked is a tool result, and a review that
+    read only user turns never saw "yes, push it" and blocked every push the operator had just agreed
+    to. Such an answer is written out as the question and the reply rather than as its JSON."""
+    texts = [_readable(text)[:1500] for text in passages if text.strip()]
     return texts[-REQUEST_MESSAGES:]
+
+
+def _readable(text: str) -> str:
+    """An AskUser answer (``{"answers": [{question, selected, custom}], …}``) as plain words; any other passage as it is."""
+    if not text.lstrip().startswith("{"):
+        return text
+    try:
+        answers = json.loads(text).get("answers")
+    except (ValueError, AttributeError):
+        return text
+    if not isinstance(answers, list):
+        return text
+    lines = []
+    for answer in answers:
+        if not isinstance(answer, dict):
+            continue
+        reply = "; ".join([str(x) for x in answer.get("selected") or []] + ([str(answer["custom"])] if answer.get("custom") else []))
+        lines.append(f"Answering the agent's question \"{answer.get('question') or ''}\": {reply or '(no answer)'}")
+    return "\n".join(lines) or text
 
 
 def summarise_action(tool: str, arguments: dict[str, Any], redact: Callable[[str], str]) -> str:

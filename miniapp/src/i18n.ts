@@ -4264,6 +4264,9 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "settings.asr.language": { en: "Language hint (empty = auto)", ru: "Подсказка языка (пусто — определять само)" },
   "settings.asr.autosend": { en: "Send without confirmation", ru: "Отправлять без подтверждения" },
   "settings.asr.autosend.sub": { en: "The words of a voice note go to the agent as soon as they are ready, instead of waiting in the draft.", ru: "Слова голосовой заметки уходят агенту сразу, как только готовы, а не ждут в черновике." },
+  "settings.review.title": { en: "Action review", ru: "Проверка действий" },
+  "settings.review.sub": { en: "Before a push, a message to people or a payment, this model checks the action against what you asked for.", ru: "Перед push, сообщением людям или оплатой эта модель сверяет действие с вашей просьбой." },
+  "settings.review.rules": { en: "Which actions are checked — in Rules", ru: "Какие действия проверяются — в «Правилах»" },
   "settings.vision.title": { en: "Image understanding", ru: "Понимание изображений" },
   "settings.vision.sub": {
     en: "The agent's eyes: a separate image-capable model answers questions about pictures so the main context never carries pixels. Pick any model marked “images on”.",

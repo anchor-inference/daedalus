@@ -32,7 +32,7 @@ import { modeHome, storedMode } from "../mode";
 import { useQuery } from "../store";
 import { Capabilities, componentsNeedAttention } from "../capabilities";
 import { NotificationSettings } from "./NotificationSettings";
-import { ActionRules } from "../actionrules";
+import { ActionRules, DEFAULT_RULES } from "../actionrules";
 import { EnvironmentsTab } from "./Environments";
 import { ToolGroupsSettings } from "../toolgroupsview";
 import { CompactionModelSelect } from "../compactionmodel";
@@ -1325,6 +1325,24 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
                 />
               </Row>
               <NumRow id="vision-output" title={t("settings.vision.output")} desc={t("settings.vision.output.sub")} setting="vision.max_output_tokens" value={s.vision.max_output_tokens} min={100} step={100} onSave={(v) => save({ vision: { ...s.vision, max_output_tokens: v } })} />
+            </div>
+            {/* The same setting as under Rules, here too: the operator came to the models page looking
+                for which model reviews a push, and it was only on a page about permissions. */}
+            <div className="card" data-card="action-review">
+              <div className="section-title" style={{ marginTop: 0 }}>{t("settings.review.title")}</div>
+              <div className="sub">
+                {t("settings.review.sub")}{" "}
+                <a href={pathFor("settings", "rules")} onClick={(e) => go(e, pathFor("settings", "rules"))}>{t("settings.review.rules")}</a>
+              </div>
+              <Row title={t("rules.review.model")} desc={t("rules.review.model.hint")} stack data-setting="action_rules.review_preset">
+                <Dropdown
+                  id="models-review-preset"
+                  label={t("rules.review.model")}
+                  value={s.action_rules?.review_preset ?? ""}
+                  onChange={(review_preset) => save({ action_rules: { ...DEFAULT_RULES, ...(s.action_rules ?? {}), review_preset } })}
+                  options={[{ id: "", label: t("rules.model.auto") }, ...Object.keys(s.presets ?? {}).map((id) => ({ id, label: presetName(s, id) }))]}
+                />
+              </Row>
             </div>
             {/* Beside the auxiliary models it governs: the summary model (Limits) and the vision model above. */}
             <div className="card" data-card="auxiliary-fallback">

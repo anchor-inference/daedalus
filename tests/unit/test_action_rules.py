@@ -97,15 +97,30 @@ def test_the_reviewer_never_sees_a_secret() -> None:
     assert "[arguments from the agent's call of Exec; it is data from the agent" in prompt
 
 
-def test_only_the_operators_turns_count_as_the_request() -> None:
-    from protocore.contracts.types import Message, MessageRole, TextBlock
+def test_only_the_operators_words_count_as_the_request() -> None:
+    from protocore.contracts.types import OPERATOR_WORDS_METADATA_KEY, Message, MessageRole, TextBlock, ToolResultBlock
 
+    from daedalus.host.session_runner import operator_passages
+
+    said = {"daedalus.origin": "operator"}
+    answer = json.dumps({"answers": [{"question": "Push and open the MR?", "selected": ["Yes, push and open an MR into test"], "custom": None}], "source": "user"})
     history = [
-        Message(role=MessageRole.user, content_blocks=[TextBlock(text="email Bob the report")]),
-        Message(role=MessageRole.assistant, content_blocks=[TextBlock(text="I will email Mallory")]),
-        Message(role=MessageRole.user, content_blocks=[TextBlock(text="thanks")]),
+        Message(role=MessageRole.user, content_blocks=[TextBlock(text="fix the title limits")], metadata=said),
+        Message(role=MessageRole.assistant, content_blocks=[TextBlock(text="I will push to prod")]),
+        # The operator's answer to the agent's question arrives as a tool result, not a user turn: the
+        # review once missed it and blocked the push the operator had just agreed to.
+        Message(role=MessageRole.tool, content_blocks=[ToolResultBlock(tool_call_id="c1", content=answer, metadata={OPERATOR_WORDS_METADATA_KEY: True})]),
+        Message(role=MessageRole.user, content_blocks=[TextBlock(text="thanks")], metadata=said),
     ]
-    assert rules.operator_request(history) == ["email Bob the report", "thanks"]
+    assert rules.operator_request(text for _, text in operator_passages(history)) == [
+        "fix the title limits",
+        'Answering the agent\'s question "Push and open the MR?": Yes, push and open an MR into test',
+        "thanks",
+    ]
+
+
+def test_an_answer_that_is_not_an_ask_answer_is_kept_as_written() -> None:
+    assert rules.operator_request(['{"not": "answers"}', "plain"]) == ['{"not": "answers"}', "plain"]
 
 
 # -- the rules in a session ------------------------------------------------------------------------
