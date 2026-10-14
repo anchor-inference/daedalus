@@ -35,7 +35,7 @@ export type ComponentEntry = {
   detail_key: string;
   detail_args: Record<string, string>;
   installable: boolean;
-  /** `extra` | `launcher` | `models` | `none` — which of the four ways this one arrives. */
+  /** `extra` | `launcher` | `models` | `service` | `none` — which of the five ways this one arrives. */
   how: string;
   /** The command or the image tag that installs it where the app cannot. */
   fix: string;
@@ -49,6 +49,19 @@ export type ComponentEntry = {
   /** Stable keys the page writes out in the reader's language. */
   enables: string[];
   progress?: InstallProgress | null;
+  /** A component that is a running process (SearXNG): whether it runs, where, and why not. Absent
+   *  for the others, and for one that is not installed. */
+  service?: ServiceState | null;
+  /** Whether this installation can take it away again — only what it put in place itself. */
+  removable?: boolean;
+};
+
+export type ServiceState = {
+  /** `starting` | `running` | `failed` | `stopped`. */
+  state: string;
+  url: string;
+  error: string;
+  retry_in: number;
 };
 
 export type ComponentsView = {
@@ -128,5 +141,7 @@ export const fetchComponents = () => api.get<Partial<ComponentsView>>("/api/comp
 export const installComponent = (id: string) => api.post<InstallProgress>(`/api/components/${encodeURIComponent(id)}/install`, {});
 
 export const cancelComponent = (id: string) => api.post<{ cancelled: boolean }>(`/api/components/${encodeURIComponent(id)}/cancel`, {});
+
+export const removeComponent = (id: string) => api.post<ComponentEntry>(`/api/components/${encodeURIComponent(id)}/remove`, {});
 
 export const restartAgent = () => api.post<{ result: string }>("/api/components/restart", {});

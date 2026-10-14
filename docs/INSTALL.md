@@ -64,7 +64,7 @@ checkout, `chmod 600`), then `docker compose -f deploy/compose.yaml --env-file .
 | `--profile` | What it starts | Cost |
 |---|---|---|
 | `telegram` | the local Bot API server: files up to 2 GB instead of 20 MB (it needs `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` from https://my.telegram.org/apps) | ~66 MB |
-| `search` | a self-hosted SearXNG. Without it `WebSearch` goes to DuckDuckGo directly; with it, SearXNG is the backend the tool falls back to | ~382 MB |
+| `search` | a self-hosted SearXNG. Without it `WebSearch` goes to DuckDuckGo directly; with it, SearXNG is the backend the tool falls back to. Settings → Components can instead install SearXNG into the state volume, which the supervisor runs beside the agent | ~382 MB |
 | `selfdev` | the rebuilder, the only container that can reach Docker. Needed only to build a new agent image, which is what a change to the image's own recipe asks for | ~237 MB |
 | `browser` | the agent's browser: `browserd` and Chromium from the `:browser` image target, on a network of its own ([below](#the-agents-browser)) | the `:browser` tag |
 

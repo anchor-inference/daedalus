@@ -25,11 +25,11 @@ import asyncio
 import contextlib
 import logging
 import shutil
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 
 from daedalus.config import Settings
-from daedalus.host import components, launcher_bridge
+from daedalus.host import components, launcher_bridge, searxng
 
 logger = logging.getLogger(__name__)
 
@@ -86,8 +86,12 @@ class Installer:
     be reloaded, closed and opened again while it happens.
     """
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, *, after: Callable[[str, bool], Awaitable[None]] | None = None) -> None:
         self.settings = settings
+        self.after = after
+        """Called with a component id and whether it is now installed, once an install or a removal
+        is through — where the application adjusts what depends on it (WebSearch, for SearXNG)."""
+        self._installing: object | None = None
         self._progress: dict[str, dict[str, object]] = {}
         self._task: asyncio.Task[None] | None = None
         self._running_id = ""
@@ -162,7 +166,7 @@ class Installer:
         self._require_disk(component)
         self._running_id = status.id
         frame = self._publish(status.id, "queued", step="starting", restart=component.requires_restart)
-        runner = self._sync_extra if status.how == "extra" else self._ask_launcher
+        runner = {"extra": self._sync_extra, "service": self._install_service}.get(status.how, self._ask_launcher)
         self._task = asyncio.ensure_future(self._run(runner, status.id, component.requires_restart))
         return frame
 
@@ -205,10 +209,20 @@ class Installer:
             self._publish(component_id, "failed", error=f"{type(exc).__name__}: {exc}")
         else:
             self._settle(component_id)
+            await self._after(component_id, True)
             self._publish(component_id, "installed", step="done", restart=restart)
         finally:
             self._running_id = ""
             self._process = None
+            self._installing = None
+
+    async def _after(self, component_id: str, installed: bool) -> None:
+        if self.after is None:
+            return
+        try:
+            await self.after(component_id, installed)
+        except Exception as exc:  # noqa: BLE001 - the component is in place either way; this is the wiring around it
+            logger.warning("adjusting the configuration after %s changed failed: %s: %s", component_id, type(exc).__name__, exc)
 
     def _settle(self, component_id: str) -> None:
         """Let go of whatever cached the component's absence, now that it is there.
@@ -239,16 +253,23 @@ class Installer:
         """
         if self.running_id() != component_id or self._task is None:
             return False
-        if self._process is None:
+        process = self._current_process()
+        if process is None:
             return False
         with contextlib.suppress(ProcessLookupError):
-            self._process.kill()
+            process.kill()
         self._task.cancel()
         return True
 
     def cancellable(self, component_id: str) -> bool:
         """Whether :meth:`cancel` would do anything: there is a child process of ours to kill."""
-        return self.running_id() == component_id and self._process is not None
+        return self.running_id() == component_id and self._current_process() is not None
+
+    def _current_process(self) -> asyncio.subprocess.Process | None:
+        if self._process is not None:
+            return self._process
+        # A SearXNG install runs its steps through an object of its own, which holds the child.
+        return getattr(self._installing, "process", None)
 
     # -- the two ways a component arrives -----------------------------------------------
 
@@ -303,6 +324,38 @@ class Installer:
                 f"{component_id} could not be installed: {last}. If this says no matching distribution, "
                 f"this platform has no prebuilt wheel for it."
             )
+
+    async def _install_service(self, component_id: str) -> None:
+        """SearXNG: put it in the installation's folder, and wait for the supervisor to bring it up.
+
+        Done by this process rather than the launcher, because it is the same work in both shapes —
+        a source archive and a ``uv`` environment — and the container has no launcher to ask.
+        """
+        root = searxng.root_for(self.settings.state_dir, self.settings.runtime_dir)
+        template = Path(self.settings.bot_repo_dir) / "deploy" / "searxng" / "settings.yml"
+        install = searxng.Install(root, template, lambda line: self._publish(component_id, "running", step=line))
+        self._installing = install
+        try:
+            url = await install.run()
+        except searxng.InstallFailed as exc:
+            raise NotInstallable(str(exc)) from None
+        if not url:
+            logger.info("searxng installed; nothing has started it yet")
+
+    async def remove(self, component_id: str) -> None:
+        """Take a removable component away. Only SearXNG is: everything else is the runtime's own."""
+        if component_id != components.SEARXNG:
+            raise NotInstallable(f"{component_id} cannot be removed from here")
+        if (running := self.running_id()):
+            raise Busy(running)
+        root = searxng.root_for(self.settings.state_dir, self.settings.runtime_dir)
+        try:
+            await searxng.remove(root)
+        except searxng.InstallFailed as exc:
+            raise NotInstallable(str(exc)) from None
+        finally:
+            self._progress.pop(component_id, None)
+        await self._after(component_id, False)
 
     async def _ask_launcher(self, component_id: str) -> None:
         """Node or the headless browser: the launcher's folder, so the launcher's job.

@@ -24,7 +24,7 @@ import { plural, t } from "../i18n";
 import { Row } from "../settingsrow";
 import { pathFor } from "../router";
 import { go } from "../ui/index";
-import { errorText, haptic } from "../ui";
+import { confirmAsync, errorText, haptic } from "../ui";
 import type { ComponentEntry, ComponentsView } from "../componentsview";
 import {
   applyFrame,
@@ -33,6 +33,7 @@ import {
   installComponent,
   installFrame,
   mergeComponents,
+  removeComponent,
   restartAgent,
   restartPending,
   settled,
@@ -40,8 +41,13 @@ import {
 
 const label = (id: string) => t(`comp.name.${id}`);
 
-/** The state word, as a chip. Colour carries the same thing the word does, never instead of it. */
+/** The state word, as a chip. Colour carries the same thing the word does, never instead of it.
+ *  A component that is a running process says whether it runs: "installed" over a SearXNG that has
+ *  stopped is the half-truth the card is there to avoid. */
 function StateChip({ entry }: { entry: ComponentEntry }) {
+  if (entry.service && entry.state === "installed") {
+    return <span className={`comp-chip comp-svc-${entry.service.state}`}>{t(`comp.service.${entry.service.state}`)}</span>;
+  }
   return <span className={`comp-chip comp-${entry.state}`}>{t(`comp.state.${entry.state}`)}</span>;
 }
 
@@ -72,13 +78,16 @@ function Card({
   busy,
   onInstall,
   onCancel,
+  onRemove,
 }: {
   entry: ComponentEntry;
   view: ComponentsView;
   busy: string;
   onInstall: (id: string) => void;
   onCancel: (id: string) => void;
+  onRemove: (id: string) => Promise<void>;
 }) {
+  const [removing, setRemoving] = useState(false);
   const installing = entry.state === "installing";
   const failed = entry.progress?.state === "failed";
   const elsewhere = Boolean(busy) && busy !== entry.id;
@@ -136,6 +145,18 @@ function Card({
             {t("comp.cancel")}
           </button>
         )}
+        {entry.removable && !installing && (
+          <button
+            className="btn small"
+            disabled={removing || Boolean(busy)}
+            onClick={() => {
+              setRemoving(true);
+              void onRemove(entry.id).finally(() => setRemoving(false));
+            }}
+          >
+            {t("comp.remove")}
+          </button>
+        )}
       </div>
 
       {needsLauncher && <div className="sub attn comp-line">{t("comp.nolauncher")}</div>}
@@ -174,6 +195,15 @@ export function ComponentsTab({ toast }: { toast: (t: string) => void }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // A service on its way up, or waiting out its backoff, changes without an install to announce it:
+  // the list is read again until it settles, and not at all while nothing is in motion.
+  const settling = Boolean(view?.components.some((c) => c.service && (c.service.state === "starting" || c.service.state === "failed")));
+  useEffect(() => {
+    if (!settling) return;
+    const timer = window.setInterval(() => void load(), 3000);
+    return () => window.clearInterval(timer);
+  }, [settling, load]);
 
   // The install stream. A frame moves one card; a finished one reloads the list, which is where
   // "installed" and the disk total come from.
@@ -237,6 +267,18 @@ export function ComponentsTab({ toast }: { toast: (t: string) => void }) {
     void load();
   }
 
+  async function remove(id: string) {
+    if (!(await confirmAsync(t("comp.remove.confirm", { name: label(id) }), { action: t("comp.remove") }))) return;
+    setProblem("");
+    try {
+      await removeComponent(id);
+      toast(t("comp.toast.removed", { name: label(id) }));
+    } catch (e) {
+      setProblem(errorText(e));
+    }
+    void load();
+  }
+
   async function restart() {
     setRestarting(true);
     try {
@@ -287,7 +329,7 @@ export function ComponentsTab({ toast }: { toast: (t: string) => void }) {
       <div className="comp-grid">
         <SearchComponent />
         {view.components.map((entry) => (
-          <Card key={entry.id} entry={entry} view={view} busy={busy} onInstall={install} onCancel={cancel} />
+          <Card key={entry.id} entry={entry} view={view} busy={busy} onInstall={install} onCancel={cancel} onRemove={remove} />
         ))}
       </div>
     </div>

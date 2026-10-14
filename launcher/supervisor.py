@@ -105,6 +105,8 @@ SELFDEV_DIR = STATE / "selfdev"
 APPLY_RESULT = SELFDEV_DIR / "result.json"
 """What the last apply attempt did, for the bot to read after it comes back up and show in the app. The
 supervisor writes it when it refuses or reverses a change; the bot writes it when the change is live."""
+RUNTIME = Path(os.environ["DAEDALUS_RUNTIME"]) if os.environ.get("DAEDALUS_RUNTIME", "").strip() else None
+"""The native installation's runtime folder, which the launcher names; unset in the container."""
 CONFIGURED_MODE = os.environ.get("DAEDALUS_SELFDEV_MODE", "auto")
 """``server``, ``local``, ``off`` or ``auto``; the same value the bot resolves for itself. The supervisor
 resolves it again from what it can see, because it decides before the bot is running."""
@@ -114,6 +116,11 @@ _dependency_spec = importlib.util.spec_from_file_location("daedalus_dependency_r
 assert _dependency_spec is not None and _dependency_spec.loader is not None
 dependency_runtime = importlib.util.module_from_spec(_dependency_spec)
 _dependency_spec.loader.exec_module(dependency_runtime)
+
+_searxng_spec = importlib.util.spec_from_file_location("daedalus_searxng_runtime", Path(__file__).with_name("searxng.py"))
+assert _searxng_spec is not None and _searxng_spec.loader is not None
+searxng_runtime = importlib.util.module_from_spec(_searxng_spec)
+_searxng_spec.loader.exec_module(searxng_runtime)
 
 _drain_spec = importlib.util.spec_from_file_location("daedalus_update_drain", Path(__file__).with_name("update_drain.py"))
 assert _drain_spec is not None and _drain_spec.loader is not None
@@ -748,6 +755,11 @@ class Supervisor:
         """When each of the recent starts died before it was healthy. Three inside the window and the
         revision goes back to the last known-good one by itself: a change that cannot boot cannot be
         undone from the app, because the app is what is not coming up."""
+        self.searxng = searxng_runtime.Runner(
+            searxng_runtime.root_for(STATE, RUNTIME), BOT_REPO / "deploy" / "searxng" / "settings.yml", log
+        )
+        """SearXNG, when the agent has installed it: run here rather than by the bot, so that it
+        outlives every restart of the bot and is up for the whole time this supervisor is."""
         log(f"self-development mode: {self.mode} (configured {CONFIGURED_MODE})")
 
     async def _drain_before_stop(self, bot_sha: str, core_sha: str, transcript: str,
@@ -1357,6 +1369,10 @@ class Supervisor:
             await asyncio.sleep(30)
             try:
                 keep = {self.child.pid} if self.child is not None and self.child.returncode is None else set()
+                # SearXNG is this process's child too, and asyncio is waiting on it: reaping it here
+                # would take its exit status from under that wait.
+                if self.searxng.pid is not None:
+                    keep.add(self.searxng.pid)
                 reap_zombies(keep)
             except Exception as exc:  # noqa: BLE001
                 log(f"reaping failed: {exc}")
@@ -1396,6 +1412,7 @@ async def main() -> int:
     def _terminate() -> None:
         supervisor.want_running = False
         asyncio.ensure_future(supervisor.stop_child())
+        asyncio.ensure_future(supervisor.searxng.stop())
 
     for sig in (signal.SIGTERM, signal.SIGINT, *((signal.SIGBREAK,) if hasattr(signal, "SIGBREAK") else ())):
         try:
@@ -1416,8 +1433,10 @@ async def main() -> int:
         asyncio.create_task(supervisor.serve_socket()),
         asyncio.create_task(supervisor.budget_loop()),
         asyncio.create_task(supervisor.reap_loop()),
+        asyncio.create_task(supervisor.searxng.run()),
     ]
     await supervisor.run_loop()
+    await supervisor.searxng.stop()
     for task in tasks:
         task.cancel()
     return 0

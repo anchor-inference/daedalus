@@ -3758,6 +3758,21 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             raise HTTPException(404, f"no such component: {component_id}")
         return {"cancelled": installer.cancel(component_id)}
 
+    @api.post("/api/components/{component_id}/remove")
+    async def components_remove(component_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Take a component away again, where it is one this process put in place (SearXNG)."""
+        if component_id not in component_list.CATALOGUE:
+            raise HTTPException(404, f"no such component: {component_id}")
+        if not component_registry().status(component_id).removable:
+            raise HTTPException(501, f"{component_id} is not something this installation can remove from here")
+        try:
+            await installer.remove(component_id)
+        except component_install.Busy as exc:
+            raise HTTPException(409, f"{exc.component_id} is installing; wait for it to finish") from None
+        except component_install.NotInstallable as exc:
+            raise HTTPException(500, exc.reason) from None
+        return await asyncio.to_thread(lambda: component_registry().status(component_id).as_dict())
+
     async def _refuse_restart_while_busy(force: bool) -> None:
         """A restart is refused while any session is running or still writing its last turn down.
 

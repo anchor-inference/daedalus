@@ -19,6 +19,8 @@ speech        a Python extra, synced into the           in the image already
 browser       the launcher fetches it into the          the ``:browser`` image tag carries it;
               installation's runtime folder             switching tags is the launcher's job
 node          the launcher fetches it, likewise         no image carries it
+searxng       this process installs it into the         the stack's ``search`` profile, or the
+              runtime folder; the supervisor runs it    same install into the state volume
 git, rg,      the machine's own, or the pinned copy     in the image already
 opus-tools    in the runtime folder
 bwrap         Linux only; the machine's package         in the image already
@@ -50,7 +52,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from daedalus.config import RuntimeConfig, Settings
-from daedalus.host import toolchain
+from daedalus.host import searxng, toolchain
 
 if TYPE_CHECKING:  # pragma: no cover - the installer holds a registry, so the arrow points one way
     from daedalus.host.component_install import Installer
@@ -68,17 +70,19 @@ OPUS = "opus"
 BWRAP = "bwrap"
 STT_MODELS = "stt-models"
 TTS_VOICES = "tts-voices"
+SEARXNG = "searxng"
 
 #: Every id, in the order the page lists them: what the operator is most likely to want first.
-ORDER: tuple[str, ...] = (SPEECH, STT_MODELS, TTS_VOICES, BROWSER, NODE, GIT, RIPGREP, OPUS, BWRAP)
+ORDER: tuple[str, ...] = (SPEECH, STT_MODELS, TTS_VOICES, SEARXNG, BROWSER, NODE, GIT, RIPGREP, OPUS, BWRAP)
 
 #: How a component is obtained from inside the app.
 #:
 #: ``extra``    a Python extra this process syncs into the environment it is running out of.
 #: ``launcher`` the launcher fetches it; this process asks over the loopback bridge.
 #: ``models``   a download the operator picks from a catalog, on the voice page.
+#: ``service``  this process installs it into a folder of its own, and the supervisor runs it.
 #: ``none``     nothing here can install it; ``fix`` says what can.
-HOW = ("extra", "launcher", "models", "none")
+HOW = ("extra", "launcher", "models", "service", "none")
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +115,8 @@ CATALOGUE: dict[str, Component] = {
     RIPGREP: Component(RIPGREP, ("search",), 0, requires_restart=False),
     OPUS: Component(OPUS, ("voicenotes",), 0, requires_restart=False),
     BWRAP: Component(BWRAP, ("sandbox",), 0, requires_restart=False),
+    # Six megabytes of source and about thirty-five of wheels; it occupies some 130 MB unpacked.
+    SEARXNG: Component(SEARXNG, ("websearch",), 40 * 1024 * 1024, requires_restart=False),
 }
 
 #: The requirement name a skill's front matter uses, for the two components skills can declare.
@@ -151,6 +157,11 @@ class Status:
     """The skills that declare this component in their front matter and are therefore held back."""
     enables: tuple[str, ...] = ()
     progress: dict[str, object] | None = None
+    service: dict[str, object] | None = None
+    """For a component that is a running process rather than files: ``starting``, ``running``,
+    ``failed`` or ``stopped``, with the address it answers at and the reason it failed. None for the
+    rest, and for a service that is not installed."""
+    removable: bool = False
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -170,6 +181,8 @@ class Status:
             "skills": list(self.skills),
             "enables": list(self.enables),
             "progress": self.progress,
+            "service": self.service,
+            "removable": self.removable,
         }
 
 
@@ -261,6 +274,7 @@ class Registry:
             RIPGREP: self._binary_status(RIPGREP, "rg", "ripgrep"),
             OPUS: self._binary_status(OPUS, "opusdec", "opus-tools"),
             BWRAP: self._bwrap,
+            SEARXNG: self._searxng,
         }[component_id]
         status = probe()
         status.enables = component.enables
@@ -390,6 +404,30 @@ class Registry:
 
         return probe
 
+    def _searxng(self) -> Status:
+        root = searxng.root_for(self.settings.state_dir, self.settings.runtime_dir)
+        running = searxng.service(root)
+        if running is not None:
+            key = f"comp.detail.searxng.{running['state']}"
+            detail = f"SearXNG {running['version']} is {running['state']}" + (f" at {running['url']}" if running["url"] else "")
+            if running["error"]:
+                detail += f": {running['error']}"
+            return Status(SEARXNG, "installed", detail, detail_key=key,
+                          detail_args={"url": str(running["url"]), "error": str(running["error"]), "seconds": str(running["retry_in"])},
+                          how="service", disk_bytes=_dir_bytes(root), service=running, removable=True)
+        configured = self.config.tools.web.search.searxng.url
+        if not self.settings.native and searxng.is_default_url(configured) and searxng.stack_answers(configured):
+            # The compose stack's own SearXNG, from the ``search`` profile. Installed in the sense
+            # that matters — WebSearch reaches it — and not this process's to remove.
+            return Status(SEARXNG, "installed", f"the stack's SearXNG answers at {configured}", detail_key="comp.detail.searxng.stack",
+                          detail_args={"url": configured}, how="none",
+                          service={"state": "running", "url": configured, "error": "", "retry_in": 0, "version": ""})
+        if not searxng.is_default_url(configured):
+            return Status(SEARXNG, "missing", f"WebSearch is pointed at {configured}, set by hand; an install here would not change that",
+                          detail_key="comp.detail.searxng.custom", detail_args={"url": configured}, installable=True, how="service")
+        return Status(SEARXNG, "missing", "no SearXNG is installed; WebSearch asks DuckDuckGo directly",
+                      detail_key="comp.detail.searxng.missing", installable=True, how="service")
+
     def _bwrap(self) -> Status:
         from daedalus.tools.shell import bwrap_status  # Lazy: the probe is a subprocess, cached
 
@@ -417,6 +455,7 @@ __all__ = [
     "OPUS",
     "ORDER",
     "RIPGREP",
+    "SEARXNG",
     "SPEECH",
     "STT_MODELS",
     "TTS_VOICES",

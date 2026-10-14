@@ -707,7 +707,8 @@ def _component(cid, state, detail_key, detail_args=None, **over):  # type: ignor
         "id": cid, "state": state, "detail": "", "detail_key": detail_key, "detail_args": detail_args or {},
         "installable": False, "how": "none", "fix": "",
         "download_bytes": 0, "disk_bytes": 0, "requires_restart": False,
-        "installed_count": 0, "total_count": 0, "skills": [], "enables": [], "progress": None, **over,
+        "installed_count": 0, "total_count": 0, "skills": [], "enables": [], "progress": None,
+        "service": None, "removable": False, **over,
     }
 
 
@@ -724,6 +725,9 @@ COMPONENTS = {
         _component("speech", "installed", "comp.detail.speech.ok", download_bytes=15_728_640, enables=["stt", "tts", "voicenotes"]),
         _component("stt-models", "installed", "comp.detail.models.some", {"n": "1", "total": "12"}, how="models", disk_bytes=178_000_000, installed_count=1, total_count=12, enables=["stt"]),
         _component("tts-voices", "installed", "comp.detail.models.some", {"n": "2", "total": "16"}, how="models", disk_bytes=36_577_296, installed_count=2, total_count=16, enables=["tts"]),
+        _component("searxng", "installed", "comp.detail.searxng.running", {"url": "http://127.0.0.1:8768", "error": "", "seconds": "0"},
+                   how="service", download_bytes=41_943_040, disk_bytes=136_314_880, enables=["websearch"], removable=True,
+                   service={"state": "running", "url": "http://127.0.0.1:8768", "error": "", "retry_in": 0, "version": "2026.9.8+3fdc6d753"}),
         _component("browser", "installing", "comp.detail.browser.missing",
                    installable=True, how="launcher", download_bytes=104_857_600, requires_restart=True,
                    enables=["skills.browser", "screenshots"], skills=["accessibility", "canvas-design", "web-design-reviewer", "webapp-testing"],

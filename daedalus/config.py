@@ -627,8 +627,9 @@ class WebSearchConfig(BaseModel):
     is in ``keyproxy.env``.
 
     The default is the one that needs nothing installed. SearXNG answers better, but it is a
-    container and 382 MB of it, so it is a choice an operator makes (``--profile search``) rather
-    than the price of having a search tool at all; where it runs, it is the first fallback.
+    download and a process of its own, so it is a choice an operator makes (``--profile search``,
+    or the SearXNG card in Settings → Components) rather than the price of having a search tool at
+    all; where it runs, it is the first fallback, and an install from the card makes it the backend.
     """
 
     backend: str = "duckduckgo"

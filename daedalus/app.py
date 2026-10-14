@@ -17,6 +17,7 @@ from typing import Any
 from daedalus.config import RuntimeConfig, Settings
 from daedalus.extensions.notifications import Category, Draft, NotificationService, Tone
 from daedalus.extensions.resource_runtime import ResourceMonitor
+from daedalus.host import components, searxng
 from daedalus.host.boot_guard import BootGuard
 from daedalus.host.component_install import Installer
 from daedalus.host.config_validation import ConfigConflict, config_revision
@@ -29,6 +30,7 @@ from daedalus.speech.setup_model import fetch_setup_model
 from daedalus.speech.tts_service import LocalTts
 from daedalus.stores.database import Database
 from daedalus.stores.executions import ExecutionStore
+from daedalus.tools import websearch
 from daedalus.transport.telegram.front import TelegramFront
 
 logger = logging.getLogger(__name__)
@@ -66,7 +68,11 @@ class Application:
         # What the installation is missing and how a missing piece arrives. It is held here rather
         # than built per request because an install outlives the request that asked for it: the
         # headless browser takes minutes, and the page that started it may be reloaded meanwhile.
-        self.components = Installer(settings)
+        self.components = Installer(settings, after=self._component_changed)
+        # WebSearch finds a SearXNG this installation runs itself through this, on every search: the
+        # supervisor picks its port at each start, so the address is read where it is recorded.
+        searxng_root = searxng.root_for(settings.state_dir, settings.runtime_dir)
+        websearch.local_searxng = lambda: searxng.local_url(searxng_root)
         self.guard = BootGuard(settings.state_dir, window_minutes=self.config.ops.boot_loop_window_minutes, threshold=self.config.ops.boot_loop_threshold)
 
     @property
@@ -75,6 +81,18 @@ class Application:
         if self.manager is None:
             raise RuntimeError("the event bus exists once the application has started")
         return self.manager.bus
+
+    async def _component_changed(self, component_id: str, installed: bool) -> None:
+        """Make the search configuration follow SearXNG in and out (see ``searxng.adopted``)."""
+        if component_id != components.SEARXNG:
+            return
+        search = searxng.adopted(self.config.tools.web.search, installed=installed)
+        if search is None:
+            return
+        tools = self.config.tools
+        web = tools.web.model_copy(update={"search": search})
+        await self.save_config(self.config.model_copy(update={"tools": tools.model_copy(update={"web": web})}))
+        logger.info("web search now asks %s first, then %s", search.backend, ", ".join(search.fallback))
 
     async def save_config(self, config: RuntimeConfig, *, expected_revision: str | None = None) -> None:
         async with self._config_lock:

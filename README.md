@@ -131,7 +131,7 @@ How local mode checks a change before it restarts on it, the gates both modes sh
 | Area | Tools |
 |---|---|
 | Files & shell | `Exec` (inside a bubblewrap sandbox — the default on a native install where a namespace probe succeeds, optional in a container, which is a boundary already; `background=true` with `JobOutput` / `JobKill` / `JobList` for what outlives the call, and `JobWait` for a pid, a file, a log line or a port; every job that ends — or is lost to a restart — wakes the session once with its outcome; a long `sleep`, a polling loop in the foreground, or a `pgrep -f` that would find its own shell is refused), `Read`, `Write`, `Edit`, `Find`, `Search` |
-| Web | `WebFetch`, `WebSearch` — DuckDuckGo out of the box with no key at all; a self-hosted SearXNG behind a profile; Serper, Tavily, Exa, Perplexity, Keenable through the key proxy |
+| Web | `WebFetch`, `WebSearch` — DuckDuckGo out of the box with no key at all; a self-hosted SearXNG, installed from Settings → Components (natively too, without Docker) or run as a profile; Serper, Tavily, Exa, Perplexity, Keenable through the key proxy |
 | Seeing | `ImageView` — a separate vision model answers questions about an image, so the main context never carries pixels |
 | Browser | `BrowserOpen`, `BrowserSnapshot`, `BrowserAct`, `BrowserText`, `BrowserLook`, … — a real Chromium you can watch live and take over, driven by an outline of the page with refs; logins kept per project; page content fenced as data; passwords and payments left to you (`BrowserHandoff`); a purchase, a message sent, a deletion or an upload asked about first. Command-line staff get the same tools through their launch's MCP entry. Only on an installation with a browser daemon ([`docs/architecture/browser.md`](docs/architecture/browser.md)) |
 | Delegation | `SubAgent`, `SubAgentSend`, `SubAgentList`, `SpawnAgent`, `AskPeer` — helpers in the same workspace (a report wakes the leader when it is ready; an idle helper can be raised without a task; `tools_off` takes tools away from a helper, so a launch it must not make is impossible rather than discouraged), sibling sessions, named peers |
@@ -208,7 +208,7 @@ Every other piece is a profile, off unless you ask for it:
 | `--profile` | What it starts | Cost |
 |---|---|---|
 | `telegram` | the local Bot API server: files up to 2 GB instead of 20 MB (it needs `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` from https://my.telegram.org/apps) | ~66 MB |
-| `search` | a self-hosted SearXNG. Without it `WebSearch` goes to DuckDuckGo directly; with it, SearXNG is the backend the tool falls back to | ~382 MB |
+| `search` | a self-hosted SearXNG. Without it `WebSearch` goes to DuckDuckGo directly; with it, SearXNG is the backend the tool falls back to. Settings → Components can instead install SearXNG into the state volume, which the supervisor runs beside the agent | ~382 MB |
 | `selfdev` | the rebuilder, the only container that can reach Docker. Needed only to build a new agent image, which is what a change to the image's own recipe asks for | ~237 MB |
 | `browser` | the agent's browser: `browserd` and Chromium from the `:browser` image target, on a network of its own ([more](docs/INSTALL.md#the-agents-browser)) | the `:browser` tag |
 

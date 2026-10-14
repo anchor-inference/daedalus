@@ -17,7 +17,7 @@ Every screen is an address under `/app`: agents, live transcripts, the files an 
 <td width="33%" valign="top">
 
 **🛠️ Real tools**<br/>
-Shell, files, search, web fetch and search (keyless out of the box, self-hosted SearXNG behind a profile), a vision model for images, verification runs, MCP servers per session, skills the agent loads on demand.
+Shell, files, search, web fetch and search (keyless out of the box, self-hosted SearXNG from Settings → Components, or behind a profile), a vision model for images, verification runs, MCP servers per session, skills the agent loads on demand.
 
 </td>
 </tr>

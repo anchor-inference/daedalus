@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from daedalus.config import WebToolsConfig
+from daedalus.tools import websearch
 from daedalus.tools.websearch import SearchError, SearchHit, SearchQuery, clean, client, hit_from, register
 
 
@@ -61,7 +62,7 @@ class SearxngBackend:
         if query.time_range:
             params["time_range"] = query.time_range
         async with client(config, external=False) as http:
-            response = await http.get(own.url.rstrip("/") + "/search", params=params)
+            response = await http.get(websearch.searxng_url(own.url).rstrip("/") + "/search", params=params)
         if response.status_code == 403:
             raise SearchError("searxng refused JSON output: add 'json' to search.formats in its settings.yml")
         data = _check(response, self.id)

@@ -83,6 +83,27 @@ class SearchOutcome:
 
 BACKENDS: dict[str, Callable[[], SearchBackend]] = {}
 
+CONTAINER_SEARXNG = "http://searxng:8080"
+"""The configuration's default SearXNG address: the compose stack's service."""
+
+local_searxng: Callable[[], str] = lambda: ""  # noqa: E731 - a replaceable hook, not a function body
+"""Where a SearXNG this installation runs itself answers right now, or an empty string. The host sets
+it at start (``daedalus.host.searxng.local_url``); left alone, there is no such instance."""
+
+
+def searxng_url(configured: str) -> str:
+    """The SearXNG address a search goes to: the installation's own instance, when the configured
+    address is still the default and that instance is running.
+
+    The default names the compose stack's service, which on a machine is a host name that does not
+    exist; an address the operator typed in is theirs and is used as it is. Resolved per search and
+    never written into the configuration, because the instance's port is the supervisor's choice at
+    every start.
+    """
+    if configured.strip().rstrip("/") == CONTAINER_SEARXNG and (local := local_searxng()):
+        return local
+    return configured
+
 
 def register(factory: Callable[[], SearchBackend]) -> Callable[[], SearchBackend]:
     backend = factory()
@@ -211,6 +232,7 @@ __all__ = [
     "register",
     "render",
     "search",
+    "searxng_url",
 ]
 
 del _backends

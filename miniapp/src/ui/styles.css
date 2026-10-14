@@ -2833,6 +2833,10 @@ input.field[type="range"] {
 .comp-chip.comp-missing { color: var(--fg-2); }
 .comp-chip.comp-installing { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .comp-chip.comp-unavailable { color: var(--fg-3); }
+.comp-chip.comp-svc-running { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.comp-chip.comp-svc-starting { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.comp-chip.comp-svc-failed { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.comp-chip.comp-svc-stopped { color: var(--fg-2); }
 .comp-enables { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
 .comp-tags { display: flex; gap: 6px; flex-wrap: wrap; }
 .comp-tag { padding: 2px 8px; border-radius: var(--radius-pill); background: var(--card); border: 1px solid var(--line); font-size: var(--fs-12); color: var(--fg-2); }

@@ -33,10 +33,11 @@ const SAME_IN_BOTH = [
   // Two calendar services whose names are the same brand in Russian.
   "cal.provider.icloud",
   "cal.provider.outlook",
-  // Three of the components are proper names of programs and are spelled the same in Russian.
+  // Four of the components are proper names of programs and are spelled the same in Russian.
   "comp.name.git",
   "comp.name.node",
   "comp.name.ripgrep",
+  "comp.name.searxng",
   // The name of the composer's switch is the principle's own acronym, which the operator reads as is in either language.
   "composer.yagni",
   "fmt.cron.utc",
@@ -155,7 +156,7 @@ const SPOKEN = [
 ];
 
 // The component ids, as daedalus/host/components.py orders them.
-const COMPONENTS = ["speech", "stt-models", "tts-voices", "browser", "node", "git", "ripgrep", "opus", "bwrap"];
+const COMPONENTS = ["speech", "stt-models", "tts-voices", "searxng", "browser", "node", "git", "ripgrep", "opus", "bwrap"];
 
 describe("the keys the code asks for", () => {
   it("are all in the table", () => {

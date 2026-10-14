@@ -838,6 +838,17 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         nothing = {w: {"usd": 0.0, "tokens": 0, "unpriced": 0} for w in ("today", "week", "all")}
         line = {**nothing, "subscription": None}
         return 200, "application/json", json.dumps({"project_id": parts[3], "since": {}, "staff": [], "orchestrator": line, "other": line, "total": line})
+    if method.upper() == "POST" and len(parts) == 5 and parts[2] == "components" and parts[4] in ("install", "cancel", "remove"):
+        # A card's button on Settings → Components. An install is taken and goes nowhere, a removal
+        # leaves the component missing; check_searxng_component.py answers these itself to watch one go in.
+        if parts[4] == "install":
+            return 200, "application/json", json.dumps({"id": parts[3], "state": "queued", "step": "starting", "step_key": "", "error": "", "restart_required": False})
+        if parts[4] == "cancel":
+            return 200, "application/json", json.dumps({"cancelled": False})
+        return 200, "application/json", json.dumps({"id": parts[3], "state": "missing", "detail": "", "detail_key": "", "detail_args": {}, "installable": True,
+                                                    "how": "service", "fix": "", "download_bytes": 0, "disk_bytes": 0, "requires_restart": False,
+                                                    "installed_count": 0, "total_count": 0, "skills": [], "enables": [], "progress": None,
+                                                    "service": None, "removable": False})
     return None
 
 
