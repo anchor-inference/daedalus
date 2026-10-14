@@ -6,7 +6,7 @@ import { type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, us
 import { createPortal } from "react-dom";
 import { api } from "../api";
 import { t } from "../i18n";
-import { Icon } from "../icons";
+import { Icon, type IconName } from "../icons";
 import { useQuery } from "../store";
 import { errorText } from "../ui";
 import { copyText } from "../ui/components";
@@ -80,7 +80,7 @@ export function PromptCoach({ parentId, draft, raise, phone, toast, onClose, onI
       </Sheet>
     );
   }
-  return <FloatingWindow minimised={minimised} onMinimise={() => setMinimised((m) => !m)} onClose={onClose} menu={menu}>{body}</FloatingWindow>;
+  return <FloatingWindow title={t("coach.title")} icon="wand" minimised={minimised} onMinimise={() => setMinimised((m) => !m)} onClose={onClose} menu={menu}>{body}</FloatingWindow>;
 }
 
 /** The saved prompt: its first lines, the way into the message, a copy, and where it was saved. */
@@ -110,14 +110,15 @@ function ResultCard({ result, phone, onInsert, toast, onOpenFile }: { result: Co
 
 /**
  * The desktop's floating panel: dragged by its title bar, kept inside the screen, and left where the
- * viewer last put it. Minimised, it is a bar in the corner and the coach's session stays mounted, so a
- * run streaming in it is not dropped and picked up again.
+ * viewer last put it. Minimised, it is a bar in the corner and the session inside stays mounted, so a
+ * run streaming in it is not dropped and picked up again. The side question's window is the same panel
+ * under its own title and with a place of its own.
  */
-function FloatingWindow({ minimised, onMinimise, onClose, menu, children }: { minimised: boolean; onMinimise: () => void; onClose: () => void; menu: ReactNode; children: ReactNode }) {
+export function FloatingWindow({ title, icon, positionKey, className, minimised, onMinimise, onClose, menu, children }: { title: string; icon: IconName; positionKey?: string; className?: string; minimised: boolean; onMinimise: () => void; onClose: () => void; menu: ReactNode; children: ReactNode }) {
   const viewport = () => ({ width: window.innerWidth, height: window.innerHeight });
   const [size, setSize] = useState(() => windowSize(viewport()));
   const [at, setAt] = useState<Point>(() => {
-    const remembered = readPosition();
+    const remembered = readPosition(positionKey);
     const box = windowSize(viewport());
     return remembered ? clampPosition(remembered, box, viewport()) : defaultPosition(box, viewport());
   });
@@ -143,7 +144,7 @@ function FloatingWindow({ minimised, onMinimise, onClose, menu, children }: { mi
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
-      writePosition(last);
+      writePosition(last, positionKey);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -151,10 +152,10 @@ function FloatingWindow({ minimised, onMinimise, onClose, menu, children }: { mi
   };
   const style = minimised ? { right: EDGE * 1.5, bottom: COMPOSER_CLEARANCE } : { left: at.x, top: at.y, width: size.width, height: size.height };
   return createPortal(
-    <div className={`coach-window ${minimised ? "min" : ""}`} style={style} role="dialog" aria-label={t("coach.title")}>
+    <div className={`coach-window ${minimised ? "min" : ""} ${className ?? ""}`} style={style} role="dialog" aria-label={title}>
       <div className="coach-head" onPointerDown={drag} title={minimised ? undefined : t("coach.drag")}>
-        <Icon name="wand" size={16} />
-        <span className="coach-title grow truncate">{t("coach.title")}</span>
+        <Icon name={icon} size={16} />
+        <span className="coach-title grow truncate">{title}</span>
         {menu}
         <button type="button" className="iconbtn small" onClick={onMinimise} aria-label={t(minimised ? "coach.restore" : "coach.minimise")} title={t(minimised ? "coach.restore" : "coach.minimise")}>
           <Icon name={minimised ? "expand" : "down"} size={16} />

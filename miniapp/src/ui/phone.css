@@ -1126,6 +1126,9 @@
   .coach-sheet .sheet-head { margin: 0; padding: 0 var(--space-2) 0 var(--gutter); border-bottom: 1px solid var(--line); }
   .coach-sheet .sheet-head h3 { flex: 1; min-width: 0; }
   .coach-sheet .coach-result-actions .btn { flex: 1; justify-content: center; }
+  .btw-ask { padding: var(--space-3) var(--gutter); }
+  .btw-ask textarea { font-size: var(--fs-16); }
+  .btw-actions .btn { flex: 1; justify-content: center; min-height: 44px; }
   .panel-sheet .sheet-head { flex-wrap: wrap; align-items: center; margin: 0 -16px; padding: 0 var(--space-2) 0 var(--gutter); gap: 0; border-bottom: 1px solid var(--line); }
   .panel-sheet-title { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 2px 0 4px; }
   .panel-sheet-title b { font-size: var(--fs-16); font-weight: 600; color: var(--fg); }

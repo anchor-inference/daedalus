@@ -50,12 +50,13 @@ export function clampPosition(at: Point, size: Size, viewport: Size): Point {
   return { x: Math.round(Math.min(Math.max(at.x, EDGE), maxX)), y: Math.round(Math.min(Math.max(at.y, EDGE), maxY)) };
 }
 
-const POSITION_KEY = "daedalus.coach.position";
+export const POSITION_KEY = "daedalus.coach.position";
 
-/** The position this viewer last left the window at, or null; storage that throws or holds junk is no position. */
-export function readPosition(): Point | null {
+/** The position this viewer last left the window at, or null; storage that throws or holds junk is no position.
+ *  Each kind of window keeps its own, so two open at once do not stand on top of each other. */
+export function readPosition(key = POSITION_KEY): Point | null {
   try {
-    const raw = JSON.parse(window.localStorage.getItem(POSITION_KEY) ?? "null") as unknown;
+    const raw = JSON.parse(window.localStorage.getItem(key) ?? "null") as unknown;
     if (raw && typeof raw === "object" && Number.isFinite((raw as Point).x) && Number.isFinite((raw as Point).y)) return { x: (raw as Point).x, y: (raw as Point).y };
   } catch {
     /* a private window or blocked storage: the corner it is */
@@ -63,9 +64,9 @@ export function readPosition(): Point | null {
   return null;
 }
 
-export function writePosition(at: Point): void {
+export function writePosition(at: Point, key = POSITION_KEY): void {
   try {
-    window.localStorage.setItem(POSITION_KEY, JSON.stringify(at));
+    window.localStorage.setItem(key, JSON.stringify(at));
   } catch {
     /* remembered for this visit only */
   }

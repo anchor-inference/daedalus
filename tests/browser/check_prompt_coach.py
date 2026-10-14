@@ -1,8 +1,8 @@
 """The prompt coach's window, driven from a chat's composer in a real browser.
 
 The unit tests pin the server: what the coach may call, where its prompt lands, that no list shows it.
-What only a browser shows is the window: that the composer's button (a wand beside "+" on a desktop, a
-row of the "+" sheet on a phone) opens it with the draft framed in the reader's language, that it
+What only a browser shows is the window: that the composer's button (the wand beside "+" on a desktop,
+whose menu holds the coach beside the side question; a row of the "+" sheet on a phone) opens it with the draft framed in the reader's language, that it
 embeds the coach's own conversation with its question card, that a coach which has saved a prompt
 offers Insert and Copy and the saved path, that Insert puts the prompt into the chat's own message,
 that the desktop window floats inside the screen, can be dragged (and remembers where), minimised and
@@ -42,8 +42,8 @@ PROMPT = (
     "Done when: every item on /menu shows a price formatted like \"350 ₽\", and the page still passes its tests."
 )
 WORDS = {
-    "en": {"open": "Improve prompt", "title": "Prompt coach", "seed": f"Help me improve this prompt:\n\n{DRAFT}", "insert": "Insert into message", "copy": "Copy", "restart": "Start over"},
-    "ru": {"open": "Улучшить промпт", "title": "Улучшение промпта", "seed": f"Помоги улучшить этот промпт:\n\n{DRAFT}", "insert": "Вставить в сообщение", "copy": "Копировать", "restart": "Начать заново"},
+    "en": {"open": "Improve prompt", "helpers": "Improve the prompt or ask a quick question", "title": "Prompt coach", "seed": f"Help me improve this prompt:\n\n{DRAFT}", "insert": "Insert into message", "copy": "Copy", "restart": "Start over"},
+    "ru": {"open": "Улучшить промпт", "helpers": "Улучшить промпт или задать вопрос по ходу", "title": "Улучшение промпта", "seed": f"Помоги улучшить этот промпт:\n\n{DRAFT}", "insert": "Вставить в сообщение", "copy": "Копировать", "restart": "Начать заново"},
 }
 PRESETS = {"opus": {"provider": "claude", "model": "claude-opus-5", "label": "Claude Opus 5", "thinking": True, "reasoning_effort": "high", "images": True, "context_window": 200000, "max_output_tokens": 32000}}
 
@@ -195,9 +195,14 @@ def run(browser, lang: str, phone: bool, scheme: str, problems: list[str]) -> No
         if button.count() != 1:
             say(f"the composer has {button.count()} coach buttons")
             return
-        if button.get_attribute("aria-label") != words["open"]:
-            say(f"the button is not labelled {words['open']!r}")
+        if button.get_attribute("aria-label") != words["helpers"]:
+            say(f"the button is not labelled {words['helpers']!r}")
         button.click()
+        item = page.locator(".helpers-menu [data-action='coach']")
+        item.wait_for(timeout=5000)
+        if words["open"] not in item.inner_text():
+            say(f"the helpers' menu does not offer {words['open']!r} ({item.inner_text()!r})")
+        item.click()
 
     root = ".coach-sheet" if phone else ".coach-window"
     try:

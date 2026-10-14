@@ -78,6 +78,7 @@ import { RawHtml } from "../rawhtml";
 import { RenameSheet, SearchSheet, SessionMenuSheet, SessionTopBar, StateSub, type SessionRow, type SessionTile } from "./SessionPhone";
 import { SubagentsTab, subagentIdFor } from "../subagents";
 import { PromptCoach } from "../coach/PromptCoach";
+import { SideQuestion } from "../btw/SideQuestion";
 import { COMPOSE_EVENT, ComposeTarget, type ComposeRequest } from "../annotate/compose";
 import { noticeFromEvent, raiseFromError, raiseSettingNotice, SettingNoticeLines, settingRef } from "../settinglink";
 
@@ -186,6 +187,10 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // window back up when the button is pressed again. It belongs to this chat and closes when the chat changes.
   const [coach, setCoach] = useState<{ draft: string; raise: number } | null>(null);
   useEffect(() => setCoach(null), [id]);
+  // The side question's window (/btw), with what was asked; `ask` changes with each /btw or press of the
+  // button. Like the coach's, it belongs to this chat and closes when the chat changes.
+  const [btw, setBtw] = useState<{ question: string; ask: number } | null>(null);
+  useEffect(() => setBtw(null), [id]);
   // An ordinary session's side questions decide whether it has a Questions tab at all, so they are read
   // before the tabs are; the orchestrator's and the main chat's lists are read below, with their scope.
   const sideWaiting = useQuestions(panelContext === "session" && !bare ? { sessionId: id } : null).questions?.length ?? 0;
@@ -1703,7 +1708,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             yagni={!!detail?.yagni}
             onChooseMode={bare ? undefined : setMode}
             onYagni={bare ? undefined : setYagni}
-            onCoach={bare || embedded || main || orchestrating || detail?.prompt_coach_of ? undefined : (draft) => setCoach((open) => ({ draft: open?.draft ?? draft, raise: (open?.raise ?? 0) + 1 }))}
+            onCoach={bare || embedded || main || orchestrating || detail?.prompt_coach_of || detail?.btw_of ? undefined : (draft) => setCoach((open) => ({ draft: open?.draft ?? draft, raise: (open?.raise ?? 0) + 1 }))}
+            onBtw={bare || embedded || main || orchestrating || detail?.prompt_coach_of || detail?.btw_of ? undefined : (question) => setBtw((open) => ({ question, ask: (open?.ask ?? 0) + 1 }))}
             place={{ project: detail?.project?.name, workspace: detail?.workspace_name || detail?.workspace, system: !!(detail?.project?.system || detail?.project?.settings.system) }}
             targetProject={detail?.project?.id}
             targetWorkspace={detail?.workspace}
@@ -1834,6 +1840,10 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           onInsert={(prompt) => composer.current?.replace(prompt)}
           onOpenFile={hasDetails && panelTabs.includes("files") ? (path) => openPreview({ base: sessionBase(id), path }) : undefined}
           chat={(coachId) => <SessionScreen key={coachId} id={coachId} onBack={() => setCoach(null)} toast={toast} bare />} />
+      )}
+      {btw && (
+        <SideQuestion parentId={id} question={btw.question} ask={btw.ask} phone={phone} onClose={() => setBtw(null)}
+          chat={(btwId) => <SessionScreen key={btwId} id={btwId} onBack={() => setBtw(null)} toast={toast} placeholder={t("btw.followup")} bare />} />
       )}
 
     </div>

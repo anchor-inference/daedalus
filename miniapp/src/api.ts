@@ -909,6 +909,8 @@ export type SessionDetail = {
   subagent_name?: string | null;
   /** The chat this session is the prompt coach of: it has no coach of its own. */
   prompt_coach_of?: string | null;
+  /** The chat this session answers a side question about (/btw), when it is one. */
+  btw_of?: string | null;
   /** The project this session is the orchestrator of (current or retired). */
   orchestrator_of?: string | null;
   /** The staff member this session is the work of. */

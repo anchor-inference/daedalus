@@ -5105,3 +5105,10 @@ button.coach-path:hover { color: var(--fg); }
 /* The coach's composer is for answering it: the mode chip and the folder chip of a working chat are noise
    in a window this small (the folder is the chat's, which the window sits over). */
 .coach-chat .composer-mode, .coach-chat .composer-place { display: none; }
+/* The helpers' menu names the command each row also answers to, on the right where a shortcut stands. */
+.helpers-menu kbd { margin-left: auto; padding-left: 16px; font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-3); }
+/* The side question's empty window: one field, a line on what happens, and Ask. */
+.btw-ask { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 12px; }
+.btw-ask textarea { width: 100%; resize: vertical; font: inherit; font-size: var(--fs-14); line-height: 1.45; }
+.btw-note { margin: 0; font-size: var(--fs-12); line-height: 1.45; }
+.btw-actions { display: flex; justify-content: flex-end; }

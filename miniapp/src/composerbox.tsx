@@ -45,6 +45,7 @@ import { t } from "./i18n";
 import { insideTerminal } from "./terminal/keys";
 import { raiseFromError } from "./settinglink";
 import { AskCard, type AskCardHandle } from "./questions/AskCard";
+import { btwCommand, btwQuestion } from "./btw/btw";
 import type { Answer } from "./questions/ask";
 
 export type { Answer } from "./questions/ask";
@@ -123,6 +124,9 @@ export type ComposerProps = {
   above?: ReactNode;
   /** Open the prompt coach with the draft as it stands; absent where there is no coach (inside one). */
   onCoach?: (draft: string) => void;
+  /** Ask a side question about the chat (`/btw`, or the helpers' menu): the question, or "" to open its
+   *  window on an empty field. Never a message to the chat, so never a steer while a run is on. */
+  onBtw?: (question: string) => void;
 };
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(props, ref) {
@@ -137,6 +141,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const [progress, setProgress] = useState<number | null>(null);
   const [modelOpen, setModelOpen] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   // The operator's secrets on this draft, by name: the value went to the host when the form was sent.
   const [secrets, setSecrets] = useState<AttachedSecret[]>([]);
   const [secretOpen, setSecretOpen] = useState(false);
@@ -148,6 +153,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const photoInput = useRef<HTMLInputElement>(null);
   const photosInput = useRef<HTMLInputElement>(null);
   const plusButton = useRef<HTMLButtonElement>(null);
+  const helpButton = useRef<HTMLButtonElement>(null);
   const dock = useRef<HTMLDivElement>(null);
 
   // The draft is the session's: leaving and coming back finds it, another session does not.
@@ -261,7 +267,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   // ── the slash palette ──
   const paletteQuery = draft.startsWith("/") && !draft.includes("\n") && !draft.includes(" ") ? draft.slice(1).toLowerCase() : null;
-  const paletteItems = useMemo(() => (paletteQuery === null ? [] : commands.filter((c) => c.name.startsWith(paletteQuery))), [commands, paletteQuery]);
+  // The app's own /btw beside the host's commands: it is answered here, by the side question's window.
+  const offered = useMemo(() => (props.onBtw ? [btwCommand(), ...commands.filter((c) => c.name !== "btw")] : commands), [commands, props.onBtw]);
+  const paletteItems = useMemo(() => (paletteQuery === null ? [] : offered.filter((c) => c.name.startsWith(paletteQuery))), [offered, paletteQuery]);
   const skillItems = useMemo(() => paletteQuery === null ? [] : (props.skills ?? []).filter((s) => s.name.toLowerCase().includes(paletteQuery)).slice(0, Math.max(0, 8 - paletteItems.length)),
     [props.skills, paletteQuery, paletteItems.length]);
   // The run is told in words which skill to load; the Skill tool does the loading, so no new command exists.
@@ -295,6 +303,18 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     ask.current?.go();
   }
 
+  // ── the side question ──
+  // Taken before anything else a send would do: while a run is on, a sent line becomes a steer, and a
+  // side question must never reach the run it is asked beside. Files and secrets stay in the pill for
+  // the next real message.
+  function sideQuestion(text: string): boolean {
+    const question = props.onBtw ? btwQuestion(text) : null;
+    if (question === null) return false;
+    setDraft("");
+    props.onBtw!(question);
+    return true;
+  }
+
   // ── send / stop / queue ──
   const { action, enabled } = primaryAction({ status, hasDraft: !!draft.trim(), hasFiles: files.length > 0 || secrets.length > 0, asking, sending });
   async function send(override?: string) {
@@ -302,6 +322,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     const going = files;
     const handed = secrets.map((secret) => secret.name);
     if (sending || fileReadySession !== sessionId || (!text && going.length === 0 && handed.length === 0)) return;
+    if (sideQuestion(text)) return;
     const queue = status === "running";
     if (text.startsWith("/") && going.length === 0 && commands.some((c) => c.name === text.slice(1).split(" ")[0].toLowerCase())) {
       await runCommand(text);
@@ -336,6 +357,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     }
   }
   function primary() {
+    if (sideQuestion(draft)) return;
     if (action === "stop") onStop();
     else if (action === "reply") void reply();
     else void send();
@@ -399,12 +421,15 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       if (paletteItems.length) pickCommand(paletteItems[0]);
       else pickSkill(skillItems[0]);
     } else if (intent === "escape") {
+      // A layer above the chat (the side question's window, a sheet) took this press already.
+      if (e.defaultPrevented) return;
       if (paletteQuery !== null) {
         e.preventDefault();
         setDraft("");
       } else if (draft === "") e.currentTarget.blur();
     } else if (intent === "send") {
       e.preventDefault();
+      if (sideQuestion(draft)) return;
       if (action === "reply") void reply();
       else void send();
     } else if (intent === "model") {
@@ -640,6 +665,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               onCommands={commands.length || props.skills?.length ? () => { setDraft("/"); window.setTimeout(() => textarea.current?.focus(), 0); } : undefined}
               onSecret={() => setSecretOpen(true)}
               onCoach={props.onCoach ? () => props.onCoach!(draft) : undefined}
+              onBtw={props.onBtw ? () => props.onBtw!("") : undefined}
               commandsHint={commands.length || props.skills?.length ? t("ph.plus.commands.hint", { n: commands.length + (props.skills?.length ?? 0) }) : undefined}
               place={place.map((chip) => chip.name).join(" · ") || undefined} />
           )}
@@ -652,12 +678,23 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); setSecretOpen(true); }}><Icon name="lock" size={16} />{t("composer.secret")}</button>
             </Popover>
           )}
-          {/* The coach is one tap from the field on a desktop; a phone's row has no room for it, and
-              it waits in the + sheet there instead. */}
-          {!phone && props.onCoach && (
-            <button type="button" className="iconbtn flat coach-open" onClick={() => props.onCoach!(draft)} aria-label={t("coach.open")} title={t("coach.open")}>
+          {/* The helpers — the prompt coach and the side question — are one button beside the field on a
+              desktop, a menu of two when both are there; a phone's row has no room for it, and they wait
+              in the + sheet there instead. */}
+          {!phone && (props.onCoach || props.onBtw) && (
+            <button ref={helpButton} type="button" className={`iconbtn flat coach-open ${helpOpen ? "on" : ""}`}
+              onClick={() => { if (props.onCoach && props.onBtw) setHelpOpen((o) => !o); else if (props.onCoach) props.onCoach(draft); else props.onBtw!(""); }}
+              aria-label={props.onCoach && props.onBtw ? t("helpers.open") : props.onCoach ? t("coach.open") : t("btw.open")}
+              title={props.onCoach && props.onBtw ? t("helpers.open") : props.onCoach ? t("coach.open") : t("btw.open")}
+              aria-haspopup={props.onCoach && props.onBtw ? "menu" : undefined} aria-expanded={props.onCoach && props.onBtw ? helpOpen : undefined}>
               <Icon name="wand" />
             </button>
+          )}
+          {helpOpen && !phone && (
+            <Popover anchor={helpButton.current} onClose={() => setHelpOpen(false)} className="plus-menu helpers-menu" label={t("helpers.open")}>
+              {props.onCoach && <button type="button" role="menuitem" data-action="coach" onClick={() => { setHelpOpen(false); props.onCoach!(draft); }}><Icon name="wand" size={16} />{t("coach.open")}</button>}
+              {props.onBtw && <button type="button" role="menuitem" data-action="btw" onClick={() => { setHelpOpen(false); props.onBtw!(""); }}><Icon name="ask" size={16} />{t("btw.open")}<kbd className="menu-kbd">/btw</kbd></button>}
+            </Popover>
           )}
           {secretOpen && <SecretSheet sessionId={sessionId} phone={phone} attached={secrets.map((secret) => secret.name)} onClose={() => setSecretOpen(false)}
             onAttach={(secret) => setSecrets((list) => [...list.filter((other) => other.name !== secret.name), secret])} />}
@@ -740,9 +777,9 @@ function draftChange(saved: DraftTarget | null, now: DraftTarget): string {
  * The composer's "+" on a phone: three tiles for what is attached most (a photo now, a picture from the
  * gallery, a file) and rows for the rest. Each command is offered only where the composer has it.
  */
-export function PlusSheet({ onClose, onPhoto, onPhotos, onFiles, onPaste, onRecord, onCommands, commandsHint, onSecret, onCoach, place, extra }: {
+export function PlusSheet({ onClose, onPhoto, onPhotos, onFiles, onPaste, onRecord, onCommands, commandsHint, onSecret, onCoach, onBtw, place, extra }: {
   onClose: () => void; onPhoto: () => void; onPhotos?: () => void; onFiles: () => void; onPaste?: () => void; onRecord?: () => void;
-  onCommands?: () => void; commandsHint?: string; onSecret?: () => void; onCoach?: () => void; place?: string; extra?: ReactNode;
+  onCommands?: () => void; commandsHint?: string; onSecret?: () => void; onCoach?: () => void; onBtw?: () => void; place?: string; extra?: ReactNode;
 }) {
   const run = (fn: () => void) => () => { onClose(); fn(); };
   return (
@@ -757,6 +794,7 @@ export function PlusSheet({ onClose, onPhoto, onPhotos, onFiles, onPaste, onReco
       {onCommands && <SheetRow icon="bolt" label={t("ph.plus.commands")} hint={commandsHint} chevron onClick={run(onCommands)} />}
       {onSecret && <SheetRow icon="lock" label={t("composer.secret")} hint={t("composer.secret.hint")} onClick={run(onSecret)} />}
       {onCoach && <SheetRow icon="wand" label={t("coach.open")} hint={t("coach.open.hint")} onClick={run(onCoach)} data={{ action: "coach" }} />}
+      {onBtw && <SheetRow icon="ask" label={t("btw.open")} hint={t("btw.open.hint")} onClick={run(onBtw)} data={{ action: "btw" }} />}
       {place && <SheetRow icon="folder" label={t("ph.plus.place")} hint={t("ph.plus.place.hint")} value={place} />}
       {extra}
     </BottomSheet>

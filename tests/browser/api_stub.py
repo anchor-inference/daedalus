@@ -678,6 +678,12 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         # unfinished. A harness that draws the window (check_prompt_coach.py) answers these itself.
         coach = {"session_id": f"coach-{parts[3]}", "parent_id": parts[3], "finished": False, "result": None}
         return 200, "application/json", json.dumps({"coach": {**coach, "created": True} if method.upper() == "POST" else None})
+    if len(parts) == 5 and parts[2] == "sessions" and parts[4] == "btw" and method.upper() in ("POST", "DELETE"):
+        # The chat's side question (/btw): asked, its own session; closed, gone. A harness that draws
+        # the window (check_btw.py) answers these itself.
+        if method.upper() == "DELETE":
+            return 200, "application/json", json.dumps({"deleted": 1})
+        return 200, "application/json", json.dumps({"btw": {"session_id": f"btw-{parts[3]}", "parent_id": parts[3], "lent": 2}})
     write = SHARED_WRITES.get((method.upper(), path))
     if write is not None:
         return write
