@@ -134,9 +134,12 @@ export type SessionScreenProps = {
   /** Opened by its plain address in Agents mode: a session that belongs to orchestration mode (the
    *  main chat, anything of a project with an orchestrator) moves there as soon as it is known to. */
   leaveForOrchestration?: boolean;
+  /** Drawn inside another page (the companion's): the side panel starts closed whatever was last
+   *  open elsewhere, and never writes the address, which belongs to the page around it. */
+  embedded?: boolean;
 };
 
-export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus, banner, flow, placeholder, main = false, leaveForOrchestration = false }: SessionScreenProps) {
+export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus, banner, flow, placeholder, main = false, leaveForOrchestration = false, embedded = false }: SessionScreenProps) {
   // Each pane says which session it shows, so a split view reports both and the voice screen's
   // embedded session reports itself, without anybody reading the address.
   usePresenceScope({ session: id || undefined });
@@ -171,7 +174,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       : undefined),
     [focus?.projectId, focus?.kind, id, main],
   );
-  const panel = usePanel(id, sessionBase(id), { route: pane === "right" ? null : route.query, beside: pane === "left" ? route.with : null, pane, context: panelContext, at: panelAt });
+  const panel = usePanel(id, sessionBase(id), { route: pane === "right" || embedded ? null : route.query, beside: pane === "left" ? route.with : null, pane, context: panelContext, at: panelAt, closed: embedded });
   const panelTabs = tabsFor(panelContext, { browser: hasBrowser || panel.state.tab === "browser", preview: panel.state.stack.length > 0, subagents: (detail?.subagents?.length ?? 0) > 0 || panel.state.tab === "subagents" });
   const browserShown = pipGroup(browsers.groups);
   const runningSubagents = detail?.subagents?.filter((child) => child.running).length ?? 0;

@@ -298,8 +298,8 @@ export type PanelControls = {
  *  `context` decides the tabs (`tabsFor`) and where the last one is remembered; `at` is the address
  *  the pane lives at, for a pane that is not an agent's own page — a project's focus mode writes the
  *  panel into its own route, or opening a tab would leave the project. */
-export function usePanel(sessionId: string, base: string, opts: { route: URLSearchParams | null; beside?: string | null; pane?: "left" | "right"; context?: PanelContext; at?: (query: Record<string, string | null>) => string }): PanelControls {
-  const { route, beside, pane, context = "session", at } = opts;
+export function usePanel(sessionId: string, base: string, opts: { route: URLSearchParams | null; beside?: string | null; pane?: "left" | "right"; context?: PanelContext; at?: (query: Record<string, string | null>) => string; closed?: boolean }): PanelControls {
+  const { route, beside, pane, context = "session", at, closed } = opts;
   // What the route may name, the Browser tab included; what a panel opens on by itself is `first`.
   const tabs = routeTabsFor(context);
   const first = tabsFor(context)[0];
@@ -308,6 +308,7 @@ export function usePanel(sessionId: string, base: string, opts: { route: URLSear
     if (fromRoute) return applyPanelQuery(PANEL_CLOSED, fromRoute, base);
     // The second pane keeps its panel closed until asked while the window has room for one only.
     if (pane === "right" && window.innerWidth < DUAL_BOTH_MIN) return PANEL_CLOSED;
+    if (closed) return PANEL_CLOSED;
     const tab = readPanelTab(window.innerWidth, undefined, context);
     return tab ? openTab(PANEL_CLOSED, tab) : PANEL_CLOSED;
   });

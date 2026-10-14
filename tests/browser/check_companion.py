@@ -1,10 +1,11 @@
-"""The companion's page: its face and name, its state, Pause, its tabs, and what a typed message does.
+"""The companion's page: its face and name, its state, its menu, its four tabs, and what a typed message does.
 
 The unit tests pin the API and the session; what only a browser shows is that the header draws what
-`GET /api/companion` says, that each tab reads its own endpoint and draws something rather than an
-error, that a goal added on the page is listed and can be paused and deleted, that the face can be
-edited, and that a message typed into the conversation is a text turn (`/api/companion/message`) and
-not an utterance. In both languages, on a wide window and on a phone.
+`GET /api/companion` says, that each tab and each sheet of the menu reads its own endpoint and draws
+something rather than an error, that a goal added on the page is listed and can be paused, that the
+face can be edited, that the header fits a phone, and that a message typed into the conversation is
+a text turn (`/api/companion/message`) and not an utterance. In both languages, on a wide window and
+on a phone.
 
     cd miniapp && npm run build
     python3 tests/browser/serve_app.py 8231 /tmp/app-root &
@@ -27,8 +28,12 @@ from api_stub import expect_app  # noqa: E402
 
 BASE = shots.BASE
 TABS = {
-    "en": ["Conversation", "Goals", "Schedule", "Activity", "Computer", "Tools", "Memory"],
-    "ru": ["Разговор", "Цели", "Расписание", "Активность", "Компьютер", "Инструменты", "Память"],
+    "en": ["Chat", "Goals", "Activity", "Computer"],
+    "ru": ["Разговор", "Цели", "Активность", "Компьютер"],
+}
+MENU = {
+    "en": {"edit": "Edit name and look", "pause": "Pause", "tools": "What it can do", "memory": "What it remembers"},
+    "ru": {"edit": "Имя и внешность", "pause": "Пауза", "tools": "Что он умеет", "memory": "Что он помнит"},
 }
 
 
@@ -55,15 +60,22 @@ def run(browser, check, lang: str, viewport: dict, where: str) -> None:  # type:
     page.on("pageerror", lambda error: errors.append(str(error)))
     page.route("**/api/**", stub)
     page.goto(f"{BASE}/companion?token=t&scheme=dark&lang={lang}")
-    page.wait_for_selector(".companion-title .companion-avatar", timeout=15000)
+    page.wait_for_selector(".pagehead-row > .companion-avatar", timeout=15000)
 
     title = page.locator(".pagehead h1").inner_text()
     check("Daedalus" in title, f"{where}: the header names the companion ({title!r})")
-    check(page.locator(".companion-title .companion-avatar line").count() >= 1, f"{where}: and draws its face with the antenna the profile asked for")
+    check(page.locator(".pagehead-row > .companion-avatar line").count() >= 1, f"{where}: and draws its face with the antenna the profile asked for")
     word = page.locator(".companion-state").inner_text()
-    check(word.strip() in ("Agents working", "Работают агенты"), f"{where}: the state chip says what it is doing ({word!r})")
+    check(word.strip() in ("Agents working", "Работают агенты"), f"{where}: the state line says what it is doing ({word!r})")
     tabs = page.locator(".companion-tabs [role=tab]").all_inner_texts()
-    check(tabs == TABS[lang], f"{where}: the seven tabs, in the reader's language ({tabs})")
+    check(tabs == TABS[lang], f"{where}: the four tabs, in the reader's language ({tabs})")
+    # The header was a row that ran off a phone: Call cut in half, the state wrapped under the face.
+    edge = page.evaluate("(() => { const r = document.querySelector('.companion-menu').getBoundingClientRect(); return r.right; })()")
+    check(edge <= viewport["width"], f"{where}: the menu, the last thing on the header, is inside the window ({edge:.0f})")
+    clipped = page.evaluate("[...document.querySelectorAll('.companion-tabs [role=tab]')].filter(b => b.scrollWidth > b.clientWidth + 1 || b.getBoundingClientRect().right > window.innerWidth).length")
+    check(clipped == 0, f"{where}: every tab label is whole and on the screen ({clipped} clipped)")
+    one = page.evaluate("(() => { const n = document.querySelector('.pagehead h1').getBoundingClientRect(); const s = document.querySelector('.companion-sub').getBoundingClientRect(); return s.top >= n.bottom - 2 && Math.abs(s.left - n.left) < 2 && s.height < 26; })()")
+    check(one, f"{where}: the state is one line, straight under the name")
     check(page.locator(".voice-beta").count() == 0, f"{where}: no beta chip on the page any more")
 
     # The conversation opens on its transcript, and a typed message is a text turn.
@@ -77,11 +89,19 @@ def run(browser, check, lang: str, viewport: dict, where: str) -> None:  # type:
     check(len(sent) == 1 and sent[0][2].get("text") == "what is on today" and sent[0][2].get("source") == "app", f"{where}: a typed message goes to /api/companion/message ({sent})")
     check(not [p for m, p, b in posted if p == "/api/companion/say"], f"{where}: and not as an utterance")
 
-    # Pause.
-    page.locator(".pagehead-actions button[aria-pressed]").first.click()
+    def menu(item: str) -> None:
+        page.locator(".companion-menu").click()
+        page.get_by_role("menuitem", name=MENU[lang][item], exact=True).click()
+
+    # Pause, from the menu; the banner it leaves resumes.
+    menu("pause")
     page.wait_for_timeout(400)
     check(("POST", "/api/companion/pause", {"paused": True}) in posted, f"{where}: Pause pauses it")
-    check(page.locator(".companion-state.paused").count() == 1, f"{where}: and the header says so")
+    check(page.locator(".companion-state.state-paused").count() == 1, f"{where}: and the header says so")
+    check(page.locator(".companion-paused").count() == 1, f"{where}: with a line saying what pausing means")
+    page.locator(".companion-paused button").click()
+    page.wait_for_timeout(400)
+    check(("POST", "/api/companion/pause", {"paused": False}) in posted, f"{where}: and its button resumes")
 
     # Goals: listed, added, paused, deleted.
     page.locator(".companion-tabs [role=tab]").nth(1).click()
@@ -89,19 +109,22 @@ def run(browser, check, lang: str, viewport: dict, where: str) -> None:  # type:
     page.wait_for_selector(".companion-goal", timeout=15000)
     check(page.locator(".companion-goal").count() == 2, f"{where}: the goals tab lists the two open goals")
     check(page.locator(".companion-goal-report").count() == 1, f"{where}: with the last report of the one that has one")
+    check(page.locator(".companion-sched").count() >= 1, f"{where}: and what runs on its clock under them")
+    page.locator(".companion-head-row .btn").first.click()
     form = page.locator(".companion-goal-form")
+    form.wait_for(timeout=5000)
     form.locator("input").first.fill("Read the news at nine")
-    form.locator("input").nth(1).fill("daily")
     form.locator("button[type=submit]").click()
     page.wait_for_function("document.querySelectorAll('.companion-goal').length === 3", timeout=5000)
-    check(any(p == "/api/companion/goals" and b.get("cadence") == "daily" for m, p, b in posted), f"{where}: a goal added on the page is written with its cadence")
+    check(any(p == "/api/companion/goals" and b.get("cadence") == "daily" for m, p, b in posted), f"{where}: a goal added on the page is written with the cadence it offered (every day)")
+    check(page.locator(".companion-goal-form").count() == 0, f"{where}: and the sheet closes")
     first = page.locator(".companion-goal").first
-    first.locator(".btnrow button").first.click()
+    first.locator(".companion-goal-actions button").first.click()
     page.wait_for_timeout(400)
     check(any(m == "PATCH" and b.get("status") == "paused" for m, p, b in posted), f"{where}: and can be paused from its card")
 
-    # Every other tab draws without an error.
-    for index, selector in ((2, ".companion-pane .card, .companion-pane .empty"), (3, ".companion-activity li"), (4, ".companion-computer"), (5, ".companion-pane code"), (6, ".companion-pane .empty, .companion-pane .companion-row")):
+    # The other tabs, and the two sheets of the menu, draw without an error.
+    for index, selector in ((2, ".companion-activity li"), (3, ".companion-computer")):
         page.locator(".companion-tabs [role=tab]").nth(index).click()
         try:
             page.wait_for_selector(selector, timeout=8000)
@@ -109,9 +132,19 @@ def run(browser, check, lang: str, viewport: dict, where: str) -> None:  # type:
         except Exception:  # noqa: BLE001 — reported below
             drawn = False
         check(drawn, f"{where}: the {TABS['en'][index]} tab draws ({selector})")
+    for item, selector in (("tools", ".companion-sheet code"), ("memory", ".companion-sheet .companion-empty, .companion-sheet .companion-note")):
+        menu(item)
+        try:
+            page.wait_for_selector(selector, timeout=8000)
+            drawn = True
+        except Exception:  # noqa: BLE001 — reported below
+            drawn = False
+        check(drawn, f"{where}: the {item} sheet draws ({selector})")
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(300)
 
     # The face can be edited.
-    page.locator(".pagehead-actions button").first.click()
+    menu("edit")
     page.wait_for_selector(".companion-editor", timeout=5000)
     page.locator(".companion-editor input.field").fill("Iris")
     page.locator(".companion-swatch").nth(2).click()
@@ -122,13 +155,17 @@ def run(browser, check, lang: str, viewport: dict, where: str) -> None:  # type:
     page.wait_for_function("document.querySelector('.pagehead h1').innerText.includes('Iris')", timeout=8000)
     check(True, f"{where}: and the header follows")
 
-    # Call opens the stage and the microphone, and tells the server; hanging up closes both.
-    page.locator(".companion-call").click()
+    # The field's microphone opens the stage and the microphone, and tells the server; the same
+    # button, now Hang up, closes both. It is the only microphone on the page.
+    page.locator(".companion-tabs [role=tab]").first.click()
+    check(page.locator(".voice-read").count() == 1, f"{where}: closing the sheets with Escape left the conversation on its transcript")
+    page.locator(".voice-compose-btn.mic").click()
     page.wait_for_selector(".voice-stage", timeout=10000)
     page.wait_for_timeout(500)
-    check(("POST", "/api/companion/call", {"on": True}) in posted, f"{where}: Call opens a call on the server")
-    check(page.locator(".companion-call.on").count() == 1, f"{where}: and the button turns into Hang up")
-    page.locator(".companion-call").click()
+    check(("POST", "/api/companion/call", {"on": True}) in posted, f"{where}: the microphone opens a call on the server")
+    check(page.locator(".voice-compose-btn.hangup").count() == 1, f"{where}: and the button turns into Hang up")
+    check(page.locator(".pagehead .ic-mic, .pagehead [aria-label='Call'], .pagehead [aria-label='Позвонить']").count() == 0, f"{where}: with no second microphone in the header")
+    page.locator(".voice-compose-btn.hangup").click()
     page.wait_for_timeout(400)
     check(("POST", "/api/companion/call", {"on": False}) in posted, f"{where}: hanging up closes it")
 

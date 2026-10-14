@@ -715,8 +715,6 @@
   .composer[data-shape] .steer-x { width: var(--tap); height: var(--tap); border-radius: 50%; }
   .composer[data-shape] > .ph-note { margin: 0; }
   :root[data-keyboard="open"] .composer[data-shape] { padding-bottom: var(--space-2); }
-  /* The voice page's microphone floats over the last centimetres; its composers give them up. */
-  .voice-read .composer[data-shape], :root[data-keyboard="open"] .voice-read .composer[data-shape] { padding-bottom: 58px; }
 
   /* ── the project's tab bar: 56 px, a 52 × 30 pill behind the current tab's icon ───────────── */
   .tabbar.project-tabs { display: flex; padding: 0 0 env(safe-area-inset-bottom); background: var(--bg); border-top: 1px solid var(--line); }

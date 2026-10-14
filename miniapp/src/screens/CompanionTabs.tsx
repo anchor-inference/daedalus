@@ -12,10 +12,14 @@ import { Icon } from "../icons";
 import { pathFor, sessionPath } from "../router";
 import { invalidate, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
-import { Dropdown, Sheet, go, useMedia } from "../ui/index";
+import { Dropdown, OverflowMenu, Sheet, go, useMedia } from "../ui/index";
+import type { MenuItem } from "../ui/dialogs";
 import { timeAgo } from "../ui/components";
 
-export const TABS = ["conversation", "goals", "schedule", "activity", "computer", "tools", "memory"] as const;
+// Four, because four fit across a phone. What the companion runs on its clock is the second half of
+// Goals — a goal's cadence and its own schedules are the same question, "what will it do next" — and
+// its tools and notes are looked at rarely enough to live in the header's menu as sheets.
+export const TABS = ["conversation", "goals", "activity", "computer"] as const;
 export type CompanionTabId = (typeof TABS)[number];
 
 /** `GET /api/companion`: the shape every client codes against. */
@@ -42,49 +46,53 @@ type Goal = {
   sessions: string[];
 };
 
-export function CompanionTab({ tab, profile, toast, onOpen }: { tab: CompanionTabId; profile: CompanionProfile | null; toast: (t: string) => void; onOpen: (id: string) => void }) {
+export function CompanionTab({ tab, toast, onOpen }: { tab: CompanionTabId; toast: (t: string) => void; onOpen: (id: string) => void }) {
   return (
     <div className="screen wide companion-pane">
       {tab === "goals" && <Goals toast={toast} />}
-      {tab === "schedule" && <Schedule />}
       {tab === "activity" && <Activity onOpen={onOpen} />}
       {tab === "computer" && <Computer toast={toast} />}
-      {tab === "tools" && <Tools />}
-      {tab === "memory" && <Memory sessionId={profile?.session_id ?? ""} toast={toast} />}
     </div>
+  );
+}
+
+/** Tools and Memory: what it may do and what it keeps, opened from the header's menu. */
+export function CompanionSheet({ kind, sessionId, toast, onClose }: { kind: "tools" | "memory"; sessionId: string; toast: (t: string) => void; onClose: () => void }) {
+  return (
+    <Sheet title={t(`companion.sheet.${kind}`)} onClose={onClose} size="narrow" className="companion-sheet">
+      {kind === "tools" ? <Tools /> : <Memory sessionId={sessionId} toast={toast} />}
+    </Sheet>
   );
 }
 
 // ── goals ──────────────────────────────────────────────────────────────────────────────────
 
+// The cadences a person picks from, in the words the server already reads. Anything else — a cron,
+// "every 3h" — is typed into the custom field.
+const CADENCES = ["", "hourly", "every 6h", "daily", "weekly"] as const;
+
+/** A cadence as the server writes it back ("every 1d", "0 7 * * *"), in the reader's words. */
+export function cadenceLabel(text: string): string {
+  if (!text) return t("companion.cadence.none");
+  const match = /^every (\d+)([mhd])$/.exec(text);
+  if (!match) return (CADENCES as readonly string[]).includes(text) ? t(`companion.cadence.${text}`) : text;
+  const n = Number(match[1]);
+  const unit = match[2];
+  if (unit === "h" && n === 1) return t("companion.cadence.hourly");
+  if (unit === "d" && n === 1) return t("companion.cadence.daily");
+  if (unit === "d" && n === 7) return t("companion.cadence.weekly");
+  return t(`companion.cadence.every.${unit}`, { n });
+}
+
 function Goals({ toast }: { toast: (t: string) => void }) {
   const [closed, setClosed] = useState(false);
+  const [adding, setAdding] = useState(false);
   const { data } = useQuery<{ goals: Goal[] }>(`/api/companion/goals${closed ? "?closed=true" : ""}`, { staleMs: 3000, pollMs: 30000 });
   // Both lists (open, and with the finished ones) are stale after any write, and a read already on
   // its way answers from before it: invalidating drops that read rather than joining it.
   const refresh = async () => invalidate("/api/companion/goals");
-  const [title, setTitle] = useState("");
-  const [brief, setBrief] = useState("");
-  const [cadence, setCadence] = useState("");
-  const [busy, setBusy] = useState(false);
   const goals = data?.goals ?? [];
 
-  async function add(e: React.FormEvent) {
-    e.preventDefault();
-    if (!title.trim()) return;
-    setBusy(true);
-    try {
-      await api.post("/api/companion/goals", { title, brief, cadence });
-      setTitle("");
-      setBrief("");
-      setCadence("");
-      await refresh();
-    } catch (err) {
-      toast(errorText(err));
-    } finally {
-      setBusy(false);
-    }
-  }
   async function change(goal: Goal, status: Goal["status"]) {
     try {
       await api.patch(`/api/companion/goals/${encodeURIComponent(goal.id)}`, { status });
@@ -105,87 +113,136 @@ function Goals({ toast }: { toast: (t: string) => void }) {
 
   return (
     <>
-      <form className="card companion-goal-form" onSubmit={(e) => void add(e)}>
-        <div className="section-title" style={{ marginTop: 0 }}>{t("companion.goals.add")}</div>
-        <input className="field" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("companion.goals.title")} aria-label={t("companion.goals.title")} maxLength={200} />
-        <textarea className="field" value={brief} onChange={(e) => setBrief(e.target.value)} placeholder={t("companion.goals.brief")} aria-label={t("companion.goals.brief")} rows={2} maxLength={4000} />
-        <div className="companion-goal-row">
-          <input className="field" value={cadence} onChange={(e) => setCadence(e.target.value)} placeholder={t("companion.goals.cadence.hint")} aria-label={t("companion.goals.cadence")} maxLength={120} />
-          <button className="btn small" type="submit" disabled={busy || !title.trim()}>{t("companion.goals.create")}</button>
-        </div>
-      </form>
-      {goals.length === 0 && data && <div className="empty"><div>{t("companion.goals.empty")}</div></div>}
-      <div className="companion-list">
-        {goals.map((goal) => (
-          <div key={goal.id} className={`card companion-goal ${goal.status}`}>
-            <div className="companion-goal-top">
-              <b className="grow">{goal.title}</b>
-              <span className={`chip ${goal.status === "active" ? "accent" : "quiet"}`}>{t(`companion.goals.status.${goal.status}`)}</span>
-            </div>
-            {goal.brief && <div className="sub clamp-2">{goal.brief}</div>}
-            <div className="sub num">
-              {goal.cadence ? `${goal.cadence} · ${goal.next_check_at && goal.status === "active" ? t("companion.goals.next", { when: shortDateTime(goal.next_check_at) }) : ""}` : t("companion.goals.never")}
-              {goal.sessions.length > 0 && ` · ${t("companion.goals.agents", { n: goal.sessions.length })}`}
-            </div>
-            {goal.last_report && (
-              <div className="companion-goal-report">
-                <div className="sub">{t("companion.goals.report", { when: timeAgo(goal.last_report_at) })}</div>
-                <div>{goal.last_report}</div>
-              </div>
-            )}
-            <div className="btnrow">
-              {goal.status === "active" && <button className="btn ghost small" onClick={() => void change(goal, "paused")}>{t("companion.goals.pause")}</button>}
-              {goal.status !== "active" && <button className="btn ghost small" onClick={() => void change(goal, "active")}>{t("companion.goals.resume")}</button>}
-              {goal.status !== "done" && <button className="btn ghost small" onClick={() => void change(goal, "done")}>{t("companion.goals.done")}</button>}
-              {goal.status !== "dropped" && <button className="btn ghost small" onClick={() => void change(goal, "dropped")}>{t("companion.goals.drop")}</button>}
-              <button className="btn ghost small danger" onClick={() => void remove(goal)}>{t("companion.goals.delete")}</button>
-            </div>
-          </div>
-        ))}
+      <div className="companion-head-row">
+        <div className="section-title">{t("companion.tab.goals")}</div>
+        <button className="btn small" onClick={() => setAdding(true)}>
+          <Icon name="plus" size={14} /> {t("companion.goals.add")}
+        </button>
       </div>
-      <label className="companion-closed">
-        <input type="checkbox" checked={closed} onChange={(e) => setClosed(e.target.checked)} /> {t("companion.goals.closed")}
-      </label>
+      {adding && <GoalForm onClose={() => setAdding(false)} onSaved={refresh} toast={toast} />}
+      {goals.length === 0 && data && <div className="companion-empty sub">{t("companion.goals.empty")}</div>}
+      <div className="companion-list">
+        {goals.map((goal) => {
+          const open = goal.status === "active" || goal.status === "paused";
+          const menu: MenuItem[] = [
+            ...(goal.status !== "done" ? [{ label: t("companion.goals.done"), icon: "check" as const, onSelect: () => void change(goal, "done") }] : []),
+            ...(goal.status !== "dropped" ? [{ label: t("companion.goals.drop"), icon: "close" as const, onSelect: () => void change(goal, "dropped") }] : []),
+            { label: t("companion.goals.delete"), icon: "trash", danger: true, onSelect: () => void remove(goal) },
+          ];
+          const when = goal.status === "active" && goal.next_check_at ? t("companion.goals.next", { when: shortDateTime(goal.next_check_at) }) : "";
+          return (
+            <div key={goal.id} className={`card companion-goal ${goal.status}`}>
+              <div className="companion-goal-top">
+                <b className="grow">{goal.title}</b>
+                {goal.status !== "active" && <span className="chip quiet">{t(`companion.goals.status.${goal.status}`)}</span>}
+                <OverflowMenu items={menu} small label={t("companion.goals.menu")} />
+              </div>
+              {goal.brief && <div className="sub clamp-2">{goal.brief}</div>}
+              <div className="companion-goal-meta sub num">
+                <Icon name="clock" size={13} />
+                <span>{[cadenceLabel(goal.cadence), when, goal.sessions.length ? t("companion.goals.agents", { n: goal.sessions.length }) : ""].filter(Boolean).join(" · ")}</span>
+              </div>
+              {goal.last_report && (
+                <div className="companion-goal-report">
+                  <div className="sub">{t("companion.goals.report", { when: timeAgo(goal.last_report_at) })}</div>
+                  <div className="clamp-3">{goal.last_report}</div>
+                </div>
+              )}
+              {open && (
+                <div className="companion-goal-actions">
+                  {goal.status === "active"
+                    ? <button className="btn ghost small" onClick={() => void change(goal, "paused")}><Icon name="pause" size={14} /> {t("companion.goals.pause")}</button>
+                    : <button className="btn ghost small" onClick={() => void change(goal, "active")}><Icon name="play" size={14} /> {t("companion.goals.resume")}</button>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <button type="button" className="companion-closed link" onClick={() => setClosed(!closed)} aria-pressed={closed}>
+        {t(closed ? "companion.goals.closed.hide" : "companion.goals.closed")}
+      </button>
+      <Schedule />
     </>
   );
 }
 
-// ── schedule ───────────────────────────────────────────────────────────────────────────────
+function GoalForm({ onClose, onSaved, toast }: { onClose: () => void; onSaved: () => Promise<void>; toast: (t: string) => void }) {
+  const [title, setTitle] = useState("");
+  const [brief, setBrief] = useState("");
+  const [preset, setPreset] = useState<string>("daily");
+  const [custom, setCustom] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function add(e: React.FormEvent) {
+    e.preventDefault();
+    if (!title.trim()) return;
+    setBusy(true);
+    try {
+      await api.post("/api/companion/goals", { title, brief, cadence: preset === "custom" ? custom : preset });
+      await onSaved();
+      onClose();
+    } catch (err) {
+      toast(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Sheet title={t("companion.goals.add")} onClose={onClose} size="narrow">
+      <form className="companion-goal-form" onSubmit={(e) => void add(e)}>
+        <label className="companion-field">
+          <span className="sub">{t("companion.goals.title.label")}</span>
+          <input className="field" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("companion.goals.title")} maxLength={200} autoFocus />
+        </label>
+        <label className="companion-field">
+          <span className="sub">{t("companion.goals.brief.label")}</span>
+          <textarea className="field" value={brief} onChange={(e) => setBrief(e.target.value)} placeholder={t("companion.goals.brief")} rows={3} maxLength={4000} />
+        </label>
+        <div className="companion-field">
+          <span className="sub">{t("companion.goals.cadence")}</span>
+          <Dropdown
+            label={t("companion.goals.cadence")}
+            value={preset}
+            onChange={setPreset}
+            options={[...CADENCES.map((id) => ({ id: id as string, label: cadenceLabel(id) })), { id: "custom", label: t("companion.cadence.custom") }]}
+          />
+          {preset === "custom" && <input className="field" value={custom} onChange={(e) => setCustom(e.target.value)} placeholder={t("companion.goals.cadence.hint")} aria-label={t("companion.cadence.custom")} maxLength={120} />}
+        </div>
+        <div className="btnrow">
+          <button className="btn ghost small" type="button" onClick={onClose}>{t("companion.edit.cancel")}</button>
+          <button className="btn small" type="submit" disabled={busy || !title.trim()}>{t("companion.goals.create")}</button>
+        </div>
+      </form>
+    </Sheet>
+  );
+}
+
+// ── what runs on its clock ─────────────────────────────────────────────────────────────────
 
 type ScheduleRow = { id: string; name: string; kind?: string; cron?: string | null; run_at?: string | null; next_run_at?: string | null; status?: string };
 
+/** Its own schedules and the ones it proposed, under the goals; a goal's checks are on its card. */
 function Schedule() {
-  const { data } = useQuery<{ schedules: ScheduleRow[]; proposals: ScheduleRow[]; goals: Goal[] }>("/api/companion/schedules", { staleMs: 5000, pollMs: 60000 });
-  if (!data) return <div className="sub">{t("common.loading")}</div>;
-  const nothing = !data.schedules.length && !data.proposals.length && !data.goals.length;
-  if (nothing) return <div className="empty"><div>{t("companion.schedule.empty")}</div></div>;
-  const row = (r: ScheduleRow) => (
-    <div key={r.id} className="card row companion-row">
-      <Icon name="clock" size={16} />
+  const { data } = useQuery<{ schedules: ScheduleRow[]; proposals: ScheduleRow[] }>("/api/companion/schedules", { staleMs: 5000, pollMs: 60000 });
+  if (!data || (!data.schedules.length && !data.proposals.length)) return null;
+  const row = (r: ScheduleRow, waiting: boolean) => (
+    <div key={r.id} className="companion-sched">
+      <Icon name={waiting ? "question" : "clock"} size={15} />
       <div className="grow">
-        <b className="truncate">{r.name}</b>
-        <div className="sub num">{r.cron || shortDateTime(r.run_at)}{r.next_run_at ? ` · ${t("companion.schedule.next", { when: shortDateTime(r.next_run_at) })}` : ""}</div>
+        <div className="truncate">{r.name}</div>
+        <div className="sub num">{waiting ? t("companion.schedule.waiting") : r.next_run_at ? t("companion.schedule.next", { when: shortDateTime(r.next_run_at) }) : r.cron || shortDateTime(r.run_at)}</div>
       </div>
     </div>
   );
   return (
     <>
-      {data.goals.length > 0 && <div className="section-title">{t("companion.schedule.goals")}</div>}
-      {data.goals.map((g) => (
-        <div key={g.id} className="card row companion-row">
-          <Icon name="compass" size={16} />
-          <div className="grow">
-            <b className="truncate">{g.title}</b>
-            <div className="sub num">{g.cadence}{g.next_check_at && g.status === "active" ? ` · ${t("companion.schedule.next", { when: shortDateTime(g.next_check_at) })}` : ` · ${t(`companion.goals.status.${g.status}`)}`}</div>
-          </div>
-        </div>
-      ))}
-      {data.schedules.length > 0 && <div className="section-title">{t("companion.schedule.own")}</div>}
-      {data.schedules.map(row)}
-      {data.proposals.length > 0 && <div className="section-title">{t("companion.schedule.proposals")}</div>}
-      {data.proposals.map(row)}
-      <div className="btnrow">
+      <div className="companion-head-row">
+        <div className="section-title">{t("companion.schedule.title")}</div>
         <a className="btn ghost small" href={pathFor("schedules")} onClick={(e) => go(e, pathFor("schedules"))}>{t("companion.schedule.manage")}</a>
+      </div>
+      <div className="card companion-scheds">
+        {data.proposals.map((r) => row(r, true))}
+        {data.schedules.map((r) => row(r, false))}
       </div>
     </>
   );
@@ -251,21 +308,21 @@ function Tools() {
   const { data } = useQuery<{ companion: { name: string; description: string }[]; agents: { tools: number; mcp: string[] } }>("/api/companion/tools", { staleMs: 60000 });
   if (!data) return <div className="sub">{t("common.loading")}</div>;
   return (
-    <>
+    <div className="companion-sheet-body">
+      <div className="sub">{t("companion.tools.never")}</div>
       <div className="section-title">{t("companion.tools.own")}</div>
-      <div className="companion-list">
+      <div className="card companion-tools">
         {data.companion.map((tool) => (
-          <div key={tool.name} className="card row companion-row">
+          <div key={tool.name} className="companion-tool">
             <code>{tool.name}</code>
-            <span className="sub grow">{tool.description}</span>
+            <div className="sub clamp-2">{tool.description}</div>
           </div>
         ))}
       </div>
-      <div className="sub companion-intro">{t("companion.tools.never")}</div>
       <div className="section-title">{t("companion.tools.agents")}</div>
       <div className="sub">{t("companion.tools.agents.body", { n: data.agents.tools })}</div>
       <div className="sub">{data.agents.mcp.length ? t("companion.tools.mcp", { list: data.agents.mcp.join(", ") }) : t("companion.tools.mcp.none")}</div>
-    </>
+    </div>
   );
 }
 
@@ -285,19 +342,22 @@ function Memory({ sessionId, toast }: { sessionId: string; toast: (t: string) =>
     }
   }
   return (
-    <>
-      <div className="sub companion-intro">{t("companion.memory.intro")}</div>
-      {(!sessionId || (data && !records.length)) && <div className="empty"><div>{t("companion.memory.empty")}</div></div>}
-      <div className="companion-list">
-        {records.map((r) => (
-          <div key={r.id} className="card row companion-row">
-            <span className="chip quiet">{r.kind}</span>
-            <span className="grow">{r.text}</span>
-            <button className="btn ghost small" onClick={() => void forget(r.id)}>{t("companion.memory.delete")}</button>
-          </div>
-        ))}
-      </div>
-    </>
+    <div className="companion-sheet-body">
+      <div className="sub">{t("companion.memory.intro")}</div>
+      {(!sessionId || (data && !records.length)) && <div className="companion-empty sub">{t("companion.memory.empty")}</div>}
+      {records.length > 0 && (
+        <div className="card companion-tools">
+          {records.map((r) => (
+            <div key={r.id} className="companion-note">
+              <span className="grow">{r.text}</span>
+              <button className="iconbtn" onClick={() => void forget(r.id)} aria-label={t("companion.memory.delete")} title={t("companion.memory.delete")}>
+                <Icon name="trash" size={16} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

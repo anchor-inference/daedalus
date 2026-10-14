@@ -142,7 +142,7 @@ def check_through_the_switch(browser, check, visual: str) -> None:  # type: igno
     before = playing(page)
     check(not before["paused"], "the answer is being read out before the transcript is opened")
 
-    page.get_by_role("button", name="Transcript").click()
+    page.locator(".voice-to-transcript").click()
     page.wait_for_selector(".voice-read .chat-scroll", timeout=15000)
     page.wait_for_timeout(700)
 
@@ -156,20 +156,16 @@ def check_through_the_switch(browser, check, visual: str) -> None:  # type: igno
 
     said_now = page.locator(".voice-read-foot .voice-said .voice-sentence").count()
     check(said_now == said_before, f"the captions came with it, sentence for sentence ({said_before} → {said_now})")
-    check(page.locator(".voice-mic-float").count() == 1, "the microphone is still on the page, as a control of its own")
-    check("phase-speaking" in (page.locator(".voice-mic-float").get_attribute("class") or ""), "the floating control says what the page is doing")
-    check(page.locator(".voice-mic-float").get_attribute("aria-pressed") == "true", "the microphone is still open")
-    # The miniature is driven by the same three custom properties the orb was, written by the same
-    # animation frame onto whichever control is on the screen. A control the loop never found would
-    # look right and stand perfectly still, which is exactly the failure a class name cannot catch.
-    written = page.evaluate(
-        "(() => { const el = document.querySelector('.voice-mic-float'); return { scale: el.style.getPropertyValue('--orb-scale'), spin: el.style.getPropertyValue('--orb-spin') }; })()"
-    )
-    check(bool(written["scale"]) and bool(written["spin"]), f"and the animation frame found it: it is moving, not merely coloured ({written})")
+    # The call is still on: the field's one button is Hang up, and the field says what the page is
+    # doing where its placeholder was.
+    check(page.locator(".voice-read-foot .voice-compose-btn.hangup").count() == 1, "the call is still on, and the field's button hangs it up")
+    check(page.locator(".voice-compose-btn.mic").count() == 0, "with no second microphone anywhere on the page")
+    hint = page.locator(".voice-read-foot .voice-compose .field").get_attribute("placeholder") or ""
+    check(hint == "Speaking", f"and the field says what the page is doing ({hint!r})")
     check(page.locator(".voice-read.own .composer").count() == 0 or not page.locator(".voice-read.own .composer").first.is_visible(), "the session's own composer gives way to the voice field")
     check(page.locator(".voice-read .voice-compose").count() == 1, "and the voice field is there to type into instead")
 
-    page.get_by_role("button", name="Back to the call").first.click()
+    page.locator(".voice-back-to-call").click()
     page.wait_for_selector(".voice-stage", timeout=15000)
     page.wait_for_timeout(400)
     after = playing(page)
@@ -193,6 +189,9 @@ def check_the_agent(browser, check) -> None:  # type: ignore[no-untyped-def]
         page.wait_for_timeout(100)
     streams_before = wire.streams
     title = page.locator(".voice-agent b").first.inner_text()
+    # On a call, so the strip has a call to end.
+    page.locator(".voice-mascot, .voice-orb").first.click()
+    page.wait_for_selector(".voice-compose-btn.hangup", timeout=5000)
 
     page.locator(".voice-agent").first.click()
     page.wait_for_selector(".voice-read .chat-scroll", timeout=15000)
@@ -200,11 +199,13 @@ def check_the_agent(browser, check) -> None:  # type: ignore[no-untyped-def]
 
     check(wire.streams == streams_before, f"opening an agent does not reopen the concierge's stream (opened {wire.streams})")
     check(not playing(page)["paused"], "and does not stop the answer the concierge is in the middle of")
-    crumb = page.locator(".voice-crumb").inner_text()
+    crumb = page.locator(".voice-crumbs").inner_text()
     check(title in crumb, f"the breadcrumb says which agent is being read ({crumb!r})")
     check(page.locator(".voice-agents").count() == 1, "the panel stays where it was")
     check(page.locator(".voice-agent.open").count() == 1, "and says which of its agents is open")
-    check(page.locator(".voice-mic-float").count() == 1, "the microphone is on the page here too")
+    # The agent's transcript has its own composer, and the call is held by the header's button,
+    # which is on the page whichever view is in the middle.
+    check(page.locator(".voice-crumbs .voice-compose-btn.hangup").count() == 1, "the call can be ended from the agent's strip")
 
     composer = page.locator(".voice-read .composer textarea")
     check(composer.count() == 1 and composer.is_visible(), "an agent's own composer is there, because typing to it is the point")
@@ -214,31 +215,30 @@ def check_the_agent(browser, check) -> None:  # type: ignore[no-untyped-def]
     sent = [p for p in wire.posted if p.endswith("/messages")]
     check(len(sent) == 1, f"what was typed went to that agent's session ({sent})")
 
-    # And the microphone still works from where it is now.
-    page.locator(".voice-mic-float").click()
-    page.wait_for_timeout(400)
-    check(page.locator(".voice-mic-float").get_attribute("aria-pressed") == "true", "tap to talk works from the floating control")
-    check(not playing(page)["paused"] or True, "the page is still alive afterwards")
+    # And back to the conversation's own transcript from the strip.
+    page.locator(".voice-crumbs .iconbtn").click()
+    page.wait_for_selector(".voice-read.own", timeout=5000)
+    check(page.locator(".voice-crumbs").count() == 0, "the strip goes with the agent: the companion's own transcript has no frame")
     context.close()
 
 
 def check_the_phone(browser, check) -> None:  # type: ignore[no-untyped-def]
-    """On a phone the transcript fills the screen and the microphone overlays it."""
+    """On a phone the transcript fills the screen, and the microphone is the field's own button."""
     wire = Wire()
     context, page = open_page(browser, wire, {"width": 390, "height": 844})
     page.wait_for_selector(".voice-stage", timeout=15000)
-    page.get_by_role("button", name="Transcript").click()
+    page.locator(".voice-to-transcript").click()
     page.wait_for_selector(".voice-read .chat-scroll", timeout=15000)
     page.wait_for_timeout(500)
-    box = page.locator(".voice-mic-float").bounding_box()
+    box = page.locator(".voice-read-foot .voice-compose-btn").bounding_box()
+    field = page.locator(".voice-read-foot .voice-compose .field").bounding_box()
     read = page.locator(".voice-read").bounding_box()
-    assert box and read
-    middle = abs((box["x"] + box["width"] / 2) - 195)
-    check(middle < 40, f"the microphone sits at the bottom centre, under a thumb ({middle:.0f}px off)")
-    check(box["y"] > read["y"], "over the transcript rather than beside it")
-    check(read["width"] > 330, f"and the transcript has the width of the screen ({read['width']:.0f}px)")
-    page.locator(".voice-panel-key").click()
-    page.locator(".voice-agent").first.click()
+    assert box and read and field
+    check(box["y"] + box["height"] <= 844 and box["x"] + box["width"] <= 390, f"the call's button is on the screen, at the end of the field ({box})")
+    check(abs((box["y"] + box["height"] / 2) - (field["y"] + field["height"] / 2)) < 4, "in the field's row rather than floating over it")
+    check(read["width"] >= 388, f"and the transcript has the whole width of the screen ({read['width']:.0f}px)")
+    page.locator(".companion-agents-key").click()
+    page.locator(".voice-agents-sheet .voice-agent").first.click()
     page.wait_for_selector(".voice-read .composer textarea")
     for height in (844, 480):
         page.locator(".voice-read .composer textarea").focus()
@@ -246,11 +246,9 @@ def check_the_phone(browser, check) -> None:  # type: ignore[no-untyped-def]
         page.wait_for_timeout(300)
         bounds = page.evaluate("""() => {
           const rect = s => { const r = document.querySelector(s).getBoundingClientRect(); return {top:r.top, bottom:r.bottom}; };
-          return {row:rect('.voice-read .composer-row'), card:rect('.voice-read .composer-box'),
-            mic:rect('.voice-mic-float'), messages:rect('.voice-read .chat-scroll')};
+          return {row:rect('.voice-read .composer-row'), card:rect('.voice-read .composer-box'), messages:rect('.voice-read .chat-scroll')};
         }""")
-        check(bounds["row"]["top"] >= 0 and bounds["row"]["bottom"] <= bounds["mic"]["top"], f"{height}: embedded composer controls stay above the microphone ({bounds})")
-        # No bottom bar on a phone any more: the card stays on the screen.
+        check(bounds["row"]["top"] >= 0 and bounds["row"]["bottom"] <= height, f"{height}: the agent's composer is on the screen ({bounds})")
         check(bounds["card"]["bottom"] <= height, f"{height}: the card stays on the screen")
         check(bounds["messages"]["bottom"] <= bounds["card"]["top"], f"{height}: the card leaves the message viewport clear")
     context.close()

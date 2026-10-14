@@ -70,7 +70,7 @@ def measure(page) -> dict:  # type: ignore[no-untyped-def]
         doc: {scroll: doc.scrollHeight, client: doc.clientHeight},
         main: {scroll: main.scrollHeight, client: main.clientHeight},
         read: scroll ? {scroll: scroll.scrollHeight, client: scroll.clientHeight, top: scroll.scrollTop} : null,
-        mic: box('.voice-mic-float'),
+        mic: box('.voice-read-foot .voice-compose-btn'),
         agents: box('.voice-agents'),
       };
     }""")
@@ -83,7 +83,7 @@ def open_transcript(browser, viewport: dict):  # type: ignore[no-untyped-def]
     page.goto(f"{BASE}/companion?token=t&scheme=dark&lang=en")
     shots.stage(page)
     page.wait_for_selector(".voice-stage", timeout=15000)
-    page.get_by_role("button", name="Transcript").click()
+    page.locator(".voice-to-transcript").click()
     page.wait_for_selector(".voice-read .chat-scroll", timeout=15000)
     page.wait_for_timeout(900)
     return context, page
@@ -115,9 +115,9 @@ def check_width(browser, check, label: str, viewport: dict) -> None:  # type: ig
     if viewport["width"] > 900:
         check(bool(agents) and agents["top"] >= 0 and agents["top"] < h, f"{label}: the agents panel is on the screen ({agents})")
     else:
-        # On a phone the panel is a sheet that rises from a key in the breadcrumb; closed, it is
-        # meant to be off the bottom of the screen, and what matters is that the key is reachable.
-        key = page.locator(".voice-panel-key").bounding_box()
+        # On a phone the panel is a sheet that rises from a key in the header; closed, it is not on
+        # the page at all, and what matters is that the key is reachable.
+        key = page.locator(".companion-agents-key").bounding_box()
         check(bool(key) and key["y"] >= 0 and key["y"] + key["height"] <= h + 1, f"{label}: the key that raises the agents panel is on the screen ({key})")
     context.close()
 

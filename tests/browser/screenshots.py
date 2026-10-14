@@ -1112,9 +1112,10 @@ def call(page: Page) -> None:
 
     The page opens on its transcript and reads answers aloud only on a call, so every picture and
     check of the voice half starts by pressing Call, as the operator does."""
-    page.wait_for_selector(".companion-call", timeout=15000)
-    if page.locator(".companion-call.on").count() == 0:
-        page.locator(".companion-call").click()
+    page.wait_for_selector(".voice-compose-btn", timeout=15000)
+    if page.locator(".voice-compose-btn.hangup").count() == 0:
+        page.wait_for_selector(".voice-compose-btn.mic:not([disabled])", timeout=15000)
+        page.locator(".voice-compose-btn.mic").click()
     page.wait_for_selector(".voice-stage", timeout=15000)
 
 
@@ -1126,12 +1127,18 @@ def stage(page: Page) -> None:
         page.wait_for_selector(".voice-read", timeout=8000)
     except Exception:  # noqa: BLE001 — an installation with no conversation yet opens on the orb
         pass
-    # Pressed again if the first press is swallowed by a render in flight, which a loaded machine
-    # showed once in a full run: the toggle is the same button whichever view it leaves.
+    # The orb without a call has no button of its own any more — Call opens the microphone with it —
+    # so the page's own key is used. Pressed again if the first press is swallowed by a render in
+    # flight, which a loaded machine showed once in a full run.
     for _ in range(3):
         if page.locator(".voice-read").count() == 0:
             break
-        page.locator(".companion-toolbar button[aria-pressed]").click()
+        # A click first: the browser lets a page make a sound only after a gesture, the button this
+        # used to press was one, and the key alone left the playback checks two clips short.
+        # On the name, which does nothing: the state line under it holds the agents' key.
+        page.locator(".pagehead h1").click()
+        page.evaluate("document.activeElement && document.activeElement.blur()")
+        page.keyboard.press("t")
         try:
             page.wait_for_selector(".voice-stage", timeout=5000)
         except Exception:  # noqa: BLE001 — tried again, and the wait below reports a page that never switches
@@ -1350,8 +1357,11 @@ VOICE_MIC = ".voice-mascot, .voice-orb"
 
 
 def listening(page: Page) -> None:
-    """Open the microphone and say nothing: the state the page spends most of its time in."""
-    page.locator(VOICE_MIC).click()
+    """Open the microphone and say nothing: the state the page spends most of its time in.
+
+    Through Call, as the operator does it: the page opens on its transcript, and the orb the
+    microphone used to be clicked on is only in the middle once a call has put it there."""
+    call(page)
     page.wait_for_timeout(900)
 
 
@@ -1363,7 +1373,7 @@ def talking(page: Page) -> None:
     on the screen. Asking after the first delivery and shooting before the third is what leaves
     exactly one answer under exactly one question.
     """
-    page.locator(VOICE_MIC).click()
+    call(page)
     page.wait_for_timeout(1200)
     page.fill(".voice-compose .field", VOICE_ASKED)
     page.locator(".voice-compose button[type=submit]").click()
@@ -1372,12 +1382,11 @@ def talking(page: Page) -> None:
 def reading(page: Page) -> None:
     """Ask something, then open the transcript of this very conversation while it is being answered.
 
-    The button is found by its place rather than by its word: the page is photographed in two
-    languages and the first action in the header is the transcript in both of them.
+    The stage's own Transcript button, found by its class: the page is photographed in two languages.
     """
     talking(page)
     page.wait_for_timeout(900)
-    page.locator(".pagehead-actions .btn.ghost").first.click()
+    page.locator(".voice-to-transcript").click()
     page.wait_for_selector(".voice-read .chat-scroll", timeout=15000)
 
 
@@ -1385,6 +1394,10 @@ def reading_agent(page: Page) -> None:
     """The same, for one of the agents the concierge started: its transcript, the conversation kept."""
     talking(page)
     page.wait_for_timeout(900)
+    # On a phone the agents are a sheet opened from the header rather than a column.
+    if not page.locator(".voice-agent").first.is_visible():
+        page.locator(".companion-agents-key").click()
+        page.wait_for_selector(".voice-agents-sheet .voice-agent", timeout=5000)
     page.locator(".voice-agent").first.click()
     page.wait_for_selector(".voice-read .chat-scroll", timeout=15000)
 

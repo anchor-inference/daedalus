@@ -1,4 +1,6 @@
-"""The voice control keeps its microphone while its visual switches between mascot forms."""
+"""The voice control keeps its microphone while its visual switches between mascot forms.
+
+The choice is in the header's menu, as three checkable items that leave the menu open."""
 
 from __future__ import annotations
 
@@ -11,6 +13,14 @@ from playwright.sync_api import sync_playwright
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
 from screenshots import UNHANDLED, stage, stub  # noqa: E402
+
+
+def choose(page, name: str) -> None:  # type: ignore[no-untyped-def]
+    page.locator(".companion-menu").click()
+    item = page.get_by_role("menuitemcheckbox", name=name, exact=True)
+    item.click()
+    assert item.get_attribute("aria-checked") == "true"
+    page.keyboard.press("Escape")
 
 
 def main() -> None:
@@ -40,18 +50,17 @@ def main() -> None:
                 # The canvas takes the screen's density once its renderer has measured it, which on a
                 # loaded machine is after the first frame; a ratio read at once caught it at 1.
                 page.wait_for_function("(() => { const c = document.querySelector('.voice-mascot canvas'); return c && c.width / c.getBoundingClientRect().width >= 2; })()", timeout=10000)
-            page.get_by_role("button", name="Head", exact=True).click()
+            choose(page, "Head")
             page.locator(".voice-mascot canvas").wait_for()
             page.wait_for_function("document.querySelector('.voice-mascot canvas')?.width >= document.querySelector('.voice-mascot canvas')?.getBoundingClientRect().width * .95")
-            assert page.get_by_role("button", name="Head", exact=True).get_attribute("aria-pressed") == "true"
             assert page.locator(".voice-mascot canvas").evaluate("canvas => !canvas.getContext('webgl2')?.isContextLost()")
-            page.get_by_role("button", name="No mascot").click()
+            choose(page, "No mascot")
             assert page.locator(".voice-orb").count() == 1
             assert page.locator(".voice-mascot").count() == 0
             page.reload()
             stage(page)
             page.locator(".voice-orb").wait_for()
-            page.get_by_role("button", name="Mascot", exact=True).click()
+            choose(page, "Mascot")
             page.locator(".voice-mascot canvas").wait_for()
             assert not errors, errors
             page.close()

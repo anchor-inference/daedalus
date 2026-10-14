@@ -2394,10 +2394,6 @@ h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500;
 @keyframes chip-travel { 0%, 100% { opacity: .25; transform: scaleY(.364) translateY(0); } 50% { opacity: 1; transform: scaleY(.364) translateY(-3px); } }
 
 .voice-orb-wrap { display: grid; place-items: center; padding: 8px 0 4px; }
-.voice-mascot-options { display:flex; align-items:center; gap:3px; padding:3px; border:1px solid var(--line); border-radius:10px; background:var(--surface-1); }
-.voice-mascot-options button { min-height:30px; padding:0 11px; border:0; border-radius:7px; background:transparent; color:var(--fg-2); font-size:var(--fs-12); cursor:pointer; }
-.voice-mascot-options button:hover { color:var(--fg); background:var(--surface-2); }
-.voice-mascot-options button[aria-pressed="true"] { color:var(--fg); background:var(--surface-3); box-shadow:inset 0 0 0 1px var(--line); }
 .voice-mascot-wrap { display:grid; place-items:center; width:100%; min-height:400px; }
 .voice-mascot { position:relative; display:block; width:min(100%,440px); aspect-ratio:1; padding:0; border:0; background:transparent; cursor:pointer; transform:scale(var(--orb-scale,1)); transition:transform .12s ease; }
 .voice-mascot:disabled { cursor:default; }
@@ -2481,10 +2477,21 @@ h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500;
 @keyframes sentence-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes waiting-breathe { 0%, 100% { opacity: .1; transform: scaleX(.654); } 50% { opacity: .28; transform: scaleX(1); } }
 
-/* Typing is the fallback, not the feature: it keeps its place and gives up its weight. */
-.voice-compose { width: min(100%, 560px); display: flex; gap: 8px; margin-top: auto; opacity: .62; transition: opacity .2s ease; }
-.voice-compose:hover, .voice-compose:focus-within { opacity: 1; }
-.voice-compose .field { flex: 1; background: transparent; }
+/* Typing is half of the conversation, so the field is a field: full strength, a round send at its
+   end, and under a transcript the microphone in that same place until something is typed. */
+.voice-compose { width: min(100%, 760px); display: flex; align-items: center; gap: 8px; margin-top: auto; }
+.voice-compose .field { flex: 1; min-width: 0; border-radius: var(--radius-pill); padding-inline: 16px; }
+/* One round button at the end of the field: send, start a call, or hang up. A grid with nothing
+   else in it, so the glyph is centred by the box and not by a label's gap. */
+.voice-compose-btn { flex: none; display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 0; border-radius: 50%; cursor: pointer; line-height: 0; }
+.voice-compose-btn .ic { display: block; margin: 0; }
+.voice-compose-btn.send { background: var(--primary); color: var(--primary-ink); }
+.voice-compose-btn.send:disabled { background: var(--surface-2); color: var(--fg-3); opacity: 1; }
+.voice-compose-btn.mic { background: var(--surface-2); color: var(--fg); box-shadow: inset 0 0 0 1px var(--line); }
+.voice-compose-btn.mic:hover { background: var(--surface-3); }
+.voice-compose-btn.hangup { background: var(--bad); color: #fff; }
+.voice-compose-btn.small { width: 32px; height: 32px; }
+.voice-compose-btn:disabled { cursor: default; opacity: .5; }
 .voice-why { width: min(100%, 720px); text-align: center; }
 
 .voice-agents { display: grid; gap: 8px; align-content: start; overflow-y: auto; animation: panel-slide .34s cubic-bezier(.2, .7, .3, 1) both; }
@@ -2534,50 +2541,15 @@ h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500;
 .voice-read.own .composer { display: none; }
 .voice-read-wait { padding: 20px; }
 .voice-crumbs { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--surface-1); }
-.voice-crumb { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; color: var(--fg-2); }
-.voice-crumb b { color: var(--fg); font-weight: 600; }
-.voice-crumb > span { color: var(--fg-3); }
-.voice-crumb .link { background: none; border: 0; padding: 0; color: var(--fg-2); font: inherit; cursor: pointer; }
-.voice-crumb .link:hover { color: var(--fg); }
-.voice-crumbs .btn { margin-left: auto; }
+.voice-crumbs b { min-width: 0; font-size: 14px; font-weight: 600; }
+.voice-to-transcript { margin-left: auto; }
 /* The captions and the field, under the concierge's own transcript: what is being said out loud now
    belongs with what was said before it, not on another screen. */
-/* The side padding is not decoration: the microphone floats in the bottom right corner of this same
-   area, and a composer centred in the whole width puts its send button under the pill. The room the
-   control takes is given to it, on both sides, so the field stays centred and stays clear. */
-.voice-read-foot { flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 190px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface-1); }
+.voice-read-foot { flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 16px calc(10px + env(safe-area-inset-bottom)); }
 .voice-read-foot .voice-captions { max-height: 22vh; overflow-y: auto; }
 .voice-read-foot .voice-said { font-size: 16px; }
-.voice-read-foot .voice-compose { margin-top: 0; opacity: 1; }
-
-/* The microphone while the orb is not on the screen. Bottom right of the reading area on a wide
-   window, bottom centre and above the tab bar on a phone, and the same four painted layers at a
-   fifth of the size: the state has to be readable from the corner of the eye here too. */
-.voice-mic-float {
-  position: absolute; right: 18px; bottom: 18px; z-index: 6; display: flex; align-items: center; gap: 10px;
-  min-height: 52px; padding: 8px 18px 8px 10px; border-radius: 999px; cursor: pointer;
-  border: 1px solid color-mix(in srgb, var(--orb-color) 34%, var(--line-strong));
-  background: color-mix(in srgb, var(--orb-color) 10%, var(--surface-3)); color: var(--fg);
-  box-shadow: var(--shadow-pop); animation: rise .18s ease-out;
-  --orb-color: var(--fg-3); --orb-scale: 1; --orb-glow: .3; --orb-spin: 8s;
-}
-.voice-mic-float.phase-idle { --orb-color: var(--fg-3); }
-.voice-mic-float.phase-loading { --orb-color: var(--warn); }
-.voice-mic-float.phase-listening { --orb-color: var(--accent); }
-.voice-mic-float.phase-thinking, .voice-mic-float.phase-delegating { --orb-color: var(--info); }
-.voice-mic-float.phase-speaking { --orb-color: var(--ok); }
-.voice-mic-float:disabled { cursor: default; opacity: .55; }
-.voice-mic-float .orb-halo, .voice-mic-float .orb-shell, .voice-mic-float .orb-sweep, .voice-mic-float .orb-ring, .voice-mic-float .orb-glyph {
-  position: absolute; left: 10px; top: 50%; width: 36px; height: 36px; margin-top: -18px; border-radius: 50%; inset-inline-end: auto;
-}
-/* The miniature of the orb's own motion: the same custom property the animation frame writes, on a
-   node a fifth of the size. The halo and the sweep are scaled down with it rather than blurred flat. */
-.voice-mic-float .orb-shell { transform: scale(var(--orb-scale)); transition: transform .09s linear; }
-.voice-mic-float .orb-halo { left: 2px; width: 52px; height: 52px; margin-top: -26px; filter: blur(9px); }
-.voice-mic-float .orb-sweep { filter: blur(5px); }
-.voice-mic-float.on .orb-ring { animation: orb-ripple 2.4s cubic-bezier(.25, .7, .35, 1) infinite; }
-.voice-mic-float .orb-glyph { display: grid; place-items: center; }
-.voice-mic-word { margin-left: 44px; font-size: 13px; font-weight: 600; color: color-mix(in srgb, var(--orb-color) 60%, var(--fg)); white-space: nowrap; }
+.voice-read-foot .voice-compose { margin-top: 0; }
+.voice-read-foot .voice-captions:not(:has(p, span)) { display: none; }
 
 /* The agent whose transcript is open: the panel is a set of destinations now, and one of them is
    where the reader already is. */
@@ -2601,29 +2573,21 @@ h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500;
   .voice-compose { margin-top: 12px; opacity: 1; }
   .voice-agents { animation-name: panel-rise; }
   /* Reading fills the screen on a phone, literally: the page stops scrolling and the transcript takes
-     every pixel between the header and the tab bar, so it is read at the size a transcript is read at
-     and not through a letterbox. The panel has nowhere to stand beside it, so it becomes a sheet that
-     rises over it from a key in the breadcrumb; and the microphone goes to the bottom centre, over
-     both, where a thumb already is. */
-  .screen.voice:has(.voice-grid.reading) { padding: 6px 8px calc(66px + env(safe-area-inset-bottom)); }
-  .voice-grid.reading { gap: 8px; }
-  .voice-grid.reading .voice-read { border-radius: 12px; }
-  .voice-grid.reading .voice-agents {
-    position: fixed; left: 0; right: 0; bottom: calc(64px + env(safe-area-inset-bottom)); z-index: 32;
-    max-height: 62dvh; overflow-y: auto; animation: none;
-    padding: 12px 12px 16px; border-radius: 18px 18px 0 0;
-    background: var(--surface-1); border-top: 1px solid var(--line-strong); box-shadow: var(--shadow-pop);
-    transform: translateY(calc(100% + 64px + env(safe-area-inset-bottom))); transition: transform .2s cubic-bezier(.2, .7, .3, 1);
-  }
-  .voice-grid.reading.panel-open .voice-agents { transform: none; }
-  /* The strip the microphone stands in. A floating control over the field somebody is typing into is
-     a control in the way; the field gives up the last few centimetres instead, and the pill sits in
-     them. Both composers do it — the voice field under the concierge's transcript, and an agent's
-     own — because the microphone is in the same place over both. */
-  .voice-read-foot { padding-inline: 12px; padding-bottom: 58px; }
-  .voice-read .composer { padding-bottom: 58px; }
-  .voice-mic-float { position: fixed; left: 50%; right: auto; translate: -50% 0; bottom: calc(70px + env(safe-area-inset-bottom)); z-index: 33; }
+     every pixel under the header, with no card around it — a frame inside a screen this narrow was
+     two borders and a margin of nothing on each side. The agents are a sheet opened from the header. */
+  .screen.voice:has(.voice-grid.reading) { padding: 0; }
+  .voice-grid.reading { gap: 0; }
+  .voice-grid.reading .voice-read { border: 0; border-radius: 0; background: none; box-shadow: none; }
+  /* The call is the same: no frame, and only what a person talking needs — the state, the face that
+     is the microphone, the line of what was said and the field. The engine and timing lines are
+     for the Settings card and the wide window. */
+  .voice-stage { border: 0; background: none; box-shadow: none; }
+  .voice-chips .chip.quiet, .voice-stage .voice-timing, .voice-stage .voice-engine { display: none; }
+  .voice-read-foot { padding-inline: 12px; }
+  .voice-read-foot .voice-captions { max-height: 14vh; }
+  .voice-read-foot .voice-said { font-size: 15px; }
 }
+.voice-agents-sheet .voice-agents { animation: none; overflow: visible; }
 @keyframes panel-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 /* The global rule at the top of this file takes every animation and transition away for a reader who
    asked for less motion. That is not enough here: the orb's size and glow are driven by the
@@ -2642,7 +2606,6 @@ h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500;
      and six words. */
   .voice-centre-view { animation: none !important; }
   .voice-agents { transition: none !important; }
-  .voice-mic-float .orb-shell { transform: none !important; }
 }
 
 /* ── add a model: the first-run flow and the same three steps from Settings ───────────────── */
@@ -4997,37 +4960,62 @@ body:has(.context-menu) .rail-tip { visibility: hidden; }
 .settings-desktop-wayland { margin: var(--space-2) 0; }
 .settings-desktop-commands { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-1); }
 .settings-desktop-commands code { white-space: nowrap; }
-/* The companion's page: a face and a name over tabs for what it owns. The conversation tab is the
-   voice grid above; the rest are lists read one tab at a time. */
-.companion-title { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
-.companion-sub { display: inline-flex; align-items: center; gap: 8px; }
-.companion-state.thinking, .companion-state.listening { color: var(--accent); }
-.companion-state.paused { color: var(--muted); }
-.companion-call.on { background: var(--accent); color: var(--bg, #000); }
-.companion-tabs { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; margin-top: 8px; }
-.companion-tabs button { flex: none; border: 0; background: none; color: var(--muted); padding: 6px 10px; border-radius: var(--radius-xs); font-size: var(--fs-13); cursor: pointer; }
-.companion-tabs button.on { background: var(--card-2); color: var(--fg); }
-.companion-toolbar { display: flex; align-items: center; gap: 8px; padding: 0 16px 8px; min-width: 0; }
-.companion-toolbar > .sub { flex: 1; min-width: 0; }
+/* The companion's page: a face, a name and one line of state over four tabs. On a phone the header
+   is one row — menu, face, name, Call, the overflow — and the tabs share the width evenly, because
+   seven tabs in a scroller meant the last ones were never seen and the row read as a sentence cut off. */
+.companion-title { display: block; min-width: 0; }
+.pagehead-row > .companion-avatar { margin-left: 4px; }
+.companion-sub { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; color: var(--fg-3); }
+.companion-state::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--fg-3); vertical-align: 1px; }
+.companion-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.companion-state.state-working::before { background: var(--ok); }
+.companion-state.state-thinking::before, .companion-state.state-listening::before { background: var(--accent); }
+.companion-state.state-paused::before { background: var(--warn); }
+.companion-agents-key { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-12); cursor: pointer; }
+.companion-agents-key:hover { color: var(--fg); border-color: var(--fg-3); }
+.companion-tabs { display: flex; gap: 2px; margin-top: 6px; border-bottom: 1px solid var(--line); }
+.companion-tabs button { flex: none; position: relative; border: 0; background: none; color: var(--fg-3); padding: 8px 12px 10px; font: inherit; font-size: var(--fs-13); font-weight: 500; cursor: pointer; white-space: nowrap; }
+.companion-tabs button:hover { color: var(--fg); }
+.companion-tabs button.on { color: var(--fg); }
+.companion-tabs button.on::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: -1px; height: 2px; border-radius: 2px; background: var(--accent); }
+.companion-paused { display: flex; align-items: center; gap: 10px; margin: 8px 16px 0; padding: 8px 8px 8px 12px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--warn) 12%, var(--surface-1)); color: var(--fg-2); font-size: var(--fs-13); }
 .companion-pane { display: flex; flex-direction: column; gap: 10px; }
+.companion-head-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; }
+.companion-head-row .section-title { margin: 0; }
+.companion-empty { padding: 12px 4px; text-align: center; }
 .companion-list { display: flex; flex-direction: column; gap: 8px; }
-.companion-row { display: flex; align-items: center; gap: 10px; }
-.companion-intro { margin: 4px 0; }
-.companion-goal-form { display: flex; flex-direction: column; gap: 8px; }
-.companion-goal-row { display: flex; gap: 8px; align-items: center; }
-.companion-goal-row .field { flex: 1; min-width: 0; }
+.companion-goal-form { display: flex; flex-direction: column; gap: 12px; }
+.companion-goal-form .btnrow { justify-content: flex-end; }
 .companion-goal { display: flex; flex-direction: column; gap: 6px; }
 .companion-goal.done, .companion-goal.dropped { opacity: .7; }
-.companion-goal-top { display: flex; align-items: center; gap: 8px; }
-.companion-goal-report { border-left: 2px solid var(--line); padding-left: 10px; font-size: var(--fs-13); }
-.companion-closed { display: inline-flex; gap: 6px; align-items: center; font-size: var(--fs-13); color: var(--muted); }
-.companion-activity { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.companion-event { display: grid; grid-template-columns: 88px auto minmax(0, 1fr); gap: 4px 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.companion-goal-top { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.companion-goal-top b { min-width: 0; line-height: 1.35; padding-top: 3px; overflow-wrap: anywhere; }
+.companion-goal-top .chip { flex: none; margin-top: 2px; }
+.companion-goal-meta { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.companion-goal-meta .ic { flex: none; }
+.companion-goal-report { border-left: 2px solid var(--line-strong); padding-left: 10px; font-size: var(--fs-13); display: flex; flex-direction: column; gap: 2px; }
+.companion-goal-actions { display: flex; gap: 6px; }
+.companion-closed { align-self: flex-start; border: 0; background: none; padding: 4px 0; color: var(--fg-3); font: inherit; font-size: var(--fs-13); cursor: pointer; }
+.companion-closed:hover { color: var(--fg); }
+.companion-scheds { padding: 0; overflow: hidden; }
+.companion-sched { display: flex; align-items: center; gap: 10px; padding: 10px 12px; min-width: 0; }
+.companion-sched + .companion-sched { border-top: 1px solid var(--line); }
+.companion-sched .ic { flex: none; color: var(--fg-3); }
+.companion-sheet-body { display: flex; flex-direction: column; gap: 10px; }
+.companion-sheet-body .section-title { margin: 6px 0 0; }
+.companion-tools { padding: 0; overflow: hidden; }
+.companion-tool { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; min-width: 0; }
+.companion-tool + .companion-tool, .companion-note + .companion-note { border-top: 1px solid var(--line); }
+.companion-tool code { font-size: var(--fs-13); color: var(--fg); background: none; padding: 0; }
+.companion-note { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; }
+.companion-activity { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.companion-event { display: grid; grid-template-columns: 88px auto minmax(0, 1fr); gap: 4px 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .companion-event-body { grid-column: 3; }
 .companion-computer { padding: 0; overflow: hidden; }
+.companion-intro { margin: 4px 0; }
 .companion-editor { display: flex; flex-direction: column; gap: 12px; }
 .companion-editor-face { display: flex; justify-content: center; padding: 8px 0; }
-.companion-field { display: flex; flex-direction: column; gap: 4px; }
+.companion-field { display: flex; flex-direction: column; gap: 6px; }
 .companion-swatches { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .companion-swatch { width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
 .companion-swatch.on { border-color: var(--fg); }
@@ -5038,6 +5026,9 @@ body:has(.context-menu) .rail-tip { visibility: hidden; }
 @keyframes companion-bob { 50% { transform: translateY(-2px); } }
 @keyframes companion-breathe { 50% { transform: scale(1.05); } }
 @media (max-width: 1023px) {
+  .companion-tabs button { flex: 1 1 0; min-width: 0; padding-inline: 4px; overflow: hidden; text-overflow: ellipsis; }
+  .companion-tabs button.on::after { left: 16%; right: 16%; }
+  .companion-paused { margin-inline: 12px; }
   .companion-event { grid-template-columns: auto minmax(0, 1fr); }
   .companion-event-when { grid-column: 1 / -1; }
   .companion-event-body { grid-column: 1 / -1; }

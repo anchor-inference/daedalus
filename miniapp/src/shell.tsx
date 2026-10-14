@@ -29,7 +29,9 @@ export function go(e: React.MouseEvent, path: string) {
  *  On a phone it is the top bar: a page without `back` is a top-level page and gets the hamburger
  *  that opens the drawer, since the drawer is the only way to the other destinations there; its
  *  title is centred unless a second line asks for the room. A desktop draws exactly what it drew. */
-export function PageHeader({ title, subtitle, actions, back, children }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; back?: string; children?: ReactNode }) {
+/** `lead` stands between the back or menu button and the title, so a face beside a two-line title
+ * keeps both lines beside it instead of the subtitle wrapping under the face. */
+export function PageHeader({ title, subtitle, actions, back, lead, children }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; back?: string; lead?: ReactNode; children?: ReactNode }) {
   const phone = useMedia("(max-width: 1023px)");
   const centred = phone && !back && !subtitle;
   return (
@@ -40,6 +42,7 @@ export function PageHeader({ title, subtitle, actions, back, children }: { title
             <Icon name="back" />
           </a>
         ) : phone && <MenuButton />}
+        {lead}
         <div className={`pagehead-title ${centred ? "center" : ""}`}>
           <h1>{title}</h1>
           {subtitle && <div className="sub">{subtitle}</div>}
