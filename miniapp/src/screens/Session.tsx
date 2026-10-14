@@ -48,7 +48,7 @@ import { groupDetail, groupName, searchedGroup } from "../toolgroups";
 import { usePresenceScope } from "../presence";
 import { endsTerminals, TerminalButton, TerminalDock, TerminalFull, TerminalSheet, useSessionTerminals, useTerminalDock } from "../terminal/dock";
 import { dockShortcut, insideTerminal, isMac } from "../terminal/keys";
-import { tabsFor } from "../panel";
+import { tabsFor, type PanelTab } from "../panel";
 import { EventCard, FocusChat, FocusChatContext, MessageFate, ReplyChip, ReplyQuote, StepsCard, currentReply, setReply, stepDescription, useAnsweredMark, useFocusChat } from "../project/chat";
 import { GoalStrip } from "../project/goalstrip";
 import { excerptOf, messageBody, uploadText } from "../project/goalmodel";
@@ -174,8 +174,12 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       : undefined),
     [focus?.projectId, focus?.kind, id, main],
   );
-  const panel = usePanel(id, sessionBase(id), { route: pane === "right" || embedded ? null : route.query, beside: pane === "left" ? route.with : null, pane, context: panelContext, at: panelAt, closed: embedded });
-  const panelTabs = tabsFor(panelContext, { browser: hasBrowser || panel.state.tab === "browser", preview: panel.state.stack.length > 0, subagents: (detail?.subagents?.length ?? 0) > 0 || panel.state.tab === "subagents" });
+  const tabsNow = useRef<PanelTab[]>([]);
+  const panel = usePanel(id, sessionBase(id), { route: pane === "right" || embedded ? null : route.query, beside: pane === "left" ? route.with : null, pane, context: panelContext, at: panelAt, closed: embedded, shown: () => tabsNow.current });
+  // An ordinary session's side questions decide whether it has a Questions tab at all, so they are read
+  // before the tabs are; the orchestrator's and the main chat's lists are read below, with their scope.
+  const sideWaiting = useQuestions(panelContext === "session" ? { sessionId: id } : null).questions?.length ?? 0;
+  const panelTabs = tabsNow.current = tabsFor(panelContext, { browser: hasBrowser || panel.state.tab === "browser", preview: panel.state.stack.length > 0, subagents: (detail?.subagents?.length ?? 0) > 0 || panel.state.tab === "subagents", questions: sideWaiting > 0 || panel.state.tab === "questions" });
   const browserShown = pipGroup(browsers.groups);
   const runningSubagents = detail?.subagents?.filter((child) => child.running).length ?? 0;
   // Every way the conversation names a helper — its SubAgent step, its report, the reminder about the
@@ -200,11 +204,16 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     if (orchestrationPath) navigate(orchestrationPath + window.location.search, { replace: true, keepHash: true });
   }, [orchestrationPath]);
   const staffName = useMember(focus && detail?.staff ? detail.staff.id : null).data?.name ?? "";
-  // What waits for the operator: the orchestrator's project's list, or every project's in the main
-  // chat. The cards live in the panel's Questions tab; the chat carries one line that opens it.
-  const questionScope = useMemo<QuestionScope | null>(() => (orchestrating ? { projectId: focus!.projectId } : main ? "all" : null), [orchestrating, focus?.projectId, main]);
+  // What waits for the operator: the orchestrator's project's list, every project's in the main chat,
+  // or an ordinary session's own side questions. The cards live in the panel's Questions tab; the
+  // chat carries one line that opens it.
+  const sideQuestions = panelContext === "session";
+  const questionScope = useMemo<QuestionScope | null>(() => (orchestrating ? { projectId: focus!.projectId } : main ? "all" : sideQuestions ? { sessionId: id } : null), [orchestrating, focus?.projectId, main, sideQuestions, id]);
   const questions = useQuestions(questionScope);
   const waiting = questions.questions?.length ?? 0;
+  // A session's side questions have a tab only while some wait (or the tab is open, so the cards just
+  // answered can say so before they go); the orchestrator's and the main chat's lists always do.
+  const questionsShown = !!questionScope && (!sideQuestions || panelTabs.includes("questions"));
   // A direct question already has an actionable line beside the composer. Its generic goal alert
   // used to add a second amber callout and another Open button for the same decision.
   const showGoalLine = questions.questions?.length === 0 || (questions.questions === null && Boolean(questions.error));
@@ -1400,7 +1409,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     { id: "search", icon: "search", label: t("session.phone.search"), onSelect: () => setPhoneSheet("search") },
     { id: "terminal", icon: "terminal", label: t("session.phone.terminal"), count: sessionTerminals.running.length, disabled: !!terminalDock.reason && sessionTerminals.running.length === 0, onSelect: () => terminalDock.setSheet(true) },
     ...(hasBrowser ? [{ id: "browser", icon: "globe" as IconName, label: t("panel.tab.browser"), attn: !!browserShown?.needs_you, onSelect: openBrowser }] : []),
-    ...(questionScope ? [{ id: "questions", icon: "ask" as IconName, label: t("panel.tab.questions"), count: waiting, attn: waiting > 0, onSelect: () => panel.open("questions") }] : []),
+    ...(questionsShown ? [{ id: "questions", icon: "ask" as IconName, label: t("panel.tab.questions"), count: waiting, attn: waiting > 0, onSelect: () => panel.open("questions") }] : []),
     ...(panelTabs.includes("files") && hasDetails ? [{ id: "files", icon: "folder" as IconName, label: t("panel.tab.files"), onSelect: () => panel.open("files") }] : []),
     ...(hasDetails ? [{ id: "details", icon: "settings" as IconName, label: t("panel.tab.details"), onSelect: () => { setDetailsFocus("session"); panel.open("details"); } }] : []),
     ...(panelTabs.includes("preview") && panel.state.stack.length > 0 ? [{ id: "preview", icon: "eye" as IconName, label: t("panel.tab.preview"), onSelect: () => panel.open("preview") }] : []),
@@ -1518,7 +1527,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           {!phone && detail && (detail.subagents?.length ?? 0) > 0 && (
             <SubagentsButton detail={detail} on={panel.state.tab === "subagents"} onToggle={() => (panel.state.tab === "subagents" ? panel.close() : panel.openSubagent(null))} />
           )}
-          {phone && questionScope && (
+          {phone && questionsShown && (
             // A phone has no panel column: the questions open as a sheet from here, with how many wait.
             <button className={`iconbtn questions-headbtn ${waiting ? "attn" : ""}`} onClick={() => panel.open("questions")} aria-label={plural("questions.line", waiting)} title={t("panel.tab.questions")}>
               <Icon name="ask" />
@@ -1731,7 +1740,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                 chat={(child) => <SubagentTranscript key={child} id={child} onPreview={openPreview} toast={toast} />}
               />,
             }}
-            badges={{ ...(questionScope && waiting ? { questions: waiting } : {}), ...(runningSubagents ? { subagents: runningSubagents } : {}) }}
+            badges={{ ...(questionsShown && waiting ? { questions: waiting } : {}), ...(runningSubagents ? { subagents: runningSubagents } : {}) }}
             marks={browserShown ? { browser: browserShown.needs_you ? "attn" : browserShown.acting ? "busy" : undefined } : undefined}
             details={hasDetails ? (ids) =>
               <SessionDetails
@@ -1948,7 +1957,7 @@ function SystemNoteRow({ note, cacheKey, run }: { note: SystemNote; cacheKey?: s
     <div className={`sysnote ${note.kind}`}>
       <div className="sysnote-row">
       <button type="button" className="sysnote-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-        <Icon name={note.kind === "loop" ? "loop" : note.kind === "schedule" || note.kind === "reminder" ? "clock" : note.kind === "subagent" || note.kind === "subagents" || note.kind === "task" ? "spawn" : "compact"} size={14} />
+        <Icon name={note.kind === "loop" ? "loop" : note.kind === "schedule" || note.kind === "reminder" ? "clock" : note.kind === "subagent" || note.kind === "subagents" || note.kind === "task" ? "spawn" : note.kind === "answers" ? "ask" : "compact"} size={14} />
         <span className="truncate">{noteTitle(note)}</span>
         <Chevron open={open} />
       </button>

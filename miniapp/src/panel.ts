@@ -32,14 +32,18 @@ export type PanelContext = "session" | "orchestrator" | "member" | "main";
  * The orchestrator has no Preview tab of its own, yet its chat carries file cards — a member's
  * patch, the operator's attachment — that open in Preview. With `preview` (a file has been opened)
  * the tab joins its strip after Details, so the file on screen has a tab to be on.
+ *
+ * An ordinary session has a Questions tab only while its agent's side questions wait (`questions`),
+ * first, where the orchestrator's is: most sessions never leave one, and a tab that is nearly always
+ * empty is one more thing on a phone's strip to read past.
  */
-export function tabsFor(context: PanelContext, opts: { browser?: boolean; preview?: boolean; subagents?: boolean } = {}): PanelTab[] {
+export function tabsFor(context: PanelContext, opts: { browser?: boolean; preview?: boolean; subagents?: boolean; questions?: boolean } = {}): PanelTab[] {
   const browser: PanelTab[] = opts.browser ? ["browser"] : [];
   const own: PanelTab[] = [...PANEL_TABS, ...(opts.subagents ? (["subagents"] as PanelTab[]) : [])];
   if (context === "orchestrator") return ["questions", "details", ...(opts.preview ? (["preview"] as PanelTab[]) : []), ...browser, ...PROJECT_TABS];
   if (context === "member") return [...own, ...browser, ...PROJECT_TABS];
   if (context === "main") return ["questions", ...own, ...browser];
-  return [...own, ...browser];
+  return [...(opts.questions ? (["questions"] as PanelTab[]) : []), ...own, ...browser];
 }
 
 /** Every tab a route may name in this context. A link to `?panel=browser` must open the tab even
@@ -49,7 +53,7 @@ export function tabsFor(context: PanelContext, opts: { browser?: boolean; previe
  *  moment — the first click fetched the file and showed nothing, and only a second click, landing
  *  on an address that no longer changed, kept it open. */
 export function routeTabsFor(context: PanelContext): PanelTab[] {
-  return tabsFor(context, { browser: true, preview: true, subagents: true });
+  return tabsFor(context, { browser: true, preview: true, subagents: true, questions: true });
 }
 
 /** One file the Preview tab showed: where the bytes come from, and the lines an answer cited, if any. */

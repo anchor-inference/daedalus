@@ -833,6 +833,12 @@
   .q-state { font-size: var(--fs-14); }
   .q-state i { display: none; }
   .q-clear { min-height: var(--tap); padding: 0 4px; font-weight: 600; color: var(--fg-2); }
+  /* Round 44 px targets for the paperclip and "not needed", like every control a finger presses here.
+     A phone pastes from its own keyboard and drops nothing, so the hint about both is left out. */
+  .q-attach, .q-aside { width: var(--tap); height: var(--tap); background: var(--surface-1); -webkit-tap-highlight-color: transparent; }
+  .q-attach:hover { background: var(--surface-1); }
+  .q-aside { margin: -8px -6px 0 0; background: transparent; }
+  .q-files-hint { display: none; }
   .questions-send { padding: 10px var(--gutter) calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface-1); box-shadow: none; }
   .questions-send-info { font-size: var(--fs-14); }
   .questions-send-btn { min-height: var(--tap); padding: 0 var(--space-5); border-radius: var(--radius-pill); font-size: var(--fs-15); }

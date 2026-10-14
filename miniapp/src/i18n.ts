@@ -6816,6 +6816,17 @@ Object.assign(DICT, {
   "questions.fate.elsewhere": { en: "Answered elsewhere", ru: "Отвечено в другом месте" },
   "questions.line": { en: "{n} question waiting|{n} questions waiting", ru: "{n} вопрос ждёт ответа|{n} вопроса ждут ответа|{n} вопросов ждут ответа" },
   "questions.open": { en: "Open", ru: "Открыть" },
+  "questions.empty.session": { en: "When the agent has a question that can wait, it leaves it here and keeps working.", ru: "Когда у агента появится вопрос, который может подождать, он оставит его здесь и продолжит работу." },
+  "questions.asker.agent": { en: "Side question", ru: "Попутный вопрос" },
+  "questions.attach": { en: "Attach files", ru: "Прикрепить файлы" },
+  "questions.attach.title": { en: "Attach files — or paste a screenshot into the answer, or drop files on the card", ru: "Прикрепить файлы — или вставьте скриншот в поле ответа, или перетащите файлы на карточку" },
+  "questions.attach.hint": { en: "Paste or drop a screenshot", ru: "Вставьте или перетащите скриншот" },
+  "questions.aside": { en: "Not needed", ru: "Не нужно" },
+  "questions.aside.title": { en: "Put this question aside without answering; the agent is not woken for it", ru: "Убрать вопрос без ответа; агент не будет из-за этого разбужен" },
+  "questions.fate.aside": { en: "Put aside", ru: "Убрано без ответа" },
+  "questions.fate.withdrawn.agent": { en: "The agent took it back", ru: "Агент снял вопрос" },
+  "questions.fate.withdrawn.agent.draft": { en: "The agent took it back — your draft was dropped", ru: "Агент снял вопрос — ваш черновик удалён" },
+  "turn.note.answers": { en: "Your answers to side questions", ru: "Ваши ответы на попутные вопросы" },
 });
 
 // The agent's browser: the Browser tab, the corner preview, the phone's button and its takeover.

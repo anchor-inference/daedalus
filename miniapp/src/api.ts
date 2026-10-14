@@ -1058,7 +1058,7 @@ export type Ask = {
   short_id: string;
   /** Null only for the main orchestrator's confirmation of a project that does not exist yet. */
   project_id: string | null;
-  origin: "staff" | "orchestrator" | "dispatcher";
+  origin: "staff" | "orchestrator" | "dispatcher" | "session";
   kind: "question" | "permission" | "folder" | "project";
   staff_id: string | null;
   task_id: string | null;
@@ -1116,10 +1116,14 @@ export type WaitingQuestion = Ask & {
   /** The MCP server whose every tool "Always" can allow at once, or empty. */
   always_server?: string;
   urgent: boolean;
+  /** Whether an answer may bring files: a question of an agent session (a side question, the orchestrator's own). */
+  files?: boolean;
+  /** The session that left a side question; null for every other request. */
+  session_id?: string | null;
 };
 
-/** One answer of a batch sent from the list. */
-export type QuestionAnswer = { ask_id: string; selected?: string[]; text?: string; note?: string; allow?: boolean; always?: boolean; server?: boolean };
+/** One answer of a batch sent from the list. `files` are the places of its files among the batch's uploads. */
+export type QuestionAnswer = { ask_id: string; selected?: string[]; text?: string; note?: string; allow?: boolean; always?: boolean; server?: boolean; files?: number[] };
 
 /** What the host did with one answer of a batch. */
 export type QuestionOutcome = {
