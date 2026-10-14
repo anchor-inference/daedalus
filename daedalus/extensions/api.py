@@ -2100,7 +2100,10 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         teams = await manager.staff.team_counts() if orchestrated else {}
         waiting = await manager.asks.open_counts("operator") if orchestrated else {}
         # ``pinned_at`` orders the sidebar's Pinned block; empty is not pinned.
-        folders = [{**p.view(), **counts.get(p.id, empty), "orchestrator": orchestration(p, teams, waiting), "pinned_at": pins.get(p.id, "")} for p in projects]
+        # A chat's project with no session in it is one a moved chat left behind, and listed it would
+        # be a nameless entry in every picker the listing feeds.
+        folders = [{**p.view(), **counts.get(p.id, empty), "orchestrator": orchestration(p, teams, waiting), "pinned_at": pins.get(p.id, "")}
+                   for p in projects if not (p.settings.ephemeral and p.id not in counts)]
         folders.sort(key=lambda p: (p["last_message_at"] or p["created_at"], p["id"]), reverse=True)
         return {"sessions": rows, "projects": folders, "next_cursor": next_cursor}
 

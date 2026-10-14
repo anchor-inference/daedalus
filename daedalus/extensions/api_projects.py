@@ -345,7 +345,15 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         to mount this" instead of showing a project whose files are mysteriously absent. ``reach``
         is who could ever work there.
         """
-        return [view(project, await sessions_of(project.id)) for project in await manager.projects.list()]
+        out = []
+        for project in await manager.projects.list():
+            sessions = await sessions_of(project.id)
+            # A chat's project a moved chat left behind is nobody's to pick: kept a while only so the
+            # move can be undone, and swept later (ProjectStore.sweep_leftovers).
+            if project.settings.ephemeral and not sessions:
+                continue
+            out.append(view(project, sessions))
+        return out
 
     @api.get("/api/project-environments")
     async def project_environments(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

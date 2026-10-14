@@ -5,8 +5,8 @@ one ``as-project`` command with the name typed; the sidebar then lists a project
 "Turn back into a chat" on that project's menu sends ``as-chat`` and the chat is back among the chats;
 on a project with several chats the item is there but disabled. A chat dragged onto a project row is
 moved into it working in its folder, with an Undo that moves it back; a drop on the installation's own
-project does nothing. A chat's menu lists no subagents. On a phone the same two commands live in the
-row's sheet and the project section's sheet. In English and Russian, and nothing runs off the side.
+project does nothing. A chat's menu lists no subagents, on a desktop or a phone. On a phone the same
+two commands live in the row's sheet and the project section's sheet. In English and Russian, and nothing runs off the side.
 
     cd miniapp && npm run build
     python3 tests/browser/serve_app.py 9047 /tmp/app-root &
@@ -212,6 +212,13 @@ def main() -> int:
 
                 def sheet_pick(name: str, page=page):  # type: ignore[no-untyped-def]
                     return page.locator(".ph-actions .ph-mrow", has_text=name).first
+
+                # The leader's sheet lists no subagents either; the chat's own menu has their tile.
+                page.locator(f"[data-session='{shots.S1}'] .ph-row-more").click()
+                rows = page.locator(".ph-actions .ph-mrow").all_inner_texts()
+                check(not any(name in " ".join(rows) for name in ("link-check", "photo-alt", "price-audit")), f"{lang} phone {scheme}: a chat's sheet lists no subagents")
+                page.keyboard.press("Escape")
+                page.wait_for_timeout(300)
 
                 page.locator(f"[data-session='{shots.S6}'] .ph-row-more").click()
                 sheet_pick(words["make"]).click()

@@ -1747,7 +1747,6 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "pin.on": { en: "Pin", ru: "Закрепить" },
   "pin.off": { en: "Unpin", ru: "Открепить" },
   "agents.fork.of": { en: "forked from {name} at message {n}", ru: "ответвление от «{name}» на сообщении {n}" },
-  "agents.sub.open": { en: "open {name}", ru: "открыть {name}" },
   "agents.sub.more": { en: "{n} more subagent|{n} more subagents", ru: "ещё {n} субагент|ещё {n} субагента|ещё {n} субагентов" },
   "agents.sub.fewer": { en: "Fewer", ru: "Свернуть" },
   "agents.loop.line": { en: "Loop {cadence} · {runs}", ru: "Цикл {cadence} · {runs}" },

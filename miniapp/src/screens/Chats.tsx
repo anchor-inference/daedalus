@@ -103,10 +103,11 @@ function ChatRow({ row, fork, projectName, toast, onOpen, onNewIn, pin }: { row:
   const projects = useProjects();
   const project = (projects.data ?? []).find((p) => p.id === s.project_id) ?? null;
   const { items, layers } = useSessionCommands(s, { onProject: project ? () => setProjectOpen(true) : undefined, projectName, chat: fork ? null : project });
+  // No entry per subagent: with many helpers the sheet ran off the screen, and the chat itself
+  // shows them, counted on this row's meta line and as the Subagents tile of its menu.
   const actions: MenuItem[] = [
     { label: t("ph.newchat.in", { name: projectName }), icon: "compose", onSelect: onNewIn },
     ...(pin ? [pinCommand(s.project_id, pin === "on")] : []),
-    ...row.kids.map((kid) => ({ label: t("agents.sub.open", { name: agentName(kid) }), icon: "bots" as const, hint: statusWord(kid.status), onSelect: () => onOpen(kid.id) })),
     ...items,
   ];
   const find = (icon: string) => items.find((item) => item !== "-" && item.icon === icon) as Exclude<MenuItem, "-"> | undefined;

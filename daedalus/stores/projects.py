@@ -9,7 +9,7 @@ import sqlite3
 import uuid
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -177,6 +177,11 @@ class ProjectSettings:
     wakes its coordinator (no event, schedule or watch) until it is restored. Every row it owns is
     kept, so restoring is switching this off and nothing else."""
     orchestrator: OrchestratorSettings = field(default_factory=OrchestratorSettings)
+    emptied_at: str = ""
+    """When a chat's project was first found with no session left in it — a chat moved out leaves it
+    so — and empty until then; :meth:`ProjectStore.sweep_leftovers` writes it, clears it when a session
+    comes back, and removes the record once it has been empty longer than the grace, which is what
+    lets an Undo of the move find the project still there."""
 
     @classmethod
     def load(cls, raw: Any, *, default_env: str = "") -> ProjectSettings:
@@ -190,6 +195,7 @@ class ProjectSettings:
             setup_command=str(data.get("setup_command") or "").strip(),
             archived=bool(data.get("archived", False)),
             orchestrator=OrchestratorSettings.load(data.get("orchestrator")),
+            emptied_at=str(data.get("emptied_at") or ""),
         )
 
     def dump(self) -> dict[str, Any]:
@@ -201,6 +207,7 @@ class ProjectSettings:
             "setup_command": self.setup_command,
             "archived": self.archived,
             "orchestrator": self.orchestrator.dump(),
+            "emptied_at": self.emptied_at,
         }
 
 
@@ -387,6 +394,10 @@ def top_level_sessions(rows: Iterable[tuple[str, str | None, Any]]) -> dict[str,
             if project_id and not _nested_under(session_id, metadata, known)}
 
 
+LEFTOVER_GRACE = timedelta(hours=1)
+"""How long a chat's project emptied by a move is kept: the move's Undo lasts seconds, and an hour
+also covers moving the chat back by hand after a change of mind."""
+
 CHAT_CARRIES = frozenset({"sessions", "project_folders", "project_pins", "project_journal", "operation_receipts"})
 """The tables whose rows a chat's project may hold as well as a project: its chat (counted on its
 own), its folders, its pin, the log of what was done to it, and the receipts of the operator's own
@@ -409,6 +420,27 @@ _HELD = {
 }
 
 
+async def held_work(conn: Any, project_id: str) -> list[str]:
+    """What the project holds that a chat's project cannot, in words, each once; empty when nothing.
+
+    Asked of the schema rather than of a list: every table with a foreign key to ``projects`` except
+    those a chat's project shares (:data:`CHAT_CARRIES`), so a table added later is covered without
+    anyone remembering this function. Rows every project is born with do not count (:data:`_BORN_WITH`).
+    """
+    held: list[str] = []
+    tables = await (await conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")).fetchall()
+    for table in (row["name"] for row in tables):
+        if table in CHAT_CARRIES:
+            continue
+        keys = await (await conn.execute(f'PRAGMA foreign_key_list("{table}")')).fetchall()
+        for column in sorted({key["from"] for key in keys if key["table"] == "projects"}):
+            worth = f" AND {_BORN_WITH[table]}" if table in _BORN_WITH else ""
+            found = await (await conn.execute(f'SELECT 1 FROM "{table}" WHERE "{column}" = ?{worth} LIMIT 1', (project_id,))).fetchone()
+            if found is not None:
+                held.append(_HELD.get(table, "records only a project keeps"))
+    return list(dict.fromkeys(held))
+
+
 async def why_not_a_chat(conn: Any, project_id: str) -> str:
     """Why this project cannot become a chat's project again, or "" when it can; read inside the
     caller's transaction so the answer still holds when the flag is written.
@@ -416,10 +448,9 @@ async def why_not_a_chat(conn: Any, project_id: str) -> str:
     A chat's project is removed with its last chat (``delete_session``), so what a chat cannot carry
     is decided by that removal. A row that cascades with it would be lost without a word — a team,
     a board, a brief — and a row whose foreign key does not cascade (a schedule, a budget) would make
-    the removal fail, and with it the deletion of the chat. Both are refused here, where the operator
-    can still be told, by asking the schema rather than a list: a table added later that points at
-    projects is covered without anyone remembering this function. :meth:`ProjectStore.delete` refuses
-    automation history for the second reason.
+    the removal fail, and with it the deletion of the chat. Both are refused here (:func:`held_work`),
+    where the operator can still be told. :meth:`ProjectStore.delete` refuses automation history for
+    the second reason.
     """
     project = await (await conn.execute("SELECT name, settings, system, setup_by FROM projects WHERE id = ?", (project_id,))).fetchone()
     if project is None:
@@ -443,19 +474,9 @@ async def why_not_a_chat(conn: Any, project_id: str) -> str:
     chats = sum(1 for owner in top_level_sessions((r["id"], r["project_id"], r["metadata"]) for r in sessions).values() if owner == project_id)
     if chats != 1:
         return f"only a project with exactly one chat can become a chat; {name} has {chats}"
-    held: list[str] = []
-    tables = await (await conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")).fetchall()
-    for table in (row["name"] for row in tables):
-        if table in CHAT_CARRIES:
-            continue
-        keys = await (await conn.execute(f'PRAGMA foreign_key_list("{table}")')).fetchall()
-        for column in sorted({key["from"] for key in keys if key["table"] == "projects"}):
-            worth = f" AND {_BORN_WITH[table]}" if table in _BORN_WITH else ""
-            found = await (await conn.execute(f'SELECT 1 FROM "{table}" WHERE "{column}" = ?{worth} LIMIT 1', (project_id,))).fetchone()
-            if found is not None:
-                held.append(_HELD.get(table, "records only a project keeps"))
+    held = await held_work(conn, project_id)
     if held:
-        return f"{name} holds {', '.join(dict.fromkeys(held))}, which a chat's project cannot keep"
+        return f"{name} holds {', '.join(held)}, which a chat's project cannot keep"
     return ""
 
 
@@ -1459,7 +1480,63 @@ class ProjectStore:
         return await self.get(pid) if pid else None
 
     async def attach(self, session_id: str, project_id: str) -> None:
-        await self._db.execute("UPDATE sessions SET project_id = ? WHERE id = ?", (project_id, session_id))
+        async with self._db.transaction() as conn:
+            await conn.execute("UPDATE sessions SET project_id = ? WHERE id = ?", (project_id, session_id))
+            # A chat moved back (the Undo of a move) makes its old project its own again; the mark
+            # that would have let the sweep remove it goes, so emptying it later starts the grace anew.
+            await conn.execute(
+                "UPDATE projects SET settings = json_set(settings, '$.emptied_at', '') WHERE id = ?"
+                " AND json_valid(settings) AND COALESCE(json_extract(settings, '$.emptied_at'), '') != ''",
+                (project_id,),
+            )
+
+    async def sweep_leftovers(self, *, grace: timedelta = LEFTOVER_GRACE, now: datetime | None = None) -> list[str]:
+        """Remove the records of chats' projects that no session has been in for longer than ``grace``;
+        the ids removed.
+
+        A chat moved into a project leaves its own project behind with nothing in it. The lists hide
+        such a project at once; the record is kept a while so the move's Undo can put the chat back,
+        and only then removed, as deleting the chat would have removed it. "Empty since" is not
+        stored anywhere a move writes, so the sweep marks a project the first time it finds it empty
+        (``emptied_at``) and removes it on a later pass: the grace is at least ``grace``, and at most
+        that plus the time between passes. A project that holds work (:func:`held_work`) is left
+        alone, as is anything not ephemeral. Only the record goes, the operator's folder or not: no
+        file is ever deleted here, exactly as when the last chat of a chat's project is deleted.
+        """
+        at = now or datetime.now(UTC)
+        removed: list[str] = []
+        async with self._db.transaction() as conn:
+            # A session came back (one started in it, or a move this store did not see): not empty.
+            await conn.execute(
+                "UPDATE projects SET settings = json_set(settings, '$.emptied_at', '')"
+                " WHERE json_valid(settings) AND COALESCE(json_extract(settings, '$.emptied_at'), '') != ''"
+                " AND EXISTS (SELECT 1 FROM sessions WHERE project_id = projects.id)"
+            )
+            rows = await (await conn.execute(
+                "SELECT id, COALESCE(json_extract(settings, '$.emptied_at'), '') AS emptied_at FROM projects"
+                " WHERE system = '' AND json_valid(settings) AND json_extract(settings, '$.ephemeral') = 1"
+                " AND NOT EXISTS (SELECT 1 FROM sessions WHERE project_id = projects.id)"
+            )).fetchall()
+            for row in rows:
+                if not row["emptied_at"]:
+                    await conn.execute("UPDATE projects SET settings = json_set(settings, '$.emptied_at', ?) WHERE id = ?", (at.isoformat(), row["id"]))
+                    continue
+                try:
+                    since = datetime.fromisoformat(row["emptied_at"])
+                except ValueError:
+                    since = at
+                if at - since < grace or await held_work(conn, row["id"]):
+                    continue
+                cursor = await conn.execute(
+                    "DELETE FROM projects WHERE id = ? AND system = '' AND json_extract(settings, '$.ephemeral') = 1"
+                    " AND NOT EXISTS (SELECT 1 FROM sessions WHERE project_id = projects.id)",
+                    (row["id"],),
+                )
+                if cursor.rowcount:
+                    removed.append(row["id"])
+        if removed:
+            await self.list()
+        return removed
 
     async def sessions_of(self, project_id: str) -> list[dict[str, str]]:
         rows = await self._db.fetchall("SELECT id, title FROM sessions WHERE project_id = ? ORDER BY last_message_at DESC", (project_id,))
@@ -1501,6 +1578,7 @@ class ProjectStore:
 __all__ = [
     "BRIEF_SECTIONS",
     "CHAT_CARRIES",
+    "LEFTOVER_GRACE",
     "FOLDER_NAME_MAX",
     "BriefSection",
     "FolderSpec",
@@ -1518,6 +1596,7 @@ __all__ = [
     "RULE_TEXT_MAX",
     "folder_name",
     "normalise_root",
+    "held_work",
     "top_level_sessions",
     "why_not_a_chat",
 ]

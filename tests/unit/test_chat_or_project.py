@@ -18,6 +18,7 @@ import json
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -26,6 +27,7 @@ import httpx
 
 from daedalus.config import RuntimeConfig, Settings
 from daedalus.extensions.api import build_app
+from daedalus.extensions.scheduler import Scheduler
 from daedalus.host.session_runner import SessionManager
 from daedalus.stores.database import MIGRATIONS, Database, _chat_or_project
 from daedalus.stores.projects import ProjectSettings, ProjectStore
@@ -471,3 +473,76 @@ async def test_turning_back_into_a_chat_is_refused_while_the_project_holds_work(
         await client.post(f"/api/projects/{plain['id']}/journal", headers=HEADERS, json={"text": "started"})
         assert (await _command(client, plain["id"], "as-chat")).status_code == 200
         assert (await manager.projects.pins()).get(plain["id"])
+
+
+# -- the project a moved chat leaves behind ---------------------------------------------------
+
+
+async def _left_behind(manager: SessionManager, client: httpx.AsyncClient, title: str) -> str:
+    """A chat moved into a project of the operator's: the id of the chat's own project it left empty."""
+    chat = await manager.create_session(title)
+    left = chat.project.id  # type: ignore[union-attr]
+    target = (await client.post("/api/projects", headers=HEADERS, json={"name": f"Into {title}"})).json()["id"]
+    moved = await client.post(f"/api/sessions/{chat.session.id}/project", headers=HEADERS, json={"project_id": target})
+    assert moved.status_code == 200
+    return left
+
+
+async def test_a_left_behind_project_is_hidden_at_once_and_swept_after_the_grace(settings: Settings, config: RuntimeConfig, db: Database) -> None:
+    async with _api(settings, config, db) as (manager, client):
+        left = await _left_behind(manager, client, "Old chat")
+        assert left not in {p["id"] for p in (await client.get("/api/projects", headers=HEADERS)).json()}
+        assert left not in {p["id"] for p in (await client.get("/api/sessions", headers=HEADERS)).json()["projects"]}
+
+        start = datetime.now(UTC)
+        assert await manager.projects.sweep_leftovers(now=start) == [], "the first pass only marks it"
+        assert await manager.projects.sweep_leftovers(now=start + timedelta(minutes=30)) == [], "inside the grace it stays"
+        assert await manager.projects.get(left) is not None
+        assert await manager.projects.sweep_leftovers(now=start + timedelta(hours=1, minutes=1)) == [left]
+        assert await manager.projects.get(left) is None
+
+
+async def test_an_undone_move_keeps_the_project_and_restarts_the_grace(settings: Settings, config: RuntimeConfig, db: Database) -> None:
+    async with _api(settings, config, db) as (manager, client):
+        chat = await manager.create_session("Undo me")
+        left = chat.project.id  # type: ignore[union-attr]
+        target = (await client.post("/api/projects", headers=HEADERS, json={"name": "Somewhere"})).json()["id"]
+        await client.post(f"/api/sessions/{chat.session.id}/project", headers=HEADERS, json={"project_id": target})
+        start = datetime.now(UTC)
+        await manager.projects.sweep_leftovers(now=start)
+        # The Undo: the chat goes back, and its project is its own again.
+        back = await client.post(f"/api/sessions/{chat.session.id}/project", headers=HEADERS, json={"project_id": left})
+        assert back.status_code == 200
+        assert (await manager.projects.get(left)).settings.emptied_at == ""  # type: ignore[union-attr]
+        assert await manager.projects.sweep_leftovers(now=start + timedelta(hours=2)) == []
+        assert await _ephemeral(db, left)
+        # Moved out again much later: a fresh grace, not the old mark.
+        await client.post(f"/api/sessions/{chat.session.id}/project", headers=HEADERS, json={"project_id": target})
+        later = start + timedelta(hours=3)
+        assert await manager.projects.sweep_leftovers(now=later) == []
+        assert await manager.projects.get(left) is not None
+
+
+async def test_the_sweep_leaves_work_and_projects_alone(settings: Settings, config: RuntimeConfig, db: Database) -> None:
+    async with _api(settings, config, db) as (manager, client):
+        scheduled = await _left_behind(manager, client, "Scheduled")
+        await db.execute("INSERT INTO schedules(id, name, prompt, workspace, created_at, project_id) VALUES ('sch2', 'daily', 'go', '/w', '2026-01-01', ?)", (scheduled,))
+        empty_project = (await client.post("/api/projects", headers=HEADERS, json={"name": "Made by hand"})).json()["id"]
+        start = datetime.now(UTC)
+        await manager.projects.sweep_leftovers(now=start)
+        assert await manager.projects.sweep_leftovers(now=start + timedelta(days=1)) == []
+        assert await manager.projects.get(scheduled) is not None, "a schedule keeps it, or its removal would fail"
+        assert await manager.projects.get(empty_project) is not None, "a project made by hand is a project before its first chat"
+        assert empty_project in {p["id"] for p in (await client.get("/api/projects", headers=HEADERS)).json()}
+
+
+async def test_the_maintenance_tick_sweeps_the_leftovers(settings: Settings, config: RuntimeConfig, db: Database) -> None:
+    async with _api(settings, config, db) as (manager, client):
+        left = await _left_behind(manager, client, "Swept")
+        long_ago = (datetime.now(UTC) - timedelta(hours=2)).isoformat()
+        await db.execute("UPDATE projects SET settings = json_set(settings, '$.emptied_at', ?) WHERE id = ?", (long_ago, left))
+        app = SimpleNamespace(settings=settings, config=config, db=db, manager=manager, notifications=None, extensions={})
+        scheduler = Scheduler(app)  # type: ignore[arg-type]
+        await scheduler._maintain_database(datetime.now(UTC))
+        await scheduler.drain_retention()
+        assert await manager.projects.get(left) is None
