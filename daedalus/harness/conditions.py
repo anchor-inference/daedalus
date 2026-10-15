@@ -141,7 +141,7 @@ def derive(
                      if signal and phase == "first_output" else "")
             out.append(Condition(
                 name, "false", "timed_out",
-                f"{name}: {_WAITING_WORDS[name]} within {allowed} s; the deadline passed at"
+                f"{name}: {_WAITING_WORDS[name].removesuffix(' yet')} within {allowed} s; the deadline passed at"
                 f" {_clock_time(row['deadline_at'])} and the host stopped the attempt{heard}",
                 since=row["deadline_at"], params=params,
             ))
