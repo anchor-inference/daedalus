@@ -278,6 +278,38 @@ async def test_answer_to_an_old_task_contract_is_recorded_but_not_applied(
         await r.manager.close()
 
 
+
+@pytest.mark.parametrize("kind", ["question", "permission"])
+async def test_a_member_still_hears_an_answer_given_to_an_old_task_contract(
+    settings: Settings, db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
+    # The member's request holds its turn: kept from it, a reviewer waited for good while the
+    # orchestrator's messages queued behind that same turn.
+    r = await rig(settings, db, tmp_path)
+    try:
+        task = await r.orch.board.add(title="Review the pack", project_id=r.project.id, operator=True)
+        ask = await r.manager.asks.open(r.project.id, origin="staff", kind=kind,
+                                        text="How do I hand it in?", routed_to="orchestrator", task_id=task["id"])
+        await db.execute("UPDATE board_tasks SET contract_revision = contract_revision + 1 WHERE id = ?", (task["id"],))
+        handed: list[dict[str, Any]] = []
+
+        async def deliver(_ask: Any, **kwargs: Any) -> tuple[bool, str]:
+            handed.append(kwargs)
+            return True, ""
+
+        monkeypatch.setattr(r.team, "_deliver", deliver)
+        outcome = await r.team.answer(ask.id, allow=True if kind == "permission" else None,
+                                      text="Hand it in as it is", by="operator")
+        assert outcome["applied"] is False and outcome["delivered"] is True
+        [given] = handed
+        if kind == "permission":
+            assert given["allow"] is False and "Not granted" in given["text"]
+        else:
+            assert "contract changed" in given["text"] and given["text"].endswith("The answer: Hand it in as it is")
+    finally:
+        await r.manager.close()
+
+
 async def test_permissions_and_escalations_sit_above_the_questions_and_the_main_list_gathers_projects(settings: Settings, db: Database, tmp_path: Path) -> None:
     r = await rig(settings, db, tmp_path)
     try:

@@ -1529,11 +1529,28 @@ class Team:
             raise AlreadyAnswered(f"request {ask.short_id} was already answered by the {current.resolved_by if current else 'someone else'}")
         answered = await self.manager.asks.get(ask.id)
         if answered is not None and answered.resolution.get("applies") is False:
-            # The operator's words are recorded, but an old task contract must not receive a
-            # permission or decision as if it answered the current version of the work.
+            # The words are recorded, but an old task contract must not receive a permission or a
+            # decision as if it answered the current version of the work. The member still hears
+            # back: its request holds its turn, and an answer kept from it left a reviewer waiting
+            # for good while the orchestrator's messages queued behind that same turn.
+            delivered, error = False, "the task contract changed after this request was asked"
+            if ask.origin == "staff":
+                said = (text or "").strip()
+                if ask.kind == "permission":
+                    stale_allow, stale_text = False, (
+                        "Not granted: the task contract changed while this permission was waiting."
+                        " Re-read the task and ask again if the current version still needs it.")
+                else:
+                    stale_allow, stale_text = allow, (
+                        "The task contract changed while you waited, so this answer was given for its"
+                        " earlier version; check the current task before relying on it."
+                        + (f" The answer: {said}" if said else ""))
+                delivered, failure = await self._deliver(ask, allow=stale_allow, text=stale_text,
+                                                         selected=selected, by=by)
+                error = failure or error
             await self._announce_resolved(ask, allow=allow, by=by, via=resolution["via"])
-            return {"state": "answered", "applied": False, "delivered": False,
-                    "error": "the task contract changed after this request was asked", "ask": answered.view()}
+            return {"state": "answered", "applied": False, "delivered": delivered,
+                    "error": error, "ask": answered.view()}
         if rule is not None and ask.staff_id:
             # Kept before the delivery: the operator's "always" stands even when the session that
             # asked has ended by now, and its next launch is where the rule is read.
