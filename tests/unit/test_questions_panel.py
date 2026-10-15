@@ -310,6 +310,33 @@ async def test_a_member_still_hears_an_answer_given_to_an_old_task_contract(
         await r.manager.close()
 
 
+async def test_an_answer_that_does_not_reach_a_native_member_still_closes_the_operators_copy(
+    settings: Settings, db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The session publishes a native member's answer only when it reaches it; one that did not
+    # closed nothing, and the operator's held copy went out later as a question waiting for them.
+    r = await rig(settings, db, tmp_path)
+    try:
+        ask = await r.manager.asks.open(r.project.id, origin="staff", kind="question", text="How do I hand it in?",
+                                        routed_to="orchestrator", detail={"event_ref": "ask:s1:call-1"})
+        closed: list[tuple[str, str]] = []
+
+        async def resolve(ref: str, resolution: str, *, via: str) -> int:
+            closed.append((ref, resolution))
+            return 1
+
+        async def deliver(_ask: Any, **_kwargs: Any) -> tuple[bool, str]:
+            return False, "the session that asked has ended"
+
+        monkeypatch.setattr(r.team.app.notifications, "resolve", resolve, raising=False)
+        monkeypatch.setattr(r.team, "_deliver", deliver)
+        outcome = await r.team.answer(ask.id, text="Hand it in as it is", by="operator")
+        assert outcome["delivered"] is False
+        assert closed == [("ask:s1:call-1", "answered")]
+    finally:
+        await r.manager.close()
+
+
 async def test_permissions_and_escalations_sit_above_the_questions_and_the_main_list_gathers_projects(settings: Settings, db: Database, tmp_path: Path) -> None:
     r = await rig(settings, db, tmp_path)
     try:

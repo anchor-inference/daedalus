@@ -627,7 +627,21 @@ class NotificationService:
                         ("watch approval withdrawn before notification release", _now(), exc.delivery_id),
                     )
 
+    async def _settled(self, request_ref: str) -> bool:
+        """Whether the ask a held row stands for is already resolved. The row closed only when the
+        member's session published the answer, so an answer kept from the member left it open, and the
+        operator was shown a question 17 seconds after the orchestrator had settled it."""
+        ask = await self.db.fetchone(
+            "SELECT resolved_at FROM asks WHERE json_extract(detail_json, '$.event_ref') = ? ORDER BY created_at DESC LIMIT 1", (request_ref,),
+        )
+        return ask is not None and bool(ask["resolved_at"])
+
     async def _release_row_fenced(self, row_id: int) -> None:
+        held = await self.db.fetchone("SELECT request_ref FROM notifications WHERE id = ? AND held_until IS NOT NULL AND resolved_at IS NULL", (row_id,))
+        if held is not None and held["request_ref"] and await self._settled(str(held["request_ref"])):
+            # Closed as the answer would have closed it: silently, since the operator never heard of it.
+            await self.resolve(str(held["request_ref"]), "answered", via="hold")
+            return
         async with self.db.transaction() as conn:
             cursor = await conn.execute(
                 "UPDATE notifications SET held_until = NULL WHERE id = ? AND held_until IS NOT NULL AND resolved_at IS NULL", (row_id,),

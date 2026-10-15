@@ -1674,7 +1674,17 @@ class Team:
         published when the session is answered or granted. The notification router closes the operator's
         copy from these events, and the orchestrator is woken by the answer to what it asked."""
         ref = str(ask.detail.get("event_ref") or "")
-        if ref.startswith("orchestrator:"):
+        if ref.startswith("ask:"):
+            # The session publishes its answer only when the answer reaches it. One that did not — kept
+            # from an old contract, or a session gone — closed nothing, and the operator's held copy
+            # was later released as news about a question already settled.
+            resolve = getattr(self.app.notifications, "resolve", None)
+            if resolve is not None:
+                try:
+                    await resolve(ref, "answered", via=via)
+                except Exception:  # noqa: BLE001 — the answer stands; a copy left open is closed at its release
+                    logger.warning("could not close the notification of %s", ask.short_id, exc_info=True)
+        elif ref.startswith("orchestrator:"):
             await self.publish("ask.answered", {"request_id": ask.id, "request_ref": ref, "via": via, "by": by}, project_id=ask.project_id)
         elif ref.startswith("staff:"):
             member = await self.manager.staff.get(ask.staff_id) if ask.staff_id else None

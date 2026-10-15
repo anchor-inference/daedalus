@@ -4,6 +4,7 @@ answers taken from a notification (the first one wins), the channels, the words,
 from __future__ import annotations
 
 import asyncio
+import json
 import string
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -299,6 +300,33 @@ async def test_what_came_due_while_the_host_was_down_goes_out_at_start(settings:
         [announced] = await manager.bus.replay(0, EventFilter(types=("notify",)), limit=10)
         assert announced.payload["notification"]["needs_you"] is True
         assert await restarted.release_due() == 0  # once
+    finally:
+        await manager.close()
+
+
+async def test_a_held_question_already_answered_is_closed_at_its_release_not_announced(settings: Settings, db: Database) -> None:
+    """The orchestrator answered a member's question at 06:17:11 and the answer was kept from the
+    member's session, so nothing closed the operator's held copy: it went out at 06:17:28 as a
+    question waiting for them. A row whose ask is resolved is closed silently when its hold ends."""
+    manager = await _manager(settings, db, ScriptedProvider([]))
+    service = NotificationService(db, manager.bus)
+    service.set_project_policy(lambda _project: ProjectNotifyPolicy(orchestrated=True, hold_seconds=600))
+    try:
+        await service.post(Draft("question", "Naya asks", request_ref="ask:s1:c1", session_id="s1", project_id="p1", staff_id="st1"))
+        await service.post(Draft("question", "Naya asks again", request_ref="ask:s1:c2", session_id="s1", project_id="p1", staff_id="st1"))
+        now = datetime.now(UTC).isoformat()
+        for ref, resolved in (("ask:s1:c1", now), ("ask:s1:c2", None)):
+            await db.execute(
+                "INSERT INTO asks(id, short_id, origin, kind, text, detail_json, routed_to, created_at, routed_at, resolved_at, resolved_by)"
+                " VALUES (?, ?, 'staff', 'question', 'Which?', ?, 'orchestrator', ?, ?, ?, ?)",
+                (f"ask-{ref[-2:]}", ref[-2:], json.dumps({"event_ref": ref}), now, now, resolved, "orchestrator" if resolved else None),
+            )
+        await db.execute("UPDATE notifications SET held_until = ?", ((datetime.now(UTC) - timedelta(seconds=1)).isoformat(),))
+        await service.release_due()
+        [announced] = await manager.bus.replay(0, EventFilter(types=("notify",)), limit=10)
+        assert announced.payload["notification"]["request_ref"] == "ask:s1:c2", "the open one still reaches the operator"
+        closed = await db.fetchone("SELECT resolved_at, resolution, event_seq FROM notifications WHERE request_ref = 'ask:s1:c1'")
+        assert closed["resolved_at"] and closed["resolution"] == "answered" and closed["event_seq"] is None
     finally:
         await manager.close()
 
