@@ -350,6 +350,9 @@ class SessionState:
     loop tick, say) must become one run plus one steer, never two runs driving one history."""
     history_keys: list[str] = field(default_factory=list)
     """Transcript keys of the working history at the last persist, to see what a compaction removed."""
+    compacting_keys: list[str] | None = None
+    """Transcript keys of the working history as a compaction in the middle of a run found it: the
+    turns its summary will stand for are the ones missing afterwards. ``None`` outside a compaction."""
     persist_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     """Serialises history persistence so an older snapshot can never overwrite a newer one."""
     persist_tasks: set[asyncio.Task[None]] = field(default_factory=set)
@@ -4258,37 +4261,12 @@ class SessionManager:
     ) -> None:
         """The writes themselves, under the caller's lock: the transcript, then the working history."""
         session_id = state.session.id
-        current = {self.sessions.transcript_key(m) for m in history}
         known = set(previous_keys)
         for message in fresh if fresh is not None else history:
             if self.sessions.transcript_key(message) not in known:
                 message.metadata.setdefault("daedalus.run_id", state.run_id)
-        removed = [k for k in previous_keys if k not in current]
         self._stamp_model(state, fresh if fresh is not None else history, previous_keys)
-        unlabelled = [i for i, m in enumerate(history) if m.metadata.get(COMPACTION_SUMMARY_METADATA_KEY) and "daedalus.archived" not in m.metadata]
-        if unlabelled:
-            seqs = await self.sessions.transcript_seqs(session_id, removed) if removed else []
-            if removed and len(seqs) < len(removed):
-                logger.warning("session %s: %d of %d archived turns were never in the transcript", session_id, len(removed) - len(seqs), len(removed))
-            for index in unlabelled:
-                original = history[index]
-                if seqs:
-                    contiguous = seqs[-1] - seqs[0] + 1 == len(seqs)
-                    span = f"seq {seqs[0]}–{seqs[-1]}" if contiguous else f"within seq {seqs[0]}–{seqs[-1]} ({len(seqs)} turns)"
-                    note = f"[archived turns {span}: HistoryExpand({seqs[0]}, {seqs[-1]}) returns them verbatim]"
-                    annotated = annotate_summary(original, note, seqs)
-                else:
-                    annotated = original.model_copy(update={"metadata": {**original.metadata, "daedalus.archived": {"seqs": []}}})
-                history[index] = annotated
-                # Locate the live message by identity, never by position: the core may have
-                # reshaped its history since this snapshot was taken.
-                key = self.sessions.transcript_key(original)
-                if state.engine is not None:
-                    live = state.engine.history
-                    for li, lm in enumerate(live):
-                        if lm.metadata.get(COMPACTION_SUMMARY_METADATA_KEY) and "daedalus.archived" not in lm.metadata and self.sessions.transcript_key(lm) == key:
-                            live[li] = annotated
-                            break
+        await self._label_summaries(state, history, previous_keys)
         await self.sessions.append_transcript(session_id, fresh if fresh is not None else history, from_history=True)
         # A round adds to the end of the history it was given; only a rewrite of the
         # sequence starts a generation, and that is not what a round does. ``fresh`` is
@@ -4298,6 +4276,78 @@ class SessionManager:
             await self.sessions.sync_messages(session_id, TENANT, history)
         elif fresh:
             await self.sessions.append_messages(session_id, TENANT, fresh)
+
+    async def _label_summaries(self, state: SessionState, history: list[Message], previous_keys: Sequence[str]) -> None:
+        """Tag each compaction summary not yet labelled with the transcript seqs of the turns it replaced.
+
+        The seqs go into its metadata (for the Mini App) and its text (so the model knows what
+        HistoryExpand would return). ``previous_keys`` is the history as the store last had it: the
+        turns missing from ``history`` now are the ones the summary stands for. The live engine's
+        copy is labelled too, found by identity and never by position, since the core may have
+        reshaped its history since ``history`` was taken.
+        """
+        unlabelled = [i for i, m in enumerate(history) if m.metadata.get(COMPACTION_SUMMARY_METADATA_KEY) and "daedalus.archived" not in m.metadata]
+        if not unlabelled:
+            return
+        session_id = state.session.id
+        current = {self.sessions.transcript_key(m) for m in history}
+        removed = [k for k in previous_keys if k not in current]
+        seqs = await self.sessions.transcript_seqs(session_id, removed) if removed else []
+        if removed and len(seqs) < len(removed):
+            logger.warning("session %s: %d of %d archived turns were never in the transcript", session_id, len(removed) - len(seqs), len(removed))
+        for index in unlabelled:
+            original = history[index]
+            if seqs:
+                contiguous = seqs[-1] - seqs[0] + 1 == len(seqs)
+                span = f"seq {seqs[0]}–{seqs[-1]}" if contiguous else f"within seq {seqs[0]}–{seqs[-1]} ({len(seqs)} turns)"
+                note = f"[archived turns {span}: HistoryExpand({seqs[0]}, {seqs[-1]}) returns them verbatim]"
+                annotated = annotate_summary(original, note, seqs)
+            else:
+                annotated = original.model_copy(update={"metadata": {**original.metadata, "daedalus.archived": {"seqs": []}}})
+            history[index] = annotated
+            key = self.sessions.transcript_key(original)
+            if state.engine is not None:
+                live = state.engine.history
+                for li, lm in enumerate(live):
+                    if lm.metadata.get(COMPACTION_SUMMARY_METADATA_KEY) and "daedalus.archived" not in lm.metadata and self.sessions.transcript_key(lm) == key:
+                        live[li] = annotated
+                        break
+
+    async def _transcribe_before_compaction(self, state: SessionState, engine: QueryEngine) -> None:
+        """Write every turn of the working history into the transcript before a compaction in a run replaces them.
+
+        The core hands its history over at the start of a run and at a background wake, not after
+        each round, so the turns a run produced before it compacted were never written anywhere:
+        HistoryExpand could not return them and the summary's archived range had holes in it. They
+        are written here, with the model stamp and run id a hand-over would have given them, and
+        their keys are kept to tell, once the compaction is done, which turns the summary replaced.
+        """
+        chain = state.persist_chain
+        if chain is not None and not chain.done():
+            await asyncio.wait([chain])  # its outcome is its own; this waits only for its turn
+        history = list(engine.history)
+        known = set(state.history_keys)
+        for message in history:
+            if self.sessions.transcript_key(message) not in known:
+                message.metadata.setdefault("daedalus.run_id", state.run_id)
+        self._stamp_model(state, history, state.history_keys)
+        async with state.persist_lock:
+            await self.sessions.append_transcript(state.session.id, history, from_history=True)
+        state.compacting_keys = [self.sessions.transcript_key(m) for m in history]
+
+    async def _label_compacted_history(self, state: SessionState, engine: QueryEngine) -> None:
+        """Label the summary a compaction in the middle of a run just wrote, before the next request.
+
+        The label used to be added by the next hand-over of the history, which comes at a
+        background wake or at the end of the run, so requests went out without it and a later one
+        carried it: a second rewrite of the head of the conversation, and a second miss on all of
+        it. Measured on 2026-10-14, two compactions of a 980k session were each followed two calls
+        later by a request of 465k tokens served 23k from the cache. The core waits for this while
+        it handles the event, so the request it builds next already carries the label.
+        """
+        previous = state.compacting_keys if state.compacting_keys is not None else state.history_keys
+        state.compacting_keys = None
+        await self._label_summaries(state, engine.history, previous)
 
     async def _start_run(
         self, state: SessionState, message: Message | None, *, continue_turn: bool = False
@@ -4553,6 +4603,10 @@ class SessionManager:
             iterator = engine.run(None) if continue_turn else engine.run(message)
             async for event in iterator:
                 await self._dispatch_event(state, event)
+                if event.type is EventType.COMPACTION_STARTED:
+                    await self._transcribe_before_compaction(state, engine)
+                elif event.type is EventType.COMPACTION_COMPLETED:
+                    await self._label_compacted_history(state, engine)
             if engine.state is LoopState.AWAITING and state.pending is not None:
                 status = "awaiting"
             elif engine.state is LoopState.FAILED:

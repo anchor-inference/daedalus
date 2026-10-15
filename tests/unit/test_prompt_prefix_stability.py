@@ -7,12 +7,30 @@ again. These tests replay the shapes that used to rewrite history in the middle 
 
 from __future__ import annotations
 
-from protocore.contracts.types import Message, MessageRole, TextBlock, ToolResultBlock, ToolUseBlock
-from protocore.prompts import bundled_prompt_provider
-from protocore.runtime.stale_result_trim import trim_stale_results
+import asyncio
+from collections.abc import AsyncIterator
+from typing import Any
 
-from daedalus.config import RuntimeConfig
+from protocore.contracts.turn_policy import TurnContext, TurnCoordinate
+from protocore.contracts.types import (
+    COMPACTION_SUMMARY_METADATA_KEY,
+    Message,
+    MessageRole,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+)
+from protocore.prompts import bundled_prompt_provider
+from protocore.runtime.events.envelope import TurnEvent
+from protocore.runtime.events.types import EventType
+from protocore.runtime.stale_result_trim import trim_stale_results
+from protocore.runtime.turn_policies import TurnPolicyRegistry
+
+from daedalus.config import RuntimeConfig, Settings
 from daedalus.host.engine_factory import runtime_constants, stale_trim_batch_chars
+from daedalus.stores.database import Database
+from tests.support.waiting import until
+from tests.unit.test_session_runner import ScriptedProvider, _manager
 
 PROMPTS = bundled_prompt_provider()
 
@@ -72,3 +90,86 @@ def test_the_trim_threshold_follows_the_window_and_never_falls_below_the_batch()
     assert rc.tool_result_stale_trim_batch_chars == 294_000
     config.tools.results.trim_window_share = 0.0
     assert stale_trim_batch_chars(config, 980_000) == config.tools.results.trim_batch_chars
+
+
+def _sent(message: Message) -> str:
+    """What of a message reaches the provider: a request builds its messages afresh, so their
+    creation time differs from one request to the next and is never sent."""
+    return message.model_dump_json(include={"role", "content_blocks", "reasoning_content"})
+
+
+class _CompactOnce:
+    """Stands in for the core's compaction gate: at the second gap between a batch and the next
+    request, the oldest round becomes a summary, as a compaction in the middle of a run leaves it.
+    That round was never handed over to the host: the core does that at the start of a run."""
+
+    name = "per_iteration_compaction"
+    coordinates = frozenset({TurnCoordinate.iteration_end})
+
+    def __init__(self) -> None:
+        self.seen = 0
+
+    async def apply(self, turn: TurnContext) -> AsyncIterator[TurnEvent]:
+        self.seen += 1
+        if self.seen != 2:
+            return
+        yield TurnEvent(type=EventType.COMPACTION_STARTED, run_id="r", payload={"reason": "proactive_per_iteration"})
+        history = turn.engine.history
+        summary = Message(
+            role=MessageRole.user,
+            content_blocks=[TextBlock(text="<compacted-turn id='auto'>the first command printed one</compacted-turn>")],
+            metadata={COMPACTION_SUMMARY_METADATA_KEY: True},
+        )
+        history[1:3] = [summary]
+        yield TurnEvent(type=EventType.COMPACTION_COMPLETED, run_id="r", payload={"reason": "proactive_per_iteration", "tokens_before": 100, "tokens_after": 50})
+
+
+async def test_the_summary_of_a_compaction_in_a_run_is_labelled_before_the_next_request(settings: Settings, db: Database) -> None:
+    provider = ScriptedProvider([
+        {"tool": "Exec", "args": {"command": "echo one"}},
+        {"tool": "Exec", "args": {"command": "echo two"}},
+        {"tool": "Exec", "args": {"command": "echo three"}},
+        {"text": "done"},
+    ])
+    manager = await _manager(settings, db, provider)
+    state = await manager.create_session("compacting")
+    build = manager._build_engine
+
+    async def with_the_gate(*args: Any, **kwargs: Any) -> Any:
+        engine = await build(*args, **kwargs)
+        engine.turn_policies = TurnPolicyRegistry([_CompactOnce()])
+        return engine
+
+    manager._build_engine = with_the_gate  # type: ignore[method-assign]
+    finished = asyncio.Event()
+
+    async def on_finished(session_id: str, run_id: str, status: str) -> None:
+        finished.set()
+
+    manager.on_finished(on_finished)
+    await manager.submit(state.session.id, "run three commands")
+    await asyncio.wait_for(finished.wait(), timeout=30)
+    await until(lambda: not manager._settling(state), "the run to settle")
+
+    def summary_of(request: Any) -> str:
+        texts = [block.text for message in request.messages if message.metadata.get(COMPACTION_SUMMARY_METADATA_KEY) for block in message.content_blocks if isinstance(block, TextBlock)]
+        assert len(texts) == 1
+        return texts[0]
+
+    after = provider.requests[2:]
+    assert len(after) == 2
+    # The first request after the compaction already names the archived turns; the label used to
+    # arrive a request later and rewrite the head of the conversation a second time.
+    assert "[archived turns seq" in summary_of(after[0])
+    first = [_sent(message) for message in after[0].messages]
+    second = [_sent(message) for message in after[1].messages]
+    assert second[: len(first)] == first
+    stored = await manager.sessions.list_messages(state.session.id, "daedalus", limit=50)
+    labelled = [m for m in stored if m.metadata.get(COMPACTION_SUMMARY_METADATA_KEY)]
+    assert len(labelled) == 1 and labelled[0].content_blocks[0].text.count("[archived turns") == 1  # type: ignore[union-attr]
+    # The round the summary replaced is in the transcript, where HistoryExpand finds it.
+    archived = labelled[0].metadata["daedalus.archived"]
+    expanded = await manager.sessions.expand_transcript(state.session.id, archived["from_seq"], archived["to_seq"])
+    assert [message.role for _, message in expanded] == [MessageRole.assistant, MessageRole.tool]
+    assert "call_1" in expanded[0][1].model_dump_json()
+    await manager.close()
