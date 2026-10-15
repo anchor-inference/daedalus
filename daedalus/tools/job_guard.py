@@ -164,10 +164,12 @@ def wait_script(*, timeout: int, pid: int | None = None, path: str | None = None
         what = f"/{pattern}/ in {log}"
         check = f"grep -Eq -- {shlex.quote(pattern)} {shlex.quote(log)} 2>/dev/null"
         done = f"grep -E -m 3 -- {shlex.quote(pattern)} {shlex.quote(log)}"
+    # Whole seconds, so "greater than" rather than "at least": with ``-ge`` a wait started late in a
+    # second ran out up to a second early, and a one-second wait could end almost at once.
     script = (
         f"deadline=$(( $(date +%s) + {max(1, int(timeout))} )); "
         f"until {check}; do "
-        f"if [ \"$(date +%s)\" -ge \"$deadline\" ]; then echo {shlex.quote(f'timed out after {int(timeout)}s waiting for {what}')}; exit {WAIT_TIMED_OUT}; fi; "
+        f"if [ \"$(date +%s)\" -gt \"$deadline\" ]; then echo {shlex.quote(f'timed out after {int(timeout)}s waiting for {what}')}; exit {WAIT_TIMED_OUT}; fi; "
         f"sleep {interval:g}; done; {done}"
     )
     return script, f"wait for {what}"

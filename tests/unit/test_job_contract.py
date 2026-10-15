@@ -416,3 +416,14 @@ async def test_the_migration_moves_host_job_records_and_survives_a_second_run(tm
             rows = {k: v for k, v in await (await conn.execute("SELECT key, value FROM kv")).fetchall()}
             assert list(rows) == ["jobs:abc"]
             assert json.loads(rows["jobs:abc"]) == [{**record, "where": "host"}]
+
+
+def test_a_wait_never_runs_out_before_its_timeout(tmp_path: Path) -> None:
+    # The deadline is kept in whole seconds: compared with "at least", a wait started late in a second
+    # ran out up to a second early, and a background wait of one second ended before JobWait returned.
+    script, _ = job_guard.wait_script(timeout=1, path=str(tmp_path / "never"), interval=0.05)
+    for _ in range(3):
+        began = time.monotonic()
+        done = subprocess.run(["sh", "-c", script], capture_output=True, text=True, check=False)
+        assert done.returncode == job_guard.WAIT_TIMED_OUT
+        assert time.monotonic() - began >= 1.0
