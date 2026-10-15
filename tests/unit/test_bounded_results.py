@@ -182,3 +182,17 @@ def test_the_run_is_built_with_stale_trimming_on() -> None:
     assert rc.tool_result_stale_max_chars == config.tools.results.stale_max_chars
     assert rc.tool_result_stale_trim_batch_chars == config.tools.results.trim_batch_chars
     assert rc.tool_result_stale_trim_min_share == config.tools.results.trim_min_share
+
+
+async def test_read_finds_a_file_whose_name_the_disk_keeps_decomposed(tmp_path: Path) -> None:
+    # Uploaded from macOS, the name keeps "й" as "и" and a combining breve; the model writes "й".
+    import unicodedata
+
+    locator.register(SessionServices(session_id="nfd", workspace_dir=tmp_path))
+    try:
+        name = "3_Заявление_о_регистрации.txt"
+        (tmp_path / unicodedata.normalize("NFD", name)).write_text("заявление\n", encoding="utf-8")
+        result = await read_file().invoke(_ctx("nfd"), {"path": unicodedata.normalize("NFC", name)})
+        assert not result.is_error and "заявление" in result.content
+    finally:
+        locator.unregister("nfd")

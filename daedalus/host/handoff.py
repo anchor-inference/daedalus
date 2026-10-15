@@ -23,6 +23,7 @@ import hashlib
 import os
 import posixpath
 import shutil
+import unicodedata
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -293,7 +294,10 @@ class Handoff:
         return await asyncio.to_thread(digest) == stored.sha256
 
     def _names(self, stored: StoredFile) -> list[str]:
-        return [stored.name, _variant(stored.name, stored.sha256), *(_variant(stored.name, stored.sha256, n) for n in range(1, 20))]
+        # Composed, the way a model writes the name back: kept as uploaded from macOS (NFD), the
+        # member's Read of the path the brief gave it missed the file.
+        name = unicodedata.normalize("NFC", stored.name)
+        return [name, _variant(name, stored.sha256), *(_variant(name, stored.sha256, n) for n in range(1, 20))]
 
     async def _write_host(self, stored: StoredFile, *, inbox: str, target_dir: str, actor: str) -> str:
         bridge = self.host()

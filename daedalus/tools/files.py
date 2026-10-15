@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import difflib
 import shlex
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,22 @@ def _resolve_path(context: ToolContext, services: Any, path: str | None, action:
         return services.resolve(path, write=action in ("written", "edited")), None
     except PathOutsideProject as exc:
         return None, error(context, str(exc))
+
+
+async def _as_spelled(fs: Any, target: Path) -> Path:
+    """The path as the disk spells it, when it differs from the model's only in Unicode normal form.
+
+    A file uploaded from macOS keeps its name decomposed (NFD: "и" and a combining breve for "й"),
+    while a model always writes the composed form. Find listed such a file and Read answered "no such
+    file", so a member worked round it through Exec and the host never saw the input opened.
+    """
+    if await fs.exists(target):
+        return target
+    for form in ("NFC", "NFD"):
+        other = Path(unicodedata.normalize(form, str(target)))
+        if other != target and await fs.exists(other):
+            return other
+    return target
 
 
 def _line_allowance(text: str, lines: int, budget: int) -> int:
@@ -90,6 +107,7 @@ async def read_file(
     if refusal is not None:
         return refusal
     assert target is not None
+    target = await _as_spelled(fs, target)
     if not await fs.exists(target):
         return error(context, f"no such file: {target}")
     if await fs.is_dir(target):
@@ -184,6 +202,7 @@ async def edit_file(
         return refusal
     assert target is not None
     fs = services.fs
+    target = await _as_spelled(fs, target)
     if not await fs.is_file(target):
         return error(context, f"no such file: {target}")
     text = await fs.read_text(target)
@@ -306,6 +325,7 @@ async def multi_edit(context: ToolContext, path: str, edits: list[dict[str, Any]
         return refusal
     assert target is not None
     fs = services.fs
+    target = await _as_spelled(fs, target)
     if not await fs.is_file(target):
         return error(context, f"no such file: {target}")
     if not edits:

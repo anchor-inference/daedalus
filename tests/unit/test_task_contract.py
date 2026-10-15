@@ -475,3 +475,13 @@ async def test_a_folder_is_found_by_the_name_it_is_listed_by(settings: Settings,
     finally:
         await close_team(r.manager)
         await r.manager.close()
+
+
+def test_a_decomposed_input_name_counts_as_named_by_the_composed_spelling() -> None:
+    # The delivery kept the uploaded NFD name; the member's tool call wrote the composed one.
+    import unicodedata
+
+    from daedalus.extensions.task_contract import _names_file
+
+    path = unicodedata.normalize("NFD", "/w/.agents/inbox/t/3_Заявление.docx")
+    assert _names_file('{"path": ".agents/inbox/t/3_Заявление.docx"}', path)

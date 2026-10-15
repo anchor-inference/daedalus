@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -334,6 +335,9 @@ def _names_file(text: str, path: str) -> bool:
     inbox on, which is how a member's relative path to it reads."""
     if not path:
         return False
+    # Compared composed: a name kept decomposed (NFD, as macOS writes it) never matched the composed
+    # spelling every model uses, and the input stayed unopened however the member read it.
+    text, path = unicodedata.normalize("NFC", text), unicodedata.normalize("NFC", path)
     if path in text:
         return True
     tail = path[path.rfind("/inbox/") + 1:] if "/inbox/" in path else path.rsplit("/", 1)[-1]
