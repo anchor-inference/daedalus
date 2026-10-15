@@ -831,6 +831,30 @@
       "synonyms": ["next message", "suggestion", "ghost text", "autocomplete", "prediction", "следующее сообщение", "подсказка", "автодополнение", "предсказание"]
     },
     {
+      "section": "chat", "anchor": "autopilot.enabled", "config": "autopilot.enabled",
+      "title": { "en": "Autopilot", "ru": "Автопилот" },
+      "about": { "en": "After a turn of a chat with autopilot on, a small model decides whether the work goes on by itself, is done or needs you. Each chat switches it on in its mode menu.", "ru": "После хода чата с включённым автопилотом небольшая модель решает: продолжить самому, сообщить о готовности или спросить вас. Каждый чат включает его в меню режима." },
+      "synonyms": ["autopilot", "auto continue", "continue automatically", "judge", "автопилот", "автопродолжение", "продолжать само"]
+    },
+    {
+      "section": "chat", "anchor": "autopilot.max_continuations", "config": "autopilot.max_continuations",
+      "title": { "en": "Autopilot turns after your message", "ru": "Ходов автопилота после вашего сообщения" },
+      "about": { "en": "How many turns autopilot may start by itself before it waits for you again.", "ru": "Сколько ходов автопилот может начать сам, прежде чем снова дождаться вас." },
+      "synonyms": ["autopilot limit", "continuations", "лимит автопилота", "продолжения"]
+    },
+    {
+      "section": "chat", "anchor": "autopilot.usd_per_day", "config": "autopilot.usd_per_day",
+      "title": { "en": "Autopilot daily allowance", "ru": "Дневной лимит автопилота" },
+      "about": { "en": "What autopilot's deciding calls may cost in a day; today's spend is shown beside it.", "ru": "Сколько решающие запросы автопилота могут стоить за день; сегодняшний расход показан рядом." },
+      "synonyms": ["autopilot budget", "autopilot cost", "бюджет автопилота", "расход автопилота"]
+    },
+    {
+      "section": "chat", "anchor": "user_style", "config": null,
+      "title": { "en": "How you write", "ru": "Как вы пишете" },
+      "about": { "en": "The style profile learned from your own messages, read by the suggestion, the prompt coach and autopilot; view it or forget it.", "ru": "Портрет стиля, изученный по вашим сообщениям; его читают подсказка, тренер промптов и автопилот. Здесь его можно посмотреть или забыть." },
+      "synonyms": ["style", "writing style", "profile", "preferences", "стиль", "манера письма", "портрет", "предпочтения"]
+    },
+    {
       "section": "chat", "anchor": "telegram.mode", "config": "telegram.mode",
       "title": { "en": "Where sessions live", "ru": "Где живут сессии" },
       "about": { "en": "All sessions in one private chat with the bot, or a forum topic per session.", "ru": "Все сессии в одном личном чате с ботом или по теме форума на сессию." },

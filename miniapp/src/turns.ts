@@ -340,7 +340,8 @@ export function systemNote(m: Pick<MessageView, "role" | "text" | "origin" | "in
   }
   const ctx = CONTEXT_RE.exec(text);
   if (ctx) return { kind: ctx[1] === "heartbeat" ? "heartbeat" : "context", origin: origin || ctx[1], body: ctx[2] };
-  if (!origin || origin === "operator" || origin.startsWith("inbound")) return null;
+  // Autopilot's turn is a message to the agent like the operator's, labelled where it is drawn.
+  if (!origin || origin === "operator" || origin === "autopilot" || origin.startsWith("inbound")) return null;
   // A custom page's message: the operator's request (a button, the page's composer) is their bubble
   // with the page named on it; the page reporting on its own is a note.
   if (origin.startsWith("page:")) return m.silent ? { kind: "page", origin: origin.slice(5), body: text } : null;

@@ -1,7 +1,7 @@
 import { useContextActions } from "../ui/context-menu";
 import { Component, Fragment, createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactElement, ReactNode } from "react";
-import { api, ApiError, AsrStatus, ModelFallback, ProviderUsage, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, SessionDetail, Compacting, type SessionFolder, type Question } from "../api";
+import { api, ApiError, AsrStatus, type AutopilotMark, type AutopilotStatus, ModelFallback, ProviderUsage, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, SessionDetail, Compacting, type SessionFolder, type Question } from "../api";
 import { Chevron, Dot, Status, copyText, fmtInt, statusWord, timeAgo } from "../ui/components";
 import { MenuItem, OverflowMenu, confirmDialog, Overlay } from "../ui/dialogs";
 import { absDate, clock, commandPreview, duration, plainPreview, shortDateTime } from "../format";
@@ -296,6 +296,17 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       load();
     } catch (e) {
       toast(errorText(e));
+    }
+  }
+
+  async function setAutopilot(on: boolean) {
+    try {
+      const status = await api.post<AutopilotStatus>(`/api/sessions/${id}/autopilot`, { on });
+      toast(t(!on ? "composer.autopilot.toast.off" : status.enabled ? "composer.autopilot.toast.on" : "composer.autopilot.toast.disabled"));
+      load();
+    } catch (e) {
+      toast(errorText(e));
+      load();
     }
   }
 
@@ -1713,6 +1724,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             yagni={!!detail?.yagni}
             onChooseMode={bare ? undefined : setMode}
             onYagni={bare ? undefined : setYagni}
+            autopilot={detail?.autopilot}
+            onAutopilot={bare || embedded || main || orchestrating ? undefined : setAutopilot}
             onCoach={bare || embedded || main || orchestrating || detail?.prompt_coach_of || detail?.btw_of ? undefined : (draft) => setCoach((open) => ({ draft: open?.draft ?? draft, raise: (open?.raise ?? 0) + 1 }))}
             onBtw={bare || embedded || main || orchestrating || detail?.prompt_coach_of || detail?.btw_of ? undefined : (question) => setBtw((open) => ({ question, ask: (open?.ask ?? 0) + 1 }))}
             place={{ project: detail?.project?.name, workspace: detail?.workspace_name || detail?.workspace, system: !!(detail?.project?.system || detail?.project?.settings.system) }}
@@ -1886,6 +1899,13 @@ class Safe extends Component<{ children: ReactNode }, { failed: boolean }> {
   render() {
     return this.state.failed ? <div className="note">{t("session.norender")}</div> : this.props.children;
   }
+}
+
+/** The label's tooltip: what the chosen option was, or the question the operator answered. */
+function autopilotTitle(mark: AutopilotMark): string {
+  if (mark.kind === "choice" && mark.label) return t("turn.autopilot.choice.title", { label: mark.label });
+  if (mark.kind === "answer" && mark.question) return t("turn.autopilot.answer.title", { question: mark.question });
+  return t("turn.autopilot.continue.title");
 }
 
 function shortModel(name?: string, max = 18): string {
@@ -2084,6 +2104,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
           <UserBubble>
             {inbound && <span className="msg-origin">{t("turn.origin.inbound", { source: inbound })}</span>}
             {fromPage && <span className="msg-origin" data-from-page={fromPage}>{t("turn.origin.page", { slug: fromPage })}</span>}
+            {turn.user.autopilot && <span className="msg-origin msg-autopilot" data-autopilot={turn.user.autopilot.kind} title={autopilotTitle(turn.user.autopilot)}>{t(`turn.autopilot.${turn.user.autopilot.kind}`)}</span>}
             {turn.user.yagni && <span className="msg-origin msg-yagni" title={t("turn.yagni.title")}>{t(turn.user.yagni === "on" ? "turn.yagni.on" : "turn.yagni.off")}</span>}
             {turn.user.depth && <DepthChip depth={turn.user.depth} sessionId={sessionId} toast={toast} />}
             {turn.user.reply_to && <ReplyQuote reply={turn.user.reply_to} />}

@@ -372,7 +372,7 @@ type CardProps = {
 /** Who asks, in a few words: a member by name and what they want, or the orchestrator. */
 function askerWords(q: WaitingQuestion): string {
   if (q.origin === "dispatcher") return t("questions.asker.main");
-  if (q.origin === "session") return t("questions.asker.agent");
+  if (q.origin === "session") return t(q.asker === "autopilot" ? "questions.asker.autopilot" : "questions.asker.agent");
   if (q.origin === "orchestrator") return t(q.kind === "folder" ? "questions.asker.folder" : "questions.asker.orchestrator");
   return t(q.kind === "permission" ? "questions.asker.permission" : "questions.asker.staff", { name: q.asker });
 }

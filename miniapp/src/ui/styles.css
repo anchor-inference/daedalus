@@ -317,6 +317,7 @@ button.more-item { border: 0; font-family: inherit; cursor: pointer; }
 .msg.user p + p { margin-top:6px; }
 .msg-origin { display:block; font-size:var(--fs-11); color:var(--fg-3); margin-bottom:2px; }
 .msg-origin.msg-yagni { display:flex; align-items:center; gap:var(--space-1); color:var(--accent); }
+.msg-origin.msg-autopilot { display:flex; align-items:center; gap:var(--space-1); color:var(--accent); }
 /* The auto mode's level on the message: a word, quiet like the other origins, that opens the correction. */
 .msg-origin.msg-depth { display:inline-flex; align-items:center; background:none; border:0; padding:0; font:inherit; font-size:var(--fs-11); cursor:pointer; color:var(--fg-3); }
 .msg-origin.msg-depth:hover, .msg-origin.msg-depth[aria-expanded="true"] { color:var(--accent); }
@@ -2158,6 +2159,10 @@ h1.settings-title { margin: 0 0 16px; font-size: 28px; font-weight: 650; letter-
 .settings-num { display: inline-flex; align-items: center; gap: 8px; }
 .settings-num input.field { width: 104px; margin: 0; padding: 6px 10px; text-align: right; font-variant-numeric: tabular-nums; }
 .settings-num input.field[aria-invalid="true"] { border-color: var(--bad); }
+/* Settings → Chat: the learned style as the host wrote it, and what autopilot did today. */
+.style-profile { margin: var(--space-2) 0 0; padding: var(--space-2) var(--space-3); white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: var(--fs-13); color: var(--fg); background: var(--surface-2); border-radius: var(--radius-md); max-height: 240px; overflow: auto; }
+.style-empty, .style-learned { margin-top: var(--space-2); }
+.autopilot-today { margin-top: var(--space-2); }
 .prose-stepper { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; min-width: 0; }
 .prose-stepper-ctl { display: inline-flex; align-items: center; gap: 6px; }
 .prose-stepper-value { min-width: 84px; text-align: center; font-variant-numeric: tabular-nums; color: var(--fg); }

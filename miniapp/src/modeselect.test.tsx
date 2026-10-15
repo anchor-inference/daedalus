@@ -6,7 +6,7 @@ import { act } from "react";
 import { createRoot, Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLang } from "./i18n";
-import { ModeSelect, modeChip, modeHint, modeName } from "./modeselect";
+import { ModeSelect, autopilotHint, modeChip, modeHint, modeName } from "./modeselect";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -105,6 +105,22 @@ describe("the chip and its menu", () => {
     await act(async () => root.render(<ModeSelect mode="" modes={[]} yagni onChooseMode={() => {}} onYagni={() => {}} sheet={false} />));
     expect(chip().classList.contains("yagni")).toBe(true);
     expect(chip().querySelector(".mode-yagni")?.textContent).toBe("YAGNI");
+  });
+
+  it("offers autopilot beside YAGNI where the session may have it, and says how many turns it took", async () => {
+    const onAutopilot = vi.fn();
+    const status = { on: true, enabled: true, eligible: true, used: 2, allowed: 3 };
+    await act(async () => root.render(<ModeSelect mode="" modes={[]} yagni={false} onChooseMode={() => {}} onYagni={() => {}} autopilot={status} onAutopilot={onAutopilot} sheet={false} />));
+    await act(async () => chip().click());
+    const row = document.querySelector<HTMLButtonElement>(".autopilot-row")!;
+    expect(row.getAttribute("aria-checked")).toBe("true");
+    expect(row.textContent).toContain("2 of 3 turns used");
+    await act(async () => row.click());
+    expect(onAutopilot).toHaveBeenCalledWith(false);
+    expect(autopilotHint({ ...status, enabled: false }, true)).toContain("Settings → Chat");
+    // A session with a role of its own (an orchestrator, staff) is not offered the switch at all.
+    await act(async () => root.render(<ModeSelect mode="" modes={[]} yagni={false} onChooseMode={() => {}} onYagni={() => {}} autopilot={{ ...status, eligible: false }} onAutopilot={onAutopilot} sheet={false} />));
+    expect(document.querySelector(".autopilot-row")).toBeNull();
   });
 
   it("opens a sheet on a phone, in Russian too", async () => {

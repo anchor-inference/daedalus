@@ -767,6 +767,18 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     if method.upper() == "POST" and len(parts) == 5 and parts[2] == "sessions" and parts[4] in ("mode", "yagni"):
         # The composer's mode chip: a harness that reads the switch back answers these itself.
         return 200, "application/json", "{}"
+    if len(parts) == 5 and parts[2] == "sessions" and parts[4] == "autopilot":
+        # The session's autopilot switch, in the mode menu: on as asked, the installation's master switch on.
+        on = bool(body.get("on")) if method.upper() == "POST" and isinstance(body, dict) else False
+        return 200, "application/json", json.dumps({"on": on, "enabled": True, "eligible": True, "used": 0, "allowed": 3})
+    if method.upper() == "GET" and path == "/api/autopilot":
+        # What Settings → Chat shows under the autopilot settings: the day's spend and verdicts.
+        return 200, "application/json", json.dumps({"enabled": False, "preset": "", "max_continuations": 3, "usd_per_day": 0.2, "spent_today": 0.012,
+                                                    "verdicts_today": {"continue": 4, "done": 2, "choice": 1}, "skipped_today": 3, "sessions_on": 2})
+    if path == "/api/user-style" and method.upper() in ("GET", "DELETE"):
+        # The style profile learned from the operator's messages, shown in Settings → Chat; Forget empties it.
+        summary = "" if method.upper() == "DELETE" else "Writes short, direct requests in Russian.\nCorrects verbosity: wants answers without bullet lists.\nPrefers the agent to run the tests itself."
+        return 200, "application/json", json.dumps({"summary": summary, "learned": 0 if not summary else 24, "updated_at": "2026-10-15T09:00:00+00:00", "max_chars": 2400})
     if len(parts) >= 5 and parts[2] == "sessions" and parts[4] == "meeting":
         # Meeting notes from a recording: the stub's job is done at once, with notes to show.
         if method.upper() == "POST" and len(parts) == 5:

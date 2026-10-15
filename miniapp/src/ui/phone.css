@@ -556,6 +556,8 @@
   .main .settings-col .segmented button::after { content: ""; position: absolute; inset: -6px 0; }
   .main .settings-col .switch { position: relative; }
   .main .settings-col .switch::after { content: ""; position: absolute; inset: -6px -4px; }
+  .main .settings-col .settings-row-ctl :is(.btn, .dropdown-btn) { position: relative; }
+  .main .settings-col .settings-row-ctl :is(.btn, .dropdown-btn)::after { content: ""; position: absolute; inset: -6px 0; }
   .main .settings-col .card input.field:not([type="checkbox"]):not([type="range"]), .main .settings-col .card select.field { min-height: var(--tap); }
   /* Inside a tile a long unit ("characters") would push a full-width number past the tile's edge at
      360 px; the field gives way instead. */

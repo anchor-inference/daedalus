@@ -2,7 +2,7 @@
 // actions are supplied by the parent so the card also works inside the voice page.
 
 import { forwardRef, type ReactNode, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, AsrStatus, ModelFallback, PendingAnswered, Question, SkillEntry, SlashCommand } from "./api";
+import { api, ApiError, AsrStatus, AutopilotStatus, ModelFallback, PendingAnswered, Question, SkillEntry, SlashCommand } from "./api";
 import { clipboardImages, nameIncoming, pastedFiles } from "./attachfiles";
 import { Popover } from "./ui/dialogs";
 import { Banner, BottomSheet, SheetRow } from "./ui/phone";
@@ -92,6 +92,9 @@ export type ComposerProps = {
   yagni?: boolean;
   onChooseMode?: (mode: string) => void;
   onYagni?: (on: boolean) => void;
+  /** The session's autopilot switch, beside YAGNI in the mode menu. */
+  autopilot?: AutopilotStatus | null;
+  onAutopilot?: (on: boolean) => void;
   place?: ComposerPlace;
   targetProject?: string;
   targetWorkspace?: string;
@@ -713,7 +716,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           {secretOpen && <SecretSheet sessionId={sessionId} phone={phone} attached={secrets.map((secret) => secret.name)} onClose={() => setSecretOpen(false)}
             onAttach={(secret) => setSecrets((list) => [...list.filter((other) => other.name !== secret.name), secret])} />}
           {props.onChooseMode && props.onYagni
-            ? <ModeSelect mode={props.mode ?? ""} modes={props.modes ?? []} yagni={!!props.yagni} onChooseMode={props.onChooseMode} onYagni={props.onYagni} sheet={phone} />
+            ? <ModeSelect mode={props.mode ?? ""} modes={props.modes ?? []} yagni={!!props.yagni} onChooseMode={props.onChooseMode} onYagni={props.onYagni} autopilot={props.autopilot} onAutopilot={props.onAutopilot} sheet={phone} />
             : <span className="composer-mode">{t("composer.mode.agent")}</span>}
           {phone && offline && shape === "open" && <span className="grow ph-hint">{t("ph.offline.kept")}</span>}
           <div className="composer-tools">

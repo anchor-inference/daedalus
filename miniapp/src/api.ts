@@ -831,6 +831,9 @@ export type MessageView = {
   outcome?: RunOutcome | null;
   /** The YAGNI switch this turn told the model about; the note itself is never shown. */
   yagni?: "on" | "off" | null;
+  /** A message autopilot sent on the operator's behalf: a continuation, a chosen option, or the
+   *  operator's answer to autopilot's question (with that question). */
+  autopilot?: AutopilotMark | null;
   /** The level the auto mode ran this message at; absent on a session with a fixed mode. */
   depth?: TurnDepth | null;
   /** How an operator's message reached the model: placed into a turn under way (`steer`), opening the
@@ -901,6 +904,8 @@ export type SessionDetail = {
   depth_next?: string;
   /** YAGNI mode: the host tells the model in the next turn, never in the system prompt. */
   yagni?: boolean;
+  /** The session's autopilot switch; null for a host without autopilot. */
+  autopilot?: AutopilotStatus | null;
   usd_cap?: number | null;
   brief?: string;
   spawned_by?: string | null;
@@ -1542,6 +1547,8 @@ export type Settings = {
   navigation?: NavConfig;
   /** The helpers around the operator's messages; absent from a host older than them. */
   assist?: { predict: boolean; predict_preset?: string; predict_usd_per_day?: number; depth_preset?: string };
+  /** Autopilot: the master switch, the judge's model, the turns after one message, the daily allowance. */
+  autopilot?: { enabled: boolean; preset?: string; max_continuations: number; usd_per_day: number };
   telegram: {
     mode: "topics" | "private" | null;
     forum_chat_id: number;
@@ -1565,3 +1572,25 @@ export type Settings = {
 export function telegram() {
   return tg();
 }
+
+/** A message autopilot sent: `continue` on its own, `choice` an option the operator picked, `answer`
+ *  the operator's words to autopilot's question. */
+export type AutopilotMark = { kind: "continue" | "choice" | "answer"; label?: string; question?: string };
+
+/** A session's autopilot switch, and how many of the turns allowed after the operator's last message it took. */
+export type AutopilotStatus = { on: boolean; enabled: boolean; eligible: boolean; used: number; allowed: number };
+
+/** What Settings shows beside autopilot's configuration. */
+export type AutopilotOverview = {
+  enabled: boolean;
+  preset: string;
+  max_continuations: number;
+  usd_per_day: number;
+  spent_today: number;
+  verdicts_today: Record<string, number>;
+  skipped_today: number;
+  sessions_on: number;
+};
+
+/** The operator's style profile as learned from their own messages. */
+export type UserStyle = { summary: string; learned: number; updated_at: string; max_chars: number };

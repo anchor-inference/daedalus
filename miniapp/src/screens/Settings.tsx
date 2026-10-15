@@ -38,6 +38,7 @@ import { ToolGroupsSettings } from "../toolgroupsview";
 import { CompactionModelSelect } from "../compactionmodel";
 import { ProviderMark, providerName as providerTitle } from "../ui/provider-mark";
 import { AsrSettingsCard } from "./AsrSettings";
+import { AutopilotSettings, UserStyleCard } from "./AutopilotSettings";
 import { DesktopAppCard } from "../updatedialog";
 import { ProviderLimit } from "./ProviderLimit";
 import { OPENCODE_KEY_URL, missingPlans, opencodePlanOf, opencodeProvider } from "../opencode";
@@ -1469,6 +1470,8 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
                 <Switch checked={s.assist?.predict ?? true} onChange={(predict) => save({ assist: { ...s.assist, predict } })} label={t("settings.chat.predict")} />
               </Row>
             </div>
+            <AutopilotSettings s={s} save={save} presetLabel={(id) => presetName(s, id)} />
+            <UserStyleCard toast={toast} />
             <div className="card">
               <div className="section-title" style={{ marginTop: 0 }}>{t("settings.chat.telegram")}</div>
               <Row title={t("settings.chat.where")} data-setting="telegram.mode" desc={mode === "private" ? t("settings.chat.private.sub") : t(s.telegram.forum_chat_id ? "settings.chat.topics.sub" : "settings.chat.topics.bind")} stack>

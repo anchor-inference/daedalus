@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { Popover, Sheet } from "./ui/dialogs";
 import { Icon } from "./icons";
 import { DICT, t } from "./i18n";
+import type { AutopilotStatus } from "./api";
 
 export type ModeInfo = { name: string; description: string };
 
@@ -21,9 +22,19 @@ export type ModeSelectProps = {
   yagni: boolean;
   onChooseMode: (mode: string) => void;
   onYagni: (on: boolean) => void;
+  /** The session's autopilot switch; absent where the session cannot have one (a role of its own, an older host). */
+  autopilot?: AutopilotStatus | null;
+  onAutopilot?: (on: boolean) => void;
   /** Phones: a sheet instead of a popover. */
   sheet: boolean;
 };
+
+/** What the autopilot row says under its name: off for the whole app, the turns it took, or what it does. */
+export function autopilotHint(status: AutopilotStatus, on: boolean): string {
+  if (!status.enabled) return t("composer.autopilot.disabled");
+  if (on) return t("composer.autopilot.used", { used: String(status.used), allowed: String(status.allowed) });
+  return t("composer.autopilot.hint");
+}
 
 /** A mode's name in the reader's language: the built-in ones are translated, an operator's own is shown as written. */
 export function modeName(mode: string): string {
@@ -43,7 +54,7 @@ export function modeChip(mode: string, yagni: boolean): { label: string; title: 
   return { label, title: yagni ? `${label} · ${t("composer.yagni")}` : label };
 }
 
-export function ModeSelect({ mode, modes, yagni, onChooseMode, onYagni, sheet }: ModeSelectProps) {
+export function ModeSelect({ mode, modes, yagni, onChooseMode, onYagni, autopilot, onAutopilot, sheet }: ModeSelectProps) {
   const trigger = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   // The switch answers at once; the host's word arrives with the next poll and replaces it.
@@ -58,6 +69,13 @@ export function ModeSelect({ mode, modes, yagni, onChooseMode, onYagni, sheet }:
   const toggle = () => {
     setShown(!on);
     onYagni(!on);
+  };
+  const [pilotShown, setPilotShown] = useState<boolean | null>(null);
+  useEffect(() => setPilotShown(null), [autopilot?.on]);
+  const pilotOn = pilotShown ?? !!autopilot?.on;
+  const togglePilot = () => {
+    setPilotShown(!pilotOn);
+    onAutopilot?.(!pilotOn);
   };
   const list = (
     <div className="mode-list">
@@ -83,6 +101,15 @@ export function ModeSelect({ mode, modes, yagni, onChooseMode, onYagni, sheet }:
         </span>
         <span className={`mode-switch ${on ? "on" : ""}`} aria-hidden="true"><i /></span>
       </button>
+      {autopilot?.eligible && onAutopilot && (
+        <button type="button" role="menuitemcheckbox" aria-checked={pilotOn} className={`model-row mode-row autopilot-row ${pilotOn ? "on" : ""}`} onClick={togglePilot}>
+          <span className="grow model-text">
+            <span className="truncate">{t("composer.autopilot")}</span>
+            <span className="sub clamp-2">{autopilotHint(autopilot, pilotOn)}</span>
+          </span>
+          <span className={`mode-switch ${pilotOn ? "on" : ""}`} aria-hidden="true"><i /></span>
+        </button>
+      )}
     </div>
   );
   return (
