@@ -202,7 +202,7 @@ class OpenResults:
             if member.one_off:
                 continue
             session = live.get(member.id)
-            if session is None or session.status in ("idle", "turn_done_unseen", "exited"):
+            if session is None or session.status in ("idle", "turn_done_unseen", "suspended", "exited"):
                 free.append(member.name)
         return free
 

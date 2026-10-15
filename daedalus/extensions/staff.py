@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Any, cast
 from protocore.runtime.events.envelope import TurnEvent
 from protocore.runtime.events.types import EventType
 
+from daedalus.extensions import staff_suspend
 from daedalus.extensions.board import NOTES_MAX_CHARS
 from daedalus.extensions.launch_controls import launch_resources
 from daedalus.extensions.notifications import ActionConflict, ActionOutcome, ActionRefused, Draft
@@ -149,7 +150,7 @@ class TurnEnded(StaffError):
     started a new turn that nobody asked for."""
 
 
-TURN_ENDED = frozenset({"idle", "turn_done_unseen", "error"})
+TURN_ENDED = frozenset({"idle", "turn_done_unseen", "error", "suspended"})
 """The statuses in which a member's turn is over. Any message delivered then is typed into an empty
 prompt (or submitted to an idle native session) and so starts a turn; ``after_turn`` does not help,
 because the turn it would wait for has already ended."""
@@ -263,6 +264,7 @@ class Team:
             raise RuntimeError("the staff runtime and model calls must share the same execution owner")
         self.runtimes: dict[str, StaffRuntime] = {"daedalus": DaedalusStaffRuntime(self.manager)}
         self._execution_locks: dict[str, asyncio.Lock] = {}
+        self._suspend_locks: dict[str, asyncio.Lock] = {}
         self._answered_runs: set[str] = set()
         self._tool_inputs: dict[tuple[str, str], dict[str, Any]] = {}
         """A member's tool calls whose results have not come back, by session and call: an input
@@ -892,6 +894,11 @@ class Team:
         """A stop and retasking share ownership: neither may overtake the other's external call."""
         return self._execution_locks.setdefault(staff_id, asyncio.Lock())
 
+    def suspend_lock(self, staff_id: str) -> asyncio.Lock:
+        """An idle suspend and a message that would wake the member: a message never finds it half
+        stopped, and two messages never launch it twice. Taken before ``execution_lock``."""
+        return self._suspend_locks.setdefault(staff_id, asyncio.Lock())
+
     async def start(self, member: Staff, task: BoardTask, *, principal: Principal,
                     check_authority: Callable[[], Awaitable[None]], by: str = "operator",
                     resume_from: str | None = None, capacity_slot_id: str | None = None,
@@ -969,6 +976,15 @@ class Team:
             # A Daedalus member's next task is a new session, and the idle one it replaces ends
             # here; so is a command-line member's whose session cannot take it (see _continues).
             await self._end(previous, "next task", stop=True)
+            if (source is None and capacity_slot_id is None and previous.session.status == staff_suspend.SUSPENDED
+                    and previous.staff.harness == member.harness):
+                # A member suspended while idle takes the new task up in the conversation it was
+                # stopped in, where the task is worked where that one was; anywhere else (another
+                # worktree, another branch) it starts afresh, as a live member would.
+                try:
+                    source = await self._resume_source(member, task, folder, previous.id)
+                except StaffError as exc:
+                    logger.info("%s starts afresh rather than resuming its suspended session: %s", member.name, exc)
         predecessor = source.session if source else next((s for s in await self.manager.staff.sessions(member.id, limit=20) if s.task_id == task.id), None)
         worktree: Worktree | None = None
         if member.isolation == "worktree":
@@ -1308,6 +1324,17 @@ class Team:
             raise StaffError(f"{member.name} has no live session; assign a task to start one")
         if automatic and live.session.status in TURN_ENDED:
             raise TurnEnded(f"{member.name}'s turn has ended; an automatic notice does not start another")
+        if live.session.status == staff_suspend.SUSPENDED or self.suspend_lock(member.id).locked():
+            # Suspended while idle, or being suspended now: its CLI is launched again on its own
+            # session first, and the message then goes as to any member at its prompt.
+            async with self.suspend_lock(member.id):
+                live = await self.live_of(member)
+                if live is None:
+                    raise StaffError(f"{member.name} has no live session; assign a task to start one")
+                if live.session.status == staff_suspend.SUSPENDED:
+                    if automatic:
+                        raise TurnEnded(f"{member.name} is suspended; an automatic notice does not wake it")
+                    live = await staff_suspend.wake(self, live)
         # A value of the operator's pasted into a message by habit goes as its placeholder; the member has
         # the value where it may use it.
         text = _concealed(text)
@@ -1484,6 +1511,8 @@ class Team:
             except Exception:  # noqa: BLE001 — the row ends whatever the process did; reconcile finds a survivor
                 logger.exception("stopping %s's session failed", live.staff.name)
         await self._stop_services(live, reason)
+        if live.session.status == staff_suspend.SUSPENDED:
+            await self.manager.db.execute("DELETE FROM kv WHERE key = ?", (staff_suspend.KEY + live.id,))
         ended = await self.manager.staff.end_session(live.id, reason)
         if ended is not None:
             payload: dict[str, Any] = {"status": "exited", "previous": live.session.status, "detail": reason[:500]}
@@ -2124,6 +2153,10 @@ class Team:
         now = now or datetime.now(UTC)
         config = self.manager.config.staff
         await self.settle(now)
+        try:
+            await staff_suspend.suspend_idle(self, now)
+        except Exception:  # noqa: BLE001 — freeing memory must not stop the silence checks and the queue
+            logger.exception("suspending idle members failed")
         for session in await self.manager.staff.all_live():
             if _age_seconds(session.last_signal_at, now) > config.silence_minutes * 60 and await self.silence_watched(session):
                 live = await self.live(session.id)

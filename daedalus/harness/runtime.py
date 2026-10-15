@@ -147,6 +147,11 @@ at random in the range, so a taken one is usually followed by a free one."""
 Lookup = Callable[[str], Awaitable[LiveSession | None]]
 
 
+class SuspendUnknown(Exception):
+    """A suspend whose stop could not be confirmed: the CLI may still run. Reported, never retried on
+    its own, since a second launch on the same native session beside a survivor is two writers."""
+
+
 class _PortTaken(Exception):
     """The port a plan chose already has a listener; the launch is undone and planned again."""
 
@@ -385,6 +390,9 @@ class CliSession:
     quiet_checked: float = 0.0
     idle_checked: float = 0.0
     stopping: bool = False
+    suspending: bool = False
+    """The host is stopping the idle CLI to suspend it: the row already says ``suspended``, and nothing
+    the CLI says on its way out is applied to it."""
     finished: bool = False
     changed: asyncio.Event = field(default_factory=asyncio.Event)
     """Set by every event applied, so a message waiting for its window looks again at once."""
@@ -884,7 +892,7 @@ class CliStaffRuntime:
         """One event through the status machine, and what it changed to the ingress. Serialised per
         session, so the machine always starts from the state the previous event left."""
         async with session.lock:
-            if session.finished:
+            if session.finished or session.suspending:
                 return
             live = await self.lookup(session.staff_session_id)
             if live is None:
@@ -1382,6 +1390,9 @@ class CliStaffRuntime:
     def _session(self, live: LiveSession) -> CliSession:
         session = self.sessions.get(live.id)
         if session is None or session.finished:
+            if live.session.status == StaffState.SUSPENDED.value:
+                raise RuntimeError(f"{live.staff.name}'s {self.adapter.capabilities.label} is suspended while idle;"
+                                   " the next message or assignment launches it again on the same session")
             raise RuntimeError(f"{live.staff.name}'s {self.adapter.capabilities.label} is not running here")
         return session
 
@@ -1392,7 +1403,9 @@ class CliStaffRuntime:
         the member is then launched afresh."""
         session = self.sessions.get(live.id)
         if session is None:
-            return "gone" if self.taken_up else "attaching"
+            # A suspended session has no launch for a reconcile to take up: it is launched again
+            # when it is needed, never waited for.
+            return "gone" if self.taken_up or live.session.status == StaffState.SUSPENDED.value else "attaching"
         if session.finished or session.stopping or session.exited.is_set():
             return "gone"
         if live.session.status == StaffState.STARTING.value:
@@ -1520,8 +1533,13 @@ class CliStaffRuntime:
         return turns[-READ_TRANSCRIPT_TURNS:]
 
     async def _env_of(self, live: LiveSession) -> str:
+        """Where the session's CLI runs, or ran: a suspended member has no open launch, and its
+        transcript is still in the environment of its last one, which may be the host."""
         launch = await self.store.open_launch_for(live.id)
-        return launch.env if launch is not None else "container"
+        if launch is not None:
+            return launch.env
+        row = await self.store.db.fetchone("SELECT env FROM harness_launches WHERE staff_session_id = ? ORDER BY started_at DESC LIMIT 1", (live.id,))
+        return str(row["env"]) if row is not None else "container"
 
     async def _diff(self, live: LiveSession, req: ReadRequest) -> ReadPage:
         session = self.sessions.get(live.id)
@@ -1595,6 +1613,73 @@ class CliStaffRuntime:
                     wait.cancel()
         async with session.lock:
             await self._finish(session, "stopped", end=False)
+
+    # -- suspending an idle CLI -----------------------------------------------------------------------
+
+    def suspendable(self, live: LiveSession) -> str:
+        """Why the session's CLI may not be suspended now, from what this runtime holds; empty when
+        it may. The team adds what only it knows (the board, the requests, the messages)."""
+        if not self.adapter.capabilities.resumes:
+            return f"{self.adapter.capabilities.label} cannot take a session up again"
+        if not live.session.cli_session_id:
+            return "its native session is not known"
+        session = self.sessions.get(live.id)
+        if session is None:
+            return "it is not running here"
+        return self._busy(session, live)
+
+    @staticmethod
+    def _busy(session: CliSession, live: LiveSession) -> str:
+        if session.finished or session.stopping or session.exited.is_set():
+            return "it is stopping"
+        if not session.ready.is_set() or session.first_prompt_pending or session.resend_first:
+            return "it has not finished starting"
+        if live.session.status not in (StaffState.IDLE.value, StaffState.TURN_DONE_UNSEEN.value):
+            return f"it is {live.session.status}"
+        if session.open or session.tool_asks or session.turn_ended_waiting:
+            return "a request of it is open"
+        if session.worker is not None and session.worker.size():
+            return "a message is on its way to it"
+        return ""
+
+    async def suspend(self, live: LiveSession, *, recheck: Callable[[LiveSession], Awaitable[str]],
+                      mark: Callable[[LiveSession], Awaitable[None]]) -> str:
+        """Stop an idle CLI and keep its native session; returns why not, or empty once it stopped.
+
+        Everything is read again under the session's lock immediately before the stop, the team's
+        conditions too (``recheck``), since an answer, a message or a turn may have arrived since the
+        sweep looked. ``mark`` records the suspension before anything is stopped, so a host that dies
+        in the middle leaves a row that says what was meant, which ``reconcile`` completes; from then
+        on nothing the CLI says is applied. A stop the daemon cannot confirm raises
+        :class:`SuspendUnknown`.
+        """
+        why = self.suspendable(live)
+        if why:
+            return why
+        session = self.sessions[live.id]
+        async with session.lock:
+            fresh = await self.lookup(live.id)
+            if fresh is None:
+                return "the session ended"
+            why = self._busy(session, fresh) or await recheck(fresh)
+            if why:
+                return why
+            await mark(fresh)
+            session.suspending = True
+        try:
+            await self.stop(fresh)
+        except Exception as exc:  # noqa: BLE001 — what is known of the stop is reported, not raised past
+            raise SuspendUnknown(f"stopping it failed: {exc}") from exc
+        for terminal_id in (session.term.id, *session.companions):
+            try:
+                view = await self.terminals.get(terminal_id)
+            except NotFound:
+                continue
+            except TerminalError as exc:
+                raise SuspendUnknown(f"terminal {terminal_id} could not be read after the stop: {exc.message}") from exc
+            if view.get("status") == "running":
+                raise SuspendUnknown(f"terminal {terminal_id} still runs after the stop")
+        return ""
 
     async def _finish(self, session: CliSession, reason: str, *, end: bool, live: LiveSession | None = None) -> None:
         """Let a session go: its tasks, its terminals and its launch. ``end`` reports to the team
@@ -1682,6 +1767,11 @@ class CliStaffRuntime:
                             and not prior.end_reason and prior.terminal_id == launch.terminal_id):
                         await self.ingress.ended(LiveSession(member, prior),
                                                 f"{self.adapter.capabilities.label} ended while the host was away")
+                continue
+            if live.session.status == StaffState.SUSPENDED.value:
+                # The host went in the middle of a suspend: the row says what was meant, and the stop
+                # is finished. A suspended member's terminal is meant to be gone, never a crash.
+                await self._end_launch(launch, terminals, actor=f"agent:{actor}")
                 continue
             running = False
             if launch.terminal_id:
@@ -1801,4 +1891,4 @@ def install_runtimes(
     return made
 
 
-__all__ = ["CliSession", "CliStaffRuntime", "RuntimeEnvironment", "RuntimeTerminal", "install_runtimes"]
+__all__ = ["CliSession", "CliStaffRuntime", "RuntimeEnvironment", "RuntimeTerminal", "SuspendUnknown", "install_runtimes"]

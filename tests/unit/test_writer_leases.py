@@ -715,7 +715,8 @@ async def test_failed_file_delivery_keeps_the_contained_attempt_claim(db: Databa
         team = object.__new__(Team)
         team.app = SimpleNamespace(executions=owner)
         team.manager = SimpleNamespace(db=db)
-        live = SimpleNamespace(id="staff-session", session=SimpleNamespace(task_id="task"))
+        team._suspend_locks = {}
+        live = SimpleNamespace(id="staff-session", session=SimpleNamespace(task_id="task", status="idle"))
 
         async def live_of(_self, _member):
             return live
@@ -730,7 +731,7 @@ async def test_failed_file_delivery_keeps_the_contained_attempt_claim(db: Databa
         team.cwd_of = MethodType(cwd_of, team)
         team.hand_files = MethodType(hand_files, team)
         with pytest.raises(RuntimeError, match="unknown"):
-            await team.tell(SimpleNamespace(), "message", files=[SimpleNamespace()])
+            await team.tell(SimpleNamespace(id="worker"), "message", files=[SimpleNamespace()])
         assert len((await db.kv_get(KEY))["handoffs"]) == 1
         assert not await leases.release_if_safe(lease)
     finally:

@@ -82,6 +82,10 @@ class Capabilities:
     into every launch, and a rule may cover every tool of one MCP server. Claude Code alone: Codex
     routes an MCP tool's approval as an elicitation, which has no standing answer, and OpenCode's and
     Grok's "always" knows no server."""
+    resumes: bool = False
+    """The adapter takes a native session up again in a new launch (``resume_plan``) on the same
+    conversation. Only such a CLI is suspended when idle: one that could not come back on its own
+    session would wake as a stranger to its own work."""
 
 
 CAPABILITIES: dict[str, Capabilities] = {
@@ -100,6 +104,7 @@ CAPABILITIES: dict[str, Capabilities] = {
         # TUI; these are conservative starting values, not observations.
         paste=PasteRules(collapses_over=800, burst_guard_ms=400),
         companion=False,
+        resumes=True,
         pointer_dir_flag="--add-dir",
         tested_versions=("2.1.281", "2.2.0"),
         supported_major=2,
@@ -119,6 +124,7 @@ CAPABILITIES: dict[str, Capabilities] = {
         interrupt="structured",
         paste=None,
         companion=True,
+        resumes=True,
         pointer_dir_flag="",
         tested_versions=("0.155.1", "0.161.0"),
         supported_major=0,
@@ -138,6 +144,7 @@ CAPABILITIES: dict[str, Capabilities] = {
         interrupt="structured",
         paste=None,
         companion=False,
+        resumes=True,
         pointer_dir_flag="",
         tested_versions=("1.18.23", "1.19.0"),
         supported_major=1,
@@ -156,6 +163,7 @@ CAPABILITIES: dict[str, Capabilities] = {
         interrupt="structured",
         paste=None,
         companion=False,
+        resumes=True,
         pointer_dir_flag="",
         tested_versions=("0.84.2", "0.88.0"),
         supported_major=0,
@@ -178,6 +186,7 @@ CAPABILITIES: dict[str, Capabilities] = {
         # Pasting four lines or more shows "[Pasted: N lines]"; a single long line is shown as it is.
         paste=PasteRules(collapses_over=None, burst_guard_ms=400),
         companion=False,
+        resumes=True,
         pointer_dir_flag="",
         tested_versions=("1.0.40", "1.1.0"),
         supported_major=1,
@@ -196,6 +205,7 @@ CAPABILITIES: dict[str, Capabilities] = {
         interrupt="structured",
         paste=None,
         companion=False,
+        resumes=True,
         pointer_dir_flag="",
         tested_versions=("2026.10.01", "2026.11.01"),
         supported_major=2026,

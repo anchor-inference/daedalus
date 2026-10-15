@@ -273,7 +273,7 @@ async def _who_made_it(orch: Orchestrators, project: Project, hired: Staff, fold
     hints: list[str] = []
     for row in rows:
         session = live.get(row["id"])
-        if row["id"] in seen or (session is not None and session.status not in ("idle", "turn_done_unseen")):
+        if row["id"] in seen or (session is not None and session.status not in ("idle", "turn_done_unseen", "suspended")):
             continue
         seen.add(row["id"])
         hints.append(f"{row['name']} is free and worked on \"{row['title']}\" ({row['task_id']})")

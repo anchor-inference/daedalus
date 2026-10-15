@@ -965,6 +965,9 @@ class Orchestrators:
         if session is None:
             return f"{member.name}{role}, {kind}, {where}: off"
         status = session.status.replace("_", " ")
+        if session.status == "suspended":
+            # Not a failure and not busy: the cheapest member to give work to after an idle one.
+            status = "suspended while idle, available: a Tell or Assign resumes it in the same conversation"
         task = tasks.get(session.task_id or "")
         on = f" on \"{_one_line(task['title'], 60)}\" ({task['id']})" if task else ""
         waiting = f" — {session.waiting_for}" if session.waiting_for else ""

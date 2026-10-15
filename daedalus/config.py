@@ -1760,6 +1760,11 @@ class HarnessConfig(BaseModel):
     shown with its team tools not connected."""
     stop_grace_s: float = Field(default=10.0, ge=0, le=120)
     """Between asking a CLI to exit and killing its terminal."""
+    idle_suspend_minutes: int = Field(default=20, ge=0, le=1440)
+    """A command-line member idle this long, with nothing assigned, asked or on its way to it, has
+    its CLI stopped and its native session kept; the next message or assignment launches it again on
+    that session. Each idle CLI holds hundreds of megabytes, and the provider's prompt cache has
+    usually expired by then anyway. 0 never suspends."""
     catalog_ttl_s: int = Field(default=21_600, ge=300)
     """How often each environment is looked at again for what is installed, signed in, and which
     agents and models each CLI offers. Never an update: a version changes only when the operator asks."""

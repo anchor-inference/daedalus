@@ -16,6 +16,7 @@ running (the clock says when the host will give up); a ``false`` without one is 
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -35,6 +36,8 @@ STEPS: tuple[tuple[str, str], ...] = (
 )
 ACTIVE_ATTEMPT = frozenset({"queued", "starting", "running", "waiting"})
 TURN_ENDED = frozenset({"turn_done_unseen", "idle"})
+SUSPENSION_KEY = "staff_suspension:"
+"""The kv record of a suspended session (``extensions/staff_suspend.py``): since when, after how long."""
 
 _WAITING_WORDS = {
     "prepared": "preparing the launch",
@@ -51,7 +54,7 @@ class Condition:
     status: Status
     reason: str
     """A code the app has words for: ``done``, ``waiting``, ``timed_out``, ``pending``,
-    ``not_reached``, ``reported``, ``turn_ended``, ``ended``, ``not_yet``."""
+    ``not_reached``, ``reported``, ``turn_ended``, ``ended``, ``not_yet``, ``suspended``."""
     message: str
     """The same in one English sentence, for the orchestrator and the log."""
     since: str | None = None
@@ -200,22 +203,42 @@ def line(conditions: Sequence[Condition]) -> str:
     return f"condition: {found.message}" if found is not None else ""
 
 
+def suspended(record: Mapping[str, Any] | None, session_status_at: str | None) -> Condition:
+    """A member whose idle CLI the host stopped: not a failure, a process that is not running and
+    comes back on the next message. Read from the suspension's own record (``staff_suspend``)."""
+    minutes = int((record or {}).get("idle_minutes") or 0)
+    since = str((record or {}).get("since") or "") or session_status_at
+    after = f" after {minutes} min idle" if minutes else " while idle"
+    return Condition("running", "false", "suspended",
+                     f"running: suspended{after}; the next message or assignment resumes it on the same session",
+                     since=since, params={"idle_minutes": minutes})
+
+
 async def load(db: Database, *, staff_session_id: str, session_status: str, session_status_at: str | None = None,
                end_reason: str = "", now: datetime | None = None) -> list[Condition]:
-    """The conditions of the newest attempt of one staff session."""
+    """The conditions of the newest attempt of one staff session, and of the session itself when it
+    is suspended."""
+    out: list[Condition] = []
+    if session_status == "suspended":
+        row = await db.fetchone("SELECT value FROM kv WHERE key = ?", (SUSPENSION_KEY + staff_session_id,))
+        try:
+            record = json.loads(row["value"]) if row is not None else None
+        except (TypeError, ValueError):
+            record = None
+        out.append(suspended(record if isinstance(record, dict) else None, session_status_at))
     attempt = await db.fetchone(
         "SELECT id,state,created_at,updated_at FROM execution_attempts WHERE staff_session_id = ?"
         " ORDER BY created_at DESC LIMIT 1", (staff_session_id,))
     if attempt is None:
-        return []
+        return out
     clocks = await db.fetchall(
         "SELECT phase,started_at,deadline_at,last_signal_at,last_progress_at,outcome FROM attempt_phase_clocks"
         " WHERE attempt_id = ?", (attempt["id"],))
     report = await db.fetchone(
         "SELECT outcome,created_at FROM result_receipts WHERE attempt_id = ? ORDER BY created_at DESC LIMIT 1",
         (attempt["id"],))
-    return derive(clocks=clocks, attempt=attempt, report=report, session_status=session_status,
-                  session_status_at=session_status_at, end_reason=end_reason, now=now)
+    return out + derive(clocks=clocks, attempt=attempt, report=report, session_status=session_status,
+                        session_status_at=session_status_at, end_reason=end_reason, now=now)
 
 
-__all__ = ["STEPS", "Condition", "blocking", "derive", "line", "load"]
+__all__ = ["STEPS", "SUSPENSION_KEY", "Condition", "blocking", "derive", "line", "load", "suspended"]
