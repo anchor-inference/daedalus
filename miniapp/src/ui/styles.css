@@ -2089,6 +2089,9 @@ pre.diff .file { color: var(--fg); font-weight: 600; }
 .quota-line .quota-name { color: var(--fg); }
 .quota-line b { color: var(--fg); font-weight: 600; text-align: right; }
 .quota-line .sub { text-align: right; min-width: 90px; }
+/* The forecast sits under its window across the whole row: it is a sentence, not a column. */
+.quota-line .quota-fc { grid-column: 1 / -1; margin-top: -4px; font-size: var(--fs-12); color: var(--fg-3); }
+.quota-line .quota-fc.warn { color: var(--warn); }
 .tablecard { overflow-x: auto; }
 .tablecard td.dayc { white-space: nowrap; }
 /* A phone has no room for seven columns: scrolled sideways, the cost column was the one off the

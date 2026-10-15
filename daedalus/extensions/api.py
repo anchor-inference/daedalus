@@ -130,6 +130,7 @@ from daedalus.extensions.pet import EMOTIONS as PET_EMOTIONS
 from daedalus.extensions.pet import PROPS as PET_PROPS
 from daedalus.extensions.pet import normalize_reaction
 from daedalus.extensions.push import PushRefused, PushService
+from daedalus.extensions.quota_sampler import fetch_subscriptions
 from daedalus.extensions.review import ReviewRefused
 from daedalus.extensions.services import SHARE_COOKIE_PREFIX, SHARE_MODES, pid_alive
 from daedalus.harness import conditions as member_conditions
@@ -181,6 +182,7 @@ from daedalus.stores.harness import HarnessStore
 from daedalus.stores.inference_budget import InferenceBudget
 from daedalus.stores.media import MEDIA_TENANT
 from daedalus.stores.projects import Project, ProjectError
+from daedalus.stores.quota import quota_forecast
 from daedalus.stores.sqlite import ReceiptConflict, message_text
 from daedalus.stores.staff import ACTIVE_STATUSES, HARNESSES, Staff, StaffBusy, StaffError
 from daedalus.terminals.gateway import TERMINAL_WS_MAX_BYTES, Gateway, SocketGone, ticket_who
@@ -5415,6 +5417,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             "recent": [{**dict(r), "raw": json.loads(r["raw"])} for r in recent],
             "sessions": [dict(r) for r in by_session],
             "subscriptions": await subscription_usage(),
+            # Read after the subscriptions, so the reading just taken is in its own forecast.
+            "forecasts": [f.view() for f in await quota_forecast(app.db)],
         }
 
     @api.get("/api/usage/provider/{provider_id}")
@@ -5432,16 +5436,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         return {"provider": provider_id, "today": dict(row) if row else {}, "subscription": subscriptions.get(provider_id), "balance": balances.get(provider_id)}
 
     async def subscription_usage() -> dict[str, Any]:
-        """Quota windows of the Codex, Grok and Claude subscriptions, read from the key proxy that holds their logins."""
-        origin = _keyproxy_origin()
-        if not origin:
-            return {}
-        try:
-            async with httpx.AsyncClient(timeout=8.0) as client:
-                response = await client.get(origin + "/subscriptions/usage")
-            return response.json() if response.status_code == 200 else {}
-        except (httpx.HTTPError, ValueError):
-            return {}
+        """Quota windows of the Codex, Grok and Claude subscriptions, read from the key proxy that holds
+        their logins; each read is kept as a reading for the windows' forecast."""
+        return await fetch_subscriptions(app)  # type: ignore[arg-type]
 
     @api.get("/api/balance")
     async def balance(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

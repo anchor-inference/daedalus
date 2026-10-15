@@ -2510,6 +2510,16 @@ class Ingress:
 
     async def usage(self, live: LiveSession, snapshot: UsageSnapshot) -> None:
         await self.manager.staff.record_usage(live.id, snapshot.view())
+        if snapshot.windows:
+            from daedalus.stores.harness import HarnessStore  # Lazy: only a CLI reports windows.
+            from daedalus.stores.quota import record_cli
+
+            launch = await HarnessStore(self.manager.db).open_launch_for(live.id)
+            env = (launch.env if launch is not None else "") or live.staff.env or self.manager.projects.local_env
+            try:
+                await record_cli(self.manager.db, live.staff.harness, env, snapshot.windows)
+            except Exception:  # noqa: BLE001 — a reading that cannot be kept must not cost the usage
+                logger.warning("the quota reading of %s could not be kept", live.staff.name, exc_info=True)
 
     async def signal(self, live: LiveSession) -> None:
         await self.manager.staff.touch(live.id)

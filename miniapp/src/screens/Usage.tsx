@@ -3,7 +3,9 @@ import { Skeleton } from "../ui/index";
 import { absTime, clock, dayLabel, int, planName, tokens, untilShort, usd } from "../format";
 import { PageHeader, screenTitle } from "../ui/index";
 import { useQuery } from "../store";
-import { plural, t } from "../i18n";
+import { DICT, plural, t } from "../i18n";
+import { cliAccount, forecastFor, forecastText, forecastWarns, type QuotaForecast } from "../quotaforecast";
+import { HARNESS_NAMES } from "../team/team";
 
 type Daily = { day: string; provider_id: string; model: string; calls: number; input_tokens: number; output_tokens: number; cache_read_tokens: number; reasoning_tokens: number; cost_usd: number | null; unmetered: number };
 type Recent = {
@@ -25,7 +27,7 @@ type Recent = {
 type BySession = { session_id: string | null; title: string | null; calls: number; input_tokens: number; output_tokens: number; cost_usd: number | null; unmetered: number };
 type SubWindow = { name: string; used_percent: number; resets_at?: number | string | null };
 type Subscription = { provider: string; logged_in: boolean; plan?: string; limit_reached?: boolean; windows?: SubWindow[]; products?: { product: string; used_percent?: number }[]; error?: string };
-type UsageData = { daily: Daily[]; recent: Recent[]; sessions: BySession[]; subscriptions?: Record<string, Subscription> };
+type UsageData = { daily: Daily[]; recent: Recent[]; sessions: BySession[]; subscriptions?: Record<string, Subscription>; forecasts?: QuotaForecast[] };
 type Balance = { balances: Record<string, number | null>; thresholds: number[] };
 
 const SUB_LABEL: Record<string, string> = { codex: "Codex · ChatGPT", claude: "Claude", opencode: "OpenCode Go", grok: "SuperGrok" };
@@ -42,8 +44,9 @@ function fmtMs(ms: number): string {
   return ms < 1000 ? `${ms} ms` : t("fmt.dur.s", { n: (ms / 1000).toFixed(ms < 10000 ? 1 : 0) });
 }
 
-/** One quota window: label · bar · what is left · when it resets. */
-function QuotaLine({ w }: { w: SubWindow }) {
+/** One quota window: label · bar · what is left · when it resets, and under it the pace it is spent
+ *  at and when it runs out, when the host has readings enough to say. */
+function QuotaLine({ w, forecast }: { w: SubWindow; forecast?: QuotaForecast | null }) {
   const used = Math.min(100, Math.max(0, w.used_percent));
   return (
     <div className="quota-line" title={w.resets_at ? t("usage.resetsat", { when: absTime(typeof w.resets_at === "number" ? w.resets_at * 1000 : w.resets_at) }) : undefined}>
@@ -51,6 +54,9 @@ function QuotaLine({ w }: { w: SubWindow }) {
       <div className={`bar ${level(used)}`} style={{ ["--v" as string]: used }}><i /></div>
       <b className="num">{Math.round(100 - used)}{t("usage.left")}</b>
       <span className="sub num">{w.resets_at ? t("usage.resetsat", { when: untilShort(typeof w.resets_at === "number" ? w.resets_at * 1000 : w.resets_at) }) : ""}</span>
+      {forecast && (
+        <span className={`quota-fc ${forecastWarns(forecast) ? "warn" : ""}`} data-forecast={forecast.status}>{forecastText(forecast)}</span>
+      )}
     </div>
   );
 }
@@ -78,6 +84,11 @@ export function UsageScreen({ onOpen }: { onOpen?: (id: string) => void }) {
       for (const w of s.windows ?? []) if (!best || w.used_percent > best.used) best = { name: `${SUB_LABEL[pid] ?? pid} · ${w.name}`, used: w.used_percent, resets: w.resets_at };
     }
     return best;
+  }, [usage]);
+  const members = useMemo(() => {
+    const out = new Map<string, QuotaForecast[]>();
+    for (const f of usage?.forecasts ?? []) if (cliAccount(f.account)) out.set(f.account, [...(out.get(f.account) ?? []), f]);
+    return Array.from(out.entries());
   }, [usage]);
   const recent = (usage?.recent ?? []).filter((r) => provider === "all" || r.provider_id === provider);
   const byDay = new Map<string, Daily[]>();
@@ -131,10 +142,30 @@ export function UsageScreen({ onOpen }: { onOpen?: (id: string) => void }) {
                       </div>
                       {!s.logged_in && <div className="sub">{t(name === "opencode" ? "usage.nokey" : "usage.notloggedin")}</div>}
                       {s.error && <div className="sub" style={{ color: "var(--bad)" }}>{s.error}</div>}
-                      {(s.windows ?? []).map((w) => <QuotaLine key={w.name} w={w} />)}
+                      {(s.windows ?? []).map((w) => <QuotaLine key={w.name} w={w} forecast={forecastFor(usage.forecasts, name, w.name)} />)}
                       {(s.products ?? []).filter((p) => p.used_percent !== undefined && p.used_percent !== null).map((p) => <QuotaLine key={p.product} w={{ name: p.product, used_percent: p.used_percent ?? 0 }} />)}
                     </div>
                   ))}
+                </div>
+              </>
+            )}
+
+            {members.length > 0 && (
+              <>
+                {/* A member's CLI reports its own login's windows, which need not be the key proxy's. */}
+                <div className="section-title">{t("usage.fc.members")}</div>
+                <div className="usage-cards">
+                  {members.map(([account, rows]) => {
+                    const who = cliAccount(account)!;
+                    return (
+                      <div key={account} className="card" data-cli-account={account}>
+                        <div className="title-row">
+                          <span className="title">{t("usage.fc.cli", { cli: HARNESS_NAMES[who.harness as keyof typeof HARNESS_NAMES] ?? who.harness, env: `team.env.${who.env}` in DICT ? t(`team.env.${who.env}`) : who.env })}</span>
+                        </div>
+                        {rows.map((f) => <QuotaLine key={f.window} w={{ name: f.window, used_percent: f.used_percent, resets_at: f.resets_at }} forecast={f} />)}
+                      </div>
+                    );
+                  })}
                 </div>
               </>
             )}

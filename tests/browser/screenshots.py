@@ -462,7 +462,21 @@ def usage_data() -> dict:
         "claude": {"provider": "claude", "logged_in": True, "plan": "max", "windows": [{"name": "5h", "used_percent": 23, "resets_at": ahead(hours=3)}, {"name": "weekly", "used_percent": 41, "resets_at": ahead(days=4)}]},
         "opencode": {"provider": "opencode", "logged_in": True, "plan": "go", "windows": [{"name": "5h", "used_percent": 8, "resets_at": ahead(hours=1)}, {"name": "weekly", "used_percent": 12, "resets_at": ahead(days=6)}, {"name": "monthly", "used_percent": 31, "resets_at": ahead(days=17)}]},
     }
-    return {"daily": daily, "recent": recent, "sessions": sessions, "subscriptions": subscriptions}
+    def forecast(account: str, window: str, used: float, status: str, *, burn: float | None = None, eta: dict | None = None,
+                 band: tuple[dict, dict | None] | None = None, resets: dict | None = None, samples: int = 9) -> dict:
+        return {"account": account, "window": window, "status": status, "used_percent": used, "samples": samples, "sampled_at": ago(minutes=4),
+                "burn_per_hour": burn, "eta_at": ahead(**eta) if eta else None,
+                "eta_early_at": ahead(**band[0]) if band else None, "eta_late_at": ahead(**band[1]) if band and band[1] else None,
+                "resets_at": ahead(**resets) if resets else None,
+                "exhausts_before_reset": (eta is not None and resets is not None and timedelta(**eta) < timedelta(**resets)) if status == "ok" else None}
+    # A busy afternoon on Claude: the five-hour window runs out before it resets; the week lasts.
+    forecasts = [
+        forecast("claude", "5h", 23, "ok", burn=31.0, eta={"hours": 2, "minutes": 29}, band=({"hours": 1, "minutes": 50}, {"hours": 3, "minutes": 40}), resets={"hours": 3}),
+        forecast("claude", "weekly", 41, "ok", burn=0.6, eta={"days": 4, "hours": 2}, band=({"days": 3}, None), resets={"days": 4}),
+        forecast("opencode", "5h", 8, "insufficient", samples=2, resets={"hours": 1}),
+        forecast("cli:codex@container", "5h", 37, "ok", burn=9.5, eta={"hours": 6, "minutes": 38}, band=({"hours": 5}, {"hours": 9}), resets=None),
+    ]
+    return {"daily": daily, "recent": recent, "sessions": sessions, "subscriptions": subscriptions, "forecasts": forecasts}
 
 
 SETTINGS = {

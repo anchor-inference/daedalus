@@ -2519,6 +2519,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS autopilot_decisions_by_key ON autopilot_decisi
 CREATE INDEX IF NOT EXISTS autopilot_decisions_by_ask ON autopilot_decisions(ask_id) WHERE ask_id IS NOT NULL;
 """)
 
+# Samples of the subscription quota windows the CLIs and the key proxy report, kept a little over a
+# week (the longest window) so a burn rate and a time to exhaustion can be read from them.
+MIGRATIONS.append("""
+CREATE TABLE quota_samples (
+    account TEXT NOT NULL,
+    window_name TEXT NOT NULL,
+    sampled_at TEXT NOT NULL,
+    used_percent REAL NOT NULL,
+    resets_at TEXT,
+    window_seconds INTEGER,
+    source TEXT NOT NULL CHECK (source IN ('keyproxy', 'cli')),
+    PRIMARY KEY (account, window_name, sampled_at)
+);
+CREATE INDEX quota_samples_by_time ON quota_samples(sampled_at);
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""
