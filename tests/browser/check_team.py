@@ -27,8 +27,8 @@ CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 PID = "9f3c2a1b7d40"
 
 WORDS = {
-    "en": {"title": "Team · Bakery", "hire": "Hire", "save": "Save", "dismiss": "Dismiss", "signedout": "not signed in", "missing": "not installed", "working": "working", "edit": "Edit {name}", "edit.phone": "Edit", "empty": "No staff yet", "empty.phone": "No one on the team yet", "kept": "How these settings are kept", "walls": "the host's walls refuse", "worker": "Worker", "reviewer": "Reviewer", "enable": "coordinator on", "shared": "Shared folder", "worktree": "Own worktree", "blocked": "This environment cannot safely write in a shared folder"},
-    "ru": {"title": "Команда · Bakery", "hire": "Нанять", "save": "Сохранить", "dismiss": "Уволить", "signedout": "нет входа", "missing": "не установлен", "working": "работает", "edit": "Изменить: {name}", "edit.phone": "Изменить", "empty": "Сотрудников пока нет", "empty.phone": "В команде пока никого", "kept": "Как соблюдаются эти настройки", "walls": "хост отклоняет", "worker": "Исполнитель", "reviewer": "Ревьюер", "enable": "Включить координатора", "shared": "Общая папка", "worktree": "Свой worktree", "blocked": "Эта среда не может безопасно писать в общую папку"},
+    "en": {"title": "Team · Bakery", "hire": "Hire", "save": "Save", "dismiss": "Dismiss", "signedout": "not signed in", "missing": "not installed", "working": "working", "edit": "Edit {name}", "edit.phone": "Edit", "empty": "No staff yet", "empty.phone": "No one on the team yet", "kept": "How these settings are kept", "walls": "the host's walls refuse", "worker": "Worker", "reviewer": "Reviewer", "enable": "coordinator on", "shared": "Shared folder", "worktree": "Own worktree", "blocked": "This environment cannot safely write in a shared folder", "editing": "Editing now", "session": "session “Fix prices”"},
+    "ru": {"title": "Команда · Bakery", "hire": "Нанять", "save": "Сохранить", "dismiss": "Уволить", "signedout": "нет входа", "missing": "не установлен", "working": "работает", "edit": "Изменить: {name}", "edit.phone": "Изменить", "empty": "Сотрудников пока нет", "empty.phone": "В команде пока никого", "kept": "Как соблюдаются эти настройки", "walls": "хост отклоняет", "worker": "Исполнитель", "reviewer": "Ревьюер", "enable": "Включить координатора", "shared": "Общая папка", "worktree": "Свой worktree", "blocked": "Эта среда не может безопасно писать в общую папку", "editing": "Сейчас правят", "session": "сессия «Fix prices»"},
 }
 
 
@@ -47,6 +47,9 @@ def run_one(page: Page, lang: str, width: int, unhandled: Unhandled) -> None:
     words = WORDS[lang]
     team = TeamStub(project(), staff=[TeamStub.member("st-cleo", "Cleo", harness="claude", status="working", sessions=9, role="Reviews every change", model="opus", permission_mode="acceptEdits", color="violet")])
     team.staff[0]["project_id"] = PID
+    # Cleo and the operator's own session both changed the menu: the shared file is marked.
+    team.editing = [TeamStub.editor("staff:st-cleo", "Cleo", ["src/menu.ts", "src/prices.ts", "src/cart.ts", "src/api.ts"]),
+                    TeamStub.editor("session:s-op", "Fix prices", ["src/prices.ts"], kind="session", age_s=200)]
     board = BoardStub(project())
 
     def stub(route) -> None:  # type: ignore[no-untyped-def]
@@ -89,6 +92,14 @@ def run_one(page: Page, lang: str, width: int, unhandled: Unhandled) -> None:
     if not phone:
         expect(cleo).to_contain_text("Claude Code · opus · acceptEdits")
     fits(page, f"{lang} {width} list")
+    # Who edits what: one line per agent, its first three files, and the overlap marked.
+    editing = page.locator(".team-editing-row")
+    expect(editing).to_have_count(2)
+    expect(page.get_by_text(words["editing"], exact=True)).to_be_visible()
+    expect(editing.nth(0)).to_contain_text("Cleo")
+    expect(editing.nth(0).locator(".team-editing-files > span")).to_have_count(3)
+    expect(editing.nth(0).locator(".overlap")).to_have_text(", src/prices.ts")
+    expect(editing.nth(1)).to_contain_text(words["session"])
 
     # Hire a Daedalus member. The executors that cannot run here are there, disabled, saying why.
     page.get_by_role("button", name=words["hire"], exact=True).first.click()

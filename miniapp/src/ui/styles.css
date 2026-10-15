@@ -3224,6 +3224,13 @@ h1.start-greeting { margin:0; max-width:18em; font-size:var(--fs-18); font-weigh
 .harness-badge.daedalus { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .staff-list { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-2); }
 .staff-list.archived { opacity: 0.7; }
+/* Who edits what in the shared folders: one compact line per agent; a file two agents hold is marked. */
+.team-editing { display: flex; flex-direction: column; gap: 2px; margin-top: var(--space-2); font-size: var(--fs-12); }
+.team-editing-row { display: flex; align-items: baseline; gap: var(--space-3); min-width: 0; padding: 4px 12px; }
+.team-editing-who { flex: none; max-width: 40%; font-weight: 600; }
+.team-editing-files { flex: 1; min-width: 0; color: var(--fg-2); font-family: var(--mono); }
+.team-editing-files .overlap { color: var(--warn); font-weight: 600; }
+.team-editing-age { flex: none; color: var(--fg-3); }
 .staff-row { display: flex; align-items: flex-start; gap: var(--space-3); width: 100%; min-height: var(--row-h); padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); color: var(--fg); font: inherit; text-align: left; }
 button.staff-row { cursor: pointer; }
 button.staff-row:hover { background: var(--surface-2); }

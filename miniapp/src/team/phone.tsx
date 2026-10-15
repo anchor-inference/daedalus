@@ -16,6 +16,7 @@ import type { MenuItem } from "../ui/dialogs";
 import { EmptyState, ListRow, SectionHeader } from "../ui/phone";
 import { firstWait, splitTeam, staffTone, waitKey, type StaffTone } from "../project/focus";
 import { spendLine, staffUsage, type ProjectUsage } from "../project/usage";
+import { EditingNow } from "./editing";
 import { HarnessBadge, StaffAvatar } from "./parts";
 import type { Staff, Team } from "./team";
 
@@ -189,6 +190,11 @@ export function PhoneTeamList({ projectId, team, tasks, usage, toast, onEdit, on
         <section>
           <SectionHeader count={oneOff.length}>{t("focus.oneoff")}</SectionHeader>
           <div className="ph-list" role="list">{oneOff.map(row)}</div>
+        </section>
+      )}
+      {(team.editing?.length ?? 0) > 0 && (
+        <section>
+          <EditingNow editing={team.editing ?? []} heading={<SectionHeader count={team.editing?.length}>{t("team.editing.section")}</SectionHeader>} />
         </section>
       )}
     </>

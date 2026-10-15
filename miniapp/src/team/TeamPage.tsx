@@ -16,6 +16,7 @@ import { RouteLine } from "./route";
 import { StaffSheet } from "./StaffSheet";
 import { Setups } from "./setups";
 import { HARNESS_NAMES, Staff, Team, statusTone } from "./team";
+import { EditingNow } from "./editing";
 import { firstWait, waitKey } from "../project/focus";
 import { ConditionLine } from "../staff/conditions";
 import { HealthLine } from "../staff/health";
@@ -89,6 +90,7 @@ export function TeamPage({ projectId, toast, back }: { projectId: string; toast:
             {active.map((m) => <StaffRow key={m.id} member={m} team={team} spend={spendLine(staffUsage(usage, m.id))} onOpen={() => setEditing(m)} />)}
           </div>
         )}
+        {team && !closed && (team.editing?.length ?? 0) > 0 && <EditingNow editing={team.editing ?? []} />}
         {team && !closed && showArchived && archived.length > 0 && (
           <>
             <div className="section-title">{t("team.dismissed.section")}</div>

@@ -79,6 +79,16 @@ export type Staff = {
 
 export type TeamFolder = { id: string; path: string; label: string; env: Env; is_git: boolean; readonly: boolean };
 
+/** One agent's live edit leases: a member, or a session (the operator's own, often). */
+export type Editing = {
+  holder: string;
+  kind: "member" | "session";
+  name: string;
+  edited_at: string;
+  age_s: number;
+  files: { path: string; shown: string }[];
+};
+
 export type Team = {
   project: {
     id: string;
@@ -95,6 +105,8 @@ export type Team = {
   staff: Staff[];
   /** The project's whole launch queue, in the order it would start. */
   queue?: Queued[];
+  /** Who is editing which file in the project's folders now, newest edit first. */
+  editing?: Editing[];
   counts: { staff: number; working: number };
   choices: { harnesses: Harness[]; personas: string[]; presets: { id: string; label: string }[]; default_preset: string; coordinator_default_preset: string };
 };

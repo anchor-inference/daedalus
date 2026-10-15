@@ -1130,6 +1130,14 @@ class TeamStub:
         self.spend: dict[str, dict] = {}
         """What each member spent, ``staff_id -> {"today": {...}, "subscription": ...}``; the rest spent nothing."""
         self.orchestrator_spend: dict | None = None
+        self.editing: list[dict] = []
+        """The edit board of the project's folders, as ``/staff`` carries it: who holds which files now."""
+
+    @staticmethod
+    def editor(holder: str, name: str, files: list[str], *, kind: str = "member", age_s: int = 20) -> dict:
+        """One agent's live edit leases, the files given relative to the project's folder."""
+        return {"holder": holder, "kind": kind, "name": name, "edited_at": "2026-10-15T12:00:00+00:00", "age_s": age_s,
+                "files": [{"path": f"/home/operator/work/{f}", "shown": f} for f in files]}
 
     @staticmethod
     def spent(usd: float = 0.0, tokens: int = 0, *, unpriced: int = 0, week: float | None = None, total: float | None = None, subscription: float | None = None) -> dict:
@@ -1181,6 +1189,7 @@ class TeamStub:
         return {
             "project": self.project,
             "staff": rows,
+            "editing": self.editing,
             "counts": {"staff": sum(1 for m in self.staff if not m["archived_at"]), "working": working},
             "choices": {"harnesses": ["daedalus", "claude", "codex", "grok", "opencode", "pi", "cursor"], "personas": self.personas, "presets": self.presets, "default_preset": self.presets[0]["id"] if self.presets else "", "coordinator_default_preset": self.presets[0]["id"] if self.presets else ""},
         }
@@ -2581,6 +2590,12 @@ class FocusStub:
             member["project_id"] = pid
         team = TeamStub({**bakery}, staff=staff)
         team.project["orchestrator"] = True
+        # Naya and the one-off share the folder, and the operator's own session is in it as well.
+        team.editing = [
+            TeamStub.editor("staff:st-naya", "Naya", ["bot/handlers.py", "bot/menu.py"], age_s=12),
+            TeamStub.editor("staff:st-link", words["link.name"], ["bot/menu.py"], age_s=40),
+            TeamStub.editor("session:sess-op", words["editing.session"], ["README.md"], kind="session", age_s=300),
+        ]
         team.spend = {"st-lev": TeamStub.spent(1.2, 412_000, week=6.8, total=21.5), "st-ira": TeamStub.spent(0, 380_000, subscription=23)}
         team.orchestrator_spend = TeamStub.spent(0.85, 96_000, week=4.1, total=12.3)
 
@@ -2958,7 +2973,7 @@ FOCUS_WORDS: dict[str, dict[str, str]] = {
         "watch.note": "Max's turn finished → wake me",
         "task.checkout": "Checkout", "task.bot": "Notify: bot", "task.endpoint": "Notify: endpoint", "task.photos": "Menu photo captions", "task.hours": "Opening hours",
         "task.menu": "Seasonal menu page", "task.prices": "Price sheet check", "task.hero": "Hero image",
-        "ira.role": "front end", "naya.role": "the baker's bot", "lev.role": "review", "olga.role": "copy", "link.name": "Menu link check",
+        "ira.role": "front end", "naya.role": "the baker's bot", "lev.role": "review", "olga.role": "copy", "link.name": "Menu link check", "editing.session": "Fix the menu prices",
         "lev.task": "Task: captions for the menu photos. Done when every photo in the gallery has a caption from the sheet.",
         "lev.reply": "Twelve of eighteen captions are written from the sheet; the rest have no row yet, so I am asking the orchestrator.",
         "lev.message": "Take the captions from the owner's sheet, column C", "lev.first": "Start with the seasonal photos",
@@ -3010,7 +3025,7 @@ FOCUS_WORDS: dict[str, dict[str, str]] = {
         "watch.note": "ход Макса завершён → разбудить меня",
         "task.checkout": "Оформление заказа", "task.bot": "Уведомление: бот", "task.endpoint": "Уведомление: эндпоинт", "task.photos": "Подписи к фото в меню", "task.hours": "Часы работы",
         "task.menu": "Страница сезонного меню", "task.prices": "Сверка прайса", "task.hero": "Главное изображение",
-        "ira.role": "фронтенд", "naya.role": "бот пекаря", "lev.role": "ревью", "olga.role": "тексты", "link.name": "Проверка ссылок меню",
+        "ira.role": "фронтенд", "naya.role": "бот пекаря", "lev.role": "ревью", "olga.role": "тексты", "link.name": "Проверка ссылок меню", "editing.session": "Поправить цены в меню",
         "lev.task": "Задача: подписи к фото в меню. Готово, когда у каждого фото в галерее есть подпись из таблицы.",
         "lev.reply": "Двенадцать из восемнадцати подписей взяты из таблицы; для остальных строк нет, спрашиваю оркестратора.",
         "lev.message": "Подписи бери из таблицы владельца, колонка C", "lev.first": "Начни с сезонных фото",
