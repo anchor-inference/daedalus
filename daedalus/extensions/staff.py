@@ -78,7 +78,9 @@ from daedalus.staff_runtime import (
 from daedalus.stores.capacity import claim_in, finish_in
 from daedalus.stores.control import ControlDenied, Principal, one
 from daedalus.stores.files import FileRefused, StoredFile
+from daedalus.stores.harness import HarnessStore
 from daedalus.stores.projects import Project, ProjectFolder, ProjectSettings
+from daedalus.stores.quota import record_cli
 from daedalus.stores.runtime_release import physical_exit_in
 from daedalus.stores.staff import (
     ACTIVE_STATUSES,
@@ -2511,9 +2513,6 @@ class Ingress:
     async def usage(self, live: LiveSession, snapshot: UsageSnapshot) -> None:
         await self.manager.staff.record_usage(live.id, snapshot.view())
         if snapshot.windows:
-            from daedalus.stores.harness import HarnessStore  # Lazy: only a CLI reports windows.
-            from daedalus.stores.quota import record_cli
-
             launch = await HarnessStore(self.manager.db).open_launch_for(live.id)
             env = (launch.env if launch is not None else "") or live.staff.env or self.manager.projects.local_env
             try:

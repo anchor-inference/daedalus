@@ -2522,7 +2522,7 @@ CREATE INDEX IF NOT EXISTS autopilot_decisions_by_ask ON autopilot_decisions(ask
 # Samples of the subscription quota windows the CLIs and the key proxy report, kept a little over a
 # week (the longest window) so a burn rate and a time to exhaustion can be read from them.
 MIGRATIONS.append("""
-CREATE TABLE quota_samples (
+CREATE TABLE IF NOT EXISTS quota_samples (
     account TEXT NOT NULL,
     window_name TEXT NOT NULL,
     sampled_at TEXT NOT NULL,
@@ -2532,7 +2532,7 @@ CREATE TABLE quota_samples (
     source TEXT NOT NULL CHECK (source IN ('keyproxy', 'cli')),
     PRIMARY KEY (account, window_name, sampled_at)
 );
-CREATE INDEX quota_samples_by_time ON quota_samples(sampled_at);
+CREATE INDEX IF NOT EXISTS quota_samples_by_time ON quota_samples(sampled_at);
 """)
 
 CACHE_PAGES = -65536
