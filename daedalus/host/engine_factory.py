@@ -11,7 +11,7 @@ from protocore.contracts.llm import IProviderChain
 from protocore.contracts.tool_registry import IToolRegistry, ToolVisibilityPolicy, policy_admits
 from protocore.runtime.query_engine import QueryEngine, QueryEngineConfig
 from protocore.runtime.runtime_constants import default_runtime_constants
-from protocore.runtime.tool_deferral import discovery_tool_names, ensure_tool_deferral
+from protocore.runtime.tool_deferral import discovery_tool_names, ensure_tool_deferral, tool_rules_mark
 from protocore.runtime.tool_dispatch import ToolDispatcher
 from protocore.runtime.tool_permission import (
     PermissionStage,
@@ -258,6 +258,7 @@ def build_engine(
     discovered_tools: Collection[str | Mapping[str, str]] = (),
     loaded_tool_groups: Collection[str] = (),
     tool_group_loads: Mapping[str, str] | None = None,
+    tool_rules_session: str | None = None,
     trimmed_tool_result_ids: Collection[str] = (),
 ) -> QueryEngine:
     """``role`` picks the system prompt: an agent that works in a folder, the companion that talks,
@@ -318,6 +319,11 @@ def build_engine(
         blob_store=deps.blob_store,
         provider_chain=provider_chain,
     )
+    if tool_rules_session:
+        # The rules mark sits in the tool catalogue at the head of the prompt and is derived from the
+        # session. A fork carrying its source's history also carries rules given under the source's
+        # mark, and only the source's mark keeps the prefix the same bytes as the source's.
+        engine._tool_rules_mark = tool_rules_mark(tool_rules_session, deps.tool_rules_key)
     # The container is the boundary: no shell deny patterns, no path isolation.
     engine._tool_dispatcher = ToolDispatcher(  # type: ignore[attr-defined]
         registry=deps.tool_registry,

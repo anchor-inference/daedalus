@@ -45,6 +45,8 @@ logger = logging.getLogger(__name__)
 STOP_WAIT_SECONDS = 30.0
 """How long an interrupting message waits for the stopped turn to settle before it is sent anyway."""
 DIFF_TIMEOUT = 30.0
+FORK_WHOLE_HISTORY = 2**62
+"""A transcript position past any a session reaches: a fork from it copies every settled turn."""
 
 
 def isolation_of(req: StartRequest) -> str:
@@ -52,6 +54,23 @@ def isolation_of(req: StartRequest) -> str:
     if req.worktree is not None:
         return "worktree"
     return "readonly" if req.staff.isolation == "readonly" else "shared"
+
+
+def fork_note(req: StartRequest) -> str:
+    """What a forked attempt is told before its task: who and where it is now.
+
+    Its system prompt and history are its source's, kept so for the prompt cache, and both name the
+    source's working directory and standing brief. Without this it would take them for its own."""
+    where = str(req.worktree.cwd) if req.worktree is not None else str(req.cwd)
+    branch = f" on the branch {req.worktree.branch}" if req.worktree is not None else ""
+    return (
+        f"[You continue the conversation above as {req.staff.name}, one of several attempts at the same task.] "
+        f"Your working directory is {where}{branch}, a worktree of your own made from the folder's current "
+        "commit: the working directory the system prompt and the earlier turns name belongs to the member "
+        "whose conversation this was, and its uncommitted changes are not in yours. Work, commit and report "
+        "only in yours. Your standing brief from here on, in place of the one the system prompt quotes:\n"
+        + req.brief_text
+    )
 
 
 class DaedalusStaffRuntime:
@@ -93,13 +112,19 @@ class DaedalusStaffRuntime:
         state = await self.manager.create_session(title[:120], metadata=metadata, project_id=req.project.id, folder_id=req.folder.id)
         session_id = state.session.id
         try:
+            if req.fork_from:
+                # The source's whole settled history, then its prompt identity: the attempt's first
+                # request repeats the source's prefix byte for byte and differs only in its tail.
+                await self.manager.fork_into(req.fork_from, FORK_WHOLE_HISTORY, state, copy_workspace=False)
+                await self.manager.pin_fork_identity(session_id, req.fork_from)
             if req.model:
                 await self.manager.set_model(session_id, preset=req.model)
             if req.effort and req.effort != "off":
                 await self.manager.set_model(session_id, reasoning_effort=req.effort)
             elif req.effort == "off":
                 await self.manager.set_model(session_id, thinking=False)
-            await self.manager.submit(session_id, req.first_message, as_answer=False, origin=req.origin, client_message_id=req.first_message_id or None)
+            first = fork_note(req) + "\n\n" + req.first_message if req.fork_from else req.first_message
+            await self.manager.submit(session_id, first, as_answer=False, origin=req.origin, client_message_id=req.first_message_id or None)
         except Exception:
             # A session that could not be given its task is not left behind as an empty chat.
             try:

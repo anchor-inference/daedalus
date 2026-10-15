@@ -127,6 +127,9 @@ class StartRequest:
     """The operator's standing grants to the member, as the CLI's allow rules, for a CLI that keeps them."""
     resources: dict[str, Any] | None = None
     """An exact host-owned resource binding; the runtime pins its launch before spawning."""
+    fork_from: str | None = None
+    """A Daedalus session to start from instead of an empty one: an exploration's attempt continues
+    its source member's conversation, so every attempt shares that history as a cached prefix."""
 
 
 @dataclass(frozen=True, slots=True)

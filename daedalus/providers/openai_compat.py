@@ -16,6 +16,7 @@ import re
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 from urllib.parse import urlsplit
@@ -218,6 +219,13 @@ adapter has not been checked against."""
 CACHE_KEY_UPSTREAMS = ("codex", "openai")
 """Key-proxy upstreams that take ``prompt_cache_key``: one per session, so the requests of one
 conversation reach the same prompt cache instead of whichever machine answers."""
+
+
+CACHE_ROUTING: ContextVar[str | None] = ContextVar("daedalus_cache_routing", default=None)
+"""The conversation a run's requests are routed by in place of its own session, set by the run.
+
+A fork that starts with its source's bytes is cached with the source only on the server that holds
+the source's cache: keyed by its own session it lands elsewhere and pays for the whole prefix again."""
 
 
 CONVERSATION_HEADER_UPSTREAMS = ("grok",)
@@ -744,7 +752,7 @@ class OpenAICompatibleProvider(ILLMProvider):
             apply_cache_control(body["messages"], breakpoints, index_map=wire_index)
         if takes_cache_key(self.endpoint):
             obs = request.observability
-            cache_key = (obs.session_id if obs is not None else None) or (obs.run_id if obs is not None else None)
+            cache_key = CACHE_ROUTING.get() or (obs.session_id if obs is not None else None) or (obs.run_id if obs is not None else None)
             if cache_key:
                 body["prompt_cache_key"] = cache_key
         if self.endpoint.kind == "llamacpp":
@@ -859,7 +867,7 @@ class OpenAICompatibleProvider(ILLMProvider):
             headers["x-opencode-session"] = session or self.endpoint.id
         if takes_conversation_header(self.endpoint):
             obs = request.observability if request is not None else None
-            conversation = (obs.session_id if obs is not None else None) or (obs.run_id if obs is not None else None)
+            conversation = CACHE_ROUTING.get() or (obs.session_id if obs is not None else None) or (obs.run_id if obs is not None else None)
             # No fallback to a fixed value: one id shared by every caller would pin them all to one server.
             if conversation:
                 headers["x-grok-conv-id"] = conversation
@@ -1065,6 +1073,7 @@ async def _sse_data(lines: AsyncIterator[str]) -> AsyncIterator[str | None]:
 
 
 __all__ = [
+    "CACHE_ROUTING",
     "ImageLoader",
     "ModelPricing",
     "OpenAICompatibleProvider",

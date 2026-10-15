@@ -116,6 +116,7 @@ from daedalus.processes import end_tree
 from daedalus.providers.chain import build_chain
 from daedalus.providers.free_catalog import approved_endpoint
 from daedalus.providers.free_catalog import catalog as free_catalog
+from daedalus.providers.openai_compat import CACHE_ROUTING
 from daedalus.providers.registry import ProviderRegistry
 from daedalus.security import operator_secrets, redact
 from daedalus.stores.blobs import FileBlobStore
@@ -469,6 +470,26 @@ def home_of(metadata: dict[str, Any]) -> str:
     """The session's own directory name under the workspaces root, or ``""`` when it works in a folder."""
     value = str(metadata.get(HOME_KEY) or "").strip()
     return value if _HOME_RE.fullmatch(value) and value not in (".", "..") else ""
+
+
+FORK_IDENTITY_KEY = "fork_identity"
+"""What a fork's system prompt is written from, taken from its source when it was made.
+
+A fork made to try the source's work again elsewhere (an exploration's attempt in a worktree of its
+own) has a title, a working directory and a brief of its own, each of which the system prompt
+names. Written from those, its first request differed from the source's in the system prompt and the
+provider served none of the shared history from cache. Its prompt is written from the source's
+instead, and what differs is said in the fork's first message, after the shared prefix."""
+
+FORK_COPIED_KEYS = ("discovered_tools", tool_groups.CARRIED_KEY)
+"""The source's loaded tools, which decide the tool list the cached prefix starts with."""
+
+
+def fork_identity(metadata: dict[str, Any]) -> dict[str, Any] | None:
+    pinned = metadata.get(FORK_IDENTITY_KEY)
+    if not isinstance(pinned, dict) or not all(isinstance(pinned.get(k), str) for k in ("title", "workspace", "notes")):
+        return None
+    return pinned
 
 
 def host_home_name(session_id: str) -> str:
@@ -2646,7 +2667,33 @@ class SessionManager:
             raise
         return {"id": target.session.id, "title": name, **result}
 
-    async def fork_into(self, source_id: str, seq: int, target: SessionState) -> dict[str, Any]:
+    async def pin_fork_identity(self, target_id: str, source_id: str) -> dict[str, Any]:
+        """Have ``target``'s requests start with the bytes ``source``'s next request would start with.
+
+        Call after :meth:`fork_into`. The system prompt is written from the source's title, working
+        directory and notes, the source's loaded tools and stale-trimmed results are carried, and the
+        run's requests are routed by the source's conversation, so a provider's prefix cache serves the
+        fork the history it shares with the source. A fork of a fork keeps the first source's identity.
+        """
+        source = await self.get_state(source_id)
+        target = await self.get_state(target_id)
+        if source is None or target is None:
+            raise KeyError(source_id if source is None else target_id)
+        pinned = fork_identity(source.metadata)
+        if pinned is None:
+            trimmed = sorted(source.engine.trimmed_tool_result_ids) if source.engine is not None else []
+            pinned = {"title": source.session.title, "workspace": str(self.work_dir(source)),
+                      "project": source.project.name if source.project is not None else "",
+                      "notes": self.notes_for(source, window=int(source.context_window or 0)),
+                      "trimmed": trimmed, "cache_key": source_id}
+        copied = {key: source.metadata[key] for key in FORK_COPIED_KEYS if key in source.metadata}
+        for meta in (target.metadata, target.session.metadata):
+            meta[FORK_IDENTITY_KEY] = pinned
+            meta.update(copied)
+        await self.sessions.update_metadata(target_id, target.session.metadata)
+        return pinned
+
+    async def fork_into(self, source_id: str, seq: int, target: SessionState, *, copy_workspace: bool = True) -> dict[str, Any]:
         """Give ``target`` the source's history before transcript ``seq`` and the right project files.
 
         Turns a revert undid and turns a compaction summary already stands for are left out of
@@ -2660,6 +2707,9 @@ class SessionManager:
         Two sessions in the same project share one directory and nothing is copied at all. Where a
         copy does happen it is a whole directory tree, so it is measured first and refused above
         ``ops.checkpoint_max_gb`` rather than written into the state directory unbounded.
+        ``copy_workspace=False`` copies the history alone: a staff member's fork works in a git
+        worktree of its own, and the source's tree copied over it would replace the file that links
+        the worktree to its repository.
         """
         source = await self.get_state(source_id)
         if source is None:
@@ -2719,7 +2769,9 @@ class SessionManager:
             target.history_keys = [self.sessions.transcript_key(m) for m in history]
             _forget_persisted(target)
             copied = False
-            if target.workspace == source.workspace:
+            if not copy_workspace:
+                pass
+            elif target.workspace == source.workspace:
                 # Both sessions are in the same project: the folder is the operator's and there is one
                 # of it. Copying it would take the repository out of the folder they chose, unbounded,
                 # and leave the fork working on a stale duplicate of it.
@@ -4076,15 +4128,16 @@ class SessionManager:
         state.effective_model = ""
         state.model_change_reason = ""
         state.model_stamps.clear()
+        pinned = fork_identity(state.metadata)
         engine = build_engine(
             deps=deps,
             config=self.config,
             mode=mode,
             run_id=run_id,
             session_id=state.session.id,
-            session_title=state.session.title,
-            workspace=self.work_dir(state),
-            project=state.project.name if state.project is not None else "",
+            session_title=pinned["title"] if pinned else state.session.title,
+            workspace=Path(pinned["workspace"]) if pinned else self.work_dir(state),
+            project=str(pinned.get("project") or "") if pinned else state.project.name if state.project is not None else "",
             rungs=rungs,
             provider_chain=chain,
             model_name=rungs[0][1],
@@ -4092,7 +4145,7 @@ class SessionManager:
             reasoning_effort=overrides.get("reasoning_effort") or preset.reasoning_effort,
             context_window=state.context_window or preset.context_window,
             max_output_tokens=preset.max_output_tokens,
-            extra_notes=self.notes_for(state, window=int(state.context_window or preset.context_window or 0)),
+            extra_notes=pinned["notes"] if pinned else self.notes_for(state, window=int(state.context_window or preset.context_window or 0)),
             tool_visibility_policy=self.tool_policy_for(state),
             role="companion" if self.is_companion(state) else "coach" if self.is_prompt_coach(state) else "btw" if self.is_btw(state) else "orchestrator" if self.is_orchestrator(state) else "dispatcher" if self.is_dispatcher(state) else "agent",
             max_advertised_tools=self.advertised_tools_limit(rungs),
@@ -4100,8 +4153,10 @@ class SessionManager:
             loaded_tool_groups=self.loaded_groups_for(state),
             # The previous run's engine is still the state's here: what it cut stays cut, or the new run
             # decided again from nothing and cut, at its first request, what the last one left whole.
-            trimmed_tool_result_ids=state.engine.trimmed_tool_result_ids if state.engine is not None else (),
+            trimmed_tool_result_ids=(state.engine.trimmed_tool_result_ids if state.engine is not None
+                                     else tuple(pinned["trimmed"]) if pinned else ()),
             tool_group_loads=self.tool_group_loads_for(state) if not self.is_dispatcher(state) else None,
+            tool_rules_session=(str(pinned.get("cache_key") or "") or None) if pinned else None,
         )
         self._attach_hooks(engine, state)
         if chain is not None:
@@ -4643,6 +4698,10 @@ class SessionManager:
     ) -> None:
         run_id = engine.config.run_id
         status = "completed"
+        pinned = fork_identity(state.metadata)
+        if pinned and pinned.get("cache_key"):
+            # This task's own context: the routing reaches every request of the run and nothing else.
+            CACHE_ROUTING.set(str(pinned["cache_key"]))
         try:
             # A continuation drives the model against the history as it stands; nothing is appended.
             closed = None

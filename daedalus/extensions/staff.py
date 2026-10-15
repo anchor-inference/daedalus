@@ -890,6 +890,15 @@ class Team:
         return await self._move_task(task, "todo", actor=by,
                                      actor_id=principal.actor_id if principal else None, assignee=None)
 
+    async def _fork_source(self, member: Staff, task: BoardTask) -> str | None:
+        """The session an exploration's native attempt starts from, recorded before its launch."""
+        if member.harness != "daedalus":
+            return None
+        row = await self.app.db.fetchone("SELECT fork_session_id FROM exploration_attempts"
+                                         " WHERE staff_id = ? AND task_id = ? AND fork_session_id IS NOT NULL",
+                                         (member.id, task.id))
+        return str(row["fork_session_id"]) if row is not None else None
+
     def execution_lock(self, staff_id: str) -> asyncio.Lock:
         """A stop and retasking share ownership: neither may overtake the other's external call."""
         return self._execution_locks.setdefault(staff_id, asyncio.Lock())
@@ -1083,6 +1092,7 @@ class Team:
             first_message_id=first_id,
             allow_rules=tuple(r["rule"] for r in await self.manager.staff.allow_rules(member.id)),
             resources=resources,
+            fork_from=await self._fork_source(member, task) if predecessor is None else None,
         )
         identity = None
         entered_provider = False
