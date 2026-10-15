@@ -958,6 +958,9 @@ class Orchestrators:
     def _member_line(self, member: Staff, session: Any, tasks: dict[str, dict[str, Any]], now: datetime) -> str:
         role = f" — {_one_line(member.role, 60)}" if member.role else ""
         kind = HARNESS_NAMES.get(member.harness, member.harness) + (f" {member.agent}" if member.agent else "")
+        if member.route_home:
+            # Said in the state, so a fallback does not read as the member's own runtime.
+            kind += f" (route fallback from {HARNESS_NAMES.get(str(member.route_home.get('harness')), member.route_home.get('harness'))})"
         where = member.isolation + (f" {session.branch}" if session is not None and session.branch else "")
         if session is None:
             return f"{member.name}{role}, {kind}, {where}: off"

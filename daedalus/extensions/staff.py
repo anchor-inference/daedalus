@@ -818,9 +818,21 @@ class Team:
         if effort is not None and (member.harness != "daedalus" or effort not in DAEDALUS_EFFORTS[1:]):
             raise StaffError("an assignment's effort is a Daedalus effort: off, low, medium, high or xhigh")
         task_id = str(task["id"]) if isinstance(task, dict) else task
-        return await queue_launch(self.app, task_id, principal, staff_id=member.id,
-                                  client_operation_id=client_operation_id,
-                                  expected_entity_revision=expected_entity_revision, resume_from=resume_from, effort=effort)
+
+        async def launch(chosen: Staff, chosen_effort: str | None) -> dict[str, Any]:
+            return await queue_launch(self.app, task_id, principal, staff_id=chosen.id,
+                                      client_operation_id=client_operation_id,
+                                      expected_entity_revision=expected_entity_revision, resume_from=resume_from,
+                                      effort=chosen_effort)
+
+        project = await self.project(member.project_id)
+        # A resumed conversation belongs to the runtime that holds it, so it never takes the route.
+        if project.settings.member_route and resume_from is None:
+            from daedalus.extensions.launch_route import route_assign  # Lazy: it imports this module's types
+
+            return await route_assign(self, member, task_id, principal=principal,
+                                      client_operation_id=client_operation_id, effort=effort, launch=launch)
+        return await launch(member, effort)
 
     async def _holder(self, task: BoardTask) -> tuple[str, str]:
         """Who holds a card in doing, and, when nobody works it any more, why not (else ``""``).
@@ -2499,12 +2511,32 @@ class Ingress:
         self.team.queue.pump_soon(live.staff.project_id)
 
 
+async def _report_interrupted_routes(team: Team) -> None:
+    """A route launch the last host left claimed is reported in its project's journal, never resumed."""
+    from daedalus.stores.launch_routes import LaunchRoutes  # Lazy: only the start reads it here
+
+    try:
+        settled = await LaunchRoutes(team.manager.db).settle_interrupted()
+    except Exception:  # noqa: BLE001 — a launch command still refuses a claimed operation id
+        logger.exception("could not settle the route launches the last host left open")
+        return
+    for record in settled:
+        try:
+            await team.manager.projects.record(record.project_id, "system", "launch_route",
+                                               f"task {record.task_id}: {record.reason}",
+                                               {"task_id": record.task_id, "staff_id": record.staff_id,
+                                                "operation_id": record.operation_id, "outcome": record.state})
+        except Exception:  # noqa: BLE001 — the record itself already says it
+            logger.warning("could not journal the interrupted route launch %s", record.operation_id, exc_info=True)
+
+
 async def install(app: Application) -> list[asyncio.Task[None]]:
     from daedalus.extensions.review import Review  # Lazy: review.py imports this module for its names
 
     team = Team(app)
     team.review = Review(app, team)
     app.extensions["staff"] = team
+    await _report_interrupted_routes(team)
     handler = team.attach()
     return [handler, asyncio.create_task(team.loop(), name="staff")]
 

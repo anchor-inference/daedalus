@@ -178,7 +178,7 @@ async def hire(
     *,
     name: str,
     role: str,
-    harness: str = "daedalus",
+    harness: str = "",
     agent: str = "",
     model: str = "",
     effort: str = "",
@@ -191,7 +191,15 @@ async def hire(
 ) -> str:
     team = _team(orch)
     agent = _agent_name(agent)
-    harness = (harness or "daedalus").strip().lower()
+    harness = (harness or "").strip().lower()
+    if harness == "native":
+        harness = "daedalus"
+    if not harness:
+        # No runtime named: the project's route says which, its first runtime that is installed here
+        # (a spent window is the launch's business, not the hire's), and Daedalus without a route.
+        route = [entry for entry in project.settings.member_route if team.runtimes.get(entry.runtime) is not None]
+        harness = route[0].runtime if route else "daedalus"
+        model = model or (route[0].model if route else "")
     if harness not in HARNESSES:
         raise Refused(f"harness is one of {', '.join(HARNESSES)}")
     runtime = team.runtimes.get(harness)
@@ -710,6 +718,8 @@ async def assign(
         notes.append(added)
     if secrets_handed:
         notes.append(f"Handed over: {', '.join(secret.placeholder for secret in secrets_handed)}; the launch carries them, never the brief.")
+    if launched.get("route"):
+        notes.insert(0, f"Launch route: {launched['route']['reason']}.")
     tail = "".join(" " + note for note in notes)
     admission = await OutboxStore(orch.manager.db).view(launched["effect_id"])
     waiting = (f" queue position {admission['wait_position']} ({admission['wait_reason']})"

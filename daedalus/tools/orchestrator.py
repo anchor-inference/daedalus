@@ -341,7 +341,8 @@ async def project_report(context: ToolContext, text: str, title: str = "", kind:
     description=(
         "Add a member to the team. name (unique, it names their branch), role (their lasting area of work), harness "
         "(daedalus, or a command-line agent: claude, codex, cursor, grok, opencode, pi — Harnesses shows what is installed and "
-        "what each offers), agent (a persona for daedalus, the CLI's agent otherwise), model (a preset for daedalus, "
+        "what each offers; empty takes the project's member route, whose other runtimes are the member's fallbacks when "
+        "a launch is refused for a spent usage window, a missing sign-in or a missing CLI), agent (a persona for daedalus, the CLI's agent otherwise), model (a preset for daedalus, "
         "the CLI's model otherwise), effort (Daedalus: off, low, medium, high or xhigh; empty inherits the preset), permission_mode (CLI only), env (container or host), folder (their "
         "default folder), isolation (worktree: their own branch, the default in a git folder; shared; readonly), "
         "instructions (standing guidance), one_off=true for a helper dismissed when their task is done. Hire for a "
@@ -352,7 +353,7 @@ async def hire(
     context: ToolContext,
     name: str,
     role: str,
-    harness: str = "daedalus",
+    harness: str = "",
     agent: str = "",
     model: str = "",
     effort: str = "",

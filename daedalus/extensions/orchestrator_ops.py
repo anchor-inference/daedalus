@@ -490,7 +490,8 @@ async def tasks(
             return f"{line}\nassigned, but it cannot start: {exc}"
         state = launched.get("state")
         where = f" (queue position {launched.get('position')}: {launched.get('detail')})" if state == "queued" else ""
-        return f"{line}\n{member.name if member else 'the assignee'}: {state}{where}"
+        routed = f"\nLaunch route: {launched['route']['reason']}." if launched.get("route") else ""
+        return f"{line}\n{member.name if member else 'the assignee'}: {state}{where}{routed}"
     return line
 
 
