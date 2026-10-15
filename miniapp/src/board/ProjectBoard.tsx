@@ -23,6 +23,7 @@ import { TaskDiagnostics } from "./TaskDiagnostics";
 import { AcceptedResultDetail, ResultFlow, type AcceptedResultReference } from "./ResultFlow";
 import { TaskWorkflow } from "./TaskWorkflow";
 import { TaskComparison } from "./TaskComparison";
+import { TaskExplorations } from "./TaskExplorations";
 import { RuntimeHandoff } from "./RuntimeHandoff";
 import { HostCapacity } from "./HostCapacity";
 import { UnknownStops } from "./UnknownStops";
@@ -775,6 +776,7 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
       {task && !task.branch && (task.status === "todo" || task.status === "blocked" || task.status === "review") && <ManualResult task={task} toast={toast} onChanged={onDone} />}
       {task && task.status !== "done" && <ManualReopenRecovery task={task} toast={toast} onChanged={onDone} />}
       {task && <TaskComparison task={task} staff={data.staff} onChanged={onDone} toast={toast} />}
+      {task && <TaskExplorations task={task} />}
       {task && <RuntimeHandoff task={task} onChanged={onDone} toast={toast} />}
 
   </>;

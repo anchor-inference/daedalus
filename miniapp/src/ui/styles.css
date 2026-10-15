@@ -4871,6 +4871,11 @@ button.staff-row:hover { background: var(--surface-2); }
 .result-details { margin: 12px 0; }
 .result-details summary { cursor: pointer; }
 .result-details li, .result-details .mono { overflow-wrap: anywhere; }
+.explorations { margin: 12px 0; }
+.explorations h4 { margin: 0 0 4px; }
+.exploration-attempts { margin: 4px 0 8px; padding-left: 0; list-style: none; }
+.exploration-attempts li { overflow-wrap: anywhere; }
+.exploration-attempts li.won { font-weight: 600; }
 .result-compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
 .result-compare section { min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; overflow-wrap: anywhere; }
 .result-compare h4 { margin: 0 0 8px; }
