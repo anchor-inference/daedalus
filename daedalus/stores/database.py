@@ -2477,6 +2477,15 @@ CREATE TABLE IF NOT EXISTS project_environments (
     setup_session_id TEXT NOT NULL DEFAULT '',
     started_at TEXT,
     finished_at TEXT,
+
+# How the operator writes, learned from their own messages a few at a time: one summary per tenant,
+# and the transcript position up to which their messages have been read into it.
+MIGRATIONS.append("""
+CREATE TABLE IF NOT EXISTS user_style (
+    tenant_id TEXT PRIMARY KEY,
+    summary TEXT NOT NULL DEFAULT '',
+    through_seq INTEGER NOT NULL DEFAULT 0,
+    learned INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL
 );
 """)

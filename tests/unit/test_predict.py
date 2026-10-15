@@ -32,7 +32,7 @@ async def _manager(settings: Settings, db: Database, **assist: object) -> tuple[
     await manager.start()
     asked: list[str] = []
 
-    async def small_model(prompt: str, preset: str, *, purpose: str, session_id: str | None = None, max_tokens: int = 200, temperature: float = 0.0) -> str:
+    async def small_model(prompt: str, preset: str, *, purpose: str, session_id: str | None = None, max_tokens: int = 200, temperature: float = 0.0, instructions: str = "") -> str:
         assert purpose == predict.PURPOSE
         asked.append(prompt)
         return '"Now run the full suite"'

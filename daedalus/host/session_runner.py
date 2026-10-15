@@ -70,7 +70,17 @@ from daedalus.config import (
     max_advertised_tools_for,
     on_demand_tool_groups_for,
 )
-from daedalus.host import capabilities, depth, launcher_bridge, prompt_coach, prompts, standing, summaries, tool_groups
+from daedalus.host import (
+    capabilities,
+    depth,
+    launcher_bridge,
+    prompt_coach,
+    prompts,
+    standing,
+    summaries,
+    tool_groups,
+    user_style,
+)
 from daedalus.host.btw import BTW_KEY, btw_of, btws_of
 from daedalus.host.checkpoint_retention import CheckpointRetention, RetentionBounds, RetentionReport
 from daedalus.host.checkpoints import DIR_NAME as CHECKPOINT_DIR_NAME
@@ -3756,19 +3766,24 @@ class SessionManager:
         logger.info("session %s: message sorted %s by the %s in %d ms", state.session.id, sorted_as.level, sorted_as.source, sorted_as.milliseconds)
         return sorted_as
 
-    async def small_model(self, prompt: str, preset: str, *, purpose: str, session_id: str | None = None, max_tokens: int = 200, temperature: float = 0.0) -> str:
+    async def small_model(self, prompt: str, preset: str, *, purpose: str, session_id: str | None = None, max_tokens: int = 200, temperature: float = 0.0, instructions: str = "") -> str:
         """One short request to a preset for a helper around the operator's messages.
 
         ``purpose`` is the label the call's cost is booked under in Usage (``call_category="assist"``
         is what tells the usage record to keep it), so what the helpers spend is visible apart from
         the runs. Refused when the day's budget is spent and the model is a paid one.
+
+        ``instructions``, when given, go first as a system message of their own and ``prompt`` follows
+        as the user's: the helper's fixed wording then stays one cacheable prefix, and whatever moves
+        (the conversation's tail, the operator's style profile) rides in the message after it.
         """
         provider, model = self.providers.rungs_for(self.config, preset or None)[0]
         if self.budget_exceeded() and not self.provider_costs_nothing(provider.endpoint.id, model):
             raise RuntimeError("daily inference budget exceeded")
+        lead = [Message(role=MessageRole.system, content_blocks=[TextBlock(text=instructions)])] if instructions.strip() else []
         request = LLMRequest(
             model=model,
-            messages=[Message(role=MessageRole.user, content_blocks=[TextBlock(text=prompt)])],
+            messages=[*lead, Message(role=MessageRole.user, content_blocks=[TextBlock(text=prompt)])],
             max_tokens=max_tokens,
             temperature=temperature,
             extra={"enable_thinking": False},
@@ -4560,6 +4575,10 @@ class SessionManager:
             volatile.append("\n" + asked)
         if self.is_btw(state):
             volatile.append("\n- " + prompts.BTW_TURN_NOTE)
+        if self.is_prompt_coach(state) and (style := user_style.context_block((await user_style.load(self.db)).summary)):
+            # A coach writes a prompt in the operator's voice, so it reads how they write. Here and not in
+            # its role prompt: the profile changes as it learns, and the role prompt is the cached prefix.
+            volatile.append("\n\n" + style)
         if handed := operator_secrets.prompt_section(self.secrets.available(state.session.id)):
             # In the turn context rather than the system prompt: the set changes whenever the operator adds
             # one, and the system prompt is the part every later call is cached on.
