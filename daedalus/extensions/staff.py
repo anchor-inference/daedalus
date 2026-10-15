@@ -142,6 +142,17 @@ class AlreadyAnswered(StaffError):
     """A request someone else answered first; the message says who."""
 
 
+class TurnEnded(StaffError):
+    """An automatic notice was kept from a member whose turn has ended: delivering it would have
+    started a new turn that nobody asked for."""
+
+
+TURN_ENDED = frozenset({"idle", "turn_done_unseen", "error"})
+"""The statuses in which a member's turn is over. Any message delivered then is typed into an empty
+prompt (or submitted to an idle native session) and so starts a turn; ``after_turn`` does not help,
+because the turn it would wait for has already ended."""
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -1206,7 +1217,10 @@ class Team:
             if task is None or task.status != "doing" or member is None or not member.active:
                 continue
             try:
-                await self.tell(member, text, when="after_turn", by=by)
+                await self.tell(member, text, when="after_turn", by=by, automatic=True)
+            except TurnEnded:
+                # "After the turn" of a member whose turn is over is now: it would have been woken.
+                continue
             except Exception:  # noqa: BLE001 — one member who cannot be told must not keep the rule from the rest
                 logger.warning("could not tell %s of a changed rule", member.name, exc_info=True)
                 continue
@@ -1265,7 +1279,8 @@ class Team:
     # -- control ---------------------------------------------------------------------------------------
 
     async def tell(self, member: Staff, text: str, *, when: str = "now", by: str = "operator",
-                   files: list[StoredFile] | None = None, message_id: str | None = None, wakes: bool = False) -> dict[str, Any]:
+                   files: list[StoredFile] | None = None, message_id: str | None = None, wakes: bool = False,
+                   automatic: bool = False) -> dict[str, Any]:
         """Say something to a member's live session; returns the message and its receipt. ``when`` is
         ``now`` (into the running turn), ``after_turn`` or ``interrupt``; ``now`` is the default
         because a message to someone at work is almost always about that work, and one that waited
@@ -1277,10 +1292,20 @@ class Team:
         member's turn is held on a question of its own, the message is handed to it as the reply to
         that question, whatever ``when`` says. Queued instead, it waited behind a turn that could not
         end until the question was answered — a reviewer sat on a question about a requirement that
-        had been withdrawn while the orchestrator's messages about it queued."""
+        had been withdrawn while the orchestrator's messages about it queued.
+
+        ``automatic`` marks a notice the host sends on its own (a CI failure, a changed rule, a file
+        found later) rather than words someone chose to send now. Such a notice never starts a turn:
+        to a member whose turn has ended it raises :class:`TurnEnded` and nothing is recorded, and
+        the caller takes it to the orchestrator or leaves it for the next brief. Only the operator
+        and the orchestrator's own Tell or Assign may set a finished member working again; a status
+        notice that did is how another orchestrator ran a second, unasked turn of a member that had
+        already reported."""
         live = await self.live_of(member)
         if live is None:
             raise StaffError(f"{member.name} has no live session; assign a task to start one")
+        if automatic and live.session.status in TURN_ENDED:
+            raise TurnEnded(f"{member.name}'s turn has ended; an automatic notice does not start another")
         # A value of the operator's pasted into a message by habit goes as its placeholder; the member has
         # the value where it may use it.
         text = _concealed(text)
@@ -2183,7 +2208,10 @@ class Team:
                     when="now",
                     by="orchestrator",
                     files=found,
+                    automatic=True,
                 )
+            except TurnEnded:
+                continue  # the files are on the task, where the orchestrator sees them
             except StaffError as exc:
                 logger.warning("could not hand %s the files of task %s: %s", live.staff.name, row["id"], exc)
         await self.manager.db.kv_set(RECOVERED_KEY, True)
@@ -2541,4 +2569,4 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     return [handler, asyncio.create_task(team.loop(), name="staff")]
 
 
-__all__ = ["AlreadyAnswered", "Ingress", "Team", "install"]
+__all__ = ["AlreadyAnswered", "Ingress", "Team", "TurnEnded", "install"]

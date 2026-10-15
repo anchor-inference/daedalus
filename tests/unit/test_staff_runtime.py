@@ -20,7 +20,7 @@ from daedalus.extensions.api import build_app
 from daedalus.extensions.effects import EffectDispatcher
 from daedalus.extensions.notifications import ActionConflict, ActionRequest
 from daedalus.extensions.runtime_observations import observe_exit
-from daedalus.extensions.staff import AlreadyAnswered, Team
+from daedalus.extensions.staff import AlreadyAnswered, Team, TurnEnded
 from daedalus.extensions.task_launch import TaskLaunchEffect
 from daedalus.host.events import AppEvent, EventFilter
 from daedalus.host.launch_queue import Entry, LaunchQueue
@@ -1046,6 +1046,39 @@ async def test_live_sessions_answer_for_a_member(settings: Settings, db: Databas
         runtime.receipt = runtime.receipt.__class__("failed", "the terminal is gone")
         failed = await team.tell(ada, "again")
         assert (failed["state"], failed["error"]) == ("failed", "the terminal is gone")
+    finally:
+        await close_team(manager)
+        await manager.close()
+
+
+async def test_an_automatic_notice_never_starts_a_turn_of_a_member_whose_turn_ended(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """Only the operator or the orchestrator's own Tell may set a finished member working again: a
+    host notice (a changed rule, a CI failure) to a member at its empty prompt is refused, not typed in."""
+    manager, team, runtime, project = await fake_team(settings, db, tmp_path)
+    try:
+        ada = await manager.staff.hire(project.id, name="Ada", isolation="shared")
+        task_id = await board_task(manager, project, "Menu")
+        await operator_assignment(team, ada, task_id)
+        await db.execute("UPDATE board_tasks SET status = 'doing' WHERE id = ?", (task_id,))
+        live = await team.live_of(ada)
+        assert live is not None
+        before = len(runtime.sent)
+        # While the turn runs, a notice goes into it.
+        await team.ingress.status(live, "working")
+        assert await team.announce_rule(project.id, "Keep the menu short.", by="orchestrator") == ["Ada"]
+        assert len(runtime.sent) == before + 1
+        for ended in ("turn_done_unseen", "idle", "error"):
+            await team.ingress.status(live, ended)
+            sent = len(runtime.sent)
+            messages = len(await manager.staff.messages(ada.id, limit=50))
+            with pytest.raises(TurnEnded):
+                await team.tell(ada, "CI failed", by="orchestrator", automatic=True)
+            assert await team.announce_rule(project.id, "Use metric units.", by="orchestrator") == []
+            assert len(runtime.sent) == sent, f"a notice to a member at {ended} must not start a turn"
+            assert len(await manager.staff.messages(ada.id, limit=50)) == messages
+        # The orchestrator's own words still reach it.
+        told = await team.tell(ada, "One more thing.", by="orchestrator")
+        assert told["state"] == "submitted" and runtime.sent[-1][1].text == "One more thing."
     finally:
         await close_team(manager)
         await manager.close()

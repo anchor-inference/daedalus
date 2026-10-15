@@ -14,7 +14,7 @@ from daedalus.extensions.ci_observations import observation_from_webhook, record
 from daedalus.extensions.ci_wake import CiFailures, ci_link
 from daedalus.host.events import EventBus
 from daedalus.stores.database import Database
-from daedalus.stores.staff import StaffStore
+from daedalus.stores.staff import StaffError, StaffStore
 
 HEAD = "a" * 40
 
@@ -38,7 +38,12 @@ class FakeTeam:
             return None
         return SimpleNamespace(staff=await self.store.get(session.staff_id), session=session)
 
-    async def tell(self, member: Any, text: str, *, when: str, by: str, message_id: str) -> dict[str, Any]:
+    async def tell(self, member: Any, text: str, *, when: str, by: str, message_id: str,
+                   automatic: bool = False) -> dict[str, Any]:
+        # The real team refuses an automatic notice to a member whose turn has ended.
+        session = next(iter((await self.store.live_sessions("project")).values()), None)
+        if automatic and session is not None and session.status in ("idle", "turn_done_unseen", "error"):
+            raise StaffError("its turn has ended; an automatic notice does not start another")
         message = await self.store.add_message(member.id, text, origin=by, mode=when, message_id=message_id)
         self.told.append({"member": member.id, "text": text, "by": by, "message_id": message.id})
         return {"message_id": message.id, "state": "failed" if self.fail else "submitted", "error": ""}
@@ -128,6 +133,15 @@ async def test_failed_delivery_to_the_worker_falls_back_to_the_coordinator(world
     sent = await observe(world, "unit-red", body(41, "failure"))
     assert [item["to"] for item in sent] == ["coordinator"]
     assert await observe(world, "unit-red-again", body(41, "failure")) == []
+
+
+async def test_a_worker_whose_turn_ended_is_not_woken_and_the_coordinator_is(world: Any) -> None:
+    """A CI failure is the board speaking: it reaches a worker only inside a turn that runs. To one
+    that has finished, the coordinator hears of it and decides whether to Tell the worker."""
+    await world.db.execute("UPDATE staff_sessions SET status = 'turn_done_unseen' WHERE id = 'staff-session'")
+    sent = await observe(world, "unit-red", body(41, "failure"))
+    assert [item["to"] for item in sent] == ["coordinator"] and world.team.told == []
+    assert len(await ci_events(world.db)) == 1
 
 
 async def test_old_heads_passes_and_unrequired_checks_stay_quiet(world: Any) -> None:

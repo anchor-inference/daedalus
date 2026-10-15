@@ -149,7 +149,10 @@ class CiFailures:
         try:
             # The message travels as the coordinator's: only the operator's words are framed as a
             # person's, and this notice is the board speaking, which is the coordinator's side.
-            receipt = await team.tell(live.staff, text, when="now", by="orchestrator", message_id=f"sm-{key}")
+            # Automatic: a worker whose turn has ended is not set working by the board on its own;
+            # the refusal falls back to waking the coordinator, which decides whether to Tell it.
+            receipt = await team.tell(live.staff, text, when="now", by="orchestrator", message_id=f"sm-{key}",
+                                      automatic=True)
         except StaffError:
             logger.info("CI failure of task %s could not reach its worker", task_id, exc_info=True)
             return None
