@@ -2460,6 +2460,27 @@ CREATE INDEX IF NOT EXISTS launch_routes_by_task ON launch_routes(task_id, creat
 CREATE INDEX IF NOT EXISTS launch_routes_claimed ON launch_routes(state) WHERE state = 'claimed';
 """, _route_home))
 
+# A project's declared environment and how its last preparation ended (stores/project_environment.py).
+# One row per project that has a spec; a project with none has no row and behaves as before. The
+# attempt counter is what a finishing preparation compares against, so a restart that failed the
+# attempt and a new Prepare that started another cannot be overwritten by the old one's end.
+MIGRATIONS.append("""
+CREATE TABLE IF NOT EXISTS project_environments (
+    project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+    spec_json TEXT NOT NULL DEFAULT '{}',
+    state TEXT NOT NULL DEFAULT 'unprepared' CHECK (state IN ('unprepared', 'preparing', 'ready', 'failed')),
+    attempt INTEGER NOT NULL DEFAULT 0,
+    attempt_hash TEXT NOT NULL DEFAULT '',
+    prepared_hash TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    log TEXT NOT NULL DEFAULT '',
+    setup_session_id TEXT NOT NULL DEFAULT '',
+    started_at TEXT,
+    finished_at TEXT,
+    updated_at TEXT NOT NULL
+);
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

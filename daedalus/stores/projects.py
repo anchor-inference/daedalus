@@ -475,6 +475,7 @@ _HELD = {
     "recurring_cycles": "automation history", "project_briefs": "a brief", "watches": "watches",
     "asks": "questions", "knowledge_fact_versions": "project knowledge", "actor_grants": "granted authority",
     "planning_budgets": "a budget", "project_goal_budgets": "a budget", "project_goal_revisions": "a goal", "resource_profile_versions": "a resource profile",
+    "project_environments": "an environment",
 }
 
 
