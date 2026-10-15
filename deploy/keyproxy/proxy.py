@@ -75,6 +75,11 @@ from subscriptions import (
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s keyproxy %(levelname)s: %(message)s")
 logger = logging.getLogger("keyproxy")
+timing_logger = logging.getLogger("keyproxy.timing")
+# One line per upstream request at INFO, while the rest of the process stays at WARNING: the timings
+# are what an operator reads to tell a slow upstream from a slow host, and nothing else here is chatty
+# enough to drown them. httpx keeps its own per-request INFO lines off because the root stays at WARNING.
+timing_logger.setLevel(logging.INFO)
 
 DEFAULT_UPSTREAMS = {
     "deepseek": ("https://api.deepseek.com", "DEEPSEEK_API_KEY"),
@@ -655,9 +660,78 @@ def subscriptions_status() -> dict[str, Any]:
     return {"codex": {"logged_in": CODEX_AUTH.available()}, "grok": {"logged_in": GROK_AUTH.available()}, "claude": {"logged_in": CLAUDE_AUTH.available()}}
 
 
-async def _sse_lines(response: httpx.Response) -> Any:
+async def _sse_lines(response: httpx.Response, timing: UpstreamTiming | None = None) -> Any:
     async for line in response.aiter_lines():
+        if timing is not None:
+            timing.received(len(line) + 1)  # the newline the decoder took off still came over the wire
         yield line
+
+
+def slow_first_byte_seconds() -> float:
+    """From how long without a first byte an upstream request is logged as a warning rather than a note."""
+    try:
+        return max(0.0, float(os.environ.get("KEYPROXY_SLOW_FIRST_BYTE_SECONDS", "30") or 30))
+    except ValueError:
+        return 30.0
+
+
+class UpstreamTiming:
+    """When one upstream request was answered, for the log; never a header's value or a byte of the body.
+
+    Three moments are kept because each names a different fault: response headers late is an upstream
+    slow to accept the request, headers on time and the first body byte late is one that accepted it
+    and then sat silent (a cold Grok request once waited 103.7 s here while its peers took 8 to 13 s),
+    and both on time with a long total is a stream that is merely long. The bot's own records see only
+    the first chunk it could parse, which cannot tell the first two apart.
+    """
+
+    __slots__ = ("upstream", "method", "path", "model", "started", "headers_at", "first_byte_at", "status", "size", "reported")
+
+    def __init__(self, upstream: str, method: str, path: str, model: str = "") -> None:
+        self.upstream = upstream
+        self.method = method
+        self.path = path.strip("/")
+        self.model = model
+        self.started = time.monotonic()
+        self.headers_at: float | None = None
+        self.first_byte_at: float | None = None
+        self.status = 0
+        self.size = 0
+        self.reported = False
+
+    def answered(self, status: int) -> None:
+        self.headers_at = time.monotonic()
+        self.status = status
+
+    def received(self, size: int) -> None:
+        if size <= 0:
+            return
+        if self.first_byte_at is None:
+            self.first_byte_at = time.monotonic()
+        self.size += size
+
+    def milliseconds(self, at: float | None) -> int | None:
+        return None if at is None else int((at - self.started) * 1000)
+
+    def view(self, outcome: str) -> dict[str, Any]:
+        return {
+            "upstream": self.upstream, "method": self.method, "path": self.path, "model": self.model,
+            "status": self.status, "headers_ms": self.milliseconds(self.headers_at),
+            "first_byte_ms": self.milliseconds(self.first_byte_at), "total_ms": self.milliseconds(time.monotonic()),
+            "bytes": self.size, "outcome": outcome,
+        }
+
+    def report(self, outcome: str = "done") -> dict[str, Any]:
+        """Write the one line for this request; a second call (a handler's ``finally`` after its own report) is a no-op."""
+        view = self.view(outcome)
+        if self.reported:
+            return view
+        self.reported = True
+        waited = view["first_byte_ms"] if view["first_byte_ms"] is not None else view["total_ms"]
+        level = logging.WARNING if waited >= slow_first_byte_seconds() * 1000 else logging.INFO
+        fields = " ".join(f"{key}={'-' if value is None or value == '' else value}" for key, value in view.items() if key not in ("upstream", "method", "path"))
+        timing_logger.log(level, "upstream %s %s %s %s", self.upstream, self.method, self.path, fields)
+        return view
 
 
 def _stamp_grok_model(headers: dict[str, str], body: bytes) -> None:
@@ -719,12 +793,18 @@ async def handle_claude(request: web.Request, rest: str) -> web.StreamResponse:
     payload, names = chat_to_messages(body)
     headers["anthropic-beta"] = request_betas(payload)
     upstream = client.build_request("POST", CLAUDE_API + "/v1/messages?beta=true", json=payload, headers={**headers, "accept": "text/event-stream", "content-type": "application/json"})
+    timing = UpstreamTiming("claude", "POST", "v1/messages", str(payload.get("model") or model))
     try:
         response = await client.send(upstream, stream=True)
     except httpx.HTTPError as exc:
+        timing.report(f"unreachable:{type(exc).__name__}")
         return web.json_response({"error": {"message": f"upstream unreachable: {type(exc).__name__}", "type": "proxy_error"}}, status=502)
+    timing.answered(response.status_code)
     if response.status_code >= 400:
-        raw = (await response.aread()).decode("utf-8", "replace")
+        raw_bytes = await response.aread()
+        timing.received(len(raw_bytes))
+        timing.report("refused")
+        raw = raw_bytes.decode("utf-8", "replace")
         await response.aclose()
         try:
             payload_err = json.loads(raw)
@@ -733,7 +813,7 @@ async def handle_claude(request: web.Request, rest: str) -> web.StreamResponse:
         return web.json_response(payload_err, status=response.status_code)
     if windows := claude_header_windows(response.headers):
         _claude_header_snapshot.update(windows=windows, at=time.monotonic())
-    chunks = messages_events_to_chunks(_sse_lines(response), model=model, names=names)
+    chunks = messages_events_to_chunks(_sse_lines(response, timing), model=model, names=names)
     served = served_headers("claude", str(payload.get("model") or model))
     try:
         if not stream:
@@ -745,8 +825,13 @@ async def handle_claude(request: web.Request, rest: str) -> web.StreamResponse:
         await out.write_eof()
         return out
     except (ConnectionResetError, asyncio.CancelledError):
+        timing.report("caller_gone")
         return web.Response(status=499)
+    except httpx.HTTPError as exc:
+        timing.report(f"upstream_dropped:{type(exc).__name__}")
+        raise
     finally:
+        timing.report()
         await response.aclose()
 
 
@@ -784,13 +869,19 @@ async def handle_codex(request: web.Request, rest: str) -> web.StreamResponse:
     replayed = any(item.get("type") == "reasoning" for item in sent["input"])
     while True:
         upstream = client.build_request("POST", CODEX_BASE + "/codex/responses", json=sent, headers=request_headers)
+        timing = UpstreamTiming("codex", "POST", "codex/responses", str(sent.get("model") or model))
         try:
             response = await client.send(upstream, stream=True)
         except httpx.HTTPError as exc:
+            timing.report(f"unreachable:{type(exc).__name__}")
             return web.json_response({"error": {"message": f"upstream unreachable: {type(exc).__name__}", "type": "proxy_error"}}, status=502)
+        timing.answered(response.status_code)
         if response.status_code < 400:
             break
-        raw = (await response.aread()).decode("utf-8", "replace")
+        raw_bytes = await response.aread()
+        timing.received(len(raw_bytes))
+        timing.report("refused")
+        raw = raw_bytes.decode("utf-8", "replace")
         await response.aclose()
         if replayed and refused_reasoning(response.status_code, raw):
             # Reasoning the backend will not read back costs the model its earlier thinking, not
@@ -803,7 +894,7 @@ async def handle_codex(request: web.Request, rest: str) -> web.StreamResponse:
         except ValueError:
             payload = {"error": {"message": raw[:400], "type": "upstream_error"}}
         return web.json_response(payload, status=response.status_code)
-    chunks = responses_events_to_chunks(_sse_lines(response), model=model)
+    chunks = responses_events_to_chunks(_sse_lines(response, timing), model=model)
     served = served_headers("codex", str(sent.get("model") or model))
     try:
         if not stream:
@@ -815,8 +906,13 @@ async def handle_codex(request: web.Request, rest: str) -> web.StreamResponse:
         await out.write_eof()
         return out
     except (ConnectionResetError, asyncio.CancelledError):
+        timing.report("caller_gone")
         return web.Response(status=499)
+    except httpx.HTTPError as exc:
+        timing.report(f"upstream_dropped:{type(exc).__name__}")
+        raise
     finally:
+        timing.report()
         await response.aclose()
 
 
@@ -991,34 +1087,46 @@ async def handle(request: web.Request) -> web.StreamResponse:
         _stamp_grok_model(headers, body)
     meter = bool(AGENT_API) and METERED_HEADER not in request.headers and request.method == "POST" and is_completion(rest)
     request_model = ""
-    if meter:
+    if meter or (request.method == "POST" and is_completion(rest)):
+        # Read for the timing line too: which model was slow is the first thing anyone asks of it.
         try:
             request_model = str(json.loads(body).get("model") or "")
-        except (ValueError, AttributeError):
+        except (ValueError, AttributeError, UnicodeDecodeError):
             request_model = ""
     started = time.monotonic()
     captured = bytearray()
+    timing = UpstreamTiming(name, request.method, rest, request_model)
     try:
         upstream = client.build_request(request.method, target_url(base, rest, request.query_string), headers=headers, content=body)
         response = await client.send(upstream, stream=True)
     except httpx.HTTPError as exc:
+        timing.report(f"unreachable:{type(exc).__name__}")
         return web.json_response({"error": {"message": f"upstream unreachable: {type(exc).__name__}", "type": "proxy_error"}}, status=502)
+    timing.answered(response.status_code)
     out = web.StreamResponse(status=response.status_code)
     for k, v in response.headers.items():
         if k.lower() not in DROP_RESPONSE_HEADERS:
             out.headers[k] = v
     out.headers.update(served_headers(name, request_model))
     await out.prepare(request)
+    outcome = "done"
     try:
         # aiter_bytes() decodes gzip/br on the way through; aiter_raw() would hand the client compressed bytes with the header gone.
         async for chunk in response.aiter_bytes():
+            timing.received(len(chunk))
             if meter and len(captured) < CAPTURE_LIMIT:
                 captured.extend(chunk)
             await out.write(chunk)
         await out.write_eof()
     except (ConnectionResetError, asyncio.CancelledError):
-        pass  # the caller went away mid-stream
+        outcome = "caller_gone"  # the caller went away mid-stream, or before the first byte
+    except httpx.HTTPError as exc:
+        # Raised on, as before: swallowed, aiohttp would end the chunked body cleanly and a stream the
+        # upstream dropped would reach the caller as one that finished.
+        outcome = f"upstream_dropped:{type(exc).__name__}"
+        raise
     finally:
+        timing.report(outcome)
         await response.aclose()
     if meter and response.status_code < 300:
         asyncio.create_task(report_direct_usage(client, name, request_model, bytes(captured), response.headers.get("content-type", ""), started))
