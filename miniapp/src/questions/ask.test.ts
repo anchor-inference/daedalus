@@ -196,6 +196,11 @@ describe("the record in the transcript", () => {
     expect(recordOf(args, result, false).rows.map((r) => r.answer)).toEqual(["the last full one", "", ""]);
   });
 
+  it("keeps who answered, so a member's question the orchestrator settled reads as the orchestrator's", () => {
+    const result = JSON.stringify({ answers: [{ question: "Which week?", selected: [], custom: "Hand it in as it is" }], source: "orchestrator" });
+    expect(recordOf(args, result, false)).toMatchObject({ state: "answered", by: "orchestrator" });
+  });
+
   it("says when nobody answered, and when the run stopped while it waited", () => {
     const timeout = JSON.stringify({ answers: [{ question: "Which week?", selected: [], custom: "No operator is available" }], source: "timeout" });
     expect(recordOf(args, timeout, false).state).toBe("expired");

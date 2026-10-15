@@ -795,6 +795,10 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .dock-title kbd { font:inherit; font-size:var(--fs-11); color:var(--fg-3); white-space:nowrap; }
 .dock-detail { font-size:var(--fs-mono); color:var(--fg-2); padding:6px 8px; background:var(--surface-1); border-radius:var(--radius-sm); }
 .dock-actions { display:flex; gap:6px; }
+/* a question settled elsewhere waits on nobody: no warning edge, and the answer reads as words, not code */
+.dock.answered { border-color:var(--line); }
+.dock.answered .dock-title .ic { color:var(--fg-3); }
+.dock.answered .dock-detail { font-size:var(--fs-14); white-space:pre-wrap; overflow-wrap:anywhere; }
 
 /* the + and the model list open upward from the pill */
 /* Popovers open upward from the composer. `.menu` itself is `right:10px` for the header overflow;

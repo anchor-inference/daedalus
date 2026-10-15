@@ -1,7 +1,9 @@
 // The composer's one circle, its keys, its draft and its docks, read back without a browser.
 
 import { describe, expect, it } from "vitest";
+import { t } from "./i18n";
 import {
+  answeredTitle,
   questionsKey,
   composerKey,
   composerContext,
@@ -279,5 +281,15 @@ describe("Voice mode in ordinary chats", () => {
     for (const [file, text] of Object.entries(sources)) {
       expect(text, file).not.toMatch(/pathFor\("voice"\)|data-action="voice"|VoiceCircle/);
     }
+  });
+});
+
+describe("a question settled elsewhere", () => {
+  it("is titled by who settled it, and every title is a word of the dictionary", () => {
+    expect(answeredTitle("orchestrator")).toBe("composer.answered.orchestrator");
+    expect(answeredTitle("operator")).toBe("composer.answered.operator");
+    expect(answeredTitle("system")).toBe("composer.answered.system");
+    expect(answeredTitle("staff")).toBe("composer.answered.other");
+    for (const by of ["orchestrator", "operator", "system", ""]) expect(t(answeredTitle(by))).not.toBe(answeredTitle(by));
   });
 });

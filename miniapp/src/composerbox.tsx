@@ -2,7 +2,7 @@
 // actions are supplied by the parent so the card also works inside the voice page.
 
 import { forwardRef, type ReactNode, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, AsrStatus, ModelFallback, Question, SkillEntry, SlashCommand } from "./api";
+import { api, ApiError, AsrStatus, ModelFallback, PendingAnswered, Question, SkillEntry, SlashCommand } from "./api";
 import { clipboardImages, nameIncoming, pastedFiles } from "./attachfiles";
 import { Popover } from "./ui/dialogs";
 import { Banner, BottomSheet, SheetRow } from "./ui/phone";
@@ -31,6 +31,7 @@ import {
   fieldHeight,
   composerContext,
   ComposerPlace,
+  answeredTitle,
   placeholderKey,
   primaryAction,
   readDraft,
@@ -108,6 +109,9 @@ export type ComposerProps = {
   onSteer?: (message: QueuedMessage) => void;
   questions?: Question[] | null;
   onAnswer?: (answers: Answer[]) => Promise<void>;
+  /** The waiting question was settled elsewhere: drawn as answered, with who and what, in place of
+   *  options whose send could only be refused. */
+  answered?: PendingAnswered | null;
   approval?: Approval | null;
   onApprove?: (a: Approval) => void;
   /** What "Allow similar" grants for this request (``npm test*``), when the host offers a family. */
@@ -295,7 +299,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   }
 
   // ── the agent's question ──
-  const questions = props.questions ?? null;
+  const answered = props.answered ?? null;
+  const questions = answered ? null : props.questions ?? null;
   const asking = !!questions && questions.length > 0;
   const ask = useRef<AskCardHandle>(null);
   // The Reply circle does what the card's own button does: the next question, the review, or the send.
@@ -584,6 +589,15 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             )}
             <button type="button" className="btn small" onClick={() => props.onDeny?.(approval)}>{t("composer.deny")}</button>
           </div>
+        </div>
+      )}
+      {answered && !approval && (
+        <div className="dock answered" role="status" data-answered-by={answered.by}>
+          <div className="dock-title">
+            <Icon name="question" size={16} />
+            <span className="grow">{t(answeredTitle(answered.by))}</span>
+          </div>
+          {answered.text && <div className="dock-detail">{answered.text}</div>}
         </div>
       )}
       {asking && !approval && props.onAnswer && (

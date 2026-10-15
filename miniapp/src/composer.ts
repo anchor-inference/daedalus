@@ -38,6 +38,11 @@ export function primaryAction(i: PrimaryInput): { action: Primary; enabled: bool
 }
 
 /** The placeholder, by state: what typing here would do. */
+/** The title of a question settled elsewhere, by who settled it: `system` withdrew it. */
+export function answeredTitle(by: string): string {
+  return by === "operator" || by === "orchestrator" || by === "system" ? `composer.answered.${by}` : "composer.answered.other";
+}
+
 export function placeholderKey(status: ComposerStatus, asking: boolean): string {
   if (status === "running") return "session.composer.running";
   if (status === "waiting" || asking) return "session.composer.waiting";

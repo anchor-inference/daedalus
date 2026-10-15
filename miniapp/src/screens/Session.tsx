@@ -1165,8 +1165,13 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   }
 
   async function answer(answers: Answer[]) {
-    await api.post(`/api/sessions/${id}/answer`, { answers });
-    load();
+    try {
+      await api.post(`/api/sessions/${id}/answer`, { answers });
+    } finally {
+      // Refused too: a question someone else answered is then drawn as answered rather than left
+      // offering options whose send can only be refused again.
+      load();
+    }
   }
 
   async function stop() {
@@ -1721,6 +1726,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             onWithdraw={withdraw}
             onSteer={steerNow}
             questions={detail?.pending?.questions ?? null}
+            answered={detail?.pending?.answered ?? null}
             onAnswer={answer}
             approval={approval}
             onApprove={approve}

@@ -1862,6 +1862,24 @@ class Team:
             await self._hand_over_recorded(live, current)
         return f"this question was already answered by the {current.resolved_by if current else 'someone else'}"
 
+    async def answered_question(self, session_id: str, tool_call_id: str) -> dict[str, str] | None:
+        """Who settled a native member's question and with what, when it is settled while the member's
+        session still shows it waiting; ``None`` while it is open, or for a session no member runs."""
+        live = await self.live_for_session(session_id)
+        if live is None:
+            return None
+        row = await self.manager.db.fetchone(
+            "SELECT id FROM asks WHERE staff_session_id = ? AND request_ref = ? AND kind = 'question' ORDER BY created_at DESC LIMIT 1", (live.id, tool_call_id),
+        )
+        ask = await self.manager.asks.get(row["id"]) if row is not None else None
+        if ask is None or ask.open:
+            return None
+        resolution = ask.resolution
+        if resolution.get("closed"):
+            return {"by": "system", "text": str(resolution["closed"]), "via": "withdrawn"}
+        words = [str(item) for item in resolution.get("selected") or []] + [str(resolution.get(key) or "").strip() for key in ("text", "note")]
+        return {"by": ask.resolved_by or "", "text": " — ".join(word for word in dict.fromkeys(words) if word), "via": str(resolution.get("via") or "")}
+
     async def _hand_over_recorded(self, live: LiveSession, ask: Ask) -> None:
         """Give a native member the recorded answer of a question its turn is still held on.
 

@@ -13,7 +13,9 @@ export function AskRecord({ item }: { item: ToolItem }) {
   const record = recordOf(item.args, item.result, item.error);
   const state = record.state;
   const n = Array.isArray(item.args.questions) ? item.args.questions.length : 0;
-  const status = state === "answered" ? t("ask.record.answered") : "";
+  // A member's question answered by the orchestrator says so: read back in the member's session, a
+  // bare "answered" left the operator guessing whether it was their own answer.
+  const status = state === "answered" ? t(record.by === "orchestrator" ? "ask.record.answered.orchestrator" : "ask.record.answered") : "";
   return (
     <div className="act-wrap ask-record" data-state={state}>
       <div className="act">

@@ -2270,6 +2270,19 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             })
         return out
 
+    async def _pending_view(state: Any) -> dict[str, Any] | None:
+        """The question the session waits on, and, when it is a staff member's question someone
+        already answered, who and with what: the member's card stayed open with its options while
+        answering it only returned "already answered by the orchestrator"."""
+        if state.pending is None:
+            return None
+        view = dict(state.pending.payload)
+        team = app.extensions.get("staff")
+        answered = await team.answered_question(state.session.id, state.pending.tool_call_id) if team is not None and hasattr(team, "answered_question") else None
+        if answered is not None:
+            view["answered"] = answered
+        return view
+
     @api.get("/api/sessions/{session_id}")
     async def get_session(session_id: str, tail: int = 600, before: int = 0, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """One page of a session. ``tail`` is the newest N turns; ``before=<seq>`` the page older than one already shown.
@@ -2330,7 +2343,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             # Subagents share their leader's workspace by design; they are listed under Subagents (and the leader under
             # "leader:"), so the workspace list shows only the sessions that were attached to it.
             "workspace_sessions": [u for u in await manager.workspace_users(state.workspace) if u["id"] != session_id and u["id"] not in {c["session_id"] for c in subagents} and u["id"] != state.metadata.get("subagent_of")],
-            "pending": state.pending.payload if state.pending else None,
+            "pending": await _pending_view(state),
             "model": await session_model_label(state),
             "provider": await session_provider(state),
             **(await session_thinking(state)),

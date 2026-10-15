@@ -630,7 +630,10 @@ async def test_an_answer_typed_into_a_member_waiting_on_an_undelivered_answer_ha
         _ada, live = await working(r)
         ask = await r.manager.asks.open(r.project.id, origin="staff", kind="question", text="How do I hand it in?",
                                         routed_to="orchestrator", staff_id=live.staff.id, staff_session_id=live.id, request_ref="call-1")
+        assert await r.team.answered_question(live.session_id, "call-1") is None, "open: the card offers its options"
         assert await r.manager.asks.resolve(ask.id, "orchestrator", {"text": "Hand it in as it is", "selected": [], "via": "orchestrator"})
+        # The member's card shows who settled it and how, instead of options that can no longer be sent.
+        assert await r.team.answered_question(live.session_id, "call-1") == {"by": "orchestrator", "text": "Hand it in as it is", "via": "orchestrator"}
         refusal = await r.team.claim_answer(live.session_id, "call-1", "app")
         assert refusal == "this question was already answered by the orchestrator"
         [(_live_id, ref, decision)] = runtime.answered

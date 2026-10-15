@@ -174,7 +174,8 @@ export type RecordState = "answered" | "expired" | "unanswered";
 
 export type RecordRow = { header: string; question: string; answer: string };
 
-export type AskRecord = { state: RecordState; rows: RecordRow[]; raw: string };
+/** `by`: who answered, as the host's result names it (`orchestrator`, `operator`, `user`); empty when unknown. */
+export type AskRecord = { state: RecordState; rows: RecordRow[]; raw: string; by?: string };
 
 function questionsOf(args: Record<string, unknown>): Question[] {
   const list = Array.isArray(args.questions) ? args.questions : [];
@@ -201,7 +202,8 @@ export function recordOf(args: Record<string, unknown>, result: string | undefin
     const parsed = JSON.parse(result) as { answers?: unknown; source?: unknown };
     if (!parsed || !Array.isArray(parsed.answers)) throw new Error("not the host's answer");
     if (parsed.source === "timeout") return { state: "expired", rows: rows([]), raw: "" };
-    return { state: "answered", rows: rows(parsed.answers as { question?: string; selected?: string[]; custom?: string | null }[]), raw: "" };
+    const by = typeof parsed.source === "string" ? parsed.source : "";
+    return { state: "answered", rows: rows(parsed.answers as { question?: string; selected?: string[]; custom?: string | null }[]), raw: "", by };
   } catch {
     return { state: "answered", rows: [], raw: result };
   }

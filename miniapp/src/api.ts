@@ -882,7 +882,9 @@ export type SessionDetail = {
   /** The folders of its project the session may read, which its file pane can switch between; empty
    *  for a session with a directory of its own. */
   folders?: SessionFolder[];
-  pending: { questions: Question[] } | null;
+  /** The question the session waits on. `answered`: a staff member's question someone else already
+   *  settled while the session still shows it waiting — who, and with what. */
+  pending: { questions: Question[]; answered?: PendingAnswered } | null;
   model: string;
   provider?: string;
   /** Session override, else the preset: whether the next call thinks, and how hard. */
@@ -1127,6 +1129,9 @@ export type WaitingQuestion = Ask & {
 };
 
 /** One answer of a batch sent from the list. `files` are the places of its files among the batch's uploads. */
+/** Who settled a waiting question elsewhere: `operator`, `orchestrator`, or `system` when it was withdrawn. */
+export type PendingAnswered = { by: string; text: string; via?: string };
+
 export type QuestionAnswer = { ask_id: string; selected?: string[]; text?: string; note?: string; allow?: boolean; always?: boolean; server?: boolean; files?: number[] };
 
 /** What the host did with one answer of a batch. */
