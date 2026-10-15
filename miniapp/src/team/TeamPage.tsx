@@ -12,6 +12,7 @@ import { useUsage } from "../project/data";
 import { spendLine, staffUsage } from "../project/usage";
 import { plural, t } from "../i18n";
 import { HarnessBadge, StaffAvatar } from "./parts";
+import { RouteLine } from "./route";
 import { StaffSheet } from "./StaffSheet";
 import { Setups } from "./setups";
 import { HARNESS_NAMES, Staff, Team, statusTone } from "./team";
@@ -140,6 +141,7 @@ function StaffRow({ member, team, spend, onOpen }: { member: Staff; team: Team; 
           {spend && <span className="staff-spend">{spend}</span>}
         </div>
         <HealthLine health={member.health ?? null} compact />
+        <RouteLine member={member} />
         {/* On a phone the status moves under the name, so a long one never squeezes the name to nothing. */}
         <div className="staff-status-inline">{status}</div>
       </div>

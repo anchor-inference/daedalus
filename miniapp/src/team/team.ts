@@ -71,6 +71,8 @@ export type Staff = {
   queued?: Queued[];
   /** Whether the host still hears the member's live session; absent without one. */
   health?: ChannelHealth | null;
+  /** The member's own runtime while the project's route runs it on another, with why; absent or null on its own. */
+  route_home?: { harness: string; model: string; reason?: string } | null;
 };
 
 export type TeamFolder = { id: string; path: string; label: string; env: Env; is_git: boolean; readonly: boolean };

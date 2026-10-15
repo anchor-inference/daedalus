@@ -23,6 +23,7 @@ import { DiskUsage } from "./diskusage";
 import { ProjectArchive } from "./project/ProjectArchive";
 import { ProjectBudget, budgetKey } from "./project/ProjectBudget";
 import { ProjectResources, resourceProfileKey } from "./project/ProjectResources";
+import { ProjectRoute } from "./project/ProjectRoute";
 import { RevealButton } from "./reveal";
 import { FolderBrowser, type FolderChoice } from "./project/FolderBrowser";
 import { openNewProject } from "./project/NewProject";
@@ -496,6 +497,7 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
       <div className="sub">{t("project.setup.hint")}</div>
       <ProjectBudget projectId={project.id} write={writes.write} canWrite={writes.ready} confirmed={writes.confirmed} />
       <ProjectResources projectId={project.id} write={writes.write} canWrite={writes.ready} />
+      <ProjectRoute projectId={project.id} saved={project.settings.member_route ?? []} write={writes.write} canWrite={writes.ready} />
       <ProjectExtensions projectId={project.id} toast={toast} />
       {/* Restoring a project opens its team page and nothing more. It used to write the project lens
           into storage too, behind the shell's back, so the column narrowed only at the next load,

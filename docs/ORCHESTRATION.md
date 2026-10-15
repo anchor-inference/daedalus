@@ -64,6 +64,17 @@ planned again, and their running workers stop. Tick nothing to keep the board as
 
 Services a member starts stop when its session ends.
 
+**Member runtimes** in a project's settings is an ordered route, for example Claude Code, then
+Codex, then a Daedalus member, each with an optional model. A member keeps the runtime it was hired
+on as its first; the route supplies the fallbacks. A launch moves to the next runtime only when one
+is refused before it starts for a reason that is certain: a usage window the CLI reported as spent,
+no sign-in, a CLI that is not installed, or every provider of a Daedalus preset out of quota. A
+launch that was accepted, or whose outcome was lost, never moves on, and a task that still has a
+live member on another runtime needs the reviewed runtime handoff instead. The coordinator's answer,
+the journal and the card say what happened ("Claude Code: usage window exhausted … → Codex
+accepted"), and the member's card shows that it runs elsewhere until its own runtime takes a launch
+again. An empty route launches every member on its own runtime alone.
+
 ## Folders on the host
 
 When Daedalus runs in a container, a project folder may live on the host machine instead. Every

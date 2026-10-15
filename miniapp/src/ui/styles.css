@@ -4864,6 +4864,13 @@ button.staff-row:hover { background: var(--surface-2); }
 .project-resource-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px 10px; margin: 10px 0; align-items: center; }
 .project-resource-fields input { min-width: 0; }
 @media (max-width: 480px) { .project-resource-fields { grid-template-columns: minmax(0, 1fr); } }
+.project-route { margin: 14px 0; padding: 12px 0; border-top: 1px solid var(--line); }
+.project-route > summary { cursor: pointer; font-weight: 600; }
+.project-route-row { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr) auto auto auto; gap: 6px; align-items: center; margin: 6px 0; }
+.project-route-row .field { min-width: 0; margin: 0; }
+.project-route-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+@media (max-width: 480px) { .project-route-row { grid-template-columns: auto minmax(0, 1fr) auto auto auto; } .project-route-row input { grid-column: 2 / -1; grid-row: 2; } }
+.staff-route { color: var(--fg-2); }
 .project-extension-list { display: grid; gap: 12px; margin-top: 12px; }
 .project-extension { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 12px; min-width: 0; }
 .project-extension-head { display: flex; justify-content: space-between; gap: 8px; }

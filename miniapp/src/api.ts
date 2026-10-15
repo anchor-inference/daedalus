@@ -1028,12 +1028,15 @@ export type OrchestratorSettings = {
   telegram_topic_id: number;
 };
 
+/** One runtime of a project's member route, in order; an empty model is the runtime's own default. */
+export type RouteEntry = { runtime: "claude" | "codex" | "grok" | "opencode" | "pi" | "cursor" | "daedalus"; model: string };
+
 export type Project = {
   id: string;
   entity_revision?: number;
   name: string;
   created_at: string;
-  settings: { snapshots: boolean; system?: string; ephemeral?: boolean; default_env?: "container" | "host"; setup_command?: string; orchestrator?: OrchestratorSettings;
+  settings: { snapshots: boolean; system?: string; ephemeral?: boolean; default_env?: "container" | "host"; setup_command?: string; member_route?: RouteEntry[]; orchestrator?: OrchestratorSettings;
     /** Put away by the operator: hidden from the lists and its coordinator not woken, nothing deleted. */
     archived?: boolean };
   /** Non-empty on a project the installation made for itself: "companion" is the companion's. It cannot be moved or removed. */
