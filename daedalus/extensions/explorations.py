@@ -39,6 +39,9 @@ from daedalus.extensions.orchestrator_team import (
     _journal,
     _label,
     _member,
+    assign,
+    dismiss,
+    hire,
     previous_owner,
 )
 from daedalus.extensions.task_contract import split_checks
@@ -218,6 +221,11 @@ class Explorations:
         await _journal(orch, project, "decision",
                        f"The orchestrator explores {task_id} \"{task['title']}\" with {attempts} competing attempts ({exploration_id}).",
                        {"task_id": task_id, "exploration_id": exploration_id})
+        slots = project.settings.orchestrator.concurrency
+        if slots < attempts + 1:
+            # Attempts queued behind a full team share the deadline with nothing to show for it.
+            lines.append(f"The project runs {slots} member(s) at once, so some attempts wait for a slot; "
+                         "Team(concurrency=…) lets them work side by side.")
         return (f"Exploring {task_id} in {exploration_id}, ${usd(budget)} held, deadline in {minutes} min:\n"
                 + "\n".join(lines)
                 + "\nYou are woken once, when every attempt has reported or the deadline or budget passes; "
@@ -283,8 +291,6 @@ class Explorations:
     async def _launch(self, orch: Orchestrators, project: Project, session_id: str, exploration_id: str,
                       slot: int, task: dict[str, Any], folder: ProjectFolder, source: Staff | None) -> str:
         """Hire, copy the card and hand it over, recording each step before the next one."""
-        from daedalus.extensions.orchestrator_team import assign, hire
-
         if not await self._mark(exploration_id, slot, "launching", from_states=("planned",)):
             attempt = await self._attempt(exploration_id, slot)
             return f"  {slot}. not launched again: it is {attempt['state']}"
@@ -648,8 +654,6 @@ class Explorations:
 
     async def _release(self, orch: Orchestrators, project: Project, session_id: str, exploration_id: str,
                        attempt: dict[str, Any], why: str) -> str:
-        from daedalus.extensions.orchestrator_team import dismiss
-
         if attempt["staff_id"]:
             member = await orch.manager.staff.get(attempt["staff_id"])
             if member is not None and member.active:
