@@ -14,7 +14,7 @@ export const HARNESS_BADGES: Record<Harness, string> = { daedalus: "D", claude: 
 export const HARNESS_NAMES: Record<Harness, string> = { daedalus: "Daedalus", claude: "Claude Code", codex: "Codex", grok: "Grok Build", opencode: "OpenCode", pi: "pi", cursor: "Cursor Agent" };
 
 /** Every status a staff member can show: the live session's, or "off" when there is none. */
-export const STAFF_STATUSES = ["off", "starting", "working", "turn_done_unseen", "idle", "question", "permission", "error", "exited", "no_signal"] as const;
+export const STAFF_STATUSES = ["off", "starting", "working", "turn_done_unseen", "idle", "question", "permission", "error", "exited", "no_signal", "suspended"] as const;
 export type StaffStatus = (typeof STAFF_STATUSES)[number];
 
 export const ISOLATIONS = ["worktree", "shared", "readonly"] as const;

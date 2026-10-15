@@ -34,4 +34,13 @@ describe("member conditions", () => {
     expect(conditionText(cond({ name: "reported", reason: "reported", params: { outcome: "partial" } }))).toBe("handed in: partly");
     expect(conditionText(cond({ reason: "done", params: { took_s: 4 } }))).toBe("done in 4s");
   });
+
+  it("shows a member suspended while idle as waiting for its next message, not as failed", () => {
+    const suspended = cond({ name: "running", status: "false", reason: "suspended", since: "2026-10-15T08:00:00Z", params: { idle_minutes: 20 } });
+    expect(conditionTone(suspended)).toBe("wait");
+    expect(blockingCondition([suspended, cond({ name: "reported", reason: "reported", params: { outcome: "complete" } })])).toBe(suspended);
+    expect(conditionText(suspended)).toBe("suspended after 20 min idle, resumes on next message");
+    setLang("ru");
+    expect(conditionText(suspended)).toBe("приостановлен после 20 мин простоя, продолжит со следующим сообщением");
+  });
 });

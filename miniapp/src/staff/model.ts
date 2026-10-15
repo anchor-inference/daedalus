@@ -258,6 +258,8 @@ export function blockingCondition(conditions: MemberCondition[] | null | undefin
 /** Whether a condition is fine, waiting, failed or not known, for its colour. */
 export function conditionTone(c: MemberCondition): "ok" | "wait" | "bad" | "unknown" {
   if (c.status === "true") return "ok";
+  // A CLI the host stopped while idle is not a failure: it is launched again on the next message.
+  if (c.reason === "suspended") return "wait";
   if (c.status === "unknown") return "unknown";
   return c.deadline ? "wait" : "bad";
 }
@@ -283,6 +285,8 @@ export function conditionText(c: MemberCondition, now = Date.now()): string {
       return t("staff.cond.reported", { outcome: t(`staff.cond.outcome.${p.outcome ?? "complete"}`) });
     case "ended":
       return t("staff.cond.ended");
+    case "suspended":
+      return p.idle_minutes ? t("staff.cond.suspended", { minutes: p.idle_minutes }) : t("staff.cond.suspended.idle");
     default:
       return t(`staff.cond.${c.reason}`);
   }

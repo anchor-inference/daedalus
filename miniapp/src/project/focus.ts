@@ -50,6 +50,8 @@ const TONES: Record<StaffStatus, StaffTone> = {
   error: "error",
   exited: "off",
   no_signal: "silent",
+  // Stopped while idle to free memory: as free as an idle member, the next message wakes it.
+  suspended: "free",
 };
 
 /** A launch waiting in the queue is "waiting" too: the operator asked for work that has not begun. */

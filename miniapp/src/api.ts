@@ -1210,13 +1210,14 @@ export type ChannelHealth = {
 /** One step of a member's newest attempt and why it stands there (`daedalus/harness/conditions.py`).
  *  A `false` with a `deadline` is a wait still running; without one, a step that failed. */
 export type MemberCondition = {
-  name: "prepared" | "spawned" | "authenticated" | "ready" | "first_output" | "reported";
+  /** "running" is the session's own: present only while its idle CLI is suspended. */
+  name: "prepared" | "spawned" | "authenticated" | "ready" | "first_output" | "reported" | "running";
   status: "true" | "false" | "unknown";
-  reason: "done" | "waiting" | "timed_out" | "pending" | "not_reached" | "reported" | "turn_ended" | "ended" | "not_yet";
+  reason: "done" | "waiting" | "timed_out" | "pending" | "not_reached" | "reported" | "turn_ended" | "ended" | "not_yet" | "suspended";
   message: string;
   since: string | null;
   deadline: string | null;
-  params: { took_s?: number | null; elapsed_s?: number | null; allowed_s?: number | null; last_signal_at?: string | null; outcome?: string; state?: string; end_reason?: string };
+  params: { took_s?: number | null; elapsed_s?: number | null; allowed_s?: number | null; last_signal_at?: string | null; outcome?: string; state?: string; end_reason?: string; idle_minutes?: number };
 };
 
 /** `GET /api/staff/{id}/session`: the member's live session as its runtime knows it. */
