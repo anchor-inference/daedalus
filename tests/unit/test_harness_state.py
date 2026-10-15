@@ -64,6 +64,8 @@ TABLE: list[tuple[str, EventKind, dict[str, str], StateContext, tuple[StaffState
     ("notification: agent needs input", EventKind.NOTIFICATION, {"type": "agent_needs_input"}, NOTHING_OPEN, (S, W, D, Id, Q, P, E, X, N, Su)),
     ("usage", EventKind.USAGE, {}, NOTHING_OPEN, (S, W, D, Id, Q, P, E, X, N, Su)),
     ("transcript", EventKind.TRANSCRIPT, {}, NOTHING_OPEN, (S, W, D, Id, Q, P, E, X, N, Su)),
+    # The runtime answers it before the machine; were it ever handed one, nothing would move.
+    ("files edited", EventKind.FILES_EDITED, {}, NOTHING_OPEN, (S, W, D, Id, Q, P, E, X, N, Su)),
 ]
 
 

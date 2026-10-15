@@ -27,6 +27,7 @@ from daedalus.stores.comparison_schema import MIGRATION as COMPARISON_MIGRATION
 from daedalus.stores.contract_change_schema import MIGRATION as CONTRACT_CHANGE_MIGRATION
 from daedalus.stores.control_schema import MIGRATION as CONTROL_MIGRATION
 from daedalus.stores.coordinator_handoff_schema import MIGRATION as COORDINATOR_HANDOFF_MIGRATION
+from daedalus.stores.edit_board import SCHEMA as EDIT_BOARD_SCHEMA
 from daedalus.stores.execution_schema import MIGRATION as EXECUTION_MIGRATION
 from daedalus.stores.extension_schema import EXTENSION_SCHEMA
 from daedalus.stores.goal_budget_schema import MIGRATION as GOAL_BUDGET_MIGRATION
@@ -2580,6 +2581,10 @@ ALTER TABLE staff_sessions_rebuilt RENAME TO staff_sessions;
 CREATE UNIQUE INDEX staff_sessions_live ON staff_sessions(staff_id) WHERE ended_at IS NULL;
 CREATE INDEX staff_sessions_by_session ON staff_sessions(session_id);
 """, True))
+
+# Who is editing which file now, for agents sharing one folder: short leases per (file, agent) and
+# the signature of the last roster note each agent was shown (stores/edit_board.py).
+MIGRATIONS.append(EDIT_BOARD_SCHEMA)
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session

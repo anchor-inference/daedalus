@@ -75,6 +75,7 @@ from daedalus.harness.contract import (
     TurnUsage,
     UpdateResult,
 )
+from daedalus.harness.edits import edited_paths
 from daedalus.harness.tools import tooling
 
 logger = logging.getLogger(__name__)
@@ -380,7 +381,10 @@ class GrokAdapter:
             return [*events, StaffEvent(EventKind.NOTIFICATION, at, {"type": kind, "message": str(body.get("message") or "")[:200]})]
         if name in ("PostToolUse", "PostToolUseFailure", "PermissionDenied"):
             resolved = [StaffEvent(EventKind.REQUEST_RESOLVED, at, {}, native_id=tool_id)] if state.requests.pop(tool_id, None) is not None else []
-            return [*events, *resolved, StaffEvent(EventKind.TOOL_FINISHED, at, {"tool": tool, "ok": name == "PostToolUse"}, native_id=tool_id)]
+            finished: dict[str, Any] = {"tool": tool, "ok": name == "PostToolUse"}
+            if name == "PostToolUse" and (edited := edited_paths(tool, tool_input or state.tools.get(tool_id, ("", {}))[1])):
+                finished["edited"] = edited
+            return [*events, *resolved, StaffEvent(EventKind.TOOL_FINISHED, at, finished, native_id=tool_id)]
         if name == "Stop":
             if body.get("reason") != "end_turn" or not body.get("promptId"):
                 # The session's own last word as it shuts down, after SessionEnd: not a turn.

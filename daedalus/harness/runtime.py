@@ -26,7 +26,7 @@ import logging
 import secrets
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -437,6 +437,9 @@ class CliStaffRuntime:
     """What the project's environment adds to one launch — the tool set of its MCP servers and its
     skill files — set by the environment subsystem. Asked once per launch, so a change to the
     environment reaches the next launch of a member and never the CLI already running."""
+    edit_board: Callable[[str, Sequence[str], str], Awaitable[str]] | None = None
+    """The edit board, set by its subsystem: ``(staff session, files, cwd) -> note``. Asked for every
+    edit a launch reports, and the note goes back into the tool's result when the CLI waits for one."""
 
     def __init__(
         self,
@@ -846,7 +849,14 @@ class CliStaffRuntime:
     async def _consume(self, session: CliSession) -> None:
         try:
             async for event in self.adapter.events(session.term, session.launch):
+                if event.kind is EventKind.FILES_EDITED:
+                    await self._edited(session, event)
+                    continue
                 await self._apply(session, event)
+                if event.payload.get("edited"):
+                    # In line, not spawned: the turn's end that follows purges the member's leases,
+                    # and a lease written after that purge would outlive the turn.
+                    await self._edited(session, event)
                 if session.finished:
                     return
         except asyncio.CancelledError:
@@ -855,6 +865,23 @@ class CliStaffRuntime:
             logger.exception("the events of %s stopped", session.staff_session_id)
             if not session.finished:
                 await self._apply(session, StaffEvent(EventKind.TURN_FAILED, _now(), {"failure": f"its events stopped: {exc}"}, launch_id=session.launch.launch_id))
+
+    async def _edited(self, session: CliSession, event: StaffEvent) -> None:
+        """Record the files a tool wrote on the edit board, and answer a held hook with its note."""
+        note = ""
+        paths = [str(p) for p in event.payload.get("edited") or [] if p]
+        try:
+            if self.edit_board is not None and paths:
+                note = await self.edit_board(session.staff_session_id, paths, session.cwd)
+        except Exception:  # noqa: BLE001 — the edit happened; a board that fails must not stop the CLI's events
+            logger.warning("the edit board failed for %s", session.staff_session_id, exc_info=True)
+        finally:
+            reply_id = str(event.payload.get("reply_id") or "")
+            if reply_id:
+                # Answered whatever happened, at once: the CLI waits on this hook until it is.
+                reply = getattr(self.adapter, "edit_reply", None)
+                with contextlib.suppress(Exception):
+                    await session.term.reply(reply_id, reply(note) if note and reply is not None else None)
 
     async def _on_terminal_event(self, event: TerminalEvent) -> None:
         if event.type != "terminal.exited" or not event.terminal_id:

@@ -94,6 +94,9 @@ class EventKind(StrEnum):
     NOTIFICATION = "notification"
     USAGE = "usage"
     TRANSCRIPT = "transcript"
+    FILES_EDITED = "files_edited"
+    """A held post-edit hook: ``edited`` names the files, ``reply_id`` the hook waiting for the edit
+    board's note. Never a status: the runtime answers it and the state machine never sees it."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,7 +105,8 @@ class StaffEvent:
 
     The payload keys the state machine reads: ``summary`` (what a permission or question is about),
     ``failure`` (why a turn failed), ``screen`` (a ``ScreenClass`` value for ``reconciled``),
-    ``exit_code``. Anything else is for the log and the feed.
+    ``exit_code``. ``edited`` (the files a finished tool wrote) is for the edit board. Anything else
+    is for the log and the feed.
     """
 
     kind: EventKind

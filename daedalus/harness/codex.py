@@ -598,7 +598,13 @@ class CodexAdapter:
             if started:
                 self._put(state, EventKind.TOOL_STARTED, {"tool": tool}, str(item.get("id") or ""))
             else:
-                self._put(state, EventKind.TOOL_FINISHED, {"tool": tool, "ok": item.get("status") == "completed"}, str(item.get("id") or ""))
+                finished: dict[str, Any] = {"tool": tool, "ok": item.get("status") == "completed"}
+                if kind == "fileChange" and finished["ok"]:
+                    # A patch names every file it touched in its changes, each with its own path.
+                    edited = [str(c.get("path")) for c in item.get("changes") or [] if isinstance(c, dict) and c.get("path")]
+                    if edited:
+                        finished["edited"] = edited
+                self._put(state, EventKind.TOOL_FINISHED, finished, str(item.get("id") or ""))
         else:
             self._put(state, EventKind.ACTIVITY, {"item": kind})
 

@@ -86,6 +86,7 @@ from daedalus.harness.contract import (
     UpdateResult,
     standing_rule,
 )
+from daedalus.harness.edits import edited_paths
 from daedalus.harness.team import SKILL_PATH
 from daedalus.harness.tools import tooling
 from daedalus.security import operator_secrets
@@ -101,6 +102,11 @@ HOOK_TIMEOUT_S = 10
 """A hook that is not held answers at once; this bounds one whose listener has gone."""
 HOLD_SLACK_S = 30
 """What a held hook's own timeout exceeds its hold by, so Claude never kills the hook first."""
+EDIT_TOOLS = "Edit|Write|MultiEdit|NotebookEdit"
+"""The tools whose completion is held for the edit board's note (a matcher, as Claude reads one)."""
+EDIT_HOLD_MS = 3000
+"""How long a finished edit waits for that note. The host answers in milliseconds; this only
+bounds a host that has gone, after which Claude carries on as if no hook had answered."""
 MCP_TIMEOUT_SLACK_MS = 60_000
 """What Claude's timeout on a team tool call exceeds the longest hold by."""
 TEAM_TOOLS = ("mcp__daedalus_team__Report", "mcp__daedalus_team__AskOrchestrator")
@@ -319,6 +325,10 @@ class ClaudeCodeAdapter:
                 timeout = permission_hold // 1000 + HOLD_SLACK_S
             hooks[event] = [{"hooks": [{"type": "command", "command": command, "timeout": timeout}]}]
         hooks["SessionStart"].append({"hooks": [{"type": "command", "command": SECRET_ENV_HOOK, "timeout": HOOK_TIMEOUT_S}]})
+        # A second, held PostToolUse for the file tools: its reply carries the edit board's line into
+        # the tool's result (``additionalContext``), the one place a note reaches the model without
+        # touching the system prompt or an earlier message. The entry above still reports every tool.
+        hooks["PostToolUse"].append({"matcher": EDIT_TOOLS, "hooks": [{"type": "command", "command": f'"$DAEDALUS_PTYD_BIN" hook PostToolUse --wait-ms {EDIT_HOLD_MS}', "timeout": EDIT_HOLD_MS // 1000 + HOOK_TIMEOUT_S}]})
         if permission_hold:
             # A question to the operator is answered through this held hook's reply; every other
             # tool's PreToolUse goes by the entry above and is never held.
@@ -480,6 +490,9 @@ class ClaudeCodeAdapter:
             summary = summary_of(tool, tool_input)
             state.requests[ref] = _Request("permission", tool, dict(tool_input), post.reply_id, summary)
             return [StaffEvent(EventKind.PERMISSION_REQUESTED, at, {"tool": tool, "summary": summary, "options": ["allow_once", "deny"]}, native_id=ref)]
+        if name == "PostToolUse" and post.reply_id is not None:
+            # The held entry for the file tools: the unheld one reports the tool finishing.
+            return [StaffEvent(EventKind.FILES_EDITED, at, {"edited": edited_paths(tool, tool_input), "reply_id": post.reply_id}, native_id=tool_id)]
         if name in ("PostToolUse", "PostToolUseFailure", "PermissionDenied"):
             events = [StaffEvent(EventKind.REQUEST_RESOLVED, at, {}, native_id=tool_id)] if tool_id in state.requests else []
             if not state.turn_open:
@@ -501,6 +514,11 @@ class ClaudeCodeAdapter:
             # "waiting for your input" is a timer on an empty prompt.
             return [StaffEvent(EventKind.NOTIFICATION, at, {"type": body.get("notification_type") or "", "message": str(body.get("message") or "")[:200]})]
         return [StaffEvent(EventKind.ACTIVITY, at, {"hook": name})]
+
+    @staticmethod
+    def edit_reply(note: str) -> dict[str, Any]:
+        """The held post-edit hook's answer that puts ``note`` into the tool's result."""
+        return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": note}}
 
     @staticmethod
     def _key(tool: str, tool_input: Mapping[str, Any]) -> str:

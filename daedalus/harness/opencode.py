@@ -69,6 +69,7 @@ from daedalus.harness.contract import (
     TurnUsage,
     UpdateResult,
 )
+from daedalus.harness.edits import edited_paths
 from daedalus.harness.streams import EventStream, HttpAnswer, http_request
 from daedalus.harness.team import SKILL_NAME
 from daedalus.harness.tools import tooling
@@ -446,7 +447,11 @@ class OpenCodeAdapter:
                 self._put(state, EventKind.TOOL_STARTED, {"tool": tool}, call)
             elif status in ("completed", "error"):
                 state.tools.discard(call)
-                self._put(state, EventKind.TOOL_FINISHED, {"tool": tool, "ok": status == "completed"}, call)
+                finished: dict[str, Any] = {"tool": tool, "ok": status == "completed"}
+                tool_input = (part.get("state") or {}).get("input")
+                if status == "completed" and (edited := edited_paths(tool, tool_input if isinstance(tool_input, dict) else None)):
+                    finished["edited"] = edited
+                self._put(state, EventKind.TOOL_FINISHED, finished, call)
         elif kind == "text" and str(part.get("messageID") or "") in state.assistant and str(part.get("text") or "").strip():
             state.last_message = str(part["text"])
 

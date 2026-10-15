@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import logging
 import shlex
 import unicodedata
 from pathlib import Path
@@ -19,6 +20,8 @@ from daedalus.stores.control import ControlConflict, ControlDenied
 from daedalus.tools import search_hint
 from daedalus.tools._common import FRAME_CHARS, clip, error, ok, output_limit, refuse_protected, services_for
 from daedalus.tools.shell import shell_argv, shell_environment
+
+logger = logging.getLogger(__name__)
 
 _MAX_LINE_CHARS = 2000
 #: How far into a file to look for a NUL before calling it binary. A text file
@@ -177,7 +180,7 @@ async def write_file(context: ToolContext, path: str, content: str) -> ToolResul
         await services.fs.write_text(target, content)
     except (OSError, ControlConflict, ControlDenied) as exc:
         return error(context, f"could not write {target}: {exc}")
-    return ok(context, f"wrote {len(content)} characters to {target}" + await diagnostics(services, target), path=str(target))
+    return ok(context, f"wrote {len(content)} characters to {target}" + await diagnostics(services, target) + await board_note(context, services, target), path=str(target))
 
 
 @search_hint(
@@ -215,7 +218,7 @@ async def edit_file(
     except (OSError, ControlConflict, ControlDenied) as exc:
         return error(context, f"could not write {target}: {exc}")
     note = f" (matched {how})" if how != "exactly" else ""
-    return ok(context, f"edited {target}: {count} replacement(s){note}" + await diagnostics(services, target), path=str(target))
+    return ok(context, f"edited {target}: {count} replacement(s){note}" + await diagnostics(services, target) + await board_note(context, services, target), path=str(target))
 
 
 class EditMiss(ValueError):
@@ -343,7 +346,27 @@ async def multi_edit(context: ToolContext, path: str, edits: list[dict[str, Any]
         await fs.write_text(target, text)
     except (OSError, ControlConflict, ControlDenied) as exc:
         return error(context, f"could not write {target}: {exc}")
-    return ok(context, f"edited {target}: {total} replacement(s) in {len(edits)} edits" + await diagnostics(services, target), path=str(target))
+    return ok(context, f"edited {target}: {total} replacement(s) in {len(edits)} edits" + await diagnostics(services, target) + await board_note(context, services, target), path=str(target))
+
+
+async def board_note(context: ToolContext, services: Any, target: Path) -> str:
+    """The edit board's line about other agents editing this file, appended to the result, or nothing.
+
+    Only ever in this result: a note in the system prompt or an earlier message would break the
+    cached prefix of every later request. A session driving another machine is left out, since its
+    paths name that machine's files and would meet a local file of the same name by accident."""
+    if services.exec_backend is not None:
+        return ""
+    manager = services.extra.get("manager")
+    hook = manager.service_hooks.get("edit_board") if manager is not None else None
+    if hook is None:
+        return ""
+    try:
+        note = await hook(context.session_id, [str(target)])
+    except Exception:  # noqa: BLE001 — the edit is written; a board that fails must not turn it into an error
+        logger.warning("the edit board failed for %s", target, exc_info=True)
+        return ""
+    return f"\n{note}" if note else ""
 
 
 _DIAGNOSABLE = {".py"}

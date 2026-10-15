@@ -1600,6 +1600,19 @@ class PeersConfig(BaseModel):
     wait_timeout_minutes: int = Field(default=30, ge=1)
 
 
+class EditBoardConfig(BaseModel):
+    """Who is editing which file, for agents that share one folder (stores/edit_board.py)."""
+
+    enabled: bool = True
+    lease_seconds: int = Field(default=60, ge=5)
+    """How long one edit keeps a file marked as the agent's; every further edit extends it. Long
+    enough to cover the pause between two edits of one change, short enough that a file somebody
+    left is not reported for long after."""
+    reshow_minutes: int = Field(default=45, ge=1)
+    """How long an agent is not shown the same note again. A compaction may fold the first one away,
+    and after this long the agent may well have lost it."""
+
+
 class SubagentsConfig(BaseModel):
     max_active: int = Field(default=4, ge=1)
     """Running subagents one leader may have at a time."""
@@ -2227,6 +2240,7 @@ class RuntimeConfig(BaseModel):
     autopilot: AutopilotConfig = Field(default_factory=AutopilotConfig)
     board: BoardConfig = Field(default_factory=BoardConfig)
     peers: PeersConfig = Field(default_factory=PeersConfig)
+    edit_board: EditBoardConfig = Field(default_factory=EditBoardConfig)
     subagents: SubagentsConfig = Field(default_factory=SubagentsConfig)
     staff: StaffConfig = Field(default_factory=StaffConfig)
     orchestrator: OrchestratorConfig = Field(default_factory=OrchestratorConfig)

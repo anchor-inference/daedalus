@@ -1773,6 +1773,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             "staff": [staff_row(m, live.get(m.id), counts.get(m.id, 0), await staff_health(m, live.get(m.id)),
                                 await staff_conditions(m, live.get(m.id))) for m in members],
             "queue": queue.queue(project_id) if (queue := getattr(app.extensions.get("staff"), "queue", None)) is not None else [],
+            "editing": await board.project_view(project) if (board := app.extensions.get("edit_board")) is not None else [],
             "counts": {"staff": sum(1 for m in members if m.active), "working": sum(1 for s in live.values() if s.status in ACTIVE_STATUSES)},
             "choices": {
                 "harnesses": list(HARNESSES),
