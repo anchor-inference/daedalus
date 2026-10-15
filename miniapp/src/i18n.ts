@@ -7929,3 +7929,62 @@ Object.assign(DICT, {
   "meeting.turn.hint": { en: "Keep recording as a meeting: no dictation limit, and notes instead of a transcript in the field when it stops", ru: "Продолжить запись как встречу: без лимита диктовки, а по остановке — заметки вместо текста в поле" },
   "usage.purpose.meeting_notes": { en: "meeting notes", ru: "заметки встречи" },
 });
+
+// A project's environment in its settings: the repositories, seed files, servers, skills and setup goal,
+// and how the last preparation went.
+Object.assign(DICT, {
+  "env.title": { en: "Environment", ru: "Окружение" },
+  "env.intro": {
+    en: "Prepared once, before the project's members start: repositories are cloned into folders of their own, seed files are written where none exist, and the setup goal is worked on by an agent in the project's folder. Nothing on disk is ever overwritten.",
+    ru: "Готовится один раз, до запуска участников проекта: репозитории клонируются в отдельные папки, файлы-заготовки пишутся только там, где их нет, а цель подготовки выполняет агент в папке проекта. Ничего на диске не перезаписывается.",
+  },
+  "env.state.unprepared": { en: "Not prepared yet", ru: "Ещё не подготовлено" },
+  "env.state.preparing": { en: "Preparing…", ru: "Готовится…" },
+  "env.state.ready": { en: "Ready", ru: "Готово" },
+  "env.state.failed": { en: "Preparation failed", ru: "Подготовка не удалась" },
+  "env.state.nothing": { en: "Nothing to prepare", ru: "Готовить нечего" },
+  "env.stale": { en: "changed since", ru: "изменено с тех пор" },
+  "env.stale.hint": {
+    en: "The environment changed after it was prepared. Members keep working; press Prepare to apply the change.",
+    ru: "Окружение изменилось после подготовки. Участники продолжают работу; нажмите «Подготовить», чтобы применить изменение.",
+  },
+  "env.finished": { en: "finished {when}", ru: "завершено {when}" },
+  "env.repos": { en: "Repositories", ru: "Репозитории" },
+  "env.repos.hint": {
+    en: "Each is cloned once into a folder beside the project's main folder and added to the project. A folder that already has something in it is kept as it is.",
+    ru: "Каждый клонируется один раз в папку рядом с основной папкой проекта и добавляется в проект. Папка, в которой уже что-то есть, остаётся как есть.",
+  },
+  "env.repo.url": { en: "Repository URL", ru: "Адрес репозитория" },
+  "env.repo.branch": { en: "Branch (optional)", ru: "Ветка (необязательно)" },
+  "env.repo.folder": { en: "Folder name", ru: "Имя папки" },
+  "env.repo.add": { en: "Add a repository", ru: "Добавить репозиторий" },
+  "env.seeds": { en: "Seed files", ru: "Файлы-заготовки" },
+  "env.seeds.hint": {
+    en: "Written into the main folder only where no such file exists, so your own edits stay. A path starting with a repository's folder name goes into that repository.",
+    ru: "Пишутся в основную папку, только если такого файла нет, поэтому ваши правки сохраняются. Путь, начинающийся с имени папки репозитория, попадает в этот репозиторий.",
+  },
+  "env.seed.path": { en: "Path, such as AGENTS.md", ru: "Путь, например AGENTS.md" },
+  "env.seed.content": { en: "File content", ru: "Содержимое файла" },
+  "env.seed.add": { en: "Add a file", ru: "Добавить файл" },
+  "env.mcp": { en: "MCP servers", ru: "MCP-серверы" },
+  "env.subset.hint": {
+    en: "Ticked ones are all the project's chats and members see; none ticked means all of them. A change reaches each agent at its next run.",
+    ru: "Отмеченные — всё, что видят чаты и участники проекта; если ничего не отмечено, видны все. Изменение доходит до агента при его следующем запуске.",
+  },
+  "env.mcp.none": { en: "No MCP servers are configured.", ru: "MCP-серверы не настроены." },
+  "env.skills": { en: "Skills", ru: "Навыки" },
+  "env.skills.none": { en: "No skills are installed.", ru: "Навыки не установлены." },
+  "env.goal": { en: "Setup goal", ru: "Цель подготовки" },
+  "env.goal.placeholder": { en: "Install the dependencies and make the test suite runnable", ru: "Установить зависимости и сделать так, чтобы тесты запускались" },
+  "env.goal.minutes": { en: "Minutes at most", ru: "Не дольше, минут" },
+  "env.goal.usd": { en: "Dollars at most", ru: "Не дороже, долларов" },
+  "env.goal.hint": {
+    en: "An agent works on it once in the project's folder, within these bounds, and the network follows the policy. Leave it empty for no agent.",
+    ru: "Агент выполняет её один раз в папке проекта в этих пределах, доступ в сеть — по политике. Оставьте пустой, чтобы обойтись без агента.",
+  },
+  "env.prepare": { en: "Prepare", ru: "Подготовить" },
+  "env.prepare.started": { en: "Preparing the environment", ru: "Окружение готовится" },
+  "env.prepare.saveFirst": { en: "Save the changes first", ru: "Сначала сохраните изменения" },
+  "env.log": { en: "Last preparation (attempt {attempt})", ru: "Последняя подготовка (попытка {attempt})" },
+  "env.log.session": { en: "Setup session: {id}", ru: "Сессия подготовки: {id}" },
+});

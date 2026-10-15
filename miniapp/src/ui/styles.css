@@ -4861,6 +4861,14 @@ button.staff-row:hover { background: var(--surface-2); }
 .pagehead-actions .project-budget-chip { max-width: min(32vw, 130px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-resources { margin: 14px 0; padding: 12px 0; border-top: 1px solid var(--line); }
 .project-resources > summary { cursor: pointer; font-weight: 600; }
+.project-environment { margin: 14px 0; padding: 12px 0; border-top: 1px solid var(--line); }
+.project-environment > summary { cursor: pointer; font-weight: 600; }
+.project-environment .env-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
+.project-environment .env-row > .field { flex: 1 1 140px; min-width: 0; margin: 0; }
+.project-environment .env-seed > textarea.field { flex-basis: 100%; }
+.project-environment .env-status { margin: 8px 0; }
+.project-environment .env-actions { display: flex; gap: 8px; margin: 12px 0 6px; }
+.project-environment .env-log pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
 .project-resource-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px 10px; margin: 10px 0; align-items: center; }
 .project-resource-fields input { min-width: 0; }
 @media (max-width: 480px) { .project-resource-fields { grid-template-columns: minmax(0, 1fr); } }
