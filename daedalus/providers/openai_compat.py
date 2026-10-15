@@ -8,6 +8,7 @@ the reasoning stream, and how usage is shaped.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -308,6 +309,10 @@ class ProviderEndpoint:
     """When set, every request to this endpoint samples at this temperature (a benchmark pin)."""
     subscription: bool = False
     """A prepaid plan (``billing = "subscription"``): every call is recorded at $0 and no dollar cap counts it."""
+    first_byte_timeout_seconds: float = 0.0
+    """How long a streamed request may get no byte back at all before it is abandoned and sent again; 0 never."""
+    first_byte_retries: int = 1
+    """How many times such a request is sent again before the silence is raised as a timeout."""
 
     def source_digest(self) -> str:
         """Bind a saved provider decision to this connection without retaining its credentials."""
@@ -411,9 +416,22 @@ class OpenAICompatibleProvider(ILLMProvider):
         keep_reasoning = replays_reasoning(self.endpoint)
         details: list[dict[str, Any]] = []
         try:
-            async with self._client.stream(
-                "POST", self._url("/chat/completions"), json=body, headers=self._headers(request)
-            ) as response:
+            silent = 0
+            while True:
+                opened = await self._open_stream(request, body, silent)
+                if opened is not None:
+                    break
+                silent += 1
+                if silent > self.endpoint.first_byte_retries:
+                    raise _classified(LLMTimeoutError(
+                        f"{self.endpoint.id}: no response byte within {self.endpoint.first_byte_timeout_seconds:.0f}s"
+                        f" on {silent} identical attempt(s)"), ProviderVerdict("timeout", True))
+                # Said to the core before the next attempt waits its own window: its idle watchdog
+                # counts from the last delta, and two silent windows back to back would otherwise
+                # pass its baseline and be cut as a stalled stream half-way through the resend.
+                yield ProviderDelta(kind=ProviderDeltaKind.progress)
+            response, lines = opened
+            try:
                 if response.status_code >= 400:
                     raw = await response.aread()
                     if response.status_code == 400:
@@ -421,7 +439,7 @@ class OpenAICompatibleProvider(ILLMProvider):
                     text = raw.decode("utf-8", "replace")
                     await self._observe_failure(request, reservation, response.status_code, text, response.headers)
                     self._raise_for_status(response.status_code, text)
-                async for data in _sse_data(response):
+                async for data in _sse_data(lines):
                     if data is None:
                         # A comment line (the key proxy's keepalive, OpenRouter's processing note):
                         # no content, but proof the upstream is alive during a silent think.
@@ -461,6 +479,8 @@ class OpenAICompatibleProvider(ILLMProvider):
                         # A role-only or empty-delta chunk still resets the core's idle clock;
                         # without it a model that reasons silently was killed as a stalled stream.
                         yield ProviderDelta(kind=ProviderDeltaKind.progress)
+            finally:
+                await response.aclose()
         except httpx.TimeoutException as exc:
             raise LLMTimeoutError(f"{self.endpoint.id}: {exc}") from exc
         except httpx.HTTPError as exc:
@@ -485,6 +505,56 @@ class OpenAICompatibleProvider(ILLMProvider):
         yield ProviderDelta(kind=ProviderDeltaKind.usage, usage=normalized)
         kept = (reasoning_envelope(self.endpoint.id, request.model, details, normalized["reasoning_tokens"]),) if details else None
         yield ProviderDelta(kind=ProviderDeltaKind.finish, finish_reason=_map_finish(resolved_finish), reasoning_items=kept)
+
+    async def _open_stream(self, request: LLMRequest, body: dict[str, Any],
+                           attempt: int) -> tuple[httpx.Response, AsyncIterator[str]] | None:
+        """Send the request and wait for its first line back; ``None`` when nothing came in time.
+
+        The deadline covers the response headers and the first line of the body together, because an
+        upstream that answers its headers at once and then says nothing is as stuck as one that never
+        answers (the Grok subscription route held a cold request 103.7 s this way while its peers
+        took 8 to 13 s). Any line counts, an SSE comment or an empty one included: the key proxy turns
+        every upstream event a silent thinker sends (Anthropic's ping, a Responses ``created``) into a
+        keepalive comment, so a model that thinks for a minute is never taken for a dead one. A line,
+        not a byte, is what is waited for because servers flush whole lines; nothing writes half of one
+        and then pauses.
+
+        Abandoning such a request and sending the same one again is safe because nothing came back:
+        no partial output reached the run, so none can be repeated. The body is the caller's own dict,
+        serialised the same way each time, so a provider's prompt cache sees the identical prefix. A
+        refusal (status 400 and up) is an answer, so its body is read with no deadline.
+        """
+        timeout = self.endpoint.first_byte_timeout_seconds
+        sent = self._client.build_request("POST", self._url("/chat/completions"), json=body, headers=self._headers(request))
+        began = time.monotonic()
+        response: httpx.Response | None = None
+        lines: AsyncIterator[str] | None = None
+        answered_at: float | None = None
+        try:
+            async with asyncio.timeout(timeout if timeout > 0 else None) as deadline:
+                response = await self._client.send(sent, stream=True)
+                answered_at = time.monotonic()
+                lines = response.aiter_lines()
+                if response.status_code >= 400:
+                    deadline.reschedule(None)
+                    return response, lines
+                first = await anext(lines, None)
+        except TimeoutError:
+            if response is not None:
+                await response.aclose()
+            if not deadline.expired():
+                raise
+            headers = "no headers" if answered_at is None else f"headers after {answered_at - began:.1f}s"
+            logger.warning("%s: no byte of the %s response within %.0fs (%s); sending the identical request again (%d of %d)",
+                           self.endpoint.id, request.model, timeout, headers, attempt + 1, self.endpoint.first_byte_retries)
+            return None
+        except BaseException:
+            if response is not None:
+                await response.aclose()
+            raise
+        if attempt:
+            logger.warning("%s: the resent %s request answered after %.1fs", self.endpoint.id, request.model, time.monotonic() - began)
+        return response, _after(first, lines)
 
     def _tool_call_chunk(
         self, open_tools: dict[int, dict[str, Any]], tc: dict[str, Any], started: float
@@ -945,13 +1015,22 @@ def parse_json_text(text: str) -> dict[str, Any] | None:
     return None
 
 
-async def _sse_data(response: httpx.Response) -> AsyncIterator[str | None]:
+async def _after(first: str | None, rest: AsyncIterator[str]) -> AsyncIterator[str]:
+    """``first`` (the line the watchdog already read; ``None`` for a body that ended empty), then ``rest``."""
+    if first is None:
+        return
+    yield first
+    async for line in rest:
+        yield line
+
+
+async def _sse_data(lines: AsyncIterator[str]) -> AsyncIterator[str | None]:
     """Yield the ``data:`` payload of each SSE event, and ``None`` for each comment line.
 
     A comment carries no data but is the only sign of life some upstreams give while they think.
     """
     buffer: list[str] = []
-    async for line in response.aiter_lines():
+    async for line in lines:
         if line == "":
             if buffer:
                 yield "\n".join(buffer)

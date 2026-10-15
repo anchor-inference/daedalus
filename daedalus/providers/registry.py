@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from daedalus.config import ProviderConfig, RuntimeConfig, Settings
+from daedalus.config import ProviderConfig, RuntimeConfig, Settings, first_byte_timeout_for
 from daedalus.host.setting_refs import provider_key
 from daedalus.providers.admission import InferenceAdmission
 from daedalus.providers.context_window import windows_from_catalog
@@ -174,6 +174,8 @@ class ProviderRegistry:
             pricing={} if pc.kind == "llamacpp" or pc.billing == "subscription" else {**self._fetched.get(pc.kind, {}), **pricing_table(pc.kind, pc.pricing)},
             temperature=pc.temperature,
             subscription=pc.billing == "subscription",
+            first_byte_timeout_seconds=first_byte_timeout_for(pc),
+            first_byte_retries=pc.first_byte_retries,
         )
 
     async def refresh_prices(self, db: Any | None = None, *, force: bool = False) -> int:

@@ -505,6 +505,15 @@ class ProviderConfig(BaseModel):
     (masked in the Mini App, never echoed back). Empty means "no key" for self-hosted
     endpoints and "use the environment key" for the built-in kinds (deepseek, openrouter, vllm)."""
     timeout_seconds: float = 600.0
+    first_byte_timeout_seconds: float | None = Field(default=None, ge=0, le=600)
+    """How long a streamed request may get no byte back at all — no headers and no line of the body, a
+    keepalive comment included — before it is abandoned and sent again unchanged, so the prompt cache
+    still holds. ``None`` takes :func:`first_byte_timeout_for`; 0 never abandons. Keep it under the core's
+    90 s idle baseline, or the core cuts a request that asked for no thinking before this ever fires."""
+    first_byte_retries: int = Field(default=1, ge=0, le=3)
+    """How many times a request that got no byte back is sent again before the silence is a timeout the run's
+    fallback chain answers. One: a stuck request is usually alone, and a second silent one says the endpoint is
+    sick, which a sibling provider answers better than a third wait."""
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     """Sampling temperature sent with every request to this endpoint; ``None`` leaves the core's default. Pin it for benchmarks."""
     max_advertised_tools: int | None = Field(default=None, ge=0)
@@ -520,6 +529,29 @@ class ProviderConfig(BaseModel):
     dollar cap, and the plan's own allowance is what limits them, read from the key proxy beside the other
     subscriptions. Any per-token price for it is ignored, so a list price cannot become a charge. ``metered``
     is everything billed per token, priced or not."""
+
+
+FIRST_BYTE_TIMEOUT_SECONDS = 60.0
+"""The default wait for a hosted endpoint's first byte, read off a week of the operator's own runs (8 to 15
+October 2026). The time to first *visible* output — hidden thinking included — had a p99 of 52.6 s on Claude
+Opus, 53.3 s on Sonnet, 30.4 s on GPT-6.1, 22.9 s on Grok 4.7, 12.3 s on GPT-6 and 11 s on DeepSeek; the
+first *byte* comes sooner still, because the key proxy forwards every upstream event a thinking model sends as
+a keepalive. Only one Grok request in 479 went past 60 s, at 103.7 s, and it is the stuck request this exists
+for. Cold requests of 128k tokens answer in 8 to 13 s, so the margin is four to seven times a cold start."""
+
+
+def first_byte_timeout_for(provider: ProviderConfig) -> float:
+    """The first-byte watchdog for ``provider``: its own setting, else off for the operator's own hardware.
+
+    A llama.cpp or vLLM server processes a long prompt before it streams anything, and on a home GPU that
+    can take minutes that are no fault; sending it again would start the work over. The key proxy's
+    ``local`` upstream is the same kind of machine behind an OpenAI-compatible name.
+    """
+    if provider.first_byte_timeout_seconds is not None:
+        return provider.first_byte_timeout_seconds
+    if provider.kind in ("llamacpp", "vllm") or keyproxy_upstream(provider.base_url) == "local":
+        return 0.0
+    return FIRST_BYTE_TIMEOUT_SECONDS
 
 
 KNOWN_TOOL_LIMITS: tuple[tuple[str, int], ...] = (("grok", 350), ("gemini", 128))
