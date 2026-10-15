@@ -221,6 +221,91 @@ def _section(title: str, items: list[str], *, cap: int, more: str) -> Section:
     return lines, more
 
 
+UNCHANGED_TITLE = "Unchanged since the last turn that showed them"
+"""Opens the line that names the sections of the state a turn does not repeat."""
+REPEAT_MIN_CHARS = 200
+"""A section shorter than this is sent again whole: naming it would save next to nothing."""
+
+
+def _section_key(line: str) -> str:
+    """What identifies a section of the state block across turns: its first line up to the colon."""
+    return line.split(":", 1)[0].strip()
+
+
+def _section_label(key: str) -> str:
+    """The short name of a section, as the line of unchanged sections lists it."""
+    return key.split(" (", 1)[0].split(" — ", 1)[0].strip()
+
+
+def _state_sections(block: str) -> dict[str, str]:
+    """A shown state block split back into its sections, by key: a line at the margin opens one
+    and the indented lines under it belong to it, the way :func:`_section` writes them."""
+    sections: dict[str, list[str]] = {}
+    current: list[str] | None = None
+    for line in block.split("\n"):
+        if line.startswith("  ") and current is not None:
+            current.append(line)
+            continue
+        current = [line]
+        sections.setdefault(_section_key(line), current)
+    return {key: "\n".join(lines) for key, lines in sections.items()}
+
+
+def shown_states(history: list[Message]) -> list[dict[str, str]]:
+    """The state blocks the model can still read in ``history``, newest first, each split into sections.
+
+    Only the turn context of a user turn counts. A summary never carries one (the summariser is
+    handed the history without them), so a block that a compaction folded away is not here.
+    """
+    blocks: list[dict[str, str]] = []
+    for message in reversed(history):
+        if message.role is not MessageRole.user:
+            continue
+        for block in message.content_blocks:
+            text = block.text if isinstance(block, TextBlock) else ""
+            at = text.rfind(prompts.TURN_CONTEXT_OPEN)
+            if at >= 0:
+                blocks.append(_state_sections(text[at:]))
+    return blocks
+
+
+def without_repeats(sections: list[Section], shown: list[dict[str, str]]) -> tuple[list[Section], list[str]]:
+    """Drop the sections the model last saw exactly as they are now; return what is left and their names.
+
+    The state block rides on every turn of an orchestrator and was its largest repeated cost: in
+    one project's session, 137,000 of the 179,000 characters of 37 blocks were sections already
+    shown word for word, the brief alone 77,000. A section is left out only when the newest block
+    that speaks of it — showing it, or naming it as unchanged in turn — shows it with this very
+    text. Matching any older block would be wrong: a team that went from X to Y and back to X
+    must be shown, since the last thing the model read said Y. Only new text is affected; what
+    earlier turns carried stays as it was sent, so the conversation's cached prefix is untouched.
+    """
+    if not shown:
+        return sections, []
+    kept: list[Section] = []
+    unchanged: list[str] = []
+    for lines, more in sections:
+        text = "\n".join(lines)
+        if not lines or len(text) < REPEAT_MIN_CHARS:
+            kept.append((lines, more))
+            continue
+        key = _section_key(lines[0])
+        label = _section_label(key)
+        same = False
+        for block in shown:
+            if key in block:
+                same = block[key] == text
+                break
+            named = block.get(UNCHANGED_TITLE, "")
+            if label not in [part.strip() for part in named.split(":", 1)[-1].split(" (", 1)[0].split(",")]:
+                break  # the newest block does not show this section at all: it is shown again
+        if same:
+            unchanged.append(label)
+        else:
+            kept.append((lines, more))
+    return kept, unchanged
+
+
 def fit(sections: list[Section], limit: int) -> str:
     """Join the sections, cutting the longest lists first until the whole fits ``limit`` characters.
 
@@ -658,15 +743,21 @@ class Orchestrators:
             project, _ = await self.current(state.session.id)
         except NotCurrent as exc:
             return f"\n- {exc}. Its tools refuse; tell the operator, and do nothing else."
-        text = await self.project_state(project, session_id=state.session.id)
+        # The blocks the model can still read: the previous run's engine holds the history this run
+        # starts from. With none (the first run after a start) everything is shown whole.
+        shown = shown_states(list(state.engine.history)) if state.engine is not None else []
+        text = await self.project_state(project, session_id=state.session.id, shown=shown)
         if state.metadata.get("predecessor") and not state.metadata.get("predecessor_announced"):
             for metadata in (state.metadata, state.session.metadata):
                 metadata["predecessor_announced"] = True
             await self.manager.sessions.update_metadata(state.session.id, state.session.metadata)
         return "\n" + text
 
-    async def project_state(self, project: Project, *, session_id: str | None = None) -> str:
-        """The state block: the project as it is now, bounded by ``orchestrator.state_max_chars``."""
+    async def project_state(self, project: Project, *, session_id: str | None = None, shown: list[dict[str, str]] | None = None) -> str:
+        """The state block: the project as it is now, bounded by ``orchestrator.state_max_chars``.
+
+        ``shown`` are the blocks the model can still read (:func:`shown_states`); a section it last
+        saw exactly as it is now is named on one line instead of being sent again."""
         now = datetime.now(UTC)
         config = self.manager.config
         orchestrator = project.settings.orchestrator
@@ -764,7 +855,11 @@ class Orchestrators:
                 sections.append(await extra(project))
             except Exception:  # noqa: BLE001 — one section that fails must not take the state away
                 logger.exception("an orchestrator state section failed for %s", project.id)
-        return fit(sections, config.orchestrator.state_max_chars)
+        sections, unchanged = without_repeats(sections, shown or [])
+        text = fit(sections, config.orchestrator.state_max_chars)
+        if unchanged:
+            text += f"\n{UNCHANGED_TITLE}: {', '.join(unchanged)} (the tools show them again)"
+        return text
 
     async def _hireable(self, project: Project) -> list[str]:
         """What can be hired for the project now, by executor and environment: the models each offers —

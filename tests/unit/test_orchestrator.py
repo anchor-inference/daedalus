@@ -14,13 +14,20 @@ from typing import Any
 import httpx
 import pytest
 from protocore.contracts.tool_registry import policy_admits
-from protocore.contracts.types import MessageRole, TextBlock
+from protocore.contracts.types import Message, MessageRole, TextBlock
 
 from daedalus.config import ORCHESTRATOR_ONLY_TOOLS, ORCHESTRATOR_TOOLS, ModelPresetConfig, Settings
 from daedalus.extensions.api import build_app
 from daedalus.extensions.board import Board
 from daedalus.extensions.coordinator_authority import approve_authority, install_authority
-from daedalus.extensions.orchestrator import NotCurrent, Orchestrators, fit
+from daedalus.extensions.orchestrator import (
+    UNCHANGED_TITLE,
+    NotCurrent,
+    Orchestrators,
+    fit,
+    shown_states,
+    without_repeats,
+)
 from daedalus.extensions.orchestrator_domain import apply_goal_revision
 from daedalus.extensions.orchestrator_ops import Refused
 from daedalus.extensions.staff import Team
@@ -320,6 +327,48 @@ async def test_the_state_block_shows_the_project_and_stays_within_its_bound(sett
         r.manager.config.orchestrator.state_max_chars = 1200
         small = await r.orch.project_state(await r.refreshed())
         assert len(small) <= 1200 and small.startswith("Project: Bakery") and "more (" in small
+    finally:
+        await close_team(r.manager)
+        await r.manager.close()
+
+
+def _turn(state: str) -> Message:
+    """A wake-up as the orchestrator's history holds it: the events, then the state in the turn context."""
+    return Message(role=MessageRole.user, content_blocks=[TextBlock(text=f"[events]\n- something\n\n{prompts.turn_context(notes=chr(10) + state)}")])
+
+
+def test_a_section_is_left_out_only_when_the_newest_block_showing_it_says_the_same() -> None:
+    brief = "Brief — goals: " + "a bakery site " * 30
+    team_x = ["Team:", *(f"  - member {n} on the long task of the week" for n in range(6))]
+    team_y = ["Team:", *(f"  - member {n} on another long task entirely" for n in range(6))]
+    sections = [(["Project: x"], ""), ([brief], ""), (team_x, "Team")]
+    first = "\n".join(["Project: x", brief, *team_x])
+    kept, unchanged = without_repeats(sections, shown_states([_turn(first)]))
+    assert unchanged == ["Brief", "Team"] and kept == [(["Project: x"], "")], "a short section is always sent again"
+    # The team went X, then Y, and is X again: the last thing the model read said Y, so it is shown.
+    second = "\n".join(["Project: x", *team_y, f"{UNCHANGED_TITLE}: Brief (the tools show them again)"])
+    kept, unchanged = without_repeats(sections, shown_states([_turn(first), _turn(second)]))
+    assert unchanged == ["Brief"] and (team_x, "Team") in kept, "the brief is found through the block that named it unchanged"
+    # A block that neither shows a section nor names it means it is not there to point at.
+    third = "Project: x"
+    kept, unchanged = without_repeats(sections, shown_states([_turn(first), _turn(third)]))
+    assert unchanged == [] and len(kept) == 3
+    assert without_repeats(sections, []) == (sections, [])
+
+
+async def test_the_state_block_does_not_repeat_what_the_last_turn_showed(settings: Settings, db: Database, tmp_path: Path) -> None:
+    r = await rig(settings, db, tmp_path)
+    try:
+        sid = (await r.orch.enable(r.project.id, autonomy="normal")).settings.orchestrator.session_id
+        await set_goal(r, "A bakery site with online orders, " + "delivered to the whole city and its suburbs " * 6)
+        first = await r.orch.project_state(await r.refreshed(), session_id=sid)
+        assert "goals: A bakery site" in first and UNCHANGED_TITLE not in first
+        again = await r.orch.project_state(await r.refreshed(), session_id=sid, shown=shown_states([_turn(first)]))
+        assert "goals: A bakery site" not in again and f"{UNCHANGED_TITLE}: Brief" in again
+        assert again.startswith("Project: Bakery") and "Board: " in again
+        await set_goal(r, "A bakery site with a delivery map, " + "for the whole city and its suburbs " * 6)
+        changed = await r.orch.project_state(await r.refreshed(), session_id=sid, shown=shown_states([_turn(first), _turn(again)]))
+        assert "goals: A bakery site with a delivery map" in changed and "Brief" not in changed.rsplit("\n", 1)[-1]
     finally:
         await close_team(r.manager)
         await r.manager.close()
