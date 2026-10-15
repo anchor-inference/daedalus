@@ -1375,6 +1375,26 @@ class AssistConfig(BaseModel):
     transcriber for a day."""
 
 
+class AutopilotConfig(BaseModel):
+    """What happens after an ordinary chat's run ends with autopilot switched on for it: one small
+    judge call decides whether the work goes on by itself, is finished, or needs the operator.
+
+    Off by default and per session as well: a session's switch does nothing while ``enabled`` is
+    off, so one setting stops every unattended continuation at once."""
+
+    enabled: bool = False
+    """The master switch. Off, no session is judged, whatever its own switch says."""
+    preset: str = ""
+    """The judge's model preset; empty = the one the next-message guess uses, since the judge is
+    that guess made explicit and wants the same cheap model."""
+    max_continuations: int = Field(default=3, ge=0, le=20)
+    """Turns autopilot may start on its own after one message of the operator's. Reached, the
+    judge may still say the work is done or ask, but it no longer continues silently."""
+    usd_per_day: float = Field(default=0.2, ge=0)
+    """What the judge's own calls may cost in a day, summed from Usage under their label. Reached,
+    no session is judged until tomorrow; ``0`` turns the judge off for paid models."""
+
+
 class ModeConfig(BaseModel):
     """A named bundle of run limits and behaviour a session can switch to."""
 
@@ -2199,6 +2219,7 @@ class RuntimeConfig(BaseModel):
     stt: SttConfig = Field(default_factory=SttConfig)
     companion: CompanionConfig = Field(default_factory=CompanionConfig)
     assist: AssistConfig = Field(default_factory=AssistConfig)
+    autopilot: AutopilotConfig = Field(default_factory=AutopilotConfig)
     board: BoardConfig = Field(default_factory=BoardConfig)
     peers: PeersConfig = Field(default_factory=PeersConfig)
     subagents: SubagentsConfig = Field(default_factory=SubagentsConfig)

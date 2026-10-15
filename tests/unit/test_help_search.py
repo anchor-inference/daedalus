@@ -123,7 +123,7 @@ def test_the_settings_index_is_whole_and_names_real_configuration() -> None:
     known: set[str] = set()
     for name in ("model", "presets", "providers", "prompt", "vision", "tools", "mcp", "self_change", "limits", "balance", "scheduler",
                  "notifications", "compaction", "heartbeat", "asr", "stt", "companion", "terminals", "browser", "navigation", "telegram",
-                 "orchestrator", "dispatcher", "answer_language", "action_rules", "assist", "memory"):
+                 "orchestrator", "dispatcher", "answer_language", "action_rules", "assist", "autopilot", "memory"):
         known.update(describe_section(name))
     for field in raw["fields"]:
         assert field["section"] in sections, field["anchor"]

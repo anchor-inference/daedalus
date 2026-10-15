@@ -53,6 +53,13 @@ _SUMMARY_WRAP_RE = re.compile(r"</?compacted-turn[^>]*>")
 _NUDGE_MARKERS = ("[internal control", "tool repeatedly failed with the same error", "has been disabled for the rest of this run", "The run has reached its budget")
 
 
+def _autopilot_mark(metadata: Any) -> dict[str, str] | None:
+    mark = metadata.get("daedalus.autopilot") if isinstance(metadata, dict) else None
+    if not isinstance(mark, dict) or not mark.get("kind"):
+        return None
+    return {key: str(mark[key]) for key in ("kind", "label", "question") if mark.get(key)}
+
+
 def _looks_like_core_nudge(text: str) -> bool:
     head = text.lstrip()[:400]
     return any(marker in head for marker in _NUDGE_MARKERS)
@@ -140,6 +147,8 @@ def message_view(message: Message) -> dict[str, Any]:
         "delivery": delivery if isinstance(delivery, str) else None,
         # What the message answers (a report, an event line), as the operator chose it in the chat.
         "reply_to": message.metadata.get("daedalus.reply_to") if isinstance(message.metadata, dict) else None,
+        # A message autopilot sent on the operator's behalf (``kind``: continue, choice, answer), for the label.
+        "autopilot": _autopilot_mark(message.metadata) if message.role is MessageRole.user else None,
         # The operator's secrets attached to the message, by name and scope; never a value.
         "secrets": handed if isinstance(handed, list) else None,
         # A member's steps for the operator the host put in the chat, drawn as a card of their own.

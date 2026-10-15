@@ -3238,6 +3238,7 @@ class SessionManager:
         operator_words: Sequence[str] | None = None,
         reply_to: dict[str, Any] | None = None,
         secrets: Sequence[str] = (),
+        autopilot: dict[str, Any] | None = None,
         _provider_resume: tuple[str, str, str] | None = None,
     ) -> str:
         """Deliver input. Starts a run, or queues a follow-up when one is active.
@@ -3251,6 +3252,8 @@ class SessionManager:
         among a wake-up's events): compaction quotes them, and nothing else of the note.
         ``secrets`` names operator's secrets attached to the message: each becomes a line saying what the
         model may use and how, and the message carries the names for the app to draw.
+        ``autopilot`` marks a message autopilot sent (its kind and decision), which the app labels and
+        the continuation count reads (:mod:`daedalus.extensions.autopilot`).
         """
         # Whatever reaches a session — the operator's words, a staff member's report relayed, a wake-up — goes
         # in with each value the operator handed over put back as its placeholder. A password pasted into a
@@ -3260,6 +3263,8 @@ class SessionManager:
         if reply_to:
             # Rides with the operator's words on every copy of the message, so the app draws what it answers.
             words = {**words, "daedalus.reply_to": dict(reply_to)}
+        if autopilot:
+            words = {**words, "daedalus.autopilot": dict(autopilot)}
         state = await self.get_state(session_id)
         if state is None:
             raise KeyError(session_id)
@@ -6705,7 +6710,7 @@ def _image_refs_metadata(image_refs: Sequence[tuple[str, str]]) -> dict[str, Any
 # core places, or the one that opens the next turn, is written later from the queue item alone, so the item
 # has to carry it. It used to be dropped there: a message with a secret attached showed the host's note
 # about the secret as the operator's words and no chip.
-_DISPLAY_KEYS = ("daedalus.secrets", "daedalus.reply_to")
+_DISPLAY_KEYS = ("daedalus.secrets", "daedalus.reply_to", "daedalus.autopilot")
 
 
 def _queued_display(words: dict[str, Any]) -> dict[str, Any]:
@@ -6729,6 +6734,11 @@ def _merged_words(items: Sequence[dict[str, Any]]) -> dict[str, Any]:
     reply = (items[0].get("display") or {}).get("daedalus.reply_to") if items else None
     if reply:
         merged["daedalus.reply_to"] = reply
+    # Autopilot's mark only when every item is autopilot's: a message joined with the operator's own
+    # words is theirs, and labelling it would claim the operator's text was generated.
+    marks = [(item.get("display") or {}).get("daedalus.autopilot") for item in items]
+    if items and all(marks):
+        merged["daedalus.autopilot"] = marks[-1]
     return merged
 
 

@@ -66,6 +66,7 @@ from daedalus.doctor import DoctorContext, render_text, run_checks, summarize
 from daedalus.extensions import (
     api_action_rules,
     api_attempt_diagnostics,
+    api_autopilot,
     api_board,
     api_browsers,
     api_btw,
@@ -734,6 +735,8 @@ class SettingsBody(BaseModel):
     asr: dict[str, Any] | None = None
     assist: dict[str, Any] | None = None
     """The helpers around the operator's messages: the depth sort's model, the next-message guess and its allowance."""
+    autopilot: dict[str, Any] | None = None
+    """Autopilot: the master switch, the judge's model, the turns it may take after one message, its daily allowance."""
     notifications: dict[str, Any] | None = None
     """Where each kind of notification goes, quiet hours, the rate limits. The app saves it through
     ``/api/notifications/preferences``; it is here as well so the agent's SettingsChange can reach it,
@@ -1625,6 +1628,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_prompt_coach.register(api, app, auth)
     # A chat's side question (/btw): asked from the composer, answered in a window beside the chat.
     api_btw.register(api, app, auth)
+    api_autopilot.register(api, app, auth)
     api_goal_budget.register(api, app, auth)
     api_provider_holds.register(api, app, auth)
     api_knowledge.register(api, app, auth)
@@ -2356,6 +2360,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             "mode": state.metadata.get("mode") or "",
             "depth_next": state.metadata.get("depth_next") or "",
             "yagni": bool(state.metadata.get("yagni")),
+            "autopilot": await app.extensions["autopilot"].status(session_id, state) if "autopilot" in app.extensions else None,
             "usd_cap": state.metadata.get("usd_cap"),
             "brief": state.metadata.get("brief") or "",
             "spawned_by": state.metadata.get("spawned_by"),

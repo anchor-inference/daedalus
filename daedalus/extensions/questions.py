@@ -67,7 +67,7 @@ def takes_files(ask: Ask) -> bool:
     """Whether an answer to this request may bring files: a question whose asker is an agent session
     that can be handed them (a side question's session, the orchestrator's). A staff member's request
     and a permission go to a member working elsewhere, where a chat upload means nothing."""
-    return ask.kind == "question" and ask.origin in ("session", "orchestrator")
+    return ask.kind == "question" and ask.origin in ("session", "orchestrator") and not ask.detail.get("autopilot")
 
 
 def section_of(ask: Ask) -> str:
@@ -106,10 +106,11 @@ async def _view(app: Application, ask: Ask, names: dict[str, str], members: dict
 
 
 def _side_view(ask: Ask) -> dict[str, Any]:
-    """A side question as the list shows it: the agent of its session asks, and an answer may bring files."""
+    """A side question as the list shows it: the agent of its session asks, and an answer may bring files.
+    Autopilot's question is autopilot's, and its answer is a message, where a file has nowhere to go."""
     options = _options(ask)
-    return {**ask.view(), "project_name": "", "asker": "agent", "section": "questions", "options": options, "multi": False,
-            "host": False, "always": False, "always_server": "", "urgent": False, "files": True}
+    return {**ask.view(), "project_name": "", "asker": "autopilot" if ask.detail.get("autopilot") else "agent", "section": "questions",
+            "options": options, "multi": False, "host": False, "always": False, "always_server": "", "urgent": False, "files": takes_files(ask)}
 
 
 async def waiting(app: Application, project_id: str | None = None, *, session_id: str | None = None) -> list[dict[str, Any]]:
@@ -244,6 +245,14 @@ async def answer(
             answered = (await manager.asks.get(ask.id)) or ask
             result = {**base, "state": "answered", "applied": True, "delivered": True, "error": "", "ask": answered.view()}
             results.append(result)
+            pilot = app.extensions.get("autopilot")
+            if answered.detail.get("autopilot") and pilot is not None:
+                # Autopilot asked, not the agent: a chosen option sends the goal kept for it, words of the
+                # operator's own go in as their message. The agent never saw this question to be answered.
+                failed = await pilot.answered(answered, via=via)
+                result["delivered"] = not failed
+                result["error"] = failed
+                continue
             sides.setdefault(str(ask.session_id), []).append((answered, names, files, result))
             continue
         if team is None:

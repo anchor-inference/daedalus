@@ -228,6 +228,19 @@ a batch (JSON, or multipart with files as above) and hands the answers to the se
 a steer while it works, a new turn when it is idle — with the files in its inbox; `POST
 /api/sessions/{id}/asks/{ask_id}/dismiss` puts one aside without waking it. An `ask.side` event
 (`change`: opened, answered, withdrawn — with the agent's `reason` — or dismissed) redraws the list.
+
+An ordinary chat may have **autopilot** (`POST /api/sessions/{id}/autopilot` with `{"on"}`; `GET` the
+same, and the session's own view carries it as `autopilot`: on, the installation's `enabled`, whether
+the session may have it at all, and the turns `used` of those `allowed` since your last message). When
+one of its runs answers, one small call decides: go on (the next goal arrives as a user turn marked
+`autopilot` and the run starts, at most `autopilot.max_continuations` times after one message of
+yours), done (a notification), ask (a question in the session's list), or a choice of two to four ways
+forward — the same question with an option each, buttons on its notification and in Telegram. Only the
+labels leave the host; a tap sends that option's goal into that session, once, however many fronts
+answer it. Nothing is judged after a stopped or failed run, while a question waits, or once you wrote
+again. `GET /api/autopilot` is the day's spend against `autopilot.usd_per_day` and the day's verdicts.
+`GET /api/user-style` is the profile of how you write that the next-message guess learns from your own
+messages and that the guess, the prompt coach and autopilot read; `DELETE` forgets it.
 It sets its own alarms with `WakeMe` (in some minutes, at a moment, or on a cron at most every ten
 minutes) and is woken with the note, even mid-turn; you can leave it one too. `GET|POST
 /api/projects/{id}/wakeups` (`{"note", "in_minutes" | "at" | "cron"}`) and `DELETE …/wakeups/{id}` are

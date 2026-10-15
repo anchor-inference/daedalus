@@ -2477,6 +2477,9 @@ CREATE TABLE IF NOT EXISTS project_environments (
     setup_session_id TEXT NOT NULL DEFAULT '',
     started_at TEXT,
     finished_at TEXT,
+    updated_at TEXT NOT NULL
+);
+""")
 
 # How the operator writes, learned from their own messages a few at a time: one summary per tenant,
 # and the transcript position up to which their messages have been read into it.
@@ -2488,6 +2491,32 @@ CREATE TABLE IF NOT EXISTS user_style (
     learned INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL
 );
+""")
+
+# Autopilot: what the judge decided at the end of each run of a session with autopilot on. One row
+# per run, so a run is judged once; ``admission_key`` is the input receipt a continuation or an
+# answered choice is admitted under, written before the run is started, so a double tap or a replay
+# after a restart finds the receipt instead of sending a second turn. The options of a choice keep
+# their next goals here and nowhere the app reads.
+MIGRATIONS.append("""
+CREATE TABLE IF NOT EXISTS autopilot_decisions (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    run_id TEXT NOT NULL,
+    anchor_seq INTEGER NOT NULL DEFAULT 0,
+    state TEXT NOT NULL CHECK (state IN ('judging', 'skipped', 'abandoned', 'notified', 'asking', 'admitting', 'admitted', 'closed')),
+    verdict TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    detail_json TEXT NOT NULL DEFAULT '{}',
+    ask_id TEXT,
+    admission_key TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (session_id, run_id)
+);
+CREATE INDEX IF NOT EXISTS autopilot_decisions_by_session ON autopilot_decisions(session_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS autopilot_decisions_by_key ON autopilot_decisions(admission_key) WHERE admission_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS autopilot_decisions_by_ask ON autopilot_decisions(ask_id) WHERE ask_id IS NOT NULL;
 """)
 
 CACHE_PAGES = -65536
