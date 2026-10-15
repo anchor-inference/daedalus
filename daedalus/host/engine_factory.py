@@ -101,6 +101,23 @@ def refusal_text(decision: Any, hint: str | None = None) -> str:
     return f"refused by policy: {decision.reason} (rule {decision.rule}). This is not a question for the operator; do the task another way."
 
 
+STALE_TRIM_CHARS_PER_TOKEN = 4
+"""How ``tools.results.trim_window_share`` turns a window in tokens into the core's threshold in characters."""
+
+
+def stale_trim_batch_chars(config: RuntimeConfig, context_window: int) -> int:
+    """The trimmable excess a run must pile up before it trims: the configured batch, or the window's share.
+
+    A trim rewrites a result far back in the conversation, and the provider then writes everything
+    after it into its cache again, so a run should trim seldom and in large steps. A fixed batch
+    that suits a 128k window is a drip on a million-token one: there the share decides, and the
+    trims that remain are the few that cut a large slice of a view that has really grown.
+    """
+    results = config.tools.results
+    by_window = int(results.trim_window_share * max(0, int(context_window)) * STALE_TRIM_CHARS_PER_TOKEN)
+    return max(results.trim_batch_chars, by_window)
+
+
 def runtime_constants(config: RuntimeConfig, *, context_window: int, max_output_tokens: int, thinking: bool, mode: ModeConfig | None = None, max_advertised_tools: int = 0) -> Any:
     """``max_advertised_tools`` is the provider's cap on the number of tools in one request, 0 for none."""
     context_window = max(8_000, int(context_window))
@@ -162,7 +179,7 @@ def runtime_constants(config: RuntimeConfig, *, context_window: int, max_output_
         tool_result_stale_trim_enabled=True,
         tool_result_fresh_count=config.tools.results.fresh_count,
         tool_result_stale_max_chars=config.tools.results.stale_max_chars,
-        tool_result_stale_trim_batch_chars=config.tools.results.trim_batch_chars,
+        tool_result_stale_trim_batch_chars=stale_trim_batch_chars(config, context_window),
         tool_result_stale_trim_min_share=config.tools.results.trim_min_share,
     )
 
@@ -320,4 +337,4 @@ def build_engine(
     return engine
 
 
-__all__ = ["TENANT", "EngineDeps", "PolicyAdapter", "Role", "admitted_tools", "advertised_tools", "build_engine", "refusal_text", "runtime_constants"]
+__all__ = ["TENANT", "EngineDeps", "PolicyAdapter", "Role", "admitted_tools", "advertised_tools", "build_engine", "refusal_text", "runtime_constants", "stale_trim_batch_chars"]

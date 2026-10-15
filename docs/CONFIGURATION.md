@@ -43,6 +43,8 @@ stale_max_chars = 2000       # head kept of an older result longer than this
 trim_batch_chars = 40000     # trimmable excess that must build up before any trimming happens
 trim_min_share = 0.25        # a trim must save this share of the request: a cut far back makes
                              # the provider write the whole conversation into its cache again
+trim_window_share = 0.075    # and this share of the model's window (4 characters a token), so a long
+                             # window trims seldom and in large steps
 
 [tools.groups.browser]       # how a group of tools reaches a run: eager (always in the tool list),
 load = "lazy"                # auto (while it fits), lazy (one catalogue line; the agent loads it with

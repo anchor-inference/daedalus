@@ -169,7 +169,7 @@ async def test_a_small_file_is_returned_whole_with_no_header(tmp_path: Path) -> 
 
 def test_the_result_budget_defaults_are_the_documented_ones() -> None:
     results = RuntimeConfig().tools.results
-    assert (results.fresh_count, results.stale_max_chars, results.trim_batch_chars, results.trim_min_share) == (6, 2_000, 40_000, 0.25)
+    assert (results.fresh_count, results.stale_max_chars, results.trim_batch_chars, results.trim_min_share, results.trim_window_share) == (6, 2_000, 40_000, 0.25, 0.075)
 
 
 def test_the_run_is_built_with_stale_trimming_on() -> None:

@@ -747,6 +747,14 @@ class ResultToolsConfig(BaseModel):
     saved 42,000 characters of 1.6 million and was served only the system prompt from the cache —
     repaid after hundreds of calls, if ever. At 0.25 a trim pays back within about fifty; 0 leaves
     only the batch threshold."""
+    trim_window_share: float = Field(default=0.075, ge=0.0, le=1.0)
+    """The trimmable excess must also reach this share of the model's context window, counted at four
+    characters a token: 294,000 characters on a 980k window, and no more than ``trim_batch_chars`` on
+    128k. The share rule alone let a run that keeps reading long documents trim again each time the
+    stale excess grew back to a quarter of a small view: a reviewer on a 980k window, never above 150k
+    tokens, trimmed seven times in 68 calls and each time the provider wrote 40–60k tokens into its
+    cache again. Replayed over 24 recent runs, this threshold cut the trims from 18 to 4 at the same
+    weighted price, and that run to one; 0 leaves only the two rules above."""
 
 
 class JobsToolsConfig(BaseModel):
