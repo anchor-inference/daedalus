@@ -1207,6 +1207,18 @@ export type ChannelHealth = {
   level: "ok" | "warn";
 };
 
+/** One step of a member's newest attempt and why it stands there (`daedalus/harness/conditions.py`).
+ *  A `false` with a `deadline` is a wait still running; without one, a step that failed. */
+export type MemberCondition = {
+  name: "prepared" | "spawned" | "authenticated" | "ready" | "first_output" | "reported";
+  status: "true" | "false" | "unknown";
+  reason: "done" | "waiting" | "timed_out" | "pending" | "not_reached" | "reported" | "turn_ended" | "ended" | "not_yet";
+  message: string;
+  since: string | null;
+  deadline: string | null;
+  params: { took_s?: number | null; elapsed_s?: number | null; allowed_s?: number | null; last_signal_at?: string | null; outcome?: string; state?: string; end_reason?: string };
+};
+
 /** `GET /api/staff/{id}/session`: the member's live session as its runtime knows it. */
 export type StaffSessionView = {
   staff: { id: string; name: string; harness: string; project_id: string };
@@ -1215,6 +1227,8 @@ export type StaffSessionView = {
   launch?: { harness: string; model: string; effort: string; agent: string; permission_mode: string; env: string | null; version: string | null; launch_id: string | null; companion_terminal_id: string | null; worktree: string | null; branch: string | null; task_id: string | null };
   channel?: Record<string, unknown>;
   health?: ChannelHealth | null;
+  /** The steps of the newest attempt, of the last session when none is live. */
+  conditions?: MemberCondition[];
   requests?: Ask[];
   /** The operator's standing grants to the member ("Always"), as its CLI's allow rules. */
   rules?: StandingRule[];

@@ -4122,6 +4122,22 @@ button.staff-row:hover { background: var(--surface-2); }
 .staff-health.warn .ic { color: var(--warn); }
 .staff-health-part.warn { color: var(--warn); }
 .staff-health.compact { margin-top: 2px; }
+/* The step a member's attempt is stuck at or was stopped at: amber while its clock still runs, red
+   once it ran out, so a member stopped at a deadline reads as stopped, not as quietly "exited". */
+.staff-cond { display: flex; align-items: flex-start; gap: 10px; margin-top: 2px; font-size: var(--fs-12); color: var(--warn); min-width: 0; }
+.staff-cond.bad { color: var(--bad); }
+.staff-cond .ic { flex: none; margin-top: 1px; }
+.staff-cond-text { min-width: 0; overflow-wrap: anywhere; }
+.staff-cond-text b { font-weight: 600; }
+.staff-cond-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: var(--fs-13); }
+.staff-cond-item { display: grid; grid-template-columns: 8px minmax(96px, auto) 1fr; align-items: baseline; gap: 8px; }
+.staff-cond-mark { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-3); align-self: center; }
+.staff-cond-item.ok .staff-cond-mark { background: var(--ok); }
+.staff-cond-item.wait .staff-cond-mark { background: var(--warn); }
+.staff-cond-item.bad .staff-cond-mark { background: var(--bad); }
+.staff-cond-item.bad .staff-cond-why { color: var(--bad); }
+.staff-cond-item.wait .staff-cond-why { color: var(--warn); }
+.staff-cond-why { color: var(--fg-2); min-width: 0; overflow-wrap: anywhere; }
 .staff-aside { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--line); background: var(--surface-1); }
 .staff-panel { display: flex; flex-direction: column; min-height: 0; height: 100%; }
 /* Five tabs in Russian are wider than the narrowest column (280 px): the row scrolls sideways, as

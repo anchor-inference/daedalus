@@ -139,3 +139,36 @@ async def test_a_chats_own_project_has_no_team(settings: Settings, config: Runti
             assert refused.status_code == 400 and "chat's own project" in refused.json()["detail"]
     finally:
         await manager.close()
+
+
+async def test_a_member_the_host_stopped_shows_the_step_and_why(settings: Settings, config: RuntimeConfig, db: Database, tmp_path: Path) -> None:
+    """With no live session left, the card and the staff view read the last session's attempt: a
+    member stopped at its first-output deadline says so instead of a bare "off"."""
+    manager = SessionManager(settings, config, db=db)
+    await manager.start()
+    repo = tmp_path / "bakery"
+    repo.mkdir()
+    try:
+        async with _client(settings, config, db, manager) as client:
+            pid = (await client.post("/api/projects", headers=HEADERS, json={"name": "Bakery", "folders": [{"path": str(repo)}]})).json()["id"]
+            cleo = (await client.post(f"/api/projects/{pid}/staff", headers=HEADERS, json={"name": "Cleo", "harness": "claude", "isolation": "shared"})).json()
+            assert (await client.get(f"/api/staff/{cleo['id']}", headers=HEADERS)).json()["conditions"] == []
+            session = await manager.staff.claim_session(cleo["id"], kind="cli")
+            await db.execute("INSERT INTO board_tasks(id,title,status,priority,project_id,created_at,updated_at)"
+                             " VALUES ('task','Menu','doing',3,?,'2026-10-14','2026-10-14')", (pid,))
+            await db.execute("INSERT INTO execution_attempts(id,task_id,contract_revision,host_generation,fence_token_hash,state,"
+                             "created_at,updated_at,staff_session_id) VALUES ('attempt','task',1,1,'x','cancelled',"
+                             "'2026-10-14T18:10:03+00:00','2026-10-14T18:15:08+00:00',?)", (session.id,))
+            for phase, start, deadline, outcome in (("prepare", "18:10:03", "18:12:03", "completed"),
+                                                    ("first_output", "18:10:05", "18:15:05", "timed_out")):
+                await db.execute("INSERT INTO attempt_phase_clocks(attempt_id,phase,started_at,deadline_at,outcome)"
+                                 " VALUES ('attempt',?,?,?,?)", (phase, f"2026-10-14T{start}+00:00", f"2026-10-14T{deadline}+00:00", outcome))
+            await manager.staff.end_session(session.id, "the host stopped it")
+            row = next(m for m in (await client.get(f"/api/projects/{pid}/staff", headers=HEADERS)).json()["staff"] if m["id"] == cleo["id"])
+            assert row["status"] == "off"
+            first = next(c for c in row["conditions"] if c["name"] == "first_output")
+            assert (first["status"], first["reason"], first["params"]["allowed_s"]) == ("false", "timed_out", 300)
+            view = (await client.get(f"/api/staff/{cleo['id']}/session", headers=HEADERS)).json()
+            assert view["session"] is None and [c["name"] for c in view["conditions"]] == ["prepared", "spawned", "ready", "first_output", "reported"]
+    finally:
+        await manager.close()

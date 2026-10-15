@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from daedalus.extensions.staff import Team
 from daedalus.extensions.staff_kept import how_kept
+from daedalus.harness import conditions as member_conditions
 from daedalus.harness.capabilities import CAPABILITIES
 from daedalus.stores.harness import HarnessStore
 from daedalus.stores.staff import Staff, StaffBusy, StaffError
@@ -101,6 +102,11 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         session = await manager.staff.live(staff_id)
         out: dict[str, Any] = {"staff": member.view(), "session": session.view() if session is not None else None, "rules": await manager.staff.allow_rules(staff_id)}
         out["kept"] = await kept_of(member)
+        # The last session's steps when none is live, so the view of a member the host stopped says why.
+        shown = session or next(iter(await manager.staff.sessions(staff_id, limit=1)), None)
+        out["conditions"] = [c.view() for c in await member_conditions.load(
+            manager.db, staff_session_id=shown.id, session_status=shown.status, session_status_at=shown.status_at,
+            end_reason=shown.end_reason)] if shown is not None else []
         if session is None:
             return out
         caps = CAPABILITIES.get(member.harness)

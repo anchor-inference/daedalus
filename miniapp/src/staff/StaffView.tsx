@@ -35,6 +35,7 @@ import { TerminalView } from "../terminal/view";
 import type { TerminalState } from "../terminal/instance";
 import { errorText } from "../ui";
 import { FeedView, useTurns } from "./FeedView";
+import { ConditionLine } from "./conditions";
 import { HealthLine } from "./health";
 import { BrowserTab } from "../browser/BrowserPanel";
 import { deviceSaving, useBrowsers } from "../browser/data";
@@ -227,6 +228,7 @@ export function StaffView({ projectId, staffId, wide, toast, onBack }: { project
             </button>
           )}
           <HealthLine health={view?.health ?? member.health ?? null} compact />
+          <ConditionLine conditions={view?.conditions ?? member.conditions} />
         </StaffHeader>
         <div ref={bodyRef} className="chat-body">
           <div className="chat-main">
@@ -313,6 +315,7 @@ export function StaffView({ projectId, staffId, wide, toast, onBack }: { project
       >
         {/* A phone's header keeps only what is wrong; the whole line is in the sheet beside. */}
         <HealthLine health={view?.health ?? member.health ?? null} compact={!wide} />
+        <ConditionLine conditions={view?.conditions ?? member.conditions} />
       </StaffHeader>
       <div ref={bodyRef} className={`chat-body ${wide && side ? "with-staff-aside" : ""}`} data-aside-width={asideWidth ?? "auto"} style={asideWidth != null ? ({ "--staff-aside-w": `${asideWidth}px` } as CSSProperties) : undefined}>
         <div className="chat-main">

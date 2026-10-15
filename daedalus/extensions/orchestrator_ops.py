@@ -26,6 +26,7 @@ from daedalus.extensions.plugins import PluginRefused, PluginRegistry
 from daedalus.extensions.task_contract import split_checks
 from daedalus.extensions.watch_commands import WatchCommands
 from daedalus.extensions.watches import WatchRefused
+from daedalus.harness import conditions as member_conditions
 from daedalus.host import prompts
 from daedalus.host.peek import LocalFolderAccess, PeekRefused
 from daedalus.staff_runtime import LiveSession
@@ -341,6 +342,13 @@ async def team(orch: Orchestrators, project: Project, session_id: str, *, staff:
             # The same verdict the operator sees on the member's card, so the two never disagree
             # about whether the member can hear them.
             lines.append((await orch.team.health(LiveSession(member, s))).line(datetime.now(UTC)))
+        if s is sessions[0]:
+            # The step the newest attempt is stuck at or was stopped at, in the words the card uses.
+            blocked = member_conditions.line(await member_conditions.load(
+                manager.db, staff_session_id=s.id, session_status=s.status, session_status_at=s.status_at,
+                end_reason=s.end_reason))
+            if blocked:
+                lines.append(blocked)
     if orch.team is not None:
         for entry in orch.team.queue.waiting_for(member.id):
             lines.append(f"queued: task {entry['task_id']} at {entry['position']} ({entry['reason']}: {entry['detail']})")

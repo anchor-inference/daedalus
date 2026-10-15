@@ -7,7 +7,8 @@
 // (`HarnessCapabilities`), never from the harness's name: a CLI added to the table is drawn right
 // without a line here.
 
-import type { Ask, ChannelHealth, HarnessCapabilities, MessageState, StaffMessage, StaffTurn } from "../api";
+import type { Ask, ChannelHealth, HarnessCapabilities, MemberCondition, MessageState, StaffMessage, StaffTurn } from "../api";
+import { clock, duration } from "../format";
 import { DICT, t } from "../i18n";
 
 /** The order a message moves in. A receipt never goes back: an event that arrives late (a replay
@@ -245,6 +246,46 @@ export function healthParts(health: ChannelHealth | null | undefined): { key: st
   if (health.last_message?.state === "failed") parts.push({ key: "staff.health.failed", warn: true });
   else if (health.last_acknowledged_at) parts.push({ key: "staff.health.accepted", at: health.last_acknowledged_at, warn: false });
   return parts;
+}
+
+/** The condition to read first: a failed step before a waiting one, since a failure is final and a
+ *  wait may still resolve. Null when nothing stands in the way. Mirrors `blocking` on the host. */
+export function blockingCondition(conditions: MemberCondition[] | null | undefined): MemberCondition | null {
+  const list = conditions ?? [];
+  return list.find((c) => c.status === "false" && !c.deadline) ?? list.find((c) => c.status === "false") ?? null;
+}
+
+/** Whether a condition is fine, waiting, failed or not known, for its colour. */
+export function conditionTone(c: MemberCondition): "ok" | "wait" | "bad" | "unknown" {
+  if (c.status === "true") return "ok";
+  if (c.status === "unknown") return "unknown";
+  return c.deadline ? "wait" : "bad";
+}
+
+/** "none for 5m, deadline 08:12": why a step stands where it does, with its numbers. The step's own
+ *  name is drawn beside it. `now` keeps a running wait's age current between reads. */
+export function conditionText(c: MemberCondition, now = Date.now()): string {
+  const p = c.params ?? {};
+  switch (c.reason) {
+    case "done":
+      return p.took_s != null ? t("staff.cond.done.in", { took: duration(p.took_s * 1000) }) : t("staff.cond.done");
+    case "waiting": {
+      const since = c.since ? Date.parse(c.since) : NaN;
+      const elapsed = Number.isFinite(since) ? Math.max(0, now - since) : (p.elapsed_s ?? 0) * 1000;
+      return t(`staff.cond.waiting.${c.name}`, { elapsed: duration(elapsed), deadline: clock(c.deadline) });
+    }
+    case "timed_out": {
+      const text = t(`staff.cond.timed_out.${c.name}`, { allowed: duration((p.allowed_s ?? 0) * 1000), at: clock(c.since) });
+      // Signals up to the deadline with no output are what tells a hung CLI from a dead terminal.
+      return c.name === "first_output" && p.last_signal_at ? `${text} · ${t("staff.cond.signal", { at: clock(p.last_signal_at) })}` : text;
+    }
+    case "reported":
+      return t("staff.cond.reported", { outcome: t(`staff.cond.outcome.${p.outcome ?? "complete"}`) });
+    case "ended":
+      return t("staff.cond.ended");
+    default:
+      return t(`staff.cond.${c.reason}`);
+  }
 }
 
 /** Where a CLI's status comes from, in the reader's words: the table's code where the app has a word

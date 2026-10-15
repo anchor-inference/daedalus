@@ -132,6 +132,7 @@ from daedalus.extensions.pet import normalize_reaction
 from daedalus.extensions.push import PushRefused, PushService
 from daedalus.extensions.review import ReviewRefused
 from daedalus.extensions.services import SHARE_COOKIE_PREFIX, SHARE_MODES, pid_alive
+from daedalus.harness import conditions as member_conditions
 from daedalus.harness.capabilities import CAPABILITIES
 from daedalus.host import capabilities, component_install, launcher_bridge
 from daedalus.host import components as component_list
@@ -1679,12 +1680,25 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     # -- staff: the named members of a project's team ------------------------------------------
 
-    def staff_row(member: Staff, live: Any, sessions: int, health: dict[str, Any] | None = None) -> dict[str, Any]:
+    def staff_row(member: Staff, live: Any, sessions: int, health: dict[str, Any] | None = None,
+                  conditions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         queue = getattr(app.extensions.get("staff"), "queue", None)
         # What the member waits to start, each with why: "queued" alone is the question the
         # operator would then have to ask.
         queued = queue.waiting_for(member.id) if queue is not None else []
-        return {**member.view(), "live": live.view() if live is not None else None, "status": live.status if live is not None else "off", "sessions": sessions, "queued": queued, "health": health}
+        return {**member.view(), "live": live.view() if live is not None else None, "status": live.status if live is not None else "off",
+                "sessions": sessions, "queued": queued, "health": health, "conditions": conditions or []}
+
+    async def staff_conditions(member: Staff, live: Any) -> list[dict[str, Any]]:
+        """The steps of the member's newest attempt, each with why it stands where it does. Read from
+        the last session when none is live: a member the host stopped is exactly the one whose card
+        must say at which step and why, and that member has no live session left."""
+        session = live or next(iter(await manager.staff.sessions(member.id, limit=1)), None)
+        if session is None:
+            return []
+        found = await member_conditions.load(manager.db, staff_session_id=session.id, session_status=session.status,
+                                             session_status_at=session.status_at, end_reason=session.end_reason)
+        return [c.view() for c in found]
 
     async def staff_health(member: Staff, session: Any) -> dict[str, Any] | None:
         """Whether the host still hears a working member, for its card; nothing without a live session."""
@@ -1754,7 +1768,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 "orchestrator": orchestrator.enabled,
                 "folders": [{"id": f.id, "path": str(f.path), "label": f.label, "env": f.env, "is_git": f.is_git, "readonly": f.readonly} for f in project.folders],
             },
-            "staff": [staff_row(m, live.get(m.id), counts.get(m.id, 0), await staff_health(m, live.get(m.id))) for m in members],
+            "staff": [staff_row(m, live.get(m.id), counts.get(m.id, 0), await staff_health(m, live.get(m.id)),
+                                await staff_conditions(m, live.get(m.id))) for m in members],
             "queue": queue.queue(project_id) if (queue := getattr(app.extensions.get("staff"), "queue", None)) is not None else [],
             "counts": {"staff": sum(1 for m in members if m.active), "working": sum(1 for s in live.values() if s.status in ACTIVE_STATUSES)},
             "choices": {
@@ -1799,7 +1814,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     async def get_staff(staff_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         member = await staff_member(staff_id)
         live = await manager.staff.live(staff_id)
-        return staff_row(member, live, len(await manager.staff.sessions(staff_id, limit=500)), await staff_health(member, live))
+        return staff_row(member, live, len(await manager.staff.sessions(staff_id, limit=500)), await staff_health(member, live),
+                         await staff_conditions(member, live))
 
     @api.patch("/api/staff/{staff_id}")
     async def patch_staff(staff_id: str, body: StaffPatch, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

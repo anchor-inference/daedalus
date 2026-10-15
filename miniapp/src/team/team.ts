@@ -2,7 +2,7 @@
 // makes from them — which executor can be chosen and why not, what a status is called, what branch a
 // worktree will be given. Pure, so each one is tested without a browser.
 
-import type { ChannelHealth } from "../api";
+import type { ChannelHealth, MemberCondition } from "../api";
 
 export const HARNESSES = ["daedalus", "claude", "codex", "grok", "opencode", "pi", "cursor"] as const;
 export type Harness = (typeof HARNESSES)[number];
@@ -73,6 +73,8 @@ export type Staff = {
   health?: ChannelHealth | null;
   /** The member's own runtime while the project's route runs it on another, with why; absent or null on its own. */
   route_home?: { harness: string; model: string; reason?: string } | null;
+  /** The steps of the member's newest attempt, each with why; of its last session when none is live. */
+  conditions?: MemberCondition[];
 };
 
 export type TeamFolder = { id: string; path: string; label: string; env: Env; is_git: boolean; readonly: boolean };

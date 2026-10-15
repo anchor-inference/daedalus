@@ -2396,6 +2396,8 @@ class FocusStub:
         naya = next(m for m in self.team.staff if m["id"] == "st-naya")
         naya["live"].update(terminal_id="tm-naya", status_at=at(minutes=2))
         naya["health"] = health(at, tools="missing", silent=True)
+        ira["conditions"] = conditions(at, now)
+        naya["conditions"] = conditions(at, now, waiting=True)
         self.messages["st-ira"] = [
             {"id": "mi3", "staff_id": "st-ira", "staff_session_id": "ss-ira", "origin": "orchestrator", "text": words["ira.queued"], "mode": "after_turn", "state": "queued", "attempts": 0, "created_at": at(minutes=1), "updated_at": at(minutes=1), "error": ""},
             {"id": "mi2", "staff_id": "st-ira", "staff_session_id": "ss-ira", "origin": "operator", "text": words["ira.sent"], "mode": "now", "state": "submitted", "attempts": 1, "created_at": at(minutes=4), "updated_at": at(minutes=4), "error": ""},
@@ -2434,7 +2436,7 @@ class FocusStub:
                   "worktree": ira["live"]["worktree_path"], "branch": "agent/ira/checkout", "task_id": "t-checkout"}
         self.staff_views["st-ira"] = {
             "session": {"staff": {"id": "st-ira", "name": "Ira", "harness": "claude", "project_id": pid}, "session": {**ira["live"], "cli_session_id": "7c1e2f4a-claude-session"},
-                        "capabilities": CAPABILITIES["claude"], "launch": launch, "channel": {"team_tools": "connected"}, "health": ira["health"], "requests": [permission],
+                        "capabilities": CAPABILITIES["claude"], "launch": launch, "channel": {"team_tools": "connected"}, "health": ira["health"], "conditions": ira["conditions"], "requests": [permission],
                         "usage": {"input_tokens": 412000, "output_tokens": 31000, "cost_usd": None, "window_used_pct": None, "source": "subscription",
                                   "context_tokens": 386000, "context_window": None, "windows": [], "replies": 3, "at": at(minutes=20)}},
             "turns": turns, "events": events, "changes": changes,
@@ -2442,7 +2444,7 @@ class FocusStub:
         naya_launch = {**launch, "harness": "opencode", "model": "", "permission_mode": "", "version": "1.18.23", "launch_id": "l-naya", "worktree": None, "branch": None, "task_id": "t-bot"}
         self.staff_views["st-naya"] = {
             "session": {"staff": {"id": "st-naya", "name": "Naya", "harness": "opencode", "project_id": pid}, "session": {**naya["live"], "cli_session_id": "ses_naya"},
-                        "capabilities": CAPABILITIES["opencode"], "launch": naya_launch, "channel": {"team_tools": "missing"}, "health": naya["health"], "requests": [], "usage": None},
+                        "capabilities": CAPABILITIES["opencode"], "launch": naya_launch, "channel": {"team_tools": "missing"}, "health": naya["health"], "conditions": naya["conditions"], "requests": [], "usage": None},
             "turns": turns[:2], "events": [], "changes": {"files": [], "added": 0, "removed": 0, "untracked": [], "detail": "no worktree of its own"},
         }
         return permission
@@ -2775,6 +2777,23 @@ def health(at, *, tools: str, silent: bool = False) -> dict:  # type: ignore[no-
         "silent_s": 540 if silent else 40, "silence_after_s": 300, "silent": silent, "last_message": {"id": "mi2", "state": "submitted"}, "last_acknowledged_at": at(minutes=25),
         "problems": problems, "level": "warn" if problems else "ok",
     }
+
+
+def conditions(at, now: datetime, *, waiting: bool = False) -> list[dict]:  # type: ignore[no-untyped-def]
+    """``daedalus/harness/conditions.py``'s steps for an invented member: all through, or waiting
+    four minutes for its first output with a minute left before the host gives up."""
+    def step(name: str, start: float, took: int) -> dict:
+        return {"name": name, "status": "true", "reason": "done", "message": f"{name}: done", "since": at(minutes=start, seconds=-took),
+                "deadline": None, "params": {"took_s": took}}
+    steps = [step("prepared", 58, 1), step("spawned", 58, 2), step("ready", 58, 3)]
+    if waiting:
+        steps.append({"name": "first_output", "status": "false", "reason": "waiting", "message": "first_output: no output yet",
+                      "since": at(minutes=4), "deadline": (now + timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                      "params": {"elapsed_s": 240, "allowed_s": 300, "last_signal_at": at(seconds=30)}})
+    else:
+        steps.append(step("first_output", 57, 9))
+    steps.append({"name": "reported", "status": "unknown", "reason": "not_yet", "message": "reported: not yet", "since": None, "deadline": None, "params": {}})
+    return steps
 
 
 def _caps(harness: str, label: str, channel: str, channel_label: str, steer: str, permissions: str, team_tools: str, tested: tuple[str, str], major: int) -> dict:

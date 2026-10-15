@@ -17,6 +17,7 @@ import { StaffSheet } from "./StaffSheet";
 import { Setups } from "./setups";
 import { HARNESS_NAMES, Staff, Team, statusTone } from "./team";
 import { firstWait, waitKey } from "../project/focus";
+import { ConditionLine } from "../staff/conditions";
 import { HealthLine } from "../staff/health";
 
 export function TeamPage({ projectId, toast, back }: { projectId: string; toast: (text: string) => void; back?: string | null }) {
@@ -142,6 +143,7 @@ function StaffRow({ member, team, spend, onOpen }: { member: Staff; team: Team; 
         </div>
         <HealthLine health={member.health ?? null} compact />
         <RouteLine member={member} />
+        <ConditionLine conditions={member.conditions} />
         {/* On a phone the status moves under the name, so a long one never squeezes the name to nothing. */}
         <div className="staff-status-inline">{status}</div>
       </div>

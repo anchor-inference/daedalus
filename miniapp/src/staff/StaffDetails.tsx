@@ -11,6 +11,7 @@ import { duration, relTimeLong, shortDateTime, tokens, usd } from "../format";
 import { DICT, plural, t } from "../i18n";
 import { HarnessBadge } from "../team/parts";
 import { HARNESS_NAMES, type Staff } from "../team/team";
+import { ConditionList } from "./conditions";
 import { contextFill, conversationCounts, hasSpend, keptWords, sessionAge, windowName } from "./details";
 import { turnFacts } from "./model";
 
@@ -54,6 +55,7 @@ export function StaffDetails({ member, view, turns, now = Date.now() }: { member
   const facts = turnFacts(turns, session?.status_at, now);
   const counts = conversationCounts(turns);
   const health = view?.health ?? member.health ?? null;
+  const conditions = view?.conditions ?? member.conditions ?? [];
   const notReported = t("staff.details.notreported", { cli });
   const status = session ? session.status : member.status;
   return (
@@ -88,6 +90,12 @@ export function StaffDetails({ member, view, turns, now = Date.now() }: { member
           </>
         )}
       </Section>
+
+      {conditions.length > 0 && (
+        <Section ids={ids} id="staff-conditions" icon="list" label={t("staff.cond.title")}>
+          <ConditionList conditions={conditions} now={now} />
+        </Section>
+      )}
 
       <Section ids={ids} id="staff-context" icon="braces" label={t("session.context")} aside={fill?.pct != null ? `${fill.pct}%` : undefined}>
         {fill ? (
