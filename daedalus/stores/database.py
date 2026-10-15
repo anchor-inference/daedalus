@@ -2535,6 +2535,52 @@ CREATE TABLE IF NOT EXISTS quota_samples (
 CREATE INDEX IF NOT EXISTS quota_samples_by_time ON quota_samples(sampled_at);
 """)
 
+# A staff session may be ``suspended``: its idle CLI stopped to free memory, its native session kept
+# for the next launch. The status is a column constraint, so the table is rebuilt; foreign keys are
+# off for the copy, since a DROP with them on would cascade every message, request and attempt that
+# names a session.
+MIGRATIONS.append(("""
+CREATE TABLE staff_sessions_rebuilt (
+    id TEXT PRIMARY KEY,
+    staff_id TEXT NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('daedalus', 'cli')),
+    session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+    terminal_id TEXT,
+    cli_session_id TEXT,
+    transcript_ref TEXT,
+    task_id TEXT REFERENCES board_tasks(id) ON DELETE SET NULL,
+    status TEXT NOT NULL DEFAULT 'starting' CHECK (status IN ('starting', 'working', 'turn_done_unseen', 'idle', 'question', 'permission', 'error', 'exited', 'no_signal', 'suspended')),
+    waiting_for TEXT NOT NULL DEFAULT '',
+    status_at TEXT NOT NULL,
+    last_signal_at TEXT,
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    end_reason TEXT NOT NULL DEFAULT '',
+    predecessor_id TEXT REFERENCES staff_sessions(id) ON DELETE SET NULL,
+    folder_id TEXT REFERENCES project_folders(id) ON DELETE SET NULL,
+    worktree_path TEXT,
+    branch TEXT,
+    base_ref TEXT,
+    pause_requested INTEGER NOT NULL DEFAULT 0,
+    team_token_hash TEXT NOT NULL DEFAULT '',
+    usage_json TEXT NOT NULL DEFAULT '{}',
+    launch_cwd TEXT
+);
+INSERT INTO staff_sessions_rebuilt(id, staff_id, kind, session_id, terminal_id, cli_session_id, transcript_ref, task_id,
+                                   status, waiting_for, status_at, last_signal_at, started_at, ended_at, end_reason,
+                                   predecessor_id, folder_id, worktree_path, branch, base_ref, pause_requested,
+                                   team_token_hash, usage_json, launch_cwd)
+SELECT id, staff_id, kind, session_id, terminal_id, cli_session_id, transcript_ref, task_id,
+       status, waiting_for, status_at, last_signal_at, started_at, ended_at, end_reason,
+       predecessor_id, folder_id, worktree_path, branch, base_ref, pause_requested,
+       team_token_hash, usage_json, launch_cwd
+FROM staff_sessions;
+DROP TABLE staff_sessions;
+ALTER TABLE staff_sessions_rebuilt RENAME TO staff_sessions;
+CREATE UNIQUE INDEX staff_sessions_live ON staff_sessions(staff_id) WHERE ended_at IS NULL;
+CREATE INDEX staff_sessions_by_session ON staff_sessions(session_id);
+""", True))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

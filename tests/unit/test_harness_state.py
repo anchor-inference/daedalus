@@ -12,7 +12,7 @@ import pytest
 from daedalus.harness.contract import EventKind, ScreenClass, StaffEvent
 from daedalus.harness.state import OpenRequest, StaffState, StateContext, Transition, next_state
 
-S, W, D, Id, Q, P, E, X, N = (
+S, W, D, Id, Q, P, E, X, N, Su = (
     StaffState.STARTING,
     StaffState.WORKING,
     StaffState.TURN_DONE_UNSEEN,
@@ -22,46 +22,48 @@ S, W, D, Id, Q, P, E, X, N = (
     StaffState.ERROR,
     StaffState.EXITED,
     StaffState.NO_SIGNAL,
+    StaffState.SUSPENDED,
 )
-ORDER = (S, W, D, Id, Q, P, E, X, N)
+ORDER = (S, W, D, Id, Q, P, E, X, N, Su)
 
 NOTHING_OPEN = StateContext()
 FIRST_PROMPT = StateContext(first_prompt_pending=True)
 QUESTION_OPEN = StateContext(open_requests=(OpenRequest("question", "which colour?"),))
 PERMISSION_OPEN = StateContext(open_requests=(OpenRequest("permission", "npm install grammy"),))
 
-# (case name, event kind, payload, context): targets for S, W, D, Id, Q, P, E, X, N.
+# (case name, event kind, payload, context): targets for S, W, D, Id, Q, P, E, X, N, Su. A suspended
+# session is not running, so nothing moves it: the host's own launch sets it starting.
 TABLE: list[tuple[str, EventKind, dict[str, str], StateContext, tuple[StaffState, ...]]] = [
-    ("ready", EventKind.READY, {}, NOTHING_OPEN, (Id, W, D, Id, Q, P, E, X, N)),
-    ("ready, first prompt pending", EventKind.READY, {}, FIRST_PROMPT, (S, W, D, Id, Q, P, E, X, N)),
-    ("prompt acknowledged", EventKind.PROMPT_ACKNOWLEDGED, {}, NOTHING_OPEN, (W, W, W, W, W, W, W, X, W)),
-    ("prompt acknowledged, a question open", EventKind.PROMPT_ACKNOWLEDGED, {}, QUESTION_OPEN, (W, W, W, W, Q, P, W, X, W)),
-    ("turn started", EventKind.TURN_STARTED, {}, NOTHING_OPEN, (W, W, W, W, Q, P, E, X, W)),
-    ("tool started", EventKind.TOOL_STARTED, {}, NOTHING_OPEN, (W, W, W, W, Q, P, E, X, W)),
-    ("tool finished", EventKind.TOOL_FINISHED, {}, NOTHING_OPEN, (W, W, W, W, Q, P, E, X, W)),
-    ("activity", EventKind.ACTIVITY, {}, NOTHING_OPEN, (S, W, D, Id, Q, P, E, X, W)),
-    ("permission requested", EventKind.PERMISSION_REQUESTED, {"summary": "npm install grammy"}, NOTHING_OPEN, (P, P, P, P, P, P, P, X, P)),
-    ("question asked", EventKind.QUESTION_ASKED, {"summary": "which colour?"}, NOTHING_OPEN, (Q, Q, Q, Q, Q, P, Q, X, Q)),
-    ("request resolved, nothing open", EventKind.REQUEST_RESOLVED, {}, NOTHING_OPEN, (S, W, D, Id, W, W, E, X, N)),
-    ("request resolved, a question still open", EventKind.REQUEST_RESOLVED, {}, QUESTION_OPEN, (S, W, D, Id, Q, Q, E, X, N)),
-    ("request resolved, a permission still open", EventKind.REQUEST_RESOLVED, {}, PERMISSION_OPEN, (S, W, D, Id, P, P, E, X, N)),
-    ("turn completed", EventKind.TURN_COMPLETED, {}, NOTHING_OPEN, (D, D, D, Id, D, D, E, X, D)),
-    ("turn completed, a permission open", EventKind.TURN_COMPLETED, {}, PERMISSION_OPEN, (D, D, D, Id, Q, P, E, X, D)),
-    ("turn cancelled", EventKind.TURN_CANCELLED, {}, NOTHING_OPEN, (Id, Id, D, Id, Id, Id, E, X, Id)),
-    ("turn failed", EventKind.TURN_FAILED, {"failure": "rate limit"}, NOTHING_OPEN, (E, E, E, E, E, E, E, X, E)),
-    ("seen", EventKind.SEEN, {}, NOTHING_OPEN, (S, W, Id, Id, Q, P, E, X, N)),
-    ("session ended", EventKind.SESSION_ENDED, {}, NOTHING_OPEN, (X, X, X, X, X, X, X, X, X)),
-    ("process exited", EventKind.PROCESS_EXITED, {"exit_code": "0"}, NOTHING_OPEN, (X, X, X, X, X, X, X, X, X)),
-    ("quiet", EventKind.QUIET, {}, NOTHING_OPEN, (S, W, D, Id, Q, P, E, X, N)),
-    ("reconciled: idle composer", EventKind.RECONCILED, {"screen": "idle_composer"}, NOTHING_OPEN, (S, D, D, Id, Q, P, E, X, D)),
-    ("reconciled: busy", EventKind.RECONCILED, {"screen": "busy"}, NOTHING_OPEN, (S, W, D, Id, Q, P, E, X, W)),
-    ("reconciled: dialog", EventKind.RECONCILED, {"screen": "dialog"}, NOTHING_OPEN, (S, N, D, Id, Q, P, E, X, N)),
-    ("reconciled: unknown", EventKind.RECONCILED, {"screen": "unknown"}, NOTHING_OPEN, (S, N, D, Id, Q, P, E, X, N)),
-    ("reconciled: nonsense", EventKind.RECONCILED, {"screen": "sparkles"}, NOTHING_OPEN, (S, N, D, Id, Q, P, E, X, N)),
-    ("notification: idle prompt", EventKind.NOTIFICATION, {"type": "idle_prompt"}, NOTHING_OPEN, (S, W, D, Id, Q, P, E, X, N)),
-    ("notification: agent needs input", EventKind.NOTIFICATION, {"type": "agent_needs_input"}, NOTHING_OPEN, (S, W, D, Id, Q, P, E, X, N)),
-    ("usage", EventKind.USAGE, {}, NOTHING_OPEN, (S, W, D, Id, Q, P, E, X, N)),
-    ("transcript", EventKind.TRANSCRIPT, {}, NOTHING_OPEN, (S, W, D, Id, Q, P, E, X, N)),
+    ("ready", EventKind.READY, {}, NOTHING_OPEN, (Id, W, D, Id, Q, P, E, X, N, Su)),
+    ("ready, first prompt pending", EventKind.READY, {}, FIRST_PROMPT, (S, W, D, Id, Q, P, E, X, N, Su)),
+    ("prompt acknowledged", EventKind.PROMPT_ACKNOWLEDGED, {}, NOTHING_OPEN, (W, W, W, W, W, W, W, X, W, Su)),
+    ("prompt acknowledged, a question open", EventKind.PROMPT_ACKNOWLEDGED, {}, QUESTION_OPEN, (W, W, W, W, Q, P, W, X, W, Su)),
+    ("turn started", EventKind.TURN_STARTED, {}, NOTHING_OPEN, (W, W, W, W, Q, P, E, X, W, Su)),
+    ("tool started", EventKind.TOOL_STARTED, {}, NOTHING_OPEN, (W, W, W, W, Q, P, E, X, W, Su)),
+    ("tool finished", EventKind.TOOL_FINISHED, {}, NOTHING_OPEN, (W, W, W, W, Q, P, E, X, W, Su)),
+    ("activity", EventKind.ACTIVITY, {}, NOTHING_OPEN, (S, W, D, Id, Q, P, E, X, W, Su)),
+    ("permission requested", EventKind.PERMISSION_REQUESTED, {"summary": "npm install grammy"}, NOTHING_OPEN, (P, P, P, P, P, P, P, X, P, Su)),
+    ("question asked", EventKind.QUESTION_ASKED, {"summary": "which colour?"}, NOTHING_OPEN, (Q, Q, Q, Q, Q, P, Q, X, Q, Su)),
+    ("request resolved, nothing open", EventKind.REQUEST_RESOLVED, {}, NOTHING_OPEN, (S, W, D, Id, W, W, E, X, N, Su)),
+    ("request resolved, a question still open", EventKind.REQUEST_RESOLVED, {}, QUESTION_OPEN, (S, W, D, Id, Q, Q, E, X, N, Su)),
+    ("request resolved, a permission still open", EventKind.REQUEST_RESOLVED, {}, PERMISSION_OPEN, (S, W, D, Id, P, P, E, X, N, Su)),
+    ("turn completed", EventKind.TURN_COMPLETED, {}, NOTHING_OPEN, (D, D, D, Id, D, D, E, X, D, Su)),
+    ("turn completed, a permission open", EventKind.TURN_COMPLETED, {}, PERMISSION_OPEN, (D, D, D, Id, Q, P, E, X, D, Su)),
+    ("turn cancelled", EventKind.TURN_CANCELLED, {}, NOTHING_OPEN, (Id, Id, D, Id, Id, Id, E, X, Id, Su)),
+    ("turn failed", EventKind.TURN_FAILED, {"failure": "rate limit"}, NOTHING_OPEN, (E, E, E, E, E, E, E, X, E, Su)),
+    ("seen", EventKind.SEEN, {}, NOTHING_OPEN, (S, W, Id, Id, Q, P, E, X, N, Su)),
+    ("session ended", EventKind.SESSION_ENDED, {}, NOTHING_OPEN, (X, X, X, X, X, X, X, X, X, Su)),
+    ("process exited", EventKind.PROCESS_EXITED, {"exit_code": "0"}, NOTHING_OPEN, (X, X, X, X, X, X, X, X, X, Su)),
+    ("quiet", EventKind.QUIET, {}, NOTHING_OPEN, (S, W, D, Id, Q, P, E, X, N, Su)),
+    ("reconciled: idle composer", EventKind.RECONCILED, {"screen": "idle_composer"}, NOTHING_OPEN, (S, D, D, Id, Q, P, E, X, D, Su)),
+    ("reconciled: busy", EventKind.RECONCILED, {"screen": "busy"}, NOTHING_OPEN, (S, W, D, Id, Q, P, E, X, W, Su)),
+    ("reconciled: dialog", EventKind.RECONCILED, {"screen": "dialog"}, NOTHING_OPEN, (S, N, D, Id, Q, P, E, X, N, Su)),
+    ("reconciled: unknown", EventKind.RECONCILED, {"screen": "unknown"}, NOTHING_OPEN, (S, N, D, Id, Q, P, E, X, N, Su)),
+    ("reconciled: nonsense", EventKind.RECONCILED, {"screen": "sparkles"}, NOTHING_OPEN, (S, N, D, Id, Q, P, E, X, N, Su)),
+    ("notification: idle prompt", EventKind.NOTIFICATION, {"type": "idle_prompt"}, NOTHING_OPEN, (S, W, D, Id, Q, P, E, X, N, Su)),
+    ("notification: agent needs input", EventKind.NOTIFICATION, {"type": "agent_needs_input"}, NOTHING_OPEN, (S, W, D, Id, Q, P, E, X, N, Su)),
+    ("usage", EventKind.USAGE, {}, NOTHING_OPEN, (S, W, D, Id, Q, P, E, X, N, Su)),
+    ("transcript", EventKind.TRANSCRIPT, {}, NOTHING_OPEN, (S, W, D, Id, Q, P, E, X, N, Su)),
 ]
 
 
@@ -91,7 +93,7 @@ def test_a_notification_is_never_a_question(kind: str) -> None:
     for state in ORDER:
         step = _step(state, EventKind.NOTIFICATION, {"type": kind, "message": "Claude is waiting for your input"})
         assert step.state is state and not step.changed
-        assert step.signal is (state is not X)
+        assert step.signal is (state not in (X, Su))
 
 
 def test_what_it_waits_for_travels_with_the_state() -> None:

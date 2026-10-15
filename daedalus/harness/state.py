@@ -36,6 +36,9 @@ class StaffState(StrEnum):
     ERROR = "error"
     EXITED = "exited"
     NO_SIGNAL = "no_signal"
+    SUSPENDED = "suspended"
+    """The host stopped the idle CLI and kept its native session. No event of the CLI reaches it,
+    since the CLI is not running; the host's own launch on the next message sets it ``starting``."""
 
 
 WAITING = frozenset({StaffState.QUESTION, StaffState.PERMISSION})
@@ -122,7 +125,9 @@ def next_state(current: StaffState, event: StaffEvent, context: StateContext = S
 def _next(current: StaffState, event: StaffEvent, context: StateContext) -> Transition:
     kind = event.kind
     signal = kind not in _SILENT
-    if current is StaffState.EXITED:
+    if current in (StaffState.EXITED, StaffState.SUSPENDED):
+        # A suspended session hears nothing until the host launches it again; whatever a CLI on its
+        # way out still says must not set the row of a stopped process working.
         return _stay(current, context, signal=False)
     if kind in _ENDING:
         return _to(current, StaffState.EXITED, signal=signal)

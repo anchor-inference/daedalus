@@ -39,7 +39,9 @@ ISOLATIONS = ("shared", "worktree", "readonly")
 ENVIRONMENTS = ("container", "host")
 CREATORS = ("operator", "orchestrator")
 
-STATUSES = ("starting", "working", "turn_done_unseen", "idle", "question", "permission", "error", "exited", "no_signal")
+STATUSES = ("starting", "working", "turn_done_unseen", "idle", "question", "permission", "error", "exited", "no_signal", "suspended")
+"""``suspended`` is a live session whose idle CLI the host stopped to free its memory, keeping its
+native session to launch again on the next message or assignment (``Team.suspend_idle``)."""
 ACTIVE_STATUSES = frozenset({"starting", "working", "question", "permission", "no_signal"})
 """The statuses that hold one of the project's concurrency slots. A session that finished its turn,
 is idle or has failed occupies nothing until it is given work again."""
