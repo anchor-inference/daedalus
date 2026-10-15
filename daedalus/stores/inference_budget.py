@@ -139,6 +139,12 @@ async def held_in(conn: aiosqlite.Connection, limit: Constraint) -> tuple[int, s
         for row in await cursor.fetchall():
             if row['comparison_slot_id'] not in covered:
                 total += row['quoted_microusd']
+    if limit.scope_only:
+        from daedalus.stores.explorations import (
+            held_in as explorations_held_in,  # Lazy: the exploration hold reads the same ledger.
+        )
+
+        total += await explorations_held_in(conn, limit.key)
     return total, covered
 
 
@@ -229,6 +235,9 @@ class InferenceBudget:
                 raise BudgetRefused('the inference has no host-attested execution attempt')
             slot_id = await ComparisonFunding(self.db).check_slot_in(conn, execution_attempt_id, provider_id,
                                                                    model, quoted_microusd, quote)
+        from daedalus.stores.explorations import cover_in  # Lazy: the exploration hold reads this ledger.
+
+        explored = await cover_in(conn, session_id)
         for limit in constraints:
             if not limit.key or type(limit.cap_microusd) is not int or not 0 <= limit.cap_microusd <= 2**63 - 1:
                 raise BudgetRefused("a finite integer balance is required")
@@ -237,6 +246,9 @@ class InferenceBudget:
             # A funded request consumes its own held pool. A new child/run-specific cap still
             # sees the individual quote; no parent allocation can bypass that narrower cap.
             increment = 0 if slot_id in covered_slots else quoted_microusd
+            # An exploration's attempt spends what its exploration already holds under the goal
+            # budget; counting the quote beside that hold refused its last calls with room to spare.
+            increment = max(0, increment - explored.get(limit.key, 0))
             if spent + held + increment > limit.cap_microusd:
                 available = max(0, limit.cap_microusd - spent - held)
                 need = Decimal(quoted_microusd) / 1_000_000

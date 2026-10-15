@@ -29,6 +29,7 @@ from daedalus.stores.control_schema import MIGRATION as CONTROL_MIGRATION
 from daedalus.stores.coordinator_handoff_schema import MIGRATION as COORDINATOR_HANDOFF_MIGRATION
 from daedalus.stores.edit_board import SCHEMA as EDIT_BOARD_SCHEMA
 from daedalus.stores.execution_schema import MIGRATION as EXECUTION_MIGRATION
+from daedalus.stores.exploration_schema import MIGRATION as EXPLORATION_MIGRATION
 from daedalus.stores.extension_schema import EXTENSION_SCHEMA
 from daedalus.stores.goal_budget_schema import MIGRATION as GOAL_BUDGET_MIGRATION
 from daedalus.stores.goal_criteria_schema import MIGRATION as GOAL_CRITERIA_MIGRATION
@@ -2585,6 +2586,11 @@ CREATE INDEX staff_sessions_by_session ON staff_sessions(session_id);
 # Who is editing which file now, for agents sharing one folder: short leases per (file, agent) and
 # the signature of the last roster note each agent was shown (stores/edit_board.py).
 MIGRATIONS.append(EDIT_BOARD_SCHEMA)
+
+# Speculative attempts at one board task: the exploration and each of its attempts are written
+# before anything is launched, so a restart finds what was in flight and reports it instead of
+# launching it again. An open exploration holds its budget against the project's goal budget.
+MIGRATIONS.append(EXPLORATION_MIGRATION)
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
