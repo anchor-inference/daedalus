@@ -343,6 +343,12 @@ Take it into your plan now and confirm: Report(kind="checkpoint", note=…, ackn
 cannot meet it, Report(kind="needs_input") naming {label}."""
 """A requirement added to the card while its member works it, delivered into the running turn."""
 
+STAFF_MESSAGE_AS_REPLY = """[no answer to your question yet: while you waited, the {by} sent you this message, \
+which may settle the question or make it moot. If it does neither, ask again]
+{text}"""
+"""A message from the operator or the orchestrator handed to a member as the reply to the question its turn
+is held on: queued, it would have waited for the end of a turn that cannot end until the question is answered."""
+
 STAFF_REQUIREMENT_WITHDRAWN = "[requirement {label} of task {task_id} is withdrawn by {origin}; it no longer applies]\n{text}"
 
 STAFF_RETURNED = """

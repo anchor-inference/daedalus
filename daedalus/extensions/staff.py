@@ -1253,13 +1253,19 @@ class Team:
     # -- control ---------------------------------------------------------------------------------------
 
     async def tell(self, member: Staff, text: str, *, when: str = "now", by: str = "operator",
-                   files: list[StoredFile] | None = None, message_id: str | None = None) -> dict[str, Any]:
+                   files: list[StoredFile] | None = None, message_id: str | None = None, wakes: bool = False) -> dict[str, Any]:
         """Say something to a member's live session; returns the message and its receipt. ``when`` is
         ``now`` (into the running turn), ``after_turn`` or ``interrupt``; ``now`` is the default
         because a message to someone at work is almost always about that work, and one that waited
         for the turn's end used to arrive after the work it was meant to change. ``files`` are put
         where the member can open them first, and the message ends with their paths; they also stay
-        with the session's task, so a restart of it hands them over again."""
+        with the session's task, so a restart of it hands them over again.
+
+        ``wakes`` is for words the operator or the orchestrator wrote to the member themselves: when the
+        member's turn is held on a question of its own, the message is handed to it as the reply to
+        that question, whatever ``when`` says. Queued instead, it waited behind a turn that could not
+        end until the question was answered — a reviewer sat on a question about a requirement that
+        had been withdrawn while the orchestrator's messages about it queued."""
         live = await self.live_of(member)
         if live is None:
             raise StaffError(f"{member.name} has no live session; assign a task to start one")
@@ -1287,6 +1293,11 @@ class Team:
             await self.manager.staff.request_pause(live.id, False)
         message = await self.manager.staff.add_message(member.id, text, origin=by, mode=when,
                                                        staff_session_id=live.id, message_id=message_id)
+        answered = await self._reply_to_question(live, message.id, message.text, by) if wakes else None
+        if answered is not None:
+            await self.ingress.message_state(message.id, "acknowledged")
+            return {"message_id": message.id, "state": "acknowledged", "error": "", "degraded_to": None,
+                    "files": [d.path for d in delivered], "answered": answered}
         outgoing = OutgoingMessage(message.id, message.text, when, "orchestrator" if by == "orchestrator" else "operator")  # type: ignore[arg-type]
         try:
             receipt = await self.runtime(member).send(live, outgoing)
@@ -1294,6 +1305,37 @@ class Team:
             receipt = Receipt("failed", str(exc)[:500])
         await self.ingress.message_state(message.id, receipt.state, receipt.error)
         return {"message_id": message.id, "state": receipt.state, "error": receipt.error, "degraded_to": receipt.degraded_to, "files": [d.path for d in delivered]}
+
+    async def _reply_to_question(self, live: LiveSession, message_id: str, text: str, by: str) -> str | None:
+        """Hand a message to a native member as the reply to the question its turn is held on; the
+        question's short id, or ``None`` when its turn is not held on one (or someone else answered
+        first, or the reply could not be handed over, and the message then goes the usual way).
+
+        The member is told plainly that this is a message and not an answer, so a question the
+        message does not settle is asked again rather than taken as decided."""
+        if live.staff.harness != "daedalus" or by not in ("operator", "orchestrator") or not live.session_id:
+            return None
+        state = self.manager.live_state(live.session_id)
+        pending = getattr(state, "pending", None)
+        if pending is None or getattr(state, "running", False):
+            return None
+        row = await self.manager.db.fetchone(
+            "SELECT id FROM asks WHERE staff_session_id = ? AND request_ref = ? AND kind = 'question' AND resolved_at IS NULL"
+            " ORDER BY created_at DESC LIMIT 1", (live.id, pending.tool_call_id),
+        )
+        ask = await self.manager.asks.get(row["id"]) if row is not None else None
+        if ask is None or not await self.manager.asks.resolve(ask.id, by, {"via": "message", "message_id": message_id, "text": text}):
+            return None
+        reply = prompts.STAFF_MESSAGE_AS_REPLY.format(by=by, text=text)
+        try:
+            await self.runtime(live.staff).answer(live, AskRef(ask.id, ask.kind, ask.request_ref), Decision(allow=None, text=reply, selected=[], by=by))  # type: ignore[arg-type]
+        except Exception:  # noqa: BLE001 — the question waits again and the message goes the usual way
+            logger.warning("could not hand a message to %s as the reply to %s", live.staff.name, ask.short_id, exc_info=True)
+            await self.manager.asks.reopen(ask.id)
+            return None
+        await self._after_answer(live)
+        await self._announce_resolved(ask, allow=None, by=by, via="message")
+        return ask.short_id
 
     async def secrets_note(self, member: Staff, handed: list[operator_secrets.Secret]) -> str:
         """Make secrets handed to a member at work usable now, and return what the message tells it.
@@ -1816,7 +1858,34 @@ class Team:
             await self._after_answer(live)
             return None
         current = await self.manager.asks.get(ask.id)
+        if current is not None:
+            await self._hand_over_recorded(live, current)
         return f"this question was already answered by the {current.resolved_by if current else 'someone else'}"
+
+    async def _hand_over_recorded(self, live: LiveSession, ask: Ask) -> None:
+        """Give a native member the recorded answer of a question its turn is still held on.
+
+        An answer is claimed here only while the session still waits, so a question already resolved
+        means its answer never reached the member: the operator was told "already answered by the
+        orchestrator" on a card that stayed open, and the member waited on an answer nobody would send
+        again. The answer that won goes to it now, and the operator's refused one stays refused."""
+        resolution = ask.resolution
+        said = " — ".join(part for part in dict.fromkeys((str(resolution.get("text") or "").strip(), str(resolution.get("note") or "").strip())) if part)
+        if resolution.get("closed"):
+            said = f"This question was withdrawn: {resolution['closed']}"
+        elif resolution.get("applies") is False:
+            said = ("The task contract changed while you waited, so this answer was given for its earlier version;"
+                    " check the current task before relying on it." + (f" The answer: {said}" if said else ""))
+        selected = [str(item) for item in resolution.get("selected") or []]
+        if not said and not selected:
+            said = f"The {ask.resolved_by} settled this question without words; go on with the task, or ask again."
+        by = "orchestrator" if ask.resolved_by == "orchestrator" else "operator"
+        try:
+            await self.runtime(live.staff).answer(live, AskRef(ask.id, ask.kind, ask.request_ref), Decision(allow=None, text=said or None, selected=selected, by=by))  # type: ignore[arg-type]
+        except Exception:  # noqa: BLE001 — the refusal still reaches the operator; the member stays as it was
+            logger.warning("could not hand %s the recorded answer to %s", live.staff.name, ask.short_id, exc_info=True)
+            return
+        await self._after_answer(live)
 
     # -- following the sessions --------------------------------------------------------------------------
 

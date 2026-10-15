@@ -9,6 +9,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -578,6 +579,62 @@ async def test_the_tell_tool_hands_its_timing_through_and_offers_only_the_three(
             locator.unregister(sid)
         assert not later.is_error and not default.is_error
         assert [(m.text, m.mode) for _, m in runtime.sent] == [("then the prices", "after_turn"), ("use the owner's sheet", "now")]
+    finally:
+        await close_team(r.manager)
+        await r.manager.close()
+
+
+async def test_a_message_to_a_member_held_on_its_own_question_is_handed_to_it_as_the_reply(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """A reviewer's turn was held on its question to the orchestrator while the requirement it asked
+    about was withdrawn; the orchestrator's messages, even the "after this turn" ones, queued behind a
+    turn that could not end. A message the orchestrator writes now goes to the member as the reply to
+    that question, marked as a message rather than an answer, and the question is closed."""
+    r = await rig(settings, db, tmp_path)
+    try:
+        runtime = fake(r)
+        sid = await office(r)
+        _ada, live = await working(r)
+        ask = await r.manager.asks.open(r.project.id, origin="staff", kind="question", text="R3 will not open; how do I hand it in?",
+                                        routed_to="orchestrator", staff_id=live.staff.id, staff_session_id=live.id, request_ref="call-1")
+        native = live.session_id
+        held = {"pending": SimpleNamespace(tool_call_id="call-1")}
+        real = r.manager.live_state
+        r.manager.live_state = lambda session_id: (  # type: ignore[method-assign]
+            SimpleNamespace(pending=held["pending"], running=False, metadata={"staff_session_id": live.id}) if session_id == native else real(session_id))
+        said = await r.call(sid, "tell", staff="Ada", text="R3 is withdrawn; hand it in as it is", when="after_turn")
+        assert f"waiting on their question [{ask.short_id}]" in said and "(after_turn): acknowledged" in said
+        assert runtime.sent == [], "nothing queued behind the held turn"
+        [(_live_id, ref, decision)] = runtime.answered
+        assert ref.request_ref == "call-1" and decision.by == "orchestrator" and decision.allow is None
+        assert decision.text and decision.text.startswith("[no answer to your question yet") and decision.text.endswith("R3 is withdrawn; hand it in as it is")
+        closed = await r.manager.asks.get(ask.id)
+        assert closed is not None and closed.resolved_by == "orchestrator" and closed.resolution["via"] == "message"
+
+        # Not held on a question: the message goes the usual way, with the timing it was given.
+        held["pending"] = None
+        await r.call(sid, "tell", staff="Ada", text="then the prices", when="after_turn")
+        assert [(m.text, m.mode) for _, m in runtime.sent] == [("then the prices", "after_turn")] and len(runtime.answered) == 1
+    finally:
+        await close_team(r.manager)
+        await r.manager.close()
+
+
+async def test_an_answer_typed_into_a_member_waiting_on_an_undelivered_answer_hands_over_the_one_that_won(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """The orchestrator's answer to a reviewer was recorded and never reached it; the operator then
+    answered on the reviewer's own card and was told "already answered by the orchestrator", while
+    the card stayed open and the reviewer waited. The recorded answer goes to the member now."""
+    r = await rig(settings, db, tmp_path)
+    try:
+        runtime = fake(r)
+        await office(r)
+        _ada, live = await working(r)
+        ask = await r.manager.asks.open(r.project.id, origin="staff", kind="question", text="How do I hand it in?",
+                                        routed_to="orchestrator", staff_id=live.staff.id, staff_session_id=live.id, request_ref="call-1")
+        assert await r.manager.asks.resolve(ask.id, "orchestrator", {"text": "Hand it in as it is", "selected": [], "via": "orchestrator"})
+        refusal = await r.team.claim_answer(live.session_id, "call-1", "app")
+        assert refusal == "this question was already answered by the orchestrator"
+        [(_live_id, ref, decision)] = runtime.answered
+        assert ref.request_ref == "call-1" and decision.by == "orchestrator" and decision.text == "Hand it in as it is"
     finally:
         await close_team(r.manager)
         await r.manager.close()

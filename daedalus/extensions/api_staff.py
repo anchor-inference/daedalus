@@ -144,7 +144,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         the operator to stop typing — it is the operator."""
         member = await member_of(staff_id)
         try:
-            return await team().tell(member, body.text, when=body.when, by="operator")  # type: ignore[no-any-return]
+            return await team().tell(member, body.text, when=body.when, by="operator", wakes=True)  # type: ignore[no-any-return]
         except StaffBusy as exc:
             raise HTTPException(409, str(exc)) from exc
         except StaffError as exc:

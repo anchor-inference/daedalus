@@ -361,13 +361,16 @@ async def _tell_live(orch: Orchestrators, task_id: str, request: dict[str, Any],
                                                 text=requirement.text)
     try:
         receipt = await team.tell(member, text, when="now", by="orchestrator",
-                                  files=[stored] if stored is not None else None, message_id=message_id)
+                                  files=[stored] if stored is not None else None, message_id=message_id, wakes=True)
     except StaffError as exc:
         return f"it could not be sent to {member.name} ({exc}); it goes with the card's next brief"
     if request["mode"] != "withdraw":
         path = (receipt.get("files") or [""])[0] if stored is not None else ""
         await team.contracts.delivered(requirement, staff_session_id=live.id, staff_id=member.id, via="message",
                                        message_id=str(receipt["message_id"]), path=path)
+    if receipt.get("answered"):
+        return (f"sent to {member.name} as the reply to their open question [{receipt['answered']}], which held their turn; "
+                "their turn goes on, and their confirmation shows in the state block until it comes")
     from daedalus.extensions.orchestrator_team import _degraded  # Lazy: the team's module imports this one
 
     state = receipt["state"] + (f", {receipt['error']}" if receipt.get("error") else "")

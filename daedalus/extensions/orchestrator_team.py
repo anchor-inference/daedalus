@@ -961,7 +961,7 @@ async def tell(
     if secrets_handed:
         body = body + "\n\n" + await _team(orch).secrets_note(member, secrets_handed)
     try:
-        receipt = await _team(orch).tell(member, body, when=when, by="orchestrator", files=handed)
+        receipt = await _team(orch).tell(member, body, when=when, by="orchestrator", files=handed, wakes=True)
     except StaffError as exc:
         raise Refused(str(exc) + await _last_session(orch, member)) from exc
     live = await _team(orch).live_of(member)
@@ -971,6 +971,9 @@ async def tell(
         causes={"report_stuck", "report_needs_input"},
     )
     line = f"message {receipt['message_id']} to {member.name} ({when}): {receipt['state']}"
+    if receipt.get("answered"):
+        line += (f" — {member.name} was waiting on their question [{receipt['answered']}], so the message went to them as "
+                 "its reply and their turn goes on; they ask again if it did not settle it")
     named = await other_models(orch, project, member, body)
     if named:
         line += (
