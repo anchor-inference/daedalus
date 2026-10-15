@@ -11,6 +11,7 @@ import sqlite3
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -123,6 +124,54 @@ async def test_a_command_line_member_confirms_its_inputs_in_words(settings: Sett
             await r.team.ingress.report(session, "done", "done", call_id=f"fixture-report:{uuid.uuid4().hex}")
         told = await r.team.ingress.report(session, "done", "script.md written after watching ref.mp4", acknowledged=["R1"], call_id=f"fixture-report:{uuid.uuid4().hex}")
         assert "confirmed R1" in told and "task is in review" in told
+        assert (await task_row(r.manager, task_id))["acceptance_state"] == "handed_in"
+    finally:
+        await close_team(r.manager)
+        await r.manager.close()
+
+
+async def test_a_native_member_is_told_how_to_settle_an_unopened_input_and_may_confirm_it(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """A native reviewer read its .docx inputs through a script and was refused with nothing but the
+    labels, while a Read that had refused the same files as binary counted them as opened. A failed
+    call opens nothing now; the refusal names each file and the confirmation that settles it, and a
+    native member's confirmation counts as a command-line member's does."""
+    from protocore.runtime.events.envelope import TurnEvent
+    from protocore.runtime.events.types import EventType
+
+    r = await rig(settings, db, tmp_path)
+    try:
+        fake(r)
+        sid = await office(r)
+        mira = await member(r)
+        one, two = await attach(r, "ref-a.mp4"), await attach(r, "ref-b.mp4")
+        task_id, _ = await assigned(r, sid, staff="Mira", title="Promo script", **SCRIPT, inputs=[one.handle, two.handle])
+        session = await live(r, mira)
+        rows = await r.manager.db.fetchall("SELECT path FROM requirement_deliveries WHERE staff_session_id = ? AND path != '' ORDER BY path", (session.id,))
+        first, second = rows[0]["path"], rows[1]["path"]
+        native = session.session.session_id
+        r.manager.live_state = lambda sid: SimpleNamespace(metadata={"staff_session_id": session.id}) if sid == native else None  # type: ignore[method-assign]
+
+        async def call(call_id: str, arguments: dict[str, Any], *, failed: bool) -> None:
+            await r.team.on_turn_event(native, TurnEvent(type=EventType.TOOL_USE_STOP, run_id="run", payload={"tool_call_id": call_id, "final_input": arguments}))
+            await r.team.on_turn_event(native, TurnEvent(type=EventType.TOOL_RESULT, run_id="run", payload={"tool_call_id": call_id, "is_error": failed}))
+
+        await call("c1", {"path": first}, failed=True)
+        await call("c2", {"path": second}, failed=True)
+        with pytest.raises(ValueError) as refused:
+            await r.team.ingress.report(session, "done", "script.md written", call_id=f"fixture-report:{uuid.uuid4().hex}")
+        said = str(refused.value)
+        assert said.startswith("task input was not opened or confirmed: R1, R2"), "a Read that failed opened nothing"
+        assert f"R1: {first}" in said and f"R2: {second}" in said
+        assert 'Report(kind="done", acknowledged=["R1", "R2"]' in said
+
+        # A command that ran in the box over a glob of the file opens it; the other is confirmed in words.
+        box = first.rsplit("/", 1)[0]
+        await call("c3", {"command": f"cd {box} && ffprobe ref-a*"}, failed=False)
+        with pytest.raises(ValueError, match=r"not opened or confirmed: R2\n"):
+            await r.team.ingress.report(session, "done", "script.md written", call_id=f"fixture-report:{uuid.uuid4().hex}")
+        told = await r.team.ingress.report(session, "done", "script.md written after watching both references", acknowledged=["R2"],
+                                           call_id=f"fixture-report:{uuid.uuid4().hex}")
+        assert "confirmed R2" in told and "task is in review" in told
         assert (await task_row(r.manager, task_id))["acceptance_state"] == "handed_in"
     finally:
         await close_team(r.manager)
@@ -481,7 +530,26 @@ def test_a_decomposed_input_name_counts_as_named_by_the_composed_spelling() -> N
     # The delivery kept the uploaded NFD name; the member's tool call wrote the composed one.
     import unicodedata
 
-    from daedalus.extensions.task_contract import _names_file
+    from daedalus.extensions.task_contract import names_input
 
     path = unicodedata.normalize("NFD", "/w/.agents/inbox/t/3_Заявление.docx")
-    assert _names_file('{"path": ".agents/inbox/t/3_Заявление.docx"}', path)
+    assert names_input('{"path": ".agents/inbox/t/3_Заявление.docx"}', path)
+
+
+def test_a_command_in_the_inputs_box_that_names_the_file_or_a_matching_glob_counts_as_opening_it() -> None:
+    """A reviewer read three .docx inputs with ``cd .agents/inbox/<task> && python3 …glob('*.docx')…``
+    and was refused the hand-in: no call had spelled a path. A command placed in the box that points at
+    the file counts now; one that only looks at the box, or names another box, still does not."""
+    from daedalus.extensions.task_contract import names_input
+
+    path = "/srv/w/.agents/inbox/5a9dc0a419b5/2.Устав Anchor Inference.docx"
+    script = "cd .agents/inbox/5a9dc0a419b5 && python3 - <<'EOF'\nimport zipfile,glob\nfor f in sorted(glob.glob('*.docx')):\n    print(f)\nEOF"
+    assert names_input({"command": script}, path)
+    assert names_input({"command": "unzip -p .agents/inbox/5a9dc0a419b5/*.docx word/document.xml"}, path)
+    assert names_input({"command": "for f in /srv/w/.agents/inbox/5a9dc0a419b5/*; do pandoc \"$f\"; done"}, path)
+    assert names_input({"command": "python3 read.py *.docx", "cwd": ".agents/inbox/5a9dc0a419b5"}, path)
+    assert names_input({"command": "python3 read.py '2.Устав Anchor Inference.docx'", "cwd": "/srv/w/.agents/inbox/5a9dc0a419b5/"}, path)
+    assert not names_input({"command": "ls -la .agents/inbox/5a9dc0a419b5/"}, path), "seeing the box is not opening the file"
+    assert not names_input({"command": "cat *.txt", "cwd": ".agents/inbox/5a9dc0a419b5"}, path), "a glob that matches another file"
+    assert not names_input({"command": "cd .agents/inbox/5a9dc0a419b5b && cat *.docx"}, path), "another box"
+    assert not names_input({"command": "cat *.docx"}, path), "a glob outside the box"

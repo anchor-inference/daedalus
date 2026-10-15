@@ -230,8 +230,7 @@ class StaffReportService:
             checks, unproven, stray = await self._evidence(conn, task_id,
                                                            identity.contract_revision, known_evidence)
             if kind == "done":
-                await self._check_inputs(conn, task_id, live.staff.id,
-                                         identity.contract_revision, cli=live.staff.harness != "daedalus")
+                await self._check_inputs(conn, task_id, live.staff.id, identity.contract_revision)
             if remember and remember.strip():
                 await self._remember(conn, live.staff.id, remember.strip())
             file_refs = []
@@ -408,21 +407,49 @@ class StaffReportService:
         return checks, sorted(required_proof - provided), stray
 
     async def _check_inputs(self, conn: aiosqlite.Connection, task_id: str, staff_id: str,
-                            contract_revision: int, *, cli: bool) -> None:
+                            contract_revision: int) -> None:
+        """Refuse a hand-in while an input of the card is neither opened nor confirmed by the member.
+
+        Opened is what the host saw a tool of the member's point at; confirmed is the member's word,
+        ``Report(acknowledged=["R2"])``, which a command-line member always gives, since the host
+        cannot watch it, and a native one gives for a file it read some way the host cannot read
+        back. A native member once read three .docx files through a script and was refused with only
+        their labels, with no way to say it had read them; the refusal now names each file and the
+        call that settles it, so the member is never left guessing what the host wants.
+        """
         rows = []
         async with conn.execute("SELECT r.number,r.text,d.path,d.acknowledged_at,d.opened_at"
                                 " FROM task_requirements r LEFT JOIN requirement_deliveries d"
                                 " ON d.requirement_id = r.id AND d.staff_id = ? AND d.contract_revision = ?"
-                                " WHERE r.task_id = ? AND r.state = 'active' AND r.kind = 'input'",
+                                " WHERE r.task_id = ? AND r.state = 'active' AND r.kind = 'input' ORDER BY r.number",
                                 (staff_id, contract_revision, task_id)) as cursor:
             rows = await cursor.fetchall()
         grouped: dict[int, list[aiosqlite.Row]] = {}
         for row in rows:
             grouped.setdefault(row["number"], []).append(row)
-        missing = [f"R{number}" for number, deliveries in grouped.items()
-                   if not any(item["acknowledged_at"] if cli else item["opened_at"] for item in deliveries)]
-        if missing:
-            raise ValueError("task input was not opened or confirmed: " + ", ".join(missing))
+        missing = {number: deliveries for number, deliveries in grouped.items()
+                   if not any(item["acknowledged_at"] or item["opened_at"] for item in deliveries)}
+        if not missing:
+            return
+        given: list[str] = []
+        lines: list[str] = []
+        for number, deliveries in missing.items():
+            path = next((item["path"] for item in deliveries if item["path"]), "")
+            if any(item["path"] is not None for item in deliveries):
+                given.append(f"R{number}")
+                lines.append(f"- R{number}: {path or deliveries[0]['text'][:200]}")
+            else:
+                lines.append(f"- R{number}: never handed to you ({deliveries[0]['text'][:200]}); "
+                             "ask the orchestrator for it with AskOrchestrator")
+        how = ""
+        if given:
+            labels = ", ".join(f'"{label}"' for label in given)
+            how = (f"\nOpen each with Read, or with a command that names its path, its box folder and the "
+                   f"file (a glob that matches it will do). If you have already read it another way, "
+                   f"confirm it in this hand-in: Report(kind=\"done\", acknowledged=[{labels}], …) with "
+                   f"the rest of this report.")
+        raise ValueError("task input was not opened or confirmed: " + ", ".join(f"R{n}" for n in missing)
+                         + "\n" + "\n".join(lines) + how)
 
     async def _remember(self, conn: aiosqlite.Connection, staff_id: str, text: str) -> None:
         row = await _one(conn, "SELECT notes FROM staff WHERE id = ?", (staff_id,))

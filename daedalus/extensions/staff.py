@@ -251,6 +251,9 @@ class Team:
         self.runtimes: dict[str, StaffRuntime] = {"daedalus": DaedalusStaffRuntime(self.manager)}
         self._execution_locks: dict[str, asyncio.Lock] = {}
         self._answered_runs: set[str] = set()
+        self._tool_inputs: dict[tuple[str, str], dict[str, Any]] = {}
+        """A member's tool calls whose results have not come back, by session and call: an input
+        counts as opened only once the call that pointed at it succeeded."""
         """Native sessions whose current run has had the model's first output: the clock it settles is
         settled once, not in a transaction for every step."""
         # A host folder in Docker is worked in through the host terminal bridge; the service is
@@ -1831,9 +1834,14 @@ class Team:
             call_id = str(event.payload.get("tool_call_id") or "")
             await self.ingress.question(live, call_id, str(first.get("question") or ""), options, event_ref=f"ask:{session_id}:{call_id}")
         elif event.type is EventType.TOOL_USE_STOP and isinstance(event.payload.get("final_input"), dict):
-            # An input the member was given counts as opened once a tool of its is pointed at it: the
-            # host cannot know it was understood, only that it was not skipped.
-            await self.contracts.opened(live.id, json.dumps(event.payload["final_input"], ensure_ascii=False))
+            self._tool_inputs[(session_id, str(event.payload.get("tool_call_id") or ""))] = event.payload["final_input"]
+        elif event.type is EventType.TOOL_RESULT:
+            arguments = self._tool_inputs.pop((session_id, str(event.payload.get("tool_call_id") or "")), None)
+            if arguments is not None and not event.payload.get("is_error"):
+                # An input the member was given counts as opened once a tool of its pointed at it and
+                # succeeded: the host cannot know it was understood, only that it was not skipped. A
+                # Read that refused a .docx as binary used to count, for a file nobody had read.
+                await self.contracts.opened(live.id, arguments)
         elif event.type is EventType.QUEUE_UPDATE and event.payload.get("placed"):
             # A queued message the model has now received: that is the acknowledgement.
             for message_id in event.payload["placed"]:
@@ -1853,6 +1861,8 @@ class Team:
 
     async def on_run_finished(self, session_id: str, run_id: str, status: str) -> None:
         self._answered_runs.discard(session_id)
+        for key in [key for key in self._tool_inputs if key[0] == session_id]:
+            del self._tool_inputs[key]
         state = self.manager.live_state(session_id)
         staff_session_id = str(state.metadata.get("staff_session_id") or "") if state is not None else ""
         if staff_session_id and status in ("completed", "failed", "cancelled"):

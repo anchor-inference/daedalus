@@ -40,7 +40,7 @@ def _hook(context: ToolContext):  # type: ignore[no-untyped-def]
         "also goes to review until the exact result is checked). note: a factual report preserved in full. "
         "evidence (with done): [{item, how, result}] for each check (C1 …) and requirement (R1 …) of the task — "
         "what you ran or looked at and what it showed. acknowledged: the requirements (R…) sent to you that you "
-        "have taken into your plan. operator_steps: when the operator has to do something themselves — sign in, press, check — the steps for them, which reach them word for word: {goal, steps: […], roles?: [{account, purpose}], expected?, check?, limits?, verified: 'on-running-version' when you walked every step on the version that runs, else 'unverified', verified_how?}. Never a password in them: name where it is kept. artifacts: paths or links of what you produced. remember: one "
+        "have taken into your plan, and the input files (R…) you read some way the host did not see. operator_steps: when the operator has to do something themselves — sign in, press, check — the steps for them, which reach them word for word: {goal, steps: […], roles?: [{account, purpose}], expected?, check?, limits?, verified: 'on-running-version' when you walked every step on the version that runs, else 'unverified', verified_how?}. Never a password in them: name where it is kept. artifacts: paths or links of what you produced. remember: one "
         "line to keep in your notes for every later session."
     ),
 )

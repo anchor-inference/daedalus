@@ -20,6 +20,7 @@ where the work is, ``accepted`` is that someone checked it.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import re
 import unicodedata
@@ -228,32 +229,18 @@ class Contracts:
             confirmed.append(requirement.label)
         return confirmed, unknown
 
-    async def opened(self, staff_session_id: str, text: str) -> list[str]:
-        """Mark the input files a tool call of the session names as opened; their requirements' ids."""
+    async def opened(self, staff_session_id: str, arguments: Any) -> list[str]:
+        """Mark the input files a tool call of the session points at as opened; their requirements' ids.
+        ``arguments`` are the call's arguments as the model wrote them (a mapping, or its JSON)."""
         rows = await self.db.fetchall(
             "SELECT d.requirement_id, d.path FROM requirement_deliveries d JOIN board_tasks t ON t.id = d.task_id"
             " WHERE d.staff_session_id = ? AND d.path != '' AND d.opened_at IS NULL"
             " AND d.contract_revision = t.contract_revision", (staff_session_id,)
         )
-        hit = [row["requirement_id"] for row in rows if _names_file(text, row["path"])]
+        hit = [row["requirement_id"] for row in rows if names_input(arguments, row["path"])]
         for requirement_id in hit:
             await self.db.execute("UPDATE requirement_deliveries SET opened_at = ? WHERE requirement_id = ? AND staff_session_id = ?", (_now(), requirement_id, staff_session_id))
         return hit
-
-    async def unmet_inputs(self, task_id: str, staff_id: str, *, cli: bool) -> list[tuple[Requirement, str]]:
-        """The card's input files the member has not opened (a command-line member: not confirmed),
-        in any of its sessions on the card, with the path it was given them at."""
-        missing: list[tuple[Requirement, str]] = []
-        for requirement in await self.requirements(task_id):
-            if requirement.kind != "input":
-                continue
-            rows = await self.db.fetchall("SELECT d.path, d.acknowledged_at, d.opened_at FROM requirement_deliveries d"
-                                          " JOIN board_tasks t ON t.id = d.task_id WHERE d.requirement_id = ? AND d.staff_id = ?"
-                                          " AND d.contract_revision = t.contract_revision", (requirement.id, staff_id))
-            done = any((row["acknowledged_at"] if cli else row["opened_at"]) for row in rows)
-            if not done:
-                missing.append((requirement, next((row["path"] for row in rows if row["path"]), "")))
-        return missing
 
     async def deliveries(self, task_id: str) -> dict[str, list[dict[str, Any]]]:
         rows = await self.db.fetchall(
@@ -330,20 +317,98 @@ class Contracts:
         return None
 
 
-def _names_file(text: str, path: str) -> bool:
-    """Whether a tool call's arguments name a delivered file: its path whole, or the part from the
-    inbox on, which is how a member's relative path to it reads."""
+GLOB_TOKEN_RE = re.compile(r"[^\s\"'`(),;|&<>=]*[*?][^\s\"'`(),;|&<>=]*")
+"""A word of a command that is a glob: ``*.docx``, ``inbox/t/*``, ``glob('*.docx')``'s argument."""
+
+
+def _strings(value: Any) -> list[str]:
+    """Every string in a tool call's arguments, decoded: a command, a path, a working directory.
+    Arguments handed over as their JSON are read as the mapping they spell."""
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            return [value]
+        return _leaves(parsed) if isinstance(parsed, (dict, list)) else [value]
+    return _leaves(value)
+
+
+def _leaves(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [s for item in value.values() for s in _leaves(item)]
+    if isinstance(value, list):
+        return [s for item in value for s in _leaves(item)]
+    return []
+
+
+def _from_inbox(path: str) -> str:
+    """The part of a path from the inbox on, which is how a member's relative path to it reads."""
+    return path[path.rfind("/inbox/") + 1:] if "/inbox/" in path else ""
+
+
+def _names_folder(text: str, folder: str) -> bool:
+    """Whether the text names the folder, by its whole path or from the inbox on, as a whole word:
+    ``inbox/5a9`` must not be read in ``inbox/5a9b``."""
+    for spelling in dict.fromkeys(s for s in (folder, _from_inbox(folder)) if s):
+        if re.search(re.escape(spelling) + r"(?![\w.-])", text):
+            return True
+    return False
+
+
+def _runs_in(arguments: Any, folder: str) -> bool:
+    """Whether a command runs with the folder as its working directory (``cwd``, whole or relative)."""
+    if not isinstance(arguments, dict):
+        return False
+    cwd = unicodedata.normalize("NFC", str(arguments.get("cwd") or "")).rstrip("/")
+    if not cwd:
+        return False
+    tail = _from_inbox(folder)
+    return cwd == folder or bool(tail) and (cwd == tail or cwd.endswith("/" + tail))
+
+
+def names_input(arguments: Any, path: str) -> bool:
+    """Whether a tool call's arguments point at a delivered input file.
+
+    Its path whole, or from the inbox on, counts anywhere. A member that read the inputs with a
+    command — ``cd .agents/inbox/<task> && python3 …glob('*.docx')…`` — never wrote a path, and the
+    hand-in was refused for files it had read; so a command also counts when it places itself in
+    the file's box (names that folder, or runs with it as its ``cwd``) and names the file there, by
+    its name or by a glob that matches it. Listing the box alone does not: a member must point at the
+    file, not merely see that it is there.
+    """
     if not path:
         return False
     # Compared composed: a name kept decomposed (NFD, as macOS writes it) never matched the composed
     # spelling every model uses, and the input stayed unopened however the member read it.
-    text, path = unicodedata.normalize("NFC", text), unicodedata.normalize("NFC", path)
-    if path in text:
+    path = unicodedata.normalize("NFC", path)
+    pieces = [unicodedata.normalize("NFC", s) for s in _strings(arguments)]
+    text = "\n".join(pieces)
+    tail = _from_inbox(path) or path.rsplit("/", 1)[-1]
+    if path in text or (tail and tail in text):
         return True
-    tail = path[path.rfind("/inbox/") + 1:] if "/inbox/" in path else path.rsplit("/", 1)[-1]
-    return bool(tail) and tail in text
+    folder, _, name = path.rpartition("/")
+    if not folder or not name:
+        return False
+    if not (_names_folder(text, folder) or _runs_in(arguments, folder)):
+        return False
+    if re.search(r"(?<![\w.-])" + re.escape(name) + r"(?![\w-])", text):
+        return True
+    for glob in GLOB_TOKEN_RE.findall(text):
+        pattern = glob.strip("'\"")
+        if not pattern:
+            continue
+        # A glob with a folder in it is matched against the path's end, any other against the name.
+        if "/" in pattern:
+            relative = pattern.removeprefix("./")
+            if fnmatch.fnmatchcase(path, relative if relative.startswith("/") else "*/" + relative):
+                return True
+        elif fnmatch.fnmatchcase(name, pattern):
+            return True
+    return False
 
 
 __all__ = [
-    "ACCEPTANCE_STATES", "CHECKS_MAX", "REQUIREMENTS_MAX", "REQUIREMENT_KINDS", "RETURNED", "Contracts", "Requirement", "check_items", "split_checks",
+    "ACCEPTANCE_STATES", "CHECKS_MAX", "REQUIREMENTS_MAX", "REQUIREMENT_KINDS", "RETURNED", "Contracts", "Requirement", "check_items", "names_input", "split_checks",
 ]
