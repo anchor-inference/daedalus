@@ -11,7 +11,14 @@ import aiosqlite
 
 from daedalus.host.events import AppEvent, EventBus
 from daedalus.stores.control import ControlConflict, ControlStore, Entity, Mutation, Principal, Scope, now, one
-from daedalus.stores.projects import ENVIRONMENTS, ProjectError, ProjectStore, normalise_root, why_not_a_chat
+from daedalus.stores.projects import (
+    ENVIRONMENTS,
+    ProjectError,
+    ProjectStore,
+    normalise_root,
+    parse_route,
+    why_not_a_chat,
+)
 
 if TYPE_CHECKING:
     from daedalus.stores.database import Database
@@ -80,9 +87,13 @@ class ProjectCommands:
                        client_operation_id: str, expected_entity_revision: int,
                        name: str | None = None, snapshots: bool | None = None,
                        default_env: str | None = None,
-                       setup_command: str | None = None, archived: bool | None = None) -> dict[str, Any]:
+                       setup_command: str | None = None, archived: bool | None = None,
+                       member_route: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         payload = {"name": name, "snapshots": snapshots, "default_env": default_env,
                    "setup_command": setup_command, "archived": archived}
+        if member_route is not None:
+            # Only when given, so the receipt of an ordinary settings write keeps its old payload.
+            payload["member_route"] = member_route
 
         async def effect(conn: aiosqlite.Connection, _: Mutation) -> dict[str, Any]:
             self.check_env(default_env)
@@ -119,6 +130,8 @@ class ProjectCommands:
                 if "\n" in setup_command.strip():
                     raise ProjectError("the setup command is one line; join commands with &&")
                 settings_patch["setup_command"] = setup_command.strip()
+            if member_route is not None:
+                settings_patch["member_route"] = [entry.dump() for entry in parse_route(member_route, strict=True)]
             await conn.execute(
                 "UPDATE projects SET name = ?,settings = json_patch(CASE WHEN json_valid(settings)"
                 " THEN settings ELSE '{}' END,?) WHERE id = ?",

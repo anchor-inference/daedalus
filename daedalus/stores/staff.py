@@ -181,6 +181,9 @@ class Staff:
     created_by: str
     created_at: str
     archived_at: str | None
+    route_home: dict[str, Any] | None = None
+    """The member's own runtime and settings while the project's route runs it on another; ``None``
+    while it runs on its own. Kept so the next launch tries its own runtime first again."""
 
     @property
     def active(self) -> bool:
@@ -207,6 +210,7 @@ class Staff:
             "created_by": self.created_by,
             "created_at": self.created_at,
             "archived_at": self.archived_at,
+            "route_home": self.route_home,
         }
 
 
@@ -387,7 +391,18 @@ def _staff(row: Any) -> Staff:
         created_by=row["created_by"],
         created_at=row["created_at"],
         archived_at=row["archived_at"],
+        route_home=_route_home(row),
     )
+
+
+def _route_home(row: Any) -> dict[str, Any] | None:
+    """A row read without the column (a narrower SELECT) is a member on its own runtime."""
+    raw = row["route_home"] if "route_home" in row.keys() else None
+    try:
+        home = json.loads(raw) if raw else None
+    except ValueError:
+        return None
+    return home if isinstance(home, dict) else None
 
 
 def _session(row: Any) -> StaffSession:

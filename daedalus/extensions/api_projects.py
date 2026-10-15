@@ -143,6 +143,9 @@ class ProjectPatch(MutationBody):
     snapshots: bool | None = None
     default_env: Env | None = None
     setup_command: str | None = Field(default=None, max_length=2000)
+    member_route: list[dict[str, Any]] | None = Field(default=None, max_length=16)
+    """The member runtimes in order, each ``{runtime, model}``; an empty list launches every member
+    on its own runtime alone."""
     archived: bool | None = None
     """Archive (true) or restore (false): hidden from the lists and never woken, nothing deleted."""
 
@@ -404,6 +407,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
                 expected_entity_revision=body.expected_entity_revision, name=body.name,
                 snapshots=body.snapshots, default_env=body.default_env,
                 setup_command=body.setup_command, archived=body.archived,
+                member_route=body.member_route,
             )
         except ControlConflict as exc:
             raise conflict(exc) from exc

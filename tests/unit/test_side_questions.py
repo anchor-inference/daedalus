@@ -343,7 +343,10 @@ async def test_the_migration_keeps_every_request_and_lets_a_session_ask(tmp_path
     await db.close()
     raw = sqlite3.connect(path)
     raw.executescript(OLD_ASKS)
-    raw.execute("UPDATE schema_version SET version = ?", (len(MIGRATIONS) - 1,))
+    # The version just before the rebuild of the asks, found by its script: later migrations are
+    # appended after it, and "the last one" stopped naming it the day the first of them was.
+    rebuild = next(i for i, m in enumerate(MIGRATIONS) if isinstance(m, tuple) and "asks_rebuilt" in m[0])
+    raw.execute("UPDATE schema_version SET version = ?", (rebuild,))
     raw.execute("INSERT INTO projects(id, name, created_at) VALUES ('p1', 'Bakery', '2026-09-01T00:00:00+00:00')")
     raw.execute(
         "INSERT INTO asks(id, short_id, project_id, origin, kind, text, detail_json, routed_to, created_at, routed_at, resolved_at, resolved_by, title) "

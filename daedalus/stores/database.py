@@ -2426,6 +2426,40 @@ CREATE INDEX asks_by_dispatch ON asks(dispatch_id) WHERE dispatch_id IS NOT NULL
 CREATE INDEX asks_by_session ON asks(session_id, resolved_at) WHERE session_id IS NOT NULL;
 """, True))
 
+async def _route_home(conn: aiosqlite.Connection) -> None:
+    """Checked first: a database restored over a newer file runs this again over a column it already
+    has, and a bare ADD COLUMN would then fail the whole start."""
+    present = {row[1] for row in await (await conn.execute("PRAGMA table_info(staff)")).fetchall()}
+    if "route_home" not in present:
+        await conn.execute("ALTER TABLE staff ADD COLUMN route_home TEXT")
+
+
+# A member's runtime route: every launch the project's route chose is recorded under its operation id
+# before the launch is queued, so a repeated command is answered from the record and never launches
+# twice, and a launch the host lost mid-way is reported rather than tried again. ``route_home`` keeps a
+# member's own runtime and settings while a fallback runs it on another, so the next launch tries its
+# own runtime first again.
+MIGRATIONS.append(DataMigration("""
+CREATE TABLE IF NOT EXISTS launch_routes (
+    operation_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    task_id TEXT REFERENCES board_tasks(id) ON DELETE SET NULL,
+    staff_id TEXT REFERENCES staff(id) ON DELETE SET NULL,
+    actor_id TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL CHECK (state IN ('claimed', 'accepted', 'handoff_required', 'no_runtime', 'refused', 'admission_unknown')),
+    selected_harness TEXT NOT NULL DEFAULT '',
+    selected_model TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    attempts_json TEXT NOT NULL DEFAULT '[]',
+    result_json TEXT NOT NULL DEFAULT '{}',
+    claim_token TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS launch_routes_by_task ON launch_routes(task_id, created_at);
+CREATE INDEX IF NOT EXISTS launch_routes_claimed ON launch_routes(state) WHERE state = 'claimed';
+""", _route_home))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

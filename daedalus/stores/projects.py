@@ -141,6 +141,54 @@ def _mode(settings: ProjectSettings) -> str | None:
     return "orchestration" if settings.orchestrator.enabled else "agents"
 
 
+ROUTE_RUNTIMES = ("claude", "codex", "grok", "opencode", "pi", "cursor", "daedalus")
+"""What a member route may name: the command-line agents and Daedalus itself, which the route also
+accepts as ``native``."""
+ROUTE_MAX = len(ROUTE_RUNTIMES)
+
+
+@dataclass(frozen=True, slots=True)
+class RouteEntry:
+    runtime: str
+    model: str = ""
+    """Empty is the runtime's own default: the CLI's model, or the default preset for Daedalus."""
+
+    def dump(self) -> dict[str, str]:
+        return {"runtime": self.runtime, "model": self.model}
+
+
+def parse_route(raw: Any, *, strict: bool = False) -> tuple[RouteEntry, ...]:
+    """The ordered member route. ``strict`` refuses what loading quietly drops: an unknown runtime, a
+    runtime named twice (a second entry for it could never be reached), a model that is not text."""
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        if strict:
+            raise ProjectError("a member route is a list of runtimes")
+        return ()
+    entries: list[RouteEntry] = []
+    for item in raw:
+        runtime = str(item.get("runtime") or "").strip().lower() if isinstance(item, dict) else ""
+        runtime = "daedalus" if runtime == "native" else runtime
+        model = item.get("model") if isinstance(item, dict) else None
+        model = "" if model is None else model
+        problem = ""
+        if runtime not in ROUTE_RUNTIMES:
+            problem = f"a route runtime is one of {', '.join(ROUTE_RUNTIMES)} or native"
+        elif not isinstance(model, str) or len(model) > 200 or "\n" in model:
+            problem = "a route model is one line of text"
+        elif any(e.runtime == runtime for e in entries):
+            problem = f"{runtime} is named twice in the route"
+        if problem:
+            if strict:
+                raise ProjectError(problem)
+            continue
+        entries.append(RouteEntry(runtime, str(model).strip()))
+    if strict and len(entries) > ROUTE_MAX:
+        raise ProjectError(f"a member route has at most {ROUTE_MAX} entries")
+    return tuple(entries[:ROUTE_MAX])
+
+
 @dataclass(frozen=True, slots=True)
 class ProjectSettings:
     """What the operator decides per project.
@@ -182,6 +230,10 @@ class ProjectSettings:
     so — and empty until then; :meth:`ProjectStore.sweep_leftovers` writes it, clears it when a session
     comes back, and removes the record once it has been empty longer than the grace, which is what
     lets an Undo of the move find the project still there."""
+    member_route: tuple[RouteEntry, ...] = ()
+    """The runtimes a member's launch may use, in order. A launch moves to the next only when one is
+    refused before admission for a definite reason (a spent usage window, no sign-in, not installed);
+    empty launches each member on its own runtime alone."""
 
     @classmethod
     def load(cls, raw: Any, *, default_env: str = "") -> ProjectSettings:
@@ -196,6 +248,7 @@ class ProjectSettings:
             archived=bool(data.get("archived", False)),
             orchestrator=OrchestratorSettings.load(data.get("orchestrator")),
             emptied_at=str(data.get("emptied_at") or ""),
+            member_route=parse_route(data.get("member_route")),
         )
 
     def dump(self) -> dict[str, Any]:
@@ -208,6 +261,7 @@ class ProjectSettings:
             "archived": self.archived,
             "orchestrator": self.orchestrator.dump(),
             "emptied_at": self.emptied_at,
+            "member_route": [entry.dump() for entry in self.member_route],
         }
 
 

@@ -238,3 +238,27 @@ async def test_lost_reload_response_replays_receipt_and_announces_one_event(
     assert (await db.fetchone("SELECT count(*) AS n FROM app_events WHERE type = 'project.changed'"
                              " AND project_id = ? AND json_extract(payload_json,'$.change') = 'settings'",
                              (project_id,)))["n"] == 1
+
+
+async def test_the_member_route_is_written_in_order_and_refused_when_malformed(running: Any, tmp_path: Path) -> None:
+    _, client = running
+    folder = tmp_path / "site"
+    folder.mkdir()
+    created = (await client.post("/api/projects", headers=HEADERS,
+                                 json={"name": "Bakery", "folders": [{"path": str(folder)}]})).json()
+    path = f"/api/projects/{created['id']}"
+    route = [{"runtime": "claude", "model": "opus"}, {"runtime": "native", "model": ""}]
+    written = await client.patch(path, headers=HEADERS, json={
+        "client_operation_id": "route-one", "expected_entity_revision": await _revision(client, created["id"]), "member_route": route})
+    assert written.status_code == 200, written.text
+    current = next(item for item in (await client.get("/api/projects", headers=HEADERS)).json() if item["id"] == created["id"])
+    assert current["settings"]["member_route"] == [{"runtime": "claude", "model": "opus"}, {"runtime": "daedalus", "model": ""}]
+    twice = await client.patch(path, headers=HEADERS, json={
+        "client_operation_id": "route-two", "expected_entity_revision": await _revision(client, created["id"]),
+        "member_route": [{"runtime": "pi"}, {"runtime": "pi"}]})
+    assert twice.status_code == 400 and "named twice" in twice.text
+    cleared = await client.patch(path, headers=HEADERS, json={
+        "client_operation_id": "route-three", "expected_entity_revision": await _revision(client, created["id"]), "member_route": []})
+    assert cleared.status_code == 200
+    current = next(item for item in (await client.get("/api/projects", headers=HEADERS)).json() if item["id"] == created["id"])
+    assert current["settings"]["member_route"] == []
