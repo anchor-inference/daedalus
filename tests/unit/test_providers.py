@@ -522,3 +522,33 @@ async def test_stream_turns_comments_and_empty_chunks_into_progress() -> None:
         ProviderDeltaKind.finish,
     ]
     assert deltas[3].content == "Hello"
+
+
+@pytest.mark.parametrize(("base_url", "sent"), [
+    ("{proxy}/grok/v1", True),
+    ("https://api.x.ai/v1", True),
+    ("{proxy}/deepseek", False),
+])
+async def test_grok_routes_a_conversation_by_header_and_leaves_the_body_alone(base_url: str, sent: bool) -> None:
+    """xAI keeps a conversation on its cache server by ``x-grok-conv-id``; the body must stay byte-identical."""
+    from protocore.contracts.llm import LLMObservabilityContext
+
+    from daedalus.config import keyproxy_base
+
+    base_url = base_url.format(proxy=keyproxy_base())
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, text=_sse([_chunk({"content": "ok"}, finish="stop")]), headers={"content-type": "text/event-stream"})
+
+    endpoint = ProviderEndpoint(id="grok", kind="openai_compat", base_url=base_url)
+    provider = OpenAICompatibleProvider(endpoint, client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    request = _request().model_copy(update={"observability": LLMObservabilityContext(session_id="sess-42", run_id="run-1")})
+    async for _ in provider.stream_with_tools(request):
+        pass
+    async for _ in provider.stream_with_tools(_request()):  # no session to name: no header rather than a shared one
+        pass
+    assert captured[0].headers.get("x-grok-conv-id") == ("sess-42" if sent else None)
+    assert "x-grok-conv-id" not in captured[1].headers
+    assert captured[0].content == captured[1].content  # the session reaches the wire only as the header

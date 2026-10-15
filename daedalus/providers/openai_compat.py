@@ -220,6 +220,19 @@ CACHE_KEY_UPSTREAMS = ("codex", "openai")
 conversation reach the same prompt cache instead of whichever machine answers."""
 
 
+CONVERSATION_HEADER_UPSTREAMS = ("grok",)
+"""Key-proxy upstreams that route by ``x-grok-conv-id``: one per session, so a conversation keeps reaching
+the server that holds its prompt cache. xAI's prompt-caching guide asks for this header (``prompt_cache_key``
+is its Responses API spelling; this is Chat Completions), and the Grok CLI sets it on every request to the
+chat proxy, giving its side calls ids of their own. A header, not a body field: the cached prefix is untouched."""
+
+
+def takes_conversation_header(endpoint: ProviderEndpoint) -> bool:
+    """Whether a request to this endpoint carries ``x-grok-conv-id``: the Grok subscription route or xAI itself."""
+    host = (urlsplit(endpoint.base_url).hostname or "").lower()
+    return keyproxy_upstream(endpoint.base_url) in CONVERSATION_HEADER_UPSTREAMS or host == "api.x.ai"
+
+
 def replays_reasoning(endpoint: ProviderEndpoint) -> bool:
     """Whether this endpoint's reasoning entries are kept on the message and sent back."""
     return keyproxy_upstream(endpoint.base_url) in REASONING_REPLAY_UPSTREAMS
@@ -844,6 +857,12 @@ class OpenAICompatibleProvider(ILLMProvider):
             obs = request.observability if request is not None else None
             session = (obs.session_id if obs is not None else None) or (obs.run_id if obs is not None else None)
             headers["x-opencode-session"] = session or self.endpoint.id
+        if takes_conversation_header(self.endpoint):
+            obs = request.observability if request is not None else None
+            conversation = (obs.session_id if obs is not None else None) or (obs.run_id if obs is not None else None)
+            # No fallback to a fixed value: one id shared by every caller would pin them all to one server.
+            if conversation:
+                headers["x-grok-conv-id"] = conversation
         return headers
 
     def _close_tools(
