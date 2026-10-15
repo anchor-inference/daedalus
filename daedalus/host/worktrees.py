@@ -914,6 +914,22 @@ class StaffWorktrees:
                 return False
             return True
 
+    async def park_branch(self, folder: ProjectFolder, branch: str, ref: str) -> bool:
+        """Keep ``branch``'s commits under ``ref`` and delete the branch; whether there was one.
+
+        For work set aside on purpose, such as an exploration's attempt that was not kept: the branch
+        list no longer shows it, and ``git log <ref>`` still finds every commit it had."""
+        if not ref.startswith("refs/") or ref.startswith("refs/heads/"):
+            raise WorktreeRefused(f"{ref} is not a place to park a branch")
+        git = self._git(folder.env)
+        async with await self._lock(git, folder.path):
+            if not await self._branch_exists(git, folder.path, branch):
+                return False
+            tip = (await git.run(["rev-parse", f"refs/heads/{branch}"], cwd=folder.path)).strip()
+            await git.run(["update-ref", ref, tip], cwd=folder.path)
+            await git.run(["branch", "-D", branch], cwd=folder.path)
+            return True
+
     async def remove(self, worktree: Worktree, *, delete_branch_if_merged: bool) -> bool:
         """Remove the worktree; with ``delete_branch_if_merged``, also its branch once the folder's current
         branch has all of it. Returns whether the branch was deleted.

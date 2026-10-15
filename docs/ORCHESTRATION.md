@@ -75,6 +75,24 @@ the journal and the card say what happened ("Claude Code: usage window exhausted
 accepted"), and the member's card shows that it runs elsewhere until its own runtime takes a launch
 again. An empty route launches every member on its own runtime alone.
 
+**Competing attempts.** For a card where the right approach is unclear, the coordinator can race two
+or three attempts at it with its `Explore` tool and keep the best. Each attempt is a one-off member
+working a copy of the card in a worktree and on a branch of its own. Attempts of a Daedalus member
+continue that member's conversation: their requests start with the same bytes as its own, so the
+provider serves the shared history from its cache and each attempt pays only for its own tail. A
+command-line attempt is a fresh member of the runtime and model the coordinator names, with an
+optional approach of its own. The exploration reserves its budget (by default
+`orchestrator.explore_usd_per_attempt` for each attempt) against the project's goal budget before
+anything starts, and is refused when the budget cannot hold it; the attempts have
+`orchestrator.explore_deadline_minutes` to report. Their reports do not wake the coordinator one by
+one: once every attempt has reported, or the deadline or budget passes, it is woken once with the
+attempts side by side — what each changed, the checks it reported, what it cost — and picks one or
+none. The kept attempt's card goes on to review and the merge like any card, and the cards that
+waited on the original wait on it; the others are dismissed, their worktrees removed and their
+branches parked under `refs/daedalus/explored/`. Everything is recorded before it is launched, so a
+restart reports an attempt whose launch it interrupted instead of launching it again. The card
+shows its attempts with their state, cost and the one kept.
+
 ## Folders on the host
 
 When Daedalus runs in a container, a project folder may live on the host machine instead. Every

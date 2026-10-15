@@ -611,6 +611,47 @@ review_result().definition.parameters.properties["verification"]["enum"] = ["unv
 
 
 @search_hint(
+    "explore competing attempts parallel try several ways race variants speculative pick best winner "
+    "несколько попыток параллельно попробовать разные подходы конкурирующие варианты выбрать лучший победитель"
+)
+@tool(
+    name="Explore",
+    description=(
+        "Race 2 or 3 competing attempts at one card and keep the best. op='start' (default) with task_id (a card "
+        "in todo or blocked with a whole brief) and attempts (2 or 3): each attempt is a one-off member on a copy "
+        "of the card, in a worktree and on a branch of its own. staff names whose setup they copy (default: who "
+        "worked the card); a Daedalus member's attempts continue its conversation, so they share it from cache. "
+        "variants gives each attempt its own {harness, model, approach}. budget_usd (default per attempt from the "
+        "settings) is held against the project budget until they are done, and the start is refused when the "
+        "budget cannot hold it; deadline_minutes bounds them. Their reports do not wake you one by one: you are "
+        "woken once with the attempts side by side. op='pick' with exploration and winner (its number, or 'none') "
+        "and why keeps one: its card goes on to review and the merge, the others are dismissed with their "
+        "worktrees and branches. op='status' shows an exploration, or lists them."
+    ),
+)
+async def explore(
+    context: ToolContext,
+    op: str = "start",
+    task_id: str | None = None,
+    attempts: int = 2,
+    staff: str | None = None,
+    variants: list[Any] | None = None,
+    budget_usd: float | None = None,
+    deadline_minutes: int | None = None,
+    exploration: str | None = None,
+    winner: str | None = None,
+    why: str = "",
+) -> ToolResult:
+    return await _call(context, "explore", op=op, task_id=task_id, attempts=attempts, staff=staff,
+                       variants=variants, budget_usd=budget_usd, deadline_minutes=deadline_minutes,
+                       exploration=exploration, winner=winner, why=why, client_operation_id=call_id(context))
+
+
+explore().definition.parameters.properties["op"]["enum"] = ["start", "status", "pick"]
+explore().definition.parameters.properties["attempts"]["enum"] = [2, 3]
+
+
+@search_hint(
     "decide nothing further close result no next step waiting reason decision "
     "решить закрыть результат ничего дальше без следующего шага причина решение"
 )
@@ -893,7 +934,7 @@ async def project_extension(context: ToolContext, plugin_id: str, tool_name: str
 
 TOOLS = [
     brief, folders, journal, team, tasks, peek, AskOperator, withdraw_questions, project_report,
-    hire, staff_edit, dismiss, assign, staff_sessions, require, review_result, decide, tell, read_staff, answer, interrupt, pause, release, harnesses,
+    hire, staff_edit, dismiss, assign, staff_sessions, require, review_result, explore, decide, tell, read_staff, answer, interrupt, pause, release, harnesses,
     wake_me, Watch, unwatch, project_extension,
 ]
 

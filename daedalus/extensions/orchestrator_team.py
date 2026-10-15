@@ -518,6 +518,12 @@ async def assign(
             existing = await board.get(task_id, actor=session_id)
         except KeyError as exc:
             raise Refused(f"no task {task_id} on {project.name}'s board; Tasks() lists them") from exc
+        explored = await orch.manager.db.fetchone("SELECT id FROM explorations WHERE task_id = ?"
+                                                  " AND state IN ('launching','running','ready')", (task_id,))
+        if explored is not None:
+            # Its attempts are at work on copies of it; a member on the card itself would be one
+            # more attempt nobody is comparing.
+            raise Refused(f"task {task_id} is being explored in {explored['id']}; Explore(op='pick', …) decides it")
         # Repeating the saved brief while naming a card must not turn a first assignment
         # into an edit that requires project-wide planning authority.
         given = {key: value for key, value in given.items()

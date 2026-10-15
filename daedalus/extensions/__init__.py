@@ -37,6 +37,7 @@ EXTENSIONS = (
     "daedalus.extensions.disk_guard",
     "daedalus.extensions.staff",
     "daedalus.extensions.orchestrator",
+    "daedalus.extensions.explorations",
     "daedalus.extensions.project_topics",
     "daedalus.extensions.dispatches",
     "daedalus.extensions.dispatcher",

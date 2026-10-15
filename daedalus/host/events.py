@@ -436,6 +436,17 @@ class OpenResults(TypedDict):
     lines: list[str]
 
 
+class ExplorationNews(TypedDict):
+    """An exploration's attempts are done, or its deadline or budget stopped them: the one event its
+    orchestrator is woken by, with the attempts side by side (see :mod:`daedalus.extensions.explorations`)."""
+
+    exploration_id: str
+    task_id: str
+    state: str
+    reason: str
+    lines: list[str]
+
+
 BusGap = TypedDict("BusGap", {"from": int, "to": int})
 
 
@@ -675,6 +686,7 @@ REGISTRY: dict[str, EventSpec] = {
     "task.merge_failed": EventSpec(TaskChange),
     "task.ci_failed": EventSpec(TaskChange),
     "orchestrator.open_results": EventSpec(OpenResults),
+    "orchestrator.exploration": EventSpec(ExplorationNews),
     "schedule.fired": EventSpec(ScheduleFired),
     "watch.fired": EventSpec(WatchFired),
     "webhook.received": EventSpec(WebhookReceived),

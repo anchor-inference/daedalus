@@ -1533,6 +1533,7 @@ ORCHESTRATOR_ONLY_TOOLS = [
     "Assign",
     "Require",
     "ReviewResult",
+    "Explore",
     "Decide",
     "Tell",
     "ReadStaff",
@@ -1694,6 +1695,13 @@ class OrchestratorConfig(BaseModel):
     wake_cron_min_minutes: int = Field(default=10, ge=1, le=1440)
     """The shortest gap a recurring wake-up may have. A fired wake-up is urgent and passes the hourly
     cap, so this is what keeps a cron from buying a turn every minute."""
+    explore_usd_per_attempt: float = Field(default=1.0, gt=0, le=100)
+    """What an exploration reserves for each of its attempts when the orchestrator names no budget of
+    its own. The whole reservation is held against the project's goal budget until the attempts are
+    done, so an exploration the budget cannot cover is refused before anything starts."""
+    explore_deadline_minutes: int = Field(default=120, ge=5, le=1440)
+    """How long an exploration's attempts may work before the orchestrator is asked to choose among
+    what has reported; the ones still working are stopped then."""
 
 
 class WatchesConfig(BaseModel):

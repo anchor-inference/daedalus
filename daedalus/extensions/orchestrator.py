@@ -31,7 +31,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from protocore.contracts.types import OPERATOR_WORDS_METADATA_KEY, Message, MessageRole, TextBlock
 
 from daedalus.config import NoModelConfigured
-from daedalus.extensions import orchestrator_contract, orchestrator_ops, orchestrator_team, wakeups
+from daedalus.extensions import explorations, orchestrator_contract, orchestrator_ops, orchestrator_team, wakeups
 from daedalus.extensions.coordinator_handoff import CoordinatorHandoff
 from daedalus.extensions.likeness import same_question
 from daedalus.extensions.notifications import Draft, ProjectNotifyPolicy
@@ -95,6 +95,7 @@ WAKE_TYPES = (
     "dispatch.message",
     "ask.batch",
     "orchestrator.open_results",
+    "orchestrator.exploration",
 )
 """What an orchestrator's queue subscribes to; :meth:`Orchestrators.classify` decides which of them wake it.
 The two ``dispatch`` types are the main orchestrator's hand-overs to a project; they wake at once."""
@@ -205,7 +206,7 @@ def who(member: Staff | None) -> str:
 Section = tuple[list[str], str]
 """Lines of the state block, and where the orchestrator finds what a cut left out."""
 
-OPERATIONS = {**orchestrator_ops.OPS, **orchestrator_team.OPS, **orchestrator_contract.OPS}
+OPERATIONS = {**orchestrator_ops.OPS, **orchestrator_team.OPS, **orchestrator_contract.OPS, **explorations.OPS}
 """Everything the orchestrator's tools can ask of this extension: the project tools and the team tools."""
 
 CUT_NOTE = "\n[… the state is cut here; the tools show the rest]"
@@ -1148,6 +1149,12 @@ class Orchestrators:
         ):
             return None
         kind = event.type
+        explored = self.app.extensions.get("explorations")
+        if explored is not None and (kind in ("staff.report", "staff.status") or kind in TASK_WAKES) and await explored.quiet(event):
+            # An exploration's attempts wake it once, when they are all in: see ``orchestrator.exploration``.
+            return None
+        if kind == "orchestrator.exploration":
+            return Wake(f"exploration:{p.get('exploration_id') or event.seq}", urgent=True)
         if kind == "staff.status":
             status = str(p.get("status") or "")
             if status not in STAFF_WAKE_STATUSES or not event.staff_id:
@@ -1363,6 +1370,8 @@ class Orchestrators:
         if kind == "watch.fired":
             said = " — ".join(_one_line(str(p[key]), 240) for key in ("detail", "note") if p.get(key))
             return f"watch [{p.get('watch_id')}] fired{': ' + said if said else ''}"
+        if kind == "orchestrator.exploration":
+            return "\n".join(str(line) for line in p.get("lines") or []) or f"exploration {p.get('exploration_id')} is ready"
         if kind == "orchestrator.open_results":
             lines = [str(line) for line in p.get("lines") or []]
             return "your last turn ended with no decision on these (said once; they stay in the state block until one is made):\n  " + "\n  ".join(lines)

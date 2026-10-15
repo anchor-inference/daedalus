@@ -124,6 +124,11 @@ the review column with its marks — and says that nothing further follows one w
 done, stuck or needs-input, and a card left in todo with nobody on it, stay in the orchestrator's state
 block until one of its decisions follows; a turn that ends with one still open is followed by one
 `orchestrator.open_results` event, and never a second.
+`GET /api/board/{id}/explorations` lists the explorations a card was raced by or is an attempt of
+(`state`: `launching`, `running`, `ready`, `chosen`, `abandoned`; `winner_slot`, `budget_usd`,
+`deadline_at`), each with its `attempts` (`slot`, `staff_name`, `harness`, `model`, `state`,
+`task_id`, `forked`, `usd`, `unpriced`). Its orchestrator hears of one once, in an
+`orchestrator.exploration` event, when every attempt has reported or its deadline or budget passed.
 
 **What the operator sees of it.** `GET /api/projects/{id}/focus-state` is built from those rows and
 never from a model: `counts` (`in_work`, `decisions`, `waiting_for_you`, `unconfirmed`,

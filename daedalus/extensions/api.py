@@ -78,6 +78,7 @@ from daedalus.extensions import (
     api_coordinator_authority,
     api_diagrams,
     api_disk,
+    api_explorations,
     api_files,
     api_folder_browser,
     api_goal_budget,
@@ -1620,6 +1621,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_board.register(api, app, auth)
     api_capacity.register(api, app, auth)
     api_comparisons.install_routes(api, app, auth)
+    api_explorations.register(api, app, auth)
     api_ci.install_routes(api, app, auth)
     api_control.register(api, app, auth)
     api_coordinator_authority.register(api, app, auth)

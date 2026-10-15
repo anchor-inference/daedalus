@@ -1614,6 +1614,8 @@ class BoardStub:
                            "contract_revision": row["contract_revision"], "returned_from_review": True}
                 self.ci_requirement_receipts[operation] = receipt
                 return 200, receipt
+            if path.endswith("/explorations") and method == "GET":
+                return 200, {"task_id": row["id"], "explorations": row.get("explorations", [])}
             if path.endswith("/handoff-options") and method == "GET":
                 source_harness = row.get("source_harness") or (row.get("assignee") or {}).get("harness")
                 source_id = row.get("current_attempt_id")

@@ -26,4 +26,6 @@ def mutates(operation: str, arguments: dict[str, Any]) -> bool:
         return arguments.get("op", "list") not in ("list", "get", "issues")
     if operation == "review_result":
         return arguments.get("op") != "inspect"
+    if operation == "explore":
+        return arguments.get("op", "start") != "status"
     return True
