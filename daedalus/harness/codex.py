@@ -291,6 +291,8 @@ class CodexAdapter:
         files: dict[str, bytes] = {tools.path: tools.file for tools in spec.tool_sets}
         if spec.team_skill:
             files[SKILL_FILE] = spec.team_skill.encode()
+        for name, text in spec.skills:
+            files[f"{SKILLS_DIR}/{name}/SKILL.md"] = text.encode()
         argv = ("sh", "-c", WAIT_THEN_ATTACH, "codex-tui", f"{LAUNCH_DIR}/{THREAD_FILE}", socket, *TUI_SETTINGS)
         return LaunchPlan(
             argv=argv,

@@ -97,7 +97,7 @@ from daedalus.host.setting_refs import (
     preset_images,
     provider_spend_cap,
 )
-from daedalus.host.skills import DirectorySkillStore
+from daedalus.host.skills import DirectorySkillStore, ScopedSkillStore
 from daedalus.host.transcript_view import TranscriptViewBuilder, message_view
 from daedalus.host.worktrees import append_exclude, exclude_lines
 from daedalus.mcp.manager import McpManager, blocked_for, mcp_tool_prefix
@@ -118,6 +118,7 @@ from daedalus.stores.inference_budget import InferenceBudget
 from daedalus.stores.knowledge import KnowledgeStore, project_facts_note
 from daedalus.stores.media import MediaStore
 from daedalus.stores.persistent import PersistentMemory, PersistentWorkspace
+from daedalus.stores.project_environment import EnvironmentStore
 from daedalus.stores.projects import FolderSpec, Project, ProjectFolder, ProjectSettings, ProjectStore
 from daedalus.stores.provider_holds import (
     PROVIDER_RESUME_NOTE,
@@ -315,6 +316,11 @@ class SessionState:
     """Lowered when a run starts, raised again once its history is persisted and its snapshot taken.
     The next run waits for it: the files a revert would restore must describe the turn that just ended,
     not the one starting. The rest of the housekeeping nobody waits for."""
+    environment_scope: tuple[frozenset[str] | None, frozenset[str] | None] = (None, None)
+    """The MCP servers and the skills the project's environment lets this session see, ``None`` for
+    all of them. Read from the store when a run's engine is assembled and left alone until the next
+    one: the tools and the skill catalogue are part of the prompt prefix the provider caches, and an
+    operator editing the environment mid-run would otherwise invalidate it for the rest of the run."""
     standing: tuple[str, list[dict[str, Any]]] = ("", [])
     """The carried instructions and memory of an imported session, as read from their blob (the blob's
     reference, then the files); see :mod:`daedalus.host.standing`."""
@@ -1140,7 +1146,28 @@ class SessionManager:
     # -- MCP per session --------------------------------------------------------------
 
     def mcp_enabled(self, state: SessionState) -> list[str]:
-        return [s for s in state.metadata.get("mcp_enabled", []) if s in self.mcp.available()]
+        return [s for s in state.metadata.get("mcp_enabled", []) if s in self.mcp_visible(state)]
+
+    def mcp_visible(self, state: SessionState) -> list[str]:
+        """The configured MCP servers this session may switch on: all of them, or the subset its
+        project's environment names (as of the current run's start)."""
+        allowed = state.environment_scope[0]
+        return [s for s in self.mcp.available() if allowed is None or s in allowed]
+
+    async def _environment_scope(self, state: SessionState) -> tuple[frozenset[str] | None, frozenset[str] | None]:
+        """The visibility subsets of the session's project environment; ``None`` where it names none."""
+        if state.project is None:
+            return (None, None)
+        try:
+            record = await EnvironmentStore(self.db).get(state.project.id)
+        except Exception:  # noqa: BLE001 — a store that cannot be read narrows nothing; the run is not refused for it
+            logger.warning("the environment of project %s could not be read; its sessions see every server and skill", state.project.id, exc_info=True)
+            return (None, None)
+        spec = record.spec
+        return (frozenset(spec.mcp) if spec.mcp else None, frozenset(spec.skills) if spec.skills else None)
+
+    def skills_for(self, state: SessionState) -> ScopedSkillStore:
+        return ScopedSkillStore(self.skills, lambda: state.environment_scope[1])
 
     async def set_mcp(self, session_id: str, server: str, enabled: bool, *, announce: bool = True) -> list[str]:
         """Switch ``server`` on or off for a session; returns the servers enabled now.
@@ -1155,6 +1182,8 @@ class SessionManager:
         current = self.mcp_enabled(state)
         was_enabled = server in current
         if enabled:
+            if server in self.mcp.available() and server not in self.mcp_visible(state):
+                raise KeyError(f"MCP server {server!r} is not part of this project's environment; it offers: {', '.join(self.mcp_visible(state)) or 'none'}")
             await self.mcp.ensure(server)
             if server not in current:
                 current.append(server)
@@ -1207,8 +1236,11 @@ class SessionManager:
             raise KeyError(session_id)
         if op == "list":
             enabled = set(self.mcp_enabled(state))
+            visible = set(self.mcp_visible(state))
             lines = []
             for item in self.mcp.status():
+                if item["name"] not in visible:
+                    continue
                 mark = "on " if item["name"] in enabled else "off"
                 tools = self.mcp_tools_line(state, item["name"]) if item["tools"] else ("connected, no tools" if item["connected"] else "not connected yet")
                 err = f" (error: {item['error']})" if item["error"] else ""
@@ -2929,7 +2961,7 @@ class SessionManager:
             # every local folder of the project to read, the ones not marked read-only to write, or
             # the session's own directory alone when it has one.
             walls=self.walls_of(state),
-            extra={"skill_store": self.skills, "manager": self, "vision": _LiveVision(self), "jobs": self.jobs.setdefault(state.session.id, {})},
+            extra={"skill_store": self.skills_for(state), "manager": self, "vision": _LiveVision(self), "jobs": self.jobs.setdefault(state.session.id, {})},
         )
         host_folder = self.host_folder_of(state.session.id, state.session.metadata, state.project)
         if host_folder is not None:
@@ -3958,6 +3990,10 @@ class SessionManager:
 
     async def _assemble_engine(self, state: SessionState, run_id: str, overrides: dict[str, Any], rungs: list[Any], preset: Any) -> QueryEngine:
         await self._load_capability_ancestors(state)
+        scope = await self._environment_scope(state)
+        if scope != state.environment_scope:
+            state.environment_scope = scope
+            self._apply_tool_visibility_all()
         await standing.load(self, state)
         if rungs and self.provider_costs_nothing(rungs[0][0].endpoint.id, rungs[0][1]):
             # A local, free or subscription primary remains usable after a priced budget is
@@ -3977,7 +4013,7 @@ class SessionManager:
             tool_registry=self.registry_for(state),
             event_stream=self.events,
             blob_store=self.blobs,
-            skill_store=self.skills,
+            skill_store=self.skills_for(state),
             hook_manager=self.hooks,
             bot_repo=self.settings.bot_repo_dir,
             core_repo=self.settings.core_repo_dir,

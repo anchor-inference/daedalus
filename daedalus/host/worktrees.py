@@ -409,12 +409,12 @@ def _conflicted_names(message: str) -> list[str]:
     return list(dict.fromkeys(names))
 
 
-async def _run_local(argv: list[str], *, cwd: Path, timeout: float) -> SetupResult:
+async def _run_local(argv: list[str], *, cwd: Path, timeout: float, env_vars: dict[str, str] | None = None) -> SetupResult:
     """Run ``argv`` with its output merged, keeping only the tail in memory: an install may print
     megabytes, and only its last lines say why it failed. Its own session, so a timeout kills the
     whole group: ``npm ci`` under ``bash -c`` would otherwise outlive the shell that was killed."""
     proc = await asyncio.create_subprocess_exec(
-        *argv, cwd=str(cwd), env=setup_environment(_QUIET),
+        *argv, cwd=str(cwd), env=setup_environment({**_QUIET, **(env_vars or {})}),
         stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
         start_new_session=True,
     )
@@ -657,13 +657,23 @@ class StaffWorktrees:
         version manager) are on the path as they are in their own terminal. A failure is a result,
         not an exception; only a bridge that cannot be reached raises.
         """
-        argv = ["bash", "-lc", command]
-        if worktree.env == self.local_env:
-            return await _run_local(argv, cwd=worktree.cwd, timeout=timeout)
+        return await self.run_in(worktree.env, ["bash", "-lc", command], cwd=worktree.cwd, timeout=timeout)
+
+    async def run_in(self, env: str, argv: list[str], *, cwd: Path, timeout: float,
+                     env_vars: dict[str, str] | None = None, stdin: bytes | None = None) -> SetupResult:
+        """Run ``argv`` in a folder of ``env``: locally as a process group of this host, otherwise
+        through the host bridge. A failure is a result; only a bridge that cannot be reached raises.
+        ``stdin`` is for the bridge, which cannot write files itself; a local caller writes them."""
+        variables = {**_QUIET, **(env_vars or {})}
+        if env == self.local_env:
+            if stdin is not None:
+                raise ValueError("a local command is given its input as files, not on stdin")
+            return await _run_local(argv, cwd=cwd, timeout=timeout, env_vars=variables)
         if self.host is None:
             raise WorktreeUnavailable("host folders need the host terminal bridge")
         try:
-            result = await self.host.exec_run(worktree.env, argv, cwd=str(worktree.cwd), env_vars=dict(_QUIET), timeout=timeout)
+            extra = {"stdin": stdin} if stdin is not None else {}
+            result = await self.host.exec_run(env, argv, cwd=str(cwd), env_vars=variables, timeout=timeout, **extra)
         except OSError as exc:
             raise WorktreeUnavailable(f"the host terminal bridge did not answer: {exc}") from exc
         output = _text(getattr(result, "stdout", "")) + _text(getattr(result, "stderr", ""))

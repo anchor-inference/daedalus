@@ -49,6 +49,7 @@ EXTENSIONS = (
     "daedalus.extensions.terminals",
     "daedalus.extensions.harness",
     "daedalus.extensions.browser",
+    "daedalus.extensions.project_environment",
     "daedalus.extensions.pages",
     "daedalus.extensions.watches",
     "daedalus.extensions.plugins",

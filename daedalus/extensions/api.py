@@ -89,6 +89,7 @@ from daedalus.extensions import (
     api_memory,
     api_pages,
     api_plugins,
+    api_project_environment,
     api_project_start,
     api_projects,
     api_prompt_coach,
@@ -1629,6 +1630,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_knowledge.register(api, app, auth)
     api_recurring.register(api, app, auth)
     api_resource_profiles.register(api, app, auth)
+    api_project_environment.register(api, app, auth)
     # The Memory screen: records by category and topic, merges, the tidying's suggestions, undo.
     api_memory.register(api, app, auth)
     api_runtime.register(api, app, auth)

@@ -461,6 +461,13 @@ class TaskLaunchEffect:
                 readiness = await dependency_readiness(conn, task.id)
             if not readiness["ready"]:
                 return EffectOutcome("deferred", "the task waits for current accepted dependency results")
+            environments = self.app.extensions.get("project_environment")
+            if environments is not None:
+                # Last of the checks, so a launch refused for another reason does not start the
+                # project's first preparation; the first one that would start does.
+                held = await environments.hold(project.id, start=True)  # type: ignore[attr-defined]
+                if held:
+                    return EffectOutcome("deferred", canonical({"reason": "environment", "detail": held}))
         except (ControlDenied, ValueError, KeyError) as exc:
             return EffectOutcome("failed", str(exc))
 

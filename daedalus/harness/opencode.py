@@ -225,6 +225,9 @@ class OpenCodeAdapter:
             config["instructions"] = [f"{LAUNCH_DIR}/{SYSTEM_FILE}"]
         if spec.team_skill:
             files[SKILL_FILE] = spec.team_skill.encode()
+        for name, text in spec.skills:
+            files[f"{SKILLS_DIR}/{name}/SKILL.md"] = text.encode()
+        if spec.team_skill or spec.skills:
             config["skills"] = {"paths": [f"{LAUNCH_DIR}/{SKILLS_DIR}"]}
         argv = ["opencode", spec.cwd, "--port", str(port), "--hostname", "127.0.0.1"]
         if spec.agent:

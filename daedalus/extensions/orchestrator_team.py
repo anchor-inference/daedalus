@@ -720,6 +720,11 @@ async def assign(
         notes.append(f"Handed over: {', '.join(secret.placeholder for secret in secrets_handed)}; the launch carries them, never the brief.")
     if launched.get("route"):
         notes.insert(0, f"Launch route: {launched['route']['reason']}.")
+    environments = orch.app.extensions.get("project_environment")
+    if environments is not None:
+        held = await environments.hold(project.id, start=True)  # type: ignore[attr-defined]
+        if held:
+            notes.append(f"The launch is held — {held}. Nothing to do about it here; it starts by itself once the environment is ready.")
     tail = "".join(" " + note for note in notes)
     admission = await OutboxStore(orch.manager.db).view(launched["effect_id"])
     waiting = (f" queue position {admission['wait_position']} ({admission['wait_reason']})"

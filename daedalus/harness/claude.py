@@ -354,6 +354,8 @@ class ClaudeCodeAdapter:
             argv += ["--append-system-prompt-file", f"{LAUNCH_DIR}/system.md"]
         if spec.team_skill:
             files[SKILL_PATH] = spec.team_skill.encode()
+        for name, text in spec.skills:
+            files[f".claude/skills/{name}/SKILL.md"] = text.encode()
         if spec.title:
             argv += ["--name", spec.title[:120]]
         if spec.agent and spec.agent.lower() != "default":

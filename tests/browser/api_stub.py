@@ -870,6 +870,19 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
                                                       "state": "disabled", "limits": None,
                                                       "min_free_disk_bytes": 0,
                                                       "disk_quota_supported": False})
+    if len(parts) in (5, 6) and parts[2] == "projects" and parts[4] == "environment":
+        # A project's environment: none declared, so nothing holds its members back.
+        spec = (body or {}).get("spec") if method.upper() == "PUT" and isinstance(body, dict) else None
+        view = {"project_id": parts[3], "spec": spec or {"repos": [], "seeds": [], "mcp": [], "skills": [], "goal": "",
+                                                          "goal_minutes": 30, "goal_usd": 2.0},
+                "configured": bool(spec), "needs_preparation": bool(spec and (spec.get("repos") or spec.get("seeds") or spec.get("goal"))),
+                "state": "unprepared", "stale": False, "reason": "", "log": "", "hold": "", "attempt": 0,
+                "setup_session_id": "", "started_at": "", "finished_at": "", "updated_at": "",
+                "choices": {"mcp": ["github"], "skills": ["review"]}}
+        if len(parts) == 5 and method.upper() in ("GET", "PUT"):
+            return 200, "application/json", json.dumps(view)
+        if len(parts) == 6 and parts[5] == "prepare" and method.upper() == "POST":
+            return 200, "application/json", json.dumps({**view, "state": "preparing"})
     if method.upper() == "DELETE" and len(parts) == 5 and parts[2:4] == ["secrets", "logins"]:
         # Forgetting a sign-in saved from the browser's private form; none is listed here.
         return 404, "application/json", json.dumps({"detail": "no such saved sign-in"})

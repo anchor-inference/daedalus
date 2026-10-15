@@ -11,7 +11,7 @@ import hashlib
 import mimetypes
 import re
 import shutil
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -235,6 +235,42 @@ class DirectorySkillStore(ISkillStore):
         return target.read_bytes()
 
 
+class ScopedSkillStore:
+    """The skill store as one session sees it: only the skills its project's environment names.
+
+    ``allowed`` is read on every call and answers ``None`` for "every skill", which is what a session
+    outside a project with a skills list gets. The session runner sets the answer when a run's engine
+    is assembled, so the catalogue the core builds once per run, and caches in the prompt prefix, is
+    the same list the Skill tool loads from for the rest of that run. Writes and everything else go
+    to the store underneath unchanged: the subset hides skills, it does not own them.
+    """
+
+    def __init__(self, store: DirectorySkillStore, allowed: Callable[[], frozenset[str] | None]) -> None:
+        self._store = store
+        self._allowed = allowed
+
+    def _visible(self, entry: SkillIndexEntry) -> bool:
+        allowed = self._allowed()
+        return allowed is None or entry.name in allowed or entry.id in allowed
+
+    async def list(self, tenant_id: str) -> Sequence[SkillIndexEntry]:
+        return [e for e in await self._store.list(tenant_id) if self._visible(e)]
+
+    async def load(self, tenant_id: str, skill_id: str) -> SkillBundle:
+        bundle = await self._store.load(tenant_id, skill_id)
+        allowed = self._allowed()
+        if allowed is not None and bundle.manifest.id not in allowed and bundle.manifest.name not in allowed:
+            raise SkillNotFoundError(skill_id)
+        return bundle
+
+    async def list_subset(self, tenant_id: str, names: Sequence[str]) -> Sequence[SkillIndexEntry]:
+        return [e for e in await self._store.list_subset(tenant_id, names) if self._visible(e)]
+
+    async def list_enabled_subset(self, tenant_id: str, names: Sequence[str]) -> Sequence[SkillIndexEntry]:
+        return [e for e in await self._store.list_enabled_subset(tenant_id, names) if self._visible(e)]
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._store, name)
 
 
 # The static contract a skill must meet before the operator may activate it; also what SkillDraft

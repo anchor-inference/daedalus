@@ -178,6 +178,9 @@ class PiAdapter:
         if spec.team_skill:
             files[SKILL_FILE] = spec.team_skill.encode()
             argv += ["--skill", f"{LAUNCH_DIR}/{SKILL_FILE}"]
+        for name, text in spec.skills:
+            files[f"skills/{name}/SKILL.md"] = text.encode()
+            argv += ["--skill", f"{LAUNCH_DIR}/skills/{name}/SKILL.md"]
         if spec.title:
             argv += ["--name", spec.title[:120]]
         if spec.model:

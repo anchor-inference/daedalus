@@ -105,6 +105,17 @@ class ToolSet(Protocol):
 
     async def call(self, live: LiveSession, tool: str, arguments: dict[str, Any], *, ask: Callable[[str, str, str], Awaitable[bool | None]], launch_id: str, cwd: str) -> tuple[str, bool]: ...
 
+@dataclass(frozen=True, slots=True)
+class Extras:
+    """A launch's share of its project's environment."""
+
+    tool_sets: tuple[ToolSetSpec, ...] = ()
+    skills: tuple[tuple[str, str], ...] = ()
+
+
+LaunchExtras = Callable[[StartRequest, str, int], Awaitable[Extras]]
+"""``(request, launch id, tool hold in ms) -> Extras``."""
+
 LAUNCH_COLS = 120
 LAUNCH_ROWS = 36
 """The size a CLI's terminal starts at. A TUI lays itself out once for the size it sees first, and
@@ -414,6 +425,11 @@ class CliStaffRuntime:
     finished turn seen — and the machine must start from where the row is, not where this left it.
     """
 
+    launch_extras: LaunchExtras | None = None
+    """What the project's environment adds to one launch — the tool set of its MCP servers and its
+    skill files — set by the environment subsystem. Asked once per launch, so a change to the
+    environment reaches the next launch of a member and never the CLI already running."""
+
     def __init__(
         self,
         adapter: HarnessAdapter,
@@ -441,6 +457,9 @@ class CliStaffRuntime:
         self.tool_sets: dict[str, ToolSet] = {}
         """Daedalus's tools beyond the team's that every launch offers (``browser``), set by the
         subsystem that has them; each becomes an MCP entry and its calls arrive as ``tools`` posts."""
+        self.scoped_sets: dict[str, ToolSet] = {}
+        """Tool sets offered only by ``launch_extras``, never to every launch; their calls arrive as
+        ``tools`` posts like the others'."""
         self._by_terminal: dict[str, CliSession] = {}
         self._unsubscribe = terminals.subscribe(self._on_terminal_event)
         self._background: set[asyncio.Task[Any]] = set()
@@ -501,7 +520,16 @@ class CliStaffRuntime:
         what ended otherwise."""
         return await self._launch(req, resume_ref=prior.cli_session_id or "")
 
-    def _spec(self, req: StartRequest, launch_id: str, resume_ref: str) -> LaunchSpec:
+    async def _extras(self, req: StartRequest, launch_id: str) -> Extras:
+        if self.launch_extras is None:
+            return Extras()
+        try:
+            return await self.launch_extras(req, launch_id, self._tools_hold_ms())
+        except Exception:  # noqa: BLE001 — the environment adds to a launch; failing to read it does not stop the member
+            logger.warning("the environment of project %s could not be added to launch %s", req.project.id, launch_id, exc_info=True)
+            return Extras()
+
+    def _spec(self, req: StartRequest, launch_id: str, resume_ref: str, extras: Extras | None = None) -> LaunchSpec:
         cfg = self.config()
         facts = protocol.TeamFacts(
             staff_name=req.staff.name,
@@ -535,8 +563,9 @@ class CliStaffRuntime:
             report_hold_ms=cfg.report_hold_s * 1000,
             permission_hold_ms=cfg.permission_hold_s * 1000,
             port_range=port_range(cfg.opencode_port_range),
-            tool_sets=tuple(tools.spec(self._tools_hold_ms()) for tools in self.tool_sets.values()),
+            tool_sets=tuple(tools.spec(self._tools_hold_ms()) for tools in self.tool_sets.values()) + (extras.tool_sets if extras else ()),
             allow_rules=req.allow_rules,
+            skills=extras.skills if extras else (),
         )
 
     def _tools_hold_ms(self) -> int:
@@ -570,7 +599,7 @@ class CliStaffRuntime:
     async def _launch_once(self, req: StartRequest, *, resume_ref: str) -> Started:
         actor = self._actor(req.staff_session_id)
         launch_id = "l" + secrets.token_hex(8)
-        spec = self._spec(req, launch_id, resume_ref)
+        spec = self._spec(req, launch_id, resume_ref, await self._extras(req, launch_id))
         plan = self.adapter.resume_plan(spec, resume_ref) if resume_ref else self.adapter.launch_plan(spec)
         from daedalus.harness.observation import observe  # Lazy: observe imports the launch contract used by adapters.
         effective = observe(self.adapter, spec, plan)
@@ -1294,7 +1323,7 @@ class CliStaffRuntime:
                 if post.reply_id:
                     await session.term.reply(post.reply_id, seen[1])
                 return
-            tools = self.tool_sets.get(name)
+            tools = self.tool_sets.get(name) or self.scoped_sets.get(name)
             live = await self.lookup(session.staff_session_id)
             arguments = body.get("arguments") if isinstance(body.get("arguments"), dict) else {}
             if live is None:
