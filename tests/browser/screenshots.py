@@ -109,6 +109,15 @@ def _team() -> TeamStub:
     ]
     for member in staff:
         member["project_id"] = P1
+    # Kai's last launch was stopped at its first-output deadline: the card says at which step and why.
+    staff[2]["conditions"] = [
+        *({"name": n, "status": "true", "reason": "done", "message": f"{n}: done", "since": ago(hours=2), "deadline": None, "params": {"took_s": 1}}
+          for n in ("prepared", "spawned", "ready")),
+        {"name": "first_output", "status": "false", "reason": "timed_out", "message": "first_output: no output within 300 s",
+         "since": ago(hours=1, minutes=55), "deadline": None, "params": {"allowed_s": 300, "last_signal_at": ago(hours=1, minutes=55, seconds=20)}},
+        {"name": "reported", "status": "false", "reason": "ended", "message": "reported: the attempt ended cancelled without a report",
+         "since": ago(hours=1, minutes=55), "deadline": None, "params": {"state": "cancelled", "end_reason": "the host stopped it"}},
+    ]
     return TeamStub({**bakery, "folders": listed}, staff=staff, presets=[{"id": "strong", "label": "Claude Opus 5"}, {"id": "fast", "label": "DeepSeek Flash"}], personas=["builder", "reviewer", "tester"])
 
 
@@ -468,7 +477,7 @@ def usage_data() -> dict:
                 "burn_per_hour": burn, "eta_at": ahead(**eta) if eta else None,
                 "eta_early_at": ahead(**band[0]) if band else None, "eta_late_at": ahead(**band[1]) if band and band[1] else None,
                 "resets_at": ahead(**resets) if resets else None,
-                "exhausts_before_reset": (eta is not None and resets is not None and timedelta(**eta) < timedelta(**resets)) if status == "ok" else None}
+                "exhausts_before_reset": (timedelta(**eta) < timedelta(**resets)) if status == "ok" and eta and resets else None}
     # A busy afternoon on Claude: the five-hour window runs out before it resets; the week lasts.
     forecasts = [
         forecast("claude", "5h", 23, "ok", burn=31.0, eta={"hours": 2, "minutes": 29}, band=({"hours": 1, "minutes": 50}, {"hours": 3, "minutes": 40}), resets={"hours": 3}),
