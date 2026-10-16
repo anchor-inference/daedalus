@@ -84,6 +84,10 @@ mac:
   # and codesign failed on the main executable.
   hardenedRuntime: true
   gatekeeperAssess: false
+  # macOS asks before a program may hear the microphone and shows this sentence; a program without it
+  # is refused outright. Dictation in the window and in Quick Chat both need it.
+  extendInfo:
+    NSMicrophoneUsageDescription: Daedalus listens while you dictate a message.
   extraFiles:
     - from: stage/mac-${arch}
       to: MacOS

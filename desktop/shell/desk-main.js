@@ -21,6 +21,11 @@ const policy = require('./policy');
 // compositor draws the frame after the hide, and a capture taken at once has the box in it.
 const HIDE_SETTLE_MS = 250;
 
+// How long the region overlay's pages are given to draw the still they show. A page that never says
+// it is ready (it failed to load) would otherwise leave the capture busy and every later appshot
+// refused until the application restarts.
+const REGION_READY_MS = 10000;
+
 module.exports = function startDesk({ app, dir, getMain, showMain, getStrings, guard, language }) {
   const settingsFile = path.join(app.getPath('userData'), 'desk.json');
   let settings = desk.normaliseSettings(readJSON(settingsFile));
@@ -33,6 +38,11 @@ module.exports = function startDesk({ app, dir, getMain, showMain, getStrings, g
   let capturing = false;
   // Pictures taken by the appshot shortcut before the page could hear of them: it asks on load.
   let pending = [];
+  // The voice shortcut's request to start dictation, kept for the page to collect: a page loaded by
+  // this very press has not yet registered for quick:shown when the event is sent.
+  let voiceAsked = false;
+  // The region overlay while it is up: one window per display, and how to end it.
+  let region = null;
   let tray = null;
   let trayIcon = '';
   let status = desk.normaliseStatus(null);
@@ -42,6 +52,8 @@ module.exports = function startDesk({ app, dir, getMain, showMain, getStrings, g
     open: () => showMain(),
     quickChat: () => showQuick(),
     appshot: () => void appshotNow(),
+    region: () => void regionNow(),
+    voice: () => voiceNow(),
     pauseCompanion: () => tellMain('desk:action', 'pause-companion'),
     resumeCompanion: () => tellMain('desk:action', 'resume-companion'),
     quit: () => app.quit(),
@@ -63,7 +75,7 @@ module.exports = function startDesk({ app, dir, getMain, showMain, getStrings, g
   }
 
   function register() {
-    report = desk.registerShortcuts(globalShortcut, settings, { quickChat: toggleQuick, appshot: actions.appshot }, held);
+    report = desk.registerShortcuts(globalShortcut, settings, { quickChat: toggleQuick, appshot: actions.appshot, region: actions.region, voice: actions.voice }, held);
   }
 
   function fromMain(event) {
@@ -172,6 +184,122 @@ module.exports = function startDesk({ app, dir, getMain, showMain, getStrings, g
     const result = await capture(() => appshot.captureScreen(deps));
     pending.push(result);
     showQuick({ appshot: true });
+  }
+
+  // The region shortcut, like the appshot's, ends in Quick Chat with the picture attached. An Esc
+  // ends it where it started: Quick Chat comes back only if it was open before.
+  async function regionNow() {
+    if (!origin) {
+      showMain();
+      return;
+    }
+    const wasOpen = Boolean(quick && !quick.isDestroyed() && quick.isVisible());
+    const result = await capture(() => appshot.captureRegion(deps, chooseRegion));
+    if (!result.ok && result.error === 'dismissed') {
+      if (wasOpen) bringBackQuick();
+      return;
+    }
+    pending.push(result);
+    showQuick({ appshot: true });
+  }
+
+  function voiceNow() {
+    if (!origin) {
+      showMain();
+      return;
+    }
+    voiceAsked = true;
+    showQuick({ voice: true });
+  }
+
+  function bringBackQuick() {
+    if (!quick || quick.isDestroyed()) return;
+    place(quick);
+    quick.show();
+    quick.focus();
+  }
+
+  // chooseRegion puts an overlay on every display, each showing the still taken of it, and answers
+  // with the rectangle the operator drags on one of them, or null for Esc. The display a rectangle
+  // belongs to is the overlay that reported it, never a value from the page. A selection stays on
+  // one display: a drag across two would be a picture stitched from two scales.
+  function chooseRegion(shots) {
+    return new Promise((resolve, reject) => {
+      const overlays = [];
+      let settled = false;
+      let timer = null;
+      const end = (settle) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        region = null;
+        for (const overlay of overlays) {
+          if (!overlay.window.isDestroyed()) overlay.window.destroy();
+        }
+        settle();
+      };
+      region = {
+        overlays,
+        finish: (answer) => end(() => resolve(answer)),
+        ready: () => {
+          if (overlays.every((overlay) => overlay.ready)) clearTimeout(timer);
+        },
+      };
+      timer = setTimeout(() => end(() => reject(new Error('the selection overlay did not open'))), REGION_READY_MS);
+      const pointer = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+      const hint = getStrings().regionHint;
+      for (const shot of shots) {
+        const bounds = shot.display.bounds;
+        const window = new BrowserWindow({
+          x: bounds.x,
+          y: bounds.y,
+          width: bounds.width,
+          height: bounds.height,
+          frame: false,
+          resizable: false,
+          movable: false,
+          minimizable: false,
+          maximizable: false,
+          // Full screen is how a Linux window manager lets a window over its panels; on a Mac it
+          // would be a new Space with its animation, and the bounds already cover the display.
+          fullscreenable: process.platform === 'linux',
+          alwaysOnTop: true,
+          skipTaskbar: true,
+          show: false,
+          hasShadow: false,
+          enableLargerThanScreen: true,
+          title: 'Daedalus',
+          backgroundColor: '#000000',
+          webPreferences: { preload: path.join(dir, 'preload.js'), contextIsolation: true, sandbox: true, nodeIntegration: false },
+        });
+        // JPEG for the picture under the selection: a 4K PNG takes long enough to encode that the
+        // overlay would open late. The cut itself is taken from the lossless still, not from this.
+        const overlay = { window, bounds, displayId: shot.display.id, focus: shot.display.id === pointer.id, ready: false, background: `data:image/jpeg;base64,${shot.image.toJPEG(90).toString('base64')}` };
+        overlays.push(overlay);
+        window.setAlwaysOnTop(true, 'screen-saver');
+        if (process.platform === 'darwin') window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+        guard(window.webContents);
+        // An overlay closed by anything but its own answer — the system, a crash — is an Esc: the
+        // others must not stay up over the screen with nobody to dismiss them.
+        window.on('closed', () => region && region.overlays === overlays && region.finish(null));
+        window.loadFile(path.join(dir, 'pages', 'region.html'), { query: { hint } });
+      }
+    });
+  }
+
+  function overlayOf(event) {
+    if (!region) return null;
+    return region.overlays.find((overlay) => !overlay.window.isDestroyed() && event.sender === overlay.window.webContents) || null;
+  }
+
+  // An overlay is shown once its page has drawn the still, so the display never flashes black.
+  // The bounds are set again after showing: Windows sizes a window placed on a display of another
+  // scale by the scale of the display it was created on, until it is moved there once.
+  function showOverlay(overlay) {
+    overlay.window.show();
+    overlay.window.setBounds(overlay.bounds);
+    if (process.platform === 'linux') overlay.window.setFullScreen(true);
+    if (overlay.focus) overlay.window.focus();
   }
 
   function ownSourceIds() {
@@ -287,12 +415,43 @@ module.exports = function startDesk({ app, dir, getMain, showMain, getStrings, g
   ipcMain.handle('quick:capture', async (event, windowId) => {
     if (!fromQuick(event)) return null;
     const result = await capture(() => (windowId ? appshot.captureWindow(deps, String(windowId)) : appshot.captureScreen(deps)));
-    if (quick && !quick.isDestroyed()) {
-      place(quick);
-      quick.show();
-      quick.focus();
-    }
+    bringBackQuick();
     return result;
+  });
+  ipcMain.handle('quick:region', async (event) => {
+    if (!fromQuick(event)) return null;
+    const result = await capture(() => appshot.captureRegion(deps, chooseRegion));
+    bringBackQuick();
+    return result;
+  });
+  ipcMain.handle('quick:voice', (event) => {
+    if (!fromQuick(event)) return false;
+    const asked = voiceAsked;
+    voiceAsked = false;
+    return asked;
+  });
+  ipcMain.handle('region:image', (event) => {
+    const overlay = overlayOf(event);
+    return overlay ? overlay.background : null;
+  });
+  ipcMain.on('region:ready', (event) => {
+    const overlay = overlayOf(event);
+    if (!overlay || overlay.ready) return;
+    overlay.ready = true;
+    showOverlay(overlay);
+    region.ready();
+  });
+  // The pointer moved onto another display's overlay: it takes the keyboard, so Esc is heard there.
+  ipcMain.on('region:focus', (event) => {
+    const overlay = overlayOf(event);
+    if (overlay && overlay.ready) overlay.window.focus();
+  });
+  ipcMain.on('region:done', (event, answer) => {
+    const overlay = overlayOf(event);
+    if (!overlay) return;
+    if (!(answer && typeof answer === 'object' && answer.rect)) return region.finish(null);
+    const content = overlay.window.getContentBounds();
+    region.finish({ displayId: overlay.displayId, rect: answer.rect, offset: { x: content.x - overlay.bounds.x, y: content.y - overlay.bounds.y } });
   });
 
   app.on('will-quit', () => {

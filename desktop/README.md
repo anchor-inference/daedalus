@@ -465,27 +465,31 @@ keeps the draft. The chip at its top picks where the words go: the companion (wh
 has one), the conversation you were last in, or a new one; the confirmation line under the box has
 an **Open** button that shows that conversation in the window. `@` attaches a conversation, a project
 or a file from the last conversation's folder as context; `$` asks for a skill; the microphone uses
-the same speech recognition as the composer. The box is the app's own page (`/app/quick`), signed in
+the same speech recognition as the composer. A shortcut of its own, Alt+Shift+V, opens Quick Chat
+already listening; pressed again it stops, and the words land in the field. The box is the app's own page (`/app/quick`), signed in
 by the window's session, so nothing new on the host serves it.
 
 The **appshot** — a button in Quick Chat, and its own shortcut, Alt+Shift+Space — photographs the
 screen under the pointer and attaches the picture; the button beside it offers the other programs'
-windows as thumbnails to pick one instead. macOS asks once for permission to record the screen
+windows as thumbnails to pick one instead. The **area** button, and its shortcut Alt+Shift+S, freeze
+every display under a dimmed overlay: drag a rectangle on any of them and just that part is attached,
+at the display's own pixels on a HiDPI screen; Esc or the right button cancels. The overlay shows a
+still taken a moment before, so the picture is exactly what was selected. macOS asks once for permission to record the screen
 (System Settings → Privacy & Security → Screen Recording); until it is given an appshot says so
 instead of attaching an empty picture.
 
 The **tray** icon shows what is running and what waits for you (a dot, amber while agents work, red
 while a question or an approval waits; on a Mac the number beside it), and its menu has Open, Quick
-Chat, Appshot, Pause or Resume the companion when there is one, and Quit. On Linux the icon needs a
+Chat, Appshot, the area appshot, dictation into Quick Chat, Pause or Resume the companion when there is one, and Quit. On Linux the icon needs a
 desktop that shows StatusNotifierItem icons: KDE, Ubuntu's GNOME and most others do; plain GNOME
 needs the AppIndicator extension, and there closing the window quits rather than hiding it.
 
-Both shortcuts, and closing into the tray, are set in the app under **Settings → Desktop app**, which
+The four shortcuts, and closing into the tray, are set in the app under **Settings → Desktop app**, which
 records a shortcut from the keys you press and says when another program already holds it. They are
 kept per computer, in the application's own `desk.json`. On a Wayland desktop a program may grab a
 key for the whole desktop only through the desktop's portal, which some desktops refuse; there, bind
-a system shortcut to `daedalus --quick-chat` or `daedalus --appshot` instead — a second start with
-either does what the shortcut would.
+a system shortcut to `daedalus --quick-chat`, `--appshot`, `--region` or `--voice` instead — a second
+start with one does what the shortcut would.
 
 ### Links
 

@@ -10,8 +10,16 @@ const DEFAULTS = Object.freeze({
   // the default on every system — the key ChatGPT's Quick Chat and Claude's quick entry taught.
   quickChat: 'Alt+Space',
   appshot: 'Alt+Shift+Space',
+  // A region of the screen: S as in select, beside the screen's own appshot on the same modifiers.
+  // Windows' snipping tool is Win+Shift+S, which this leaves alone.
+  region: 'Alt+Shift+S',
+  // Quick Chat with the microphone already listening: V as in voice.
+  voice: 'Alt+Shift+V',
   hideToTray: true,
 });
+
+// The shortcuts, in the order they are registered, listed and checked against each other.
+const SHORTCUTS = Object.freeze(['quickChat', 'appshot', 'region', 'voice']);
 
 const MODIFIERS = new Set(['command', 'cmd', 'control', 'ctrl', 'commandorcontrol', 'cmdorctrl', 'alt', 'option', 'altgr', 'shift', 'super', 'meta']);
 const NAMED_KEYS = new Set([
@@ -43,14 +51,24 @@ function validAccelerator(value) {
 
 // normaliseSettings reads what was saved, keeping each value that is still valid and putting the
 // default in for anything else: a settings file edited by hand, or written by an older shell, must
-// never leave Quick Chat without its shortcut because one field was wrong.
+// never leave Quick Chat without its shortcut because one field was wrong. A default that lands on a
+// key the operator already gave another action is left off rather than fought over.
 function normaliseSettings(raw) {
   const saved = raw && typeof raw === 'object' ? raw : {};
-  return {
-    quickChat: validAccelerator(saved.quickChat) ? saved.quickChat : DEFAULTS.quickChat,
-    appshot: validAccelerator(saved.appshot) ? saved.appshot : DEFAULTS.appshot,
-    hideToTray: typeof saved.hideToTray === 'boolean' ? saved.hideToTray : DEFAULTS.hideToTray,
-  };
+  const settings = {};
+  const chosen = new Set();
+  for (const name of SHORTCUTS) {
+    if (validAccelerator(saved[name])) {
+      settings[name] = saved[name];
+      if (saved[name]) chosen.add(saved[name].toLowerCase());
+    }
+  }
+  for (const name of SHORTCUTS) {
+    if (name in settings) continue;
+    settings[name] = chosen.has(DEFAULTS[name].toLowerCase()) ? '' : DEFAULTS[name];
+  }
+  settings.hideToTray = typeof saved.hideToTray === 'boolean' ? saved.hideToTray : DEFAULTS.hideToTray;
+  return settings;
 }
 
 // mergeSettings applies a change from the settings page. An invalid value is an error the page shows,
@@ -58,22 +76,25 @@ function normaliseSettings(raw) {
 function mergeSettings(current, patch) {
   const next = { ...current };
   const errors = {};
-  for (const name of ['quickChat', 'appshot']) {
+  for (const name of SHORTCUTS) {
     if (!(patch && name in patch)) continue;
     if (validAccelerator(patch[name])) next[name] = patch[name];
     else errors[name] = 'invalid';
   }
   if (patch && typeof patch.hideToTray === 'boolean') next.hideToTray = patch.hideToTray;
-  // One key cannot do both: the field that was just changed is the one refused, and keeps its value.
-  if (next.quickChat && next.quickChat.toLowerCase() === next.appshot.toLowerCase()) {
-    const changed = next.appshot !== current.appshot ? 'appshot' : 'quickChat';
-    errors[changed] = 'duplicate';
-    next[changed] = current[changed];
+  // One key cannot do two jobs: the field that was just changed is the one refused, and keeps its value.
+  for (const name of SHORTCUTS) {
+    if (!next[name] || next[name] === current[name]) continue;
+    const clash = SHORTCUTS.some((other) => other !== name && next[other] && next[other].toLowerCase() === next[name].toLowerCase());
+    if (clash) {
+      errors[name] = 'duplicate';
+      next[name] = current[name];
+    }
   }
   return { settings: next, errors };
 }
 
-// registerShortcuts puts the two shortcuts in place, replacing the ones registered before, and says
+// registerShortcuts puts the shortcuts in place, replacing the ones registered before, and says
 // for each whether it works. A shortcut another program holds makes register() return false (some
 // systems throw instead); either way it is reported, never fatal. `held` is the set of accelerators
 // this shell registered last time, which are the only ones it releases: unregisterAll would also
@@ -86,7 +107,7 @@ function registerShortcuts(globalShortcut, settings, actions, held) {
   }
   held.clear();
   const report = {};
-  for (const name of ['quickChat', 'appshot']) {
+  for (const name of SHORTCUTS) {
     const accelerator = settings[name];
     if (!accelerator) {
       report[name] = { accelerator: '', ok: false, reason: 'off' };
@@ -185,6 +206,8 @@ function trayTemplate(view, strings, settings, actions) {
     { label: strings.trayOpen, click: actions.open },
     { label: strings.trayQuickChat, accelerator: settings.quickChat || undefined, registerAccelerator: false, click: actions.quickChat },
     { label: strings.trayAppshot, accelerator: settings.appshot || undefined, registerAccelerator: false, click: actions.appshot },
+    { label: strings.trayRegion, accelerator: settings.region || undefined, registerAccelerator: false, click: actions.region },
+    { label: strings.trayVoice, accelerator: settings.voice || undefined, registerAccelerator: false, click: actions.voice },
   ];
   if (view.status.companion.present) {
     items.push({ type: 'separator' });
@@ -202,6 +225,8 @@ function actionFrom(argv) {
   const args = (argv || []).filter((arg) => typeof arg === 'string');
   if (args.includes('--quick-chat')) return 'quickChat';
   if (args.includes('--appshot')) return 'appshot';
+  if (args.includes('--region')) return 'region';
+  if (args.includes('--voice')) return 'voice';
   // The tray's Quit, for a script or an uninstaller: with closing the window only hiding it, there
   // was no way left to end the application but the tray's own menu.
   if (args.includes('--quit')) return 'quit';
@@ -259,6 +284,7 @@ function appOrigin(raw) {
 
 module.exports = {
   DEFAULTS,
+  SHORTCUTS,
   QUICK_WIDTH,
   QUICK_MIN_HEIGHT,
   QUICK_MAX_HEIGHT,

@@ -107,3 +107,86 @@ test('a chosen window is photographed by its id, and one that closed meanwhile i
   assert.equal((await appshot.captureWindow(d, 'window:9:0')).error, 'gone');
   assert.equal((await appshot.captureWindow(d, 'screen:1')).error, 'failed');
 });
+
+// A picture that remembers what was done to it, for the region appshot's resize and cut.
+function picture(name, width, height, steps = []) {
+  return {
+    isEmpty: () => false,
+    getSize: () => ({ width, height }),
+    toPNG: () => Buffer.from(`png:${name}:${steps.join('/')}`),
+    resize: (size) => picture(name, size.width, size.height, [...steps, `resize ${size.width}x${size.height}`]),
+    crop: (rect) => picture(name, rect.width, rect.height, [...steps, `crop ${rect.x},${rect.y} ${rect.width}x${rect.height}`]),
+  };
+}
+
+const wide = { ...left, bounds: { x: 0, y: 0, width: 1920, height: 1080 } };
+// A HiDPI display to the right: 1280×800 points, 2560×1600 pixels.
+const sharp = { ...right, bounds: { x: 1920, y: 0, width: 1280, height: 800 } };
+
+function regionDeps(sources) {
+  const d = deps({ sources });
+  d.screen.getAllDisplays = () => [wide, sharp];
+  return d;
+}
+
+test('every display is photographed once, each brought to its own pixel size', async () => {
+  // One request for both, at the largest pixel size; the 1080p screen comes back scaled up to fit it.
+  const d = regionDeps([
+    { id: 'screen:1', display_id: '11', thumbnail: picture('left', 2560, 1440) },
+    { id: 'screen:2', display_id: '22', thumbnail: picture('right', 2560, 1600) },
+  ]);
+  const taken = await appshot.captureDisplays(d);
+  assert.equal(taken.ok, true);
+  assert.deepEqual(d.asked[0].thumbnailSize, { width: 2560, height: 1600 });
+  assert.deepEqual(taken.shots.map((shot) => [shot.display.id, shot.image.getSize().width, shot.image.getSize().height]), [[11, 1920, 1080], [22, 2560, 1600]]);
+  // A single source with no display id stands for one display, never for both.
+  const lone = await appshot.captureDisplays(regionDeps([{ id: 'screen:0', display_id: '', thumbnail: picture('only', 1920, 1080) }]));
+  assert.equal(lone.shots.length, 1);
+});
+
+test('a selection on a HiDPI display is cut at its pixels', async () => {
+  const d = regionDeps([
+    { id: 'screen:1', display_id: '11', thumbnail: picture('left', 1920, 1080) },
+    { id: 'screen:2', display_id: '22', thumbnail: picture('right', 2560, 1600) },
+  ]);
+  let offered = null;
+  const shot = await appshot.captureRegion(d, async (shots) => {
+    offered = shots.length;
+    return { displayId: 22, rect: { x: 100, y: 50, width: 200, height: 100 }, offset: { x: 0, y: 0 } };
+  });
+  assert.equal(offered, 2);
+  assert.equal(shot.ok, true);
+  assert.equal(Buffer.from(shot.bytes).toString(), 'png:right:crop 200,100 400x200');
+  assert.deepEqual([shot.width, shot.height], [400, 200]);
+  assert.equal(shot.name, 'appshot-20261013-090507.png');
+});
+
+test('Esc, a click without a drag and a refused capture are not pictures', async () => {
+  const sources = [{ id: 'screen:1', display_id: '11', thumbnail: picture('left', 1920, 1080) }];
+  assert.deepEqual(await appshot.captureRegion(regionDeps(sources), async () => null), { ok: false, error: 'dismissed', detail: '' });
+  const click = await appshot.captureRegion(regionDeps(sources), async () => ({ displayId: 11, rect: { x: 5, y: 5, width: 0, height: 0 }, offset: { x: 0, y: 0 } }));
+  assert.equal(click.error, 'dismissed');
+  let asked = false;
+  const closed = await appshot.captureRegion(regionDeps([]), async () => { asked = true; return null; });
+  assert.equal(closed.error, 'cancelled');
+  assert.equal(asked, false, 'the overlay is never shown without pictures to draw on');
+  const mac = regionDeps(sources);
+  mac.platform = 'darwin';
+  mac.systemPreferences.getMediaAccessStatus = () => 'denied';
+  assert.equal((await appshot.captureRegion(mac, async () => { asked = true; return null; })).error, 'permission');
+  assert.equal(asked, false);
+});
+
+test('the cut is clamped to the picture, rounded outwards, and follows a drag in any direction', () => {
+  const bounds = { width: 1280, height: 800 };
+  const image = { width: 1920, height: 1200 };
+  // 150 %: a selection on fractional pixels keeps every pixel it touches.
+  assert.deepEqual(appshot.cropRect({ x: 10.2, y: 10.2, width: 10, height: 10 }, bounds, image), { x: 15, y: 15, width: 16, height: 16 });
+  // Dragged up and to the left, and past the edge.
+  assert.deepEqual(appshot.cropRect({ x: 1300, y: 900, width: -100, height: -200 }, bounds, image), { x: 1800, y: 1050, width: 120, height: 150 });
+  assert.equal(appshot.cropRect({ x: 2000, y: 0, width: 50, height: 50 }, bounds, image), null);
+  // A window placed short of the display's corner: the page's pixels move with it, unscaled.
+  assert.deepEqual(appshot.selectionOnDisplay({ x: 64, y: 40, width: 64, height: 40 }, { x: 0, y: 27 }), { x: 64, y: 67, width: 64, height: 40 });
+  assert.equal(appshot.selectionOnDisplay({ x: 'a', y: 0, width: 1, height: 1 }, { x: 0, y: 0 }), null);
+  assert.equal(appshot.selectionOnDisplay({ x: 0, y: 0, width: 1, height: 1 }, null), null);
+});

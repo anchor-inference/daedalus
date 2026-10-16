@@ -15,9 +15,12 @@ test('a shortcut needs a modifier, except a function key, and empty means off', 
 });
 
 test('saved settings keep what is valid and fall back to the defaults for the rest', () => {
-  assert.deepEqual(desk.normaliseSettings(null), { quickChat: 'Alt+Space', appshot: 'Alt+Shift+Space', hideToTray: true });
-  assert.deepEqual(desk.normaliseSettings({ quickChat: 'Ctrl+Shift+J', appshot: 'Space', hideToTray: false }), { quickChat: 'Ctrl+Shift+J', appshot: 'Alt+Shift+Space', hideToTray: false });
-  assert.deepEqual(desk.normaliseSettings({ quickChat: '', hideToTray: 'yes' }), { quickChat: '', appshot: 'Alt+Shift+Space', hideToTray: true });
+  const defaults = { quickChat: 'Alt+Space', appshot: 'Alt+Shift+Space', region: 'Alt+Shift+S', voice: 'Alt+Shift+V', hideToTray: true };
+  assert.deepEqual(desk.normaliseSettings(null), defaults);
+  assert.deepEqual(desk.normaliseSettings({ quickChat: 'Ctrl+Shift+J', appshot: 'Space', hideToTray: false }), { ...defaults, quickChat: 'Ctrl+Shift+J', hideToTray: false });
+  assert.deepEqual(desk.normaliseSettings({ quickChat: '', hideToTray: 'yes' }), { ...defaults, quickChat: '' });
+  // A default already given to another action is left off, not registered twice.
+  assert.deepEqual(desk.normaliseSettings({ quickChat: 'alt+shift+v' }), { ...defaults, quickChat: 'alt+shift+v', voice: '' });
 });
 
 test('a change is refused field by field, and one key cannot do both jobs', () => {
@@ -33,6 +36,15 @@ test('a change is refused field by field, and one key cannot do both jobs', () =
   assert.deepEqual(moved.errors, { quickChat: 'duplicate' });
   assert.equal(moved.settings.quickChat, 'Alt+Space');
   assert.deepEqual(desk.mergeSettings(current, { quickChat: 'Ctrl+Shift+Space' }).errors, {});
+  // The region and voice shortcuts are checked against every other one, not only Quick Chat's.
+  const voice = desk.mergeSettings(current, { voice: 'Alt+Shift+S' });
+  assert.deepEqual(voice.errors, { voice: 'duplicate' });
+  assert.equal(voice.settings.voice, 'Alt+Shift+V');
+  const swapped = desk.mergeSettings(current, { region: 'Ctrl+Alt+R', voice: 'Ctrl+Alt+V' });
+  assert.deepEqual(swapped.errors, {});
+  assert.equal(swapped.settings.region, 'Ctrl+Alt+R');
+  // Two actions may both be off.
+  assert.deepEqual(desk.mergeSettings(desk.mergeSettings(current, { region: '' }).settings, { voice: '' }).errors, {});
 });
 
 function fakeShortcuts({ taken = [], throws = [] } = {}) {
@@ -60,18 +72,19 @@ test('each shortcut says whether it works, and a taken one is reported, not fata
   assert.deepEqual(report.appshot, { accelerator: 'Alt+Shift+Space', ok: false, reason: 'taken' });
   shortcuts.registered.get('Alt+Space')();
   assert.equal(opened, 1);
-  assert.deepEqual([...held], ['Alt+Space']);
+  assert.deepEqual([...held], ['Alt+Space', 'Alt+Shift+S', 'Alt+Shift+V']);
 });
 
 test('changing a shortcut releases the old one and leaves nothing behind', () => {
   const shortcuts = fakeShortcuts({ throws: ['Ctrl+F13'] });
   const held = new Set();
   desk.registerShortcuts(shortcuts, desk.normaliseSettings(null), { quickChat() {}, appshot() {} }, held);
-  assert.deepEqual([...shortcuts.registered.keys()].sort(), ['Alt+Shift+Space', 'Alt+Space']);
-  const report = desk.registerShortcuts(shortcuts, { quickChat: 'Ctrl+F13', appshot: '', hideToTray: true }, { quickChat() {}, appshot() {} }, held);
+  assert.deepEqual([...shortcuts.registered.keys()].sort(), ['Alt+Shift+S', 'Alt+Shift+Space', 'Alt+Shift+V', 'Alt+Space']);
+  const report = desk.registerShortcuts(shortcuts, { quickChat: 'Ctrl+F13', appshot: '', region: '', voice: '', hideToTray: true }, { quickChat() {}, appshot() {} }, held);
   assert.deepEqual([...shortcuts.registered.keys()], []);
   assert.equal(report.quickChat.reason, 'taken');
   assert.equal(report.appshot.reason, 'off');
+  assert.equal(report.voice.reason, 'off');
   assert.equal(held.size, 0);
 });
 
@@ -117,26 +130,30 @@ test("the tray's menu offers Pause only when there is a companion to pause", () 
   const en = policy.strings('en');
   const settings = desk.normaliseSettings(null);
   const calls = [];
-  const actions = Object.fromEntries(['open', 'quickChat', 'appshot', 'pauseCompanion', 'resumeCompanion', 'quit'].map((name) => [name, () => calls.push(name)]));
+  const actions = Object.fromEntries(['open', 'quickChat', 'appshot', 'region', 'voice', 'pauseCompanion', 'resumeCompanion', 'quit'].map((name) => [name, () => calls.push(name)]));
   const labels = (status) => desk.trayTemplate(desk.trayView(status, en), en, settings, actions).filter((item) => item.label).map((item) => item.label);
-  assert.deepEqual(labels({}), ['Nothing running', 'Open Daedalus', 'Quick Chat', 'Appshot', 'Quit Daedalus']);
-  assert.deepEqual(labels({ companion: { paused: false } }), ['Nothing running', 'Open Daedalus', 'Quick Chat', 'Appshot', 'Pause the companion', 'Quit Daedalus']);
+  assert.deepEqual(labels({}), ['Nothing running', 'Open Daedalus', 'Quick Chat', 'Appshot', 'Appshot of an area', 'Dictate to Quick Chat', 'Quit Daedalus']);
+  assert.deepEqual(labels({ companion: { paused: false } }), ['Nothing running', 'Open Daedalus', 'Quick Chat', 'Appshot', 'Appshot of an area', 'Dictate to Quick Chat', 'Pause the companion', 'Quit Daedalus']);
   assert.ok(labels({ companion: { paused: true } }).includes('Resume the companion'));
   const menu = desk.trayTemplate(desk.trayView({ companion: {} }, en), en, settings, actions);
   assert.equal(menu.find((item) => item.label === 'Quick Chat').accelerator, 'Alt+Space');
   // The menu shows the key but must not register it a second time: the global shortcut owns it.
   assert.equal(menu.find((item) => item.label === 'Quick Chat').registerAccelerator, false);
+  assert.equal(menu.find((item) => item.label === 'Dictate to Quick Chat').accelerator, 'Alt+Shift+V');
   menu.find((item) => item.label === 'Pause the companion').click();
-  assert.deepEqual(calls, ['pauseCompanion']);
+  menu.find((item) => item.label === 'Appshot of an area').click();
+  assert.deepEqual(calls, ['pauseCompanion', 'region']);
 });
 
 test('every word of the tray is in both dictionaries', () => {
   assert.deepEqual(Object.keys(policy.dictionary.ru).sort(), Object.keys(policy.dictionary.en).sort());
 });
 
-test('a second start can ask for Quick Chat or an appshot', () => {
+test('a second start can ask for Quick Chat, an appshot, an area or dictation', () => {
   assert.equal(desk.actionFrom(['daedalus', '--quick-chat']), 'quickChat');
   assert.equal(desk.actionFrom(['Daedalus.exe', '--appshot']), 'appshot');
+  assert.equal(desk.actionFrom(['daedalus', '--region']), 'region');
+  assert.equal(desk.actionFrom(['daedalus', '--voice']), 'voice');
   assert.equal(desk.actionFrom(['Daedalus.exe', '--quit']), 'quit');
   assert.equal(desk.actionFrom(['daedalus', 'daedalus://open/x']), null);
 });

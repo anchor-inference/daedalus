@@ -1,0 +1,116 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Daedalus</title>
+<!--
+  The region appshot's overlay, one per display (desk-main.js, chooseRegion). It shows the still the
+  shell took of this display and lets the operator drag a rectangle on it; the rectangle goes back
+  in this page's CSS pixels, and the shell places it by where the window really is and cuts it out
+  of the lossless still. Esc or the right button cancels. A click without a drag starts over rather than
+  cancelling: a slipped click should not throw the whole selection away.
+-->
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; cursor: crosshair; user-select: none; }
+  #still { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; pointer-events: none; }
+  /* Everything but the selection is dimmed. Before a drag the whole display is; during it the dim is
+     the selection's own shadow, which leaves the inside clear without a second copy of the picture. */
+  #dim { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.42); pointer-events: none; }
+  #box { position: fixed; display: none; outline: 1px solid #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 0 0 100vmax rgba(0, 0, 0, 0.42); pointer-events: none; }
+  #size { position: fixed; display: none; padding: 2px 6px; border-radius: 4px; background: rgba(0, 0, 0, 0.72); color: #fff;
+          font: 12px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace; pointer-events: none; white-space: nowrap; }
+  #hint { position: fixed; top: 24px; left: 50%; transform: translateX(-50%); padding: 8px 14px; border-radius: 8px;
+          background: rgba(20, 21, 24, 0.86); color: #f2f2f3; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+          pointer-events: none; white-space: nowrap; }
+  body.dragging #hint { display: none; }
+</style>
+</head>
+<body>
+<img id="still" alt="">
+<div id="dim"></div>
+<div id="box"></div>
+<div id="size"></div>
+<div id="hint"></div>
+<script>
+  const bridge = window.daedalus && window.daedalus.region;
+  const still = document.getElementById('still');
+  const dim = document.getElementById('dim');
+  const box = document.getElementById('box');
+  const size = document.getElementById('size');
+  document.getElementById('hint').textContent = new URLSearchParams(location.search).get('hint') || '';
+  let origin = null;
+  let rect = null;
+  let answered = false;
+
+  function answer(value) {
+    if (answered || !bridge) return;
+    answered = true;
+    bridge.done(value);
+  }
+
+  function draw() {
+    if (!rect) {
+      box.style.display = size.style.display = 'none';
+      dim.style.display = 'block';
+      document.body.classList.remove('dragging');
+      return;
+    }
+    dim.style.display = 'none';
+    document.body.classList.add('dragging');
+    Object.assign(box.style, { display: 'block', left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.width}px`, height: `${rect.height}px` });
+    size.textContent = `${Math.round(rect.width)} × ${Math.round(rect.height)}`;
+    size.style.display = 'block';
+    // Below the box when there is room, inside its top edge when the box reaches the bottom.
+    const below = rect.y + rect.height + 28 < innerHeight;
+    size.style.left = `${Math.min(rect.x, innerWidth - 120)}px`;
+    size.style.top = `${below ? rect.y + rect.height + 6 : Math.max(4, rect.y + 6)}px`;
+  }
+
+  function span(event) {
+    const x = Math.max(0, Math.min(innerWidth, event.clientX));
+    const y = Math.max(0, Math.min(innerHeight, event.clientY));
+    return { x: Math.min(origin.x, x), y: Math.min(origin.y, y), width: Math.abs(x - origin.x), height: Math.abs(y - origin.y) };
+  }
+
+  document.addEventListener('pointerdown', (event) => {
+    if (event.button === 2) return answer(null);
+    if (event.button !== 0) return;
+    origin = { x: event.clientX, y: event.clientY };
+    rect = null;
+    document.body.setPointerCapture(event.pointerId);
+    draw();
+  });
+  document.addEventListener('pointermove', (event) => {
+    if (!origin) return;
+    rect = span(event);
+    draw();
+  });
+  document.addEventListener('pointerup', (event) => {
+    if (!origin || event.button !== 0) return;
+    const chosen = span(event);
+    origin = null;
+    if (chosen.width < 4 || chosen.height < 4) {
+      rect = null;
+      draw();
+      return;
+    }
+    answer({ rect: chosen });
+  });
+  document.addEventListener('contextmenu', (event) => event.preventDefault());
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') answer(null);
+  });
+  document.documentElement.addEventListener('pointerenter', () => bridge && bridge.focus());
+
+  if (bridge) {
+    bridge.image().then((url) => {
+      if (!url) return answer(null);
+      still.onload = () => bridge.ready();
+      still.onerror = () => answer(null);
+      still.src = url;
+    });
+  }
+</script>
+</body>
+</html>

@@ -10,7 +10,9 @@
 // desk is the app's side of Quick Chat, the appshot and the tray (desk-main.js): the settings page
 // reads and changes their settings, and the app in the main window reports what runs for the tray and
 // hears its menu's commands. quick is Quick Chat's own page: hide, grow, open a conversation in the
-// main window, take a picture. The main process answers each only from the window it belongs to.
+// main window, take a picture, collect the voice shortcut's request to dictate. region is the page of
+// the region appshot's overlay (pages/region.html): the still it draws on and the rectangle chosen.
+// The main process answers each only from the window it belongs to.
 const { contextBridge, ipcRenderer } = require('electron');
 
 function listen(channel, callback) {
@@ -46,6 +48,14 @@ contextBridge.exposeInMainWorld('daedalus', {
     pending: () => ipcRenderer.invoke('quick:pending'),
     windows: () => ipcRenderer.invoke('quick:windows'),
     capture: (windowId) => ipcRenderer.invoke('quick:capture', windowId ? String(windowId) : ''),
+    region: () => ipcRenderer.invoke('quick:region'),
+    voice: () => ipcRenderer.invoke('quick:voice'),
     onShown: (callback) => listen('quick:shown', (detail) => callback(detail || {})),
+  },
+  region: {
+    image: () => ipcRenderer.invoke('region:image'),
+    ready: () => ipcRenderer.send('region:ready'),
+    focus: () => ipcRenderer.send('region:focus'),
+    done: (answer) => ipcRenderer.send('region:done', answer || null),
   },
 });
