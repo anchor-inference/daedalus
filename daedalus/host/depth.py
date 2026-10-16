@@ -2,8 +2,8 @@
 
 A session in the ``auto`` mode has each message it starts a run with sorted into one of three
 levels before the run is built: ``quick`` (a question with a short answer), ``normal`` (ordinary
-work) or ``long`` (a task that takes many steps). The level picks the mode and the reasoning
-effort of that one run; the session itself stays on ``auto``.
+work) or ``long`` (a task that takes many steps). The level picks the mode of that one run and moves
+its reasoning effort from the one the session runs at otherwise; the session itself stays on ``auto``.
 
 A small model sorts the message when one is configured and answers in time; a heuristic of the
 message's length and words sorts it otherwise. The model is bounded by a short timeout, because the
@@ -28,13 +28,29 @@ names none of their limits itself, it picks one of them for each run."""
 
 LEVELS: tuple[Level, ...] = ("quick", "normal", "long")
 
-LEVEL_SETTINGS: dict[str, tuple[str, str]] = {
-    "quick": ("quick", "low"),
-    "normal": ("", "medium"),
-    "long": ("deep", "high"),
-}
-"""Level → (mode, reasoning effort) for the run. ``normal`` is the plain agent: the level the host
-falls back to when it cannot tell, so it must be the one that changes nothing."""
+LEVEL_MODES: dict[str, str] = {"quick": "quick", "normal": "", "long": "deep"}
+"""Level → the mode the run takes. ``normal`` is the plain agent: the level the host falls back to
+when it cannot tell, so it must be the one that changes nothing."""
+
+EFFORTS = ("low", "medium", "high", "xhigh")
+
+
+def effort_for(level: str, base: str) -> str:
+    """The reasoning effort one run of ``level`` takes, from the effort the session runs at otherwise.
+
+    The level moves the session's own effort rather than replacing it: a fixed table ran every
+    ordinary message at medium whatever the model was set to, so a model kept at high was quietly
+    turned down, and a deep task on a model kept at the top effort ran below it. ``quick`` is the
+    lowest effort, ``normal`` is the session's own and ``long`` is at least high.
+    """
+    if base not in EFFORTS:
+        base = "medium"
+    if level == "quick":
+        return EFFORTS[0]
+    if level == "long":
+        return max(base, "high", key=EFFORTS.index)
+    return base
+
 
 CLASSIFY_PROMPT = (
     "You sort a message an operator sent to their AI agent by how much work answering it takes.\n"
@@ -109,15 +125,14 @@ class Depth:
 
     @property
     def mode(self) -> str:
-        return LEVEL_SETTINGS[self.level][0]
-
-    @property
-    def effort(self) -> str:
-        return LEVEL_SETTINGS[self.level][1]
+        return LEVEL_MODES[self.level]
 
     def metadata(self) -> dict[str, object]:
-        """What the operator's message carries, for the run's build and the chip the app draws on the turn."""
-        return {"level": self.level, "mode": self.mode, "effort": self.effort, "source": self.source, "ms": self.milliseconds}
+        """What the operator's message carries, for the run's build and the chip the app draws on the turn.
+
+        No effort: it follows from the level and the effort the session runs at when the run is built.
+        """
+        return {"level": self.level, "mode": self.mode, "source": self.source, "ms": self.milliseconds}
 
 
 Ask = Callable[[str], Awaitable[str]]

@@ -4004,10 +4004,11 @@ class SessionManager:
                 # plain agent, not whatever the last sorted message happened to be.
                 sorted_as = message.metadata.get("daedalus.depth")
                 state.turn_depth = sorted_as if isinstance(sorted_as, dict) else None
-            if state.turn_depth and state.turn_depth.get("effort"):
+            if state.turn_depth and state.turn_depth.get("level"):
                 # For this run only: the operator's own effort in the live controls is untouched, and
-                # the next message is sorted afresh.
-                overrides = {**overrides, "reasoning_effort": state.turn_depth["effort"]}
+                # the next message is sorted afresh. The effort itself is settled once the model is
+                # known, because the level moves that model's own effort.
+                overrides = {**overrides, "depth_level": str(state.turn_depth["level"])}
         for hook in self.preset_hooks:
             chosen = hook(state)
             if chosen:
@@ -4142,7 +4143,8 @@ class SessionManager:
             provider_chain=chain,
             model_name=rungs[0][1],
             thinking=preset.thinking if overrides.get("thinking_enabled") is None else bool(overrides["thinking_enabled"]),
-            reasoning_effort=overrides.get("reasoning_effort") or preset.reasoning_effort,
+            reasoning_effort=depth.effort_for(overrides["depth_level"], overrides.get("reasoning_effort") or preset.reasoning_effort)
+            if overrides.get("depth_level") else overrides.get("reasoning_effort") or preset.reasoning_effort,
             context_window=state.context_window or preset.context_window,
             max_output_tokens=preset.max_output_tokens,
             extra_notes=pinned["notes"] if pinned else self.notes_for(state, window=int(state.context_window or preset.context_window or 0)),

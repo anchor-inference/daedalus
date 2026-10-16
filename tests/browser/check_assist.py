@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 from api_stub import meeting_job
 from check_composer import BASE, CHROMIUM, HOST, SESSION, UNHANDLED, message
@@ -86,9 +87,10 @@ def main() -> None:
         assert ("POST", f"/api/sessions/{SESSION}/depth", {"level": "quick"}) in HOST.posted, HOST.posted
         expect(page.get_by_text("The next message runs as Quick")).to_be_visible()
 
-        # The composer names the mode, and the effort as the mode's.
+        # The composer names the mode, and the effort the mode moves each message from: a bare "auto"
+        # read as an effort of its own beside a model whose settings name one.
         expect(page.locator(".composer .composer-mode")).to_contain_text("Auto")
-        expect(page.locator(".composer .model-effort")).to_have_text("auto")
+        expect(page.locator(".composer .model-effort")).to_have_text(re.compile(r"^auto · (low|medium|high|max)$"))
 
         # The answer settles; the guess arrives as the empty field's placeholder.
         field = page.locator(".composer textarea")

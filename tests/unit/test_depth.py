@@ -39,11 +39,17 @@ def test_the_heuristic_sorts_the_labelled_messages() -> None:
     assert _accuracy(HELD_OUT) >= 0.85
 
 
-def test_each_level_names_a_mode_and_an_effort() -> None:
-    assert depth.LEVEL_SETTINGS["normal"] == ("", "medium")
-    assert depth.Depth("quick", "heuristic", 0).metadata() == {"level": "quick", "mode": "quick", "effort": "low", "source": "heuristic", "ms": 0}
-    assert depth.Depth("long", "model", 3).mode == "deep" and depth.Depth("long", "model", 3).effort == "high"
+def test_each_level_names_a_mode_and_moves_the_session_effort() -> None:
+    assert depth.LEVEL_MODES["normal"] == ""
+    assert depth.Depth("quick", "heuristic", 0).metadata() == {"level": "quick", "mode": "quick", "source": "heuristic", "ms": 0}
+    assert depth.Depth("long", "model", 3).mode == "deep"
     assert depth.parse_level("Long.") == "long" and depth.parse_level("**quick**") == "quick" and depth.parse_level("medium") is None
+    # An ordinary message runs at the model's own effort: a fixed medium turned a model kept at high down.
+    assert [depth.effort_for("normal", base) for base in ("low", "medium", "high", "xhigh")] == ["low", "medium", "high", "xhigh"]
+    assert {depth.effort_for("quick", base) for base in ("low", "medium", "high", "xhigh")} == {"low"}
+    # A long task never runs below the model's own effort, and never below high.
+    assert [depth.effort_for("long", base) for base in ("low", "medium", "high", "xhigh")] == ["high", "high", "high", "xhigh"]
+    assert depth.effort_for("normal", "") == "medium"
 
 
 async def test_the_model_answers_when_it_answers_in_time() -> None:
@@ -115,6 +121,15 @@ async def test_an_auto_message_runs_at_its_level_and_only_that_run(settings: Set
         assert manager.mode_for(state) is None
         # The operator's own effort in the live controls is not touched by any of it.
         assert (await manager.live.load(sid)).get("reasoning_effort") is None
+
+        # The level moves the session's own effort: an ordinary message keeps a model set to the top
+        # effort there, and a long task does not pull it down to high.
+        await manager.set_model(sid, reasoning_effort="xhigh")
+        normal = depth.Depth("normal", "heuristic", 0)
+        kept = await manager._build_engine(state, "run-4", message=Message(role=MessageRole.user, content_blocks=[TextBlock(text="fix the typo")], metadata={"daedalus.depth": normal.metadata()}))
+        assert kept.config.reasoning_effort == "xhigh"
+        top = await manager._build_engine(state, "run-5", message=Message(role=MessageRole.user, content_blocks=[TextBlock(text="go")], metadata={"daedalus.depth": long.metadata()}))
+        assert top.config.reasoning_effort == "xhigh"
         assert message_view(message)["depth"]["level"] == "quick"
     finally:
         await manager.close()
