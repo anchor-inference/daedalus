@@ -30,6 +30,7 @@ import { Answer, Composer, ComposerHandle } from "../composerbox";
 import { Approval, QueuedMessage, pendingApproval, queuedAfter, questionsKey, readQueued } from "../composer";
 import { ModelChoice } from "../modelselect";
 import { AUTO_MODE, ModeInfo, modeName } from "../modeselect";
+import { effortWord } from "../effortselect";
 import { DepthChip } from "../depthchip";
 import { MoveSessionSheet } from "../projects";
 import { MakeProjectSheet, makeProjectCommand } from "../chatproject";
@@ -1475,14 +1476,14 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   ] : [];
   // An idle session with jobs still running has not finished: say what it waits for rather than look done.
   const jobsPending = !busy && !saving && !compacting && status !== "failed" ? detail?.background_count ?? 0 : 0;
-  const effortWord = detail ? t(detail.thinking === false ? "add.effort.off" : detail.mode === AUTO_MODE ? "add.effort.auto" : `add.effort.${detail.reasoning_effort || "medium"}`) : "";
+  const effortText = detail ? effortWord(detail.reasoning_effort, detail.thinking !== false, detail.mode === AUTO_MODE) : "";
   const phoneSub = offline ? <StateSub tone="offline">{t("session.phone.reconnecting")}</StateSub>
     : compacting ? <StateSub tone="compacting">{t("session.compacting.bar")}</StateSub>
     : busy ? <LiveSub status={status} base={tail} live={live} />
     : saving ? <StateSub tone="saving">{t("session.livebar.saving")}</StateSub>
     : status === "failed" ? <StateSub tone="failed">{statusWord("failed")}</StateSub>
     : jobsPending > 0 ? <StateSub tone="running">{plural("session.jobs.waiting", jobsPending)}</StateSub>
-    : detail ? <span className={detail.fallback ? "ph-chat-fallback" : undefined}>{shortModel(detail.fallback?.to ?? detail.model, 28)}{effortWord ? ` · ${effortWord}` : ""}</span>
+    : detail ? <span className={detail.fallback ? "ph-chat-fallback" : undefined}>{shortModel(detail.fallback?.to ?? detail.model, 28)}{effortText ? ` · ${effortText}` : ""}</span>
     : null;
   const phoneChip = phone && browserShown
     ? <BrowserHeadButton groups={browsers.groups} onOpen={openBrowser} streaming={panel.state.tab !== "browser"} saving={deviceSaving(true)} />
@@ -1539,7 +1540,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             // thinking, and the live state, which the line carries itself rather than a bar beside it.
             <span className="chat-sub">
               {isProject(detail.project) && detail.project.name !== detail.title && <><span className="truncate chat-sub-project">{detail.project.name}</span><span className="sep">·</span></>}
-              <span className="truncate chat-sub-model">{shortModel(detail.fallback?.to ?? detail.model, 28)}{effortWord && <span className="chat-sub-effort"> {effortWord}</span>}</span>
+              <span className="truncate chat-sub-model">{shortModel(detail.fallback?.to ?? detail.model, 28)}{effortText && <span className="chat-sub-effort"> {effortText}</span>}</span>
               {detail.imported && <><span className="sep">·</span><span className="truncate chat-sub-from">{t("imp.head.from", { name: harnessMeta(detail.imported.harness, detail.imported.harness_name).name })}</span></>}
               {compacting ? null : busy || saving ? <><span className="sep">·</span><LiveBar status={status} saving={saving} base={tail} live={live} workspace={detail.workspace} onJump={jumpToBottom} /></>
                 : status === "failed" ? <><span className="sep">·</span><span className="head-status failed" role="status"><b>{statusWord(status)}</b></span></>
@@ -1715,7 +1716,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             fallback={detail?.fallback ?? null}
             onChooseModel={chooseModel}
             thinking={detail?.thinking}
-            reasoningEffort={detail?.mode === AUTO_MODE ? "auto" : detail?.reasoning_effort}
+            reasoningEffort={detail?.reasoning_effort} effortAuto={detail?.mode === AUTO_MODE}
             onChooseEffort={chooseEffort}
             suggestion={suggestion}
             onSuggestionUsed={() => setSuggestion("")}

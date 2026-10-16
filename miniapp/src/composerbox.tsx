@@ -81,6 +81,8 @@ export type ComposerProps = {
   /** Effective thinking for this session (override or the preset). */
   thinking?: boolean;
   reasoningEffort?: string;
+  /** The session's auto mode moves the effort per message from ``reasoningEffort``. */
+  effortAuto?: boolean;
   onChooseEffort?: (effort: string) => void;
   /** The operator's likely next message, shown in the empty field and taken with Tab; empty for none. */
   suggestion?: string;
@@ -183,7 +185,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     });
     return () => { active = false; };
   }, [sessionId]);
-  const currentTarget: DraftTarget = { session: sessionId, project: props.targetProject ?? "", workspace: props.targetWorkspace ?? "", model: props.model, mode: props.mode ?? "", effort: props.reasoningEffort ?? "", reply: replyTarget ? `${replyTarget.seq}:${replyTarget.excerpt}` : "" };
+  const currentTarget: DraftTarget = { session: sessionId, project: props.targetProject ?? "", workspace: props.targetWorkspace ?? "", model: props.model, mode: props.mode ?? "", effort: props.effortAuto ? "auto" : props.reasoningEffort ?? "", reply: replyTarget ? `${replyTarget.seq}:${replyTarget.excerpt}` : "" };
   const needsReview = draftTargetChanged(savedTarget, currentTarget);
   const rememberTarget = () => {
     const target = savedTarget ?? currentTarget;
@@ -721,7 +723,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           {phone && offline && shape === "open" && <span className="grow ph-hint">{t("ph.offline.kept")}</span>}
           <div className="composer-tools">
             {(!phone || status !== "running") && <ModelSelect model={props.model} fallback={props.fallback} open={modelOpen} onOpenChange={setModelOpen} onChoose={props.onChooseModel} sheet={phone}
-              effort={props.reasoningEffort} thinking={props.thinking} onChooseEffort={props.onChooseEffort} />}
+              effort={props.reasoningEffort} effortAuto={props.effortAuto} thinking={props.thinking} onChooseEffort={props.onChooseEffort} />}
             {pct !== null && ctx && (
               <button type="button" className={`ctx-ring ${pct >= 90 ? "bad" : pct >= 60 ? "attn" : ""}`} onClick={props.onContext} title={t("composer.context", { pct, used: fmtTok(ctx.tokens), window: fmtTok(ctx.window), n: fmtInt(ctx.messages) })} aria-label={t("composer.context.label")}>
                 <Ring pct={pct} />

@@ -7955,7 +7955,7 @@ Object.assign(DICT, {
 Object.assign(DICT, {
   "composer.mode.name.auto": { en: "Auto", ru: "Авто" },
   "composer.mode.hint.auto": { en: "Each message is sorted into quick, normal or deep work and run at that level", ru: "Каждое сообщение оценивается как быстрое, обычное или глубокое и выполняется на этом уровне" },
-  "add.effort.auto": { en: "auto", ru: "авто" },
+  "add.effort.auto": { en: "auto · {effort}", ru: "авто · {effort}" },
   "turn.depth.quick": { en: "Quick", ru: "Быстро" },
   "turn.depth.normal": { en: "Normal", ru: "Обычно" },
   "turn.depth.long": { en: "Deep", ru: "Глубоко" },

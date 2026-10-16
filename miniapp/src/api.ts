@@ -166,7 +166,7 @@ function upload<T>(path: string, form: FormData, onProgress?: (fraction: number)
 }
 
 /** The auto mode's sort of one message: its level, the mode and effort that run got, and who decided. */
-export type TurnDepth = { level: "quick" | "normal" | "long"; mode: string; effort: string; source: "model" | "heuristic" | "override"; ms: number };
+export type TurnDepth = { level: "quick" | "normal" | "long"; mode: string; source: "model" | "heuristic" | "override"; ms: number };
 
 export const api = {
   get: <T>(path: string) => call<T>("GET", path),
