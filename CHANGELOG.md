@@ -2,6 +2,12 @@
 
 Notable changes, newest first. The repository's `main` is the released version.
 
+## 2026-10-16 — desktop-v0.19.2
+
+- **A screenshot of just the part you need.** Quick Chat has an area button, and Alt+Shift+S starts it from anywhere: the screens freeze dimmed, you drag a rectangle, and that area is attached to the message, sharp on a high-density display. Esc or the right button cancels.
+- **Dictation in Quick Chat.** A microphone button dictates into the field through the same speech recognition as the main composer, and Alt+Shift+V opens Quick Chat already listening; pressing it again stops, and the words wait in the field. Both shortcuts can be changed or turned off under Settings → Desktop app and are in the tray menu; `daedalus --region` and `daedalus --voice` do the same where a desktop refuses global shortcuts.
+- **The auto mode keeps the model's effort.** An ordinary message runs at the effort the model is set to instead of always at medium, a quick one at low, and a long task at no less than high and never below the model's own; the composer says what it moves from, as in "auto · medium".
+
 ## 2026-10-16 — desktop-v0.19.1
 
 - **Autopilot for a finished run.** When a chat's run ends, a small judge decides whether the work is done, should go on, or needs you, and offers the choice as buttons; with autopilot on it carries on by itself within a limit of continuations and a daily dollar cap. It learns how you write from the suggested next message, and the app shows both.
