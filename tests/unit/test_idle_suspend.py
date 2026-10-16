@@ -227,10 +227,12 @@ async def test_an_assignment_resumes_the_suspended_conversation(settings: Settin
         await s.assign(ada, await s.task("Price list"))
 
         async def started_again() -> bool:
+            # The new session's row is written before its CLI is launched; asked as soon as the row
+            # appeared, the runtime had sometimes not launched it yet and nothing was resumed.
             live = await s.manager.staff.live(ada.id)
-            return live is not None and live.id != row.id
+            return live is not None and live.id != row.id and bool(resumed(s))
 
-        await eventually(started_again, "the next task started")
+        await eventually(started_again, "the next task started on the resumed conversation")
         fresh = await s.session_row(ada)
         assert fresh.predecessor_id == row.id
         assert resumed(s) == [row.cli_session_id]
