@@ -2,6 +2,16 @@
 
 Notable changes, newest first. The repository's `main` is the released version.
 
+## 2026-10-16 — desktop-v0.19.1
+
+- **Autopilot for a finished run.** When a chat's run ends, a small judge decides whether the work is done, should go on, or needs you, and offers the choice as buttons; with autopilot on it carries on by itself within a limit of continuations and a daily dollar cap. It learns how you write from the suggested next message, and the app shows both.
+- **Competing attempts at one card.** The orchestrator can start two or three attempts at the same task, each a card in its own worktree with its budget held in advance; it wakes once with a side-by-side summary, and the card shows each attempt's state, cost and the one kept. The winner goes to review and you merge it.
+- **Who is editing what.** Agents sharing a folder learn when someone else has just edited the same file, in the tool result and never as a refusal, and the project's team page shows who is editing what right now.
+- **Idle members are suspended.** A command-line member with nothing to do is suspended after twenty minutes and resumed when it is told something or given a task; its card says so.
+- **A project's environment and member route.** A project declares its environment once in its settings; it is prepared before members start, and they wait until it is ready. A member route falls back to the next runtime only when the first one definitely refused before admission, and the member shows the fallback.
+- **Clearer members and quotas.** A member's card says why its attempt stands where it does, the usage page forecasts when a subscription's quota window runs out, and automatic notices no longer start the turn of a member that has finished.
+- **Steadier providers.** A streamed request that sends no byte back in time is sent again; each Grok conversation is named so its cache holds; stale tool results are trimmed in proportion to the model's window; an orchestrator receives only the parts of its state that changed; a member's first tool call counts as its first output, and a JobWait never runs out before its timeout.
+
 ## 2026-10-14 — desktop-v0.19.0
 
 - **A companion instead of the voice page.** One standing agent, talked to by text or out loud on one page. It owns goals and checks them on a schedule, hands work to agents and reports back, and pauses when asked. On a phone the page is four tabs, one menu and one microphone at the end of the field.
