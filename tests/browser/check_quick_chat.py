@@ -10,7 +10,10 @@ the shell, and the API answers what the companion's contract says. What is check
 - `$` picks a skill and the message asks for it in words; `@` attaches a conversation, and a message
   to the last chat goes to its own messages route as a follow-up, with the context listed by id;
 - the appshot button asks the shell for a picture, which is previewed and uploaded through the
-  companion's session; a window can be chosen from thumbnails;
+  companion's session; a window can be chosen from thumbnails; the area button attaches the cut the
+  shell returns, and an Esc over its overlay ("dismissed") attaches nothing and says nothing;
+- the voice shortcut's request starts dictation, the next one stops it and the words land in the
+  field; a host without speech recognition is said to be one;
 - Esc closes an open list first and hides the window only then;
 - with GET /api/companion answering 404 the companion is no target at all;
 - signed out, the page says so and offers the main window; the words follow ?lang=ru;
@@ -29,6 +32,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -53,7 +57,9 @@ window.__action = null;
 window.__navigate = null;
 const png = Uint8Array.from(atob('__PNG__'), (c) => c.charCodeAt(0));
 const shot = (name) => ({ ok: true, name, type: 'image/png', bytes: png, width: 160, height: 100 });
-window.__desk = { settings: { quickChat: 'Alt+Space', appshot: 'Alt+Shift+Space', hideToTray: true } };
+window.__desk = { settings: { quickChat: 'Alt+Space', appshot: 'Alt+Shift+Space', region: 'Alt+Shift+S', voice: 'Alt+Shift+V', hideToTray: true } };
+window.__region = null;
+window.__voice = false;
 window.daedalus = {
   window: true,
   shell: true,
@@ -64,6 +70,8 @@ window.daedalus = {
     pending: async () => [],
     windows: async () => { window.__calls.push(['windows']); return { ok: true, windows: [{ id: 'window:7:0', name: 'Editor', thumbnail: 'data:image/png;base64,__PNG__' }] }; },
     capture: async (id) => { window.__calls.push(['capture', id || '']); return shot(id ? 'appshot-window.png' : 'appshot-screen.png'); },
+    region: async () => { window.__calls.push(['region']); return window.__region || shot('appshot-region.png'); },
+    voice: async () => { const asked = window.__voice; window.__voice = false; return asked; },
     onShown: (cb) => { window.__shown = cb; return () => {}; },
   },
   desk: {
@@ -76,7 +84,7 @@ window.daedalus = {
   },
 };
 function info(errors) {
-  return { settings: { ...window.__desk.settings }, defaults: { quickChat: 'Alt+Space', appshot: 'Alt+Shift+Space', hideToTray: true },
+  return { settings: { ...window.__desk.settings }, defaults: { quickChat: 'Alt+Space', appshot: 'Alt+Shift+Space', region: 'Alt+Shift+S', voice: 'Alt+Shift+V', hideToTray: true },
     report: { quickChat: { accelerator: window.__desk.settings.quickChat, ok: true, reason: '' }, appshot: { accelerator: window.__desk.settings.appshot, ok: false, reason: 'taken' } },
     errors, platform: 'linux', wayland: true, tray: { ready: true, note: '' }, screen: 'granted' };
 }
@@ -97,6 +105,8 @@ class Api:
     def __init__(self) -> None:
         self.posts: list[tuple[str, str, object]] = []
         self.no_companion = False
+        self.no_asr = False
+        self.transcribed = 0
 
     def __call__(self, route) -> None:  # type: ignore[no-untyped-def]
         request = route.request
@@ -104,9 +114,15 @@ class Api:
         rel = path[path.index("/api/"):]
         if rel == "/api/sessions" and request.method == "GET":
             return respond(route, SESSIONS)
+        if rel == "/api/asr" and self.no_asr:
+            return respond(route, {"configured": False, "reason": "not set up", "provider": "", "model": "", "max_seconds": 120, "autosend": False})
         if rel == "/api/asr":
             # Speech recognition is set up, so the box offers dictation through the host.
             return respond(route, {"configured": True, "reason": "", "provider": "local", "model": "small", "max_seconds": 120, "autosend": False})
+        if rel == "/api/transcribe" and request.method == "POST":
+            # Dictation in Quick Chat has no session yet, so it is heard by the host's own route.
+            self.transcribed += 1
+            return respond(route, {"transcript": "hello from the stub", "text": "hello from the stub", "autosend": False})
         if rel == "/api/companion" and request.method == "GET" and self.no_companion:
             return respond(route, {"detail": "Not Found"}, status=404)
         if request.method in ("POST", "PATCH") and (rel.startswith("/api/companion") or rel.startswith("/api/sessions")):
@@ -137,7 +153,8 @@ def run() -> int:
     SHOTS.mkdir(parents=True, exist_ok=True)
     api = Api()
     with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=CHROMIUM)
+        # A fake microphone, allowed without asking: the voice shortcut's dictation records from it.
+        browser = p.chromium.launch(executable_path=CHROMIUM, args=["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", "--autoplay-policy=no-user-gesture-required"])
         ctx = browser.new_context(viewport={"width": 680, "height": 420})
         ctx.add_init_script(BRIDGE)
         page = ctx.new_page()
@@ -222,6 +239,44 @@ def run() -> int:
         assert "what is wrong here?" in str(body) and "appshot-screen.png" in str(body) and "appshot-window.png" in str(body), str(body)[:300]
         expect(chip).to_have_count(0)
 
+        # An area of the screen: the shell's cut is attached; Esc over the overlay attaches nothing.
+        page.get_by_role("button", name="Appshot of an area — drag a rectangle on the screen").click()
+        expect(chip).to_contain_text("appshot-region.png")
+        assert calls(page, "region"), "the area button never asked the shell"
+        page.evaluate("window.__region = { ok: false, error: 'dismissed', detail: '' }")
+        page.get_by_role("button", name="Appshot of an area — drag a rectangle on the screen").click()
+        page.wait_for_timeout(200)
+        assert len(calls(page, "region")) == 2
+        expect(chip).to_have_count(1)
+        expect(page.locator(".quick-status.bad")).to_have_count(0)
+        page.screenshot(path=str(SHOTS / "quick-region.png"))
+        chip.get_by_role("button", name="Remove").click()
+        expect(chip).to_have_count(0)
+
+        # The voice shortcut: Quick Chat opens listening, the same press again stops it, and the
+        # words the host heard land in the field rather than being sent.
+        field.fill("")
+        posted = len(api.posts)
+        page.evaluate("window.__voice = true; window.__shown({ voice: true })")
+        expect(page.locator(".voicebar[data-phase=recording]")).to_be_visible()
+        page.screenshot(path=str(SHOTS / "quick-voice.png"))
+        page.wait_for_timeout(600)
+        page.evaluate("window.__voice = true; window.__shown({ voice: true })")
+        expect(page.locator(".quick-field")).to_have_value(re.compile("hello from the stub"))
+        assert len(api.posts) == posted, f"dictation sent the words by itself: {api.posts[posted:]}"
+        assert api.transcribed == 1, api.transcribed
+        # A host that cannot transcribe says so instead of ignoring the press.
+        api.no_asr = True
+        page.reload()
+        expect(page.locator(".quick-field")).to_be_visible()
+        expect(page.locator(".quick-actions .mic")).to_have_count(0)
+        page.evaluate("window.__voice = true; window.__shown({ voice: true })")
+        expect(page.locator(".quick-status.bad")).to_contain_text("Speech recognition is not set up")
+        api.no_asr = False
+        page.reload()
+        field = page.locator(".quick-field")
+        expect(field).to_be_visible()
+
         # Esc with nothing open hides the window.
         page.keyboard.press("Escape")
         assert calls(page, "hide"), "Esc did not hide the window"
@@ -266,6 +321,9 @@ def run() -> int:
         expect(panel).to_contain_text("Alt+Space")
         expect(panel).to_contain_text("Another program holds this shortcut")
         expect(panel).to_contain_text("daedalus --quick-chat")
+        expect(panel).to_contain_text("daedalus --voice")
+        expect(panel).to_contain_text("Appshot of an area")
+        expect(panel).to_contain_text("Alt+Shift+V")
         main.screenshot(path=str(SHOTS / "settings-desktop.png"))
         panel.get_by_role("button", name="Change").first.click()
         expect(panel.locator("kbd.recording")).to_be_visible()
@@ -292,7 +350,7 @@ def run() -> int:
         expect(other.locator(".settings-index")).not_to_contain_text("Desktop app")
         plain.close()
         browser.close()
-    print("quick chat: sends to the companion, the last chat and a new one; $ and @; appshot; Esc; settings; tray status")
+    print("quick chat: sends to the companion, the last chat and a new one; $ and @; appshot, area and dictation; Esc; settings; tray status")
     return 0
 
 

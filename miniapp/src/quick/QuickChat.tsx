@@ -5,6 +5,8 @@
 // the companion's endpoint, files through the ordinary upload, dictation through the host's speech
 // recognition. `@` attaches a conversation, a project or a file as context, `$` asks for a skill,
 // the chip at the top picks where Enter sends. Esc hides the window; the draft stays for next time.
+// The shell's voice shortcut opens the box already dictating, and its area appshot attaches a
+// rectangle dragged on the screen.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, type AsrStatus, type Project, type SessionList, type SkillEntry } from "../api";
@@ -94,6 +96,8 @@ export function QuickChat() {
 
   const take = useCallback((shots: AppshotResult[]) => {
     for (const shot of shots) {
+      // Esc over the area overlay: the operator changed their mind, and an error line would scold them.
+      if (!shot.ok && shot.error === "dismissed") continue;
       if (shot.ok) {
         const file = appshotFile(shot);
         setFiles((now) => [...now, { file, url: URL.createObjectURL(file) }]);
@@ -106,19 +110,29 @@ export function QuickChat() {
     }
   }, []);
 
+  // Each press of the voice shortcut since the page last looked; acted on once dictation's status is known.
+  const [voiceWanted, setVoiceWanted] = useState(0);
+  // The request is collected rather than read off quick:shown: a press that opened the window for the
+  // first time sent the event before this page was listening for it.
+  const collectVoice = useCallback((quick: NonNullable<ReturnType<typeof bridge>>) => {
+    void quick.voice?.().then((asked) => { if (asked) setVoiceWanted((n) => n + 1); }).catch(() => undefined);
+  }, []);
+
   const focus = () => window.setTimeout(() => field.current?.focus(), 0);
   useEffect(() => {
     const quick = bridge();
     if (!quick) return;
     void quick.pending().then(take).catch(() => undefined);
+    collectVoice(quick);
     return quick.onShown(() => {
       setSent(null);
       invalidate("/api/sessions");
       loadCompanion();
       void quick.pending().then(take).catch(() => undefined);
+      collectVoice(quick);
       focus();
     });
-  }, [take, loadCompanion]);
+  }, [take, loadCompanion, collectVoice]);
   useEffect(() => void focus(), [authed]);
 
   // The window is as tall as what it shows: the box alone, or the box with a list open.
@@ -172,6 +186,25 @@ export function QuickChat() {
     toast: setError,
   });
   const recording = note.state.phase === "recording" || note.state.phase === "transcribing";
+
+  // The voice shortcut starts dictation, and stops it when pressed while the box is listening — the
+  // same key both ways, so the hands stay where they were. It waits for the host to say whether it
+  // can transcribe; a host that cannot is told plainly rather than the press being ignored.
+  const noteNow = useRef(note);
+  noteNow.current = note;
+  useEffect(() => {
+    if (!voiceWanted || authed === null) return;
+    if (authed && asr.data === undefined && !asr.error) return;
+    setVoiceWanted(0);
+    if (!authed) return;
+    if (!asr.data?.configured) {
+      setError(t("quick.voice.unavailable"));
+      return;
+    }
+    const current = noteNow.current;
+    if (current.state.phase === "recording") current.stop(false);
+    else if (current.state.phase === "idle") current.start();
+  }, [voiceWanted, authed, asr.data, asr.error]);
 
   function edit(value: string, at: number) {
     setText(value);
@@ -249,6 +282,20 @@ export function QuickChat() {
     setCapturing(true);
     try {
       const shot = await quick.capture(windowId);
+      if (shot) take([shot]);
+    } finally {
+      setCapturing(false);
+      focus();
+    }
+  }
+
+  async function appshotRegion() {
+    const quick = bridge();
+    if (!quick?.region || capturing) return;
+    setPicker(null);
+    setCapturing(true);
+    try {
+      const shot = await quick.region();
       if (shot) take([shot]);
     } finally {
       setCapturing(false);
@@ -351,6 +398,7 @@ export function QuickChat() {
   const targets: TargetKind[] = [...(companion ? ["companion" as const] : []), ...(last ? ["last" as const] : []), "new"];
   const canSend = !!shown && !sending && (!!text.trim() || files.length > 0);
   const hasBridge = !!bridge();
+  const hasRegion = !!bridge()?.region;
 
   return (
     <div className="quick" ref={root}>
@@ -424,6 +472,11 @@ export function QuickChat() {
               <button type="button" className="iconbtn flat quick-appshot" onClick={() => void appshot()} disabled={capturing} title={t("quick.appshot.screen")} aria-label={t("quick.appshot.screen")}>
                 <Icon name="camera" />
               </button>
+              {hasRegion && (
+                <button type="button" className="iconbtn flat small quick-appshot-region" onClick={() => void appshotRegion()} disabled={capturing} title={t("quick.appshot.region")} aria-label={t("quick.appshot.region")}>
+                  <Icon name="region" size={16} />
+                </button>
+              )}
               <button type="button" className="iconbtn flat small quick-appshot-window" onClick={() => void chooseWindow()} disabled={capturing} title={t("quick.appshot.window")} aria-label={t("quick.appshot.window")}>
                 <Icon name="apps" size={16} />
               </button>

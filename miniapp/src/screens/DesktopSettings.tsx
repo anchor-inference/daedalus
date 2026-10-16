@@ -1,19 +1,17 @@
-// Settings → Desktop app: Quick Chat's and the appshot's shortcuts, closing to the tray, and what
+// Settings → Desktop app: the shortcuts of Quick Chat, the appshots and dictation, closing to the tray, and what
 // this system allows. The values belong to the desktop shell, not to the host — each computer the
 // application runs on keeps its own — so they are read and written through window.daedalus.desk.
 
 import { useCallback, useEffect, useState } from "react";
 import { t } from "../i18n";
 import { acceleratorFrom, showAccelerator } from "../quick/accelerator";
-import type { DeskInfo, DeskSettings } from "../quick/bridge";
+import type { DeskInfo, DeskSettings, ShortcutName } from "../quick/bridge";
 import { Row } from "../settingsrow";
 import { Switch } from "../ui/components";
 
-type ShortcutName = "quickChat" | "appshot";
-
 /** What a system shortcut runs where the desktop refuses the application one of its own: a second
  *  start with the flag does what the shortcut would (desktop/shell/main.js). Commands, not words. */
-const COMMANDS = ["daedalus --quick-chat", "daedalus --appshot"];
+const COMMANDS = ["daedalus --quick-chat", "daedalus --appshot", "daedalus --region", "daedalus --voice"];
 
 export function DesktopPanel() {
   const desk = window.daedalus?.desk;
@@ -77,6 +75,10 @@ export function DesktopPanel() {
       <div className="section-title" style={{ marginTop: 0 }}>{t("settings.sec.desktop")}</div>
       {shortcut({ name: "quickChat", setting: "desktop.quickChat" }, t("settings.desktop.quick.title"), t("settings.desktop.quick.desc"))}
       {shortcut({ name: "appshot", setting: "desktop.appshot" }, t("settings.desktop.appshot.title"), t("settings.desktop.appshot.desc"))}
+      {/* A shell older than the area appshot and the voice shortcut reports neither: no row for a
+          shortcut it would not register. */}
+      {"region" in info.settings && shortcut({ name: "region", setting: "desktop.region" }, t("settings.desktop.region.title"), t("settings.desktop.region.desc"))}
+      {"voice" in info.settings && shortcut({ name: "voice", setting: "desktop.voice" }, t("settings.desktop.voice.title"), t("settings.desktop.voice.desc"))}
       {info.wayland && (
         <div className="sub settings-desktop-wayland" role="note">
           {t("settings.desktop.wayland")}
