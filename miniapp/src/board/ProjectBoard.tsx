@@ -35,6 +35,7 @@ import { IssueImport } from "./IssueImport";
 import { PhoneTaskPage } from "./TaskPage";
 import { Harness, statusTone } from "../team/team";
 import { confirmAsync, errorText } from "../ui";
+import { closeItems } from "./operatorClose";
 import {
   Arranged,
   BRIEF_FIELDS,
@@ -489,7 +490,6 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
   const phone = useMedia("(max-width: 1023px)");
   const operation = useRef<{ fingerprint: string; id: string } | null>(null);
   const launchOperation = useRef<{ fingerprint: string; id: string } | null>(null);
-  const archiveOperation = useRef<string | null>(null);
   const stopOperation = useRef<string | null>(null);
   const createRevision = useRef<number | null>(null);
   const intentId = (body: Record<string, unknown>) => {
@@ -687,23 +687,6 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
       onDone();
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) stopOperation.current = null;
-      toast(errorText(error));
-    } finally { setBusy(false); }
-  }
-  async function archiveTask() {
-    if (!task || writeBlocked || busy) return;
-    if (!(await confirmAsync(t("pboard.archive.title", { title: task.title }), { body: t("pboard.archive.body"), action: t("pboard.archive.action"), danger: true }))) return;
-    const id = archiveOperation.current ?? crypto.randomUUID();
-    archiveOperation.current = id;
-    setBusy(true);
-    try {
-      await api.delete(`/api/board/${encodeURIComponent(task.id)}?client_operation_id=${encodeURIComponent(id)}&expected_entity_revision=${task.entity_revision}`);
-      archiveOperation.current = null;
-      toast(t("pboard.archive.saved"));
-      onDone();
-      onClose();
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 409) archiveOperation.current = null;
       toast(errorText(error));
     } finally { setBusy(false); }
   }
@@ -905,7 +888,7 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
       {writeBlocked && <div className="result-warning" role="status">{t("result.block.unconfirmed")}</div>}
   </>;
   if (phone && task) return (
-    <PhoneTaskPage projectId={projectId} task={task} onClose={onClose} toast={toast} busy={busy} writeBlocked={writeBlocked} onArchive={() => void archiveTask()} onMove={(status) => void move(status)}
+    <PhoneTaskPage projectId={projectId} task={task} onClose={onClose} toast={toast} busy={busy} writeBlocked={writeBlocked} onDone={onDone} onMove={(status) => void move(status)}
       taskTab={<>{taskHead}{taskMiddle}{formPart}</>} resultTab={task.status === "review" || task.acceptance_state === "operator_approved" || !!resultReference || hasAcceptance(task) ? <>{resultPart}{acceptancePart}</> : null}
       diffTab={task.status === "review" && task.branch ? diffPart : null} />
   );
@@ -926,7 +909,7 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
               ...(task.assignee?.session_id ? [{ label: t("pboard.open.staff", { name: task.assignee.name }), icon: "bots" as const, onSelect: () => navigate(projectSessionPath(projectId, task.assignee!.session_id!)) }] : []),
               { label: t("board.copyid"), icon: "copy", onSelect: async () => toast((await copyText(task.id)) ? t("board.copied") : task.id) },
               "-",
-              { label: t("pboard.archive.action"), icon: "trash", danger: true, disabled: writeBlocked || busy || !["todo", "blocked"].includes(task.status), hint: t("pboard.archive.unavailable"), onSelect: () => void archiveTask() },
+              ...closeItems(task, writeBlocked || busy, { onDone, toast, onRemoved: onClose }),
             ]}
           />
         )

@@ -162,3 +162,67 @@ async def test_a_report_with_no_branch_is_accepted_and_its_card_finished(tmp_pat
         assert verdict["reason"].startswith("report read: ")
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_an_operator_input_file_does_not_hold_a_report_back(tmp_path: Path) -> None:
+    """The operator's screenshot handed in with the card is what the work started from: the report is
+    accepted without proving it again, and the card's revision and current result need not be copied."""
+    db = Database(tmp_path / "state.sqlite")
+    await db.open()
+    try:
+        await db.execute("INSERT INTO projects(id,name,created_at,settings)"
+                         " VALUES ('project1','Project','2026-01-01',?)",
+                         (json.dumps({"orchestrator": {"enabled": True, "session_id": "session1"}}),))
+        await db.execute("INSERT INTO sessions(id,tenant_id,project_id,metadata,created_at,last_message_at)"
+                         " VALUES ('session1','tenant','project1',?,'2026-01-01','2026-01-01')",
+                         (json.dumps({"orchestrator_of": "project1"}),))
+        snapshot = {"requirements": [{"id": "req1", "kind": "input", "text": "shot.png: the work starts from it",
+                                      "source": "operator", "file_id": "file1"}],
+                    "checklist": [], "brief": {}}
+        for task_id in ("task1", "task2"):
+            await db.execute("INSERT INTO board_tasks(id,title,status,priority,acceptance,checklist,depends_on,"
+                             " created_at,updated_at,project_id,brief_json) VALUES"
+                             " (?,'Task','review',3,'','[]','[]','2026-01-01','2026-01-01','project1','{}')", (task_id,))
+            await db.execute("INSERT INTO task_contract_versions(task_id,contract_revision,origin_kind,origin_ref,"
+                             " snapshot_json,created_at) VALUES (?,1,'operator','',?,'2026-01-01')",
+                             (task_id, json.dumps(snapshot)))
+            report = "The contact on every page is now the domain address; the old one is gone."
+            async with db.transaction() as conn:
+                await submit_result(conn, result_id=f"result-{task_id}", task_id=task_id, attempt_id=None,
+                                    contract_revision=1, outcome="complete", original_text=report,
+                                    original_blob_ref=None, original_digest=hashlib.sha256(report.encode()).hexdigest(),
+                                    original_size_bytes=len(report), actor_id="staff:member1",
+                                    manifest_ids=[], checks=[], limitations=[], allow_empty_manifest=True)
+
+        async def current(session_id: str):  # type: ignore[no-untyped-def]
+            return SimpleNamespace(id="project1"), None
+
+        class Board:
+            async def get(self, task_id: str, *, actor: str):
+                return {"id": task_id, "project_id": "project1"}
+
+        grant = await ControlStore(db).issue_grant(Principal.operator({"via": "token", "user_id": 1}),
+                                                   Principal("orchestrator:session1", "agent"),
+                                                   Scope("project", "project1"),
+                                                   operations=["review.verdict", "review.return"],
+                                                   effects=[], expires_at=(datetime.now(UTC) + timedelta(hours=1)).isoformat())
+
+        async def authority(*, session_id: str, project_id: str, task_id: str, operation: str) -> Principal:
+            return Principal("orchestrator:session1", "agent", grant["grant_id"], grant["generation"])
+
+        orch = SimpleNamespace(board=Board(), manager=SimpleNamespace(db=db), current=current,
+                               app=SimpleNamespace(extensions={"orchestrator_review_authority": authority}))
+        project = SimpleNamespace(id="project1")
+        accepted = json.loads(await review_result(orch, project, "session1", task_id="task1", op="accept",
+                                                  client_operation_id="call-accept",
+                                                  reason="Every page shows the domain address now."))
+        assert accepted["status"] == "done" and accepted["result_id"] == "result-task1"
+        returned = json.loads(await review_result(orch, project, "session1", task_id="task2", op="return",
+                                                  client_operation_id="call-return",
+                                                  reason="The English pages still show the old address."))
+        assert returned["status"] == "todo" and returned["result_id"] == "result-task2"
+        verdict = await db.fetchone("SELECT verification,accepted FROM review_verdicts WHERE id = ?", (returned["verdict_id"],))
+        assert (verdict["verification"], verdict["accepted"]) == ("failed", 0)
+    finally:
+        await db.close()

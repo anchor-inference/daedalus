@@ -267,6 +267,9 @@ class Board:
         """The board as ``actor`` sees it; ``None`` is the operator, who sees every session's tasks.
         ``project_id`` narrows it to one project's board."""
         where, args = await self._scope(actor)
+        # A removed card is still found by its id (a journal entry or an old message names it), but
+        # no board lists it again.
+        where = f"{where} AND removed_at IS NULL"
         if project_id is not None:
             where, args = f"{where} AND project_id = ?", (*args, project_id)
         if status:
@@ -503,7 +506,7 @@ class Board:
         await self._accepted_result_costs(tasks)
         await self._issue_links(project_id, tasks)
         needs = await self.needs_you(project_id)
-        counts_rows = await self.app.db.fetchall("SELECT status, count(*) AS n FROM board_tasks WHERE project_id = ? GROUP BY status", (project_id,))
+        counts_rows = await self.app.db.fetchall("SELECT status, count(*) AS n FROM board_tasks WHERE project_id = ? AND removed_at IS NULL GROUP BY status", (project_id,))
         counts = {status: 0 for status in STATUSES}
         counts.update({r["status"]: int(r["n"]) for r in counts_rows if r["status"] in counts})
         team = [{"id": m["id"], "name": m["name"], "color": m["color"], "harness": m["harness"], "isolation": m["isolation"]} for m in members.values() if m["archived_at"] is None]
@@ -706,7 +709,7 @@ class Board:
         family = await self.family(session_id)
         leader = family[0]
         placeholders = ",".join("?" for _ in family)
-        rows = await self.app.db.fetchall(f"SELECT * FROM board_tasks WHERE origin_session_id IN ({placeholders}) ORDER BY CASE status WHEN 'doing' THEN 0 WHEN 'review' THEN 1 WHEN 'todo' THEN 2 WHEN 'blocked' THEN 3 WHEN 'done' THEN 4 ELSE 5 END, priority, created_at", tuple(family))
+        rows = await self.app.db.fetchall(f"SELECT * FROM board_tasks WHERE origin_session_id IN ({placeholders}) AND removed_at IS NULL ORDER BY CASE status WHEN 'doing' THEN 0 WHEN 'review' THEN 1 WHEN 'todo' THEN 2 WHEN 'blocked' THEN 3 WHEN 'done' THEN 4 ELSE 5 END, priority, created_at", tuple(family))
         tasks = [self._view(dict(r)) for r in rows]
         lines = ["# Plan", "", f"Board tasks created by session {leader}" + (" and its subagents" if len(family) > 1 else "") + "; edit them with the Board tools, this file is regenerated.", ""]
         for t in tasks:

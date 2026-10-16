@@ -765,7 +765,7 @@ class Orchestrators:
         members = await self.manager.staff.list(project.id)
         live = await self.manager.staff.live_sessions(project.id)
         working = sum(1 for s in live.values() if s.status in ACTIVE_STATUSES)
-        tasks = {r["id"]: dict(r) for r in await self.manager.db.fetchall("SELECT id, title, status, priority, assignee_staff_id, branch FROM board_tasks WHERE project_id = ? ORDER BY priority, updated_at DESC", (project.id,))}
+        tasks = {r["id"]: dict(r) for r in await self.manager.db.fetchall("SELECT id, title, status, priority, assignee_staff_id, branch FROM board_tasks WHERE project_id = ? AND removed_at IS NULL ORDER BY priority, updated_at DESC", (project.id,))}
         by_id = {m.id: m for m in members}
 
         head = [f"Project: {project.name} · default env {project.settings.default_env or self.manager.projects.local_env} · autonomy {orchestrator.autonomy} · concurrency {orchestrator.concurrency} of cap {orchestrator.concurrency_cap} · {working} working"]
@@ -1410,7 +1410,9 @@ class Orchestrators:
             parts.append(f"confirmed {', '.join(str(a) for a in p['acknowledged'])}")
         if p.get("kind") == "done" and p.get("task_id"):
             shown = [str(e.get("item")) for e in p.get("evidence") or [] if isinstance(e, dict)]
-            said = (f"evidence for {', '.join(shown)}" if shown else "") + ("; " if shown and p.get("unproven") else "") + (f"none for {', '.join(p['unproven'])}" if p.get("unproven") else "")
+            # "none for C3, R1" read as a gate, and coordinators sent members to hand the same work in
+            # again; it is only what the member listed, and accepting never looks at it.
+            said = (f"the member listed evidence for {', '.join(shown)}" if shown else "") + ("; " if shown and p.get("unproven") else "") + (f"not for {', '.join(p['unproven'])} — judge those from the report itself" if p.get("unproven") else "")
             parts.append(f"handed in, not accepted{': ' + said if said else ''} — ReviewResult(task_id='{p['task_id']}', op='inspect') shows the exact report, and op='accept' finishes a card with no branch")
         return (" — " + "; ".join(parts)) if parts else ""
 

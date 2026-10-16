@@ -18,13 +18,14 @@ import { relTime } from "../format";
 import { DiffView } from "../previewparts";
 import { DecisionSlot } from "./slot";
 import { NEXT, type ProjectTask, type Review, type TaskStatus } from "./board";
+import { closeItems } from "./operatorClose";
 
 type Tab = "task" | "result" | "diff";
 const STEPS = ["handed_in", "accepted", "operator_approved"] as const;
 
-export function PhoneTaskPage({ projectId, task, onClose, toast, busy, writeBlocked, onArchive, onMove, taskTab, resultTab, diffTab }: {
+export function PhoneTaskPage({ projectId, task, onClose, toast, busy, writeBlocked, onDone, onMove, taskTab, resultTab, diffTab }: {
   projectId: string; task: ProjectTask; onClose: () => void; toast: (text: string) => void; busy: boolean; writeBlocked: boolean;
-  onArchive: () => void; onMove: (status: TaskStatus) => void; taskTab: ReactNode; resultTab: ReactNode | null; diffTab: ReactNode | null;
+  onDone: () => void; onMove: (status: TaskStatus) => void; taskTab: ReactNode; resultTab: ReactNode | null; diffTab: ReactNode | null;
 }) {
   const { project } = useProject(projectId);
   // The same key the review panel reads, so the tab's file count costs no second request.
@@ -73,7 +74,7 @@ export function PhoneTaskPage({ projectId, task, onClose, toast, busy, writeBloc
           { label: t("board.copyid"), icon: "copy", onSelect: async () => toast((await copyText(task.id)) ? t("board.copied") : task.id) },
           ...NEXT[task.status].map((status) => ({ label: t("pbph.moveto", { column: t(`board.col.${status}`) }), icon: "forward" as const, disabled: writeBlocked, onSelect: () => onMove(status) })),
           "-",
-          { label: t("pboard.archive.action"), icon: "archive", danger: true, disabled: writeBlocked || busy || !["todo", "blocked"].includes(task.status), hint: t("pboard.archive.unavailable"), onSelect: onArchive },
+          ...closeItems(task, writeBlocked || busy, { onDone, toast, onRemoved: onClose }),
         ]} />
       )}
     </Sheet>

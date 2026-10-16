@@ -8,10 +8,24 @@ from typing import Any
 
 import aiosqlite
 
-from daedalus.extensions.orchestrator_domain import DomainConflict, capture_contract_change, check_planning_capacity
+from daedalus.extensions.orchestrator_domain import (
+    DomainConflict,
+    capture_contract_change,
+    check_planning_capacity,
+    close_by_operator,
+)
 from daedalus.extensions.task_contract import REQUIREMENT_KINDS, REQUIREMENTS_MAX, check_items
 from daedalus.host.events import AppEvent, EventBus
-from daedalus.stores.control import ControlConflict, ControlStore, Entity, Mutation, Principal, Scope, now
+from daedalus.stores.control import (
+    ControlConflict,
+    ControlDenied,
+    ControlStore,
+    Entity,
+    Mutation,
+    Principal,
+    Scope,
+    now,
+)
 from daedalus.stores.database import Database
 from daedalus.stores.runtime_release import attempt_released_in
 
@@ -273,8 +287,16 @@ class BoardCommands:
                 raise ControlConflict("task is outside the command scope")
             if status not in (None, "todo", "blocked", "dropped"):
                 raise DomainConflict("work, review and completion require their dedicated result or launch command")
-            if status is not None and status != row["status"] and row["status"] in ("review", "done"):
+            # A handed-in card may be dropped without a verdict: the matter was settled elsewhere, or
+            # the work is no longer wanted. Refusing it sent coordinators through return-then-drop,
+            # and return needs a verdict, so cards nobody would ever accept sat in review for good.
+            dropping_handed_in = status == "dropped" and row["status"] == "review"
+            if (status is not None and status != row["status"] and row["status"] in ("review", "done")
+                    and not dropping_handed_in):
                 raise DomainConflict("return the exact reviewed result before reopening")
+            if dropping_handed_in:
+                await conn.execute("UPDATE open_loops SET closed_at = ?, closed_by = 'system', decision = 'dropped'"
+                                   " WHERE task_id = ? AND closed_at IS NULL", (now(), task_id))
             if status in ("blocked", "dropped") and row["current_attempt_id"]:
                 attempt = await _one(conn, "SELECT state FROM execution_attempts WHERE id = ?",
                                      (row["current_attempt_id"],))
@@ -403,5 +425,50 @@ class BoardCommands:
         return await self._mutate(principal, scope, "board.task.update", client_operation_id,
                                   expected_entity_revision, Entity("task", task_id), payload, effect, "task.changed")
 
+
+    async def close(self, principal: Principal, scope: Scope, task_id: str, *,
+                    client_operation_id: str, expected_entity_revision: int,
+                    status: str, reason: str) -> dict[str, Any]:
+        """The operator's word on a card: done or dropped, past whatever its review still wants."""
+        if principal.origin_class != "operator":
+            raise ControlDenied("only the operator closes a card past its review")
+
+        async def effect(conn: aiosqlite.Connection, mutation: Mutation) -> dict[str, Any]:
+            row = await _one(conn, "SELECT project_id FROM board_tasks WHERE id = ?", (task_id,))
+            if row is None or row["project_id"] != (scope.id if scope.kind == "project" else None):
+                raise ControlConflict("task is outside the command scope")
+            return await close_by_operator(conn, task_id=task_id, status=status, actor_id=principal.actor_id,
+                                           reason=reason, result_id=mutation.object_id, verdict_id=uuid.uuid4().hex)
+
+        return await self._mutate(principal, scope, "board.task.close", client_operation_id,
+                                  expected_entity_revision, Entity("task", task_id),
+                                  {"status": status, "reason": reason}, effect, "task.changed")
+
+    async def remove(self, principal: Principal, scope: Scope, task_id: str, *,
+                     client_operation_id: str, expected_entity_revision: int,
+                     reason: str = "") -> dict[str, Any]:
+        """Take a card off the board for good; an open one is dropped on the way.
+
+        The row stays: its results, attempts and reports sit in append-only tables that refuse a
+        delete, and the journal still names it. ``removed_at`` only keeps it out of every list."""
+        if principal.origin_class != "operator":
+            raise ControlDenied("only the operator removes a card")
+        reason = " ".join((reason or "").split()) or "removed from the board"
+
+        async def effect(conn: aiosqlite.Connection, mutation: Mutation) -> dict[str, Any]:
+            row = await _one(conn, "SELECT project_id,status,removed_at FROM board_tasks WHERE id = ?", (task_id,))
+            if row is None or row["project_id"] != (scope.id if scope.kind == "project" else None):
+                raise ControlConflict("task is outside the command scope")
+            if row["removed_at"]:
+                raise DomainConflict("the card is already removed")
+            if row["status"] not in ("done", "dropped"):
+                await close_by_operator(conn, task_id=task_id, status="dropped", actor_id=principal.actor_id,
+                                        reason=reason, result_id=mutation.object_id, verdict_id=uuid.uuid4().hex)
+            await conn.execute("UPDATE board_tasks SET removed_at = ?,updated_at = ? WHERE id = ?", (now(), now(), task_id))
+            return {"task_id": task_id, "removed": True}
+
+        return await self._mutate(principal, scope, "board.task.remove", client_operation_id,
+                                  expected_entity_revision, Entity("task", task_id),
+                                  {"reason": reason}, effect, "task.changed")
 
 __all__ = ["BoardCommands", "insert_task"]

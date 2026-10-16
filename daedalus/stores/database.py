@@ -2592,6 +2592,17 @@ MIGRATIONS.append(EDIT_BOARD_SCHEMA)
 # launching it again. An open exploration holds its budget against the project's goal budget.
 MIGRATIONS.append(EXPLORATION_MIGRATION)
 
+async def _removed_cards(conn: aiosqlite.Connection) -> None:
+    """A card the operator removed from the board. The row cannot be deleted once it has results,
+    attempts or reports, which live in append-only tables, so removal is a mark every list honours.
+    Checked first, like every added column: a later migration run again must not fail on it."""
+    present = {row[1] for row in await (await conn.execute("PRAGMA table_info(board_tasks)")).fetchall()}
+    if "removed_at" not in present:
+        await conn.execute("ALTER TABLE board_tasks ADD COLUMN removed_at TEXT")
+
+
+MIGRATIONS.append(DataMigration("SELECT 1;", _removed_cards))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

@@ -138,6 +138,9 @@ async def test_each_decision_closes_the_result(settings: Settings, db: Database,
             assert said.startswith(f"decided: nothing further on task {task_id}")
             journal = [e.text for e in await r.manager.projects.journal(r.project.id, limit=5)]
             assert f"Nothing further on task {task_id}: the operator paused the updater work until next week" in journal
+            # A second Decide finds nothing open: the reason is kept, and what closes the card is named.
+            again = await r.call(sid, "decide", task_id=task_id, why="still paused until the operator returns next week")
+            assert again.startswith(f"noted: nothing was waiting on task {task_id}") and "status='dropped'" in again
         elif decision == "ask":
             await r.call(sid, "ask_operator", title="Supervisor version", text="Which supervisor version should the updater target?", task_id=task_id)
         else:

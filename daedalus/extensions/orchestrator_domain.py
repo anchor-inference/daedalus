@@ -569,6 +569,19 @@ async def operator_attestation_in(conn: aiosqlite.Connection, evidence_id: str) 
     return (criterion is not None and not criterion.get("file_id")) or (not criteria and row["criterion_id"] == "completion")
 
 
+def owed_requirements(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """The requirements a result has to answer for: every one but the inputs.
+
+    An input is what the work starts from — the operator's screenshot, a document handed over with
+    the card. Counting it as something to prove left every card with an attached file unable to
+    close: the report path refused any file-bound requirement outright, and a verdict wanted a
+    passing check on the screenshot's own digest, which no reviewer could produce. Coordinators
+    then sent extra members to "hand in" the operator's file again, and the card still stayed in
+    review.
+    """
+    return [item for item in snapshot.get("requirements", []) if item.get("kind") != "input"]
+
+
 async def record_verdict(
     conn: aiosqlite.Connection, *, verdict_id: str, result_id: str, reviewer_actor_id: str,
     verification: str, accepted: bool, head: str | None, base: str | None,
@@ -643,7 +656,7 @@ async def record_verdict(
                               (result["task_id"], result["contract_revision"]))
         snapshot = _json(contract["snapshot_json"], {}) if contract is not None else {}
         required = {item["id"] for item in snapshot.get("checklist", [])}
-        required.update(item["id"] for item in snapshot.get("requirements", []))
+        required.update(item["id"] for item in owed_requirements(snapshot))
         if required:
             covered = set()
             for evidence_id in evidence:
@@ -652,7 +665,7 @@ async def record_verdict(
                     covered.add(row["criterion_id"])
             if not required.issubset(covered):
                 raise DomainConflict("not every acceptance check or requirement has applicable evidence")
-        for item in snapshot.get("requirements", []):
+        for item in owed_requirements(snapshot):
             file_id = item.get("file_id")
             if not file_id:
                 continue
@@ -840,7 +853,7 @@ async def accept_report(
     stayed handed in for good: the coordinator read the report, could not record that, and the
     operator's "the question is closed" had nowhere to go. Here reading the report is the check, and
     ``reason`` says what it showed. Branch work keeps its stricter path (a check on the head, then
-    the merge), and a file-bound requirement still needs its exact file proven.
+    the merge), and a file the result owes still needs its exact copy proven; an input file is not owed.
     """
     task = await _one(conn, "SELECT project_id, status, contract_revision, branch, checklist, current_attempt_id"
                       " FROM board_tasks WHERE id = ?", (task_id,))
@@ -875,7 +888,7 @@ async def accept_report(
     contract = await _one(conn, "SELECT snapshot_json FROM task_contract_versions"
                           " WHERE task_id = ? AND contract_revision = ?", (task_id, task["contract_revision"]))
     snapshot = _json(contract["snapshot_json"], {}) if contract is not None else {}
-    if any(item.get("file_id") for item in snapshot.get("requirements", [])):
+    if any(item.get("file_id") for item in owed_requirements(snapshot)):
         raise DomainConflict("a file-bound requirement needs verified evidence for its exact file")
     ci = await ci_readiness(conn, task_id, int(task["contract_revision"]), None)
     if ci["state"] == "blocked":
@@ -894,6 +907,89 @@ async def accept_report(
                            acceptance_state="accepted")
     return {"task_id": task_id, "result_id": result_id, "verdict_id": verdict_id,
             "contract_revision": contract_revision, "acceptance_state": "accepted", "status": "done"}
+
+
+LIVE_ATTEMPT_STATES = ("queued", "starting", "running", "waiting", "recovering")
+CLOSE_REASON_MAX = 2000
+
+
+async def close_by_operator(
+    conn: aiosqlite.Connection, *, task_id: str, status: str, actor_id: str, reason: str,
+    result_id: str, verdict_id: str,
+) -> dict[str, Any]:
+    """Finish or drop a card on the operator's word, whatever state its review is in.
+
+    Every other way to close a card proves something first: a verdict needs bound evidence, a
+    report acceptance refuses branch work, a drop refuses a card in review or one whose worker is
+    still attached. Those proofs are for the coordinator and the members. The operator kept
+    hitting them on work that was plainly finished — a deploy already live, a question already
+    answered, a member whose session had ended without releasing its attempt — and the only way
+    out was to send yet another member to hand the same thing in again. This is the way out.
+
+    The current attempt is fenced (its later report is refused as superseded) and its member asked
+    to stop after the turn. A ``done`` close accepts the latest complete result as the operator's
+    approval, or records ``reason`` as the operator's own result when nothing was handed in, so the
+    cards that wait on this one see an accepted result and move. A branch is not merged here.
+    """
+    if status not in ("done", "dropped"):
+        raise ValueError("a card closes as done or dropped")
+    body = " ".join((reason or "").split())
+    if not body or len(body) > CLOSE_REASON_MAX:
+        raise ValueError(f"say why the card closes, in at most {CLOSE_REASON_MAX} characters")
+    task = await _one(conn, "SELECT project_id, status, contract_revision, checklist, current_attempt_id, notes"
+                      " FROM board_tasks WHERE id = ?", (task_id,))
+    if task is None:
+        raise KeyError(task_id)
+    if task["status"] == status:
+        raise DomainConflict(f"the card is already {status}")
+    at = _now()
+    await conn.execute("UPDATE effect_outbox SET state = 'cancelled', error = ?, completed_at = ?"
+                       " WHERE kind = 'task.launch' AND state = 'pending'"
+                       " AND json_extract(payload_json,'$.control.task_id') = ?",
+                       ("the operator closed the card", at, task_id))
+    if task["current_attempt_id"]:
+        await conn.execute(f"UPDATE execution_attempts SET state = 'superseded', updated_at = ?"
+                           f" WHERE id = ? AND state IN ({','.join('?' for _ in LIVE_ATTEMPT_STATES)})",
+                           (at, task["current_attempt_id"], *LIVE_ATTEMPT_STATES))
+    await conn.execute("UPDATE staff_sessions SET pause_requested = 1 WHERE task_id = ? AND ended_at IS NULL",
+                       (task_id,))
+    await conn.execute("UPDATE open_loops SET closed_at = ?, closed_by = 'operator', decision = ?"
+                       " WHERE task_id = ? AND closed_at IS NULL",
+                       (at, f"closed by the operator as {status}", task_id))
+    contract_revision = int(task["contract_revision"])
+    accepted_result = None
+    if status == "done":
+        latest = await _one(conn, "SELECT r.id FROM result_receipts r WHERE r.task_id = ? AND r.contract_revision = ?"
+                            " AND r.outcome = 'complete'"
+                            " AND NOT EXISTS (SELECT 1 FROM review_returns x WHERE x.result_id = r.id)"
+                            " ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1", (task_id, contract_revision))
+        if latest is not None:
+            accepted_result = latest["id"]
+        else:
+            text = f"Closed by the operator: {body}"
+            raw = text.encode("utf-8")
+            await conn.execute(
+                "INSERT INTO result_receipts(id, task_id, contract_revision, attempt_id, outcome, original_text,"
+                " original_blob_ref, original_digest, original_size_bytes, checks_json, limitations_json,"
+                " actor_id, created_at) VALUES (?, ?, ?, NULL, 'complete', ?, NULL, ?, ?, '[]', '[]', ?, ?)",
+                (result_id, task_id, contract_revision, text, hashlib.sha256(raw).hexdigest(), len(raw),
+                 actor_id, at))
+            accepted_result = result_id
+        await conn.execute(
+            "INSERT INTO review_verdicts(id, result_id, contract_revision, reviewer_actor_id, verification, accepted,"
+            " head, base, environment_digest, evidence_json, reason, self_review_waiver_receipt_id, created_at)"
+            " VALUES (?, ?, ?, ?, 'verified', 1, NULL, NULL, NULL, '[]', ?, NULL, ?)",
+            (verdict_id, accepted_result, contract_revision, actor_id, "closed by the operator: " + body, at))
+        await _finish_accepted(conn, task, task_id=task_id, result_id=accepted_result, verdict_id=verdict_id,
+                               contract_revision=contract_revision, attempt_id=None,
+                               acceptance_state="operator_approved")
+    note = f"[{at[:16]}] closed by the operator as {status}: {body}"
+    await conn.execute("UPDATE board_tasks SET status = ?, current_attempt_id = NULL, notes = substr(?, -8000),"
+                       " updated_at = ? WHERE id = ?",
+                       (status, ((task["notes"] or "") + "\n" + note).lstrip("\n"), at, task_id))
+    await reconcile_dependents(conn, task_id)
+    return {"task_id": task_id, "status": status, "result_id": accepted_result,
+            "verdict_id": verdict_id if accepted_result else None, "contract_revision": contract_revision}
 
 
 async def return_result(

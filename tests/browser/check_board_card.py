@@ -114,9 +114,14 @@ def check(page: Page, lang: str, unhandled: Unhandled) -> None:
         task_sheet.get_by_role("checkbox").click()
     assert stub.updated[-1][1]["check_ids"] == ["C1"] and stub.updated[-1][1]["client_operation_id"]
     task_sheet.get_by_role("button", name="Actions" if lang == "en" else "Действия").click()
-    page.get_by_role("menuitem", name="Archive task…" if lang == "en" else "Архивировать задачу…").click()
-    page.locator(".sheet-backdrop.confirm .dialog button").last.click()
-    assert next(task for task in stub.tasks if task["title"] == "Check plants")["status"] == "dropped"
+    page.get_by_role("menuitem", name="Close as done…" if lang == "en" else "Закрыть как готовую…").click()
+    dialog = page.locator(".sheet-backdrop.confirm .dialog")
+    dialog.locator("textarea").fill("Checked by hand")
+    with page.expect_response(lambda response: urlsplit(response.url).path.endswith(f"/api/board/{task_id}/close")):
+        dialog.locator("button").last.click()
+    assert stub.closed[-1] == (task_id, {**stub.closed[-1][1], "status": "done", "reason": "Checked by hand"})
+    closed = next(task for task in stub.tasks if task["title"] == "Check plants")
+    assert closed["status"] == "done" and closed["acceptance_state"] == "operator_approved"
 
 
 def run() -> int:

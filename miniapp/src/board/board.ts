@@ -231,14 +231,16 @@ export function briefChanges(before: Brief, after: Brief): Partial<Brief> {
   return out;
 }
 
-/** Where a task can be moved from where it stands. Done is not offered: a finished task is the
- *  operator's acceptance from review, which is its own button. */
+/** Where a task can be moved from where it stands — only the moves the server takes. Done is not
+ *  offered: a finished task is an acceptance, or the operator's own close, each its own button.
+ *  Review back to doing, done back to todo and doing to review used to be offered here and were
+ *  refused every time; a result is returned or reopened from its own panel instead. */
 export const NEXT: Record<TaskStatus, TaskStatus[]> = {
   todo: ["doing", "blocked", "dropped"],
   blocked: ["todo", "dropped"],
-  doing: ["review", "todo", "blocked"],
-  review: ["doing"],
-  done: ["todo"],
+  doing: ["todo", "blocked"],
+  review: ["dropped"],
+  done: [],
   dropped: ["todo"],
 };
 

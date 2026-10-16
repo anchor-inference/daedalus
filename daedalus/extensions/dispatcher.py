@@ -661,7 +661,7 @@ async def op_projects(d: Dispatcher, session_id: str, *, project: str | None = N
     teams = await manager.staff.team_counts()
     waiting = await manager.asks.open_counts("operator")
     board: dict[str, dict[str, int]] = {}
-    for row in await manager.db.fetchall("SELECT project_id, status, COUNT(*) AS n FROM board_tasks WHERE project_id IS NOT NULL GROUP BY project_id, status"):
+    for row in await manager.db.fetchall("SELECT project_id, status, COUNT(*) AS n FROM board_tasks WHERE project_id IS NOT NULL AND removed_at IS NULL GROUP BY project_id, status"):
         board.setdefault(row["project_id"], {})[row["status"]] = int(row["n"])
     opened: dict[str, int] = {}
     for dispatch in await manager.dispatches.open_for():
@@ -703,7 +703,7 @@ async def _project_detail(d: Dispatcher, project: Project, now: datetime) -> str
         if body:
             lines.append(f"Brief, {name.replace('_', ' ')}: {_one_line(body.splitlines()[0], 200)}")
     counts: dict[str, int] = {}
-    for row in await manager.db.fetchall("SELECT status, COUNT(*) AS n FROM board_tasks WHERE project_id = ? GROUP BY status", (project.id,)):
+    for row in await manager.db.fetchall("SELECT status, COUNT(*) AS n FROM board_tasks WHERE project_id = ? AND removed_at IS NULL GROUP BY status", (project.id,)):
         counts[row["status"]] = int(row["n"])
     lines.append("Board: " + " · ".join(f"{s} {counts.get(s, 0)}" for s in ("doing", "review", "todo", "blocked", "done")))
     members = await manager.staff.list(project.id)

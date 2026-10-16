@@ -49,10 +49,10 @@ async def test_card_command_replay_keeps_its_receipt_and_current_projection_sepa
         assert (await client.put(f"/api/board/{task_id}", json={"status": "done", "client_operation_id": "done",
                                                               "expected_entity_revision": 2})).status_code == 409
         assert (await client.delete(f"/api/board/{task_id}")).status_code == 422
-        archived = await client.delete(f"/api/board/{task_id}", params={"client_operation_id": "archive", "expected_entity_revision": 2})
-        assert archived.status_code == 200, archived.text
-        assert archived.json()["archived"] is True
-        assert (await db.fetchone("SELECT status FROM board_tasks WHERE id = ?", (task_id,)))[0] == "dropped"
+        removed = await client.delete(f"/api/board/{task_id}", params={"client_operation_id": "remove", "expected_entity_revision": 2})
+        assert removed.status_code == 200, removed.text
+        assert removed.json()["command"]["removed"] is True
+        assert removed.json()["task"]["status"] == "dropped" and removed.json()["task"]["removed_at"]
         versions = await db.fetchall("SELECT contract_revision,snapshot_json FROM task_contract_versions WHERE task_id = ? ORDER BY contract_revision", (task_id,))
         assert [row["contract_revision"] for row in versions] == [1, 2]
         assert [json.loads(row["snapshot_json"])["title"] for row in versions] == ["Draft", "Edited"]

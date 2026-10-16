@@ -452,6 +452,11 @@ async def tasks(
             return await _next_action(orch, project, session_id, task_id, next_kind, owner,
                                       client_operation_id, expected_entity_revision)
         else:
+            if expected_entity_revision is None and task_id:
+                # Left out, it is the card as it stands now: a refusal only sent the coordinator to
+                # Tasks(get) for the number and back, which guards against nothing.
+                current = await orch.manager.db.fetchone("SELECT entity_revision FROM board_tasks WHERE id = ?", (task_id,))
+                expected_entity_revision = int(current["entity_revision"]) if current is not None else None
             if not client_operation_id or expected_entity_revision is None:
                 raise Refused("update needs its trusted call id and expected_entity_revision from Tasks(get)")
             if op == "move" and not status:

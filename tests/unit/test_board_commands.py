@@ -78,8 +78,8 @@ async def test_project_card_creation_and_semantic_edit_are_replayable(tmp_path: 
         review_revision = (await db.fetchone("SELECT entity_revision FROM board_tasks WHERE id = ?",
                                              (task_id,)))["entity_revision"]
         with pytest.raises(DomainConflict, match="return the exact"):
-            await commands.update(principal, scope, task_id, client_operation_id="drop-review",
-                                  expected_entity_revision=review_revision, status="dropped")
+            await commands.update(principal, scope, task_id, client_operation_id="reopen-review",
+                                  expected_entity_revision=review_revision, status="todo")
         assert (await db.fetchone("SELECT count(*) AS n FROM task_contract_versions WHERE task_id = ?",
                                   (task_id,)))["n"] == 3
     finally:

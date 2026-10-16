@@ -31,6 +31,7 @@ import { UnknownStops } from "./UnknownStops";
 import { UncertainLaunches } from "./UncertainLaunches";
 import type { AcceptedResultReference } from "./ResultFlow";
 import { NEXT, acceptanceChip, arrange, chips, columnCount, sections, statusLine, toggleFilter, type Arranged, type Column, type NeedsYou, type ProjectTask, type TaskStatus } from "./board";
+import { closeItems } from "./operatorClose";
 
 const enc = encodeURIComponent;
 const boardKey = (projectId: string) => `/api/projects/${enc(projectId)}/board`;
@@ -315,11 +316,7 @@ function TaskMenu({ task, projectId, titles, toast, onOpen, onClose, onDone }: {
     if (!(await confirmAsync(t("result.stopTaskTitle", { title: task.title }), { body: t("result.stopTaskBody"), action: t("result.stopTaskAction"), danger: true }))) return;
     void run(() => api.post(`/api/board/${enc(task.id)}/stop`, { expected_entity_revision: task.entity_revision, client_operation_id: crypto.randomUUID(), reason: "operator_requested" }), t("result.stopTaskQueued"));
   };
-  const archive = async () => {
-    if (!(await confirmAsync(t("pboard.archive.title", { title: task.title }), { body: t("pboard.archive.body"), action: t("pboard.archive.action"), danger: true }))) return;
-    void run(() => api.delete(`/api/board/${enc(task.id)}?client_operation_id=${enc(crypto.randomUUID())}&expected_entity_revision=${task.entity_revision}`), t("pboard.archive.saved"));
-  };
-  const canArchive = ["todo", "blocked"].includes(task.status);
+  const ending = closeItems(task, blocked, { onDone, toast });
   return (
     <BottomSheet onClose={onClose} className="ph-actions ph-task-menu" label={task.title}
       preview={{ title: <span className="ph-task-preview">{task.title}{task.priority <= 2 && <span className={`ph-pill ${task.priority === 1 ? "bad" : ""}`}>P{task.priority}</span>}</span>, meta }}>
@@ -339,7 +336,10 @@ function TaskMenu({ task, projectId, titles, toast, onOpen, onClose, onDone }: {
         <SheetRow icon="copy" label={t("board.copyid")} value={<code>{task.id}</code>} onClick={async () => { onClose(); toast((await copyText(task.id)) ? t("board.copied") : task.id); }} />
         <div className="ph-msep" role="separator" />
         {task.status === "doing" && <SheetRow icon="stop" danger label={t("result.stopTaskAction")} hint={t("result.stopTaskScope")} disabled={blocked} onClick={() => void stop()} />}
-        <SheetRow icon="archive" label={t("pboard.archive.action")} hint={canArchive ? undefined : t("pboard.archive.unavailable")} disabled={blocked || !canArchive} onClick={() => void archive()} />
+        {ending.map((item) => item !== "-" && (
+          <SheetRow key={item.label} icon={item.icon ?? "archive"} danger={item.danger} label={item.label} disabled={item.disabled}
+            onClick={() => { onClose(); item.onSelect(); }} />
+        ))}
       </div>
     </BottomSheet>
   );

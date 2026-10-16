@@ -685,7 +685,7 @@ class ProjectStatusAdapter:
         if row is None:
             raise PluginRefused("no such project")
         counts = await self.db.fetchall(
-            "SELECT status, COUNT(*) count FROM board_tasks WHERE project_id = ? GROUP BY status", (project_id,)
+            "SELECT status, COUNT(*) count FROM board_tasks WHERE project_id = ? AND removed_at IS NULL GROUP BY status", (project_id,)
         )
         return {"project_id": project_id, "name": row["name"], "tasks": {item["status"]: item["count"] for item in counts}}
 
@@ -719,7 +719,7 @@ class DeclarativeReadAdapter:
             raise PluginRefused("no such project")
         if model == "task_counts":
             rows = await self.db.fetchall(
-                "SELECT status,COUNT(*) AS count FROM board_tasks WHERE project_id = ? GROUP BY status",
+                "SELECT status,COUNT(*) AS count FROM board_tasks WHERE project_id = ? AND removed_at IS NULL GROUP BY status",
                 (project_id,),
             )
             return {"project_id": project_id, "name": project["name"],

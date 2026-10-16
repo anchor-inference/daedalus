@@ -1288,6 +1288,7 @@ class BoardStub:
         self.merge_receipts: dict[str, dict] = {}
         self.rejected: list[tuple[str, str]] = []
         self.stops: list[tuple[str, dict]] = []
+        self.closed: list[tuple[str, dict]] = []
         self.workflow_runs: dict[str, dict] = {}
         self.workflow_commands: dict[str, dict] = {}
         self.workflow_unknowns = 0
@@ -1350,7 +1351,7 @@ class BoardStub:
         return self.reviews.get(row["id"]) or self.review(row)
 
     def listing(self, include_done: bool) -> dict:
-        rows = [t for t in self.tasks if include_done or t["status"] not in ("done", "dropped")]
+        rows = [t for t in self.tasks if not t.get("removed_at") and (include_done or t["status"] not in ("done", "dropped"))]
         rows.sort(key=lambda t: (self.ORDER.get(t["status"], 9), t["priority"], t["created_at"]))
         counts = {s: sum(1 for t in self.tasks if t["status"] == s) for s in self.ORDER}
         counts["needs_you"] = len(self.needs_you)
@@ -1582,7 +1583,7 @@ class BoardStub:
             return 201, {"command": {"task_id": row["id"], "entity_revision": row["entity_revision"]}, "task": row}
         if path == "/api/board" and method == "GET":
             # The host names a project's task's project on this listing, as the Board screen's card reads it.
-            listed = [t for t in self.tasks if "include_done=1" in query or t["status"] not in ("done", "dropped")]
+            listed = [t for t in self.tasks if not t.get("removed_at") and ("include_done=1" in query or t["status"] not in ("done", "dropped"))]
             return 200, [{**t, "project_name": self.project["name"] if t.get("project_id") else None} for t in listed]
         if path.startswith("/api/board/"):
             parts = path.split("/")
@@ -1722,6 +1723,18 @@ class BoardStub:
                 receipt = self.merge_receipts.get(row["id"])
                 return 200, {**self._review_of(row), "status": row["status"], "head_sha": "head", "base_sha": "base",
                              "current_sha": "merged-head" if receipt and receipt["state"] == "merged" else "base", "merge_receipt": receipt}
+            if path.endswith("/close") and method == "POST":
+                payload = dict(body or {})
+                if payload.get("status") not in ("done", "dropped") or not payload.get("reason"):
+                    return 422, {"detail": "a card closes as done or dropped, with a reason"}
+                if row["status"] == payload["status"]:
+                    return 409, {"detail": f"the card is already {row['status']}"}
+                self.closed.append((row["id"], payload))
+                row.update(status=payload["status"], current_attempt_id=None)
+                if payload["status"] == "done":
+                    row["acceptance_state"] = "operator_approved"
+                row["entity_revision"] += 1
+                return 200, {"command": {"task_id": row["id"], "status": row["status"], "entity_revision": row["entity_revision"]}, "task": row}
             if path.endswith("/stop") and method == "POST":
                 self.stops.append((row["id"], dict(body or {})))
                 return 200, {"effect_id": "stop-1", "task_id": row["id"], "state": "queued", "receipt_id": "receipt", "entity_revision": row["entity_revision"] + 1}
@@ -1774,8 +1787,9 @@ class BoardStub:
                 return 200, {"command": {"task_id": row["id"], "entity_revision": row["entity_revision"]}, "task": row}
             if method == "DELETE":
                 row["status"] = "dropped"
+                row["removed_at"] = "2026-10-16T12:00:00Z"
                 row["entity_revision"] += 1
-                return 200, {"archived": True, "command": {"task_id": row["id"], "entity_revision": row["entity_revision"]}, "task": row}
+                return 200, {"command": {"task_id": row["id"], "removed": True, "entity_revision": row["entity_revision"]}, "task": row}
         return None
 
 

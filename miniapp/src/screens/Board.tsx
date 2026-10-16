@@ -17,6 +17,7 @@ import { confirmAsync, errorText } from "../ui";
 // plain name where there is no task in scope, and `t2` inside the functions that take one.
 import { plural, t, t as t2 } from "../i18n";
 import { useSessionTitles } from "./Sessions";
+import { closeItems } from "../board/operatorClose";
 
 type Status = "todo" | "doing" | "review" | "done" | "blocked" | "dropped";
 type Task = {
@@ -101,20 +102,11 @@ export function BoardScreen({ toast, onOpen, selected, project }: { toast: (t: s
       toast(errorText(e));
     }
   }
-  async function remove(t: Task) {
-    if (offline || !Number.isInteger(t.entity_revision)) { toast(t2("result.block.unconfirmed")); return; }
-    if (!(await confirmAsync(t2("pboard.archive.title", { title: t.title }), { body: t2("pboard.archive.body"), action: t2("pboard.archive.action"), danger: true }))) return;
-    const id = operationId(`${t.id}:archive:${t.entity_revision}`);
-    try {
-      await api.delete(`/api/board/${encodeURIComponent(t.id)}?client_operation_id=${encodeURIComponent(id)}&expected_entity_revision=${t.entity_revision}`);
-      pending.current = null;
-      if (selected === t.id) navigate(pathFor("board"), { replace: true });
-      reload();
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 409) { pending.current = null; reload(); }
-      toast(errorText(e));
-    }
-  }
+  const ending = (task: Task, blocked: boolean): MenuItem[] => closeItems(task, blocked, {
+    onDone: reload, toast,
+    onRemoved: () => { if (selected === task.id) navigate(pathFor("board"), { replace: true }); },
+  });
+
 
   const all = tasks ?? [];
   const finished = all.filter((t) => FINISHED.includes(t.status));
@@ -154,10 +146,10 @@ export function BoardScreen({ toast, onOpen, selected, project }: { toast: (t: s
   useEdgeFade(kanban, `${showDone}:${all.length}`);
   const sheets = <>
     {creating && <NewTaskSheet onClose={() => setCreating(false)} onCreated={() => { setCreating(false); reload(); }} toast={toast} />}
-    {open && <TaskSheet t={open} owner={open.session_id ? titles[open.session_id] : undefined} board={open.origin_session_id ? titles[open.origin_session_id] : undefined} onClose={() => navigate(pathFor("board"), { replace: true })} onMove={move} onCheck={check} onRemove={remove} onOpenSession={onOpen} toast={toast} />}
+    {open && <TaskSheet t={open} owner={open.session_id ? titles[open.session_id] : undefined} board={open.origin_session_id ? titles[open.origin_session_id] : undefined} onClose={() => navigate(pathFor("board"), { replace: true })} onMove={move} onCheck={check} ending={ending} onOpenSession={onOpen} toast={toast} />}
   </>;
   if (phone) return <PhoneBoardView tasks={tasks} error={error} loading={loading} refresh={refresh} showDone={showDone} setShowDone={setShowDone} project={project ?? null}
-    titles={titles} offline={offline} onNew={() => setCreating(true)} onMove={move} onRemove={remove} onOpenSession={onOpen} toast={toast} sheets={sheets} />;
+    titles={titles} offline={offline} onNew={() => setCreating(true)} onMove={move} ending={ending} onOpenSession={onOpen} toast={toast} sheets={sheets} />;
   return (
     <>
       <PageHeader
@@ -216,7 +208,7 @@ export function BoardScreen({ toast, onOpen, selected, project }: { toast: (t: s
 
 type PhoneBoardProps = {
   tasks: Task[] | null | undefined; error: string | null | undefined; loading: boolean; refresh: () => void; showDone: boolean; setShowDone: (v: boolean) => void; project: Project | null;
-  titles: Record<string, string>; offline: boolean; onNew: () => void; onMove: (t: Task, s: Status) => void; onRemove: (t: Task) => void;
+  titles: Record<string, string>; offline: boolean; onNew: () => void; onMove: (t: Task, s: Status) => void; ending: (t: Task, blocked: boolean) => MenuItem[];
   onOpenSession: (id: string) => void; toast: (text: string) => void; sheets: ReactNode;
 };
 
@@ -226,7 +218,7 @@ type PhoneBoardProps = {
  * commands (open, move, its session, copy, archive) are its long-press sheet; what the list shows
  * (open or with finished, the project lens) is behind the options glyph, so the bar keeps two glyphs.
  */
-function PhoneBoardView({ tasks, error, loading, refresh, showDone, setShowDone, project, titles, offline, onNew, onMove, onRemove, onOpenSession, toast, sheets }: PhoneBoardProps) {
+function PhoneBoardView({ tasks, error, loading, refresh, showDone, setShowDone, project, titles, offline, onNew, onMove, ending, onOpenSession, toast, sheets }: PhoneBoardProps) {
   const [filter, setFilter] = useState<Status | "finished" | null>(null);
   const [options, setOptions] = useState(false);
   const all = tasks ?? [];
@@ -254,7 +246,7 @@ function PhoneBoardView({ tasks, error, loading, refresh, showDone, setShowDone,
       ...(task.session_id ? [{ label: owner ? t("board.open.owner", { name: owner }) : t("board.open.session"), icon: "bots" as const, onSelect: () => onOpenSession(task.session_id!) }] : []),
       ...(task.project_id ? [{ label: t("board.on.project", { name: task.project_name ?? task.project_id }), icon: "board" as const, onSelect: () => navigate(projectPagePath(task.project_id!, "board", { task: task.id })) }] : []),
       { label: t("board.copyid"), icon: "copy", onSelect: async () => toast((await copyText(task.id)) ? t("board.copied") : task.id) },
-      { label: t("pboard.archive.action"), icon: "archive", danger: true, disabled: blocked || !["todo", "blocked"].includes(task.status), hint: t("pboard.archive.unavailable"), onSelect: () => onRemove(task) },
+      ...ending(task, blocked),
     ];
     return (
       <ListRow key={task.id} className={`ph-task p${Math.min(task.priority, 4)} ${task.status}`} data={{ task: task.id }} title={task.title} label={task.title}
@@ -356,7 +348,7 @@ function TaskRow({ t, owner, onOpen, onDragStart, onDragEnd, dragging, canDrag }
   );
 }
 
-function TaskSheet({ t, owner, board, onClose, onMove, onCheck, onRemove, onOpenSession, toast }: { t: Task; owner?: string; board?: string; onClose: () => void; onMove: (t: Task, s: Status) => void; onCheck: (t: Task, i: number) => void; onRemove: (t: Task) => void; onOpenSession: (id: string) => void; toast: (t: string) => void }) {
+function TaskSheet({ t, owner, board, onClose, onMove, onCheck, ending, onOpenSession, toast }: { t: Task; owner?: string; board?: string; onClose: () => void; onMove: (t: Task, s: Status) => void; onCheck: (t: Task, i: number) => void; ending: (t: Task, blocked: boolean) => MenuItem[]; onOpenSession: (id: string) => void; toast: (t: string) => void }) {
   const offline = useOffline();
   const writeBlocked = offline || !Number.isInteger(t.entity_revision);
   const done = t.checklist.filter((c) => c.done).length;
@@ -376,7 +368,7 @@ function TaskSheet({ t, owner, board, onClose, onMove, onCheck, onRemove, onOpen
             ...(t.session_id ? [{ label: owner ? t2("board.open.owner", { name: owner }) : t2("board.open.session"), icon: "bots" as const, onSelect: () => onOpenSession(t.session_id!) }] : []),
             { label: t2("board.copyid"), icon: "copy", onSelect: async () => toast((await copyText(t.id)) ? t2("board.copied") : t.id) },
             "-",
-            { label: t2("pboard.archive.action"), icon: "trash", danger: true, disabled: writeBlocked || !["todo", "blocked"].includes(t.status), hint: t2("pboard.archive.unavailable"), onSelect: () => onRemove(t) },
+            ...ending(t, writeBlocked),
           ]}
         />
       }

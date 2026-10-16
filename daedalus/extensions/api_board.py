@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
@@ -60,6 +60,14 @@ class UpdateBody(BaseModel):
     check_ids: list[str] | None = Field(default=None, max_length=12)
     uncheck_ids: list[str] | None = Field(default=None, max_length=12)
     folder_id: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class CloseBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    client_operation_id: str = Field(min_length=1, max_length=160)
+    expected_entity_revision: int = Field(ge=1, strict=True)
+    status: Literal["done", "dropped"]
+    reason: str = Field(min_length=1, max_length=2000)
 
 
 def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
@@ -127,10 +135,31 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     async def edit(task_id: str, body: UpdateBody, authenticated: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         return await update(task_id, body, authenticated)
 
+    async def scope_of(task_id: str) -> Scope:
+        task = await app.db.fetchone("SELECT project_id FROM board_tasks WHERE id = ?", (task_id,))
+        if task is None:
+            raise KeyError(task_id)
+        return Scope("project", task["project_id"]) if task["project_id"] else Scope("global", "global")
+
+    @api.post("/api/board/{task_id}/close")
+    async def close(task_id: str, body: CloseBody, authenticated: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Done or dropped on the operator's word, whatever the review or the worker still holds."""
+        try:
+            result = await commands().close(Principal.operator(authenticated), await scope_of(task_id), task_id,
+                                            **body.model_dump())
+            return await projection(result)
+        except (ControlConflict, ControlDenied, KeyError, ValueError) as exc:
+            raise rejected(exc) from exc
+
     @api.delete("/api/board/{task_id}")
-    async def archive(task_id: str, client_operation_id: str = Query(min_length=1, max_length=160),
-                      expected_entity_revision: int = Query(ge=1),
-                      authenticated: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        task = await update(task_id, UpdateBody(client_operation_id=client_operation_id,
-                            expected_entity_revision=expected_entity_revision, status="dropped"), authenticated)
-        return {"archived": True, **task}
+    async def remove(task_id: str, client_operation_id: str = Query(min_length=1, max_length=160),
+                     expected_entity_revision: int = Query(ge=1), reason: str = Query(default="", max_length=2000),
+                     authenticated: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Off the board for good; an open card is dropped first, and its history stays readable."""
+        try:
+            result = await commands().remove(Principal.operator(authenticated), await scope_of(task_id), task_id,
+                                             client_operation_id=client_operation_id,
+                                             expected_entity_revision=expected_entity_revision, reason=reason)
+            return await projection(result)
+        except (ControlConflict, ControlDenied, KeyError, ValueError) as exc:
+            raise rejected(exc) from exc

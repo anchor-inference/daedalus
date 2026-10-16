@@ -337,7 +337,7 @@ async def test_human_report_enters_review_atomically_and_keeps_attestation_prove
         assert (await board.get(task["id"]))["status"] == "done"
 
 
-async def test_manual_file_requirement_needs_the_exact_attached_source(app: Any) -> None:
+async def test_an_input_file_is_not_a_deliverable_to_prove(app: Any) -> None:
     board = Board(app)
     task = await board.add(title="Use the supplied document")
     source = await app.manager.files.add(b"Approved document", name="approved.txt", origin="operator",
@@ -399,15 +399,15 @@ async def test_manual_file_requirement_needs_the_exact_attached_source(app: Any)
                 "verification": "verified", "accepted": True, "head": None, "base": None,
                 "evidence_ids": [evidence.json()["evidence_id"]], "reason": "Document reviewed",
             })
-            if index == 1:
-                assert verdict.status_code == 409
-            else:
-                assert verdict.status_code == 200, verdict.text
-                accepted = await client.post(base + f"/results/{result_id}/accept", json={
-                    "client_operation_id": "source-accept", "expected_entity_revision": verdict.json()["entity_revision"],
-                    "verdict_id": verdict.json()["verdict_id"], "contract_revision": contract["contract_revision"],
-                })
-                assert accepted.status_code == 200, accepted.text
+            # The result carries another file than the input, and is accepted all the same: the input
+            # is what the work started from, checked when the member opened it, not a deliverable.
+            assert verdict.status_code == 200, verdict.text
+            accepted = await client.post(base + f"/results/{result_id}/accept", json={
+                "client_operation_id": "source-accept", "expected_entity_revision": verdict.json()["entity_revision"],
+                "verdict_id": verdict.json()["verdict_id"], "contract_revision": contract["contract_revision"],
+            })
+            assert accepted.status_code == 200, accepted.text
+            break
     assert (await board.get(task["id"]))["status"] == "done"
 
 

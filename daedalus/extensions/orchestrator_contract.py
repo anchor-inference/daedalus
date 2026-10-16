@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import uuid
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
@@ -477,10 +478,22 @@ async def review_result(
                           ensure_ascii=False, sort_keys=True)
     if op not in ("verdict", "return", "accept"):
         raise Refused("op is inspect, verdict, accept or return")
+    # The card's revision, its current result and its contract are what the coordinator would have
+    # copied out of op='inspect' anyway. Asking for them by hand cost a refused call each time one
+    # was left out; a wrong value given explicitly is still refused as stale.
+    current = await orch.manager.db.fetchone("SELECT entity_revision, contract_revision FROM board_tasks WHERE id = ?",
+                                             (task_id,))
+    if current is not None:
+        if expected_entity_revision is None:
+            expected_entity_revision = int(current["entity_revision"])
+        if not result_id and op in ("accept", "return"):
+            candidates = [item for item in await domain.results(task_id)
+                          if int(item["contract_revision"]) == int(current["contract_revision"])]
+            result_id = candidates[0]["result_id"] if candidates else None
+        if contract_revision is None and op == "return":
+            contract_revision = int(current["contract_revision"])
     if not result_id or not client_operation_id or not isinstance(expected_entity_revision, int) or isinstance(expected_entity_revision, bool):
         raise Refused("mutation needs result_id, host call id and expected_entity_revision")
-    if op == "return" and (not verdict_id or contract_revision is None):
-        raise Refused("return needs the exact verdict_id and contract_revision")
     if op == "verdict" and verification not in ("verified", "failed", "stale"):
         raise Refused("verification must be verified, failed or stale")
     await orch.current(session_id)
@@ -508,10 +521,18 @@ async def review_result(
                 reviewer_actor_id=principal.actor_id, verification=verification, accepted=accepted,
                 head=head, base=base, environment_digest=environment_digest,
                 evidence_ids=evidence_ids or [], reason=reason)
-        assert verdict_id is not None and contract_revision is not None
+        assert contract_revision is not None
+        judged = verdict_id
+        if judged is None:
+            # A return is itself the judgement that the result fails; recording it as a verdict here
+            # spares the separate op='verdict' call a return used to need first.
+            judged = (await record_verdict(
+                conn, verdict_id=uuid.uuid4().hex, result_id=result_id, reviewer_actor_id=principal.actor_id,
+                verification="failed", accepted=False, head=head, base=base,
+                environment_digest=environment_digest, evidence_ids=[], reason=reason))["verdict_id"]
         return await return_result(
             conn, return_id=mutation.object_id, task_id=task_id, result_id=result_id,
-            verdict_id=verdict_id, contract_revision=contract_revision,
+            verdict_id=judged, contract_revision=contract_revision,
             actor_id=principal.actor_id, reason=reason)
 
     try:
@@ -540,8 +561,16 @@ async def decide(orch: Orchestrators, project: Project, session_id: str, *, why:
     if not target_task and not target_staff:
         raise Refused("name what the decision is about: task_id, or loop (L… from the state block)")
     closed = await orch.loops.close(project.id, task_id=target_task, staff_id=target_staff, by="orchestrator", decision=DECIDED + reason)
+    if not closed and not target_task:
+        raise Refused("no result is waiting for a decision on that; the state block lists those that are")
     if not closed:
-        raise Refused(f"no result is waiting for a decision on {target_task or 'that'}; the state block lists those that are")
+        # Coordinators reached for Decide to record "nothing further" on a card with no open result,
+        # were refused, and tried again on every wake. The reason is still worth keeping, and what
+        # actually closes the card is named instead.
+        await _journal(orch, project, f"Nothing further on task {target_task}: {reason}", target_task)
+        return (f"noted: nothing was waiting on task {target_task}, and the journal keeps why. Decide never closes a"
+                f" card: ReviewResult(op='accept') finishes a handed-in report, Tasks(op='move', status='dropped')"
+                f" drops one that will not be finished")
     about = f"task {target_task}" if target_task else "a member's report"
     await _journal(orch, project, f"Nothing further on {about}: {reason}", target_task or "")
     return f"decided: nothing further on {about} ({', '.join(f'L{i}' for i in closed)} closed); the journal keeps why"
