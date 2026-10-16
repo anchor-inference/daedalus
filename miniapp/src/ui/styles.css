@@ -1828,6 +1828,14 @@ button.secret-chip:hover { background: var(--card-2); }
 .mfield.end { justify-content: flex-end; }
 .mfield > span { color: var(--muted); font-size: var(--fs-12); }
 .mfield > span .faint { color: var(--fg-3); }
+/* Settings → MCP servers: a server's buttons wrap under its name on a narrow screen rather than
+   pushing the card wider than the page; the sign-in switch reads as one line, box then words. */
+.mcp-list .dt-server-head { flex-wrap: wrap; }
+.mcp-list .dt-hint[data-tone="bad"] { color: var(--bad); }
+.mcp-form { margin-top: 12px; }
+.mcp-form .mcp-check { flex-direction: row; align-items: center; gap: 8px; }
+.mcp-form .mcp-check > span { color: var(--fg); font-size: var(--fs-14); }
+.mcp-form .mcp-actions { flex-direction: row; gap: 8px; }
 .mfield .field { margin: 0; width: 100%; }
 .segmented.inline { display: inline-flex; margin: 0; }
 .segmented.inline button { flex: none; padding: 4px 12px; font-size: var(--fs-13); }

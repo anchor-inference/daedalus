@@ -111,6 +111,7 @@ from daedalus.host.skills import DirectorySkillStore, ScopedSkillStore
 from daedalus.host.transcript_view import TranscriptViewBuilder, message_view
 from daedalus.host.worktrees import append_exclude, exclude_lines
 from daedalus.mcp.manager import McpManager, blocked_for, mcp_tool_prefix
+from daedalus.mcp.oauth import mcp_callback_url
 from daedalus.memory.tools import build_memory_tools
 from daedalus.processes import end_tree
 from daedalus.providers.chain import build_chain
@@ -729,7 +730,8 @@ class SessionManager:
             settings, config, usage_sink=self.usage, image_loader=self._load_image,
             admission=HostInferenceAdmission(self),
         )
-        self.mcp = McpManager(config.mcp.servers, self.tools, token_dir=settings.state_dir / "mcp")
+        self.mcp = McpManager(config.mcp.servers, self.tools, token_dir=settings.state_dir / "mcp",
+                              redirect_default=lambda: mcp_callback_url(settings.miniapp_public_url))
         # A server's catalogue can change under running sessions — a re-listing, a reconnect, another
         # session enabling it. Each session refuses the proxies of servers it did not enable by name, so
         # every session's policy is recomputed at once, not at the next thing that happens to refresh it.
@@ -1283,6 +1285,15 @@ class SessionManager:
             return "\n".join(f"{key}: {value}" for key, value in self.mcp.oauth_status(server).items())
         if op == "oauth_begin":
             url = await self.mcp.oauth_begin(server)
+            client = self.mcp.oauth_client(server)
+            if client is not None and client.redirect_uri.endswith("/api/mcp/oauth/callback"):
+                return (
+                    "Give this authorization URL to the owner to open in a browser (it creates or links the account on "
+                    "the server's own page):\n\n"
+                    f"{url}\n\n"
+                    "After approving, the browser comes back to the app and the link completes by itself; then run "
+                    f"McpEnable(server={server!r}). McpOAuthStatus says whether it is linked."
+                )
             return (
                 "Give this authorization URL to the owner to open in a browser (it creates or links the account on "
                 "the server's own page):\n\n"

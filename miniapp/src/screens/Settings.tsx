@@ -38,6 +38,7 @@ import { ToolGroupsSettings } from "../toolgroupsview";
 import { CompactionModelSelect } from "../compactionmodel";
 import { ProviderMark, providerName as providerTitle } from "../ui/provider-mark";
 import { AsrSettingsCard } from "./AsrSettings";
+import { McpServers } from "./McpServers";
 import { AutopilotSettings, UserStyleCard } from "./AutopilotSettings";
 import { DesktopAppCard } from "../updatedialog";
 import { ProviderLimit } from "./ProviderLimit";
@@ -731,12 +732,7 @@ function ToolsTab({ s, save, toast, onSettings }: { s: Settings; save: (patch: a
         <NumRow setting="tools.exec.max_output_chars" title={t("settings.exec.maxchars")} desc={t("settings.exec.maxchars.hint")} unit={t("settings.unit.chars")} value={s.tools.exec.max_output_chars} min={2000} step={5000} onSave={(v) => save({ tools: { exec: { max_output_chars: v } } })} />
       </div>
 
-      <div className="card" data-setting="mcp.servers">
-        <div className="section-title" style={{ marginTop: 0 }}>{t("settings.mcp.title")}</div>
-        <div className="sub">{t("settings.mcp.sub")}</div>
-        <div className="sub" style={{ marginTop: 6 }}>{Object.keys((s as any).mcp?.servers ?? {}).join(", ") || t("settings.mcp.none")}</div>
-        <div className="sub" style={{ marginTop: 6 }}>{t("settings.mcp.apply")}</div>
-      </div>
+      <McpServers toast={toast} />
     </>
   );
 }

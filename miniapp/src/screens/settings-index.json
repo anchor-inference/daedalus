@@ -713,8 +713,8 @@
     {
       "section": "tools", "anchor": "mcp.servers", "config": null,
       "title": { "en": "MCP servers", "ru": "Серверы MCP" },
-      "about": { "en": "The MCP servers configured in config.toml; each session turns them on from its menu.", "ru": "Серверы MCP из config.toml; каждая сессия включает их из своего меню." },
-      "synonyms": ["MCP", "model context protocol", "MCP server", "connectors", "integrations", "серверы MCP", "коннекторы", "интеграции"]
+      "about": { "en": "Add, sign in to and remove MCP servers while Daedalus runs; each session turns them on from its menu.", "ru": "Добавление, вход и удаление серверов MCP на ходу; каждая сессия включает их из своего меню." },
+      "synonyms": ["MCP", "model context protocol", "MCP server", "connectors", "integrations", "OAuth", "add server", "серверы MCP", "коннекторы", "интеграции", "добавить сервер", "авторизация"]
     },
     {
       "section": "environments", "anchor": "terminals.running_cap", "config": "terminals.running_cap",

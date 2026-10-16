@@ -131,6 +131,18 @@ def _pkce_pair() -> tuple[str, str]:
     return verifier, challenge
 
 
+CALLBACK_PATH = "/api/mcp/oauth/callback"
+
+
+def mcp_callback_url(public_url: str) -> str:
+    """The app's own OAuth callback when it has a public address; empty means the loopback default.
+
+    A server sending the owner back there finishes the link by itself, where the loopback address
+    could not load and its URL had to be copied out of the address bar and pasted to the agent."""
+    parsed = urlparse(public_url or "")
+    return f"{parsed.scheme}://{parsed.netloc}{CALLBACK_PATH}" if parsed.scheme and parsed.netloc else ""
+
+
 def _safe_origin(url: str) -> str:
     parsed = urlparse(url)
     if not parsed.scheme or not parsed.netloc:
@@ -141,10 +153,12 @@ def _safe_origin(url: str) -> str:
 class MCPOAuthClient:
     """One OAuth client per MCP server; all HTTP goes through the injected httpx client."""
 
-    def __init__(self, server: str, config: McpOAuthConfig, server_url: str, token_path: Any, http: httpx.AsyncClient) -> None:
+    def __init__(self, server: str, config: McpOAuthConfig, server_url: str, token_path: Any, http: httpx.AsyncClient,
+                 redirect_default: str = "") -> None:
         self.server = server
         self.config = config
         self.server_url = server_url
+        self.redirect_default = redirect_default
         self.store = OAuthTokenStore(token_path)
         self.http = http
         self._discovery: OAuthDiscovery | None = None
@@ -162,47 +176,101 @@ class MCPOAuthClient:
 
     @property
     def redirect_uri(self) -> str:
-        return self.config.redirect_uri or DEFAULT_REDIRECT_URI
+        return self.config.redirect_uri or self.redirect_default or DEFAULT_REDIRECT_URI
 
-    def _issuer(self) -> str:
-        return self.config.issuer or _safe_origin(self.server_url)
+    async def _authorization_server(self) -> str:
+        """The issuer: configured, else named by the MCP server itself (RFC 9728), else its origin.
+
+        Most hosted MCP servers keep their authorization server elsewhere and say where in
+        ``/.well-known/oauth-protected-resource``; looking only at the MCP server's own origin
+        found no metadata there and the link could not even begin."""
+        if self.config.issuer:
+            return self.config.issuer.rstrip("/")
+        origin = _safe_origin(self.server_url)
+        path = urlparse(self.server_url).path.rstrip("/")
+        candidates = ([f"{origin}/.well-known/oauth-protected-resource{path}"] if path else []) + [f"{origin}/.well-known/oauth-protected-resource"]
+        for url in candidates:
+            doc = await self._try_json(url)
+            servers = doc.get("authorization_servers") if doc else None
+            if isinstance(servers, list) and servers:
+                return str(servers[0]).rstrip("/")
+        return origin
 
     async def discovery(self) -> OAuthDiscovery:
         if self._discovery is None:
-            doc = await self._get_json(f"{self._issuer()}/.well-known/oauth-authorization-server")
+            issuer = await self._authorization_server()
+            parsed = urlparse(issuer)
+            base, path = f"{parsed.scheme}://{parsed.netloc}", parsed.path.rstrip("/")
+            # RFC 8414 puts the well-known part between the host and an issuer's path; OpenID
+            # Connect appends it. Servers answer one or the other.
+            candidates = [f"{base}/.well-known/oauth-authorization-server{path}", f"{base}/.well-known/openid-configuration{path}"]
+            if path:
+                candidates.append(f"{issuer}/.well-known/openid-configuration")
+            doc: dict[str, Any] = {}
+            for url in candidates:
+                doc = await self._try_json(url) or {}
+                if doc.get("authorization_endpoint") and doc.get("token_endpoint"):
+                    break
             auth = doc.get("authorization_endpoint")
             token = doc.get("token_endpoint")
             reg = doc.get("registration_endpoint")
-            if not auth or not token or not reg:
-                raise OAuthError(f"{self.server}: oauth discovery document is missing endpoints: {sorted(doc)}")
+            if not auth or not token:
+                raise OAuthError(f"{self.server}: no oauth metadata found for {issuer} (tried {', '.join(candidates)})")
+            if not reg and not self.config.client_id:
+                raise OAuthError(f"{self.server}: {issuer} does not register clients by itself; register one on its site"
+                                 " and give its client id (and secret, if it issued one)")
             self._discovery = OAuthDiscovery(
-                issuer=str(doc.get("issuer") or self._issuer()),
+                issuer=str(doc.get("issuer") or issuer),
                 authorization_endpoint=str(auth),
                 token_endpoint=str(token),
-                registration_endpoint=str(reg),
+                registration_endpoint=str(reg or ""),
                 code_challenge_methods=[str(m) for m in doc.get("code_challenge_methods_supported") or []],
             )
         return self._discovery
 
-    async def _get_json(self, url: str) -> dict[str, Any]:
+    async def _try_json(self, url: str) -> dict[str, Any] | None:
+        """A metadata document, or None when it is not there: discovery tries several places."""
         try:
             response = await self.http.get(url)
         except httpx.HTTPError as exc:
-            raise OAuthError(f"{self.server}: oauth discovery request failed: {exc}") from exc
+            logger.info("%s: oauth metadata %s unreachable: %s", self.server, url, exc)
+            return None
         if response.status_code != 200:
-            raise OAuthError(f"{self.server}: oauth discovery {url} returned {response.status_code}")
-        return response.json()
+            return None
+        try:
+            doc = response.json()
+        except ValueError:
+            return None
+        return doc if isinstance(doc, dict) else None
+
+    def _client_auth(self, form: dict[str, str]) -> dict[str, str]:
+        if self.config.client_secret:
+            form["client_secret"] = self.config.client_secret
+        return form
 
     # -- registration (RFC 7591) ----------------------------------------------------
 
     def client_id(self) -> str | None:
+        if self.config.client_id:
+            return self.config.client_id
         value = self.store.get("client_id")
         return str(value) if value else None
 
-    async def register_client(self) -> str:
-        existing = self.client_id()
-        if existing:
-            return existing
+    async def register_client(self, *, for_new_link: bool = False) -> str:
+        """The client id; registered on first use. ``for_new_link`` also registers anew when the
+        stored client was made for another redirect address.
+
+        A client is registered for one redirect address. Once the app's own callback took the place
+        of the loopback one, a new sign-in with the old client would be refused at the redirect. Only
+        a new sign-in registers again: a refresh keeps the client its refresh token was issued to,
+        or every linked server would lose its link at the next renewal."""
+        if self.config.client_id:
+            return self.config.client_id
+        existing = self.store.get("client_id")
+        # A registration that predates the record was made for the address configured then.
+        registered_for = self.store.get("client_redirect") or (self.config.redirect_uri or DEFAULT_REDIRECT_URI)
+        if existing and (not for_new_link or registered_for == self.redirect_uri):
+            return str(existing)
         doc = await self.discovery()
         metadata = {
             "client_name": self.config.client_name or f"{self.server} MCP client",
@@ -225,6 +293,7 @@ class MCPOAuthClient:
         if not client_id:
             raise OAuthError(f"{self.server}: registration response has no client_id: {_brief(response.text)}")
         self.store.set("client_id", str(client_id))
+        self.store.set("client_redirect", self.redirect_uri)
         return str(client_id)
 
     # -- interactive authorization (RFC 7636) ---------------------------------------
@@ -232,7 +301,7 @@ class MCPOAuthClient:
     async def authorization_url(self) -> str:
         """Register the client and return the URL the owner must open to link the account."""
         doc = await self.discovery()
-        client_id = await self.register_client()
+        client_id = await self.register_client(for_new_link=True)
         if self.scopes and "S256" not in doc.code_challenge_methods:
             raise OAuthError(f"{self.server}: authorization server does not support PKCE S256")
         verifier, challenge = _pkce_pair()
@@ -295,7 +364,7 @@ class MCPOAuthClient:
             "code_verifier": str(verifier),
         }
         try:
-            response = await self.http.post(doc.token_endpoint, data=form)
+            response = await self.http.post(doc.token_endpoint, data=self._client_auth(form))
         except httpx.HTTPError as exc:
             raise OAuthError(f"{self.server}: token request failed: {exc}") from exc
         if response.status_code != 200:
@@ -382,13 +451,18 @@ class MCPOAuthClient:
             if self.scope_string:
                 form["scope"] = self.scope_string
             try:
-                response = await self.http.post(doc.token_endpoint, data=form)
+                response = await self.http.post(doc.token_endpoint, data=self._client_auth(form))
             except httpx.HTTPError as exc:
                 raise OAuthError(f"{self.server}: refresh request failed: {exc}") from exc
             if response.status_code != 200:
                 self.store.set("tokens", {})  # a rejected refresh token is dead; force a fresh link
                 raise OAuthError(f"{self.server}: token refresh failed ({response.status_code}): {_brief(response.text)}")
             self._save_tokens(response.json(), preserve_refresh=True)
+
+    def pending_state(self) -> str:
+        """The ``state`` of the authorization waiting for its callback, or empty."""
+        pending = self.store.get("pending") or {}
+        return str(pending.get("state") or "")
 
     def linked(self) -> bool:
         tokens = self._tokens()

@@ -35,7 +35,7 @@ def test_the_rare_groups_wait_on_demand_and_the_everyday_ones_stay_while_they_fi
     assert {grouped[n] for n in ("DocsRead", "DocsSearch")} == {"docs"}
     assert {grouped[n] for n in ("LearningReport", "SkillDraft")} == {"learning"}
     assert {grouped[n] for n in ("McpOAuthBegin", "McpOAuthFinish", "McpOAuthStatus", "McpOAuthDisconnect")} == {"mcp_oauth"}
-    assert {grouped[n] for n in ("McpList", "McpEnable", "McpDisable")} == {"mcp"}
+    assert {grouped[n] for n in ("McpList", "McpEnable", "McpDisable", "McpAdd", "McpRemove")} == {"mcp"}
     assert {grouped[n] for n in ("PageCreate", "PageImport", "PageCheck", "PagePublish", "PageShow")} == {"pages"}
     assert grouped["Widget"] == "widgets" and "Widget" in TOOL_GROUPS["widgets"].description
     # The line the model reads says what the group is for, and the browser's sends plain pages elsewhere.

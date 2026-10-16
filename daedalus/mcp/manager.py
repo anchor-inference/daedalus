@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import re
+import secrets
 from collections import OrderedDict
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -267,8 +268,8 @@ class McpConnection:
                         self.last_error_code = "authorization_required"
                         self.error = (
                             f"{self.name}: this MCP server needs an OAuth link before it can connect. "
-                            "Ask the owner to run McpOAuthBegin(server=...) to get the authorization URL, open it, "
-                            "and paste the redirect URL back via McpOAuthFinish. Then enable this server again."
+                            "The owner can sign in from Settings → MCP servers, or McpOAuthBegin(server=...) gives the "
+                            "authorization URL to hand over. Then enable this server again."
                         )
                         self._ready.set()
                         return
@@ -389,8 +390,12 @@ def _config_digest(config: McpServerConfig) -> str:
 
 
 class McpManager:
-    def __init__(self, servers: dict[str, McpServerConfig], registry: IToolRegistry, token_dir: Path | None = None) -> None:
+    def __init__(self, servers: dict[str, McpServerConfig], registry: IToolRegistry, token_dir: Path | None = None,
+                 redirect_default: Callable[[], str] | None = None) -> None:
         self._configs = servers
+        self._redirect_default = redirect_default
+        """The OAuth redirect a server without its own ``redirect_uri`` registers: the app's callback."""
+        self._retiring: set[asyncio.Task[None]] = set()
         self._registry = registry
         self._connections: dict[str, McpConnection] = {}
         self._token_dir = token_dir
@@ -413,6 +418,50 @@ class McpManager:
             replacement = servers.get(name)
             if replacement is None or _config_digest(replacement) != _config_digest(config):
                 self._replace_catalog(name, ())
+                # A removed server only lost its tools here, and its connection — a stdio server's
+                # whole process — ran on until the host stopped. A changed one keeps no stale OAuth
+                # client either: the next ensure() builds both from the new config.
+                try:
+                    task = asyncio.get_running_loop().create_task(self._retire(name, forget=replacement is None))
+                except RuntimeError:
+                    continue
+                self._retiring.add(task)
+                task.add_done_callback(self._retiring.discard)
+
+    async def _retire(self, name: str, *, forget: bool) -> None:
+        """Stop a server's connection and drop its OAuth client; ``forget`` also deletes its tokens."""
+        async with self._ensure_locks.setdefault(name, asyncio.Lock()):
+            config = self._configs.get(name)
+            if config is not None and forget:
+                return  # added back before this ran: it is someone else's now
+            # Only what the current config no longer describes: an ensure() that took the lock first
+            # (a check right after the save) has already built the replacement, and stopping it here
+            # left the server just added looking dead.
+            connection = self._connections.get(name)
+            if connection is not None and (config is None or connection.config_digest != _config_digest(config)):
+                self._connections.pop(name, None)
+                try:
+                    await connection.stop()
+                except Exception:  # noqa: BLE001 — a connection that fails to stop is still forgotten
+                    logger.exception("MCP server %s did not stop cleanly", name)
+            oauth = self._oauth_clients.get(name)
+            if oauth is not None and (config is None or oauth.config != config.oauth or oauth.server_url != config.url):
+                self._oauth_clients.pop(name, None)
+                if forget:
+                    oauth.disconnect()
+                await oauth.http.aclose()
+            elif oauth is None and forget and self._token_dir is not None:
+                (self._token_dir / f"{_safe_slug(name)}.json").unlink(missing_ok=True)
+
+    def find_pending(self, state: str) -> str | None:
+        """The server whose authorization is waiting for the callback that carries ``state``."""
+        if not state:
+            return None
+        for name in self.available():
+            oauth = self.oauth_client(name)
+            if oauth is not None and secrets.compare_digest(oauth.pending_state(), state):
+                return name
+        return None
 
     def _replace_catalog(self, server: str, tools: Sequence[McpToolProxy]) -> None:
         """Publish one server's current catalogue without disturbing another server's bindings.
@@ -475,6 +524,7 @@ class McpManager:
             server_url=config.url,
             token_path=self._token_dir / f"{_safe_slug(name)}.json",
             http=httpx.AsyncClient(timeout=30.0),
+            redirect_default=self._redirect_default() if self._redirect_default is not None else "",
         )
         self._oauth_clients[name] = client
         return client
@@ -558,11 +608,14 @@ class McpManager:
             return connection
 
     async def close(self) -> None:
-        for connection in self._connections.values():
+        if self._retiring:
+            await asyncio.gather(*tuple(self._retiring), return_exceptions=True)
+        # A copy: a retirement still running pops from the map while a stop awaits.
+        for connection in tuple(self._connections.values()):
             await connection.stop()
         for name in tuple(self._registered_tools):
             self._replace_catalog(name, ())
-        for client in self._oauth_clients.values():
+        for client in tuple(self._oauth_clients.values()):
             await client.http.aclose()
         self._oauth_clients.clear()
         self._ensure_locks.clear()

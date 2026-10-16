@@ -47,6 +47,8 @@ _TOOL_ICONS = {
     "SelfRebuild": "🔄",
     "McpEnable": "🔌",
     "McpDisable": "🔌",
+    "McpAdd": "🔌",
+    "McpRemove": "🔌",
 }
 
 _EVIDENCE_RE = re.compile(r"<\s*(file|run)\s+([^<>]*?)/?\s*>")

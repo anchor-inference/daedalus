@@ -87,6 +87,7 @@ from daedalus.extensions import (
     api_issue_sync,
     api_knowledge,
     api_lifecycle,
+    api_mcp,
     api_meetings,
     api_memory,
     api_pages,
@@ -1619,6 +1620,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_action_rules.register(api, app, auth)
     api_attempt_diagnostics.register(api, app, auth)
     api_board.register(api, app, auth)
+    api_mcp.register(api, app, auth)
     api_capacity.register(api, app, auth)
     api_comparisons.install_routes(api, app, auth)
     api_explorations.register(api, app, auth)

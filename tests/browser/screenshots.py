@@ -832,6 +832,9 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         # A widget's writes are kept, so a reload finds what it stored, and its page answers with the
         # address the app then opens.
         return None
+    if rel.startswith("/api/mcp/") and fulfil_shared(route):
+        # Settings → MCP servers answers its writes with the list as it now stands, like the host.
+        return None
     if request.method != "GET":
         return respond(route, {"ok": True})
     if rel == "/api/events" and getattr(stub, "events", ""):

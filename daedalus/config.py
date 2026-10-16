@@ -809,20 +809,26 @@ class ToolsConfig(BaseModel):
 class McpOAuthConfig(BaseModel):
     """OAuth 2.1 (authorization code + PKCE) for remote MCP servers that require it.
 
-    The flow is interactive: ``McpOAuthBegin`` returns an authorization URL the owner
-    opens, the server redirects back to ``redirect_uri`` (loopback; the owner pastes the
-    final URL back via ``McpOAuthFinish``), and the client exchanges the code for tokens.
-    Tokens live on the state volume (0600), never in chat or tool arguments.
+    The flow is interactive: the owner opens an authorization URL (from Settings, or one the
+    agent hands over), approves on the server's own page, and the server redirects back to
+    ``redirect_uri`` — the app's own callback when a public address is set, which finishes the
+    link by itself; otherwise a loopback address whose final URL is pasted back through
+    ``McpOAuthFinish``. Tokens live on the state volume (0600), never in chat or tool arguments.
     """
 
     issuer: str = ""
-    """Discovery base for ``/.well-known/oauth-authorization-server``; empty = origin of the server URL."""
+    """The authorization server; empty = the one the MCP server names in its protected-resource
+    metadata, else the origin of the server URL."""
     scopes: list[str] = Field(default_factory=list)
     """OAuth scopes requested, e.g. ``["board:read", "board:write"]``."""
     redirect_uri: str = ""
-    """Loopback redirect registered with the server; default ``http://127.0.0.1:8931/callback``."""
+    """Where the server sends the owner back; empty = the app's callback, or the loopback address."""
     client_name: str = ""
     """Client name sent during dynamic client registration (default: ``"<server> MCP client"``)."""
+    client_id: str = ""
+    """A client registered by hand, for a server without dynamic registration; empty = register."""
+    client_secret: str = ""
+    """That client's secret, when the server issued one."""
 
 
 class McpServerConfig(BaseModel):

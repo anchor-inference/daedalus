@@ -824,6 +824,27 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         return 200, "application/json", json.dumps({"hits": [], "partial": False, "semantic": False, "reason": "off"})
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "sessions" and parts[4] == "mcp":
         return 200, "application/json", json.dumps({"enabled": [], "servers": []})
+    if len(parts) >= 3 and parts[2] == "mcp":
+        # Settings → Tools → MCP servers: one local server that answers and one remote one that waits
+        # for its sign-in, so the card shows both kinds of row.
+        servers = [
+            {"name": "files", "transport": "stdio", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/data"], "url": "",
+             "description": "Read and write the shared data folder", "headers": {}, "env": {}, "oauth": None,
+             "state": "ready", "error": None, "tools": ["Mcp_Files_read_file", "Mcp_Files_write_file", "Mcp_Files_list_directory"]},
+            {"name": "tracker", "transport": "http", "command": "", "args": [], "url": "https://mcp.tracker.example/mcp",
+             "description": "Issues and projects", "headers": {}, "env": {},
+             "oauth": {"scopes": [], "issuer": "", "client_id": "", "client_secret": "", "linked": False, "redirect_uri": ""},
+             "state": "auth_required", "error": None, "tools": []},
+        ]
+        probe = {"state": "ready", "error": None, "tools": ["Mcp_Files_read_file"]}
+        if method.upper() == "GET" and path == "/api/mcp/servers":
+            return 200, "application/json", json.dumps({"servers": servers, "callback": "https://agent.example/api/mcp/oauth/callback"})
+        if method.upper() == "POST" and path.endswith("/oauth/begin"):
+            return 200, "application/json", json.dumps({"auth_url": "about:blank"})
+        if method.upper() in ("PUT", "POST"):
+            return 200, "application/json", json.dumps({"name": parts[4] if len(parts) > 4 else "", "added": True, "probe": probe, "servers": servers})
+        if method.upper() == "DELETE":
+            return 200, "application/json", json.dumps({"removed": parts[4], "servers": servers[1:]})
     if method.upper() == "GET" and len(parts) == 5 and parts[3] == "provider" and parts[2] == "usage":
         # The provider card in Details: a day with nothing spent, no subscription read.
         return 200, "application/json", json.dumps({"provider": parts[4], "today": {}, "subscription": None, "balance": None})

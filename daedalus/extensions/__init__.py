@@ -23,6 +23,7 @@ EXTENSIONS = (
     "daedalus.extensions.effects",
     "daedalus.extensions.push",
     "daedalus.extensions.agent_settings",
+    "daedalus.extensions.mcp_admin",
     "daedalus.extensions.selfdev",
     "daedalus.extensions.scheduler",
     "daedalus.extensions.heartbeat",
