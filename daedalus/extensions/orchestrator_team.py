@@ -25,6 +25,7 @@ from daedalus.extensions.board_commands import BoardCommands
 from daedalus.extensions.likeness import same_card
 from daedalus.extensions.orchestrator_contract import bound, narrowing_refusal, source_of
 from daedalus.extensions.orchestrator_ops import Refused, _folder, board_principal
+from daedalus.extensions.runtime_observations import settle_previous_host
 from daedalus.extensions.task_contract import (
     CHECK_MAX_CHARS,
     CHECKS_MAX,
@@ -618,6 +619,7 @@ async def assign(
             "task_id. If it is the same work under a better title, say so in reason"
         )
     if existing is not None:
+        await settle_previous_host(orch.app, existing["id"])
         ownership = await orch.manager.db.fetchone(
             "SELECT t.current_attempt_id,"
             " EXISTS(SELECT 1 FROM runtime_exit_observations e"

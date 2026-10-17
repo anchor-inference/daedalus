@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any
 from daedalus.extensions.board_commands import BoardCommands
 from daedalus.extensions.notifications import Draft
 from daedalus.extensions.orchestrator_domain import capture_contract_change, check_planning_capacity
+from daedalus.extensions.runtime_observations import settle_previous_host
 from daedalus.extensions.task_contract import Contracts
 from daedalus.stores.control import ControlStore, Entity, Principal, Scope
 
@@ -778,6 +779,7 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
         if op == "update":
             if task_id is None or expected_entity_revision is None:
                 raise ValueError("task_id and expected_entity_revision are required")
+            await settle_previous_host(app, task_id)
             updated = await commands.update(principal, scope, task_id,
                                             client_operation_id=client_operation_id,
                                             expected_entity_revision=expected_entity_revision, **kwargs)

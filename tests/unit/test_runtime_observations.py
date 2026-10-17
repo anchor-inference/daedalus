@@ -11,7 +11,7 @@ import pytest
 from daedalus.extensions.launch_controls import prepare_attempt
 from daedalus.extensions.lifecycle import Lifecycle
 from daedalus.extensions.orchestrator_domain import DomainConflict, apply_goal_revision
-from daedalus.extensions.runtime_observations import admit_native_run, observe_exit
+from daedalus.extensions.runtime_observations import admit_native_run, observe_exit, settle_previous_host
 from daedalus.staff_runtime import BoardTask
 from daedalus.stores.control import ControlConflict, ControlDenied, ControlStore, Entity, Principal, Scope
 from daedalus.stores.database import Database
@@ -310,5 +310,60 @@ async def test_cli_exited_row_and_different_daemon_do_not_release_attempt(db: Da
                                   observed_status="exited", runtime_instance="daemon-one")
         assert (await db.fetchone("SELECT state FROM execution_attempts"))[0] == "cancelled"
         assert (await db.fetchone("SELECT count(*) FROM runtime_exit_observations"))[0] == 1
+    finally:
+        store.release()
+
+
+
+async def restart(store) -> None:
+    """Restart the host the way a deploy does: every live attempt is left recovering under the old generation."""
+    store.release()
+    store.acquire()
+    await store.boot()
+
+
+async def test_terminal_that_outlived_a_restart_still_releases_its_attempt(db: Database) -> None:
+    store, identity, _ = await owner(db)
+    app = SimpleNamespace(db=db, executions=store)
+    try:
+        await bound_cli(db, "running")
+        await restart(store)
+        assert (await db.fetchone("SELECT state FROM execution_attempts WHERE id = ?", (identity.id,)))[0] == "recovering"
+        assert await observe_exit(app, staff_session_id="staff-session", runtime_ref="terminal",
+                                  observed_status="exited", runtime_instance="daemon-one")
+        assert (await db.fetchone("SELECT state FROM execution_attempts WHERE id = ?", (identity.id,)))[0] == "cancelled"
+    finally:
+        store.release()
+
+
+async def test_settling_an_earlier_host_attempt_needs_an_ended_session_and_exit_proof(db: Database) -> None:
+    store, identity, _ = await owner(db)
+    app = SimpleNamespace(db=db, executions=store)
+    try:
+        await bound_cli(db, "recovering")
+        assert not await settle_previous_host(app, "task")  # recovering under this host: not settled here
+        await restart(store)
+        assert not await settle_previous_host(app, "task")  # the session has not ended
+        await db.execute("UPDATE staff_sessions SET ended_at = 'now',status = 'exited' WHERE id = 'staff-session'")
+        await db.execute("UPDATE execution_attempts SET runtime_instance = 'daemon-two'")
+        assert not await settle_previous_host(app, "task")  # the exit proof is for another daemon instance
+        await db.execute("UPDATE execution_attempts SET runtime_instance = 'daemon-one'")
+        assert await settle_previous_host(app, "task")
+        assert (await db.fetchone("SELECT state FROM execution_attempts WHERE id = ?", (identity.id,)))[0] == "cancelled"
+        assert (await db.fetchone("SELECT count(*) FROM runtime_exit_observations"))[0] == 1
+        assert not await settle_previous_host(app, "task")
+    finally:
+        store.release()
+
+
+async def test_a_native_run_of_an_earlier_host_is_settled_once_its_session_ended(db: Database) -> None:
+    store, identity, _ = await owner(db)
+    app = SimpleNamespace(db=db, executions=store)
+    try:
+        await restart(store)
+        assert not await settle_previous_host(app, "task")
+        await db.execute("UPDATE staff_sessions SET ended_at = 'now',status = 'exited' WHERE id = 'staff-session'")
+        assert await settle_previous_host(app, "task")
+        assert (await db.fetchone("SELECT state FROM execution_attempts WHERE id = ?", (identity.id,)))[0] == "cancelled"
     finally:
         store.release()

@@ -155,7 +155,12 @@ async def observe_exit(app: Application, *, staff_session_id: str, runtime_ref: 
                             (staff_session_id, runtime_ref, f"terminal:{runtime_ref}"))
             # Projection changes refuse further worker writes, but cannot erase physical ownership.
             # The exact old run still has to release its slot before the replacement can start.
-            if row is None or row["host_generation"] != generation:
+            # A terminal outlives a host restart, which leaves its attempt recovering under the old
+            # generation; refusing that exit left the card behind a run nothing could ever release.
+            # A native run dies with its host, so an old generation's report of one is only stale.
+            if row is None or not (row["host_generation"] == generation
+                                   or (row["runtime_kind"] == "cli" and row["state"] == "recovering"
+                                       and row["host_generation"] < generation)):
                 return False
             if row["runtime_kind"] == "daedalus":
                 run = await one(conn, "SELECT session_id,status FROM runs WHERE id = ?", (runtime_ref,))
@@ -228,6 +233,51 @@ async def observe_exit(app: Application, *, staff_session_id: str, runtime_ref: 
                     # held until a later probe proves the whole attempt group empty.
                     logger.exception("the exited terminal's attempt containment could not be reconciled")
         return True
+
+
+async def settle_previous_host(app: Application, task_id: str) -> bool:
+    """Close the card's attempt when an earlier host left it recovering and its runtime is gone.
+
+    A restart marks every live attempt recovering, and only an exit observed under the current
+    generation used to release one. A member released after the restart, or a native run that died
+    with the old process, therefore held its card for good: every reassignment was refused with
+    "stop or reconcile the current execution". The attempt is closed only on proof — its session
+    ended and, for a terminal, the daemon recorded the exit of that exact instance; a native run
+    lives inside the host process, so an earlier generation's run cannot still be running.
+    """
+    async with app.db.transaction() as conn:
+        generation = await app.executions._host(conn)
+        row = await one(conn, "SELECT a.id,a.state,a.host_generation,a.runtime_kind,a.provider_session_ref,a.runtime_instance,"
+                        "a.native_run_id,a.staff_session_id,a.contract_revision,s.ended_at,s.terminal_id"
+                        " FROM board_tasks t JOIN execution_attempts a ON a.id = t.current_attempt_id"
+                        " LEFT JOIN staff_sessions s ON s.id = a.staff_session_id WHERE t.id = ?", (task_id,))
+        if (row is None or row["state"] != "recovering" or row["host_generation"] >= generation
+                or not row["staff_session_id"] or not row["ended_at"]):
+            return False
+        if row["runtime_kind"] == "cli":
+            terminal_id = (row["provider_session_ref"] or "").removeprefix("terminal:")
+            proof = await one(conn, "SELECT 1 FROM terminal_exit_observations WHERE terminal_id = ? AND runtime_instance = ?",
+                              (terminal_id, row["runtime_instance"]))
+            if not terminal_id or not row["runtime_instance"] or proof is None:
+                return False
+            runtime_ref, observed = terminal_id, "exited"
+        elif row["runtime_kind"] == "daedalus":
+            runtime_ref, observed = row["native_run_id"] or "", "cancelled"
+        else:
+            return False
+        await conn.execute("INSERT OR IGNORE INTO runtime_exit_observations(attempt_id,runtime_ref,provider_session_ref,"
+                           "staff_session_id,contract_revision,host_generation,runtime_kind,runtime_instance,"
+                           "observed_status,observed_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                           (row["id"], runtime_ref, row["provider_session_ref"], row["staff_session_id"],
+                            row["contract_revision"], row["host_generation"], row["runtime_kind"],
+                            row["runtime_instance"], observed, now()))
+        changed = await conn.execute("UPDATE execution_attempts SET state = 'cancelled',updated_at = ?"
+                                     " WHERE id = ? AND state = 'recovering'", (now(), row["id"]))
+        if changed.rowcount != 1:
+            return False
+        await record_fault(conn, row["id"], "cancelled", cancelled_by="system")
+    logger.info("closed attempt %s of task %s, left recovering by host generation %s", row["id"], task_id, row["host_generation"])
+    return True
 
 
 async def _stop_reason(conn: aiosqlite.Connection, attempt_id: str, observed_status: str) -> str:

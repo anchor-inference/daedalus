@@ -23,6 +23,7 @@ from daedalus.extensions.likeness import same_question
 from daedalus.extensions.notifications import Draft
 from daedalus.extensions.orchestrator_domain import clear_next_action, set_next_action
 from daedalus.extensions.plugins import PluginRefused, PluginRegistry
+from daedalus.extensions.runtime_observations import settle_previous_host
 from daedalus.extensions.task_contract import split_checks
 from daedalus.extensions.watch_commands import WatchCommands
 from daedalus.extensions.watches import WatchRefused
@@ -470,6 +471,8 @@ async def tasks(
                 if status != "blocked":
                     raise Refused("waiting_on goes with status='blocked': what the card waits for")
                 note = (note + " " if note else "") + f"waits on: {waits}"
+            if task_id:
+                await settle_previous_host(orch.app, task_id)
             principal = await board_principal(orch, session_id, project.id, "board.task.update", task_id)
             updated = await commands.update(principal, scope, task_id, client_operation_id=client_operation_id,
                                             expected_entity_revision=expected_entity_revision,
