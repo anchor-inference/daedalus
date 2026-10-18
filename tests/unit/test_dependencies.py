@@ -160,6 +160,26 @@ async def test_docker_writes_recipe_and_trigger_but_never_installs_in_running_co
     service.preview({"python": ["Pillow"], "system": ["gcc"]})
 
 
+async def test_retry_clears_the_previous_attempts_trigger_files_before_rebuilding(service: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    service.native = False
+    service.trigger.mkdir()
+
+    async def noop(*args: Any, **kwargs: Any) -> str:
+        return ""
+
+    monkeypatch.setattr(runtime, "command", noop)
+    first = service.accept(service.preview({"python": [], "system": ["gcc"]}), "d" * 32)
+    await service.install(first)
+    # The first attempt failed and left its result on the shared volume, as the rebuilder does.
+    (service.trigger / f"dependencies-{first['id']}.result").write_text("image build failed")
+    assert service.status()["job"]["state"] == "failed"
+    # Re-approving the same proposal reuses the id. Without clearing the stale result, status() would
+    # read it and fail the new job at once.
+    second = service.accept(service.preview({"python": [], "system": ["gcc"]}), "d" * 32)
+    assert not (service.trigger / f"dependencies-{second['id']}.result").exists()
+    assert service.status()["job"]["state"] == "installing"
+
+
 def test_interrupted_native_install_reports_partial_failure_and_unlocks(service: Any) -> None:
     service.accept(service.preview({"python": ["Pillow"], "system": []}), "a" * 32)
     assert service.status()["job"]["state"] == "failed"

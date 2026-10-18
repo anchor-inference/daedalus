@@ -312,6 +312,14 @@ class Dependencies:
         job = {"id": job_id, "state": "installing", "error": "", "recipe": desired, "previous": current, "started_at": time.time(), "progress": []}
         if self.native:
             job["previous_active"] = read_json(self.root / "active.json", {})
+        else:
+            # A retry reuses the proposal's id as the job id, so a previous attempt's trigger files are
+            # still on the shared volume. Left in place, status() reads the stale result the instant the
+            # new job starts and marks it failed before the rebuilder has begun — and the rebuilder,
+            # triggered in parallel, rebuilds anyway. Clear them here, the one point every accepted
+            # job passes through; the rebuilder writes each one fresh.
+            for suffix in ("result", "progress", "log"):
+                (self.trigger / f"dependencies-{job_id}.{suffix}").unlink(missing_ok=True)
         self.advance(job, "queued")
         (self.root / "install.log").write_text("")
         (self.root / "maintenance").write_text(job_id)

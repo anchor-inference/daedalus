@@ -49,7 +49,12 @@ export function DependenciesTab() {
         // still survive a reload.
         setRequest(proposalStillEditable ? next.proposal!.request : "");
       }
-      if (next.proposal?.state === "ready" && next.proposal.id !== opened.current) {
+      // A freshly planned proposal opens its review on its own. A proposal the host returned to
+      // "ready" because its installation failed must not: the failure card already carries an
+      // explicit "try again", and auto-opening the sheet on every reload looked like the approval
+      // kept coming back on its own.
+      const retryReady = next.job?.state === "failed" && next.job.id === next.proposal?.id;
+      if (next.proposal?.state === "ready" && next.proposal.id !== opened.current && !retryReady) {
         opened.current = next.proposal.id;
         setAccepted(false);
         setReview(true);
