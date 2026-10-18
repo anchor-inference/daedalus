@@ -85,12 +85,16 @@ class DependencyPlanner:
             inventory = await self.rpc("dependencies_inventory")
             self.inventory_cache = time.monotonic(), inventory
         proposal = await self.proposal()
-        if proposal and proposal["state"] == "ready" and (status.get("job") or {}).get("id") == proposal["id"]:
+        job = status.get("job") or {}
+        same_job = bool(proposal) and job.get("id") == proposal["id"]
+        if proposal and same_job and proposal["state"] == "ready" and job.get("state") in ("installing", "restarting"):
             # The supervisor may accept just before the HTTP connection is lost to the restart.
-            # Its durable receipt wins over a browser which never saw the acknowledgement.
+            # Its durable receipt wins over a browser which never saw the acknowledgement. Only an
+            # in-progress job counts: without the state guard a *failed* job also matched here, and
+            # the retry branch below set it back, so the two oscillated on every poll.
             proposal = {**with_activity(proposal, "applying"), "state": "applying"}
             await self.app.db.kv_set(KEY, proposal)
-        elif proposal and proposal["state"] == "applying" and (status.get("job") or {}).get("id") == proposal["id"] and status["job"].get("state") == "failed":
+        elif proposal and same_job and proposal["state"] == "applying" and job.get("state") == "failed":
             # A failed installation restores the recipe it started from, so the reviewed patch is
             # still valid and can be accepted again. Left "applying", the page had nothing to
             # press: a build that failed for a passing reason (a registry it could not reach) could

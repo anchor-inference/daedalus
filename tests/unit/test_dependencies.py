@@ -435,6 +435,9 @@ async def test_a_failed_installation_returns_its_patch_for_another_approval(tmp_
 
     planner.rpc = rpc
     assert (await planner.view())["proposal"]["state"] == "ready"
+    # Reconciliation must settle: a ready proposal beside its own failed job stays ready, it does not
+    # flip back to applying on the next poll.
+    assert (await planner.view())["proposal"]["state"] == "ready"
     await planner.approve("a")
     assert calls[-1] == "dependencies_apply"
     assert (await planner.view())["proposal"]["state"] == "applying"
