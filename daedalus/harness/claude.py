@@ -169,7 +169,12 @@ in 3s"); a finished turn leaves "✻ Brewed for 3m 5s", with no ellipsis."""
 PASTE_MARKER = "[Pasted text #"
 _PASTED_OPEN = re.compile(r'<pasted_content id="[^"]*">\n?')
 _PASTED_CLOSE = re.compile(r'\n?</pasted_content(?: id="[^"]*")?>')
-_RULE = re.compile(r"^\s*─{8,}")
+_RULE = re.compile(r"^\s*─{8,}|^.*\S ─\s*$")
+"""A rule of the composer. Started with ``--name``, Claude draws the session title into the top rule,
+right-aligned: "──── opus-sequel · Shorten the corridor passages ─". A terminal narrower than about
+eighty columns leaves no dashes before it (" opus-sequel · Shorten the corri… ─"), and a rule known
+only by its leading dashes was not found: the composer was never seen, no Enter was sent, and every
+message to the member sat pasted in its prompt from the moment a phone attached."""
 
 
 def unpasted(prompt: str) -> str:

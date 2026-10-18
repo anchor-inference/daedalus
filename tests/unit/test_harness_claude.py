@@ -163,6 +163,34 @@ def test_the_screen_is_classified_and_the_composer_found() -> None:
     assert adapter.composer_holds(pasted, "a long message\n" * 12)
 
 
+
+# The bottom of Claude Code 2.1.299 started with --name, as captured at 166 and at 50 columns: the
+# title is drawn into the composer's top rule, and a narrow terminal leaves no dashes before it.
+TITLED_WIDE = (
+    "✻ Brewed for 12s · done 2:42 PM\n\n"
+    + "─" * 96 + " opus-sequel · Укоротить коридорные переходы и починить их геометрию ─\n"
+    "❯ [Pasted text #2 +3 lines]\n" + "─" * 166 + "\n"
+    "  [Sonnet 5.5 · medium] ░░░░░░░░░░ 4% (44k/1.0M)\n  paste again to expand"
+)
+TITLED_NARROW = (
+    "✻ Brewed for 12s · done 2:42 PM\n          ✔ Update installed · Restart to update\n"
+    " opus-sequel · Укоротить коридорные переходы и … ─\n"
+    "❯ [Pasted text #2 +3 lines]\n" + "─" * 50 + "\n"
+    "  [Sonnet 5.5 · medium] ░░░░░░░░░░ 4% (44k/1.0M…\n  ⏵⏵ bypass permissions on (shift+tab to cycle)"
+)
+
+
+def test_the_composer_is_found_under_a_titled_rule_at_any_width() -> None:
+    """A phone attached to the member's terminal narrowed it, and from then on no message was ever
+    submitted: the rule carrying the title had no leading dashes and the composer was not found."""
+    adapter = ClaudeCodeAdapter()
+    for view in (TITLED_WIDE, TITLED_NARROW):
+        assert composer(view) == "[Pasted text #2 +3 lines]"
+        assert adapter.classify_screen(view) is ScreenClass.IDLE_COMPOSER
+        assert adapter.composer_holds(view, "a long message\n" * 4)
+    busy = TITLED_NARROW.replace("✻ Brewed for 12s · done 2:42 PM", "✶ Brewing… (12s · ↓ 1k tokens)")
+    assert adapter.classify_screen(busy) is ScreenClass.BUSY
+
 def test_the_real_transcript_is_read_as_turns() -> None:
     turns = parse_transcript((RECORDED / "transcript.jsonl").read_text(encoding="utf-8"))
     roles = [t.role for t in turns]
