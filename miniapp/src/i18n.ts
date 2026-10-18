@@ -87,6 +87,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "deps.job.restarting": { en: "Restarting application", ru: "Перезапуск приложения" },
   "deps.job.completed": { en: "Dependencies installed", ru: "Зависимости установлены" },
   "deps.job.failed": { en: "Installation failed", ru: "Ошибка установки" },
+  "deps.retry": { en: "Review and try again", ru: "Проверить и повторить" },
   "deps.installingHint": { en: "You can leave this page. Installation continues in the supervisor; its result survives an application restart.", ru: "Можно уйти с этой страницы. Установку продолжает supervisor; результат сохранится после перезапуска приложения." },
   "composer.skill.use": { en: "Use the {name} skill: ", ru: "Используй навык {name}: " },
   "composer.skill.kind": { en: "skill", ru: "навык" },

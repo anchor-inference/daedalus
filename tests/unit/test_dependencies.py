@@ -400,6 +400,27 @@ async def test_supervisor_receipt_recovers_a_lost_approval_acknowledgement(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_a_failed_installation_returns_its_patch_for_another_approval(tmp_path: Path) -> None:
+    planner = planner_for(tmp_path, None)
+    await planner.app.db.kv_set(KEY, {"id": "a", "state": "applying", "proposal": {"recipe": {"python": ["Pillow"], "system": []}}})
+    job = {"id": "a", "state": "failed", "error": "image build failed"}
+    calls = []
+
+    async def rpc(op: str, **kwargs: Any) -> Any:
+        calls.append(op)
+        if op == "dependencies_apply":
+            job.update(state="installing", error="")
+            return job
+        return {"job": job}
+
+    planner.rpc = rpc
+    assert (await planner.view())["proposal"]["state"] == "ready"
+    await planner.approve("a")
+    assert calls[-1] == "dependencies_apply"
+    assert (await planner.view())["proposal"]["state"] == "applying"
+
+
+@pytest.mark.asyncio
 async def test_command_timeout_kills_process() -> None:
     with pytest.raises(TimeoutError):
         await runtime.command([runtime.sys.executable, "-c", "import time; time.sleep(30)"], limit=0.05)

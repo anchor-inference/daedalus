@@ -90,6 +90,13 @@ class DependencyPlanner:
             # Its durable receipt wins over a browser which never saw the acknowledgement.
             proposal = {**with_activity(proposal, "applying"), "state": "applying"}
             await self.app.db.kv_set(KEY, proposal)
+        elif proposal and proposal["state"] == "applying" and (status.get("job") or {}).get("id") == proposal["id"] and status["job"].get("state") == "failed":
+            # A failed installation restores the recipe it started from, so the reviewed patch is
+            # still valid and can be accepted again. Left "applying", the page had nothing to
+            # press: a build that failed for a passing reason (a registry it could not reach) could
+            # only be retried by describing the same request again and waiting for a new plan.
+            proposal = {**with_activity(proposal, "ready"), "state": "ready"}
+            await self.app.db.kv_set(KEY, proposal)
         return {**self.inventory_cache[1], **status, "proposal": proposal, "models": [{"id": key, "label": preset.display(key)} for key, preset in self.app.config.presets.items()]}
 
     async def start(self, text: str, preset: str) -> dict[str, Any]:

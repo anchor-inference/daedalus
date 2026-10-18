@@ -114,6 +114,9 @@ export function DependenciesTab() {
     {view && view.job && (installing || view.job.state === "failed") && <section className={`card deps-job ${view.job.state}`} aria-label={t("deps.installProgress")}>
         <div className="deps-job-title"><span className="deps-job-icon"><Icon name={view.job.state === "failed" ? "close" : "download"} size={18} /></span><span><b>{t(`deps.job.${view.job.state}`)}</b><span className="sub">{installing ? t("deps.installingHint") : view.job.error}</span></span></div>
         <DependencyProgress value={view.job} active={installing} installation />
+        {/* The host hands a failed installation's patch back for review, since the recipe was
+            restored; without this the card reported the failure and offered nothing to do. */}
+        {view.job.state === "failed" && proposal?.state === "ready" && proposal.id === view.job.id && <div className="btnrow"><button className="btn small" disabled={busy || offline} onClick={() => { setAccepted(false); setReview(true); }}><Icon name="reload" size={14} /> {t("deps.retry")}</button></div>}
       </section>}
     {view && <>
       {!installing && <div className="card deps-request-card" data-setting="dependencies.request">
