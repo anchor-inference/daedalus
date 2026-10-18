@@ -1211,9 +1211,10 @@ async def test_a_queued_start_whose_folder_has_no_worktree_to_give_is_taken_back
         assert [r.task.id for r in runtime.started] == [first], "nothing started in the plain folder"
         assert await status_of(manager, ada) == "off"
         row = await task_row(manager, waiting)
-        assert row["status"] == "todo" and row["assignee_staff_id"] == ada.id
+        assert row["status"] == "todo" and row["assignee_staff_id"] is None
         effect = await OutboxStore(manager.db).view(queued["effect_id"])
         assert "task folder changed after the launch command" in effect["error"]
+        assert "Ada could not start: the task folder changed after the launch command" in row["notes"]
         assert not await manager.db.fetchall("SELECT id FROM execution_attempts WHERE task_id = ?", (waiting,))
     finally:
         await close_team(manager)

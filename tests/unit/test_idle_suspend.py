@@ -240,6 +240,35 @@ async def test_an_assignment_resumes_the_suspended_conversation(settings: Settin
         assert old is not None and old.ended_at is not None
 
 
+
+@pytest.mark.parametrize("named", ["the suspended session", "an earlier session of its conversation"])
+async def test_an_assignment_naming_the_held_conversation_resumes_it(settings: Settings, db: Database, named: str) -> None:
+    """A coordinator names the conversation to resume: the suspended session itself, or the earlier
+    one it continues. Both used to be refused before the suspended session ended, so the launch
+    failed and the member asleep after its idle minutes never got its next task."""
+    async with stand(settings, db, adapter=QuietResume(DONE)) as s:
+        ada = await finished(s)
+        row = await s.session_row(ada)
+        assert await staff_suspend.suspend_idle(s.team, later()) == 1
+        source = row.id
+        if named != "the suspended session":
+            source = "ss-earlier"
+            await db.execute("INSERT INTO staff_sessions(id,staff_id,kind,terminal_id,cli_session_id,transcript_ref,task_id,"
+                             "status,status_at,started_at,ended_at,end_reason,folder_id,launch_cwd)"
+                             " SELECT 'ss-earlier',staff_id,kind,'gone',cli_session_id,transcript_ref,task_id,'exited',"
+                             "status_at,started_at,started_at,'released',folder_id,launch_cwd FROM staff_sessions WHERE id = ?",
+                             (row.id,))
+        await s.assign(ada, await s.task("Price list"), resume_from=source)
+
+        async def started_again() -> bool:
+            live = await s.manager.staff.live(ada.id)
+            return live is not None and live.id != row.id and bool(resumed(s))
+
+        await eventually(started_again, "the next task started on the held conversation")
+        assert resumed(s) == [row.cli_session_id]
+        old = await s.manager.staff.session(row.id)
+        assert old is not None and old.ended_at is not None
+
 async def test_a_restarted_host_leaves_a_suspended_member_suspended(settings: Settings, db: Database) -> None:
     async with stand(settings, db, adapter=QuietResume(DONE)) as s:
         ada = await finished(s)

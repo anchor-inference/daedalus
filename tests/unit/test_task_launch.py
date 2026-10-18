@@ -230,6 +230,30 @@ async def test_queued_worktree_launch_refuses_changed_source_after_command(db: D
         app.executions.release()
 
 
+
+async def test_a_refused_launch_is_said_on_the_card_and_wakes_the_assigner(db: Database) -> None:
+    """The Assign answered "admission in progress"; a refusal after that used to stay in the outbox
+    alone, and the orchestrator told the operator the work was handed over."""
+    app, dispatcher, team, starts, revision = await queued_fixture(db)
+    team.note_on_card = AsyncMock()
+    team._set_assignee = AsyncMock()
+    try:
+        await db.execute("UPDATE board_tasks SET assignee_staff_id = 'worker' WHERE id = 'task'")
+        revision = (await db.fetchone("SELECT entity_revision FROM board_tasks"))[0]
+        await queue_launch(app, "task", OPERATOR, staff_id="worker",
+                           client_operation_id="refused", expected_entity_revision=revision)
+        team.worktrees.check.return_value = "b" * 40
+        assert await dispatcher.step()
+        assert starts == []
+        note = team.note_on_card.await_args.args
+        assert note[0] == "task" and "could not start" in note[1] and "moved since launch approval" in note[1]
+        (task, assignee), changed = team._set_assignee.await_args
+        assert task.id == "task" and assignee is None and changed["actor"] == "system"
+        assert changed["error"] == note[1]
+    finally:
+        team.queue.close()
+        app.executions.release()
+
 async def test_busy_admission_leaves_only_the_durable_command(db: Database) -> None:
     app, dispatcher, team, starts, revision = await queued_fixture(db)
 

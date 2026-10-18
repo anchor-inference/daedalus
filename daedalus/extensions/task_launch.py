@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -47,6 +48,8 @@ from daedalus.stores.update_drains import UpdateDrainActive, assert_admission_op
 
 if TYPE_CHECKING:
     from daedalus.app import Application
+
+logger = logging.getLogger(__name__)
 
 
 def task_digest(task: Any) -> str:
@@ -392,6 +395,37 @@ class TaskLaunchEffect:
             raise ControlDenied("the resource profile changed after the launch command")
 
     async def run(self, claim: Claim, check: Callable[[Claim], Awaitable[None]]) -> EffectOutcome:
+        outcome = await self._run(claim, check)
+        if outcome.state == "failed":
+            await self._report_failure(claim, outcome.error or "the launch was refused")
+        return outcome
+
+    async def _report_failure(self, claim: Claim, error: str) -> None:
+        """Say a refused launch on the card and wake whoever assigned it.
+
+        A coordinator's Assign answers "admission in progress" and the start happens later. When
+        that start was refused, only the outbox row knew: the card stayed assigned and unstarted,
+        the orchestrator was never woken, and it told the operator the work had been handed over.
+        A failed outcome is a known refusal before runtime entry, so taking the assignment back
+        cannot hide a running process; an uncertain one is "unknown" and is not reported here.
+        """
+        team: Any = self.app.extensions.get("staff")
+        if team is None:
+            return
+        try:
+            task = await team.task(claim.payload["task_id"])
+            member = await self.app.db.fetchone("SELECT name FROM staff WHERE id = ?", (claim.payload["staff_id"],))
+            name = member["name"] if member is not None else "the member"
+            # Started after all, or closed meanwhile: a closed card's refused start is no news.
+            if task is None or task.status not in ("todo", "blocked"):
+                return
+            await team.note_on_card(task.id, f"{name} could not start: {error}")
+            await team._set_assignee(task, None if task.assignee_staff_id == claim.payload["staff_id"] else task.assignee_staff_id,
+                                     actor="system", error=f"{name} could not start: {error}")
+        except Exception:  # noqa: BLE001 — the outbox keeps the failure whatever the report did
+            logger.exception("reporting the refused launch of task %s failed", claim.payload.get("task_id"))
+
+    async def _run(self, claim: Claim, check: Callable[[Claim], Awaitable[None]]) -> EffectOutcome:
         try:
             async with self.app.db.transaction() as conn:
                 await assert_admission_open_in(conn)
@@ -456,7 +490,7 @@ class TaskLaunchEffect:
                 if current_head != expected_head:
                     return EffectOutcome("failed", "the selected workspace moved since launch approval; assign again")
             if claim.payload["resume_from"]:
-                await team._resume_source(member, task, folder, claim.payload["resume_from"])
+                await team.check_resume(member, task, folder, claim.payload["resume_from"])
             async with self.app.db.transaction() as conn:
                 readiness = await dependency_readiness(conn, task.id)
             if not readiness["ready"]:

@@ -798,6 +798,21 @@ class Team:
             result.append(view)
         return result
 
+    async def check_resume(self, member: Staff, task: BoardTask, folder: ProjectFolder, source_id: str) -> None:
+        """Refuse a conversation the start could not resume; the member's own holding session passes,
+        since the start ends it first (see ``_start``)."""
+        live = await self.live_of(member)
+        if live is not None and await self._holds_conversation(live, source_id):
+            return
+        await self._resume_source(member, task, folder, source_id)
+
+    async def _holds_conversation(self, live: LiveSession, source_id: str) -> bool:
+        """Whether the live session is, or continues, the CLI conversation of ``source_id``."""
+        if live.id == source_id:
+            return True
+        source = await self.manager.staff.session(source_id)
+        return bool(source is not None and source.cli_session_id and live.session.cli_session_id == source.cli_session_id)
+
     async def _resume_source(self, member: Staff, task: BoardTask, folder: ProjectFolder, source_id: str) -> LiveSession:
         source = await self.manager.staff.session(source_id)
         owner = await self.manager.staff.get(source.staff_id) if source else None
@@ -956,8 +971,14 @@ class Team:
         runtime = self.runtime(member)
         project = await self.project(member.project_id)
         folder = self.folder_for(project, member, task)
-        source = await self._resume_source(member, task, folder, resume_from) if resume_from else None
         previous = await self.live_of(member)
+        # The conversation to resume may be the one the member's own idle or suspended session still
+        # holds: the coordinator names that session, or an earlier one of the same conversation.
+        # Checked here, before that session ended, it was refused as "already open" or "not ended",
+        # and a member asleep after twenty idle minutes could never be given its next task.
+        held = (resume_from is not None and previous is not None
+                and await self._holds_conversation(previous, resume_from))
+        source = await self._resume_source(member, task, folder, resume_from) if resume_from and not held else None
         if resources is not None and resources.get("mode") == "writer":
             # Git preparation and initial file delivery have no contained process owner yet.
             # Refuse them before the claim crosses its uncertain preparation boundary.
@@ -985,7 +1006,9 @@ class Team:
             # A Daedalus member's next task is a new session, and the idle one it replaces ends
             # here; so is a command-line member's whose session cannot take it (see _continues).
             await self._end(previous, "next task", stop=True)
-            if (source is None and capacity_slot_id is None and previous.session.status == staff_suspend.SUSPENDED
+            if held:
+                source = await self._resume_source(member, task, folder, previous.id)
+            elif (source is None and capacity_slot_id is None and previous.session.status == staff_suspend.SUSPENDED
                     and previous.staff.harness == member.harness):
                 # A member suspended while idle takes the new task up in the conversation it was
                 # stopped in, where the task is worked where that one was; anywhere else (another
@@ -994,6 +1017,9 @@ class Team:
                     source = await self._resume_source(member, task, folder, previous.id)
                 except StaffError as exc:
                     logger.info("%s starts afresh rather than resuming its suspended session: %s", member.name, exc)
+        if held and previous is None and source is None:
+            # The holding session turned out stale and was settled: the conversation is free now.
+            source = await self._resume_source(member, task, folder, resume_from)
         predecessor = source.session if source else next((s for s in await self.manager.staff.sessions(member.id, limit=20) if s.task_id == task.id), None)
         worktree: Worktree | None = None
         if member.isolation == "worktree":
