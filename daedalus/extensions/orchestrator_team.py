@@ -590,10 +590,14 @@ async def assign(
         )
     if existing is None:
         previous = await _last_handed_in(orch, project, member, session_id)
+        # Only a card in review can take another round; an accepted or dropped one cannot, so a
+        # nearly identical title there is the follow-up it must be, not a forgotten task_id.
+        if previous is not None and previous["status"] != "review":
+            previous = None
         if previous is not None and not new and _same_work(wanted, previous["title"]):
             raise Refused(
                 f"{member.name} handed in {previous['id']} \"{previous['title']}\" {_minutes_ago(previous)}, and \"{wanted}\" reads as the same work. "
-                f"For its next round, Assign(task_id='{previous['id']}', …) reopens that card and keeps its history; for separate work, repeat this with new=true"
+                f"For its next round, {_next_round(previous['id'])}, which keeps its history; for separate work, repeat this with new=true"
             )
     # Checked before anything is written, so a refused hand-over leaves no half-briefed task behind.
     if existing is None:
@@ -607,7 +611,7 @@ async def assign(
     renamed = wanted if existing is not None and wanted and wanted != existing["title"] else None
     reopened = existing is not None and existing["status"] in HANDED_IN
     if reopened:
-        raise Refused("return the exact reviewed result before assigning another round")
+        raise Refused(_closed_card(existing))
     if existing is not None and renamed is not None and not reopened and not _same_work(renamed, existing["title"]) and len(" ".join((reason or "").split())) < 8:
         # A card a member was at work on was renamed into an unrelated check of a mail service by an
         # Assign that named it: the work it held left the board half done, under another title, and
@@ -720,7 +724,7 @@ async def assign(
     if previous is not None:
         notes.append(
             f"This is a card of its own. {member.name}'s previous card {previous['id']} \"{previous['title']}\" was handed in {_minutes_ago(previous)}; "
-            f"if this work is its next round, drop {task['id']} and Assign(task_id='{previous['id']}') instead."
+            f"if this work is its next round, drop {task['id']}; {_next_round(previous['id'])}."
         )
     if added:
         notes.append(added)
@@ -867,6 +871,29 @@ def _checks(raw: list[str] | None) -> list[str]:
     if any(len(c) > CHECK_MAX_CHARS for c in items):
         raise Refused(f"a check is at most {CHECK_MAX_CHARS} characters")
     return items
+
+
+def _next_round(task_id: str) -> str:
+    """How a card in review gets another round: its result returned first, then the Assign."""
+    return (f"ReviewResult(task_id='{task_id}', op='return', reason=…) sends its result back and "
+            f"then Assign(task_id='{task_id}', …) gives it the round")
+
+
+def _closed_card(card: dict[str, Any]) -> str:
+    """Why an Assign naming a handed-in card is refused, and the one way on from there.
+
+    It once said "return the exact reviewed result" whatever the card's state. A return is refused
+    for a card not in review, and the answer to the new card made instead advised an Assign on the
+    old one: an orchestrator following the host from an accepted card met only refusals, and told
+    the operator the card could not be handed back.
+    """
+    task_id = card["id"]
+    if card["status"] == "review":
+        return f"task {task_id} is in review: {_next_round(task_id)}"
+    closed = "is done and its result accepted" if card["status"] == "done" else "was dropped"
+    return (f"task {task_id} {closed}, and a closed card does not take another round: a follow-up is a card of its own — "
+            f"Assign without task_id (new=true when its title reads as the same work), with depends_on=['{task_id}'] "
+            "when it builds on that card. Reopening a closed card is the operator's decision")
 
 
 async def _last_handed_in(orch: Orchestrators, project: Project, member: Staff, session_id: str) -> dict[str, Any] | None:
