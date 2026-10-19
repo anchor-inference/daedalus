@@ -177,6 +177,10 @@ only by its leading dashes was not found: the composer was never seen, no Enter 
 message to the member sat pasted in its prompt from the moment a phone attached."""
 
 
+_PLACEHOLDER = re.compile(r'Try "[^"\n]*"')
+"""The suggestion an empty composer shows (measured on 2.1.302)."""
+
+
 def unpasted(prompt: str) -> str:
     """A prompt as it was sent, without the tags Claude wraps a collapsed paste in.
 
@@ -660,6 +664,12 @@ class ClaudeCodeAdapter:
             return True
         tail = _squeezed(text)[-40:]
         return bool(tail) and tail in _squeezed(held)
+
+    def composer_text(self, screen: str) -> str | None:
+        held = composer(screen)
+        # An empty composer shows a suggestion in its place ('Try "fix typecheck errors"'), drawn
+        # dim, which the screen's text does not tell apart from typing.
+        return "" if held is not None and _PLACEHOLDER.fullmatch(held) else held
 
     # -- the transcript -------------------------------------------------------------------------
 

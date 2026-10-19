@@ -627,6 +627,11 @@ class HarnessAdapter(Protocol):
         When unsure, false: a message that is not seen in the composer is not submitted."""
         ...
 
+    def composer_text(self, screen: str) -> str | None:
+        """What the composer on ``screen`` holds, empty for nothing (a placeholder the CLI draws is
+        nothing); None when no composer can be read there. Only a CLI written to by paste reads one."""
+        ...
+
 
 __all__ = [
     "ANSWER_CHOICES",

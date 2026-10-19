@@ -378,6 +378,7 @@ class StaffChannel(TypedDict):
 class StaffMessage(TypedDict):
     message_id: str
     state: str
+    origin: NotRequired[str]
     error: NotRequired[str]
     actor: NotRequired[str]
 

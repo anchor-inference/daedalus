@@ -44,6 +44,12 @@ class PasteRules:
     as a paste and swallow an Enter that arrives inside it."""
     bracketed: bool = True
     """Wrap the paste in bracketed-paste markers when the terminal has mode 2004 on."""
+    clear_keys: tuple[str, str] = ("C-u", "Backspace")
+    """The key that clears the composer's line under the cursor, and the one that joins that line to
+    the one above, which together take a text out of the composer line by line. Measured on Claude
+    Code 2.1.302 and Grok Build 1.0.41, wide and narrow: a collapsed paste and a wrapped line each go
+    with one Ctrl+U. Never pressed on an empty composer: Grok's Ctrl+U there resumes another session,
+    or restarts it for an update."""
 
 
 @dataclass(frozen=True, slots=True)

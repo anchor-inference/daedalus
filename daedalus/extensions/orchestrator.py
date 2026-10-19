@@ -83,6 +83,7 @@ WAKE_TYPES = (
     "staff.status",
     "staff.report",
     "staff.channel",
+    "staff.message",
     "ask.pending",
     "ask.answered",
     "permission.pending",
@@ -101,6 +102,9 @@ WAKE_TYPES = (
 The two ``dispatch`` types are the main orchestrator's hand-overs to a project; they wake at once."""
 
 STAFF_WAKE_STATUSES = frozenset({"turn_done_unseen", "error", "exited", "no_signal"})
+FAILED_MESSAGE_NEWS_S = 24 * 3600
+"""How old a message may be for its failure to wake the orchestrator. One the tick finds weeks after it
+was sent (the host had no such sweep then) is history, not something to act on."""
 URGENT_REPORTS = frozenset({"needs_input", "stuck"})
 TASK_WAKES = frozenset({"task.created", "task.moved", "task.assigned", "task.accepted", "task.merge_failed",
                         "task.ci_failed", "task.launch_waiting"})
@@ -186,6 +190,17 @@ def _age(at: str | None, now: datetime) -> str:
         return f"{minutes} min"
     hours = minutes // 60
     return f"{hours} h" if hours < 48 else f"{hours // 24} d"
+
+
+def _seconds_between(at: str, later: str) -> float:
+    """Seconds from one stored stamp to another; zero for one that cannot be read, which then counts
+    as recent rather than being dropped."""
+    try:
+        stamps = [datetime.fromisoformat(value.replace("Z", "+00:00")) for value in (at, later)]
+    except ValueError:
+        return 0.0
+    first, second = (stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC) for stamp in stamps)
+    return (second - first).total_seconds()
 
 
 def _tokens(n: int) -> str:
@@ -1168,6 +1183,15 @@ class Orchestrators:
             return Wake(f"report:{event.seq}", urgent=p.get("kind") in URGENT_REPORTS)
         if kind == "staff.channel":
             return Wake(f"channel:{event.staff_id or event.seq}", urgent=False) if event.staff_id else None
+        if kind == "staff.message":
+            # Only its own message that failed: Tell answers "queued", and without this the
+            # orchestrator never heard that a message it counted on had not arrived.
+            if p.get("state") != "failed" or p.get("origin") != "orchestrator" or not event.staff_id:
+                return None
+            message = await self.manager.staff.message(str(p.get("message_id") or ""))
+            if message is None or _seconds_between(message.created_at, event.at) > FAILED_MESSAGE_NEWS_S:
+                return None
+            return Wake(f"message:{message.id}", urgent=False)
         if kind in ("ask.pending", "permission.pending"):
             if not event.staff_id:
                 return None
@@ -1317,6 +1341,12 @@ class Orchestrators:
             # A report is the member's answer to the orchestrator and arrives whole: cut at 300
             # characters, a detailed reply reached it as a stub, and no tool could show the rest.
             return f"{who(member)} reported {p.get('kind')}{(' on ' + task) if task else ''}: \"{_verbatim(str(p.get('text') or ''))}\"{refs_line(p.get('files'))}{self._report_tail(p)}{self._steps_tail(p)}"
+        if kind == "staff.message":
+            message = await self.manager.staff.message(str(p.get("message_id") or ""))
+            said = f' ("{_one_line(message.text, HEADLINE_CHARS)}")' if message is not None else ""
+            why = _one_line(str(p.get("error") or "no reason was given"), 300)
+            return (f"your message {p.get('message_id')} to {who(member)}{said} was not delivered: {why}. "
+                    "It is not sent again by itself; Tell again if it still applies")
         if kind == "staff.channel":
             if p.get("team_tools") == "missing":
                 return f"{who(member)}'s team tools are not connected: {_one_line(str(p.get('detail') or ''), 200)}. They keep working, but will not Report or AskOrchestrator; Tell and ReadStaff still work"

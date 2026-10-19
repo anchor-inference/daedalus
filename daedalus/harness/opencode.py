@@ -541,6 +541,9 @@ class OpenCodeAdapter:
     def composer_holds(self, screen: str, text: str) -> bool:
         return False  # nothing is typed into OpenCode's composer; messages go by its server
 
+    def composer_text(self, screen: str) -> str | None:
+        return None  # nothing is typed into OpenCode's composer; messages go by its server
+
     # -- the transcript -------------------------------------------------------------------------
 
     async def transcript(self, env: EnvironmentPort, ref: str, since: int = 0) -> list[Turn]:
