@@ -289,6 +289,23 @@ async def test_a_restarted_host_leaves_a_suspended_member_suspended(settings: Se
         await s.status_event(ada, "working")
 
 
+async def test_a_member_taken_up_after_a_restart_is_still_suspended_when_idle(settings: Settings, db: Database) -> None:
+    """A member idle at its prompt when the host restarted was taken up again and never suspended:
+    the readiness the start had seen was not carried over, nothing an idle CLI says sets it again,
+    and the sweep read "it has not finished starting" for days while the CLI held a host place."""
+    async with stand(settings, db, adapter=QuietResume(DONE)) as s:
+        ada = await finished(s)
+        row = await s.session_row(ada)
+        s.runtime.close()
+        runtime = s.restart_runtime(QuietResume(DONE))
+        assert await runtime.reconcile(wait=5) == 1
+        live = await s.team.live(row.id)
+        assert live is not None and live.session.status in staff_suspend.CANDIDATES
+        assert runtime.suspendable(live) == ""
+        assert await staff_suspend.suspend_idle(s.team, later()) == 1
+        assert (await s.session_row(ada)).status == "suspended"
+
+
 async def test_a_host_gone_in_the_middle_of_a_suspend_finishes_it(settings: Settings, db: Database) -> None:
     async with stand(settings, db, adapter=QuietResume(DONE)) as s:
         ada = await finished(s)

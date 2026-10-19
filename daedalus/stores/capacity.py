@@ -171,7 +171,13 @@ async def finish_in(conn: aiosqlite.Connection, attempt_id: str, *, started: boo
                            " WHERE attempt_id = ? AND state = 'admitted'", (at, attempt_id))
 
 
-async def cancel_in(conn: aiosqlite.Connection, attempt_id: str) -> None:
-    """Withdraw a waiting command without consuming a future slot."""
-    await conn.execute("UPDATE scheduler_claims SET state = 'cancelled',updated_at = ?"
-                       " WHERE attempt_id = ? AND state = 'waiting'", (_now(), attempt_id))
+async def withdraw_in(conn: aiosqlite.Connection, attempt_id: str) -> None:
+    """Take a launch out of the line for host places while it waits for something else.
+
+    A waiting claim is the head of the line for every project. One whose launch went on to wait for
+    its member, its dependencies or its project's own limit kept that head while it could not start,
+    and every other project's worker was refused with "an older project is waiting" until it could.
+    The row is deleted rather than cancelled: a cancelled claim refuses the launch for good when it
+    next asks for a place, while a withdrawn one simply joins the line again at its end.
+    """
+    await conn.execute("DELETE FROM scheduler_claims WHERE attempt_id = ? AND state = 'waiting'", (attempt_id,))

@@ -29,7 +29,7 @@ from daedalus.stores.control import ControlConflict, ControlDenied, Principal
 from daedalus.stores.database import Database
 from daedalus.stores.outbox import OutboxStore
 from daedalus.stores.result_anchors import result_turn_refs
-from daedalus.stores.staff import StaffStore
+from daedalus.stores.staff import StaffError, StaffStore
 from tests.support.waiting import until_await
 from tests.unit.test_launch_controls import OPERATOR, launch_fixture
 from tests.unit.test_session_runner import ScriptedProvider, _manager
@@ -254,6 +254,69 @@ async def test_a_refused_launch_is_said_on_the_card_and_wakes_the_assigner(db: D
         team.queue.close()
         app.executions.release()
 
+async def test_a_start_refused_before_its_attempt_exists_fails_instead_of_staying_uncertain(db: Database) -> None:
+    """A start the host refused before it created the attempt (no worktree, files that could not be
+    handed over, a lost writer gate) was recorded as uncertain: nothing could ever prove it, the card
+    could not be assigned again ("already has a queued or uncertain launch") and nobody was told."""
+    app, dispatcher, team, starts, revision = await queued_fixture(db)
+    team.note_on_card = AsyncMock()
+    team._set_assignee = AsyncMock()
+
+    async def refused(entry):
+        await entry.check_authority()
+        raise StaffError("no worktree for Worker in /tmp/fixture-worktree: the folder is not a repository")
+
+    team.queue._launch = refused
+    try:
+        result = await queue_launch(app, "task", OPERATOR, staff_id="worker",
+                                    client_operation_id="refused-start", expected_entity_revision=revision)
+        assert await dispatcher.step()
+        view = await dispatcher.store.view(result["effect_id"])
+        assert view["state"] == "failed" and "not a repository" in view["error"]
+        note = team.note_on_card.await_args.args
+        assert note[0] == "task" and "could not start" in note[1] and "not a repository" in note[1]
+        assert starts == []
+        current = (await db.fetchone("SELECT entity_revision FROM board_tasks"))[0]
+        await queue_launch(app, "task", OPERATOR, staff_id="worker",
+                           client_operation_id="again", expected_entity_revision=current)
+    finally:
+        team.queue.close()
+        app.executions.release()
+
+
+@pytest.mark.parametrize("where", ["claim", "check"])
+async def test_a_launch_the_outbox_settles_itself_is_reported_once(db: Database, where: str) -> None:
+    """The outbox cancels a waiting launch whose authority was revoked, and fails one whose claim
+    changed under it, without its handler ever running: the card stayed assigned and unstarted and
+    the assigner was never woken, the very silence a refused start is reported to end."""
+    app, dispatcher, team, starts, revision = await queued_fixture(db)
+    team.note_on_card = AsyncMock()
+    team._set_assignee = AsyncMock()
+    try:
+        await db.execute("UPDATE board_tasks SET assignee_staff_id = 'worker' WHERE id = 'task'")
+        revision = (await db.fetchone("SELECT entity_revision FROM board_tasks"))[0]
+        result = await queue_launch(app, "task", OPERATOR, staff_id="worker",
+                                    client_operation_id="settled", expected_entity_revision=revision)
+        if where == "claim":
+            dispatcher.store.control.authorize = AsyncMock(side_effect=ControlDenied("grant was revoked or replaced"))
+        else:
+            dispatcher.store.check = AsyncMock(side_effect=ControlDenied("the effect claim is no longer current"))
+        await dispatcher.step()
+        view = await dispatcher.store.view(result["effect_id"])
+        assert view["state"] == ("cancelled" if where == "claim" else "failed")
+        assert starts == []
+        assert team.note_on_card.await_count == 1
+        note = team.note_on_card.await_args.args
+        assert note[0] == "task" and "could not start" in note[1] and view["error"] in note[1]
+        (task, assignee), changed = team._set_assignee.await_args
+        assert task.id == "task" and assignee is None and changed["error"] == note[1]
+        assert not await dispatcher.step()
+        assert team.note_on_card.await_count == 1
+    finally:
+        team.queue.close()
+        app.executions.release()
+
+
 async def test_a_launch_held_for_capacity_is_said_once_and_wakes_the_assigner(db: Database) -> None:
     """A start held back for capacity waited in the outbox without a word while the orchestrator
     told the operator the work was handed over."""
@@ -280,6 +343,37 @@ async def test_a_launch_held_for_capacity_is_said_once_and_wakes_the_assigner(db
         (kind, payload), where = app.manager.bus.publish.await_args
         assert app.manager.bus.publish.await_count == 1 and kind == "task.launch_waiting"
         assert payload["error"] == note[1] and where["project_id"] == "project"
+    finally:
+        team.queue.close()
+        app.executions.release()
+
+
+async def test_a_launch_waiting_for_its_busy_member_is_said_once(db: Database) -> None:
+    """A start held because its member was still on another card waited without a word: the
+    orchestrator, told "admission in progress", never learnt that the member's earlier card had to
+    be handed in, moved or released before this one could start."""
+    app, dispatcher, team, starts, revision = await queued_fixture(db)
+    team.note_on_card = AsyncMock()
+    app.manager.bus = SimpleNamespace(publish=AsyncMock())
+
+    async def busy(_entry):
+        return "Worker's task other is still in doing; it has to be reported done, moved or released first"
+
+    team.queue._free = busy
+    try:
+        await db.execute("UPDATE board_tasks SET assignee_staff_id = 'worker' WHERE id = 'task'")
+        revision = (await db.fetchone("SELECT entity_revision FROM board_tasks"))[0]
+        await queue_launch(app, "task", OPERATOR, staff_id="worker",
+                           client_operation_id="busy", expected_entity_revision=revision)
+        assert await dispatcher.step()
+        dispatcher.notify()
+        assert await dispatcher.step()
+        assert starts == []
+        assert team.note_on_card.await_count == 1
+        note = team.note_on_card.await_args.args
+        assert note[0] == "task" and "is not free yet" in note[1] and "still in doing" in note[1]
+        (kind, payload), _ = app.manager.bus.publish.await_args
+        assert app.manager.bus.publish.await_count == 1 and kind == "task.launch_waiting"
     finally:
         team.queue.close()
         app.executions.release()
@@ -611,6 +705,68 @@ async def test_a_launch_takes_and_keeps_one_machine_wide_place(db: Database) -> 
         reservation = await db.fetchone("SELECT attempt_id,state,role_class FROM capacity_reservations")
         assert (reservation["attempt_id"], reservation["state"], reservation["role_class"]) == (starts[0].id, "active", "worker")
         assert (await db.fetchone("SELECT state FROM scheduler_claims"))[0] == "admitted"
+    finally:
+        team.queue.close()
+        app.executions.release()
+
+
+async def test_a_launch_waiting_for_its_member_leaves_the_line_for_host_places(db: Database) -> None:
+    """Once in the line for a host place, a launch kept its head after it went on to wait for its
+    busy member, and every other project's start was refused behind it until the member was free."""
+    app, dispatcher, team, starts, revision = await queued_fixture(db)
+    app.manager.config = SimpleNamespace(terminals=SimpleNamespace(running_cap=3))
+    team.queue._claim_host = lambda entry: claim_host_slot(app, entry)
+    team.queue._finish_host = lambda entry, started: finish_host_slot(app, entry, started)
+    for shell in ("shell", "other"):
+        await db.execute("INSERT INTO terminals(id,env,owner_kind,cwd,created_at,created_by)"
+                         " VALUES (?,'host','session','/tmp','now','agent')", (shell,))
+    busy = None
+
+    async def free(_entry):
+        return busy
+
+    team.queue._free = free
+    try:
+        result = await queue_launch(app, "task", OPERATOR, staff_id="worker", client_operation_id="launch",
+                                    expected_entity_revision=revision)
+        assert await dispatcher.step()
+        assert (await db.fetchone("SELECT state FROM scheduler_claims"))[0] == "waiting"
+        busy = "Worker is still working on other"
+        dispatcher.wake.set()
+        assert await dispatcher.step()
+        assert (await dispatcher.store.view(result["effect_id"]))["state"] == "pending"
+        assert await db.fetchone("SELECT 1 FROM scheduler_claims WHERE state = 'waiting'") is None
+        busy = None
+        await db.execute("UPDATE terminals SET status = 'exited' WHERE id = 'shell'")
+        dispatcher.wake.set()
+        assert await dispatcher.step()
+        assert len(starts) == 1
+    finally:
+        team.queue.close()
+        app.executions.release()
+
+
+async def test_an_operator_launch_settles_an_attempt_an_earlier_host_left_recovering(db: Database) -> None:
+    """A card whose native worker died with an earlier host process kept that attempt recovering.
+    The orchestrator's commands settled it first, but the operator's own launch and the automatic
+    handoff went straight to the outbox and were refused "stop or reconcile the previous execution"."""
+    app, dispatcher, team, starts, revision = await queued_fixture(db)
+    try:
+        member = await team.member("worker")
+        session = await StaffStore(db).session("staff-session")
+        identity = await prepare_attempt(app, OPERATOR, member, await team.task("task"), session,
+                                         fence_token=secrets.token_urlsafe(32))
+        await db.execute("UPDATE board_tasks SET status = 'todo' WHERE id = 'task'")
+        app.executions.release()
+        app.executions.acquire()
+        await app.executions.boot()
+        assert (await db.fetchone("SELECT state FROM execution_attempts WHERE id = ?", (identity.id,)))[0] == "recovering"
+        await db.execute("UPDATE staff_sessions SET ended_at = 'now',status = 'exited' WHERE id = 'staff-session'")
+        current = (await db.fetchone("SELECT entity_revision FROM board_tasks"))[0]
+        result = await queue_launch(app, "task", OPERATOR, staff_id="worker",
+                                    client_operation_id="after-restart", expected_entity_revision=current)
+        assert result["state"] == "queued"
+        assert (await db.fetchone("SELECT state FROM execution_attempts WHERE id = ?", (identity.id,)))[0] == "cancelled"
     finally:
         team.queue.close()
         app.executions.release()

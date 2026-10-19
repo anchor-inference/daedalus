@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from daedalus.stores.capacity import claim_in, finish_in, snapshot_in
+from daedalus.stores.capacity import claim_in, finish_in, snapshot_in, withdraw_in
 from daedalus.stores.database import Database
 
 
@@ -118,4 +118,22 @@ async def test_older_project_goes_before_new_worker_after_release(db: Database) 
     async with db.transaction() as conn:
         await finish_in(conn, "running", started=False)
     assert "older project" in (await _claim(db, "newer", "one") or "")
+    assert await _claim(db, "older", "two") is None
+
+
+async def test_a_launch_gone_to_wait_for_something_else_gives_up_its_place_in_line(db: Database) -> None:
+    """A launch that once waited for a host place kept the head of the line after it went on to wait
+    for something else (its member busy, its dependencies, its project's own limit): every other
+    project's worker was refused with "an older project is waiting" while that one could not start."""
+    await _project(db, "one")
+    await _project(db, "two")
+    assert await _claim(db, "running", "one") is None
+    assert await _claim(db, "older", "two") is not None
+    async with db.transaction() as conn:
+        await withdraw_in(conn, "older")
+        await finish_in(conn, "running", started=False)
+    assert await _claim(db, "newer", "one") is None
+    # Back in line once it waits for a place again, behind whoever came meanwhile.
+    async with db.transaction() as conn:
+        await finish_in(conn, "newer", started=False)
     assert await _claim(db, "older", "two") is None

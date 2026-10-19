@@ -53,7 +53,10 @@ class EffectResolution:
 
 class Handler(Protocol):
     async def run(self, claim: Claim, check: Callable[[Claim], Awaitable[None]]) -> EffectOutcome:
-        """Recheck the claim immediately before the external effect; report its proven outcome."""
+        """Recheck the claim immediately before the external effect; report its proven outcome.
+
+        A handler may also define ``settled(action_id, state, error)``: the dispatcher calls it once
+        for a command of its kind that the outbox cancelled or failed without running it."""
 
 
 class EffectDispatcher:
@@ -103,16 +106,20 @@ class EffectDispatcher:
         if self.wake.is_set():
             self.wake.clear()
             self.postponed.clear()
-        claim = await self.store.claim(tuple(self.handlers), exclude=tuple(self.postponed))
+        settled: list[tuple[str, str, str, str]] = []
+        claim = await self.store.claim(tuple(self.handlers), exclude=tuple(self.postponed), settled=settled)
+        for action_id, kind, state, error in settled:
+            await self._settled(action_id, kind, state, error)
         if claim is None:
             return False
         try:
             await self.store.check(claim)
         except ControlDenied as exc:
-            await self.store.finish(claim, state="failed", error=str(exc))
+            if await self.store.finish(claim, state="failed", error=str(exc)):
+                await self._settled(claim.id, claim.kind, "failed", str(exc))
             return True
         if claim.kind == "task.launch" and self.wake.is_set():
-            await self.store.defer(claim, reason="launch admission changed before execution")
+            await self._defer(claim, "launch admission changed before execution")
             return True
         try:
             outcome = await self.handlers[claim.kind].run(claim, self.store.check)
@@ -127,11 +134,29 @@ class EffectDispatcher:
             if outcome.state == "retry":
                 await self.store.retry(claim, error_class=outcome.error_class or "unknown")
             elif outcome.state == "deferred":
-                await self.store.defer(claim, reason=outcome.error or "waiting for admission")
+                await self._defer(claim, outcome.error or "waiting for admission")
                 self.postponed.add(claim.id)
             else:
                 await self.store.finish(claim, state=outcome.state, error=outcome.error)
         return True
+
+    async def _defer(self, claim: Claim, reason: str) -> None:
+        if await self.store.defer(claim, reason=reason):
+            return
+        # Releasing the claim re-reads its authority, and one revoked meanwhile cancels the command.
+        row = await self.store.db.fetchone("SELECT state,error FROM effect_outbox WHERE id = ?", (claim.id,))
+        if row is not None and row["state"] == "cancelled":
+            await self._settled(claim.id, claim.kind, "cancelled", row["error"] or "")
+
+    async def _settled(self, action_id: str, kind: str, state: str, error: str) -> None:
+        """Tell a command's handler that the outbox settled it without running it."""
+        settled = getattr(self.handlers.get(kind), "settled", None)
+        if not callable(settled):
+            return
+        try:
+            await settled(action_id, state, error)
+        except Exception:  # noqa: BLE001 — the outbox row keeps the outcome whatever the report did
+            logger.exception("telling the handler of effect %s that it was %s failed", action_id, state)
 
     async def run(self) -> None:
         await self.store.recover()

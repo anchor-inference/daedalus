@@ -18,8 +18,10 @@ from daedalus.extensions.runtime_handoff import (
     target_capability,
 )
 from daedalus.extensions.runtime_handoff import preview as handoff_preview
+from daedalus.extensions.runtime_observations import settle_previous_host
 from daedalus.host.launch_queue import Entry
 from daedalus.host.worktrees import WORKTREES_DIR, WorktreeError, WorktreeRefused, staff_slug
+from daedalus.stores.capacity import withdraw_in
 from daedalus.stores.control import (
     ControlConflict,
     ControlDenied,
@@ -73,6 +75,10 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
     if not row["project_id"]:
         raise ControlConflict("a worker task needs a project")
     scope = Scope("project", row["project_id"])
+    # Every launch path, not only the orchestrator's commands: an operator's launch or an automatic
+    # handoff of a card whose worker died with an earlier host process was refused "stop or
+    # reconcile the previous execution", and nothing the operator could stop was running.
+    await settle_previous_host(app, task_id)
     if fallback_from_attempt_id and (resume_from or not fallback_preview_digest):
         raise ControlConflict("a runtime handoff needs its reviewed preview, not provider-session resume")
     operation = "task.continue" if fallback_from_attempt_id else "task.launch"
@@ -327,9 +333,14 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
     return result
 
 
-WAIT_TOLD = frozenset({"host", "machine", "project", "terminals"})
-"""Deferrals the assigner is told of: a lack of capacity it may act on by releasing someone. An
-update drain or a stagger passes on its own and is not news."""
+WAIT_TOLD = frozenset({"host", "machine", "project", "terminals", "busy"})
+"""Deferrals the assigner is told of: a lack of capacity it may act on by releasing someone, or a
+member still held by an earlier card that has to be handed in, moved or released first. An update
+drain or a stagger passes on its own and is not news."""
+
+KEEPS_PLACE = frozenset({"host", "stagger"})
+"""Deferrals that keep a launch's place in the line for host places: it waits for one, or starts
+within seconds. Any other wait takes it out of the line until it asks for a place again."""
 
 
 def _wait_reason(error: str | None) -> tuple[str, str]:
@@ -414,13 +425,17 @@ class TaskLaunchEffect:
         before = await self.app.db.fetchone("SELECT error FROM effect_outbox WHERE id = ?", (claim.id,))
         outcome = await self._run(claim, check)
         if outcome.state == "failed":
-            await self._report_failure(claim, outcome.error or "the launch was refused")
+            await self._report_failure(claim.payload, outcome.error or "the launch was refused")
         elif outcome.state == "deferred":
+            if _wait_reason(outcome.error)[0] not in KEEPS_PLACE:
+                async with self.app.db.transaction() as conn:
+                    await withdraw_in(conn, claim.payload["attempt_id"])
             await self._report_wait(claim, before["error"] if before is not None else None, outcome.error)
         return outcome
 
     async def _report_wait(self, claim: Claim, previous: str | None, current: str | None) -> None:
-        """Say once on the card, and to whoever assigned it, that the start waits for a place.
+        """Say once on the card, and to whoever assigned it, that the start waits for a place or for
+        its member to be free.
 
         Assign answers "admission in progress" and a start held back for capacity used to wait in
         the outbox without a word: the orchestrator told the operator the work was handed over
@@ -439,7 +454,8 @@ class TaskLaunchEffect:
                 return
             member = await self.app.db.fetchone("SELECT name FROM staff WHERE id = ?", (claim.payload["staff_id"],))
             name = member["name"] if member is not None else "the member"
-            said = f"{name} waits for a place to start: {detail}"
+            said = (f"{name} is not free yet: {detail}" if reason == "busy"
+                    else f"{name} waits for a place to start: {detail}")
             await team.note_on_card(task.id, said)
             await self.app.manager.bus.publish(
                 "task.launch_waiting",
@@ -450,7 +466,15 @@ class TaskLaunchEffect:
         except Exception:  # noqa: BLE001 — the outbox keeps the wait whatever the report did
             logger.exception("reporting the waiting launch of task %s failed", claim.payload.get("task_id"))
 
-    async def _report_failure(self, claim: Claim, error: str) -> None:
+    async def settled(self, action_id: str, state: str, error: str) -> None:
+        """A launch the outbox cancelled or failed without running it is a refused start as well."""
+        row = await self.app.db.fetchone("SELECT payload_json FROM effect_outbox WHERE id = ?", (action_id,))
+        if row is None:
+            return
+        await self._report_failure(json.loads(row["payload_json"])["data"],
+                                   error or ("the launch was cancelled" if state == "cancelled" else "the launch was refused"))
+
+    async def _report_failure(self, target: dict[str, Any], error: str) -> None:
         """Say a refused launch on the card and wake whoever assigned it.
 
         A coordinator's Assign answers "admission in progress" and the start happens later. When
@@ -463,17 +487,17 @@ class TaskLaunchEffect:
         if team is None:
             return
         try:
-            task = await team.task(claim.payload["task_id"])
-            member = await self.app.db.fetchone("SELECT name FROM staff WHERE id = ?", (claim.payload["staff_id"],))
+            task = await team.task(target["task_id"])
+            member = await self.app.db.fetchone("SELECT name FROM staff WHERE id = ?", (target["staff_id"],))
             name = member["name"] if member is not None else "the member"
             # Started after all, or closed meanwhile: a closed card's refused start is no news.
             if task is None or task.status not in ("todo", "blocked"):
                 return
             await team.note_on_card(task.id, f"{name} could not start: {error}")
-            await team._set_assignee(task, None if task.assignee_staff_id == claim.payload["staff_id"] else task.assignee_staff_id,
+            await team._set_assignee(task, None if task.assignee_staff_id == target["staff_id"] else task.assignee_staff_id,
                                      actor="system", error=f"{name} could not start: {error}")
         except Exception:  # noqa: BLE001 — the outbox keeps the failure whatever the report did
-            logger.exception("reporting the refused launch of task %s failed", claim.payload.get("task_id"))
+            logger.exception("reporting the refused launch of task %s failed", target.get("task_id"))
 
     async def _run(self, claim: Claim, check: Callable[[Claim], Awaitable[None]]) -> EffectOutcome:
         try:
@@ -626,11 +650,17 @@ class TaskLaunchEffect:
             # Refused before the worker had a session to enter: a known failure, not an uncertain
             # one, or the card could not be assigned again until someone reconciled it.
             return EffectOutcome("failed", str(exc))
-        except Exception:
+        except Exception as exc:
             async with self.app.db.transaction() as conn:
                 refused = await no_entry_in(conn, claim.payload["attempt_id"])
-            if refused:
-                return EffectOutcome("failed", "the host refused this launch before runtime entry")
+                # The attempt is written in the same transaction that authorizes runtime entry, and
+                # nothing starts a process before it. A start that raised with no attempt written
+                # was refused by the host before anything could run: settled as unknown, it was
+                # never provable, and the card was refused every later assignment for good.
+                unwritten = await one(conn, "SELECT 1 FROM execution_attempts WHERE id = ?",
+                                      (claim.payload["attempt_id"],)) is None
+            if refused or unwritten:
+                return EffectOutcome("failed", str(exc) or "the host refused this launch before runtime entry")
             raise
         finally:
             launch_attempt.reset(bound)

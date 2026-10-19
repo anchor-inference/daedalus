@@ -535,11 +535,13 @@ async def test_refusals_are_said_before_anything_is_sent(settings: Settings, db:
         await c.manager.files.attach_to_task(task_id, [taken], actor="orchestrator")
         queued = await operator_assignment(c.r.team, langpt, task_id, wait_for_admission=False)
 
-        async def launch_uncertain() -> bool:
+        async def launch_refused() -> bool:
+            # Refused before the attempt was written, so nothing ran: a known failure, not an
+            # uncertain outcome that would keep the card from ever being assigned again.
             row = await c.manager.db.fetchone("SELECT state FROM effect_outbox WHERE id = ?", (queued["effect_id"],))
-            return row is not None and row["state"] == "unknown"
+            return row is not None and row["state"] == "failed"
 
-        await until_await(launch_uncertain, "the unavailable host bridge stayed unresolved in its receipt")
+        await until_await(launch_refused, "the unavailable host bridge failed the launch in its receipt")
         failure = await c.manager.db.fetchone("SELECT error FROM effect_outbox WHERE id = ?", (queued["effect_id"],))
         assert failure is not None and "host terminal bridge" in failure["error"]
         assert c.opened() == []

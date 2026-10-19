@@ -591,16 +591,14 @@ async def assign(
         )
     if existing is None:
         previous = await _last_handed_in(orch, project, member, session_id)
+        # Only a card in review can take another round; an accepted or dropped one cannot, so a
+        # nearly identical title there is the follow-up it must be, not a forgotten task_id.
+        if previous is not None and previous["status"] != "review":
+            previous = None
         if previous is not None and not new and _same_work(wanted, previous["title"]):
-            if previous["status"] == "review":
-                round_of = (f"For its next round, ReviewResult(op='return', task_id='{previous['id']}', reason=…) sends its result back "
-                            f"and Assign(task_id='{previous['id']}', …) then reopens that card with its history; for separate work, repeat this with new=true")
-            else:
-                round_of = (f"That card is {previous['status']} and stays finished; if this is further work on it, repeat this with new=true "
-                            "and it gets a card of its own")
             raise Refused(
                 f"{member.name} handed in {previous['id']} \"{previous['title']}\" {_minutes_ago(previous)}, and \"{wanted}\" reads as the same work. "
-                + round_of
+                f"For its next round, {_next_round(previous['id'])}, which keeps its history; for separate work, repeat this with new=true"
             )
     # Checked before anything is written, so a refused hand-over leaves no half-briefed task behind.
     if existing is None:
@@ -614,7 +612,7 @@ async def assign(
     renamed = wanted if existing is not None and wanted and wanted != existing["title"] else None
     reopened = existing is not None and existing["status"] in HANDED_IN
     if reopened:
-        raise Refused(_next_round(existing))  # type: ignore[arg-type]
+        raise Refused(_closed_card(existing))
     if existing is not None and renamed is not None and not reopened and not _same_work(renamed, existing["title"]) and len(" ".join((reason or "").split())) < 8:
         # A card a member was at work on was renamed into an unrelated check of a mail service by an
         # Assign that named it: the work it held left the board half done, under another title, and
@@ -730,13 +728,10 @@ async def assign(
         # Said out loud: a card renamed in passing is a card whose earlier work leaves the board
         # under another name, and nobody who reads the board afterwards can tell.
         notes.append(f"The card was renamed: \"{existing['title']}\" → \"{renamed}\"; its earlier rounds stay in its notes.")
-    if previous is not None and previous["status"] == "review":
-        # Only a card still in review can take another round. Offered for a done card as well, the
-        # coordinator dropped the card it had just made and was refused the one it was sent to.
+    if previous is not None:
         notes.append(
             f"This is a card of its own. {member.name}'s previous card {previous['id']} \"{previous['title']}\" was handed in {_minutes_ago(previous)}; "
-            f"if this work is its next round, drop {task['id']}, ReviewResult(op='return', task_id='{previous['id']}', reason=…) "
-            f"and Assign(task_id='{previous['id']}') instead."
+            f"if this work is its next round, drop {task['id']}; {_next_round(previous['id'])}."
         )
     if added:
         notes.append(added)
@@ -762,22 +757,6 @@ async def assign(
     files_wait = " The files are copied to them when they start." if handed else ""
     return (f"{member.name} will start {task['id']} \"{task['title']}\" after admitted;"
             f" effect {launched['effect_id']}: {admission['state']},{waiting}.{files_wait}" + tail)
-
-
-def _next_round(task: dict[str, Any]) -> str:
-    """Why a handed-in card cannot be assigned as it stands, and the call that gets the work going.
-
-    The refusal used to be "return the exact reviewed result before assigning another round" for
-    every handed-in card. On a card already accepted the return is refused too, since only a result
-    in review can go back, and a coordinator asked for one more check after an accepted report went
-    from Assign to ReviewResult and back without learning that the work needed a card of its own."""
-    task_id = task["id"]
-    if task["status"] == "review":
-        return (f"task {task_id} is in review: its result is handed in and not judged yet. ReviewResult(op='return', task_id='{task_id}', "
-                f"reason=…) sends it back for another round, and Assign(task_id='{task_id}') then starts that round with the card's history")
-    finished = "its result was accepted" if task["status"] == "done" else "it was dropped"
-    return (f"task {task_id} is {task['status']}: {finished}, and a finished card is not reopened. Further work on it is a card of its own: "
-            "repeat this Assign without task_id, with a title and the four parts of the brief (new=true when the title repeats the finished card's)")
 
 
 TWIN_WINDOW = timedelta(hours=6)
@@ -917,6 +896,29 @@ def _checks(raw: list[str] | None) -> list[str]:
     if any(len(c) > CHECK_MAX_CHARS for c in items):
         raise Refused(f"a check is at most {CHECK_MAX_CHARS} characters")
     return items
+
+
+def _next_round(task_id: str) -> str:
+    """How a card in review gets another round: its result returned first, then the Assign."""
+    return (f"ReviewResult(task_id='{task_id}', op='return', reason=…) sends its result back and "
+            f"then Assign(task_id='{task_id}', …) gives it the round")
+
+
+def _closed_card(card: dict[str, Any]) -> str:
+    """Why an Assign naming a handed-in card is refused, and the one way on from there.
+
+    It once said "return the exact reviewed result" whatever the card's state. A return is refused
+    for a card not in review, and the answer to the new card made instead advised an Assign on the
+    old one: an orchestrator following the host from an accepted card met only refusals, and told
+    the operator the card could not be handed back.
+    """
+    task_id = card["id"]
+    if card["status"] == "review":
+        return f"task {task_id} is in review: {_next_round(task_id)}"
+    closed = "is done and its result accepted" if card["status"] == "done" else "was dropped"
+    return (f"task {task_id} {closed}, and a closed card does not take another round: a follow-up is a card of its own — "
+            f"Assign without task_id (new=true when its title reads as the same work), with depends_on=['{task_id}'] "
+            "when it builds on that card. Reopening a closed card is the operator's decision")
 
 
 async def _last_handed_in(orch: Orchestrators, project: Project, member: Staff, session_id: str) -> dict[str, Any] | None:
