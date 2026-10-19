@@ -1340,6 +1340,13 @@ class CliStaffRuntime:
                 session.refused_report = None  # the member got it through after all
             except (PermissionError, ValueError, RuntimeError) as exc:
                 reply = {"text": str(exc), "error": True}
+                if isinstance(exc, PermissionError):
+                    # The attempt this session reported on is no longer current: closed by an earlier
+                    # done, or set aside by a contract change or a host restart. Members retried the
+                    # same report up to three times on the bare refusal, then gave up in silence.
+                    reply["text"] += (". This report did not reach the task card, and sending it again will not change"
+                                      " that. Your orchestrator is told what it said when this turn ends; finish the turn"
+                                      " and wait for its message.")
                 session.reported = accepted_before
                 session.refused_report = (str(body.get("kind") or ""), str(body.get("note") or ""), str(exc))
             self._remember_call(session, call_id, ("report", reply))

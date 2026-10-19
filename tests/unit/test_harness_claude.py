@@ -399,6 +399,9 @@ async def test_a_report_the_host_refused_still_reaches_the_orchestrator_when_the
         assert (done.payload["kind"], bool(done.payload.get("implicit"))) == ("done", False)
         assert refused.payload["implicit"] is True and refused.payload["refused"]
         assert "correction the address is wrong" in refused.payload["text"] and "the correction was refused" in refused.payload["text"]
+        # The member is told retrying is futile and that its words still reach the orchestrator.
+        said = [r["body"]["text"] for r in s.ptyd.replies if isinstance(r.get("body"), dict) and r["body"].get("error")]
+        assert len(said) == 1 and "sending it again will not change that" in said[0] and "orchestrator is told" in said[0]
 
 
 async def test_a_permission_is_answered_through_its_held_hook(settings: Settings, db: Database) -> None:
