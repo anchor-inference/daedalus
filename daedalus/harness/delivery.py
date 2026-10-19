@@ -530,6 +530,9 @@ class DeliveryWorker:
             self.inflight = pending
             await self._submit(pending, text, "paste", self.config(), human=pending.origin == "operator", note=f"submit {pending.message_id} after a restart")
             return
+        # Written by the previous host and not seen now: it may still sit in a composer that cannot be
+        # read, and is a leftover like any paste this worker gave up on.
+        self.leftover.append(text)
         await self._state(pending, "failed", error="unknown after restart")
 
     # -- reporting -----------------------------------------------------------------------------

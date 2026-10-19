@@ -475,3 +475,18 @@ async def test_a_steers_interrupt_waits_out_the_keyboard_too(running: Any, monke
     r.worker.put(Pending("sm-j", "stop the render now", "now", "orchestrator", degraded_to=r.worker.degraded("now")))
     assert await r.settled("sm-j") == "acknowledged"
     assert prompt.submitted == ["stop the render now"]
+
+
+async def test_a_paste_a_previous_host_left_unseen_is_not_glued_to_the_next_message(running: Any) -> None:
+    """After a restart a message the previous host had written is looked for, never typed again; one
+    not found may still be in a composer that cannot be read, and the next paste waits for it."""
+    prompt = Composer("claude", readable=False, held="[orchestrator] written before the restart")
+    r = running(rig(prompt, config(paste_confirm_s=0.4)))
+    r.worker.put(Pending("sm-k", "[orchestrator] written before the restart", "now", "orchestrator", reexamine=True))
+    assert await r.settled("sm-k") == "failed"
+    r.worker.put(Pending("sm-l", "[orchestrator] after the restart", "now", "orchestrator"))
+    assert await r.settled("sm-l") == "failed" and prompt.pastes == 0
+    prompt.readable = True
+    r.worker.put(Pending("sm-m", "[orchestrator] once it can be read", "now", "orchestrator"))
+    assert await r.settled("sm-m") == "acknowledged"
+    assert prompt.submitted == ["[orchestrator] once it can be read"]
