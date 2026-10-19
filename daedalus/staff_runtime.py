@@ -322,9 +322,10 @@ class TeamIngress(Protocol):
         """The executor ended on its own — the command-line agent exited — rather than being stopped.
         The session ends with that reason and its open requests are withdrawn."""
 
-    async def implicit_report(self, live: LiveSession, kind: str, text: str) -> None:
+    async def implicit_report(self, live: LiveSession, kind: str, text: str, *, refused: str = "") -> None:
         """A turn ended without the member reporting: ``turn_done`` with the end of its last message,
-        or ``needs_input`` when that message asks something. Published as a report the host made."""
+        or ``needs_input`` when that message asks something. Published as a report the host made.
+        ``refused`` is why the host refused a report the member did make in that turn."""
 
     async def channel(self, live: LiveSession, team_tools: str, detail: str = "") -> None:
         """The member's team tools are ``connected`` or ``missing``: whether its reports and

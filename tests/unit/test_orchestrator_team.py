@@ -1097,6 +1097,13 @@ async def test_a_report_is_never_folded_into_the_more_line(settings: Settings, d
         implicit = (await r.manager.bus.latest(events_filter("staff.report"), limit=1))[0]
         line = await r.orch.line(await r.refreshed(), implicit)
         assert "word " * 190 in line and "ReadStaff(\"Ada\")" in line
+
+        # A report the host refused is quoted whole, with why: it was the turn's news.
+        correction = "Correction: 10.0.65.1 is a container bridge the operator cannot reach. " * 30
+        await r.team.ingress.implicit_report(live, "turn_done", correction, refused="the execution attempt or contract has been superseded")
+        refused = (await r.manager.bus.latest(events_filter("staff.report"), limit=1))[0]
+        line = await r.orch.line(await r.refreshed(), refused)
+        assert "refused (the execution attempt or contract has been superseded)" in line and correction.strip() in line
     finally:
         await close_team(r.manager)
         await r.manager.close()

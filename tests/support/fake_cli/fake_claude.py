@@ -50,7 +50,9 @@ from the real Claude Code 2.1.282 in a throwaway configuration; the recordings a
   ``~/.claude/projects/<cwd with every non-alphanumeric as ->/<session>.jsonl``.
 - **Team tools**: the ``--mcp-config`` servers are started as the real CLI starts them, and the
   script's ``report:``/``askorch:`` steps call ``mcp__daedalus_team__Report`` /
-  ``…__AskOrchestrator``, which, like every tool, need an allow rule not to prompt. ``MCP_TOOL_TIMEOUT``
+  ``…__AskOrchestrator``, which, like every tool, need an allow rule not to prompt — and in ``plan``
+  mode prompt even with one: an allow rule lets no MCP tool through there (measured on 2.1.302, a
+  read-only member's ``Report`` asked its permission five times in one session). ``MCP_TOOL_TIMEOUT``
   (milliseconds) bounds a call. Skills under ``<--add-dir>/.claude/skills/<name>/SKILL.md`` are
   found (measured) and logged as ``skills``; ``--append-system-prompt`` is logged as ``system_prompt``.
 - **Commands**: ``--version``, ``agents --json`` (every live fake session: ``pid, cwd, kind,
@@ -431,6 +433,8 @@ class FakeClaude(FakeAgent):
     def _allowed(self, tool: str, tool_input: dict[str, Any]) -> bool:
         if self.mode == "bypassPermissions":
             return True
+        if self.mode == "plan" and tool.startswith("mcp__"):
+            return False
         for rule in self.allow:
             name, _, pattern = rule.partition("(")
             if name.startswith("mcp__") and name.count("__") == 1 and tool.startswith(name + "__"):

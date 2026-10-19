@@ -274,11 +274,11 @@ class Stand:
     project: Project
     harness: HarnessConfig
 
-    async def hire(self, name: str = "Ada") -> Staff:
+    async def hire(self, name: str = "Ada", *, isolation: str = "") -> Staff:
         # The fake daemon has no cgroup delegation; these tests exercise the CLI conversation.
         harness = getattr(self.adapter, "name", "claude")
         # Read-only starts a CLI in its own no-write mode; one without such a mode shares the folder.
-        isolation = "readonly" if harness in RESTRICTIVE_MODES else "shared"
+        isolation = isolation or ("readonly" if harness in RESTRICTIVE_MODES else "shared")
         return await self.manager.staff.hire(self.project.id, name=name, harness=harness, isolation=isolation)
 
     async def task(self, title: str = "Menu page", *,
@@ -545,12 +545,20 @@ async def test_the_team_tools_are_answered_by_the_host(settings: Settings, db: D
         row = await s.session_row(ada)
         screen = "\n".join((await s.terminals.read_screen(row.terminal_id, scrollback=200))["lines"])
         # The held question got the answer; the report got what the team made of it; a refused
-        # report came back to the worker as an error with the reason.
+        # report came back to the worker as an error with the reason, and, not tried again in the
+        # turn, reached the orchestrator at the turn's end with that reason.
         assert "AskOrchestrator: euros" in screen
         assert "Report: reported checkpoint" in screen
         assert "Report: a report needs a supported kind and nonempty note" in screen
-        [report] = await s.events("staff.report", staff_id=ada.id)
+
+        async def both() -> bool:
+            return len(await s.events("staff.report", staff_id=ada.id)) == 2
+
+        await eventually(both, "the refused report at the turn's end")
+        report, refused = await s.events("staff.report", staff_id=ada.id)
         assert (report.payload["kind"], report.payload["text"], report.payload["task_id"]) == ("checkpoint", "menu drafted", task_id)
+        assert refused.payload["implicit"] is True and "supported kind" in refused.payload["refused"]
+        assert refused.payload["text"].startswith("Its finished report, refused by the host: not a kind")
         assert await s.statuses(ada) == ["starting", "working", "question", "working", "turn_done_unseen"]
         assert [r["body"] for r in s.ptyd.replies][0] == {"text": "euros"}
 

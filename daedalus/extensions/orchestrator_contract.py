@@ -94,6 +94,12 @@ async def source_of(orch: Orchestrators, project: Project, source: str | None) -
             ask = await orch.manager.asks.get(row["id"]) if row is not None else None
         if ask is None or ask.project_id != project.id:
             raise Refused(f"source {text!r}: {project.name} has no request {ref!r}")
+        if ask.kind == "permission":
+            # A grant already reached the member that asked. Made a requirement, it once revised a
+            # task's contract while that member waited on another permission, which the revision
+            # then voided: the member was told "Not granted" for a call the orchestrator had allowed.
+            raise Refused(f"source {text!r}: request [{ask.short_id}] is a permission; its answer went to the member "
+                          "that asked and is not a requirement of the work")
         if ask.resolved_by != "operator":
             raise Refused(f"source {text!r}: request [{ask.short_id}] was not answered by the operator" + (" yet" if ask.open else f" but by the {ask.resolved_by}"))
         return f"answer:{ask.short_id}"

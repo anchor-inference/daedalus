@@ -304,9 +304,9 @@ def log(s: Stand, what: str) -> list[dict[str, Any]]:
 
 
 async def started(s: Stand, script: str, *, name: str = "Ada",
-                  requirements: list[dict[str, str]] | None = None) -> Any:
+                  requirements: list[dict[str, str]] | None = None, isolation: str = "") -> Any:
     """A member assigned a task whose brief ends with the fake model's script."""
-    member = await s.hire(name)
+    member = await s.hire(name, isolation=isolation)
     # The fake model reads ";"-separated directives: closed off, the brief after them is not part of the last one.
     task_id = await s.task(f"Menu page;{script};", requirements=requirements)
     assert (await s.assign(member, task_id))["state"] == "queued"
@@ -382,6 +382,28 @@ async def test_a_turn_ending_on_a_question_is_routed_as_needing_input_and_a_repo
         assert [(r.payload["kind"], bool(r.payload.get("implicit"))) for r in reports] == [("checkpoint", False)]
 
 
+async def test_a_report_the_host_refused_still_reaches_the_orchestrator_when_the_turn_ends(settings: Settings, db: Database) -> None:
+    # A correction sent after a done report was refused as "superseded", the refusal counted as the
+    # turn's report, and nothing at all reached the orchestrator: neither the correction nor the
+    # member's last words, which said the report had not gone through.
+    async with stand(settings, db, **claude()) as s:
+        trust(s)
+        ada = await started(s, "report:done:menu written;report:checkpoint:correction the address is wrong;echo:the correction was refused")
+        await s.status_event(ada, "turn_done_unseen")
+
+        async def two_reports() -> bool:
+            return len(await s.events("staff.report", staff_id=ada.id)) == 2
+
+        await eventually(two_reports, "the done report and the refused one")
+        done, refused = await s.events("staff.report", staff_id=ada.id)
+        assert (done.payload["kind"], bool(done.payload.get("implicit"))) == ("done", False)
+        assert refused.payload["implicit"] is True and refused.payload["refused"]
+        assert "correction the address is wrong" in refused.payload["text"] and "the correction was refused" in refused.payload["text"]
+        # The member is told retrying is futile and that its words still reach the orchestrator.
+        said = [r["body"]["text"] for r in s.ptyd.replies if isinstance(r.get("body"), dict) and r["body"].get("error")]
+        assert len(said) == 1 and "sending it again will not change that" in said[0] and "orchestrator is told" in said[0]
+
+
 async def test_a_permission_is_answered_through_its_held_hook(settings: Settings, db: Database) -> None:
     async with stand(settings, db, **claude()) as s:
         trust(s)
@@ -402,6 +424,24 @@ async def test_a_permission_is_answered_through_its_held_hook(settings: Settings
         assert not log(s, "dialog_answered")
         decision = next(r["body"] for r in s.ptyd.replies if isinstance(r.get("body"), dict) and "hookSpecificOutput" in r["body"])
         assert decision["hookSpecificOutput"]["decision"] == {"behavior": "allow"}
+
+
+async def test_the_teams_own_tools_never_wait_on_a_permission_even_in_plan_mode(settings: Settings, db: Database) -> None:
+    # A read-only member runs in plan mode, where Claude asks before every MCP tool whatever the
+    # allow list says. Its Report once waited on the orchestrator five times in one session, one of
+    # those requests was denied, and the orchestrator told the member to answer in plain text instead.
+    async with stand(settings, db, **claude()) as s:
+        trust(s)
+        ada = await started(s, "report:checkpoint:menu drafted;echo:done for now")
+        assert ada.isolation == "readonly"
+        await s.status_event(ada, "turn_done_unseen")
+        reports = await s.events("staff.report", staff_id=ada.id)
+        assert [(r.payload["kind"], r.payload["text"]) for r in reports] == [("checkpoint", "menu drafted")]
+        assert not await s.events("permission.pending", staff_id=ada.id)
+        assert "permission" not in await s.statuses(ada)
+        assert not await s.manager.asks.open_for(s.project.id)
+        decision = next(r["body"] for r in s.ptyd.replies if isinstance(r.get("body"), dict) and "hookSpecificOutput" in r["body"])
+        assert decision["hookSpecificOutput"] == {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}
 
 
 async def test_without_a_hold_the_answer_waits_for_the_dialog_before_its_key(settings: Settings, db: Database) -> None:
@@ -437,7 +477,8 @@ async def test_always_is_the_dialogs_do_not_ask_again_row(settings: Settings, db
 async def test_always_for_a_whole_mcp_server_is_held_by_the_session_and_kept_for_the_next_launch(settings: Settings, db: Database) -> None:
     async with stand(settings, db, **claude()) as s:
         trust(s)
-        ada = await started(s, "mcpperm:daedalus_browser:BrowserNavigate;mcpperm:daedalus_browser:BrowserClick;mcpperm:shop:CartAdd;echo:done")
+        # A shared folder, so not plan mode: there no allow rule lets an MCP tool through at all.
+        ada = await started(s, "mcpperm:daedalus_browser:BrowserNavigate;mcpperm:daedalus_browser:BrowserClick;mcpperm:shop:CartAdd;echo:done", isolation="shared")
         await s.status_event(ada, "permission")
         [ask] = await s.manager.asks.open_for(s.project.id)
         assert ask.detail["tool"] == "mcp__daedalus_browser__BrowserNavigate"
