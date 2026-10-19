@@ -1356,22 +1356,24 @@ class Team:
         and the orchestrator's own Tell or Assign may set a finished member working again; a status
         notice that did is how another orchestrator ran a second, unasked turn of a member that had
         already reported."""
+        # The whole of it under the member's suspend lock, which the idle sweep never waits for: a
+        # message that passed a look at an idle member and was handed over while the sweep stopped
+        # its CLI went into a delivery queue that was going away, and stayed queued for good.
+        async with self.suspend_lock(member.id):
+            return await self._tell(member, text, when=when, by=by, files=files, message_id=message_id, wakes=wakes,
+                                    automatic=automatic)
+
+    async def _tell(self, member: Staff, text: str, *, when: str, by: str, files: list[StoredFile] | None,
+                    message_id: str | None, wakes: bool, automatic: bool) -> dict[str, Any]:
         live = await self.live_of(member)
         if live is None:
             raise StaffError(f"{member.name} has no live session; assign a task to start one")
         if automatic and live.session.status in TURN_ENDED:
             raise TurnEnded(f"{member.name}'s turn has ended; an automatic notice does not start another")
-        if live.session.status == staff_suspend.SUSPENDED or self.suspend_lock(member.id).locked():
-            # Suspended while idle, or being suspended now: its CLI is launched again on its own
-            # session first, and the message then goes as to any member at its prompt.
-            async with self.suspend_lock(member.id):
-                live = await self.live_of(member)
-                if live is None:
-                    raise StaffError(f"{member.name} has no live session; assign a task to start one")
-                if live.session.status == staff_suspend.SUSPENDED:
-                    if automatic:
-                        raise TurnEnded(f"{member.name} is suspended; an automatic notice does not wake it")
-                    live = await staff_suspend.wake(self, live)
+        if live.session.status == staff_suspend.SUSPENDED:
+            # Suspended while idle: its CLI is launched again on its own session first, and the
+            # message then goes as to any member at its prompt.
+            live = await staff_suspend.wake(self, live)
         # A value of the operator's pasted into a message by habit goes as its placeholder; the member has
         # the value where it may use it.
         text = _concealed(text)
