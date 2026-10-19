@@ -170,3 +170,48 @@ async def test_the_orchestrator_is_woken_by_its_own_message_that_failed(settings
     finally:
         await close_team(r.manager)
         await r.manager.close()
+
+
+async def test_a_native_members_brief_and_a_follow_up_that_open_runs_are_acknowledged(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """A Daedalus member's first brief opens its run, and a message for after the turn opens the next
+    one; neither is placed into a running run, the one way a native message was acknowledged. Both
+    stayed "sent" for good while the member worked on them: sixteen briefs on record."""
+    from daedalus.host.staff_daedalus import DaedalusStaffRuntime
+    from tests.support.waiting import until_await
+    from tests.unit.test_session_runner import ScriptedProvider, _manager
+    from tests.unit.test_staff_runtime import project_with, repository, status_of, team_for
+
+    gate = asyncio.Event()
+
+    class Held(ScriptedProvider):
+        async def stream_with_tools(self, request: Any) -> Any:
+            if len(self.requests) == 0:
+                await gate.wait()
+            async for delta in super().stream_with_tools(request):
+                yield delta
+
+    manager = await _manager(settings, db, Held([{"text": "On it."}, {"text": "Prices next."}]))
+    try:
+        team = await team_for(settings, manager)
+        team.runtimes["daedalus"] = DaedalusStaffRuntime(manager)
+        project = await project_with(manager, repository(tmp_path))
+        ada = await manager.staff.hire(project.id, name="Ada", isolation="shared")
+        await operator_assignment(team, ada, await board_task(manager, project, "Menu"))
+        [brief] = await manager.staff.messages(ada.id)
+        later = await team.tell(ada, "Then the prices.", when="after_turn", by="orchestrator")
+        assert later["state"] == "submitted"
+        gate.set()
+
+        async def both() -> bool:
+            states = {m.id: m.state for m in await manager.staff.messages(ada.id)}
+            return states == {brief.id: "acknowledged", later["message_id"]: "acknowledged"}
+
+        await until_await(both, "the brief and the follow-up were acknowledged")
+
+        async def finished() -> bool:
+            return await status_of(manager, ada) == "turn_done_unseen"
+
+        await until_await(finished, "the follow-up's run ended")
+    finally:
+        await close_team(manager)
+        await manager.close()

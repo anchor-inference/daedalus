@@ -2075,6 +2075,9 @@ class Team:
         if event.type is EventType.MESSAGE_STOP and session_id not in self._answered_runs:
             self._answered_runs.add(session_id)
             await observe_native_output(self.app, live.id)
+            # A run opened from the queue (a follow-up taken when the last run ended) passes no
+            # run-started hook; by its first answer its input is placed whichever way it came.
+            await self._acknowledge_consumed(session_id, event.run_id)
         if event.type is EventType.TOOL_CALL_PENDING and event.payload.get("kind") == "ask_user" and event.payload.get("tool_name") == "AskOrchestrator":
             questions = (event.payload.get("ask_user_payload") or {}).get("questions") or [{}]
             first = questions[0] if isinstance(questions[0], dict) else {}
@@ -2106,6 +2109,21 @@ class Team:
         live = await self.live_for_session(session_id)
         if live is not None and live.session.status != "working":
             await self.ingress.status(live, "working")
+        if live is not None:
+            await self._acknowledge_consumed(session_id, run_id)
+
+    async def _acknowledge_consumed(self, session_id: str, run_id: str) -> None:
+        """Acknowledge the staff messages a native run took as its input. Only a message placed into a
+        running run said so (``QUEUE_UPDATE``); one that opened a run, as every first brief does, or
+        a follow-up that opened the next, stayed ``submitted`` for good while the member worked on
+        it, and the app counted it as still on its way."""
+        rows = await self.manager.db.fetchall(
+            "SELECT m.id FROM input_receipts r JOIN staff_messages m ON m.id = r.client_message_id"
+            " WHERE r.session_id = ? AND r.run_id = ? AND r.status = 'consumed' AND m.state IN ('queued', 'written', 'submitted')",
+            (session_id, run_id),
+        )
+        for row in rows:
+            await self.ingress.message_state(row["id"], "acknowledged")
 
     async def on_run_finished(self, session_id: str, run_id: str, status: str) -> None:
         self._answered_runs.discard(session_id)
