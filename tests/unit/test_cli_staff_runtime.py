@@ -270,11 +270,11 @@ class Stand:
     project: Project
     harness: HarnessConfig
 
-    async def hire(self, name: str = "Ada") -> Staff:
+    async def hire(self, name: str = "Ada", *, isolation: str = "") -> Staff:
         # The fake daemon has no cgroup delegation; these tests exercise the CLI conversation.
         harness = getattr(self.adapter, "name", "claude")
         # Read-only starts a CLI in its own no-write mode; one without such a mode shares the folder.
-        isolation = "readonly" if harness in RESTRICTIVE_MODES else "shared"
+        isolation = isolation or ("readonly" if harness in RESTRICTIVE_MODES else "shared")
         return await self.manager.staff.hire(self.project.id, name=name, harness=harness, isolation=isolation)
 
     async def task(self, title: str = "Menu page", *,

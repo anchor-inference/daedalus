@@ -930,6 +930,13 @@ class CliStaffRuntime:
     async def _apply_locked(self, session: CliSession, live: LiveSession, event: StaffEvent) -> None:
         kind = event.kind
         session.changed.set()
+        if kind is EventKind.PERMISSION_REQUESTED and event.native_id and not event.payload.get("team_allow_failed") and protocol.is_team_tool(str(event.payload.get("tool") or "")):
+            # The team's own tools are allowed by the host, never asked of anyone: the request opens
+            # no ask, wakes nobody and leaves the status alone. Answered off the lock, since an
+            # answer typed into a dialog waits for the dialog to be drawn.
+            session.ready.set()
+            self._spawn(self._allow_team_tool(session, event), f"harness-team-allow-{session.staff_session_id}")
+            return
         if kind in (EventKind.READY, EventKind.PROMPT_ACKNOWLEDGED, EventKind.TURN_STARTED, EventKind.TOOL_STARTED, EventKind.PERMISSION_REQUESTED, EventKind.QUESTION_ASKED, EventKind.TURN_COMPLETED):
             session.ready.set()
         if kind is EventKind.TURN_FAILED and not session.ready.is_set() and not session.start_failure:
@@ -1081,6 +1088,17 @@ class CliStaffRuntime:
             return
         if snapshot is not None:
             await self.ingress.usage(live, snapshot)
+
+    async def _allow_team_tool(self, session: CliSession, event: StaffEvent) -> None:
+        """Answer a CLI's permission request for a team tool with "allow". Should the CLI not take the
+        answer, the request goes the ordinary way rather than leave the member's report stuck."""
+        try:
+            allowed = await self.adapter.answer(session.term, event.native_id, Answer("allow_once"))
+        except Exception:  # noqa: BLE001 — the ordinary request below is the fallback for any failure
+            logger.warning("the team tool request of %s could not be allowed", session.staff_session_id, exc_info=True)
+            allowed = False
+        if not allowed:
+            await self._apply(session, replace(event, payload={**event.payload, "team_allow_failed": True}))
 
     async def _implicit_report(self, live: LiveSession, last_message: str) -> None:
         """A turn that ended without a Report still reaches the orchestrator: the end of its last

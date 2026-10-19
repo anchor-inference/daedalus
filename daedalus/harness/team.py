@@ -22,6 +22,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from daedalus.harness.contract import mcp_server
+
+SERVER = "daedalus_team"
+"""The MCP server every command-line member's team tools are served under."""
+
 SKILL_NAME = "daedalus-team"
 SKILL_PATH = f".claude/skills/{SKILL_NAME}/SKILL.md"
 """Where the skill sits under a directory a CLI is told to look in; the layout Claude Code reads."""
@@ -136,6 +141,18 @@ in your head.
 """
 
 
+def is_team_tool(tool: str) -> bool:
+    """Whether a CLI's permission request is for one of the team's own tools.
+
+    Those tools only talk to the member's own orchestrator, so they are never a member's to be
+    granted: a request for one is answered by the host at once. Claude Code in plan mode asks before
+    every MCP tool whatever its allow list says, and a read-only member's ``Report`` once waited on
+    the orchestrator five times in one session; one such request was denied, and the orchestrator,
+    believing the tool itself was withheld, told the member to answer in plain text instead. Grok
+    names the tools ``daedalus_team__<tool>``, the others ``mcp__daedalus_team__<tool>``."""
+    return mcp_server(tool) == SERVER or tool.startswith(f"{SERVER}__")
+
+
 def excerpt(text: str, limit: int = EXCERPT_CHARS) -> str:
     """The end of a message on one line: a turn's last words carry its conclusion."""
     flat = " ".join((text or "").split())
@@ -163,11 +180,13 @@ def looks_like_question(text: str) -> bool:
 __all__ = [
     "EXCERPT_CHARS",
     "NO_REPORT",
+    "SERVER",
     "SKILL_NAME",
     "SKILL_PATH",
     "TeamFacts",
     "excerpt",
     "first_line",
+    "is_team_tool",
     "looks_like_question",
     "mandatory_block",
     "skill_markdown",
