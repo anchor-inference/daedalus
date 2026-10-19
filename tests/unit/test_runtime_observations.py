@@ -11,7 +11,12 @@ import pytest
 from daedalus.extensions.launch_controls import prepare_attempt
 from daedalus.extensions.lifecycle import Lifecycle
 from daedalus.extensions.orchestrator_domain import DomainConflict, apply_goal_revision
-from daedalus.extensions.runtime_observations import admit_native_run, observe_exit, settle_previous_host
+from daedalus.extensions.runtime_observations import (
+    admit_native_run,
+    adopt_surviving_cli,
+    observe_exit,
+    settle_previous_host,
+)
 from daedalus.staff_runtime import BoardTask
 from daedalus.stores.control import ControlConflict, ControlDenied, ControlStore, Entity, Principal, Scope
 from daedalus.stores.database import Database
@@ -365,5 +370,56 @@ async def test_a_native_run_of_an_earlier_host_is_settled_once_its_session_ended
         await db.execute("UPDATE staff_sessions SET ended_at = 'now',status = 'exited' WHERE id = 'staff-session'")
         assert await settle_previous_host(app, "task")
         assert (await db.fetchone("SELECT state FROM execution_attempts WHERE id = ?", (identity.id,)))[0] == "cancelled"
+    finally:
+        store.release()
+
+
+async def surviving_cli(db: Database) -> None:
+    """A command-line attempt whose terminal is still running in the daemon instance it started in."""
+    await db.execute("UPDATE staff_sessions SET kind = 'cli',terminal_id = 'terminal' WHERE id = 'staff-session'")
+    await db.execute("UPDATE execution_attempts SET runtime_kind = 'cli',provider_session_ref = 'terminal:terminal',"
+                     "runtime_instance = 'daemon-one',state = 'running'")
+    await db.execute("INSERT INTO terminals(id,env,owner_kind,cwd,status,created_at,ptyd_instance)"
+                     " VALUES ('terminal','container','staff','/tmp','running','now','daemon-one')")
+
+
+async def test_a_terminal_alive_after_a_restart_takes_its_attempt_up_again(db: Database) -> None:
+    """A member whose terminal outlived a deploy went on working, but its attempt stayed recovering
+    under the old host generation, and every report it made was refused as superseded."""
+    store, identity, _ = await owner(db)
+    app = SimpleNamespace(db=db, executions=store)
+    try:
+        await surviving_cli(db)
+        await restart(store)
+        with pytest.raises(ControlDenied, match="superseded"):
+            async with db.transaction() as conn:
+                await store.check_staff(conn, "staff-session")
+        assert await adopt_surviving_cli(app, "staff-session")
+        row = await db.fetchone("SELECT state,host_generation FROM execution_attempts WHERE id = ?", (identity.id,))
+        assert row["state"] == "running" and row["host_generation"] == store.generation
+        async with db.transaction() as conn:
+            assert (await store.check_staff(conn, "staff-session")).id == identity.id
+        assert not await adopt_surviving_cli(app, "staff-session")
+    finally:
+        store.release()
+
+
+@pytest.mark.parametrize("change", [
+    "UPDATE terminals SET status = 'exited'",
+    "UPDATE terminals SET ptyd_instance = 'daemon-two'",
+    "UPDATE staff_sessions SET ended_at = 'now'",
+    "UPDATE board_tasks SET current_attempt_id = NULL",
+    "UPDATE board_tasks SET contract_revision = 2",
+    "INSERT INTO terminal_exit_observations VALUES ('terminal','daemon-one','now')",
+])
+async def test_an_attempt_is_taken_up_only_on_proof_its_runtime_is_the_same_and_alive(db: Database, change: str) -> None:
+    store, identity, _ = await owner(db)
+    app = SimpleNamespace(db=db, executions=store)
+    try:
+        await surviving_cli(db)
+        await restart(store)
+        await db.execute(change)
+        assert not await adopt_surviving_cli(app, "staff-session")
+        assert (await db.fetchone("SELECT state FROM execution_attempts WHERE id = ?", (identity.id,)))[0] == "recovering"
     finally:
         store.release()

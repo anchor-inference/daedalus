@@ -14,6 +14,7 @@ import functools
 import logging
 from typing import TYPE_CHECKING, cast
 
+from daedalus.extensions.runtime_observations import adopt_surviving_cli
 from daedalus.harness import (  # noqa: F401 — importing an adapter registers it
     ADAPTERS,
     claude,
@@ -136,6 +137,13 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
             return
         if count:
             logger.info("%d %s staff session(s) taken up from the previous host", count, runtime.kind)
+        # The runtime attached only sessions whose terminal its daemon reports running; their
+        # attempts go on under this host, so the reports they make are not refused as superseded.
+        for staff_session_id in list(runtime.sessions):
+            try:
+                await adopt_surviving_cli(app, staff_session_id)
+            except Exception:  # noqa: BLE001 — an attempt not taken up stays recovering, as before
+                logger.exception("the attempt of staff session %s was not taken up", staff_session_id)
         # Once, now that the sessions are held again: rows the previous host left stale (grey over an
         # idle prompt, or working on a task that is over) are settled before the queue looks at them,
         # so the members' waiting tasks go to them rather than wait behind a status nobody corrects.

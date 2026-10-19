@@ -280,6 +280,57 @@ async def settle_previous_host(app: Application, task_id: str) -> bool:
     return True
 
 
+async def adopt_surviving_cli(app: Application, staff_session_id: str) -> bool:
+    """Take up under this host the attempt of a command-line member whose terminal outlived a restart.
+
+    A restart marks every live attempt recovering, which is right while nobody knows whether its
+    process survived. A terminal does survive, in its daemon, and the member taken up again went on
+    working; but its attempt stayed recovering under the old generation, and every report it made
+    was refused as superseded (eleven of fifty-nine finished turns lost their report so). The
+    attempt is taken up only on proof that it is the same live runtime: its session is open on that
+    terminal, the terminal still runs in the daemon instance the attempt started in with no exit
+    recorded, the card still names this attempt under the same contract, and nothing asked for it to
+    stop. An attempt made recovering by a stop, a deadline or a cancellation stays as it is, and a
+    contained launch, whose bindings belong to the old generation, is left to its own release.
+    """
+    async with app.db.transaction() as conn:
+        generation = await app.executions._host(conn)
+        row = await one(conn,
+            "SELECT a.id,a.task_id,a.host_generation FROM execution_attempts a"
+            " JOIN staff_sessions s ON s.id = a.staff_session_id"
+            " JOIN board_tasks t ON t.id = a.task_id AND t.current_attempt_id = a.id"
+            " AND t.contract_revision = a.contract_revision"
+            " JOIN terminals m ON 'terminal:' || m.id = a.provider_session_ref AND m.id = s.terminal_id"
+            " WHERE a.staff_session_id = ? AND a.runtime_kind = 'cli' AND a.state = 'recovering'"
+            " AND a.host_generation < ? AND s.ended_at IS NULL AND s.pause_requested = 0"
+            " AND m.status = 'running' AND a.runtime_instance IS NOT NULL AND m.ptyd_instance = a.runtime_instance"
+            " AND NOT EXISTS (SELECT 1 FROM terminal_exit_observations x WHERE x.terminal_id = m.id"
+            " AND x.runtime_instance = m.ptyd_instance)"
+            " AND NOT EXISTS (SELECT 1 FROM runtime_exit_observations e WHERE e.attempt_id = a.id)"
+            " AND NOT EXISTS (SELECT 1 FROM attempt_faults f WHERE f.attempt_id = a.id)"
+            " AND NOT EXISTS (SELECT 1 FROM attempt_phase_clocks c WHERE c.attempt_id = a.id AND c.outcome = 'timed_out')"
+            " AND NOT EXISTS (SELECT 1 FROM attempt_resource_bindings r WHERE r.attempt_id = a.id)"
+            " AND NOT EXISTS (SELECT 1 FROM writer_attempt_bindings w WHERE w.attempt_id = a.id)"
+            " AND NOT EXISTS (SELECT 1 FROM lifecycle_owners o WHERE o.child_kind = 'execution_attempt'"
+            " AND o.child_id = a.id AND o.cancel_state != 'active')"
+            " AND NOT EXISTS (SELECT 1 FROM lifecycle_parents p WHERE p.parent_kind = 'task'"
+            " AND p.parent_id = a.task_id AND p.cancel_state != 'active')"
+            " AND NOT EXISTS (SELECT 1 FROM effect_outbox o WHERE o.kind = 'task.stop'"
+            " AND o.state IN ('pending','claimed','unknown')"
+            " AND json_extract(o.payload_json,'$.control.task_id') = a.task_id)",
+            (staff_session_id, generation))
+        if row is None:
+            return False
+        changed = await conn.execute("UPDATE execution_attempts SET state = 'running',host_generation = ?,updated_at = ?"
+                                     " WHERE id = ? AND state = 'recovering' AND host_generation = ?",
+                                     (generation, now(), row["id"], row["host_generation"]))
+        if changed.rowcount != 1:
+            return False
+    logger.info("took up attempt %s of task %s, whose terminal outlived host generation %s",
+                row["id"], row["task_id"], row["host_generation"])
+    return True
+
+
 async def _stop_reason(conn: aiosqlite.Connection, attempt_id: str, observed_status: str) -> str:
     """Why the host stopped an owned runtime, in words for the session's end and its event."""
     clock = await one(conn, "SELECT phase,started_at,deadline_at FROM attempt_phase_clocks"
