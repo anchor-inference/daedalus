@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -10,7 +11,7 @@ import pytest
 from daedalus.extensions.launch_controls import observe_bind, prepare_attempt
 from daedalus.staff_runtime import BoardTask, Started
 from daedalus.stores.control import ControlConflict, ControlDenied, Principal
-from daedalus.stores.database import Database
+from daedalus.stores.database import MIGRATIONS, Database
 from daedalus.stores.executions import ExecutionStore
 from daedalus.stores.staff import StaffStore
 from daedalus.stores.writer_leases import PREPARATION_KEY, WriterLeases
@@ -145,5 +146,41 @@ async def test_fast_result_is_not_revived_when_start_returns(db: Database) -> No
         with pytest.raises(ControlDenied, match="previous host generation"):
             await observe_bind(app, identity, session, Started(None, None, None, "native-session"))
         assert (await db.fetchone("SELECT state FROM execution_attempts"))[0] == "completed"
+    finally:
+        app.executions.release()
+
+
+async def test_a_workers_report_rights_outlive_a_day_at_its_card(db: Database) -> None:
+    """Report rights once expired a day after the launch: a member still at work the next day had
+    every Report refused with "grant has expired"."""
+    app, member, task, session = await launch_fixture(db)
+    try:
+        await prepare_attempt(app, OPERATOR, member, task, session, fence_token=secrets.token_urlsafe(32))
+        grant = await db.fetchone("SELECT expires_at FROM actor_grants")
+        assert datetime.fromisoformat(grant["expires_at"]) > datetime.now(UTC) + timedelta(days=30)
+    finally:
+        app.executions.release()
+
+
+async def test_the_migration_renews_only_the_expired_rights_of_workers_still_at_work(db: Database) -> None:
+    app, member, task, session = await launch_fixture(db)
+    try:
+        await prepare_attempt(app, OPERATOR, member, task, session, fence_token=secrets.token_urlsafe(32))
+        await db.execute("INSERT INTO staff_sessions(id,staff_id,kind,task_id,status_at,started_at,ended_at)"
+                         " VALUES ('over','worker','daedalus','task','2026-01-01','2026-01-01','2026-01-02')")
+        live = (await db.fetchone("SELECT id FROM actor_grants"))[0]
+        for grant, revoked in (("ended", None), ("revoked", "2026-01-02")):
+            await db.execute("INSERT INTO actor_grants(id,actor_id,origin_class,issuer_id,scope_kind,scope_id,project_id,task_id,"
+                             "operations_json,effects_json,expires_at,created_at,staff_session_id,revoked_at)"
+                             " VALUES (?,'staff:worker','agent','x','task','task','project','task','[]','[]','2026-01-02','2026-01-01',?,?)",
+                             (grant, "over" if grant == "ended" else "staff-session", revoked))
+        await db.execute("UPDATE actor_grants SET expires_at = '2026-01-02T00:00:00+00:00' WHERE id = ?", (live,))
+        step = MIGRATIONS[-1].step
+        for _ in range(2):
+            async with db.transaction() as conn:
+                await step(conn)
+        rows = {row["id"]: row["expires_at"] for row in await db.fetchall("SELECT id,expires_at FROM actor_grants")}
+        assert datetime.fromisoformat(rows[live]) > datetime.now(UTC) + timedelta(days=300)
+        assert rows["ended"] == rows["revoked"] == "2026-01-02"
     finally:
         app.executions.release()

@@ -22,6 +22,12 @@ launch_attempt: ContextVar[str | None] = ContextVar("launch_attempt", default=No
 launch_capacity_slot: ContextVar[str | None] = ContextVar("launch_capacity_slot", default=None)
 launch_resources: ContextVar[dict | None] = ContextVar("launch_resources", default=None)
 
+WORKER_GRANT_LIFETIME = timedelta(days=365)
+"""How long a worker's report rights may last at most. What really bounds them is their staff
+session, which they die with, and the launch approval they are capped by. They once expired a day
+after the launch: a member still at work on its card the next day had every Report refused with
+"grant has expired", and its results reached the orchestrator only as a turn's last words."""
+
 
 async def prepare_attempt(app: Application, principal: Principal, member: Staff, task: BoardTask,
                           session: StaffSession, *, fence_token: str,
@@ -44,7 +50,7 @@ async def prepare_attempt(app: Application, principal: Principal, member: Staff,
         if row is None:
             raise KeyError(task.id)
         grant = await control.issue_worker_grant_in(conn, principal, scope, staff_session_id=session.id,
-                                                   expires_at=(datetime.now(UTC) + timedelta(hours=24)).isoformat())
+                                                   expires_at=(datetime.now(UTC) + WORKER_GRANT_LIFETIME).isoformat())
         worker = Principal(f"staff:{member.id}", "agent", grant["grant_id"], grant["generation"])
         identity = await app.executions.create(conn, attempt_id=launch_attempt.get() or uuid.uuid4().hex, task_id=task.id,
                                            contract_revision=row["contract_revision"], launcher=principal,

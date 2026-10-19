@@ -900,8 +900,8 @@ def _checks(raw: list[str] | None) -> list[str]:
 
 def _next_round(task_id: str) -> str:
     """How a card in review gets another round: its result returned first, then the Assign."""
-    return (f"ReviewResult(task_id='{task_id}', op='return', reason=…) sends its result back and "
-            f"then Assign(task_id='{task_id}', …) gives it the round")
+    return (f"ReviewResult(op='return', task_id='{task_id}', reason=…) sends its result back and "
+            f"then Assign(task_id='{task_id}') gives it the round")
 
 
 def _closed_card(card: dict[str, Any]) -> str:

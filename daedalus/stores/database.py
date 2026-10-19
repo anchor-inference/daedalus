@@ -2603,6 +2603,22 @@ async def _removed_cards(conn: aiosqlite.Connection) -> None:
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _removed_cards))
 
+
+async def _live_worker_grants(conn: aiosqlite.Connection) -> None:
+    """Report rights of workers still at their cards, which a day's expiry had already cut off: they
+    now last as long as the launch approval they come from, a year at most, and still die with
+    their session. Run again it changes nothing, since a grant renewed once is no longer expired."""
+    await conn.execute(
+        "UPDATE actor_grants SET expires_at = coalesce("
+        " (SELECT p.expires_at FROM actor_grants p WHERE p.id = actor_grants.parent_grant_id),"
+        " strftime('%Y-%m-%dT%H:%M:%f+00:00','now','+365 days'))"
+        " WHERE staff_session_id IS NOT NULL AND revoked_at IS NULL"
+        " AND expires_at <= strftime('%Y-%m-%dT%H:%M:%f+00:00','now')"
+        " AND EXISTS (SELECT 1 FROM staff_sessions s WHERE s.id = actor_grants.staff_session_id AND s.ended_at IS NULL)")
+
+
+MIGRATIONS.append(DataMigration("SELECT 1;", _live_worker_grants))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

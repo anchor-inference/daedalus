@@ -152,8 +152,8 @@ async def test_new_work_for_the_same_member_never_takes_over_the_card_they_just_
 
         lessons, said = await assigned(r, sid, staff="Leo", title="Lessons from the videos, to the archive", **REVISED)
         assert lessons != presentation
-        assert f"previous card {presentation} \"Presentation of the product\" was handed in" in said and f"Assign(task_id='{presentation}', …)" in said
-        assert f"ReviewResult(task_id='{presentation}', op='return'" in said
+        assert f"previous card {presentation} \"Presentation of the product\" was handed in" in said and f"Assign(task_id='{presentation}')" in said
+        assert f"ReviewResult(op='return', task_id='{presentation}'" in said
         card = await r.board.get(presentation)
         assert card["title"] == "Presentation of the product" and card["status"] == "review"
         assert card["brief"]["objective"] == PLAN["objective"] and "round 2" not in card["notes"]
@@ -180,7 +180,7 @@ async def test_a_round_needs_the_exact_return_and_keeps_the_card_history(setting
             await r.call(sid, "assign", staff="Ada", title="Tariff plan, revision 2", **REVISED)
         assert len(await r.board.list(project_id=r.project.id)) == 1, "a refused hand-over writes nothing"
 
-        with pytest.raises(Refused, match=f"{first} is in review: ReviewResult\\(task_id='{first}', op='return'"):
+        with pytest.raises(Refused, match=f"{first} is in review: ReviewResult\\(op='return', task_id='{first}'"):
             await r.call(sid, "assign", staff="Ada", task_id=first, title="Tariff plan, revision 2", **REVISED)
         first_result = await return_reviewed_result(r.team, first, reason="The report left two questions unanswered")
         _task, said = await assigned(r, sid, staff="Ada", task_id=first,
