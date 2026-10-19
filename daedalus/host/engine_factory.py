@@ -11,12 +11,10 @@ from protocore.contracts.llm import IProviderChain
 from protocore.contracts.tool_registry import IToolRegistry, ToolVisibilityPolicy, policy_admits
 from protocore.runtime.query_engine import QueryEngine, QueryEngineConfig
 from protocore.runtime.runtime_constants import default_runtime_constants
-from protocore.runtime.tool_deferral import discovery_tool_names, ensure_tool_deferral, tool_rules_mark
-from protocore.runtime.tool_dispatch import ToolDispatcher
+from protocore.runtime.tool_deferral import discovery_tool_names, ensure_tool_deferral
 from protocore.runtime.tool_permission import (
     PermissionStage,
     ToolPermissionDecision,
-    ToolPermissionGate,
     ToolPermissionOutcome,
 )
 
@@ -307,7 +305,10 @@ def build_engine(
         loaded_tool_groups=tuple(loaded_tool_groups),
         tool_group_loads=dict(tool_group_loads or {}),
         trimmed_tool_result_ids=tuple(trimmed_tool_result_ids),
-        tool_rules_key=deps.tool_rules_key,
+        # Every session runs under one tenant, so the mark is scoped to the session; a fork names its
+        # source's session, since only the source's mark keeps the prefix the same bytes as the source's.
+        tool_rules_mark_key=deps.tool_rules_key.hex(),
+        tool_rules_session_id=tool_rules_session or session_id,
     )
     engine = QueryEngine(
         config=engine_config,
@@ -318,17 +319,10 @@ def build_engine(
         skill_store=deps.skill_store,
         blob_store=deps.blob_store,
         provider_chain=provider_chain,
-    )
-    if tool_rules_session:
-        # The rules mark sits in the tool catalogue at the head of the prompt and is derived from the
-        # session. A fork carrying its source's history also carries rules given under the source's
-        # mark, and only the source's mark keeps the prefix the same bytes as the source's.
-        engine._tool_rules_mark = tool_rules_mark(tool_rules_session, deps.tool_rules_key)
-    # The container is the boundary: no shell deny patterns, no path isolation.
-    engine._tool_dispatcher = ToolDispatcher(  # type: ignore[attr-defined]
-        registry=deps.tool_registry,
-        permission_gate=ToolPermissionGate(policies=[deps.policy_gate(session_id, run_id)] if deps.policy_gate is not None else []),
-        hook_manager=deps.hook_manager,
+        # The container is the boundary: no shell deny patterns, no path isolation. The engine builds the
+        # dispatcher around these itself; one built here lost the run's tool-error count, the tool roles
+        # and the resilience classifier.
+        tool_safety_policies=[deps.policy_gate(session_id, run_id)] if deps.policy_gate is not None else [],
     )
     if role == "agent":
         # A subagent or a staff member told how to notify the operator, or a session told about a board
