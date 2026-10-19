@@ -735,6 +735,9 @@ class CodexAdapter:
     def composer_holds(self, screen: str, text: str) -> bool:
         return False  # nothing is typed into Codex's composer; messages go by the app server
 
+    def composer_text(self, screen: str) -> str | None:
+        return None  # nothing is typed into Codex's composer; messages go by the app server
+
     # -- the transcript -------------------------------------------------------------------------
 
     async def transcript(self, env: EnvironmentPort, ref: str, since: int = 0) -> list[Turn]:

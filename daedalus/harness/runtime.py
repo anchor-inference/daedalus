@@ -1095,16 +1095,19 @@ class CliStaffRuntime:
             logger.warning("the implicit report of %s was not made", live.id, exc_info=True)
 
     async def _in_transcript(self, session: CliSession, text: str) -> bool:
-        """Whether the CLI's own transcript has the message as a prompt it took."""
+        """Whether the CLI's own transcript has the message as a prompt it took: one that starts with
+        it, or ends with it, as a prompt does that took the message after other text in the composer."""
         if not session.transcript_ref:
             return False
-        wanted = normalised(text)[:200]
+        whole = normalised(text)
+        wanted = whole[:200]
         try:
             turns = await self.adapter.transcript(session.env_port, session.transcript_ref)
         except Exception:  # noqa: BLE001 — unreadable is "not found", which never resends anything
             logger.info("the transcript of %s could not be read", session.staff_session_id, exc_info=True)
             return False
-        return any(t.role in ("user", "orchestrator") and wanted and normalised(t.text).startswith(wanted) for t in turns[-READ_TRANSCRIPT_TURNS:])
+        return any(t.role in ("user", "orchestrator") and wanted and (normalised(t.text).startswith(wanted) or normalised(t.text).endswith(whole))
+                   for t in turns[-READ_TRANSCRIPT_TURNS:])
 
     async def _watch_team_tools(self, session: CliSession) -> None:
         """The team tools must say they loaded within a while of the CLI being ready. If they do not,

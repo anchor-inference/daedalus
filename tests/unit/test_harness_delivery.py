@@ -284,6 +284,129 @@ async def test_a_late_transcript_entry_acknowledges_a_submitted_message(running:
     assert r.receipts.of("sm-8") == ["written", "submitted", "acknowledged"]
 
 
+@dataclass
+class Composer(Prompt):
+    """A prompt that keeps what is typed into it, as a real one does: a paste goes after what is
+    there, Ctrl+U clears the line under the cursor, Backspace joins it to the one above, and Enter
+    submits the whole of it. ``readable`` off draws a screen whose composer cannot be found, the
+    way a narrow terminal once hid Claude Code's from its reader."""
+
+    readable: bool = True
+    keys: list[str] = field(default_factory=list)
+
+    async def write(self, *, text: str | None = None, paste: str | None = None, keys: list[str] | None = None, note: str = "", wait_keyboard: bool = True) -> None:
+        if paste is not None:
+            self.pastes += 1
+            self.held += paste
+            return
+        assert keys is not None and len(keys) == 1
+        key = keys[0]
+        self.keys.append(key)
+        if key == "C-u":
+            # Grok's Ctrl+U on an empty composer resumes another session: it must never be pressed.
+            assert self.held, "Ctrl+U was pressed on an empty composer"
+            head, _, _ = self.held.rpartition("\n")
+            self.held = head + "\n" if "\n" in self.held else ""
+        elif key == "Backspace":
+            self.held = self.held[:-1]
+        elif key == "Enter":
+            self.enters += 1
+            if self.held.strip():
+                sent = self.held
+                self.submitted.append(sent)
+                self.held = ""
+                if self.hooks and self.worker is not None:
+                    worker = self.worker
+                    asyncio.get_running_loop().call_later(self.hook_after, lambda: worker.acknowledge(sent))
+
+    async def screen(self, *, scrollback: int = 0) -> str:
+        lines = self.held.split("\n") if self.held else [""]
+        if not self.readable:
+            return "\n".join(["✻ Churned for 1m 51s", "", f"> {lines[0]}", *lines[1:], "", "  [a status line of the operator's own]"])
+        if self.harness == "grok":
+            box = [f"  │ ❯ {lines[0]:<56} │", *(f"  │   {line:<56} │" for line in lines[1:])]
+            return "\n".join(["     ❯ earlier prompt", "", "  ╭" + "─" * 60 + "╮", *box, "  ╰" + "─" * 60 + "╯", "", "  Enter:send  │  Alt+Enter:newline"])
+        rule = "─" * 120
+        return "\n".join(["✻ Churned for 1m 51s · done 8:03 PM", "", rule + " mira · promo ─", f"❯ {lines[0]}", *(f"  {line}" for line in lines[1:]), rule, "  ⏵⏵ accept edits on (shift+tab to cycle)"])
+
+
+THREE_LINES = "[orchestrator] stop the render now\nkill its child processes too\nthen report what is left"
+
+
+@pytest.mark.parametrize("harness", ["claude", "grok"])
+async def test_a_paste_left_unseen_in_the_composer_is_never_glued_to_the_next_message(harness: str, running: Any) -> None:
+    """What the operator found on 10-18: with a phone attached the composer could not be read, each
+    message was pasted, reported failed, and left where it was; the next Enter sent five of them as
+    one prompt. A message is not pasted while such a leftover may be there and cannot be seen, and
+    once it can be seen the leftover is taken out first."""
+    prompt = Composer(harness, readable=False)
+    r = running(rig(prompt, config(paste_confirm_s=0.4)))
+    r.worker.put(Pending("sm-a", THREE_LINES, "now", "orchestrator"))
+    assert await r.settled("sm-a") == "failed"
+    assert prompt.held == THREE_LINES and prompt.enters == 0
+    r.worker.put(Pending("sm-b", "[orchestrator] a second message", "now", "orchestrator"))
+    assert await r.settled("sm-b") == "failed"
+    assert "was not pasted after it" in r.receipts.error("sm-b")
+    assert prompt.pastes == 1 and prompt.held == THREE_LINES  # nothing glued to the first
+    prompt.readable = True
+    r.worker.put(Pending("sm-c", "[orchestrator] the third message", "now", "orchestrator"))
+    assert await r.settled("sm-c") == "acknowledged"
+    assert prompt.submitted == ["[orchestrator] the third message"]
+    assert prompt.keys[-1] == "Enter" and set(prompt.keys[:-1]) == {"C-u", "Backspace"}
+    assert r.worker.leftover == []
+
+
+async def test_a_message_no_enter_could_send_is_taken_out_before_the_next_one() -> None:
+    """Enters lost every time leave the text in the prompt; the next message must not ride on it."""
+    prompt = Composer("claude")
+    cfg = config(enter_retries=1)
+    r = rig(prompt, cfg)
+    task = r.worker.start()
+    try:
+        original = prompt.write
+        lost = {"left": 2}
+
+        async def losing(**kwargs: Any) -> None:
+            if kwargs.get("keys") == ["Enter"] and lost["left"]:
+                lost["left"] -= 1
+                prompt.enters += 1
+                return
+            await original(**kwargs)
+
+        prompt.write = losing  # type: ignore[method-assign]
+        r.worker.put(Pending("sm-d", "[orchestrator] the first one", "after_turn", "orchestrator"))
+        assert await r.settled("sm-d") == "failed"
+        assert prompt.held == "[orchestrator] the first one"
+        r.worker.put(Pending("sm-e", "[orchestrator] the second one", "after_turn", "orchestrator"))
+        assert await r.settled("sm-e") == "acknowledged"
+        assert prompt.submitted == ["[orchestrator] the second one"]
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_a_persons_draft_is_left_alone_and_the_message_after_it_is_acknowledged(running: Any) -> None:
+    """Text someone else typed is not the worker's to remove. Pasted after it, the message reaches the
+    CLI as the end of one prompt, and that prompt acknowledges it."""
+    prompt = Composer("claude", held="a draft the operator left ")
+    r = running(rig(prompt, config()))
+    r.worker.put(Pending("sm-f", "[orchestrator] please check the footer", "now", "orchestrator"))
+    assert await r.settled("sm-f") == "acknowledged"
+    assert prompt.keys == ["Enter"]
+    assert prompt.submitted == ["a draft the operator left [orchestrator] please check the footer"]
+
+
+async def test_the_empty_composers_placeholder_is_not_taken_for_a_leftover(running: Any) -> None:
+    """An empty Claude composer draws a suggestion where text would be; a clear pressed for it would
+    find nothing to clear and could not tell why."""
+    prompt = Composer("claude", held='Try "fix typecheck errors"')
+    r = running(rig(prompt, config()))
+    r.worker.leftover.append("[orchestrator] an older message")
+    r.worker.put(Pending("sm-g", "[orchestrator] next", "now", "orchestrator"))
+    assert await r.settled("sm-g") == "acknowledged"
+    assert "C-u" not in prompt.keys and r.worker.leftover == []
+
+
 @pytest.mark.parametrize("harness", ["claude", "grok"])
 async def test_a_write_that_timed_out_waiting_for_the_keyboard_waits_again(harness: str, running: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """The daemon gives up on a write after its own wait when input keeps arriving, with a timeout

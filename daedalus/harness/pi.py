@@ -351,6 +351,9 @@ class PiAdapter:
         tail = "".join(text.split())[-40:]
         return bool(held) and bool(tail) and tail in "".join(held.split())
 
+    def composer_text(self, screen: str) -> str | None:
+        return composer(screen)
+
     # -- the transcript -------------------------------------------------------------------------
 
     async def transcript(self, env: EnvironmentPort, ref: str, since: int = 0) -> list[Turn]:

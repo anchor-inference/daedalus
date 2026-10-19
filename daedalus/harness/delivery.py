@@ -24,6 +24,11 @@ that takes its messages in order and, for each:
    nothing is ever pasted again blindly — a duplicate instruction is worse than a missing one,
    because nobody notices it.
 
+A paste that never showed in the composer, or that no Enter could send, may still sit there unseen.
+The worker remembers it, and before its next paste takes it out of the composer again, or does not
+paste at all while the composer cannot be read: a member once received five messages glued into
+one prompt, three of them reported as failed, after a phone had narrowed its terminal.
+
 Every step is a receipt state (``written``, ``submitted``, ``acknowledged``, ``failed``) reported
 through the team's ingress, and a fact in ``harness_deliveries``.
 """
@@ -58,6 +63,8 @@ SETTLE_MAX_S = 8.0
 """The longest wait after one Enter, however many came before it."""
 KEYBOARD_RETRY_S = 1.0
 """After a person held the keyboard through a write's wait, the pause before trying again."""
+CLEAR_ROUNDS_EXTRA = 4
+"""Keys spent clearing a leftover beyond two per line it shows: a line is one clear and one join."""
 PASTES_MAX = 2
 """A paste a dialog swallowed is pasted once more when the dialog has gone; never a third time."""
 MATCH_CHARS = 200
@@ -76,11 +83,14 @@ def normalised(text: str) -> str:
 
 
 def same_prompt(sent: str, reported: str) -> bool:
-    """Whether a prompt the CLI reports is a message that was sent: the same start, spacing aside."""
+    """Whether a prompt the CLI reports is a message that was sent: the same start, spacing aside, or
+    the whole message at its end. The end is for a message pasted after text already in the composer
+    (a person's draft, an earlier paste nobody sent): the CLI then reports both as one prompt, and a
+    match on the start alone left such a message ``submitted`` for good while the member worked on it."""
     a, b = normalised(sent), normalised(reported)
     if not a or not b:
         return False
-    return a[:MATCH_CHARS] == b[:MATCH_CHARS]
+    return a[:MATCH_CHARS] == b[:MATCH_CHARS] or b.endswith(a)
 
 
 def keyboard_wait(exc: TerminalError) -> bool:
@@ -128,6 +138,9 @@ class DeliveryWorker:
     arrived: asyncio.Event = field(default_factory=asyncio.Event)
     inflight: Pending | None = None
     task: asyncio.Task[None] | None = None
+    leftover: list[str] = field(default_factory=list)
+    """What this worker typed into the composer and gave up on: a paste it never saw there, or one no
+    Enter could send. It may sit there unseen, and is taken out before the next paste."""
 
     def start(self) -> asyncio.Task[None]:
         self.task = asyncio.create_task(self._run(), name=f"harness-deliver-{self.session.staff_session_id}")
@@ -298,6 +311,10 @@ class DeliveryWorker:
         pending.acknowledged = asyncio.get_running_loop().create_future()
         self.inflight = pending
         human = pending.origin == "operator"
+        blocked = await self._clear_leftover(pending, cfg, human=human)
+        if blocked:
+            await self._state(pending, "failed", error=f"{blocked}; this one was not pasted after it")
+            return
         pastes = 0
         while True:
             await self._write(pending, paste=text, human=human, note=f"message {pending.message_id}".strip())
@@ -317,6 +334,7 @@ class DeliveryWorker:
             if pending.acknowledged.done():
                 await self._state(pending, "acknowledged")
                 return
+            self.leftover.append(text)
             await self._state(pending, "failed", error=f"the message did not appear in the command-line agent's composer within {cfg.paste_confirm_s:g} s; no Enter was sent")
             return
         await self._submit(pending, text, via, cfg, human=human)
@@ -344,6 +362,7 @@ class DeliveryWorker:
                 if enters <= cfg.enter_retries:
                     settle = min(settle * 2, SETTLE_MAX_S)
                     continue  # the Enter was lost; the text is still there and nothing was submitted
+                self.leftover.append(text)
                 await self._state(pending, "failed", error=f"the message is still in the command-line agent's composer after {enters} Enters; it was not submitted")
                 return
             if not submitted:
@@ -364,6 +383,63 @@ class DeliveryWorker:
             # The composer let the message go on an Enter and the CLI has not said it took it. It
             # stays ``submitted``, which is what is known; it is not typed again.
             return
+
+    async def _clear_leftover(self, pending: Pending, cfg: HarnessConfig, *, human: bool) -> str:
+        """Take out of the composer what an earlier message of this worker left there; why it could
+        not be, when nothing may be pasted, else empty.
+
+        Only text seen to be such a leftover is touched: a composer holding anything else (a person's
+        draft, or nothing) is left as it is and the leftover forgotten — someone sent or removed it.
+        The adapter's keys clear the line the cursor is on and join the one above it, one key at a
+        time and only while the composer reads non-empty, because on an empty composer the same keys
+        mean something else (Grok's Ctrl+U resumes another session there). A composer that cannot be
+        read is waited for, ``paste_confirm_s`` at most: a paste into it would be glued to the
+        leftover it may hold, and the member would read both as one prompt."""
+        rules = self.adapter.capabilities.paste
+        if not self.leftover or rules is None:
+            return ""
+        term = self.session.term
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + cfg.paste_confirm_s
+        stuck = "an earlier message still sits unsent in the command-line agent's composer and could not be cleared"
+        before: str | None = None
+        presses = 0
+        budget = 0
+        while True:
+            screen = await term.screen()
+            if self.adapter.classify_screen(screen) is ScreenClass.DIALOG:
+                await self._nudged(WINDOW_POLL_S)
+                deadline = loop.time() + cfg.paste_confirm_s
+                continue
+            held = self.adapter.composer_text(screen)
+            if held is None:
+                if loop.time() >= deadline:
+                    return (f"an earlier message may still sit unsent in the command-line agent's composer, which could not be read"
+                            f" within {cfg.paste_confirm_s:g} s")
+                await asyncio.sleep(COMPOSER_POLL_S)
+                continue
+            ours = any(self.adapter.composer_holds(screen, text) for text in self.leftover)
+            if not held or (presses == 0 and not ours):
+                self.leftover.clear()
+                return ""
+            if held == before and presses % 2 == 1:
+                # The last clear changed nothing: what is left is not text (a placeholder the CLI
+                # draws), unless it is still the leftover, which these keys then cannot take out. A
+                # join may change nothing visible (it takes the empty line a clear left), and is
+                # followed by the next clear.
+                if ours:
+                    return stuck
+                self.leftover.clear()
+                return ""
+            if presses == 0:
+                budget = 2 * (held.count("\n") + 1) + CLEAR_ROUNDS_EXTRA
+            if presses >= budget:
+                return stuck
+            key = rules.clear_keys[presses % 2]
+            await self._write(pending, keys=[key], human=human, note=f"clear the composer before {pending.message_id}".strip())
+            presses += 1
+            before = held
+            await asyncio.sleep(COMPOSER_POLL_S)
 
     async def _taken(self, pending: Pending, text: str, settle: float) -> str:
         """After an Enter: ``acknowledged`` when the CLI said it took the prompt, ``cleared`` when the

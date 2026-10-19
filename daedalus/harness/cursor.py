@@ -297,6 +297,9 @@ class CursorAdapter:
     def composer_holds(self, screen: str, text: str) -> bool:
         return False  # staff delivery goes through ACP, never through terminal keystrokes
 
+    def composer_text(self, screen: str) -> str | None:
+        return None  # staff delivery goes through ACP, never through terminal keystrokes
+
     async def transcript(self, env: EnvironmentPort, ref: str, since: int = 0) -> list[Turn]:
         stat = await env.stat(ref)
         size = min(int((stat or {}).get("size") or 0), 32 << 20)

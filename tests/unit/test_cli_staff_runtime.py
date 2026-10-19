@@ -246,6 +246,10 @@ class StubClaude:
         lines = [line for line in screen.splitlines() if line.startswith("❯ ")]
         return bool(lines) and ("[Pasted text #" in lines[-1] or text.split()[-1] in lines[-1])
 
+    def composer_text(self, screen: str) -> str | None:
+        lines = [line for line in screen.splitlines() if line.startswith("❯ ")]
+        return lines[-1][2:].strip() if lines else None
+
 
 class Notes:
     def __init__(self) -> None:

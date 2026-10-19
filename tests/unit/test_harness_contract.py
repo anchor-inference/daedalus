@@ -142,6 +142,9 @@ class StubAdapter:
     def composer_holds(self, screen: str, text: str) -> bool:
         return False
 
+    def composer_text(self, screen: str) -> str | None:
+        return None
+
 
 def test_the_registry_takes_an_adapter_by_its_harness_name(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(harness, "ADAPTERS", {})
