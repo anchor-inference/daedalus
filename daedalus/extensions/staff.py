@@ -2558,10 +2558,12 @@ class Ingress:
             except Exception:  # noqa: BLE001 — the report stands; a follower that fails is logged
                 logger.exception("a report hook failed on %s", event.seq)
 
-    async def implicit_report(self, live: LiveSession, kind: str, text: str) -> None:
+    async def implicit_report(self, live: LiveSession, kind: str, text: str, *, refused: str = "") -> None:
         text = _concealed(text)
         task = await self.team.task(live.session.task_id) if live.session.task_id else None
         payload: dict[str, Any] = {"kind": kind, "text": text[:NOTE_MAX], "actor": "system", "implicit": True}
+        if refused:
+            payload["refused"] = _concealed(refused)[:500]
         if task is not None:
             payload["task_id"] = task.id
         await self._published(await self.team.publish("staff.report", payload, member=live.staff, session_id=live.session_id))

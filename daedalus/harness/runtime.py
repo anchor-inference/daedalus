@@ -398,7 +398,12 @@ class CliSession:
     """Set by every event applied, so a message waiting for its window looks again at once."""
     worker: DeliveryWorker | None = None
     reported: bool = False
-    """A Report arrived in the current turn; a turn that ends without one is reported for it."""
+    """A Report the host accepted arrived in the current turn; a turn that ends without one is
+    reported for it."""
+    refused_report: tuple[str, str, str] | None = None
+    """The kind, note and refusal of the turn's last Report the host refused. It is no report: a
+    refusal once counted as one, and a member's correction sent after its done report — refused as
+    superseded — reached nobody, nor did the words in which it said so."""
     turn_ended_waiting: bool = False
     """The turn ended while a request was still open, and nothing has started since: when that
     request is answered the CLI is idle, and the answer waits for it as a message. Without this the
@@ -948,6 +953,7 @@ class CliStaffRuntime:
             # while the CLI's own events queue behind the adapter, so a Report made early in a turn
             # (pi's, measured) is often seen before the prompt that started the turn.
             session.reported = False
+            session.refused_report = None
         if kind is EventKind.TRANSCRIPT:
             await self._located(session, live, event)
         if kind is EventKind.PROMPT_ACKNOWLEDGED:
@@ -1010,9 +1016,16 @@ class CliStaffRuntime:
             await self.ingress.signal(live)
         if kind is EventKind.TURN_COMPLETED and step.state is StaffState.TURN_DONE_UNSEEN:
             self._spawn(self._record_usage(session), f"harness-usage-{session.staff_session_id}")
-            if not session.reported:
-                await self._implicit_report(live, str(event.payload.get("last_message") or ""))
+            if not session.reported or session.refused_report is not None:
+                # A refusal after an accepted report counts too: a correction sent after a done
+                # report is refused as superseded, and is then the one thing the team has not heard.
+                await self._implicit_report(live, str(event.payload.get("last_message") or ""), session.refused_report)
+        if kind is EventKind.TURN_COMPLETED:
+            # Every turn's end, including one that ended with a request still open: cleared only on
+            # the way to turn_done_unseen, a Report of such a turn stood for the next turn as well,
+            # and that turn, ending without one, reached the orchestrator as nothing at all.
             session.reported = False
+            session.refused_report = None
         if step.reconcile:
             self._spawn(self._reconcile_screen(session), f"harness-reconcile-{session.staff_session_id}")
 
@@ -1101,15 +1114,20 @@ class CliStaffRuntime:
         if not allowed:
             await self._apply(session, replace(event, payload={**event.payload, "team_allow_failed": True}))
 
-    async def _implicit_report(self, live: LiveSession, last_message: str) -> None:
+    async def _implicit_report(self, live: LiveSession, last_message: str, refused: tuple[str, str, str] | None = None) -> None:
         """A turn that ended without a Report still reaches the orchestrator: the end of its last
         message, marked as no report, and as needing input when it ends by asking something. Nothing
-        is answered for the member; the orchestrator decides."""
+        is answered for the member; the orchestrator decides. A report the host refused in that turn
+        comes with it whole, with the refusal: what the member meant to say is the turn's news."""
         kind = "needs_input" if protocol.looks_like_question(last_message) else "turn_done"
         words = protocol.excerpt(last_message)
         text = f"{words} ({protocol.NO_REPORT})" if words else f"The turn ended without a message ({protocol.NO_REPORT})."
+        reason = ""
+        if refused is not None:
+            asked, note, reason = refused
+            text = f"Its {asked or 'report'} report, refused by the host: {note.strip()}\n\nThe turn ended with: {text}"
         try:
-            await self.ingress.implicit_report(live, kind, text)
+            await self.ingress.implicit_report(live, kind, text, refused=reason)
         except Exception:  # noqa: BLE001 — the status already says the turn ended; this is its gloss
             logger.warning("the implicit report of %s was not made", live.id, exc_info=True)
 
@@ -1307,7 +1325,9 @@ class CliStaffRuntime:
         call_id = str(body.get("call_id") or "")
         seen = session.calls.get(call_id) if call_id else None
         if tool == "report":
-            session.reported = True
+            # Counted before the host has answered, as the turn's end may be applied meanwhile; a
+            # refusal takes it back below.
+            accepted_before, session.reported = session.reported, True
             try:
                 evidence = [e for e in body.get("evidence") or [] if isinstance(e, dict)]
                 acknowledged = [str(a) for a in body.get("acknowledged") or []]
@@ -1317,8 +1337,11 @@ class CliStaffRuntime:
                     operator_steps=body.get("operator_steps") if isinstance(body.get("operator_steps"), dict) else None,
                 )
                 reply: dict[str, Any] = {"text": told}
+                session.refused_report = None  # the member got it through after all
             except (PermissionError, ValueError, RuntimeError) as exc:
                 reply = {"text": str(exc), "error": True}
+                session.reported = accepted_before
+                session.refused_report = (str(body.get("kind") or ""), str(body.get("note") or ""), str(exc))
             self._remember_call(session, call_id, ("report", reply))
             await self._apply(session, StaffEvent(EventKind.ACTIVITY, post.at, {"team": "report"}, launch_id=session.launch.launch_id))
             if post.reply_id:

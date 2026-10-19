@@ -152,3 +152,65 @@ async def test_a_busy_or_changing_screen_is_never_taken_for_a_turn_end() -> None
     ticking.term = Ticking()
     await rt._check_quiet(ticking, rt.config())
     assert applied == [] and status == ["working"]
+
+
+class Ingress:
+    """The ingress calls a turn's end makes, recorded; the status kept as the store would keep it."""
+
+    def __init__(self, status: list[str]) -> None:
+        self.status_now = status
+        self.implicit: list[tuple[str, str, str]] = []
+
+    async def status(self, live: Any, status: str, waiting_for: str = "", *, detail: str = "") -> None:
+        self.status_now[0] = status
+
+    async def signal(self, live: Any) -> None:
+        pass
+
+    async def resolved(self, live: Any, ref: str, *, by: str = "operator", via: str = "terminal") -> bool:
+        return True
+
+    async def message_state(self, message_id: str, state: str, error: str = "") -> None:
+        pass
+
+    async def implicit_report(self, live: Any, kind: str, text: str, *, refused: str = "") -> None:
+        self.implicit.append((kind, text, refused))
+
+
+async def test_a_report_in_a_turn_that_ended_waiting_does_not_stand_for_the_next_turn() -> None:
+    """A turn reported, then ended with its question still open; the next turn ended with no report,
+    and the orchestrator heard nothing of it: the first turn's flag was cleared only on the way to
+    ``turn_done_unseen``, which that turn never took."""
+    from daedalus.harness.runtime import CliSession
+    from daedalus.harness.state import OpenRequest
+
+    status = ["question"]
+    ingress = Ingress(status)
+    rt: Any = object.__new__(CliStaffRuntime)
+    rt.adapter = ClaudeCodeAdapter()
+    rt.ingress = ingress
+    rt._background = set()
+    rt.clock = lambda: 0.0
+
+    async def nothing(_: Any) -> None:
+        return None
+
+    rt.usage = nothing
+    class Row:
+        waiting_for = ""
+
+        @property
+        def status(self) -> str:
+            return status[0]
+
+    live = SimpleNamespace(id="ss-ada", session=Row())
+    ada = CliSession("ss-ada", SimpleNamespace(launch_id="l-ada"), Screen(""), None, "/work")  # type: ignore[arg-type]
+    ada.reported = True
+    ada.open["team:r1"] = OpenRequest("question", "Euros or dollars?")
+    for event in (StaffEvent(EventKind.TURN_COMPLETED, "t1", {"last_message": "asked; waiting"}),
+                  StaffEvent(EventKind.REQUEST_RESOLVED, "t2", {"via": "orchestrator"}, native_id="team:r1"),
+                  StaffEvent(EventKind.PROMPT_ACKNOWLEDGED, "t3", {"prompt": "[orchestrator] euros"}),
+                  StaffEvent(EventKind.TURN_COMPLETED, "t4", {"last_message": "Priced in euros; menu.md updated."})):
+        await rt._apply_locked(ada, live, event)
+    assert status == ["turn_done_unseen"]
+    assert [(kind, text.split(" (")[0]) for kind, text, _ in ingress.implicit] == [("turn_done", "Priced in euros; menu.md updated.")]

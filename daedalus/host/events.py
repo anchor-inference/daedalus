@@ -354,6 +354,9 @@ class StaffReport(TypedDict):
     implicit: NotRequired[bool]
     """Made by the host from the turn's last message because the member did not report; ``needs_input``
     when that message ends by asking something."""
+    refused: NotRequired[str]
+    """On an implicit report: why the host refused the report the member did make in that turn, whose
+    note then leads the text."""
     files: NotRequired[list[FileRef]]
     """The artifacts the host took in from the member's folder, kept as the project's files."""
     acknowledged: NotRequired[list[str]]

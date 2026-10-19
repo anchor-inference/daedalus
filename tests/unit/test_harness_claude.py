@@ -382,6 +382,25 @@ async def test_a_turn_ending_on_a_question_is_routed_as_needing_input_and_a_repo
         assert [(r.payload["kind"], bool(r.payload.get("implicit"))) for r in reports] == [("checkpoint", False)]
 
 
+async def test_a_report_the_host_refused_still_reaches_the_orchestrator_when_the_turn_ends(settings: Settings, db: Database) -> None:
+    # A correction sent after a done report was refused as "superseded", the refusal counted as the
+    # turn's report, and nothing at all reached the orchestrator: neither the correction nor the
+    # member's last words, which said the report had not gone through.
+    async with stand(settings, db, **claude()) as s:
+        trust(s)
+        ada = await started(s, "report:done:menu written;report:checkpoint:correction the address is wrong;echo:the correction was refused")
+        await s.status_event(ada, "turn_done_unseen")
+
+        async def two_reports() -> bool:
+            return len(await s.events("staff.report", staff_id=ada.id)) == 2
+
+        await eventually(two_reports, "the done report and the refused one")
+        done, refused = await s.events("staff.report", staff_id=ada.id)
+        assert (done.payload["kind"], bool(done.payload.get("implicit"))) == ("done", False)
+        assert refused.payload["implicit"] is True and refused.payload["refused"]
+        assert "correction the address is wrong" in refused.payload["text"] and "the correction was refused" in refused.payload["text"]
+
+
 async def test_a_permission_is_answered_through_its_held_hook(settings: Settings, db: Database) -> None:
     async with stand(settings, db, **claude()) as s:
         trust(s)

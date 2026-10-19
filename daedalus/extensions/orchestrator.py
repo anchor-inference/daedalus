@@ -1310,6 +1310,11 @@ class Orchestrators:
                 return f"{who(member)}'s session ended{': ' + detail if detail else ''}"
             return f"{who(member)} has gone silent{await self._on_task(member)}{': ' + detail if detail else ''} (silent is not failed)"
         if kind == "staff.report":
+            if p.get("implicit") and p.get("refused"):
+                # What the member tried to report arrives whole, as an accepted report would: it is
+                # often a correction to what it reported before, refused because that closed its attempt.
+                return (f"{who(member)} made a report{(' on ' + task) if task else ''} the host refused ({_one_line(str(p['refused']), 200)}); "
+                        f"it is not on the card: \"{_verbatim(str(p.get('text') or ''))}\"")
             if p.get("implicit"):
                 name = member.name if member else ""
                 ending = "ended a turn with a question and no report" if p.get("kind") == "needs_input" else "finished a turn without a report"
