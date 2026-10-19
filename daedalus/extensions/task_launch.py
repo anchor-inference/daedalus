@@ -18,6 +18,7 @@ from daedalus.extensions.runtime_handoff import (
     target_capability,
 )
 from daedalus.extensions.runtime_handoff import preview as handoff_preview
+from daedalus.extensions.runtime_observations import settle_previous_host
 from daedalus.host.launch_queue import Entry
 from daedalus.host.worktrees import WORKTREES_DIR, WorktreeError, WorktreeRefused, staff_slug
 from daedalus.stores.capacity import withdraw_in
@@ -74,6 +75,10 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
     if not row["project_id"]:
         raise ControlConflict("a worker task needs a project")
     scope = Scope("project", row["project_id"])
+    # Every launch path, not only the orchestrator's commands: an operator's launch or an automatic
+    # handoff of a card whose worker died with an earlier host process was refused "stop or
+    # reconcile the previous execution", and nothing the operator could stop was running.
+    await settle_previous_host(app, task_id)
     if fallback_from_attempt_id and (resume_from or not fallback_preview_digest):
         raise ControlConflict("a runtime handoff needs its reviewed preview, not provider-session resume")
     operation = "task.continue" if fallback_from_attempt_id else "task.launch"

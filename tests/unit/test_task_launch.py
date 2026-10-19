@@ -744,3 +744,29 @@ async def test_a_launch_waiting_for_its_member_leaves_the_line_for_host_places(d
     finally:
         team.queue.close()
         app.executions.release()
+
+
+async def test_an_operator_launch_settles_an_attempt_an_earlier_host_left_recovering(db: Database) -> None:
+    """A card whose native worker died with an earlier host process kept that attempt recovering.
+    The orchestrator's commands settled it first, but the operator's own launch and the automatic
+    handoff went straight to the outbox and were refused "stop or reconcile the previous execution"."""
+    app, dispatcher, team, starts, revision = await queued_fixture(db)
+    try:
+        member = await team.member("worker")
+        session = await StaffStore(db).session("staff-session")
+        identity = await prepare_attempt(app, OPERATOR, member, await team.task("task"), session,
+                                         fence_token=secrets.token_urlsafe(32))
+        await db.execute("UPDATE board_tasks SET status = 'todo' WHERE id = 'task'")
+        app.executions.release()
+        app.executions.acquire()
+        await app.executions.boot()
+        assert (await db.fetchone("SELECT state FROM execution_attempts WHERE id = ?", (identity.id,)))[0] == "recovering"
+        await db.execute("UPDATE staff_sessions SET ended_at = 'now',status = 'exited' WHERE id = 'staff-session'")
+        current = (await db.fetchone("SELECT entity_revision FROM board_tasks"))[0]
+        result = await queue_launch(app, "task", OPERATOR, staff_id="worker",
+                                    client_operation_id="after-restart", expected_entity_revision=current)
+        assert result["state"] == "queued"
+        assert (await db.fetchone("SELECT state FROM execution_attempts WHERE id = ?", (identity.id,)))[0] == "cancelled"
+    finally:
+        team.queue.close()
+        app.executions.release()
