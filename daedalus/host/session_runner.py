@@ -5214,6 +5214,12 @@ class SessionManager:
             state.model_stamps.pop(next(iter(state.model_stamps)))
 
     async def _dispatch_event(self, state: SessionState, event: TurnEvent) -> None:
+        if event.type is EventType.MODEL_CHANGED and "configured" not in event.payload:
+            # The core now says itself when the chain advances or a restore lands on a later rung.
+            # The host's own event (see ``_model_change``) already covers both and names the
+            # provider, the configured model and whether it is a fallback; passing the core's on as
+            # well put two model changes in front of the app for one demotion.
+            return
         if event.type is EventType.QUEUE_UPDATE and event.payload.get("placed") and state.engine is not None:
             # The core yields immediately after appending the received prompt. Submission time
             # belongs to the queue; this message's place in history is when the model received it.
