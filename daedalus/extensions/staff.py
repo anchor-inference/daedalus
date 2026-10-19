@@ -1186,6 +1186,7 @@ class Team:
                                        "detail": "the launch outcome is unknown; reconcile the original execution"}, member=member)
             else:
                 await self.manager.staff.end_session(session.id, f"could not start: {exc}"[:500])
+                await self.undelivered(session.id, f"could not start: {exc}"[:500])
                 await self.publish("staff.status", {"status": "exited", "previous": "starting", "detail": f"could not start: {exc}"[:500]}, member=member)
                 if capacity_slot_id is None:
                     await self._move_task(moved, "todo", actor="system", assignee=None)
@@ -1553,6 +1554,7 @@ class Team:
         if live.session.status == staff_suspend.SUSPENDED:
             await self.manager.db.execute("DELETE FROM kv WHERE key = ?", (staff_suspend.KEY + live.id,))
         ended = await self.manager.staff.end_session(live.id, reason)
+        await self.undelivered(live.id, reason, starting_since=live.session.status_at if live.session.status == "starting" else None)
         if ended is not None:
             payload: dict[str, Any] = {"status": "exited", "previous": live.session.status, "detail": reason[:500]}
             if by:
@@ -1563,6 +1565,48 @@ class Team:
         for ask in await self._open_asks(live.id):
             if await self.manager.asks.resolve(ask.id, "system", {"closed": f"the session ended: {reason}"}):
                 await self._withdrawn(ask)
+
+    async def undelivered(self, staff_session_id: str, reason: str, *, starting_since: str | None = None) -> int:
+        """Fail what will now never reach an ended session, so its sender hears it; returns how many.
+
+        A message still ``queued`` or ``written`` waited in a delivery queue that ended with the
+        session; nothing took it to the next session, and nothing said so: five messages sat
+        ``queued`` for weeks, one of them an orchestrator's "stop the render now". It is not carried
+        to a later session either — an instruction about work that ended is the sender's to repeat,
+        knowing the session it was meant for is gone. ``starting_since`` is for a session that ended
+        while it was still starting: the first prompt a CLI was given on its command line is
+        ``submitted`` from the launch on, and is failed too if it came in that start, since the CLI
+        never got as far as reading it."""
+        rows = await self.manager.db.fetchall(
+            "SELECT id FROM staff_messages WHERE staff_session_id = ? AND (state IN ('queued', 'written')"
+            " OR (state = 'submitted' AND ? IS NOT NULL AND created_at >= ?)) ORDER BY created_at",
+            (staff_session_id, starting_since, starting_since),
+        )
+        for row in rows:
+            await self.ingress.message_state(row["id"], "failed", f"the session ended before the message reached it ({reason})"[:500])
+        return len(rows)
+
+    async def settle_undelivered(self, now: datetime | None = None) -> int:
+        """Fail messages whose session is gone by a way that did not pass through :meth:`_end` (an
+        exit observed by the daemon, a recovery that closed the row), and any left ``queued`` in a
+        suspended session, whose delivery queue went with its CLI. Run by the tick."""
+        cutoff = ((now or datetime.now(UTC)) - timedelta(seconds=TICK_SECONDS)).isoformat()
+        rows = await self.manager.db.fetchall(
+            "SELECT m.id, s.id AS session, s.end_reason, s.ended_at FROM staff_messages m"
+            " LEFT JOIN staff_sessions s ON s.id = m.staff_session_id"
+            " WHERE m.state IN ('queued', 'written') AND (s.id IS NULL OR s.ended_at IS NOT NULL"
+            " OR (s.status = ? AND m.updated_at < ?)) ORDER BY m.created_at",
+            (staff_suspend.SUSPENDED, cutoff),
+        )
+        for row in rows:
+            if row["session"] is None:
+                error = "the session it was sent to is gone"
+            elif row["ended_at"]:
+                error = f"the session ended before the message reached it ({row['end_reason'] or 'no reason was recorded'})"
+            else:
+                error = "the member was suspended before the message reached it"
+            await self.ingress.message_state(row["id"], "failed", error[:500])
+        return len(rows)
 
     async def _stop_services(self, live: LiveSession, reason: str) -> None:
         """Stop the servers the worker's session started with ServiceStart. They belong to the session,
@@ -2193,6 +2237,10 @@ class Team:
         config = self.manager.config.staff
         await self.settle(now)
         try:
+            await self.settle_undelivered(now)
+        except Exception:  # noqa: BLE001 — a receipt that cannot be settled must not stop the rest of the tick
+            logger.exception("settling undelivered messages failed")
+        try:
             await staff_suspend.suspend_idle(self, now)
         except Exception:  # noqa: BLE001 — freeing memory must not stop the silence checks and the queue
             logger.exception("suspending idle members failed")
@@ -2517,7 +2565,8 @@ class Ingress:
         if after is None or before is None or after.state == before.state:
             return
         member = await self.manager.staff.get(after.staff_id)
-        payload: dict[str, Any] = {"message_id": message_id, "state": after.state}
+        # Who sent it rides along, so the sender is the one woken by a message that failed.
+        payload: dict[str, Any] = {"message_id": message_id, "state": after.state, "origin": after.origin}
         if after.error:
             payload["error"] = after.error[:500]
         await self.team.publish("staff.message", payload, member=member)
