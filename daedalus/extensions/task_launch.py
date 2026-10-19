@@ -328,9 +328,10 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
     return result
 
 
-WAIT_TOLD = frozenset({"host", "machine", "project", "terminals"})
-"""Deferrals the assigner is told of: a lack of capacity it may act on by releasing someone. An
-update drain or a stagger passes on its own and is not news."""
+WAIT_TOLD = frozenset({"host", "machine", "project", "terminals", "busy"})
+"""Deferrals the assigner is told of: a lack of capacity it may act on by releasing someone, or a
+member still held by an earlier card that has to be handed in, moved or released first. An update
+drain or a stagger passes on its own and is not news."""
 
 KEEPS_PLACE = frozenset({"host", "stagger"})
 """Deferrals that keep a launch's place in the line for host places: it waits for one, or starts
@@ -428,7 +429,8 @@ class TaskLaunchEffect:
         return outcome
 
     async def _report_wait(self, claim: Claim, previous: str | None, current: str | None) -> None:
-        """Say once on the card, and to whoever assigned it, that the start waits for a place.
+        """Say once on the card, and to whoever assigned it, that the start waits for a place or for
+        its member to be free.
 
         Assign answers "admission in progress" and a start held back for capacity used to wait in
         the outbox without a word: the orchestrator told the operator the work was handed over
@@ -447,7 +449,8 @@ class TaskLaunchEffect:
                 return
             member = await self.app.db.fetchone("SELECT name FROM staff WHERE id = ?", (claim.payload["staff_id"],))
             name = member["name"] if member is not None else "the member"
-            said = f"{name} waits for a place to start: {detail}"
+            said = (f"{name} is not free yet: {detail}" if reason == "busy"
+                    else f"{name} waits for a place to start: {detail}")
             await team.note_on_card(task.id, said)
             await self.app.manager.bus.publish(
                 "task.launch_waiting",

@@ -348,6 +348,37 @@ async def test_a_launch_held_for_capacity_is_said_once_and_wakes_the_assigner(db
         app.executions.release()
 
 
+async def test_a_launch_waiting_for_its_busy_member_is_said_once(db: Database) -> None:
+    """A start held because its member was still on another card waited without a word: the
+    orchestrator, told "admission in progress", never learnt that the member's earlier card had to
+    be handed in, moved or released before this one could start."""
+    app, dispatcher, team, starts, revision = await queued_fixture(db)
+    team.note_on_card = AsyncMock()
+    app.manager.bus = SimpleNamespace(publish=AsyncMock())
+
+    async def busy(_entry):
+        return "Worker's task other is still in doing; it has to be reported done, moved or released first"
+
+    team.queue._free = busy
+    try:
+        await db.execute("UPDATE board_tasks SET assignee_staff_id = 'worker' WHERE id = 'task'")
+        revision = (await db.fetchone("SELECT entity_revision FROM board_tasks"))[0]
+        await queue_launch(app, "task", OPERATOR, staff_id="worker",
+                           client_operation_id="busy", expected_entity_revision=revision)
+        assert await dispatcher.step()
+        dispatcher.notify()
+        assert await dispatcher.step()
+        assert starts == []
+        assert team.note_on_card.await_count == 1
+        note = team.note_on_card.await_args.args
+        assert note[0] == "task" and "is not free yet" in note[1] and "still in doing" in note[1]
+        (kind, payload), _ = app.manager.bus.publish.await_args
+        assert app.manager.bus.publish.await_count == 1 and kind == "task.launch_waiting"
+    finally:
+        team.queue.close()
+        app.executions.release()
+
+
 async def test_busy_admission_leaves_only_the_durable_command(db: Database) -> None:
     app, dispatcher, team, starts, revision = await queued_fixture(db)
 
