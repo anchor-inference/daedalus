@@ -29,7 +29,7 @@ from daedalus.stores.control import ControlConflict, ControlDenied, Principal
 from daedalus.stores.database import Database
 from daedalus.stores.outbox import OutboxStore
 from daedalus.stores.result_anchors import result_turn_refs
-from daedalus.stores.staff import StaffStore
+from daedalus.stores.staff import StaffError, StaffStore
 from tests.support.waiting import until_await
 from tests.unit.test_launch_controls import OPERATOR, launch_fixture
 from tests.unit.test_session_runner import ScriptedProvider, _manager
@@ -253,6 +253,36 @@ async def test_a_refused_launch_is_said_on_the_card_and_wakes_the_assigner(db: D
     finally:
         team.queue.close()
         app.executions.release()
+
+async def test_a_start_refused_before_its_attempt_exists_fails_instead_of_staying_uncertain(db: Database) -> None:
+    """A start the host refused before it created the attempt (no worktree, files that could not be
+    handed over, a lost writer gate) was recorded as uncertain: nothing could ever prove it, the card
+    could not be assigned again ("already has a queued or uncertain launch") and nobody was told."""
+    app, dispatcher, team, starts, revision = await queued_fixture(db)
+    team.note_on_card = AsyncMock()
+    team._set_assignee = AsyncMock()
+
+    async def refused(entry):
+        await entry.check_authority()
+        raise StaffError("no worktree for Worker in /tmp/fixture-worktree: the folder is not a repository")
+
+    team.queue._launch = refused
+    try:
+        result = await queue_launch(app, "task", OPERATOR, staff_id="worker",
+                                    client_operation_id="refused-start", expected_entity_revision=revision)
+        assert await dispatcher.step()
+        view = await dispatcher.store.view(result["effect_id"])
+        assert view["state"] == "failed" and "not a repository" in view["error"]
+        note = team.note_on_card.await_args.args
+        assert note[0] == "task" and "could not start" in note[1] and "not a repository" in note[1]
+        assert starts == []
+        current = (await db.fetchone("SELECT entity_revision FROM board_tasks"))[0]
+        await queue_launch(app, "task", OPERATOR, staff_id="worker",
+                           client_operation_id="again", expected_entity_revision=current)
+    finally:
+        team.queue.close()
+        app.executions.release()
+
 
 async def test_a_launch_held_for_capacity_is_said_once_and_wakes_the_assigner(db: Database) -> None:
     """A start held back for capacity waited in the outbox without a word while the orchestrator

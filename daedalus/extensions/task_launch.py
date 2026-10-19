@@ -626,11 +626,17 @@ class TaskLaunchEffect:
             # Refused before the worker had a session to enter: a known failure, not an uncertain
             # one, or the card could not be assigned again until someone reconciled it.
             return EffectOutcome("failed", str(exc))
-        except Exception:
+        except Exception as exc:
             async with self.app.db.transaction() as conn:
                 refused = await no_entry_in(conn, claim.payload["attempt_id"])
-            if refused:
-                return EffectOutcome("failed", "the host refused this launch before runtime entry")
+                # The attempt is written in the same transaction that authorizes runtime entry, and
+                # nothing starts a process before it. A start that raised with no attempt written
+                # was refused by the host before anything could run: settled as unknown, it was
+                # never provable, and the card was refused every later assignment for good.
+                unwritten = await one(conn, "SELECT 1 FROM execution_attempts WHERE id = ?",
+                                      (claim.payload["attempt_id"],)) is None
+            if refused or unwritten:
+                return EffectOutcome("failed", str(exc) or "the host refused this launch before runtime entry")
             raise
         finally:
             launch_attempt.reset(bound)
