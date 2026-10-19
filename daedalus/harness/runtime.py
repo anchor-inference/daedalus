@@ -549,6 +549,7 @@ class CliStaffRuntime:
             task_id=req.task.id if req.task is not None else "",
             task_title=req.task.title if req.task is not None else "",
             branch=req.worktree.branch if req.worktree is not None else "",
+            harness=self.kind,
         )
         block = protocol.mandatory_block(facts) + (f"\n\n{req.brief_text.strip()}" if req.brief_text.strip() else "")
         # The protocol's first line leads the first prompt too: a CLI that reads its system channel

@@ -38,6 +38,31 @@ enough that the orchestrator reads it rather than skims it."""
 NO_REPORT = "no report — ReadStaff for details"
 
 
+TOOL_NAMES = {
+    "claude": "mcp__daedalus_team__{tool}",
+    "codex": "mcp__daedalus_team__{tool}",
+    "grok": "daedalus_team__{tool}",
+    "opencode": "daedalus_team_{tool}",
+}
+"""What each CLI calls a tool of the team's MCP server, as its model sees it (Claude Code and Codex:
+``mcp__<server>__<tool>``, seen in their transcripts; Grok: ``<server>__<tool>``, in its hooks;
+OpenCode: ``<server>_<tool>``). A member told to "call Report" in Claude Code called ``Report``,
+was told no such tool exists, and found the real one only on its second try. pi's bridge serves the
+bare names; a CLI not listed is pointed at the server instead."""
+
+LOADING = {
+    "claude": 'If they are not among your tools, load them with ToolSearch with the query "select:{report},{ask}"; '
+              "if that finds nothing, the team's server is still connecting: go on with the task and load them later.",
+    "grok": "They wait behind search_tool: find them there and call them with use_tool.",
+}
+"""Where a CLI defers its MCP tools behind a search, how to reach the team's."""
+
+
+def tool_name(harness: str, tool: str) -> str:
+    """``Report`` or ``AskOrchestrator`` as the member's CLI names it."""
+    return TOOL_NAMES.get(harness, "{tool}").format(tool=tool)
+
+
 @dataclass(frozen=True, slots=True)
 class TeamFacts:
     """Who the member is and what it works on, for the texts below."""
@@ -49,27 +74,53 @@ class TeamFacts:
     task_title: str = ""
     branch: str = ""
     """The member's own branch when it works in a worktree: "done" then means committed there."""
+    harness: str = ""
+    """The member's CLI, which decides the names its team tools go by."""
+
+    @property
+    def report(self) -> str:
+        return tool_name(self.harness, "Report")
+
+    @property
+    def ask(self) -> str:
+        return tool_name(self.harness, "AskOrchestrator")
+
+
+def _naming(facts: TeamFacts) -> str:
+    """The line that ties the words "Report" and "AskOrchestrator" — in the brief, the requirements,
+    the orchestrator's messages — to the tools of this CLI, and says how to reach them."""
+    loading = LOADING.get(facts.harness, "").format(report=facts.report, ask=facts.ask)
+    if facts.report != "Report":
+        named = f"Wherever your brief or a message says Report or AskOrchestrator, it means {facts.report} and {facts.ask}."
+    elif facts.harness in ("", "pi"):
+        named = ""
+    else:
+        named = f"Both are tools of the {SERVER} MCP server."
+    return " ".join(part for part in (named, loading) if part)
 
 
 def mandatory_block(facts: TeamFacts) -> str:
     """The few lines every CLI member reads before anything else. Kept under ten lines: it rides in
     the system prompt of every turn."""
     role = f" ({facts.role})" if facts.role else ""
+    report, ask = facts.report, facts.ask
     done = (
-        f"commit your work on the branch {facts.branch}, then call Report with kind done"
+        f"commit your work on the branch {facts.branch}, then call {report} with kind done"
         if facts.branch
-        else "call Report with kind done, saying what you produced and where"
+        else f"call {report} with kind done, saying what you produced and where"
     )
+    naming = _naming(facts)
     return "\n".join(
         [
             f"You are {facts.staff_name}{role}, a staff member of the project {facts.project_name}, working under its orchestrator.",
-            "Talk to your team only through two tools: Report (kind checkpoint, needs_input, stuck or done, with a short note) "
-            "and AskOrchestrator (a question you cannot settle yourself, with the options you see).",
-            "Never ask the person at this terminal: nobody reads it. A question goes to AskOrchestrator; if its answer is "
+            f"Talk to your team only through two tools: {report} (kind checkpoint, needs_input, stuck or done, with a short note) "
+            f"and {ask} (a question you cannot settle yourself, with the options you see).",
+            *([naming] if naming else []),
+            f"Never ask the person at this terminal: nobody reads it. A question goes to {ask}; if its answer is "
             "pending, end your turn — the answer arrives as your next message.",
-            f"When the task's done-when is met, {done}. A turn that ends without a Report leaves your team guessing.",
+            f"When the task's done-when is met, {done}. A turn that ends without a report leaves your team guessing.",
             "Files handed to you are in .agents/inbox/<task>/ of your folder. To hand files back, keep them in your folder "
-            "and name their paths in Report's artifacts; a file only on another machine reaches nobody.",
+            f"and name their paths in {report}'s artifacts; a file only on another machine reaches nobody.",
             f"The {SKILL_NAME} skill, where you have skills, has examples of good reports and when to ask.",
         ]
     )
@@ -79,8 +130,8 @@ def first_line(facts: TeamFacts) -> str:
     """The block's one-line reminder, put at the top of the first prompt: a CLI that shows its system
     prompt to the model late, or not at all, still starts the task knowing the protocol."""
     return (
-        f"[team] You are {facts.staff_name}, staff of {facts.project_name}. Report progress and results with the Report "
-        "tool and ask with AskOrchestrator; never ask the terminal."
+        f"[team] You are {facts.staff_name}, staff of {facts.project_name}. Report progress and results with the {facts.report} "
+        f"tool and ask with {facts.ask}; never ask the terminal."
     )
 
 
@@ -89,12 +140,13 @@ def skill_markdown(facts: TeamFacts) -> str:
     the member's branch."""
     where = (
         f"You work in your own git worktree on the branch `{facts.branch}`. Commit there as you go, with clear "
-        "messages; never switch branches, never touch the operator's checkout, never push. Report(done) is refused "
-        "while the worktree has uncommitted changes: commit first."
+        "messages; never switch branches, never touch the operator's checkout, never push. "
+        f"{facts.report}(done) is refused while the worktree has uncommitted changes: commit first."
         if facts.branch
         else "You work in a folder other members may be working in too: change only what your task needs, and "
         "leave files you did not create alone."
     )
+    report, ask = facts.report, facts.ask
     return f"""---
 name: {SKILL_NAME}
 description: How {facts.staff_name}, a staff member of the project {facts.project_name}, reports to and asks its orchestrator. Use it whenever you are about to report progress, ask a question, hand work over or finish a turn.
@@ -103,11 +155,11 @@ description: How {facts.staff_name}, a staff member of the project {facts.projec
 # Working as a staff member
 
 You were given one task by your project's orchestrator. Nobody watches your terminal: the orchestrator
-hears from you only through two tools, and the operator only through the orchestrator.
+hears from you only through two tools, and the operator only through the orchestrator. {_naming(facts)}
 
-## Report
+## {report}
 
-`Report(kind, note, artifacts?, remember?)` — the kinds:
+`{report}(kind, note, artifacts?, remember?)` — the kinds:
 
 - `checkpoint`: progress worth knowing. "Parser rewritten and its 14 tests pass; the CLI flag is next."
 - `needs_input`: you cannot go on without a decision. Say what the decision is and what you would pick.
@@ -118,12 +170,12 @@ hears from you only through two tools, and the operator only through the orchest
 A good note is short and factual: what was done, where it is, how it was checked. `remember` keeps one line
 in your notes for every later session ("tests run with `make check`, not pytest").
 
-End every turn with a Report. A turn that ends without one is passed on as "no report", with the last thing
+End every turn with a {report}. A turn that ends without one is passed on as "no report", with the last thing
 you wrote, and the orchestrator has to read your session to find out what happened.
 
-## AskOrchestrator
+## {ask}
 
-`AskOrchestrator(question, options?, context?)` asks what you cannot settle yourself: a choice the brief does
+`{ask}(question, options?, context?)` asks what you cannot settle yourself: a choice the brief does
 not make, a boundary you would have to cross. Give the options you see and the context needed to decide
 without reading your whole session. Ask once. If the result says the answer is pending, end your turn: the
 answer arrives as your next message. Do not ask the person at the terminal, and do not stop to wait for
@@ -136,7 +188,7 @@ permission the brief already gives you: decide what the brief allows, ask about 
 ## Handing over
 
 When you finish or stop, the next session (yours or another member's) starts from what you leave: committed
-work, a done or checkpoint Report that says where things are, and notes worth remembering. Leave nothing only
+work, a done or checkpoint {report} that says where things are, and notes worth remembering. Leave nothing only
 in your head.
 """
 
@@ -183,6 +235,7 @@ __all__ = [
     "SERVER",
     "SKILL_NAME",
     "SKILL_PATH",
+    "TOOL_NAMES",
     "TeamFacts",
     "excerpt",
     "first_line",
@@ -190,4 +243,5 @@ __all__ = [
     "looks_like_question",
     "mandatory_block",
     "skill_markdown",
+    "tool_name",
 ]
