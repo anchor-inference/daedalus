@@ -20,6 +20,7 @@ from daedalus.extensions.runtime_handoff import (
 from daedalus.extensions.runtime_handoff import preview as handoff_preview
 from daedalus.host.launch_queue import Entry
 from daedalus.host.worktrees import WORKTREES_DIR, WorktreeError, WorktreeRefused, staff_slug
+from daedalus.stores.capacity import withdraw_in
 from daedalus.stores.control import (
     ControlConflict,
     ControlDenied,
@@ -331,6 +332,10 @@ WAIT_TOLD = frozenset({"host", "machine", "project", "terminals"})
 """Deferrals the assigner is told of: a lack of capacity it may act on by releasing someone. An
 update drain or a stagger passes on its own and is not news."""
 
+KEEPS_PLACE = frozenset({"host", "stagger"})
+"""Deferrals that keep a launch's place in the line for host places: it waits for one, or starts
+within seconds. Any other wait takes it out of the line until it asks for a place again."""
+
 
 def _wait_reason(error: str | None) -> tuple[str, str]:
     """The reason and words of a deferral the outbox recorded."""
@@ -416,6 +421,9 @@ class TaskLaunchEffect:
         if outcome.state == "failed":
             await self._report_failure(claim.payload, outcome.error or "the launch was refused")
         elif outcome.state == "deferred":
+            if _wait_reason(outcome.error)[0] not in KEEPS_PLACE:
+                async with self.app.db.transaction() as conn:
+                    await withdraw_in(conn, claim.payload["attempt_id"])
             await self._report_wait(claim, before["error"] if before is not None else None, outcome.error)
         return outcome
 

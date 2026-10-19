@@ -677,3 +677,39 @@ async def test_a_launch_takes_and_keeps_one_machine_wide_place(db: Database) -> 
     finally:
         team.queue.close()
         app.executions.release()
+
+
+async def test_a_launch_waiting_for_its_member_leaves_the_line_for_host_places(db: Database) -> None:
+    """Once in the line for a host place, a launch kept its head after it went on to wait for its
+    busy member, and every other project's start was refused behind it until the member was free."""
+    app, dispatcher, team, starts, revision = await queued_fixture(db)
+    app.manager.config = SimpleNamespace(terminals=SimpleNamespace(running_cap=3))
+    team.queue._claim_host = lambda entry: claim_host_slot(app, entry)
+    team.queue._finish_host = lambda entry, started: finish_host_slot(app, entry, started)
+    for shell in ("shell", "other"):
+        await db.execute("INSERT INTO terminals(id,env,owner_kind,cwd,created_at,created_by)"
+                         " VALUES (?,'host','session','/tmp','now','agent')", (shell,))
+    busy = None
+
+    async def free(_entry):
+        return busy
+
+    team.queue._free = free
+    try:
+        result = await queue_launch(app, "task", OPERATOR, staff_id="worker", client_operation_id="launch",
+                                    expected_entity_revision=revision)
+        assert await dispatcher.step()
+        assert (await db.fetchone("SELECT state FROM scheduler_claims"))[0] == "waiting"
+        busy = "Worker is still working on other"
+        dispatcher.wake.set()
+        assert await dispatcher.step()
+        assert (await dispatcher.store.view(result["effect_id"]))["state"] == "pending"
+        assert await db.fetchone("SELECT 1 FROM scheduler_claims WHERE state = 'waiting'") is None
+        busy = None
+        await db.execute("UPDATE terminals SET status = 'exited' WHERE id = 'shell'")
+        dispatcher.wake.set()
+        assert await dispatcher.step()
+        assert len(starts) == 1
+    finally:
+        team.queue.close()
+        app.executions.release()
