@@ -1143,9 +1143,12 @@ def ready_to_speak(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> Any:
     app = client.app_state  # type: ignore[attr-defined]
     with_voice_page(app, [])
     pretend_installed(app)
-    client.post("/api/tts/select", json={"voice": "ru-dmitri"}, headers=HEAD)
+    # The fake engine goes in before the voice is chosen: choosing warms the voice in the test
+    # client's own event loop, and a warm-up importing the real engine outlived that loop with the
+    # cache's lock still held. Run alone, the next sentence waited on that lock for good.
     monkeypatch.setitem(sys.modules, "sherpa_onnx", FakeSherpa)
     monkeypatch.setattr("daedalus.speech.tts_service.encoder_present", lambda: False)
+    client.post("/api/tts/select", json={"voice": "ru-dmitri"}, headers=HEAD)
     app.tts.forget()
     FakeTts.calls.clear()
     return app
