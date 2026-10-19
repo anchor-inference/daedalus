@@ -1831,6 +1831,12 @@ class CliStaffRuntime:
                 session.channel["team_tools"] = "connected"
             await self.adapter.attach(session.term, launch)
             starting = live.session.status == StaffState.STARTING.value
+            if not starting:
+                # Its start was seen through before the restart. Readiness used to be left unset
+                # here, and nothing an idle CLI says sets it again: a member idle at its prompt
+                # across a deploy read "it has not finished starting" to the idle suspend for days,
+                # holding a host place the whole time.
+                session.ready.set()
             await self._take_up_messages(session, live, starting=starting)
             # A session still starting when the host went has its gate run again: the dialog it was
             # stuck on may still be on screen, and reading a screen twice is harmless.
