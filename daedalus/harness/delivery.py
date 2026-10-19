@@ -44,7 +44,7 @@ from daedalus.harness.contract import Delivery, HarnessAdapter, ScreenClass, Sen
 from daedalus.harness.state import StaffState
 from daedalus.staff_runtime import LiveSession, TeamIngress
 from daedalus.stores.harness import HarnessStore
-from daedalus.terminals.model import Conflict
+from daedalus.terminals.model import Conflict, TerminalError, TimedOut
 
 if TYPE_CHECKING:
     from daedalus.harness.runtime import CliSession
@@ -81,6 +81,16 @@ def same_prompt(sent: str, reported: str) -> bool:
     if not a or not b:
         return False
     return a[:MATCH_CHARS] == b[:MATCH_CHARS]
+
+
+def keyboard_wait(exc: TerminalError) -> bool:
+    """Whether a write failed only because a person was at the keyboard, so nothing was written and it
+    may be tried again. The daemon says so in two ways: ``keyboard_held`` while a person holds it, and
+    a timeout when someone kept typing (or a browser kept sending input) through the write's whole
+    wait. Only the first was waited out; the second failed the message, four times on record."""
+    if isinstance(exc, Conflict):
+        return exc.details.get("reason") == "keyboard_held"
+    return isinstance(exc, TimedOut) and "waiting for the keyboard" in exc.message
 
 
 @dataclass(eq=False)
@@ -205,7 +215,19 @@ class DeliveryWorker:
         live = await self._live()
         if StaffState(live.session.status) not in (StaffState.WORKING, StaffState.NO_SIGNAL):
             return
-        await self.adapter.interrupt(self.session.term)
+        while True:
+            try:
+                await self.adapter.interrupt(self.session.term)
+                break
+            except (Conflict, TimedOut) as exc:
+                # The interrupt is typed like any write, and waits out a person at the keyboard the
+                # same way: a Grok steer once failed here, its message with it.
+                if not keyboard_wait(exc):
+                    raise
+            await asyncio.sleep(KEYBOARD_RETRY_S)
+            live = await self._live()
+            if StaffState(live.session.status) not in (StaffState.WORKING, StaffState.NO_SIGNAL):
+                return
         deadline = asyncio.get_running_loop().time() + cfg.interrupt_timeout_s
         while asyncio.get_running_loop().time() < deadline:
             live = await self._live()
@@ -405,8 +427,8 @@ class DeliveryWorker:
                 async with self.guard_send(pending.message_id):
                     await self.session.term.write(paste=paste, keys=keys, note=note, wait_keyboard=not human)
                 return
-            except Conflict as exc:
-                if exc.details.get("reason") != "keyboard_held":
+            except (Conflict, TimedOut) as exc:
+                if not keyboard_wait(exc):
                     raise
             await asyncio.sleep(KEYBOARD_RETRY_S)
             await self._live()

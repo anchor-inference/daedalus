@@ -282,3 +282,73 @@ async def test_a_late_transcript_entry_acknowledges_a_submitted_message(running:
     r.worker.put(Pending("sm-8", "one line", "after_turn", "operator"))
     assert await r.settled("sm-8") == "acknowledged"
     assert r.receipts.of("sm-8") == ["written", "submitted", "acknowledged"]
+
+
+@pytest.mark.parametrize("harness", ["claude", "grok"])
+async def test_a_write_that_timed_out_waiting_for_the_keyboard_waits_again(harness: str, running: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The daemon gives up on a write after its own wait when input keeps arriving, with a timeout
+    rather than ``keyboard_held``. That failed four messages for good; nothing was written, so it is
+    the same wait as any other and the message goes once the keyboard is free."""
+    from daedalus.harness import delivery
+    from daedalus.terminals.model import TimedOut
+
+    monkeypatch.setattr(delivery, "KEYBOARD_RETRY_S", 0.05)
+    prompt = Prompt(harness)
+    original = prompt.write
+    refused = {"left": 2}
+
+    async def busy_keyboard(**kwargs: Any) -> None:
+        if refused["left"]:
+            refused["left"] -= 1
+            raise TimedOut("writing to the terminal: timed out waiting for the keyboard")
+        await original(**kwargs)
+
+    prompt.write = busy_keyboard  # type: ignore[method-assign]
+    r = running(rig(prompt, config()))
+    r.worker.put(Pending("sm-h", "please also check the footer", "now", "orchestrator"))
+    assert await r.settled("sm-h") == "acknowledged"
+    assert prompt.pastes == 1 and prompt.submitted == ["please also check the footer"]
+
+
+async def test_another_timeout_still_fails_the_message(running: Any) -> None:
+    from daedalus.terminals.model import TimedOut
+
+    prompt = Prompt("claude")
+
+    async def stuck(**kwargs: Any) -> None:
+        raise TimedOut("writing to the terminal: the terminal service did not answer")
+
+    prompt.write = stuck  # type: ignore[method-assign]
+    r = running(rig(prompt, config()))
+    r.worker.put(Pending("sm-i", "one line", "now", "orchestrator"))
+    assert await r.settled("sm-i") == "failed"
+    assert "did not answer" in r.receipts.error("sm-i")
+
+
+async def test_a_steers_interrupt_waits_out_the_keyboard_too(running: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Grok takes a message for now as an interrupt and then the message. The interrupt is a write
+    like any other; one that met a busy keyboard once failed the message it was for."""
+    from daedalus.harness import delivery
+    from daedalus.terminals.model import TimedOut
+
+    monkeypatch.setattr(delivery, "KEYBOARD_RETRY_S", 0.05)
+    prompt = Prompt("grok", busy=True)
+    original = prompt.write
+    refused = {"left": 1}
+    r: Rig
+
+    async def busy_keyboard(**kwargs: Any) -> None:
+        if kwargs.get("keys") == ["C-c"]:
+            if refused["left"]:
+                refused["left"] -= 1
+                raise TimedOut("writing to the terminal: timed out waiting for the keyboard")
+            prompt.busy = False
+            r.status[0] = "idle"
+            return
+        await original(**kwargs)
+
+    prompt.write = busy_keyboard  # type: ignore[method-assign]
+    r = running(rig(prompt, config(), status="working"))
+    r.worker.put(Pending("sm-j", "stop the render now", "now", "orchestrator", degraded_to=r.worker.degraded("now")))
+    assert await r.settled("sm-j") == "acknowledged"
+    assert prompt.submitted == ["stop the render now"]
