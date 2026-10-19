@@ -284,6 +284,39 @@ async def test_a_start_refused_before_its_attempt_exists_fails_instead_of_stayin
         app.executions.release()
 
 
+@pytest.mark.parametrize("where", ["claim", "check"])
+async def test_a_launch_the_outbox_settles_itself_is_reported_once(db: Database, where: str) -> None:
+    """The outbox cancels a waiting launch whose authority was revoked, and fails one whose claim
+    changed under it, without its handler ever running: the card stayed assigned and unstarted and
+    the assigner was never woken, the very silence a refused start is reported to end."""
+    app, dispatcher, team, starts, revision = await queued_fixture(db)
+    team.note_on_card = AsyncMock()
+    team._set_assignee = AsyncMock()
+    try:
+        await db.execute("UPDATE board_tasks SET assignee_staff_id = 'worker' WHERE id = 'task'")
+        revision = (await db.fetchone("SELECT entity_revision FROM board_tasks"))[0]
+        result = await queue_launch(app, "task", OPERATOR, staff_id="worker",
+                                    client_operation_id="settled", expected_entity_revision=revision)
+        if where == "claim":
+            dispatcher.store.control.authorize = AsyncMock(side_effect=ControlDenied("grant was revoked or replaced"))
+        else:
+            dispatcher.store.check = AsyncMock(side_effect=ControlDenied("the effect claim is no longer current"))
+        await dispatcher.step()
+        view = await dispatcher.store.view(result["effect_id"])
+        assert view["state"] == ("cancelled" if where == "claim" else "failed")
+        assert starts == []
+        assert team.note_on_card.await_count == 1
+        note = team.note_on_card.await_args.args
+        assert note[0] == "task" and "could not start" in note[1] and view["error"] in note[1]
+        (task, assignee), changed = team._set_assignee.await_args
+        assert task.id == "task" and assignee is None and changed["error"] == note[1]
+        assert not await dispatcher.step()
+        assert team.note_on_card.await_count == 1
+    finally:
+        team.queue.close()
+        app.executions.release()
+
+
 async def test_a_launch_held_for_capacity_is_said_once_and_wakes_the_assigner(db: Database) -> None:
     """A start held back for capacity waited in the outbox without a word while the orchestrator
     told the operator the work was handed over."""

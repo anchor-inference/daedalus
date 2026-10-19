@@ -414,7 +414,7 @@ class TaskLaunchEffect:
         before = await self.app.db.fetchone("SELECT error FROM effect_outbox WHERE id = ?", (claim.id,))
         outcome = await self._run(claim, check)
         if outcome.state == "failed":
-            await self._report_failure(claim, outcome.error or "the launch was refused")
+            await self._report_failure(claim.payload, outcome.error or "the launch was refused")
         elif outcome.state == "deferred":
             await self._report_wait(claim, before["error"] if before is not None else None, outcome.error)
         return outcome
@@ -450,7 +450,15 @@ class TaskLaunchEffect:
         except Exception:  # noqa: BLE001 — the outbox keeps the wait whatever the report did
             logger.exception("reporting the waiting launch of task %s failed", claim.payload.get("task_id"))
 
-    async def _report_failure(self, claim: Claim, error: str) -> None:
+    async def settled(self, action_id: str, state: str, error: str) -> None:
+        """A launch the outbox cancelled or failed without running it is a refused start as well."""
+        row = await self.app.db.fetchone("SELECT payload_json FROM effect_outbox WHERE id = ?", (action_id,))
+        if row is None:
+            return
+        await self._report_failure(json.loads(row["payload_json"])["data"],
+                                   error or ("the launch was cancelled" if state == "cancelled" else "the launch was refused"))
+
+    async def _report_failure(self, target: dict[str, Any], error: str) -> None:
         """Say a refused launch on the card and wake whoever assigned it.
 
         A coordinator's Assign answers "admission in progress" and the start happens later. When
@@ -463,17 +471,17 @@ class TaskLaunchEffect:
         if team is None:
             return
         try:
-            task = await team.task(claim.payload["task_id"])
-            member = await self.app.db.fetchone("SELECT name FROM staff WHERE id = ?", (claim.payload["staff_id"],))
+            task = await team.task(target["task_id"])
+            member = await self.app.db.fetchone("SELECT name FROM staff WHERE id = ?", (target["staff_id"],))
             name = member["name"] if member is not None else "the member"
             # Started after all, or closed meanwhile: a closed card's refused start is no news.
             if task is None or task.status not in ("todo", "blocked"):
                 return
             await team.note_on_card(task.id, f"{name} could not start: {error}")
-            await team._set_assignee(task, None if task.assignee_staff_id == claim.payload["staff_id"] else task.assignee_staff_id,
+            await team._set_assignee(task, None if task.assignee_staff_id == target["staff_id"] else task.assignee_staff_id,
                                      actor="system", error=f"{name} could not start: {error}")
         except Exception:  # noqa: BLE001 — the outbox keeps the failure whatever the report did
-            logger.exception("reporting the refused launch of task %s failed", claim.payload.get("task_id"))
+            logger.exception("reporting the refused launch of task %s failed", target.get("task_id"))
 
     async def _run(self, claim: Claim, check: Callable[[Claim], Awaitable[None]]) -> EffectOutcome:
         try:

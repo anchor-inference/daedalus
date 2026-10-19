@@ -147,7 +147,12 @@ class OutboxStore:
             await conn.execute("UPDATE effect_outbox SET retry_at = ?,retry_blocked = ?,error = ? WHERE id = ? AND state = 'unknown'",
                                (due, 0 if retry else 1, f"status read {error_class}" if retry else f"status read {error_class}; manual reconciliation required", claim.id))
 
-    async def claim(self, kinds: tuple[str, ...], *, exclude: tuple[str, ...] = ()) -> Claim | None:
+    async def claim(self, kinds: tuple[str, ...], *, exclude: tuple[str, ...] = (),
+                    settled: list[tuple[str, str, str, str]] | None = None) -> Claim | None:
+        """The next deliverable command, claimed. Commands this pass cancels or fails on the way,
+        without any handler running them, are appended to ``settled`` as (id, kind, state, error):
+        only the caller can tell their handlers, and a launch settled here in silence left its card
+        assigned and unstarted with nobody told."""
         if not kinds:
             return None
         async with self.db.transaction() as conn:
@@ -192,12 +197,16 @@ class OutboxStore:
                     await self._authorize(conn, row)
                 except (ControlDenied, KeyError) as exc:
                     await conn.execute("UPDATE effect_outbox SET state = 'cancelled',error = ?,completed_at = ? WHERE id = ? AND state = 'pending'", (str(exc), now(), row["id"]))
+                    if settled is not None:
+                        settled.append((row["id"], row["kind"], "cancelled", str(exc)))
                     continue
                 await conn.execute("UPDATE effect_outbox SET state = 'claimed',claim_generation = claim_generation + 1,claimed_at = ? WHERE id = ? AND state = 'pending'", (now(), row["id"]))
                 prior = await one(conn, "SELECT count(*) AS count FROM retry_attempts WHERE effect_id = ? AND phase = 'delivery'", (row["id"],))
                 ordinal = int(prior["count"]) + 1
                 if ordinal > budget(row["kind"]):
                     await conn.execute("UPDATE effect_outbox SET state = 'failed',error = 'retry budget exhausted',completed_at = ? WHERE id = ?", (now(), row["id"]))
+                    if settled is not None:
+                        settled.append((row["id"], row["kind"], "failed", "retry budget exhausted"))
                     continue
                 await conn.execute(
                     "INSERT INTO retry_attempts(op_id,effect_id,phase,ordinal,budget_left,state,created_at) VALUES (?,?,'delivery',?,?,?,?)",
