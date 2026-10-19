@@ -103,7 +103,7 @@ The two ``dispatch`` types are the main orchestrator's hand-overs to a project; 
 STAFF_WAKE_STATUSES = frozenset({"turn_done_unseen", "error", "exited", "no_signal"})
 URGENT_REPORTS = frozenset({"needs_input", "stuck"})
 TASK_WAKES = frozenset({"task.created", "task.moved", "task.assigned", "task.accepted", "task.merge_failed",
-                        "task.ci_failed"})
+                        "task.ci_failed", "task.launch_waiting"})
 SELF_EVENTS_ALLOWED = frozenset({"ask.answered", "permission.resolved"})
 """Events that carry the orchestrator's own session id but are someone else's news: the operator
 answering what it asked."""
@@ -1356,6 +1356,8 @@ class Orchestrators:
                 return f"{title} assigned to {assignee.name}{error}" if assignee else f"{title} is unassigned{error}"
             if kind == "task.accepted":
                 return f"{actor} accepted {title}"
+            if kind == "task.launch_waiting":
+                return f"{title} has not started yet: {_one_line(str(p.get('error') or ''), 500)}"
             if kind == "task.ci_failed":
                 # Only reaches the coordinator when no worker is live on the task to take it itself.
                 failed = ", ".join(str(name) for name in p.get("failed_checks") or [p.get("check_name")])

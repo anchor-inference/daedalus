@@ -685,6 +685,7 @@ REGISTRY: dict[str, EventSpec] = {
     "task.accepted": EventSpec(TaskChange),
     "task.merge_failed": EventSpec(TaskChange),
     "task.ci_failed": EventSpec(TaskChange),
+    "task.launch_waiting": EventSpec(TaskChange),
     "orchestrator.open_results": EventSpec(OpenResults),
     "orchestrator.exploration": EventSpec(ExplorationNews),
     "schedule.fired": EventSpec(ScheduleFired),

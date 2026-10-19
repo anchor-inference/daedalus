@@ -254,6 +254,37 @@ async def test_a_refused_launch_is_said_on_the_card_and_wakes_the_assigner(db: D
         team.queue.close()
         app.executions.release()
 
+async def test_a_launch_held_for_capacity_is_said_once_and_wakes_the_assigner(db: Database) -> None:
+    """A start held back for capacity waited in the outbox without a word while the orchestrator
+    told the operator the work was handed over."""
+    app, dispatcher, team, starts, revision = await queued_fixture(db)
+    team.note_on_card = AsyncMock()
+    app.manager.bus = SimpleNamespace(publish=AsyncMock())
+
+    async def occupied(_):
+        return 1
+
+    team.queue._active = occupied
+    try:
+        await db.execute("UPDATE board_tasks SET assignee_staff_id = 'worker' WHERE id = 'task'")
+        revision = (await db.fetchone("SELECT entity_revision FROM board_tasks"))[0]
+        await queue_launch(app, "task", OPERATOR, staff_id="worker",
+                           client_operation_id="held", expected_entity_revision=revision)
+        assert await dispatcher.step()
+        dispatcher.notify()
+        assert await dispatcher.step()
+        assert starts == []
+        assert team.note_on_card.await_count == 1
+        note = team.note_on_card.await_args.args
+        assert note[0] == "task" and "waits for a place to start" in note[1] and "staff slots" in note[1]
+        (kind, payload), where = app.manager.bus.publish.await_args
+        assert app.manager.bus.publish.await_count == 1 and kind == "task.launch_waiting"
+        assert payload["error"] == note[1] and where["project_id"] == "project"
+    finally:
+        team.queue.close()
+        app.executions.release()
+
+
 async def test_busy_admission_leaves_only_the_durable_command(db: Database) -> None:
     app, dispatcher, team, starts, revision = await queued_fixture(db)
 
@@ -559,10 +590,12 @@ async def test_a_launch_takes_and_keeps_one_machine_wide_place(db: Database) -> 
     app.manager.config = SimpleNamespace(terminals=SimpleNamespace(running_cap=3))
     team.queue._claim_host = lambda entry: claim_host_slot(app, entry)
     team.queue._finish_host = lambda entry, started: finish_host_slot(app, entry, started)
-    # The fixture's unbound staff session and an operator's shell take two of the three places;
-    # the last one is kept for coordination or review, so the worker waits in the durable order.
-    await db.execute("INSERT INTO terminals(id,env,owner_kind,cwd,created_at)"
-                     " VALUES ('shell','host','session','/tmp','now')")
+    # Two shells an agent opened take two of the three places (the member's own live session does
+    # not count: the launch ends it); the last one is kept for coordination or review, so the
+    # worker waits in the durable order.
+    for shell in ("shell", "other"):
+        await db.execute("INSERT INTO terminals(id,env,owner_kind,cwd,created_at,created_by)"
+                         " VALUES (?,'host','session','/tmp','now','agent')", (shell,))
     try:
         result = await queue_launch(app, "task", OPERATOR, staff_id="worker", client_operation_id="launch",
                                     expected_entity_revision=revision)

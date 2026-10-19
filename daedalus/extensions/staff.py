@@ -229,7 +229,8 @@ async def claim_host_slot(app: Any, entry: Entry) -> str | None:
 
     Each project's own limit let several projects' built-in workers together run past the one
     machine cap, and nothing kept a place free for a coordinator or reviewer. An entry without a
-    durable attempt has no command to hold the place for, so it is not charged here.
+    durable attempt has no command to hold the place for, so it is not charged here. The member's
+    own live session is not counted against it: starting the launch ends that session.
     """
     if entry.attempt_id is None:
         return None
@@ -238,12 +239,12 @@ async def claim_host_slot(app: Any, entry: Entry) -> str | None:
         return await claim_in(conn, attempt_id=entry.attempt_id, project_id=entry.project_id,
                               runtime_kind="cli" if entry.terminal else "daedalus",
                               role_class=entry.role_class, generation=generation,
-                              cap=app.manager.config.terminals.running_cap)
+                              cap=app.manager.config.terminals.running_cap, replacing=entry.staff_id)
 
 
 async def finish_host_slot(app: Any, entry: Entry, started: bool) -> None:
     """Settle a launch's machine place: a failed start returns it, a started one stays charged
-    until the worker's end is observed. A launch still waiting in the durable order needs no call:
+    until the worker's session ends. A launch still waiting in the durable order needs no call:
     its claim is cancelled when its command settles."""
     if entry.attempt_id is None:
         return

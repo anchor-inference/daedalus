@@ -327,6 +327,22 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
     return result
 
 
+WAIT_TOLD = frozenset({"host", "machine", "project", "terminals"})
+"""Deferrals the assigner is told of: a lack of capacity it may act on by releasing someone. An
+update drain or a stagger passes on its own and is not news."""
+
+
+def _wait_reason(error: str | None) -> tuple[str, str]:
+    """The reason and words of a deferral the outbox recorded."""
+    try:
+        said = json.loads(error or "")
+    except ValueError:
+        return "", str(error or "")
+    if not isinstance(said, dict):
+        return "", str(error or "")
+    return str(said.get("reason") or ""), str(said.get("detail") or "")
+
+
 class TaskLaunchEffect:
     def __init__(self, app: Application) -> None:
         self.app = app
@@ -395,10 +411,44 @@ class TaskLaunchEffect:
             raise ControlDenied("the resource profile changed after the launch command")
 
     async def run(self, claim: Claim, check: Callable[[Claim], Awaitable[None]]) -> EffectOutcome:
+        before = await self.app.db.fetchone("SELECT error FROM effect_outbox WHERE id = ?", (claim.id,))
         outcome = await self._run(claim, check)
         if outcome.state == "failed":
             await self._report_failure(claim, outcome.error or "the launch was refused")
+        elif outcome.state == "deferred":
+            await self._report_wait(claim, before["error"] if before is not None else None, outcome.error)
         return outcome
+
+    async def _report_wait(self, claim: Claim, previous: str | None, current: str | None) -> None:
+        """Say once on the card, and to whoever assigned it, that the start waits for a place.
+
+        Assign answers "admission in progress" and a start held back for capacity used to wait in
+        the outbox without a word: the orchestrator told the operator the work was handed over
+        while the card sat unstarted for good. Said again only when the reason changes, not on
+        every retry while the count of occupied places moves.
+        """
+        reason, detail = _wait_reason(current)
+        if reason not in WAIT_TOLD or reason == _wait_reason(previous)[0]:
+            return
+        team: Any = self.app.extensions.get("staff")
+        if team is None:
+            return
+        try:
+            task = await team.task(claim.payload["task_id"])
+            if task is None or task.status not in ("todo", "blocked"):
+                return
+            member = await self.app.db.fetchone("SELECT name FROM staff WHERE id = ?", (claim.payload["staff_id"],))
+            name = member["name"] if member is not None else "the member"
+            said = f"{name} waits for a place to start: {detail}"
+            await team.note_on_card(task.id, said)
+            await self.app.manager.bus.publish(
+                "task.launch_waiting",
+                {"task_id": task.id, "title": task.title, "actor": "system",
+                 "assignee_staff_id": claim.payload["staff_id"], "error": said},
+                project_id=task.project_id,
+            )
+        except Exception:  # noqa: BLE001 — the outbox keeps the wait whatever the report did
+            logger.exception("reporting the waiting launch of task %s failed", claim.payload.get("task_id"))
 
     async def _report_failure(self, claim: Claim, error: str) -> None:
         """Say a refused launch on the card and wake whoever assigned it.

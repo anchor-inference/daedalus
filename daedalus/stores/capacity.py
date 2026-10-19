@@ -16,14 +16,20 @@ def _now() -> str:
 
 
 async def _reconcile(conn: aiosqlite.Connection, generation: int, at: str) -> None:
-    """Release only claims with observed end or a timed-out start without a live session."""
+    """Release claims whose session is over and timed-out starts that never got one.
+
+    A claim once waited for an observed runtime exit as well. CLI sessions that ended by the
+    member's own exit, by "next task" or before a host restart never got that observation, so
+    their claims stayed active for good: eleven days of finished work held seven of the twenty
+    places and an idle member could not be given its next card. Whatever still runs after its
+    session ended is counted from the terminals and runs themselves, so the claim is not needed
+    to keep it charged.
+    """
     await conn.execute(
         "UPDATE capacity_reservations SET state = 'released',released_at = ?"
         " WHERE state = 'active' AND EXISTS (SELECT 1 FROM execution_attempts a"
         " JOIN staff_sessions s ON s.id = a.staff_session_id"
-        " WHERE a.id = capacity_reservations.attempt_id AND s.ended_at IS NOT NULL"
-        " AND (EXISTS (SELECT 1 FROM runtime_exit_observations x WHERE x.attempt_id = a.id)"
-        " OR EXISTS (SELECT 1 FROM runtime_no_entry_observations n WHERE n.attempt_id = a.id)))",
+        " WHERE a.id = capacity_reservations.attempt_id AND s.ended_at IS NOT NULL)",
         (at,))
     await conn.execute(
         "UPDATE capacity_reservations SET state = 'active'"
@@ -48,25 +54,37 @@ async def _reconcile(conn: aiosqlite.Connection, generation: int, at: str) -> No
                        " AND e.state IN ('completed','failed','cancelled','unknown'))", (at,))
 
 
-async def snapshot_in(conn: aiosqlite.Connection, *, generation: int, cap: int) -> dict[str, Any]:
-    """Count real live staff plus starts promised before their sessions are visible."""
+async def snapshot_in(conn: aiosqlite.Connection, *, generation: int, cap: int,
+                      replacing: str | None = None) -> dict[str, Any]:
+    """Count the staff processes that are really there, plus starts promised before their sessions
+    are visible.
+
+    ``replacing`` is the member a launch is for: its own live session ends when the launch starts,
+    so it is not counted against the place that launch needs. Counting it left an idle member
+    unable to take its next card on a full host, with the card silently waiting.
+
+    A suspended CLI member has no process. An operator's own shell is the operator's, not staff
+    work: six idle shells from days before held six places. A claim is counted only until its
+    attempt has a session; from then on the session, its terminal or its run is what is counted.
+    """
     at = _now()
     await _reconcile(conn, generation, at)
     observed = await one(conn,
-        "SELECT count(*) AS n FROM staff_sessions s WHERE s.ended_at IS NULL AND"
-        " (s.kind = 'cli' OR s.status IN ('starting','working','question','permission','no_signal'))")
+        "SELECT count(*) AS n FROM staff_sessions s WHERE s.ended_at IS NULL"
+        " AND s.staff_id IS NOT ? AND"
+        " ((s.kind = 'cli' AND s.status != 'suspended')"
+        " OR s.status IN ('starting','working','question','permission','no_signal'))",
+        (replacing,))
     other_terminals = await one(conn,
-        "SELECT count(*) AS n FROM terminals t WHERE t.status = 'running' AND NOT EXISTS"
-        " (SELECT 1 FROM staff_sessions s WHERE s.terminal_id = t.id AND s.ended_at IS NULL)")
+        "SELECT count(*) AS n FROM terminals t WHERE t.status = 'running' AND t.created_by != 'operator'"
+        " AND NOT EXISTS (SELECT 1 FROM staff_sessions s WHERE s.terminal_id = t.id AND s.ended_at IS NULL)")
     main_runs = await one(conn,
         "SELECT count(*) AS n FROM runs r WHERE r.status = 'running' AND NOT EXISTS"
         " (SELECT 1 FROM staff_sessions s WHERE s.session_id = r.session_id AND s.ended_at IS NULL)")
     held = await one(conn,
         "SELECT count(*) AS n FROM capacity_reservations r WHERE r.host_id = ?"
         " AND r.state IN ('held','active') AND NOT EXISTS"
-        " (SELECT 1 FROM execution_attempts a JOIN staff_sessions s ON s.id = a.staff_session_id"
-        " WHERE a.id = r.attempt_id AND s.ended_at IS NULL AND"
-        " (s.kind = 'cli' OR s.status IN ('starting','working','question','permission','no_signal')))",
+        " (SELECT 1 FROM execution_attempts a WHERE a.id = r.attempt_id AND a.staff_session_id IS NOT NULL)",
         (HOST_ID,))
     active = int(observed["n"]) + int(other_terminals["n"]) + int(main_runs["n"])
     reserved = int(held["n"])
@@ -75,12 +93,15 @@ async def snapshot_in(conn: aiosqlite.Connection, *, generation: int, cap: int) 
 
 
 async def claim_in(conn: aiosqlite.Connection, *, attempt_id: str, project_id: str,
-                   runtime_kind: str, role_class: str, generation: int, cap: int) -> str | None:
-    """Reserve one slot under the caller's immediate transaction; return a concrete blocker."""
+                   runtime_kind: str, role_class: str, generation: int, cap: int,
+                   replacing: str | None = None) -> str | None:
+    """Reserve one slot under the caller's immediate transaction; return a concrete blocker.
+
+    ``replacing`` is the member the launch is for; see :func:`snapshot_in`."""
     if role_class not in ("coordinator", "reviewer", "worker"):
         raise ValueError("unknown admission role")
     at = _now()
-    view = await snapshot_in(conn, generation=generation, cap=cap)
+    view = await snapshot_in(conn, generation=generation, cap=cap, replacing=replacing)
     existing = await one(conn, "SELECT * FROM capacity_reservations WHERE attempt_id = ?", (attempt_id,))
     if existing is not None and existing["state"] in ("held", "active"):
         if (existing["generation"] != generation or existing["project_id"] != project_id
