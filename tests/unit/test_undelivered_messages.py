@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from daedalus.config import Settings
-from daedalus.host.events import EventFilter
+from daedalus.host.events import AppEvent, EventFilter
 from daedalus.staff_runtime import LiveSession, OutgoingMessage, Receipt
 from daedalus.stores.database import Database
 from tests.support.authorized_launch import operator_assignment
@@ -133,3 +133,40 @@ async def test_a_message_is_handed_over_under_the_suspend_lock(settings: Setting
     finally:
         await close_team(manager)
         await manager.close()
+
+
+async def test_the_orchestrator_is_woken_by_its_own_message_that_failed(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """Tell answers "queued"; what became of the message arrived as an event no wake-up listened to,
+    so an orchestrator went on counting on an order its member never got."""
+    from tests.unit.test_orchestrator import rig
+    from tests.unit.test_orchestrator_team import fake, office, working
+
+    r = await rig(settings, db, tmp_path)
+    try:
+        runtime = fake(r)
+        sid = await office(r)
+        await r.orch.stop_queue(r.project.id)
+        member, live = await working(r)
+        await r.team.ingress.status(live, "working")
+        runtime.receipt = Receipt("queued")
+        said = await r.call(sid, "tell", staff="Ada", text="Stop the render now.")
+        message_id = said.split()[1]
+        await r.team._end(await r.team.live_of(member), "its task was done", stop=False)
+        events = await r.manager.bus.latest(EventFilter(types=("staff.message",), staff_id=member.id), limit=10)
+        [failed] = [e for e in events if e.payload.get("state") == "failed"]
+        wake = await r.orch.classify(r.project.id, failed)
+        assert wake is not None and wake.key == f"message:{message_id}"
+        line = await r.orch.line(r.project, failed)
+        assert f"your message {message_id} to" in line and "Stop the render now." in line
+        assert "was not delivered: the session ended before the message reached it (its task was done)" in line
+
+        # The operator's own message is the operator's news, and a weeks-old one found late is history.
+        operator = AppEvent(seq=0, at=failed.at, type="staff.message", payload={**failed.payload, "origin": "operator"},
+                            project_id=r.project.id, staff_id=member.id)
+        assert await r.orch.classify(r.project.id, operator) is None
+        await db.execute("UPDATE staff_messages SET created_at = ? WHERE id = ?",
+                         ((datetime.now(UTC) - timedelta(days=20)).isoformat(), message_id))
+        assert await r.orch.classify(r.project.id, failed) is None
+    finally:
+        await close_team(r.manager)
+        await r.manager.close()
