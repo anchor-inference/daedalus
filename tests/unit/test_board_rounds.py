@@ -179,7 +179,7 @@ async def test_a_round_needs_the_exact_return_and_keeps_the_card_history(setting
             await r.call(sid, "assign", staff="Ada", title="Tariff plan, revision 2", **REVISED)
         assert len(await r.board.list(project_id=r.project.id)) == 1, "a refused hand-over writes nothing"
 
-        with pytest.raises(Refused, match="return the exact reviewed result"):
+        with pytest.raises(Refused, match=f"task {first} is in review: .*ReviewResult\\(op='return', task_id='{first}'"):
             await r.call(sid, "assign", staff="Ada", task_id=first, title="Tariff plan, revision 2", **REVISED)
         first_result = await return_reviewed_result(r.team, first, reason="The report left two questions unanswered")
         _task, said = await assigned(r, sid, staff="Ada", task_id=first,

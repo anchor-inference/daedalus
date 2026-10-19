@@ -28,7 +28,7 @@ from daedalus.extensions.orchestrator_domain import (
     return_result,
 )
 from daedalus.extensions.orchestrator_loops import DECIDED
-from daedalus.extensions.orchestrator_ops import Refused, board_principal
+from daedalus.extensions.orchestrator_ops import Refused, board_principal, stale_revision
 from daedalus.extensions.task_contract import REQUIREMENT_KINDS, Contracts, Requirement
 from daedalus.extensions.task_controls import queue_stop
 from daedalus.host import prompts
@@ -448,6 +448,20 @@ async def _journal(orch: Orchestrators, project: Project, text: str, task_id: st
     await orch._changed(project.id, "journal", "orchestrator")
 
 
+def _not_returnable(task: dict[str, Any]) -> str:
+    """Why a card outside review has no result to send back, and what to do instead."""
+    task_id, status = task["id"], task.get("status")
+    if status == "done":
+        return (f"task {task_id} is done: its result was accepted, and an accepted result is not sent back. Further work on it is a "
+                "card of its own: Assign without task_id, with a title and the four parts of the brief")
+    if status == "dropped":
+        return f"task {task_id} is dropped; further work on it is a card of its own: Assign without task_id"
+    if status == "doing":
+        return f"task {task_id} is in doing: nothing is handed in yet to send back; Tell reaches the member at work on it"
+    return (f"task {task_id} is {status}: nothing is handed in to send back. Assign(task_id='{task_id}') starts it"
+            + (", with what to change in the brief or requirements" if status == "todo" else ""))
+
+
 async def review_result(
     orch: Orchestrators, project: Project, session_id: str, *, task_id: str,
     op: str = "inspect", result_id: str | None = None, verdict_id: str | None = None,
@@ -478,6 +492,11 @@ async def review_result(
                           ensure_ascii=False, sort_keys=True)
     if op not in ("verdict", "return", "accept"):
         raise Refused("op is inspect, verdict, accept or return")
+    if op == "return" and task.get("status") not in (None, "review"):
+        # The domain's "return target is not the current reviewed result" was all a coordinator heard
+        # when it tried to send an accepted card back for one more check, and it could not tell that
+        # no result id would ever do.
+        raise Refused(_not_returnable(task))
     # The card's revision, its current result and its contract are what the coordinator would have
     # copied out of op='inspect' anyway. Asking for them by hand cost a refused call each time one
     # was left out; a wrong value given explicitly is still refused as stale.
@@ -540,9 +559,30 @@ async def review_result(
                                         "review.return" if op == "return" else "review.verdict",
                                         client_operation_id, expected_entity_revision,
                                         Entity("task", task_id), payload, effect)
-    except (ControlConflict, ControlDenied, DomainConflict, ValueError, KeyError) as exc:
+    except ControlConflict as exc:
+        raise Refused(stale_revision(exc, task_id=task_id)) from exc
+    except DomainConflict as exc:
+        if str(exc) == "evidence does not bind to the reviewed result":
+            raise Refused(await _unbound_evidence(orch, result_id, evidence_ids or [])) from exc
+        raise Refused(str(exc)) from exc
+    except (ControlDenied, ValueError, KeyError) as exc:
         raise Refused(str(exc)) from exc
     return json.dumps(response, ensure_ascii=False, sort_keys=True)
+
+
+async def _unbound_evidence(orch: Orchestrators, result_id: str, given: list[str]) -> str:
+    """Which of the given evidence ids are not recorded on the result, and what is.
+
+    Coordinators passed file handles, artifact manifests and evidence of an earlier result, and were
+    told only that the evidence did not bind; op='inspect' lists no evidence ids, so ten verdicts in
+    a row were refused before one went through with none."""
+    rows = await orch.manager.db.fetchall("SELECT id FROM review_evidence WHERE result_id = ? ORDER BY rowid", (result_id,))
+    recorded = [row["id"] for row in rows]
+    unbound = [item for item in given if item not in recorded]
+    return (f"evidence {', '.join(unbound) or '(none)'} is not recorded on result {result_id}: an evidence id is a check "
+            "recorded against this exact result, not a file handle, an artifact manifest or evidence of an earlier result. "
+            f"Recorded on it: {', '.join(recorded) or 'nothing yet'}. A failed verdict needs no evidence (evidence_ids=[]), "
+            "and work with no branch is accepted with op='accept'")
 
 
 async def decide(orch: Orchestrators, project: Project, session_id: str, *, why: str, task_id: str | None = None, loop: str | None = None) -> str:

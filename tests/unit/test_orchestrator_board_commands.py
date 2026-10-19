@@ -16,7 +16,7 @@ from tests.unit.test_orchestrator import rig
 
 
 @pytest.mark.asyncio
-async def test_task_tool_create_requires_live_grant_and_collection_revision(
+async def test_task_tool_create_requires_live_grant_and_checks_a_given_collection_revision(
     settings: Settings, db: Database, tmp_path: Path,
 ) -> None:
     run = await rig(settings, db, tmp_path)
@@ -38,9 +38,13 @@ async def test_task_tool_create_requires_live_grant_and_collection_revision(
                                  objective="Inspect the invoice total", client_operation_id="tool-call-one",
                                  expected_collection_revision=revision)
         assert "Check the invoice" in created
-        with pytest.raises(Refused, match="expected_collection_revision"):
+        # A stale revision is refused with the current one; a left-out one is the board as it stands.
+        current = await ControlStore(db).revision(scope, Entity("collection", scope.id))
+        with pytest.raises(Refused, match=f"collection revision {current} now.*expected_collection_revision={current}"):
             await run.orch.service("tasks", session_id=session_id, op="create", title="Another task",
-                                   client_operation_id="tool-call-two")
+                                   client_operation_id="tool-call-two", expected_collection_revision=revision)
+        assert "Another task" in await run.orch.service("tasks", session_id=session_id, op="create", title="Another task",
+                                                         client_operation_id="tool-call-three")
     finally:
         await run.manager.close()
 

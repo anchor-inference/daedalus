@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 from daedalus.extensions.board_commands import BoardCommands
 from daedalus.extensions.likeness import same_card
 from daedalus.extensions.orchestrator_contract import bound, narrowing_refusal, source_of
-from daedalus.extensions.orchestrator_ops import Refused, _folder, board_principal
+from daedalus.extensions.orchestrator_ops import Refused, _folder, board_principal, held_by, stale_revision
 from daedalus.extensions.runtime_observations import settle_previous_host
 from daedalus.extensions.task_contract import (
     CHECK_MAX_CHARS,
@@ -38,7 +38,7 @@ from daedalus.host.events import EventFilter
 from daedalus.security import operator_secrets
 from daedalus.security.operator_secrets import SecretError
 from daedalus.staff_runtime import LiveSession, ReadRequest
-from daedalus.stores.control import ControlStore, Principal, Scope
+from daedalus.stores.control import ControlConflict, ControlStore, Entity, Principal, Scope
 from daedalus.stores.files import FileRefused, StoredFile
 from daedalus.stores.outbox import OutboxStore
 from daedalus.stores.projects import Project, ProjectFolder
@@ -59,7 +59,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 HANDED_IN = ("review", "done", "dropped")
-"""A task whose member is finished with it: another Assign of it opens its next round."""
+"""A task whose member is finished with it. Only one in review can have another round, once its result
+is returned; a done or dropped card is finished, and further work is a card of its own."""
 FOLLOW_UP_WINDOW = timedelta(hours=2)
 """How soon after a member handed a card in a new assignment with nearly its title is taken for a
 round of it that forgot its task_id."""
@@ -591,9 +592,15 @@ async def assign(
     if existing is None:
         previous = await _last_handed_in(orch, project, member, session_id)
         if previous is not None and not new and _same_work(wanted, previous["title"]):
+            if previous["status"] == "review":
+                round_of = (f"For its next round, ReviewResult(op='return', task_id='{previous['id']}', reason=…) sends its result back "
+                            f"and Assign(task_id='{previous['id']}', …) then reopens that card with its history; for separate work, repeat this with new=true")
+            else:
+                round_of = (f"That card is {previous['status']} and stays finished; if this is further work on it, repeat this with new=true "
+                            "and it gets a card of its own")
             raise Refused(
                 f"{member.name} handed in {previous['id']} \"{previous['title']}\" {_minutes_ago(previous)}, and \"{wanted}\" reads as the same work. "
-                f"For its next round, Assign(task_id='{previous['id']}', …) reopens that card and keeps its history; for separate work, repeat this with new=true"
+                + round_of
             )
     # Checked before anything is written, so a refused hand-over leaves no half-briefed task behind.
     if existing is None:
@@ -607,7 +614,7 @@ async def assign(
     renamed = wanted if existing is not None and wanted and wanted != existing["title"] else None
     reopened = existing is not None and existing["status"] in HANDED_IN
     if reopened:
-        raise Refused("return the exact reviewed result before assigning another round")
+        raise Refused(_next_round(existing))  # type: ignore[arg-type]
     if existing is not None and renamed is not None and not reopened and not _same_work(renamed, existing["title"]) and len(" ".join((reason or "").split())) < 8:
         # A card a member was at work on was renamed into an unrelated check of a mail service by an
         # Assign that named it: the work it held left the board half done, under another title, and
@@ -632,7 +639,8 @@ async def assign(
                                       or ownership["pending_launch"]):
             # An edit followed by a refused launch used to leave the old worker running under
             # a newly written title and brief, with no command tying them to the same attempt.
-            raise Refused("stop or reconcile the current execution before reassigning or changing and relaunching this task")
+            raise Refused("stop or reconcile the current execution before reassigning or changing and relaunching this task: "
+                          + await held_by(orch, existing["id"]))
         reopen_after_exit = bool(ownership is not None and ownership["current_attempt_id"]
                                  and ownership["exited"] and existing["status"] == "doing")
     try:
@@ -647,7 +655,10 @@ async def assign(
         file_ids = [stored.id for stored in handed]
         if existing is None:
             if expected_collection_revision is None:
-                raise Refused("new assignments need expected_collection_revision from Tasks(list)")
+                # Left out, it is the board as it stands, as Tasks(update) and ReviewResult fill in
+                # theirs: refusing sent the coordinator to Tasks(list) for the number and back, and the
+                # duplicate it might guard against is refused by the twin check above.
+                expected_collection_revision = await ControlStore(orch.manager.db).revision(scope, Entity("collection", project.id))
             principal = await board_principal(orch, session_id, project.id, "board.task.create")
             created = await commands.create(principal, scope, client_operation_id=client_operation_id,
                                             expected_collection_revision=expected_collection_revision,
@@ -660,7 +671,7 @@ async def assign(
         else:
             task = existing
             if expected_entity_revision is None:
-                raise Refused("existing assignments need expected_entity_revision from Tasks(get)")
+                expected_entity_revision = int(task["entity_revision"])
             unchanged = (task["status"] == "todo" and task["assignee_staff_id"] == member.id
                          and not renamed and not given and priority is None and depends_on is None
                          and folder is None and files is None and requirements is None and inputs is None
@@ -696,6 +707,8 @@ async def assign(
                 task = await board.get(changed["task_id"], actor=session_id)
     except KeyError as exc:
         raise Refused(f"no task {exc.args[0] if exc.args else ''} on {project.name}'s board") from exc
+    except ControlConflict as exc:
+        raise Refused(stale_revision(exc, task_id=existing["id"] if existing is not None else None)) from exc
     except ValueError as exc:
         raise Refused(str(exc)) from exc
     added = f"{len(handoff_requirements)} requirements are on the card." if handoff_requirements else ""
@@ -717,10 +730,13 @@ async def assign(
         # Said out loud: a card renamed in passing is a card whose earlier work leaves the board
         # under another name, and nobody who reads the board afterwards can tell.
         notes.append(f"The card was renamed: \"{existing['title']}\" → \"{renamed}\"; its earlier rounds stay in its notes.")
-    if previous is not None:
+    if previous is not None and previous["status"] == "review":
+        # Only a card still in review can take another round. Offered for a done card as well, the
+        # coordinator dropped the card it had just made and was refused the one it was sent to.
         notes.append(
             f"This is a card of its own. {member.name}'s previous card {previous['id']} \"{previous['title']}\" was handed in {_minutes_ago(previous)}; "
-            f"if this work is its next round, drop {task['id']} and Assign(task_id='{previous['id']}') instead."
+            f"if this work is its next round, drop {task['id']}, ReviewResult(op='return', task_id='{previous['id']}', reason=…) "
+            f"and Assign(task_id='{previous['id']}') instead."
         )
     if added:
         notes.append(added)
@@ -735,11 +751,33 @@ async def assign(
             notes.append(f"The launch is held — {held}. Nothing to do about it here; it starts by itself once the environment is ready.")
     tail = "".join(" " + note for note in notes)
     admission = await OutboxStore(orch.manager.db).view(launched["effect_id"])
-    waiting = (f" queue position {admission['wait_position']} ({admission['wait_reason']})"
-               if admission.get("wait_position") is not None else " admission in progress")
+    # Read as "started", "admission in progress" let coordinators tell the operator a member was
+    # already at work on a start that was then held or refused; the answer says it has not begun.
+    if admission["state"] == "completed":
+        waiting = " started"
+    else:
+        waiting = ((f" queue position {admission['wait_position']} ({admission['wait_reason']})"
+                    if admission.get("wait_position") is not None else " admission in progress")
+                   + "; not started yet — a start that is held or refused is noted on the card and wakes you")
     files_wait = " The files are copied to them when they start." if handed else ""
     return (f"{member.name} will start {task['id']} \"{task['title']}\" after admitted;"
             f" effect {launched['effect_id']}: {admission['state']},{waiting}.{files_wait}" + tail)
+
+
+def _next_round(task: dict[str, Any]) -> str:
+    """Why a handed-in card cannot be assigned as it stands, and the call that gets the work going.
+
+    The refusal used to be "return the exact reviewed result before assigning another round" for
+    every handed-in card. On a card already accepted the return is refused too, since only a result
+    in review can go back, and a coordinator asked for one more check after an accepted report went
+    from Assign to ReviewResult and back without learning that the work needed a card of its own."""
+    task_id = task["id"]
+    if task["status"] == "review":
+        return (f"task {task_id} is in review: its result is handed in and not judged yet. ReviewResult(op='return', task_id='{task_id}', "
+                f"reason=…) sends it back for another round, and Assign(task_id='{task_id}') then starts that round with the card's history")
+    finished = "its result was accepted" if task["status"] == "done" else "it was dropped"
+    return (f"task {task_id} is {task['status']}: {finished}, and a finished card is not reopened. Further work on it is a card of its own: "
+            "repeat this Assign without task_id, with a title and the four parts of the brief (new=true when the title repeats the finished card's)")
 
 
 TWIN_WINDOW = timedelta(hours=6)
@@ -772,6 +810,18 @@ async def refuse_twin(orch: Orchestrators, project: Project, title: str, objecti
         if new and (len(" ".join((reason or "").split())) >= 8 or row["status"] in HANDED_IN):
             continue
         holder = f", {row['name']}" if row["name"] else ""
+        if row["status"] in ("done", "dropped"):
+            # A finished card is not handed on; pointing at it sent coordinators into a refused Assign.
+            raise Refused(
+                f"\"{title}\" is work already on the board: {row['id']} \"{row['title']}\" ({row['status']}{holder}), finished. If this is "
+                "further work on it, repeat this with new=true and it gets a card of its own"
+            )
+        if row["status"] == "review":
+            raise Refused(
+                f"\"{title}\" is work already on the board: {row['id']} \"{row['title']}\" (review{holder}). For another round of it, "
+                f"ReviewResult(op='return', task_id='{row['id']}', reason=…) and then Assign(task_id='{row['id']}', …); for separate work, "
+                "repeat this with new=true"
+            )
         raise Refused(
             f"\"{title}\" is work already on the board: {row['id']} \"{row['title']}\" ({row['status']}{holder}). For the same work, "
             f"Assign(task_id='{row['id']}', …) hands that card on — to someone other than who worked it, with a reason; for separate work, "
@@ -1021,6 +1071,15 @@ async def tell(
 async def _last_session(orch: Orchestrators, member: Staff) -> str:
     """Why a member has no session to tell, when it had one: "has no live session" alone once sent the
     orchestrator guessing, seconds after a stop the host had made, whether the member had crashed."""
+    waiting = await orch.manager.db.fetchone(
+        "SELECT t.id FROM effect_outbox e JOIN board_tasks t ON t.id = json_extract(e.payload_json,'$.control.task_id')"
+        " WHERE e.kind = 'task.launch' AND e.state IN ('pending','claimed') AND t.assignee_staff_id = ?"
+        " ORDER BY e.created_at DESC LIMIT 1", (member.id,))
+    if waiting is not None:
+        # "assign a task to start one" told the coordinator to do what it had just done: the start
+        # it had assigned was waiting for a free place.
+        return (f"; their card {waiting['id']} is waiting to start, and a message reaches them only once it runs: "
+                f"put what it says into the card (Require(task_id='{waiting['id']}', …)), or Tell again when it has started")
     row = await orch.manager.db.fetchone(
         "SELECT s.ended_at,s.end_reason,s.task_id,t.status FROM staff_sessions s LEFT JOIN board_tasks t ON t.id = s.task_id"
         " WHERE s.staff_id = ? AND s.ended_at IS NOT NULL ORDER BY s.ended_at DESC LIMIT 1", (member.id,))

@@ -33,6 +33,7 @@ from daedalus.host.peek import LocalFolderAccess, PeekRefused
 from daedalus.staff_runtime import LiveSession
 from daedalus.stores.control import ControlConflict, ControlDenied, ControlStore, Entity, Principal, Scope
 from daedalus.stores.files import HANDOVER_MAX_FILES, MAIN, FileRefused, human_size, parse_handle
+from daedalus.stores.outbox import OutboxStore
 from daedalus.stores.projects import (
     BRIEF_SECTIONS,
     COMMITMENT_KIND,
@@ -61,6 +62,76 @@ TEAM_MESSAGES = 5
 
 class Refused(ValueError):
     """What an orchestrator tool will not do, said so the orchestrator can do something else."""
+
+
+async def held_by(orch: Orchestrators, task_id: str) -> str:
+    """What holds a card that cannot be reassigned or changed now, and the one thing to do about it.
+
+    "stop or reconcile the current execution" alone named nothing to stop. Coordinators released
+    the member, were told it had no live session, and were refused again: the card was held by a
+    start still waiting for a free place, which nothing needed to stop, or by a run whose end the
+    host had never seen, which only the operator could settle."""
+    launch = await orch.manager.db.fetchone(
+        "SELECT id FROM effect_outbox WHERE kind = 'task.launch' AND state IN ('pending','claimed','unknown')"
+        " AND json_extract(payload_json,'$.control.task_id') = ? ORDER BY created_at DESC LIMIT 1", (task_id,))
+    if launch is not None:
+        view = await OutboxStore(orch.manager.db).view(launch["id"])
+        waits = (f"queue position {view['wait_position']}" + (f", {view['wait_reason']}" if view.get("wait_reason") else "")
+                 if view.get("wait_position") is not None else f"{view['state']}, admission in progress")
+        return (f"its start is already waiting (effect {launch['id']}: {waits}) and starts by itself; nothing runs that needs stopping. "
+                "A start that is refused is noted on the card and wakes you; once it runs, Tell reaches the work in hand")
+    row = await orch.manager.db.fetchone(
+        "SELECT a.state, a.staff_session_id, s.ended_at, s.status, m.name FROM board_tasks t"
+        " JOIN execution_attempts a ON a.id = t.current_attempt_id"
+        " LEFT JOIN staff_sessions s ON s.id = a.staff_session_id LEFT JOIN staff m ON m.id = s.staff_id"
+        " WHERE t.id = ?", (task_id,))
+    if row is None:
+        return "Tasks(op='get') shows the card as it is now"
+    if row["name"] and row["ended_at"] is None:
+        return (f"{row['name']} is at work on it (session {row['staff_session_id']}, {str(row['status'] or '').replace('_', ' ')}). "
+                f"To add to the work in hand, Tell(staff='{row['name']}'); to take the card back, Release(staff='{row['name']}') "
+                "ends that session, and the card can then be assigned")
+    who = f"{row['name']}'s session on it ended at {str(row['ended_at'])[11:19]} UTC" if row["name"] else "its last run has no session"
+    return (f"{who}, but the host has no proof that the run stopped (attempt {row['state']}), so the card stays bound to it. "
+            "Nothing a coordinator can call frees it: tell the operator in one line — they can close the card from the board — "
+            "and put further work on a card of its own")
+
+
+async def _movable(orch: Orchestrators, task_id: str, status: str | None) -> None:
+    """Refuse, with the call that does it, a move the board would refuse in words of its own.
+
+    The board's "return the exact reviewed result before reopening" named no tool and was said of a
+    done card as well, which nothing returns; "stop or reconcile the current execution" named
+    nothing to stop. Coordinators retried the same move until they gave up on the card."""
+    row = await orch.manager.db.fetchone("SELECT status, current_attempt_id FROM board_tasks WHERE id = ?", (task_id,))
+    if row is None or status is None or status == row["status"]:
+        return
+    if row["status"] == "review" and status != "dropped":
+        raise Refused(f"task {task_id} is in review: ReviewResult(op='return', task_id='{task_id}', reason=…) sends its result back "
+                      "and puts the card in todo; status='dropped' ends it without a verdict")
+    if row["status"] == "done":
+        raise Refused(f"task {task_id} is done: its result was accepted, and a finished card is not reopened. Further work on it is "
+                      "a card of its own: Assign without task_id, or Tasks(op='create')")
+    if status in ("blocked", "dropped") and row["current_attempt_id"]:
+        attempt = await orch.manager.db.fetchone("SELECT state FROM execution_attempts WHERE id = ?", (row["current_attempt_id"],))
+        if attempt is not None and attempt["state"] in ("queued", "starting", "running", "waiting", "recovering"):
+            raise Refused("stop or reconcile the current execution before changing task state: " + await held_by(orch, task_id))
+
+
+def stale_revision(exc: ControlConflict, *, task_id: str | None = None) -> str:
+    """A refused revision, with the revision it is now and the argument to repeat with.
+
+    "the entity has changed" alone sent the coordinator to Tasks(list) or Tasks(get) for one number
+    and back; a hire between its list and its Assign was enough to cause it."""
+    if exc.current_revision is None or str(exc) != "the entity has changed":
+        return str(exc)
+    if task_id:
+        return (f"card {task_id} changed since the revision given: it is at entity revision {exc.current_revision} now. "
+                f"Tasks(op='get', task_id='{task_id}') shows what changed; repeat with expected_entity_revision={exc.current_revision}, "
+                "or leave it out to act on the card as it stands")
+    return (f"the board changed since the revision given: it is at collection revision {exc.current_revision} now. "
+            f"Tasks(op='list') shows what changed; repeat with expected_collection_revision={exc.current_revision}, "
+            "or leave it out to act on the board as it stands")
 
 
 async def board_principal(orch: Orchestrators, session_id: str, project_id: str,
@@ -422,8 +493,12 @@ async def tasks(
         if op == "create":
             if not title:
                 raise Refused("a task needs a title")
-            if not client_operation_id or expected_collection_revision is None:
-                raise Refused("create needs its trusted call id and expected_collection_revision from Tasks(list)")
+            if expected_collection_revision is None:
+                # Left out, it is the board as it stands, as for an update: the twin check below is
+                # what refuses a card for work already on the board.
+                expected_collection_revision = await ControlStore(orch.manager.db).revision(scope, Entity("collection", project.id))
+            if not client_operation_id:
+                raise Refused("create needs its trusted call id")
             from daedalus.extensions.orchestrator_team import refuse_twin  # Lazy: the team's module imports this one
 
             await refuse_twin(orch, project, " ".join(title.split()), objective or "", new=new, reason=reason)
@@ -473,6 +548,7 @@ async def tasks(
                 note = (note + " " if note else "") + f"waits on: {waits}"
             if task_id:
                 await settle_previous_host(orch.app, task_id)
+                await _movable(orch, task_id, status)
             principal = await board_principal(orch, session_id, project.id, "board.task.update", task_id)
             updated = await commands.update(principal, scope, task_id, client_operation_id=client_operation_id,
                                             expected_entity_revision=expected_entity_revision,
@@ -482,6 +558,8 @@ async def tasks(
             task = await board.get(updated["task_id"], actor=session_id)
     except KeyError as exc:
         raise Refused(f"no task {exc.args[0] if exc.args else task_id} on {project.name}'s board") from exc
+    except ControlConflict as exc:
+        raise Refused(stale_revision(exc, task_id=task_id if op != "create" else None)) from exc
     except ValueError as exc:
         if isinstance(exc, Refused):
             raise
