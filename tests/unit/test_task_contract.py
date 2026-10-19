@@ -299,6 +299,27 @@ async def test_the_operators_requirement_is_changed_only_on_their_answer(setting
         await r.manager.close()
 
 
+async def test_a_permission_the_operator_granted_is_no_requirement(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """"granted always (mcp__daedalus_team)" became requirement R4 of a member's next task: the new
+    contract revision voided the permission that member was waiting on at that moment, and its report
+    came back "Not granted" although the orchestrator had just allowed it."""
+    r = await rig(settings, db, tmp_path)
+    try:
+        fake(r)
+        sid = await office(r)
+        mira = await member(r)
+        task_id = await operator_task(db, r.project.id, "Mail settings", brief=SCRIPT)
+        ask = await r.manager.asks.open(r.project.id, origin="staff", kind="permission", text="mcp__daedalus_browser__BrowserNavigate: open the page",
+                                        routed_to="operator", staff_id=mira.id, detail={"tool": "mcp__daedalus_browser__BrowserNavigate"})
+        await r.manager.asks.resolve(ask.id, "operator", {"allow": True, "always": True, "rule": "mcp__daedalus_browser"})
+        with pytest.raises(Refused, match=r"is a permission; .*not a requirement"):
+            await r.call(sid, "require", task_id=task_id, text="granted always (mcp__daedalus_browser)", source=f"answer:{ask.short_id}")
+        assert not await r.manager.db.fetchall("SELECT 1 FROM task_requirements WHERE task_id = ?", (task_id,))
+    finally:
+        await close_team(r.manager)
+        await r.manager.close()
+
+
 async def test_a_card_holds_a_bounded_number_of_requirements(settings: Settings, db: Database, tmp_path: Path) -> None:
     r = await rig(settings, db, tmp_path)
     try:
