@@ -17,6 +17,7 @@ from daedalus.config import RuntimeConfig, Settings
 from daedalus.host.checkpoint_retention import RetentionBounds
 from daedalus.host.checkpoints import WORKSPACE_FILE, Checkpoints, store_dir
 from daedalus.host.session_runner import SessionManager
+from daedalus.stores import database as database_module
 from daedalus.stores.database import MIGRATIONS, Database
 
 IDENTITY = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@localhost", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@localhost"}
@@ -36,7 +37,9 @@ def _legacy_store(workspace: Path, text: str) -> str:
 
 
 async def _reopen_one_schema_back(settings: Settings, db: Database) -> Database:
-    await db.execute(f"UPDATE schema_version SET version = {len(MIGRATIONS) - 1}")
+    # Back to just before the store migration, found by what it is: later migrations follow it, and
+    # they run again on the reopen as they would on a database that had not seen them.
+    await db.execute(f"UPDATE schema_version SET version = {MIGRATIONS.index(database_module._sealed_checkpoint_stores)}")
     await db.close()
     reopened = Database(settings.db_path, workspaces_dir=settings.workspaces_dir)
     await reopened.open()

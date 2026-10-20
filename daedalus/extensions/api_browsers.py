@@ -220,13 +220,20 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         up = [e for e in envs if e["available"]]
         reason = "" if up else next((f"{e['env']}: {e['detail'] or e['reason']}" for e in envs if e["configured"]), "no browser is configured")
         groups = await found.list(session_id=session, staff_id=staff, project_id=project, status=status)
-        return {
+        out = {
             "available": bool(up),
             "reason": reason,
             "groups": groups,
             "envs": envs,
             "capacity": {"open": await found.running(found.agent_env()), "cap": app.config.browser.running_cap, "queued": found.queue()},
         }
+        if session is not None and found.user_offered():
+            # The panel's switch: which browser this conversation uses, and whether the operator's
+            # Chrome is there to switch to.
+            choice = await found.choices.get(session)
+            relay = next((e.get("relay") for e in envs if e["env"] == "user"), None) or {}
+            out["user"] = {"env": choice["env"], "consented": choice["consented"], "connected": bool(relay.get("connected")), "name": str(relay.get("profile_name") or "")}
+        return out
 
     @api.get("/api/browsers/load")
     async def browsers_load(cap: int | None = Query(default=None, ge=1, le=64), _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -257,13 +264,13 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         return {"profiles": await service().profiles()}
 
     @api.post("/api/browsers/profiles/{env}/{profile}/clear")
-    async def browsers_profile_clear(env: Literal["container", "host"], profile: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+    async def browsers_profile_clear(env: Literal["container", "host", "user"], profile: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """Forget a profile's cookies, storage and cache: every login made in it. Refused while its browser runs."""
         await service().profile_action(env, profile, "clear")
         return {"ok": True}
 
     @api.delete("/api/browsers/profiles/{env}/{profile}")
-    async def browsers_profile_delete(env: Literal["container", "host"], profile: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+    async def browsers_profile_delete(env: Literal["container", "host", "user"], profile: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         await service().profile_action(env, profile, "delete")
         return {"ok": True}
 

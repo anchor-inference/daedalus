@@ -1581,3 +1581,68 @@ container (Ubuntu 24.04 image, non-root, `seccomp=unconfined`); numbers are medi
 
 The latency a person sees adds the host's relay and the network: a frame is forwarded as it came,
 so on a LAN that is the round trip plus the frame's size over the link.
+
+## The operator's Chrome: the host's side
+
+The `user` environment is the operator's own Chrome, driven through the Daedalus extension by a
+daemon that launches no browser (`--backend attach`). The host reaches it like the others, through a
+run directory: `BROWSER_USER_DIR` (natively the launcher's `<local>/browserd-user/run`; on a server
+the `browser-user` compose service's volume, mounted at `/run/daedalus-browser-user`). It is sealed
+from the agent's commands like the other daemons' directories.
+
+**Who chooses it.** Never the agent and never `[browser] env`: the operator switches a conversation
+in the browser panel's header ("Agent's browser | Your Chrome · <name>"), and the first switch in a
+conversation carries their yes to the consent summary. The choice, the consent and the sites granted
+in the conversation are kept per session (`kv` `browser.user.sessions`) and dropped with it. No tool
+takes an environment; an agent's group there is `s-<session>-u` on the one profile `user`. A switched
+conversation keeps its group in the other browser open, and the agent's calls reach only the
+browser it uses now. With Chrome not connected, `BrowserOpen` says so; it never falls back to the
+agent's browser.
+
+**What changes for the agent there**:
+
+- A site new to the conversation is asked about before it is opened (`BrowserOpen(url)`,
+  `BrowserNavigate`, `BrowserTabs(new)`): a question of kind `site`, always the operator's, a staff
+  member's too. A yes grants the registrable domain and its subdomains for the conversation.
+  `[browser.user] granted_sites` never ask. The daemon's navigation guard is given the same list as
+  `egress_allow`, present even when empty, so a page's own navigation elsewhere is an ask that the
+  host turns into the same question.
+- A purchase, a message sent, a deletion or a sign-in always asks: `[[browser.rules]]` cannot let
+  them through in `user` (`daedalus.host.policy.CONSEQUENTIAL_KINDS`). Other kinds follow the rules.
+- Refused before the daemon is asked: `BrowserCookies` import and clear, `fresh=true`, and clearing
+  or deleting the profile. `BrowserLogin` becomes a hand-over ("sign in in the agent's window").
+- `BrowserNetwork(body=true)` reads a body only when `[browser.user] bodies` is on, and then only
+  from a granted site.
+- The injection monitor and watch mode are on (`[browser.user] monitor`, `watch`) whatever
+  `[browser]` says for the agent's browser.
+- There is no cap and no idle close; only the recording's limits are sent to that daemon.
+- Every result there starts with `[in the operator's own Chrome «<name>»]`; `BrowserOpen` says it in
+  words.
+
+**Routes** (the app's authentication):
+
+| Route | |
+|---|---|
+| `GET /api/browser/user` | `{configured, enabled, daemon, reason, detail, relay, native, launcher, launcher_error, devices, server_url, consent}`. `relay` is the daemon's `relay.status`; `launcher` (natively) the desktop launcher's report on Chrome, the connector and the extension folder |
+| `POST /api/browser/user/register`, `/unregister` | natively, through the launcher (`daedalus.host.launcher_bridge.user_browser`): `{launcher, error}`; 501 on a server |
+| `POST /api/browser/user/check` | host → `relay.notify` → the extension: `{ok, rtt_ms, host_ms}` |
+| `POST /api/browser/user/pairing` | a server's one-time code: `{code: "ABCD-EFGH", expires_at, server_url}`, 10 minutes |
+| `GET /api/browser/user/devices`, `DELETE …/devices/{id}` | paired Chromes `{id, name, last_seen, connected, …}`; a revoke ends a live relay with 4401 |
+| `GET`, `PUT /api/browser/user/sessions/{session}` | `{env: "agent" \| "user", consented, sites, offered, consent}`; `PUT {env, consent}`, 409 `consent_needed` with `consent` on a first switch without it |
+
+`GET /api/browsers?session=<id>` carries `user: {env, consented, connected, name}` where the
+installation offers the operator's Chrome. The events `browser.user {kind: connected | lost | check |
+switched, profile_name, reason?}` follow the relay (a popup's "Check connection" is a toast in the
+app) and a conversation's switch.
+
+**The public doors on a server.** `POST /api/browser/pair {code, profile_id, profile_name,
+ext_version, chrome_version}` → `{token}` spends a code (single use; spending one voids the others)
+for a device token. `wss /api/browser/relay` takes the token in its first frame, the extension's
+`hello`; a socket from a web page (an `http(s)` `Origin`) is refused before anything is read. The
+host opens `relay.open {transport: "server"}` on a connection of its own to the user daemon and
+copies frames both ways, split into pieces and joined as the bridge does, with the token taken out
+of the hello. One relay at a time: another Chrome profile is refused with `bye {reason:
+"another_relay"}` and close 4409 naming the connected one (the same profile replaces its own); a
+wrong, revoked or 90-days-unused token gets `bye {reason: "unauthorized"}` and 4401. Codes and
+tokens are kept as SHA-256 only and compared in constant time; failed attempts at both doors share
+a limit (5 per address and 30 overall in 10 minutes); nothing presented is logged.

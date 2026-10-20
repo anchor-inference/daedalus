@@ -48,10 +48,13 @@ from daedalus.browser.model import (
     Unsupported,
     group_id,
 )
+from daedalus.browser.model import USER as USER_ENV
 from daedalus.browser.monitor import InjectionMonitor
 from daedalus.browser.notes import ACTIVE, NOTE, PROCEDURE, SiteNotes
 from daedalus.browser.replay import RecordedSkills
 from daedalus.browser.replay import replay as run_replay
+from daedalus.browser.user import site_granted
+from daedalus.browser.user import site_of as registrable_site
 from daedalus.host.policy import ALLOW, ASK, DENY, Decision, approval_key, browser_sensitive, host_allowed
 from daedalus.security import operator_secrets
 from daedalus.security.untrusted import fenced as untrusted
@@ -440,11 +443,14 @@ class SensitiveAsk:
     def network(self) -> bool:
         """Whether this is the network wall's question about an address rather than an action on a page.
         It is the one ask a staff member's orchestrator may answer: where the browser may go is the
-        project's business, what it buys or sends is the operator's."""
+        project's business, what it buys or sends is the operator's. A new site in the operator's own
+        Chrome (``site``) is not: it is the operator's sign-ins the agent would reach there."""
         return "network" in self.kinds
 
     def said(self) -> str:
         """The request in the words its decider reads."""
+        if "site" in self.kinds:
+            return f"open {self.element} in your own Chrome, where you are signed in" + (f"; the agent says why: “{self.why[:300]}”" if self.why else "")
         if self.network:
             return f"open {self.element} in the browser: {self.decision.reason}" + (f"; the agent says why: “{self.why[:300]}”" if self.why else "")
         return f"{self.action} “{self.element}”" + (f" (the page calls it “{self.name}”)" if self.name and self.name.casefold() not in self.element.casefold() else "") + f" on {self.origin}"
@@ -606,14 +612,54 @@ class BrowserAgent:
     # -- the group and the tab -----------------------------------------------------------------
 
     async def _group(self, caller: Caller) -> dict[str, Any]:
-        """The caller's current group: the one it used last of those open."""
+        """The caller's current group: the one it used last of those open in the browser its
+        conversation uses now. A conversation the operator switched keeps its group in the other
+        browser open, and the agent's calls never reach it until they switch back."""
+        user = await self.service.env_for(caller.owner) == USER_ENV
         row = await self.service.db.fetchone(
-            "SELECT * FROM browser_groups WHERE owner_kind = ? AND owner_id = ? AND status = 'open' ORDER BY last_activity_at DESC LIMIT 1",
-            (caller.owner.kind, caller.owner.id),
+            "SELECT * FROM browser_groups WHERE owner_kind = ? AND owner_id = ? AND status = 'open' AND (env = 'user') = ? ORDER BY last_activity_at DESC LIMIT 1",
+            (caller.owner.kind, caller.owner.id, int(user)),
         )
         if row is None:
-            raise NotFound("no browser is open for you; BrowserOpen starts one")
+            raise NotFound("no browser is open for you; BrowserOpen starts one" + (" in the operator's Chrome, which they gave this conversation" if user else ""))
         return dict(row)
+
+    def _user_name(self) -> str:
+        """The name the operator gave their Chrome in the extension's popup, as its relay reported it."""
+        relay = self.service.links[USER_ENV].info.get("relay") if USER_ENV in self.service.links else None
+        name = str(relay.get("profile_name") or "") if isinstance(relay, dict) else ""
+        return name or "Chrome"
+
+    async def _granted_sites(self, caller: Caller) -> list[str]:
+        """The sites the agent may open in the operator's Chrome without asking: the operator's
+        always-list and what they granted in this conversation."""
+        sites = list(self.service.config().user.granted_sites)
+        if caller.owner.session_id:
+            sites += (await self.service.choices.get(caller.owner.session_id))["sites"]
+        return sites
+
+    async def _site_ask(self, caller: Caller, group: dict[str, Any], url: str, why: str) -> None:
+        """In the operator's Chrome, a site new to the conversation is asked about before the agent
+        opens it: the core of what replaces the network wall there, since every site the operator is
+        signed in to is one navigation away, and an address with data in its query is how a steered
+        agent would carry it out. Asked of the operator, a staff member's too. A yes grants the site
+        (its subdomains with it) for this conversation."""
+        if group.get("env") != USER_ENV:
+            return
+        host = host_of(url)
+        if not host or urlsplit(url).scheme.lower() not in ("http", "https"):
+            return  # the daemon judges every other scheme, and opens about:blank itself
+        if site_granted(host, await self._granted_sites(caller)):
+            return
+        site = registrable_site(host)
+        decision = Decision(ASK, f"the agent asks to open {site} in your own Chrome, where you are signed in", "browser.site", key=approval_key("BrowserNavigate", {"group": group["id"], "site": site}))
+        ask = SensitiveAsk(decision, "BrowserNavigate", group["id"], "open", ["site"], f"https://{site}", site, host, 0, "", why=" ".join(why.split())[:300])
+        allowed, said = await caller.gate(ask)
+        await self._audit(group, caller, "sensitive", {"kinds": ["site"], "decision": "allow" if allowed else "ask", "key": decision.key, "host": host, "site": site})
+        if not allowed:
+            raise Forbidden(said)
+        if caller.owner.session_id:
+            await self.service.choices.grant_site(caller.owner.session_id, site)
 
     async def _tab(self, group: dict[str, Any], tab: str | None) -> dict[str, Any]:
         listing = await self.service.call(group["id"], "tab.list", {"group_id": group["id"]}, what="listing the tabs")
@@ -650,7 +696,8 @@ class BrowserAgent:
         the action log, so the operator sees what waited for them."""
         cfg = self.service.config()
         host = host_of(url)
-        if not cfg.watch_mode or not host or not host_allowed(host, cfg.watch_domains) or self.service.watched(group["id"]):
+        on = cfg.watch_mode or (group.get("env") == USER_ENV and cfg.user.watch)
+        if not on or not host or not host_allowed(host, cfg.watch_domains) or self.service.watched(group["id"]):
             return
         await self._audit(group, caller, "watch", {"url": url[:2000], "host": host, "error": "the operator is not watching"})
         raise Forbidden(
@@ -661,7 +708,8 @@ class BrowserAgent:
     async def _screen(self, group: dict[str, Any], caller: Caller, url: str, text: str) -> None:
         """The injection monitor's look at page text before the agent reads it, when it is on. A hit
         pauses the browser, asks the operator, and refuses the read: the agent never sees the page."""
-        if self.monitor is None or not self.service.config().injection_monitor:
+        cfg = self.service.config()
+        if self.monitor is None or not (cfg.injection_monitor or (group.get("env") == USER_ENV and cfg.user.monitor)):
             return
         origin = origin_of(url)
         if not origin.startswith("http"):
@@ -729,6 +777,12 @@ class BrowserAgent:
             await self._through_wall(caller, row, lambda: self.service.call(group["id"], "page.navigate", {"tab_id": tab.get("id"), "url": url, "origin": self._origin(caller), "timeout_ms": NAVIGATE_TIMEOUT_MS}, what="opening the page", timeout=NAVIGATE_TIMEOUT_MS / 1000 + 25), url=url, why=why or "")
         if url:
             await self._site_notes(caller, url)
+        if group.get("env") == USER_ENV:
+            head = (
+                f"Browser {'opened' if opened['created'] else 'already open'} in the operator's own Chrome «{self._user_name()}», which they gave this conversation: "
+                "signed in as them, in a tab group of yours in a window of its own. Every new site asks them first; a purchase, a message, a deletion or a sign-in always asks."
+            )
+            return f"{head} Tabs:\n{await self._tabs_text(group['id'])}\nNext: BrowserSnapshot to see the page and its refs, BrowserNavigate to go elsewhere."
         where = "a throwaway profile, wiped when it closes" if fresh else ("the project's profile, whose logins the project's agents share" if caller.owner.project_id else "your own profile")
         head = f"Browser {'opened' if opened['created'] else 'already open'} ({where})."
         return f"{head} Tabs:\n{await self._tabs_text(group['id'])}\nNext: BrowserSnapshot to see the page and its refs, BrowserNavigate to go elsewhere."
@@ -764,6 +818,8 @@ class BrowserAgent:
         the operator, or a staff member's orchestrator for an address — and on a yes grant exactly that
         host and port and go once more. ``url`` and ``why`` are what the decider is shown: the address
         as the agent wrote it and the agent's own reason."""
+        if url:
+            await self._site_ask(caller, group, url, why)
         try:
             return await go()
         except Blocked as exc:
@@ -771,6 +827,12 @@ class BrowserAgent:
                 raise
             host, port = str(exc.details.get("host") or ""), int(exc.details.get("port") or 0)
             reason = str(exc.details.get("reason") or "")
+            if group.get("env") == USER_ENV:
+                # The user daemon's navigation guard judges against the operator's always-list: a site
+                # this conversation was granted (or is granted now) is let through at the daemon too.
+                await self._site_ask(caller, group, f"https://{host}", why)
+                await self.service.grant(group["id"], host, port, by=caller.actor)
+                return await go()
             what = f"{host}:{port}" if port else host
             scheme = urlsplit(url).scheme.lower() if url else ""
             decision = Decision(ASK, f"the browser's network wall asks before it reaches {what} ({NETWORK_WORDS.get(reason, reason or 'not on the allowlist')})", "browser.network", key=approval_key("BrowserNavigate", {"group": group["id"], "host": host, "port": port}))
@@ -1137,6 +1199,7 @@ class BrowserAgent:
                 typed = text or "".join(n for n, _ in uploads)
                 decision = browser_sensitive(
                     tool="BrowserAct", group=group["id"], host=host_of(url), page_origin=origin_of(url), kinds=kinds, action=action, name=name, text=typed, rules=self.service.config().rules,
+                    env=str(group.get("env") or ""),
                 )
                 decided = "allowed"
                 if caller.rules is not None and decision.action != DENY:
@@ -1379,7 +1442,10 @@ class BrowserAgent:
             raise InvalidRequest(f"{rid!r} is not a request id; they look like r12 and come from BrowserNetwork's list")
         params: dict[str, Any] = {"tab_id": current["id"], "id": rid, "origin": self._origin(caller)}
         limit = max(500, min(max_chars or BODY_CHARS, BODY_CHARS * 5, caller.budget - 3000))
-        if body:
+        withheld = ""
+        if body and group.get("env") == USER_ENV:
+            withheld = await self._user_body(caller, current)
+        if body and not withheld:
             params.update({"body": True, "max_chars": limit})
         try:
             result = await self.service.call(group["id"], "page.request", params, what="reading the request", timeout=30.0)
@@ -1400,9 +1466,16 @@ class BrowserAgent:
         if request.get("post_data"):
             said.append("It sent a body, which is never shown: a form's body can hold a password.")
         text = result.get("body")
-        refused = ""
-        if body and isinstance(text, str):
-            refused = self._outside_allowlist(group, target)
+        refused = withheld
+        if withheld:
+            pass
+        elif body and isinstance(text, str):
+            if group.get("env") == USER_ENV:
+                # Judged again on the request's own host: a granted page may call another site's API.
+                granted = site_granted(host_of(target), await self._granted_sites(caller))
+                refused = "" if granted else f"it came from {host_of(target)}, which is not a site granted for this work"
+            else:
+                refused = self._outside_allowlist(group, target)
             if not refused:
                 said.append(f"Response body ({request.get('mime') or 'no stated type'}{', cut at ' + str(limit) + ' characters' if result.get('truncated') else ''}):\n{text}")
         elif body:
@@ -1416,6 +1489,17 @@ class BrowserAgent:
         if refused:
             out.append(f"No body: {refused}.")
         return "\n".join(out)
+
+    async def _user_body(self, caller: Caller, current: dict[str, Any]) -> str:
+        """Why a response body is not read in the operator's Chrome, or ``""``. A logged-in site's API
+        answers with the operator's own data, so a body is read only when the operator turned it on,
+        and then only on a site granted for the work."""
+        if not self.service.config().user.bodies:
+            return "response bodies are not read in the operator's Chrome unless they turn it on (Settings → Browser → Your Chrome)"
+        host = host_of(str(current.get("url") or ""))
+        if not site_granted(host, await self._granted_sites(caller)):
+            return f"{host or 'this page'} is not a site granted for this work, and in the operator's Chrome a body is read only on one"
+        return ""
 
     def _outside_allowlist(self, group: dict[str, Any], url: str) -> str:
         """Why a response's body is not read: it came from a host outside the operator's allowlist,
@@ -1533,6 +1617,12 @@ class BrowserAgent:
         await self.service.handoff(group["id"], reason, what.strip()[:500], actor=caller.actor)
         return f"Asked the operator to {what.strip()[:300]}. End your turn now; you will get a message when they hand the browser back."
 
+    async def _user_refusal(self, caller: Caller, what: str) -> None:
+        """Refuse what the operator's own Chrome is never given: a cookie import or clear, which would
+        write into or wipe their real profile. Said plainly, before anything reaches the daemon."""
+        if await self.service.env_for(caller.owner) == USER_ENV:
+            raise Forbidden(f"{what} is not done in the operator's own Chrome: it would change their real profile. It is signed in as them already; if the task needs other cookies, ask the operator to switch this conversation back to the agent's browser")
+
     async def login(self, caller: Caller, *, url_or_domain: str, reason: str, selectors: Any = None) -> str:
         """Ask the operator to sign the browser in through the app's private form (``daedalus.browser.login``).
 
@@ -1543,6 +1633,10 @@ class BrowserAgent:
         target = url_or_domain.strip()
         if not target:
             raise InvalidRequest("url_or_domain is required: the sign-in page's address, or the site (github.com)")
+        if await self.service.env_for(caller.owner) == USER_ENV:
+            # The operator is signed in to their own Chrome already, and a saved sign-in is never
+            # typed into their real profile: it is a hand-over, done by them in the agent's window.
+            return await self.handoff(caller, reason="login", what=f"sign in to {registrable_site(target)} in the agent's window of your Chrome ({reason.strip()[:200] or 'the task needs it'})")
         if not reason.strip():
             raise InvalidRequest("reason is required: say what the sign-in is for; the operator reads it in the form")
         chosen = check_selectors(selectors)
@@ -1607,6 +1701,8 @@ class BrowserAgent:
         expiry and line numbers only."""
         if action not in COOKIE_ACTIONS:
             raise InvalidRequest(f"action is one of {', '.join(COOKIE_ACTIONS)}")
+        if action in ("import", "clear"):
+            await self._user_refusal(caller, f"BrowserCookies(action='{action}')")
         if action == "import":
             return await self._import_cookies(caller, path=path, text=text, domain=domain)
         group = await self._group(caller)
@@ -1751,10 +1847,14 @@ class BrowserAgent:
         first, once."""
         text, failed = await self._dispatch(tool, arguments, caller)
         notices: list[str] = []
-        for fresh in (False, True):
-            notices.extend(self.service.take_notices(group_id(caller.owner, fresh=fresh)))
+        for gid in (group_id(caller.owner), group_id(caller.owner, fresh=True), group_id(caller.owner, env=USER_ENV)):
+            notices.extend(self.service.take_notices(gid))
         if notices:
             text = "\n".join(notices) + "\n\n" + text
+        if tool != "BrowserOpen" and await self.service.env_for(caller.owner) == USER_ENV:
+            # Every result says which browser it is about: an agent that forgot it is acting in the
+            # operator's own Chrome would read a page there as if it were its own browser's.
+            text = f"[in the operator's own Chrome «{self._user_name()}»]\n{text}"
         if caller.notes:
             # After the result and outside its fence: the operator's site notes and the loop hints
             # are the host's words to the agent, not the page's.

@@ -318,6 +318,16 @@ class BrowserWorkflow(TypedDict):
     state: str
 
 
+class BrowserUser(TypedDict):
+    """The operator's Chrome and the ``user`` daemon: ``connected``, ``lost``, or ``check`` (the operator
+    pressed "Check connection" in the extension's popup, which the app shows as a toast). Ephemeral:
+    the status the card reads is the truth."""
+
+    kind: str
+    profile_name: str
+    reason: NotRequired[str]
+
+
 class BrowserClosed(TypedDict):
     group_id: str
     reason: str
@@ -678,6 +688,7 @@ REGISTRY: dict[str, EventSpec] = {
     "browser.control": EventSpec(BrowserControl, persist=False),
     "browser.activity": EventSpec(BrowserActivity, persist=False),
     "browser.workflow": EventSpec(BrowserWorkflow, persist=False),
+    "browser.user": EventSpec(BrowserUser, persist=False),
     "staff.status": EventSpec(StaffStatus),
     "staff.report": EventSpec(StaffReport),
     "staff.message": EventSpec(StaffMessage),
