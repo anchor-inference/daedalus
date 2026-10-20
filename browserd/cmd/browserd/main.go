@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ascorblack/daedalus/browserd/internal/bridge"
 	"github.com/ascorblack/daedalus/browserd/internal/browser"
 	"github.com/ascorblack/daedalus/browserd/internal/config"
 	"github.com/ascorblack/daedalus/browserd/internal/netwall"
@@ -33,6 +34,7 @@ import (
 
 const usage = `usage:
   browserd serve --env <name> --run-dir <dir> --state-dir <dir> [flags]
+  browserd bridge [--run-dir <dir>] [--data <dir>] <chrome-extension://id/>
   browserd version
 
 serve flags:
@@ -44,6 +46,10 @@ serve flags:
   --backend launch|attach              browsers of its own (default), or the operator's Chrome over a relay
   --install-name <name>                the installation's name the Chrome extension shows (attach)
 
+bridge is Chrome's native messaging host for the Daedalus extension: Chrome starts it with the
+extension's origin, and it carries the extension's relay to the attach daemon whose run directory
+--run-dir, $BROWSERD_BRIDGE_RUN_DIR, browserd-bridge.json beside the executable, or the default
+installation's local state names (see docs/architecture/browser.md, The operator's Chrome).
 `
 
 func main() {
@@ -51,7 +57,15 @@ func main() {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
 	}
+	if bridge.IsOrigin(os.Args[1]) {
+		// Chrome starts a native messaging host by the path in its manifest, with the extension's
+		// origin as the first argument and nothing to say which command is meant: an origin there
+		// is the bridge.
+		os.Exit(bridge.Main(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+	}
 	switch os.Args[1] {
+	case "bridge":
+		os.Exit(bridge.Main(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
 	case "version", "--version":
 		fmt.Printf("browserd %s (protocol %d)\n", version.Version, version.Protocol)
 	case "serve":
