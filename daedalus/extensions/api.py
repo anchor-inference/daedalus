@@ -74,6 +74,7 @@ from daedalus.extensions import (
     api_capacity,
     api_ci,
     api_comparisons,
+    api_computer,
     api_control,
     api_coordinator_authority,
     api_diagrams,
@@ -1683,6 +1684,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         api_diagrams.register(api, app, auth)
     # The agent's browser: its groups, the live view's ticket and socket, control, the audit.
     api_browsers.register(api, app, auth)
+    # The operator's own desktop, natively: the Computer control's state, its grant, Stop and Resume.
+    api_computer.register(api, app, auth)
 
     # -- staff: the named members of a project's team ------------------------------------------
 

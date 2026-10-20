@@ -41,6 +41,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -212,4 +213,82 @@ async def busy(launcher: Launcher) -> tuple[str, str]:
     return str(body.get("busy") or ""), str(body.get("failure") or "")
 
 
-__all__ = ["HEADER", "Launcher", "LauncherBusy", "LauncherUnavailable", "act", "busy", "instance_path", "job", "read", "status"]
+COMPUTER_TIMEOUT = 30.0
+"""Longer than an action's handshake: ``/api/computer/permissions`` asks the system, and macOS may
+hold that call while its own prompt is on the screen."""
+
+
+class DesktopUnavailable(RuntimeError):
+    """The launcher answered, but it has no desktop daemon to speak for: none in this build, or it is
+    not running. The message is the launcher's own plain sentence, meant for the operator."""
+
+
+class DesktopRefused(RuntimeError):
+    """The desktop daemon refused the call. ``code``, ``message`` and ``data`` are the daemon's
+    JSON-RPC error as the launcher passed it on, untouched, so the refusal table can say it in words."""
+
+    def __init__(self, code: int, message: str, data: Any) -> None:
+        super().__init__(message or f"the desktop refused the request (code {code})")
+        self.code = code
+        self.message = message
+        self.data = data
+
+
+async def computer(launcher: Launcher, method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+    """One of the launcher's ``/api/computer*`` routes, which speak for the operator to the desktop
+    daemon: its state, the apps on screen, a grant of control, Stop, Resume, a permission prompt.
+
+    Every route carries the token, the reads included: the answers name the windows on the screen,
+    and a window's title is personal. A 503 is :class:`DesktopUnavailable`, a 409 is
+    :class:`DesktopRefused`; anything else that is not a JSON object is :class:`LauncherUnavailable`.
+    """
+    if method not in ("GET", "POST"):
+        raise ValueError(f"the desktop's routes are read with GET and changed with POST, not {method!r}")
+    if path != "/api/computer" and not path.startswith("/api/computer/"):
+        raise ValueError(f"{path!r} is not one of the desktop's routes")
+    async with httpx.AsyncClient(timeout=COMPUTER_TIMEOUT) as client:
+        try:
+            if method == "POST":
+                response = await client.post(f"{launcher.base}{path}", headers={HEADER: launcher.token}, json=body or {})
+            else:
+                response = await client.get(f"{launcher.base}{path}", headers={HEADER: launcher.token})
+        except httpx.HTTPError as exc:
+            raise LauncherUnavailable(f"the launcher on port {launcher.port} did not answer: {type(exc).__name__}") from None
+    if response.status_code in (401, 403):
+        raise LauncherUnavailable("the launcher refused the request; it may have been restarted since this process started")
+    if response.status_code == 404:
+        raise LauncherUnavailable("this launcher knows nothing of computer use; it is older than this build of the app")
+    if response.status_code == 501:
+        raise LauncherUnavailable("the launcher offers computer use only in a native installation")
+    try:
+        answer = response.json()
+    except ValueError:
+        raise LauncherUnavailable(f"the launcher answered {response.status_code}: {_sentence(response)}".rstrip(": ")) from None
+    if not isinstance(answer, dict):
+        raise LauncherUnavailable(f"the launcher answered {response.status_code} with something that is not an object")
+    if response.status_code == 503:
+        raise DesktopUnavailable(str(answer.get("reason") or "the desktop daemon is not running"))
+    if response.status_code == 409:
+        error = answer.get("error") if isinstance(answer.get("error"), dict) else {}
+        code = error.get("code")
+        raise DesktopRefused(code if isinstance(code, int) else 0, str(error.get("message") or ""), error.get("data"))
+    if response.status_code >= 400:
+        raise LauncherUnavailable(f"the launcher answered {response.status_code} to {path!r}")
+    return answer
+
+
+__all__ = [
+    "HEADER",
+    "DesktopRefused",
+    "DesktopUnavailable",
+    "Launcher",
+    "LauncherBusy",
+    "LauncherUnavailable",
+    "act",
+    "busy",
+    "computer",
+    "instance_path",
+    "job",
+    "read",
+    "status",
+]
