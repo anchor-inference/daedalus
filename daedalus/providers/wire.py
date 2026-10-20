@@ -158,6 +158,23 @@ def parse_json_arguments(raw: str) -> dict[str, Any]:
     return value if isinstance(value, dict) else {"value": value}
 
 
+def arguments_cut(raw: str) -> bool:
+    """Whether tool-call arguments stop part-way, as opposed to being whole JSON written slightly wrong.
+
+    A fence, a trailing comma or single quotes are a model's sloppiness over a call it finished, and
+    the repaired call is the one it meant. Only braces or quotes left open are the mark of a call the
+    stream cut, whose repaired arguments are not what the model would have sent.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return False
+    try:
+        json.loads(text)
+        return False
+    except json.JSONDecodeError:
+        return _repair_arguments(text)[1] == "truncated"
+
+
 _ARGS_FENCE_RE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
 _TRAILING_COMMA_RE = re.compile(r",\s*([}\]])")
 _SINGLE_QUOTED_RE = re.compile(r"'((?:[^'\\]|\\.)*)'")

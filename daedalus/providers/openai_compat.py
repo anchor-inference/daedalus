@@ -17,7 +17,9 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
@@ -44,7 +46,7 @@ from daedalus.providers.dsml import DsmlGuard
 from daedalus.providers.failure_evidence import FailureEvidence, failure_evidence
 from daedalus.providers.llamacpp import tools_to_llamacpp_wire
 from daedalus.providers.pricing import ModelPricing, complete_usage
-from daedalus.providers.wire import messages_to_wire, parse_json_arguments, tools_to_wire
+from daedalus.providers.wire import arguments_cut, messages_to_wire, parse_json_arguments, tools_to_wire
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +100,11 @@ class ProviderVerdict:
 
     reason: str
     retryable: bool
+    retry_after_seconds: float | None = None
+    """The wait the provider stated (``Retry-After``, or the key proxy's reading of a failed stream).
+
+    The core waits at least this long before asking the same endpoint again; without it a rate limit
+    was retried on the core's own short backoff and spent its attempts before the window reopened."""
 
 
 _PERMANENT_ERROR_TYPES = {
@@ -111,11 +118,74 @@ _PERMANENT_ERROR_TYPES = {
 
 Read from the body as well as the status because a stream reports its error in a chunk, after the 200."""
 
-_EXHAUSTED_ERROR_TYPES = {"gousagelimiterror"}
+_EXHAUSTED_ERROR_TYPES = {"gousagelimiterror", "usage_limit_reached", "usage_not_included"}
 """Error types that mean the account has spent its allowance, carried on a 429 that looks like a blip.
 
 The reset is hours or days away, so retrying the same endpoint only burns backoff; the verdict is
-permanent for this run and the chain moves on."""
+permanent for this run and the chain moves on. ``usage_limit_reached`` is the ChatGPT plan's spent window
+behind the key proxy's Codex route, which the Codex CLI itself never retries."""
+
+_EXHAUSTED_ERROR_CODES = {
+    "insufficient_quota",
+    "billing_hard_limit_reached",
+    "billing_not_active",
+    "usage_not_included",
+    "credit_balance_exhausted",
+    "organization_spend_limit_exceeded",
+    "project_spend_limit_exceeded",
+    "organization_usage_limit_exceeded",
+}
+"""Error codes that mean the account has no allowance left, whatever status or stream chunk carried them."""
+
+STREAM_TRUNCATED = "stream_truncated"
+"""The error code the key proxy writes when its upstream ended a stream before the final event."""
+
+_STREAM_ERROR_STATUS = {
+    "rate_limit_exceeded": 429,
+    "slow_down": 429,
+    "server_is_overloaded": 529,
+    "context_length_exceeded": 400,
+}
+"""The HTTP status a named error code stands for when it arrives in a stream chunk, after the 200.
+
+Without it every such chunk was classified as a 500: a rate limit was retried as a server error with no
+regard for its wait, and a context overflow was retried unchanged instead of being shrunk."""
+
+
+def stream_error_status(error: Any) -> int:
+    """The status to classify a mid-stream error object by: its own when it names one, else its code's."""
+    if not isinstance(error, dict):
+        return 500
+    code = error.get("code")
+    if isinstance(code, int) and not isinstance(code, bool) and 400 <= code <= 599:
+        return code  # OpenRouter writes the upstream's status here
+    if isinstance(code, str) and code.isdigit() and 400 <= int(code) <= 599:
+        return int(code)
+    return _STREAM_ERROR_STATUS.get(str(code or ""), 500)
+
+
+def _retry_after_seconds(headers: Any, text: str) -> float | None:
+    """The wait a refusal states in seconds: the ``Retry-After`` header, else the body's ``retry_after_seconds``."""
+    value = headers.get("retry-after") if headers is not None else None
+    if value:
+        try:
+            seconds = float(value)
+        except ValueError:
+            try:
+                seconds = (parsedate_to_datetime(value) - datetime.now(UTC)).total_seconds()
+            except (TypeError, ValueError, OverflowError):
+                seconds = 0.0
+        if seconds > 0:
+            return seconds
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None
+    error = data.get("error", data) if isinstance(data, dict) else None
+    stated = error.get("retry_after_seconds") if isinstance(error, dict) else None
+    if isinstance(stated, (int, float)) and not isinstance(stated, bool) and stated > 0:
+        return float(stated)
+    return None
 
 _PERMANENT_STATUS = {401: "auth", 402: "billing", 403: "auth", 404: "model_not_found"}
 
@@ -158,8 +228,7 @@ def classify_failure(status: int, text: str) -> ProviderVerdict:
     lowered = f"{code} {message}".lower()
     if status in (401, 403):
         return ProviderVerdict("auth", False)
-    if (status == 402 or code in {"insufficient_quota", "billing_hard_limit_reached", "billing_not_active"}
-            or kind.lower() in _EXHAUSTED_ERROR_TYPES):
+    if status == 402 or code in _EXHAUSTED_ERROR_CODES or kind.lower() in _EXHAUSTED_ERROR_TYPES:
         return ProviderVerdict("billing", False)
     if status == 429 or kind == "rate_limit_error":
         return ProviderVerdict("rate_limit", True)
@@ -433,6 +502,11 @@ class OpenAICompatibleProvider(ILLMProvider):
         usage_raw: dict[str, Any] | None = None
         open_tools: dict[int, dict[str, Any]] = {}
         finish_reason: str | None = None
+        # Whether the stream said it was over. A body that ends with neither ``[DONE]`` nor a finish
+        # reason, or whose last frame is cut inside its JSON, was cut in transit: it used to be read as
+        # an ordinary stop, so a cut answer was stored as final and a half-written call ran.
+        saw_done = False
+        garbled_last = False
         guard = DsmlGuard()
         keep_reasoning = replays_reasoning(self.endpoint)
         details: list[dict[str, Any]] = []
@@ -459,7 +533,7 @@ class OpenAICompatibleProvider(ILLMProvider):
                         logger.warning("%s rejected a request; message shape: %s", self.endpoint.id, message_shape(body["messages"]))
                     text = raw.decode("utf-8", "replace")
                     await self._observe_failure(request, reservation, response.status_code, text, response.headers)
-                    self._raise_for_status(response.status_code, text)
+                    self._raise_for_status(response.status_code, text, response.headers)
                 async for data in _sse_data(lines):
                     if data is None:
                         # A comment line (the key proxy's keepalive, OpenRouter's processing note):
@@ -467,13 +541,21 @@ class OpenAICompatibleProvider(ILLMProvider):
                         yield ProviderDelta(kind=ProviderDeltaKind.progress)
                         continue
                     if data == "[DONE]":
+                        saw_done = True
                         break
                     try:
                         chunk = json.loads(data)
                     except json.JSONDecodeError:
+                        # Skipped, but remembered: as the last frame it is the cut tail of a dropped
+                        # body, and whatever it carried is lost.
+                        logger.warning("%s: an unreadable stream frame (%d chars): %r", self.endpoint.id, len(data), data[:120])
+                        garbled_last = True
+                        continue
+                    garbled_last = False
+                    if not isinstance(chunk, dict):
                         continue
                     if "error" in chunk and not chunk.get("choices"):
-                        self._raise_for_status(500, json.dumps(chunk["error"]))
+                        self._raise_stream_error(chunk["error"])
                     if chunk.get("usage"):
                         usage_raw = chunk["usage"]
                     spoke = bool(chunk.get("usage"))  # the trailing usage chunk is bookkeeping, not liveness
@@ -506,6 +588,11 @@ class OpenAICompatibleProvider(ILLMProvider):
             raise LLMTimeoutError(f"{self.endpoint.id}: {exc}") from exc
         except httpx.HTTPError as exc:
             raise LLMProviderError(f"{self.endpoint.id}: transport error: {exc}") from exc
+        if not saw_done and (finish_reason is None or garbled_last):
+            # The same answer as a connection the transport saw drop: retried, and no call it opened
+            # is ever closed, so none of them can run.
+            raise _classified(LLMProviderError(
+                f"{self.endpoint.id}: the stream ended before the answer was finished"), ProviderVerdict("connection", True))
         rest, recovered = guard.finish()
         if rest:
             yield ProviderDelta(kind=ProviderDeltaKind.text, content=rest)
@@ -808,13 +895,20 @@ class OpenAICompatibleProvider(ILLMProvider):
         if response.status_code >= 400:
             if request is not None:
                 await self._observe_failure(request, reservation, response.status_code, response.text, response.headers)
-            self._raise_for_status(response.status_code, response.text)
+            self._raise_for_status(response.status_code, response.text, response.headers)
         data = response.json()
         if "error" in data and not data.get("choices"):
-            self._raise_for_status(500, json.dumps(data["error"]))
+            self._raise_stream_error(data["error"])
         return data
 
-    def _raise_for_status(self, status: int, text: str) -> None:
+    def _raise_stream_error(self, error: Any) -> None:
+        """An error the provider reported inside a 200 (a stream chunk, or the key proxy's assembled body)."""
+        if isinstance(error, dict) and error.get("code") == STREAM_TRUNCATED:
+            raise _classified(LLMProviderError(f"{self.endpoint.id}: {error.get('message') or STREAM_TRUNCATED}"),
+                              ProviderVerdict("connection", True))
+        self._raise_for_status(stream_error_status(error), json.dumps(error))
+
+    def _raise_for_status(self, status: int, text: str, headers: httpx.Headers | None = None) -> None:
         lowered = text.lower()
         if self.endpoint.kind == "llamacpp" and status == 503:
             # No free inference slot and a model which is still loading or waking both answer 503.
@@ -827,6 +921,9 @@ class OpenAICompatibleProvider(ILLMProvider):
         if status in (400, 413, 422) and any(m in lowered for m in _CONTEXT_ERROR_MARKERS):
             raise LLMContextWindowExceeded(f"{self.endpoint.id}: {text[:300]}", **context_overflow_sizes(text))
         verdict = classify_failure(status, text)
+        wait = _retry_after_seconds(headers, text)
+        if wait is not None:
+            verdict = replace(verdict, retry_after_seconds=wait)
         if verdict.reason == "rate_limit":
             raise _classified(LLMRateLimitError(f"{self.endpoint.id}: rate limited: {text[:300]}"), verdict)
         if verdict.reason == "timeout":
@@ -891,7 +988,8 @@ class OpenAICompatibleProvider(ILLMProvider):
             raw_args = slot["args"]
             try:
                 json.loads(raw_args or "{}")
-                partial = False
+                # A call with no arguments at all in an answer the cap cut is the call it cut.
+                partial = finish_reason == "length" and not raw_args.strip()
             except json.JSONDecodeError:
                 partial = True
             out.append(
@@ -901,7 +999,11 @@ class OpenAICompatibleProvider(ILLMProvider):
                     tool_name=slot["name"] or "unknown",
                     tool_input_final=parse_json_arguments(raw_args),
                     is_block_end=True,
-                    truncated_by_output_cap=partial and finish_reason == "length",
+                    # A cut call under any finish but an ordinary stop goes to the core's output-cap
+                    # recovery, which never dispatches it. Reading only "length" here let a cut call
+                    # under a tool-use finish run with its braces repaired: the core's truncated-call
+                    # policy looks only at a stop, and nothing looked at a tool-use finish.
+                    truncated_by_output_cap=partial and (finish_reason == "length" or (finish_reason != "stop" and arguments_cut(raw_args))),
                     args_partial_truncated=partial,
                 )
             )

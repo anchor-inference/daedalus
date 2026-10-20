@@ -76,3 +76,10 @@ def test_an_exhausted_opencode_allowance_is_a_quota_and_not_retried_in_place() -
     verdict = classify_failure(429, GO_USAGE_LIMIT)
     assert (verdict.reason, verdict.retryable) == ("billing", False)
     assert classify_failure(429, '{"error":{"type":"rate_limit_error"}}').retryable is True
+
+
+def test_a_spent_chatgpt_window_is_a_quota_and_not_retried_in_place() -> None:
+    body = '{"error":{"type":"usage_limit_reached","message":"The usage limit has been reached","plan_type":"plus"}}'
+    evidence = failure_evidence(429, body, {}, provider_kind="openai_compat", observed_at=OBSERVED)
+    assert (evidence.failure_class, evidence.provider_code) == ("quota", "usage_limit_reached")
+    assert (classify_failure(429, body).reason, classify_failure(429, body).retryable) == ("billing", False)
