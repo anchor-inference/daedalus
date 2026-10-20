@@ -11,6 +11,9 @@ from __future__ import annotations
 
 from typing import Any
 
+NOT_FOUND = 1001
+LIMIT = 1003
+UNSUPPORTED = 1007
 HUMAN_DRIVING = 1101
 NO_LEASE = 1200
 STALE_SCREENSHOT = 1201
@@ -102,12 +105,22 @@ def explain(code: int, message: str = "", data: Any = None) -> str:
         )
     if code == OPERATOR_ONLY:
         return "Only the operator can do that, from the app."
-    text = str(message or "").strip()
-    return text or f"The desktop refused the request (code {code})."
+    said = str(message or "").strip()
+    if code == NOT_FOUND:
+        return "That window or app is not on the screen any more" + (f" ({said})" if said else "") + ". List them again with ComputerApps."
+    if code == LIMIT:
+        # The daemon's message names the bound (the characters a call may type, a picture too large for
+        # one frame); the advice is the same for each.
+        return "That is more than the desktop takes in one call" + (f": {said}" if said else "") + ". Split it into smaller calls."
+    if code == UNSUPPORTED:
+        return "The desktop on this system cannot do that" + (f": {said}" if said else "") + ". Do it another way, or ask the operator."
+    return said or f"The desktop refused the request (code {code})."
 
 
 __all__ = [
     "HUMAN_DRIVING",
+    "LIMIT",
+    "NOT_FOUND",
     "NO_LEASE",
     "NO_PERMISSION",
     "OPERATOR_ONLY",
@@ -117,5 +130,6 @@ __all__ = [
     "SECURE_DESKTOP",
     "STALE_SCREENSHOT",
     "UNREACHABLE",
+    "UNSUPPORTED",
     "explain",
 ]
