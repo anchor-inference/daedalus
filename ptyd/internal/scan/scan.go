@@ -17,6 +17,7 @@
 package scan
 
 import (
+	"bytes"
 	"strconv"
 	"unicode/utf8"
 )
@@ -168,9 +169,9 @@ func (s *Scanner) Scan(chunk []byte) ([]byte, []Mark) {
 	return s.out, s.marks
 }
 
-// Strip returns the plain text of p: sequences removed, CR LF and lone CR turned into LF, tabs and
-// line feeds kept, every other control dropped. It is for agents reading output, so it errs on the
-// side of readable rather than exact.
+// Strip returns the plain text of p: sequences removed, CR LF turned into LF, a line redrawn after a
+// lone CR kept at its last drawing, tabs and line feeds kept, every other control dropped.
+// It is for agents reading output, so it errs on the side of readable rather than exact.
 func Strip(p []byte) []byte {
 	s := &Scanner{strip: true}
 	out, _ := s.Scan(p)
@@ -195,10 +196,15 @@ func (s *Scanner) emitText(b byte) {
 	}
 	if s.cr {
 		s.cr = false
-		s.out = append(s.out, '\n')
 		if b == '\n' {
+			s.out = append(s.out, '\n')
 			return
 		}
+		// A lone carriage return is a redraw: a progress bar or spinner draws its line again in
+		// place. Turning it into a line feed handed the agent every frame as its own line, a few
+		// hundred lines of percentages for one download, so the line is dropped back to its start
+		// and only the last drawing is kept, as the terminal itself would show it.
+		s.out = s.out[:bytes.LastIndexByte(s.out, '\n')+1]
 	}
 	switch {
 	case b == '\r':
