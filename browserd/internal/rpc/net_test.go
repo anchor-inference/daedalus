@@ -26,6 +26,7 @@ func blocked(err error) map[string]any {
 // reason, the operator's grant opens an asked port for the group's browser, and the rules are read
 // strictly.
 func TestTheNetworkWallThroughTheDaemon(t *testing.T) {
+	launchOnly(t, "the wall's proxy and its grants belong to each browser the daemon starts; the operator's Chrome goes out on its own network")
 	needChromium(t)
 	h := start(t, nil)
 	var reached int

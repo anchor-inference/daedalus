@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/ascorblack/daedalus/browserd/internal/cdp"
-	"github.com/ascorblack/daedalus/browserd/internal/chrome"
 	"github.com/ascorblack/daedalus/ptyd/proto/wire"
 )
 
@@ -22,7 +21,9 @@ type Browser struct {
 	StartedAt time.Time
 	Version   string
 
-	proc        *chrome.Process
+	proc        process
+	pid         int // the main process, 0 for the operator's Chrome
+	attached    bool
 	conn        *cdp.Conn
 	m           *Manager
 	userAgent   string
@@ -61,7 +62,7 @@ type pageAttach struct {
 func (b *Browser) Conn() *cdp.Conn { return b.conn }
 
 // Pid is the browser's main process.
-func (b *Browser) Pid() int { return b.proc.Pid }
+func (b *Browser) Pid() int { return b.pid }
 
 // DownloadDir is where Chromium saves this browser's downloads.
 func (b *Browser) DownloadDir() string { return b.downloadDir }
@@ -141,7 +142,7 @@ func (b *Browser) View() map[string]any {
 		status = "exited"
 	default:
 	}
-	return map[string]any{"id": b.ID, "profile": b.Profile, "pid": b.proc.Pid, "status": status,
+	return map[string]any{"id": b.ID, "profile": b.Profile, "pid": b.pid, "status": status,
 		"started_at": b.StartedAt, "groups": groups, "tabs": tabs, "chromium_version": b.Version}
 }
 

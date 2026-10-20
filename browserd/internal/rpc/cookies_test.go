@@ -37,6 +37,7 @@ func listCookies(h *harness, group, domain string) ([]cookieRow, string) {
 }
 
 func TestCookiesSetReachThePageAndNeverComeBack(t *testing.T) {
+	launchOnly(t, "cookies are never imported into the operator's Chrome (TestAttachRefusals)")
 	needChromium(t)
 	h := start(t, nil)
 	o := h.open("c1", "cookie-profile", "")
@@ -139,6 +140,7 @@ func TestCookiesSetReachThePageAndNeverComeBack(t *testing.T) {
 }
 
 func TestThrowawayGroupsKeepTheirOwnCookies(t *testing.T) {
+	launchOnly(t, "the operator's Chrome takes no throwaway contexts (TestAttachRefusals)")
 	needChromium(t)
 	h := start(t, nil)
 	h.open("e1", browser.EphemeralProfile, "")

@@ -24,6 +24,7 @@ import (
 	"github.com/ascorblack/daedalus/browserd/internal/chrome"
 	"github.com/ascorblack/daedalus/browserd/internal/config"
 	"github.com/ascorblack/daedalus/browserd/internal/display"
+	"github.com/ascorblack/daedalus/browserd/internal/relay"
 	"github.com/ascorblack/daedalus/ptyd/proto/events"
 	"github.com/ascorblack/daedalus/ptyd/proto/wire"
 )
@@ -54,6 +55,9 @@ type Deps struct {
 	Wall Wall
 	// Busy says whether someone watches the browser, which keeps it from closing as idle.
 	Busy func(b *Browser) bool
+	// Relay is where the operator's Chrome connects; the attach backend (config.Backend) drives the
+	// browser behind it, and needs it.
+	Relay *relay.Hub
 }
 
 // Wall is the browsers' one way out. Open gives a browser about to start the address of its own
@@ -71,9 +75,10 @@ type Wall interface {
 
 // Manager holds every browser, group and tab of the daemon.
 type Manager struct {
-	deps Deps
-	lim  config.Limits
-	log  *slog.Logger
+	deps    Deps
+	lim     config.Limits
+	log     *slog.Logger
+	backend Backend
 
 	mu        sync.Mutex
 	browsers  map[string]*Browser // by id
@@ -114,6 +119,13 @@ func New(deps Deps) *Manager {
 	if deps.Config.Chromium.NoSandbox {
 		m.sandbox = "off by configuration"
 	}
+	if deps.Config.Backend == BackendAttach {
+		// The operator's Chrome is the browser: the daemon neither looks for a Chromium of its own
+		// nor runs one to ask its version.
+		m.backend = &attach{m: m, hub: deps.Relay, dispatched: map[int]time.Time{}}
+		return m
+	}
+	m.backend = &launch{m: m}
 	m.found, m.foundOK = chrome.Find(deps.Config.Chromium.Path)
 	if m.foundOK {
 		go m.probeVersion(m.found.Path)
@@ -317,6 +329,9 @@ func (m *Manager) Open(ctx context.Context, p OpenParams) (*Group, *Tab, bool, e
 	if err := checkLabels(p.Labels); err != nil {
 		return nil, nil, false, err
 	}
+	if m.Attached() && p.Profile == EphemeralProfile {
+		return nil, nil, false, ErrAttachRefused("a throwaway context")
+	}
 	vp := Viewport{W: config.DefaultViewportW, H: config.DefaultViewportH}
 	if p.Viewport != nil {
 		vp = *p.Viewport
@@ -338,7 +353,12 @@ func (m *Manager) Open(ctx context.Context, p OpenParams) (*Group, *Tab, bool, e
 		return g, g.ActiveTab(), false, nil
 	}
 	m.mu.Unlock()
-	b, err := m.ensureBrowser(ctx, p.Profile)
+	key := p.Profile
+	if m.Attached() {
+		// One browser, the operator's Chrome, whatever profile the host keeps its groups under.
+		key = UserProfile
+	}
+	b, err := m.ensureBrowser(ctx, key)
 	if err != nil {
 		return nil, nil, false, err
 	}
@@ -346,10 +366,16 @@ func (m *Manager) Open(ctx context.Context, p OpenParams) (*Group, *Tab, bool, e
 	if err != nil {
 		return nil, nil, false, err
 	}
-	t, err := m.NewTab(ctx, g, "", false)
-	if err != nil {
-		m.CloseGroup(context.Background(), g.ID)
-		return nil, nil, false, err
+	var t *Tab
+	if m.Attached() {
+		// A group taken up again in Chrome has its tabs already.
+		t = g.ActiveTab()
+	}
+	if t == nil {
+		if t, err = m.NewTab(ctx, g, "", false); err != nil {
+			m.CloseGroup(context.Background(), g.ID)
+			return nil, nil, false, err
+		}
 	}
 	m.publish("group.opened", map[string]any{"group_id": g.ID, "browser_id": b.ID, "profile": g.Profile, "labels": g.Labels})
 	if p.URL != "" {
@@ -403,7 +429,7 @@ func (m *Manager) ensureBrowser(ctx context.Context, profile string) (*Browser, 
 		done := make(chan struct{})
 		m.starting[profile] = done
 		m.mu.Unlock()
-		b, err := m.startBrowser(ctx, profile)
+		b, err := m.backend.start(ctx, profile)
 		m.mu.Lock()
 		delete(m.starting, profile)
 		if err == nil {
@@ -415,10 +441,12 @@ func (m *Manager) ensureBrowser(ctx context.Context, profile string) (*Browser, 
 		if err != nil {
 			return nil, err
 		}
-		m.publish("browser.started", map[string]any{"browser_id": b.ID, "profile": profile, "pid": b.proc.Pid,
+		m.publish("browser.started", map[string]any{"browser_id": b.ID, "profile": profile, "pid": b.pid,
 			"chromium_version": b.Version})
 		go m.watch(b)
-		go m.probeSandbox(b)
+		if !b.attached {
+			go m.probeSandbox(b)
+		}
 		return b, nil
 	}
 }
@@ -434,105 +462,12 @@ func (m *Manager) ProfileDir(profile string) string {
 	return filepath.Join(m.deps.Config.StateDir, "profiles", profile)
 }
 
-func (m *Manager) startBrowser(ctx context.Context, profile string) (*Browser, error) {
-	m.mu.Lock()
-	found, ok := m.found, m.foundOK
-	if !ok {
-		// Installed since the daemon started? Look again rather than make the operator restart it.
-		found, ok = chrome.Find(m.deps.Config.Chromium.Path)
-		m.found, m.foundOK = found, ok
-	}
-	m.mu.Unlock()
-	if !ok {
-		return nil, errWith(wire.CodeUnsupported, map[string]any{"reason": "no Chromium"},
-			"no Chromium was found; install the browser (Playwright's chromium) or name one with --chromium")
-	}
-	b := &Browser{ID: newID("b"), Profile: profile, Ephemeral: profile == EphemeralProfile, StartedAt: time.Now().UTC(),
+// newBrowser is a browser not yet started, with the bookkeeping every backend's needs.
+func (m *Manager) newBrowser(profile string) *Browser {
+	return &Browser{ID: newID("b"), Profile: profile, StartedAt: time.Now().UTC(),
 		groups: map[string]*Group{}, contexts: map[string]*Group{}, claims: map[string]chan *Tab{},
 		claimGroups: map[string]*Group{}, early: map[string]pageAttach{}, gone: make(chan struct{}), m: m,
 		screenKnown: make(chan struct{})}
-	dir := m.ProfileDir(profile)
-	if b.Ephemeral {
-		dir = filepath.Join(m.deps.Config.StateDir, "ephemeral", b.ID)
-		b.tempDir = dir
-	}
-	b.downloadDir = filepath.Join(m.deps.Config.StateDir, "downloads", b.ID)
-	if err := os.MkdirAll(b.downloadDir, 0o700); err != nil {
-		return nil, err
-	}
-	proxy := ""
-	if m.deps.Wall != nil {
-		addr, err := m.deps.Wall.Open(b.ID)
-		if err != nil {
-			return nil, errWith(wire.CodeUnsupported, map[string]any{"reason": err.Error()}, "the browser's network wall did not start: %v", err)
-		}
-		proxy = addr
-	}
-	env, err := m.browserEnv()
-	if err != nil {
-		m.closeWall(b)
-		return nil, errWith(wire.CodeUnsupported, map[string]any{"reason": err.Error()}, "%v", err)
-	}
-	cc := m.deps.Config.Chromium
-	screenW, screenH := cc.Screen()
-	proc, err := chrome.Start(chrome.Options{Path: found.Path, ProfileDir: dir, Proxy: proxy, Args: cc.Args, NoSandbox: cc.NoSandbox,
-		Env: env, Headed: cc.Headed(), ScreenW: screenW, ScreenH: screenH}, func(e cdp.Event) { m.onEvent(b, e) })
-	if err != nil {
-		m.closeWall(b)
-		return nil, errWith(wire.CodeUnsupported, map[string]any{"reason": err.Error()}, "Chromium did not start: %v", err)
-	}
-	b.proc = proc
-	b.conn = proc.Conn
-	budget := config.ChromiumStart
-	if d := m.deps.Config.Chromium.StartTimeout; d > 0 {
-		budget = d
-	}
-	begin := time.Now()
-	var ver struct {
-		Product   string `json:"product"`
-		UserAgent string `json:"userAgent"`
-	}
-	if err := proc.FirstAnswer(ctx, budget, "Browser.getVersion", &ver); err != nil {
-		proc.Kill()
-		m.closeWall(b)
-		b.removeTemp()
-		reason := chrome.SandboxProblem(proc.Stderr())
-		if reason != "" {
-			m.mu.Lock()
-			m.sandbox = reason
-			m.mu.Unlock()
-			return nil, errWith(wire.CodeUnsupported, map[string]any{"reason": reason}, "%s", reason)
-		}
-		return nil, errWith(wire.CodeUnsupported, map[string]any{"reason": lastLine(proc.Stderr())}, "%v", err)
-	}
-	took := time.Since(begin)
-	// The setup calls get a budget of their own: a browser that has answered once is up, and a slow
-	// first answer must not leave them too little time.
-	startCtx, cancel := context.WithTimeout(ctx, budget)
-	defer cancel()
-	b.Version = ver.Product
-	b.userAgent, b.uaMetadata = userAgent(ver.Product, ver.UserAgent)
-	for _, call := range []struct {
-		method string
-		params any
-	}{
-		{"Target.setDiscoverTargets", map[string]any{"discover": true}},
-		// Every new page waits for its setup (size, user agent, domains) before its first script.
-		{"Target.setAutoAttach", map[string]any{"autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true}},
-		{"Browser.setDownloadBehavior", map[string]any{"behavior": "allowAndName", "downloadPath": b.downloadDir, "eventsEnabled": true}},
-	} {
-		if err := b.conn.Call(startCtx, "", call.method, call.params, nil); err != nil {
-			proc.Kill()
-			m.closeWall(b)
-			b.removeTemp()
-			return nil, errWith(wire.CodeUnsupported, map[string]any{"reason": err.Error()}, "Chromium refused %s: %v", call.method, err)
-		}
-	}
-	// How long the first answer took is logged so a slow start shows in the log before it ever runs
-	// out of budget.
-	m.log.Info("browser started", "browser", b.ID, "profile", profile, "pid", proc.Pid, "chromium", ver.Product,
-		"first_answer_ms", took.Milliseconds())
-	return b, nil
 }
 
 // browserEnv is the environment a browser starts with: the daemon's own, and for a headed browser
@@ -630,23 +565,14 @@ func (m *Manager) newGroup(ctx context.Context, b *Browser, p OpenParams, vp Vie
 	b.groups[g.ID] = g
 	delete(m.gone, g.ID)
 	m.mu.Unlock()
-	if b.Ephemeral {
-		var r struct {
-			BrowserContextID string `json:"browserContextId"`
-		}
-		err := b.conn.Call(ctx, "", "Target.createBrowserContext", map[string]any{"disposeOnDetach": false}, &r)
-		if err == nil {
-			g.ContextID = r.BrowserContextID
-			err = b.conn.Call(ctx, "", "Browser.setDownloadBehavior", map[string]any{"behavior": "allowAndName",
-				"browserContextId": g.ContextID, "downloadPath": b.downloadDir, "eventsEnabled": true}, nil)
-		}
-		if err != nil {
-			m.mu.Lock()
-			delete(m.groups, g.ID)
-			delete(b.groups, g.ID)
-			m.mu.Unlock()
-			return nil, fmt.Errorf("a throwaway context: %w", err)
-		}
+	if err := m.backend.openGroup(ctx, g); err != nil {
+		m.mu.Lock()
+		delete(m.groups, g.ID)
+		delete(b.groups, g.ID)
+		m.mu.Unlock()
+		return nil, err
+	}
+	if g.ContextID != "" {
 		m.mu.Lock()
 		b.contexts[g.ContextID] = g
 		m.mu.Unlock()
@@ -661,12 +587,14 @@ func (m *Manager) CloseGroup(ctx context.Context, id string) (int, error) {
 		return 0, err
 	}
 	tabs := g.Tabs()
-	for _, t := range tabs {
-		_ = g.Browser.conn.Call(ctx, "", "Target.closeTarget", map[string]any{"targetId": t.TargetID}, nil)
-	}
-	if g.ContextID != "" {
-		_ = g.Browser.conn.Call(ctx, "", "Target.disposeBrowserContext", map[string]any{"browserContextId": g.ContextID}, nil)
-	}
+	m.backend.closeGroup(ctx, g, tabs)
+	m.forgetGroup(g, tabs)
+	m.publish("group.closed", map[string]any{"group_id": g.ID, "browser_id": g.Browser.ID, "profile": g.Profile, "labels": g.Labels})
+	return len(tabs), nil
+}
+
+// forgetGroup drops a closed group and its tabs from the model.
+func (m *Manager) forgetGroup(g *Group, tabs []*Tab) {
 	m.mu.Lock()
 	delete(m.groups, g.ID)
 	delete(g.Browser.groups, g.ID)
@@ -679,8 +607,6 @@ func (m *Manager) CloseGroup(ctx context.Context, id string) (int, error) {
 		m.tabGone(t)
 	}
 	g.closeControl()
-	m.publish("group.closed", map[string]any{"group_id": g.ID, "browser_id": g.Browser.ID, "profile": g.Profile, "labels": g.Labels})
-	return len(tabs), nil
 }
 
 // CloseBrowser ends a browser and forgets its groups.
@@ -827,7 +753,8 @@ func (m *Manager) CloseIdle(now time.Time) {
 	}
 	var idle []*Browser
 	for _, b := range m.browsers {
-		if now.Sub(b.LastActivity()) >= m.lim.IdleClose {
+		// The operator's Chrome is never closed for idling: it is theirs, and open for them.
+		if !b.attached && now.Sub(b.LastActivity()) >= m.lim.IdleClose {
 			idle = append(idle, b)
 		}
 	}
@@ -855,6 +782,10 @@ type ProfileInfo struct {
 
 // Profiles lists the persistent profiles on disk.
 func (m *Manager) Profiles() []ProfileInfo {
+	if m.Attached() {
+		// The operator's Chrome has its own profiles, which are none of the daemon's business.
+		return nil
+	}
 	root := filepath.Join(m.deps.Config.StateDir, "profiles")
 	entries, _ := os.ReadDir(root)
 	var out []ProfileInfo
@@ -886,6 +817,9 @@ func (m *Manager) Profiles() []ProfileInfo {
 // ClearProfile removes a profile's cookies, storage and cache, keeping the directory; DeleteProfile
 // removes it. Neither touches a profile whose browser runs.
 func (m *Manager) ClearProfile(profile string, remove bool) error {
+	if m.Attached() {
+		return ErrAttachRefused("clearing or deleting a profile")
+	}
 	if !ValidID(profile) || profile == EphemeralProfile {
 		return wire.Errorf(wire.CodeInvalidParams, "no such profile %q", profile)
 	}
@@ -958,6 +892,15 @@ func (m *Manager) onEvent(b *Browser, e cdp.Event) {
 	if !tab {
 		return
 	}
+	if b.attached && (e.Method == "Page.downloadWillBegin" || e.Method == "Page.downloadProgress") {
+		// The operator's Chrome announces a download on the page that started it: the daemon sets no
+		// download behaviour on a browser that is not its own, so there is no Browser event, and the
+		// page model follows downloads by the Browser event's name and shape, which these share.
+		be := cdp.Event{Method: "Browser." + strings.TrimPrefix(e.Method, "Page."), Params: e.Params}
+		for _, l := range m.listeners {
+			l.BrowserEvent(b, be)
+		}
+	}
 	t.event(e)
 	for _, l := range m.listeners {
 		l.TabEvent(t, e)
@@ -994,7 +937,9 @@ func (m *Manager) attachFrame(b *Browser, t *Tab, parent string, raw json.RawMes
 	}
 	calls := []call{
 		{"Target.setAutoAttach", map[string]any{"autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true}},
-		{"Emulation.setUserAgentOverride", map[string]any{"userAgent": b.userAgent, "userAgentMetadata": b.uaMetadata}},
+	}
+	if !b.attached {
+		calls = append(calls, call{"Emulation.setUserAgentOverride", map[string]any{"userAgent": b.userAgent, "userAgentMetadata": b.uaMetadata}})
 	}
 	// A frame of another site is a document of its own, and the page's script does not reach it. The
 	// frame's session takes the script only with its Page domain on: without Page.enable the call

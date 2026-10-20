@@ -4,6 +4,9 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
+	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -132,4 +135,120 @@ func sessionMembers(sid int) int {
 		}
 	}
 	return n
+}
+
+// TestUserDaemonAndBridge runs a user daemon (--backend attach) and the bridge as Chrome starts it,
+// by the path alone with the extension's origin first: the extension's hello is welcomed, daemon.info
+// shows the relay, and the daemon stopping reaches the extension as its bye.
+func TestUserDaemonAndBridge(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "browserd")
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+	run := filepath.Join(dir, "run")
+	daemon := exec.Command(bin, "serve", "--env", "user", "--backend", "attach", "--install-name", "Home", "--run-dir", run,
+		"--state-dir", filepath.Join(dir, "state"))
+	daemon.Stderr = os.Stderr
+	if err := daemon.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer daemon.Process.Kill()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(filepath.Join(run, "endpoint")); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no endpoint")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	id := strings.Repeat("abcdefghijklmnop", 2)
+	bridge := exec.Command(bin, "chrome-extension://"+id+"/")
+	bridge.Env = append(os.Environ(), "BROWSERD_BRIDGE_RUN_DIR="+run, "BROWSERD_BRIDGE_EXTENSION_IDS="+id)
+	bridge.Stderr = os.Stderr
+	stdin, _ := bridge.StdinPipe()
+	stdout, _ := bridge.StdoutPipe()
+	if err := bridge.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Process.Kill()
+	hello := []byte(`{"t":"hello","proto":1,"ext_version":"1.0.0","chrome_version":"141.0","platform":"linux","profile_id":"p","profile_name":"Home Chrome"}`)
+	head := make([]byte, 4)
+	binary.LittleEndian.PutUint32(head, uint32(len(hello)))
+	if _, err := stdin.Write(append(head, hello...)); err != nil {
+		t.Fatal(err)
+	}
+	read := func() map[string]any {
+		t.Helper()
+		got := make(chan map[string]any, 1)
+		go func() {
+			var h [4]byte
+			if _, err := io.ReadFull(stdout, h[:]); err != nil {
+				got <- nil
+				return
+			}
+			b := make([]byte, binary.LittleEndian.Uint32(h[:]))
+			if _, err := io.ReadFull(stdout, b); err != nil {
+				got <- nil
+				return
+			}
+			var m map[string]any
+			_ = json.Unmarshal(b, &m)
+			got <- m
+		}()
+		select {
+		case m := <-got:
+			return m
+		case <-time.After(10 * time.Second):
+			t.Fatal("nothing from the bridge")
+			return nil
+		}
+	}
+	if w := read(); w["t"] != "welcome" || w["install_name"] != "Home" || w["install_kind"] != "native" {
+		t.Fatalf("welcome: %v", w)
+	}
+	c, err := clienttest.Dial(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var info struct {
+		Backend string `json:"backend"`
+		Relay   struct {
+			Connected   bool   `json:"connected"`
+			ProfileName string `json:"profile_name"`
+		} `json:"relay"`
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := c.Call(ctx, "daemon.info", map[string]any{}, &info); err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+	if info.Backend != "attach" || !info.Relay.Connected || info.Relay.ProfileName != "Home Chrome" {
+		t.Fatalf("daemon.info %+v", info)
+	}
+	if err := daemon.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		m := read()
+		if m == nil {
+			t.Fatal("the bridge ended without the daemon's bye")
+		}
+		if m["t"] == "bye" {
+			if m["reason"] != "shutdown" {
+				t.Fatalf("bye %v", m)
+			}
+			break
+		}
+	}
+	done := make(chan error, 1)
+	go func() { done <- bridge.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the bridge outlived its daemon")
+	}
 }

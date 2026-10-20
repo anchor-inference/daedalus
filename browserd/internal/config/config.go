@@ -88,11 +88,22 @@ type Config struct {
 	ConfigFile string
 	LogFile    string
 	LogLevel   string
+	// Backend is BackendLaunch (browsers of the daemon's own) or BackendAttach (the operator's
+	// Chrome through the Daedalus extension, over a relay).
+	Backend string
+	// InstallName is the installation's name the extension's popup shows; the attach backend's only.
+	InstallName string
 
 	Limits   Limits
 	Chromium Chromium
 	Input    Input
 }
+
+// The backends, as --backend names them (the browser package says what each is).
+const (
+	BackendLaunch = "launch"
+	BackendAttach = "attach"
+)
 
 // Input is how the agent's actions move the pointer and type. The zero value is the default: human
 // input on, within DefaultHumanBudget, so a configuration that says nothing gets it.
@@ -231,6 +242,8 @@ func Parse(args []string) (*Config, error) {
 	fs.StringVar(&c.ConfigFile, "config", "", "JSON file with limits and the Chromium")
 	fs.StringVar(&c.LogFile, "log-file", "", "log file (default stderr)")
 	fs.StringVar(&c.LogLevel, "log-level", "info", "debug, info, warn or error")
+	fs.StringVar(&c.Backend, "backend", BackendLaunch, "launch (browsers of its own) or attach (the operator's Chrome, over a relay)")
+	fs.StringVar(&c.InstallName, "install-name", "Daedalus", "the installation's name the Chrome extension shows (attach)")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
@@ -249,6 +262,12 @@ func Parse(args []string) (*Config, error) {
 	}
 	if c.StateDir, err = filepath.Abs(c.StateDir); err != nil {
 		return nil, err
+	}
+	if c.Backend != BackendLaunch && c.Backend != BackendAttach {
+		return nil, fmt.Errorf("--backend must be launch or attach, not %q", c.Backend)
+	}
+	if len(c.InstallName) > 200 {
+		return nil, errors.New("--install-name is at most 200 bytes")
 	}
 	if c.Listen != "unix" && !strings.HasPrefix(c.Listen, "tcp:127.0.0.1:") {
 		// Only loopback: the token is the whole of the authentication.

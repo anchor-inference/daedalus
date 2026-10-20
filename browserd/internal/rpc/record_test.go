@@ -134,6 +134,7 @@ func TestRecordingKeepsKeyframesOfActions(t *testing.T) {
 // daemon.info names the Chromium's version before any browser ran, and knows the sandbox's state
 // within a few seconds of the first browser starting, not at the first ten-second statistics.
 func TestDaemonInfoKnowsTheBrowserEarly(t *testing.T) {
+	launchOnly(t, "the sandbox reported is of a Chromium the daemon runs")
 	needChromium(t)
 	h := start(t, nil)
 	var info struct {

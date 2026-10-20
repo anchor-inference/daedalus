@@ -49,7 +49,7 @@ const maxForeignProcs = 64
 // less what the other processes in it hold, is the browsers' memory, shared out over them in
 // proportion to their private figures; elsewhere the private figure stands.
 func (m *Manager) Sample(s *procstat.Sampler, now time.Time) Stats {
-	bs := m.Browsers()
+	bs := m.ownBrowsers()
 	terms := make([]procstat.Term, len(bs))
 	for i, b := range bs {
 		terms[i] = procstat.Term{ID: b.ID, Pid: b.Pid()}
@@ -125,6 +125,18 @@ func (m *Manager) Sample(s *procstat.Sampler, now time.Time) Stats {
 	return out
 }
 
+// ownBrowsers are the browsers whose processes are the daemon's: the operator's Chrome is neither
+// measured as the daemon's cost nor ever ended for the memory limit.
+func (m *Manager) ownBrowsers() []*Browser {
+	var out []*Browser
+	for _, b := range m.Browsers() {
+		if !b.attached {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
 // fitToCgroup shares what the kernel charged the cgroup, less what its other processes hold, over
 // the browsers in proportion to their private estimates. It is false when there is nothing to share
 // or the figures contradict each other (the others alone hold more than was charged), and the
@@ -157,7 +169,7 @@ func (m *Manager) RunStats(stop <-chan struct{}) {
 			return
 		case <-tick.C:
 		}
-		bs := m.Browsers()
+		bs := m.ownBrowsers()
 		if len(bs) == 0 {
 			continue
 		}
