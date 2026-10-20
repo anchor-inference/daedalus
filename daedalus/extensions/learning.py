@@ -22,7 +22,7 @@ from protocore.contracts.types import Message, MessageRole, TextBlock, ToolResul
 from daedalus.extensions.notifications import Draft
 from daedalus.host.prompts import split_headline, without_turn_context
 from daedalus.host.session_runner import TENANT
-from daedalus.host.summaries import transcript_for_summary
+from daedalus.host.summaries import OMISSION_RULE, clip_middle, transcript_for_summary
 from daedalus.stores.knowledge import KnowledgeStore
 
 if TYPE_CHECKING:
@@ -42,7 +42,21 @@ decisions the operator made, preferences the operator stated, identifiers (repos
 will be needed again), and how-tos that took effort to find. Not: the task itself, intermediate results, anything
 already obvious from files, or anything that only matters for this task. Each fact is one self-contained sentence
 naming its subject. Answer with a JSON list only: [{"kind": "decision|preference|identifier|howto|fact", "text": "..."}].
-An empty list is a fine answer."""
+An empty list is a fine answer.
+""" + OMISSION_RULE
+
+EXTRACT_RESULT_CHARS = 1500
+"""Each tool result the extraction reads, cut in the middle. At 300 characters a path or a command found
+by a search was cut away before the model could name it as a fact."""
+EXTRACT_INPUT_CHARS = 60_000
+"""The whole transcript the extraction reads, cut in the middle. It used to be the first 60,000
+characters, so on a long run the operator's closing decision — the likeliest durable fact — was never
+read; the start keeps the ask and the end keeps how it was settled."""
+
+
+def extraction_input(history: list[Message]) -> str:
+    """The transcript of one run as the memory extraction reads it."""
+    return clip_middle(transcript_for_summary(history, result_chars=EXTRACT_RESULT_CHARS), EXTRACT_INPUT_CHARS)
 
 
 class Learning:
@@ -127,7 +141,7 @@ class Learning:
             provider, model = manager.providers.rungs_for(self.app.config, cfg.extract_preset)[0]
         request = LLMRequest(
             model=model,
-            messages=[Message(role=MessageRole.user, content_blocks=[TextBlock(text=EXTRACT_PROMPT + "\n\n" + transcript_for_summary(history, result_chars=300)[:60_000])])],
+            messages=[Message(role=MessageRole.user, content_blocks=[TextBlock(text=EXTRACT_PROMPT + "\n\n" + extraction_input(history))])],
             max_tokens=1500,
             temperature=0.1,
             extra={"enable_thinking": False},
