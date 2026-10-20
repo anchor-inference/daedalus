@@ -114,6 +114,9 @@ func (d *Daemon) cookiesSet(ctx context.Context, c *server.Conn, params json.Raw
 	if err := decode(params, &p); err != nil {
 		return nil, err
 	}
+	if d.Manager.Attached() {
+		return nil, browser.ErrAttachRefused("importing cookies")
+	}
 	if len(p.Cookies) == 0 || len(p.Cookies) > maxCookies {
 		return nil, wire.Errorf(wire.CodeInvalidParams, "cookies must hold 1-%d cookies", maxCookies)
 	}
@@ -189,6 +192,9 @@ func (d *Daemon) cookiesList(ctx context.Context, c *server.Conn, params json.Ra
 	if err != nil {
 		return nil, err
 	}
+	if d.Manager.Attached() {
+		return d.cookieNames(ctx, g, p.Domain)
+	}
 	stored, err := d.storedCookies(ctx, g)
 	if err != nil {
 		return nil, err
@@ -222,6 +228,9 @@ func (d *Daemon) cookiesClear(ctx context.Context, c *server.Conn, params json.R
 	if err := decode(params, &p); err != nil {
 		return nil, err
 	}
+	if d.Manager.Attached() {
+		return nil, browser.ErrAttachRefused("clearing cookies")
+	}
 	// Every cookie of the profile at once is profile.clear's, with the browser closed; this is a site.
 	if strings.Trim(strings.TrimSpace(p.Domain), ".") == "" {
 		return nil, wire.Errorf(wire.CodeInvalidParams, "domain is required: the site whose cookies go")
@@ -252,4 +261,38 @@ func (d *Daemon) cookiesClear(ctx context.Context, c *server.Conn, params json.R
 	}
 	g.Touch()
 	return map[string]any{"cleared": cleared}, nil
+}
+
+// cookieNames is cookies.list in the operator's Chrome: the extension answers the cookies Chrome
+// would send to the site, without their values. A domain asked for is its https address; none is the
+// address of the group's active tab.
+func (d *Daemon) cookieNames(ctx context.Context, g *browser.Group, domain string) (any, error) {
+	url := ""
+	if site := strings.Trim(strings.TrimSpace(domain), "."); site != "" {
+		url = "https://" + site + "/"
+	} else if t := g.ActiveTab(); t != nil {
+		url = t.URL()
+	}
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		return nil, wire.Errorf(wire.CodeInvalidParams, "domain is required while the group's tab shows no site")
+	}
+	names, err := d.Manager.CookieNames(ctx, g, url)
+	if err != nil {
+		return nil, err
+	}
+	out := []cookieView{}
+	for _, ck := range names {
+		expires := ck.Expires
+		if ck.Session || expires < 0 {
+			expires = 0
+		}
+		out = append(out, cookieView{Name: ck.Name, Domain: ck.Domain, Path: ck.Path, Expires: expires, Secure: ck.Secure, HTTPOnly: ck.HTTPOnly, SameSite: ck.SameSite})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Domain != out[j].Domain {
+			return out[i].Domain < out[j].Domain
+		}
+		return out[i].Name < out[j].Name
+	})
+	return map[string]any{"cookies": out}, nil
 }

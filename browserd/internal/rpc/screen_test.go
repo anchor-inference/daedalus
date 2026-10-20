@@ -98,6 +98,9 @@ func onScreen(t *testing.T, c click) {
 func TestClicksLandOnTheScreen(t *testing.T) {
 	for _, fix := range []string{config.ScreenFixAuto, config.ScreenFixAlways} {
 		t.Run(fix, func(t *testing.T) {
+			if fix == config.ScreenFixAlways {
+				launchOnly(t, "the screen position script is never put into the operator's pages")
+			}
 			h := crossSitesWith(t, func(c *config.Config) { c.Input.ScreenFix = fix })
 			o := h.open("g1", "project-a", "")
 			tab := o.Tab.ID

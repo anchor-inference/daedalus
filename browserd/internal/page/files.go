@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -42,7 +43,6 @@ type Download struct {
 	profile string
 	browser *browser.Browser
 	path    string // where the finished file is kept
-	partial string // where Chromium writes it
 }
 
 func newID(prefix string) string {
@@ -80,8 +80,7 @@ func (p *Model) BrowserEvent(b *browser.Browser, e cdp.Event) {
 			return
 		}
 		dl := &Download{ID: newID("d"), GroupID: g.ID, Name: safeName(d.SuggestedFilename), URL: d.URL,
-			State: "in_progress", StartedAt: time.Now().UTC(), guid: d.GUID, profile: g.Profile, browser: b,
-			partial: filepath.Join(b.DownloadDir(), d.GUID)}
+			State: "in_progress", StartedAt: time.Now().UTC(), guid: d.GUID, profile: g.Profile, browser: b}
 		if t != nil {
 			dl.TabID = t.ID
 		}
@@ -114,9 +113,13 @@ func (p *Model) BrowserEvent(b *browser.Browser, e cdp.Event) {
 			go func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
-				_ = b.Conn().Call(ctx, "", "Browser.cancelDownload", map[string]any{"guid": d.GUID}, nil)
+				_ = b.CancelDownload(ctx, d.GUID)
 			}()
 			p.finish(dl, "too_large")
+		case d.State == "completed" && b.Attached():
+			// Where the operator's Chrome put the file is a question to the extension, which the
+			// events behind this one need not wait for.
+			go p.finish(dl, "completed")
 		case d.State == "completed":
 			p.finish(dl, "completed")
 		case d.State == "canceled":
@@ -137,12 +140,27 @@ func (p *Model) finish(dl *Download, state string) {
 	dl.State = state
 	dl.FinishedAt = &now
 	p.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// The file is the daemon's to move only from its own download directory. A download in the
+	// operator's Chrome stays in their downloads, where they expect it, and the daemon keeps a copy.
+	var src string
+	var own bool
+	srcErr := errors.New("not asked")
+	if state == "completed" || !dl.browser.Attached() {
+		src, own, srcErr = dl.browser.DownloadPath(ctx, dl.guid)
+	}
 	if state == "completed" {
 		dir := filepath.Join(p.stateDir, "downloads", "groups", dl.GroupID)
 		path := filepath.Join(dir, dl.ID)
-		err := os.MkdirAll(dir, 0o700)
+		err := srcErr
 		if err == nil {
-			err = os.Rename(dl.partial, path)
+			err = os.MkdirAll(dir, 0o700)
+		}
+		if err == nil && own {
+			err = os.Rename(src, path)
+		} else if err == nil {
+			err = copyFile(src, path)
 		}
 		if err != nil {
 			p.log.Warn("keeping a download", "error", err.Error())
@@ -153,14 +171,32 @@ func (p *Model) finish(dl *Download, state string) {
 			dl.path, dl.SHA256, dl.Size = path, sum, size
 			p.mu.Unlock()
 		}
-	} else {
-		_ = os.Remove(dl.partial)
+	} else if srcErr == nil && own {
+		_ = os.Remove(src)
 	}
 	p.mu.Lock()
 	dl.State = state
 	p.mu.Unlock()
 	p.evict(dl.profile)
 	p.m.Publish("download.done", map[string]any{"group_id": dl.GroupID, "download": dl.snapshot()})
+}
+
+// copyFile copies a finished download the daemon does not own into its keeping.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 func hashFile(path string) (string, int64) {

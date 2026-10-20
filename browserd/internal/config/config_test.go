@@ -29,6 +29,22 @@ func TestParse(t *testing.T) {
 	}
 }
 
+func TestBackend(t *testing.T) {
+	dir := t.TempDir()
+	base := []string{"--env", "user", "--run-dir", dir + "/run", "--state-dir", dir + "/state"}
+	c, err := Parse(base)
+	if err != nil || c.Backend != BackendLaunch || c.InstallName != "Daedalus" {
+		t.Fatalf("defaults: %+v %v", c, err)
+	}
+	c, err = Parse(append(base, "--backend", "attach", "--install-name", "Home"))
+	if err != nil || c.Backend != BackendAttach || c.InstallName != "Home" {
+		t.Fatalf("attach: %+v %v", c, err)
+	}
+	if _, err := Parse(append(base, "--backend", "relay")); err == nil {
+		t.Fatal("an unknown backend was accepted")
+	}
+}
+
 func TestConfigFile(t *testing.T) {
 	dir := t.TempDir()
 	write := func(body string) string {

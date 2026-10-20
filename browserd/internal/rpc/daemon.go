@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/ascorblack/daedalus/browserd/internal/browser"
@@ -17,6 +18,7 @@ import (
 	"github.com/ascorblack/daedalus/browserd/internal/netwall"
 	"github.com/ascorblack/daedalus/browserd/internal/page"
 	"github.com/ascorblack/daedalus/browserd/internal/record"
+	"github.com/ascorblack/daedalus/browserd/internal/relay"
 	"github.com/ascorblack/daedalus/browserd/internal/version"
 	"github.com/ascorblack/daedalus/browserd/internal/view"
 	"github.com/ascorblack/daedalus/browserd/internal/workflow"
@@ -42,14 +44,24 @@ type Daemon struct {
 	Record *record.Recorder
 	// Workflow records a person's steps; nil serves no workflow.* methods.
 	Workflow *workflow.Recorder
+	// Relay is where the operator's Chrome connects, on a daemon of the attach backend; nil on one
+	// that launches its own browsers, which refuses relay.*.
+	Relay *relay.Hub
 
 	sampler *procstat.Sampler
+	// listening counts the connections subscribed to the events: the host's.
+	listening atomic.Int64
 }
 
 // Hello is the handshake's notification.
 func (d *Daemon) Hello() any {
-	return map[string]any{"version": version.Version, "protocol": version.Protocol, "instance": d.Instance, "env": d.Config.Env}
+	return map[string]any{"version": version.Version, "protocol": version.Protocol, "instance": d.Instance, "env": d.Config.Env,
+		"backend": d.Manager.Backend().Name()}
 }
+
+// HostSeen says whether anyone listens to the daemon's events, which is the host: a popup's check
+// is confirmed to the extension only when the app can show it too.
+func (d *Daemon) HostSeen() bool { return d.listening.Load() > 0 }
 
 // Register adds every method to the server.
 func (d *Daemon) Register(s *server.Server) {
@@ -87,6 +99,7 @@ func (d *Daemon) Register(s *server.Server) {
 	d.registerRecord(s)
 	d.registerWorkflow(s)
 	d.registerCookies(s)
+	d.registerRelay(s)
 }
 
 // decode reads params strictly: an unknown field is an error, so a misspelt parameter is never
@@ -113,6 +126,17 @@ func (d *Daemon) info(ctx context.Context, c *server.Conn, params json.RawMessag
 	if v := d.Manager.ChromiumVersion(); v != "" {
 		chromium["version"] = v
 	}
+	var relayStatus any
+	if d.Relay != nil {
+		// The operator's Chrome is the browser: no Chromium of the daemon's to report, and the
+		// connected Chrome's version stands in its place.
+		st := d.Relay.Status()
+		relayStatus = st
+		chromium = map[string]any{"path": "", "version": nil, "kind": "relay"}
+		if st.Connected && st.ChromeVersion != "" {
+			chromium["version"] = st.ChromeVersion
+		}
+	}
 	counts := d.Manager.Counts()
 	counts["viewers"] = d.Hub.Count()
 	lim := d.Manager.Limits()
@@ -121,6 +145,7 @@ func (d *Daemon) info(ctx context.Context, c *server.Conn, params json.RawMessag
 		"version": version.Version, "protocol": version.Protocol, "instance": d.Instance, "env": d.Config.Env,
 		"os": runtime.GOOS, "arch": runtime.GOARCH, "pid": os.Getpid(), "started_at": d.StartedAt,
 		"uptime_s": int64(time.Since(d.StartedAt).Seconds()), "chromium": chromium,
+		"backend": d.Manager.Backend().Name(), "relay": relayStatus,
 		"capabilities": map[string]any{"sandbox": d.Manager.Sandbox(), "headed": d.Config.Chromium.Headed(), "screencast": true},
 		"limits":       lim, "counts": counts, "machine": st.Machine,
 	}, nil
@@ -529,6 +554,9 @@ func (d *Daemon) subscribe(ctx context.Context, c *server.Conn, params json.RawM
 	subCtx, cancel := context.WithCancel(c.Context())
 	c.SetValue(subscriptionKey{}, cancel)
 	result := map[string]any{"instance": d.Instance, "from_seq": cursor + 1, "resync": resync}
+	// Counted from the reply on, not from when the pump gets going: a check right after the host
+	// subscribed is the host's to see.
+	d.listening.Add(1)
 	return server.Then{Result: result, After: func() { go d.pump(subCtx, c, cursor) }}, nil
 }
 
@@ -547,6 +575,7 @@ func (d *Daemon) stopSubscription(c *server.Conn) {
 // pump delivers events after cursor, in order, as ptyd does: a subscriber that falls off the log
 // is told with events.resync and continues from the oldest event held.
 func (d *Daemon) pump(ctx context.Context, c *server.Conn, cursor int64) {
+	defer d.listening.Add(-1)
 	for {
 		wake := d.Events.Wait()
 		evs, lost := d.Events.After(cursor, 256)

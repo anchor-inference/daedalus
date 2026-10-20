@@ -124,6 +124,30 @@ func (c *Conn) Send(ctx context.Context, session, method string, params any) <-c
 	return out
 }
 
+// Reply is a command's result as it came, or its error.
+type Reply struct {
+	Result json.RawMessage
+	Err    error
+}
+
+// Start writes one command now, as Send does, and returns a channel that gets its result as it
+// came. A proxy of commands (the tests' fake of the Chrome extension's relay) forwards each the
+// moment it arrives and answers it whenever Chromium does, so the order on the pipe is the order
+// they were sent in, and a paused page's setup is never held up behind a reply it cannot give yet.
+func (c *Conn) Start(ctx context.Context, session, method string, params any) <-chan Reply {
+	out := make(chan Reply, 1)
+	ch, id, err := c.write(session, method, params)
+	if err != nil {
+		out <- Reply{Err: err}
+		return out
+	}
+	go func() {
+		r, err := c.await(ctx, method, ch, id)
+		out <- Reply{Result: r, Err: err}
+	}()
+	return out
+}
+
 // CallRaw is Call returning the result as it came.
 func (c *Conn) CallRaw(ctx context.Context, session, method string, params any) (json.RawMessage, error) {
 	ch, id, err := c.write(session, method, params)

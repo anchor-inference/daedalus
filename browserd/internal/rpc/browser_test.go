@@ -135,6 +135,7 @@ func TestResizeChangesThePageTheViewerSees(t *testing.T) {
 }
 
 func TestBrowserCapAndThrowawayGroups(t *testing.T) {
+	launchOnly(t, "the cap counts browsers the daemon starts, and the operator's Chrome is one browser that takes no throwaway contexts")
 	h := start(t, func(l *config.Limits) { l.MaxBrowsers = 1 })
 	h.open("g1", "project-a", "/still")
 	// Two groups of one profile share its browser.
@@ -160,6 +161,7 @@ func TestBrowserCapAndThrowawayGroups(t *testing.T) {
 }
 
 func TestEphemeralGroupsAreSeparate(t *testing.T) {
+	launchOnly(t, "the operator's Chrome takes no throwaway contexts (TestAttachRefusals)")
 	h := start(t, nil)
 	a := h.open("e1", browser.EphemeralProfile, "/still")
 	b := h.open("e2", browser.EphemeralProfile, "/still")
@@ -436,6 +438,7 @@ func TestPopupJoinsTheOpenersGroup(t *testing.T) {
 }
 
 func TestIdleCloseAndCrash(t *testing.T) {
+	launchOnly(t, "the operator's Chrome is never closed for idling, and has no process of the daemon's to crash")
 	h := start(t, func(l *config.Limits) { l.IdleClose = time.Minute })
 	h.open("g1", "project-a", "/still")
 	h.open("g2", "project-b", "/still")
