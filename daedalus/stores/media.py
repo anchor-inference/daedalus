@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import mimetypes
 import os
 import re
 import stat
@@ -25,6 +26,7 @@ MEDIA_REF_RE = re.compile(r"!\[(?P<alt>[^\]\n]{0,500})\]\(daedalus-media:(?P<id>
 MAX_ITEMS = 10
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_AV_BYTES = 100 * 1024 * 1024
+MAX_FILE_BYTES = 100 * 1024 * 1024
 MAX_IMAGE_PIXELS = 40_000_000
 MEDIA_TENANT = "inline-media"
 
@@ -106,6 +108,13 @@ _LINK_KINDS = {
     ".wav": ("audio", "audio/wav"),
 }
 _KIND_MIME = {"image": "image/jpeg", "animation": "image/gif", "video": "video/mp4", "audio": "audio/mpeg"}
+_MEDIA_SUFFIXES = frozenset(_LINK_KINDS)
+
+
+def _file_kind(path: Path) -> tuple[str, str, int | None, int | None]:
+    """A file that is no picture, clip or sound: a document, a spreadsheet, an archive, code. It is
+    kept as it is and drawn as a file card; nothing is probed, since nothing is decoded."""
+    return "file", mimetypes.guess_type(path.name)[0] or "application/octet-stream", None, None
 
 
 def _admit_link(url: str, kind_hint: str, alt: str, caption: str) -> dict[str, Any]:
@@ -171,9 +180,9 @@ class MediaStore:
             if url:
                 admitted.append(_admit_link(url, str(item.get("kind") or ""), item.get("alt", ""), item.get("caption", "")))
             else:
-                admitted.append(await asyncio.to_thread(self._admit, Path(item["path"]), item.get("alt", ""), item.get("caption", "")))
+                admitted.append(await asyncio.to_thread(self._admit, Path(item["path"]), item.get("alt", ""), item.get("caption", ""), str(item.get("kind") or "")))
         if layout == "album" and (len(admitted) < 2 or any(item["kind"] not in ("image", "video", "animation") for item in admitted)):
-            raise ValueError("an album needs 2-10 images, videos or animations; audio must be attached separately")
+            raise ValueError("an album needs 2-10 images, videos or animations; audio and other files are attached one per call")
         presentation_id = str(uuid.uuid4())
         now = datetime.now(UTC).isoformat()
         async with self.db.transaction() as conn:
@@ -195,7 +204,7 @@ class MediaStore:
         alt = admitted[0]["alt"] or admitted[0]["caption"] or admitted[0]["filename"]
         return {"id": presentation_id, "kind": "album" if layout == "album" else admitted[0]["kind"], "markdown": f"![{alt}](daedalus-media:{presentation_id})"}
 
-    def _admit(self, path: Path, alt: str, caption: str) -> dict[str, Any]:
+    def _admit(self, path: Path, alt: str, caption: str, kind_hint: str = "") -> dict[str, Any]:
         alt = alt.strip()
         caption = caption.strip()
         if len(alt) > 500 or len(caption) > 1000:
@@ -207,8 +216,18 @@ class MediaStore:
             if not stat.S_ISREG(before.st_mode):
                 raise ValueError("media source must be a regular file")
             head = os.read(fd, 64 * 1024)
-            kind, mime_type, width, height = _probe(head)
-            limit = MAX_IMAGE_BYTES if kind in ("image", "animation") else MAX_AV_BYTES
+            if kind_hint == "file":
+                kind, mime_type, width, height = _file_kind(path)
+            else:
+                try:
+                    kind, mime_type, width, height = _probe(head)
+                except ValueError:
+                    # A file named as media that does not decode is a broken picture, said so; any
+                    # other file is a document the answer carries as a card.
+                    if path.suffix.lower() in _MEDIA_SUFFIXES:
+                        raise
+                    kind, mime_type, width, height = _file_kind(path)
+            limit = MAX_FILE_BYTES if kind == "file" else MAX_IMAGE_BYTES if kind in ("image", "animation") else MAX_AV_BYTES
             if kind in ("image", "animation") and (not width or not height or width * height > MAX_IMAGE_PIXELS):
                 raise ValueError("image dimensions are missing or exceed the 40 megapixel limit")
             if before.st_size > limit:

@@ -18,11 +18,13 @@ from daedalus.tools._common import error, local_copy, ok, refuse_protected, serv
 @tool(
     name="SendFile",
     description=(
-        "Send a file from the workspace (or any path) to the operator in the current chat, "
-        "with an optional caption. Images (png/jpg) render inline; everything else arrives as a "
-        "document. Use it for reports, archives, generated code and any output longer than a "
-        "screen. Chat replies themselves are Markdown and render natively (headings, tables, "
-        "code blocks, quotes, <details> blocks), so short structured answers need no file."
+        "Push a file from the workspace (or any path) to the operator's Telegram chat, with an "
+        "optional caption; the app shows it as a card under the turn. Not every session has a chat "
+        "bound, so to put a deliverable — a report, a document, a spreadsheet, an archive — into your "
+        "answer use AttachMedia instead, which places it there as a file card whether or not a chat is "
+        "bound and sends the chat a copy when one is. Chat replies themselves are Markdown and render "
+        "natively (headings, tables, code blocks, quotes, <details> blocks), so short structured "
+        "answers need no file."
     ),
 )
 async def send_file(context: ToolContext, path: str, caption: str | None = None) -> ToolResult:
@@ -56,18 +58,24 @@ async def send_file(context: ToolContext, path: str, caption: str | None = None)
 
 @search_hint(
     "attach picture photo image video audio gif album inline answer embed media "
-    "прикрепить прикрепи вставить вставь картинку фото фотку видео гифку альбом медиа ответ"
+    "attach file document docx pdf xlsx spreadsheet archive zip report deliverable result "
+    "прикрепить прикрепи вставить вставь картинку фото фотку видео гифку альбом медиа ответ "
+    "приложить приложи файл документ отчет таблицу архив результат к ответу"
 )
 @tool(
     name="AttachMedia",
     description=(
-        "Attach images, a picture album, video, audio or a GIF inside the final answer. Each item is "
-        "{path, alt, caption} for a workspace file, or {url, alt, caption, kind} for an http(s) link. "
-        "Pass the link itself; do not download it first. kind is image, video, animation or audio, and is "
-        "only needed when the link has no filename extension. Use layout=album for 2-10 images, videos or "
-        "GIFs in any order, otherwise use single with one item. The result contains one Markdown line: "
-        "copy that line into the final answer exactly where the media should appear. This prepares the "
-        "media; do not also SendFile it."
+        "Attach a file inside the final answer: an image, a picture album, video, audio or a GIF, or any "
+        "other file — a document (docx, pdf), a spreadsheet, an archive, code — which the operator sees "
+        "in place as a file card to open and download. This is how a deliverable reaches the operator: "
+        "the card stays with the answer whether or not a Telegram chat is bound, and a bound chat gets "
+        "the file too. Each item is {path, alt, caption} for a file, or {url, alt, caption, kind} for an "
+        "http(s) link to media. Pass the link itself; do not download it first. kind is image, video, "
+        "animation or audio, and is only needed when the link has no filename extension; kind=file on a "
+        "path attaches even a picture as a plain file. Use layout=album for 2-10 images, videos or GIFs "
+        "in any order, otherwise use single with one item (attach several documents with one call each). "
+        "The result contains one Markdown line: copy that line into the final answer exactly where the "
+        "file should appear. This prepares the file; do not also SendFile it."
     ),
 )
 async def attach_media(context: ToolContext, items: list[dict[str, str]], layout: str = "single") -> ToolResult:
@@ -96,7 +104,7 @@ async def attach_media(context: ToolContext, items: list[dict[str, str]], layout
             return error(context, str(exc))
         if not local.is_file():
             return error(context, f"no such file: {target}")
-        resolved.append({"path": str(local), "alt": str(item.get("alt") or ""), "caption": str(item.get("caption") or "")})
+        resolved.append({"path": str(local), "kind": str(item.get("kind") or ""), "alt": str(item.get("alt") or ""), "caption": str(item.get("caption") or "")})
     try:
         attached = await services.attach_media(resolved, layout)
     except (OSError, ValueError) as exc:

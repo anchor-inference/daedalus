@@ -2724,9 +2724,19 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             path,
             media_type=str(item["mime_type"]),
             filename=str(item["filename"]),
-            content_disposition_type="inline",
+            # A picture or a clip is shown by the page's own element. Any other file is handed over
+            # as a download: an attached HTML page or SVG opened inline would run on the app's origin.
+            content_disposition_type="attachment" if item["kind"] == "file" else "inline",
             headers={"Cache-Control": "private, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff"},
         )
+
+    @api.get("/api/sessions/{session_id}/media/{presentation_id}/download")
+    async def media_download(session_id: str, presentation_id: str, path: str, _: dict[str, Any] = Depends(auth)) -> Response:
+        """An attached item in the shape every file of the app is fetched in, ``{base}/download?path=…``:
+        ``path`` is ``<item id>/<file name>``, so the panel's preview names the kind by the name (a
+        document, a spreadsheet) and a download link carries the token as any other does."""
+        item_id = path.split("/", 1)[0]
+        return await media_content(session_id, presentation_id, item_id)
 
     async def companion_turn(session_id: str) -> None:
         """A message into the companion's own session by the ordinary routes is one of its text turns."""
@@ -4473,7 +4483,10 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         mime, location = found
         if location.startswith(("https://", "http://")):
             return RedirectResponse(location, status_code=302, headers=noindex)
-        return FileResponse(location, media_type=mime, content_disposition_type="inline", headers={**noindex, **artifact_headers(mime)})
+        # An attached document is a download here as in the app: only a picture, a clip or a sound
+        # is shown in place, and an SVG, which can carry script, is not one of them.
+        shown = mime.split("/", 1)[0] in ("image", "video", "audio") and mime != "image/svg+xml"
+        return FileResponse(location, media_type=mime, content_disposition_type="inline" if shown else "attachment", headers={**noindex, **artifact_headers(mime)})
 
     @api.get("/c/{slug}")
     async def dialog_page(slug: str, request: Request) -> Response:

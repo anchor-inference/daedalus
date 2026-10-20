@@ -85,7 +85,7 @@ async def test_delivery_failure_is_recorded_not_swallowed(tmp_path: Path) -> Non
 
 
 async def test_ready_inline_media_is_delivered_by_native_telegram_type(front: TelegramFront, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    files = [tmp_path / name for name in ("one.png", "two.png", "clip.mp4", "voice.mp3", "loop.gif")]
+    files = [tmp_path / name for name in ("one.png", "two.png", "clip.mp4", "voice.mp3", "loop.gif", "act.docx")]
     for path in files:
         path.write_bytes(b"content")
 
@@ -97,6 +97,7 @@ async def test_ready_inline_media_is_delivered_by_native_telegram_type(front: Te
             {"id": "video", "layout": "single", "items": [{"path": str(files[2]), "kind": "video", "caption": "V"}]},
             {"id": "audio", "layout": "single", "items": [{"path": str(files[3]), "kind": "audio", "caption": "S"}]},
             {"id": "animation", "layout": "single", "items": [{"path": str(files[4]), "kind": "animation", "caption": "G"}]},
+            {"id": "document", "layout": "single", "items": [{"path": str(files[5]), "kind": "file", "caption": "D"}]},
         ]
 
     monkeypatch.setattr(front.manager.media, "ready_for_run", ready_for_run)
@@ -111,6 +112,8 @@ async def test_ready_inline_media_is_delivered_by_native_telegram_type(front: Te
         ("audio", files[3], "S"),
         ("animation", files[4], "G"),
     ]
+    # An attached document reaches the chat as one; it used to fall through to send_photo.
+    assert outbox.documents == [files[5]]
 
 
 def test_flood_budget_is_per_chat() -> None:

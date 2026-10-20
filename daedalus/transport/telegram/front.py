@@ -2587,6 +2587,10 @@ class TelegramFront:
                         await outbox.send_audio(path, caption)
                     elif item["kind"] == "animation":
                         await outbox.send_animation(path, caption)
+                    elif item["kind"] == "file":
+                        # A file has no link form (only media are attached by address), so its
+                        # source is always the kept copy.
+                        await outbox.send_document(Path(path), caption)
                     else:
                         await outbox.send_photo(path, caption)
             except Exception:  # noqa: BLE001 — the text answer still reaches the chat; the app keeps the original
