@@ -1,4 +1,4 @@
-"""The routes of the operator's own Chrome: the card in Settings → Browser, a conversation's switch,
+"""The routes of the operator's own Chrome: the card in Settings → Environments, a conversation's switch,
 and — on a server — the two public doors a paired Chrome comes in by.
 
 ``/api/browser/user*`` are the operator's (the app's authentication). ``POST /api/browser/pair`` and
@@ -197,7 +197,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         found = service()
         await session_choice(session_id)
         if body.env == USER and not found.user_offered():
-            raise Unsupported("this installation does not offer your Chrome (Settings → Browser → Your Chrome)")
+            raise Unsupported("this installation does not offer your Chrome (Settings → Environments → Your Chrome)")
         await found.choices.switch(session_id, body.env, consent=body.consent)
         if found.bus is not None:
             with suppress(Exception):

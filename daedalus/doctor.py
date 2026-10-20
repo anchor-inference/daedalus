@@ -725,7 +725,7 @@ async def _user_browser(ctx: DoctorContext, service: Any) -> Check:
     if relay.get("connected"):
         return Check(name, True, f"Chrome «{relay.get('profile_name') or 'Chrome'}» connected ({relay.get('transport') or '?'}), extension {relay.get('ext_version') or '?'}, Chrome {relay.get('chrome_version') or '?'}", "ok")
     why = str(relay.get("last_error") or "no Chrome has connected since the service started")
-    return Check(name, True, f"no Chrome connected: {why}", "info", "Settings → Browser → Your Chrome")
+    return Check(name, True, f"no Chrome connected: {why}", "info", "Settings → Environments → Your Chrome")
 
 
 async def _token_counter(ctx: DoctorContext) -> list[Check]:

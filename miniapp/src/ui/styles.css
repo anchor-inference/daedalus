@@ -4784,7 +4784,7 @@ button.staff-row:hover { background: var(--surface-2); }
 .staff-panel.with-browser { display: flex; flex-direction: column; height: 100%; }
 .staff-panel-body.tab-browser { padding: 0; display: flex; flex-direction: column; overflow: hidden; flex: 1; min-height: 0; }
 
-/* Settings → Browser. Rows of the running browsers and the profiles: what it is, whose it is, its
+/* Settings → Environments. Rows of the running browsers and the profiles: what it is, whose it is, its
    size, and the buttons that end or wipe it, which never shrink under the text. */
 .bs { display: grid; gap: 12px; }
 .bs .card { margin: 0; }

@@ -1,4 +1,4 @@
-"""Settings → Browser → "Your Chrome" and the browser panel's switch, driven in a real browser.
+"""Settings → Environments → "Your Chrome" and the browser panel's switch, driven in a real browser.
 
 At 1440 × 900 and on a 390 px phone, in English and Russian:
 

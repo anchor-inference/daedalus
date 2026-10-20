@@ -9,7 +9,7 @@ browser. At 1440 × 900, in English and Russian:
 - the finished recording offers its steps (a sign-in reads as the operator's, not recorded), a goal and
   "Make a skill draft"; the draft opens for editing, and approving saves the operator's words first;
 - a recording the give-back ends is kept, and discarding one asks first;
-- Settings → Browser lists a procedure with its title, a few lines of it, and edits it in place;
+- Settings → Environments lists a procedure with its title, a few lines of it, and edits it in place;
   on a phone it does not scroll sideways.
 
 Exit 0 when every step holds.

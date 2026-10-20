@@ -1,4 +1,4 @@
-// Settings → Browser → "Your Chrome": the operator's own Chrome as a browser the agent may be given.
+// Settings → Environments → "Your Chrome": the operator's own Chrome as a browser the agent may be given.
 //
 // The connection is checked from both sides, so the card says what Daedalus sees — whether the
 // connector is registered (on this computer), whether the extension is connected and as which

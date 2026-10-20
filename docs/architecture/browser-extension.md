@@ -39,7 +39,7 @@ text, which the extension turns into what the operator should do:
 
 | Chrome's message | Shown as |
 |---|---|
-| "Specified native messaging host not found." | the connector is not registered: open Daedalus → Settings → Browser |
+| "Specified native messaging host not found." | the connector is not registered: open Daedalus → Settings → Environments |
 | "Access to the specified native messaging host is forbidden." | the same: the manifest exists but does not name this extension |
 | "Native host has exited." (and the bridge's `bye {reason: "not_running"}`) | Daedalus is not running on this computer |
 

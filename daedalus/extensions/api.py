@@ -767,7 +767,7 @@ class SettingsBody(BaseModel):
     terminals: dict[str, Any] | None = None
     """``running_cap`` from Settings; the terminals service reads the configuration on every admission."""
     browser: dict[str, Any] | None = None
-    """Settings → Browser: the cap, the idle close, recording, watch mode, the local network the
+    """Settings → Environments: the cap, the idle close, recording, watch mode, the local network the
     browser may be let into, the injection monitor. The browser service hands the daemon its part at
     once (``limits.set``, ``net.configure``)."""
     navigation: dict[str, Any] | None = None

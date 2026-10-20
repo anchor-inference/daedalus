@@ -293,7 +293,7 @@ class Pairing:
                 match = hmac.compare_digest(wanted, str(entry.get("hash") or "")) or match
             if not match:
                 self.attempts.failed(address)
-                raise PairingRefused("the code is wrong or has expired; make a new one in the app (Settings → Browser → Your Chrome)")
+                raise PairingRefused("the code is wrong or has expired; make a new one in the app (Settings → Environments → Your Chrome)")
             await self.db.kv_set(self.CODES, [])
             token = secrets.token_urlsafe(32)
             stamp = self.now().isoformat()

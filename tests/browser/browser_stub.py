@@ -673,7 +673,7 @@ class BrowserStub:
         return 404, {"detail": "no such route"}
 
     def answer_settings(self, method: str, parts: list[str], body: Any) -> tuple[int, Any]:
-        """Settings → Browser's routes: the running browsers, the profiles, the recordings and the load."""
+        """Settings → Environments's routes: the running browsers, the profiles, the recordings and the load."""
         what = parts[0]
         if what == "running" and method == "GET":
             return 200, {"browsers": self.running}

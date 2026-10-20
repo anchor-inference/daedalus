@@ -838,7 +838,7 @@ the Daedalus extension. Chrome only, whatever its version. The launcher's part:
   into the local state's `browser-extension/`. That folder keeps its path across releases, which is
   what Chrome remembers an unpacked extension by. You load it once: `chrome://extensions`, Developer
   mode, *Load unpacked*.
-- **The connector**, written only when you press *Register* in Settings → Browser → Your Chrome: a
+- **The connector**, written only when you press *Register* in Settings → Environments → Your Chrome: a
   native-messaging host named `com.daedalus.browser`, allowed to the Daedalus extension alone, that
   starts `browserd bridge` through a small wrapper in `browser-connector/`. On Windows the manifest
   is named by `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.daedalus.browser`; on macOS

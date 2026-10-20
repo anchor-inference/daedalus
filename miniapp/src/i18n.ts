@@ -7385,7 +7385,7 @@ Object.assign(DICT, {
   "browser.steps.approve": { en: "Approve", ru: "Одобрить" },
   "browser.steps.save": { en: "Save", ru: "Сохранить" },
   "browser.steps.later": { en: "Later", ru: "Позже" },
-  "browser.steps.later.title": { en: "It waits in Settings → Browser → Site notes", ru: "Черновик подождёт в Настройки → Браузер → Заметки о сайтах" },
+  "browser.steps.later.title": { en: "It waits in Settings → Environments → Site notes", ru: "Черновик подождёт в Настройки → Окружения → Заметки о сайтах" },
   "browser.steps.approved": { en: "Agents on {host} will see this procedure", ru: "Агенты на {host} будут видеть эту процедуру" },
   "browser.steps.saved": { en: "Saved", ru: "Сохранено" },
   "browser.steps.discarded": { en: "Draft discarded", ru: "Черновик удалён" },

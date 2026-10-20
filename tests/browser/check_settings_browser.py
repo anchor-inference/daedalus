@@ -253,7 +253,7 @@ def phone(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ign
     width = page.evaluate("[document.documentElement.scrollWidth, document.documentElement.clientWidth, Math.max(...[...document.querySelectorAll('.bs *')].map(e => e.getBoundingClientRect().right))]")
     print(f"[{lang}] phone widths: {width}")
     if width[0] > width[1] or width[2] > width[1] + 0.5:
-        say(f"Settings → Browser scrolls sideways on a phone: {width}")
+        say(f"Settings → Environments scrolls sideways on a phone: {width}")
     page.context.close()
 
 

@@ -367,13 +367,13 @@ GATES: dict[str, object] = {
     # has a browser. A harness that opens one installs `browser_stub.BrowserStub`, which answers the rest
     # of `/api/browsers*` and the live view's WebSocket.
     "/api/browsers": {"available": True, "reason": "", "groups": []},
-    # Settings → Browser and the load bars read these; a harness with a browser installs the stub's.
+    # Settings → Environments and the load bars read these; a harness with a browser installs the stub's.
     "/api/browsers/load": browser_load(running=0),
     "/api/browsers/running": {"browsers": []},
     "/api/browsers/profiles": {"profiles": []},
     "/api/browsers/recordings": {"envs": []},
     "/api/browsers/notes": {"notes": []},
-    # Settings → Browser → Your Chrome: an installation without a daemon for the operator's Chrome,
+    # Settings → Environments → Your Chrome: an installation without a daemon for the operator's Chrome,
     # where the card is not drawn. check_user_browser.py answers the card's routes itself.
     "/api/browser/user": {"configured": False, "enabled": True, "daemon": False, "reason": "not_configured", "detail": "", "relay": None, "native": False,
                           "launcher": None, "launcher_error": "", "devices": [], "server_url": "", "consent": ""},

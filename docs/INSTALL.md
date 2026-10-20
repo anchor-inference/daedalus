@@ -142,7 +142,7 @@ included) and run `docker compose -f deploy/compose.yaml --env-file .env up -d -
   and so the logins you made in them, stay in the `browser-state` volume; the app says how many
   browsers the update closes before it does.
 - **Its size.** Memory is capped at `BROWSER_MEMORY_LIMIT` (3 GB): two browsers with eight tabs each
-  measured under 1.2 GB. Settings → Browser sets how many run at once and when an idle one closes,
+  measured under 1.2 GB. Settings → Environments sets how many run at once and when an idle one closes,
   and shows what they cost beside the terminals on one load bar.
 - **What a page can still do to the agent.** A page may try to talk the agent into something: text
   addressed to it, a fake system message, an instruction hidden off screen. The agent is told that
@@ -151,7 +151,7 @@ included) and run `docker compose -f deploy/compose.yaml --env-file .env up -d -
   ports (the network wall), a password or payment field (the agent cannot type into one), a purchase,
   a message sent, a deletion or an upload (each asked about first), and, with an allowlist, any site
   off it — a link or redirect the page follows there is stopped and the agent told. It can still waste
-  the agent's time on public pages. For more, Settings → Browser has **watch mode** (on the sites you
+  the agent's time on public pages. For more, Settings → Environments has **watch mode** (on the sites you
   list, the agent acts only while you have its browser open) and an **injection monitor** (a small
   model reads each new site's page before the agent and pauses on one that talks to it); both are off
   until you turn them on.

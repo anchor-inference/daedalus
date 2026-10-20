@@ -122,7 +122,7 @@ async def test_steps_are_checked_whole_before_any_is_done(rig: Rig) -> None:
 async def test_a_point_is_off_until_the_operator_allows_it_and_then_walled_like_a_ref(rig: Rig) -> None:
     sid = await opened(rig)
     text, failed = await rig.call(sid, "BrowserAct", action="click", x=150, y=210, element="the name field")
-    assert failed and "Settings → Browser" in text and actions(rig) == []
+    assert failed and "Settings → Environments" in text and actions(rig) == []
     rig.manager.config.browser.point_clicks = True
     try:
         text, failed = await rig.call(sid, "BrowserAct", action="click", x=150, y=210, element="the name field")

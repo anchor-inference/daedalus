@@ -1128,7 +1128,7 @@ class BrowserAgent:
         if step.pointed:
             if not self.service.config().point_clicks:
                 raise Forbidden(
-                    "Acting at a point is off: the operator switches it on in Settings → Browser. Act on a ref from BrowserSnapshot "
+                    "Acting at a point is off: the operator switches it on in Settings → Environments. Act on a ref from BrowserSnapshot "
                     "(BrowserText(find=…) finds one by its words), or ask the operator."
                 )
             base.update({"x": float(step.x or 0), "y": float(step.y or 0), "allow_point": True})
@@ -1495,7 +1495,7 @@ class BrowserAgent:
         answers with the operator's own data, so a body is read only when the operator turned it on,
         and then only on a site granted for the work."""
         if not self.service.config().user.bodies:
-            return "response bodies are not read in the operator's Chrome unless they turn it on (Settings → Browser → Your Chrome)"
+            return "response bodies are not read in the operator's Chrome unless they turn it on (Settings → Environments → Your Chrome)"
         host = host_of(str(current.get("url") or ""))
         if not site_granted(host, await self._granted_sites(caller)):
             return f"{host or 'this page'} is not a site granted for this work, and in the operator's Chrome a body is read only on one"
@@ -1820,7 +1820,7 @@ class BrowserAgent:
             except Exception:  # noqa: BLE001 — the note is kept whether or not the operator could be told now
                 logger.exception("could not tell the operator of site note %s", proposed["id"])
         return (
-            f"Proposed a note for {proposed['host']}. The operator reads it first (Settings → Browser → Site notes); once they "
+            f"Proposed a note for {proposed['host']}. The operator reads it first (Settings → Environments → Site notes); once they "
             "approve it, agents on that site are shown it. Nothing else to do; carry on."
         )
 

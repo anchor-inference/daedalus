@@ -181,7 +181,7 @@ func userBrowserLines(r UserBrowserReport) []string {
 	case r.Connector.Stale:
 		lines = append(lines, "connector    registered, outdated — the next start rewrites it")
 	default:
-		lines = append(lines, "connector    not registered — Settings → Browser → Your Chrome")
+		lines = append(lines, "connector    not registered — Settings → Environments → Your Chrome")
 	}
 	if r.Extension.Ready {
 		lines = append(lines, "extension    "+r.Extension.Version+" in "+r.Extension.Path)

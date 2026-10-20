@@ -414,7 +414,7 @@ export type BrowserFrame = { no: number; at: number; tab: string; url: string; k
 
 export type BrowserRecording = { recording: { frames: boolean; human: boolean }; frames: BrowserFrame[] };
 
-/** A browser a daemon runs now (`GET /api/browsers/running`), for Settings → Browser. */
+/** A browser a daemon runs now (`GET /api/browsers/running`), for Settings → Environments. */
 export type RunningBrowser = {
   env: string;
   id: string;

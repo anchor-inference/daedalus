@@ -162,7 +162,7 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
         if notifications is None:
             return
         await notifications.post(Draft(
-            "system", f"A site note for {note['host']} waits for you", f"{note['text']}\n\nSettings → Browser → Site notes: approve it, or discard it.",
+            "system", f"A site note for {note['host']} waits for you", f"{note['text']}\n\nSettings → Environments → Site notes: approve it, or discard it.",
             kind="browser_note", project_id=note.get("project_id") or None, dedupe_key=f"browser_note:{note['id']}", source="browser",
         ))
 
