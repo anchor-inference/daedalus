@@ -46,6 +46,11 @@ type Server struct {
 
 	helpers setupHelpers
 	after   afterSetup
+
+	// computerClient is the launcher's operator connection to the desktop daemon (computer.go),
+	// made when a computer-use route is first asked.
+	computerOnce   sync.Once
+	computerClient *deskdOperator
 }
 
 const defaultPort = 8770
@@ -92,6 +97,13 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/action/", s.handleAction)
 	mux.HandleFunc("/api/jobs/", s.handleJob)
+	mux.HandleFunc("/api/computer", s.handleComputer)
+	mux.HandleFunc("/api/computer/apps", s.handleComputerApps)
+	mux.HandleFunc("/api/computer/grant", s.handleComputerGrant)
+	mux.HandleFunc("/api/computer/revoke", s.handleComputerRevoke)
+	mux.HandleFunc("/api/computer/stop", s.handleComputerBare("stop"))
+	mux.HandleFunc("/api/computer/resume", s.handleComputerBare("resume"))
+	mux.HandleFunc("/api/computer/permissions", s.handleComputerPermissions)
 	mux.HandleFunc("/focus", s.handleFocus)
 	mux.Handle("/assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(mustSub()))))
 	s.http = &http.Server{Handler: s.sameOrigin(mux), ReadHeaderTimeout: 10 * time.Second}
@@ -111,6 +123,9 @@ func (s *Server) Stop(ctx context.Context) {
 	RemoveInstance(s.app.paths)
 	if s.http != nil {
 		_ = s.http.Shutdown(ctx)
+	}
+	if s.computerClient != nil {
+		s.computerClient.Close()
 	}
 }
 
