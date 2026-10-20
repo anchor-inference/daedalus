@@ -2370,6 +2370,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             "housekeeping": state.housekeeping is not None and not state.housekeeping.done(),
             "error": state.last_error_message if state.last_error_kind else "",
             "compacting": state.compacting,
+            # A summary written ahead of the trigger while the session goes on: shown, never as blocking.
+            "compaction_background": state.background_compacting,
             "run_id": state.run_id,
             # Where its files are: for a session working on the host, the folder there and not its
             # directory here, which holds only the inbox. The app places a turn's absolute paths by it

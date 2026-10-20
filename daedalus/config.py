@@ -1051,6 +1051,9 @@ class CompactionConfig(BaseModel):
     parallel_calls: int = Field(default=12, ge=1, le=64)
     """Part summaries in flight at once (never more than there are parts). Six made a 980k-token history
     five waves of calls; a rate limit halves the width for the rest of that compaction."""
+    background_share: float = Field(default=0.7, ge=0.0, lt=1.0)
+    """Share of the trigger at which the summary of the history so far starts being written in the
+    background, between turns, so that reaching the trigger only adopts it; 0 = never in advance."""
     core_trigger_ratio: float = Field(default=0.85, gt=0.0, lt=1.0)
     """Where the core's own mid-run compaction starts; above the host's ratio so runs boundaries compact first."""
     preset: str = ""

@@ -857,7 +857,8 @@ export type MessageView = {
   created_at: string;
 };
 
-export type Compacting = { reason: string; stage: "summarising" | "merging" | "writing"; messages: number; parts_done: number; parts_total: number; started_at: string };
+/** A compaction in flight. `background`: the summary written ahead of the trigger while the session goes on — never blocking. */
+export type Compacting = { reason: string; stage: "summarising" | "merging" | "writing"; messages: number; parts_done: number; parts_total: number; started_at: string; background?: boolean };
 
 export type SessionDetail = {
   id: string;
@@ -871,6 +872,8 @@ export type SessionDetail = {
    *  Present until the next run starts: the reply the model managed to write is not the only trace of a failure. */
   error?: string;
   compacting?: Compacting | null;
+  /** The summary being written ahead of the trigger; the session is not compacting while it is. */
+  compaction_background?: Compacting | null;
   run_id: string | null;
   workspace: string;
   workspace_name?: string;

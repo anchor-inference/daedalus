@@ -5104,6 +5104,8 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "session.compacting.merging": { en: "merging the parts", ru: "сводим части" },
   "session.compacting.part": { en: "part {n} of {total}", ru: "часть {n} из {total}" },
   "session.compacting.summarising": { en: "summarising", ru: "составляем выжимку" },
+  "session.compacting.ahead": { en: "Summarising ahead · {what}", ru: "Выжимка заранее · {what}" },
+  "session.compacting.ahead.hint": { en: "The summary for the next compaction is being written in the background; the session stays usable", ru: "Выжимка для следующего сжатия пишется в фоне; сессией можно пользоваться" },
   "session.sentfiles": { en: "files sent to you", ru: "присланные файлы" },
   "session.receipt": { en: "Receipt {id}", ru: "Отчёт {id}" },
   "session.receipt.none": { en: "No receipt {id} in this session — the agent may have cited a run it did not make.", ru: "Отчёта {id} в этой сессии нет — возможно, агент сослался на запуск, которого не было." },

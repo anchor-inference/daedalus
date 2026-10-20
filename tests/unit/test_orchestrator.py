@@ -391,7 +391,7 @@ async def test_compaction_of_an_orchestrator_is_told_what_to_keep(settings: Sett
         ordinary = await r.manager.create_session("work", project_id=r.project.id)
         told: dict[str, str] = {}
 
-        async def capture(state: Any, history: Any, tail: Any, instructions: str, reason: str, *, own_task_ok: bool) -> str:
+        async def capture(state: Any, history: Any, tail: Any, instructions: str, reason: str, *, own_task_ok: bool, summary: str | None = None) -> str:
             told[state.session.id] = instructions
             return "summary"
 

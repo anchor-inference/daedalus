@@ -27,6 +27,7 @@ from daedalus.providers.openai_compat import UsageRecord
 from daedalus.stores.database import Database
 from tests.support.models import model_config
 from tests.support.summariser import streamed
+from tests.support.waiting import until
 
 SECTIONED = "## Standing instructions\ns\n## Stable facts\nf\n## Threads\n### t\nx\n## Closed threads\nc\n## Unknowns\nu\n## Identifiers\ni"
 
@@ -530,4 +531,118 @@ async def test_a_compaction_that_frees_nothing_is_reported_and_not_repeated(sett
     await _measured(manager, state, 70_000, "r3")
     await manager._maybe_auto_compact(state)
     assert calls == ["compacted", "compacted"]
+    await manager.close()
+
+
+async def _ahead(settings: Settings, db: Database, title: str) -> tuple[SessionManager, Any, Any, list[str], asyncio.Event, list[Any]]:
+    """A session on a 100k window at 40k tokens: past 0.7 of its 50k trigger, so the summary starts ahead."""
+    config = model_config()
+    config.compaction.auto_ratio = 0.5
+    config.compaction.background_share = 0.7
+    config.compaction.keep_recent_messages = 2
+    config.compaction.min_messages = 4
+    manager = SessionManager(settings, config, db=db)
+    await manager.start()
+    state = await manager.create_session(title)
+    state.context_window = 100_000
+    history = _long_history(3)
+    await manager.sessions.replace_messages(state.session.id, "daedalus", history)
+    await manager.sessions.append_transcript(state.session.id, history)
+    _, preset = manager.config.preset()
+    provider = manager.providers.get(preset.provider)
+    calls: list[str] = []
+    release = asyncio.Event()
+    release.set()
+
+    async def summarise(request: Any) -> LLMResponse:
+        calls.append(request.messages[0].content_blocks[0].text)
+        await release.wait()
+        return LLMResponse(message=Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=SECTIONED)]), stop_reason=StopReason.end_turn)
+
+    provider.stream_with_tools = streamed(summarise)  # type: ignore[method-assign]
+    events: list[Any] = []
+
+    async def sink(session_id: str, event: Any) -> None:
+        events.append(event)
+
+    manager.add_sink(sink)
+    return manager, state, provider, calls, release, events
+
+
+async def _turn(manager: SessionManager, state: Any, text: str) -> None:
+    """One more exchange appended to the history, the way a run's persist leaves it."""
+    history = [*await manager.sessions.list_messages(state.session.id, "daedalus", limit=100), _op(text), Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=f"done: {text}")])]
+    await manager.sessions.replace_messages(state.session.id, "daedalus", history)
+    await manager.sessions.append_transcript(state.session.id, history)
+
+
+async def test_the_summary_is_written_ahead_without_the_lock_and_adopted_at_the_trigger(settings: Settings, db: Database) -> None:
+    """Eight minutes of 'compacting' on a 980k session: the operator waited on the whole summariser.
+    It is written in the background before the trigger now, and reaching the trigger only adopts it."""
+    from daedalus.host.session_runner import HostEventType, _status_word
+
+    manager, state, _provider, calls, release, events = await _ahead(settings, db, "ahead")
+    release.clear()
+    await _measured(manager, state, 40_000, "r1")
+    await manager._maybe_auto_compact(state)  # returns at once: the summary is written on its own task
+    assert state.prepared_compaction is not None
+    await until(lambda: calls)
+    assert not state.lock.locked(), "the session lock is held while the summary is written"
+    assert state.compacting is None and _status_word(state) == "idle", "a background summary is not a blocking compaction"
+    assert state.background_compacting is not None and state.background_compacting["background"] is True
+    assert (await manager.list_sessions(limit=5))[0]["status"] == "idle"
+    await _turn(manager, state, "a turn while it is written")  # the session goes on meanwhile
+    release.set()
+    await state.prepared_compaction.task
+    assert state.background_compacting is None
+    background = [e.payload["compaction"] for e in events if getattr(e, "type", None) == HostEventType.COMPACTION_BACKGROUND]
+    assert background[0]["stage"] == "summarising" and background[-1] is None
+    assert not [e for e in events if getattr(e, "payload", {}).get("reason") == "compaction_progress"], "the background summary was announced as a blocking compaction"
+
+    await _turn(manager, state, "the turn that crosses the trigger")
+    await _measured(manager, state, 60_000, "r2")
+    await manager._maybe_auto_compact(state)
+    assert len(calls) == 1, "the summary written ahead was not used; the trigger summarised again"
+    messages = await manager.sessions.list_messages(state.session.id, "daedalus", limit=100)
+    record = messages[0].metadata["daedalus.compaction"]
+    assert record["messages"] == 4 and record["kept"] == 6  # the prefix it summarised; everything after it kept as it is
+    assert [m.content_blocks[0].text for m in messages[-2:]] == ["the turn that crosses the trigger", "done: the turn that crosses the trigger"]  # type: ignore[union-attr]
+    assert state.prepared_compaction is None
+    await manager.close()
+
+
+async def test_a_summary_written_ahead_is_dropped_when_the_history_was_rewritten(settings: Settings, db: Database) -> None:
+    manager, state, _provider, calls, _release, _events = await _ahead(settings, db, "reverted")
+    await _measured(manager, state, 40_000, "r1")
+    await manager._maybe_auto_compact(state)
+    assert state.prepared_compaction is not None
+    await state.prepared_compaction.task
+    # The operator undoes the second exchange, which the summary written ahead stands for.
+    rows = await manager.sessions.list_transcript(state.session.id)
+    second = [m for m in rows if m.role is MessageRole.user][1]
+    await manager.revert(state.session.id, int(second.metadata["daedalus.seq"]))
+    for text in ("again one", "again two"):
+        await _turn(manager, state, text)
+    await _measured(manager, state, 60_000, "r2")
+    await manager._maybe_auto_compact(state)
+    assert len(calls) == 2, "a summary of turns the operator undid was adopted"
+    assert "ask 1:" not in calls[1] and "again one" in calls[1]
+    messages = await manager.sessions.list_messages(state.session.id, "daedalus", limit=100)
+    assert "ask 1:" not in messages[0].content_blocks[0].text  # type: ignore[union-attr]
+    await manager.close()
+
+
+async def test_a_summary_written_ahead_is_dropped_when_its_prefix_changed_without_a_rewrite_mark(settings: Settings, db: Database) -> None:
+    """The core's own compaction inside a run replaces messages without the host's rewrite counter."""
+    manager, state, _provider, calls, _release, _events = await _ahead(settings, db, "core-compacted")
+    await _measured(manager, state, 40_000, "r1")
+    await manager._maybe_auto_compact(state)
+    await state.prepared_compaction.task
+    history = await manager.sessions.list_messages(state.session.id, "daedalus", limit=100)
+    rewritten = [_op("[the core's summary of the first turns]"), *history[2:]]
+    await manager.sessions.replace_messages(state.session.id, "daedalus", rewritten)
+    await _turn(manager, state, "next")
+    await _measured(manager, state, 60_000, "r2")
+    await manager._maybe_auto_compact(state)
+    assert len(calls) == 2 and "the core's summary of the first turns" in calls[1]
     await manager.close()
