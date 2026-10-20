@@ -8,7 +8,7 @@
 
 import { NATIVE_HOST, type ExtensionFrame } from "./protocol.js";
 
-/** Why a transport closed, in the terms the popup explains: an error code from the dictionary. */
+/** Why a transport closed, in the terms the side panel explains: an error code from the dictionary. */
 export type CloseReason =
   | "not_running"
   | "not_registered"

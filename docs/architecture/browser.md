@@ -32,7 +32,7 @@ browserd version
 | `--config` | a JSON file: `{"limits": {…}, "chromium": {"path", "args": [], "no_sandbox", "mode", "screen": "<w>x<h>"}, "input": {"human", "budget_ms", "screen_fix"}}`; unknown keys are refused; a flag wins over the file |
 | `--log-file`, `--log-level` | the daemon's own JSON-lines log (stderr, `info`) |
 | `--backend` | `launch` (the default): browsers of the daemon's own on its profiles; `attach`: the operator's Chrome over a relay, no browser launched (The operator's Chrome) |
-| `--install-name` | the installation's name the extension's popup shows (`Daedalus`); `attach` only |
+| `--install-name` | the installation's name the extension's side panel shows (`Daedalus`); `attach` only |
 
 `SIGTERM` or `SIGINT` stops the daemon: the endpoint file is removed first, every browser is asked to
 close (`Browser.close` over its pipe), and after 3 s whatever is left of each browser's process group
@@ -585,7 +585,7 @@ are in `data`. The daemon keeps the last 20 000, no more than 64 MiB. `events.su
 | `workflow.stopped` | `{group_id, workflow: Workflow}`, whole: what the host keeps |
 | `relay.connected` | `{profile_id, profile_name, ext_version, chrome_version, platform, transport, proto}` — the operator's Chrome connected (The operator's Chrome) |
 | `relay.lost` | `{reason: "closed" \| "no_pong" \| "replaced" \| "shutdown" \| "bad_frame", profile_id, profile_name}` |
-| `relay.check` | `{n, profile_id, profile_name}` — the operator pressed "Check connection" in the extension's popup |
+| `relay.check` | `{n, profile_id, profile_name}` — the operator pressed "Check connection" in the extension's side panel |
 
 `action.text_len` is the length of the typed text; the text itself is never in an event, a log or the
 daemon's memory past the call. The one exception is a recording of a person's steps whose operator
@@ -893,6 +893,7 @@ convention, and `internal/browser/attach_test.go` holds each one:
 | `relay.open` | `{transport: "native" \| "server", install_name?}` → `{channel, proto}`: the connection becomes a relay; channel `channel` carries its frames (The relay channel). `install_name` replaces `--install-name` for this relay (the host's proxy names its installation). On a daemon of the launch backend `1007 {reason: "launch_backend"}` |
 | `relay.status` | → `Relay` |
 | `relay.notify` | `{text? ≤ 200 bytes}` → `{rtt_ms}`: the app's "Check connection". The extension flashes its badge and shows `text`, or its own "Daedalus checked the connection" when empty; `1007 {reason: "chrome_not_connected"}` with no Chrome |
+| `relay.call` | `{op, args}` → `{}`: the host's message to the extension's side panel, carried as a `call`. `op` is `panel.grant` or `panel.event` and nothing else (`1002` for any other: the host cannot drive tabs around the daemon's own rules this way); `1007 {reason: "chrome_not_connected"}` with no Chrome |
 
 `Relay` is `{connected, profile_id?, profile_name?, ext_version?, chrome_version?, platform?, transport?,
 since, last_seen, last_error?}`: the connected Chrome, or the last one with `connected: false`.
@@ -915,24 +916,25 @@ the channel (an empty frame, as for any channel) ends the relay.
 
 Every relay frame is one JSON object with its type in `t`. `browserd/internal/relay/testdata/frames.json`
 holds a golden frame of every kind, which the daemon's and the extension's tests both read; it is the
-contract's example, this table its rules. The protocol's version is `proto`, now 1; a frame of a type
-a side does not know is ignored, so additions keep the version.
+contract's example, this table its rules. The protocol's version is `proto`, now 2 (2 names the
+conversation that owns each group, which the extension's side panel follows the active tab by, and
+adds the side panel's calls); a frame of a type a side does not know is ignored.
 
 | From | Frame | Fields and meaning |
 |---|---|---|
-| extension | `hello` | `{proto, ext_version, chrome_version, platform, profile_id, profile_name, token?}`, the first frame. `profile_id` is random and kept in `chrome.storage.local`; `profile_name` is what the operator typed in the popup ("Chrome" if empty); `token` (a device token) only on the server transport, where the host checks it before any frame reaches the daemon |
+| extension | `hello` | `{proto, ext_version, chrome_version, platform, profile_id, profile_name, token?}`, the first frame. `profile_id` is random and kept in `chrome.storage.local`; `profile_name` is what the operator typed in the side panel's settings ("Chrome" if empty); `token` (a device token) only on the server transport, where the host checks it before any frame reaches the daemon |
 | daemon | `welcome` | `{proto, daemon_version, install_name, install_kind: "native" \| "server"}`: accepted |
 | daemon | `cdp` | `{id, session, method, params?}`: a DevTools command for `chrome.debugger.sendCommand`. `session` is `x<tabId>` for a tab, `x<tabId>/<sessionId>` for a flat child session of it (a frame of another site). The extension sends the commands in the order they arrive without waiting for each one's answer: a paused frame's setup is answered only after the command that lets it run, which comes last |
 | daemon | `call` | `{id, op, args}`: a browser-level operation the extension does with the extension APIs (below) |
 | extension | `result` | `{id, ok, value?}` or `{id, ok: false, error{code, message}}`: the answer to a `cdp` or `call`. `code` is `refused` (the allowlist, or a tab outside the agent's groups), `no_tab`, `detached`, `cdp` (Chrome's own error: `message` is its JSON text `{"code", "message", "data"?}`, whose code the daemon keeps) or `failed` |
 | extension | `event` | `{session, method, params}`: a DevTools event, its params as Chrome sent them. The daemon, not the extension, renames the `sessionId` inside `Target.attachedToTarget` and `Target.detachedFromTarget` from Chrome's id to `x<tabId>/<sessionId>`, and back in `Target.detachFromTarget`'s params |
 | extension | `tabs` | `{op, tab?, group?}`: what the operator changed. `created` (a popup: `tab{id, group, opener, url?, title?}`), `joined` (dragged into an agent's group), `left` (dragged out), `removed` (closed), `updated` (`tab{id, url, title}`), `group_closed` (`group`). A tab the daemon asked for with `tab.create` is in that call's answer and need not be announced; announced anyway, it is taken once. A `created` or `joined` tab whose opener is not an agent tab and whose group is not an agent's is ignored. `joined` for a tab the daemon already has means the extension attached its debugger afresh (it does so after a detach, and replays the tabs it holds after a `welcome`): the attachment's state went with the old one, so the daemon forgets the tab (`tab.closed {reason: "reattached"}`) and sets it up again as a new tab |
-| extension | `input` | `{tab}`: the operator's own trusted input in an agent tab. There is no pause frame: while the operator has paused a group in the popup, the extension sends `input` for its tabs every 2 s (which keeps control with the operator) and refuses `Input.*` itself |
+| extension | `input` | `{tab}`: the operator's own trusted input in an agent tab. There is no pause frame: while the operator has paused a group in the side panel, the extension sends `input` for its tabs every 2 s (which keeps control with the operator) and refuses `Input.*` itself |
 | daemon | `ping` | `{n}`, every 15 s; the relay is lost after three go unanswered (`bye {reason: "lost"}`) |
 | extension | `pong` | `{n}` |
-| extension | `check` | `{n}`: the popup's "Check connection" |
-| daemon | `check_ok` | `{n, host_seen}`: `host_seen` says the host is listening to the daemon's events, so the app shows its toast ("Chrome «name» checked the connection") at the same moment the popup shows "Daedalus confirmed" |
-| daemon | `bye` | `{reason, message?, proto?}`, the relay's last frame: `shutdown`, `replaced` (the same `profile_id` connected again: the stale relay goes), `another_relay` (another Chrome is connected: "another Chrome is already connected: <name>"), `proto` (versions differ; `proto` is the daemon's, so the popup can say which side to update), `lost`, `bad_frame`. The bridge sends two of its own: `not_running` (no daemon: "Daedalus is not running on this computer") and `unavailable` (the daemon refused `relay.open`; `message` says why) |
+| extension | `check` | `{n}`: the side panel's "Check connection" |
+| daemon | `check_ok` | `{n, host_seen}`: `host_seen` says the host is listening to the daemon's events, so the app shows its toast ("Chrome «name» checked the connection") at the same moment the side panel shows "Daedalus confirmed" |
+| daemon | `bye` | `{reason, message?, proto?}`, the relay's last frame: `shutdown`, `replaced` (the same `profile_id` connected again: the stale relay goes), `another_relay` (another Chrome is connected: "another Chrome is already connected: <name>"), `proto` (versions differ; `proto` is the daemon's, so the extension can say which side to update), `lost`, `bad_frame`. The bridge sends two of its own: `not_running` (no daemon: "Daedalus is not running on this computer") and `unavailable` (the daemon refused `relay.open`; `message` says why) |
 
 One relay at a time per daemon. A second `hello` with another `profile_id` is refused with
 `another_relay` and the first keeps working; the same `profile_id` replaces the first, which is how
@@ -943,14 +945,16 @@ The calls:
 
 | `op` | `args` → `value` |
 |---|---|
-| `window.ensure` | `{group}` → `{window, tabs: [Tab]}`: the agent's own unfocused window and Chrome tab group for a daemon group, made if missing; `tabs` are the ones that group already holds |
-| `tab.create` | `{group, url}` → `{tab: Tab}`: a tab in the group's window, attached to the debugger before the answer. The extension opens it on `about:blank` whatever `url` says, and the daemon navigates once the tab is set up and its guard is on |
+| `window.ensure` | `{group, session?, title?}` → `{window, tabs: [Tab]}`: the agent's own unfocused window and Chrome tab group for a daemon group, made if missing; `tabs` are the ones that group already holds. `session` and `title` are the host conversation the group works for and its name, from the group's labels (`session_id`, `title`): the tab group is titled with it, and the side panel shows the conversation whose group holds the active tab. A group the side panel made for the operator's tab (below) already has its window, the operator's, and is answered with that tab |
+| `tab.create` | `{group, url, session?, title?}` → `{tab: Tab}`: a tab in the group's window, attached to the debugger before the answer. The extension opens it on `about:blank` whatever `url` says, and the daemon navigates once the tab is set up and its guard is on |
 | `tab.close`, `tab.activate` | `{tab}` → `{}` |
 | `window.bounds` | `{group, bounds?{width, height}}` → `{bounds{left, top, width, height}}`: sizes the group's window when `bounds` is given, then reads it |
 | `downloads.search` | `{id}` → `{path, state, bytes}`: `id` is the DevTools guid of `Page.downloadWillBegin`; the extension finds the `chrome.downloads` item behind it |
 | `cookies.names` | `{url}` → `{cookies: [{name, domain, path, expires, secure, http_only, same_site?, session}]}`: `chrome.cookies.getAll({url})` without values |
 | `group.close` | `{group}` → `{}`: closes the agent's tabs of the group, its tab group and window |
 | `notify` | `{text}` → `{}`: the toast and badge flash of `relay.notify` |
+| `panel.grant` | `{base, token, expires}` → `{}`: the side panel's credential, from the host through `relay.call`. The extension keeps it in `chrome.storage.session` only if `base` is this installation (the paired server's origin, or a loopback address natively) and gives it to the panel's frame alone |
+| `panel.event` | `{session, kind: "needs_you" \| "done", title, waiting, tab?}` → `{}`: a conversation in this Chrome waits for the operator or finished its turn; a notification (unless the operator is looking at that window's panel) whose click opens the panel on it, and the badge counts `waiting` |
 
 `Tab` is `{id, group?, opener?, url?, title?}`: `id` is Chrome's tab id, `opener` a tab id of the
 agent's.

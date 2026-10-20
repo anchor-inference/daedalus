@@ -650,4 +650,3 @@ function ShotCrop({ shot, onCancel, onAttach }: { shot: PageInfo & { image: stri
     </div>
   );
 }
-

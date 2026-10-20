@@ -30,6 +30,8 @@ declare namespace chrome {
     const id: string;
     let lastError: { message?: string } | undefined;
     function connectNative(application: string): Port;
+    function connect(info?: { name?: string }): Port;
+    const onConnect: ChromeEvent<(port: Port & { sender?: MessageSender }) => void>;
     function sendMessage(message: unknown): Promise<any>;
     function getManifest(): { version: string; [key: string]: unknown };
     function getPlatformInfo(): Promise<PlatformInfo>;
@@ -83,6 +85,8 @@ declare namespace chrome {
     function group(options: GroupOptions): Promise<number>;
     function ungroup(tabIds: number | number[]): Promise<void>;
     function sendMessage(tabId: number, message: unknown): Promise<any>;
+    function captureVisibleTab(windowId: number, options?: { format?: "png" | "jpeg"; quality?: number }): Promise<string>;
+    const onActivated: ChromeEvent<(info: { tabId: number; windowId: number }) => void>;
     const onCreated: ChromeEvent<(tab: Tab) => void>;
     const onRemoved: ChromeEvent<(tabId: number, info: { windowId: number; isWindowClosing: boolean }) => void>;
     const onUpdated: ChromeEvent<(tabId: number, info: UpdateInfo, tab: Tab) => void>;
@@ -135,6 +139,7 @@ declare namespace chrome {
     function create(data: CreateData): Promise<Window>;
     function get(windowId: number): Promise<Window>;
     function getLastFocused(options?: { windowTypes?: string[] }): Promise<Window>;
+    function getCurrent(): Promise<Window>;
     function update(windowId: number, info: UpdateInfo): Promise<Window>;
     const onRemoved: ChromeEvent<(windowId: number) => void>;
   }
@@ -186,6 +191,20 @@ declare namespace chrome {
       files: string[];
       injectImmediately?: boolean;
     }): Promise<unknown[]>;
+    // A function run in the page's isolated world, for what the side panel attaches: the page's text
+    // or the operator's selection. Its result comes back as `[{ result }]`.
+    function executeScript<T>(injection: { target: { tabId: number }; func: () => T }): Promise<{ result?: T }[]>;
+  }
+
+  export namespace sidePanel {
+    function setPanelBehavior(behavior: { openPanelOnActionClick: boolean }): Promise<void>;
+    function open(options: { windowId?: number; tabId?: number }): Promise<void>;
+  }
+
+  export namespace notifications {
+    function create(id: string, options: { type: "basic"; iconUrl: string; title: string; message: string; priority?: number }): Promise<string>;
+    function clear(id: string): Promise<boolean>;
+    const onClicked: ChromeEvent<(id: string) => void>;
   }
 
   export namespace cookies {

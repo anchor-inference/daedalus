@@ -1,4 +1,4 @@
-// An English sentence written straight into the popup cannot be translated, and nothing says so: it
+// An English sentence written straight into the side panel cannot be translated, and nothing says so: it
 // stays English while everything around it turns Russian. These tests read the extension's sources
 // as text and fail on one, and prove both dictionaries carry every key with the same placeholders.
 //
@@ -11,7 +11,7 @@ import { DICTIONARIES, isKey } from "../src/i18n.js";
 
 const src = new URL("../src/", import.meta.url);
 const read = (name: string) => readFileSync(new URL(name, src), "utf8");
-const popupHtml = readFileSync(new URL("../static/popup.html", import.meta.url), "utf8");
+const panelHtml = readFileSync(new URL("../static/panel.html", import.meta.url), "utf8");
 
 // Files whose strings are never shown to a person, with the reason. Everything else may hold no
 // prose outside the dictionary.
@@ -25,6 +25,8 @@ const ALLOWED: Record<string, string> = {
   "relay.ts": "result",
   // Chrome's own native-messaging error text, matched to tell its failures apart; never shown.
   "transport.ts": "*",
+  // The bridge's error codes go to the framed app, which shows its own words for each.
+  "bridge.ts": "*",
 };
 
 // A fragment that carries the punctuation of code (CSS, a template built of translations) is not
@@ -75,15 +77,15 @@ describe("the dictionaries", () => {
 });
 
 describe("no hard-coded words", () => {
-  it("the popup page holds structure only, every text by key", () => {
-    const text = [...popupHtml.replace(/<script[\s\S]*?<\/script>/g, "").matchAll(/>([^<>]+)</g)]
+  it("the panel page holds structure only, every text by key", () => {
+    const text = [...panelHtml.replace(/<script[\s\S]*?<\/script>/g, "").matchAll(/>([^<>]+)</g)]
       .map((m) => m[1].trim())
       .filter(Boolean);
     expect(text).toEqual([]);
-    const keys = [...popupHtml.matchAll(/data-i18n="([^"]+)"/g)].map((m) => m[1]);
+    const keys = [...panelHtml.matchAll(/data-i18n(?:-title)?="([^"]+)"/g)].map((m) => m[1]);
     expect(keys.length).toBeGreaterThan(10);
     expect(keys.filter((key) => !isKey(key))).toEqual([]);
-    const props = [...popupHtml.matchAll(/\b(?:title|placeholder|aria-label|alt)="([^"]*)"/g)].map((m) => m[1]);
+    const props = [...panelHtml.matchAll(/\b(?:title|placeholder|aria-label|alt)="([^"]*)"/g)].map((m) => m[1]);
     expect(props.filter(isProse)).toEqual([]);
   });
 

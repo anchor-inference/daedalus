@@ -66,6 +66,14 @@ const en = {
   "menu.grant_none": "Let Daedalus use this tab (no agent is working)",
   "menu.grant_to": "Give to: {title}",
   "badge.title": "Daedalus: {state}",
+  "panel.open_app": "Open the app",
+  "panel.settings": "Connection and settings",
+  "panel.lead": "Connect this Chrome to Daedalus to see the conversations that use it here.",
+  "panel.frame_failed": "Daedalus did not answer. Is it running, and can this computer reach it?",
+  "panel.retry": "Try again",
+  "notify.needs_you": "Waiting for you in your Chrome",
+  "notify.done": "The agent has finished",
+  "settings.shortcut": "The toolbar button or Alt+Shift+D opens this panel; the keys can be changed at chrome://extensions/shortcuts.",
 };
 
 export type Key = keyof typeof en;
@@ -133,6 +141,14 @@ const ru: Record<Key, string> = {
   "menu.grant_none": "Разрешить Daedalus эту вкладку (агент не работает)",
   "menu.grant_to": "Отдать: {title}",
   "badge.title": "Daedalus: {state}",
+  "panel.open_app": "Открыть приложение",
+  "panel.settings": "Подключение и настройки",
+  "panel.lead": "Подключите этот Chrome к Daedalus, чтобы видеть здесь разговоры, которые с ним работают.",
+  "panel.frame_failed": "Daedalus не ответил. Он запущен, и этот компьютер может до него достучаться?",
+  "panel.retry": "Повторить",
+  "notify.needs_you": "Ждёт вас в вашем Chrome",
+  "notify.done": "Агент закончил",
+  "settings.shortcut": "Эту панель открывает кнопка на панели инструментов или Alt+Shift+D; клавиши меняются на chrome://extensions/shortcuts.",
 };
 
 export const DICTIONARIES: Record<"en" | "ru", Record<Key, string>> = { en, ru };

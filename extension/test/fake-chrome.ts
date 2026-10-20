@@ -52,6 +52,11 @@ export function installFakeChrome(options: { language?: string } = {}) {
   let dnrRules: any[] = [];
   const nativePorts: any[] = [];
   const runtimeMessages: any[] = [];
+  const notifications: { id: string; options: any }[] = [];
+  const sidePanel = { behavior: null as null | { openPanelOnActionClick: boolean }, opened: [] as any[] };
+  const captures: number[] = [];
+  const scripts: { tabId: number; func?: string }[] = [];
+  let pageScript: (tabId: number, func: () => unknown) => unknown = () => "";
   let commandHandler: (method: string, params: any, target: any) => any = () => ({});
   let attachError: string | null = null;
 
@@ -66,6 +71,9 @@ export function installFakeChrome(options: { language?: string } = {}) {
     menuClicked: new FakeEvent(),
     alarm: new FakeEvent(),
     windowRemoved: new FakeEvent(),
+    tabsActivated: new FakeEvent(),
+    runtimeConnect: new FakeEvent(),
+    notificationClicked: new FakeEvent(),
   };
 
   function addWindow(focused = false) {
@@ -127,6 +135,11 @@ export function installFakeChrome(options: { language?: string } = {}) {
       getManifest: () => ({ version: "0.1.0" }),
       getPlatformInfo: async () => ({ os: "linux", arch: "x86-64" }),
       getURL: (path: string) => `chrome-extension://lkhhklicnjlplokpadpccndipomikoaj/${path}`,
+      connect(info?: { name?: string }) {
+        const port = { name: info?.name ?? "", sent: [] as unknown[], onMessage: new FakeEvent(), onDisconnect: new FakeEvent(), postMessage(m: unknown) { port.sent.push(m); }, disconnect() {} };
+        return port;
+      },
+      onConnect: events.runtimeConnect,
       onMessage: events.runtimeMessage,
       onStartup: new FakeEvent(),
       onInstalled: new FakeEvent(),
@@ -144,8 +157,10 @@ export function installFakeChrome(options: { language?: string } = {}) {
         if (!tab) throw new Error(`No tab with id: ${tabId}.`);
         return { ...tab };
       },
-      async query() {
-        return [...tabs.values()].map((tab) => ({ ...tab }));
+      async query(info: { active?: boolean; windowId?: number } = {}) {
+        return [...tabs.values()]
+          .filter((tab) => (info.active === undefined || tab.active === info.active) && (info.windowId === undefined || tab.windowId === info.windowId))
+          .map((tab) => ({ ...tab }));
       },
       async update(tabId: number, properties: { active?: boolean; url?: string }) {
         const tab = tabs.get(tabId);
@@ -184,6 +199,11 @@ export function installFakeChrome(options: { language?: string } = {}) {
       async sendMessage(tabId: number, message: unknown) {
         tabMessages.push({ tabId, message });
       },
+      async captureVisibleTab(windowId: number) {
+        captures.push(windowId);
+        return "data:image/png;base64,AAAA";
+      },
+      onActivated: events.tabsActivated,
       onCreated: events.tabsCreated,
       onRemoved: events.tabsRemoved,
       onUpdated: events.tabsUpdated,
@@ -215,6 +235,9 @@ export function installFakeChrome(options: { language?: string } = {}) {
         return { ...window };
       },
       async getLastFocused() {
+        return { ...windows.get(operatorWindow)! };
+      },
+      async getCurrent() {
         return { ...windows.get(operatorWindow)! };
       },
       async update(windowId: number, info: Record<string, unknown>) {
@@ -264,10 +287,34 @@ export function installFakeChrome(options: { language?: string } = {}) {
       onClicked: events.menuClicked,
     },
     scripting: {
-      async executeScript(injection: { target: { tabId: number } }) {
+      async executeScript(injection: { target: { tabId: number }; files?: string[]; func?: () => unknown }) {
+        if (injection.func) {
+          scripts.push({ tabId: injection.target.tabId, func: String(injection.func) });
+          return [{ result: pageScript(injection.target.tabId, injection.func) }];
+        }
         injected.push(injection.target.tabId);
         return [];
       },
+    },
+    sidePanel: {
+      async setPanelBehavior(behavior: { openPanelOnActionClick: boolean }) {
+        sidePanel.behavior = behavior;
+      },
+      async open(options: unknown) {
+        sidePanel.opened.push(options);
+      },
+    },
+    notifications: {
+      async create(id: string, options: unknown) {
+        notifications.push({ id, options });
+        return id;
+      },
+      async clear(id: string) {
+        const index = notifications.findIndex((n) => n.id === id);
+        if (index >= 0) notifications.splice(index, 1);
+        return index >= 0;
+      },
+      onClicked: events.notificationClicked,
     },
     cookies: {
       async getAll() {
@@ -314,6 +361,10 @@ export function installFakeChrome(options: { language?: string } = {}) {
     menus,
     nativePorts,
     runtimeMessages,
+    notifications,
+    sidePanel,
+    captures,
+    scripts,
     operatorWindow,
     get dnrRules() {
       return dnrRules;
@@ -326,6 +377,9 @@ export function installFakeChrome(options: { language?: string } = {}) {
     },
     failAttach(message: string | null) {
       attachError = message;
+    },
+    onPageScript(handler: (tabId: number, func: () => unknown) => unknown) {
+      pageScript = handler;
     },
   };
 }

@@ -43,7 +43,7 @@ def main():
         log("frame", frame)
         kind = frame.get("t")
         if kind == "hello":
-            send({"t": "welcome", "proto": 1, "daemon_version": "0.0.0-stub", "install_name": "Stub", "install_kind": "native"})
+            send({"t": "welcome", "proto": 2, "daemon_version": "0.0.0-stub", "install_name": "Stub", "install_kind": "native"})
             send({"t": "ping", "n": 1})
             send({"t": "call", "id": 1, "op": "notify", "args": {"text": "stub"}})
             send({"t": "call", "id": 2, "op": "tab.create", "args": {"group": "g1", "title": "Smoke"}})
