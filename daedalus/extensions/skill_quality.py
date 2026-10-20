@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions.effects import EffectOutcome, EffectResolution
-from daedalus.host.skills import DirectorySkillStore, assess, skill_declarations
+from daedalus.host.skills import SKILL_ID, DirectorySkillStore, assess, skill_declarations
 from daedalus.host.toolchain import status as toolchain_status
 from daedalus.stores.control import ControlStore, Entity, Principal, Scope
 from daedalus.stores.database import Database
@@ -57,7 +57,10 @@ class SkillQuality:
         dependencies: list[dict[str, str]], *, expected_collection_revision: int,
         client_operation_id: str,
     ) -> dict[str, Any]:
-        check = assess(skill_id, markdown, dependencies)
+        # A skill already on disk carries its supporting files there, and the new text must not name
+        # one it does not have; a new skill's files arrive with it, so there is nothing to look in yet.
+        present = self.directory.root / skill_id if SKILL_ID.fullmatch(skill_id) else None
+        check = assess(skill_id, markdown, dependencies, directory=present if present is not None and present.is_dir() else None)
         if not check["valid"] or not re.fullmatch(r"[0-9][a-z0-9_.-]{0,63}", version):
             raise SkillRefused("; ".join(check["errors"]) or "invalid version")
         manifest = {"id": skill_id, "version": version, "digest": check["digest"], "markdown": markdown, "dependencies": dependencies}

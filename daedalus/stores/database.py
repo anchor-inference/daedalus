@@ -16,6 +16,7 @@ from typing import Any
 import aiosqlite
 
 from daedalus.config import native_mode
+from daedalus.host.checkpoints import SESSION_WORKSPACES_SQL, move_workspace_stores, session_workspace
 from daedalus.memory.taxonomy import CATEGORIES, corpus_vocabulary, guess_category, infer_topics, normalise_topics
 from daedalus.stores.attempt_fault_schema import MIGRATION as ATTEMPT_FAULT_MIGRATION
 from daedalus.stores.calendar_diagram_schema import migration as CALENDAR_DIAGRAM_MIGRATION
@@ -2618,6 +2619,30 @@ async def _live_worker_grants(conn: aiosqlite.Connection) -> None:
 
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _live_worker_grants))
+
+
+def _sealed_checkpoint_stores(db: Database) -> DataMigration:
+    """The workspaces' snapshot stores move from ``<workspace>/.checkpoints`` into the sealed state
+    directory beside this file. In the workspace a store was a git directory the agent could write,
+    and git ran a hook or an ``fsmonitor`` planted there as the host at the next snapshot.
+
+    Every workspace a session names is asked, and every folder of the managed workspaces root; a
+    workspace that cannot be reached now (a project's disk not mounted) keeps its old store and
+    starts a fresh one. Run again it moves nothing, since nothing is left to move."""
+
+    async def step(conn: aiosqlite.Connection) -> None:
+        rows = await (await conn.execute(SESSION_WORKSPACES_SQL)).fetchall()
+        workspaces = [session_workspace(row, db.workspaces_dir) for row in rows]
+        if db.workspaces_dir.is_dir():
+            workspaces.extend(entry for entry in sorted(db.workspaces_dir.iterdir()) if entry.is_dir())
+        moved = await asyncio.to_thread(move_workspace_stores, workspaces, db.path.parent / "checkpoints")
+        if moved:
+            logger.info("moved %d checkpoint store(s) out of their workspaces", len(moved))
+
+    return DataMigration("SELECT 1;", step)
+
+
+MIGRATIONS.append(_sealed_checkpoint_stores)
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session

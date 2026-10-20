@@ -213,7 +213,7 @@ async def _prune_checkpoints(settings: Settings, db: Any, started: float) -> int
     )
 
     config = RuntimeConfig.load(settings.config_path)
-    retention = CheckpointRetention(db, workspaces_dir=settings.workspaces_dir)
+    retention = CheckpointRetention(db, workspaces_dir=settings.workspaces_dir, checkpoints_dir=settings.checkpoints_dir)
     bounds = RetentionBounds.from_ops(config.ops)
     print(f"bounds: {bounds.keep_days} days, {bounds.total_max_gb:.1f} GB in total, the last {bounds.keep_last} per session always kept")
     print("This packs the snapshot repositories; run it while no agent is working, or leave it to the maintenance tick.")

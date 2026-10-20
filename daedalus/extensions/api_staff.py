@@ -23,6 +23,7 @@ from daedalus.extensions.staff import Team
 from daedalus.extensions.staff_kept import how_kept
 from daedalus.harness import conditions as member_conditions
 from daedalus.harness.capabilities import CAPABILITIES
+from daedalus.host.gitrun import git_argv, nul_names, numstat_entries
 from daedalus.stores.harness import HarnessStore
 from daedalus.stores.staff import Staff, StaffBusy, StaffError
 
@@ -41,15 +42,9 @@ class MessageBody(BaseModel):
 
 
 def _numstat(text: str) -> dict[str, Any]:
-    """``git diff --numstat`` as the files it names and the lines added and removed; a binary file
+    """``git diff --numstat -z`` as the files it names and the lines added and removed; a binary file
     counts as changed with no lines."""
-    files: list[dict[str, Any]] = []
-    for line in text.splitlines():
-        parts = line.split("\t", 2)
-        if len(parts) != 3:
-            continue
-        added, removed, path = parts
-        files.append({"path": path, "added": int(added) if added.isdigit() else None, "removed": int(removed) if removed.isdigit() else None})
+    files = [{"path": path, "added": added, "removed": removed} for added, removed, path in numstat_entries(text)]
     return {
         "files": files,
         "added": sum(f["added"] or 0 for f in files),
@@ -204,14 +199,14 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         base = session.base_ref or "HEAD"
         try:
             numstat, untracked = await asyncio.gather(
-                terminals.exec_run(env, ["git", "-C", session.worktree_path, "diff", "--numstat", base], timeout=CHANGES_TIMEOUT_S, actor="operator"),
-                terminals.exec_run(env, ["git", "-C", session.worktree_path, "ls-files", "--others", "--exclude-standard"], timeout=CHANGES_TIMEOUT_S, actor="operator"),
+                terminals.exec_run(env, git_argv("-C", session.worktree_path, "diff", "--numstat", "-z", base), timeout=CHANGES_TIMEOUT_S, actor="operator"),
+                terminals.exec_run(env, git_argv("-C", session.worktree_path, "ls-files", "--others", "--exclude-standard", "-z"), timeout=CHANGES_TIMEOUT_S, actor="operator"),
             )
         except Exception as exc:  # noqa: BLE001 — the daemon's refusal is the answer the view shows
             raise HTTPException(503, f"the changes could not be read: {getattr(exc, 'message', exc)}") from exc
         if numstat.exit_code != 0:
             raise HTTPException(409, f"git could not compare the worktree: {(numstat.stderr or numstat.stdout).strip()[:300]}")
-        return {**_numstat(numstat.stdout), "untracked": [line for line in untracked.stdout.splitlines() if line.strip()], "base": base}
+        return {**_numstat(numstat.stdout), "untracked": nul_names(untracked.stdout), "base": base}
 
 
 __all__ = ["register"]

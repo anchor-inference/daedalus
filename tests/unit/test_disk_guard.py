@@ -138,13 +138,13 @@ def test_measure_is_bounded(tmp_path: Path) -> None:
 def test_resolve_target_refuses_escapes(tmp_path: Path) -> None:
     workspace = tmp_path / "ws"
     (workspace / "keep" / "inner").mkdir(parents=True)
-    (workspace / ".checkpoints").mkdir()
+    (workspace / "inbox").mkdir()
     secret = tmp_path / "operator-home"
     (secret / "project").mkdir(parents=True)
     (workspace / "link").symlink_to(secret)
     for path, reason in (
         ("", "root"), (".", "root"), ("/etc", "root"), ("../ws2", "outside"), ("keep/../..", "outside"),
-        ("link", "symlink"), ("link/project", "symlink"), (".checkpoints", "protected"),
+        ("link", "symlink"), ("link/project", "symlink"), ("inbox", "protected"),
         ("inbox/x", "protected"), ("keep/.git", "protected"), ("nothing", "missing"),
     ):
         with pytest.raises(Refused) as caught:
@@ -317,7 +317,7 @@ async def test_routes_show_and_clean(host) -> None:
     _git(workspace / "repo", "init", "-q")
     _git(workspace / "repo", "add", "src/main.py")
     _git(workspace / "repo", "commit", "-q", "-m", "src")
-    (workspace / ".checkpoints").mkdir()
+    (workspace / "inbox").mkdir()
     (workspace / "escape").symlink_to(root.parent)
     api = FastAPI()
     api_disk.register(api, app, lambda: {"via": "token", "user_id": 1})
@@ -329,18 +329,18 @@ async def test_routes_show_and_clean(host) -> None:
         assert detail["over"] == 1
         entries = {e["path"]: e for e in detail["entries"]}
         assert entries["_scratch"]["throwaway"] and not entries["_scratch"]["tracked"]
-        assert entries[".checkpoints"]["protected"]
+        assert entries["inbox"]["protected"]
         assert [c["path"] for c in entries["repo"]["children"]][:1] in (["repo/src"], ["repo/.git"])
         project = (await client.get("/api/disk/project/proj")).json()
         assert project["outside"] == [] and project["workspaces"] == []  # its folder was never created
         response = await client.post("/api/disk/cleanup", json={
-            "workspace": "sess1", "paths": ["_scratch", "escape", ".checkpoints", "repo/src", "", "../sess1"],
+            "workspace": "sess1", "paths": ["_scratch", "escape", "inbox", "repo/src", "", "../sess1"],
         })
         assert response.status_code == 200
         result = response.json()
         assert result["removed"] == ["_scratch"] and result["freed_bytes"] >= 3 * MB
         assert {r["path"]: r["reason"] for r in result["refused"]} == {
-            "escape": "symlink", ".checkpoints": "protected", "repo/src": "tracked", "": "root", "../sess1": "outside",
+            "escape": "symlink", "inbox": "protected", "repo/src": "tracked", "": "root", "../sess1": "outside",
         }
         assert (workspace / "repo" / "src" / "main.py").exists() and root.parent.exists()
         forced = (await client.post("/api/disk/cleanup", json={"workspace": "sess1", "paths": ["repo/src"], "include_tracked": True})).json()

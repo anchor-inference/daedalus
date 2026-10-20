@@ -18,10 +18,19 @@ import pytest
 from daedalus.config import RuntimeConfig, Settings
 from daedalus.extensions import project_environment as environment_module
 from daedalus.extensions.api import build_app
-from daedalus.extensions.project_environment import PrepareFailed, ProjectEnvironments, _verdict, _write_absent
+from daedalus.extensions.project_environment import (
+    SKILL_LAUNCH_FILES,
+    PrepareFailed,
+    ProjectEnvironments,
+    _verdict,
+    _write_absent,
+)
 from daedalus.extensions.task_launch import queue_launch
 from daedalus.harness.claude import ClaudeCodeAdapter
-from daedalus.harness.contract import LaunchSpec
+from daedalus.harness.codex import CodexAdapter
+from daedalus.harness.contract import HandedSkill, LaunchSpec
+from daedalus.harness.opencode import OpenCodeAdapter
+from daedalus.harness.pi import PiAdapter
 from daedalus.host.session_runner import SessionManager
 from daedalus.host.skills import DirectorySkillStore, ScopedSkillStore
 from daedalus.host.worktrees import StaffWorktrees
@@ -257,10 +266,70 @@ async def test_a_command_line_launch_gets_the_project_skills(envs: ProjectEnviro
     project = await envs.app.manager.projects.create("Shop")
     await envs.save(project.id, {"skills": ["review"]})
     extras = await envs.launch_extras(SimpleNamespace(project=project), "l1", 1000)  # type: ignore[arg-type]
-    assert extras.tool_sets == () and extras.skills == (("review", "---\nname: review\ndescription: r\n---\nRead the diff."),)
+    assert extras.tool_sets == () and extras.skills == (HandedSkill("review", (("SKILL.md", b"---\nname: review\ndescription: r\n---\nRead the diff."),)),)
     spec = LaunchSpec(harness="claude", env="container", cwd="/w", launch_id="l1", first_prompt=None, skills=extras.skills)
     plan = ClaudeCodeAdapter().launch_plan(spec)
     assert plan.files[".claude/skills/review/SKILL.md"].endswith(b"Read the diff.")
+
+
+async def test_a_command_line_launch_gets_the_whole_skill_directory(envs: ProjectEnvironments, tmp_path: Path) -> None:
+    """A skill that says "run scripts/check.py" went to a CLI without the script: only SKILL.md was
+    handed over. Its files go with it now, without links, without junk, and under its directory's name."""
+    manager = envs.app.manager
+    _skills(manager, tmp_path)
+    root = manager.skills.root / "Daedalus Pages"
+    (root / "scripts").mkdir(parents=True)
+    (root / "references" / "deep").mkdir(parents=True)
+    (root / "__pycache__").mkdir()
+    (root / "SKILL.md").write_text("---\nname: Daedalus pages\ndescription: build a page\n---\nRun scripts/check.py, then read references/api.md.\n")
+    (root / "scripts" / "check.py").write_text("print('ok')\n")
+    (root / "references" / "api.md").write_text("the api\n")
+    (root / "references" / "deep" / "more.md").write_text("more\n")
+    (root / "__pycache__" / "check.cpython-312.pyc").write_bytes(b"junk")
+    (root / ".DS_Store").write_bytes(b"junk")
+    secret = tmp_path / "id_ed25519"
+    secret.write_text("PRIVATE KEY")
+    (root / "references" / "key.md").symlink_to(secret)
+    (root / "linked").symlink_to(tmp_path)
+    project = await manager.projects.create("Shop")
+    await envs.save(project.id, {"skills": ["Daedalus Pages"]})
+    extras = await envs.launch_extras(SimpleNamespace(project=project), "l1", 1000)  # type: ignore[arg-type]
+    [skill] = extras.skills
+    assert skill.name == "daedalus-pages"
+    assert [path for path, _ in skill.files] == ["SKILL.md", "scripts/check.py", "references/api.md", "references/deep/more.md"]
+    for harness, adapter, prefix in (
+        ("claude", ClaudeCodeAdapter(), ".claude/skills"),
+        ("opencode", OpenCodeAdapter(), "skills"),
+        ("codex", CodexAdapter(), "skills"),
+        ("pi", PiAdapter(), "skills"),
+    ):
+        plan = adapter.launch_plan(LaunchSpec(harness=harness, env="container", cwd="/w", launch_id="l1", first_prompt=None, skills=extras.skills))
+        assert plan.files[f"{prefix}/daedalus-pages/scripts/check.py"] == b"print('ok')\n", harness
+        handed = plan.files[f"{prefix}/daedalus-pages/SKILL.md"].decode()
+        # OpenCode drops a skill whose name is not its directory's.
+        assert handed.startswith("---\nname: daedalus-pages\n") and "Daedalus pages" not in handed, harness
+        assert not any(b"PRIVATE KEY" in data for data in plan.files.values()), harness
+        assert not any("pycache" in name or "DS_Store" in name or "linked" in name for name in plan.files), harness
+
+
+async def test_a_skill_too_big_for_one_launch_says_what_it_left_behind(envs: ProjectEnvironments, tmp_path: Path) -> None:
+    manager = envs.app.manager
+    _skills(manager, tmp_path)
+    for name in ("big", "small"):
+        (manager.skills.root / name / "references").mkdir(parents=True)
+        (manager.skills.root / name / "SKILL.md").write_text(f"---\nname: {name}\ndescription: d\n---\nRead references/f29.md first.\n")
+    for index in range(40):
+        (manager.skills.root / "big" / "references" / f"f{index:02d}.md").write_text(f"part {index}\n")
+    project = await manager.projects.create("Shop")
+    await envs.save(project.id, {"skills": ["big", "small"]})
+    extras = await envs.launch_extras(SimpleNamespace(project=project), "l1", 1000)  # type: ignore[arg-type]
+    big, small = extras.skills
+    assert sum(len(skill.files) for skill in extras.skills) <= SKILL_LAUNCH_FILES
+    assert [path for path, _ in small.files] == ["SKILL.md"], "every skill keeps room for its own SKILL.md"
+    names = [path for path, _ in big.files]
+    assert names[:2] == ["SKILL.md", "references/f29.md"], "a file the text names goes before the rest"
+    note = dict(big.files)["SKILL.md"].decode()
+    assert "Not handed over with this launch" in note and "references/f39.md" in note
 
 
 # -- the routes -----------------------------------------------------------------------------------------

@@ -11,7 +11,7 @@ import pytest
 from daedalus.extensions.launch_controls import observe_bind, prepare_attempt
 from daedalus.staff_runtime import BoardTask, Started
 from daedalus.stores.control import ControlConflict, ControlDenied, Principal
-from daedalus.stores.database import MIGRATIONS, Database
+from daedalus.stores.database import MIGRATIONS, Database, DataMigration, _live_worker_grants
 from daedalus.stores.executions import ExecutionStore
 from daedalus.stores.staff import StaffStore
 from daedalus.stores.writer_leases import PREPARATION_KEY, WriterLeases
@@ -175,7 +175,8 @@ async def test_the_migration_renews_only_the_expired_rights_of_workers_still_at_
                              " VALUES (?,'staff:worker','agent','x','task','task','project','task','[]','[]','2026-01-02','2026-01-01',?,?)",
                              (grant, "over" if grant == "ended" else "staff-session", revoked))
         await db.execute("UPDATE actor_grants SET expires_at = '2026-01-02T00:00:00+00:00' WHERE id = ?", (live,))
-        step = MIGRATIONS[-1].step
+        # Found by what it runs, not as the last migration: a later one is appended after it.
+        step = next(m.step for m in MIGRATIONS if isinstance(m, DataMigration) and m.step is _live_worker_grants)
         for _ in range(2):
             async with db.transaction() as conn:
                 await step(conn)

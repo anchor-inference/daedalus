@@ -1,51 +1,127 @@
 """Git-backed workspace checkpoints.
 
-Every session workspace keeps a hidden repository (``.checkpoints``) whose work tree is
-the workspace itself. A snapshot is taken before every operator turn and after every run,
-so "undo the last three turns" can put the files back as well as the history. The
-repository is derived data: deleting ``.checkpoints`` loses nothing but the undo.
+Every session workspace has a repository whose work tree is the workspace itself. A snapshot is
+taken before every operator turn and after every run, so "undo the last three turns" can put the
+files back as well as the history. The repository is derived data: deleting it loses nothing but
+the undo.
+
+The repository lives in the host's state directory, one per workspace (:func:`store_dir`), and not
+in the workspace. Inside the workspace it was the agent's to write: a ``hooks/pre-commit`` or a
+``core.fsmonitor`` planted in it ran as the host at the next snapshot, and a rewritten history could
+make the operator's undo put back files the agent chose. The state directory is sealed from the
+agent, so the store is out of its reach whatever git does with its configuration.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import os
+import re
+import shutil
+import subprocess
 import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+
+from daedalus.host.gitrun import child_environment, git_argv
 
 logger = logging.getLogger(__name__)
 
-DIR_NAME = ".checkpoints"
-EXCLUDES = (DIR_NAME + "/", ".agents/", "node_modules/", ".venv/", "__pycache__/", "*.pyc")
-SKIP_DIRS = {DIR_NAME, ".agents", "node_modules", ".venv", "__pycache__"}
+EXCLUDES = (".agents/", "node_modules/", ".venv/", "__pycache__/", "*.pyc")
+SKIP_DIRS = {".agents", "node_modules", ".venv", "__pycache__"}
 NESTED_SCAN_DEPTH = 6
+WORKSPACE_FILE = "daedalus-workspace"
+"""The file in a store that names its workspace: what retention reads to tell a store whose workspace
+was deleted from one whose workspace is only unreachable for now."""
 
 
 class CheckpointError(RuntimeError):
     pass
 
 
+def store_dir(root: Path, workspace: Path) -> Path:
+    """The store of ``workspace`` under ``root``: the folder's name, for a person reading the
+    directory, and a digest of its resolved path, so two folders of one name never share a chain."""
+    resolved = workspace.resolve()
+    name = re.sub(r"[^A-Za-z0-9._-]+", "-", resolved.name).strip("-.")[:40] or "workspace"
+    return root / f"{name}-{hashlib.sha256(str(resolved).encode('utf-8')).hexdigest()[:16]}"
+
+
+SESSION_WORKSPACES_SQL = (
+    # The folder the session works in: the one its metadata names, or its project's first.
+    "SELECT s.id AS id, s.metadata AS metadata, COALESCE("
+    "(SELECT f.path FROM project_folders f WHERE f.project_id = s.project_id AND f.id = json_extract(s.metadata, '$.folder_id')), "
+    "(SELECT f.path FROM project_folders f WHERE f.project_id = s.project_id ORDER BY f.position LIMIT 1)) AS root "
+    "FROM sessions s"
+)
+
+
+def session_workspace(row: Any, workspaces_dir: Path) -> Path:
+    """Where a session works, the same three answers ``create_session`` gives, out of a row of
+    :data:`SESSION_WORKSPACES_SQL`."""
+    if row["root"]:
+        return Path(str(row["root"]))
+    try:
+        named = json.loads(row["metadata"] or "{}").get("workspace")
+    except (TypeError, ValueError, AttributeError):
+        named = None
+    return Path(str(named)) if named else workspaces_dir / str(row["id"])
+
+
+LEGACY_DIR_NAME = ".checkpoints"
+
+
+def move_workspace_stores(workspaces: Iterable[Path], root: Path) -> list[Path]:
+    """Move every ``<workspace>/.checkpoints`` into its sealed store under ``root``; returns the
+    workspaces moved. The one migration of the stores out of the workspaces: a second run finds
+    nothing left to move, and a workspace whose store is already in place keeps the copy in the
+    workspace for a person to look at rather than lose either."""
+    moved: list[Path] = []
+    for workspace in dict.fromkeys(workspaces):
+        legacy = workspace / LEGACY_DIR_NAME
+        try:
+            if legacy.is_symlink() or not (legacy / "HEAD").is_file():
+                continue
+        except OSError:
+            continue
+        target = store_dir(root, workspace)
+        if target.exists():
+            logger.warning("checkpoint store of %s is already at %s; %s left where it is", workspace, target, legacy)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(legacy), str(target))
+        subprocess.run(
+            git_argv("config", "--file", str(target / "config"), "--unset", "core.worktree"),
+            env=child_environment(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, timeout=30,
+        )
+        (target / WORKSPACE_FILE).write_text(str(workspace.resolve()) + "\n", encoding="utf-8")
+        moved.append(workspace)
+    return moved
+
+
 class Checkpoints:
-    def __init__(self, workspace: Path) -> None:
+    def __init__(self, workspace: Path, root: Path) -> None:
         self.workspace = workspace
-        self.git_dir = workspace / DIR_NAME
+        self.git_dir = store_dir(root, workspace)
 
     async def _git(self, *args: str, index: Path | None = None) -> str:
-        env = {
-            **os.environ,
+        env = child_environment({
             "GIT_DIR": str(self.git_dir),
             "GIT_WORK_TREE": str(self.workspace),
             "GIT_AUTHOR_NAME": "daedalus",
             "GIT_AUTHOR_EMAIL": "daedalus@localhost",
             "GIT_COMMITTER_NAME": "daedalus",
             "GIT_COMMITTER_EMAIL": "daedalus@localhost",
-        }
+        })
         if index is not None:
             env["GIT_INDEX_FILE"] = str(index)
         proc = await asyncio.create_subprocess_exec(
-            "git", *args, cwd=str(self.workspace), env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            *git_argv(*args), cwd=str(self.workspace), env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
         out, err = await asyncio.wait_for(proc.communicate(), timeout=300)
         if proc.returncode != 0:
@@ -55,6 +131,7 @@ class Checkpoints:
     async def ensure(self, scan: WorkspaceScan | None = None) -> None:
         if not (self.git_dir / "HEAD").exists():
             self.workspace.mkdir(parents=True, exist_ok=True)
+            self.git_dir.parent.mkdir(parents=True, exist_ok=True)
             await self._git("init", "-q")
             await self.relocate()
         await self._write_excludes(scan)
@@ -65,11 +142,22 @@ class Checkpoints:
         await self._git("rm", "-rf", "--cached", "--ignore-unmatch", "--", ".agents", ":(glob)**/.agents/**", index=index)
 
     async def relocate(self) -> None:
-        """Forget the work-tree path ``git init`` recorded, so a copied ``.checkpoints`` never points back at its origin."""
+        """Forget the work-tree path ``git init`` recorded, so a copied store never points back at its
+        origin, and name the workspace this store now belongs to."""
         try:
             await self._git("config", "--unset", "core.worktree")
         except CheckpointError:
             pass
+        (self.git_dir / WORKSPACE_FILE).write_text(str(self.workspace.resolve()) + "\n", encoding="utf-8")
+
+    async def copy_to(self, workspace: Path, root: Path) -> Checkpoints:
+        """This store copied for ``workspace`` (a fork's copy of this workspace), with the copy's
+        history the same as this one's; an existing store of ``workspace`` is replaced."""
+        target = Checkpoints(workspace, root)
+        if (self.git_dir / "HEAD").exists():
+            await asyncio.to_thread(_replace_tree, self.git_dir, target.git_dir)
+            await target.relocate()
+        return target
 
     async def _write_excludes(self, scan: WorkspaceScan | None = None) -> list[str]:
         """Exclude derived directories and every nested git repository (a snapshot cannot hold those).
@@ -203,4 +291,10 @@ def scan_workspace(path: Path) -> WorkspaceScan:
     return WorkspaceScan(nested=tuple(sorted(found)), size=total)
 
 
-__all__ = ["DIR_NAME", "CheckpointError", "Checkpoints", "WorkspaceScan", "scan_workspace"]
+def _replace_tree(source: Path, target: Path) -> None:
+    shutil.rmtree(target, ignore_errors=True)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source, target, symlinks=True)
+
+
+__all__ = ["SESSION_WORKSPACES_SQL", "WORKSPACE_FILE", "move_workspace_stores", "session_workspace", "CheckpointError", "Checkpoints", "WorkspaceScan", "scan_workspace", "store_dir"]

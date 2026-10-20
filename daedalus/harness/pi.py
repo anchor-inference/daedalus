@@ -68,6 +68,7 @@ from daedalus.harness.contract import (
     TurnUsage,
     UpdateResult,
     mapped,
+    skill_files,
 )
 from daedalus.harness.tools import tooling
 
@@ -179,9 +180,9 @@ class PiAdapter:
         if spec.team_skill:
             files[SKILL_FILE] = spec.team_skill.encode()
             argv += ["--skill", f"{LAUNCH_DIR}/{SKILL_FILE}"]
-        for name, text in spec.skills:
-            files[f"skills/{name}/SKILL.md"] = text.encode()
-            argv += ["--skill", f"{LAUNCH_DIR}/skills/{name}/SKILL.md"]
+        files.update(skill_files(spec.skills, "skills"))
+        for skill in spec.skills:
+            argv += ["--skill", f"{LAUNCH_DIR}/skills/{skill.name}/SKILL.md"]
         if spec.title:
             argv += ["--name", spec.title[:120]]
         if spec.model:

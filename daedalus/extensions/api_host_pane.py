@@ -43,7 +43,7 @@ HOST = "host"
 
 LIST_SKIP = frozenset({".git", "__pycache__", "node_modules", ".venv"})
 """What the pane never lists, as the local listing leaves it out."""
-SEARCH_SKIP = (".git", "__pycache__", "node_modules", ".venv", ".checkpoints", ".mypy_cache", ".ruff_cache", ".pytest_cache")
+SEARCH_SKIP = (".git", "__pycache__", "node_modules", ".venv", ".mypy_cache", ".ruff_cache", ".pytest_cache")
 LIST_LIMIT = 5000
 """The most entries one listing asks the daemon for: its own cap on ``fs.list``."""
 TEXT_PREVIEW_BYTES = 512_000

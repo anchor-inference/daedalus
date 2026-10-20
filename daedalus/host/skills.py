@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import mimetypes
+import os
 import re
 import shutil
 from collections.abc import Callable, Sequence
@@ -188,7 +189,7 @@ class DirectorySkillStore(ISkillStore):
         if not skill_dir.is_dir():
             raise SkillNotFoundError(skill_id)
         refs: list[SkillFileRef] = []
-        for path in sorted(p for p in skill_dir.rglob("*") if p.is_file()):
+        for path in _regular_files(skill_dir):
             if path.name in (DISABLED_MARKER, ".published"):
                 continue
             data = path.read_bytes()
@@ -230,9 +231,99 @@ class DirectorySkillStore(ISkillStore):
     async def load_file(self, tenant_id: str, skill_id: str, path: str) -> bytes | None:
         skill_dir = self._dir(skill_id)
         target = (skill_dir / path).resolve()
-        if not str(target).startswith(str(skill_dir.resolve())) or not target.is_file():
+        # Compared as paths, not as strings: as a string prefix, ``skills/ab/x`` passed for skill
+        # ``a`` (``skills/a`` is a prefix of it), so ``../ab/x`` read another skill's files.
+        if not target.is_relative_to(skill_dir.resolve()) or not target.is_file():
             return None
         return target.read_bytes()
+
+
+def _regular_files(root: Path) -> list[Path]:
+    """Every regular file under ``root``, sorted, reached without following a symbolic link.
+
+    A skill directory is something the agent can write (a draft, a skill it is improving), and a
+    link in it to ``~/.ssh/id_ed25519`` or to the state directory was listed, hashed and read back
+    as one of the skill's own files."""
+    found: list[Path] = []
+    for directory, dirs, files in os.walk(root, followlinks=False):
+        dirs[:] = sorted(d for d in dirs if not os.path.islink(os.path.join(directory, d)))
+        for name in files:
+            path = Path(directory) / name
+            if not path.is_symlink() and path.is_file():
+                found.append(path)
+    return sorted(found)
+
+
+HANDOVER_SKIP_DIRS = frozenset({".git", "__pycache__", "node_modules", ".venv", ".pytest_cache", ".mypy_cache", ".ruff_cache"})
+HANDOVER_SKIP_FILES = frozenset({DISABLED_MARKER, ".published", ".requires-unavailable", ".DS_Store", "Thumbs.db"})
+HANDOVER_FILE_BYTES = 512 << 10
+"""The largest file a launch takes: the terminal daemon refuses a launch with a bigger one."""
+HANDOVER_NAME = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+"""A path part the terminal daemon writes into a launch directory; a file with any other name cannot go."""
+HANDOVER_DEPTH = 3
+"""Directories below the skill's own a handed file may sit in: the launch puts the skill two or three
+levels down already (``.claude/skills/<name>/``), and the daemon takes six in all."""
+_REFERENCED = re.compile(r"(?<![\w./-])((?:scripts|references|templates)/[A-Za-z0-9_][A-Za-z0-9._/-]*\.[A-Za-z0-9]+)")
+
+
+def referenced_files(markdown: str) -> list[str]:
+    """The ``scripts/…``, ``references/…`` and ``templates/…`` files a skill's text names, in order.
+
+    Only names with an extension count: "keep templates/components in the content paths" is prose."""
+    return list(dict.fromkeys(m.group(1).rstrip(".") for m in _REFERENCED.finditer(markdown)))
+
+
+def handed_markdown(markdown: str, slug: str) -> str:
+    """``SKILL.md`` as a command-line agent gets it: the front matter's ``name`` is the directory's.
+
+    OpenCode drops a skill whose ``name`` differs from its directory without a word, and a skill
+    written for Daedalus may be named in words ("Daedalus pages") while its directory is a slug."""
+    match = _FRONT_MATTER.match(markdown)
+    if not match:
+        return f"---\nname: {slug}\n---\n{markdown}"
+    lines = [line for line in match.group(1).splitlines() if line.partition(":")[0].strip() != "name"]
+    return "---\n" + "\n".join([f"name: {slug}", *lines]) + "\n---\n" + markdown[match.end():]
+
+
+def handover_files(skill_dir: Path, slug: str, *, max_files: int, max_bytes: int) -> tuple[list[tuple[str, bytes]], list[str]]:
+    """A skill as it goes to a command-line agent: ``([(path, bytes)], [paths left out])``.
+
+    The whole directory, not ``SKILL.md`` alone: a skill that says "run scripts/check.py" or "read
+    references/api.md" was handed over without either, and the agent followed instructions to files
+    that were not there. No link is followed, the junk a working directory collects stays behind,
+    and the launch's limits decide the rest: ``SKILL.md`` first, then the files its text names, then
+    the others by name. What does not fit is listed at the end of the handed ``SKILL.md``, so the
+    agent knows the file exists rather than searching for it."""
+    entry = skill_dir / ENTRY
+    if entry.is_symlink():
+        raise OSError(f"{entry} is a link")
+    markdown = entry.read_text(encoding="utf-8")
+    named = referenced_files(markdown)
+    candidates: list[tuple[str, Path]] = []
+    for path in _regular_files(skill_dir):
+        relative = path.relative_to(skill_dir)
+        parts = relative.parts
+        if path == entry or path.name in HANDOVER_SKIP_FILES or path.suffix in (".pyc", ".pyo") or any(part in HANDOVER_SKIP_DIRS for part in parts):
+            continue
+        candidates.append((relative.as_posix(), path))
+    order = {name: index for index, name in enumerate(named)}
+    candidates.sort(key=lambda item: (order.get(item[0], len(order)), item[0]))
+    kept: list[tuple[str, bytes]] = []
+    left: list[str] = []
+    total = len(markdown.encode("utf-8"))
+    for relative, path in candidates:
+        parts = relative.split("/")
+        size = path.stat().st_size
+        if (len(parts) > HANDOVER_DEPTH + 1 or not all(HANDOVER_NAME.fullmatch(part) for part in parts)
+                or size > HANDOVER_FILE_BYTES or len(kept) + 1 >= max_files or total + size > max_bytes):
+            left.append(relative)
+            continue
+        kept.append((relative, path.read_bytes()))
+        total += size
+    handed = handed_markdown(markdown, slug)
+    if left:
+        handed = handed.rstrip("\n") + "\n\n(Not handed over with this launch, past what one launch carries: " + ", ".join(left) + ".)\n"
+    return [(ENTRY, handed.encode("utf-8")), *kept], left
 
 
 class ScopedSkillStore:
@@ -287,7 +378,10 @@ def skill_declarations(markdown: str) -> tuple[list[str], list[str]]:
     )
 
 
-def assess(skill_id: str, markdown: str, dependencies: list[dict[str, str]]) -> dict[str, Any]:
+def assess(skill_id: str, markdown: str, dependencies: list[dict[str, str]], *, directory: Path | None = None) -> dict[str, Any]:
+    """The static check a skill must pass before it is activated. With the skill's ``directory``,
+    the files its text names under ``scripts/``, ``references/`` and ``templates/`` must be there too:
+    a skill pointing at a script it does not carry fails at the one moment it is needed."""
     errors: list[str] = []
     if not SKILL_ID.fullmatch(skill_id):
         errors.append("invalid skill id")
@@ -310,6 +404,15 @@ def assess(skill_id: str, markdown: str, dependencies: list[dict[str, str]]) -> 
             if not isinstance(dependency, dict) or set(dependency) != {"id", "version", "digest"} or not all(isinstance(value, str) and value for value in dependency.values()) or not re.fullmatch(r"[0-9a-f]{64}", dependency["digest"]):
                 errors.append("dependencies need exact id, version and digest pins")
                 break
+    if directory is not None:
+        root = directory.resolve()
+        missing = []
+        for name in referenced_files(markdown):
+            target = directory / name
+            if target.is_symlink() or not target.resolve().is_relative_to(root) or not target.is_file():
+                missing.append(name)
+        if missing:
+            errors.append("files the skill names are missing: " + ", ".join(missing))
     return {"valid": not errors, "errors": errors, "digest": hashlib.sha256(markdown.encode()).hexdigest()}
 
 
@@ -354,7 +457,10 @@ def save_skill_draft(
     (directory / ENTRY).write_text(markdown, encoding="utf-8")
     for path, text in (files or {}).items():
         (directory / path).write_text(redact(text), encoding="utf-8")
-    return directory, slug, assess(slug, markdown, [])
+    return directory, slug, assess(slug, markdown, [], directory=directory)
 
 
-__all__ = ["DRAFTS_DIR", "DirectorySkillStore", "assess", "draft_slug", "save_skill_draft", "parse_skill_markdown", "render_skill_markdown", "skill_declarations"]
+__all__ = [
+    "DRAFTS_DIR", "DirectorySkillStore", "assess", "draft_slug", "handed_markdown", "handover_files", "parse_skill_markdown",
+    "referenced_files", "render_skill_markdown", "save_skill_draft", "skill_declarations",
+]

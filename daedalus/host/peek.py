@@ -30,7 +30,7 @@ from itertools import islice
 from pathlib import Path
 from typing import Any, Protocol, TypeVar
 
-from daedalus.host.gitrun import GitError, run_command
+from daedalus.host.gitrun import GIT_SAFE, GitError, run_command
 
 _T = TypeVar("_T")
 
@@ -57,16 +57,9 @@ _REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/@{}~^:+-]*$")
 """A revision or a range. It may not begin with ``-``: a ref is an argument, and one that begins
 with a dash is an option (``--output=<file>`` would make a read write)."""
 
-# Every git call starts with these. Each one is a way a read-only command can run a program or
-# write a file in a repository whose configuration the orchestrator does not control.
-_GIT_SAFE = (
-    "git",
-    "-c", "core.fsmonitor=false",
-    "-c", "core.hooksPath=/dev/null",
-    "-c", "diff.external=",
-    "-c", "core.pager=cat",
-    "--no-pager",
-)
+# Every git call starts with the host's safe prefix: each part of it closes a way a read-only command
+# can run a program in a repository whose configuration the orchestrator does not control.
+_GIT_SAFE = ("git", *GIT_SAFE)
 _GIT_ENV = {"GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0"}
 
 

@@ -24,7 +24,7 @@ from daedalus import supervisor_client
 from daedalus.extensions.notifications import Draft
 from daedalus.host import reachability
 from daedalus.host.forge import RestForge, remote_slug
-from daedalus.host.gitrun import GitError, run_command, run_git
+from daedalus.host.gitrun import GitError, nul_names, numstat_entries, run_command, run_git
 from daedalus.security import redact
 
 # A command that runs Python tests. Such a run prints how many it executed, so a receipt for one that
@@ -789,10 +789,10 @@ class SelfDevelopment:
     async def _change_facts(self, spec: RepoSpec, worktree: Path, base: str) -> tuple[list[str], int, dict[str, int]]:
         """What the branch changes against ``base``: the files, the lines it adds, and the size of each
         module it introduces. The three gates read this and nothing else about the diff."""
-        changed = [f for f in (await self.git(spec, "diff", "--name-only", f"{base}...HEAD", cwd=worktree)).split("\n") if f.strip()]
-        numstat = await self.git(spec, "diff", "--numstat", f"{base}...HEAD", cwd=worktree)
-        added = sum(int(a) for a, _, _ in (line.split("\t", 2) for line in numstat.splitlines() if "\t" in line) if a.isdigit())
-        new_files = [f for f in (await self.git(spec, "diff", "--name-only", "--diff-filter=A", f"{base}...HEAD", cwd=worktree)).split("\n") if f.endswith(".py") and not f.startswith("tests/")]
+        changed = nul_names(await self.git(spec, "diff", "--name-only", "-z", f"{base}...HEAD", cwd=worktree))
+        numstat = await self.git(spec, "diff", "--numstat", "-z", f"{base}...HEAD", cwd=worktree)
+        added = sum(a or 0 for a, _, _ in numstat_entries(numstat))
+        new_files = [f for f in nul_names(await self.git(spec, "diff", "--name-only", "-z", "--diff-filter=A", f"{base}...HEAD", cwd=worktree)) if f.endswith(".py") and not f.startswith("tests/")]
         return changed, added, {f: sum(1 for _ in (worktree / f).open(encoding="utf-8")) if (worktree / f).is_file() else 0 for f in new_files}
 
     async def _branch_started(self, spec: RepoSpec, worktree: Path, base: str = "origin/main") -> str | None:

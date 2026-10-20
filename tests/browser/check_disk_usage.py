@@ -40,7 +40,7 @@ def usage(page: Page, scope: str, words: dict[str, str], requests: list[str]) ->
     expect(dialog.locator("[data-disk-pick='.uv-cache'] input")).to_be_checked()
     expect(dialog.locator("[data-disk-pick='src'] input")).not_to_be_checked()
     expect(dialog.locator("[data-disk-pick='src'] input")).to_be_disabled()
-    expect(dialog.locator("[data-disk-pick='.checkpoints'] input")).to_be_disabled()
+    expect(dialog.locator("[data-disk-pick='inbox'] input")).to_be_disabled()
     dialog.get_by_label(words["tracked"]).check()
     expect(dialog.locator("[data-disk-pick='src'] input")).to_be_enabled()
     dialog.get_by_label(words["tracked"]).uncheck()
