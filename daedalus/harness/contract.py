@@ -14,12 +14,15 @@ against a fake daemon, and keeps every write to a terminal on the one audited pa
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Collection, Mapping
+import logging
+from collections.abc import AsyncIterator, Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from daedalus.harness.capabilities import Capabilities
+
+logger = logging.getLogger(__name__)
 
 Environment = Literal["container", "host"]
 SendMode = Literal["now", "after_turn", "interrupt"]
@@ -368,6 +371,18 @@ class HookPost:
     hold_ms: int = 0
 
 
+def mapped(map_post: Callable[[], list[StaffEvent]], post: HookPost) -> list[StaffEvent]:
+    """The events ``map_post`` makes of ``post``, or none when it cannot read it, which is logged.
+
+    The hook-driven adapters mapped each post inside the loop that fed the runtime, so one post
+    that raised ended the member's events for good: every later hook reached nobody."""
+    try:
+        return map_post()
+    except Exception:  # noqa: BLE001 — see the description
+        logger.warning("a %s hook post could not be read; skipped", post.name, exc_info=True)
+        return []
+
+
 @dataclass(frozen=True, slots=True)
 class ReadyStep:
     """What the readiness gate does about the screen it just read, as the adapter judges it.
@@ -671,6 +686,7 @@ __all__ = [
     "Turn",
     "TurnUsage",
     "UpdateResult",
+    "mapped",
     "mcp_server",
     "standing_rule",
 ]

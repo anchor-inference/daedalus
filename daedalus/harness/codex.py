@@ -488,30 +488,62 @@ class CodexAdapter:
         return ""
 
     async def _read(self, state: _Launch) -> None:
+        """Read the app server until the connection ends, then release every call still waiting and,
+        unless the host is stopping the member, say the side channel is lost.
+
+        Both happen however the reading ends. An exception other than a closed stream once ended the
+        reader without a word: the member looked busy, and every call waiting on an answer waited
+        out its whole timeout."""
         assert state.socket is not None
+        why = "the connection to Codex's app server closed"
+        cancelled = False
         try:
             while (text := await state.socket.receive()) is not None:
                 try:
                     message = json.loads(text)
                 except ValueError:
                     continue
-                if not isinstance(message, dict):
-                    continue
-                if "method" in message and "id" in message:
-                    await self._server_request(state, message)
-                elif "method" in message:
-                    self._notification(state, str(message["method"]), message.get("params") or {})
-                else:
-                    future = state.pending.get(message.get("id"))  # type: ignore[arg-type]
-                    if future is not None and not future.done():
-                        future.set_result(message)
+                if isinstance(message, dict):
+                    await self._handle(state, message)
         except (StreamClosed, ConnectionError):
             pass
-        for future in state.pending.values():
-            if not future.done():
-                future.set_result({"error": {"code": -1, "message": "the app server closed the connection"}})
-        if not state.stopping:
-            state.queue.put_nowait(StaffEvent(EventKind.TURN_FAILED, _now(), {"failure": "side channel lost: the connection to Codex's app server closed"}))
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
+        except Exception as exc:  # noqa: BLE001 — the channel is gone either way; the reason is the member's error
+            logger.warning("reading codex's app server failed", exc_info=True)
+            why = f"reading Codex's app server failed: {exc}"
+        finally:
+            for future in state.pending.values():
+                if not future.done():
+                    future.set_result({"error": {"code": -1, "message": why}})
+            if not state.stopping and not cancelled:
+                state.queue.put_nowait(StaffEvent(EventKind.TURN_FAILED, _now(), {"failure": f"side channel lost: {why}"}))
+
+    async def _handle(self, state: _Launch, message: dict[str, Any]) -> None:
+        """One message from the app server. One the adapter cannot read is logged and skipped: a
+        single malformed notification must not cost the member its channel."""
+        method = message.get("method")
+        params = message.get("params")
+        try:
+            if method is not None and params is not None and not isinstance(params, dict):
+                raise TypeError(f"params of {method} are {type(params).__name__}, not an object")
+            if method is not None and "id" in message:
+                await self._server_request(state, message)
+            elif method is not None:
+                self._notification(state, str(method), params or {})
+            else:
+                future = state.pending.get(message.get("id"))  # type: ignore[arg-type]
+                if future is not None and not future.done():
+                    future.set_result(message)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 — see the description
+            logger.warning("a %s message from codex's app server could not be handled; skipped", method or "reply", exc_info=True)
+            if method is not None and "id" in message:
+                # Unanswered, the request would hold the turn for good.
+                with contextlib.suppress(Exception):
+                    await self._respond(state, message["id"], error={"code": -32603, "message": f"{method} could not be read by this client"})
 
     def _put(self, state: _Launch, kind: EventKind, payload: Mapping[str, Any] | None = None, native_id: str = "") -> None:
         if kind is EventKind.ACTIVITY and not state.turn_id:
@@ -565,10 +597,12 @@ class CodexAdapter:
             state.last_message = ""
             self._put(state, EventKind.TURN_STARTED, {"turn": state.turn_id})
         elif method in ("item/started", "item/completed"):
-            self._item(state, method == "item/started", params.get("item") or {})
+            item = params.get("item")
+            self._item(state, method == "item/started", item if isinstance(item, dict) else {})
         elif method == "error":
             if not params.get("willRetry"):
-                state.failure = str((params.get("error") or {}).get("message") or "")
+                error = params.get("error")
+                state.failure = str(error.get("message") or "") if isinstance(error, dict) else str(error or "")
         elif method == "turn/completed":
             self._turn_completed(state, params.get("turn") or {})
         elif method == "serverRequest/resolved":

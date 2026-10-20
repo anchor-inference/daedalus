@@ -493,3 +493,54 @@ async def test_an_elicitation_is_answered_only_with_what_its_form_asks_for(monke
     assert ("terminal" in asked.payload["text"]) is (options == ["decline"] and answer[0] == "accept")
     await adapter.answer(term, asked.native_id, Answer(answer[0], note=answer[1]))  # type: ignore[arg-type]
     assert socket.messages == [{"id": 7, "result": result}]
+
+
+# -- the side channel -------------------------------------------------------------------------------
+
+
+class Received:
+    """The adapter's socket, saying the given messages and then ending as ``end`` says."""
+
+    def __init__(self, messages: list[Any], end: BaseException | None = None) -> None:
+        self.messages = [m if isinstance(m, str) else json.dumps(m) for m in messages]
+        self.end = end
+
+    async def receive(self) -> str | None:
+        await asyncio.sleep(0)
+        if self.messages:
+            return self.messages.pop(0)
+        if self.end is not None:
+            raise self.end
+        return None
+
+
+async def test_a_malformed_message_is_skipped_and_the_side_channel_goes_on() -> None:
+    # A notification whose params were not the expected object raised in the reader, which ended
+    # without a word: no "side channel lost", and the calls waiting on an answer waited out their
+    # thirty seconds.
+    adapter = CodexAdapter()
+    state = _Launch(thread_id="t1")
+    state.socket = Received([  # type: ignore[assignment]
+        {"method": "turn/started", "params": {"threadId": "t1", "turn": {"id": "u1"}}},
+        {"method": "turn/started", "params": ["x"]},
+        {"method": "error", "params": {"threadId": "t1", "error": "boom"}},
+        {"method": "item/completed", "params": {"threadId": "t1", "item": "x"}},
+        {"id": 9, "method": "item/commandExecution/requestApproval", "params": "x"},
+        {"method": "turn/completed", "params": {"threadId": "t1", "turn": {"id": "u1", "status": "failed", "error": None}}},
+    ])
+    await adapter._read(state)
+    events = drain(state)
+    failures = [e.payload["failure"] for e in events if e.kind is EventKind.TURN_FAILED]
+    assert failures == ["boom", "side channel lost: the connection to Codex's app server closed"]
+
+
+async def test_a_side_channel_lost_to_an_unexpected_failure_says_so_and_fails_the_waiting_calls() -> None:
+    adapter = CodexAdapter()
+    state = _Launch(thread_id="t1")
+    state.socket = Received([], end=ValueError("a frame that is not WebSocket"))  # type: ignore[assignment]
+    waiting: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+    state.pending[3] = waiting
+    await adapter._read(state)
+    assert waiting.done() and "error" in waiting.result()
+    [lost] = drain(state)
+    assert lost.kind is EventKind.TURN_FAILED and lost.payload["failure"].startswith("side channel lost") and "not WebSocket" in lost.payload["failure"]

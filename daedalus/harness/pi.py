@@ -67,6 +67,7 @@ from daedalus.harness.contract import (
     Turn,
     TurnUsage,
     UpdateResult,
+    mapped,
 )
 from daedalus.harness.tools import tooling
 
@@ -225,7 +226,7 @@ class PiAdapter:
         async def pump() -> None:
             try:
                 async for post in term.hooks():
-                    for event in self._map(state, post):
+                    for event in mapped(lambda post=post: self._map(state, post), post):
                         state.queue.put_nowait(event)
             finally:
                 state.queue.put_nowait(None)
