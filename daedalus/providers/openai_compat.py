@@ -195,10 +195,12 @@ def _retry_after_seconds(headers: Any, text: str) -> float | None:
 
 _PERMANENT_STATUS = {401: "auth", 402: "billing", 403: "auth", 404: "model_not_found"}
 
-_MODEL_REFUSAL_MARKERS = ("version_too_old", "does not support this model", "model_not_found")
+_MODEL_REFUSAL_MARKERS = ("version_too_old", "does not support this model", "model_not_found", "model is not supported")
 """A refusal of the model rather than of the request. Reported as an unknown model, not a malformed request,
 because another model of the fallback chain may be served where this one is not — a server that considers
-the client too old for one model is the case that made this list."""
+the client too old for one model is the case that made this list. The ChatGPT backend behind the key proxy
+answers "The 'gpt-6-sol' model is not supported when using Codex with a ChatGPT account" for a model the
+plan does not include; filed as a malformed request, it failed the run instead of moving down the chain."""
 
 
 def _error_fields(text: str) -> tuple[str, str, str]:
@@ -214,6 +216,9 @@ def _error_fields(text: str) -> tuple[str, str, str]:
     if not isinstance(data, dict):
         return "", "", ""
     error = data.get("error", data)
+    if error is data and isinstance(data.get("detail"), str):
+        # FastAPI-shaped servers, the ChatGPT backend among them, answer ``{"detail": "…"}``.
+        return "", "", data["detail"]
     if isinstance(error, str):
         return "", "", error
     if not isinstance(error, dict):
