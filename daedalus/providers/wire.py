@@ -16,10 +16,12 @@ from protocore.contracts.types import (
     ThinkingBlock,
     ToolDefinition,
     ToolResultBlock,
+    ToolResultImage,
     ToolUseBlock,
     message_image_refs,
 )
 from protocore.providers.openai_compat import ReasoningReplay
+from protocore.providers.openai_compat.wire import TOOL_IMAGES_CARRIER_HEADER
 
 from daedalus.security.redact import redact
 
@@ -141,13 +143,14 @@ async def messages_to_wire(
         if message.role is MessageRole.tool:
             for block in message.content_blocks:
                 if isinstance(block, ToolResultBlock):
-                    wire.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": block.tool_call_id,
-                            "content": block.content or "",
-                        }
-                    )
+                    entry = {"role": "tool", "tool_call_id": block.tool_call_id, "content": block.content or ""}
+                    if block.images:
+                        carried, notes = await _tool_image_parts(block, image_loader=image_loader, supports_images=supports_images)
+                        if notes:
+                            entry["content"] = "\n".join([entry["content"], *notes])
+                        if carried:
+                            entry[CARRIED_IMAGES] = [{"type": "text", "text": f"[images returned by tool call {block.tool_call_id}]"}, *carried]
+                    wire.append(entry)
             continue
         if message.role is MessageRole.assistant:
             entry: dict[str, Any] = {"role": "assistant"}
@@ -203,6 +206,85 @@ async def messages_to_wire(
         else:
             wire.append({"role": "user", "content": "\n".join(p["text"] for p in content)})
     return wire
+
+
+CARRIED_IMAGES = "daedalus.carried_images"
+"""The key a tool entry holds its images under until :func:`place_carried_images` moves them out.
+
+Most chat-completions servers take only a string in a ``tool`` message, so a tool's pictures ride in
+one ``user`` message after the whole run of results, opened by the core's
+``TOOL_IMAGES_CARRIER_HEADER`` exactly as the core's own adapter does it. A user turn between two
+results of one batch would close the batch and leave the calls after it unanswered, so the carrier
+can only be placed once every message of the request is on the wire."""
+
+
+async def _tool_image_parts(
+    block: ToolResultBlock, *, image_loader: Any | None, supports_images: bool,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """The content parts for a result's images, and a line for each one that cannot be sent.
+
+    A model that takes no images gets the lines in the result's own text and no extra turn. The size a
+    tool gave goes beside its image: a model that points at coordinates in a screenshot needs the size
+    it was shown to turn them back into screen positions.
+    """
+    parts: list[dict[str, Any]] = []
+    notes: list[str] = []
+    for number, image in enumerate(block.images, start=1):
+        name = image.blob_ref or "inline image"
+        if not supports_images or (image.data is None and image_loader is None):
+            notes.append(f"[image not sent, this model does not take images: {name}]")
+            continue
+        loaded = await _tool_image_bytes(image, image_loader)
+        if loaded is None:
+            notes.append(f"[image not sent, it could not be loaded: {name}]")
+            continue
+        data, mime = loaded
+        if image.width is not None and image.height is not None:
+            parts.append({"type": "text", "text": f"[image {number} of tool call {block.tool_call_id}: {image.width}x{image.height} pixels]"})
+        parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"}})
+    return parts, notes
+
+
+async def _tool_image_bytes(image: ToolResultImage, image_loader: Any | None) -> tuple[bytes, str] | None:
+    if image.data is not None:
+        return image.data, image.mime_type
+    try:
+        data, mime = await image_loader(image.blob_ref)
+    except Exception as exc:  # noqa: BLE001 — one unreadable picture must not fail the whole request
+        logger.warning("tool image %s could not be loaded: %s", image.blob_ref, exc)
+        return None
+    return data, mime or image.mime_type
+
+
+def place_carried_images(entries: list[dict[str, Any]], index_map: list[int]) -> tuple[list[dict[str, Any]], list[int]]:
+    """Move every tool entry's carried images into one ``user`` message after its run of results.
+
+    ``index_map`` names, for each core message, the wire entry it ended on (``-1`` for none); the
+    returned map names the same entries in the new list, except that a run's last result now names
+    its carrier, so a cache breakpoint set on that result covers the images sent after it.
+    """
+    out: list[dict[str, Any]] = []
+    moved: dict[int, int] = {}
+    carrier: list[dict[str, Any]] = []
+    last_tool = -1
+
+    def close_run() -> None:
+        nonlocal carrier
+        if carrier:
+            out.append({"role": "user", "content": [{"type": "text", "text": TOOL_IMAGES_CARRIER_HEADER}, *carrier]})
+            moved[last_tool] = len(out) - 1
+        carrier = []
+
+    for index, entry in enumerate(entries):
+        if entry.get("role") != "tool":
+            close_run()
+        else:
+            carrier.extend(entry.pop(CARRIED_IMAGES, None) or [])
+            last_tool = index
+        out.append(entry)
+        moved.setdefault(index, len(out) - 1)
+    close_run()
+    return out, [moved.get(index, -1) if index >= 0 else -1 for index in index_map]
 
 
 def _text_of(message: Message) -> str:
@@ -304,4 +386,4 @@ def _repair_json(text: str) -> Any:
         return {}
 
 
-__all__ = ["arguments_cut", "images_left_out", "messages_to_wire", "parse_json_arguments", "tools_to_wire"]
+__all__ = ["arguments_cut", "images_left_out", "messages_to_wire", "parse_json_arguments", "place_carried_images", "tools_to_wire"]

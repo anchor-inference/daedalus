@@ -56,6 +56,7 @@ from daedalus.providers.wire import (
     images_left_out,
     messages_to_wire,
     parse_json_arguments,
+    place_carried_images,
     tools_to_wire,
 )
 
@@ -769,6 +770,7 @@ class OpenAICompatibleProvider(ILLMProvider):
                     entries[-1]["reasoning_details"] = details
             wire.extend(entries)
             wire_index.append(len(wire) - 1 if entries else -1)  # -1: this message put nothing on the wire
+        wire, wire_index = place_carried_images(wire, wire_index)
         body: dict[str, Any] = {
             "model": model,
             "messages": wire,
