@@ -24,12 +24,13 @@ from protocore.contracts.types import Message, MessageRole, TextBlock
 from daedalus.browser import login
 from daedalus.browser.agent import BrowserAgent
 from daedalus.browser.cli import TOOL_SET, StaffBrowser
-from daedalus.browser.model import Owner
+from daedalus.browser.model import USER, Owner
 from daedalus.browser.monitor import TIMEOUT_SECONDS, InjectionMonitor
 from daedalus.browser.notes import SiteNotes
 from daedalus.browser.owners import DatabaseOwners
 from daedalus.browser.replay import RecordedSkills
 from daedalus.browser.service import Browsers
+from daedalus.browser.user import Pairing, RelayDesk
 from daedalus.browser.workflows import DRAFT_TIMEOUT_SECONDS, Workflows
 from daedalus.config import keyproxy_base
 from daedalus.extensions.notifications import Draft
@@ -94,14 +95,20 @@ def build(app: Application) -> Browsers:
             with contextlib.suppress(ValueError):
                 rules["host_addrs"] = [str(ipaddress.ip_address(settings.services_public_host.strip()))]
         allow = [h for h in app.config.policy.egress_allow if h.strip()]
-        if allow:
+        if env == USER:
+            # The operator's Chrome has its own network and no wall of the daemon's around it; what
+            # stands in its place is the navigation guard on the agent's tabs, judged against the
+            # sites the operator always grants. Present and possibly empty: every other site is an
+            # ask, which the host turns into the operator's question about the site.
+            rules["egress_allow"] = list(app.config.browser.user.granted_sites)
+        elif allow:
             rules["egress_allow"] = allow
         return rules
 
     update = DaemonUpdate(settings.rebuild_trigger_dir, binary=IMAGE_BINARY, service="browser", program="browserd") if settings.browser_container_dir is not None and not settings.native else None
     return Browsers(
         app.db,
-        run_dirs={"container": settings.browser_container_dir, "host": settings.browser_host_dir},
+        run_dirs={"container": settings.browser_container_dir, "host": settings.browser_host_dir, USER: settings.browser_user_dir},
         config=lambda: app.config.browser,
         owners=DatabaseOwners(app.db),
         bus=manager.bus,
@@ -192,10 +199,18 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     app.extensions["browser_workflows"] = Workflows(service, notes, draft=draft, scope=lasting)
     app.extensions["browser"] = service
     app.extensions["browser_agent"] = agent
+    settings = app.settings
+    if settings.browser_user_dir is not None:
+        pairing = Pairing(app.db)
+        app.extensions["browser_pairing"] = pairing
+        if not settings.native:
+            # A server's door for a paired Chrome; natively Chrome comes through the bridge instead.
+            app.extensions["browser_relays"] = RelayDesk(pairing, lambda: settings.browser_user_dir)
     manager.service_hooks["browser"] = agent
 
     async def session_deleted(session_id: str) -> None:
         await service.close_owned("session", session_id)
+        await service.choices.forget(session_id)
 
     # Command-line staff reach the same tools through their launch's MCP entry; every CLI runtime the
     # harness installed offers them from its next launch on.

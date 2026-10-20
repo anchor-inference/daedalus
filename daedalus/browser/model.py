@@ -8,7 +8,14 @@ from typing import Any
 
 from daedalus.browser import wire
 
-ENVS = ("container", "host")
+ENVS = ("container", "host", "user")
+USER = "user"
+"""The environment that is the operator's own Chrome, driven through the Daedalus extension. Never
+an agent's default: the operator switches a conversation to it, and nothing the agent says can."""
+AGENT_ENVS = ("container", "host")
+"""The environments of the agent's own browser, one of which ``[browser] env`` picks."""
+USER_PROFILE = "user"
+"""The one profile the ``user`` daemon has: the operator's Chrome profile the extension runs in."""
 OWNER_KINDS = ("session", "staff")
 GROUP_STATUSES = ("open", "closed", "lost")
 CONTROL_OWNERS = ("agent", "human", "paused")
@@ -63,19 +70,25 @@ class Owner:
             return None
 
 
-def group_id(owner: Owner, *, fresh: bool = False) -> str:
+def group_id(owner: Owner, *, fresh: bool = False, env: str = "") -> str:
     """The one group an owner has in its profile's browser, and a second one for a throwaway context.
 
-    A session's is ``s-<session>``, a command-line member's ``m-<staff>``; ``-x`` is the ephemeral one.
-    The host makes one group per owner and profile, so two sessions of one project share the project's
-    cookies but never see each other's tabs.
+    A session's is ``s-<session>``, a command-line member's ``m-<staff>``; ``-x`` is the ephemeral one
+    and ``-u`` the one in the operator's own Chrome, so a conversation switched between the two keeps
+    both rows apart. The host makes one group per owner and profile, so two sessions of one project
+    share the project's cookies but never see each other's tabs.
     """
     base = f"{'s' if owner.kind == 'session' else 'm'}-{owner.id}"
+    if env == USER:
+        return (base[:62] + "-u")[:64]
     return (base + "-x" if fresh else base)[:64]
 
 
-def profile_id(owner: Owner, *, fresh: bool = False) -> str:
-    """Where the owner's cookies live: its project's profile, else its own; a fresh group has none."""
+def profile_id(owner: Owner, *, fresh: bool = False, env: str = "") -> str:
+    """Where the owner's cookies live: its project's profile, else its own; a fresh group has none.
+    In the operator's Chrome they live in the operator's profile, which is the one there is."""
+    if env == USER:
+        return USER_PROFILE
     if fresh:
         return EPHEMERAL
     if owner.project_id:
@@ -207,12 +220,15 @@ def rpc_failure(exc: wire.RpcError, what: str) -> BrowserError:
 
 
 __all__ = [
+    "AGENT_ENVS",
     "CONTROL_OWNERS",
     "ENVS",
     "EPHEMERAL",
     "GROUP_STATUSES",
     "HANDOFF_REASONS",
     "OWNER_KINDS",
+    "USER",
+    "USER_PROFILE",
     "Blocked",
     "BrowserError",
     "BrowserGone",

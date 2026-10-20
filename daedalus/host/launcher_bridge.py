@@ -41,6 +41,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -212,4 +213,42 @@ async def busy(launcher: Launcher) -> tuple[str, str]:
     return str(body.get("busy") or ""), str(body.get("failure") or "")
 
 
-__all__ = ["HEADER", "Launcher", "LauncherBusy", "LauncherUnavailable", "act", "busy", "instance_path", "job", "read", "status"]
+USER_BROWSER_ACTIONS = ("register", "unregister")
+
+
+async def user_browser(launcher: Launcher, action: str = "") -> dict[str, Any]:
+    """The launcher's report on the operator's Chrome — the browsers and profiles it found, the
+    connector (Chrome's native-messaging host) and where it is registered, the extension folder, the
+    policies in the way — or, with ``register``/``unregister``, the report after it wrote or removed
+    the connector. The report names profiles, which are personal, so even the read carries the token.
+
+    A failed registration answers 500 with the report and the launcher's ``error``; that is returned
+    as it came, so the app can say what went wrong next to what is there.
+    """
+    if action and action not in USER_BROWSER_ACTIONS:
+        raise ValueError(f"the connector is registered or unregistered, not {action!r}")
+    path = f"/api/browser/user/{action}" if action else "/api/browser/user"
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        try:
+            if action:
+                response = await client.post(f"{launcher.base}{path}", headers={HEADER: launcher.token}, content=b"")
+            else:
+                response = await client.get(f"{launcher.base}{path}", headers={HEADER: launcher.token})
+        except httpx.HTTPError as exc:
+            raise LauncherUnavailable(f"the launcher on port {launcher.port} did not answer: {type(exc).__name__}") from None
+    if response.status_code in (403, 401):
+        raise LauncherUnavailable("the launcher refused the request; it may have been restarted since this process started")
+    if response.status_code == 404:
+        raise LauncherUnavailable("this launcher knows nothing of your Chrome; it is older than this build of the app")
+    if response.status_code == 501:
+        raise LauncherUnavailable("the launcher registers the connector only in a native installation")
+    try:
+        body = response.json()
+    except ValueError:
+        raise LauncherUnavailable(f"the launcher answered {response.status_code}: {_sentence(response)}".rstrip(": ")) from None
+    if not isinstance(body, dict):
+        raise LauncherUnavailable(f"the launcher answered {response.status_code} with something that is not a report")
+    return body
+
+
+__all__ = ["HEADER", "USER_BROWSER_ACTIONS", "Launcher", "LauncherBusy", "LauncherUnavailable", "act", "busy", "instance_path", "job", "read", "status", "user_browser"]

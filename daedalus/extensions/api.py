@@ -68,6 +68,7 @@ from daedalus.extensions import (
     api_attempt_diagnostics,
     api_autopilot,
     api_board,
+    api_browser_user,
     api_browsers,
     api_btw,
     api_calendar,
@@ -1683,6 +1684,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         api_diagrams.register(api, app, auth)
     # The agent's browser: its groups, the live view's ticket and socket, control, the audit.
     api_browsers.register(api, app, auth)
+    # The operator's own Chrome: its card, a conversation's switch, and a server's pairing and relay.
+    api_browser_user.register(api, app, auth)
 
     # -- staff: the named members of a project's team ------------------------------------------
 

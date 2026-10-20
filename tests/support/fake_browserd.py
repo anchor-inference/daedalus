@@ -245,6 +245,12 @@ class FakeBrowserd:
         """Group → its keyframes, each with its ``data``: one after every action while recording."""
         self.workflows: dict[str, dict[str, Any]] = {}
         """Group → its recording of a person's steps: the one on, or the last it made."""
+        self.relay_status: dict[str, Any] = {"connected": False, "since": None, "last_seen": None}
+        """The ``user`` daemon's ``relay.status``: what the test says the operator's Chrome is."""
+        self.relays: list[ViewChannel] = []
+        """The relays opened with ``relay.open`` (a WebSocket the host proxies), newest last."""
+        self.relay_opens: list[dict[str, Any]] = []
+        self.notified: list[dict[str, Any]] = []
         self.legacy = False
         """A daemon older than the host: no ``page.find``, no point, no scroll to a text or sideways, and
         unknown parameters refused as the real daemon's strict decoding refuses them."""
@@ -432,6 +438,8 @@ class FakeBrowserd:
         try:
             if method == "view.attach" and method not in self.fail:
                 result = self._attach(writer, params)
+            elif method == "relay.open" and method not in self.fail:
+                result = self._relay_open(writer, params)
             else:
                 result = await self._handle(method, params)
             reply: dict[str, Any] = {"jsonrpc": "2.0", "id": call_id, "result": result}
@@ -446,6 +454,31 @@ class FakeBrowserd:
             # Only once the host has the reply: a test that closes the channel at once must not have
             # its close reach the host before the channel is known there, as the real daemon never does.
             self.attached.put_nowait(self.channels[int(reply["result"]["channel"])])
+
+    def _relay_open(self, writer: asyncio.StreamWriter, params: dict[str, Any]) -> dict[str, Any]:
+        """``relay.open``: the connection carries a relay on a channel of its own, as on the user daemon."""
+        if self.env != "user":
+            raise _Fail(1007, "this daemon drives browsers of its own and takes no relay", {"reason": "launch_backend"})
+        self._next["channel"] += 1
+        cid = self._next["channel"]
+        channel = ViewChannel(cid, "", dict(params), f"r{cid}", writer)
+        self.channels[cid] = channel
+        self.relays.append(channel)
+        self.relay_opens.append(dict(params))
+        return {"channel": cid, "proto": 1}
+
+    async def relay_send(self, channel: ViewChannel, frame: dict[str, Any]) -> None:
+        """One relay frame to the extension, as one piece (``browserd/internal/relay/pieces.go``)."""
+        await self._frame(channel.writer, channel.id, b"\x00" + json.dumps(frame).encode())
+
+    async def relay_frame(self, channel: ViewChannel, timeout: float = 5.0) -> dict[str, Any]:
+        """The next relay frame from the extension, its pieces joined."""
+        buf = b""
+        while True:
+            piece = await channel.frame(timeout)
+            buf += piece[1:]
+            if piece[:1] == b"\x00":
+                return json.loads(buf)
 
     def _attach(self, writer: asyncio.StreamWriter, params: dict[str, Any]) -> dict[str, Any]:
         gid = str(params.get("group_id") or "")
@@ -569,6 +602,20 @@ class FakeBrowserd:
         if method in self.fail:
             code, text, data = self.fail.pop(method)
             raise _Fail(code, text, data)
+        if method == "daemon.info" and self.env == "user":
+            return {"version": "fake", "protocol": self.protocol, "instance": self.instance, "env": self.env, "os": "linux", "arch": "amd64", "pid": 1, "started_at": stamp(), "uptime_s": 1,
+                    "chromium": {"path": "", "version": self.relay_status.get("chrome_version"), "kind": "relay"}, "capabilities": {"sandbox": "unknown", "headed": False, "screencast": True},
+                    "limits": {}, "counts": {"browsers": len(self.browsers), "groups": len(self.groups), "tabs": 0, "viewers": 0}, "machine": self.machine,
+                    "backend": "attach", "relay": dict(self.relay_status)}
+        if method == "relay.status":
+            if self.env != "user":
+                raise _Fail(1007, "this daemon takes no relay", {"reason": "launch_backend"})
+            return dict(self.relay_status)
+        if method == "relay.notify":
+            if not self.relay_status.get("connected"):
+                raise _Fail(1007, "Chrome is not connected", {"reason": "chrome_not_connected"})
+            self.notified.append(dict(params))
+            return {"rtt_ms": 12}
         if method == "daemon.info":
             return {"version": "fake", "protocol": self.protocol, "instance": self.instance, "env": self.env, "os": "linux", "arch": "amd64", "pid": 1, "started_at": stamp(), "uptime_s": 1,
                     "chromium": {"path": "/fake/chrome", "version": "151.0.0.0", "kind": "bundled"}, "capabilities": {"sandbox": "ok", "headed": False, "screencast": True},
@@ -810,6 +857,8 @@ class FakeBrowserd:
             return {"upload_id": upload_id, "size": len(upload["data"])}
         if method == "page.login":
             return await self._login(params)
+        if method in ("cookies.set", "cookies.clear") and self.env == "user":
+            raise _Fail(1004, "refused in the operator's Chrome", {"reason": "user_browser"})
         if method == "cookies.set":
             group = self._group(str(params.get("group_id")))
             await self._held_back(group, params)
@@ -924,6 +973,12 @@ class FakeBrowserd:
     def _open(self, params: dict[str, Any]) -> dict[str, Any]:
         gid = str(params.get("group_id"))
         profile = str(params.get("profile"))
+        if self.env == "user":
+            # The user daemon's refusals (docs/architecture/browser.md, The operator's Chrome).
+            if profile == "ephemeral":
+                raise _Fail(1004, "a throwaway context is refused in the operator's Chrome", {"reason": "user_browser"})
+            if not self.relay_status.get("connected"):
+                raise _Fail(1007, "Chrome is not connected", {"reason": "chrome_not_connected"})
         if gid in self.groups:
             group = self.groups[gid]
             return {"group": group.view(), "tab": self.tab_of(gid).view(True), "created": False}
