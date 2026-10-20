@@ -1,22 +1,31 @@
-// The popup: whether this Chrome is connected to Daedalus and to which installation, the check the
-// operator can run, the agent's groups with their controls, and the connection settings. It holds no
-// state of its own; it asks the worker and draws the answer, once a second while open so that "last
-// heartbeat" stays true.
+// The side panel's settings view, which is what the toolbar popup used to be: whether this Chrome is
+// connected to Daedalus and to which installation, the check the operator can run, the agent's groups
+// with their controls, and the connection settings. It holds no state of its own; it asks the worker
+// and draws the answer, once a second while shown so that "last heartbeat" stays true. Pairing lives
+// here, in the extension's own page, because it happens before any credential for the framed app
+// exists.
 
 import { isKey, language, t, type Key } from "./i18n.js";
 import type { CheckOutcome, Status } from "./relay.js";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
-function ask<T>(message: Record<string, unknown>): Promise<T> {
+export function ask<T>(message: Record<string, unknown>): Promise<T> {
   return chrome.runtime.sendMessage(message) as Promise<T>;
 }
 
-function translateStatic(): void {
+export function translateStatic(): void {
   document.documentElement.lang = language();
   for (const element of document.querySelectorAll<HTMLElement>("[data-i18n]")) {
     const key = element.dataset.i18n ?? "";
     if (isKey(key)) element.textContent = t(key);
+  }
+  for (const element of document.querySelectorAll<HTMLElement>("[data-i18n-title]")) {
+    const key = element.dataset.i18nTitle ?? "";
+    if (isKey(key)) {
+      element.title = t(key);
+      element.setAttribute("aria-label", t(key));
+    }
   }
 }
 
@@ -31,7 +40,7 @@ function ago(now: number, at?: number): string {
 let lastNoticeAt = 0;
 let editing = false;
 
-function render(status: Status): void {
+export function renderSettings(status: Status): void {
   const phase = $("phase");
   phase.dataset.phase = status.phase;
   $("phase-text").textContent = t(`phase.${status.phase}` as Key);
@@ -102,11 +111,16 @@ function showNotice(notice: { at: number; text: string }): void {
   }, 6000);
 }
 
-async function refresh(): Promise<void> {
-  render(await ask<Status>({ kind: "get-status" }));
+export async function refreshSettings(): Promise<Status> {
+  const status = await ask<Status>({ kind: "get-status" });
+  renderSettings(status);
+  return status;
 }
 
-function wire(): void {
+const refresh = async (): Promise<void> => void (await refreshSettings());
+
+/** Wires the settings view's buttons; the panel calls it once its page has loaded. */
+export function wireSettings(): void {
   $("check").onclick = async () => {
     const result = $("check-result");
     result.removeAttribute("data-ok");
@@ -146,11 +160,5 @@ function wire(): void {
 
   chrome.runtime.onMessage.addListener((message) => {
     if (message?.kind === "notice") showNotice(message.notice);
-    if (message?.kind === "status") void refresh();
   });
 }
-
-translateStatic();
-wire();
-void refresh();
-setInterval(() => void refresh(), 1000);

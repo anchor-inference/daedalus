@@ -121,6 +121,11 @@ class UserChoices:
             return AGENT
         return str((await self.get(session_id))["env"])
 
+    async def using_user(self) -> list[str]:
+        """The conversations the operator gave their Chrome, newest switch last: what the extension's
+        side panel lists, and the only ones its credential may open."""
+        return [sid for sid, entry in (await self._all()).items() if isinstance(entry, dict) and entry.get("env") == USER]
+
     async def _update(self, session_id: str, change: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
         async with self._lock:
             entries = await self._all()

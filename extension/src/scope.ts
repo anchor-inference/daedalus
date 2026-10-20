@@ -19,6 +19,9 @@ export type Member = {
 export type Group = {
   id: string;
   title: string;
+  // The host conversation the group works for, when the daemon or the side panel named it: the panel
+  // shows the conversation that owns the active tab by this.
+  session?: string;
   color: chrome.tabGroups.Color;
   paused: boolean;
   chromeGroupId?: number;
@@ -45,7 +48,7 @@ export class Scope {
     await chrome.storage.session.set({ [KEY]: { groups: [...this.groups.values()], members: [...this.members.values()] } });
   }
 
-  ensureGroup(id: string, title?: string): Group {
+  ensureGroup(id: string, title?: string, session?: string): Group {
     let group = this.groups.get(id);
     if (!group) {
       group = { id, title: title ?? "", color: COLORS[this.groups.size % COLORS.length], paused: false };
@@ -53,7 +56,14 @@ export class Scope {
     } else if (title) {
       group.title = title;
     }
+    if (session) group.session = session;
     return group;
+  }
+
+  /** The group that works for a conversation, if this Chrome holds one. */
+  bySession(session: string): Group | undefined {
+    for (const group of this.groups.values()) if (group.session === session) return group;
+    return undefined;
   }
 
   byChromeGroup(chromeGroupId: number): Group | undefined {

@@ -2,7 +2,7 @@
 
 Loads `extension/dist` unpacked into a throwaway profile whose `NativeMessagingHosts` names the stub
 under the extension's host name, then checks the round trip a person sees: hello and welcome, ping
-and pong, the app's check flashing in the popup, the popup's own check confirmed, a tab created in
+and pong, the app's check flashing in the side panel, the panel's own check confirmed, a tab created in
 the agent's group and driven, and a cookie read refused by the extension itself.
 
 Unbranded Chromium only: branded Chrome ignores `--load-extension` since 137.
@@ -10,7 +10,7 @@ Unbranded Chromium only: branded Chrome ignores `--load-extension` since 137.
     cd extension && npm run build
     CHROMIUM=<chromium binary> python extension/test/e2e/smoke.py
 
-`SMOKE_SCREENSHOT=<file.png>` also saves a picture of the popup after the check.
+`SMOKE_SCREENSHOT=<file.png>` also saves a picture of the side panel's settings after the check.
 """
 
 import json
@@ -84,7 +84,7 @@ def main() -> int:
                 hello = wait_for(lambda: received("hello"), "hello")[0]
                 origin = [f["value"] for f in frames(log) if f["kind"] == "origin"][0]
                 assert origin == f"chrome-extension://{EXTENSION_ID}/", origin
-                assert hello["proto"] == 1 and hello["profile_name"] == "Chrome", hello
+                assert hello["proto"] == 2 and hello["profile_name"] == "Chrome", hello
                 wait_for(lambda: received("pong"), "pong")
 
                 def results():
@@ -102,14 +102,15 @@ def main() -> int:
                 # The page the browser started with, not a new one: a page Playwright creates opens in
                 # the last window, the agent's, beside an agent tab that Chrome then names its opener.
                 popup = context.pages[0] if context.pages else context.new_page()
-                popup.goto(f"chrome-extension://{EXTENSION_ID}/popup.html")
-                # The popup's policy forbids evaluating strings, so it is read through the DOM only.
-                wait_for(lambda: popup.inner_text("#install") == "Stub", "the popup to show the installation")
+                popup.goto(f"chrome-extension://{EXTENSION_ID}/panel.html")
+                # The panel's policy forbids evaluating strings, so it is read through the DOM only. With
+                # no panel credential (the stub hands none), the panel shows its settings.
+                wait_for(lambda: popup.inner_text("#install") == "Stub", "the panel to show the installation")
                 popup.click("#check")
                 popup.wait_for_selector("#check-result[data-ok='true']", timeout=6000)
                 text = popup.inner_text("#check-result")
                 assert "✓" in text, text
-                assert received("check"), "the popup's check never reached the host"
+                assert received("check"), "the panel's check never reached the host"
                 # The operator's page stayed the operator's.
                 joined = [f for f in received("tabs") if f["op"] in ("created", "joined")]
                 assert not joined, joined
@@ -119,7 +120,7 @@ def main() -> int:
                     popup.set_viewport_size({"width": 340, "height": 760})
                     popup.screenshot(path=os.environ["SMOKE_SCREENSHOT"], full_page=True)
                 print("smoke: hello/welcome, ping/pong, notify, tab.create, cdp allow and refuse, check/check_ok: ok")
-                print("popup:", text)
+                print("panel:", text)
             finally:
                 context.close()
     return 0

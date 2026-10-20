@@ -1,0 +1,661 @@
+// The extension's side panel: the app at /app/panel, framed by the Daedalus extension in Chrome.
+//
+// It shows the conversations that use this Chrome and nothing else, following the window's active
+// tab: the conversation whose tab group holds that tab, or the one shown last, or the newest. The
+// extension's page around it lends what only an extension can do (the current tab, a picture of it,
+// its text, the selection, giving the tab to a conversation, showing the agent's tab, pausing the
+// agent's group) through the bridge; everything else is the app's own pieces — the transcript, the
+// composer with its model and mode pickers and the agent's questions — talking to the panel's door
+// with the panel's credential.
+
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { api, setPanelCredential, type SessionDetail } from "../api";
+import { applyAppearance } from "../appearance";
+import { type Approval, pendingApproval } from "../composer";
+import { Composer, type ComposerHandle } from "../composerbox";
+import type { ModelChoice } from "../modelselect";
+import type { ModeInfo } from "../modeselect";
+import { messageBody } from "../project/goalmodel";
+import { Icon } from "../icons";
+import { setLang, t, useLang } from "../i18n";
+import { sessionPath } from "../router";
+import { LiveBar, TranscriptView } from "../screens/Session";
+import { buildTurns, createLiveStore, liveAfter, liveBase, type LiveStore, type Turn } from "../turns";
+import { followSession } from "../sessionstream";
+import { errorText } from "../ui";
+import { connectShell, ShellError, type Current, type PageInfo, type Shell } from "./bridge";
+import { cardKey, cropRect, dataFile, pageFile, pickSession, selectionQuote, stopUnconfirmed, type PanelListing, type PanelSession, type Rect } from "./model";
+import "./sidepanel.css";
+
+type Status = "idle" | "running" | "waiting" | "failed" | "compacting";
+
+/** What the extension asks the panel to show when the operator chose "Ask Daedalus about this page". */
+const NEW = "new";
+
+function statusOf(detail: SessionDetail | null): Status {
+  const status = detail?.status ?? "idle";
+  return (["running", "waiting", "failed", "compacting"].includes(status) ? status : "idle") as Status;
+}
+
+export function SidePanel() {
+  useLang();
+  const [shell, setShell] = useState<Shell | null>(null);
+  const [outside, setOutside] = useState(false);
+  const [current, setCurrent] = useState<Current | null>(null);
+  const [listing, setListing] = useState<PanelListing | null>(null);
+  const [shown, setShown] = useState<string | null>(null);
+  const [pinned, setPinned] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const [note, setNote] = useState("");
+  const show = useRef<string | null>(null);
+  // The actions answered here, per conversation, for as long as the panel is open: the refusal stays
+  // in the transcript after the answer, and coming back to the conversation must not offer it again.
+  const answered = useRef(new Map<string, Set<string>>());
+
+  const toast = useCallback((text: string) => setNote(text), []);
+  useEffect(() => {
+    if (!note) return;
+    const timer = window.setTimeout(() => setNote(""), 5000);
+    return () => window.clearTimeout(timer);
+  }, [note]);
+
+  useEffect(() => {
+    applyAppearance();
+    let gone = false;
+    connectShell()
+      .then((found) => {
+        if (gone) return;
+        setPanelCredential(found.hello.token, refresher(found));
+        if (found.hello.lang === "ru" || found.hello.lang === "en") setLang(found.hello.lang);
+        // "new" is the page's menu, "Ask Daedalus about this page": a new conversation for that page.
+        if (found.hello.show === NEW) setCreating(true);
+        else show.current = found.hello.show;
+        setCurrent(found.hello.current);
+        setShell(found);
+      })
+      .catch((error) => !gone && error instanceof ShellError && setOutside(true));
+    return () => {
+      gone = true;
+    };
+  }, []);
+
+  const loadList = useCallback(async () => {
+    try {
+      setListing(await api.get<PanelListing>("/api/panel/sessions"));
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    if (!shell) return;
+    void loadList();
+    const timer = window.setInterval(() => void loadList(), 15000);
+    const off = [
+      shell.on("current", (value: Current) => setCurrent(value)),
+      shell.on("token", (value: { token: string }) => value?.token && setPanelCredential(value.token, refresher(shell))),
+      shell.on("show", (session: string) => {
+        if (session === NEW) {
+          setCreating(true);
+          return;
+        }
+        show.current = session;
+        setCreating(false);
+        void loadList();
+      }),
+      shell.on("event", () => void loadList()),
+    ];
+    return () => {
+      window.clearInterval(timer);
+      for (const stop of off) stop();
+    };
+  }, [shell, loadList]);
+
+  const sessions = listing?.sessions ?? [];
+  // Which conversation to show follows the tab, the list and a notification's click.
+  useEffect(() => {
+    if (!listing) return;
+    const next = pickSession({ show: show.current, current, sessions, shown, pinned });
+    if (show.current && next === show.current) show.current = null;
+    if (next !== shown) setShown(next);
+  }, [listing, current, pinned]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (outside) {
+    return (
+      <div className="sidepanel sp-outside">
+        <Icon name="logo" size={28} />
+        <p>{t("sidepanel.outside")}</p>
+      </div>
+    );
+  }
+  if (!shell || !listing) {
+    return <div className="sidepanel sp-loading" aria-busy="true"><div className="skeleton sk-line" /></div>;
+  }
+
+  const session = sessions.find((s) => s.id === shown) ?? null;
+  const newView = creating || !session;
+
+  return (
+    <div className="sidepanel">
+      <header className="sp-head">
+        <button type="button" className="sp-title" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((open) => !open)} disabled={!sessions.length}>
+          {session && !newView ? <Dot status={session.status} needsYou={session.needs_you} /> : null}
+          <span className="truncate">{newView ? t("sidepanel.new.title") : session.title}</span>
+          {sessions.length > 0 && <Icon name="chevron" size={14} />}
+        </button>
+        <span className="grow" />
+        {!newView && (
+          <button type="button" className={`icon-btn ${pinned ? "on" : ""}`} title={t(pinned ? "sidepanel.unpin" : "sidepanel.pin")} aria-label={t(pinned ? "sidepanel.unpin" : "sidepanel.pin")} aria-pressed={pinned} onClick={() => setPinned((p) => !p)}>
+            <Icon name="pushpin" size={16} />
+          </button>
+        )}
+        <button type="button" className="icon-btn" title={t("sidepanel.new")} aria-label={t("sidepanel.new")} onClick={() => { setCreating(true); setMenu(false); }}>
+          <Icon name="compose" size={16} />
+        </button>
+        <button type="button" className="icon-btn" title={t("sidepanel.open_app")} aria-label={t("sidepanel.open_app")} onClick={() => void shell.request("open.app", { path: session && !newView ? sessionPath(session.id) : "/app/" }).catch((e) => toast(errorText(e)))}>
+          <Icon name="external" size={16} />
+        </button>
+      </header>
+      {menu && (
+        <div className="sp-menu" role="menu">
+          {sessions.map((s) => (
+            <button key={s.id} type="button" role="menuitem" className={`sp-menu-row ${s.id === shown && !newView ? "on" : ""}`}
+              onClick={() => { setShown(s.id); setCreating(false); setMenu(false); setPinned(true); }}>
+              <Dot status={s.status} needsYou={s.needs_you} />
+              <span className="truncate grow">{s.title}</span>
+              {s.needs_you && <span className="sp-badge">{t("sidepanel.needs_you")}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+      {!listing.chrome.connected && <div className="sp-banner warn">{t("sidepanel.chrome.offline")}</div>}
+      {newView ? (
+        <NewConversation shell={shell} current={current} listing={listing} toast={toast}
+          onCreated={async (id) => { await loadList(); setShown(id); setCreating(false); setPinned(false); }}
+          onCancel={sessions.length ? () => setCreating(false) : undefined} />
+      ) : (
+        <Conversation key={session.id} session={session} shell={shell} current={current} toast={toast} onChanged={loadList} answered={answered.current} />
+      )}
+      {note && <div className="sp-toast" role="status">{note}</div>}
+    </div>
+  );
+}
+
+/** How the API client asks the extension for a newer credential when the one in hand stops working. */
+function refresher(shell: Shell): () => Promise<string | null> {
+  return async () => {
+    const fresh = await shell.request<{ token: string } | null>("token.refresh");
+    return fresh?.token ?? null;
+  };
+}
+
+function Dot({ status, needsYou }: { status: string; needsYou: boolean }) {
+  const tone = needsYou ? "waiting" : status === "running" || status === "compacting" ? "running" : status === "failed" ? "failed" : "idle";
+  return <span className={`sp-dot ${tone}`} aria-hidden />;
+}
+
+// ── a new conversation ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Starts a conversation in this Chrome, as the app's own "new chat" does (the default model, no
+ * project), and gives it the tab in front of the operator at once: pressing Start here is their
+ * explicit act. The first time, the consent summary is shown above the field, and Start is the yes.
+ */
+function NewConversation({ shell, current, listing, toast, onCreated, onCancel }: { shell: Shell; current: Current | null; listing: PanelListing; toast: (text: string) => void; onCreated: (id: string) => Promise<void>; onCancel?: () => void }) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const field = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => field.current?.focus(), []);
+  const tab = current?.tab?.readable ? current.tab : null;
+
+  async function start() {
+    const words = text.trim();
+    if (!words || busy) return;
+    setBusy(true);
+    try {
+      const made = await api.post<{ id: string; group: string; title: string }>("/api/panel/sessions", { title: words, consent: !listing.consented });
+      let gave = false;
+      if (tab) {
+        try {
+          await shell.request("tab.grant", { group: made.group, session: made.id, title: made.title || words.slice(0, 80) });
+          await api.post(`/api/panel/sessions/${made.id}/tab`);
+          gave = true;
+        } catch (e) {
+          toast(t("sidepanel.tab.failed", { reason: shellReason(e) }));
+        }
+      }
+      const said = gave && tab ? `${words}\n\n${t("sidepanel.message.tab", { title: tab.title || tab.url, url: tab.url })}` : words;
+      await api.post(`/api/sessions/${made.id}/messages`, messageBody(said, { clientMessageId: crypto.randomUUID() }));
+      setText("");
+      await onCreated(made.id);
+    } catch (e) {
+      toast(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="sp-new">
+      {!listing.consented && (
+        <div className="sp-consent">
+          <b>{t("sidepanel.consent.title")}</b>
+          <p>{listing.consent}</p>
+        </div>
+      )}
+      <div className="sp-new-tab">
+        {tab ? <><Icon name="globe" size={14} /><span className="truncate">{t("sidepanel.new.tab", { title: tab.title || tab.url })}</span></> : <span className="sub">{t("sidepanel.new.notab")}</span>}
+      </div>
+      <textarea ref={field} className="sp-new-field" rows={4} value={text} placeholder={t("sidepanel.new.placeholder")} aria-label={t("sidepanel.new.placeholder")}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+            e.preventDefault();
+            void start();
+          }
+          if (e.key === "Escape" && onCancel) onCancel();
+        }} />
+      <div className="sp-new-actions">
+        {onCancel && <button type="button" className="btn small" onClick={onCancel}>{t("sidepanel.cancel")}</button>}
+        <button type="button" className="btn small primary" disabled={busy || !text.trim()} onClick={() => void start()}>
+          {listing.consented ? t("sidepanel.start") : t("sidepanel.consent.start")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function shellReason(e: unknown): string {
+  const code = e instanceof Error ? e.message : String(e);
+  if (code === "gesture") return t("sidepanel.error.gesture");
+  if (code === "unreadable") return t("sidepanel.error.unreadable");
+  return code;
+}
+
+// ── one conversation ───────────────────────────────────────────────────────────────────────
+
+function Conversation({ session, shell, current, toast, onChanged, answered }: { session: PanelSession; shell: Shell; current: Current | null; toast: (text: string) => void; onChanged: () => void; answered: Map<string, Set<string>> }) {
+  const id = session.id;
+  const [detail, setDetail] = useState<SessionDetail | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [seenKeys, setSeenKeys] = useState<Set<string>>(() => answered.get(id) ?? new Set());
+  useEffect(() => void answered.set(id, seenKeys), [answered, id, seenKeys]);
+  const [similar, setSimilar] = useState<string | null>(null);
+  const [modes, setModes] = useState<ModeInfo[]>([]);
+  const [stopAt, setStopAt] = useState<number | null>(null);
+  const [paused, setPaused] = useState(false);
+  const [shot, setShot] = useState<(PageInfo & { image: string }) | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const composer = useRef<ComposerHandle>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  const liveRef = useRef<LiveStore | null>(null);
+  if (!liveRef.current) liveRef.current = createLiveStore();
+  const live = liveRef.current;
+
+  const load = useCallback(async () => {
+    try {
+      setDetail(await api.get<SessionDetail>(`/api/sessions/${id}?tail=200`));
+      setFailed(false);
+    } catch {
+      setFailed(true);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    void load();
+    api.get<Record<string, { description?: string }>>("/api/modes").then((m) => setModes(Object.entries(m).map(([name, v]) => ({ name, description: v?.description ?? "" })))).catch(() => setModes([]));
+    let soon: number | null = null;
+    const stop = followSession(id, {
+      handle: (event, p) => {
+        live.update((state) => liveAfter(state, event, p));
+        if (event === "message_start") setDetail((prev) => (prev && prev.status !== "running" ? { ...prev, status: "running", run_id: p.run_id || prev.run_id } : prev));
+        if (event === "run_settled") {
+          setDetail((prev) => (prev ? { ...prev, status: p.status === "awaiting" ? "waiting" : p.status === "failed" ? "failed" : "idle" } : prev));
+          onChanged();
+        }
+        if (["message_start", "message_stop", "run_settled", "compaction_completed", "history_cut"].includes(event) && soon === null) {
+          soon = window.setTimeout(() => {
+            soon = null;
+            void load();
+          }, 150);
+        }
+      },
+      onDrop: () => {
+        live.reset();
+        void load();
+      },
+    });
+    return () => {
+      stop();
+      if (soon !== null) window.clearTimeout(soon);
+      live.reset();
+    };
+  }, [id, live, load, onChanged]);
+
+  const status = statusOf(detail);
+  const busy = status === "running" || status === "waiting" || status === "compacting";
+  useEffect(() => {
+    if (!busy) live.reset();
+  }, [busy, live]);
+  useEffect(() => {
+    if (status !== "running" && status !== "compacting") setStopAt(null);
+  }, [status]);
+  useEffect(() => {
+    if (stopAt === null) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 500);
+    return () => window.clearInterval(timer);
+  }, [stopAt]);
+
+  const follow = useCallback(() => {
+    const el = scroller.current;
+    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 200) el.scrollTop = el.scrollHeight;
+  }, []);
+  useEffect(() => {
+    const el = scroller.current;
+    if (el && detail) el.scrollTop = el.scrollHeight;
+  }, [detail?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const approval = useMemo(() => pendingApproval(detail?.messages ?? [], seenKeys), [detail?.messages, seenKeys]);
+  useEffect(() => {
+    setSimilar(null);
+    if (!approval) return;
+    let gone = false;
+    api.get<{ similar?: { label?: unknown } | null }>(`/api/sessions/${id}/policy/similar/${approval.key}`)
+      .then((r) => !gone && typeof r?.similar?.label === "string" && setSimilar(r.similar.label))
+      .catch(() => undefined);
+    return () => {
+      gone = true;
+    };
+  }, [id, approval?.key]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function decide(a: Approval, how: "allow" | "similar" | "deny") {
+    setSeenKeys((keys) => new Set(keys).add(a.key));
+    try {
+      if (how === "deny") await api.post(`/api/sessions/${id}/policy/refuse`, { key: a.key });
+      else if (how === "similar" && similar) await api.post(`/api/sessions/${id}/policy/grant-similar`, { key: a.key });
+      else await api.post(`/api/sessions/${id}/policy/grant`, { key: a.key });
+      if (how !== "deny") toast(t("composer.approved"));
+      onChanged();
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
+
+  async function send(text: string, files: File[], followUp: boolean, clientMessageId?: string, onProgress?: (fraction: number) => void): Promise<"sent" | "queued"> {
+    const messageId = clientMessageId ?? crypto.randomUUID();
+    let result: { receipt?: { status: string } };
+    if (files.length) {
+      const form = new FormData();
+      form.append("text", text);
+      form.append("client_message_id", messageId);
+      if (followUp) form.append("follow_up", "true");
+      form.append("expected_running", followUp ? "true" : "false");
+      for (const file of files) form.append("files", file, file.name);
+      result = await api.upload<{ receipt?: { status: string } }>(`/api/sessions/${id}/upload`, form, onProgress);
+    } else {
+      result = await api.post<{ receipt?: { status: string } }>(`/api/sessions/${id}/messages`, messageBody(text, { followUp, clientMessageId: messageId }));
+    }
+    void load();
+    return result.receipt?.status === "queued" ? "queued" : "sent";
+  }
+
+  async function stop() {
+    setStopAt(Date.now());
+    setNow(Date.now());
+    try {
+      await api.post(`/api/sessions/${id}/stop`);
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
+
+  async function pause(next: boolean, takeOver = false) {
+    try {
+      await shell.request("group.pause", { session: id, paused: next });
+      setPaused(next);
+      if (takeOver) {
+        await shell.request("tab.focus", { session: id });
+        toast(t("sidepanel.takeover.done"));
+      }
+    } catch (e) {
+      toast(t("sidepanel.tab.failed", { reason: shellReason(e) }));
+    }
+  }
+
+  async function chooseModel(body: ModelChoice) {
+    try {
+      const r = await api.post<{ model: string }>(`/api/sessions/${id}/model`, body);
+      toast(t("session.model.picked", { model: r.model }));
+      void load();
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
+
+  async function chooseEffort(effort: string) {
+    try {
+      await api.post(`/api/sessions/${id}/model`, effort === "off" ? { thinking: false } : { thinking: true, reasoning_effort: effort });
+      void load();
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
+
+  async function chooseMode(mode: string) {
+    try {
+      await api.post(`/api/sessions/${id}/mode`, { mode: mode || null });
+      void load();
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
+
+  async function attach(kind: "page" | "screenshot" | "selection") {
+    try {
+      if (kind === "page") {
+        const page = await shell.request<PageInfo & { text: string }>("page.text");
+        composer.current?.addFiles([pageFile(page)]);
+      } else if (kind === "selection") {
+        const picked = await shell.request<PageInfo & { text: string }>("page.selection");
+        if (!picked.text.trim()) toast(t("sidepanel.attach.noselection"));
+        else composer.current?.insert(selectionQuote(picked));
+      } else {
+        setShot(await shell.request<PageInfo & { image: string }>("capture.visible"));
+      }
+    } catch (e) {
+      toast(t("sidepanel.attach.failed", { reason: shellReason(e) }));
+    }
+  }
+
+  async function giveTab() {
+    try {
+      await shell.request("tab.grant", { group: session.group, session: id, title: session.title });
+      await api.post(`/api/panel/sessions/${id}/tab`);
+      toast(t("sidepanel.tab.given"));
+    } catch (e) {
+      toast(t("sidepanel.tab.failed", { reason: shellReason(e) }));
+    }
+  }
+
+  const tab = current?.tab ?? null;
+  const tabIsTheirs = current?.owner?.session === id;
+  const canGive = !!tab?.readable && !current?.owner;
+
+  return (
+    <>
+      <div className="sp-body" ref={scroller}>
+        {detail ? (
+          <TranscriptView key={detail.id} detail={detail} live={live} onPreview={() => toast(t("sidepanel.preview.app"))} toast={toast} onRender={follow} />
+        ) : failed ? (
+          <div className="empty">{t("sidepanel.unreadable")}</div>
+        ) : (
+          <div className="skeleton sk-line" />
+        )}
+      </div>
+      {detail && (busy || paused) && (
+        <ActivityStrip detail={detail} live={live} status={status} paused={paused} stopUnconfirmed={stopUnconfirmed(stopAt, status, now)} hasTab={tabIsTheirs || !!current?.owner}
+          onStop={() => void stop()} onPause={() => void pause(!paused)} onTakeOver={() => void pause(true, true)}
+          onShowTab={() => void shell.request("tab.focus", { session: id }).catch((e) => toast(t("sidepanel.tab.failed", { reason: shellReason(e) })))}
+          onOpenApp={() => void shell.request("open.app", { path: sessionPath(id) })} />
+      )}
+      {canGive && (
+        <div className="sp-give">
+          <span className="truncate sub">{tab!.title || tab!.url}</span>
+          <button type="button" className="btn small" onClick={() => void giveTab()}>{t("sidepanel.tab.give")}</button>
+        </div>
+      )}
+      {approval && <ApprovalCard key={approval.key} approval={approval} similar={similar} onDecide={(how) => void decide(approval, how)} />}
+      {shot && <ShotCrop shot={shot} onCancel={() => setShot(null)} onAttach={(file) => { composer.current?.addFiles([file]); setShot(null); }} />}
+      {detail?.id === id && (
+        <Composer
+          ref={composer}
+          above={
+            <div className="sp-attach" role="group" aria-label={t("sidepanel.attach")}>
+              <button type="button" className="chip" disabled={!tab?.readable} onClick={() => void attach("page")}><Icon name="file" size={13} />{t("sidepanel.attach.page")}</button>
+              <button type="button" className="chip" disabled={!tab?.readable} onClick={() => void attach("screenshot")}><Icon name="camera" size={13} />{t("sidepanel.attach.screenshot")}</button>
+              <button type="button" className="chip" disabled={!tab?.readable} onClick={() => void attach("selection")}><Icon name="reply" size={13} />{t("sidepanel.attach.selection")}</button>
+            </div>
+          }
+          sessionId={id}
+          status={status}
+          onSend={send}
+          onStop={() => void stop()}
+          commands={[]}
+          onCommand={async () => toast(t("sidepanel.commands.app"))}
+          model={detail.model ?? ""}
+          fallback={detail.fallback ?? null}
+          onChooseModel={chooseModel}
+          thinking={detail.thinking}
+          reasoningEffort={detail.reasoning_effort}
+          onChooseEffort={chooseEffort}
+          mode={detail.mode ?? ""}
+          modes={modes}
+          onChooseMode={chooseMode}
+          queued={[]}
+          questions={detail.pending?.questions ?? null}
+          answered={detail.pending?.answered ?? null}
+          onAnswer={async (answers) => {
+            try {
+              await api.post(`/api/sessions/${id}/answer`, { answers });
+            } finally {
+              void load();
+            }
+          }}
+          approval={null}
+          phone={false}
+          toast={toast}
+        />
+      )}
+    </>
+  );
+}
+
+// ── the activity strip ─────────────────────────────────────────────────────────────────────
+
+function ActivityStrip({ detail, live, status, paused, stopUnconfirmed: unconfirmed, hasTab, onStop, onPause, onTakeOver, onShowTab, onOpenApp }: {
+  detail: SessionDetail; live: LiveStore; status: Status; paused: boolean; stopUnconfirmed: boolean; hasTab: boolean;
+  onStop: () => void; onPause: () => void; onTakeOver: () => void; onShowTab: () => void; onOpenApp: () => void;
+}) {
+  useSyncExternalStore(live.subscribe, live.get);
+  const built = useRef<Turn[]>([]);
+  const turns = useMemo(() => {
+    built.current = buildTurns(detail.messages ?? [], built.current);
+    return built.current;
+  }, [detail.messages]);
+  const base = liveBase(turns, detail.run_id);
+  return (
+    <div className="sp-strip" role="region" aria-label={t("sidepanel.strip")}>
+      {paused ? <div className="sp-strip-line"><b>{t("sidepanel.paused")}</b></div> : <LiveBar status={status === "compacting" ? "running" : status} saving={false} base={base} live={live} workspace={detail.workspace} onJump={onShowTab} />}
+      {unconfirmed && (
+        <div className="sp-strip-warn" role="alert">
+          {t("sidepanel.stop.unconfirmed")}
+          <button type="button" className="link" onClick={onStop}>{t("sidepanel.retry")}</button>
+          <button type="button" className="link" onClick={onOpenApp}>{t("sidepanel.open_app")}</button>
+        </div>
+      )}
+      <div className="sp-strip-actions">
+        {(status === "running" || status === "compacting") && <button type="button" className="btn small danger" onClick={onStop}><Icon name="stop" size={13} />{t("sidepanel.stop")}</button>}
+        {hasTab && <button type="button" className="btn small" onClick={onPause}><Icon name={paused ? "play" : "pause"} size={13} />{t(paused ? "sidepanel.resume" : "sidepanel.pause")}</button>}
+        {hasTab && !paused && <button type="button" className="btn small" onClick={onTakeOver}>{t("sidepanel.takeover")}</button>}
+        {hasTab && <button type="button" className="btn small" onClick={onShowTab}><Icon name="eye" size={13} />{t("sidepanel.showtab")}</button>}
+      </div>
+    </div>
+  );
+}
+
+// ── the approval card ──────────────────────────────────────────────────────────────────────
+
+/** A pending action of the agent's, answered here: it takes the focus, so Enter allows once,
+ *  Ctrl+Enter allows the like for this conversation and Esc refuses, without the composer hearing. */
+function ApprovalCard({ approval, similar, onDecide }: { approval: Approval; similar: string | null; onDecide: (how: "allow" | "similar" | "deny") => void }) {
+  const card = useRef<HTMLDivElement>(null);
+  const [acked, setAcked] = useState<string | null>(null);
+  useEffect(() => card.current?.focus(), []);
+  const choose = (how: "allow" | "similar" | "deny") => {
+    if (acked) return;
+    // A moment's acknowledgement before it goes, so a key pressed by habit is seen to have done something.
+    setAcked(how);
+    window.setTimeout(() => onDecide(how), 150);
+  };
+  return (
+    <div ref={card} className="sp-card" role="alertdialog" tabIndex={0} aria-label={t("composer.approval.title", { tool: approval.tool || "tool" })}
+      onKeyDown={(e) => {
+        const how = cardKey(e);
+        if (!how) return;
+        e.preventDefault();
+        e.stopPropagation();
+        choose(how === "similar" && !similar ? "allow" : how);
+      }}>
+      <div className="sp-card-title">{t("composer.approval.title", { tool: approval.tool || "tool" })}</div>
+      {approval.detail && <div className="sp-card-detail mono">{approval.detail}</div>}
+      <div className="sp-card-actions">
+        <button type="button" className={`btn small primary ${acked === "allow" ? "acked" : ""}`} onClick={() => choose("allow")}>{t("composer.approve")} <kbd>Enter</kbd></button>
+        {similar && <button type="button" className={`btn small ${acked === "similar" ? "acked" : ""}`} onClick={() => choose("similar")}>{t("composer.approve.similar", { label: similar })} <kbd>Ctrl+Enter</kbd></button>}
+        <button type="button" className={`btn small ${acked === "deny" ? "acked" : ""}`} onClick={() => choose("deny")}>{t("composer.deny")} <kbd>Esc</kbd></button>
+      </div>
+      <div className="sp-card-foot sub">{t("sidepanel.card.foot")}</div>
+    </div>
+  );
+}
+
+// ── a screenshot, whole or a dragged part ──────────────────────────────────────────────────
+
+function ShotCrop({ shot, onCancel, onAttach }: { shot: PageInfo & { image: string }; onCancel: () => void; onAttach: (file: File) => void }) {
+  const img = useRef<HTMLImageElement>(null);
+  const [drag, setDrag] = useState<Rect | null>(null);
+  const start = useRef<{ x: number; y: number } | null>(null);
+  const at = (e: React.PointerEvent) => {
+    const box = img.current!.getBoundingClientRect();
+    return { x: Math.min(Math.max(0, e.clientX - box.left), box.width), y: Math.min(Math.max(0, e.clientY - box.top), box.height) };
+  };
+  async function attachPart() {
+    const el = img.current;
+    if (!el || !drag || Math.abs(drag.w) < 4 || Math.abs(drag.h) < 4) return onAttach(dataFile(shot.image, "screenshot.png"));
+    const box = el.getBoundingClientRect();
+    const r = cropRect(drag, { w: box.width, h: box.height }, { w: el.naturalWidth, h: el.naturalHeight });
+    const canvas = document.createElement("canvas");
+    canvas.width = r.w;
+    canvas.height = r.h;
+    canvas.getContext("2d")?.drawImage(el, r.x, r.y, r.w, r.h, 0, 0, r.w, r.h);
+    onAttach(dataFile(canvas.toDataURL("image/png"), "screenshot.png"));
+  }
+  const box = drag ? { left: Math.min(drag.x, drag.x + drag.w), top: Math.min(drag.y, drag.y + drag.h), width: Math.abs(drag.w), height: Math.abs(drag.h) } : null;
+  return (
+    <div className="sp-shot" role="dialog" aria-label={t("sidepanel.shot.title")}
+      onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}>
+      <div className="sp-shot-hint sub">{t("sidepanel.shot.hint")}</div>
+      <div className="sp-shot-frame"
+        onPointerDown={(e) => { const p = at(e); start.current = p; setDrag({ x: p.x, y: p.y, w: 0, h: 0 }); (e.target as Element).setPointerCapture?.(e.pointerId); }}
+        onPointerMove={(e) => { if (!start.current) return; const p = at(e); setDrag({ x: start.current.x, y: start.current.y, w: p.x - start.current.x, h: p.y - start.current.y }); }}
+        onPointerUp={() => { start.current = null; }}>
+        <img ref={img} src={shot.image} alt={t("sidepanel.shot.title")} draggable={false} />
+        {box && <div className="sp-shot-box" style={box} />}
+      </div>
+      <div className="sp-card-actions">
+        <button type="button" className="btn small" onClick={onCancel}>{t("sidepanel.cancel")}</button>
+        <button type="button" className="btn small primary" onClick={() => void attachPart()}>{drag && Math.abs(drag.w) >= 4 ? t("sidepanel.shot.part") : t("sidepanel.shot.whole")}</button>
+      </div>
+    </div>
+  );
+}

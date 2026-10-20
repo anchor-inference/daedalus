@@ -11,12 +11,14 @@ import (
 
 // The relay methods of a `user` daemon (--backend attach): relay.open is how the operator's Chrome
 // arrives, through `browserd bridge` on this machine or the host's WebSocket on a server; relay.status
-// and relay.notify are the app's connection card and its "Check connection".
+// and relay.notify are the app's connection card and its "Check connection"; relay.call is the host
+// handing the extension's side panel its credential and a conversation's news.
 
 func (d *Daemon) registerRelay(s *server.Server) {
 	s.Handle("relay.open", d.relayOpen)
 	s.Handle("relay.status", d.relayStatus)
 	s.Handle("relay.notify", d.relayNotify)
+	s.Handle("relay.call", d.relayCall)
 }
 
 func errNoRelay() *wire.Error {
@@ -87,4 +89,21 @@ func (d *Daemon) relayNotify(ctx context.Context, c *server.Conn, params json.Ra
 		return nil, err
 	}
 	return map[string]any{"rtt_ms": rtt.Milliseconds()}, nil
+}
+
+func (d *Daemon) relayCall(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p struct {
+		Op   string         `json:"op"`
+		Args map[string]any `json:"args,omitempty"`
+	}
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	if d.Relay == nil {
+		return nil, errNoRelay()
+	}
+	if err := d.Manager.CallExtension(ctx, p.Op, p.Args); err != nil {
+		return nil, err
+	}
+	return map[string]any{}, nil
 }

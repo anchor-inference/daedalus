@@ -3,10 +3,22 @@
 // an await, misses the event that woke the worker. Each one waits for the relay to have read its
 // state back before acting.
 
-import { Relay } from "./relay.js";
+import { MENU_ASK, NOTICE_PREFIX, Relay } from "./relay.js";
 
 const relay = new Relay();
 const ready = relay.start();
+
+// The toolbar button and its shortcut (`_execute_action`, Alt+Shift+D unless the operator changed it
+// in chrome://extensions/shortcuts) open the side panel; there is no popup any more. Chrome opens a
+// panel only on the operator's own gesture, so nothing here ever opens one by itself.
+void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => undefined);
+
+// The window the operator was last in, known without waiting: a notification's click must open the
+// panel inside the gesture, and an await before `sidePanel.open` would spend it.
+let lastWindow: number | undefined;
+chrome.tabs.onActivated.addListener((info) => {
+  lastWindow = info.windowId;
+});
 
 function after<A extends unknown[]>(handler: (...args: A) => unknown): (...args: A) => void {
   return (...args: A) => {
@@ -27,23 +39,81 @@ chrome.contextMenus.onClicked.addListener(after((info, tab) => relay.onMenuClick
 void chrome.alarms.create("daedalus-wake", { periodInMinutes: 1 });
 chrome.alarms.onAlarm.addListener(after(() => relay.wake()));
 
+// Each open side panel holds a port named for its window, so the relay knows where the operator is
+// already looking and does not notify them about what that panel shows anyway.
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "panel" || !isExtensionPage(port.sender)) return;
+  let windowId: number | undefined;
+  port.onMessage.addListener((message) => {
+    if (typeof message?.window !== "number") return;
+    windowId = message.window;
+    relay.openPanels.add(message.window);
+  });
+  port.onDisconnect.addListener(() => {
+    if (windowId !== undefined) relay.openPanels.delete(windowId);
+  });
+});
+
+// "Ask Daedalus about this page" opens the panel on a new conversation for the page in front of
+// the operator: answered here and not through the relay, whose listeners wait for its state, because
+// the panel opens only inside the click.
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId !== MENU_ASK || tab?.id === undefined) return;
+  void chrome.sidePanel.open({ tabId: tab.id }).catch(() => undefined);
+  void chrome.storage.session.set({ panelShow: "new" });
+  void chrome.runtime.sendMessage({ kind: "panel-show", session: "new" }).catch(() => undefined);
+});
+
+chrome.notifications.onClicked.addListener((id) => {
+  if (!id.startsWith(`${NOTICE_PREFIX}:`)) return;
+  const [, session = "", tab = ""] = id.split(":");
+  const tabId = /^\d+$/.test(tab) ? Number(tab) : undefined;
+  // First, while the click still counts as the operator's gesture.
+  const target = tabId !== undefined ? { tabId } : lastWindow !== undefined ? { windowId: lastWindow } : null;
+  if (target) void chrome.sidePanel.open(target).catch(() => undefined);
+  void chrome.notifications.clear(id).catch(() => undefined);
+  void chrome.storage.session.set({ panelShow: session });
+  void chrome.runtime.sendMessage({ kind: "panel-show", session }).catch(() => undefined);
+  if (tabId !== undefined) after(() => relay.focusTab(tabId))();
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message.kind !== "string") return;
   if (message.kind === "daedalus-input") {
     after(() => relay.onContentInput(sender))();
     return;
   }
-  // Only the extension's own pages (the popup, or the same page opened in a tab) may drive the relay;
-  // a content script, whose sender is the page it runs in, is never trusted with more than input.
-  if (sender.id !== chrome.runtime.id || !sender.url?.startsWith(chrome.runtime.getURL(""))) return;
+  // Only the extension's own pages (the side panel, or the same page opened in a tab) may drive the
+  // relay; a content script, whose sender is the page it runs in, is never trusted with more than input.
+  if (!isExtensionPage(sender)) return;
   void ready
     .then(() => answer(message))
     .then(sendResponse, (error) => sendResponse({ error: String(error) }));
   return true;
 });
 
+function isExtensionPage(sender: chrome.runtime.MessageSender | undefined): boolean {
+  return !!sender && sender.id === chrome.runtime.id && !!sender.url?.startsWith(chrome.runtime.getURL(""));
+}
+
 async function answer(message: { kind: string; [key: string]: unknown }): Promise<unknown> {
   switch (message.kind) {
+    case "panel-state":
+      return { status: relay.status(), grant: await relay.grant() };
+    case "panel-tab":
+      return typeof message.tab === "number" ? relay.tabOwner(message.tab) : null;
+    case "panel-tabs":
+      return relay.sessionTabs(String(message.session ?? ""));
+    case "panel-adopt":
+      return relay.adoptTab(Number(message.tab), String(message.group ?? ""), String(message.session ?? ""), String(message.title ?? ""));
+    case "panel-focus":
+      return relay.focusTab(Number(message.tab));
+    case "panel-show": {
+      // The conversation a notification's click asked for, taken once by the panel that opened.
+      const shown = (await chrome.storage.session.get("panelShow")).panelShow;
+      await chrome.storage.session.remove("panelShow");
+      return typeof shown === "string" ? shown : null;
+    }
     case "get-status":
       return relay.status();
     case "check":

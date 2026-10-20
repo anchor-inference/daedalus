@@ -251,6 +251,8 @@ class FakeBrowserd:
         """The relays opened with ``relay.open`` (a WebSocket the host proxies), newest last."""
         self.relay_opens: list[dict[str, Any]] = []
         self.notified: list[dict[str, Any]] = []
+        self.extension_calls: list[dict[str, Any]] = []
+        """``relay.call``s the host made: the side panel's grant and news, as the extension got them."""
         self.legacy = False
         """A daemon older than the host: no ``page.find``, no point, no scroll to a text or sideways, and
         unknown parameters refused as the real daemon's strict decoding refuses them."""
@@ -465,7 +467,7 @@ class FakeBrowserd:
         self.channels[cid] = channel
         self.relays.append(channel)
         self.relay_opens.append(dict(params))
-        return {"channel": cid, "proto": 1}
+        return {"channel": cid, "proto": 2}
 
     async def relay_send(self, channel: ViewChannel, frame: dict[str, Any]) -> None:
         """One relay frame to the extension, as one piece (``browserd/internal/relay/pieces.go``)."""
@@ -616,6 +618,13 @@ class FakeBrowserd:
                 raise _Fail(1007, "Chrome is not connected", {"reason": "chrome_not_connected"})
             self.notified.append(dict(params))
             return {"rtt_ms": 12}
+        if method == "relay.call":
+            if params.get("op") not in ("panel.grant", "panel.event"):
+                raise _Fail(1002, "relay.call carries the side panel's operations only")
+            if not self.relay_status.get("connected"):
+                raise _Fail(1007, "Chrome is not connected", {"reason": "chrome_not_connected"})
+            self.extension_calls.append(dict(params))
+            return {}
         if method == "daemon.info":
             return {"version": "fake", "protocol": self.protocol, "instance": self.instance, "env": self.env, "os": "linux", "arch": "amd64", "pid": 1, "started_at": stamp(), "uptime_s": 1,
                     "chromium": {"path": "/fake/chrome", "version": "151.0.0.0", "kind": "bundled"}, "capabilities": {"sandbox": "ok", "headed": False, "screencast": True},

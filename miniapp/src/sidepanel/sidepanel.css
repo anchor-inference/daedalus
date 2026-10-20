@@ -1,0 +1,161 @@
+/* The extension's side panel (/app/panel): a narrow column inside Chrome, 320–500 px wide, below the
+   extension's own 32 px strip. The page is the column: a header, the conversation, what the agent is
+   doing, the card that waits for the operator, and the composer at the bottom. */
+
+html:has(.sidepanel), body:has(.sidepanel) { height: 100%; background: var(--surface-1); overflow: hidden; }
+body:has(.sidepanel) #root { height: 100%; min-height: 0; }
+
+.sidepanel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--surface-1);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: var(--fs-14);
+  line-height: var(--lh-ui);
+}
+
+.sp-outside, .sp-loading { align-items: center; justify-content: center; gap: var(--space-3); padding: var(--space-5); text-align: center; color: var(--fg-2); }
+
+.sp-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--ctl-h);
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--line);
+}
+.sp-head .grow { flex: 1; }
+.sp-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 70%;
+  height: var(--ctl-h-sm);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.sp-title:hover:not(:disabled) { background: var(--surface-2); }
+.sp-title:disabled { cursor: default; }
+.sp-head .icon-btn.on { background: var(--surface-3); color: var(--accent); }
+
+.sp-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--fg-3); }
+.sp-dot.running { background: var(--accent); }
+.sp-dot.waiting { background: var(--warn); }
+.sp-dot.failed { background: var(--bad); }
+
+.sp-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(var(--ctl-h) + var(--space-1));
+  left: var(--space-2);
+  right: var(--space-2);
+  max-height: 60%;
+  overflow: auto;
+  padding: var(--space-1);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-pop);
+}
+.sp-menu-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--row-h);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.sp-menu-row:hover, .sp-menu-row.on { background: var(--surface-3); }
+.sp-menu-row .grow { flex: 1; }
+.sp-badge { flex: none; font-size: var(--fs-11); color: var(--warn); }
+
+.sp-banner { flex: none; padding: var(--space-2) var(--space-3); font-size: var(--fs-12); border-bottom: 1px solid var(--line); }
+.sp-banner.warn { color: var(--warn); }
+
+.sp-body { flex: 1; min-height: 0; overflow: auto; padding: var(--space-2) var(--space-3); }
+.sp-body .timeline { max-width: none; }
+
+.sp-strip, .sp-give, .sp-card, .sp-shot {
+  flex: none;
+  margin: 0 var(--space-2) var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+.sp-strip { display: grid; gap: var(--space-2); }
+.sp-strip .livebar { width: 100%; }
+.sp-strip-line { font-size: var(--fs-12); }
+.sp-strip-warn { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: var(--fs-12); color: var(--bad); }
+.sp-strip-actions, .sp-card-actions, .sp-new-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.sp-strip-actions .btn, .sp-card-actions .btn { display: inline-flex; align-items: center; gap: var(--space-1); }
+
+.sp-give { display: flex; align-items: center; gap: var(--space-2); }
+.sp-give .truncate { flex: 1; min-width: 0; }
+
+.sp-card { display: grid; gap: var(--space-2); border-color: var(--warn); outline: none; }
+.sp-card:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.sp-card-title { font-weight: 600; }
+.sp-card-detail { font-size: var(--fs-12); overflow-wrap: anywhere; color: var(--fg-2); }
+.sp-card-foot { font-size: var(--fs-11); }
+.sp-card kbd { font-size: var(--fs-11); opacity: 0.7; }
+.sp-card .btn.acked { outline: 2px solid var(--accent); }
+
+.sp-shot { display: grid; gap: var(--space-2); }
+.sp-shot-frame { position: relative; cursor: crosshair; user-select: none; touch-action: none; }
+.sp-shot-frame img { display: block; width: 100%; height: auto; border-radius: var(--radius-sm); }
+.sp-shot-box { position: absolute; border: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); pointer-events: none; }
+.sp-shot-hint { font-size: var(--fs-12); }
+
+.sp-attach { display: flex; flex-wrap: wrap; gap: var(--space-1); padding-bottom: var(--space-1); }
+.sp-attach .chip { display: inline-flex; align-items: center; gap: var(--space-1); }
+
+.sp-new { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); }
+.sp-consent { padding: var(--space-2) var(--space-3); border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-2); font-size: var(--fs-13); }
+.sp-consent p { margin: var(--space-1) 0 0; color: var(--fg-2); }
+.sp-new-tab { display: flex; align-items: center; gap: var(--space-1); min-width: 0; font-size: var(--fs-12); color: var(--fg-2); }
+.sp-new-field {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: var(--space-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--fg);
+  font: inherit;
+}
+.sp-new-actions { justify-content: flex-end; }
+
+.sp-toast {
+  position: absolute;
+  z-index: 30;
+  left: var(--space-3);
+  right: var(--space-3);
+  bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-3);
+  color: var(--fg);
+  font-size: var(--fs-12);
+  box-shadow: var(--shadow-pop);
+}

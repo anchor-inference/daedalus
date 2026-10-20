@@ -624,7 +624,7 @@ func (f *Fake) do(ctx context.Context, op string, raw json.RawMessage) (any, err
 			return nil, err
 		}
 		return f.cookieNames(ctx, a.URL)
-	case relay.OpNotify:
+	case relay.OpNotify, relay.OpPanelGrant, relay.OpPanelEvent:
 		return map[string]any{}, nil
 	}
 	return nil, &relay.Error{Code: relay.ErrRefused, Message: "no operation " + op}

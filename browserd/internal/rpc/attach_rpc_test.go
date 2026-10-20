@@ -336,3 +336,44 @@ func TestAttachPopupsAndTheOperatorsTabs(t *testing.T) {
 		t.Fatal("the operator's own tab became a debuggee")
 	}
 }
+
+// The host's side panel reaches the extension through relay.call with its two operations only, and
+// a group opened for a conversation names it to the extension, which follows the active tab by it.
+func TestAttachPanelCalls(t *testing.T) {
+	attachOnly(t)
+	h := start(t, nil)
+	var o opened
+	h.must("browser.open", map[string]any{"group_id": "s-42-u", "profile": "user", "labels": map[string]any{"owner_kind": "session", "owner_id": "42",
+		"session_id": "42", "title": "Flights to Lisbon"}}, &o)
+	grant := map[string]any{"base": "https://daedalus.example.org", "token": "pnl_x", "expires": "2026-10-21T00:00:00Z"}
+	h.must("relay.call", map[string]any{"op": relay.OpPanelGrant, "args": grant}, nil)
+	h.must("relay.call", map[string]any{"op": relay.OpPanelEvent, "args": map[string]any{"session": "42", "kind": "done", "title": "Flights", "waiting": 0}}, nil)
+	for _, op := range []string{relay.OpTabCreate, relay.OpCookiesNames, relay.OpGroupClose, "nonsense"} {
+		if err := h.call("relay.call", map[string]any{"op": op, "args": map[string]any{"group": "s-42-u", "url": "https://example.com/"}}, nil); code(err) != protowire.CodeInvalidParams {
+			t.Errorf("relay.call %s: %v", op, err)
+		}
+	}
+	var ensured, granted, evented bool
+	for _, f := range h.fake.Seen() {
+		if f.T != "call" {
+			continue
+		}
+		switch f.Op {
+		case relay.OpWindowEnsure, relay.OpTabCreate:
+			var a relay.GroupArgs
+			_ = json.Unmarshal(f.Args, &a)
+			if a.Group == "s-42-u" {
+				ensured = ensured || (a.Session == "42" && a.Title == "Flights to Lisbon")
+			}
+		case relay.OpPanelGrant:
+			granted = strings.Contains(string(f.Args), "pnl_x")
+		case relay.OpPanelEvent:
+			evented = strings.Contains(string(f.Args), `"kind":"done"`)
+		case relay.OpCookiesNames, relay.OpGroupClose:
+			t.Errorf("relay.call carried %s", f.Op)
+		}
+	}
+	if !ensured || !granted || !evented {
+		t.Fatalf("ensured %v, granted %v, evented %v", ensured, granted, evented)
+	}
+}

@@ -170,9 +170,13 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
 
     @api.delete("/api/browser/user/devices/{device_id}")
     async def user_device_revoke(device_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        """Forget a paired Chrome: its token stops working, and a relay it holds now ends."""
+        """Forget a paired Chrome: its token stops working, its side panel's with it, and a relay it
+        holds now ends."""
         if not await pairing().revoke(device_id):
             raise NotFound("no such paired browser")
+        grants = app.extensions.get("browser_panel")
+        if grants is not None:
+            await grants.revoke(device_id)
         live = relays()
         if live is not None:
             await live.revoked(device_id)

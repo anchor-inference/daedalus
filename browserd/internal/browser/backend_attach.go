@@ -181,7 +181,7 @@ func (a *attach) openGroup(ctx context.Context, g *Group) error {
 		return err
 	}
 	var r relay.WindowEnsured
-	if err := s.Call(ctx, relay.OpWindowEnsure, relay.GroupArgs{Group: g.ID}, &r); err != nil {
+	if err := s.Call(ctx, relay.OpWindowEnsure, relay.GroupArgs{Group: g.ID, Session: g.Labels["session_id"], Title: g.Labels["title"]}, &r); err != nil {
 		return relayErr(err)
 	}
 	for _, tab := range r.Tabs {
@@ -222,7 +222,8 @@ func (a *attach) newTab(ctx context.Context, g *Group) (*Tab, error) {
 		return nil, err
 	}
 	var r relay.TabCreated
-	if err := s.Call(ctx, relay.OpTabCreate, relay.TabCreateArgs{Group: g.ID, URL: "about:blank"}, &r); err != nil {
+	args := relay.TabCreateArgs{Group: g.ID, URL: "about:blank", Session: g.Labels["session_id"], Title: g.Labels["title"]}
+	if err := s.Call(ctx, relay.OpTabCreate, args, &r); err != nil {
 		return nil, relayErr(err)
 	}
 	t, err := a.prepare(ctx, g, r.Tab, "", true)
@@ -477,6 +478,23 @@ func (m *Manager) Notify(ctx context.Context, text string) (time.Duration, error
 		return 0, relayErr(err)
 	}
 	return time.Since(begin), nil
+}
+
+// CallExtension runs one of the side panel's operations (relay.PanelOps) on the connected Chrome for
+// the host: its credential, and a conversation's news for a notification. Anything else is refused,
+// so the host's socket cannot reach the tabs around the daemon's own rules.
+func (m *Manager) CallExtension(ctx context.Context, op string, args map[string]any) error {
+	if !relay.PanelOps[op] {
+		return wire.Errorf(wire.CodeInvalidParams, "relay.call carries the side panel's operations only, not %q", op)
+	}
+	hub := m.deps.Relay
+	if hub == nil || hub.Current() == nil {
+		return errNotConnected()
+	}
+	if err := hub.Current().Call(ctx, op, args, nil); err != nil {
+		return relayErr(err)
+	}
+	return nil
 }
 
 // attachObserver hears what the operator changed in the agent's scope in Chrome.

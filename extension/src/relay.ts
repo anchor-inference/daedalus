@@ -1,6 +1,6 @@
 // The relay: one connection to a daemon, the tabs it may drive, and the proxy between the two. The
-// service worker builds one of these and feeds it Chrome's events; the popup asks it for its status
-// and its buttons. Everything that must survive the worker being stopped lives in storage (settings
+// service worker builds one of these and feeds it Chrome's events; the side panel asks it for its
+// status, its buttons and the conversation that owns a tab. Everything that must survive the worker being stopped lives in storage (settings
 // in `local`, scope in `session`); everything else is rebuilt on start.
 
 import { refusal } from "./allowlist.js";
@@ -16,6 +16,8 @@ import {
   type CdpFrame,
   type DaemonFrame,
   type ExtensionFrame,
+  type PanelEvent,
+  type PanelGrant,
   type TabInfo,
 } from "./protocol.js";
 import { Scope, type Group, type Member } from "./scope.js";
@@ -67,8 +69,13 @@ export type Status = {
   tabs: number;
   groups: { id: string; title: string; tabs: number; paused: boolean }[];
   notice?: { at: number; text: string };
+  // How many conversations using this Chrome wait for the operator, as the host last said.
+  waiting: number;
   now: number;
 };
+
+/** The conversation whose agent group holds a tab, as the side panel follows the active tab. */
+export type TabOwner = { group: string; session?: string; title: string; paused: boolean };
 
 export type CheckOutcome = { ok: true; ms: number } | { ok: false; reason: "timeout" | "offline" };
 
@@ -100,8 +107,15 @@ export const PAUSE_RENEW_MS = 2_000;
 const NOTICE_SHOW_MS = 10_000;
 const FLASH_MS = 3_000;
 const MENU_ROOT = "daedalus-grant";
+// "Ask Daedalus about this page": opens the side panel on a new conversation. The worker answers its
+// click itself, at once, because opening the panel needs the click's gesture.
+export const MENU_ASK = "daedalus-ask";
+const GRANT_KEY = "panelGrant";
+// A notification's id carries what its click needs, since the worker that shows it may be stopped
+// and started again before the click: the conversation and the agent's tab.
+export const NOTICE_PREFIX = "daedalus-panel";
 
-const COLOURS = { connected: "#1a7f37", idle: "#6e7781", error: "#cf222e", flash: "#1f6feb" };
+const COLOURS = { connected: "#1a7f37", idle: "#6e7781", error: "#cf222e", flash: "#1f6feb", waiting: "#bf8700" };
 
 type Pending = { resolve: (outcome: CheckOutcome) => void; sent: number; timer: ReturnType<typeof setTimeout> };
 
@@ -131,6 +145,9 @@ export class Relay {
   // Page.downloadWillBegin names a download by a DevTools guid; chrome.downloads knows it by its own
   // id. What the event said (the address and when) is how the one is found from the other.
   private downloads = new Map<string, { url: string; at: number }>();
+  private waiting = 0;
+  /** The windows whose side panel is open now; the worker keeps it from the panels' ports. */
+  readonly openPanels = new Set<number>();
 
   constructor(
     private readonly openTransportFor: TransportFactory = openTransport,
@@ -153,8 +170,9 @@ export class Relay {
       windowMode: stored.windowMode === "current" ? "current" : "own",
     };
     await this.scope.load();
-    const session = await chrome.storage.session.get("notice");
+    const session = await chrome.storage.session.get(["notice", "panelWaiting"]);
     this.notice = session.notice;
+    this.waiting = typeof session.panelWaiting === "number" ? session.panelWaiting : 0;
     // A worker that was stopped lost its debugger sessions with it only if the extension reloaded;
     // either way the attach below is what makes a remembered tab drivable again, and a tab that no
     // longer exists is forgotten.
@@ -322,12 +340,12 @@ export class Relay {
       unavailable: "unavailable",
       unauthorized: "pairing_expired",
     };
-    // The other Chrome's name is the end of the daemon's message ("…: <name>"); the popup shows it.
+    // The other Chrome's name is the end of the daemon's message ("…: <name>"); the panel shows it.
     const name = frame.reason === "another_relay" ? /:\s*(.+)$/.exec(frame.message ?? "")?.[1] : undefined;
     this.lost(reasons[frame.reason] ?? "lost", name);
   }
 
-  // ---- the popup's buttons ----
+  // ---- the side panel's buttons ----
 
   status(): Status {
     const groups = [...this.scope.groups.values()].map((group) => ({
@@ -353,6 +371,7 @@ export class Relay {
       tabs: this.scope.members.size,
       groups,
       notice: this.notice && this.now() - this.notice.at < NOTICE_SHOW_MS ? this.notice : undefined,
+      waiting: this.waiting,
       now: this.now(),
     };
   }
@@ -405,7 +424,7 @@ export class Relay {
     this.pauseTimer = setInterval(renew, PAUSE_RENEW_MS);
   }
 
-  /** The popup's "Stop and close": the group's tabs are closed and the daemon is told it is over. */
+  /** The panel's "Stop and close": the group's tabs are closed and the daemon is told it is over. */
   async stop(groupId: string): Promise<void> {
     const group = this.scope.groups.get(groupId);
     if (!group) return;
@@ -460,7 +479,11 @@ export class Relay {
   }
 
   private async applySettings(change: Partial<Settings>): Promise<void> {
+    const before = `${this.settings.mode} ${this.settings.server ?? ""}`;
     this.settings = { ...this.settings, ...change };
+    // The panel's credential is the installation's it came from: another one, or none, must not be
+    // framed with it.
+    if (`${this.settings.mode} ${this.settings.server ?? ""}` !== before) await this.forgetGrant();
     const { mode, server, deviceToken, profileName } = this.settings;
     await chrome.storage.local.set({ mode, profileName, ...(server ? { server } : {}), ...(deviceToken ? { deviceToken } : {}) });
     if (!deviceToken) await chrome.storage.local.remove("deviceToken");
@@ -635,7 +658,7 @@ export class Relay {
   private async call(op: string, args: Record<string, unknown>): Promise<unknown> {
     switch (op) {
       case "window.ensure": {
-        const group = this.scope.ensureGroup(requireString(args, "group"), optionalString(args, "title"));
+        const group = this.scope.ensureGroup(requireString(args, "group"), optionalString(args, "title"), optionalString(args, "session"));
         const window = await this.ensureWindow(group);
         await this.scope.save();
         // The tabs already in the group come with it, so a daemon that lost track of them (it
@@ -644,7 +667,7 @@ export class Relay {
         return { window, tabs };
       }
       case "tab.create":
-        return this.createTab(requireString(args, "group"), optionalString(args, "title"));
+        return this.createTab(requireString(args, "group"), optionalString(args, "title"), optionalString(args, "session"));
       case "tab.close": {
         const member = this.requireMember(args);
         // Forgotten before it is closed, so its removal, the answer to the daemon's own call, is not
@@ -695,6 +718,12 @@ export class Relay {
       case "notify":
         await this.showNotice(optionalString(args, "text") ?? "");
         return {};
+      case "panel.grant":
+        await this.takeGrant({ base: requireString(args, "base"), token: requireString(args, "token"), expires: optionalString(args, "expires") ?? "" });
+        return {};
+      case "panel.event":
+        await this.panelEvent(args);
+        return {};
       default:
         throw new CallError(RESULT_ERRORS.failed, `unknown operation ${op}`);
     }
@@ -730,8 +759,8 @@ export class Relay {
     return group.windowId;
   }
 
-  private async createTab(groupId: string, title?: string): Promise<unknown> {
-    const group = this.scope.ensureGroup(groupId, title);
+  private async createTab(groupId: string, title?: string, session?: string): Promise<unknown> {
+    const group = this.scope.ensureGroup(groupId, title, session);
     const windowId = await this.ensureWindow(group);
     // Always a blank page. The daemon navigates after it has attached and set up its guard, so that
     // the first page the agent opens is judged like every other; a URL given here would load before
@@ -798,6 +827,126 @@ export class Relay {
     if (tabs.length) await chrome.tabs.remove(tabs).catch(() => undefined);
     await this.refreshScopeViews();
     this.broadcast();
+  }
+
+  // ---- the side panel ----
+
+  /**
+   * Keeps the side panel's credential and the address the panel frames. On a server that address is
+   * the one this Chrome was paired with and already reaches the installation at, whatever the host
+   * calls itself (its public address may be a name this laptop does not use); natively it must be this
+   * computer. A grant for anywhere else would have the panel frame, and hand the token to, a page
+   * nobody chose.
+   */
+  private async takeGrant(grant: PanelGrant): Promise<void> {
+    let origin: string;
+    if (this.settings.mode === "server" && this.settings.server) {
+      origin = this.settings.server;
+    } else {
+      let base: URL;
+      try {
+        base = new URL(grant.base);
+      } catch {
+        throw new CallError(RESULT_ERRORS.refused, "the panel's address is not a URL");
+      }
+      const loopback = base.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(base.hostname);
+      if (this.settings.mode !== "native" || !loopback) throw new CallError(RESULT_ERRORS.refused, "the panel's address is not this computer");
+      origin = base.origin;
+    }
+    await chrome.storage.session.set({ [GRANT_KEY]: { base: origin, token: grant.token, expires: grant.expires } satisfies PanelGrant });
+    void chrome.runtime.sendMessage({ kind: "panel-grant" }).catch(() => undefined);
+  }
+
+  async grant(): Promise<PanelGrant | null> {
+    const stored = (await chrome.storage.session.get(GRANT_KEY))[GRANT_KEY] as PanelGrant | undefined;
+    if (!stored?.token) return null;
+    if (stored.expires && Date.parse(stored.expires) < this.now()) return null;
+    return stored;
+  }
+
+  private async forgetGrant(): Promise<void> {
+    await chrome.storage.session.remove(GRANT_KEY);
+    void chrome.runtime.sendMessage({ kind: "panel-grant" }).catch(() => undefined);
+  }
+
+  /** A conversation using this Chrome needs the operator, or finished: the badge, and a notification
+   *  unless the operator is looking at the panel of the window they are in. */
+  private async panelEvent(args: Record<string, unknown>): Promise<void> {
+    const event: PanelEvent = {
+      session: requireString(args, "session"),
+      kind: args.kind === "needs_you" ? "needs_you" : "done",
+      title: optionalString(args, "title") ?? "",
+      waiting: typeof args.waiting === "number" && args.waiting >= 0 ? Math.floor(args.waiting) : 0,
+      ...(typeof args.tab === "number" ? { tab: args.tab } : {}),
+    };
+    this.waiting = event.waiting;
+    await chrome.storage.session.set({ panelWaiting: this.waiting });
+    this.paintBadge();
+    void chrome.runtime.sendMessage({ kind: "panel-event", event }).catch(() => undefined);
+    const focused = await chrome.windows.getLastFocused({ windowTypes: ["normal"] }).catch(() => undefined);
+    if (focused?.focused && focused.id !== undefined && this.openPanels.has(focused.id)) return;
+    // Only a tab of the conversation's own group is named: a click must not focus a tab that the
+    // event made up.
+    const tab = event.tab !== undefined && this.scope.members.get(event.tab)?.group === this.scope.bySession(event.session)?.id ? event.tab : undefined;
+    const id = `${NOTICE_PREFIX}:${event.session}:${tab ?? ""}`;
+    await chrome.notifications
+      .create(id, {
+        type: "basic",
+        iconUrl: chrome.runtime.getURL("icon-128.png"),
+        title: event.title || t("group.untitled"),
+        message: event.kind === "needs_you" ? t("notify.needs_you") : t("notify.done"),
+        priority: event.kind === "needs_you" ? 2 : 0,
+      })
+      .catch(() => undefined);
+  }
+
+  /** The conversation that owns a tab, or null when the tab is none of the agent's. */
+  tabOwner(tabId: number): TabOwner | null {
+    const member = this.scope.members.get(tabId);
+    const group = member ? this.scope.groups.get(member.group) : undefined;
+    if (!group) return null;
+    return { group: group.id, ...(group.session ? { session: group.session } : {}), title: group.title, paused: group.paused };
+  }
+
+  /** The agent tabs of a conversation, for the panel's "show the agent's tab". */
+  sessionTabs(session: string): number[] {
+    const group = this.scope.bySession(session);
+    return group ? this.scope.tabsOf(group.id).map((member) => member.tab) : [];
+  }
+
+  /**
+   * The panel's "let it work on this tab": the operator's tab joins the conversation's group, in the
+   * window it is in. The group may not exist yet (a conversation the panel just started): it is made
+   * here, in that window, so the daemon's `window.ensure` finds the tab waiting instead of opening a
+   * window of its own around nothing.
+   */
+  async adoptTab(tabId: number, groupId: string, session: string, title: string): Promise<TabInfo> {
+    const tab = await chrome.tabs.get(tabId).catch(() => undefined);
+    if (!tab || tab.id === undefined) throw new CallError(RESULT_ERRORS.noTab, "the tab is gone");
+    if (/^(chrome|chrome-extension|chrome-untrusted|chrome-search|devtools|edge|about):/i.test(tab.url || tab.pendingUrl || "")) {
+      throw new CallError(RESULT_ERRORS.refused, "a browser page cannot be given to the agent");
+    }
+    const held = this.scope.members.get(tabId);
+    if (held) {
+      if (held.group !== groupId) throw new CallError(RESULT_ERRORS.refused, "the tab already works for another conversation");
+      return this.describe(held);
+    }
+    const group = this.scope.ensureGroup(groupId, title, session);
+    if (group.windowId === undefined) group.windowId = tab.windowId;
+    await this.groupTab(group, tabId);
+    await this.join(tab, group);
+    await this.scope.save();
+    const member = this.scope.members.get(tabId);
+    if (!member) throw new CallError(RESULT_ERRORS.failed, "the tab could not be given");
+    return this.describe(member);
+  }
+
+  /** The panel's "show the agent's tab" and "take over": that tab, in front, in a focused window. */
+  async focusTab(tabId: number): Promise<void> {
+    const member = this.scope.members.get(tabId);
+    if (!member) throw new CallError(RESULT_ERRORS.noTab, "the tab is not the agent's");
+    const tab = await chrome.tabs.update(member.tab, { active: true });
+    await chrome.windows.update(tab.windowId, { focused: true });
   }
 
   // ---- what the operator does to tabs ----
@@ -991,6 +1140,10 @@ export class Relay {
     if (this.now() < this.flashUntil) {
       color = COLOURS.flash;
       text = "✓";
+    } else if (this.phase === "connected" && this.waiting > 0) {
+      // A conversation waiting for the operator matters more than how many tabs the agent holds.
+      color = COLOURS.waiting;
+      text = String(this.waiting);
     } else if (this.phase === "connected") {
       color = COLOURS.connected;
       text = this.scope.members.size ? String(this.scope.members.size) : "";
@@ -1012,6 +1165,7 @@ export class Relay {
     await updateGuard([...this.scope.members.keys()]);
     await chrome.contextMenus.removeAll().catch(() => undefined);
     const groups = [...this.scope.groups.values()];
+    chrome.contextMenus.create({ id: MENU_ASK, title: t("menu.ask"), contexts: ["page", "selection"] });
     chrome.contextMenus.create({
       id: MENU_ROOT,
       title: groups.length ? t("menu.grant") : t("menu.grant_none"),

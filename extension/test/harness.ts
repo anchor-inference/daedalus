@@ -67,7 +67,7 @@ export async function harness(options: { language?: string; settings?: Record<st
       current().handlers.onFrame(structuredClone(frame));
       await flush();
     },
-    async welcome(proto = 1) {
+    async welcome(proto = 2) {
       await h.daemon({ t: "welcome", proto, daemon_version: "0.19.2", install_name: "Daedalus", install_kind: "native" });
     },
     /** Plays the daemon asking for a call and returns the extension's result frame. */

@@ -299,6 +299,9 @@ class Browsers:
         self._watch_seq = 0
         self.choices = UserChoices(db)
         """Which conversations the operator switched to their own Chrome, and the sites granted there."""
+        self.relay_hooks: list[Callable[[str, dict[str, Any]], Awaitable[None]]] = []
+        """Told when the operator's Chrome connects, goes or checks (``relay.connected``, ``relay.lost``,
+        ``relay.check``): the side panel's grant is handed over on a connection."""
 
     # -- lifecycle --------------------------------------------------------------------------
 
@@ -520,6 +523,11 @@ class Browsers:
             with contextlib.suppress(Exception):
                 await self.bus.publish("browser.user", {"kind": "switched", "profile_name": "", "reason": env}, session_id=session_id)
         return choice
+
+    async def call_extension(self, op: str, args: dict[str, Any]) -> None:
+        """One of the side panel's operations on the connected Chrome, through the user daemon, which
+        carries those two and refuses anything else (``browserd`` ``relay.call``)."""
+        await self._call(USER, "relay.call", {"op": op, "args": args}, what="telling your Chrome's side panel", timeout=10.0)
 
     async def user_status(self) -> dict[str, Any]:
         """The ``user`` daemon and the Chrome connected to it, as the app's card reads it: whether the
@@ -818,6 +826,9 @@ class Browsers:
         agent = actor != "operator"
         deadline = time.monotonic() + (self.config().agent_wait_seconds if wait is None else wait)
         params: dict[str, Any] = {"group_id": group, "profile": profile, "labels": owner.labels()}
+        if env == USER and owner.kind == "session":
+            # The tab group in the operator's Chrome says whose it is, and the side panel names it.
+            params["labels"]["title"] = (await self.owners.label(owner))[:80]
         if url:
             params["url"] = url
         if viewport:
@@ -1364,6 +1375,8 @@ class Browsers:
         daemon's report is read again for the card."""
         self._tasks.append(asyncio.create_task(self._refresh_info(link)))
         self._tasks = [t for t in self._tasks if not t.done()]
+        for hook in self.relay_hooks:
+            self._tasks.append(asyncio.create_task(hook(kind, data)))
         if self.bus is None:
             return
         payload: dict[str, Any] = {"kind": kind.removeprefix("relay."), "profile_name": str(data.get("profile_name") or "")[:80]}

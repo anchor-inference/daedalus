@@ -36,7 +36,7 @@ from daedalus.extensions import api_browser_user
 from daedalus.stores.database import Database
 from tests.support.fake_browserd import FakeBrowserd
 
-HELLO = {"t": "hello", "proto": 1, "ext_version": "0.1.0", "chrome_version": "141.0", "platform": "linux", "profile_id": "p1", "profile_name": "Work"}
+HELLO = {"t": "hello", "proto": 2, "ext_version": "0.1.0", "chrome_version": "141.0", "platform": "linux", "profile_id": "p1", "profile_name": "Work"}
 
 
 class FakeSocket:
@@ -196,7 +196,7 @@ async def test_a_paired_chrome_is_carried_to_the_daemon_both_ways_without_its_to
     assert daemon.relay_opens[-1]["transport"] == "server"
     hello = await daemon.relay_frame(relay)
     assert hello["t"] == "hello" and hello["profile_name"] == "Work" and "token" not in hello
-    await daemon.relay_send(relay, {"t": "welcome", "proto": 1, "daemon_version": "x", "install_name": "Daedalus", "install_kind": "server"})
+    await daemon.relay_send(relay, {"t": "welcome", "proto": 2, "daemon_version": "x", "install_name": "Daedalus", "install_kind": "server"})
     assert (await sock.frame())["t"] == "welcome"
     # A frame larger than one socket frame goes in pieces and arrives whole.
     big = {"t": "result", "id": 7, "ok": True, "value": {"data": "x" * (3 << 20)}}

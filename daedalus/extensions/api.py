@@ -48,6 +48,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
+from daedalus.browser.panel import EXTENSION_ID
 from daedalus.config import (
     NO_MODEL_MESSAGE,
     NOTIFICATION_CATEGORIES,
@@ -92,6 +93,7 @@ from daedalus.extensions import (
     api_meetings,
     api_memory,
     api_pages,
+    api_panel,
     api_plugins,
     api_project_environment,
     api_project_start,
@@ -445,15 +447,33 @@ class PresenceBody(BaseModel):
 
 
 class SpaFiles(StaticFiles):
-    """The built app with its screens in the URL: a path that is not a file is the app itself."""
+    """The built app with its screens in the URL: a path that is not a file is the app itself.
+
+    Every answer says who may frame it. ``/app/panel`` is the extension's side panel and is framed by
+    that extension alone, the one page that hands it a credential. The rest of the app had no such
+    header, so any site could frame it; a framer met only the signed-out app, because the owner's
+    cookie is ``SameSite=Lax``, but that held by accident rather than by intent. It is framed by itself
+    and by Telegram's web client, which shows a Mini App in a frame. ``X-Frame-Options`` cannot name
+    either list, so the policy alone says it; every browser the app supports reads it.
+    """
 
     async def get_response(self, path: str, scope: Any) -> Any:
         try:
-            return await super().get_response(path, scope)
+            response = await super().get_response(path, scope)
         except StarletteHTTPException as exc:
             if exc.status_code == 404 and "." not in path.rsplit("/", 1)[-1]:
-                return await super().get_response("index.html", scope)
-            raise
+                response = await super().get_response("index.html", scope)
+            else:
+                raise
+        response.headers["Content-Security-Policy"] = frame_policy(path)
+        return response
+
+
+def frame_policy(path: str) -> str:
+    """The ``frame-ancestors`` of one path under ``/app``."""
+    if path.strip("/") == "panel":
+        return f"frame-ancestors chrome-extension://{EXTENSION_ID}"
+    return "frame-ancestors 'self' https://web.telegram.org"
 
 
 class HireBody(BaseModel):
@@ -1481,10 +1501,14 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             return secret_cache["value"]
 
     async def revoke_sessions() -> None:
-        """Every browser session ends at once: a new secret signs the cookies from here on."""
+        """Every browser session ends at once: a new secret signs the cookies from here on, and the
+        side panels' tokens stop with them."""
         async with secret_lock:
             await app.db.kv_set("session_secret", secrets.token_urlsafe(32))
             secret_cache.clear()
+        grants = app.extensions.get("browser_panel")
+        if grants is not None:
+            await grants.revoke_all()
 
     def over_https(request: Request) -> bool:
         """Whether the browser reached us over TLS.
@@ -1512,6 +1536,12 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         return bool(value) and verify_session_cookie(await session_secret(), value or "") == settings.owner_user_id
 
     async def auth(request: Request) -> dict[str, Any]:
+        # The side panel's door checked its token and that this route is one the panel may reach, for
+        # a conversation in the operator's Chrome; a client cannot set the scope key itself, and a
+        # panel token presented anywhere else is never read here (``api_panel``).
+        panel = request.scope.get(api_panel.SCOPE_KEY)
+        if isinstance(panel, dict):
+            return {"user_id": settings.owner_user_id, "via": "panel", **panel}
         header = request.headers.get("authorization", "")
         if header.startswith("tma "):
             if not settings.telegram_bot_token:
@@ -6532,6 +6562,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if raw["companion"].get("background_preset") == preset_id:
             raw["companion"]["background_preset"] = ""
         return await _save_provider_config(type(app.config).model_validate(raw))
+
+    # The side panel's door goes last: it looks up the operator's handlers it forwards to.
+    api_panel.register(api, app, new_body=NewSessionBody)
 
     # -- static mini app ------------------------------------------------------------
 

@@ -128,7 +128,7 @@ func TestGoldenFrames(t *testing.T) {
 			t.Errorf("no golden frame of type %s", typ)
 		}
 	}
-	for _, op := range []string{OpWindowEnsure, OpTabCreate, OpTabClose, OpTabActivate, OpWindowBounds, OpDownloadsSearch, OpCookiesNames, OpGroupClose, OpNotify} {
+	for _, op := range []string{OpWindowEnsure, OpTabCreate, OpTabClose, OpTabActivate, OpWindowBounds, OpDownloadsSearch, OpCookiesNames, OpGroupClose, OpNotify, OpPanelGrant, OpPanelEvent} {
 		if !ops[op] {
 			t.Errorf("no golden call of %s", op)
 		}
@@ -161,6 +161,10 @@ func argsOf(t *testing.T, op string) any {
 		return &CookiesNamesArgs{}
 	case OpNotify:
 		return &NotifyArgs{}
+	case OpPanelGrant:
+		return &PanelGrantArgs{}
+	case OpPanelEvent:
+		return &PanelEventArgs{}
 	}
 	t.Fatalf("a call of %q, which is no operation", op)
 	return nil
@@ -178,7 +182,7 @@ func valueOf(op string) any {
 		return &Download{}
 	case OpCookiesNames:
 		return &CookieNames{}
-	case OpNotify:
+	case OpNotify, OpPanelGrant, OpPanelEvent:
 		return &struct{}{}
 	}
 	return nil // a DevTools method's value, Chrome's own

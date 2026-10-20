@@ -17,8 +17,9 @@ import (
 
 // Proto is the version of the relay protocol, sent in hello and welcome. It changes only when a
 // frame changes meaning; on a mismatch both sides tell the operator which one to update rather
-// than half understanding each other.
-const Proto = 1
+// than half understanding each other. 2 names the conversation that owns each group, which the
+// extension's side panel follows the active tab by, and adds the side panel's two calls.
+const Proto = 2
 
 // The frame types, extension to daemon.
 const (
@@ -59,7 +60,16 @@ const (
 	OpCookiesNames    = "cookies.names"
 	OpGroupClose      = "group.close"
 	OpNotify          = "notify"
+	// The side panel's: the host hands the extension the panel's credential, and tells it that a
+	// conversation in this Chrome needs the operator or finished. Only the host asks for these,
+	// through relay.call; the daemon has nothing of its own to say to the panel.
+	OpPanelGrant = "panel.grant"
+	OpPanelEvent = "panel.event"
 )
+
+// PanelOps are the operations relay.call carries for the host, and nothing else: the host must not
+// be able to drive tabs past the daemon's own rules by naming tab.create or cookies.names itself.
+var PanelOps = map[string]bool{OpPanelGrant: true, OpPanelEvent: true}
 
 // The ops of a tabs frame: what the operator changed about the agent's scope.
 const (
@@ -236,9 +246,13 @@ type Bye struct {
 
 // The arguments and answers of the call operations.
 
-// GroupArgs names a daemon group: window.ensure, group.close.
+// GroupArgs names a daemon group: window.ensure, group.close. Session is the host conversation the
+// group works for and Title its name when the host gave them (window.ensure only): the side panel
+// shows the conversation that owns the active tab, and the tab group's title says whose it is.
 type GroupArgs struct {
-	Group string `json:"group"`
+	Group   string `json:"group"`
+	Session string `json:"session,omitempty"`
+	Title   string `json:"title,omitempty"`
 }
 
 // WindowEnsured is window.ensure's answer: the agent's own window for the group, and the tabs its
@@ -251,8 +265,10 @@ type WindowEnsured struct {
 
 // TabCreateArgs is tab.create's; its answer is TabCreated.
 type TabCreateArgs struct {
-	Group string `json:"group"`
-	URL   string `json:"url"`
+	Group   string `json:"group"`
+	URL     string `json:"url"`
+	Session string `json:"session,omitempty"`
+	Title   string `json:"title,omitempty"`
 }
 
 type TabCreated struct {
@@ -325,4 +341,25 @@ type CookieNames struct {
 // NotifyArgs is notify's: a short line the popup shows, with a flash of the badge.
 type NotifyArgs struct {
 	Text string `json:"text"`
+}
+
+// PanelGrantArgs is panel.grant's: the address of the host's app the panel frames (Base), the
+// panel's credential, and when it lapses if unused (Expires, RFC 3339). The extension keeps it in
+// session storage and gives it to the panel's frame alone.
+type PanelGrantArgs struct {
+	Base    string `json:"base"`
+	Token   string `json:"token"`
+	Expires string `json:"expires"`
+}
+
+// PanelEventArgs is panel.event's: a conversation using this Chrome needs the operator (Kind
+// "needs_you") or finished its turn ("done"), and how many conversations wait for the operator now,
+// for the toolbar badge. Tab is the agent's tab of that conversation a notification's click shows,
+// when it has one.
+type PanelEventArgs struct {
+	Session string `json:"session"`
+	Kind    string `json:"kind"`
+	Title   string `json:"title"`
+	Waiting int    `json:"waiting"`
+	Tab     int    `json:"tab,omitempty"`
 }

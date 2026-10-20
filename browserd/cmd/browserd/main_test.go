@@ -174,7 +174,7 @@ func TestUserDaemonAndBridge(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer bridge.Process.Kill()
-	hello := []byte(`{"t":"hello","proto":1,"ext_version":"1.0.0","chrome_version":"141.0","platform":"linux","profile_id":"p","profile_name":"Home Chrome"}`)
+	hello := []byte(`{"t":"hello","proto":2,"ext_version":"1.0.0","chrome_version":"141.0","platform":"linux","profile_id":"p","profile_name":"Home Chrome"}`)
 	head := make([]byte, 4)
 	binary.LittleEndian.PutUint32(head, uint32(len(hello)))
 	if _, err := stdin.Write(append(head, hello...)); err != nil {

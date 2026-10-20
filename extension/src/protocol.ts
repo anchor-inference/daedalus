@@ -2,9 +2,10 @@
 // is one JSON object with `t`; the daemon's side is in `browserd/internal/relay`, and both sides test
 // against the same golden frames. A field added on one side and not the other is a mismatch the
 // golden file catches; a change in meaning bumps `PROTO`, and both sides then show "update" instead
-// of misbehaving.
+// of misbehaving. 2 names the conversation that owns each group (`session` on `window.ensure` and
+// `tab.create`) and adds the side panel's two calls.
 
-export const PROTO = 1;
+export const PROTO = 2;
 
 // The native-messaging host the desktop launcher registers for Chrome. It is the reverse-domain name
 // Chrome requires (lowercase letters, digits, dots and underscores), and it names what it starts:
@@ -71,7 +72,7 @@ export type DaemonFrame =
 
 // Why a relay ends. The daemon sends the first six, the bridge the next two when it never reached a
 // daemon that takes a relay, and the host the last on the server transport when the device token is
-// unknown, expired or revoked. `message` is for a log; the popup shows its own words for each reason.
+// unknown, expired or revoked. `message` is for a log; the side panel shows its own words for each reason.
 // `proto` on a `proto` bye is the version the daemon speaks.
 export const BYE_REASONS = [
   "shutdown",
@@ -110,7 +111,17 @@ export const CALL_OPS = [
   "cookies.names",
   "group.close",
   "notify",
+  "panel.grant",
+  "panel.event",
 ] as const;
+
+// The side panel's credential, as `panel.grant` hands it over: the host app's address the panel
+// frames, the token, and when it lapses if unused. Kept in `chrome.storage.session` only, so it
+// dies with the browser and never reaches the disk; given to the panel's frame alone.
+export type PanelGrant = { base: string; token: string; expires: string };
+
+// A conversation using this Chrome needs the operator, or finished: a notification and the badge.
+export type PanelEvent = { session: string; kind: "needs_you" | "done"; title: string; waiting: number; tab?: number };
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);

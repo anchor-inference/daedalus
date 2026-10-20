@@ -59,7 +59,7 @@ The frames, their fields and their directions are fixed by the specification sha
 extension keeps a byte-for-byte copy in `extension/test/frames.json`, and a test fails when the two
 differ. What the extension does with them, beyond the bare list:
 
-- **`bye`** ends the relay and the popup explains its `reason` in its own words: `shutdown`,
+- **`bye`** ends the relay and the side panel explains its `reason` in its own words: `shutdown`,
   `replaced`, `another_relay` (the other Chrome's name is the end of `message`), `proto` (with the
   daemon's `proto`: lower than the extension's means "update Daedalus", higher "update the
   extension"), `lost`, `bad_frame`; from the bridge `not_running` and `unavailable` (a daemon that
@@ -109,7 +109,7 @@ agent's. A tab is in scope when the extension holds it as a member, never becaus
 - **The agent's own window.** By default the first tab of a group opens in a new, unfocused window
   of the same profile (the same sign-ins), because a background tab in the operator's window does not
   paint and a screenshot of it waits until it times out. The window's own blank tab is closed when
-  the agent's first tab arrives. A popup setting lets the agent work in a tab of the operator's
+  the agent's first tab arrives. A setting of the side panel lets the agent work in a tab of the operator's
   current window instead, opened in the background.
 - **Granting and revoking.** Dragging a tab into an agent group, or the page's context menu "Let
   Daedalus use this tab", gives it (`joined`); dragging it out takes it back (`left`); closing the
@@ -139,11 +139,17 @@ requests to loopback, private, link-local, shared and metadata addresses written
 
 ## Telling the operator
 
-- **The badge**: green with the number of agent tabs when connected, grey when idle or connecting,
-  red with `!` on an error, blue with `✓` for three seconds when the app ran its own check.
-- **The popup**: the transport, the installation's name, the daemon's version, the last heartbeat,
-  the agent's tabs and groups, errors in plain words, "Check connection" (`check` → `check_ok` within
-  5 s), and per group "Pause", "Give back" and "Stop and close".
+- **The badge**: amber with the number of conversations waiting for the operator, else green with
+  the number of agent tabs when connected, grey when idle or connecting, red with `!` on an error,
+  blue with `✓` for three seconds when the app ran its own check.
+- **The side panel's settings** (the toolbar button opened a popup with these before the panel
+  existed): the transport, the installation's name, the daemon's version, the last heartbeat, the
+  agent's tabs and groups, errors in plain words, "Check connection" (`check` → `check_ok` within
+  5 s), per group "Pause", "Give back" and "Stop and close", pairing, the browser's name and the
+  window mode.
+- **Notifications**: a conversation in this Chrome that waits for the operator or finished, unless
+  the operator is looking at the panel of the window they are in; a click opens the panel on it and
+  shows the agent's tab.
 - **The border**: a thin frame drawn in a closed shadow root of a `<daedalus-agent-border>` element
   with pointer events off, hidden for the length of a `Page.captureScreenshot`.
 - **The operator's own input** in an agent tab (trusted pointer, key and wheel events) is reported as
@@ -152,3 +158,38 @@ requests to loopback, private, link-local, shared and metadata addresses written
 
 Every word is in `extension/src/i18n.ts` in Russian and English, chosen by Chrome's interface
 language; a test fails on a sentence written anywhere else.
+
+## The side panel
+
+The toolbar button and its shortcut (Alt+Shift+D, changeable at `chrome://extensions/shortcuts`)
+open the side panel; Chrome opens a panel only on the operator's gesture, so it never opens by itself.
+There is one panel per window, and it follows that window's active tab. The page's context menu has
+"Ask Daedalus about this page", which opens the panel on a new conversation for that page.
+
+The panel page (`panel.html`, an extension page, so privileged) draws a 32 px strip with the
+connection's state and the settings above, and frames the host's own app at `/app/panel`. The app is
+framed rather than bundled so that it always speaks the API of the server it talks to: the extension
+on a laptop is updated on its own schedule. It shows the conversations that use this Chrome and
+nothing else, starts new ones (born in this Chrome, the consent summary shown once, the tab in front
+of the operator given to the new conversation's group before its first message), and answers the
+agent's pending actions inline (Enter allows once, Ctrl+Enter allows the like for the conversation,
+Esc refuses).
+
+- **The credential**: a panel token the host mints for the connected Chrome and hands over the relay
+  (`panel.grant`), kept in `chrome.storage.session`, passed to the frame in the handshake only, never
+  in an address. The host keeps its SHA-256, lets it lapse after twelve hours unused, and revokes it
+  when the device is unpaired or every browser session is ended. It opens `/api/panel/*` alone: the
+  conversations switched to the operator's Chrome, and nothing else of the installation (a
+  conversation outside them answers 404, every other route 401).
+- **Framing**: `/app/panel` answers `frame-ancestors chrome-extension://lkhhklicnjlplokpadpccndipomikoaj`;
+  the rest of the app is framed only by itself and Telegram's web client.
+- **The bridge** (`src/bridge.ts`, and `miniapp/src/sidepanel/bridge.ts` on the app's side): the frame
+  posts `DAEDALUS_PANEL_READY {proto, nonce}` to the extension's origin; the panel accepts it only from
+  the frame's own window and the host's origin and answers `DAEDALUS_PANEL_HELLO` with the nonce, the
+  credential and a `MessageChannel` port, addressed to the host's origin. Each READY starts a new
+  generation and closes the old port, so a superseded load's late request is dropped. On the port the
+  frame may ask for the current tab, a picture of the visible tab, the page's text, the selection,
+  giving the active tab to a conversation, showing a conversation's tab, pausing its group, opening
+  the app, and a newer credential. The reads of the page and giving a tab need the operator's click
+  in the panel a moment before (user activation spreads from the frame to the panel page), so a frame
+  that was taken over cannot photograph or read a page silently.

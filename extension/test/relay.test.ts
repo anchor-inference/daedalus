@@ -17,7 +17,7 @@ describe("connecting", () => {
     expect(h.current().config).toEqual({ kind: "native" });
     const [hello] = h.take();
     expect(shape(hello)).toEqual(shape(goldenFrame("hello")));
-    expect(hello).toMatchObject({ t: "hello", proto: 1, ext_version: "0.1.0", platform: "linux", profile_name: "Chrome" });
+    expect(hello).toMatchObject({ t: "hello", proto: 2, ext_version: "0.1.0", platform: "linux", profile_name: "Chrome" });
     expect(hello.profile_id).toMatch(/^[0-9a-f-]{36}$/);
     // The profile id is kept, so the same Chrome is the same Chrome after a restart.
     expect((await h.fake.chrome.storage.local.get("profileId")).profileId).toBe(hello.profile_id);
@@ -64,8 +64,8 @@ describe("connecting", () => {
   });
 
   it.each([
-    [2, "version_extension"],
-    [0, "version_daemon"],
+    [3, "version_extension"],
+    [1, "version_daemon"],
   ])("refuses a daemon speaking protocol %i: %s", async (proto, error) => {
     const h = await harness();
     await h.welcome(proto);
@@ -327,7 +327,7 @@ describe("the agent's tabs", () => {
   it("gives a tab through the context menu, in the operator's language", async () => {
     const h = await harness({ language: "ru" });
     await h.withAgentTab();
-    expect(h.fake.menus.map((m) => m.title)).toEqual(["Разрешить Daedalus эту вкладку", "Отдать: Flights to Lisbon"]);
+    expect(h.fake.menus.map((m) => m.title)).toEqual(["Спросить Daedalus об этой странице", "Разрешить Daedalus эту вкладку", "Отдать: Flights to Lisbon"]);
     const own = h.fake.addTab(h.fake.operatorWindow, "https://example.org/");
     h.take();
     h.fake.events.menuClicked.emit({ menuItemId: "daedalus-grant:g1" }, { ...own });
@@ -341,7 +341,8 @@ describe("the agent's tabs", () => {
     await h.welcome();
     await h.call("tab.create", { group: "g1" });
     await h.call("group.close", { group: "g1" });
-    expect(h.fake.menus).toEqual([expect.objectContaining({ id: "daedalus-grant", enabled: false })]);
+    // "Ask Daedalus about this page" stays: it starts a conversation, which needs no agent at work.
+    expect(h.fake.menus).toEqual([expect.objectContaining({ id: "daedalus-ask" }), expect.objectContaining({ id: "daedalus-grant", enabled: false })]);
   });
 
   it("reports a tab the operator closed, and the group when its last tab goes", async () => {
