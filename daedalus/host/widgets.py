@@ -20,6 +20,7 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
+from daedalus.slugs import page_slug_from
 from daedalus.stores.database import Database
 
 TOOL_NAME = "Widget"
@@ -164,10 +165,9 @@ class WidgetStorage:
 
 
 def page_slug(title: str, taken: set[str]) -> str:
-    """A slug for the page a widget becomes: the title's Latin letters and digits, or ``widget``,
-    numbered past the slugs already taken."""
-    words = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:48].strip("-")
-    base = words if words and words[0].isalnum() else "widget"
+    """A slug for the page a widget becomes: the title's letters (of any script) and digits, or
+    ``widget``, numbered past the slugs already taken."""
+    base = page_slug_from(title) or "widget"
     slug, n = base, 2
     while slug in taken:
         slug = f"{base}-{n}"

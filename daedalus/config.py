@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from daedalus.model_capabilities import known_image_input
+from daedalus.slugs import is_page_slug
 
 logger = logging.getLogger(__name__)
 
@@ -2081,8 +2082,18 @@ class BrowserConfig(BaseModel):
     classified as a ref's would be, so a sensitive one is still asked about."""
 
 
-NAV_ID = re.compile(r"^(page:)?[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
-"""A navigation item: a built-in screen's name (``inbox``) or a page's slug (``page:dosing``)."""
+NAV_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
+"""A built-in screen's name (``inbox``); a page is ``page:`` and its slug, in any script."""
+
+
+def _nav_id(item: str) -> bool:
+    """Whether ``item`` names a navigation destination: a screen, or ``page:<slug>`` (``page:dosing``).
+
+    A page id the older, Latin-only rule accepted still passes, so a saved navigation never stops
+    the settings from loading."""
+    if item.startswith("page:") and is_page_slug(item[5:]):
+        return True
+    return bool(NAV_ID.match(item[5:] if item.startswith("page:") else item))
 NAV_ICON = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
 NAV_LIST_MAX = 200
 
@@ -2116,7 +2127,7 @@ class NavigationConfig(BaseModel):
         seen: list[str] = []
         for item in value:
             item = item.strip()
-            if not NAV_ID.match(item):
+            if not _nav_id(item):
                 raise ValueError(f"{item!r} is not a screen name or page:<slug>")
             if item not in seen:
                 seen.append(item)
@@ -2128,7 +2139,7 @@ class NavigationConfig(BaseModel):
         if len(value) > NAV_LIST_MAX:
             raise ValueError(f"at most {NAV_LIST_MAX} icons")
         for key, name in value.items():
-            if not NAV_ID.match(key):
+            if not _nav_id(key):
                 raise ValueError(f"{key!r} is not a screen name or page:<slug>")
             if not NAV_ICON.match(name):
                 raise ValueError(f"{name!r} is not an icon name")

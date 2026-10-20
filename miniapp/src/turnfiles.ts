@@ -134,6 +134,15 @@ export function turnFiles(items: readonly Activity[], workspace = "", folders: r
 /** The cards drawn before "+N more": enough to see what came, few enough not to bury the answer. */
 export const SENT_VISIBLE = 3;
 
+/**
+ * A page's slug as the host defines it (daedalus/slugs.py): lower-case letters of any script, digits,
+ * combining marks and hyphens, starting with a letter or digit. A Latin-only test dropped the card of
+ * every page whose title was Russian once the host kept those letters.
+ */
+export function isPageSlug(slug: string): boolean {
+  return /^[\p{Ll}\p{Lm}\p{Lo}\p{Nd}][\p{Ll}\p{Lm}\p{Lo}\p{Nd}\p{Mn}\p{Mc}-]{0,62}$/u.test(slug) && slug === slug.normalize("NFC");
+}
+
 /** A page the turn showed the operator (PageShow): drawn as a card that opens it. */
 export type ShownPage = { callId: string; slug: string; draft: boolean };
 
@@ -147,7 +156,7 @@ export function turnPages(items: readonly Activity[]): ShownPage[] {
   for (const a of items) {
     if (a.kind !== "tool" || a.name !== "PageShow" || a.running || a.error) continue;
     const slug = typeof a.args.slug === "string" ? a.args.slug.trim() : "";
-    if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(slug)) continue;
+    if (!isPageSlug(slug)) continue;
     shown.delete(slug);
     shown.set(slug, { callId: a.id, slug, draft: a.args.draft === true });
   }

@@ -25,6 +25,7 @@ import os
 import re
 import secrets
 import shutil
+import unicodedata
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -32,15 +33,13 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal
 
 from daedalus.config import PagesConfig
+from daedalus.slugs import is_page_slug
 
 if TYPE_CHECKING:
     from daedalus.stores.database import Database
 
 Change = Literal["created", "updated", "draft", "published", "rolled_back", "removed"]
 
-SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
-"""Lower-case letters, digits and hyphens, starting with a letter or digit. A leading underscore is
-reserved for the host's own paths beside the pages (``/pages/_kit/``)."""
 
 KINDS = ("static", "service", "link")
 Kind = Literal["static", "service", "link"]
@@ -71,8 +70,8 @@ def _now() -> str:
 
 
 def check_slug(slug: str) -> str:
-    if not isinstance(slug, str) or not SLUG_RE.fullmatch(slug):
-        raise PageError("a page's slug is 1 to 63 lower-case letters, digits and hyphens, starting with a letter or digit")
+    if not is_page_slug(slug):
+        raise PageError("a page's slug is 1 to 63 lower-case letters (of any script), digits and hyphens, starting with a letter or digit")
     return slug
 
 
@@ -226,10 +225,12 @@ class PageStore:
                 return []
             out = []
             for entry in sorted(self.root.iterdir()):
-                if not entry.is_dir() or not SLUG_RE.fullmatch(entry.name):
+                # macOS's older filesystems hand names back decomposed; the slug is the composed form.
+                slug = unicodedata.normalize("NFC", entry.name)
+                if not entry.is_dir() or not is_page_slug(slug):
                     continue
                 try:
-                    manifest = self._read(entry.name)
+                    manifest = self._read(slug)
                 except PageError:
                     continue  # one broken page must not hide the others
                 if manifest is not None:

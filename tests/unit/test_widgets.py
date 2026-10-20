@@ -3,6 +3,7 @@ what Telegram and a shared link say in its place."""
 
 from __future__ import annotations
 
+import unicodedata
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -26,6 +27,7 @@ from daedalus.host.widgets import (
     page_document,
     page_slug,
 )
+from daedalus.slugs import is_page_slug
 from daedalus.stores.database import Database
 from daedalus.tools import widgets as widget_tools
 from daedalus.transport.telegram.render import RunRenderer, RunView
@@ -196,8 +198,28 @@ def test_the_shim_goes_first_in_the_widgets_own_head() -> None:
 
 def test_a_page_slug_comes_from_the_title_and_steps_past_the_taken_ones() -> None:
     assert page_slug("Loan calculator", set()) == "loan-calculator"
-    assert page_slug("Калькулятор", set()) == "widget"
-    assert page_slug("Калькулятор", {"widget", "widget-2"}) == "widget-3"
+    # Letters of any script are kept: a Russian title used to become "widget", "widget-2"…
+    assert page_slug("Калькулятор ипотеки", set()) == "калькулятор-ипотеки"
+    assert page_slug("Калькулятор", {"калькулятор", "калькулятор-2"}) == "калькулятор-3"
+    # Decomposed input (a name typed on macOS) gives the same slug as composed.
+    assert page_slug(unicodedata.normalize("NFD", "Мой отчёт"), set()) == "мой-отчёт"
+    assert page_slug("../etc/passwd", set()) == "etc-passwd"
+    assert page_slug("!!!", set()) == "widget"
+    for title in ("Калькулятор ипотеки", "Ünïcödé — ok", "नमस्ते दुनिया", "İstanbul"):
+        assert is_page_slug(page_slug(title, set())), title
+
+
+def test_the_page_store_and_the_navigation_take_a_slug_in_any_script(tmp_path: Path) -> None:
+    from daedalus.config import NavigationConfig
+    from daedalus.host.pages import PageError, check_slug
+
+    assert check_slug("калькулятор") == "калькулятор"
+    for bad in ("Калькулятор", "_kit", "a/b", "a.b", "a b", "", "x" * 64, unicodedata.normalize("NFD", "отчёт")):
+        with pytest.raises(PageError):
+            check_slug(bad)
+    assert NavigationConfig(rail=["page:калькулятор", "inbox"]).rail == ["page:калькулятор", "inbox"]
+    with pytest.raises(ValueError):
+        NavigationConfig(rail=["page:a/b"])
 
 
 # -- where a widget cannot run ------------------------------------------------------------------
