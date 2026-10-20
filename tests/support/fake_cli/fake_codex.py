@@ -545,6 +545,9 @@ class AppServer:
                 await pause(0.5)
                 item.update(status="completed", aggregatedOutput=f"line {n}", exitCode=0)
                 await self.item(thread, turn, item, started=False)
+                # As Codex does after every model call of a turn, not only at its end.
+                spent = {"inputTokens": 1200 * n, "cachedInputTokens": 800 * n, "outputTokens": 90 * n, "reasoningOutputTokens": 10 * n, "totalTokens": 1290 * n}
+                await self.notify(thread, "thread/tokenUsage/updated", {"threadId": thread.id, "turnId": turn["id"], "tokenUsage": {"total": spent, "last": {"inputTokens": 1200, "cachedInputTokens": 800, "outputTokens": 90, "reasoningOutputTokens": 10, "totalTokens": 1290}, "modelContextWindow": 258400}})
                 await self.take_steers(thread, turn)
             await self.item(thread, turn, {"type": "agentMessage", "text": f"Worked through {n} files."})
         elif kind == "silent":

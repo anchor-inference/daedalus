@@ -445,6 +445,8 @@ class CliSession:
     the same call made again takes its answer once, as a policy grant is taken by a session."""
     outage_streak: int = 0
     """Turns in a row the CLI's provider or account refused; a completed turn clears it."""
+    usage: UsageSnapshot | None = None
+    """The spend last reported for the session, live or from its transcript."""
     resume: asyncio.Task[None] | None = None
     """The wait after such a refusal, at whose end the turn is driven again."""
 
@@ -877,6 +879,11 @@ class CliStaffRuntime:
                 if event.kind is EventKind.FILES_EDITED:
                     await self._edited(session, event)
                     continue
+                if event.kind is EventKind.USAGE:
+                    # A reading, never a status: through the state machine it would refresh the
+                    # signal clock and take a finished turn for a working one.
+                    await self._live_usage(session, event)
+                    continue
                 await self._apply(session, event)
                 if event.payload.get("edited"):
                     # In line, not spawned: the turn's end that follows purges the member's leases,
@@ -1165,7 +1172,33 @@ class CliStaffRuntime:
             logger.info("the usage of %s could not be read", session.staff_session_id, exc_info=True)
             return
         if snapshot is not None:
-            await self.ingress.usage(live, snapshot)
+            session.usage = snapshot.over(session.usage or UsageSnapshot.from_view(live.session.usage))
+            await self.ingress.usage(live, session.usage)
+
+    async def _live_usage(self, session: CliSession, event: StaffEvent) -> None:
+        """A reading the CLI sent while it worked (``EventKind.USAGE``), laid over what is known, so a
+        reading that says only part — a rate-limit update has no token counts — keeps the rest."""
+        live = await self.lookup(session.staff_session_id)
+        if live is None:
+            return
+        said = event.payload
+        windows = tuple((int(w[0]), float(w[1])) for w in said.get("windows") or [] if isinstance(w, list | tuple) and len(w) == 2)
+        reading = UsageSnapshot(
+            input_tokens=int(said.get("input_tokens") or 0),
+            output_tokens=int(said.get("output_tokens") or 0),
+            cost_usd=None,
+            window_used_pct=None,
+            source="subscription",
+            context_tokens=int(said.get("context_tokens") or 0) or None,
+            context_window=int(said.get("context_window") or 0) or None,
+            windows=windows,
+            at=event.at,
+        )
+        session.usage = reading.over(session.usage or UsageSnapshot.from_view(live.session.usage))
+        try:
+            await self.ingress.usage(live, session.usage)
+        except Exception:  # noqa: BLE001 — a reading that cannot be kept must not stop the CLI's events
+            logger.warning("the live usage of %s could not be kept", session.staff_session_id, exc_info=True)
 
     async def _allow_team_tool(self, session: CliSession, event: StaffEvent) -> None:
         """Answer a CLI's permission request for a team tool with "allow". Should the CLI not take the

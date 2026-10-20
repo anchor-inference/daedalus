@@ -722,3 +722,48 @@ def test_an_error_info_given_as_an_object_is_named_by_its_key_and_is_no_outage()
     adapter._notification(overloaded, "turn/completed", {"threadId": "t1", "turn": {"id": "u2", "status": "failed", "error": {"message": "busy", "codexErrorInfo": "serverOverloaded"}}})
     [busy] = [e for e in drain(overloaded) if e.kind is EventKind.TURN_FAILED]
     assert busy.payload["outage"] is True and "resets_at" not in busy.payload
+
+
+# -- live usage -------------------------------------------------------------------------------------
+
+
+def test_token_counts_and_rate_limits_are_reported_as_they_arrive() -> None:
+    adapter = CodexAdapter()
+    state = _Launch(thread_id="t1")
+    total = {"totalTokens": 5300, "inputTokens": 5000, "cachedInputTokens": 3000, "outputTokens": 300, "reasoningOutputTokens": 40}
+    last = {"totalTokens": 2100, "inputTokens": 2000, "cachedInputTokens": 1500, "outputTokens": 100, "reasoningOutputTokens": 10}
+    # Between turns as well: a reading is not work, and it is never taken for it.
+    adapter._notification(state, "account/rateLimits/updated", {"rateLimits": {"primary": {"usedPercent": 12, "windowDurationMins": 300, "resetsAt": 1_790_000_000}, "secondary": None}})
+    adapter._notification(state, "thread/tokenUsage/updated", {"threadId": "t1", "turnId": "u1", "tokenUsage": {"total": total, "last": last, "modelContextWindow": 258400}})
+    adapter._notification(state, "thread/tokenUsage/updated", {"threadId": "someone-else", "turnId": "u9", "tokenUsage": {"total": total, "last": last}})
+    events = drain(state)
+    assert [e.kind for e in events] == [EventKind.USAGE, EventKind.USAGE]
+    assert events[0].payload == {"windows": [[300, 12.0]]}
+    assert events[1].payload == {"input_tokens": 5000, "output_tokens": 300, "cache_read_tokens": 3000, "context_tokens": 2000, "context_window": 258400}
+
+
+def test_a_zero_reading_never_overwrites_a_number_already_known() -> None:
+    from daedalus.staff_runtime import UsageSnapshot
+
+    known = UsageSnapshot(5000, 300, None, None, "subscription", context_tokens=2000, context_window=258400, windows=((300, 12.0),), replies=3, at="2026-10-20T10:00:00+00:00")
+    windows_only = UsageSnapshot(0, 0, None, None, "subscription", windows=((300, 14.0),), at="2026-10-20T10:05:00+00:00")
+    merged = windows_only.over(known)
+    assert (merged.input_tokens, merged.output_tokens, merged.context_tokens, merged.context_window, merged.replies) == (5000, 300, 2000, 258400, 3)
+    assert merged.windows == ((300, 14.0),) and merged.at == "2026-10-20T10:05:00+00:00"
+    assert UsageSnapshot.from_view(known.view()) == known and UsageSnapshot.from_view({}) is None
+
+
+async def test_a_members_spend_moves_during_its_turn(settings: Settings, db: Database) -> None:
+    # The board's numbers moved only once a turn had ended and its rollout was read.
+    async with stand(settings, db, **codex()) as s:
+        ada = await started(s, "slow:160")
+        await s.status_event(ada, "working")
+        row = await s.session_row(ada)
+
+        async def counted() -> bool:
+            current = await s.manager.staff.session(row.id)
+            return current is not None and int((current.usage or {}).get("input_tokens") or 0) > 0
+
+        await eventually(counted, "tokens counted before the turn ended", timeout=10)
+        assert (await s.session_row(ada)).status == "working"
+        await s.status_event(ada, "turn_done_unseen", timeout=30)

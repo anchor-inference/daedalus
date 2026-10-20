@@ -689,8 +689,34 @@ class CodexAdapter:
         elif method == "account/rateLimits/updated":
             limits = params.get("rateLimits")
             state.rate_limits = limits if isinstance(limits, dict) else {}
+            windows = [state.rate_limits.get(name) for name in ("primary", "secondary")]
+            readings = [[int(w.get("windowDurationMins") or 0), float(w["usedPercent"])] for w in windows if isinstance(w, dict) and isinstance(w.get("usedPercent"), int | float)]
+            if readings:
+                self._put(state, EventKind.USAGE, {"windows": readings})
+        elif method == "thread/tokenUsage/updated":
+            self._token_usage(state, params.get("tokenUsage"))
         else:
             self._put(state, EventKind.ACTIVITY, {"method": method})
+
+    def _token_usage(self, state: _Launch, usage: Any) -> None:
+        """The thread's spend after a model call, as the board shows it: the whole prompt sent so
+        far (the cached part included, as the transcript counts it), the output, the cached part,
+        and the last call's prompt against the window. Codex sends one after every call of a turn;
+        read only from the rollout after the turn, the numbers stood still while the member worked."""
+        if not isinstance(usage, dict):
+            return
+        total = usage.get("total") if isinstance(usage.get("total"), dict) else {}
+        last = usage.get("last") if isinstance(usage.get("last"), dict) else {}
+        assert isinstance(total, dict) and isinstance(last, dict)
+        reading = {
+            "input_tokens": int(total.get("inputTokens") or 0),
+            "output_tokens": int(total.get("outputTokens") or 0),
+            "cache_read_tokens": int(total.get("cachedInputTokens") or 0),
+            "context_tokens": int(last.get("inputTokens") or 0),
+            "context_window": int(usage.get("modelContextWindow") or 0),
+        }
+        if any(reading.values()):
+            self._put(state, EventKind.USAGE, reading)
 
     def _item(self, state: _Launch, started: bool, item: Mapping[str, Any]) -> None:
         kind = str(item.get("type") or "")

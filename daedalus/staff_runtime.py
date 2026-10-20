@@ -14,6 +14,7 @@ does not look anything up. :class:`FakeStaffRuntime` stands in for a real one in
 from __future__ import annotations
 
 import itertools
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
@@ -214,7 +215,48 @@ class UsageSnapshot:
     replies: int = 0
     """The member's replies counted in its transcript."""
     at: str = ""
-    """When the turn the snapshot was read after ended: the numbers are as of then, not live."""
+    """When the numbers were read: the end of the turn whose transcript they come from, or the moment
+    of a live reading the CLI sent during a turn."""
+
+    def over(self, older: UsageSnapshot | None) -> UsageSnapshot:
+        """This reading laid over an older one: what this one does not say — a zero count, no cost,
+        no windows — is kept from the older. A live reading carries only part of the picture (a
+        rate-limit update has no token counts), and its zeros once replaced counts already known."""
+        if older is None:
+            return self
+        return UsageSnapshot(
+            input_tokens=self.input_tokens or older.input_tokens,
+            output_tokens=self.output_tokens or older.output_tokens,
+            cost_usd=self.cost_usd if self.cost_usd is not None else older.cost_usd,
+            window_used_pct=self.window_used_pct if self.window_used_pct is not None else older.window_used_pct,
+            source=self.source,
+            context_tokens=self.context_tokens or older.context_tokens,
+            context_window=self.context_window or older.context_window,
+            windows=self.windows or older.windows,
+            replies=self.replies or older.replies,
+            at=self.at or older.at,
+        )
+
+    @classmethod
+    def from_view(cls, view: Mapping[str, Any] | None) -> UsageSnapshot | None:
+        """The snapshot a ``view`` was made of; ``None`` for an empty or unreadable one."""
+        if not view:
+            return None
+        try:
+            return cls(
+                input_tokens=int(view.get("input_tokens") or 0),
+                output_tokens=int(view.get("output_tokens") or 0),
+                cost_usd=float(view["cost_usd"]) if view.get("cost_usd") is not None else None,
+                window_used_pct=float(view["window_used_pct"]) if view.get("window_used_pct") is not None else None,
+                source="metered" if view.get("source") == "metered" else "subscription",
+                context_tokens=int(view["context_tokens"]) if view.get("context_tokens") is not None else None,
+                context_window=int(view["context_window"]) if view.get("context_window") is not None else None,
+                windows=tuple((int(w.get("minutes") or 0), float(w.get("used_pct") or 0.0)) for w in view.get("windows") or [] if isinstance(w, Mapping)),
+                replies=int(view.get("replies") or 0),
+                at=str(view.get("at") or ""),
+            )
+        except (TypeError, ValueError, AttributeError):
+            return None
 
     def view(self) -> dict[str, Any]:
         return {
