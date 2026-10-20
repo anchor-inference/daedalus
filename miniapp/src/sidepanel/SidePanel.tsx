@@ -31,6 +31,8 @@ type Status = "idle" | "running" | "waiting" | "failed" | "compacting";
 
 /** What the extension asks the panel to show when the operator chose "Ask Daedalus about this page". */
 const NEW = "new";
+/** How long a note stays: long enough to read a line, short enough not to sit over the next action. */
+const NOTE_MS = 3000;
 
 function statusOf(detail: SessionDetail | null): Status {
   const status = detail?.status ?? "idle";
@@ -47,18 +49,22 @@ export function SidePanel() {
   const [pinned, setPinned] = useState(false);
   const [creating, setCreating] = useState(false);
   const [menu, setMenu] = useState(false);
-  const [note, setNote] = useState("");
+  const [notes, setNotes] = useState<{ id: number; text: string }[]>([]);
+  const noteId = useRef(0);
   const show = useRef<string | null>(null);
   // The actions answered here, per conversation, for as long as the panel is open: the refusal stays
   // in the transcript after the answer, and coming back to the conversation must not offer it again.
   const answered = useRef(new Map<string, Set<string>>());
 
-  const toast = useCallback((text: string) => setNote(text), []);
-  useEffect(() => {
-    if (!note) return;
-    const timer = window.setTimeout(() => setNote(""), 5000);
-    return () => window.clearTimeout(timer);
-  }, [note]);
+  // Notes sit under the header, not at the foot: at the foot one covered the composer's buttons
+  // (attach, mode, model, send) for five seconds after every action. Three at most, each gone after
+  // NOTE_MS or on a click.
+  const dismiss = useCallback((id: number) => setNotes((all) => all.filter((n) => n.id !== id)), []);
+  const toast = useCallback((text: string) => {
+    const id = ++noteId.current;
+    setNotes((all) => [...all.filter((n) => n.text !== text), { id, text }].slice(-3));
+    window.setTimeout(() => dismiss(id), NOTE_MS);
+  }, [dismiss]);
 
   useEffect(() => {
     applyAppearance();
@@ -146,14 +152,14 @@ export function SidePanel() {
         </button>
         <span className="grow" />
         {!newView && (
-          <button type="button" className={`icon-btn ${pinned ? "on" : ""}`} title={t(pinned ? "sidepanel.unpin" : "sidepanel.pin")} aria-label={t(pinned ? "sidepanel.unpin" : "sidepanel.pin")} aria-pressed={pinned} onClick={() => setPinned((p) => !p)}>
+          <button type="button" className={`iconbtn small ${pinned ? "on" : ""}`} title={t(pinned ? "sidepanel.unpin" : "sidepanel.pin")} aria-label={t(pinned ? "sidepanel.unpin" : "sidepanel.pin")} aria-pressed={pinned} onClick={() => setPinned((p) => !p)}>
             <Icon name="pushpin" size={16} />
           </button>
         )}
-        <button type="button" className="icon-btn" title={t("sidepanel.new")} aria-label={t("sidepanel.new")} onClick={() => { setCreating(true); setMenu(false); }}>
+        <button type="button" className="iconbtn small" title={t("sidepanel.new")} aria-label={t("sidepanel.new")} onClick={() => { setCreating(true); setMenu(false); }}>
           <Icon name="compose" size={16} />
         </button>
-        <button type="button" className="icon-btn" title={t("sidepanel.open_app")} aria-label={t("sidepanel.open_app")} onClick={() => void shell.request("open.app", { path: session && !newView ? sessionPath(session.id) : "/app/" }).catch((e) => toast(errorText(e)))}>
+        <button type="button" className="iconbtn small" title={t("sidepanel.open_app")} aria-label={t("sidepanel.open_app")} onClick={() => void shell.request("open.app", { path: session && !newView ? sessionPath(session.id) : "/app/" }).catch((e) => toast(errorText(e)))}>
           <Icon name="external" size={16} />
         </button>
       </header>
@@ -177,7 +183,11 @@ export function SidePanel() {
       ) : (
         <Conversation key={session.id} session={session} shell={shell} current={current} toast={toast} onChanged={loadList} answered={answered.current} />
       )}
-      {note && <div className="sp-toast" role="status">{note}</div>}
+      {notes.length > 0 && (
+        <div className="sp-toasts" role="status">
+          {notes.map((n) => <button key={n.id} type="button" className="sp-toast" onClick={() => dismiss(n.id)}>{n.text}</button>)}
+        </div>
+      )}
     </div>
   );
 }

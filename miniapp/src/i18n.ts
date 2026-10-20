@@ -3950,7 +3950,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "sidepanel.error.gesture": { en: "click the button again", ru: "нажмите кнопку ещё раз" },
   "sidepanel.error.unreadable": { en: "Chrome does not let extensions read this page", ru: "Chrome не даёт расширениям читать эту страницу" },
   "sidepanel.tab.give": { en: "Let it work on this tab", ru: "Отдать эту вкладку агенту" },
-  "sidepanel.tab.given": { en: "The tab is the conversation's now.", ru: "Вкладка теперь в этом разговоре." },
+  "sidepanel.tab.given": { en: "This tab is now the agent's", ru: "Эта вкладка теперь у агента" },
   "sidepanel.tab.failed": { en: "The tab was not given: {reason}", ru: "Вкладка не отдана: {reason}" },
   "sidepanel.strip": { en: "What the agent is doing", ru: "Что делает агент" },
   "sidepanel.paused": { en: "Paused: the agent waits until you give the tabs back.", ru: "Пауза: агент ждёт, пока вы не вернёте вкладки." },

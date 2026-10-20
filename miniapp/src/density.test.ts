@@ -37,6 +37,7 @@ import quick from "./quick/quick.css?raw";
 import widget from "./widget.css?raw";
 import annotate from "./annotate/annotate.css?raw";
 import petHost from "./pethost.tsx?raw";
+import sidePanel from "./sidepanel/sidepanel.css?raw";
 // The browser's phone sheet, the session import, the agent's question card, the desktop's Quick
 // Chat, the widgets in an answer and the annotated snapshot keep their looks beside their
 // components; they answer to the same scale.
@@ -527,6 +528,36 @@ describe("settings", () => {
     expect(decl(".settings-row")).toContain("grid-template-columns: minmax(0, 1fr) auto");
     expect(decl(".dropdown-btn")).toContain("min-height: var(--ctl-h-sm)");
     expect(decl(".dropdown-item")).toContain("min-height: var(--row-h)");
+  });
+});
+
+// The Chrome side panel is a desktop column beside a page, narrow enough that the phone rules apply.
+// The operator measured its text as larger than the page it sits beside, so the panel redefines the
+// scale for its own subtree one step under the desktop (13 px body, 12 px meta) and brings the
+// desktop's control heights back. Its own sheet is held to that, and to naming steps, here.
+describe("the side panel", () => {
+  const panel = rules(sidePanel);
+  const scale = panel.find((r) => r.selector === ".sidepanel" && !r.media);
+  const value = (name: string) => Number(new RegExp(`${name}: (\\d+(?:\\.\\d+)?)px`).exec(scale?.body ?? "")?.[1] ?? Number.NaN);
+
+  it("redefines every step at or under the desktop's, with a 13 px body and 12 px meta", () => {
+    for (const [name, px] of Object.entries(TOKENS)) {
+      expect(value(name), name).toBeLessThanOrEqual(px);
+    }
+    expect(value("--fs-prose")).toBe(13);
+    expect(value("--fs-14")).toBe(13);
+    expect(value("--fs-12")).toBe(12);
+    expect(scale!.body).toContain("font-size: var(--fs-14)");
+  });
+
+  it("keeps the desktop's control heights, since it is driven with a mouse", () => {
+    expect(value("--ctl-h")).toBe(32);
+    expect(value("--ctl-h-sm")).toBe(28);
+  });
+
+  it("names a step of the scale in every rule of its own", () => {
+    expect(numericFonts(panel)).toEqual([]);
+    expect(oversizeFonts(panel)).toEqual([]);
   });
 });
 

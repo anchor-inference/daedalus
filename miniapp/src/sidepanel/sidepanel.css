@@ -5,7 +5,17 @@
 html:has(.sidepanel), body:has(.sidepanel) { height: 100%; background: var(--surface-1); overflow: hidden; }
 body:has(.sidepanel) #root { height: 100%; min-height: 0; }
 
+/* The panel's own type scale, one step under the app's. A side panel is a narrow column beside the
+   page the operator is reading, on a desktop with a mouse; at its width the app's phone rules took
+   over (16 px prose, 40 px controls) and the conversation read larger than the page beside it. The
+   tokens are redefined here, for this subtree only, so every component drawn inside the panel (the
+   transcript, the composer, the chips) follows without a copy of its rules; the desktop's row and
+   control heights come back with them, since this is not a touch screen. density.test.ts holds this
+   block to the claim. */
 .sidepanel {
+  --fs-11: 11px; --fs-12: 12px; --fs-13: 12px; --fs-14: 13px; --fs-15: 13px; --fs-16: 14px; --fs-17: 15px;
+  --fs-18: 15px; --fs-20: 16px; --fs-22: 17px; --fs-mono: 12px; --fs-prose: 13px;
+  --row-h: 36px; --row-h-dense: 32px; --ctl-h: 32px; --ctl-h-sm: 28px;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -48,7 +58,14 @@ body:has(.sidepanel) #root { height: 100%; min-height: 0; }
 }
 .sp-title:hover:not(:disabled) { background: var(--surface-2); }
 .sp-title:disabled { cursor: default; }
-.sp-head .icon-btn.on { background: var(--surface-3); color: var(--accent); }
+/* Ghost buttons, as the app's own heads draw them: no box until the pointer is on one. Pinned is the
+   pin filled in the accent colour; a filled box around it read as a warning. */
+.sp-head .iconbtn { background: transparent; color: var(--fg-2); }
+.sp-head .iconbtn:hover { background: var(--surface-2); color: var(--fg); }
+.sp-head .iconbtn:active { background: var(--surface-3); }
+.sp-head .iconbtn.on { background: transparent; color: var(--accent); }
+.sp-head .iconbtn.on .ic { fill: currentColor; }
+.sp-head .iconbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 .sp-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--fg-3); }
 .sp-dot.running { background: var(--accent); }
@@ -113,6 +130,8 @@ body:has(.sidepanel) #root { height: 100%; min-height: 0; }
 .sp-live .iconbtn.danger { color: var(--bad); }
 .sp-live-warn { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 0 var(--space-1); font-size: var(--fs-12); color: var(--bad); white-space: nowrap; }
 .sp-live-warn .truncate { flex: 1 1 auto; min-width: 0; }
+.sp-live-warn .link { flex: none; padding: 0; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }
+.sp-live-warn .link:hover { text-decoration: underline; }
 .sp-card-actions, .sp-new-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .sp-card-actions .btn { display: inline-flex; align-items: center; gap: var(--space-1); }
 
@@ -134,7 +153,11 @@ body:has(.sidepanel) #root { height: 100%; min-height: 0; }
 .sp-shot-hint { font-size: var(--fs-12); }
 
 .sp-attach { display: flex; flex-wrap: wrap; gap: var(--space-1); padding-bottom: var(--space-1); }
-.sp-attach .chip { display: inline-flex; align-items: center; gap: var(--space-1); }
+/* Light pills: a fill and no outline, so the three offers read as quiet actions on the composer and
+   not as a row of boxes over it. */
+.sp-attach .chip { display: inline-flex; align-items: center; gap: var(--space-1); padding: 2px var(--space-2); border-color: transparent; background: var(--surface-2); color: var(--fg-2); font: inherit; font-size: var(--fs-12); cursor: pointer; }
+.sp-attach .chip:hover:not(:disabled) { background: var(--surface-3); color: var(--fg); }
+.sp-attach .chip:disabled { opacity: 0.5; cursor: default; }
 
 .sp-new { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); }
 .sp-consent { padding: var(--space-2) var(--space-3); border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-2); font-size: var(--fs-13); }
@@ -153,16 +176,27 @@ body:has(.sidepanel) #root { height: 100%; min-height: 0; }
 }
 .sp-new-actions { justify-content: flex-end; }
 
-.sp-toast {
+/* Under the header, never at the foot: there a note covered the composer's controls. */
+.sp-toasts {
   position: absolute;
   z-index: 30;
+  top: calc(var(--ctl-h) + var(--space-2));
   left: var(--space-3);
   right: var(--space-3);
-  bottom: var(--space-3);
-  padding: var(--space-2) var(--space-3);
+  display: grid;
+  gap: var(--space-1);
+  pointer-events: none;
+}
+.sp-toast {
+  pointer-events: auto;
+  padding: var(--space-1) var(--space-3);
+  border: 0;
   border-radius: var(--radius-md);
   background: var(--surface-3);
   color: var(--fg);
+  font: inherit;
   font-size: var(--fs-12);
+  text-align: left;
   box-shadow: var(--shadow-pop);
+  cursor: pointer;
 }

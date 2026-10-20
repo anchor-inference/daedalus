@@ -14,7 +14,8 @@ side panel's width:
 - "This page" asks the extension for the page's text and attaches it as a file;
 - a running conversation shows one compact activity line inside the composer, with no Stop of its
   own; the composer's Stop goes to the door, and a stop the stream never confirms says so after three
-  seconds; the line stays one row at 360 and 420 px; Take over pauses the group and shows its tab;
+  seconds; the line stays one row at 360 and 420 px; Take over pauses the group and shows its tab,
+  and the note it leaves sits under the header, clear of the composer, until clicked away;
 - a new conversation shows the consent summary once, starts on the operator's words, gives the
   current tab to its group before the first message, and sends that message;
 - no request leaves for an operator's route, and the page carries the panel's credential only;
@@ -250,7 +251,8 @@ def run() -> int:
         # One Stop only: the composer's round button. The line carries the tab buttons as icons.
         assert line.get_by_role("button", name="Stop").count() == 0, "the activity line has a Stop of its own beside the composer's"
         expect(line.get_by_role("button", name="Take over")).to_be_visible()
-        page.locator(".composer .roundbtn.primary[data-action=stop]").click()
+        # The field holds the attached page, so the composer's Stop is the small one beside Queue.
+        page.locator(".composer").get_by_role("button", name="Stop the run").first.click()
         assert door.posted("/api/panel/sessions/s1/stop"), door.posts
         expect(page.locator(".sp-live-warn")).to_contain_text("did not reach Daedalus", timeout=6000)
         page.screenshot(path=str(SHOTS / "side-panel-running.png"))
@@ -268,6 +270,23 @@ def run() -> int:
         page.set_viewport_size({"width": 400, "height": 760})
         line.get_by_role("button", name="Take over").click()
         expect(page.locator(".sp-live")).to_contain_text("Paused")
+        # The note it leaves sits under the header and never over the composer or its controls.
+        expect(page.locator(".sp-toast")).to_be_visible()
+        for width in (360, 420):
+            page.set_viewport_size({"width": width, "height": 760})
+            page.wait_for_timeout(50)
+            overlap = page.evaluate("""() => {
+              const c = document.querySelector('.composer').getBoundingClientRect();
+              return [...document.querySelectorAll('.sp-toast')].some((el) => {
+                const r = el.getBoundingClientRect();
+                return r.width > 0 && r.left < c.right && r.right > c.left && r.top < c.bottom && r.bottom > c.top;
+              });
+            }""")
+            assert page.locator(".sp-toast").count() and not overlap, f"a note covers the composer at {width} px"
+            page.screenshot(path=str(SHOTS / f"side-panel-note-{width}.png"))
+        page.locator(".sp-toast").first.click()
+        expect(page.locator(".sp-toast")).to_have_count(0)
+        page.set_viewport_size({"width": 400, "height": 760})
         assert requests(page, "group.pause")[-1]["args"] == {"session": "s1", "paused": True}
         assert requests(page, "tab.focus")[-1]["args"] == {"session": "s1"}
 
