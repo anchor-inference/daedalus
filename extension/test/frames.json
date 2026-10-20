@@ -1,6 +1,6 @@
 {
   "proto": 1,
-  "about": "One golden frame of every kind the relay between the Daedalus extension and browserd carries, each as it is on the wire (one JSON object per native-messaging message or WebSocket message). browserd's tests decode each strictly and encode it back unchanged; the extension's tests read the same file. 'from' is who sends it. The relay protocol is specified in docs/architecture/browser.md, The operator's Chrome.",
+  "about": "One golden frame of every kind the relay between the Daedalus extension and browserd carries, each as it is on the wire (one JSON object per native-messaging message or WebSocket message). browserd's tests decode each strictly and encode it back unchanged; the extension's tests read the same file. 'from' is who sends it; 'value_of' names the call or DevTools method a result answers. The relay protocol is specified in docs/architecture/browser.md, The operator's Chrome.",
   "frames": [
     {"name": "hello", "from": "extension", "frame": {"t": "hello", "proto": 1, "ext_version": "1.0.0", "chrome_version": "141.0.7390.54", "platform": "win", "profile_id": "5b0c3c3e-6a51-4f7e-9d8a-2f0f8f6f1c11", "profile_name": "Chrome"}},
     {"name": "hello over the server transport", "from": "extension", "frame": {"t": "hello", "proto": 1, "ext_version": "1.0.0", "chrome_version": "141.0.7390.54", "platform": "mac", "profile_id": "5b0c3c3e-6a51-4f7e-9d8a-2f0f8f6f1c11", "profile_name": "Work", "token": "dvt_0123456789abcdef"}},
