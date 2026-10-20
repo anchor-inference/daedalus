@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions.board_commands import BoardCommands
 from daedalus.extensions.orchestrator_domain import record_verdict, return_result
-from daedalus.extensions.orchestrator_ops import Refused, board_principal
+from daedalus.extensions.orchestrator_ops import Refused, board_principal, held_by
 from daedalus.extensions.orchestrator_team import (
     CONTRACT_FIELDS,
     CONTRACT_MIN,
@@ -47,10 +47,12 @@ from daedalus.extensions.orchestrator_team import (
 from daedalus.extensions.task_contract import split_checks
 from daedalus.host.gitrun import GitError
 from daedalus.host.worktrees import WorktreeError
-from daedalus.stores.control import ControlStore, Entity, Scope, now, one
+from daedalus.stores.control import ControlConflict, ControlStore, Entity, Scope, now, one
+from daedalus.stores.executions import ACTIVE
 from daedalus.stores.explorations import spent_by_attempt_in
 from daedalus.stores.goal_budget import goal_constraints_in, usd
 from daedalus.stores.inference_budget import _historical, held_in, microusd
+from daedalus.stores.outbox import OutboxStore
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -71,6 +73,10 @@ EXCERPT_CHARS = 240
 WHY_MIN = 8
 PARKED = "refs/daedalus/explored"
 """Where a losing attempt's branch is kept once the branch itself is deleted."""
+SETTLE_SECONDS = 30.0
+"""How long a release waits for an attempt's start that is being admitted, and then for its run to
+be seen ending, before it says what holds the card and leaves it to the next pick."""
+SETTLE_POLL_SECONDS = 0.05
 
 
 def _exploration_id(project_id: str, client_operation_id: str) -> str:
@@ -360,17 +366,29 @@ class Explorations:
 
     async def _update_card(self, orch: Orchestrators, project: Project, session_id: str, task_id: str,
                            operation_id: str, **changes: Any) -> None:
+        """Change a card as it stands now.
+
+        The card is the board's, not the exploration's: a refused start that takes its assignee
+        back, or a note on it, moves its revision between the read and the write, and the attempt
+        stayed in todo with "the entity has changed". One fresh read is enough to tell that from a
+        card that keeps changing, which is refused."""
         scope = Scope("project", project.id)
         principal = await board_principal(orch, session_id, project.id, "board.task.update", task_id)
-        revision = await ControlStore(self.db).revision(scope, Entity("task", task_id))
-        try:
-            await BoardCommands(self.db, bus=self.app.manager.bus).update(
-                principal, scope, task_id, client_operation_id=operation_id,
-                expected_entity_revision=revision, **changes)
-        except (KeyError, ValueError) as exc:
-            raise Refused(str(exc)) from exc
-        except Exception as exc:  # noqa: BLE001 — a conflict on one card must not stop the others
-            raise Refused(str(exc)) from exc
+        control = ControlStore(self.db)
+        for last in (False, True):
+            revision = await control.revision(scope, Entity("task", task_id))
+            try:
+                await BoardCommands(self.db, bus=self.app.manager.bus).update(
+                    principal, scope, task_id, client_operation_id=operation_id,
+                    expected_entity_revision=revision, **changes)
+                return
+            except ControlConflict as exc:
+                if last or exc.current_revision is None or str(exc) != "the entity has changed":
+                    raise Refused(str(exc)) from exc
+            except (KeyError, ValueError) as exc:
+                raise Refused(str(exc)) from exc
+            except Exception as exc:  # noqa: BLE001 — a conflict on one card must not stop the others
+                raise Refused(str(exc)) from exc
 
     # -- following the attempts --------------------------------------------------------------------
 
@@ -472,6 +490,9 @@ class Explorations:
             return
         orch = self._orch()
         for attempt in unfinished:
+            if attempt["task_id"]:
+                # A start still waiting for a place would begin work nobody is waiting for any more.
+                await self._withdraw_launches(exploration["project_id"], attempt["task_id"], f"exploration ended: {reason}")
             if attempt["staff_id"] and orch.team is not None:
                 member = await orch.manager.staff.get(attempt["staff_id"])
                 if member is not None and member.active:
@@ -652,8 +673,63 @@ class Explorations:
             problems.append(f"  {task_id}: {exc}")
         return problems
 
+    async def _withdraw_launches(self, project_id: str, card_id: str, reason: str) -> list[str]:
+        """Cancel the starts of an attempt's card that still wait for admission, in the outbox and in
+        the launch queue; their ids."""
+        async with self.db.transaction() as conn:
+            cancelled = await OutboxStore.cancel_waiting_launches_in(conn, card_id, reason[:500])
+        team = self._orch().team
+        if team is not None:
+            team.queue.withdraw(project_id, task_id=card_id)
+        return cancelled
+
+    async def _settle_launch(self, orch: Orchestrators, project: Project, exploration_id: str, card_id: str) -> str:
+        """Leave nothing of an attempt's start in flight; what still holds the card, or ``""``.
+
+        The exploration hands its attempts' cards over, so it owns their starts. A deadline can
+        come while a start still waits for a place or is half admitted. Dismissing the member under
+        it made the start fail afterwards and take the card's assignee back, or ended the session
+        the start was entering and left its execution recovering: either way the card could not be
+        dropped and the orchestrator was told it "stays todo". A waiting start is cancelled; one
+        being admitted is waited for, since only its own outcome says whether a worker started,
+        and a worker that did is then released like any other."""
+        loop = asyncio.get_running_loop()
+        until = loop.time() + SETTLE_SECONDS
+        while True:
+            # Again on each pass: a start being admitted may be put back to wait for a place.
+            await self._withdraw_launches(project.id, card_id, f"exploration {exploration_id} was decided")
+            row = await self.db.fetchone(
+                "SELECT state FROM effect_outbox WHERE kind = 'task.launch' AND state IN ('claimed','unknown')"
+                " AND json_extract(payload_json,'$.control.task_id') = ? LIMIT 1", (card_id,))
+            if row is None:
+                return ""
+            if row["state"] == "unknown" or loop.time() >= until:
+                return f"{card_id} is held: " + await held_by(orch, card_id)
+            await asyncio.sleep(SETTLE_POLL_SECONDS)
+
+    async def _settle_execution(self, orch: Orchestrators, card_id: str) -> str:
+        """Wait for the run of a released attempt to be seen ending; what still holds the card, or ``""``.
+
+        A release ends the session at once, but its execution is closed only when the runtime's
+        exit is observed, a moment later; a drop in between was refused with "stop or reconcile
+        the current execution"."""
+        loop = asyncio.get_running_loop()
+        until = loop.time() + SETTLE_SECONDS
+        while True:
+            row = await self.db.fetchone("SELECT a.state FROM board_tasks t JOIN execution_attempts a ON a.id = t.current_attempt_id"
+                                         " WHERE t.id = ?", (card_id,))
+            if row is None or row["state"] not in (*ACTIVE, "recovering"):
+                return ""
+            if loop.time() >= until:
+                return f"{card_id} is held: " + await held_by(orch, card_id)
+            await asyncio.sleep(SETTLE_POLL_SECONDS)
+
     async def _release(self, orch: Orchestrators, project: Project, session_id: str, exploration_id: str,
                        attempt: dict[str, Any], why: str) -> str:
+        if attempt["task_id"]:
+            held = await self._settle_launch(orch, project, exploration_id, attempt["task_id"])
+            if held:
+                return held
         if attempt["staff_id"]:
             member = await orch.manager.staff.get(attempt["staff_id"])
             if member is not None and member.active:
@@ -663,6 +739,9 @@ class Explorations:
                     return f"{member.name} was not dismissed: {exc}"
         if not attempt["task_id"]:
             return ""
+        held = await self._settle_execution(orch, attempt["task_id"])
+        if held:
+            return held
         card = await self.db.fetchone("SELECT status,branch,folder_id FROM board_tasks WHERE id = ?", (attempt["task_id"],))
         if card is None:
             return ""

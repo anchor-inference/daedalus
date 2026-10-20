@@ -43,6 +43,7 @@ from daedalus.extensions.runtime_observations import (
     observe_exit,
     observe_native_output,
     observe_no_entry,
+    settle_ended,
 )
 from daedalus.extensions.staff_results import StaffReportService
 from daedalus.extensions.task_context import ContextUnavailable, assemble_task_context, render_task_context
@@ -1578,6 +1579,8 @@ class Team:
         if live.session.status == staff_suspend.SUSPENDED:
             await self.manager.db.execute("DELETE FROM kv WHERE key = ?", (staff_suspend.KEY + live.id,))
         ended = await self.manager.staff.end_session(live.id, reason)
+        if stop:
+            await settle_ended(self.app, live.id)
         await self.undelivered(live.id, reason, starting_since=live.session.status_at if live.session.status == "starting" else None)
         if ended is not None:
             payload: dict[str, Any] = {"status": "exited", "previous": live.session.status, "detail": reason[:500]}

@@ -775,6 +775,43 @@ async def test_interrupt_pause_and_release_act_through_the_runtime_and_are_journ
         await r.manager.close()
 
 
+async def _member(r: Rig, name: str) -> Any:
+    member = await r.manager.db.fetchone("SELECT id FROM staff WHERE name = ? AND project_id = ?", (name, r.project.id))
+    return await r.manager.staff.get(member["id"])
+
+
+async def test_a_released_member_leaves_its_card_free_to_drop(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """A release ended the session and stopped the run, but the execution stayed running: the exit
+    seen afterwards closes only an execution someone asked to stop, so dropping the card was refused
+    with "stop or reconcile the current execution". Bob was idle between turns, so no exit comes
+    after his stop; his last run's exit is the proof."""
+    from tests.unit.test_explorations import fake as running
+
+    r = await rig(settings, db, tmp_path)
+    try:
+        running(r)
+        sid = await office(r)
+        for name, idle in (("Ada", False), ("Bob", True)):
+            await working(r, name=name, title=f"{name}'s page")
+            if idle:
+                await r.call(sid, "interrupt", staff=name)
+            assert "session ended" in await r.call(sid, "release", staff=name)
+            card = await r.manager.db.fetchone("SELECT t.id,t.entity_revision,a.state FROM board_tasks t"
+                                               " JOIN execution_attempts a ON a.id = t.current_attempt_id WHERE t.title = ?",
+                                               (f"{name}'s page",))
+            assert card["state"] == "cancelled", name
+            # The end is the release's, in its words: the orchestrator is not woken by its own release.
+            [exited] = [e for e in await events(r.manager, "staff.status")
+                        if e.payload["status"] == "exited" and e.staff_id == (await _member(r, name)).id]
+            assert exited.payload["actor"] == "orchestrator" and await r.orch.classify(r.project.id, exited) is None, name
+            await r.call(sid, "tasks", op="update", task_id=card["id"], status="dropped",
+                         expected_entity_revision=card["entity_revision"])
+            assert (await task_row(r.manager, card["id"]))["status"] == "dropped"
+    finally:
+        await close_team(r.manager)
+        await r.manager.close()
+
+
 async def test_release_needs_a_current_operator_approval_before_stopping_a_worker(settings: Settings, db: Database, tmp_path: Path) -> None:
     r = await rig(settings, db, tmp_path)
     try:
