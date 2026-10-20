@@ -86,7 +86,37 @@ export function storedToken(): string | null {
   }
 }
 
+// The extension's side panel frames the app at /app/panel and signs in with a credential of its own,
+// which reaches it from the extension in the bridge's handshake, never in the address. In that mode
+// every request carries it, goes to the panel's door (`/api/panel/...`, the operator's own routes
+// behind it for the conversations the panel may open) and carries no cookie: the frame stays exactly
+// as able as the panel token, whoever is signed in to the app in that Chrome.
+let panelToken: string | null = null;
+let panelRefresh: (() => Promise<string | null>) | null = null;
+
+/** Puts the app in the side panel's mode; `refresh` asks the extension for a newer credential when
+ *  the one in hand stops working. */
+export function setPanelCredential(token: string, refresh: () => Promise<string | null>): void {
+  panelToken = token;
+  panelRefresh = refresh;
+}
+
+export function inPanel(): boolean {
+  return panelToken !== null;
+}
+
+/** An operator's route as the panel reaches it: the conversations and the model list move behind the
+ *  panel's door; anything else is left as it is and is refused there, as it should be. */
+export function panelPath(path: string): string {
+  if (panelToken === null) return path;
+  if (path === "/api/settings") return "/api/panel/settings";
+  if (path === "/api/modes") return "/api/panel/modes";
+  if (path === "/api/sessions" || path.startsWith("/api/sessions/") || path.startsWith("/api/sessions?")) return "/api/panel" + path.slice(4);
+  return path;
+}
+
 function authHeaders(): Record<string, string> {
+  if (panelToken !== null) return { Authorization: `Panel ${panelToken}` };
   const initData = tg()?.initData;
   if (initData) return { Authorization: `tma ${initData}` };
   const token = storedToken();
@@ -115,11 +145,22 @@ async function archiveError(response: Response): Promise<ApiError> {
 }
 
 async function call<T>(method: string, path: string, body?: unknown, responseType: "json" | "text" = "json"): Promise<T> {
-  const response = await fetch(path, {
+  const send = () => fetch(panelPath(path), {
     method,
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: body === undefined ? undefined : JSON.stringify(body),
+    ...(panelToken !== null ? { credentials: "omit" as const } : {}),
   });
+  let response = await send();
+  if (response.status === 401 && panelToken !== null && panelRefresh) {
+    // The credential lapsed or was replaced while the panel stayed open: the extension may hold a
+    // newer one, handed over its relay since.
+    const fresh = await panelRefresh().catch(() => null);
+    if (fresh && fresh !== panelToken) {
+      panelToken = fresh;
+      response = await send();
+    }
+  }
   if (!response.ok) {
     let detail: unknown = response.statusText;
     let data: Record<string, unknown> = {};
@@ -146,7 +187,7 @@ async function call<T>(method: string, path: string, body?: unknown, responseTyp
 function upload<T>(path: string, form: FormData, onProgress?: (fraction: number) => void): Promise<T> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", path);
+    xhr.open("POST", panelPath(path));
     for (const [name, value] of Object.entries(authHeaders())) xhr.setRequestHeader(name, value);
     if (onProgress) xhr.upload.onprogress = (event) => event.lengthComputable && onProgress(event.loaded / event.total);
     xhr.onerror = () => reject(new TypeError("Failed to fetch"));
@@ -186,7 +227,7 @@ export const api = {
     if (!response.ok) throw await archiveError(response);
     return await response.blob();
   },
-  streamUrl: (sessionId: string) => `/api/sessions/${sessionId}/stream`,
+  streamUrl: (sessionId: string) => panelPath(`/api/sessions/${sessionId}/stream`),
   downloadUrl: (sessionId: string, path: string) => {
     const token = storedToken();
     return `/api/sessions/${sessionId}/download?path=${encodeURIComponent(path)}${token ? `&token=${encodeURIComponent(token)}` : ""}`;

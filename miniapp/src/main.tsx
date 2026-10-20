@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { ContextMenuHost } from "./ui/context-menu";
 import { App } from "./App";
 import { QuickChat } from "./quick/QuickChat";
+import { SidePanel } from "./sidepanel/SidePanel";
 import "./ui/styles.css";
 import "./ui/desktop.css";
 import "./ui/phone.css";
@@ -15,12 +16,13 @@ if ("serviceWorker" in navigator && window.location.protocol === "https:") {
 }
 
 const root = createRoot(document.getElementById("root")!);
-// The desktop's Quick Chat window loads /app/quick: the box alone, without the app around it.
-const quick = window.location.pathname.replace(/\/+$/, "") === "/app/quick";
+// The desktop's Quick Chat window loads /app/quick: the box alone, without the app around it. The
+// Daedalus extension's side panel frames /app/panel: the conversations of that Chrome alone.
+const route = window.location.pathname.replace(/\/+$/, "");
 const render = () =>
   root.render(
     <React.StrictMode>
-      {quick ? <QuickChat /> : <><App /><ContextMenuHost /></>}
+      {route === "/app/quick" ? <QuickChat /> : route === "/app/panel" ? <><SidePanel /><ContextMenuHost /></> : <><App /><ContextMenuHost /></>}
     </React.StrictMode>,
   );
 

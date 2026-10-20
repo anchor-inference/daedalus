@@ -2368,6 +2368,44 @@ function LiveTurn({ base, live, onTurnAction, onRender }: { base: Turn | null; l
   );
 }
 
+/**
+ * A conversation's turns and nothing around them, for a page that reads and follows the session on
+ * its own: the extension's side panel. The same turns the chat draws, from the same pieces, so the
+ * panel never grows a second way of showing a step. The page keys it by the session's id.
+ */
+export function TranscriptView({ detail, live, onPreview, toast, onRender }: { detail: SessionDetail; live: LiveStore; onPreview: (src: PreviewSource) => void; toast: (text: string) => void; onRender?: () => void }) {
+  const id = detail.id;
+  const status = (detail.status ?? "idle") as Status;
+  const busy = status === "running" || status === "waiting";
+  const built = useRef<Turn[]>([]);
+  const turns = useMemo(() => {
+    built.current = buildTurns(detail.messages ?? [], built.current);
+    return built.current;
+  }, [detail.messages]);
+  const tail = busy ? liveBase(turns, detail.run_id) : null;
+  const settled = tail ? turns.slice(0, -1) : turns;
+  useEffect(() => () => forgetDisclosed(id), [id]);
+  const ctx = useMemo(() => ({
+    id,
+    workspace: detail.workspace ?? "",
+    folders: detail.folders ?? NO_FOLDERS,
+    preview: onPreview,
+    openJobs: () => undefined,
+    toast,
+    link: sessionPath(id),
+    asking: questionsKey(detail.pending?.questions ?? null),
+  }), [id, detail.workspace, detail.folders, onPreview, toast, detail.pending?.questions]);
+  useLayoutEffect(() => onRender?.(), [detail.messages, onRender]);
+  return (
+    <div className="timeline panel-chat">
+      <SessionContext.Provider value={ctx}>
+        {settled.map((turn) => <Safe key={turn.key}><TurnView turn={turn} live={false} /></Safe>)}
+        {busy && <LiveTurn base={tail} live={live} onRender={onRender} />}
+      </SessionContext.Provider>
+    </div>
+  );
+}
+
 /** How much of a helper's conversation the panel reads: its newest messages. A helper's run is one task,
  *  and the full chat is a button away for the rare one longer than this. */
 const SUBAGENT_TAIL = 160;
@@ -2475,7 +2513,7 @@ export function SubagentTranscript({ id, onPreview, toast }: { id: string; onPre
  */
 /** The run, as one line in the header: dot, word, elapsed, step, what the agent is doing. Clicking it
  *  brings the newest content back into view. The `livebar` classes are what the settle harness watches. */
-function LiveBar({ status, saving, base, live, workspace, onJump }: { status: Status; saving: boolean; base: Turn | null; live: LiveStore; workspace?: string; onJump: () => void }) {
+export function LiveBar({ status, saving, base, live, workspace, onJump }: { status: Status; saving: boolean; base: Turn | null; live: LiveStore; workspace?: string; onJump: () => void }) {
   const state = useSyncExternalStore(live.subscribe, live.get);
   useClock(1000);
   if (saving) {

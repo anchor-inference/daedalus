@@ -2,7 +2,7 @@
 // Subagents tab both follow a session this way: the same frames, the same resume point after a drop,
 // the same resync when the host says the gap is too wide to replay.
 
-import { api } from "./api";
+import { api, inPanel } from "./api";
 
 export type SessionStreamHandlers = {
   /** One event off the wire, with the envelope's run id and sequence folded into its payload. */
@@ -15,7 +15,6 @@ export type SessionStreamHandlers = {
 /** Follow a session's stream until the returned function is called; reconnects with backoff. */
 export function followSession(sessionId: string, { handle, onDrop }: SessionStreamHandlers): () => void {
   const streamUrl = api.streamUrl(sessionId);
-  const headers = api.authHeaders();
   let stop = false;
   let after: number | null = null;
   const controller = new AbortController();
@@ -24,7 +23,8 @@ export function followSession(sessionId: string, { handle, onDrop }: SessionStre
     while (!stop) {
       try {
         const url = after === null ? streamUrl : `${streamUrl}?after=${after}`;
-        const res = await fetch(url, { headers, signal: controller.signal });
+        // Read on every attempt: the side panel's credential may have been renewed since the last one.
+        const res = await fetch(url, { headers: api.authHeaders(), signal: controller.signal, ...(inPanel() ? { credentials: "omit" as const } : {}) });
         if (!res.body) return;
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
