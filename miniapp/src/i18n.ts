@@ -3974,7 +3974,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "sidepanel.showtab": { en: "Show the tab", ru: "Показать вкладку" },
   "sidepanel.stop.unconfirmed": { en: "The stop did not reach Daedalus.", ru: "Остановка не дошла до Daedalus." },
   "sidepanel.retry": { en: "Try again", ru: "Повторить" },
-  "sidepanel.card.foot": { en: "Purchases, messages sent and sign-ins always ask.", ru: "Покупки, отправка сообщений и входы в аккаунты всегда спрашивают." },
+  "sidepanel.card.foot": { en: "Purchases, messages sent and sign-ins ask unless approvals are skipped.", ru: "Покупки, отправка сообщений и входы в аккаунты спрашивают, если подтверждения не отключены." },
   "sidepanel.shot.title": { en: "Screenshot of the page", ru: "Снимок страницы" },
   "sidepanel.shot.hint": { en: "Drag to attach a part, or attach the whole screenshot.", ru: "Выделите часть мышью или приложите снимок целиком." },
   "sidepanel.shot.part": { en: "Attach the part", ru: "Приложить часть" },
