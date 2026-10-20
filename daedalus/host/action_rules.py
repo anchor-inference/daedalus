@@ -299,17 +299,38 @@ def _readable(text: str) -> str:
     return "\n".join(lines) or text
 
 
-def summarise_action(tool: str, arguments: dict[str, Any], redact: Callable[[str], str]) -> str:
-    """The call as the reviewer reads it: the tool and its arguments, masked and cut short, fenced as
-    the agent's words so an argument cannot speak to the reviewer as the operator."""
+@dataclass(frozen=True, slots=True)
+class ActionSummary:
+    """The call as the reviewer reads it, and how much of it the reviewer was not shown."""
+
+    text: str
+    cut: int = 0
+    """Characters left out of the middle; anything above zero means the reviewer cannot ALLOW."""
+
+
+ACTION_HEAD_CHARS = ACTION_CHARS * 3 // 5
+"""How much of a long call's start the reviewer sees; the rest of the budget goes to its end."""
+
+
+def summarise_action(tool: str, arguments: dict[str, Any], redact: Callable[[str], str]) -> ActionSummary:
+    """The call as the reviewer reads it: the tool and its arguments, masked, fenced as the agent's
+    words so an argument cannot speak to the reviewer as the operator.
+
+    A long call is shown as its start and its end with the middle marked as cut. Only the start was
+    shown once, so a harmless heredoc of three kilobytes followed by ``rm -rf`` or ``git push --force``
+    was judged by its harmless part and allowed; the end is where a command's real verb usually is."""
     try:
         body = json.dumps(arguments, ensure_ascii=False, sort_keys=True, default=str, indent=1)
     except (TypeError, ValueError):
         body = str(arguments)
     body = redact(body)
+    cut = 0
     if len(body) > ACTION_CHARS:
-        body = body[:ACTION_CHARS] + "\n…(cut)"
-    return f"Tool: {tool}\n" + fenced(body, kind="arguments", origin=f"the agent's call of {tool}", source="the agent", quoted_by="the call")
+        tail = ACTION_CHARS - ACTION_HEAD_CHARS
+        cut = len(body) - ACTION_CHARS
+        body = body[:ACTION_HEAD_CHARS] + f"\n…[{cut} characters cut here; you are not shown them]…\n" + body[-tail:]
+    text = f"Tool: {tool}\n" + fenced(body, kind="arguments", origin=f"the agent's call of {tool}", source="the agent", quoted_by="the call")
+    return ActionSummary(text, cut)
 
 
 def build_prompt(*, title: str, brief: str, request: Sequence[str], category: str, level: str, action: str, redact: Callable[[str], str]) -> str:
@@ -340,8 +361,11 @@ Ask = Callable[[str, str, float], Awaitable[tuple[str, str]]]
 """The reviewer's model: ``(prompt, preset, timeout) -> (answer, model name)``."""
 
 
-async def review(ask: Ask, prompt: str, *, preset: str, timeout: float) -> Verdict:
-    """The verdict on one action. Never raises, and never says yes without an answer."""
+async def review(ask: Ask, prompt: str, *, preset: str, timeout: float, cut: int = 0) -> Verdict:
+    """The verdict on one action. Never raises, and never says yes without an answer.
+
+    ``cut`` is how much of the action the prompt left out. A reviewer cannot vouch for what it did not
+    read, so its ALLOW of a cut action becomes a question to the operator; its BLOCK stands."""
     started = time.monotonic()
     try:
         answer, model = await asyncio.wait_for(ask(prompt, preset, timeout), timeout=timeout)
@@ -356,6 +380,8 @@ async def review(ask: Ask, prompt: str, *, preset: str, timeout: float) -> Verdi
         logger.warning("the action review answered none of its words: %r", answer[:200])
         return Verdict("ask", "the review gave no verdict", failed=True, elapsed_ms=elapsed, model=model)
     verdict, why = parsed
+    if verdict == "allow" and cut:
+        return Verdict("ask", f"the action is too long to review whole ({cut} characters were not read)", elapsed_ms=elapsed, model=model)
     return Verdict(verdict, why or {"allow": "covered by the request", "block": "not covered by the request", "ask": "unsure"}[verdict], elapsed_ms=elapsed, model=model)
 
 
@@ -387,7 +413,7 @@ class ReviewLog:
 
 
 __all__ = [
-    "BROWSER_KINDS", "CATEGORY_WORDS", "MCP_VERBS", "TOOL_CATEGORIES", "ReviewLog", "Ruling", "Verdict",
+    "BROWSER_KINDS", "CATEGORY_WORDS", "MCP_VERBS", "TOOL_CATEGORIES", "ActionSummary", "ReviewLog", "Ruling", "Verdict",
     "block_text", "browser_categories", "build_prompt", "categories_of", "handoff_text", "mcp_categories",
     "operator_request", "parse_verdict", "review", "ruling", "shell_categories", "summarise_action",
 ]

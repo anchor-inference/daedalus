@@ -165,7 +165,7 @@ class RulesGate:
             return replace(ask, decision=Decision(DENY, verdict.reason, f"review.{ruled.category}", key=decision.key, told=rules.block_text(ruled.category, verdict.reason)))
         return replace(ask, decision=Decision(ASK, f"the auto-review asks: {verdict.reason}", f"review.{ruled.category}", key=decision.key))
 
-    async def _review(self, state: Any, ruled: rules.Ruling, summary: str) -> rules.Verdict:
+    async def _review(self, state: Any, ruled: rules.Ruling, summary: rules.ActionSummary) -> rules.Verdict:
         # The one reading of who said what that knows an answer to the agent's question is the operator's.
         from daedalus.host.session_runner import operator_passages  # Lazy: the session runner imports this module
 
@@ -176,9 +176,9 @@ class RulesGate:
             title=str(getattr(getattr(state, "session", None), "title", "") or ""),
             brief=str(metadata.get("brief") or ""),
             request=rules.operator_request(text for _, text in operator_passages(history)),
-            category=ruled.category, level=ruled.level, action=summary, redact=self.manager.redactor.redact,
+            category=ruled.category, level=ruled.level, action=summary.text, redact=self.manager.redactor.redact,
         )
-        return await rules.review(self._ask_model, prompt, preset=self.config.review_preset, timeout=float(self.config.review_timeout_seconds))
+        return await rules.review(self._ask_model, prompt, preset=self.config.review_preset, timeout=float(self.config.review_timeout_seconds), cut=summary.cut)
 
     async def injection_check(self, origin: str, text: str) -> list[str]:
         """A small model's look at a fetched page, when the operator switched it on: the warning's
