@@ -92,6 +92,9 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/action/", s.handleAction)
 	mux.HandleFunc("/api/jobs/", s.handleJob)
+	mux.HandleFunc("/api/browser/user", s.handleUserBrowser)
+	mux.HandleFunc("/api/browser/user/register", s.handleUserBrowserChange)
+	mux.HandleFunc("/api/browser/user/unregister", s.handleUserBrowserChange)
 	mux.HandleFunc("/focus", s.handleFocus)
 	mux.Handle("/assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(mustSub()))))
 	s.http = &http.Server{Handler: s.sameOrigin(mux), ReadHeaderTimeout: 10 * time.Second}
@@ -570,6 +573,67 @@ func (s *Server) handleJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = json.NewEncoder(w).Encode(job)
+}
+
+// handleUserBrowser answers what the launcher knows of the operator's Chrome: the channels found,
+// their profiles, whether the connector is registered, the extension folder, the policies in the
+// way (userbrowser_app.go). Unlike the status beside it, it asks for the token even though it only
+// reads: the profile names are the operator's own, and the loopback port is reachable by every page
+// they open. The host asks over the loopback bridge (daedalus/host/launcher_bridge.py) with the
+// token from the handover file.
+func (s *Server) handleUserBrowser(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "get the report", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.ownAddress(r.Host) || !s.hasToken(r.Header.Get(csrfHeader)) {
+		refuse(w)
+		return
+	}
+	writeUserBrowser(w, http.StatusOK, s.app.UserBrowser(), nil)
+}
+
+// handleUserBrowserChange registers or removes the connector, at once: both are a few small files
+// and a registry value, so the answer is the new report rather than a job to poll. A failure is a
+// 500 that still carries the report, with the sentence in "error".
+func (s *Server) handleUserBrowserChange(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "post to change the connector", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.hasToken(r.Header.Get(csrfHeader)) {
+		refuse(w)
+		return
+	}
+	if !s.app.Native() {
+		http.Error(w, "the connector belongs to native mode: in Docker mode nothing on this machine is there for Chrome to start", http.StatusNotImplemented)
+		return
+	}
+	var report UserBrowserReport
+	var err error
+	if strings.HasSuffix(r.URL.Path, "/register") {
+		report, err = s.app.RegisterConnector()
+	} else {
+		report, err = s.app.UnregisterConnector()
+	}
+	status := http.StatusOK
+	if err != nil {
+		status = http.StatusInternalServerError
+	}
+	writeUserBrowser(w, status, report, err)
+}
+
+func writeUserBrowser(w http.ResponseWriter, status int, report UserBrowserReport, err error) {
+	body := struct {
+		UserBrowserReport
+		Error string `json:"error,omitempty"`
+	}{UserBrowserReport: report}
+	if err != nil {
+		body.Error = err.Error()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 // refuseAction says why an action was not started, in the two ways it can fail before it begins: a
