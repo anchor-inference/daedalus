@@ -171,9 +171,9 @@ from daedalus.tools.shell import title as shell_title
 logger = logging.getLogger(__name__)
 
 TOOL_RULES_KEY_FILE = "tool-rules-mark.key"
+"""Beside the operator's sealing key in the secrets directory, which no command the agent runs can read."""
 COMPUTER_LIVE_SECONDS = 3.0
 """How long the answer to "is the desktop daemon up" is reused by the tool policy."""
-"""Beside the operator's sealing key in the secrets directory, which no command the agent runs can read."""
 
 PROVIDER_OUTAGE_KINDS = frozenset({"llm_provider_error", "llm_timeout", "llm_stream_idle", "llm_rate_limit"})
 """Terminal error kinds that mean the endpoint, not the request, failed: the run is driven again once the wait is over."""
