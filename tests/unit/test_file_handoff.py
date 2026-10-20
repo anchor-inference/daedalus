@@ -70,7 +70,10 @@ class Routed(ScriptedProvider):
     """One model for the main orchestrator, the project's orchestrator and its staff, each reading its
     own script: they run concurrently (a dispatch wakes the project while the main orchestrator is
     still finishing its turn), so one shared list would hand each the other's steps. A step's
-    ``args`` may be a coroutine function, for handles that exist only once the turn before made them."""
+    ``args`` may be a coroutine function, for handles that exist only once the turn before made them.
+    A step with ``ready`` waits for the turn in which that coroutine function says yes: any wake of
+    the same orchestrator before then, such as its member starting, once took the step, found no
+    file to name and crashed the turn, and the turn the step was meant for had nothing left to do."""
 
     def __init__(self) -> None:
         super().__init__([])
@@ -87,7 +90,8 @@ class Routed(ScriptedProvider):
 
     async def stream_with_tools(self, request: Any) -> AsyncIterator[Any]:
         script = self.scripts[self.role(request)]
-        step = script.pop(0) if script else {"text": "Nothing more to do."}
+        waiting = bool(script) and "ready" in script[0] and not await script[0]["ready"]()
+        step = script.pop(0) if script and not waiting else {"text": "Nothing more to do."}
         if callable(step.get("args")):
             step = {**step, "args": await step["args"]()}
         self.script = [step]
@@ -122,6 +126,9 @@ class Chain:
         listed = [f for f in await self.manager.files.listing(scope) if f.origin == origin]
         assert listed, f"no {origin} file in {scope}"
         return listed[0].handle
+
+    async def has(self, scope: str, *, origin: str) -> bool:
+        return any(f.origin == origin for f in await self.manager.files.listing(scope))
 
     def opened(self) -> list[dict[str, Any]]:
         return [e for e in read_log(self.log) if e["event"] == "opened"]
@@ -302,7 +309,14 @@ async def test_an_attachment_in_a_host_projects_chat_reaches_its_host_member_whe
         assert any(json.loads(w["detail_json"])["path"] == str(target) for w in written), "the daemon's write is audited"
 
         # The member's artifact comes back as the project's file, named in the orchestrator's wake-up.
-        c.model.scripts["project"] += [{"tool": "ProjectReport", "args": report_args}, {"text": "Reported."}]
+        async def told() -> bool:
+            """The orchestrator passes the file on once its wake-up named it, not merely once it was stored."""
+            if not await c.has(c.project.id, origin="staff"):
+                return False
+            handle = await c.handle(c.project.id, origin="staff")
+            return any(handle in batch for batch in await events_messages(c.manager, sid))
+
+        c.model.scripts["project"] += [{"tool": "ProjectReport", "args": report_args, "ready": told}, {"text": "Reported."}]
 
         async def reported() -> bool:
             return any(e.payload.get("files") for e in await events(c.manager, "staff.report"))
