@@ -21,12 +21,19 @@ from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSock
 from pydantic import BaseModel, ConfigDict, Field
 
 from daedalus.browser.model import USER, InvalidRequest, NotFound, Owner, Unsupported
-from daedalus.browser.user import CONSENT, Pairing, RelayDesk
+from daedalus.browser.user import CONSENT, SKIP_WARNING, Pairing, RelayDesk
 from daedalus.host import launcher_bridge
 
 if TYPE_CHECKING:
     from daedalus.app import Application
     from daedalus.browser.service import Browsers
+
+
+class ApprovalsBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["manual", "auto", "skip"]
+    confirm: bool = False
+    """The operator said yes to what skipping approvals means; needed the first time only."""
 
 
 class SwitchBody(BaseModel):
@@ -202,6 +209,22 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         await session_choice(session_id)
         await service().switch_conversation(session_id, body.env, consent=body.consent)
         return await session_choice(session_id)
+
+    @api.get("/api/sessions/{session_id}/browser-approvals")
+    async def browser_approvals(session_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """How this conversation asks in the operator's Chrome: ``manual``, ``auto`` or ``skip``."""
+        choice = await session_choice(session_id)
+        return {"mode": choice["approvals"], "env": choice["env"], "warning": SKIP_WARNING}
+
+    @api.put("/api/sessions/{session_id}/browser-approvals")
+    async def browser_approvals_set(session_id: str, body: ApprovalsBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The operator's approval mode for one conversation, from the composer of the app or the side
+        panel (whose door lets its token reach this for its own conversations only). No tool writes it:
+        the mode decides what the agent may do unasked, so the agent never gets to choose it. The first
+        ``skip`` answers 409 ``skip_confirm_needed`` with the warning until it carries ``confirm``."""
+        await session_choice(session_id)
+        await service().choices.set_approvals(session_id, body.mode, confirm=body.confirm)
+        return await browser_approvals(session_id, _)
 
     # -- the public doors ---------------------------------------------------------------------
 

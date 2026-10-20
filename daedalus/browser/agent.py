@@ -55,7 +55,16 @@ from daedalus.browser.replay import RecordedSkills
 from daedalus.browser.replay import replay as run_replay
 from daedalus.browser.user import CONSENT, site_granted
 from daedalus.browser.user import site_of as registrable_site
-from daedalus.host.policy import ALLOW, ASK, DENY, Decision, approval_key, browser_sensitive, host_allowed
+from daedalus.host.policy import (
+    ALLOW,
+    ASK,
+    DENY,
+    Decision,
+    approval_key,
+    approval_mode_lifts,
+    browser_sensitive,
+    host_allowed,
+)
 from daedalus.security import operator_secrets
 from daedalus.security.untrusted import fenced as untrusted
 from daedalus.security.untrusted import origin_of
@@ -501,6 +510,13 @@ Look = Callable[[bytes, str, str], Awaitable[str]]
 """``(image, mime, question) -> answer`` from the vision model, or ``None`` where there is none."""
 
 
+MODE_WORDS = {
+    "auto": "the operator set this conversation to approve automatically",
+    "skip": "the operator set this conversation to skip all approvals",
+}
+"""How a result says why an action went through unasked."""
+
+
 @dataclass(slots=True)
 class Caller:
     owner: Owner
@@ -672,6 +688,15 @@ class BrowserAgent:
             return
         site = registrable_site(host)
         decision = Decision(ASK, f"the agent asks to open {site} in your own Chrome, where you are signed in", "browser.site", key=approval_key("BrowserNavigate", {"group": group["id"], "site": site}))
+        mode = await self._approval_mode(caller, group)
+        if approval_mode_lifts(mode, decision, ["site"]):
+            # Granted as the operator's own yes would be, for the conversation, and recorded as granted
+            # by the mode they chose, so the action log says why nobody was asked.
+            await self._audit(group, caller, "sensitive", {"kinds": ["site"], "decision": "allow", "by": mode, "key": decision.key, "host": host, "site": site})
+            if caller.owner.session_id:
+                await self.service.choices.grant_site(caller.owner.session_id, site)
+            caller.notes.append(f"Opened {site} without asking: {MODE_WORDS[mode]}.")
+            return
         ask = SensitiveAsk(decision, "BrowserNavigate", group["id"], "open", ["site"], f"https://{site}", site, host, 0, "", why=" ".join(why.split())[:300])
         allowed, said = await caller.gate(ask)
         await self._audit(group, caller, "sensitive", {"kinds": ["site"], "decision": "allow" if allowed else "ask", "key": decision.key, "host": host, "site": site})
@@ -679,6 +704,13 @@ class BrowserAgent:
             raise Forbidden(said)
         if caller.owner.session_id:
             await self.service.choices.grant_site(caller.owner.session_id, site)
+
+    async def _approval_mode(self, caller: Caller, group: dict[str, Any]) -> str:
+        """The operator's approval mode for this conversation in their Chrome; ``manual`` anywhere else,
+        the agent's own browser included, which has its network wall instead."""
+        if group.get("env") != USER_ENV or not caller.owner.session_id:
+            return "manual"
+        return str((await self.service.choices.get(caller.owner.session_id))["approvals"])
 
     async def _tab(self, group: dict[str, Any], tab: str | None) -> dict[str, Any]:
         listing = await self.service.call(group["id"], "tab.list", {"group_id": group["id"]}, what="listing the tabs")
@@ -1264,7 +1296,13 @@ class BrowserAgent:
                 if caller.rules is not None and decision.action != DENY:
                     ruled = await caller.rules(SensitiveAsk(decision, "BrowserAct", group["id"], action, kinds, origin_of(url), element.strip()[:300], name, len(text or ""), ""))
                     decision = ruled.decision
-                if decision.action != ALLOW:
+                mode = await self._approval_mode(caller, group)
+                if approval_mode_lifts(mode, decision, kinds):
+                    # The operator chose not to be asked here; the action still lands in the audit and the
+                    # result says it went through unasked.
+                    decided = f"allowed_{mode}"
+                    caller.notes.append(f"Done without asking ({', '.join(kinds)}): {MODE_WORDS[mode]}.")
+                elif decision.action != ALLOW:
                     thumbnail = await self._thumbnail(group, current, ref, decision.key) if decision.action == ASK and ref else ""
                     ask = SensitiveAsk(decision, "BrowserAct", group["id"], action, kinds, origin_of(url), element.strip()[:300], name, len(text or ""), thumbnail)
                     if decision.action != ASK:

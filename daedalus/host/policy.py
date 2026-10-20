@@ -137,6 +137,26 @@ NEVER_ALLOWED_KINDS = frozenset({"credentials"})
 CONSEQUENTIAL_KINDS = frozenset({"credentials", "purchase", "send", "destroy"})
 """What no rule lifts in the operator's own Chrome: there the agent acts as the operator, signed in
 everywhere they are, and buying, sending, deleting or signing in is always asked about."""
+APPROVAL_MODES = ("manual", "auto", "skip")
+"""How the operator's own Chrome asks, per conversation, as the operator set it in the composer:
+``manual`` asks about every new site and every sensitive action (the default); ``auto`` lets new sites
+and the routine asks through and still asks before buying, sending, deleting or signing in; ``skip``
+asks about nothing. None of them touches a refusal: a policy denial, a sealed port, a metadata
+address or a cookie value is refused before any question is."""
+
+
+def approval_mode_lifts(mode: str, decision: Decision, kinds: Iterable[str]) -> bool:
+    """Whether a conversation's approval mode answers this question itself, without the operator.
+
+    Only a question: a refusal, a handoff or a review's block is left as it is, which is what keeps
+    ``skip`` from lifting a hard denial."""
+    if decision.action != ASK:
+        return False
+    if mode == "skip":
+        return True
+    return mode == "auto" and not set(kinds) & CONSEQUENTIAL_KINDS
+
+
 SENSITIVE_WORDS = {
     "credentials": "submit a sign-in",
     "purchase": "buy or pay",
@@ -1053,4 +1073,4 @@ def browser_sensitive(*, tool: str, group: str, host: str, page_origin: str, kin
     return Decision(ASK, f"this would {words} on {host or page_origin}", "browser.sensitive", key=key)
 
 
-__all__ = ["ALLOW", "ASK", "BROWSER_NAV_TOOLS", "CONSEQUENTIAL_KINDS", "DENY", "HANDOFF", "SENSITIVE_KINDS", "SHELL_TOOLS", "browser_sensitive", "Decision", "Policy", "Rule", "approval_key", "argument_paths", "canonical", "expand_home", "host_allowed", "hosts_in", "mentions_sealed", "path_operands", "real_path", "real_under", "sealed_root", "shell_assignments", "shell_segments"]
+__all__ = ["ALLOW", "APPROVAL_MODES", "ASK", "BROWSER_NAV_TOOLS", "CONSEQUENTIAL_KINDS", "DENY", "HANDOFF", "SENSITIVE_KINDS", "SHELL_TOOLS", "approval_mode_lifts", "browser_sensitive", "Decision", "Policy", "Rule", "approval_key", "argument_paths", "canonical", "expand_home", "host_allowed", "hosts_in", "mentions_sealed", "path_operands", "real_path", "real_under", "sealed_root", "shell_assignments", "shell_segments"]

@@ -35,6 +35,7 @@ from urllib.parse import urlsplit
 
 from daedalus.browser import wire
 from daedalus.browser.model import USER, Conflict, EnvUnavailable, Forbidden, InvalidRequest
+from daedalus.host.policy import APPROVAL_MODES
 from daedalus.terminals.client import PtydClient, Unavailable
 from daedalus.terminals.wire import MAX_PAYLOAD
 
@@ -92,6 +93,20 @@ class ConsentNeeded(Conflict):
     code = "consent_needed"
 
 
+class SkipNeedsConfirm(Conflict):
+    """The first "skip all approvals" on this installation, without the operator's yes to it."""
+
+    code = "skip_confirm_needed"
+
+
+SKIP_CONFIRMED_KEY = "browser.user.skip_confirmed"
+SKIP_WARNING = (
+    "With approvals skipped, the agent acts in your signed-in Chrome without asking: it opens any site and "
+    "buys, sends and deletes on its own. Refusals still hold, and every action stays in the conversation and the "
+    "action log."
+)
+
+
 class UserChoices:
     """Per conversation: which browser it uses, whether the operator consented, the sites granted.
 
@@ -114,7 +129,8 @@ class UserChoices:
     async def get(self, session_id: str) -> dict[str, Any]:
         entry = (await self._all()).get(session_id) or {}
         env = entry.get("env") if entry.get("env") in CHOICES else AGENT
-        return {"env": env, "consented": bool(entry.get("consented_at")), "sites": [str(s) for s in entry.get("sites") or []]}
+        approvals = entry.get("approvals") if entry.get("approvals") in APPROVAL_MODES else "manual"
+        return {"env": env, "consented": bool(entry.get("consented_at")), "sites": [str(s) for s in entry.get("sites") or []], "approvals": approvals}
 
     async def env(self, session_id: str | None) -> str:
         if not session_id:
@@ -150,6 +166,21 @@ class UserChoices:
             if env == USER and not entry.get("consented_at"):
                 entry["consented_at"] = datetime.now(UTC).isoformat()
 
+        return await self._update(session_id, change)
+
+    async def set_approvals(self, session_id: str, mode: str, *, confirm: bool = False) -> dict[str, Any]:
+        """The operator's approval mode for one conversation in their Chrome. The first ``skip`` on this
+        installation needs their yes to what it means, asked once, as the consent is."""
+        if mode not in APPROVAL_MODES:
+            raise InvalidRequest(f"an approval mode is one of {', '.join(APPROVAL_MODES)}, not {mode!r}")
+        if mode == "skip" and not confirm and not await self.db.kv_get(SKIP_CONFIRMED_KEY, False):
+            raise SkipNeedsConfirm("the agent will act in your signed-in Chrome without asking; say yes once", consent=SKIP_WARNING)
+
+        def change(entry: dict[str, Any]) -> None:
+            entry["approvals"] = mode
+
+        if mode == "skip":
+            await self.db.kv_set(SKIP_CONFIRMED_KEY, True)
         return await self._update(session_id, change)
 
     async def grant_site(self, session_id: str, site: str) -> None:

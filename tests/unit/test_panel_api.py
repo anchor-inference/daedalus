@@ -382,3 +382,18 @@ async def test_a_conversation_held_from_the_panel_is_told_to_work_in_the_browser
     # Back in the agent's own browser, the line goes: "their Chrome" is somewhere it cannot work then.
     await rig.service.choices.switch(born, "agent", consent=True)
     assert PANEL_LINE not in await context(born)
+
+
+async def test_the_panel_sets_the_approval_mode_of_its_own_conversations_only(rig: Rig, chrome: FakeBrowserd) -> None:
+    mine = await rig.session(chrome=True)
+    other = await rig.session(chrome=False)
+    token, _ = await rig.grants.mint("dev1")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=build_app(rig.app, "tok")), base_url="http://test") as client:  # type: ignore[arg-type]
+        assert (await client.get(f"/api/panel/sessions/{mine}/browser-approvals", headers=panel(token))).json()["mode"] == "manual"
+        done = await client.put(f"/api/panel/sessions/{mine}/browser-approvals", headers=panel(token), json={"mode": "auto"})
+        assert done.status_code == 200 and done.json()["mode"] == "auto"
+        assert (await client.put(f"/api/panel/sessions/{other}/browser-approvals", headers=panel(token), json={"mode": "skip", "confirm": True})).status_code == 404
+        # The panel token opens only the panel's path; the operator's own path never reads it.
+        assert (await client.put(f"/api/sessions/{mine}/browser-approvals", headers=panel(token), json={"mode": "manual"})).status_code == 401
+    assert (await rig.service.choices.get(mine))["approvals"] == "auto"
+    assert (await rig.service.choices.get(other))["approvals"] == "manual"

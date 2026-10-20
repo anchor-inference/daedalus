@@ -20,7 +20,7 @@ from protocore.contracts.tools import ToolContext
 
 from daedalus.browser.agent import SensitiveAsk
 from daedalus.browser.model import USER, Owner, group_id
-from daedalus.browser.user import CONSENT, ConsentNeeded, site_granted, site_of
+from daedalus.browser.user import CONSENT, ConsentNeeded, SkipNeedsConfirm, site_granted, site_of
 from daedalus.config import BrowserConfig, BrowserRuleConfig, BrowserUserConfig, RuntimeConfig, Settings
 from daedalus.extensions import browser as browser_extension
 from daedalus.extensions.api import build_app
@@ -377,7 +377,7 @@ async def asked(rig: Rig, sid: str) -> str:
 async def test_the_agents_ask_switches_nothing_until_the_operator_says_yes(rig: Rig, chrome: FakeBrowserd, agents_browser: FakeBrowserd) -> None:
     sid = await rig.session()
     key = await asked(rig, sid)
-    assert await rig.service.choices.get(sid) == {"env": "agent", "consented": False, "sites": []}
+    assert await rig.service.choices.get(sid) == {"env": "agent", "consented": False, "sites": [], "approvals": "manual"}
     # Asking again, or opening the browser meanwhile, moves nothing either; the result names the browser.
     await rig.call(sid, "BrowserAskOperatorChrome", reason="read the anchorinference page signed in as you")
     text, failed = await rig.call(sid, "BrowserOpen")
@@ -401,7 +401,7 @@ async def test_the_operators_yes_switches_the_conversation_as_the_panel_does(rig
     # The state the panel's switch writes, consent recorded with it.
     panel = await rig.session()
     await rig.service.switch_conversation(panel, USER, consent=True)
-    assert await rig.service.choices.get(sid) == await rig.service.choices.get(panel) == {"env": USER, "consented": True, "sites": []}
+    assert await rig.service.choices.get(sid) == await rig.service.choices.get(panel) == {"env": USER, "consented": True, "sites": [], "approvals": "manual"}
     async with asyncio.timeout(5):
         async for event in subscription:
             assert event.payload["kind"] == "switched" and event.session_id == sid
@@ -420,7 +420,7 @@ async def test_the_operators_no_leaves_the_conversation_in_the_agents_browser(ri
     sid = await rig.session()
     key = await asked(rig, sid)
     await rig.manager.refuse(sid, key, via="app")
-    assert await rig.service.choices.get(sid) == {"env": "agent", "consented": False, "sites": []}
+    assert await rig.service.choices.get(sid) == {"env": "agent", "consented": False, "sites": [], "approvals": "manual"}
     assert not rig.pending(sid)
     assert "declined" in told[-1][1] and "your own browser" in told[-1][1]
 
@@ -501,3 +501,95 @@ async def test_a_command_line_members_browser_cannot_ask_to_move(rig: Rig, chrom
     caller = Caller(owner=Owner("staff", "m1", staff_id="m1"), actor="staff:m1", gate=never, files=None)  # type: ignore[arg-type]
     text, failed = await rig.app.extensions["browser_agent"].run("BrowserAskOperatorChrome", {"reason": "read a page"}, caller)
     assert failed and "cannot move into the operator's Chrome" in text
+
+
+# -- the approval modes ------------------------------------------------------------------------------
+
+
+async def acting_page(chrome: FakeBrowserd) -> None:
+    chrome.page("https://mail.example.com/", title="Inbox", heading="Inbox", text="three new messages", elements={
+        "e1": Element("e1", "button", "Send"),
+        "e3": Element("e3", "button", "Accept the terms"),
+    })
+
+
+async def test_manual_asks_about_a_new_site_and_a_routine_action_as_before(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await rig.session()
+    await rig.switch(sid)
+    assert (await rig.service.choices.get(sid))["approvals"] == "manual"
+    await rig.call(sid, "BrowserOpen")
+    text, failed = await rig.call(sid, "BrowserNavigate", url="https://mail.example.com/")
+    assert failed and "Approval key" in text
+
+
+async def test_automatic_grants_new_sites_and_routine_asks_but_still_asks_before_sending(rig: Rig, chrome: FakeBrowserd) -> None:
+    await acting_page(chrome)
+    sid = await rig.session()
+    await rig.switch(sid)
+    await rig.service.choices.set_approvals(sid, "auto")
+    await rig.call(sid, "BrowserOpen")
+    text, failed = await rig.call(sid, "BrowserNavigate", url="https://mail.example.com/")
+    assert not failed and "without asking" in text and "approve automatically" in text, text
+    assert not rig.pending(sid) and (await rig.service.choices.get(sid))["sites"] == ["example.com"]
+    await rig.call(sid, "BrowserSnapshot")
+    text, failed = await rig.call(sid, "BrowserAct", action="click", ref="e3", element="the Accept button")
+    assert not failed and "Done without asking (accept)" in text, text
+    text, failed = await rig.call(sid, "BrowserAct", action="click", ref="e1", element="the Send button")
+    assert failed and "Approval key" in text
+    audit = await rig.service.audit_log(group_id(Owner("session", sid), env=USER))
+    assert any(e["action"] == "sensitive" and e["detail"].get("by") == "auto" for e in audit)
+    assert any(e["action"] == "act" and e["detail"].get("decision") == "allowed_auto" for e in audit)
+
+
+@pytest.mark.parametrize("runtime", [RuntimeConfig(browser=BrowserConfig(control_wait_seconds=0.2, user=BrowserUserConfig(),
+                                                                       rules=[BrowserRuleConfig(domain="mail.example.com", action="deny", kinds=["destroy"])]))])
+async def test_skip_asks_about_nothing_yet_never_lifts_a_refusal(rig: Rig, chrome: FakeBrowserd) -> None:
+    chrome.page("https://mail.example.com/", title="Inbox", elements={"e1": Element("e1", "button", "Send"), "e4": Element("e4", "button", "Delete the account")})
+    sid = await rig.session()
+    await rig.switch(sid)
+    with pytest.raises(SkipNeedsConfirm):  # the first skip needs the operator's yes
+        await rig.service.choices.set_approvals(sid, "skip")
+    await rig.service.choices.set_approvals(sid, "skip", confirm=True)
+    await rig.call(sid, "BrowserOpen")
+    text, failed = await rig.call(sid, "BrowserNavigate", url="https://mail.example.com/")
+    assert not failed, text
+    await rig.call(sid, "BrowserSnapshot")
+    text, failed = await rig.call(sid, "BrowserAct", action="click", ref="e1", element="the Send button")
+    assert not failed and "skip all approvals" in text, text
+    # The operator's rule refuses deleting here, and skipping approvals is not a way around it.
+    text, failed = await rig.call(sid, "BrowserAct", action="click", ref="e4", element="the Delete button")
+    assert failed and "refused by policy" in text
+    assert not rig.pending(sid)
+    # The built-in refusals stand too: a cookie value is not read in the operator's Chrome.
+    text, failed = await rig.call(sid, "BrowserCookies", action="import", file="cookies.txt")
+    assert failed
+
+
+def test_the_modes_lift_questions_only() -> None:
+    from daedalus.host.policy import DENY, approval_mode_lifts  # noqa: PLC0415
+
+    ask = Decision(ASK, "x", "browser.sensitive", key="k")
+    assert not approval_mode_lifts("manual", ask, ["site"])
+    assert approval_mode_lifts("auto", ask, ["site"]) and approval_mode_lifts("auto", ask, ["accept", "upload"])
+    for kind in ("purchase", "send", "destroy", "credentials"):
+        assert not approval_mode_lifts("auto", ask, [kind]) and approval_mode_lifts("skip", ask, [kind])
+    for final in (Decision(DENY, "no", "browser.rule"), Decision("handoff", "yours", "rule")):
+        assert not approval_mode_lifts("skip", final, ["send"])
+
+
+async def test_only_the_operator_sets_the_mode_and_the_agent_has_no_way_to(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await rig.session()
+    await rig.switch(sid)
+    headers = {"x-daedalus-token": "tok"}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=build_app(rig.app, "tok")), base_url="http://test") as client:  # type: ignore[arg-type]
+        assert (await client.put(f"/api/sessions/{sid}/browser-approvals", json={"mode": "auto"})).status_code == 401
+        assert (await client.get(f"/api/sessions/{sid}/browser-approvals", headers=headers)).json()["mode"] == "manual"
+        refused = await client.put(f"/api/sessions/{sid}/browser-approvals", json={"mode": "skip"}, headers=headers)
+        assert refused.status_code == 409 and refused.json()["code"] == "skip_confirm_needed"
+        assert (await client.put(f"/api/sessions/{sid}/browser-approvals", json={"mode": "nobody"}, headers=headers)).status_code == 422
+        done = await client.put(f"/api/sessions/{sid}/browser-approvals", json={"mode": "auto"}, headers=headers)
+        assert done.status_code == 200 and done.json()["mode"] == "auto"
+    # No tool the agent has takes a mode, and none of the browser's writes the conversation's choices.
+    for tool in rig.manager.tools.list_all():
+        assert "approvals" not in repr(tool.definition).lower(), tool.name
+    assert (await rig.service.choices.get(sid))["approvals"] == "auto"
