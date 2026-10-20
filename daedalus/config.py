@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import sys
+import tempfile
 import tomllib
 from pathlib import Path
 from typing import Any, Literal
@@ -2387,11 +2388,53 @@ class RuntimeConfig(BaseModel):
         return cls.model_validate(raw)
 
     def save(self, path: Path) -> None:
+        """Write the settings that differ from the defaults, readable by the owner alone.
+
+        Every default used to be written on the first save, so a default changed in the code never
+        reached an installation that had once saved, and the file holding the bot's configuration
+        was world-readable. The file is written whole each time: comments and layout the operator
+        added by hand are not kept, as no comment-preserving TOML writer is a dependency here.
+        """
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".toml.tmp")
-        with tmp.open("wb") as fh:
-            tomli_w.dump(_without_none(self.model_dump(mode="json")), fh)
-        tmp.replace(path)
+        body = tomli_w.dumps(_without_none(_overrides(self, type(self)(), self.model_dump(mode="json"))))
+        descriptor, temporary = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
+        try:
+            # mkstemp creates the file 0600, so the settings are never readable by others even briefly.
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(body)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+        except BaseException:
+            Path(temporary).unlink(missing_ok=True)
+            raise
+
+
+_MISSING = object()
+
+
+def _overrides(model: BaseModel, default: Any, dumped: dict[str, Any]) -> dict[str, Any]:
+    """The part of ``dumped`` (``model`` as JSON) that differs from ``default``, section by section.
+
+    A section is compared field by field. A map whose default has entries (the providers) is written
+    whole whenever it is set at all: the seeds and migrations edit such a map in the file as if it
+    were all there, and a map left out would come back holding only the entry a seed added, with
+    every other default entry gone; written partially, an entry the operator deleted would return.
+    """
+    out: dict[str, Any] = {}
+    default_dump = default.model_dump(mode="json") if isinstance(default, BaseModel) else {}
+    for name in type(model).model_fields:
+        if name not in dumped:
+            continue
+        value = getattr(model, name)
+        base = getattr(default, name, None) if isinstance(default, BaseModel) else None
+        if isinstance(value, BaseModel) and type(base) is type(value):
+            nested = _overrides(value, base, dumped[name])
+            if nested:
+                out[name] = nested
+        elif (isinstance(base, dict) and base) or dumped[name] != default_dump.get(name, _MISSING):
+            out[name] = dumped[name]
+    return out
 
 
 def _without_none(value: Any) -> Any:
