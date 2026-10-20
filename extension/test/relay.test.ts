@@ -327,7 +327,7 @@ describe("the agent's tabs", () => {
   it("gives a tab through the context menu, in the operator's language", async () => {
     const h = await harness({ language: "ru" });
     await h.withAgentTab();
-    expect(h.fake.menus.map((m) => m.title)).toEqual(["Разрешить Daedalus эту вкладку", "Отдать: Flights to Lisbon"]);
+    expect(h.fake.menus.map((m) => m.title)).toEqual(["Спросить Daedalus об этой странице", "Разрешить Daedalus эту вкладку", "Отдать: Flights to Lisbon"]);
     const own = h.fake.addTab(h.fake.operatorWindow, "https://example.org/");
     h.take();
     h.fake.events.menuClicked.emit({ menuItemId: "daedalus-grant:g1" }, { ...own });
@@ -341,7 +341,8 @@ describe("the agent's tabs", () => {
     await h.welcome();
     await h.call("tab.create", { group: "g1" });
     await h.call("group.close", { group: "g1" });
-    expect(h.fake.menus).toEqual([expect.objectContaining({ id: "daedalus-grant", enabled: false })]);
+    // "Ask Daedalus about this page" stays: it starts a conversation, which needs no agent at work.
+    expect(h.fake.menus).toEqual([expect.objectContaining({ id: "daedalus-ask" }), expect.objectContaining({ id: "daedalus-grant", enabled: false })]);
   });
 
   it("reports a tab the operator closed, and the group when its last tab goes", async () => {

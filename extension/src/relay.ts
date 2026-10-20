@@ -107,6 +107,9 @@ export const PAUSE_RENEW_MS = 2_000;
 const NOTICE_SHOW_MS = 10_000;
 const FLASH_MS = 3_000;
 const MENU_ROOT = "daedalus-grant";
+// "Ask Daedalus about this page": opens the side panel on a new conversation. The worker answers its
+// click itself, at once, because opening the panel needs the click's gesture.
+export const MENU_ASK = "daedalus-ask";
 const GRANT_KEY = "panelGrant";
 // A notification's id carries what its click needs, since the worker that shows it may be stopped
 // and started again before the click: the conversation and the agent's tab.
@@ -1156,6 +1159,7 @@ export class Relay {
     await updateGuard([...this.scope.members.keys()]);
     await chrome.contextMenus.removeAll().catch(() => undefined);
     const groups = [...this.scope.groups.values()];
+    chrome.contextMenus.create({ id: MENU_ASK, title: t("menu.ask"), contexts: ["page", "selection"] });
     chrome.contextMenus.create({
       id: MENU_ROOT,
       title: groups.length ? t("menu.grant") : t("menu.grant_none"),

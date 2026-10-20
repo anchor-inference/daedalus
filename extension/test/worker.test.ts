@@ -65,4 +65,12 @@ describe("the worker", () => {
     fake.events.notificationClicked.emit("someone-else:1");
     expect(fake.sidePanel.opened).toHaveLength(1);
   });
+
+  it("opens the panel on a new conversation from the page's menu, inside the click", async () => {
+    fake.sidePanel.opened.length = 0;
+    fake.events.menuClicked.emit({ menuItemId: "daedalus-ask" }, { id: 42, windowId: fake.operatorWindow });
+    expect(fake.sidePanel.opened).toEqual([{ tabId: 42 }]);
+    await flush();
+    expect(await send({ kind: "panel-show" }, PANEL)).toBe("new");
+  });
 });

@@ -255,4 +255,12 @@ describe("the screen", { timeout: 20_000 }, () => {
     expect(message.text).toContain("find a gift");
     expect(message.text).toContain("https://bank.example/");
   });
+
+  it("opens on a new conversation when the page's menu asked for one", async () => {
+    fakeShell.current = { ...fakeShell.current!, hello: { ...fakeShell.current!.hello, show: "new" } };
+    act(() => root.render(<SidePanel />));
+    await settle();
+    expect(host.querySelector(".sp-new-field")).not.toBeNull();
+    expect(host.querySelector(".sp-new-tab")?.textContent).toContain("Bank");
+  });
 });

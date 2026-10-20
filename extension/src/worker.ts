@@ -3,7 +3,7 @@
 // an await, misses the event that woke the worker. Each one waits for the relay to have read its
 // state back before acting.
 
-import { NOTICE_PREFIX, Relay } from "./relay.js";
+import { MENU_ASK, NOTICE_PREFIX, Relay } from "./relay.js";
 
 const relay = new Relay();
 const ready = relay.start();
@@ -52,6 +52,16 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onDisconnect.addListener(() => {
     if (windowId !== undefined) relay.openPanels.delete(windowId);
   });
+});
+
+// "Ask Daedalus about this page" opens the panel on a new conversation for the page in front of
+// the operator: answered here and not through the relay, whose listeners wait for its state, because
+// the panel opens only inside the click.
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId !== MENU_ASK || tab?.id === undefined) return;
+  void chrome.sidePanel.open({ tabId: tab.id }).catch(() => undefined);
+  void chrome.storage.session.set({ panelShow: "new" });
+  void chrome.runtime.sendMessage({ kind: "panel-show", session: "new" }).catch(() => undefined);
 });
 
 chrome.notifications.onClicked.addListener((id) => {

@@ -29,6 +29,9 @@ import "./sidepanel.css";
 
 type Status = "idle" | "running" | "waiting" | "failed" | "compacting";
 
+/** What the extension asks the panel to show when the operator chose "Ask Daedalus about this page". */
+const NEW = "new";
+
 function statusOf(detail: SessionDetail | null): Status {
   const status = detail?.status ?? "idle";
   return (["running", "waiting", "failed", "compacting"].includes(status) ? status : "idle") as Status;
@@ -65,7 +68,9 @@ export function SidePanel() {
         if (gone) return;
         setPanelCredential(found.hello.token, refresher(found));
         if (found.hello.lang === "ru" || found.hello.lang === "en") setLang(found.hello.lang);
-        show.current = found.hello.show;
+        // "new" is the page's menu, "Ask Daedalus about this page": a new conversation for that page.
+        if (found.hello.show === NEW) setCreating(true);
+        else show.current = found.hello.show;
         setCurrent(found.hello.current);
         setShell(found);
       })
@@ -91,6 +96,10 @@ export function SidePanel() {
       shell.on("current", (value: Current) => setCurrent(value)),
       shell.on("token", (value: { token: string }) => value?.token && setPanelCredential(value.token, refresher(shell))),
       shell.on("show", (session: string) => {
+        if (session === NEW) {
+          setCreating(true);
+          return;
+        }
         show.current = session;
         setCreating(false);
         void loadList();

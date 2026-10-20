@@ -163,7 +163,8 @@ language; a test fails on a sentence written anywhere else.
 
 The toolbar button and its shortcut (Alt+Shift+D, changeable at `chrome://extensions/shortcuts`)
 open the side panel; Chrome opens a panel only on the operator's gesture, so it never opens by itself.
-There is one panel per window, and it follows that window's active tab.
+There is one panel per window, and it follows that window's active tab. The page's context menu has
+"Ask Daedalus about this page", which opens the panel on a new conversation for that page.
 
 The panel page (`panel.html`, an extension page, so privileged) draws a 32 px strip with the
 connection's state and the settings above, and frames the host's own app at `/app/panel`. The app is
