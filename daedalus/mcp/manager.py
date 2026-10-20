@@ -17,6 +17,7 @@ from collections import OrderedDict
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 
 import httpx
 from mcp import ClientSession, StdioServerParameters
@@ -151,7 +152,7 @@ class McpToolProxy(Tool):
         try:
             result = await self._connection.call(self._remote, self._connection.vault.resolve(arguments))
         except Exception as exc:  # noqa: BLE001
-            return f"MCP tool failed: {_describe(exc)}", True
+            return f"MCP tool failed: {self._connection.describe(exc)}", True
         parts: list[str] = []
         for item in getattr(result, "content", []) or []:
             text = getattr(item, "text", None)
@@ -194,6 +195,38 @@ def _describe(exc: BaseException) -> str:
     return f"{type(inner).__name__}: {inner}"
 
 
+_QUERY_SECRET_RE = re.compile(
+    r"(?i)([?&][^=&\s#]*(?:key|token|secret|auth|password|passwd|signature|sig|credential|session)[^=&\s#]*=)([^&\s#\"'<>]+)"
+)
+"""A query parameter named like a credential, in any URL an error quotes: many hosted servers take
+their key as ``?api_key=…``, and an HTTP library's error repeats the URL it failed on."""
+
+MIN_CONFIGURED_SECRET = 4
+"""Configured values shorter than this are left in place: they would match inside ordinary words."""
+
+
+def mask_server_secrets(config: McpServerConfig, text: str) -> str:
+    """``text`` with what this server was configured with masked: its header and environment values,
+    every query value of its URL, credential-named query values of any URL, then the shared shapes.
+
+    The process-wide redactor knows the servers configured at start, and only values of eight
+    characters or more; a server added from the app since, or a short key, reached the app's status
+    row and the model as written.
+    """
+    if not text:
+        return text
+    values = [*config.headers.values(), *config.env.values()]
+    for value in config.headers.values():
+        # ``Bearer abc``: the credential is the last word, and an error may quote it without the scheme.
+        values.extend(value.split()[1:])
+    if config.url and "?" in config.url:
+        values.extend(value for _, value in parse_qsl(urlsplit(config.url).query))
+    for value in sorted({v for v in values if len(v) >= MIN_CONFIGURED_SECRET}, key=len, reverse=True):
+        text = text.replace(value, redact.MASK)
+    text = _QUERY_SECRET_RE.sub(lambda match: match.group(1) + redact.MASK, text)
+    return redact.redact(text)
+
+
 def _looks_like_auth_failure(exc: BaseException) -> bool:
     inner = exc
     while isinstance(inner, BaseExceptionGroup) and inner.exceptions:
@@ -206,6 +239,22 @@ def _looks_like_auth_failure(exc: BaseException) -> bool:
 
 def _safe_slug(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", name) or "server"
+
+
+CONNECT_DEADLINE_SECONDS = 30.0
+"""How long a caller waits for a server to connect before it is told the server is still starting."""
+RECONNECT_DEADLINE_SECONDS = 10.0
+"""How long a tool call waits for a dropped transport to come back before it fails."""
+WEDGED_AFTER_SECONDS = 120.0
+"""How long a connection may stay connecting before it is stopped and started again. A server that
+installs its packages on first start (``npx -y``, ``uvx``) takes tens of seconds; the warm-up used to
+stop anything not ready after five, so such a server was killed on every run and never came up."""
+WARM_UP_SECONDS = 8.0
+"""The whole warm-up of a run's servers, together: a dead server must never hold the run longer."""
+
+
+class McpStillStarting(RuntimeError):
+    """The server did not connect within the caller's deadline and is still starting."""
 
 
 class McpConnection:
@@ -238,8 +287,26 @@ class McpConnection:
         self._catalog_digest = ""
         self._catalog_changed = catalog_changed
         self.config_digest = _config_digest(config)
+        self._started_at = 0.0
 
-    async def start(self) -> None:
+    def describe(self, exc: BaseException) -> str:
+        """The failure as the app and the model may see it, with this server's secrets masked."""
+        return mask_server_secrets(self.config, _describe(exc))
+
+    @property
+    def starting(self) -> bool:
+        """Connecting now, and not for so long that the attempt should be called wedged."""
+        return (self.session is None and self._task is not None and not self._task.done()
+                and asyncio.get_running_loop().time() - self._started_at < WEDGED_AFTER_SECONDS)
+
+    async def start(self, *, deadline: float | None = CONNECT_DEADLINE_SECONDS) -> None:
+        """Connect, or join the connection already being made, waiting at most ``deadline`` seconds.
+
+        A server that has not answered by then raises :class:`McpStillStarting` and goes on starting:
+        only the wait ends. The Telegram button and the app's switch waited with no bound at all,
+        and a caller that bounded the wait by cancelling it gave the next caller a half-started
+        connection that looked wedged and was killed.
+        """
         async with self._start_lock:
             if self._task is None or self._task.done():
                 self._ready.clear()
@@ -247,8 +314,12 @@ class McpConnection:
                 self.error = None
                 self.last_error_code = None
                 self.state = "connecting"
+                self._started_at = asyncio.get_running_loop().time()
                 self._task = asyncio.create_task(self._run(), name=f"mcp:{self.name}")
-        await self._ready.wait()
+        try:
+            await asyncio.wait_for(self._ready.wait(), timeout=deadline)
+        except TimeoutError:
+            raise McpStillStarting(f"MCP server {self.name} is still starting after {deadline:.0f}s; it goes on starting, so try again shortly") from None
         if self.error:
             raise RuntimeError(self.error)
 
@@ -278,7 +349,7 @@ class McpConnection:
                     async with streamable_http_client(self.config.url, http_client=client) as streams:
                         await self._serve(streams[0], streams[1])
         except BaseException as exc:  # noqa: BLE001 — anyio wraps transport failures in groups
-            self.error = _describe(exc)
+            self.error = self.describe(exc)
             self.last_error_code = "authorization_required" if _looks_like_auth_failure(exc) else "connection_failed"
             self.state = "auth_required" if self.last_error_code == "authorization_required" else "unavailable"
             logger.warning("mcp server %s failed: %s", self.name, self.error)
@@ -329,8 +400,8 @@ class McpConnection:
                     # The transport dropped before dispatch (server restart, idle reset, prior stop),
                     # so reconnecting cannot repeat an effect whose outcome is unknown.
                     try:
-                        await asyncio.wait_for(self.start(), timeout=10)
-                    except TimeoutError:
+                        await self.start(deadline=RECONNECT_DEADLINE_SECONDS)
+                    except McpStillStarting:
                         raise RuntimeError(f"MCP server {self.name}: reconnect timed out during connect") from None
                     if self.session is None:
                         raise RuntimeError(f"MCP server {self.name} is not connected: {self.error or 'connection failed'}")
@@ -576,8 +647,10 @@ class McpManager:
         """The server's tools as last listed, by name; empty until it has been connected."""
         return [tool for _, tool in sorted(self._registered_tools.get(server, {}).items())]
 
-    async def ensure(self, name: str) -> McpConnection:
-        """Connect a configured server (idempotent) and register its tools."""
+    async def ensure(self, name: str, *, deadline: float | None = CONNECT_DEADLINE_SECONDS) -> McpConnection:
+        """Connect a configured server (idempotent) and register its tools.
+
+        :class:`McpStillStarting` when it is not connected within ``deadline``; it goes on starting."""
         if name not in self._configs:
             raise KeyError(f"unknown MCP server {name!r}; configured: {self.available()}")
         lock = self._ensure_locks.setdefault(name, asyncio.Lock())
@@ -600,12 +673,49 @@ class McpManager:
                     catalog_changed=lambda tools, server=name: self._replace_catalog(server, tools),
                 )
                 self._connections[name] = connection
-            if connection.error or (connection.session is None and connection._task is not None and not connection._task.done()):
+            connecting = connection.session is None and connection._task is not None and not connection._task.done()
+            if connection.error or (connecting and not connection.starting):
                 # A connection that failed or wedged is rebuilt, not reused: McpEnable is the agent's way to recover.
+                # One that is merely slow is joined: stopping it is what kept a slow server from ever starting.
                 await connection.stop()
-            await connection.start()
+            await connection.start(deadline=deadline)
             self._replace_catalog(name, connection.tools)
             return connection
+
+    async def warm(self, names: Sequence[str], *, budget: float = WARM_UP_SECONDS) -> dict[str, str]:
+        """Connect ``names`` together within ``budget`` seconds; each server's outcome by name.
+
+        ``ready``, ``starting`` (still connecting; left to finish on its own), or ``failed``. One
+        that fails while time is left is tried once more, since a server's first start after the host
+        restarts is the one most likely to lose a race. The warm-up went one server at a time with
+        five seconds each, so three slow servers cost a run fifteen seconds and none of them came up.
+        """
+        loop = asyncio.get_running_loop()
+        until = loop.time() + budget
+
+        async def one(name: str) -> str:
+            if name not in self._configs:
+                return "failed"  # enabled once, removed from the config since
+            for attempt in (1, 2):
+                remaining = until - loop.time()
+                if remaining <= 0:
+                    return "starting" if self._connections.get(name) is not None and self._connections[name].starting else "failed"
+                try:
+                    await self.ensure(name, deadline=remaining)
+                    return "ready"
+                except McpStillStarting:
+                    logger.info("MCP server %s is still starting; it goes on in the background", name)
+                    return "starting"
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 — a server that fails must not fail the run
+                    connection = self._connections.get(name)
+                    detail = connection.describe(exc) if connection is not None else type(exc).__name__
+                    logger.warning("MCP warm-up for %s failed (attempt %d): %s", name, attempt, detail)
+            return "failed"
+
+        results = await asyncio.gather(*(one(name) for name in names))
+        return dict(zip(names, results, strict=True))
 
     async def close(self) -> None:
         if self._retiring:
@@ -647,4 +757,4 @@ def blocked_for(manager: McpManager, enabled: Sequence[str]) -> set[str]:
     return {name for name in manager.all_tool_names() if not any(name in manager.tool_names(s) for s in enabled_set)}
 
 
-__all__ = ["McpConnection", "McpManager", "McpToolProxy", "blocked_for", "mcp_group_name", "mcp_tool_name", "mcp_tool_prefix"]
+__all__ = ["McpConnection", "McpManager", "McpStillStarting", "McpToolProxy", "mask_server_secrets", "blocked_for", "mcp_group_name", "mcp_tool_name", "mcp_tool_prefix"]

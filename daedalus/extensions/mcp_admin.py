@@ -128,7 +128,7 @@ async def probe(app: Application, name: str) -> dict[str, Any]:
     """Connect once and say how it went: ready with its tools, waiting for sign-in, or the error."""
     manager = app.manager.mcp
     try:
-        await asyncio.wait_for(manager.ensure(name), CONNECT_SECONDS)
+        await manager.ensure(name, deadline=CONNECT_SECONDS)
     except (TimeoutError, RuntimeError):
         pass  # still connecting, or failed: the status row below says which, with the error
     except Exception as exc:  # noqa: BLE001 — what failed is the answer to the person who asked

@@ -110,7 +110,7 @@ from daedalus.host.setting_refs import (
 from daedalus.host.skills import DirectorySkillStore, ScopedSkillStore
 from daedalus.host.transcript_view import TranscriptViewBuilder, message_view
 from daedalus.host.worktrees import append_exclude, exclude_lines
-from daedalus.mcp.manager import McpManager, blocked_for, mcp_tool_prefix
+from daedalus.mcp.manager import McpManager, McpStillStarting, blocked_for, mcp_tool_prefix
 from daedalus.mcp.oauth import mcp_callback_url
 from daedalus.memory.tools import build_memory_tools
 from daedalus.processes import end_tree
@@ -1219,7 +1219,12 @@ class SessionManager:
         if enabled:
             if server in self.mcp.available() and server not in self.mcp_visible(state):
                 raise KeyError(f"MCP server {server!r} is not part of this project's environment; it offers: {', '.join(self.mcp_visible(state)) or 'none'}")
-            await self.mcp.ensure(server)
+            try:
+                await self.mcp.ensure(server)
+            except McpStillStarting:
+                # Switched on all the same: the server goes on starting, and its tools join the
+                # session when it is ready; the caller reads the "connecting" state from the status.
+                logger.info("MCP server %s is still starting; enabled for %s anyway", server, session_id)
             if server not in current:
                 current.append(server)
         else:
@@ -1314,6 +1319,8 @@ class SessionManager:
         # The model's own switch: its result tells it, so no note is left for the next turn.
         current = await self.set_mcp(session_id, server, enabled=(op == "enable"), announce=False)
         if op == "enable":
+            if not self.mcp.tool_names(server) and any(row["name"] == server and row["state"] == "connecting" for row in self.mcp.status()):
+                return f"enabled {server}, but it is still starting (a server may install itself on first start); its tools appear once it connects: call McpEnable(server={server!r}) again in a minute to see them"
             names = self.mcp_tools_line(state, server) or "(none)"
             if self._searches_for_tools(state):
                 # A server's tools are the first thing the core holds back whenever ToolSearch is on, so
@@ -4137,17 +4144,9 @@ class SessionManager:
         if enabled:
             # Re-establish connections for servers this session left enabled (e.g. after a
             # host restart or a dropped transport) so their tools are visible again instead
-            # of silently missing until the agent re-runs McpEnable. Bounded: a dead or
-            # slow server must never block the run.
-            for server in enabled:
-                try:
-                    await asyncio.wait_for(self.mcp.ensure(server), timeout=5)
-                except TimeoutError:
-                    logger.warning("MCP warm-up for %s timed out; tools may be unavailable this run", server)
-                except asyncio.CancelledError:
-                    raise
-                except Exception:  # noqa: BLE001
-                    logger.warning("MCP warm-up for %s failed; tools may be unavailable this run", server, exc_info=True)
+            # of silently missing until the agent re-runs McpEnable. Bounded as a whole: a dead
+            # or slow server must never block the run, and one still starting is left to finish.
+            await self.mcp.warm(enabled)
         async with self.db.transaction() as conn:
             resting = await resting_providers_in(conn, [provider.endpoint.id for provider, _ in rungs[1:]])
         chain = build_chain(rungs, room=self.providers.room_for(self.config), resting=resting)
