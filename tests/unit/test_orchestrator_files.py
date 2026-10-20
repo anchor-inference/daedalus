@@ -198,3 +198,32 @@ def test_the_orchestrator_may_deliver_but_still_not_work() -> None:
     assert {"SendFile", "AttachMedia"} <= set(ORCHESTRATOR_TOOLS)
     assert not {"Exec", "Write", "Edit", "Read", "SubAgent"} & set(ORCHESTRATOR_TOOLS)
 
+
+async def test_the_review_packet_lists_what_a_members_worktree_produced(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from daedalus.extensions.orchestrator_contract import _produced_files
+    from daedalus.host.worktrees import StaffWorktrees
+    from daedalus.stores.projects import Project, ProjectFolder
+    from tests.unit.test_containment import NOW
+
+    code, worktree, _ = _repository(tmp_path)
+    (worktree / "scripts").mkdir()
+    (worktree / "scripts" / "fill.py").write_text("print('fill')\n", encoding="utf-8")
+    _git(worktree, "add", "scripts/fill.py")
+    _git(worktree, "-c", "user.email=someone@localhost", "-c", "user.name=someone", "commit", "-q", "-m", "fill script")
+    (worktree / ".agents" / "inbox").mkdir(parents=True)
+    (worktree / ".agents" / "inbox" / "brief.md").write_text("handed to the member\n", encoding="utf-8")
+    folder = ProjectFolder(id="f-code", project_id="p", path=code, label="", env="container", is_git=True, readonly=False, position=0, created_at=NOW)
+    project = Project(id="p", name="Atlas", created_at=NOW, folders=(folder,))
+
+    class Rows:
+        async def fetchone(self, sql: str, params: Any) -> Any:
+            assert params == ("t1",)
+            return {"worktree_path": str(worktree), "folder_id": "f-code", "base_ref": "main"}
+
+    orch = SimpleNamespace(manager=SimpleNamespace(db=Rows()), team=SimpleNamespace(worktrees=StaffWorktrees("container")))
+    produced = await _produced_files(orch, project, "t1")  # type: ignore[arg-type]
+    assert produced is not None and produced["path"] == str(worktree) and not produced["more"]
+    # The committed script and the untracked document the member never handed in; not the host's inbox.
+    assert sorted(produced["files"]) == sorted(["scripts/fill.py", f"docs/drafts/{ACT}", "escape", "metadata"])

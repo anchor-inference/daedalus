@@ -15,6 +15,7 @@ import json
 import re
 import uuid
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions.contract_changes import apply_change_in, link_stop_in, stage_change_in
@@ -494,8 +495,11 @@ async def review_result(
         if result_id:
             results = [item for item in results if item["result_id"] == result_id]
         contract = await domain.contract(task_id)
-        return json.dumps({"task_id": task_id, "contract": contract, "results": results},
-                          ensure_ascii=False, sort_keys=True)
+        packet: dict[str, Any] = {"task_id": task_id, "contract": contract, "results": results}
+        produced = await _produced_files(orch, project, task_id)
+        if produced is not None:
+            packet["worktree"] = produced
+        return json.dumps(packet, ensure_ascii=False, sort_keys=True)
     if op not in ("verdict", "return", "accept"):
         raise Refused("op is inspect, verdict, accept or return")
     if op == "return" and task.get("status") not in (None, "review"):
@@ -574,6 +578,37 @@ async def review_result(
     except (ControlDenied, ValueError, KeyError) as exc:
         raise Refused(str(exc)) from exc
     return json.dumps(response, ensure_ascii=False, sort_keys=True)
+
+
+async def _produced_files(orch: Orchestrators, project: Project, task_id: str) -> dict[str, Any] | None:
+    """The worktree a task was worked in and the files it produced there, or ``None`` without one.
+
+    What a member hands in is what it chose to name; a deliverable left in its worktree was invisible
+    to the coordinator, which then could not attach it for the operator. Listing the worktree's files
+    beside the results lets it, and a git that cannot answer leaves the packet as it was.
+    """
+    worktrees = getattr(getattr(orch, "team", None), "worktrees", None)
+    if worktrees is None:
+        return None
+    row = await orch.manager.db.fetchone(
+        "SELECT worktree_path, folder_id, base_ref FROM staff_sessions WHERE task_id = ? AND worktree_path IS NOT NULL"
+        " AND worktree_path != '' ORDER BY started_at DESC, rowid DESC LIMIT 1", (task_id,))
+    if row is None:
+        return None
+    folder = project.folder(str(row["folder_id"] or "")) or project.primary
+    if folder is None:
+        return None
+    path = str(row["worktree_path"])
+    try:
+        files, more = await worktrees.produced(folder, Path(path), str(row["base_ref"] or ""))
+    except Exception:  # noqa: BLE001 — git's own failure, or a host that is not answering: the packet stays whole
+        return None
+    return {
+        "path": path,
+        "files": files,
+        "more": more,
+        "how": "AttachMedia(items=[{path: '<path>/<file>'}]) puts one of them into your answer for the operator",
+    }
 
 
 async def _unbound_evidence(orch: Orchestrators, result_id: str, given: list[str]) -> str:
