@@ -55,3 +55,12 @@ export function keptWords(line: KeptLine, known: (key: string) => boolean): { la
   const text = `staff.kept.${line.setting}.${line.kept}.${line.reason}`;
   return { label: `staff.kept.setting.${line.setting}`, text: known(text) ? text : null, kind: `staff.kept.kind.${line.kept}` };
 }
+
+/** The session view to show, given the one shown before: a spend of zeros (or none) read back for the
+ *  same session keeps the earlier spend, because the counts only grow within a session and a zero
+ *  snapshot is a turn whose transcript was not read yet. Everything else in the view is the new one,
+ *  and a new session starts from what it reports. */
+export function steadySession(previous: StaffSessionView | null | undefined, next: StaffSessionView | undefined): StaffSessionView | undefined {
+  if (!previous || !next || !next.session || previous.session?.id !== next.session.id) return next;
+  return !hasSpend(next.usage) && hasSpend(previous.usage) ? { ...next, usage: previous.usage } : next;
+}

@@ -18,6 +18,7 @@ import { confirmAsync, errorText } from "../ui";
 import { plural, t, t as t2 } from "../i18n";
 import { useSessionTitles } from "./Sessions";
 import { closeItems } from "../board/operatorClose";
+import { byProject, filtered, storedGrouping, type Grouping, type NeedsReason } from "./boardview";
 
 type Status = "todo" | "doing" | "review" | "done" | "blocked" | "dropped";
 type Task = {
@@ -40,6 +41,8 @@ type Task = {
   project_id?: string | null;
   project_name?: string | null;
   assignee?: { id: string; name: string; color: string } | null;
+  /** Why the card waits on the operator: an open question or approval tied to it, or review. */
+  needs_you?: NeedsReason | null;
 };
 type BriefField = "objective" | "deliverable" | "boundaries" | "done_when";
 const BRIEF_FIELDS: BriefField[] = ["objective", "deliverable", "boundaries", "done_when"];
@@ -48,11 +51,25 @@ const COLUMNS: Status[] = ["todo", "doing", "review", "blocked"];
 const FINISHED: Status[] = ["done", "dropped"];
 const columnLabel = (s: Status) => t(`board.col.${s}`);
 const NEXT: Record<Status, Status[]> = { todo: ["blocked", "dropped"], doing: [], review: [], blocked: ["todo", "dropped"], done: [], dropped: ["todo"] };
+/** The grouping the operator chose, kept per browser and per form: a wide window starts from the
+ *  status columns and a phone from its projects, as each did before there was a choice, and a webview
+ *  without site data simply starts from that again. */
+function useGrouping(key: string, fallback: Grouping): [Grouping, (value: Grouping) => void] {
+  const [grouping, setGrouping] = useState<Grouping>(() => storedGrouping(() => localStorage.getItem(key), fallback));
+  const choose = (value: Grouping) => {
+    setGrouping(value);
+    try { localStorage.setItem(key, value); } catch { /* the choice lasts this load */ }
+  };
+  return [grouping, choose];
+}
 
 export function BoardScreen({ toast, onOpen, selected, project }: { toast: (t: string) => void; onOpen: (id: string) => void; selected?: string | null; project?: Project | null }) {
   const offline = useOffline();
   const phone = useMedia("(max-width: 1023px)");
   const [showDone, setShowDone] = useState(false);
+  const [needs, setNeeds] = useState(false);
+  const [grouping, setGrouping] = useGrouping("board.grouping", "status");
+  const [phoneGrouping, setPhoneGrouping] = useGrouping("board.grouping.phone", "project");
   // The shell's project lens narrows this board as it narrows the list of agents.
   const key = `/api/board?include_done=${showDone ? 1 : 0}${project ? `&project=${encodeURIComponent(project.id)}` : ""}`;
   const { data: tasks, error, loading, refresh } = useQuery<Task[]>(key, { pollMs: 20000, staleMs: 5000 });
@@ -108,10 +125,13 @@ export function BoardScreen({ toast, onOpen, selected, project }: { toast: (t: s
   });
 
 
-  const all = tasks ?? [];
+  const every = tasks ?? [];
+  const needsCount = filtered(every, true).length;
+  // "Needs you" narrows what is drawn and nothing else: the counts in the header stay the board's.
+  const all = filtered(every, needs);
   const finished = all.filter((t) => FINISHED.includes(t.status));
-  const openCount = all.filter((t) => !FINISHED.includes(t.status)).length;
-  const open = selected ? all.find((t) => t.id === selected) ?? null : null;
+  const openCount = every.filter((t) => !FINISHED.includes(t.status)).length;
+  const open = selected ? every.find((t) => t.id === selected) ?? null : null;
   // A link to a finished task widens the filter so the task can be shown.
   useEffect(() => {
     if (selected && tasks && !open && !showDone) setShowDone(true);
@@ -148,7 +168,7 @@ export function BoardScreen({ toast, onOpen, selected, project }: { toast: (t: s
     {creating && <NewTaskSheet onClose={() => setCreating(false)} onCreated={() => { setCreating(false); reload(); }} toast={toast} />}
     {open && <TaskSheet t={open} owner={open.session_id ? titles[open.session_id] : undefined} board={open.origin_session_id ? titles[open.origin_session_id] : undefined} onClose={() => navigate(pathFor("board"), { replace: true })} onMove={move} onCheck={check} ending={ending} onOpenSession={onOpen} toast={toast} />}
   </>;
-  if (phone) return <PhoneBoardView tasks={tasks} error={error} loading={loading} refresh={refresh} showDone={showDone} setShowDone={setShowDone} project={project ?? null}
+  if (phone) return <PhoneBoardView tasks={tasks} error={error} loading={loading} refresh={refresh} showDone={showDone} setShowDone={setShowDone} project={project ?? null} grouping={phoneGrouping} setGrouping={setPhoneGrouping}
     titles={titles} offline={offline} onNew={() => setCreating(true)} onMove={move} ending={ending} onOpenSession={onOpen} toast={toast} sheets={sheets} />;
   return (
     <>
@@ -161,6 +181,9 @@ export function BoardScreen({ toast, onOpen, selected, project }: { toast: (t: s
           {project && <span className="chip accent">{t("board.lens", { name: project.name })}</span>}
           <button className="chip select" aria-pressed={!showDone} onClick={() => setShowDone(false)}>{t("board.filter.open")}</button>
           <button className="chip select" aria-pressed={showDone} onClick={() => setShowDone(true)}>{t("board.filter.done")}</button>
+          <button className="chip select" aria-pressed={needs} data-filter="needs" onClick={() => setNeeds(!needs)}>{t("pboard.col.needs")} <span className="n">{needsCount}</span></button>
+          <button className="chip select" aria-pressed={grouping === "status"} data-group="status" onClick={() => setGrouping("status")}>{t("board.group.status")}</button>
+          <button className="chip select" aria-pressed={grouping === "project"} data-group="project" onClick={() => setGrouping("project")}>{t("board.group.project")}</button>
           {project && !project.system && !project.settings.ephemeral && (
             <button className="chip select" onClick={() => navigate(projectPagePath(project.id, "board"))}>{t("board.lens.project")}</button>
           )}
@@ -176,7 +199,28 @@ export function BoardScreen({ toast, onOpen, selected, project }: { toast: (t: s
             <button className="btn primary" onClick={() => setCreating(true)}><Icon name="plus" size={15} /> {t("board.new")}</button>
           </div>
         )}
-        {tasks && tasks.length > 0 && (
+        {tasks && tasks.length > 0 && needs && all.length === 0 && (
+          <div className="empty">
+            <b>{t("pboard.none.needs")}</b>
+            <button className="btn" onClick={() => setNeeds(false)}>{t("pbph.all")}</button>
+          </div>
+        )}
+        {tasks && all.length > 0 && grouping === "project" && (() => {
+          const groups = byProject(all);
+          return (
+            <div ref={kanban} className="kanban" data-grouping="project" style={{ gridTemplateColumns: kanbanColumns(groups.map((group) => group.items.length)) }}>
+              {groups.map((group) => (
+                <section key={group.key} className="kanban-col" data-project={group.projectId ?? ""}>
+                  <div className="section-title">
+                    {group.projectId ? group.name : t("pbph.noproject")} <span className="n">{group.items.length}</span>
+                  </div>
+                  {group.items.map(card)}
+                </section>
+              ))}
+            </div>
+          );
+        })()}
+        {tasks && all.length > 0 && grouping === "status" && (
           <div ref={kanban} className={`kanban ${showDone ? "five" : ""}`} style={{ gridTemplateColumns: kanbanColumns([...COLUMNS.map((col) => column(col).length), ...(showDone ? [finished.length] : [])]) }}>
             {COLUMNS.map((col) => {
               const items = column(col);
@@ -208,6 +252,7 @@ export function BoardScreen({ toast, onOpen, selected, project }: { toast: (t: s
 
 type PhoneBoardProps = {
   tasks: Task[] | null | undefined; error: string | null | undefined; loading: boolean; refresh: () => void; showDone: boolean; setShowDone: (v: boolean) => void; project: Project | null;
+  grouping: Grouping; setGrouping: (value: Grouping) => void;
   titles: Record<string, string>; offline: boolean; onNew: () => void; onMove: (t: Task, s: Status) => void; ending: (t: Task, blocked: boolean) => MenuItem[];
   onOpenSession: (id: string) => void; toast: (text: string) => void; sheets: ReactNode;
 };
@@ -218,20 +263,16 @@ type PhoneBoardProps = {
  * commands (open, move, its session, copy, archive) are its long-press sheet; what the list shows
  * (open or with finished, the project lens) is behind the options glyph, so the bar keeps two glyphs.
  */
-function PhoneBoardView({ tasks, error, loading, refresh, showDone, setShowDone, project, titles, offline, onNew, onMove, ending, onOpenSession, toast, sheets }: PhoneBoardProps) {
-  const [filter, setFilter] = useState<Status | "finished" | null>(null);
+function PhoneBoardView({ tasks, error, loading, refresh, showDone, setShowDone, project, grouping, setGrouping, titles, offline, onNew, onMove, ending, onOpenSession, toast, sheets }: PhoneBoardProps) {
+  const [filter, setFilter] = useState<Status | "finished" | "needs" | null>(null);
   const [options, setOptions] = useState(false);
   const all = tasks ?? [];
-  const inColumn = (task: Task) => filter === null ? true : filter === "finished" ? FINISHED.includes(task.status) : task.status === filter;
+  const needsCount = filtered(all, true).length;
+  const inColumn = (task: Task) => filter === null ? true : filter === "needs" ? Boolean(task.needs_you) : filter === "finished" ? FINISHED.includes(task.status) : task.status === filter;
   const shown = all.filter((task) => (showDone || !FINISHED.includes(task.status)) && inColumn(task))
     .sort((a, b) => a.priority - b.priority || Date.parse(b.updated_at) - Date.parse(a.updated_at));
-  const groups = new Map<string, { id: string | null; name: string; items: Task[] }>();
-  for (const task of shown) {
-    const key = task.project_id ?? "";
-    if (!groups.has(key)) groups.set(key, { id: task.project_id ?? null, name: task.project_name ?? task.project_id ?? "", items: [] });
-    groups.get(key)!.items.push(task);
-  }
-  const ordered = [...groups.values()].sort((a, b) => Number(!a.id) - Number(!b.id) || a.name.localeCompare(b.name));
+  const ordered = byProject(shown).map((group) => ({ id: group.projectId, name: group.name, items: group.items }));
+  const byStatus = [...COLUMNS, ...FINISHED].map((status) => ({ status, items: shown.filter((task) => task.status === status) })).filter((group) => group.items.length > 0);
   const columns = [...COLUMNS, ...(showDone ? ["finished" as const] : [])].map((column) => ({ column, count: all.filter((task) => column === "finished" ? FINISHED.includes(task.status) : task.status === column).length })).filter((c) => c.count > 0);
   const openCount = all.filter((task) => !FINISHED.includes(task.status)).length;
   const row = (task: Task) => {
@@ -252,6 +293,7 @@ function PhoneBoardView({ tasks, error, loading, refresh, showDone, setShowDone,
       <ListRow key={task.id} className={`ph-task p${Math.min(task.priority, 4)} ${task.status}`} data={{ task: task.id }} title={task.title} label={task.title}
         meta={<>
           {task.assignee && <StaffAvatar name={task.assignee.name} color={task.assignee.color} size="small" />}
+          {task.needs_you && <span className="ph-pill warn" data-needs={task.needs_you}>{t(`board.needs.${task.needs_you}`)}</span>}
           <span className={`ph-ell ${task.status === "doing" ? "running" : task.status === "blocked" ? "waiting" : ""}`}>{[columnLabel(task.status), owner ?? task.assignee?.name, relTime(task.updated_at)].filter(Boolean).join(" · ")}</span>
         </>}
         trail={<>
@@ -272,6 +314,7 @@ function PhoneBoardView({ tasks, error, loading, refresh, showDone, setShowDone,
       {tasks && tasks.length > 0 && (
         <ChipBar label={t("pboard.filter")}>
           <Chip on={filter === null} count={showDone ? all.length : openCount} onClick={() => setFilter(null)}>{t("pbph.all")}</Chip>
+          {needsCount > 0 && <Chip on={filter === "needs"} tone="warn" count={needsCount} onClick={() => setFilter(filter === "needs" ? null : "needs")}>{t("pboard.col.needs")}</Chip>}
           {columns.map(({ column, count }) => (
             <Chip key={column} on={filter === column} tone={column === "blocked" ? "warn" : undefined} count={count} onClick={() => setFilter(filter === column ? null : column)}>{column === "finished" ? t("board.finished") : columnLabel(column)}</Chip>
           ))}
@@ -283,7 +326,16 @@ function PhoneBoardView({ tasks, error, loading, refresh, showDone, setShowDone,
         {error && !tasks && <EmptyState icon="alert" tone="bad" title={t("board.error")} body={error} action={<button type="button" className="ph-btn primary" onClick={refresh}>{t("common.retry")}</button>} />}
         {tasks && tasks.length === 0 && <EmptyState icon="board" title={t("board.empty")} body={t("board.empty.sub")} action={<button type="button" className="ph-btn accent" onClick={onNew}><Icon name="plus" size={18} />{t("board.new")}</button>} />}
         {tasks && tasks.length > 0 && shown.length === 0 && <EmptyState icon="board" title={t("pbph.filtered")} action={<button type="button" className="ph-btn" onClick={() => setFilter(null)}>{t("pbph.all")}</button>} />}
-        {ordered.map((group) => (
+        {grouping === "status" && byStatus.map((group) => (
+          <section key={group.status} className="ph-gboard-group" data-status={group.status}>
+            <div className="ph-gboard-head">
+              <b className="truncate">{columnLabel(group.status)}</b>
+              <span className="ph-gboard-n">{group.items.length}</span>
+            </div>
+            {group.items.map(row)}
+          </section>
+        ))}
+        {grouping === "project" && ordered.map((group) => (
           <section key={group.id ?? "none"} className="ph-gboard-group" data-project={group.id ?? ""}>
             {group.id ? (
               <button type="button" className="ph-gboard-head" onClick={() => navigate(projectPagePath(group.id!, "board"))} aria-label={t("board.on.project", { name: group.name })}>
@@ -308,6 +360,9 @@ function PhoneBoardView({ tasks, error, loading, refresh, showDone, setShowDone,
           <div className="ph-gl">{t("pbph.show")}</div>
           <div className="ph-board-opt"><SegmentedControl label={t("pbph.show")} value={showDone ? "done" : "open"} onChange={(v) => setShowDone(v === "done")}
             options={[{ id: "open", label: t("board.filter.open") }, { id: "done", label: t("board.filter.done") }]} /></div>
+          <div className="ph-gl">{t("board.group")}</div>
+          <div className="ph-board-opt"><SegmentedControl label={t("board.group")} value={grouping} onChange={(v) => setGrouping(v === "status" ? "status" : "project")}
+            options={[{ id: "project", label: t("board.group.project") }, { id: "status", label: t("board.group.status") }]} /></div>
           {project && !project.system && !project.settings.ephemeral && <SheetRow icon="board" label={t("board.lens.project")} onClick={() => { setOptions(false); navigate(projectPagePath(project.id, "board")); }} />}
           <SheetRow icon="reload" label={t("pboard.launch.refresh")} onClick={() => { refresh(); setOptions(false); }} />
         </BottomSheet>
@@ -336,6 +391,7 @@ function TaskRow({ t, owner, onOpen, onDragStart, onDragEnd, dragging, canDrag }
         )}
         {next && <div className="erow-meta"><span className="faint">{t2("board.next")}</span><span>{next.text}</span></div>}
         <div className="erow-meta">
+          {t.needs_you && <span className="chip attn" data-needs={t.needs_you}>{t2(`board.needs.${t.needs_you}`)}</span>}
           {t.priority <= 2 && <span className={`chip ${t.priority === 1 ? "bad" : "attn"}`}>P{t.priority}</span>}
           {t.assignee && <span>{t.assignee.name}</span>}
           {t.assignee && owner && <span className="sep">·</span>}

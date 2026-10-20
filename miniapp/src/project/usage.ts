@@ -66,3 +66,25 @@ export function chipText(usage: ProjectUsage | null | undefined): string | null 
 export function staffUsage(usage: ProjectUsage | null | undefined, staffId: string): StaffUsage | undefined {
   return usage?.staff.find((row) => row.staff_id === staffId);
 }
+
+const silent = (line: UsageLine) => line.all.usd === 0 && line.all.tokens === 0 && line.all.unpriced === 0 && line.all.subscriptions === 0;
+
+/** The reading to show, given the one shown before: a line whose spend to date reads zero after a
+ *  non-zero reading keeps the earlier line. Spend to date only grows, so such a zero is a reading that
+ *  failed — a member's transcript not read yet, a row the host could not price this time — and drawing
+ *  it would blank a number the operator has just seen, then bring it back on the next poll. */
+export function steadyUsage(previous: ProjectUsage | null | undefined, next: ProjectUsage): ProjectUsage {
+  if (!previous) return next;
+  const keep = (before: UsageLine | undefined, after: UsageLine): UsageLine => before && silent(after) && !silent(before) ? before : after;
+  const members = new Map(previous.staff.map((row) => [row.staff_id, row]));
+  return {
+    ...next,
+    total: keep(previous.total, next.total),
+    orchestrator: keep(previous.orchestrator, next.orchestrator),
+    other: keep(previous.other, next.other),
+    staff: next.staff.map((row) => {
+      const before = members.get(row.staff_id);
+      return before && silent(row) && !silent(before) ? { ...before, name: row.name, harness: row.harness, archived: row.archived } : row;
+    }),
+  };
+}

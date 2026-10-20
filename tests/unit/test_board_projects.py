@@ -244,6 +244,34 @@ async def test_needs_you_is_the_open_requests_routed_to_the_operator(app: Any, t
     assert await board.needs_you(team.other) == []
 
 
+async def test_every_projects_board_marks_the_cards_that_wait_on_the_operator(app: Any, tmp_path: Path) -> None:
+    board = Board(app)
+    team = await _team(app, tmp_path)
+    asked = await board.add(title="Discount", project_id=team.project, assignee_staff_id=team.ada.id, operator=True)
+    gated = await board.add(title="Install", project_id=team.project, assignee_staff_id=team.bo.id, operator=True)
+    inner = await board.add(title="Inner", project_id=team.project, operator=True)
+    checked = await board.add(title="Checked", project_id=team.project, operator=True)
+    quiet = await board.add(title="Quiet", project_id=team.project, operator=True)
+    await app.db.execute("UPDATE board_tasks SET status = 'review' WHERE id = ?", (checked["id"],))
+    asks = app.manager.asks
+    question = await asks.open(team.project, origin="staff", kind="question", text="SPRING10?", routed_to="operator", staff_id=team.ada.id, staff_session_id=team.ada_live, task_id=asked["id"])
+    await asks.open(team.project, origin="staff", kind="permission", text="npm install", routed_to="operator", staff_id=team.bo.id, task_id=gated["id"])
+    # A request the orchestrator answers is not the operator's to wait on.
+    await asks.open(team.project, origin="staff", kind="question", text="which file?", routed_to="orchestrator", staff_id=team.ada.id, task_id=inner["id"])
+
+    tasks = await board.list(None, project_id=team.project)
+    await board.mark_needs_you(tasks)
+    marks = {t["title"]: t["needs_you"] for t in tasks}
+    assert marks == {"Discount": "question", "Install": "approval", "Inner": None, "Checked": "review", "Quiet": None}
+    assert quiet["id"]
+
+    # Read from the requests every time: an answer anywhere takes the card out of "Needs you".
+    assert await asks.resolve(question.id, "operator", {"text": "after"})
+    tasks = await board.list(None, project_id=team.project)
+    await board.mark_needs_you(tasks)
+    assert {t["title"]: t["needs_you"] for t in tasks}["Discount"] is None
+
+
 async def test_stale_recovery_leaves_assigned_tasks_to_the_staff_runtime(app: Any, tmp_path: Path) -> None:
     board = Board(app)
     team = await _team(app, tmp_path)
@@ -329,6 +357,7 @@ async def test_the_board_over_http(app: Any, tmp_path: Path) -> None:
         lens = (await client.get(f"/api/board?include_done=1&project={team.project}", headers=HEADERS)).json()
         assert [t["title"] for t in lens] == ["Checkout"]
         assert len((await client.get("/api/board?include_done=1", headers=HEADERS)).json()) == 2
+        assert all("needs_you" in t for t in lens)
         archived = await client.delete(f"/api/board/{task['id']}", headers=HEADERS,
                                        params={"client_operation_id": "checkout-archive",
                                                "expected_entity_revision": task["entity_revision"]})

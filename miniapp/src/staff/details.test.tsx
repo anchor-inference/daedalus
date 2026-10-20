@@ -9,7 +9,7 @@ import type { SessionDetail, StaffSessionView, StaffTurn } from "../api";
 import { SessionDetails, type DetailsActions } from "../details";
 import { DICT, setLang } from "../i18n";
 import type { Staff } from "../team/team";
-import { contextFill, conversationCounts, hasSpend, keptWords, sessionAge, windowName } from "./details";
+import { contextFill, conversationCounts, hasSpend, keptWords, sessionAge, steadySession, windowName } from "./details";
 import { StaffDetails } from "./StaffDetails";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -169,5 +169,23 @@ describe("the panels", () => {
     await render("session");
     expect(sections()).toContain("danger");
     expect(sections()).toContain("loop");
+  });
+});
+
+describe("a member's spend read back as zeros", () => {
+  const view = (session: string | null, usage: StaffSessionView["usage"]) => ({ staff: { id: "s", name: "Ada", harness: "codex", project_id: "p" }, session: session ? { id: session } : null, usage } as unknown as StaffSessionView);
+  it("never replaces a non-zero reading of the same session: the transcript was not read yet", () => {
+    const before = view("one", { input_tokens: 1200, output_tokens: 300, cost_usd: 0.4 });
+    expect(steadySession(before, view("one", { input_tokens: 0, output_tokens: 0 }))?.usage?.input_tokens).toBe(1200);
+    expect(steadySession(before, view("one", null))?.usage?.cost_usd).toBe(0.4);
+    expect(steadySession(before, view("one", { input_tokens: 1500, output_tokens: 310 }))?.usage?.input_tokens).toBe(1500);
+  });
+  it("starts again with a new session, and keeps the rest of the view current", () => {
+    const before = view("one", { input_tokens: 1200 });
+    expect(steadySession(before, view("two", { input_tokens: 0 }))?.usage?.input_tokens).toBe(0);
+    const next = { ...view("one", {}), launch: { model: "gpt" } } as unknown as StaffSessionView;
+    expect(steadySession(before, next)?.launch?.model).toBe("gpt");
+    expect(steadySession(null, next)).toBe(next);
+    expect(steadySession(before, undefined)).toBeUndefined();
   });
 });

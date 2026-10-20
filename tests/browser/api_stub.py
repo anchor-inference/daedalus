@@ -1605,7 +1605,14 @@ class BoardStub:
         if path == "/api/board" and method == "GET":
             # The host names a project's task's project on this listing, as the Board screen's card reads it.
             listed = [t for t in self.tasks if not t.get("removed_at") and ("include_done=1" in query or t["status"] not in ("done", "dropped"))]
-            return 200, [{**t, "project_name": self.project["name"] if t.get("project_id") else None} for t in listed]
+            # And why a card waits on the operator, as the host marks it: an open request tied to the
+            # task, a question before an approval, else review.
+            waiting: dict[str, str] = {}
+            for need in self.needs_you:
+                if need.get("task_id") and waiting.get(need["task_id"]) != "question":
+                    waiting[need["task_id"]] = "question" if need.get("kind") == "question" else "approval"
+            return 200, [{**t, "project_name": self.project["name"] if t.get("project_id") else None,
+                          "needs_you": waiting.get(t["id"]) or ("review" if t["status"] == "review" else None)} for t in listed]
         if path.startswith("/api/board/"):
             parts = path.split("/")
             row = next((t for t in self.tasks if t["id"] == parts[3]), None)
