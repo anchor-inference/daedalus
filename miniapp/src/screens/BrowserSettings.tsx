@@ -20,6 +20,7 @@ import { confirmAsync, errorText } from "../ui";
 import { Dropdown, Switch, timeAgo } from "../ui/components";
 import { Row } from "../settingsrow";
 import { ProcedureEditor } from "../browser/steps";
+import { DEFAULT_USER, YourChrome } from "../browser/yourchrome";
 
 export const DEFAULT_BROWSER: BrowserSettings = {
   env: "auto",
@@ -40,6 +41,7 @@ export const DEFAULT_BROWSER: BrowserSettings = {
   injection_monitor_preset: "",
   extract_preset: "",
   point_clicks: false,
+  user: DEFAULT_USER,
 };
 
 /** A whole number within `lo`..`hi` from a draft, or null while it is not one. */
@@ -86,7 +88,7 @@ export function BrowserSettingsTab({ s, save, toast, onDraft }: { s: Settings; s
     }, SAVE_GATHER_MS);
   };
   const listing = useQuery<BrowserList & { envs?: BrowserEnv[] }>("/api/browsers?status=open", { pollMs: 15000 });
-  const envs = (listing.data?.envs ?? []).filter((e) => e.configured);
+  const envs = (listing.data?.envs ?? []).filter((e) => e.configured && e.env !== "user");
   if (listing.data && !envs.length) {
     return (
       <div className="card bs-none">
@@ -98,6 +100,7 @@ export function BrowserSettingsTab({ s, save, toast, onDraft }: { s: Settings; s
   }
   return (
     <div className="bs">
+      <YourChrome user={{ ...DEFAULT_USER, ...(b.user ?? {}) }} setUser={(patch) => set({ user: { ...DEFAULT_USER, ...(b.user ?? {}), ...patch } })} toast={toast} />
       <Environments envs={envs} />
       <Running toast={toast} />
       <Limits b={b} set={set} onDraft={onDraft} />

@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { BrowserActionRow, BrowserDraft, BrowserFrame, BrowserGroup, BrowserWorkflow } from "../api";
+import type { BrowserActionRow, BrowserDraft, BrowserFrame, BrowserGroup, BrowserUserChoice, BrowserWorkflow } from "../api";
 import { OverflowMenu, Popover, toast as statusToast, type MenuItem } from "../ui/dialogs";
 import { clock } from "../format";
 import { plural, t } from "../i18n";
@@ -33,10 +33,14 @@ import { attachBox } from "./geometry";
 import type { ViewerChord } from "./keys";
 import { SnapshotButton } from "../annotate/Annotate";
 import { liveSnapshot } from "../annotate/source";
+import { BrowserSwitch } from "./yourchrome";
 
 /** The tab's body: the session's groups, the busiest one shown (a session rarely has more than one). */
-export function BrowserTab({ groups, toast, phone }: { groups: BrowserGroup[]; toast: (text: string) => void; phone?: boolean }) {
-  const open = groups.filter(isOpenGroup);
+export function BrowserTab({ groups, toast, phone, sessionId, user }: { groups: BrowserGroup[]; toast: (text: string) => void; phone?: boolean; sessionId?: string; user?: BrowserUserChoice }) {
+  // Where the installation offers the operator's Chrome, the conversation's switch heads the tab,
+  // and only the browser it uses now is shown under it.
+  const switcher = sessionId && user ? <BrowserSwitch sessionId={sessionId} user={user} toast={toast} /> : null;
+  const open = groups.filter(isOpenGroup).filter((g) => !user || (g.env === "user") === (user.env === "user"));
   const previous = groups.filter((g) => !isOpenGroup(g));
   const [chosen, setChosen] = useState<string | null>(null);
   const group = open.find((g) => g.id === chosen) ?? open[0] ?? null;
@@ -44,6 +48,7 @@ export function BrowserTab({ groups, toast, phone }: { groups: BrowserGroup[]; t
   if (!group) {
     return (
       <div className="bp-empty">
+        {switcher}
         <Icon name="globe" size={22} />
         <b>{t("browser.none.title")}</b>
         <span>{t("browser.none.body")}</span>
@@ -58,7 +63,7 @@ export function BrowserTab({ groups, toast, phone }: { groups: BrowserGroup[]; t
   if (phone && open.length > 1 && !open.some((g) => g.id === chosen)) {
     return <PhoneBrowserList groups={open} saving={saving} onPick={setChosen} onTake={(id) => { askTake(id); setChosen(id); }} />;
   }
-  return <BrowserPanel key={group.id} group={group} groups={open} onGroup={setChosen} toast={toast} phone={phone} onList={phone && open.length > 1 ? () => setChosen(null) : undefined} />;
+  return <BrowserPanel key={group.id} group={group} groups={open} onGroup={setChosen} toast={toast} phone={phone} onList={phone && open.length > 1 ? () => setChosen(null) : undefined} switcher={switcher} />;
 }
 
 type PanelProps = {
@@ -71,6 +76,8 @@ type PanelProps = {
   full?: boolean;
   /** A phone's way back to the list of the chat's browsers, when it has several. */
   onList?: () => void;
+  /** The conversation's switch between the agent's browser and the operator's Chrome. */
+  switcher?: ReactNode;
 }
 
 type BrowserOwnership = {
@@ -203,7 +210,7 @@ function useFillPage(group: string, stage: { current: HTMLDivElement | null }, e
   }, [enabled, group, stage]);
 }
 
-export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = false, full = false, onList }: PanelProps) {
+export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = false, full = false, onList, switcher }: PanelProps) {
   const saving = useMemo(() => deviceSaving(phone), [phone]);
   const stage = useRef<HTMLDivElement | null>(null);
   const live = useLiveView(group.id, "live", {
@@ -358,6 +365,7 @@ export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = 
 
   return (
     <div className={`bp ${phone ? "phone" : ""} ${full ? "full" : ""} ${logOpen ? "log-open" : ""} ${phone && replaying ? "replaying" : ""}`} data-group={group.id} data-drive={drive}>
+      {switcher}
       {phone ? (
         <PhoneBar group={group} url={url} tabs={tabs.length} drive={drive} state={snap.state.kind} onList={onList} live={live} toast={toast} />
       ) : (

@@ -169,7 +169,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const panelContext = focus ? focus.kind : main ? "main" : "session";
   // The session's browsers: the Browser tab is offered only once it has had one.
   const browsers = useBrowsers(id ? { session: id } : null);
-  const hasBrowser = browsers.groups.length > 0;
+  // Offered too while the operator's Chrome is connected (or chosen here): the switch lives in the tab.
+  const hasBrowser = browsers.groups.length > 0 || !!(browsers.user && (browsers.user.connected || browsers.user.env === "user"));
   // In focus mode the panel's tab is written into the project's own address, so opening the board
   // beside the orchestrator does not leave the project for the agents list. The main chat keeps its
   // panel in orchestration's home for the same reason. Written as the session's plain address, every
@@ -1776,7 +1777,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                 folders: <FoldersPage projectId={focus.projectId} compact toast={toast} />,
               } : {}),
               ...(questionScope ? { questions: <QuestionsPanel scope={questionScope} toast={toast} /> } : {}),
-              browser: <BrowserTab groups={browsers.groups} toast={toast} phone={phone} />,
+              browser: <BrowserTab groups={browsers.groups} toast={toast} phone={phone} sessionId={id ?? undefined} user={browsers.user} />,
               subagents: <SubagentsTab
                 leaderId={id}
                 selected={panel.state.sub}

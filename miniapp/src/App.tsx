@@ -1,4 +1,5 @@
 import { Component, Suspense, lazy, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useChromeChecks } from "./browser/yourchrome";
 import { openPathOf } from "./subagents";
 import { api, SessionList, telegram, TerminalList } from "./api";
 import { ConfirmHost, ToastHost, toast as showToast } from "./ui/dialogs";
@@ -149,6 +150,7 @@ const SIDEBAR_W_MAX = 360;
 
 export function App() {
   useLang();
+  useChromeChecks();
   const route = useRoute();
   const wide = useWide();
   // Which mode the shell is in: the route's, where the route belongs to one, and otherwise the one the
