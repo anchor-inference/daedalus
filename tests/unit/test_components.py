@@ -30,6 +30,7 @@ from daedalus.host import components, launcher_bridge, toolchain
 from daedalus.host.component_install import Busy, Installer, NotInstallable
 from daedalus.speech.service import LocalSpeech
 from daedalus.speech.tts_service import LocalTts
+from daedalus.tools import shell as shell_tool
 
 
 def settings_for(tmp_path: Path, *, native: bool) -> Settings:
@@ -49,6 +50,8 @@ def _forget_probes() -> Any:
 def present(monkeypatch: pytest.MonkeyPatch, names: set[str]) -> None:
     """Exactly these binaries are on the PATH, and nothing else is."""
     monkeypatch.setattr(components.shutil, "which", lambda name: f"/usr/bin/{name}" if name in names else None)
+    # bubblewrap is not looked up on the PATH but in fixed system locations.
+    monkeypatch.setattr(shell_tool, "bwrap_path", lambda: "/usr/bin/bwrap" if "bwrap" in names else None)
 
 
 # -- detection ---------------------------------------------------------------------------------

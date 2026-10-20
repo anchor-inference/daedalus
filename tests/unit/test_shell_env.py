@@ -77,7 +77,7 @@ async def test_the_sandbox_opens_the_paths_the_host_named_for_the_session(tmp_pa
     from daedalus.tools import shell
 
     monkeypatch.setattr(shell, "bwrap_status", lambda: "ok")
-    monkeypatch.setattr(shell.shutil, "which", lambda name: "/usr/bin/bwrap")
+    monkeypatch.setattr(shell, "bwrap_path", lambda: "/usr/bin/bwrap")
     workspace = tmp_path / "ws"
     workspace.mkdir()
     worktree = tmp_path / "worktrees" / "bot" / "fix"
@@ -124,3 +124,24 @@ def test_the_bots_own_virtualenv_goes_only_to_its_own_checkouts(host_env, monkey
     assert "UV_PROJECT_ENVIRONMENT" not in shell_environment("sess-1")
     assert shell_environment("sess-1", cwd=bot / "daedalus")["UV_PROJECT_ENVIRONMENT"] == "/tmp/venv"
     assert shell_environment("sess-1", cwd=core)["UV_PROJECT_ENVIRONMENT"] == "/tmp/venv"
+
+
+def test_bwrap_is_taken_from_a_root_owned_system_location_never_from_the_path(tmp_path, monkeypatch) -> None:
+    """A ``bwrap`` a session plants in a folder on its PATH must not become the sandbox."""
+    from daedalus.tools import shell
+
+    planted = tmp_path / "bin" / "bwrap"
+    planted.parent.mkdir()
+    planted.write_text("#!/bin/sh\nshift $#\nexec \"$@\"\n")
+    planted.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{planted.parent}:/usr/bin:/bin")
+    # Both halves of the remembered answer are put back afterwards, or a later test sandboxes through /bin/sh.
+    monkeypatch.setattr(shell, "_bwrap_path", None)
+    monkeypatch.setattr(shell, "_bwrap_path_resolved", False)
+    # Only the planted file as a candidate: it is the user's own, so it is refused.
+    monkeypatch.setattr(shell, "BWRAP_LOCATIONS", (str(planted),))
+    assert shell.bwrap_path() is None
+    monkeypatch.setattr(shell, "_bwrap_path_resolved", False)
+    monkeypatch.setattr(shell, "BWRAP_LOCATIONS", (str(planted), "/bin/sh"))
+    # /bin/sh stands in for a root-owned system binary: the first trusted candidate is the answer.
+    assert shell.bwrap_path() == "/bin/sh"
