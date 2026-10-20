@@ -311,6 +311,10 @@ Done when: {done_when}{rules}{contract}
 Folder: {folder}{branch}{predecessor}{files}"""
 """The first message of a staff member's session: the task's four-part brief and where to work."""
 
+STAFF_CONTEXT_POINTER = """The task's pinned context (contract revision {revision}, {packet_hash}) is in your standing \
+instructions. To read it again after history is shortened: {url} with your existing team token."""
+"""Where a member's first message points for the packet its standing brief carries whole."""
+
 STAFF_RULES = """
 
 The operator's rules for this project, in force for all work here:
