@@ -28,6 +28,7 @@ from daedalus.browser.model import USER, Owner
 from daedalus.browser.monitor import TIMEOUT_SECONDS, InjectionMonitor
 from daedalus.browser.notes import SiteNotes
 from daedalus.browser.owners import DatabaseOwners
+from daedalus.browser.panel import NATIVE_DEVICE, PanelGrants, PanelHerald
 from daedalus.browser.replay import RecordedSkills
 from daedalus.browser.service import Browsers
 from daedalus.browser.user import Pairing, RelayDesk
@@ -118,6 +119,49 @@ def build(app: Application) -> Browsers:
     )
 
 
+def panel_device(service: Browsers, desk: RelayDesk | None) -> str:
+    """The Chrome a side panel token is for now: the paired device whose relay this server carries,
+    or, natively, the one Chrome of this computer while its daemon answers. Empty when none is."""
+    if desk is not None:
+        return desk.connected_device()
+    link = service.links.get(USER)
+    return NATIVE_DEVICE if link is not None and link.available else ""
+
+
+def panel_base(settings: Any) -> str:
+    """The app's address as the operator's Chrome reaches it: this computer's port natively, the
+    public address's origin on a server. Empty when a server has no public address: a panel cannot
+    frame what Chrome cannot reach."""
+    if settings.native:
+        return f"http://127.0.0.1:{settings.api_port}"
+    public = urlsplit(str(settings.miniapp_public_url or ""))
+    return f"{public.scheme}://{public.netloc}" if public.scheme in ("http", "https") and public.netloc else ""
+
+
+async def relay_changed(herald: PanelHerald, kind: str) -> None:
+    """A Chrome that connects is handed its side panel's credential at once."""
+    if kind == "relay.connected":
+        await herald.grant()
+
+
+async def run_finished(manager: Any, service: Browsers, herald: PanelHerald, session_id: str, status: str) -> None:
+    """A turn of a conversation in the operator's Chrome ended: the side panel's notification says
+    whether it waits for them (a question, or an action they must approve) or is done, and the badge
+    how many such conversations wait."""
+    if await service.choices.env(session_id) != USER:
+        return
+    state = manager.live_state(session_id)
+    if state is None:
+        return
+
+    def waits(found: Any) -> bool:
+        return found is not None and (found.pending is not None or bool(found.metadata.get("policy_pending")))
+
+    waiting = sum(1 for sid in await service.choices.using_user() if waits(manager.live_state(sid)))
+    kind = "needs_you" if status == "awaiting" or waits(state) else "done"
+    await herald.event(session_id, kind, state.session.title, waiting=waiting)
+
+
 def _port_range(text: str) -> list[int] | None:
     low, _, high = text.strip().partition("-")
     if not low.strip().isdigit():
@@ -200,12 +244,21 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     app.extensions["browser"] = service
     app.extensions["browser_agent"] = agent
     settings = app.settings
+    herald: PanelHerald | None = None
     if settings.browser_user_dir is not None:
         pairing = Pairing(app.db)
         app.extensions["browser_pairing"] = pairing
+        desk: RelayDesk | None = None
         if not settings.native:
             # A server's door for a paired Chrome; natively Chrome comes through the bridge instead.
-            app.extensions["browser_relays"] = RelayDesk(pairing, lambda: settings.browser_user_dir)
+            desk = RelayDesk(pairing, lambda: settings.browser_user_dir)
+            app.extensions["browser_relays"] = desk
+        grants = PanelGrants(app.db)
+        app.extensions["browser_panel"] = grants
+        herald = PanelHerald(grants, call=service.call_extension, device=lambda: panel_device(service, desk), base=lambda: panel_base(settings))
+        app.extensions["browser_panel_herald"] = herald
+        service.relay_hooks.append(lambda kind, data: relay_changed(herald, kind))
+        manager.on_finished(lambda session_id, run_id, status: run_finished(manager, service, herald, session_id, status))
     manager.service_hooks["browser"] = agent
 
     async def session_deleted(session_id: str) -> None:
@@ -223,6 +276,8 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
 
     manager.delete_hooks.append(session_deleted)
     tasks = await service.start()
+    if herald is not None:
+        tasks.append(asyncio.create_task(herald.keep_fresh(), name="browser-panel-grants"))
     if service.daemon_update is not None:
         # In the background: it runs a program, and nothing about the start waits for its answer.
         tasks.append(asyncio.create_task(service.daemon_update.probe(), name="browser-image-version"))  # type: ignore[arg-type]

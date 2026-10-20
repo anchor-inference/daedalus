@@ -299,6 +299,9 @@ class Browsers:
         self._watch_seq = 0
         self.choices = UserChoices(db)
         """Which conversations the operator switched to their own Chrome, and the sites granted there."""
+        self.relay_hooks: list[Callable[[str, dict[str, Any]], Awaitable[None]]] = []
+        """Told when the operator's Chrome connects, goes or checks (``relay.connected``, ``relay.lost``,
+        ``relay.check``): the side panel's grant is handed over on a connection."""
 
     # -- lifecycle --------------------------------------------------------------------------
 
@@ -498,6 +501,33 @@ class Browsers:
         if owner.kind == "session" and owner.session_id and self.user_offered() and await self.choices.env(owner.session_id) == USER:
             return USER
         return self.agent_env()
+
+    def user_connection(self) -> tuple[bool, str, str]:
+        """``(connected, name, why not)`` of the operator's Chrome, from the user daemon's last report:
+        whether a Chrome is connected now, the name its popup gives it, and the reason the last
+        connection ended. Read from memory, so a turn's context and a tool's answer ask nobody."""
+        link = self.links.get(USER)
+        relay = link.info.get("relay") if link is not None and link.available else None
+        if not isinstance(relay, dict):
+            return False, "", link.detail if link is not None and link.run_dir is not None else ""
+        return bool(relay.get("connected")), str(relay.get("profile_name") or "")[:80], str(relay.get("last_error") or "")[:200]
+
+    async def switch_conversation(self, session_id: str, env: str, *, consent: bool) -> dict[str, Any]:
+        """Move a conversation between the agent's browser and the operator's Chrome, as the operator
+        decided: their switch in the panel, or their yes to the agent's ask. One path for both, so the
+        consent record and the event the app redraws on are the same whichever way they said it."""
+        if env == USER and not self.user_offered():
+            raise Unsupported("this installation does not offer your Chrome (Settings → Environments → Your Chrome)")
+        choice = await self.choices.switch(session_id, env, consent=consent)
+        if self.bus is not None:
+            with contextlib.suppress(Exception):
+                await self.bus.publish("browser.user", {"kind": "switched", "profile_name": "", "reason": env}, session_id=session_id)
+        return choice
+
+    async def call_extension(self, op: str, args: dict[str, Any]) -> None:
+        """One of the side panel's operations on the connected Chrome, through the user daemon, which
+        carries those two and refuses anything else (``browserd`` ``relay.call``)."""
+        await self._call(USER, "relay.call", {"op": op, "args": args}, what="telling your Chrome's side panel", timeout=10.0)
 
     async def user_status(self) -> dict[str, Any]:
         """The ``user`` daemon and the Chrome connected to it, as the app's card reads it: whether the
@@ -796,6 +826,9 @@ class Browsers:
         agent = actor != "operator"
         deadline = time.monotonic() + (self.config().agent_wait_seconds if wait is None else wait)
         params: dict[str, Any] = {"group_id": group, "profile": profile, "labels": owner.labels()}
+        if env == USER and owner.kind == "session":
+            # The tab group in the operator's Chrome says whose it is, and the side panel names it.
+            params["labels"]["title"] = (await self.owners.label(owner))[:80]
         if url:
             params["url"] = url
         if viewport:
@@ -1342,6 +1375,8 @@ class Browsers:
         daemon's report is read again for the card."""
         self._tasks.append(asyncio.create_task(self._refresh_info(link)))
         self._tasks = [t for t in self._tasks if not t.done()]
+        for hook in self.relay_hooks:
+            self._tasks.append(asyncio.create_task(hook(kind, data)))
         if self.bus is None:
             return
         payload: dict[str, Any] = {"kind": kind.removeprefix("relay."), "profile_name": str(data.get("profile_name") or "")[:80]}
