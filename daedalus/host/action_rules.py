@@ -81,7 +81,9 @@ BROWSER_KINDS: dict[str, str] = {
     "cross_origin_post": "external_write",
 }
 """What the browser daemon calls a sensitive action, as a category. ``credentials`` is absent: a sign-in
-is the operator's whatever any rule says (:data:`daedalus.host.policy.NEVER_ALLOWED_KINDS`)."""
+is the operator's whatever any rule says (:data:`daedalus.host.policy.NEVER_ALLOWED_KINDS`). The desktop's
+computer tools name their kinds with the same words (:mod:`daedalus.computer.sensitive`) and are ruled
+through this table too, so a rule about sending messages holds on the desktop as in the browser."""
 
 PUBLISH_COMMANDS = (
     "gh pr create", "gh pr merge", "gh release create", "gh repo create", "gh gist create", "gh issue create",

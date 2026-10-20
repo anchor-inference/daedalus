@@ -57,6 +57,7 @@ from protocore.runtime.tool_registry import ToolRegistry
 from protocore.tools.tool_search import TOOL_SEARCH_TOOL_NAME, ToolSearchTool
 
 from daedalus.browser import cookies as cookie_files
+from daedalus.computer import wire as computer_wire
 from daedalus.config import (
     BTW_TOOLS,
     COMPANION_ONLY_TOOLS,
@@ -170,6 +171,8 @@ from daedalus.tools.shell import title as shell_title
 logger = logging.getLogger(__name__)
 
 TOOL_RULES_KEY_FILE = "tool-rules-mark.key"
+COMPUTER_LIVE_SECONDS = 3.0
+"""How long the answer to "is the desktop daemon up" is reused by the tool policy."""
 """Beside the operator's sealing key in the secrets directory, which no command the agent runs can read."""
 
 PROVIDER_OUTAGE_KINDS = frozenset({"llm_provider_error", "llm_timeout", "llm_stream_idle", "llm_rate_limit"})
@@ -400,6 +403,10 @@ class SessionState:
     """``provider:model`` the session is set to answer with: the first rung of the chain this run was built on.
     A live override (a preset chosen for the session, the companion pointing at its own) is part of it —
     what the operator chose is never a fallback, however far it is from the global default."""
+    computer_sight: tuple[str, bool] | None = None
+    """The model this run was built on and whether it takes images: what decides whether the computer
+    tools are offered and how their screenshots are sized and their points read. ``None`` until a run
+    was built; the tools are not offered before."""
     effective_model: str = ""
     """``provider:model`` that actually answered last, as the core reported it at the message it started."""
     model_change_reason: str = ""
@@ -716,6 +723,8 @@ class SessionManager:
         self.secrets.project_of = self._project_of
         self.secrets.staff_of = self._staff_of
         self._tool_rules_key: bytes | None = None
+        self._computer_live: tuple[float, bool] = (0.0, False)
+        """When the desktop daemon's endpoint was last looked at, and whether it was there."""
         self.hooks = DaedalusHookManager(self.redactor, hooks_config=lambda: self.config.hooks)
         self.action_rules = RulesGate(self)
         """The operator's action rules over this host's sessions: levels in the policy gate, the review in the hook."""
@@ -839,8 +848,11 @@ class SessionManager:
         # list is an invitation the model accepts and a failure it cannot understand.
         disabled = self.capabilities.selfdev.disabled_tools
         browser = self.capabilities.browser.configured
+        computer = self.capabilities.computer.configured
         for tool in discover_tools():
             if tool.name in disabled or (not browser and tool.name.startswith(capabilities.BROWSER_TOOL_PREFIX)):
+                continue
+            if not computer and tool.name in capabilities.COMPUTER_TOOLS:
                 continue
             self.tools.register(tool)
         for tool in build_memory_tools(self.memory, tenant_allowed=lambda: self.config.memory.sensitive_allowed, classifier=self.memory_classifier):
@@ -4163,6 +4175,9 @@ class SessionManager:
         # so it is read once here, from the same rungs the chain is built on, and not re-derived later
         # from a configuration the operator may have changed while the run was going.
         state.configured_model = self._rung_label(rungs[0][0], rungs[0][1])
+        # Read before the tool policy below, which offers the computer tools only to a model that sees.
+        accepts = getattr(rungs[0][0], "accepts_images", None) if rungs else None
+        state.computer_sight = (rungs[0][1], bool(accepts(rungs[0][1]))) if rungs and accepts is not None else None
         # The primary's switch: a fallback runs on the surface the primary was given, as the tool limit
         # is not, because a surface too big is refused and one decided for another model is only worse.
         state.on_demand_groups = on_demand_tool_groups_for(preset, rungs[0][1]) if rungs else True
@@ -5599,6 +5614,8 @@ class SessionManager:
         # An orchestrator runs a team and does none of the work: everything outside its allowlist is
         # off, and its control tools are nobody else's. Beside the two rules above, for their reason.
         blocked |= (known - set(ORCHESTRATOR_TOOLS)) if self.is_orchestrator(state) else (known & set(ORCHESTRATOR_ONLY_TOOLS))
+        if not self.computer_offered(state):
+            blocked |= known & capabilities.COMPUTER_TOOLS
         mode = self.mode_for(state)
         if mode is not None:
             if mode.tools_only:
@@ -5607,6 +5624,27 @@ class SessionManager:
                 name = str(entry)
                 blocked |= {t for t in known if t.startswith(name[:-1])} if name.endswith("*") else {name}
         return blocked
+
+    def computer_offered(self, state: SessionState) -> bool:
+        """Whether this session is offered the computer tools now: a native installation with a desktop
+        daemon that is up, and a run built on a model that takes images.
+
+        A model without images is not offered them at all rather than offered tools that answer with
+        pictures it cannot see; describing the screen through the vision model and pointing through a
+        grounding model is the later route for such a model. The daemon's endpoint is looked at once
+        every few seconds: the policy is asked many times a run, and a daemon coming or going within
+        that moment is caught by the tool's own first call."""
+        if not self.capabilities.computer.configured:
+            return False
+        sight = state.computer_sight
+        if not sight or not sight[1]:
+            return False
+        now = time.monotonic()
+        checked, live = self._computer_live
+        if now - checked > COMPUTER_LIVE_SECONDS or checked == 0.0:
+            live = computer_wire.endpoint_live(self.settings.computer_host_dir)
+            self._computer_live = (now, live)
+        return live
 
     def blocked_tools_for(self, state: SessionState) -> set[str]:
         """Everything this session may not call under its own and every loaded parent's current rules.
@@ -6230,6 +6268,39 @@ class SessionManager:
         head = f"needs the operator's approval: {decision.reason} (rule {decision.rule}). Approval key: {decision.key}. "
         if staff:
             return False, head + prompts.STAFF_BROWSER_HINT
+        return False, head + "Ask the operator with AskUser, quoting the key and what the action does; once they grant it (/allow <key>, or the Mini App), the same action passes once."
+
+    def computer_gate(self, session_id: str, ask: Any) -> tuple[bool, str]:
+        """A sensitive action on the operator's desktop, asked about as :meth:`browser_gate` asks.
+
+        The same rules: a grant for the key lets that one action through once, otherwise the request is
+        recorded and announced once and the agent is refused with the key. Always the operator's to
+        answer, a staff member's included — it is their screen, their mail and their files — and always in
+        the app, never from a lock screen or a notification's button."""
+        state = self._states.get(session_id)
+        decision = ask.decision
+        if state is None:
+            return False, "this session is not loaded; the action was not taken"
+        now = time.time()
+        grants = {k for k, until in (state.metadata.get("policy_grants") or {}).items() if float(until) > now}
+        if decision.key in grants:
+            self._consume_grant(state, decision.key)
+            return True, ""
+        pending = dict(state.metadata.get("policy_pending") or {})
+        fresh = decision.key not in pending
+        pending[decision.key] = {"tool": ask.tool, "text": self.redactor.redact(ask.said())[:500], "at": datetime.now(UTC).isoformat()}
+        for meta in (state.metadata, state.session.metadata):
+            meta["policy_pending"] = dict(list(pending.items())[-20:])
+        if fresh:
+            payload = self._permission_payload(state, decision, pending[decision.key])
+            # No thumbnail yet: the browser's is a route the app fetches the element's picture from, and
+            # the desktop has no such route; the card names the app and the window instead.
+            payload.update({
+                "risk": "elevated", "quick": False, "routed_to": "operator",
+                "computer": {"kinds": list(ask.kinds), "action": ask.action, "app": ask.app, "window": ask.window, "element": ask.element, "thumbnail": ask.thumbnail},
+            })
+            self._publish_soon(state, "permission.pending", payload)
+        head = f"needs the operator's approval: {decision.reason} (rule {decision.rule}). Approval key: {decision.key}. "
         return False, head + "Ask the operator with AskUser, quoting the key and what the action does; once they grant it (/allow <key>, or the Mini App), the same action passes once."
 
     async def flush_background(self) -> None:

@@ -129,6 +129,14 @@ TOOL_GROUPS: dict[str, ToolGroupSpec] = {
         "the shell; WebFetch for plain pages",
         "lazy",
     ),
+    "computer": ToolGroupSpec(
+        "The operator's own desktop apps while they let you: a native program, a dialog, the file manager, an app "
+        "only they have installed, seen in screenshots and driven by mouse and keyboard (Computer), its apps and "
+        "windows listed and brought to the front (ComputerApps). Only after the operator grants this conversation "
+        "control in the app. Not for web pages: the Browser tools are safer and better there. Not a replacement "
+        "for Exec, and never a way around a refusal",
+        "lazy",
+    ),
     "docs": ToolGroupSpec(
         "Search and read the documentation of this installed Daedalus version, for questions about how you "
         "yourself work or are configured",

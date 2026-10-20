@@ -26,7 +26,7 @@ H = {"X-Daedalus-Token": "tok"}
 
 def test_the_rare_groups_wait_on_demand_and_the_everyday_ones_stay_while_they_fit() -> None:
     loads = {name: spec.load for name, spec in TOOL_GROUPS.items()}
-    assert {name for name, load in loads.items() if load == "lazy"} == {"browser", "self_development", "scheduling", "calendar", "diagrams", "loop", "docs", "learning", "mcp_oauth", "settings", "pages"}
+    assert {name for name, load in loads.items() if load == "lazy"} == {"browser", "computer", "self_development", "scheduling", "calendar", "diagrams", "loop", "docs", "learning", "mcp_oauth", "settings", "pages"}
     assert {name for name, load in loads.items() if load == "auto"} == {"board", "services", "agents", "mcp", "widgets"}
     grouped = {tool.name: getattr(tool, "tool_group", "") for tool in discover_tools()}
     # What every session needs is in no group, so nothing can hold it back.
@@ -134,8 +134,8 @@ async def test_the_catalogue_names_each_group_with_its_cost_mode_and_use(client:
     await _call(db, "s1", "r1", "SubAgent", datetime.now(UTC))
     body = (await client.get("/api/tool-groups", headers=H)).json()
     by_name = {g["name"]: g for g in body["groups"]}
-    # The browser is not installed here, so there is no browser group to choose a mode for.
-    assert set(by_name) == set(TOOL_GROUPS) - {"browser"} and body["days"] == 30 and body["sessions"] == 1
+    # Neither the browser nor the desktop daemon is installed here, so neither group has a mode to choose.
+    assert set(by_name) == set(TOOL_GROUPS) - {"browser", "computer"} and body["days"] == 30 and body["sessions"] == 1
     agents = by_name["agents"]
     assert agents["default"] == agents["load"] == "auto" and "SubAgent" in agents["tools"] and agents["tokens"] > 100
     assert agents["usage"] == {"sessions": 1, "runs": 1, "calls": 1}
