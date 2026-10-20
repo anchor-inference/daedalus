@@ -26,9 +26,10 @@ The app server (``codex app-server --listen unix://<path> [-c key=value]…``):
   ``error``, ``thread/tokenUsage/updated``, ``turn/diff/updated``, ``serverRequest/resolved``.
 - Server requests for decisions: ``item/commandExecution/requestApproval`` (``accept``,
   ``acceptForSession``, ``decline``, ``cancel``) and ``item/tool/requestUserInput``. Which clients
-  receive them is ``FAKE_CODEX_APPROVALS``: ``all`` (the default; every subscribed client, the first
-  answer wins and the others are told ``serverRequest/resolved``) or ``owner`` (only the client that
-  started the thread). The real routing could not be measured: the account was at its usage limit.
+  receive them is ``FAKE_CODEX_APPROVALS``: ``all`` (the default, and what Codex does by its source:
+  every subscribed client, the first answer wins and the others are told ``serverRequest/resolved``)
+  or ``owner`` (only the client that started the thread, as Codex sends only its experimental
+  user-verification request to one connection).
 - The ``fail_at_start`` fault makes the app server print a configuration error and exit with 1.
 - ``FAKE_CODEX_SOCKET=link`` binds the socket in a private directory and leaves a link at the path
   it was told to listen on, as Codex 0.157 and later do.
@@ -194,6 +195,9 @@ class AppServer:
         self.approvals = os.environ.get("FAKE_CODEX_APPROVALS", "all")
         self.faults = Faults.from_env()
         self.turns_done = 0
+        # As Codex does (app-server-transport/src/transport/remote_control/mod.rs): the variable is
+        # read once and taken out of the environment, so nothing the server starts inherits it.
+        self.remote_control = os.environ.pop("CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED", "") != "1"
 
     def say(self, text: str) -> None:
         sys.stdout.write(text + "\r\n")
@@ -221,6 +225,7 @@ class AppServer:
         if bound != self.path:
             os.symlink(bound, self.path)
         self.say(f"codex app-server listening on unix://{self.path}")
+        self.log("app_server_started", remote_control=self.remote_control)
         stop = asyncio.Event()
         loop = asyncio.get_running_loop()
         for sig in (15, 1, 2):
@@ -301,6 +306,7 @@ class AppServer:
         if method == "thread/start":
             thread = Thread(new_id(), str(params.get("cwd") or os.getcwd()), conn, params)
             self.threads[thread.id] = thread
+            self.log("thread_started", by=conn.name, model=params.get("model"), config=params.get("config"))
             if params.get("developerInstructions"):
                 self.log("developer_instructions", text=str(params["developerInstructions"]))
             # Every client hears that a thread started; only its subscribers hear what happens in it.

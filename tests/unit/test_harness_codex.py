@@ -75,6 +75,9 @@ def test_the_adapter_is_registered_and_its_plan_runs_the_server_beside_the_tui()
     tui = overrides(plan.argv[6:])
     assert tui == {"check_for_update_on_startup": False, "notice": {"hide_rate_limit_model_nudge": True}}
     assert plan.files[SKILL_FILE].startswith(b"---\nname: daedalus-team") and plan.first_prompt_via == "channel" and plan.session_ref == ""
+    # A staff server never enrols with the remote-control relay, whatever the operator chose for
+    # this Codex home: the variable starts it with remote control off and changes no stored choice.
+    assert server.env == {"CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED": "1"}
 
 
 def test_modes_follow_the_projects_autonomy_and_a_resume_names_the_thread() -> None:
@@ -131,7 +134,8 @@ async def test_resume_requires_the_server_to_confirm_the_thread(monkeypatch: pyt
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await task
-    assert calls == ["initialize", "thread/resume"]
+    # The member names a model and no effort: the effort is read from the operator's configuration.
+    assert calls == ["initialize", "config/read", "thread/resume"]
     assert files == [] and state.thread_id == "" and state.queue.empty()
 
 
@@ -415,6 +419,22 @@ async def test_stopping_a_member_with_an_approval_on_screen_dismisses_it_and_nev
         assert [e["kind"] for e in read_log(s.log) if e["event"] == "dialog_escaped"] == ["permission"]
         # Dismissed, the dialog let the TUI take its /exit: it left on its own, not killed at the grace.
         assert (await s.terminals.get(row.terminal_id))["exit_code"] == 0
+
+
+async def test_a_member_without_a_model_of_its_own_runs_on_the_operators_configured_one(settings: Settings, db: Database) -> None:
+    # A member hired without a model or an effort ran on whatever Codex's own default was, which
+    # 0.161 turned into a new model at "low". The thread now starts with both named, from the
+    # operator's Codex configuration where the member names neither.
+    async with stand(settings, db, **codex()) as s:
+        (s.home / ".codex").mkdir(exist_ok=True)
+        (s.home / ".codex" / "config.toml").write_text('model = "gpt-6-sol"\nmodel_reasoning_effort = "high"\n', encoding="utf-8")
+        ada = await started(s, "echo:the menu is written")
+        await s.status_event(ada, "turn_done_unseen")
+        [thread] = log(s, "thread_started")
+        assert thread["model"] == "gpt-6-sol" and thread["config"] == {"model_reasoning_effort": "high"}
+        # And the server itself was started with remote control off.
+        [listening] = log(s, "app_server_started")
+        assert listening["remote_control"] is False
 
 
 async def test_a_failed_turn_is_an_error_in_codexs_words(settings: Settings, db: Database) -> None:

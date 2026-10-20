@@ -23,12 +23,20 @@ it. What matters here:
   ``userMessage`` item that follows echoes it as ``clientId``.
 - **Steer** is ``turn/steer`` with the running turn's id; a turn that just ended refuses it ("no
   active turn to steer") and the message starts a turn instead.
-- **Requests.** Approvals and questions are server requests to the subscribed clients; the answer is
-  the JSON-RPC response, and ``serverRequest/resolved`` says one was settled (by whoever answered).
-  Which clients receive them could not be measured (the account was at its usage limit, so no model
-  turn ran); the host is subscribed from the thread's start, so it receives them whether they go to
-  every client or to the thread's first one. When the thread says it waits on an approval and no
+- **Requests.** Approvals and questions are server requests to every client subscribed to the thread
+  when the request is sent (Codex's ``app-server/src/outgoing_message.rs``, the recipients from the
+  thread's subscribed connections); the first answer wins and the others hear
+  ``serverRequest/resolved``. The host is subscribed from the thread's start, so it receives every
+  one the TUI does. The exception is Codex's experimental user-verification elicitation, which goes
+  to one verification-capable connection only: when the thread says it waits on an approval and no
   request reached the host, the operator is told to answer in the terminal.
+- **Model and effort** are named on every thread the host starts or resumes: the member's own, else
+  the operator's Codex configuration (``config/read``). Left to Codex, a member ran on its bundled
+  default, which 0.161 changed to a new model at "low".
+- **Remote control** is off for every staff server, by Codex's
+  ``CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED``: a server started without a choice takes the
+  one stored for the Codex home, and an operator who paired the phone app would have every staff
+  server enrol with the relay. The variable changes no stored choice; Codex has no setting for it.
 - **Switches.** ``check_for_update_on_startup=false`` is the TUI's own setting (the update prompt
   appeared with it only on the server); the rate-limit model nudge is a dialog too and is switched off
   the same way. The MCP servers Codex starts get a filtered environment, so the team bridge's
@@ -99,6 +107,7 @@ TEAM_ENV = ("DAEDALUS_HOOK_URL", "DAEDALUS_HOOK_TOKEN", "DAEDALUS_LAUNCH_ID", "D
 """What the team bridge needs from the launch's environment. Codex starts its MCP servers with a
 filtered environment, so each is passed through by name."""
 SANDBOXES = ("read-only", "workspace-write", "danger-full-access")
+NO_REMOTE_CONTROL = {"CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED": "1"}
 LEVELS = {"ask": ("workspace-write", "untrusted"), "edits": ("workspace-write", "on-request"), "all": ("danger-full-access", "never")}
 """The project's autonomy as Codex's sandbox and approval policy. ``untrusted`` asks before anything
 that is not known to be safe, which is what "ask" means for Claude as well."""
@@ -333,7 +342,7 @@ class CodexAdapter:
             env={},
             cwd=spec.cwd,
             files=files,
-            companions=(CompanionSpec("app-server", server),),
+            companions=(CompanionSpec("app-server", server, env=NO_REMOTE_CONTROL),),
             session_ref=resume,
             first_prompt=spec.first_prompt,
             first_prompt_via="channel",
@@ -466,12 +475,13 @@ class CodexAdapter:
         settings: dict[str, Any] = {}
         if planned is not None:
             settings = {"cwd": planned.cwd, "sandbox": planned.sandbox, "approvalPolicy": planned.approval}
-            if planned.model:
-                settings["model"] = planned.model
+            model, effort = await self._model_and_effort(state, planned)
+            if model:
+                settings["model"] = model
             if planned.instructions:
                 settings["developerInstructions"] = planned.instructions
-            if planned.effort:
-                settings["config"] = {"model_reasoning_effort": planned.effort}
+            if effort:
+                settings["config"] = {"model_reasoning_effort": effort}
         if resume:
             result = await self._call(state, "thread/resume", {"threadId": resume, "excludeTurns": True, **settings})
         elif planned is None:
@@ -499,6 +509,25 @@ class CodexAdapter:
         state.connected.set()
         await self._tui_attached(term)
         state.queue.put_nowait(StaffEvent(EventKind.READY, _now(), {"thread": state.thread_id}))
+
+    async def _model_and_effort(self, state: _Launch, planned: _Thread) -> tuple[str, str]:
+        """The member's model and effort, each completed from the operator's Codex configuration as
+        the server reads it for the member's folder. Empty only where neither names one, and then
+        Codex's own default stands, which is logged: nothing in Daedalus is a better guess."""
+        model, effort = planned.model, planned.effort
+        if model and effort:
+            return model, effort
+        configured: Mapping[str, Any] = {}
+        with contextlib.suppress(CodexError, TimeoutError):
+            answer = await self._call(state, "config/read", {"cwd": planned.cwd})
+            found = (answer or {}).get("config") if isinstance(answer, dict) else None
+            configured = found if isinstance(found, dict) else {}
+        model = model or str(configured.get("model") or "")
+        effort = effort or str(configured.get("model_reasoning_effort") or "")
+        if not model or not effort:
+            logger.warning("a codex member names no %s and the operator's codex configuration none either; codex's own default applies",
+                           "model or effort" if not model and not effort else "model" if not model else "effort")
+        return model, effort
 
     async def _tui_attached(self, term: TerminalPort) -> None:
         """Ready means the TUI shows the thread, not only that the server has it: a request sent
