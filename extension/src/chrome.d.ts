@@ -219,7 +219,7 @@ declare namespace chrome {
       error?: string;
       exists: boolean;
     }
-    function search(query: { id?: number }): Promise<DownloadItem[]>;
+    function search(query: { id?: number; startedAfter?: string; orderBy?: string[]; limit?: number }): Promise<DownloadItem[]>;
   }
 
   export namespace declarativeNetRequest {

@@ -50,7 +50,7 @@ def main():
         elif kind == "check":
             send({"t": "check_ok", "n": frame["n"], "host_seen": True})
         elif kind == "result" and frame.get("id") == 2 and frame.get("ok"):
-            tab = frame["value"]["tab"]
+            tab = frame["value"]["tab"]["id"]
             session = f"x{tab}"
             send({"t": "cdp", "id": 3, "session": session, "method": "Runtime.evaluate", "params": {"expression": "6*7", "returnByValue": True}})
             send({"t": "cdp", "id": 4, "session": session, "method": "Network.getCookies", "params": {}})

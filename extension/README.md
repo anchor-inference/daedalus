@@ -46,7 +46,8 @@ npm run check          # the type check
 npm test               # vitest against a fake chrome.* (test/fake-chrome.ts)
 ```
 
-`test/frames.json` holds the golden frames of the relay protocol, which the daemon's tests read too.
+`test/frames.json` is a byte-for-byte copy of the daemon's golden relay frames
+(`browserd/internal/relay/testdata/frames.json`); a test fails when the two differ.
 
 `test/e2e/smoke.py` loads the built extension into a real, unbranded Chromium (branded Chrome ignores
 `--load-extension` since 137) with a stub native host, and checks hello and welcome, ping and pong,

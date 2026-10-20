@@ -11,18 +11,21 @@ export const PROTO = 1;
 // `browserd bridge`, which carries these frames to the `user` daemon's socket.
 export const NATIVE_HOST = "com.daedalus.browser";
 
+// The extension's id, fixed by the public key in the manifest. The bridge checks the caller's origin
+// against it, and the launcher writes it into the host manifest's `allowed_origins`.
+export const EXTENSION_ID = "lkhhklicnjlplokpadpccndipomikoaj";
+
 export type ErrorBody = { code: string; message: string };
 
+// A tab as a `tabs` frame or a call's answer names it. Empty fields are left out, as the daemon
+// writes them: `removed` and `left` carry the id alone.
 export type TabInfo = {
   id: number;
-  window: number;
-  url: string;
-  title: string;
+  group?: string;
   opener?: number;
-  attached: boolean;
+  url?: string;
+  title?: string;
 };
-
-export type GroupInfo = { id: string; title?: string; paused?: boolean };
 
 export type TabsOp = "created" | "removed" | "updated" | "joined" | "left" | "group_closed";
 
@@ -42,7 +45,7 @@ export type ExtensionFrame =
   | { t: "result"; id: number; ok: true; value: unknown }
   | { t: "result"; id: number; ok: false; error: ErrorBody }
   | { t: "event"; session: string; method: string; params: unknown }
-  | { t: "tabs"; op: TabsOp; tab?: TabInfo; group?: GroupInfo }
+  | { t: "tabs"; op: TabsOp; tab?: TabInfo; group?: string }
   | { t: "input"; tab: number }
   | { t: "pong"; n: number }
   | { t: "check"; n: number };
@@ -64,11 +67,37 @@ export type DaemonFrame =
   | CallFrame
   | { t: "ping"; n: number }
   | { t: "check_ok"; n: number; host_seen: boolean }
-  | { t: "bye"; reason: string; name?: string; proto?: number };
+  | { t: "bye"; reason: string; message?: string; proto?: number };
 
-// Why a daemon (or the host, on the server transport) ends a relay. `busy` carries the `name` of the
-// Chrome that holds the relay, and `proto` the version the daemon speaks.
-export const BYE_REASONS = ["shutdown", "replaced", "busy", "proto", "unauthorized", "unreachable"] as const;
+// Why a relay ends. The daemon sends the first six, the bridge the next two when it never reached a
+// daemon that takes a relay, and the host the last on the server transport when the device token is
+// unknown, expired or revoked. `message` is for a log; the popup shows its own words for each reason.
+// `proto` on a `proto` bye is the version the daemon speaks.
+export const BYE_REASONS = [
+  "shutdown",
+  "replaced",
+  "another_relay",
+  "proto",
+  "lost",
+  "bad_frame",
+  "not_running",
+  "unavailable",
+  "unauthorized",
+] as const;
+
+// The codes of a failed `result`, as the daemon reads them.
+export const RESULT_ERRORS = {
+  // The allowlist, or a tab outside the agent's groups.
+  refused: "refused",
+  // The tab is gone, or was never the agent's.
+  noTab: "no_tab",
+  // Chrome's own DevTools error; the message is its text.
+  cdp: "cdp",
+  // The debugger was detached from the tab and has not been attached again yet.
+  detached: "detached",
+  // Anything else.
+  failed: "failed",
+} as const;
 
 // The `call` operations the extension performs with ordinary extension APIs.
 export const CALL_OPS = [
@@ -137,7 +166,7 @@ export function isExtensionFrame(raw: unknown): raw is ExtensionFrame {
     case "tabs":
       return ["created", "removed", "updated", "joined", "left", "group_closed"].includes(raw.op as string) &&
         (raw.tab === undefined || (isObject(raw.tab) && isInt(raw.tab.id))) &&
-        (raw.group === undefined || (isObject(raw.group) && isString(raw.group.id)));
+        (raw.group === undefined || isString(raw.group));
     case "input":
       return isInt(raw.tab);
     case "pong":

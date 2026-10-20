@@ -90,7 +90,7 @@ export async function harness(options: { language?: string; settings?: Record<st
       await h.welcome();
       h.take();
       const result = await h.call("tab.create", { group: "g1", title, url: "about:blank" });
-      return result.value.tab as number;
+      return result.value.tab.id as number;
     },
   };
   return h;

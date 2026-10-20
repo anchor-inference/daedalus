@@ -41,7 +41,7 @@ text, which the extension turns into what the operator should do:
 |---|---|
 | "Specified native messaging host not found." | the connector is not registered: open Daedalus → Settings → Browser |
 | "Access to the specified native messaging host is forbidden." | the same: the manifest exists but does not name this extension |
-| "Native host has exited." (and the bridge's `bye {reason: "unreachable"}`) | Daedalus is not running on this computer |
+| "Native host has exited." (and the bridge's `bye {reason: "not_running"}`) | Daedalus is not running on this computer |
 
 **A server.** The operator types the server's address and a one-time code from the app. The
 extension posts `{code, profile_id, profile_name, ext_version, chrome_version}` to
@@ -55,33 +55,48 @@ its name). "Disconnect" forgets the token.
 ## The relay protocol
 
 The frames, their fields and their directions are fixed by the specification shared with
-`browserd/internal/relay`; both sides test against the same golden frames
-(`extension/test/frames.json`). What the extension adds to the bare frame list:
+`browserd/internal/relay`, whose `testdata/frames.json` holds one golden frame of every kind. The
+extension keeps a byte-for-byte copy in `extension/test/frames.json`, and a test fails when the two
+differ. What the extension does with them, beyond the bare list:
 
-- **`bye.reason`** is one of `shutdown`, `replaced`, `busy` (with `name`), `proto` (with the daemon's
-  `proto`), `unauthorized`, `unreachable`.
-- **`result.error.code`** is one of `refused` (the allowlist or scope said no), `detached` (the tab's
-  debugger is not attached, a reattach is pending), `paused` (input into a group the operator
-  paused), `cdp` (Chrome refused the command; its text is the message), `chrome` (an extension API
-  failed), `bad_args`, `not_found`, `unknown_op`.
-- **`tabs {op: "updated"}`** carries either a tab, when its debugger detached (`attached: false`) or
-  reattached (`attached: true`), or only a group, when the operator paused it or gave it back
-  (`group.paused`).
+- **`bye`** ends the relay and the popup explains its `reason` in its own words: `shutdown`,
+  `replaced`, `another_relay` (the other Chrome's name is the end of `message`), `proto` (with the
+  daemon's `proto`: lower than the extension's means "update Daedalus", higher "update the
+  extension"), `lost`, `bad_frame`; from the bridge `not_running` and `unavailable` (a daemon that
+  takes no relay); from the host `unauthorized` (the pairing expired or was revoked). Each but the
+  last is followed by a reconnect, slower for a busy relay or a version mismatch.
+- **`result.error.code`** is one of `refused` (the allowlist, a tab outside the agent's groups, or
+  input into a group the operator paused), `no_tab` (a call named a tab that is gone or not the
+  agent's), `cdp` (Chrome refused the command; its text is the message), `detached` (the tab's
+  debugger is not attached, a reattach is pending), `failed` (anything else).
+- **Tabs in frames** are `{id, group, opener?, url?, title?}` with empty fields left out; `removed`
+  and `left` carry the id alone, `updated` the new address and title, and `group_closed` the group's
+  id as a string.
 - **Synthetic detach events.** When a tab's session ends, the extension sends, in the events the
   daemon already understands, a `Target.detachedFromTarget {sessionId}` for each child session and
   then `Inspector.detached {reason}` on the tab's session. Chrome sends neither when the extension
-  detaches by itself (`reason: "left"`) nor for the children when the tab's session ends.
-- **After `welcome`** the extension replays every tab it still holds as `tabs {op: "joined"}`, so a
-  daemon that restarted can take them back or close their group.
+  detaches by itself (`reason: "left"`) nor for the children when the tab's session ends. When a
+  reattach succeeds the tab is reported `joined` again, so the daemon adopts the new session as it
+  would a tab the operator gave.
+- **After `welcome`** the extension replays every tab it still holds as `joined`, so a daemon that
+  restarted can take them back or close their group.
+- **Pause.** The protocol has no pause of its own. While the operator holds a group paused, the
+  extension reports `input` for each of its tabs at once and every 2 s, which keeps the daemon's
+  human-control lease alive, and refuses the daemon's `Input.*` commands on those tabs itself.
 - **`tab.create`** always opens `about:blank`, whatever `url` says. The daemon navigates after it has
-  attached and set up its navigation guard, so the first page is judged like every other. The result
-  is `{tab, session, window, attached}`.
-- **`window.ensure {group, title?}`** returns `{window}`; `window.bounds` returns `{window, left, top,
-  width, height, state}` and refuses to resize when the agent works in the operator's window.
-- **`downloads.search {id}`** answers only downloads that began while the relay was connected, so a
-  daemon cannot walk the operator's download history by id.
-- **`cookies.names {url}`** answers `{cookies: [{name, domain, path, secure, http_only, same_site,
-  session, expires?}]}`, never a value.
+  attached and set up its navigation guard, so the first page is judged like every other. The value
+  is `{tab: {id, group, url}}`.
+- **`window.ensure {group}`** answers `{window, tabs}`, the tabs already in the group, so a daemon
+  that lost track of them starts from what is there. `window.bounds` answers `{bounds: {left, top,
+  width, height}}` and refuses to resize when the agent works in the operator's window.
+- **`downloads.search {id}`** takes the DevTools guid of `Page.downloadWillBegin`. The extension
+  remembers the address each such event of an agent tab named and finds the newest
+  `chrome.downloads` item of that address begun no earlier than shortly before it; the answer is
+  `{path, state, bytes}`. A guid no agent tab announced finds nothing, so the operator's download
+  history stays out of reach.
+- **`cookies.names {url}`** answers `{cookies: [{name, domain, path, expires, secure, http_only,
+  same_site, session}]}`, never a value.
+- **`notify {text}`** answers `{}`.
 - **`Target.setAutoAttach`** is always sent with `flatten: true`: a nested session would never reach
   the extension.
 

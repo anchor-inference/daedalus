@@ -15,6 +15,7 @@ Unbranded Chromium only: branded Chrome ignores `--load-extension` since 137.
 
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -24,9 +25,10 @@ from playwright.sync_api import sync_playwright
 
 HERE = Path(__file__).resolve().parent
 EXTENSION = HERE.parent.parent / "dist"
-FRAMES = json.loads((HERE.parent / "frames.json").read_text())
-EXTENSION_ID = FRAMES["extension_id"]
-HOST = FRAMES["native_host"]
+# The id and the host name as the extension itself declares them, so this check cannot drift from it.
+PROTOCOL = (HERE.parent.parent / "src" / "protocol.ts").read_text()
+EXTENSION_ID = re.search(r'EXTENSION_ID = "([a-p]{32})"', PROTOCOL).group(1)
+HOST = re.search(r'NATIVE_HOST = "([a-z0-9_.]+)"', PROTOCOL).group(1)
 
 
 def frames(log: Path):
@@ -89,7 +91,7 @@ def main() -> int:
                     return {r["id"]: r for r in received("result")}
 
                 wait_for(lambda: 1 in results(), "the notify result")
-                assert results()[1]["ok"] and results()[1]["value"] == {"shown": True}
+                assert results()[1]["ok"] and results()[1]["value"] == {}
 
                 wait_for(lambda: {2, 3, 4, 5} <= results().keys(), "the tab, evaluate and refused results")
                 assert results()[2]["ok"], results()[2]
@@ -109,7 +111,8 @@ def main() -> int:
                 assert "✓" in text, text
                 assert received("check"), "the popup's check never reached the host"
                 # The operator's page stayed the operator's.
-                assert not received("tabs"), received("tabs")
+                joined = [f for f in received("tabs") if f["op"] in ("created", "joined")]
+                assert not joined, joined
                 if os.environ.get("SMOKE_DEBUG"):
                     print(json.dumps(frames(log), indent=1))
                 if os.environ.get("SMOKE_SCREENSHOT"):

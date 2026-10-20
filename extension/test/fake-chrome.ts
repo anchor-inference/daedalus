@@ -278,8 +278,12 @@ export function installFakeChrome(options: { language?: string } = {}) {
     },
     downloads: {
       items: [] as any[],
-      async search(query: { id?: number }) {
-        return chromeObject.downloads.items.filter((item) => item.id === query.id);
+      async search(query: { id?: number; startedAfter?: string; orderBy?: string[]; limit?: number }) {
+        let items = chromeObject.downloads.items.filter((item) =>
+          (query.id === undefined || item.id === query.id) &&
+          (query.startedAfter === undefined || Date.parse(item.startTime) > Date.parse(query.startedAfter)));
+        if (query.orderBy?.[0] === "-startTime") items = items.sort((a, b) => Date.parse(b.startTime) - Date.parse(a.startTime));
+        return items.slice(0, query.limit ?? items.length);
       },
     },
     declarativeNetRequest: {

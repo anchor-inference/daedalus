@@ -8,6 +8,7 @@ import { updateGuard } from "./guard.js";
 import { t, type Key } from "./i18n.js";
 import {
   PROTO,
+  RESULT_ERRORS,
   parseDaemonFrame,
   parseSession,
   sessionName,
@@ -15,7 +16,6 @@ import {
   type CdpFrame,
   type DaemonFrame,
   type ExtensionFrame,
-  type GroupInfo,
   type TabInfo,
 } from "./protocol.js";
 import { Scope, type Group, type Member } from "./scope.js";
@@ -37,6 +37,7 @@ export type ErrorCode =
   | "version_daemon"
   | "replaced"
   | "shutdown"
+  | "unavailable"
   | "bad_server"
   | "pair_failed";
 
@@ -93,6 +94,9 @@ export const REATTACH_MS = [2_000, 5_000, 15_000, 30_000, 60_000];
 export const OWN_INPUT_MS = 1_000;
 // One `input` frame per tab per this long is enough to keep the daemon's human-control lease alive.
 export const INPUT_REPORT_MS = 1_000;
+// While the operator holds a group paused, its tabs are reported as the operator's input this often,
+// which keeps the daemon's human-control lease from running out for as long as the pause lasts.
+export const PAUSE_RENEW_MS = 2_000;
 const NOTICE_SHOW_MS = 10_000;
 const FLASH_MS = 3_000;
 const MENU_ROOT = "daedalus-grant";
@@ -111,7 +115,6 @@ export class Relay {
   private welcome?: { install_name: string; install_kind: "native" | "server"; daemon_version: string };
   private lastHeartbeat?: number;
   private connectedSince?: number;
-  private downloadsSince?: number;
   private attempt = 0;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private heartbeatTimer?: ReturnType<typeof setInterval>;
@@ -124,6 +127,10 @@ export class Relay {
   private reattachAttempts = new Map<number, number>();
   private lastDispatch = new Map<number, number>();
   private lastInputReport = new Map<number, number>();
+  private pauseTimer?: ReturnType<typeof setInterval>;
+  // Page.downloadWillBegin names a download by a DevTools guid; chrome.downloads knows it by its own
+  // id. What the event said (the address and when) is how the one is found from the other.
+  private downloads = new Map<string, { url: string; at: number }>();
 
   constructor(
     private readonly openTransportFor: TransportFactory = openTransport,
@@ -295,27 +302,29 @@ export class Relay {
     this.errorName = undefined;
     this.lastHeartbeat = this.now();
     this.connectedSince = this.now();
-    this.downloadsSince = this.now();
     this.setPhase("connected");
     this.startHeartbeat();
     // A daemon that restarted knows nothing of the tabs this extension still holds; telling it they
     // are joined lets it take them back or close their group, instead of leaving them orphaned.
-    for (const member of this.scope.members.values()) {
-      const group = this.scope.groups.get(member.group);
-      if (group) void this.report("joined", member, group);
-    }
+    for (const member of this.scope.members.values()) void this.report("joined", member);
+    this.renewPauses();
   }
 
   private onBye(frame: Extract<DaemonFrame, { t: "bye" }>): void {
     const reasons: Record<string, ErrorCode> = {
       shutdown: "shutdown",
       replaced: "replaced",
-      busy: "busy",
-      unauthorized: "pairing_expired",
-      unreachable: "not_running",
+      another_relay: "busy",
       proto: (frame.proto ?? 0) > PROTO ? "version_extension" : "version_daemon",
+      lost: "lost",
+      bad_frame: "lost",
+      not_running: "not_running",
+      unavailable: "unavailable",
+      unauthorized: "pairing_expired",
     };
-    this.lost(reasons[frame.reason] ?? "lost", frame.name);
+    // The other Chrome's name is the end of the daemon's message ("…: <name>"); the popup shows it.
+    const name = frame.reason === "another_relay" ? /:\s*(.+)$/.exec(frame.message ?? "")?.[1] : undefined;
+    this.lost(reasons[frame.reason] ?? "lost", name);
   }
 
   // ---- the popup's buttons ----
@@ -374,8 +383,26 @@ export class Relay {
     if (!group || group.paused === paused) return;
     group.paused = paused;
     await this.scope.save();
-    this.send({ t: "tabs", op: "updated", group: groupInfo(group) });
+    this.renewPauses();
     this.broadcast();
+  }
+
+  /**
+   * Keeps a paused group the operator's. The protocol has no pause of its own; what it has is the
+   * operator's input, which makes the daemon hand control to the human for a short lease. Reporting
+   * input on every tab of a paused group, now and then every couple of seconds, holds that lease for
+   * as long as the pause lasts, and the daemon's input is refused here meanwhile as well.
+   */
+  private renewPauses(): void {
+    clearInterval(this.pauseTimer);
+    this.pauseTimer = undefined;
+    const paused = () => [...this.scope.members.values()].filter((m) => this.scope.groups.get(m.group)?.paused);
+    if (!paused().length) return;
+    const renew = () => {
+      for (const member of paused()) this.send({ t: "input", tab: member.tab });
+    };
+    renew();
+    this.pauseTimer = setInterval(renew, PAUSE_RENEW_MS);
   }
 
   /** The popup's "Stop and close": the group's tabs are closed and the daemon is told it is over. */
@@ -383,7 +410,7 @@ export class Relay {
     const group = this.scope.groups.get(groupId);
     if (!group) return;
     await this.closeGroup(group);
-    this.send({ t: "tabs", op: "group_closed", group: { id: group.id } });
+    this.send({ t: "tabs", op: "group_closed", group: group.id });
   }
 
   async pair(serverInput: string, code: string): Promise<{ ok: true } | { ok: false; error: ErrorCode }> {
@@ -450,18 +477,18 @@ export class Relay {
     const refuse = (code: string, message: string) =>
       this.send({ t: "result", id: frame.id, ok: false, error: { code, message } });
     const target = parseSession(frame.session);
-    if (!target) return refuse("refused", "only a tab's own session can be addressed");
+    if (!target) return refuse(RESULT_ERRORS.refused, "only a tab's own session can be addressed");
     const why = refusal(frame.method);
-    if (why) return refuse("refused", why);
+    if (why) return refuse(RESULT_ERRORS.refused, why);
     const member = this.scope.members.get(target.tabId);
-    if (!member) return refuse("refused", "the tab is outside the agent's groups");
-    if (target.child && !member.children.includes(target.child)) return refuse("refused", "unknown child session");
-    if (!member.attached) return refuse("detached", "the debugger is not attached to this tab");
+    if (!member) return refuse(RESULT_ERRORS.refused, "the tab is outside the agent's groups");
+    if (target.child && !member.children.includes(target.child)) return refuse(RESULT_ERRORS.refused, "unknown child session");
+    if (!member.attached) return refuse(RESULT_ERRORS.detached, "the debugger is not attached to this tab");
     const group = this.scope.groups.get(member.group);
     if (frame.method.startsWith("Input.")) {
       // A paused group is the operator's: the daemon is told so by `tabs updated`, and its input is
       // refused here too, so that a daemon that missed the frame still cannot drive the tab.
-      if (group?.paused) return refuse("paused", "the operator paused this group");
+      if (group?.paused) return refuse(RESULT_ERRORS.refused, "the operator paused this group");
       this.lastDispatch.set(member.tab, this.now());
     }
     let params = frame.params ?? {};
@@ -477,7 +504,7 @@ export class Relay {
       );
       this.send({ t: "result", id: frame.id, ok: true, value: value ?? {} });
     } catch (error) {
-      refuse("cdp", errorText(error));
+      refuse(RESULT_ERRORS.cdp, errorText(error));
     } finally {
       if (screenshot) void this.border(member.tab, true);
     }
@@ -494,6 +521,8 @@ export class Relay {
     } else if (method === "Target.detachedFromTarget" && typeof p.sessionId === "string") {
       member.children = member.children.filter((sid) => sid !== p.sessionId);
       void this.scope.save();
+    } else if ((method === "Page.downloadWillBegin" || method === "Browser.downloadWillBegin") && typeof p.guid === "string") {
+      this.downloads.set(p.guid, { url: String(p.url ?? ""), at: this.now() });
     }
     this.send({ t: "event", session: sessionName(member.tab, source.sessionId), method, params: params ?? {} });
   }
@@ -503,7 +532,6 @@ export class Relay {
     const member = this.scope.members.get(source.tabId);
     if (!member || !member.attached) return;
     this.markDetached(member, reason);
-    void this.report("updated", member);
     if (reason !== "target_closed") this.scheduleReattach(member.tab);
     this.broadcast();
   }
@@ -542,7 +570,9 @@ export class Relay {
         const member = this.scope.members.get(tab);
         if (!member || member.attached) return;
         if (await this.attach(member)) {
-          void this.report("updated", member);
+          // A fresh session on a tab the daemon already holds is, to the daemon, a tab joining again:
+          // it adopts it as it would one the operator gave, enabling its domains on the new session.
+          void this.report("joined", member);
           this.broadcast();
         } else {
           this.scheduleReattach(tab);
@@ -597,7 +627,7 @@ export class Relay {
       const value = await this.call(frame.op, args);
       this.send({ t: "result", id: frame.id, ok: true, value });
     } catch (error) {
-      const code = error instanceof CallError ? error.code : "chrome";
+      const code = error instanceof CallError ? error.code : RESULT_ERRORS.failed;
       this.send({ t: "result", id: frame.id, ok: false, error: { code, message: errorText(error) } });
     }
   }
@@ -608,7 +638,10 @@ export class Relay {
         const group = this.scope.ensureGroup(requireString(args, "group"), optionalString(args, "title"));
         const window = await this.ensureWindow(group);
         await this.scope.save();
-        return { window };
+        // The tabs already in the group come with it, so a daemon that lost track of them (it
+        // restarted, or the operator gave tabs before it asked) starts from what is there.
+        const tabs = await Promise.all(this.scope.tabsOf(group.id).map((member) => this.describe(member)));
+        return { window, tabs };
       }
       case "tab.create":
         return this.createTab(requireString(args, "group"), optionalString(args, "title"));
@@ -633,25 +666,8 @@ export class Relay {
       case "window.bounds":
         return this.windowBounds(requireString(args, "group"), args.bounds);
       case "downloads.search": {
-        const id = args.id;
-        if (typeof id !== "number") throw new CallError("bad_args", "id must be a number");
-        const [item] = await chrome.downloads.search({ id });
-        // Only downloads that began while this relay was connected: the operator's download history
-        // is theirs, and a daemon walking the ids must not be able to read it.
-        if (!item || Date.parse(item.startTime) < (this.downloadsSince ?? Infinity)) {
-          throw new CallError("not_found", "no such download");
-        }
-        return {
-          id: item.id,
-          url: item.finalUrl || item.url,
-          filename: item.filename,
-          mime: item.mime,
-          state: item.state,
-          bytes_received: item.bytesReceived,
-          total_bytes: item.totalBytes,
-          exists: item.exists,
-          ...(item.error ? { error: item.error } : {}),
-        };
+        const item = await this.findDownload(requireString(args, "id"));
+        return { path: item.filename, state: item.state, bytes: item.bytesReceived };
       }
       case "cookies.names": {
         const url = requireString(args, "url");
@@ -663,11 +679,11 @@ export class Relay {
             name: cookie.name,
             domain: cookie.domain,
             path: cookie.path,
+            expires: cookie.expirationDate ?? 0,
             secure: cookie.secure,
             http_only: cookie.httpOnly,
             same_site: cookie.sameSite,
             session: cookie.session,
-            ...(cookie.expirationDate === undefined ? {} : { expires: cookie.expirationDate }),
           })),
         };
       }
@@ -678,16 +694,16 @@ export class Relay {
       }
       case "notify":
         await this.showNotice(optionalString(args, "text") ?? "");
-        return { shown: true };
+        return {};
       default:
-        throw new CallError("unknown_op", `unknown operation ${op}`);
+        throw new CallError(RESULT_ERRORS.failed, `unknown operation ${op}`);
     }
   }
 
   private requireMember(args: Record<string, unknown>): Member {
     const tab = args.tab;
     const member = typeof tab === "number" ? this.scope.members.get(tab) : undefined;
-    if (!member) throw new CallError("refused", "the tab is outside the agent's groups");
+    if (!member) throw new CallError(RESULT_ERRORS.noTab, "the tab is gone or is not the agent's");
     return member;
   }
 
@@ -732,7 +748,7 @@ export class Relay {
     await this.attach(member);
     await this.scope.save();
     await this.refreshScopeViews();
-    return { tab: tab.id, session: sessionName(tab.id!), window: tab.windowId, attached: member.attached };
+    return { tab: { id: tab.id!, group: group.id, url: "about:blank" } satisfies TabInfo };
   }
 
   /** Puts a tab into the group's Chrome tab group, creating that group in the tab's window if needed. */
@@ -755,11 +771,11 @@ export class Relay {
 
   private async windowBounds(groupId: string, bounds: unknown): Promise<unknown> {
     const group = this.scope.groups.get(groupId);
-    if (!group || group.windowId === undefined) throw new CallError("not_found", "the group has no window");
+    if (!group || group.windowId === undefined) throw new CallError(RESULT_ERRORS.failed, "the group has no window");
     if (bounds !== undefined) {
       // The operator's own window is theirs to size.
-      if (this.settings.windowMode === "current") throw new CallError("refused", "the agent works in the operator's window");
-      if (typeof bounds !== "object" || bounds === null) throw new CallError("bad_args", "bounds must be an object");
+      if (this.settings.windowMode === "current") throw new CallError(RESULT_ERRORS.refused, "the agent works in the operator's window");
+      if (typeof bounds !== "object" || bounds === null) throw new CallError(RESULT_ERRORS.failed, "bounds must be an object");
       const b = bounds as Record<string, unknown>;
       const update: chrome.windows.UpdateInfo = {};
       for (const key of ["left", "top", "width", "height"] as const) if (typeof b[key] === "number") update[key] = b[key] as number;
@@ -767,7 +783,7 @@ export class Relay {
       await chrome.windows.update(group.windowId, update);
     }
     const window = await chrome.windows.get(group.windowId);
-    return { window: window.id, left: window.left, top: window.top, width: window.width, height: window.height, state: window.state };
+    return { bounds: { left: window.left ?? 0, top: window.top ?? 0, width: window.width ?? 0, height: window.height ?? 0 } };
   }
 
   /** Forgets the group before closing its tabs, so their removal is not reported as the operator's. */
@@ -808,7 +824,7 @@ export class Relay {
       // A popup window cannot hold a tab group; the tab stays a member without one.
     }
     await this.attach(member);
-    await this.report("created", member, group);
+    await this.report("created", member);
     await this.refreshScopeViews();
   }
 
@@ -822,13 +838,20 @@ export class Relay {
     if (!member) return;
     if (member.attached) this.markDetached(member, "target_closed");
     await this.scope.save();
-    this.send({ t: "tabs", op: "removed", tab: { id: tabId, window: -1, url: "", title: "", attached: false }, group: { id: member.group } });
+    this.send({ t: "tabs", op: "removed", tab: { id: tabId } });
     await this.refreshScopeViews();
   }
 
   async onTabUpdated(tabId: number, info: chrome.tabs.UpdateInfo, tab: chrome.tabs.Tab): Promise<void> {
     const member = this.scope.members.get(tabId);
     if (info.status === "loading" && member?.attached) await this.injectContent(tabId);
+    if (member && (info.url !== undefined || info.title !== undefined)) {
+      this.send({
+        t: "tabs",
+        op: "updated",
+        tab: { id: tabId, ...(tab.url ? { url: tab.url } : {}), ...(tab.title ? { title: tab.title } : {}) },
+      });
+    }
     if (info.groupId === undefined) return;
     if (member) {
       const group = this.scope.groups.get(member.group);
@@ -850,7 +873,7 @@ export class Relay {
     if (tab.id === undefined || this.scope.members.has(tab.id)) return;
     const member = this.scope.add(tab.id, group.id, true);
     await this.attach(member);
-    await this.report("joined", member, group);
+    await this.report("joined", member);
     await this.refreshScopeViews();
   }
 
@@ -861,8 +884,7 @@ export class Relay {
     await this.border(tabId, null);
     this.scope.remove(tabId);
     await this.scope.save();
-    const tab = await chrome.tabs.get(tabId).catch(() => undefined);
-    this.send({ t: "tabs", op, tab: tabInfo(member, tab), group: { id: member.group } });
+    this.send({ t: "tabs", op, tab: { id: tabId } });
     await this.refreshScopeViews();
   }
 
@@ -876,7 +898,7 @@ export class Relay {
       await this.border(member.tab, null);
     }
     await this.scope.save();
-    this.send({ t: "tabs", op: "group_closed", group: { id: group.id } });
+    this.send({ t: "tabs", op: "group_closed", group: group.id });
     await this.refreshScopeViews();
   }
 
@@ -904,10 +926,39 @@ export class Relay {
 
   // ---- what the operator sees ----
 
-  private async report(op: "created" | "updated" | "joined", member: Member, group?: Group): Promise<void> {
+  private async report(op: "created" | "joined", member: Member): Promise<void> {
+    this.send({ t: "tabs", op, tab: await this.describe(member) });
+  }
+
+  /** A member as the daemon names a tab, with empty fields left out as the daemon writes them. */
+  private async describe(member: Member): Promise<TabInfo> {
     const tab = await chrome.tabs.get(member.tab).catch(() => undefined);
-    const owner = group ?? this.scope.groups.get(member.group);
-    this.send({ t: "tabs", op, tab: tabInfo(member, tab), ...(owner ? { group: groupInfo(owner) } : {}) });
+    const url = tab?.url || tab?.pendingUrl;
+    return {
+      id: member.tab,
+      group: member.group,
+      ...(member.opener === undefined ? {} : { opener: member.opener }),
+      ...(url ? { url } : {}),
+      ...(tab?.title ? { title: tab.title } : {}),
+    };
+  }
+
+  /**
+   * The chrome.downloads item behind a DevTools download guid: the newest download of the address
+   * Page.downloadWillBegin named, begun no earlier than a little before that event. Only downloads an
+   * agent tab began are found, so the operator's download history stays out of reach.
+   */
+  private async findDownload(guid: string): Promise<chrome.downloads.DownloadItem> {
+    const seen = this.downloads.get(guid);
+    if (!seen) throw new CallError(RESULT_ERRORS.failed, "no download of an agent tab has this id");
+    const items = await chrome.downloads.search({
+      startedAfter: new Date(seen.at - 10_000).toISOString(),
+      orderBy: ["-startTime"],
+      limit: 50,
+    });
+    const item = items.find((candidate) => candidate.url === seen.url || candidate.finalUrl === seen.url);
+    if (!item) throw new CallError(RESULT_ERRORS.failed, "the download has not reached Chrome's list yet");
+    return item;
   }
 
   private async showNotice(text: string): Promise<void> {
@@ -999,7 +1050,7 @@ class CallError extends Error {
 
 function requireString(args: Record<string, unknown>, key: string): string {
   const value = args[key];
-  if (typeof value !== "string" || !value) throw new CallError("bad_args", `${key} must be a string`);
+  if (typeof value !== "string" || !value) throw new CallError(RESULT_ERRORS.failed, `${key} must be a string`);
   return value;
 }
 
@@ -1010,21 +1061,6 @@ function optionalString(args: Record<string, unknown>, key: string): string | un
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function groupInfo(group: Group): GroupInfo {
-  return { id: group.id, title: group.title, paused: group.paused };
-}
-
-function tabInfo(member: Member, tab?: chrome.tabs.Tab): TabInfo {
-  return {
-    id: member.tab,
-    window: tab?.windowId ?? -1,
-    url: tab?.url ?? "",
-    title: tab?.title ?? "",
-    ...(member.opener === undefined ? {} : { opener: member.opener }),
-    attached: member.attached,
-  };
 }
 
 /** Chrome's version from the user agent; the reduced user agent still carries the major version. */
