@@ -601,6 +601,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // take it away; between the two this is what there is to show.
   const saving = !busy && !!detail?.housekeeping;
   const compacting = detail?.compacting ?? null;
+  // The summary written ahead of the trigger: shown beside whatever the session is doing, never in its place.
+  const ahead = !compacting ? detail?.compaction_background ?? null : null;
   const busyRef = useRef(busy);
   busyRef.current = busy;
 
@@ -749,6 +751,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         // host's notification about the same stop brings the toast.
         const setting = settingRef(p.setting);
         if (setting && message) raiseSettingNotice({ tone: "error", title: t("setting.notice.refused"), body: message, setting, sessionId: id, toast: false });
+      } else if (event === "compaction_background") {
+        // Not a state change: the session goes on running or waiting while the summary is written.
+        setDetail((prev) => (prev ? { ...prev, compaction_background: (p.compaction as Compacting | null) ?? null } : prev));
       } else if (event === "setting_notice") {
         // An auxiliary model was not set or refused. Inline only: the host posts the toast itself.
         const notice = noticeFromEvent(id, p);
@@ -1502,6 +1507,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     : saving ? <StateSub tone="saving">{t("session.livebar.saving")}</StateSub>
     : status === "failed" ? <StateSub tone="failed">{statusWord("failed")}</StateSub>
     : jobsPending > 0 ? <StateSub tone="running">{plural("session.jobs.waiting", jobsPending)}</StateSub>
+    : ahead ? <span>{t("session.compacting.ahead", { what: compactionStage(ahead) })}</span>
     : detail ? <span className={detail.fallback ? "ph-chat-fallback" : undefined}>{shortModel(detail.fallback?.to ?? detail.model, 28)}{effortText ? ` · ${effortText}` : ""}</span>
     : null;
   const phoneChip = phone && browserShown
@@ -1564,6 +1570,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               {compacting ? null : busy || saving ? <><span className="sep">·</span><LiveBar status={status} saving={saving} base={tail} live={live} workspace={detail.workspace} onJump={jumpToBottom} /></>
                 : status === "failed" ? <><span className="sep">·</span><span className="head-status failed" role="status"><b>{statusWord(status)}</b></span></>
                 : jobsPending > 0 ? <><span className="sep">·</span><button type="button" className="head-status jobs-pending" onClick={() => panel.open("jobs")}>{plural("session.jobs.waiting", jobsPending)}</button></> : null}
+              {ahead && <><span className="sep">·</span><AheadStatus c={ahead} /></>}
             </span>
           )}
         </div>
@@ -3076,17 +3083,26 @@ function ToolAttachment({ item }: { item: ToolItem }) {
   );
 }
 
+/** Where a compaction stands, in words: writing, merging, which part of how many, or summarising. */
+function compactionStage(c: Compacting): string {
+  return c.stage === "writing"
+    ? t("session.compacting.writing")
+    : c.stage === "merging"
+      ? t("session.compacting.merging")
+      : c.parts_total > 1
+        ? t("session.compacting.part", { n: Math.min(c.parts_done + 1, c.parts_total), total: c.parts_total })
+        : t("session.compacting.summarising");
+}
+
+/** The summary written ahead of the trigger, as a quiet note beside the session's own state. */
+function AheadStatus({ c }: { c: Compacting }) {
+  return <span className="head-status compaction-ahead" role="status" title={t("session.compacting.ahead.hint")}>{t("session.compacting.ahead", { what: compactionStage(c) })}</span>;
+}
+
 /** The compaction in flight: which stage, how many parts are summarised, how long it has run. */
 function CompactionBar({ c }: { c: Compacting }) {
   useClock(1000);
-  const what =
-    c.stage === "writing"
-      ? t("session.compacting.writing")
-      : c.stage === "merging"
-        ? t("session.compacting.merging")
-        : c.parts_total > 1
-          ? t("session.compacting.part", { n: Math.min(c.parts_done + 1, c.parts_total), total: c.parts_total })
-          : t("session.compacting.summarising");
+  const what = compactionStage(c);
   return (
     <div className="livebar head-status compacting" role="status" aria-live="polite">
       <Dot status="compacting" />

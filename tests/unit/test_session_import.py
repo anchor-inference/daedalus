@@ -23,6 +23,7 @@ from daedalus.stores.projects import FolderSpec
 from daedalus.terminals.bridge import HostDaemonOutdated
 from daedalus.terminals.model import ExecResult
 from tests.support.models import model_config
+from tests.support.summariser import streamed
 from tests.support.waiting import until_await
 from tests.unit.test_foreign_sessions import call, claude_session, long_session, result, text, turn
 from tests.unit.test_project_unification import HEADERS, _client
@@ -124,6 +125,7 @@ async def manager(settings: Settings, db: Database) -> Any:
     manager = SessionManager(settings, import_config(), db=db)
     await manager.start()
     provider = ScriptedProvider([])
+    provider.stream_with_tools = streamed(provider.complete_text)  # type: ignore[method-assign]  # nothing runs here; the stream is the summariser's
     manager.providers.rungs_for = lambda config, preset_id=None: [(provider, "scripted-model")]  # type: ignore[method-assign]
     if manager.projects.local_env != "container":
         await manager.close()

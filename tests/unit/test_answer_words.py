@@ -25,6 +25,7 @@ from daedalus.host.wake_queue import Batch, Pending, Wake
 from daedalus.stores.database import Database
 from tests.support.authorized_launch import operator_assignment
 from tests.support.models import model_config
+from tests.support.summariser import streamed
 from tests.support.waiting import until_await
 from tests.unit.test_orchestrator import events_messages, last_user_text, rig
 from tests.unit.test_staff_runtime import board_task, close_team, fake_team
@@ -210,7 +211,7 @@ async def test_an_answer_in_a_wake_up_survives_the_hosts_compaction_verbatim(set
         async def fake_complete(request: Any) -> LLMResponse:
             return LLMResponse(message=Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=SECTIONED)]), stop_reason=StopReason.end_turn)
 
-        provider.complete_text = fake_complete  # type: ignore[method-assign]
+        provider.stream_with_tools = streamed(fake_complete)  # type: ignore[method-assign]
         await manager.compact(state.session.id, keep_recent=2)
         messages = await manager.sessions.list_messages(state.session.id, "daedalus", limit=100)
         summary = messages[0]

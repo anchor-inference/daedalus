@@ -1048,7 +1048,17 @@ class CompactionConfig(BaseModel):
     min_messages: int = Field(default=12, ge=2)
     """Fewer messages than this are never compacted automatically."""
     call_timeout_seconds: float = Field(default=90.0, ge=10)
-    """One summariser call may take this long; one that runs out is retried once with twice the time, then the automatic compaction stands down until the history has grown."""
+    """How long a summariser call may stay silent, before its first byte or between two, before it counts
+    as stalled and is asked once more. The host streams its summaries, so a call that is still writing is
+    never cut by this: a 120 s limit on the whole call once killed a final merge two minutes into its
+    answer and started it again from nothing. The core's own passes inside a run do not stream and take
+    it as the bound on the whole call."""
+    parallel_calls: int = Field(default=12, ge=1, le=64)
+    """Part summaries in flight at once (never more than there are parts). Six made a 980k-token history
+    five waves of calls; a rate limit halves the width for the rest of that compaction."""
+    background_share: float = Field(default=0.7, ge=0.0, lt=1.0)
+    """Share of the trigger at which the summary of the history so far starts being written in the
+    background, between turns, so that reaching the trigger only adopts it; 0 = never in advance."""
     core_trigger_ratio: float = Field(default=0.85, gt=0.0, lt=1.0)
     """Where the core's own mid-run compaction starts; above the host's ratio so runs boundaries compact first."""
     preset: str = ""

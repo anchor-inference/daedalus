@@ -22,6 +22,7 @@ from daedalus.host.session_runner import SessionManager, clip_title
 from daedalus.providers.pricing import ModelPricing
 from daedalus.stores.database import Database
 from tests.support.models import model_config
+from tests.support.summariser import streamed
 from tests.support.waiting import SETTLE, until, until_await
 
 
@@ -415,7 +416,7 @@ async def test_compact_replaces_history_with_summary_and_keeps_a_backup(settings
         return LLMResponse(message=Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=text)]), stop_reason=StopReason.end_turn)
 
     calls: list[int] = []
-    provider.complete_text = fake_complete  # type: ignore[attr-defined]
+    provider.stream_with_tools = streamed(fake_complete)  # type: ignore[attr-defined]
     summary = await manager.compact(state.session.id)
     assert len(calls) == 2, "a summary missing sections is rejected and asked for again"
     assert summary.startswith("## Standing instructions") and "## Recent operator messages (verbatim)" in summary and "hello there" in summary
@@ -561,17 +562,17 @@ async def test_compact_falls_back_to_the_sessions_model_when_the_compaction_mode
     session_rung = (await manager._compaction_rungs(state))[0]
 
     async def out_of_quota(request):  # type: ignore[no-untyped-def]
-        raise LLMRateLimitError("cheap: rate limited: usage limit exceeded")
+        raise LLMRateLimitError("cheap: rate limited: usage limit exceeded", retryable=False)  # spent, not busy
 
     async def answers(request):  # type: ignore[no-untyped-def]
         return LLMResponse(message=Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=SECTIONED)]), stop_reason=StopReason.end_turn)
 
     class Cheap:
         endpoint = SimpleNamespace(id="cheap")
-        complete_text = staticmethod(out_of_quota)
+        stream_with_tools = staticmethod(streamed(out_of_quota))
 
     cheap = Cheap()
-    provider.complete_text = answers  # type: ignore[attr-defined]
+    provider.stream_with_tools = streamed(answers)  # type: ignore[attr-defined]
 
     async def rungs(_state):  # type: ignore[no-untyped-def]
         return [(cheap, "cheap-model"), session_rung]

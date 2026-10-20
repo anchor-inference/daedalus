@@ -79,6 +79,7 @@ from daedalus.host import (
     prompts,
     standing,
     summaries,
+    summary_calls,
     tool_groups,
     user_style,
 )
@@ -228,6 +229,9 @@ class HostEventType(StrEnum):
     HISTORY_CUT = "history_cut"
     SETTING_NOTICE = "setting_notice"
     """An auxiliary model was not set or refused: what was done instead, and the setting that fixes it."""
+    COMPACTION_BACKGROUND = "compaction_background"
+    """A summary being written ahead of the trigger: its progress, then ``None`` when it is ready or gone.
+    Not a state change: the session goes on running or waiting for the operator meanwhile."""
 
 
 @dataclass(slots=True)
@@ -243,6 +247,44 @@ class HostEvent:
     type: HostEventType
     run_id: str
     payload: dict[str, Any]
+
+
+@dataclass(slots=True)
+class PreparedCompaction:
+    """A summary of the history as it stood, written without the session lock, to be used when the trigger is reached.
+
+    A compaction between turns made the operator wait as long as the summariser took: eight minutes on
+    a 980k-token session. The summary of the history that exists at a share of the trigger is written
+    in the background instead, while turns go on, and when the trigger is reached it is adopted with
+    every message that came after it kept as it is — only if the history still begins with exactly the
+    messages it summarised and nothing rewrote it meanwhile (a revert, a clear, a manual or the core's
+    own compaction); otherwise it is dropped. The shape is the core's between-run compaction
+    (``compact_session`` prepares without a lock, ``commit_session_compaction`` applies it while the
+    history still starts with its source), so the host can move onto that seam when it runs that core.
+    """
+
+    keys: list[str]
+    """Transcript keys of the summarised prefix, in order."""
+    gen: int
+    """``persist_gen`` when the prefix was taken; every history rewrite bumps it."""
+    tokens: int
+    """The measured prompt when it started, for the log."""
+    task: asyncio.Task[str]
+
+    def applies_to(self, history: Sequence[Message], gen: int) -> bool:
+        if gen != self.gen or len(history) < len(self.keys):
+            return False
+        return [SqliteSessionStore.transcript_key(m) for m in history[: len(self.keys)]] == self.keys
+
+    def summary(self) -> str | None:
+        """The finished summary, or ``None`` while it is written, after it failed, or once it was cancelled."""
+        if not self.task.done() or self.task.cancelled() or self.task.exception() is not None:
+            return None
+        return self.task.result()
+
+    def drop(self) -> None:
+        if not self.task.done():
+            self.task.cancel()
 
 
 @dataclass(slots=True)
@@ -345,6 +387,11 @@ class SessionState:
     auto_compaction: asyncio.Task[None] | None = None
     """The compaction check a settled run left behind. Deleting the session cancels it: a summary finished
     after the rows are gone writes into a session that no longer exists."""
+    prepared_compaction: PreparedCompaction | None = None
+    """The summary of a history prefix being written, or written, ahead of the trigger; see
+    :class:`PreparedCompaction`. ``None`` when none was started or the last one was used or dropped."""
+    background_compacting: dict[str, Any] | None = None
+    """That summary's progress while it is written, in the shape of ``compacting`` with ``background`` set."""
     compaction_hold: dict[str, Any] | None = None
     """Why the automatic compaction stands down, and until when: the prompt size it last acted on, how
     many attempts in a row came to nothing, and the monotonic time after which it may try regardless.
@@ -898,6 +945,11 @@ class SessionManager:
         pending = [t for s in self._states.values() for t in s.persist_tasks if not t.done()]
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)  # the last history write must land
+        # A summary written ahead owes nothing to disk and may have minutes left to write: the flush
+        # below waits for every background task, so it is dropped first rather than waited for.
+        for state in self._states.values():
+            if state.prepared_compaction is not None:
+                state.prepared_compaction.drop()
         await self.flush_background()
         await self.hooks.aclose()
         for task in (getattr(self, "_backfill_task", None), getattr(self, "_price_task", None)):
@@ -1867,6 +1919,10 @@ class SessionManager:
         if state.auto_compaction is not None and not state.auto_compaction.done():
             state.auto_compaction.cancel()
             await asyncio.gather(state.auto_compaction, return_exceptions=True)
+        if state.prepared_compaction is not None:
+            state.prepared_compaction.drop()  # a summary written ahead for a session that is going away
+            await asyncio.gather(state.prepared_compaction.task, return_exceptions=True)
+            state.prepared_compaction = None
         if state.provider_hold is not None:
             state.provider_hold.close()
             state.provider_hold = None
@@ -2076,8 +2132,17 @@ class SessionManager:
             return not grown and time.monotonic() < hold["until"]
 
         status = await self.context_status(state)
-        if below(status) or held(status):
+        if held(status):
             return
+        if below(status):
+            if not required_only:
+                await self._prepare_compaction(state, status, ratio_of(status))
+            return
+        # A summary written ahead is waited for here, outside the lock, so the session stays the
+        # operator's while it finishes; what it says is checked again behind the lock before use.
+        prepared = await self._prepared_compaction(state)
+        if self.shutting_down:
+            return  # the wait outlived the process's will to rewrite anything
         async with state.lock:
             # Asked again behind the lock: two callers that both saw a full window — a manual compaction
             # racing this one, or the check on the way into a run racing the one after a run — serialise
@@ -2090,7 +2155,7 @@ class SessionManager:
             started = time.monotonic()
             failures = int((state.compaction_hold or {}).get("failures", 0))
             try:
-                await self._compact_locked(state, "", keep_recent=cfg.keep_recent_messages, reason="auto", own_task_ok=True)  # own_task_ok: the required_only call runs inside the run's own task
+                await self._compact_locked(state, "", keep_recent=cfg.keep_recent_messages, reason="auto", own_task_ok=True, prepared=prepared)  # own_task_ok: the required_only call runs inside the run's own task
             except Exception:  # noqa: BLE001 — the next run must start even when the summary could not be made
                 failures += 1
                 wait = min(COMPACTION_RETRY_SECONDS * 2 ** (failures - 1), COMPACTION_RETRY_MAX_SECONDS)
@@ -2121,14 +2186,93 @@ class SessionManager:
                 except Exception:  # noqa: BLE001
                     logger.exception("compaction hook failed")
 
-    async def _compact_locked(self, state: SessionState, instructions: str, *, keep_recent: int = 0, reason: str = "manual", own_task_ok: bool = False) -> str:
-        session_id = state.session.id
+    async def _prepare_compaction(self, state: SessionState, status: dict[str, Any], ratio: float) -> None:
+        """Start writing the summary of the history as it stands, in the background, once the prompt passes
+        ``compaction.background_share`` of the trigger; see :class:`PreparedCompaction`.
+
+        Nothing here takes the session lock, and the summary is written on a task of its own: turns go on
+        while it is made. One that no longer applies is dropped and, still in the band, started afresh;
+        one that failed stays, so a failing summariser is not asked again after every turn — the
+        trigger then compacts the ordinary way, with its own back-off."""
+        cfg = self.config.compaction
+        prepared = state.prepared_compaction
+        if prepared is not None:
+            if prepared.applies_to(await self._working_history(state), state.persist_gen):
+                return
+            self._drop_prepared(state, "the history changed under it")
+        window = int(status["window"] or 0)
+        if cfg.background_share <= 0 or not window or status["messages"] < cfg.min_messages or state.compacting is not None:
+            return
+        if status["tokens"] < cfg.background_share * ratio * window:
+            return
+        full = await self._working_history(state)
+        prefix = full[: compaction_cut(full, cfg.keep_recent_messages)]
+        if len(prefix) < 2:
+            return
+        instructions = self._compaction_instructions(state, "")
+        task = self._spawn_background(self._write_prepared(state, prefix, instructions), f"prepare-compaction:{state.session.id}")
+        state.prepared_compaction = PreparedCompaction(keys=[self.sessions.transcript_key(m) for m in prefix], gen=state.persist_gen, tokens=int(status["tokens"]), task=task)
+        logger.info("session %s: writing the summary of %d messages ahead of the trigger (prompt %d of %d tokens)", state.session.id, len(prefix), status["tokens"], window)
+
+    async def _write_prepared(self, state: SessionState, prefix: list[Message], instructions: str) -> str:
+        started = time.monotonic()
+        state.background_compacting = {"reason": "auto", "stage": "summarising", "messages": len(prefix), "parts_done": 0, "parts_total": 0, "started_at": datetime.now(UTC).isoformat(), "background": True}
+        await self._background_progress(state)
+        try:
+            summary = await self.summarise_with_fallback(state, prefix, instructions, progress=lambda **f: self._background_progress(state, **f))
+            logger.info("session %s: the summary of %d messages is ready ahead of the trigger after %.0fs", state.session.id, len(prefix), time.monotonic() - started)
+            return summary
+        finally:  # a failure is logged by the task's owner; the trigger then compacts the ordinary way
+            state.background_compacting = None
+            await self._background_progress(state)
+
+    async def _background_progress(self, state: SessionState, **fields: Any) -> None:
+        if state.background_compacting is not None:
+            state.background_compacting.update(fields)
+        if self._states.get(state.session.id) is state:  # a deleted session has no stream to tell
+            await self._notify_sinks(state.session.id, HostEvent(HostEventType.COMPACTION_BACKGROUND, state.run_id or "", {"compaction": state.background_compacting}))
+
+    async def _prepared_compaction(self, state: SessionState) -> PreparedCompaction | None:
+        """The summary written ahead, once finished, when it still applies to the history; ``None`` otherwise."""
+        prepared = state.prepared_compaction
+        if prepared is None:
+            return None
+        if prepared.applies_to(await self._working_history(state), state.persist_gen):
+            await asyncio.gather(asyncio.shield(prepared.task), return_exceptions=True)
+            if prepared.summary() is not None and state.prepared_compaction is prepared:
+                return prepared
+        if state.prepared_compaction is prepared:
+            self._drop_prepared(state, "it failed" if prepared.task.done() and not prepared.task.cancelled() else "the history changed under it")
+        return None
+
+    def _drop_prepared(self, state: SessionState, why: str) -> None:
+        prepared = state.prepared_compaction
+        if prepared is None:
+            return
+        state.prepared_compaction = None
+        prepared.drop()
+        logger.info("session %s: dropped the summary written ahead: %s", state.session.id, why)
+
+    async def _working_history(self, state: SessionState) -> list[Message]:
+        if state.engine is not None:
+            return list(state.engine.history)
+        return list(await self.sessions.list_messages(state.session.id, TENANT, limit=10_000))
+
+    def _compaction_instructions(self, state: SessionState, instructions: str) -> str:
         if not instructions and self.is_orchestrator(state):
             # Its brief, team and board come back in full every turn; a summary that spends its words
             # on them loses the promises and open questions that exist nowhere else.
-            instructions = prompts.ORCHESTRATOR_COMPACTION
-        elif not instructions and self.is_dispatcher(state):
-            instructions = prompts.DISPATCHER_COMPACTION
+            return prompts.ORCHESTRATOR_COMPACTION
+        if not instructions and self.is_dispatcher(state):
+            return prompts.DISPATCHER_COMPACTION
+        return instructions
+
+    async def _compact_locked(self, state: SessionState, instructions: str, *, keep_recent: int = 0, reason: str = "manual", own_task_ok: bool = False, prepared: PreparedCompaction | None = None) -> str:
+        """Rewrite the history as one summary; with ``prepared``, the summary written ahead when it still applies.
+
+        Adopting it keeps every message after the prefix it summarised — more than ``keep_recent`` — and
+        makes no summariser call. Any other summary written ahead is dropped: this rewrite outdates it."""
+        instructions = self._compaction_instructions(state, instructions)
         if state.running and state.engine is not None and state.engine.is_terminal and state.task is not None and not own_task_ok:
             # The loop has settled; only bookkeeping remains.
             await asyncio.gather(asyncio.shield(state.task), return_exceptions=True)
@@ -2138,25 +2282,31 @@ class SessionManager:
         pending = [t for t in state.persist_tasks if not t.done()]
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)  # no straggler may write the old history later
-        exceeded = self.budget_exceeded()
-        compact_provider, compact_model = await self._compaction_rung(state)
-        if exceeded and not self.provider_costs_nothing(compact_provider.endpoint.id, compact_model):
-            raise RuntimeError(f"daily budget exceeded ({exceeded}); compaction is a paid call")
-        full = list(state.engine.history) if state.engine is not None else list(
-            await self.sessions.list_messages(session_id, TENANT, limit=10_000)
-        )
-        if not full:
-            raise RuntimeError("nothing to compact")
-        cut = compaction_cut(full, keep_recent)
+        full = await self._working_history(state)
+        written = prepared.summary() if prepared is not None and prepared.applies_to(full, state.persist_gen) else None
+        # Whatever was written ahead is spent now: used here, or outdated by the rewrite this makes.
+        self._drop_prepared(state, "used" if written is not None else "outdated by this compaction")
+        if written is not None:
+            assert prepared is not None
+            cut = len(prepared.keys)
+            logger.warning("session %s: adopting the summary written ahead of %d messages; the %d after it stay as they are", state.session.id, cut, len(full) - cut)
+        else:
+            exceeded = self.budget_exceeded()
+            compact_provider, compact_model = await self._compaction_rung(state)
+            if exceeded and not self.provider_costs_nothing(compact_provider.endpoint.id, compact_model):
+                raise RuntimeError(f"daily budget exceeded ({exceeded}); compaction is a paid call")
+            if not full:
+                raise RuntimeError("nothing to compact")
+            cut = compaction_cut(full, keep_recent)
         history, tail = full[:cut], full[cut:]
         if not history:
             raise RuntimeError("nothing to compact: the whole history is inside the kept tail")
         async with self.idle_work:
-            state.compacting = {"reason": reason, "stage": "summarising", "messages": len(history), "parts_done": 0, "parts_total": 0, "started_at": datetime.now(UTC).isoformat()}
+            state.compacting = {"reason": reason, "stage": "writing" if written is not None else "summarising", "messages": len(history), "parts_done": 0, "parts_total": 0, "started_at": datetime.now(UTC).isoformat()}
         await self._compaction_progress(state)
         await self._publish_status(state, "compacting")
         try:
-            return await self._compact_progressing(state, history, tail, instructions, reason, own_task_ok=own_task_ok)
+            return await self._compact_progressing(state, history, tail, instructions, reason, own_task_ok=own_task_ok, summary=written)
         finally:
             state.compacting = None
             await self._compaction_progress(state)
@@ -2285,10 +2435,11 @@ class SessionManager:
             )
         return summary
 
-    async def _compact_progressing(self, state: SessionState, history: list[Message], tail: list[Message], instructions: str, reason: str, *, own_task_ok: bool) -> str:
+    async def _compact_progressing(self, state: SessionState, history: list[Message], tail: list[Message], instructions: str, reason: str, *, own_task_ok: bool, summary: str | None = None) -> str:
         session_id = state.session.id
-        summary = await self.summarise_with_fallback(state, history, instructions, progress=lambda **f: self._compaction_progress(state, **f))
-        await self._compaction_progress(state, stage="writing")
+        if summary is None:
+            summary = await self.summarise_with_fallback(state, history, instructions, progress=lambda **f: self._compaction_progress(state, **f))
+            await self._compaction_progress(state, stage="writing")
         # What the operator said is written by code, never by the summariser: rules do not decay.
         # Their room is a share of the window as well as a fixed bound: a summary that quoted every
         # long message whole could itself fill the window past the trigger, and compact again each turn.
@@ -2391,14 +2542,15 @@ class SessionManager:
         await report(parts_total=len(parts), parts_done=0, stage="summarising")
         if len(parts) == 1:
             prompt = summaries.compact_prompt(language=language, max_words=words, has_base=bool(base)) + focus
-            return await self._summary_call(provider, model, prompt, summaries.with_base(base, rendered.transcript), observability, max_tokens=summaries.summary_max_tokens(words))
+            return await summary_calls.SummaryGate(1).call(lambda: self._summary_call(provider, model, prompt, summaries.with_base(base, rendered.transcript), observability, max_tokens=summaries.summary_max_tokens(words)))
         part_words = max(400, words // 2)
-        gate = asyncio.Semaphore(SUMMARY_PARALLEL_CALLS)
+        # Wide enough that thirty parts are three waves rather than five, never wider than the parts
+        # themselves; the gate narrows itself when the provider answers with a rate limit.
+        gate = summary_calls.SummaryGate(min(cfg.parallel_calls, len(parts)))
         done = 0
 
         async def note(prompt: str, body: str) -> str:
-            async with gate:
-                return await self._summary_call(provider, model, prompt + focus, body, observability, strict=False, max_tokens=summaries.summary_max_tokens(part_words))
+            return await gate.call(lambda: self._summary_call(provider, model, prompt + focus, body, observability, strict=False, max_tokens=summaries.summary_max_tokens(part_words)))
 
         async def part_note(index: int, part: str) -> str:
             nonlocal done
@@ -2407,7 +2559,7 @@ class SessionManager:
             await report(parts_done=done)
             return text
 
-        notes = [text for text in await asyncio.gather(*(part_note(i, part) for i, part in enumerate(parts))) if text]
+        notes = [text for text in await summary_calls.all_or_nothing(part_note(i, part) for i, part in enumerate(parts)) if text]
         limit = cfg.chunk_tokens * summaries.CHARS_PER_TOKEN
         for _ in range(summaries.MERGE_ROUNDS_MAX):
             # A history of a million tokens leaves thirty parts whose notes alone exceed one call; they
@@ -2417,16 +2569,18 @@ class SessionManager:
             groups = summaries.pack(notes, limit)
             await report(stage="merging")
             prompt = summaries.MERGE_NOTES_PROMPT.format(language=language, max_words=part_words)
-            notes = list(await asyncio.gather(*(note(prompt, summaries.joined_notes(group)) if len(group) > 1 else asyncio.sleep(0, group[0]) for group in groups)))
+            notes = await summary_calls.all_or_nothing(note(prompt, summaries.joined_notes(group)) if len(group) > 1 else asyncio.sleep(0, group[0]) for group in groups)
         await report(stage="merging")
         prompt = summaries.merge_prompt(language=language, max_words=words, has_base=bool(base)) + focus
-        return await self._summary_call(provider, model, prompt, summaries.with_base(base, summaries.joined_notes(notes)), observability, max_tokens=summaries.summary_max_tokens(words))
+        return await gate.call(lambda: self._summary_call(provider, model, prompt, summaries.with_base(base, summaries.joined_notes(notes)), observability, max_tokens=summaries.summary_max_tokens(words)))
 
     async def _summary_call(self, provider: Any, model: str, prompt: str, body: str, observability: LLMObservabilityContext, *, strict: bool = True, max_tokens: int = 6000) -> str:
-        summary = ""
+        """One summariser call; ``strict`` is the final summary, checked for its sections and asked again once.
+
+        A part's note or a merge of notes (``strict`` false) is never checked: it has none of the final
+        summary's sections by design, and checking it logged a rejection and an acceptance for every part."""
         candidate = ""
         problem = ""
-        timeout = self.config.compaction.call_timeout_seconds
         for attempt in range(2 if strict else 1):
             reminder = f"\n\nYour previous attempt was rejected: {problem}. Produce every section, each exactly once, in the given order." if problem else ""
             request = LLMRequest(
@@ -2437,47 +2591,47 @@ class SessionManager:
                 extra={"enable_thinking": False},
                 observability=observability,
             )
-            response = await self._summary_request(provider, request, timeout)
-            candidate = "".join(b.text for b in response.message.content_blocks if isinstance(b, TextBlock)).strip()
+            candidate = (await self._summary_request(provider, request)).strip()
+            if not strict:
+                break
             problem = summaries.validate_summary_sections(candidate)
             if not problem:
-                summary = candidate
-                break
+                return candidate
             logger.warning("compaction summary rejected (attempt %d): %s", attempt + 1, problem)
-        if not summary:
-            if not candidate:
-                raise RuntimeError("the model returned an empty summary")
+        if not candidate:
+            raise RuntimeError("the model returned an empty summary")
+        if problem:
             logger.warning("compaction summary accepted without the fixed sections: %s", problem)
-            summary = candidate  # a usable summary beats a session the operator cannot compact
-        return summary
+        return candidate  # a usable summary beats a session the operator cannot compact
 
-    async def _summary_request(self, provider: Any, request: LLMRequest, timeout: float) -> Any:
-        """One summariser call, asked again when the provider failed in a way that passes.
+    async def _summary_request(self, provider: Any, request: LLMRequest) -> str:
+        """One streamed summariser call, asked again when it stalled or failed in a way that passes.
 
         A compaction once died on a single HTTP 500 from the provider and the session went on
         growing to nine tenths of its window. A transient failure — a 5xx, a dropped stream — is
-        asked again after a pause, twice; what still fails goes back to the caller,
-        which tries the next model of the ladder or reports the compaction as failed with the
-        history untouched."""
-        for attempt, pause in enumerate((*SUMMARY_RETRY_PAUSES, None)):
+        asked again after a pause, twice; a call that went silent is asked again once at once (see
+        :mod:`daedalus.host.summary_calls` for why silence, not length, is what ends one). What
+        still fails goes back to the caller, which tries the next model of the ladder or reports
+        the compaction as failed with the history untouched."""
+        silence = self.config.compaction.call_timeout_seconds
+        ceiling = summary_calls.ceiling_for(request.max_tokens or 6000, silence)
+        stalled = False
+        pauses = list(SUMMARY_RETRY_PAUSES)
+        while True:
             try:
-                try:
-                    return await asyncio.wait_for(provider.complete_text(request), timeout=timeout)
-                except TimeoutError:
-                    # A provider stall must not hold the session: one more try, then the compaction gives up.
-                    # The retry gets twice the time. A model that reasons whether or not it is asked to (Grok
-                    # spends four to six thousand reasoning tokens on a part) takes 70 to 90 s over a 30k-token
-                    # part, and the same request under the same limit failed the same way every time.
-                    logger.warning("compaction summariser call exceeded %.0fs; retrying once with %.0fs", timeout, 2 * timeout)
-                    return await asyncio.wait_for(provider.complete_text(request), timeout=2 * timeout)
-            except LLMError as exc:
-                # A rate limit is a quota, not a hiccup: the next model of the ladder answers sooner than a
-                # pause on this one, and the auto-compaction's own back-off covers the case of none.
-                if pause is None or not exc.retryable or isinstance(exc, LLMRateLimitError):
+                return await summary_calls.stream_text(provider, request, silence=silence, ceiling=ceiling)
+            except summary_calls.SummaryStalled as exc:
+                if stalled or not exc.retryable:
                     raise
-                logger.warning("compaction summariser call failed (%s, attempt %d); asking again in %.0fs", exc, attempt + 1, pause)
+                stalled = True
+                logger.warning("compaction summariser call %s; asking once more", exc)
+            except LLMError as exc:
+                # A rate limit is the gate's to pace (see SummaryGate); it is not a hiccup to retry here.
+                if not pauses or not exc.retryable or isinstance(exc, LLMRateLimitError):
+                    raise
+                pause = pauses.pop(0)
+                logger.warning("compaction summariser call failed (%s); asking again in %.0fs", exc, pause)
                 await asyncio.sleep(pause)
-        raise AssertionError("unreachable")
 
     # -- checkpoints, revert, fork ------------------------------------------------------
 
@@ -6766,9 +6920,6 @@ class SessionManager:
 
 
 VERBATIM_TAIL_MESSAGES = 3
-SUMMARY_PARALLEL_CALLS = 6
-"""Part summaries in flight at once. A long history is thirty parts, and thirty calls at once is what
-a provider answers with a rate limit."""
 SUMMARY_RETRY_PAUSES = (5.0, 20.0)
 """The pauses before a failed summariser call is asked again, one per retry."""
 COMPACTION_RETRY_GROWTH = 0.1
