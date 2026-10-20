@@ -953,7 +953,7 @@ The calls:
 | `cookies.names` | `{url}` → `{cookies: [{name, domain, path, expires, secure, http_only, same_site?, session}]}`: `chrome.cookies.getAll({url})` without values |
 | `group.close` | `{group}` → `{}`: closes the agent's tabs of the group, its tab group and window |
 | `notify` | `{text}` → `{}`: the toast and badge flash of `relay.notify` |
-| `panel.grant` | `{base, token, expires}` → `{}`: the side panel's credential, from the host through `relay.call`. The extension keeps it in `chrome.storage.session` only if `base` is this installation (the paired server's origin, or a loopback address natively) and gives it to the panel's frame alone |
+| `panel.grant` | `{base, token, expires}` → `{}`: the side panel's credential, from the host through `relay.call`. The extension keeps it in `chrome.storage.session` and gives it to the panel's frame alone. A paired Chrome frames the server it was paired with, whatever `base` says; natively `base` must be a loopback address or the grant is refused |
 | `panel.event` | `{session, kind: "needs_you" \| "done", title, waiting, tab?}` → `{}`: a conversation in this Chrome waits for the operator or finished its turn; a notification (unless the operator is looking at that window's panel) whose click opens the panel on it, and the badge counts `waiting` |
 
 `Tab` is `{id, group?, opener?, url?, title?}`: `id` is Chrome's tab id, `opener` a tab id of the

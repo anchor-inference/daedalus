@@ -28,16 +28,11 @@ describe("the panel's credential", () => {
     expect(h.fake.runtimeMessages).toContainEqual({ kind: "panel-grant" });
   });
 
-  it.each([
-    ["another server", { base: "https://evil.example", token: "t", expires: "" }],
-    ["plain http to a server", { base: "http://daedalus.example.org", token: "t", expires: "" }],
-    ["no address at all", { base: "nonsense", token: "t", expires: "" }],
-  ])("is refused for %s", async (_, args) => {
+  it("frames the server this Chrome was paired with, whatever address the host gives", async () => {
     const h = await harness({ settings: SERVER });
     await h.welcome();
-    const result = await h.call("panel.grant", args);
-    expect(result).toMatchObject({ ok: false, error: { code: "refused" } });
-    expect(await h.relay.grant()).toBeNull();
+    expect(await h.call("panel.grant", { base: "https://evil.example", token: "t", expires: "" })).toMatchObject({ ok: true });
+    expect((await h.relay.grant())?.base).toBe(SERVER.server);
   });
 
   it("natively names this computer only", async () => {

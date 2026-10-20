@@ -832,21 +832,27 @@ export class Relay {
   // ---- the side panel ----
 
   /**
-   * Keeps the side panel's credential, after checking it names the installation this Chrome is
-   * connected to: on a server the paired origin, natively this computer. A grant for anywhere else
-   * would have the panel frame, and hand the token to, a page nobody chose.
+   * Keeps the side panel's credential and the address the panel frames. On a server that address is
+   * the one this Chrome was paired with and already reaches the installation at, whatever the host
+   * calls itself (its public address may be a name this laptop does not use); natively it must be this
+   * computer. A grant for anywhere else would have the panel frame, and hand the token to, a page
+   * nobody chose.
    */
   private async takeGrant(grant: PanelGrant): Promise<void> {
-    let base: URL;
-    try {
-      base = new URL(grant.base);
-    } catch {
-      throw new CallError(RESULT_ERRORS.refused, "the panel's address is not a URL");
+    let origin: string;
+    if (this.settings.mode === "server" && this.settings.server) {
+      origin = this.settings.server;
+    } else {
+      let base: URL;
+      try {
+        base = new URL(grant.base);
+      } catch {
+        throw new CallError(RESULT_ERRORS.refused, "the panel's address is not a URL");
+      }
+      const loopback = base.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(base.hostname);
+      if (this.settings.mode !== "native" || !loopback) throw new CallError(RESULT_ERRORS.refused, "the panel's address is not this computer");
+      origin = base.origin;
     }
-    const origin = base.origin;
-    const loopback = base.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(base.hostname);
-    const allowed = this.settings.mode === "server" ? origin === this.settings.server : this.settings.mode === "native" && loopback;
-    if (!allowed || (base.protocol !== "https:" && !loopback)) throw new CallError(RESULT_ERRORS.refused, "the panel's address is not this installation's");
     await chrome.storage.session.set({ [GRANT_KEY]: { base: origin, token: grant.token, expires: grant.expires } satisfies PanelGrant });
     void chrome.runtime.sendMessage({ kind: "panel-grant" }).catch(() => undefined);
   }

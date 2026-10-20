@@ -130,8 +130,8 @@ def panel_device(service: Browsers, desk: RelayDesk | None) -> str:
 
 def panel_base(settings: Any) -> str:
     """The app's address as the operator's Chrome reaches it: this computer's port natively, the
-    public address's origin on a server. Empty when a server has no public address: a panel cannot
-    frame what Chrome cannot reach."""
+    public address's origin on a server. A paired Chrome frames the address it was paired with
+    instead, which is the one it is known to reach; this is only what the host calls itself."""
     if settings.native:
         return f"http://127.0.0.1:{settings.api_port}"
     public = urlsplit(str(settings.miniapp_public_url or ""))

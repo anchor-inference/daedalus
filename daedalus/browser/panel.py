@@ -148,7 +148,7 @@ class PanelHerald:
     """Hands the connected Chrome its panel token, and tells it a conversation's news.
 
     ``device`` names the Chrome connected now (empty when none is); ``base`` is the address of the
-    app as that Chrome reaches it. Neither the herald nor anything it calls waits for an answer that
+    app as that Chrome reaches it, which a paired Chrome replaces with the address it was paired with. Neither the herald nor anything it calls waits for an answer that
     matters: a Chrome that went away between the check and the call misses one grant, and gets the
     next when it connects again.
     """
@@ -165,7 +165,7 @@ class PanelHerald:
         newest one runs out soon. Whether one was delivered."""
         device = self.device()
         base = self.base().rstrip("/")
-        if not device or not base:
+        if not device:
             return False
         async with self._lock:
             if not force:
