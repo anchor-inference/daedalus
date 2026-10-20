@@ -5,7 +5,8 @@
 #   desktop/shell/build.sh windows   the installer and the unpacked folder, under Wine in a container
 #
 # It stages what the application carries beside the shell — the launcher and browserd built from
-# this tree (CGO off, so from any machine), the Mini App built from miniapp/ — and runs
+# this tree (CGO off, so from any machine), the Mini App built from miniapp/, the Chrome extension
+# built from extension/ — and runs
 # electron-builder. ptyd is left out: it needs Zig, and the application runs without it (host
 # terminals are then unavailable). So is the seed unless SEED= names a folder made by
 # `daedalus-desktop make-seed`: without one the first run downloads, as a launcher built from source
@@ -32,6 +33,7 @@ fi
 (cd "$root/browserd" && CGO_ENABLED=0 GOOS=$goos GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o "$stage/browserd$exe" ./cmd/browserd)
 (cd "$root/miniapp" && npm ci --no-audit --no-fund && npm run build)
 cp -R "$root/miniapp/dist" "$here/stage/miniapp-dist"
+"$root/desktop/stage-extension.sh" "$here/stage/browser-extension"
 cp "$root/docs/brand/avatar-bot.png" "$here/build/icon.png"
 
 cd "$here"
