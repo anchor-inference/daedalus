@@ -53,7 +53,7 @@ from daedalus.browser.monitor import InjectionMonitor
 from daedalus.browser.notes import ACTIVE, NOTE, PROCEDURE, SiteNotes
 from daedalus.browser.replay import RecordedSkills
 from daedalus.browser.replay import replay as run_replay
-from daedalus.browser.user import site_granted
+from daedalus.browser.user import CONSENT, site_granted
 from daedalus.browser.user import site_of as registrable_site
 from daedalus.host.policy import ALLOW, ASK, DENY, Decision, approval_key, browser_sensitive, host_allowed
 from daedalus.security import operator_secrets
@@ -481,6 +481,22 @@ class Files(Protocol):
         ...
 
 
+class AskOperator(Protocol):
+    async def __call__(self, key: str, text: str, card: dict[str, Any]) -> bool:
+        """Put the request on the operator's card under ``key``, for the operator alone to answer; the
+        host switches the conversation on their yes. ``False`` when nothing could be asked."""
+        ...
+
+
+SWITCH_ASK = "browser.user.switch"
+"""What the host carries out on the operator's answer to ``BrowserAskOperatorChrome``: their yes
+switches the conversation exactly as their switch in the panel does."""
+NOT_OFFERED = (
+    "The operator's Chrome is not offered on this installation (Settings → Environments → Your Chrome). Nothing was "
+    "asked and no browser was opened: tell the operator, or use your own browser (BrowserOpen) if they agree."
+)
+
+
 Look = Callable[[bytes, str, str], Awaitable[str]]
 """``(image, mime, question) -> answer`` from the vision model, or ``None`` where there is none."""
 
@@ -504,6 +520,9 @@ class Caller:
     """The operator's action rules over a sensitive action (:meth:`daedalus.host.rules_gate.RulesGate.browser`):
     the same ask back with its decision tightened — a question, a handoff, a review's block. ``None``
     for a caller the rules do not cover (a staff member's command-line browser asks its gate as before)."""
+    ask_operator: AskOperator | None = None
+    """How the caller's request to work in the operator's Chrome reaches the operator, or ``None`` for
+    a caller whose browser cannot move there (a command-line member has no conversation to switch)."""
 
     @property
     def scope(self) -> str:
@@ -785,7 +804,47 @@ class BrowserAgent:
             return f"{head} Tabs:\n{await self._tabs_text(group['id'])}\nNext: BrowserSnapshot to see the page and its refs, BrowserNavigate to go elsewhere."
         where = "a throwaway profile, wiped when it closes" if fresh else ("the project's profile, whose logins the project's agents share" if caller.owner.project_id else "your own profile")
         head = f"Browser {'opened' if opened['created'] else 'already open'} ({where})."
+        connected, name, _ = self.service.user_connection()
+        if connected and self.service.user_offered():
+            # Said in the result because a model asked for "my browser" opened its own and reported
+            # the page as the operator's: the line lets it see the difference and ask instead.
+            head = (
+                f"Browser {'opened' if opened['created'] else 'already open'} in the agent's own browser (not the operator's Chrome «{name or 'Chrome'}») ({where}). "
+                "If the operator asked for their own browser, call BrowserAskOperatorChrome instead of working here."
+            )
         return f"{head} Tabs:\n{await self._tabs_text(group['id'])}\nNext: BrowserSnapshot to see the page and its refs, BrowserNavigate to go elsewhere."
+
+    async def ask_operator_chrome(self, caller: Caller, *, reason: str) -> tuple[str, bool]:
+        """Ask the operator to move this conversation into their Chrome. The agent never switches: the
+        request waits on the operator's card, and the host switches on their yes and wakes the agent
+        either way. Nothing falls back to the agent's own browser when their Chrome is missing — a
+        page the agent then reads would be taken for the operator's."""
+        owner = caller.owner
+        if caller.ask_operator is None or owner.kind != "session" or not owner.session_id:
+            raise Unsupported("your browser cannot move into the operator's Chrome: only a conversation of the operator's can. Use your own browser (BrowserOpen), or Report what the task needs")
+        if not self.service.user_offered():
+            return NOT_OFFERED, True
+        connected, name, why_not = self.service.user_connection()
+        name = name or "Chrome"
+        if await self.service.env_for(owner) == USER_ENV:
+            return f"This conversation already uses the operator's Chrome «{name}». BrowserOpen opens your tabs there.", False
+        if not connected:
+            return (
+                f"The operator's Chrome is not connected to Daedalus now{f' ({why_not})' if why_not else ''}. Nothing was asked and your own browser "
+                "was not opened. Tell the operator: their Chrome connects through the Daedalus extension (Settings → Environments → Your Chrome); "
+                "or ask them whether to use your own browser instead."
+            ), True
+        said = " ".join((reason or "").split())[:300]
+        if not said:
+            raise InvalidRequest("reason says in a sentence what you need their Chrome for; the operator reads it on the card")
+        key = approval_key("BrowserAskOperatorChrome", {"session": owner.session_id, "reason": said})
+        text = f"The agent asks to work in your Chrome «{name}»: {said}. {CONSENT}"
+        if not await caller.ask_operator(key, text, {"chrome": {"name": name, "reason": said}}):
+            raise EnvUnavailable("this session is not loaded; nothing was asked")
+        return (
+            f"Waiting for the operator: asked to work in their Chrome «{name}». Approval key: {key}. Only their yes switches this "
+            "conversation. End your turn now: a message brings their answer. Do not open your own browser for this meanwhile, and do not ask again."
+        ), True
 
     async def navigate(self, caller: Caller, *, url: str | None = None, go: str | None = None, tab: str | None = None, why: str | None = None) -> str:
         group = await self._group(caller)
@@ -1867,6 +1926,8 @@ class BrowserAgent:
         try:
             if tool == "BrowserOpen":
                 return await self.open(caller, url=_str(a, "url"), fresh=bool(a.get("fresh")), why=_str(a, "why")), False
+            if tool == "BrowserAskOperatorChrome":
+                return await self.ask_operator_chrome(caller, reason=_str(a, "reason") or "")
             if tool == "BrowserNavigate":
                 return await self.navigate(caller, url=_str(a, "url"), go=_str(a, "go"), tab=_str(a, "tab"), why=_str(a, "why")), False
             if tool == "BrowserSnapshot":

@@ -96,7 +96,7 @@ from daedalus.host.handoff import Handoff
 from daedalus.host.hooks import DaedalusHookManager
 from daedalus.host.host_exec import BRIDGE_DOWN, HostExecBackend
 from daedalus.host.inference_admission import HostInferenceAdmission
-from daedalus.host.policy import Decision, Policy, Rule, canonical, similar_covers, similar_grant
+from daedalus.host.policy import ASK, Decision, Policy, Rule, canonical, similar_covers, similar_grant
 from daedalus.host.presence import Presence
 from daedalus.host.request_manifests import RequestManifestStore
 from daedalus.host.rules_gate import RulesGate
@@ -814,6 +814,13 @@ class SessionManager:
         """``(session_id, tool_call_id, via) -> refusal`` asked before a pending question is answered;
         a non-empty refusal (someone else answered first) stops the answer with that text."""
         self.turn_notes_hooks: list[Callable[[SessionState], Awaitable[str | None]]] = []
+        self.turn_line_hooks: list[Callable[[SessionState], Awaitable[str]]] = []
+        """Each ``state -> line`` adds one line of volatile fact to a run's turn context (``""`` for
+        none): what an extension knows changes between runs and must stay out of the cached prompt."""
+        self.answer_hooks: dict[str, Callable[[str, dict[str, Any], bool], Awaitable[None]]] = {}
+        """``on_answer → (session_id, request, allowed)``: what the host itself carries out when the
+        operator answers a request made with :meth:`ask_operator`. Such a request lets no call through:
+        the yes is spent by the host's own action, so nothing the agent sends next can reach it."""
         self.steer_hooks: list[Callable[[str, str], Awaitable[str]]] = []
         """Each ``(session_id, text) -> text`` rewords an operator's message sent into a running turn,
         for the model only; the transcript keeps the words as sent."""
@@ -4865,6 +4872,14 @@ class SessionManager:
             volatile.append("\n" + waiting)
         if asked := await self._side_questions_note(state.session.id):
             volatile.append("\n" + asked)
+        for line_hook in self.turn_line_hooks:
+            try:
+                line = await line_hook(state)
+            except Exception:  # noqa: BLE001 — a turn starts without the line rather than not at all
+                logger.exception("turn line hook failed for session %s", state.session.id)
+                continue
+            if line:
+                volatile.append("\n" + line)
         if self.is_btw(state):
             volatile.append("\n- " + prompts.BTW_TURN_NOTE)
         if self.is_prompt_coach(state) and (style := user_style.context_block((await user_style.load(self.db)).summary)):
@@ -6441,6 +6456,38 @@ class SessionManager:
             return False, head + prompts.STAFF_BROWSER_HINT
         return False, head + "Ask the operator with AskUser, quoting the key and what the action does; once they grant it (/allow <key>, or the Mini App), the same action passes once."
 
+    def ask_operator(self, session_id: str, *, key: str, tool: str, text: str, on_answer: str, card: dict[str, Any] | None = None) -> bool:
+        """Put a request on the session that only the operator answers and the host carries out.
+
+        It is announced like a policy question — the same card, the same Allow and Deny, from the app,
+        Telegram or the staff request list — but always to the operator, a staff member's too, and
+        their answer runs ``answer_hooks[on_answer]`` instead of granting a call. ``False`` when the
+        session is not loaded and nothing was asked."""
+        state = self._states.get(session_id)
+        if state is None:
+            return False
+        pending = dict(state.metadata.get("policy_pending") or {})
+        fresh = key not in pending
+        pending[key] = {"tool": tool, "text": self.redactor.redact(text)[:800], "at": datetime.now(UTC).isoformat(), "on_answer": on_answer}
+        for meta in (state.metadata, state.session.metadata):
+            meta["policy_pending"] = dict(list(pending.items())[-20:])
+        self._spawn_background(self.sessions.update_metadata(session_id, state.session.metadata), f"operator-ask:{session_id}")
+        if fresh:
+            payload = self._permission_payload(state, Decision(ASK, text, on_answer, key=key), pending[key])
+            payload.update({"risk": "elevated", "quick": False, "routed_to": "operator", **(card or {})})
+            self._publish_soon(state, "permission.pending", payload)
+        return True
+
+    def _carried_out(self, state: SessionState, key: str, via: str) -> Callable[[str, dict[str, Any], bool], Awaitable[None]] | None:
+        """The host's own action for an open :meth:`ask_operator` request, or ``None`` for an ordinary
+        policy question. Refused to an orchestrator: what the operator alone may decide, a team's
+        autonomy does not stretch to, whatever list the request was seen on."""
+        refused = (state.metadata.get("policy_pending") or {}).get(key) or {}
+        hook = self.answer_hooks.get(str(refused.get("on_answer") or ""))
+        if hook is not None and via == "orchestrator":
+            raise ValueError("only the operator answers this request")
+        return hook
+
     async def flush_background(self) -> None:
         """Wait for the fire-and-forget writes (timing rows, egress rows, grant updates) to land."""
         if self._background:
@@ -6524,9 +6571,18 @@ class SessionManager:
         if state is None:
             raise KeyError(session_id)
         key = self._approval_key(key)
+        carry_out = self._carried_out(state, key, via)
         # Answered, so off the open list: the same call refused again after the grant is spent is a
         # new request, and is announced as one.
         approves = self._drop_pending(state, key)
+        if carry_out is not None:
+            # The host does what was asked, and no grant is written: a grant would let the agent's
+            # next call through, and the request was never the agent's to carry out.
+            await self.sessions.update_metadata(session_id, state.session.metadata)
+            await self._publish(state, "permission.resolved", {"request_id": key, "request_ref": f"policy:{session_id}:{key}", "decision": "allow", "via": via})
+            await carry_out(session_id, approves or {}, True)
+            open_grants = [k for k, until in (state.metadata.get("policy_grants") or {}).items() if float(until) > time.time()]
+            return {"key": key, "approves": approves, "grants": open_grants, "expires_in_minutes": 0}
         until = time.time() + GRANT_TTL_SECONDS
         for meta in (state.metadata, state.session.metadata):
             grants = {k: v for k, v in (meta.get("policy_grants") or {}).items() if float(v) > time.time()}
@@ -6581,9 +6637,13 @@ class SessionManager:
         if state is None:
             raise KeyError(session_id)
         key = self._approval_key(key)
+        carry_out = self._carried_out(state, key, via)
         refused = self._drop_pending(state, key)
         await self.sessions.update_metadata(session_id, state.session.metadata)
         await self._publish(state, "permission.resolved", {"request_id": key, "request_ref": f"policy:{session_id}:{key}", "decision": "deny", "via": via})
+        if carry_out is not None:
+            # Unlike a refused call, whose agent was told no already, this agent was told to wait.
+            await carry_out(session_id, refused or {}, False)
         return {"key": key, "refuses": refused}
 
     async def egress(self, session_id: str, *, limit: int = 200) -> list[dict[str, Any]]:

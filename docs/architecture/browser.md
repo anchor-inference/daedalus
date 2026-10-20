@@ -1599,6 +1599,18 @@ conversation keeps its group in the other browser open, and the agent's calls re
 browser it uses now. With Chrome not connected, `BrowserOpen` says so; it never falls back to the
 agent's browser.
 
+**The agent may ask.** The turn context carries one line on the operator's Chrome while it is
+offered — connected or not, and whether this conversation is in it — worded the same until that
+changes, so it costs no cache. When the operator asks for their own browser and the conversation is
+not in it, the agent calls `BrowserAskOperatorChrome(reason)`: the request goes on the operator's
+permission card (always the operator's, a staff member's too, and refused to an orchestrator) with
+the reason and the consent summary, and the agent ends its turn. The operator's yes switches the
+conversation through the panel's own path, consent recorded as there, and wakes the agent; a no
+wakes it with that. The yes writes no grant, so no later call of the agent's can spend it. With
+Chrome not connected, or not offered, the tool says so and asks nothing. `BrowserOpen` in the
+agent's browser says "the agent's own browser (not the operator's Chrome)" while their Chrome is
+connected, so a model that opened the wrong one can see it.
+
 **What changes for the agent there**:
 
 - A site new to the conversation is asked about before it is opened (`BrowserOpen(url)`,
