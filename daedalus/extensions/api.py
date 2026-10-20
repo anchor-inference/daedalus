@@ -48,7 +48,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from daedalus.browser.panel import EXTENSION_ID
+from daedalus.browser.panel import EXTENSION_ID, mark_panel_session
 from daedalus.config import (
     NO_MODEL_MESSAGE,
     NOTIFICATION_CATEGORIES,
@@ -2811,6 +2811,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     @api.post("/api/sessions/{session_id}/messages")
     async def send_message(session_id: str, body: SendMessageBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         text, reply = body.text, None
+        if _.get("via") == "panel":
+            await mark_panel_session(manager, session_id)
         if body.reply_to is not None:
             # The message names what it answers, in words the model reads and a reference the app
             # draws: a complaint about a member's missing instruction was once taken for one about
@@ -2859,6 +2861,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         state = await manager.get_state(session_id)
         if state is None:
             raise HTTPException(404, "no such session")
+        if _.get("via") == "panel":
+            await mark_panel_session(manager, session_id)
         staging = manager.settings.state_dir / "upload-staging"
         staging.mkdir(parents=True, exist_ok=True)
         attachments: list[Attachment] = []

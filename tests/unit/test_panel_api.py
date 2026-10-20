@@ -24,7 +24,15 @@ from starlette.applications import Starlette
 from starlette.routing import Mount
 
 from daedalus.browser.model import USER
-from daedalus.browser.panel import EXTENSION_ID, IDLE, NATIVE_DEVICE, PanelGrants, PanelHerald
+from daedalus.browser.panel import (
+    EXTENSION_ID,
+    IDLE,
+    NATIVE_DEVICE,
+    PANEL_LINE,
+    PANEL_SESSION_KEY,
+    PanelGrants,
+    PanelHerald,
+)
 from daedalus.browser.user import CONSENT
 from daedalus.config import BrowserConfig, BrowserUserConfig, RuntimeConfig, Settings
 from daedalus.extensions import api_panel
@@ -339,3 +347,38 @@ async def test_a_turn_that_ends_in_chrome_tells_the_panel_whether_it_waits(rig: 
     state.metadata["policy_pending"] = {"k": {"tool": "BrowserNavigate"}}
     await browser_extension.run_finished(rig.manager, rig.service, herald, mine, "completed")
     assert chrome.extension_calls[-1]["args"] | {"session": ""} == {"session": "", "kind": "needs_you", "title": "chat", "waiting": 1}
+
+
+async def test_a_conversation_held_from_the_panel_is_told_to_work_in_the_browser_and_others_are_not(rig: Rig, chrome: FakeBrowserd) -> None:
+    from protocore.contracts.types import Message, MessageRole, TextBlock  # noqa: PLC0415
+
+    async def context(sid: str) -> str:
+        state = await rig.manager.get_state(sid)
+        assert state is not None
+        said = Message(role=MessageRole.user, content_blocks=[TextBlock(text="find the cheapest flight here")])
+        return (await rig.manager._with_turn_context(state, said)).content_blocks[0].text  # type: ignore[union-attr]
+
+    from_app = await rig.session(chrome=True)
+    elsewhere = await rig.session(chrome=False)
+    token, _ = await rig.grants.mint("dev1")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=build_app(rig.app, "tok")), base_url="http://test") as client:  # type: ignore[arg-type]
+        made = await client.post("/api/panel/sessions", headers=panel(token), json={"title": "find the cheapest flight here", "consent": True})
+        born = made.json()["id"]
+        # A conversation in Chrome that the panel only sends into is held from it too. No model is set up
+        # here, so the turn itself is refused; the mark is made when the message arrives, before that.
+        sent = await client.post(f"/api/panel/sessions/{from_app}/messages", headers=panel(token), json={"text": "hi", "follow_up": False})
+        assert sent.status_code in (200, 409), sent.text
+        quiet = await rig.session(chrome=True)
+        # The app's own messages mark nothing.
+        assert (await client.post(f"/api/sessions/{quiet}/messages", headers={"x-daedalus-token": "tok"}, json={"text": "hi"})).status_code in (200, 409)
+    for sid in (born, from_app):
+        text = await context(sid)
+        assert text.count(PANEL_LINE) == 1 and text == await context(sid), sid
+        state = await rig.manager.get_state(sid)
+        assert "browser" in state.metadata["loaded_tool_groups"] and state.session.metadata[PANEL_SESSION_KEY] is True  # type: ignore[union-attr]
+        assert "browser" in rig.manager.loaded_groups_for(state)  # type: ignore[arg-type]
+    for sid in (quiet, elsewhere):
+        assert PANEL_LINE not in await context(sid)
+    # Back in the agent's own browser, the line goes: "their Chrome" is somewhere it cannot work then.
+    await rig.service.choices.switch(born, "agent", consent=True)
+    assert PANEL_LINE not in await context(born)

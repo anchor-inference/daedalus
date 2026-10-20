@@ -31,6 +31,7 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field
 
 from daedalus.browser.model import USER, Owner, group_id
+from daedalus.browser.panel import mark_panel_session
 from daedalus.browser.user import CONSENT, ConsentNeeded
 
 if TYPE_CHECKING:
@@ -215,6 +216,7 @@ def register(api: FastAPI, app: Application, *, new_body: type[BaseModel]) -> No
         created = await new_session(body=new_body(title=title, autotitle=True), _=who)
         session_id = str(created["id"])
         await found.switch_conversation(session_id, USER, consent=True)
+        await mark_panel_session(manager, session_id)
         await app.db.kv_set(CONSENTED_KEY, True)
         return {**created, "group": group_id(Owner("session", session_id, session_id=session_id), env=USER)}
 

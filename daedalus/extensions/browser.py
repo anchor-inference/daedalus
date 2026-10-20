@@ -28,7 +28,7 @@ from daedalus.browser.model import USER, BrowserError, Owner
 from daedalus.browser.monitor import TIMEOUT_SECONDS, InjectionMonitor
 from daedalus.browser.notes import SiteNotes
 from daedalus.browser.owners import DatabaseOwners
-from daedalus.browser.panel import NATIVE_DEVICE, PanelGrants, PanelHerald
+from daedalus.browser.panel import NATIVE_DEVICE, PANEL_LINE, PANEL_SESSION_KEY, PanelGrants, PanelHerald
 from daedalus.browser.replay import RecordedSkills
 from daedalus.browser.service import Browsers
 from daedalus.browser.user import Pairing, RelayDesk
@@ -157,7 +157,10 @@ async def chrome_line(manager: Any, service: Browsers, state: Any) -> str:
     connected, name, _ = service.user_connection()
     name = name or "Chrome"
     if await service.choices.env(state.session.id) == USER:
-        return f"- Browser: the operator gave this conversation their own Chrome «{name}»; the browser tools work there" + ("." if connected else ", which is not connected now.")
+        line = f"- Browser: the operator gave this conversation their own Chrome «{name}»; the browser tools work there" + ("." if connected else ", which is not connected now.")
+        # Only while the conversation is in their Chrome: switched back to the agent's browser, "work in
+        # their Chrome" would send the agent somewhere it cannot go.
+        return line + ("\n" + PANEL_LINE if state.metadata.get(PANEL_SESSION_KEY) else "")
     if connected:
         return (
             f"- Browser: the operator's Chrome «{name}» is connected, but this conversation uses your own browser, not theirs. "

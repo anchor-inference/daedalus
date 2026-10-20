@@ -203,4 +203,36 @@ class PanelHerald:
             delay, force = every, False
 
 
-__all__ = ["EXTENSION_ID", "IDLE", "NATIVE_DEVICE", "PanelGrants", "PanelHerald"]
+PANEL_SESSION_KEY = "browser.panel"
+"""Session metadata: the operator talks to this conversation from the Chrome side panel. Set when the
+panel starts it or sends into it, and kept: the conversation is about the page beside it."""
+
+PANEL_LINE = (
+    "- Side panel: the operator is talking to you from the Chrome side panel beside the page they are on. For "
+    "anything about pages, sites, accounts or actions on the web, work in their Chrome with the browser tools, "
+    "starting from the current tab, rather than WebSearch or WebFetch; a plain knowledge question may use search."
+)
+"""The turn context's line for such a conversation. Without it the agent answered "find the cheapest
+flight on this site" with a web search, as it would in the app; from the panel the operator means the
+page in front of them. Fixed words, so it costs one line and never a cache miss."""
+
+
+async def mark_panel_session(manager: Any, session_id: str) -> None:
+    """Mark a conversation as one the operator holds from the side panel, and have its runs start with
+    the browser's tools loaded: the group is on demand elsewhere, and an agent told to work in the
+    browser should not have to search for the tools first. Written once; later calls change nothing."""
+    from daedalus.host import tool_groups
+
+    state = await manager.get_state(session_id)
+    if state is None:
+        return
+    carried = [str(g) for g in (state.metadata.get(tool_groups.CARRIED_KEY) or ()) if isinstance(g, str)]
+    if state.metadata.get(PANEL_SESSION_KEY) and "browser" in carried:
+        return
+    for meta in (state.metadata, state.session.metadata):
+        meta[PANEL_SESSION_KEY] = True
+        meta[tool_groups.CARRIED_KEY] = list(dict.fromkeys([*carried, "browser"]))
+    await manager.sessions.update_metadata(session_id, state.session.metadata)
+
+
+__all__ = ["EXTENSION_ID", "IDLE", "NATIVE_DEVICE", "PANEL_LINE", "PANEL_SESSION_KEY", "PanelGrants", "PanelHerald", "mark_panel_session"]
