@@ -208,6 +208,10 @@ def _safe_slug(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", name) or "server"
 
 
+class McpAuthorizationRequired(RuntimeError):
+    """A server refused a call with 401; the message carries its challenge and what was done about it."""
+
+
 class McpConnection:
     """One server; the transport and session live in a background task."""
 
@@ -228,6 +232,11 @@ class McpConnection:
         self._start_lock = asyncio.Lock()
         self._refresh_lock = asyncio.Lock()
         self._refresh_generation = 0
+        self._token = ""
+        """The access token the transport presents, so a 401 renews that one and not a newer one."""
+        self._refusals = 0
+        self._challenge = ""
+        """How many 401s the server answered on this connection, and the last one's ``WWW-Authenticate``."""
         self._ready = asyncio.Event()
         self._closing = asyncio.Event()
         self.error: str | None = None
@@ -274,7 +283,10 @@ class McpConnection:
                         self._ready.set()
                         return
                     headers["Authorization"] = f"Bearer {token}"
-                async with httpx.AsyncClient(headers=headers, timeout=60.0) as client:
+                    self._token = token
+                # The SDK turns a 401 into a status-less "Server returned an error response", so the
+                # status and the server's challenge are read here, off every response it receives.
+                async with httpx.AsyncClient(headers=headers, timeout=60.0, event_hooks={"response": [self._watch_response]}) as client:
                     async with streamable_http_client(self.config.url, http_client=client) as streams:
                         await self._serve(streams[0], streams[1])
         except BaseException as exc:  # noqa: BLE001 — anyio wraps transport failures in groups
@@ -314,6 +326,11 @@ class McpConnection:
         )
         return McpToolProxy(self, remote.name, definition)
 
+    async def _watch_response(self, response: httpx.Response) -> None:
+        if response.status_code == 401:
+            self._refusals += 1
+            self._challenge = ", ".join(response.headers.get_list("www-authenticate"))
+
     async def call(self, tool: str, arguments: dict[str, Any]) -> Any:
         # An expired access token makes every call fail with a 401 that the remote may
         # report opaquely. Refresh and reconnect up front rather than after the fact.
@@ -322,41 +339,52 @@ class McpConnection:
             refresh_generation = self._refresh_generation
             if self.oauth is not None and self.oauth.needs_refresh():
                 await self._refresh_and_reconnect(refresh_generation)
-            for attempt in (1, 2):
-                if self.session is None:
-                    if attempt == 2:
-                        raise RuntimeError(f"MCP server {self.name} is not connected")
-                    # The transport dropped before dispatch (server restart, idle reset, prior stop),
-                    # so reconnecting cannot repeat an effect whose outcome is unknown.
-                    try:
-                        await asyncio.wait_for(self.start(), timeout=10)
-                    except TimeoutError:
-                        raise RuntimeError(f"MCP server {self.name}: reconnect timed out during connect") from None
-                    if self.session is None:
-                        raise RuntimeError(f"MCP server {self.name} is not connected: {self.error or 'connection failed'}")
+                refresh_generation = self._refresh_generation
+            if self.session is None:
+                # The transport dropped before dispatch (server restart, idle reset, prior stop),
+                # so reconnecting cannot repeat an effect whose outcome is unknown.
                 try:
-                    return await asyncio.wait_for(self.session.call_tool(tool, arguments), timeout=self.config.timeout_seconds)
-                except (TimeoutError, asyncio.CancelledError):
+                    await asyncio.wait_for(self.start(), timeout=10)
+                except TimeoutError:
+                    raise RuntimeError(f"MCP server {self.name}: reconnect timed out during connect") from None
+                if self.session is None:
+                    raise RuntimeError(f"MCP server {self.name} is not connected: {self.error or 'connection failed'}")
+            refusals = self._refusals
+            try:
+                return await asyncio.wait_for(self.session.call_tool(tool, arguments), timeout=self.config.timeout_seconds)
+            except (TimeoutError, asyncio.CancelledError):
+                raise
+            except Exception as exc:
+                if self.oauth is None or (self._refusals == refusals and not _looks_like_auth_failure(exc)):
                     raise
-                except Exception as exc:  # noqa: BLE001
-                    if attempt == 1 and self.oauth is not None and _looks_like_auth_failure(exc):
-                        await self._refresh_and_reconnect(refresh_generation)
-                        refresh_generation = self._refresh_generation
-                        continue
-                    raise
-            raise RuntimeError(f"MCP server {self.name}: call did not complete")
+                # Refused mid-call. The call used to be refreshed and sent again, but the host cannot
+                # tell what part of a call a server acted on before it refused it, and a tool with an
+                # effect sent twice is the worse failure. The token is renewed for the next call, and
+                # the answer carries the server's challenge, so the caller decides whether to call again.
+                challenge = self._challenge if self._refusals != refusals else ""
+                renewed = "the access token was renewed"
+                try:
+                    await self._refresh_and_reconnect(refresh_generation, rejected=self._token)
+                except NeedsAuthorization:
+                    renewed = "the link has to be made again (McpOAuthBegin)"
+                except Exception as renewal:  # noqa: BLE001 — the refusal is the answer; the renewal's failure is its detail
+                    renewed = f"renewing the token failed: {renewal}"
+                said = f" ({challenge})" if challenge else ""
+                raise McpAuthorizationRequired(
+                    f"MCP server {self.name}: authorization required{said}; {renewed}. The call was not repeated: call it again if it should run."
+                ) from exc
         finally:
             self.in_flight -= 1
 
-    async def _refresh_and_reconnect(self, observed_generation: int) -> None:
-        """The access token expired mid-session: refresh it and restart the transport."""
+    async def _refresh_and_reconnect(self, observed_generation: int, *, rejected: str = "") -> None:
+        """The access token expired, or the server refused it: renew it and restart the transport."""
         if self.oauth is None:
             return
         async with self._refresh_lock:
             if self._refresh_generation != observed_generation:
                 return
             try:
-                await self.oauth.refresh()
+                await self.oauth.refresh(rejected=rejected)
             except NeedsAuthorization:
                 self.state = "auth_required"
                 self.last_error_code = "authorization_required"

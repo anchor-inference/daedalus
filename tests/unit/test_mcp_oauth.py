@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -329,3 +330,109 @@ async def test_config_roundtrip(tmp_path: Path) -> None:
     assert server.oauth is not None
     assert server.oauth.scopes == SCOPES
     assert server.oauth.issuer == ISSUER
+
+
+def _token_endpoint(answer: Any) -> httpx.MockTransport:
+    """An authorization server whose token endpoint is ``answer(request)``; discovery and registration as usual."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url.endswith("/.well-known/oauth-authorization-server"):
+            return httpx.Response(200, json={
+                "issuer": ISSUER, "authorization_endpoint": f"{ISSUER}/oauth/authorize", "token_endpoint": f"{ISSUER}/oauth/token",
+                "registration_endpoint": f"{ISSUER}/oauth/register", "code_challenge_methods_supported": ["S256"],
+            })
+        if url.endswith("/oauth/register"):
+            return httpx.Response(201, json={"client_id": "test-client"})
+        if url.endswith("/oauth/token"):
+            return await answer(request)
+        return httpx.Response(404, text="not found")
+
+    return httpx.MockTransport(handler)
+
+
+@pytest.mark.parametrize("refusal", [503, 502, 500, 429, "network"])
+async def test_a_transient_refusal_of_a_refresh_keeps_the_link(tmp_path: Path, refusal: Any) -> None:
+    # An authority's blip answered 503 during a tool call, and the refresh token was deleted with it:
+    # every later call said "not linked yet" until the owner linked the server again by hand.
+    client, _ = _make_client(tmp_path)
+    answers = [refusal, 200]
+
+    async def answer(request: httpx.Request) -> httpx.Response:
+        now = answers.pop(0)
+        if now == "network":
+            raise httpx.ConnectError("the authority is unreachable", request=request)
+        if now != 200:
+            return httpx.Response(now, json={"error": "temporarily_unavailable"})
+        return httpx.Response(200, json={"access_token": "at-2", "token_type": "Bearer", "expires_in": 3600, "refresh_token": "rt-2"})
+
+    http = httpx.AsyncClient(transport=_token_endpoint(answer), base_url=ISSUER)
+    client.http = http
+    try:
+        client.store.set("tokens", {"access_token": None, "refresh_token": "rt-1", "expires_at": 1})
+        with pytest.raises(OAuthError) as failed:
+            await client.access_token()
+        assert not isinstance(failed.value, NeedsAuthorization)
+        assert client.linked() and client.store.get("tokens")["refresh_token"] == "rt-1"
+        assert await client.access_token() == "at-2"
+        assert client.store.get("tokens")["refresh_token"] == "rt-2"
+    finally:
+        await http.aclose()
+
+
+async def test_a_refresh_whose_caller_is_cancelled_still_keeps_the_rotated_token(tmp_path: Path) -> None:
+    # The operator stopped the turn after the authority had rotated the refresh token and before it
+    # was written: the stored token was dead, the next refresh got invalid_grant, and the link was gone.
+    client, _ = _make_client(tmp_path)
+    asked, release = asyncio.Event(), asyncio.Event()
+
+    async def answer(request: httpx.Request) -> httpx.Response:
+        asked.set()
+        await release.wait()
+        return httpx.Response(200, json={"access_token": "at-2", "token_type": "Bearer", "expires_in": 3600, "refresh_token": "rt-2"})
+
+    http = httpx.AsyncClient(transport=_token_endpoint(answer), base_url=ISSUER)
+    client.http = http
+    try:
+        client.store.set("tokens", {"access_token": None, "refresh_token": "rt-1", "expires_at": 1})
+        caller = asyncio.create_task(client.access_token())
+        await asyncio.wait_for(asked.wait(), 5)
+        caller.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await caller
+        release.set()
+        for _ in range(100):
+            if client.store.get("tokens")["refresh_token"] == "rt-2":
+                break
+            await asyncio.sleep(0.01)
+        assert client.store.get("tokens") == {**client.store.get("tokens"), "access_token": "at-2", "refresh_token": "rt-2"}
+        assert await client.access_token() == "at-2"
+    finally:
+        await http.aclose()
+
+
+async def test_a_rejected_token_is_renewed_even_before_its_expiry_and_a_newer_one_on_disk_is_adopted(tmp_path: Path) -> None:
+    client, _ = _make_client(tmp_path)
+    calls = {"token": 0}
+
+    async def answer(request: httpx.Request) -> httpx.Response:
+        calls["token"] += 1
+        return httpx.Response(200, json={"access_token": f"at-{calls['token'] + 1}", "token_type": "Bearer", "expires_in": 3600, "refresh_token": "rt-2"})
+
+    http = httpx.AsyncClient(transport=_token_endpoint(answer), base_url=ISSUER)
+    client.http = http
+    later = int(time.time()) + 3600
+    try:
+        client.store.set("tokens", {"access_token": "at-1", "refresh_token": "rt-1", "expires_at": later})
+        # A server refused at-1 although it had an hour left: refreshing only on expiry kept it, and
+        # the reconnect presented the refused token again.
+        await client.refresh(rejected="at-1")
+        assert calls["token"] == 1 and client.store.get("tokens")["access_token"] == "at-2"
+        # Another writer (a second copy of the client, the owner's new link) put a newer token in
+        # the file meanwhile: it is taken, not refreshed over.
+        other = MCPOAuthClient("board", client.config, f"{ISSUER}/mcp", tmp_path / "board.json", http)
+        other.store.set("tokens", {"access_token": "at-elsewhere", "refresh_token": "rt-elsewhere", "expires_at": later})
+        await client.refresh(rejected="at-2")
+        assert calls["token"] == 1 and await client.access_token() == "at-elsewhere"
+    finally:
+        await http.aclose()

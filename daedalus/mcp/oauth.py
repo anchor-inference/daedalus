@@ -103,6 +103,11 @@ class OAuthTokenStore:
             pass
         self._data = dict(self._data)
 
+    def reload(self) -> dict[str, Any]:
+        """The file as it is now, not as this copy last read or wrote it."""
+        self._data = {}
+        return self.load()
+
     def get(self, key: str) -> Any:
         return self.load().get(key)
 
@@ -163,6 +168,7 @@ class MCPOAuthClient:
         self.http = http
         self._discovery: OAuthDiscovery | None = None
         self._refresh_lock = asyncio.Lock()
+        self._renewal: asyncio.Task[None] | None = None
 
     # -- metadata ------------------------------------------------------------------
 
@@ -430,13 +436,31 @@ class MCPOAuthClient:
             f"{self.server}: not linked yet. Ask the owner to run McpOAuthBegin and paste back the redirect URL."
         )
 
-    async def refresh(self) -> None:
+    async def refresh(self, *, rejected: str = "") -> None:
+        """Renew the access token, once for every caller that asks while a renewal runs.
+
+        ``rejected`` is an access token a server refused: it is renewed even though its expiry is
+        still ahead, unless the store already holds another one.
+
+        The renewal is a task of this client's, not of the caller: a caller cancelled after the
+        authority rotated the refresh token (the operator stopping the turn, a call's deadline) left
+        the new token unwritten, the stored one was dead, and the next renewal was refused for good.
+        The caller's wait is shielded, so its cancellation ends only the wait."""
+        task = self._renewal
+        if task is None or task.done():
+            task = self._renewal = asyncio.get_running_loop().create_task(self._renew(rejected), name=f"mcp-oauth-refresh:{self.server}")
+        await asyncio.shield(task)
+
+    async def _renew(self, rejected: str) -> None:
         async with self._refresh_lock:
+            # Read from the file, not the copy in memory: another client of the same server (the owner
+            # linking again, a second copy of this one) may have written a newer token meanwhile, and a
+            # renewal over it would spend a refresh token that is no longer the current one.
+            self.store.reload()
             tokens = self._tokens()
-            # Another caller may have refreshed while we waited for the lock; if the
-            # stored token is already usable there is nothing left to do. The same margin
-            # as needs_refresh(), or a token inside the margin would be checked and never renewed.
-            if self._usable(tokens):
+            # The same margin as needs_refresh(), or a token inside the margin would be checked and
+            # never renewed. A token a server refused is renewed whatever its expiry says.
+            if self._usable(tokens) and (not rejected or tokens.get("access_token") != rejected):
                 return
             refresh_token = tokens.get("refresh_token")
             if not refresh_token:
@@ -453,10 +477,15 @@ class MCPOAuthClient:
             try:
                 response = await self.http.post(doc.token_endpoint, data=self._client_auth(form))
             except httpx.HTTPError as exc:
-                raise OAuthError(f"{self.server}: refresh request failed: {exc}") from exc
+                raise OAuthError(f"{self.server}: the token endpoint could not be reached ({exc}); the link is kept, try again shortly") from exc
             if response.status_code != 200:
-                self.store.set("tokens", {})  # a rejected refresh token is dead; force a fresh link
-                raise OAuthError(f"{self.server}: token refresh failed ({response.status_code}): {_brief(response.text)}")
+                if _oauth_error(response) == "invalid_grant":
+                    # The one answer that says the refresh token itself is dead (expired, revoked or
+                    # already spent). Anything else — a 5xx, a 429, a refusal naming another reason —
+                    # once deleted it too, and a 30-second blip of the authority cost the owner a new link.
+                    self.store.set("tokens", {})
+                    raise NeedsAuthorization(f"{self.server}: the authority refused the refresh token (invalid_grant); link again with McpOAuthBegin.")
+                raise OAuthError(f"{self.server}: token refresh failed ({response.status_code}): {_brief(response.text)}; the link is kept, try again shortly")
             self._save_tokens(response.json(), preserve_refresh=True)
 
     def pending_state(self) -> str:
@@ -481,6 +510,15 @@ class MCPOAuthClient:
 
     def disconnect(self) -> None:
         self.store.delete()
+
+
+def _oauth_error(response: httpx.Response) -> str:
+    """The ``error`` code of an RFC 6749 error answer, or empty when the body is not one."""
+    try:
+        body = response.json()
+    except ValueError:
+        return ""
+    return str(body.get("error") or "") if isinstance(body, dict) else ""
 
 
 def _brief(text: str, limit: int = 400) -> str:
