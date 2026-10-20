@@ -212,6 +212,12 @@ describe("the approval dock", () => {
     expect(a).toEqual({ key: "0123456789ab", callId: "c1", tool: "Exec", detail: "rm -rf build" });
   });
 
+  it("makes the agent's ask for the operator's Chrome a switch naming that Chrome and the reason", () => {
+    const asked = { tool_calls: [], tool_results: [{ id: "c1", content: "Waiting for the operator: asked to work in their Chrome «Work». Approval key: 0123456789ab.", is_error: true }] };
+    const a = pendingApproval([call("c1", "BrowserAskOperatorChrome", { reason: "read the page signed in as you" }), asked], new Set());
+    expect(a).toEqual({ key: "0123456789ab", callId: "c1", tool: "BrowserAskOperatorChrome", detail: "read the page signed in as you", chrome: { name: "Work", reason: "read the page signed in as you" } });
+  });
+
   it("is silent once the key was spent or waved away, and for an ordinary error", () => {
     const history = [call("c1", "Exec", { command: "x" }), refusal("c1", "0123456789ab")];
     expect(pendingApproval(history, new Set(["0123456789ab"]))).toBeNull();

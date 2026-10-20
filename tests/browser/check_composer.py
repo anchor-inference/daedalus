@@ -5,7 +5,8 @@ the part that only exists once it is drawn against a host: a message goes out an
 Send; while a run is on an empty pill is Stop and a written one is queued for after the turn with no
 choice asked, appearing as a card above the pill whose Steer hands it to the run now and whose ×
 withdraws it, with Stop still beside the circle; a tool call the policy refused is a dock above the
-pill whose Allow once spends the key; the agent's question is a card whose answer the circle sends
+pill whose Allow once spends the key, and the agent's ask for the operator's Chrome is the same dock
+naming that Chrome with the consent summary; the agent's question is a card whose answer the circle sends
 as Reply; the model list opens from inside the pill and a pick reaches the host; and while another
 model stands in the selector says so and offers the way back.
 
@@ -96,6 +97,13 @@ class Host:
         self.messages = self.messages + [
             message(103, "assistant", "", tool_calls=[{"id": "c_rm", "name": "Exec", "arguments": {"command": "rm -rf build"}}]),
             message(104, "tool", "", tool_results=[{"id": "c_rm", "content": f"refused by policy: destructive command.\nApproval key: {key}", "is_error": True}]),
+        ]
+
+    def ask_chrome(self, key: str) -> None:
+        """The agent's ask to work in the operator's Chrome, waiting on their card."""
+        self.messages = self.messages + [
+            message(103, "assistant", "", tool_calls=[{"id": "c_chrome", "name": "BrowserAskOperatorChrome", "arguments": {"reason": "open anchorinference signed in as you"}}]),
+            message(104, "tool", "", tool_results=[{"id": "c_chrome", "content": f"Waiting for the operator: asked to work in their Chrome «Work». Approval key: {key}. End your turn now.", "is_error": True}]),
         ]
 
 
@@ -218,10 +226,10 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
     route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
 
 
-def open_page(context, phone: bool = False) -> Page:  # type: ignore[no-untyped-def]
+def open_page(context, phone: bool = False, lang: str = "en") -> Page:  # type: ignore[no-untyped-def]
     page = context.new_page()
     page.route("**/api/**", stub)
-    page.goto(f"{BASE}/agents/{SESSION}?token=t&scheme=dark&lang=en")
+    page.goto(f"{BASE}/agents/{SESSION}?token=t&scheme=dark&lang={lang}")
     page.wait_for_selector(".composer .roundbtn.primary", timeout=15000)
     page.wait_for_timeout(400)
     return page
@@ -521,6 +529,41 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
         problems.append(f"refusing did not reach the host ({refused})")
     if page.locator(".composer .dock.approval").count():
         problems.append("the dock stayed after the call was refused")
+
+    # The agent's ask for the operator's Chrome: a card that names that Chrome, the reason and the
+    # consent summary, whose yes is the switch (the host's grant of the key) and offers no "similar".
+    HOST.messages = HOST.messages[:2]
+    HOST.ask_chrome("c0ffee123456")
+    page.reload()
+    page.wait_for_selector(".composer .dock.approval[data-kind='chrome']", timeout=15000)
+    page.wait_for_timeout(300)
+    dock = page.locator(".composer .dock.approval")
+    said = dock.inner_text()
+    print("chrome ask:", said.replace("\n", " | "))
+    for words in ("The agent asks to work in your Chrome «Work»", "open anchorinference signed in as you", "signed in as you, in a tab group of its own", "Use my Chrome", "Keep the agent's browser"):
+        if words not in said:
+            problems.append(f"the Chrome ask card does not say {words!r}")
+    if dock.locator("[data-action='allow-similar']").count():
+        problems.append("the Chrome ask card offers Allow similar")
+    before = len(posts("/policy/grant"))
+    dock.get_by_role("button", name="Use my Chrome").click()
+    reached(page, "/policy/grant", before, "Use my Chrome", problems)
+    page.wait_for_timeout(100)
+    if posts("/policy/grant")[-1][2] != {"key": "c0ffee123456"}:
+        problems.append(f"the Chrome ask's yes did not reach the host with its key ({posts('/policy/grant')[-1:]})")
+    if page.locator(".composer .dock.approval").count():
+        problems.append("the Chrome ask card stayed after the yes")
+    # Its own context: the language the address names is remembered, and the steps after this one
+    # read English words.
+    ru_context = page.context.browser.new_context(viewport={"width": 1280, "height": 900})
+    ru = open_page(ru_context, lang="ru")
+    ru.wait_for_selector(".composer .dock.approval[data-kind='chrome']", timeout=15000)
+    said = ru.locator(".composer .dock.approval").inner_text()
+    print("chrome ask (ru):", said.replace("\n", " | "))
+    for words in ("Агент просит поработать в вашем Chrome «Work»", "Использовать мой Chrome", "Оставить браузер агента", "под вашими входами"):
+        if words not in said:
+            problems.append(f"the Russian Chrome ask card does not say {words!r}")
+    ru_context.close()
 
     # The agent's question: a card with the options; the circle reads Reply and sends the answer.
     HOST.messages = HOST.messages[:2]

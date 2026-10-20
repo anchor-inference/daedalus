@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { api } from "./api";
+import { CHROME_ASK_TOOL } from "./composer";
 import { copyText, fmtInt } from "./ui/components";
 import { t } from "./i18n";
 import type { ToolItem } from "./turns";
@@ -113,7 +114,7 @@ export function ToolResultView({ sessionId, item, toast, initial, keep }: { sess
           {t(granted ? "session.allowed.once" : "session.allow.once", { key: approval[1] })}
         </button>
       )}
-      {approval && !granted && (
+      {approval && !granted && item.name !== CHROME_ASK_TOOL && (
         <button type="button" className="btn small" data-action="allow-similar" onClick={allowSimilar} disabled={grantedSimilar} title={t("composer.approve.similar.title")}>
           {grantedSimilar && similar ? t("session.allowed.similar", { label: similar }) : similar ? t("composer.approve.similar", { label: similar }) : t("session.allow.similar")}
         </button>
