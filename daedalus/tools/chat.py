@@ -88,10 +88,10 @@ async def _send_delivered(context: ToolContext, services: Any, deliver: Any, pat
 
 
 @search_hint(
-    "attach picture photo image video audio gif album inline answer embed media "
-    "attach file document docx pdf xlsx spreadsheet archive zip report deliverable result "
-    "прикрепить прикрепи вставить вставь картинку фото фотку видео гифку альбом медиа ответ "
-    "приложить приложи файл документ отчет таблицу архив результат к ответу"
+    "attach picture photo image video audio gif album inline answer media "
+    "file document docx pdf spreadsheet archive deliverable "
+    "прикрепить прикрепи вставить картинку фото видео гифку альбом медиа ответ "
+    "приложить приложи файл документ таблицу архив результат"
 )
 @tool(
     name="AttachMedia",
