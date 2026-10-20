@@ -242,6 +242,80 @@ class LauncherStub:
         return None
 
 
+class ComputerStub:
+    """The Computer control of a native installation: a macOS desktop with two apps beside Daedalus,
+    no grant until the app makes one, and the writes kept in ``posts``.
+
+    A grant becomes the lease the state reports, Stop and Revoke end it, ``paused`` stands for the
+    operator's hand on the mouse until Resume. The host filters protected apps out, so the apps here
+    are the ones the app is ever shown."""
+
+    LINKS = {
+        "screen": "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+        "accessibility": "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+    }
+    APPS = {"apps": [
+        {"id": "com.example.editor", "name": "Editor", "reachable": True, "in_scope": False, "windows": [
+            {"id": "10", "title": "notes.txt", "focused": True, "in_scope": False, "order": 1},
+            {"id": "14", "title": "Quarterly report — draft", "focused": False, "in_scope": False, "order": 3}]},
+        {"id": "com.example.terminal", "name": "Terminal", "reachable": True, "in_scope": False, "windows": [
+            {"id": "12", "title": "shell", "focused": False, "in_scope": False, "order": 2}]},
+    ]}
+
+    def __init__(self, *, os_name: str = "darwin") -> None:
+        self.os_name = os_name
+        self.lease: dict[str, object] | None = None
+        self.expires = datetime.now(UTC)
+        self.paused = False
+        self.permissions = {"screen": "denied", "accessibility": "granted", "input_monitoring": "unknown"}
+        self.posts: list[tuple[str, object]] = []
+
+    def state(self) -> dict[str, object]:
+        remaining = int((self.expires - datetime.now(UTC)).total_seconds() * 1000)
+        if self.lease is not None and remaining <= 0:
+            self.lease = None
+        lease: dict[str, object] = {"active": True, "lease": self.lease, "remaining_ms": remaining} if self.lease else {"active": False}
+        session_type = {"darwin": "quartz", "windows": "win32"}.get(self.os_name, "x11")
+        out: dict[str, object] = {
+            "native": True, "available": True, "os": self.os_name, "session_type": session_type, "permissions": self.permissions,
+            "secure": {"locked": False}, "lease": lease, "human": {"paused": bool(self.lease) and self.paused},
+            "displays": [{"id": "1", "name": "Built-in", "bounds": {"x": 0, "y": 0, "w": 1440, "h": 900}, "primary": True, "pixels_per_unit": 2, "scale": 2}],
+        }
+        if self.os_name == "darwin":
+            out["settings_links"] = self.LINKS
+        return out
+
+    def answer(self, method: str, path: str, body: object) -> tuple[int, object] | None:
+        path = path.split("?", 1)[0]
+        path = path[path.index("/api/"):] if "/api/" in path else path
+        if path == "/api/computer" and method == "GET":
+            return 200, self.state()
+        if path == "/api/computer/apps" and method == "GET":
+            return 200, self.APPS
+        if method != "POST" or not path.startswith("/api/computer/"):
+            return None
+        sent = body if isinstance(body, dict) else {}
+        action = path.rsplit("/", 1)[-1]
+        self.posts.append((action, sent))
+        if action == "grant":
+            minutes = int(sent.get("minutes") or 0)
+            self.lease = {"id": f"l{len(self.posts)}", "session": sent.get("session_id"), "scope": sent.get("scope"), "max_actions": 200, "actions": 0}
+            self.expires = datetime.now(UTC) + timedelta(minutes=minutes)
+            self.paused = False
+            return 200, {"lease": self.lease}
+        if action in ("stop", "revoke"):
+            had = self.lease is not None
+            self.lease = None
+            return 200, {"stopped": True} if action == "stop" else {"revoked": had}
+        if action == "resume":
+            was, self.paused = self.paused, False
+            return 200, {"resumed": was}
+        if action == "permissions":
+            which = str(sent.get("which") or "")
+            return 200, {"which": which, "state": self.permissions.get(which, "unknown"), "permissions": self.permissions, "hint": ""}
+        return None
+
+
 SAMPLE_PAGE: dict[str, object] = {
     "slug": "dosing", "title": {"en": "Dosing calculator", "ru": "Калькулятор дозировки"}, "icon": None,
     "icon_path": "M5 19L19 5M7 3h4v4H7zM13 17h4v4h-4z", "path": "/app/p/dosing", "version": 1, "updated_at": "2026-10-11T08:00:00Z",
@@ -373,6 +447,10 @@ GATES: dict[str, object] = {
     "/api/browsers/profiles": {"profiles": []},
     "/api/browsers/recordings": {"envs": []},
     "/api/browsers/notes": {"notes": []},
+    # The Computer control is the native application's alone: here a server, where nothing of it is
+    # drawn. check_computer.py installs ComputerStub for the native case.
+    "/api/computer": {"native": False, "available": False, "reason": "Computer use is offered only in the Daedalus desktop app, on the computer it runs on."},
+    "/api/computer/apps": {"apps": []},
     # Settings → Rules: the categories and levels the host knows, and two review decisions to list.
     "/api/action-rules": ACTION_RULES,
     # Remote identity is optional and empty until a real host is paired.
@@ -1114,7 +1192,7 @@ def ask_turn(seq: int, call_id: str, questions: list[dict], answers: list[dict] 
     return rows
 
 
-__all__ = ["ASK_KINDS", "ask_turn", "CALENDAR", "CalendarStub", "MEMORY", "MemoryStub", "VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "IMPORTS", "ImportStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "SAMPLE_PAGE", "TOOL_GROUP_CATALOGUE", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tasks", "session_tool_groups", "terminal_load"]
+__all__ = ["ASK_KINDS", "ask_turn", "CALENDAR", "CalendarStub", "ComputerStub", "MEMORY", "MemoryStub", "VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "IMPORTS", "ImportStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "SAMPLE_PAGE", "TOOL_GROUP_CATALOGUE", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tasks", "session_tool_groups", "terminal_load"]
 
 # What the harness manager reports for the container: Claude Code installed and signed in, Codex
 # installed but signed out, the rest absent. Enough for the hiring form to show one command-line agent
