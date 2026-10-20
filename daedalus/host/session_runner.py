@@ -20,7 +20,14 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from protocore.contracts.llm import LLMError, LLMObservabilityContext, LLMRateLimitError, LLMRequest
+from protocore.contracts.llm import (
+    LLMError,
+    LLMObservabilityContext,
+    LLMRateLimitError,
+    LLMRequest,
+    ProviderFailureReason,
+)
+from protocore.contracts.outcome import RUN_CAUSE_FIELD, RUN_OUTCOME_FIELD, RunCause, RunOutcome
 from protocore.contracts.runtime_constants import LoopConstants
 from protocore.contracts.tool_registry import ToolVisibilityPolicy, policy_admits, tool_group_of
 from protocore.contracts.types import (
@@ -305,12 +312,13 @@ class SessionState:
     """The text of that error, masked, as the fronts were shown it: what the inbox entry quotes."""
     last_error_permanent: bool = False
     """The provider's verdict on that error said asking again cannot help (a refused request, key or model)."""
-    soft_stop_cause: str = ""
-    """Which bound wound the current run down, from the core's ``soft_stop_notified`` state change; empty when none did."""
-    soft_stop_detail: str = ""
-    """What that bound said in its own words — the upstream's error text for a provider failure. The operator is shown this,
-    not an inference from the reply: a run the provider refused ends with the model writing a closing message, and without
-    this the message is the only trace of a failure that produced nothing."""
+    run_outcome: RunOutcome | None = None
+    """How the core says the current run ended, from its terminal ``message_stop``; ``None`` until it has."""
+    run_cause: RunCause | None = None
+    """Why the current run did not simply complete, from the same event: the bound that wound it down or the failure
+    that ended it, with the provider's verdict and its own words (masked). The operator is shown this, not an inference
+    from the reply: a run the provider refused ends with the model writing a closing message, and without this the
+    message is the only trace of a failure that produced nothing."""
     last_compaction: dict[str, Any] | None = None
     """The current run's latest ``compaction_completed`` payload: when the run dies of size, what says which tier gave out."""
     last_outcome: dict[str, Any] | None = None
@@ -2627,8 +2635,8 @@ class SessionManager:
             state.last_error_kind = ""
             state.last_error_message = ""
             state.last_error_permanent = False
-            state.soft_stop_cause = ""
-            state.soft_stop_detail = ""
+            state.run_outcome = None
+            state.run_cause = None
             result = {"seq": seq, "through": through, "dropped": dropped, "workspace_restored": restored, "untouched": untouched, "kept": len(kept)}
             await self._notify_sinks(session_id, HostEvent(HostEventType.HISTORY_CUT, state.run_id or "", result))
             if retry:
@@ -4521,8 +4529,8 @@ class SessionManager:
         state.last_error_kind = ""
         state.last_error_message = ""
         state.last_error_permanent = False
-        state.soft_stop_cause = ""
-        state.soft_stop_detail = ""
+        state.run_outcome = None
+        state.run_cause = None
         state.last_compaction = None
         if message is not None:
             state.run_origin = str(message.metadata.get("daedalus.origin") or "operator")
@@ -4853,9 +4861,13 @@ class SessionManager:
         endpoint is back — the same path a run that failed outright already takes.
 
         Nothing is claimed without the provider's own words: a wind-down with no detail behind it is
-        some other kind of stop and is left alone.
+        some other kind of stop and is left alone. What ended the run is the core's word on its
+        terminal event (``outcome`` and ``cause``), not a reading of the wind-down's text.
         """
-        if state.soft_stop_cause == CAUSE_MODEL_NO_PROGRESS:
+        cause = state.run_cause
+        if state.run_outcome is not RunOutcome.failed or cause is None:
+            return False
+        if cause.kind == CAUSE_MODEL_NO_PROGRESS:
             await self._dispatch_event(
                 state,
                 TurnEvent(type=EventType.ERROR, run_id=run_id, payload={
@@ -4864,11 +4876,12 @@ class SessionManager:
                 }),
             )
             return True
-        if state.soft_stop_cause != CAUSE_PROVIDER_ERROR or not state.soft_stop_detail:
+        if cause.kind != CAUSE_PROVIDER_ERROR or not cause.detail:
             return False
         # The host's own spending cap is not the provider: saying the provider refused sent the
-        # operator to check a key or an outage when the fix was a limit in the settings.
-        capped = "inference budget:" in state.soft_stop_detail
+        # operator to check a key or an outage when the fix was a limit in the settings. The cap
+        # raises with a ``budget`` verdict, which the core carries to here.
+        capped = cause.failure is not None and cause.failure.reason is ProviderFailureReason.budget
         note = self.SPENDING_CAP_NOTE if capped else self.PROVIDER_REFUSED_NOTE
         await self._dispatch_event(
             state,
@@ -4876,7 +4889,7 @@ class SessionManager:
                 type=EventType.ERROR,
                 run_id=run_id,
                 payload={"kind": "spending_cap" if capped else "llm_provider_error",
-                         "message": note.format(detail=state.soft_stop_detail)},
+                         "message": note.format(detail=cause.detail)},
             ),
         )
         return True
@@ -4988,7 +5001,7 @@ class SessionManager:
         outcome = run_outcome(
             status,
             error_kind=state.last_error_kind,
-            error_message=state.last_error_message or state.soft_stop_detail,
+            error_message=state.last_error_message or (state.run_cause.detail if state.run_cause is not None else ""),
             compaction=state.last_compaction,
             steps=steps,
             last_tool=last_tool,
@@ -5389,10 +5402,15 @@ class SessionManager:
             logger.warning("run error in session %s (%s): %s", getattr(getattr(state, "session", None), "id", "?"), p.get("kind") or "-", p["message"][:500])
         elif event.type is EventType.COMPACTION_COMPLETED:
             state.last_compaction = dict(p)
+        elif event.type is EventType.MESSAGE_STOP and RUN_OUTCOME_FIELD in p:
+            # The terminal stop: the cause's detail is usually the provider's own error text, which
+            # can echo a key, so it is masked before any store or front sees the event.
+            cause = p.get(RUN_CAUSE_FIELD)
+            if isinstance(cause, dict) and isinstance(cause.get("detail"), str):
+                cause["detail"] = self.redactor.redact(cause["detail"])
+            state.run_outcome = RunOutcome(p[RUN_OUTCOME_FIELD])
+            state.run_cause = RunCause.model_validate(cause) if isinstance(cause, dict) else None
         elif event.type is EventType.STATE_CHANGED and p.get("reason") in RECOVERY_REASONS:
-            if p.get("reason") == "soft_stop_notified":
-                state.soft_stop_cause = str(p.get("soft_stop_cause") or "")
-                state.soft_stop_detail = self.redactor.redact(str(p.get("soft_stop_detail") or ""))
             detail = {k: v for k, v in p.items() if k not in ("from", "to", "reason")}
             logger.warning("run recovery in session %s: %s %s", getattr(getattr(state, "session", None), "id", "?"), p.get("reason"), self.redactor.redact(json.dumps(detail, ensure_ascii=False, default=str)[:400]))
 

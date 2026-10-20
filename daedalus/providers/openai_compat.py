@@ -17,7 +17,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
 from contextvars import ContextVar
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Any, Protocol
@@ -35,6 +35,9 @@ from protocore.contracts.llm import (
     LLMTimeoutError,
     ProviderDelta,
     ProviderDeltaKind,
+    ProviderFailure,
+    ProviderFailureReason,
+    classify_transport_exception,
 )
 from protocore.contracts.types import Message, MessageRole, StopReason, TextBlock
 
@@ -92,25 +95,6 @@ _CONTEXT_ERROR_MARKERS = (
     "prompt is too long",
     "exceeds the model",
 )
-
-
-@dataclass(frozen=True, slots=True)
-class ProviderVerdict:
-    """What a failed request means, pinned on the raised error as ``classified`` for the core to read.
-
-    The core reads it by shape and never imports it. ``retryable`` decides whether the run asks the same
-    endpoint again; ``reason`` decides whether it may step to the next model of its fallback chain. Without a
-    verdict every refusal looked like a blip: a provider that rejected the request outright was retried, and
-    the operator waited through the backoff for an error that was already known on the first reply.
-    """
-
-    reason: str
-    retryable: bool
-    retry_after_seconds: float | None = None
-    """The wait the provider stated (``Retry-After``, or the key proxy's reading of a failed stream).
-
-    The core waits at least this long before asking the same endpoint again; without it a rate limit
-    was retried on the core's own short backoff and spent its attempts before the window reopened."""
 
 
 _PERMANENT_ERROR_TYPES = {
@@ -228,32 +212,38 @@ def _error_fields(text: str) -> tuple[str, str, str]:
     return str(error.get("type") or ""), str(code), str(error.get("message") or "")
 
 
-def classify_failure(status: int, text: str) -> ProviderVerdict:
-    """The verdict on a request the endpoint answered with ``status`` and ``text``.
+def _verdict(reason: str, retryable: bool) -> ProviderFailure:
+    return ProviderFailure(reason=ProviderFailureReason(reason), retryable=retryable)
+
+
+def classify_failure(status: int, text: str) -> ProviderFailure:
+    """The core's verdict on a request the endpoint answered with ``status`` and ``text``, which the
+    loop reads to retry, step down the fallback chain or give up.
 
     Rate limits, timeouts, overload and server errors pass on their own and stay retryable. Every other 4xx
     is the request or the account, and so is an error body that names one of those types whatever status
-    carried it.
+    carried it. Without a verdict every refusal looked like a blip: a provider that rejected the request
+    outright was retried, and the operator waited through the backoff for an error already known.
     """
     kind, code, message = _error_fields(text)
     lowered = f"{code} {message}".lower()
     if status in (401, 403):
-        return ProviderVerdict("auth", False)
+        return _verdict("auth", False)
     if status == 402 or code in _EXHAUSTED_ERROR_CODES or kind.lower() in _EXHAUSTED_ERROR_TYPES:
-        return ProviderVerdict("billing", False)
+        return _verdict("billing", False)
     if status == 429 or kind == "rate_limit_error":
-        return ProviderVerdict("rate_limit", True)
+        return _verdict("rate_limit", True)
     if status in (408, 504):
-        return ProviderVerdict("timeout", True)
+        return _verdict("timeout", True)
     if status == 529 or kind == "overloaded_error":
-        return ProviderVerdict("overloaded", True)
+        return _verdict("overloaded", True)
     permanent = kind in _PERMANENT_ERROR_TYPES or (400 <= status < 500)
     if not permanent:
-        return ProviderVerdict("server_error", True)
+        return _verdict("server_error", True)
     if any(marker in lowered for marker in _MODEL_REFUSAL_MARKERS):
-        return ProviderVerdict("model_not_found", False)
+        return _verdict("model_not_found", False)
     reason = _PERMANENT_STATUS.get(status) or _PERMANENT_ERROR_TYPES.get(kind) or "format_error"
-    return ProviderVerdict(reason, False)
+    return _verdict(reason, False)
 
 
 def failure_text(endpoint_id: str, status: int, text: str) -> str:
@@ -264,11 +254,6 @@ def failure_text(endpoint_id: str, status: int, text: str) -> str:
     said = f"{endpoint_id}: HTTP {status}: {message[:500]}"
     # A numeric code only repeats the status (llama.cpp writes one); a named one is what to search for.
     return f"{said} ({code})" if code and not code.isdigit() else said
-
-
-def _classified(error: Exception, verdict: ProviderVerdict) -> Exception:
-    error.classified = verdict  # type: ignore[attr-defined]
-    return error
 
 
 def message_shape(messages: list[dict[str, Any]]) -> str:
@@ -529,9 +514,9 @@ class OpenAICompatibleProvider(ILLMProvider):
                     break
                 silent += 1
                 if silent > self.endpoint.first_byte_retries:
-                    raise _classified(LLMTimeoutError(
+                    raise LLMTimeoutError(
                         f"{self.endpoint.id}: no response byte within {self.endpoint.first_byte_timeout_seconds:.0f}s"
-                        f" on {silent} identical attempt(s)"), ProviderVerdict("timeout", True))
+                        f" on {silent} identical attempt(s)", classified=_verdict("timeout", True))
                 # Said to the core before the next attempt waits its own window: its idle watchdog
                 # counts from the last delta, and two silent windows back to back would otherwise
                 # pass its baseline and be cut as a stalled stream half-way through the resend.
@@ -595,15 +580,13 @@ class OpenAICompatibleProvider(ILLMProvider):
                         yield ProviderDelta(kind=ProviderDeltaKind.progress)
             finally:
                 await response.aclose()
-        except httpx.TimeoutException as exc:
-            raise LLMTimeoutError(f"{self.endpoint.id}: {exc}") from exc
         except httpx.HTTPError as exc:
-            raise LLMProviderError(f"{self.endpoint.id}: transport error: {exc}") from exc
+            raise self._transport_failure(exc) from exc
         if not saw_done and (finish_reason is None or garbled_last):
             # The same answer as a connection the transport saw drop: retried, and no call it opened
             # is ever closed, so none of them can run.
-            raise _classified(LLMProviderError(
-                f"{self.endpoint.id}: the stream ended before the answer was finished"), ProviderVerdict("connection", True))
+            raise LLMProviderError(
+                f"{self.endpoint.id}: the stream ended before the answer was finished", classified=_verdict("connection", True))
         rest, recovered = guard.finish()
         if rest:
             yield ProviderDelta(kind=ProviderDeltaKind.text, content=rest)
@@ -902,10 +885,8 @@ class OpenAICompatibleProvider(ILLMProvider):
             response = await self._client.post(
                 self._url("/chat/completions"), json=body, headers=self._headers(request)
             )
-        except httpx.TimeoutException as exc:
-            raise LLMTimeoutError(f"{self.endpoint.id}: {exc}") from exc
         except httpx.HTTPError as exc:
-            raise LLMProviderError(f"{self.endpoint.id}: transport error: {exc}") from exc
+            raise self._transport_failure(exc) from exc
         if response.status_code >= 400:
             if request is not None:
                 await self._observe_failure(request, reservation, response.status_code, response.text, response.headers)
@@ -918,8 +899,8 @@ class OpenAICompatibleProvider(ILLMProvider):
     def _raise_stream_error(self, error: Any) -> None:
         """An error the provider reported inside a 200 (a stream chunk, or the key proxy's assembled body)."""
         if isinstance(error, dict) and error.get("code") == STREAM_TRUNCATED:
-            raise _classified(LLMProviderError(f"{self.endpoint.id}: {error.get('message') or STREAM_TRUNCATED}"),
-                              ProviderVerdict("connection", True))
+            raise LLMProviderError(f"{self.endpoint.id}: {error.get('message') or STREAM_TRUNCATED}",
+                                   classified=_verdict("connection", True))
         self._raise_for_status(stream_error_status(error), json.dumps(error))
 
     def _raise_for_status(self, status: int, text: str, headers: httpx.Headers | None = None) -> None:
@@ -929,20 +910,30 @@ class OpenAICompatibleProvider(ILLMProvider):
             # Rate-limit errors are the core's retryable provider-busy condition, so the existing
             # in-run retry and the host's longer outage recovery do the waiting instead of ending the
             # operator's task.
-            raise _classified(
-                LLMRateLimitError(f"{self.endpoint.id}: llama.cpp busy: {text[:300]}"), ProviderVerdict("rate_limit", True)
-            )
+            raise LLMRateLimitError(f"{self.endpoint.id}: llama.cpp busy: {text[:300]}", classified=_verdict("rate_limit", True))
         if status in (400, 413, 422) and any(m in lowered for m in _CONTEXT_ERROR_MARKERS):
             raise LLMContextWindowExceeded(f"{self.endpoint.id}: {text[:300]}", **context_overflow_sizes(text))
         verdict = classify_failure(status, text)
         wait = _retry_after_seconds(headers, text)
         if wait is not None:
-            verdict = replace(verdict, retry_after_seconds=wait)
-        if verdict.reason == "rate_limit":
-            raise _classified(LLMRateLimitError(f"{self.endpoint.id}: rate limited: {text[:300]}"), verdict)
-        if verdict.reason == "timeout":
-            raise _classified(LLMTimeoutError(f"{self.endpoint.id}: HTTP {status}: {text[:300]}"), verdict)
-        raise _classified(LLMProviderError(failure_text(self.endpoint.id, status, text)), verdict)
+            verdict = verdict.model_copy(update={"retry_after_seconds": wait})
+        if verdict.reason is ProviderFailureReason.rate_limit:
+            raise LLMRateLimitError(f"{self.endpoint.id}: rate limited: {text[:300]}", classified=verdict)
+        if verdict.reason is ProviderFailureReason.timeout:
+            raise LLMTimeoutError(f"{self.endpoint.id}: HTTP {status}: {text[:300]}", classified=verdict)
+        raise LLMProviderError(failure_text(self.endpoint.id, status, text), classified=verdict)
+
+    def _transport_failure(self, exc: httpx.HTTPError) -> LLMProviderError | LLMTimeoutError:
+        """A request that never got an answer, with the core's verdict on why.
+
+        A refused, reset or unreachable connection is ``connection``, which moves the run to the next
+        model of its fallback chain; it used to be raised bare, and an error without a verdict never
+        moves the chain, so a dead endpoint with a healthy fallback ended the run instead.
+        """
+        verdict = classify_transport_exception(exc)
+        if isinstance(exc, httpx.TimeoutException) or (verdict is not None and verdict.reason is ProviderFailureReason.timeout):
+            return LLMTimeoutError(f"{self.endpoint.id}: {exc}", classified=verdict or _verdict("timeout", True))
+        return LLMProviderError(f"{self.endpoint.id}: transport error: {exc}", classified=verdict)
 
     async def _observe_failure(self, request: LLMRequest, reservation: str | None, status: int,
                                text: str, headers: httpx.Headers) -> FailureEvidence:

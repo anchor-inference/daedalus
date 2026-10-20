@@ -409,7 +409,7 @@ class ProjectEnvironments:
         answer = await self._answer(session_id)
         verdict = _verdict(answer)
         if verdict is None:
-            cause = state.soft_stop_detail or state.last_error_message or "it ended without saying whether the goal was met"
+            cause = (state.run_cause.detail if state.run_cause is not None else "") or state.last_error_message or "it ended without saying whether the goal was met"
             raise PrepareFailed(f"the setup goal did not finish: {cause}; see session {session_id}")
         if verdict:
             raise PrepareFailed(f"the setup goal could not be met: {verdict}")

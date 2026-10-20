@@ -10,10 +10,10 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from protocore.contracts.llm import LLMProviderError, LLMRequest
+from protocore.contracts.llm import LLMProviderError, LLMRequest, ProviderFailure, ProviderFailureReason
 
 from daedalus.providers.failure_evidence import FailureEvidence
-from daedalus.providers.openai_compat import ProviderEndpoint, ProviderVerdict
+from daedalus.providers.openai_compat import ProviderEndpoint
 from daedalus.providers.pricing import ModelPricing, complete_usage
 from daedalus.stores.comparison_funding import PairAllocation
 from daedalus.stores.control import ControlDenied, canonical, one
@@ -232,13 +232,15 @@ class HostInferenceAdmission:
             # An authority error would settle the run and discard its recoverable snapshot.
             raise UpdateDrainPaused(str(exc)) from exc
         except BudgetRefused as exc:
-            error = LLMProviderError(f"inference budget: {exc}")
-            error.classified = ProviderVerdict("budget", False)
-            raise error from exc
+            # ``budget``: the run reports the operator's own cap, not a vendor's refusal, and nothing in the
+            # loop retries it or moves down the chain, since every rung meets the same cap.
+            raise LLMProviderError(f"inference budget: {exc}", classified=ProviderFailure(
+                reason=ProviderFailureReason.budget, retryable=False, provider_message=str(exc))) from exc
         except ControlDenied as exc:
-            error = LLMProviderError(f"inference authority: {exc}")
-            error.classified = ProviderVerdict("authority", False)
-            raise error from exc
+            # No reason of the core's names the host's own authority; ``unknown`` never moves the chain,
+            # and not retryable is final, which is what a refusal by the operator's control plane means.
+            raise LLMProviderError(f"inference authority: {exc}", classified=ProviderFailure(
+                reason=ProviderFailureReason.unknown, retryable=False, provider_message=str(exc))) from exc
 
     async def cost(self, reservation_id: str, raw: dict[str, Any], normalized: dict[str, Any]) -> float | None:
         row = await self.db.fetchone("SELECT quote_json FROM inference_reservations WHERE id = ?", (reservation_id,))

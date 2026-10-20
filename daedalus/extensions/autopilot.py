@@ -193,7 +193,7 @@ class Autopilot:
         state = await self.manager.get_state(session_id)
         if state is None or not self.switched_on(state) or not self.ordinary(state):
             return
-        if state.run_origin not in JUDGED_ORIGINS or state.last_outcome is not None or state.soft_stop_cause:
+        if state.run_origin not in JUDGED_ORIGINS or state.last_outcome is not None or state.run_cause is not None:
             return
         task = asyncio.create_task(self.judge(session_id, run_id), name=f"autopilot:{session_id}")
         self._tasks.add(task)
