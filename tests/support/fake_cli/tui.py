@@ -266,7 +266,7 @@ def usage_error(cli: str, message: str) -> None:
 
 # -- the scripted model ------------------------------------------------------------------------------
 
-_DIRECTIVE = re.compile(r"(?:^|\s)(echo|perm|mcpperm|ask|fail|slow|report|askorch|cat|mcp):(.*)$|(?:^|\s)(silent)\s*$", re.S)
+_DIRECTIVE = re.compile(r"(?:^|\s)(echo|perm|net|mcpperm|ask|fail|slow|report|askorch|cat|mcp):(.*)$|(?:^|\s)(silent)\s*$", re.S)
 """``mcp:<server>:<tool>:<JSON arguments>`` calls any MCP server's tool, as a model calls one of Daedalus's
 tool sets (``daedalus_browser``); the JSON may hold no ``;``, which ends a step. ``mcpperm:<server>:<tool>``
 asks only the permission for such a tool, with no server behind it: what a standing rule is proved on."""

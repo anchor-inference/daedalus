@@ -481,28 +481,34 @@ class AppServer:
         if kind == "echo":
             await pause(0.3)
             await self.item(thread, turn, {"type": "agentMessage", "text": arg})
-        elif kind == "perm":
-            item = {"type": "commandExecution", "id": new_id(), "command": arg, "cwd": thread.cwd, "status": "inProgress", "aggregatedOutput": None, "exitCode": None}
+        elif kind in ("perm", "net"):
+            # ``net:<host>`` is a command that wants the network: the same request, with the host it
+            # would reach, which the TUI asks about in words of its own.
+            command = f"curl -sI https://{arg}" if kind == "net" else arg
+            item = {"type": "commandExecution", "id": new_id(), "command": command, "cwd": thread.cwd, "status": "inProgress", "aggregatedOutput": None, "exitCode": None}
             await self.item(thread, turn, item, completed=False)
             if thread.params.get("approvalPolicy") == "never" or thread.params.get("sandbox") == "danger-full-access":
                 decision = "accept"
             else:
                 await self.status(thread, {"type": "active", "activeFlags": ["waitingOnApproval"]})
-                answer = await self.ask_clients(thread, "item/commandExecution/requestApproval", {"threadId": thread.id, "turnId": turn["id"], "itemId": item["id"], "command": arg, "cwd": thread.cwd, "reason": f"run {arg}"})
+                request = {"threadId": thread.id, "turnId": turn["id"], "itemId": item["id"], "command": command, "cwd": thread.cwd, "reason": f"run {command}"}
+                if kind == "net":
+                    request["networkApprovalContext"] = {"host": arg, "protocol": "https"}
+                answer = await self.ask_clients(thread, "item/commandExecution/requestApproval", request)
                 decision = str(answer.get("decision") or "decline")
                 await self.status(thread, {"type": "active", "activeFlags": []})
             if decision == "cancel":
                 raise asyncio.CancelledError
             if decision in ("accept", "acceptForSession"):
                 await pause(0.2)
-                item.update(status="completed", aggregatedOutput=f"(the fake did not run {arg})", exitCode=0)
+                item.update(status="completed", aggregatedOutput=f"(the fake did not run {command})", exitCode=0)
                 await self.item(thread, turn, item, started=False)
-                await self.notify(thread, "turn/diff/updated", {"threadId": thread.id, "turnId": turn["id"], "diff": f"--- a/fake\n+++ b/fake\n@@\n+{arg}\n"})
-                await self.item(thread, turn, {"type": "agentMessage", "text": f"Ran {arg}."})
+                await self.notify(thread, "turn/diff/updated", {"threadId": thread.id, "turnId": turn["id"], "diff": f"--- a/fake\n+++ b/fake\n@@\n+{command}\n"})
+                await self.item(thread, turn, {"type": "agentMessage", "text": f"Ran {command}."})
             else:
                 item.update(status="declined")
                 await self.item(thread, turn, item, started=False)
-                await self.item(thread, turn, {"type": "agentMessage", "text": f"Understood, I did not run {arg}."})
+                await self.item(thread, turn, {"type": "agentMessage", "text": f"Understood, I did not run {command}."})
         elif kind == "ask":
             spec = ask_arguments(arg)
             await self.status(thread, {"type": "active", "activeFlags": ["waitingOnUserInput"]})
@@ -611,7 +617,8 @@ class CodexTui:
             try:
                 self.socket = await Socket.connect(self.path)
             except (OSError, Closed) as exc:
-                self.tui.say(f"■ Failed to connect to the app server at unix://{self.path}: {exc}")
+                # What 0.163 prints (tui/src/lib.rs over app-server-client/src/remote.rs).
+                self.tui.say("Error: failed to connect to remote app server", "", "Caused by:", f"    failed to connect to remote app server at `unix://{self.path}`: {exc}")
                 await asyncio.sleep(0.2)
                 return 1
             asyncio.ensure_future(self.read())
@@ -718,7 +725,10 @@ class CodexTui:
         self.open_requests[message["id"]] = future
         if method == "item/commandExecution/requestApproval":
             meanings = ["accept", "acceptForSession", "decline"]
-            self.tui.open_dialog(Dialog("permission", "Would you like to run the following command?", [f"  $ {params.get('command')}"], ["Yes, proceed", "Yes, and don't ask again for this command", "No, and tell Codex what to do differently"],
+            network = params.get("networkApprovalContext") or {}
+            # The titles 0.163 draws (tui/src/bottom_pane/approval_overlay.rs).
+            title = f'Do you want to approve network access to "{network["host"]}"?' if network.get("host") else "Would you like to run the following command?"
+            self.tui.open_dialog(Dialog("permission", title, [f"  $ {params.get('command')}"], ["Yes, proceed", "Yes, and don't ask again for this command", "No, and tell Codex what to do differently"],
                                         on_choose=lambda i: settle(future, {"decision": meanings[i]}), on_escape=lambda: settle(future, {"decision": "decline"})))
         elif method == "item/tool/requestUserInput":
             question = (params.get("questions") or [{}])[0]

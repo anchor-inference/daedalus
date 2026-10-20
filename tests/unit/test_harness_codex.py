@@ -160,6 +160,45 @@ def test_the_readiness_gate_and_the_screen_reading_on_the_real_screens() -> None
     assert adapter.classify_screen(screen("rate-limit-nudge")) is ScreenClass.DIALOG
 
 
+# What Codex 0.163's TUI draws, by its source: the folder-trust question
+# (tui/src/onboarding/trust_directory.rs), the approval overlay's titles
+# (tui/src/bottom_pane/approval_overlay.rs) and an MCP server's request (mcp_server_elicitation.rs).
+DIALOGS_0163 = (
+    "> Trust this folder? Codex can read, edit, and run files here, subject to your approval settings.",
+    "  Would you like to run the following command?",
+    "  Would you like to make the following edits?",
+    "  Would you like to grant these permissions?",
+    '  Do you want to approve network access to "registry.npmjs.org"?',
+    "  Would you like to send input to terminal 4?",
+    "  Would you like to send input to the existing terminal?",
+    "  mail needs your approval.",
+    "  › 1. Allow this request and continue",
+)
+
+
+@pytest.mark.parametrize("title", DIALOGS_0163)
+def test_every_dialog_of_codex_0163_is_read_as_a_dialog(title: str) -> None:
+    drawn = "\n".join(["• Working on it", "", title, "", "› 1. Yes, proceed (y)", "  2. No, and tell Codex what to do differently (esc)", "", "  enter to confirm   esc to cancel"])
+    assert CodexAdapter().classify_screen(drawn) is ScreenClass.DIALOG
+
+
+def test_the_busy_line_is_read_whatever_key_interrupts() -> None:
+    adapter = CodexAdapter()
+    # The interrupt key is drawn from the operator's key map since 0.163; Esc is only the default.
+    for line in ("• Working (0s • esc to interrupt)", "• Working (12s • ctrl+g to interrupt)"):
+        assert adapter.classify_screen(f"› earlier prompt\n\n{line}") is ScreenClass.BUSY
+
+
+@pytest.mark.parametrize("said", [
+    # How the TUI reports it (tui/src/lib.rs wraps the client's own error, app-server-client/src/remote.rs).
+    "Error: failed to connect to remote app server\n\nCaused by:\n    failed to connect to remote app server at `unix:///tmp/d/codex.sock`: No such file or directory (os error 2)",
+    "failed to connect to remote app server at `unix:///tmp/d/codex.sock`: Connection refused (os error 111)",
+])
+def test_a_tui_that_cannot_reach_its_app_server_fails_the_start(said: str) -> None:
+    step = CodexAdapter().readiness(said)
+    assert step.action == "fail" and "failed to connect to remote app server" in step.reason
+
+
 def drain(state: _Launch) -> list[StaffEvent]:
     events = []
     while not state.queue.empty():
@@ -360,6 +399,22 @@ async def test_after_a_host_restart_the_thread_is_taken_up_again(settings: Setti
         live = await s.team.live((await s.session_row(ada)).id)
         texts = [t.text for t in await s.runtime.turns(live) if t.role == "user"]  # type: ignore[arg-type]
         assert texts.count("echo:once only") == 1 and texts.count("echo:still to go") == 1
+
+
+async def test_stopping_a_member_with_an_approval_on_screen_dismisses_it_and_never_answers_it_yes(settings: Settings, db: Database) -> None:
+    # Typing /exit and Enter into an approval dialog chose its highlighted first row, "Yes, proceed".
+    # A dialog the screen reading did not know (network access, here) got exactly that.
+    async with stand(settings, db, extra_env={"FAKE_CODEX_APPROVALS": "all"}, stop_grace_s=8.0, **codex()) as s:
+        ada = await started(s, "net:registry.npmjs.org")
+        await s.status_event(ada, "permission")
+        row = await s.session_row(ada)
+        assert (await s.terminals.wait_for(row.terminal_id, regex="Do you want to approve network access", timeout=10))["matched"] == "regex"
+        assert await s.team.release(ada)
+        answered = [e for e in read_log(s.log) if e["event"] == "dialog_answered"]
+        assert answered == [], answered
+        assert [e["kind"] for e in read_log(s.log) if e["event"] == "dialog_escaped"] == ["permission"]
+        # Dismissed, the dialog let the TUI take its /exit: it left on its own, not killed at the grace.
+        assert (await s.terminals.get(row.terminal_id))["exit_code"] == 0
 
 
 async def test_a_failed_turn_is_an_error_in_codexs_words(settings: Settings, db: Database) -> None:

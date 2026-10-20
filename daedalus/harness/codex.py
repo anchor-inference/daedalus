@@ -132,14 +132,30 @@ TRANSCRIPT_MAX_BYTES = 32 << 20
 DIALOG_MARKERS = (
     "Update available!",
     "Press enter to continue",
-    "Press enter to confirm",
+    "Approaching rate limits",
+    "Trust this folder?",
     "Would you like to run the following command",
     "Would you like to make the following edits",
-    "Approaching rate limits",
-    "Do you trust the contents of this directory",
-    "Allow Codex to",
+    "Would you like to grant these permissions?",
+    "Do you want to approve network access to",
+    "Would you like to send input to",
+    " needs your approval.",
+    "Allow this request",
 )
-BUSY_HINT = "esc to interrupt"
+"""What Codex 0.163 draws when it waits for a choice: the update and rate-limit prompts, the folder
+trust question (``tui/src/onboarding/trust_directory.rs``), the approval overlay's titles
+(``tui/src/bottom_pane/approval_overlay.rs``) and an MCP server's request
+(``mcp_server_elicitation.rs``). The trust question once read "Do you trust the contents of this
+directory", and three of the approval titles were never here, so ``stop`` typed into them."""
+BUSY_HINT = " to interrupt)"
+"""The end of the busy line, "Working (0s • esc to interrupt)". The key is drawn from the operator's
+key map since 0.163, so the line is matched without it."""
+CONNECT_FAILED = "failed to connect to remote app server"
+"""What the TUI prints when it cannot reach the app server, wrapped as "Error: failed to connect to
+remote app server" around the client's own "… at `<url>`: <cause>" (``tui/src/lib.rs``,
+``app-server-client/src/remote.rs``). The words once matched here were the fake's invention, so a TUI
+that never attached went unnoticed until its terminal exited."""
+DISMISS_ATTEMPTS = 3
 STARTUP_NOISE = ("<environment_context>", "<recommended_plugins>", "<user_instructions>", "# AGENTS.md", "<skills_instructions>", "<permissions")
 
 
@@ -306,8 +322,10 @@ class CodexAdapter:
         )
 
     def readiness(self, screen: str) -> ReadyStep:
-        if "Failed to resume session" in screen or "Failed to connect to the app server" in screen:
+        if "Failed to resume session" in screen:
             return ReadyStep("fail", reason="Codex could not attach to its session: " + _last_line_with(screen, "Failed"))
+        if CONNECT_FAILED in screen.lower():
+            return ReadyStep("fail", reason="Codex could not attach to its session: " + _last_line_with(screen, CONNECT_FAILED, any_case=True))
         if "Sign in with ChatGPT" in screen or "Not logged in" in screen:
             return ReadyStep("fail", reason="Codex is not signed in here: sign in from the Harnesses screen or in this terminal")
         if "Update available!" in screen:
@@ -750,9 +768,16 @@ class CodexAdapter:
         if state.turn_id:
             with contextlib.suppress(Exception):
                 await self._call(state, "turn/interrupt", {"threadId": state.thread_id, "turnId": state.turn_id}, timeout=5)
-        screen = await term.screen()
-        if self.classify_screen(screen) is ScreenClass.DIALOG:
-            return  # typing would answer the dialog; the runtime ends the terminal after its grace
+        # Never type into a dialog: Enter chooses its highlighted row, which on an approval is "Yes,
+        # proceed". Esc is the dialog's own way out (an approval's "No", an MCP request's cancel); a
+        # dialog that will not go is left for the runtime to end with the terminal after its grace.
+        for _ in range(DISMISS_ATTEMPTS):
+            if self.classify_screen(await term.screen()) is not ScreenClass.DIALOG:
+                break
+            await term.write(keys=["Esc"])
+            await asyncio.sleep(0.3)
+        else:
+            return
         await term.write(text="/exit")
         await asyncio.sleep(0.3)
         await term.write(keys=["Enter"])
@@ -863,9 +888,9 @@ def _highlighted(screen: str) -> str:
     return ""
 
 
-def _last_line_with(screen: str, word: str) -> str:
+def _last_line_with(screen: str, word: str, *, any_case: bool = False) -> str:
     for line in reversed(screen.splitlines()):
-        if word in line:
+        if word in (line.lower() if any_case else line):
             return line.strip()[:300]
     return ""
 
