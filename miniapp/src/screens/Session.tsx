@@ -65,6 +65,7 @@ import { ProjectBoard } from "../board/ProjectBoard";
 import { useMain } from "../main/data";
 import { ShareSheet } from "../share";
 import { deviceSaving, useBrowsers } from "../browser/data";
+import { ApprovalChip } from "../browser/approvals";
 import { BrowserTab } from "../browser/BrowserPanel";
 import { BrowserPip } from "../browser/pip";
 import { BrowserHeadButton, BrowserNeedsRow, useFirstOpenToast } from "../browser/phone";
@@ -1731,6 +1732,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           {detail?.id === id && <Composer
             ref={composer}
             above={orchestrating ? <>{showGoalLine && <GoalStrip projectId={focus!.projectId} />}<ReplyChip sessionId={id} /></> : undefined}
+            beside={browsers.user?.env === "user" ? <ApprovalChip key={id} sessionId={id} toast={toast} /> : undefined}
             sessionId={id}
             status={status}
             onSend={send}

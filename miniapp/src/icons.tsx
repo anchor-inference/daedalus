@@ -6,9 +6,14 @@ export type IconName =
   | "folder" | "folderplus" | "settings" | "bots" | "inbox" | "board" | "changes" | "chart" | "loop" | "pause" | "play" | "trash" | "check" | "close" | "send"
   | "download" | "share" | "split" | "key" | "link" | "unlink" | "down" | "copy" | "paste" | "columns" | "eye" | "mic" | "fork" | "undo" | "phone" | "expand" | "external" | "reload" | "forward" | "panel" | "chevron" | "bolt" | "volume" | "mute" | "lock" | "bell" | "shield" | "conductor" | "journal" | "alert" | "compass" | "user" | "ask" | "archive" | "braces" | "sidebar" | "reply" | "flag" | "menu" | "pin" | "pushpin"
   | "compose" | "grid" | "vdots" | "camera" | "region" | "offline" | "logo" | "sliders" | "apps" | "import" | "eyeoff"
+  | "hand" | "ffwd"
   | "utensils" | "cart" | "dumbbell" | "plane" | "home" | "list" | "heart" | "book" | "wand";
 
 const PATHS: Record<IconName, string> = {
+  // The approval modes of a conversation in the operator's Chrome: a raised hand asks, a fast-forward
+  // goes on by itself (skipping is the alert sign).
+  hand: "M18 11V6a2 2 0 0 0-4 0v4M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8M18 8a2 2 0 0 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-6-2.4l-3.6-3.6a2 2 0 0 1 2.8-2.8L6 15",
+  ffwd: "M13 19l9-7-9-7zM2 19l9-7-9-7z",
   // The calendar's type icons: an agent names one of these for a type it makes (or an emoji).
   utensils: "M7 3v8M5 3v5a2 2 0 0 0 4 0V3M7 11v10M17 3c-1.7 1-3 3.3-3 6v4h3M17 3v18",
   cart: "M3 4h2l2.4 11.2a1 1 0 0 0 1 .8h9.2a1 1 0 0 0 1-.8L20 8H6M9 20h.01M17 20h.01",

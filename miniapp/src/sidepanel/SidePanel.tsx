@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { api, setPanelCredential, type SessionDetail } from "../api";
 import { applyAppearance } from "../appearance";
+import { ApprovalChip } from "../browser/approvals";
 import { type Approval, pendingApproval } from "../composer";
 import { Composer, type ComposerHandle } from "../composerbox";
 import type { ModelChoice } from "../modelselect";
@@ -529,6 +530,7 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
             </div>
             </>
           }
+          beside={<ApprovalChip key={id} sessionId={id} toast={toast} />}
           sessionId={id}
           status={status}
           onSend={send}

@@ -677,6 +677,10 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         return 200, "application/json", json.dumps(session_tasks(parts[3]))
     if len(parts) == 7 and parts[2] == "sessions" and parts[4] == "tasks" and parts[6] == "stop" and method.upper() == "POST":
         return 200, "application/json", json.dumps({"stopped": True})
+    if len(parts) == 5 and parts[2] == "sessions" and parts[4] == "browser-approvals" and method.upper() in ("GET", "PUT"):
+        # The approval mode of a conversation in the operator's Chrome: manual until a write says otherwise.
+        mode = (body or {}).get("mode", "manual") if isinstance(body, dict) else "manual"
+        return 200, "application/json", json.dumps({"mode": mode, "env": "user", "warning": ""})
     if len(parts) == 5 and parts[2] == "sessions" and parts[4] == "coach":
         # The chat's prompt coach: none until the window opens one, and then the coach's own session,
         # unfinished. A harness that draws the window (check_prompt_coach.py) answers these itself.

@@ -12,6 +12,8 @@ side panel's width:
   Enter allows it once through the panel's door, Esc refuses the next one;
 - the active tab moving to another conversation's group moves the panel there; pinned, it stays;
 - "This page" asks the extension for the page's text and attaches it as a file;
+- the composer's approval chip offers the three modes and sets one through the panel's door, and the
+  composer's row does not spill at 360 or 420 px;
 - a running conversation shows one compact activity line inside the composer, with no Stop of its
   own; the composer's Stop goes to the door, and a stop the stream never confirms says so after three
   seconds; the line stays one row at 360 and 420 px; Take over pauses the group and shows its tab,
@@ -156,6 +158,9 @@ class Door:
                 return self.json(route, {"similar": None})
             if tail in ("messages", "upload"):
                 return self.json(route, {"run_id": "r1", "receipt": {"status": "consumed"}})
+            if tail == "browser-approvals":
+                sent = body if request.method == "PUT" and isinstance(body, dict) else {}
+                return self.json(route, {"mode": sent.get("mode", "manual"), "env": "user", "warning": ""})
             if tail == "tab":
                 return self.json(route, {"group": f"s-{sid}-u", "created": True})
             return self.json(route, {"ok": True, "stopped": True})
@@ -239,6 +244,21 @@ def run() -> int:
         page.get_by_role("button", name="This page").click()
         expect(page.locator(".composer")).to_contain_text("page.txt")
         assert requests(page, "page.text"), "the page's text was never asked for"
+
+        # The approval mode, from the composer's chip; the composer's row fits a narrow panel with it.
+        chip = page.locator(".composer .approvals-chip")
+        expect(chip).to_have_attribute("data-mode", "manual")
+        chip.click()
+        expect(page.locator(".approvals-menu [role=menuitemradio]")).to_have_count(3)
+        page.locator('.approvals-menu [data-mode="auto"]').click()
+        expect(chip).to_have_attribute("data-mode", "auto")
+        assert door.posted("/api/panel/sessions/s1/browser-approvals") == [{"mode": "auto"}], door.posts
+        for width in (360, 420):
+            page.set_viewport_size({"width": width, "height": 760})
+            page.wait_for_timeout(50)
+            spill = page.evaluate("(() => { const row = document.querySelector('.composer-row'); return row.scrollWidth - row.clientWidth; })()")
+            assert spill <= 0, f"the composer's row spills by {spill}px at {width} px"
+        page.set_viewport_size({"width": 400, "height": 760})
 
         # A running conversation: the strip, Stop, the unconfirmed stop, Take over.
         door.details["s1"]["status"] = "running"

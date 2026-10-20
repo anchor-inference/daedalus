@@ -131,6 +131,9 @@ export type ComposerProps = {
    *  goal line, the quote a message answers): inside the composer so they take the field's width at
    *  every size instead of copying its padding rule by rule. */
   above?: ReactNode;
+  /** A control of the conversation's own beside the mode chip: the approval mode of a conversation in
+   *  the operator's Chrome. */
+  beside?: ReactNode;
   /** Open the prompt coach with the draft as it stands; absent where there is no coach (inside one). */
   onCoach?: (draft: string) => void;
   /** Ask a side question about the chat (`/btw`, or the helpers' menu): the question, or "" to open its
@@ -727,6 +730,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           {props.onChooseMode && props.onYagni
             ? <ModeSelect mode={props.mode ?? ""} modes={props.modes ?? []} yagni={!!props.yagni} onChooseMode={props.onChooseMode} onYagni={props.onYagni} autopilot={props.autopilot} onAutopilot={props.onAutopilot} sheet={phone} />
             : <span className="composer-mode">{t("composer.mode.agent")}</span>}
+          {props.beside}
           {phone && offline && shape === "open" && <span className="grow ph-hint">{t("ph.offline.kept")}</span>}
           <div className="composer-tools">
             {(!phone || status !== "running") && <ModelSelect model={props.model} fallback={props.fallback} open={modelOpen} onOpenChange={setModelOpen} onChoose={props.onChooseModel} sheet={phone}
