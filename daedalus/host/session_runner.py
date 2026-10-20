@@ -740,6 +740,8 @@ class SessionManager:
         self._group_usage = tool_groups.UsageCache()
         self.governance_path = governance_path or (settings.bot_repo_dir / "GOVERNANCE.md")
         self._states: dict[str, SessionState] = {}
+        # One load per session at a time: see ``get_state``.
+        self._loading: dict[str, asyncio.Task[SessionState | None]] = {}
         self._sinks: list[EventSink] = []
         self._finished: list[RunFinished] = []
         self.compaction_hooks: list[Callable[[str, dict[str, Any]], Awaitable[None]]] = []
@@ -1578,9 +1580,25 @@ class SessionManager:
         return await self.projects.for_session(session_id)
 
     async def get_state(self, session_id: str) -> SessionState | None:
+        """The live state of a session, loading it once however many callers ask at the same moment.
+
+        The load awaits three reads between "not held" and "installed". After a restart the app's
+        parallel requests and a Telegram message each built their own state, the last one won the
+        map, and Stop and steer then reached an object with no run on it while the run went on in
+        another. Every caller now shares one load task, shielded so a caller that gives up does not
+        cancel it for the others.
+        """
         state = self._states.get(session_id)
         if state is not None:
             return state
+        load = self._loading.get(session_id)
+        if load is None:
+            load = asyncio.create_task(self._load_state(session_id), name=f"load-session-{session_id}")
+            self._loading[session_id] = load
+            load.add_done_callback(lambda done: self._loading.pop(session_id, None) if self._loading.get(session_id) is done else None)
+        return await asyncio.shield(load)
+
+    async def _load_state(self, session_id: str) -> SessionState | None:
         try:
             session = await self.sessions.get(session_id, TENANT)
         except Exception:
@@ -1604,6 +1622,9 @@ class SessionManager:
         measurement = await self.db.kv_get(f"context_measurement:{session_id}", {})
         state.usage_floor_seq = int(measurement.get("floor", 0))
         state.observed_prompt_tokens = int(measurement.get("tokens", 0))
+        # A state installed meanwhile by another path (a session just created) is the live one.
+        if (held := self._states.get(session_id)) is not None:
+            return held
         self._states[session_id] = state
         self.register_services(state)
         return state
