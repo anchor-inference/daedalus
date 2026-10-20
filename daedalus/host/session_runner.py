@@ -25,7 +25,9 @@ from protocore.contracts.runtime_constants import LoopConstants
 from protocore.contracts.tool_registry import ToolVisibilityPolicy, policy_admits, tool_group_of
 from protocore.contracts.types import (
     COMPACTION_SUMMARY_METADATA_KEY,
+    IMAGE_REFS_METADATA_KEY,
     OPERATOR_WORDS_METADATA_KEY,
+    ImageRefBlock,
     Message,
     MessageRole,
     Run,
@@ -6769,14 +6771,15 @@ def operator_words_metadata(origin: str, text: str, passages: Sequence[str] | No
 
 def _queued_attachments(attachments: Sequence[Attachment]) -> list[dict[str, Any]]:
     """The files of a message that waits in a queue, as the item carries them: each kept file's name
-    and type, and the blob an image was kept as. A file the store refused was never kept and is not listed."""
+    and type, and the blob an image was kept as, under the core's ``blob_ref`` so the core places the image
+    with the words. A file the store refused was never kept and is not listed."""
     out: list[dict[str, Any]] = []
     for item in attachments:
         if not item.stored_name:
             continue
         entry: dict[str, Any] = {"name": item.stored_name, "mime_type": item.mime_type}
         if item.image_ref:
-            entry["image_ref"] = item.image_ref
+            entry["blob_ref"] = item.image_ref
         out.append(entry)
     return out
 
@@ -6793,14 +6796,17 @@ def _queued_image_refs(items: Sequence[dict[str, Any]]) -> list[tuple[str, str]]
     refs: list[tuple[str, str]] = []
     for item in items:
         for entry in item.get("attachments") or []:
-            if isinstance(entry, dict) and entry.get("image_ref"):
-                refs.append((str(entry["image_ref"]), str(entry.get("mime_type") or "image/png")))
+            if isinstance(entry, dict) and entry.get("blob_ref"):
+                refs.append((str(entry["blob_ref"]), str(entry.get("mime_type") or "image/png")))
     return refs
 
 
 def _image_refs_metadata(image_refs: Sequence[tuple[str, str]]) -> dict[str, Any]:
-    """The mark that makes the wire send a user message's images with it (see ``providers.wire``)."""
-    return {"image_refs": [{"ref": ref, "mime": mime} for ref, mime in image_refs]} if image_refs else {}
+    """The mark that makes the wire send a user message's images with it, in the core's own key and
+    shape, so the core prices them and anything built on the core reads them (see ``providers.wire``)."""
+    if not image_refs:
+        return {}
+    return {IMAGE_REFS_METADATA_KEY: [ImageRefBlock(blob_ref=ref, mime_type=mime).model_dump(mode="json") for ref, mime in image_refs]}
 
 
 # What the app draws a message from besides its text. The queued row has it from ``submit``; the copy the

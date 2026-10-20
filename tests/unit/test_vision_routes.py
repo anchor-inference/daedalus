@@ -18,7 +18,7 @@ from typing import Any
 import httpx
 import pytest
 from protocore.contracts.llm import LLMResponse, LLMResponseUsage
-from protocore.contracts.types import Message, MessageRole, StopReason, TextBlock
+from protocore.contracts.types import Message, MessageRole, StopReason, TextBlock, message_image_refs
 
 from daedalus.config import ModelPresetConfig, RuntimeConfig, Settings, VisionConfig
 from daedalus.host.setting_refs import VISION_OUTPUT
@@ -222,8 +222,8 @@ async def test_a_picture_named_for_another_type_is_sent_as_what_its_bytes_are(tm
 
     class Looking(_Provider):
         async def complete_text(self, request: Any) -> Any:
-            refs = request.messages[-1].metadata["image_refs"]
-            seen.extend([refs[0]["mime"], (await store.head(TENANT, refs[0]["ref"])).content_type])
+            [image] = message_image_refs(request.messages[-1])
+            seen.extend([image.mime_type, (await store.head(TENANT, image.blob_ref)).content_type])
             return await super().complete_text(request)
 
     await vision.look((Looking("a planet"), "claude-sonnet-5-5", store, TENANT), None, jpeg, "image/png", "describe")

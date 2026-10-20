@@ -28,6 +28,7 @@ from daedalus.stores.comparison_schema import MIGRATION as COMPARISON_MIGRATION
 from daedalus.stores.contract_change_schema import MIGRATION as CONTRACT_CHANGE_MIGRATION
 from daedalus.stores.control_schema import MIGRATION as CONTROL_MIGRATION
 from daedalus.stores.coordinator_handoff_schema import MIGRATION as COORDINATOR_HANDOFF_MIGRATION
+from daedalus.stores.core_image_keys import move_image_keys
 from daedalus.stores.edit_board import SCHEMA as EDIT_BOARD_SCHEMA
 from daedalus.stores.execution_schema import MIGRATION as EXECUTION_MIGRATION
 from daedalus.stores.exploration_schema import MIGRATION as EXPLORATION_MIGRATION
@@ -2643,6 +2644,17 @@ def _sealed_checkpoint_stores(db: Database) -> DataMigration:
 
 
 MIGRATIONS.append(_sealed_checkpoint_stores)
+
+
+async def _core_image_keys(conn: aiosqlite.Connection) -> None:
+    """Pictures already in a history, a snapshot or a queue are renamed the way the core reads them
+    (see ``stores.core_image_keys``); without it they would stop reaching the model at the upgrade."""
+    moved = await move_image_keys(conn)
+    if moved:
+        logger.info("moved the images of %d stored row(s) onto the core's keys", moved)
+
+
+MIGRATIONS.append(DataMigration("SELECT 1;", _core_image_keys))
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session

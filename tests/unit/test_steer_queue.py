@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx
 import pytest
-from protocore.contracts.types import TextBlock
+from protocore.contracts.types import TextBlock, message_image_refs
 
 from daedalus.config import Settings
 from daedalus.extensions.api import build_app
@@ -558,11 +558,7 @@ def _behave_like_windows(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _images_the_model_saw(provider: ScriptedProvider) -> list[str]:
-    return [
-        str(ref["ref"])
-        for message in provider.requests[-1].messages
-        for ref in (message.metadata or {}).get("image_refs") or []
-    ]
+    return [image.blob_ref for message in provider.requests[-1].messages for image in message_image_refs(message)]
 
 
 async def test_a_blob_is_kept_on_a_platform_that_cannot_open_a_directory(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 import pytest
-from protocore.contracts.types import MessageRole, TextBlock
+from protocore.contracts.types import MessageRole, TextBlock, message_image_refs
 
 from daedalus.config import Settings
 from daedalus.extensions import questions, side_questions
@@ -196,7 +196,7 @@ async def test_answers_start_a_turn_of_an_idle_session_with_each_question_quoted
     assert "Attached files:" in text and "inbox/screenshot.png" in text
     assert (state.workspace / "inbox" / "screenshot.png").read_bytes() == PNG
     [message] = [m for m in await manager.sessions.list_transcript(sid) if m.metadata.get("daedalus.origin") == side_questions.ORIGIN]
-    assert message.metadata.get("image_refs"), "the model is shown the image, not only its path"
+    assert message_image_refs(message), "the model is shown the image, not only its path"
     assert {"change": "answered", "ask_ids": [port.id, look.id]} in await side_events(manager, sid)
     await settled(manager)
 

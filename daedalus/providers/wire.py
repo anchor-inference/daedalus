@@ -10,7 +10,6 @@ from collections.abc import Awaitable, Callable, Container, Sequence
 from typing import Any
 
 from protocore.contracts.types import (
-    ImageRefBlock,
     Message,
     MessageRole,
     TextBlock,
@@ -18,6 +17,7 @@ from protocore.contracts.types import (
     ToolDefinition,
     ToolResultBlock,
     ToolUseBlock,
+    message_image_refs,
 )
 
 from daedalus.security.redact import redact
@@ -66,12 +66,9 @@ keeps only a handful, and a step of ten could leave out every one of them."""
 
 
 def _image_refs_of(message: Message) -> list[tuple[str, str]]:
-    """``(blob_ref, mime)`` of every picture a user message carries, as blocks or in ``metadata["image_refs"]``."""
-    refs = [(block.blob_ref, block.mime_type) for block in message.content_blocks if isinstance(block, ImageRefBlock)]
-    for ref in message.metadata.get("image_refs") or []:
-        if isinstance(ref, dict) and ref.get("ref"):
-            refs.append((str(ref["ref"]), str(ref.get("mime") or "image/png")))
-    return refs
+    """``(blob_ref, mime)`` of every picture a user message carries, read the core's way: its image
+    blocks, then the list under ``protocore.image_refs`` (a user turn holds a single text block)."""
+    return [(image.blob_ref, image.mime_type) for image in message_image_refs(message)]
 
 
 async def images_left_out(
@@ -166,7 +163,7 @@ async def messages_to_wire(
                 entry["content"] = ""
             wire.append(entry)
             continue
-        # user: one text block; images ride in ``metadata["image_refs"]`` (the core allows a single block)
+        # user: one text block; images ride under ``protocore.image_refs`` (the core allows a single block)
         texts = [block.text for block in message.content_blocks if isinstance(block, TextBlock)]
         content: list[dict[str, Any]] = [{"type": "text", "text": t} for t in texts]
         has_image = False

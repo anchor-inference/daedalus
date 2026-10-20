@@ -7,7 +7,15 @@ from typing import Any
 
 from protocore.contracts.llm import LLMRequest, LLMResponse
 from protocore.contracts.tools import ToolContext
-from protocore.contracts.types import Message, MessageRole, StopReason, TextBlock, ToolResult
+from protocore.contracts.types import (
+    IMAGE_REFS_METADATA_KEY,
+    ImageRefBlock,
+    Message,
+    MessageRole,
+    StopReason,
+    TextBlock,
+    ToolResult,
+)
 from protocore.tools.decorator import tool
 
 from daedalus.host.setting_refs import VISION_MODEL, VISION_OUTPUT, SettingRef
@@ -228,7 +236,7 @@ async def _ask(vision: Any, manager: Any, data: bytes, mime: str, task: str, *, 
         Message(
             role=MessageRole.user,
             content_blocks=[TextBlock(text=f"Request: {task}")],
-            metadata={"image_refs": [{"ref": meta.ref, "mime": mime}]},
+            metadata={IMAGE_REFS_METADATA_KEY: [ImageRefBlock(blob_ref=meta.ref, mime_type=mime).model_dump(mode="json")]},
         ),
     ]
     budget = max_out

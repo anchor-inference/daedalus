@@ -40,6 +40,8 @@ from typing import Any
 from protocore.constants import MAX_TOOL_CALL_ARGUMENT_BYTES
 from protocore.contracts.types import (
     COMPACTION_SUMMARY_METADATA_KEY,
+    IMAGE_REFS_METADATA_KEY,
+    ImageRefBlock,
     Message,
     MessageRole,
     TextBlock,
@@ -556,7 +558,7 @@ class Converter:
             self._assistant(turn, parts, at, seq, sidechain, counts, out, entries)
             return entries
         texts: list[str] = []
-        refs: list[dict[str, str]] = []
+        refs: list[dict[str, Any]] = []
 
         def flush() -> None:
             if not texts and not refs:
@@ -564,7 +566,7 @@ class Converter:
             body = "\n\n".join(texts) if texts else "(image)"
             metadata = {"daedalus.origin": "operator", **self._meta(turn, sidechain)}
             if refs:
-                metadata["image_refs"] = list(refs)
+                metadata[IMAGE_REFS_METADATA_KEY] = list(refs)
             message = Message(role=MessageRole.user, content_blocks=[TextBlock(text=body)], created_at=self._tick(at), metadata=metadata)
             entries.append(Entry(message, None if sidechain else message, seq, sidechain, operator=not sidechain))
             counts["user"] += 1
@@ -595,7 +597,7 @@ class Converter:
         flush()
         return entries
 
-    def _image(self, part: dict[str, Any], out: Conversion, refs: list[dict[str, str]]) -> str:
+    def _image(self, part: dict[str, Any], out: Conversion, refs: list[dict[str, Any]]) -> str:
         """Store an image's bytes under the reference the blob store will give them, or return the line
         that says it could not be carried over."""
         mime = str(part.get("mime") or "image/png")
@@ -609,7 +611,7 @@ class Converter:
             if data and len(data) <= IMAGE_MAX_BYTES:
                 ref = hashlib.sha256(data).hexdigest()
                 out.blobs[ref] = (data, mime)
-                refs.append({"ref": ref, "mime": mime})
+                refs.append(ImageRefBlock(blob_ref=ref, mime_type=mime).model_dump(mode="json"))
                 return ""
         return f"[image: {name}, unavailable]"
 

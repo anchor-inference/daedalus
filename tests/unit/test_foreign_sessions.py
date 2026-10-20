@@ -16,6 +16,7 @@ from protocore.contracts.types import (
     ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
+    message_image_refs,
 )
 
 from daedalus.config import ModelPresetConfig
@@ -187,9 +188,9 @@ def test_an_image_is_kept_by_its_reference_and_a_missing_one_is_said() -> None:
     conversion = Converter("claude").convert(turns)
     first, second = (e.history for e in conversion.entries)
     assert first is not None and second is not None
-    ref = first.metadata["image_refs"][0]["ref"]
-    assert conversion.blobs[ref] == (picture, "image/png")
-    assert "[image: /home/someone/gone.png, unavailable]" in second.text and "image_refs" not in second.metadata
+    [image] = message_image_refs(first)
+    assert conversion.blobs[image.blob_ref] == (picture, "image/png") and image.mime_type == "image/png"
+    assert "[image: /home/someone/gone.png, unavailable]" in second.text and not message_image_refs(second)
 
 
 def test_a_call_left_without_a_result_is_said_rather_than_left_hanging() -> None:

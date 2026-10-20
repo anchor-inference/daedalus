@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx
 from protocore.contracts.llm import LLMRequest
-from protocore.contracts.types import Message, MessageRole, TextBlock
+from protocore.contracts.types import IMAGE_REFS_METADATA_KEY, ImageRefBlock, Message, MessageRole, TextBlock
 
 from daedalus.providers.openai_compat import OpenAICompatibleProvider, ProviderEndpoint
 from daedalus.providers.wire import IMAGE_WINDOW_STEP, MAX_REQUEST_IMAGE_BYTES, MAX_REQUEST_IMAGES, images_left_out
@@ -20,7 +20,7 @@ from daedalus.providers.wire import IMAGE_WINDOW_STEP, MAX_REQUEST_IMAGE_BYTES, 
 def _pictures(count: int) -> list[Message]:
     messages = []
     for index in range(count):
-        messages.append(Message(role=MessageRole.user, content_blocks=[TextBlock(text=f"shot {index}")], metadata={"image_refs": [{"ref": f"blob-{index}", "mime": "image/png"}]}))
+        messages.append(Message(role=MessageRole.user, content_blocks=[TextBlock(text=f"shot {index}")], metadata={IMAGE_REFS_METADATA_KEY: [ImageRefBlock(blob_ref=f"blob-{index}").model_dump(mode="json")]}))
         messages.append(Message(role=MessageRole.assistant, content_blocks=[TextBlock(text="seen")]))
     return messages
 
