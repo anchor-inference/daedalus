@@ -17,7 +17,7 @@ describe("connecting", () => {
     expect(h.current().config).toEqual({ kind: "native" });
     const [hello] = h.take();
     expect(shape(hello)).toEqual(shape(goldenFrame("hello")));
-    expect(hello).toMatchObject({ t: "hello", proto: 1, ext_version: "0.1.0", platform: "linux", profile_name: "Chrome" });
+    expect(hello).toMatchObject({ t: "hello", proto: 2, ext_version: "0.1.0", platform: "linux", profile_name: "Chrome" });
     expect(hello.profile_id).toMatch(/^[0-9a-f-]{36}$/);
     // The profile id is kept, so the same Chrome is the same Chrome after a restart.
     expect((await h.fake.chrome.storage.local.get("profileId")).profileId).toBe(hello.profile_id);
@@ -64,8 +64,8 @@ describe("connecting", () => {
   });
 
   it.each([
-    [2, "version_extension"],
-    [0, "version_daemon"],
+    [3, "version_extension"],
+    [1, "version_daemon"],
   ])("refuses a daemon speaking protocol %i: %s", async (proto, error) => {
     const h = await harness();
     await h.welcome(proto);
