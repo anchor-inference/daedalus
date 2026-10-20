@@ -30,6 +30,8 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from daedalus.host import tool_groups
+
 if TYPE_CHECKING:
     from daedalus.stores.database import Database
 
@@ -221,8 +223,6 @@ async def mark_panel_session(manager: Any, session_id: str) -> None:
     """Mark a conversation as one the operator holds from the side panel, and have its runs start with
     the browser's tools loaded: the group is on demand elsewhere, and an agent told to work in the
     browser should not have to search for the tools first. Written once; later calls change nothing."""
-    from daedalus.host import tool_groups
-
     state = await manager.get_state(session_id)
     if state is None:
         return
