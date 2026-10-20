@@ -2644,6 +2644,103 @@ def _sealed_checkpoint_stores(db: Database) -> DataMigration:
 
 MIGRATIONS.append(_sealed_checkpoint_stores)
 
+# The operator's own Chrome is a third browser environment, ``user``: the browser tables take it. A
+# CHECK cannot be widened in place in SQLite, so the four tables are rebuilt with every column they
+# carry now (two gained columns by ALTER since they were made). Nothing refers to them by a foreign
+# key and no trigger watches them, so the rows move as they are and the indexes are made again.
+MIGRATIONS.append("""
+CREATE TABLE browsers_rebuilt (
+    id TEXT NOT NULL,
+    env TEXT NOT NULL CHECK (env IN ('container', 'host', 'user')),
+    profile TEXT NOT NULL,
+    pid INTEGER,
+    status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'exited', 'lost')),
+    reason TEXT NOT NULL DEFAULT '',
+    chromium_version TEXT NOT NULL DEFAULT '',
+    daemon_instance TEXT NOT NULL DEFAULT '',
+    started_at TEXT NOT NULL,
+    exited_at TEXT,
+    PRIMARY KEY (env, id)
+);
+INSERT INTO browsers_rebuilt SELECT id, env, profile, pid, status, reason, chromium_version, daemon_instance, started_at, exited_at FROM browsers;
+DROP TABLE browsers;
+ALTER TABLE browsers_rebuilt RENAME TO browsers;
+CREATE INDEX browsers_by_status ON browsers(status);
+CREATE TABLE browser_profiles_rebuilt (
+    id TEXT NOT NULL,
+    env TEXT NOT NULL CHECK (env IN ('container', 'host', 'user')),
+    scope TEXT NOT NULL CHECK (scope IN ('project', 'session', 'staff', 'ephemeral')),
+    project_id TEXT,
+    session_id TEXT,
+    staff_id TEXT,
+    created_at TEXT NOT NULL,
+    last_used_at TEXT NOT NULL,
+    PRIMARY KEY (env, id)
+);
+INSERT INTO browser_profiles_rebuilt SELECT id, env, scope, project_id, session_id, staff_id, created_at, last_used_at FROM browser_profiles;
+DROP TABLE browser_profiles;
+ALTER TABLE browser_profiles_rebuilt RENAME TO browser_profiles;
+CREATE TABLE browser_groups_rebuilt (
+    id TEXT PRIMARY KEY,
+    env TEXT NOT NULL CHECK (env IN ('container', 'host', 'user')),
+    profile TEXT NOT NULL,
+    browser_id TEXT NOT NULL DEFAULT '',
+    owner_kind TEXT NOT NULL CHECK (owner_kind IN ('session', 'staff')),
+    owner_id TEXT NOT NULL,
+    project_id TEXT,
+    session_id TEXT,
+    staff_id TEXT,
+    fresh INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed', 'lost')),
+    close_reason TEXT NOT NULL DEFAULT '',
+    control_owner TEXT NOT NULL DEFAULT 'agent' CHECK (control_owner IN ('agent', 'human', 'paused')),
+    control_reason TEXT NOT NULL DEFAULT '',
+    url TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    tabs INTEGER NOT NULL DEFAULT 0,
+    daemon_instance TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    last_activity_at TEXT NOT NULL,
+    closed_at TEXT,
+    needs_json TEXT,
+    last_action_json TEXT
+);
+INSERT INTO browser_groups_rebuilt SELECT id, env, profile, browser_id, owner_kind, owner_id, project_id, session_id, staff_id, fresh, status, close_reason, control_owner,
+    control_reason, url, title, tabs, daemon_instance, created_by, created_at, last_activity_at, closed_at, needs_json, last_action_json FROM browser_groups;
+DROP TABLE browser_groups;
+ALTER TABLE browser_groups_rebuilt RENAME TO browser_groups;
+CREATE INDEX browser_groups_by_owner ON browser_groups(owner_kind, owner_id);
+CREATE INDEX browser_groups_by_session ON browser_groups(session_id);
+CREATE INDEX browser_groups_by_staff ON browser_groups(staff_id);
+CREATE INDEX browser_groups_by_project ON browser_groups(project_id);
+CREATE INDEX browser_groups_by_status ON browser_groups(status, env);
+CREATE TABLE browser_workflows_rebuilt (
+    id TEXT PRIMARY KEY,
+    group_id TEXT NOT NULL,
+    env TEXT NOT NULL CHECK (env IN ('container', 'host', 'user')),
+    project_id TEXT,
+    session_id TEXT,
+    staff_id TEXT,
+    status TEXT NOT NULL DEFAULT 'recording' CHECK (status IN ('recording', 'stopped')),
+    values_mode TEXT NOT NULL DEFAULT 'slots' CHECK (values_mode IN ('slots', 'literal')),
+    stop_reason TEXT NOT NULL DEFAULT '',
+    start_url TEXT NOT NULL DEFAULT '',
+    start_title TEXT NOT NULL DEFAULT '',
+    steps_json TEXT NOT NULL DEFAULT '[]',
+    note_id TEXT NOT NULL DEFAULT '',
+    started_at TEXT NOT NULL,
+    stopped_at TEXT,
+    skill TEXT NOT NULL DEFAULT ''
+);
+INSERT INTO browser_workflows_rebuilt SELECT id, group_id, env, project_id, session_id, staff_id, status, values_mode, stop_reason, start_url, start_title, steps_json,
+    note_id, started_at, stopped_at, skill FROM browser_workflows;
+DROP TABLE browser_workflows;
+ALTER TABLE browser_workflows_rebuilt RENAME TO browser_workflows;
+CREATE INDEX browser_workflows_by_group ON browser_workflows(group_id, started_at);
+CREATE INDEX browser_workflows_by_stopped ON browser_workflows(stopped_at);
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""
