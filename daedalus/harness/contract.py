@@ -108,8 +108,10 @@ class StaffEvent:
 
     The payload keys the state machine reads: ``summary`` (what a permission or question is about),
     ``failure`` (why a turn failed), ``screen`` (a ``ScreenClass`` value for ``reconciled``),
-    ``exit_code``. ``edited`` (the files a finished tool wrote) is for the edit board. Anything else
-    is for the log and the feed.
+    ``exit_code``. ``edited`` (the files a finished tool wrote) is for the edit board. A failure with
+    ``outage`` was the provider's or the account's, not the work's (a usage limit, an overloaded
+    service): the runtime waits, until ``resets_at`` (an ISO time) when the CLI said, and drives the
+    turn again. Anything else is for the log and the feed.
     """
 
     kind: EventKind

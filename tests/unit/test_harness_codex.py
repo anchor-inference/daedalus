@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -444,6 +445,38 @@ async def test_a_failed_turn_is_an_error_in_codexs_words(settings: Settings, db:
         assert "usageLimitExceeded" in failed.payload["detail"]
 
 
+async def test_a_member_out_of_quota_is_paused_and_takes_its_work_up_again_once_the_window_resets(settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A member that hit its ChatGPT usage limit was simply "failed", and stayed so until someone
+    # wrote to it, while the host's own sessions wait out an outage and drive the turn again.
+    from daedalus.harness import runtime as runtime_module
+
+    monkeypatch.setattr(runtime_module, "RESET_SLACK_S", 0.0)
+    async with stand(settings, db, extra_env={"FAKE_CODEX_RESET_S": "1.5"}, **codex()) as s:
+        ada = await started(s, "fail:usageLimitExceeded")
+        paused = await s.status_event(ada, "error")
+        assert paused.payload["detail"].startswith("paused until ") and "usageLimitExceeded" in paused.payload["detail"]
+        await s.status_event(ada, "turn_done_unseen", timeout=30)
+        assert await s.statuses(ada) == ["starting", "working", "error", "working", "turn_done_unseen"]
+        live = await s.team.live((await s.session_row(ada)).id)
+        said = [t.text for t in await s.runtime.turns(live) if t.role == "user"]  # type: ignore[arg-type]
+        assert any("usage limit" in text and "continue" in text for text in said), said
+
+
+async def test_a_member_whose_provider_keeps_failing_is_resumed_only_so_many_times(settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    from daedalus.harness import runtime as runtime_module
+
+    monkeypatch.setattr(runtime_module, "OUTAGE_NOTE", "[orchestrator] fail:serverOverloaded")
+    async with stand(settings, db, outage_retry_attempts=2, outage_retry_base_s=0.2, outage_retry_max_s=0.2, **codex()) as s:
+        ada = await started(s, "fail:serverOverloaded")
+
+        async def given_up() -> bool:
+            errors = [e for e in await s.events("staff.status", staff_id=ada.id) if e.payload["status"] == "error"]
+            return any("not resumed" in e.payload["detail"] for e in errors)
+
+        await eventually(given_up, "the third failure in a row is left failed", timeout=30)
+        assert (await s.statuses(ada)).count("error") == 3
+
+
 async def test_a_codex_that_leaves_a_link_at_its_socket_is_reached_through_it(settings: Settings, db: Database) -> None:
     # Codex 0.157 and later bind the app server's socket in a private directory of their own and leave
     # a link at the path they were given; the daemon follows it there.
@@ -658,3 +691,34 @@ def test_the_host_and_the_terminal_daemon_skip_the_same_injected_fragments() -> 
     assert block is not None
     daemon = tuple(json.loads(f"[{block.group(1).strip().rstrip(',')}]"))
     assert daemon == INJECTED
+
+
+# -- a member out of quota --------------------------------------------------------------------------
+
+
+def test_a_turn_refused_for_quota_says_so_with_the_reset_codex_reported() -> None:
+    adapter = CodexAdapter()
+    state = _Launch(thread_id="t1")
+    resets = 1_790_000_000
+    adapter._notification(state, "account/rateLimits/updated", {"rateLimits": {"primary": {"usedPercent": 100, "windowDurationMins": 300, "resetsAt": resets}, "secondary": {"usedPercent": 40, "windowDurationMins": 10080, "resetsAt": resets + 86400}}})
+    adapter._notification(state, "turn/started", {"threadId": "t1", "turn": {"id": "u1"}})
+    adapter._notification(state, "turn/completed", {"threadId": "t1", "turn": {"id": "u1", "status": "failed", "error": {"message": "You've hit your usage limit.", "codexErrorInfo": "usageLimitExceeded"}}})
+    [failed] = [e for e in drain(state) if e.kind is EventKind.TURN_FAILED]
+    # The account, not the work, failed: the runtime pauses the member until the window resets.
+    assert failed.payload["code"] == "usageLimitExceeded" and failed.payload["outage"] is True
+    assert failed.payload["resets_at"] == datetime.fromtimestamp(resets, UTC).isoformat()
+
+
+def test_an_error_info_given_as_an_object_is_named_by_its_key_and_is_no_outage() -> None:
+    adapter = CodexAdapter()
+    state = _Launch(thread_id="t1")
+    adapter._notification(state, "turn/started", {"threadId": "t1", "turn": {"id": "u1"}})
+    adapter._notification(state, "turn/completed", {"threadId": "t1", "turn": {"id": "u1", "status": "failed", "error": {"message": "unauthorized", "codexErrorInfo": {"httpConnectionFailed": {"httpStatusCode": 401}}}}})
+    [failed] = [e for e in drain(state) if e.kind is EventKind.TURN_FAILED]
+    # Once the dict's repr, "{'httpConnectionFailed': {'httpStatusCode': 401}}", which nothing could match.
+    assert failed.payload["code"] == "httpConnectionFailed" and not failed.payload.get("outage")
+    overloaded = _Launch(thread_id="t1")
+    adapter._notification(overloaded, "turn/started", {"threadId": "t1", "turn": {"id": "u2"}})
+    adapter._notification(overloaded, "turn/completed", {"threadId": "t1", "turn": {"id": "u2", "status": "failed", "error": {"message": "busy", "codexErrorInfo": "serverOverloaded"}}})
+    [busy] = [e for e in drain(overloaded) if e.kind is EventKind.TURN_FAILED]
+    assert busy.payload["outage"] is True and "resets_at" not in busy.payload

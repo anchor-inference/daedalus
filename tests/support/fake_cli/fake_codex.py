@@ -459,6 +459,10 @@ class AppServer:
         except TurnFailure as failure:
             outcome = "failed"
             error = {"message": FAILURE_TEXT.get(failure.kind, failure.kind), "codexErrorInfo": failure.kind}
+            if failure.kind in ("usageLimitExceeded", "rateLimitExceeded"):
+                # Codex reports the exhausted window, with its reset, to every client before the
+                # turn ends; ``FAKE_CODEX_RESET_S`` is how far ahead that reset lies.
+                await self.rate_limits(100, time.time() + float(os.environ.get("FAKE_CODEX_RESET_S") or 3600))
             await self.notify(thread, "error", {"threadId": thread.id, "turnId": turn["id"], "error": error, "willRetry": False})
         turn["status"], turn["error"] = outcome, error
         thread.active = None
@@ -473,6 +477,11 @@ class AppServer:
         if self.faults.exit_after and self.turns_done >= self.faults.exit_after:
             self.log("exit", code=3, crash=True)
             os._exit(3)
+
+    async def rate_limits(self, used: int, resets_at: float) -> None:
+        """``account/rateLimits/updated``: about the account, so to every client, with no thread."""
+        window = {"usedPercent": used, "windowDurationMins": 300, "resetsAt": int(resets_at)}
+        await self.broadcast("account/rateLimits/updated", {"rateLimits": {"limitId": "codex", "primary": window, "secondary": {"usedPercent": 40, "windowDurationMins": 10080, "resetsAt": int(resets_at) + 86400}}})
 
     async def take_steers(self, thread: Thread, turn: dict[str, Any]) -> None:
         """Steered messages join the running turn between tool calls, each with its own ``clientId``."""

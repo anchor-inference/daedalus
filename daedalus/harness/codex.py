@@ -137,6 +137,11 @@ WAITING_GRACE_S = 1.5
 """How long the thread may say it waits on an approval before the host, having received no request,
 tells the operator to answer in the terminal."""
 TIMEOUT_SLACK_S = 60
+OUTAGES = frozenset({"usageLimitExceeded", "rateLimitExceeded", "serverOverloaded"})
+"""The ``codexErrorInfo`` tags that say the account or the service failed, not the work: the turn is
+driven again once the wait is over, as the host does for its own providers."""
+QUOTAS = frozenset({"usageLimitExceeded", "rateLimitExceeded"})
+"""Of those, the ones a rate-limit window's reset ends."""
 TRANSCRIPT_MAX_BYTES = 32 << 20
 DIALOG_MARKERS = (
     "Update available!",
@@ -240,6 +245,8 @@ class _Launch:
     stopping: bool = False
     connected: asyncio.Event = field(default_factory=asyncio.Event)
     tasks: list[asyncio.Task[Any]] = field(default_factory=list)
+    rate_limits: dict[str, Any] = field(default_factory=dict)
+    """The account's rate-limit windows as ``account/rateLimits/updated`` last gave them."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -679,6 +686,9 @@ class CodexAdapter:
                     self._put(state, EventKind.REQUEST_RESOLVED, {}, ref)
         elif method == "thread/status/changed":
             self._status(state, params.get("status") or {})
+        elif method == "account/rateLimits/updated":
+            limits = params.get("rateLimits")
+            state.rate_limits = limits if isinstance(limits, dict) else {}
         else:
             self._put(state, EventKind.ACTIVITY, {"method": method})
 
@@ -728,7 +738,14 @@ class CodexAdapter:
         elif status == "failed":
             error = turn.get("error") or {}
             failure = str(error.get("message") or state.failure or "the turn failed") if isinstance(error, dict) else state.failure or "the turn failed"
-            self._put(state, EventKind.TURN_FAILED, {"failure": failure, "code": str(error.get("codexErrorInfo") or "") if isinstance(error, dict) else ""})
+            code = _error_tag(error.get("codexErrorInfo")) if isinstance(error, dict) else ""
+            payload: dict[str, Any] = {"failure": failure, "code": code}
+            if code in OUTAGES:
+                payload["outage"] = True
+                resets = _resets_at(state.rate_limits) if code in QUOTAS else ""
+                if resets:
+                    payload["resets_at"] = resets
+            self._put(state, EventKind.TURN_FAILED, payload)
         else:
             self._put(state, EventKind.TURN_COMPLETED, {"last_message": state.last_message})
 
@@ -863,6 +880,29 @@ class CodexAdapter:
         if offset:
             text = text.split("\n", 1)[1] if "\n" in text else ""
         return parse_rollout(text)[since:]
+
+
+def _error_tag(info: Any) -> str:
+    """A ``codexErrorInfo`` as one name: a string as it is, an object by its one key
+    (``{"httpConnectionFailed": {"httpStatusCode": 502}}``). Stringified whole, an object was a
+    Python dict's repr, which nothing could match."""
+    if isinstance(info, str):
+        return info
+    if isinstance(info, dict) and len(info) == 1:
+        return str(next(iter(info)))
+    return ""
+
+
+def _resets_at(limits: Mapping[str, Any]) -> str:
+    """When the exhausted rate-limit window resets, as an ISO time; empty when no window is full or
+    none says. Codex gives ``resetsAt`` in seconds since the epoch; of two full windows the later
+    reset is the one that ends the wait."""
+    resets = []
+    for name in ("primary", "secondary"):
+        window = limits.get(name)
+        if isinstance(window, dict) and float(window.get("usedPercent") or 0) >= 100 and isinstance(window.get("resetsAt"), int | float):
+            resets.append(float(window["resetsAt"]))
+    return datetime.fromtimestamp(max(resets), UTC).isoformat() if resets else ""
 
 
 ACCEPTING = ("accept", "allow_once", "allow_always")
