@@ -330,6 +330,9 @@ platform):
     pids/                   the records of running children
     ptyd/run/  ptyd/state/  the terminal daemon's endpoint and token (sealed), its journal of agent writes
     browserd/               the browser daemon's endpoint and the agent's browser profiles (sealed)
+    browserd-user/          the user browser daemon's endpoint and token, for your own Chrome (sealed)
+    browser-extension/      the Chrome extension you load unpacked, refreshed in place on each release
+    browser-connector/      the wrapper Chrome starts the bridge through (and its manifest on Windows)
     supervisor.sock         the supervisor's socket
 ```
 
@@ -822,6 +825,39 @@ skills drive (Playwright's headless launch looks for that one and does not start
 - **Not yet proven:** the Mac's Gatekeeper on a Chromium downloaded into the data folder, and the
   whole of it on Windows, where it is cross-compiled but has not run.
 
+### Your own Chrome
+
+Besides the agent's browser, the agent can work in **your** Google Chrome, with your logins, through
+the Daedalus extension. Chrome only, whatever its version. The launcher's part:
+
+- **A second daemon.** `browserd serve --env user --backend attach` starts beside the first, with its
+  own run directory (`browserd-user/run`, handed to the agent as `BROWSER_USER_DIR`) and token. It
+  launches no Chromium; it waits for the extension.
+- **The extension folder.** Each release carries the extension unpacked; on every start the launcher
+  checks it file by file against its `SHA256SUMS` and its key against the pinned id, and copies it
+  into the local state's `browser-extension/`. That folder keeps its path across releases, which is
+  what Chrome remembers an unpacked extension by. You load it once: `chrome://extensions`, Developer
+  mode, *Load unpacked*.
+- **The connector**, written only when you press *Register* in Settings → Browser → Your Chrome: a
+  native-messaging host named `com.daedalus.browser`, allowed to the Daedalus extension alone, that
+  starts `browserd bridge` through a small wrapper in `browser-connector/`. On Windows the manifest
+  is named by `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.daedalus.browser`; on macOS
+  and Linux it is written into each installed channel's `NativeMessagingHosts` folder
+  (`~/Library/Application Support/Google/Chrome/…`, `~/.config/google-chrome/…`). Chrome reads these
+  when it starts, so a Chrome already open needs a restart. Removing it, or uninstalling, deletes
+  ours and nothing beside it; a start after an upgrade rewrites a registration that names the old
+  browserd, and never creates one.
+- **Detection.** Stable, Beta, Dev and Canary, with their profiles from `Local State`, whether each
+  is running, and the policies that stand in the way (developer mode off, extensions or native hosts
+  blocked, developer tools disallowed): reported, never enforced — Chrome does that, and
+  `chrome://policy` shows the whole. A Flatpak Chrome is listed as unsupported: its sandbox cannot
+  start the bridge. `daedalus-desktop status` prints the same as `chrome`, `connector`, `extension`
+  and `policies` lines.
+
+The app reaches all of it over the launcher's loopback page with the token from the handover file:
+`GET /api/browser/user` (the report), `POST /api/browser/user/register` and
+`POST /api/browser/user/unregister` (each answers the new report).
+
 ### Windows
 
 Implemented and cross-compiled, with the path and argument logic under tests of its own, but **not
@@ -893,7 +929,7 @@ the agent — and runs `daedalus-desktop uninstall` before it removes the progra
 removes the containers and networks (the volumes too when you delete the data), in native mode it
 stops whatever of the installation still runs (and removes the downloaded runtime and the local
 state when you delete the data). It removes the `daedalus://` registration when that still points at
-this installation.
+this installation, and the Chrome connector if you registered one.
 
 To remove the data by hand afterwards, on any system: run `daedalus-desktop uninstall --remove-data`
 before removing the application, or delete the per-user folder ([The folder](#the-folder)) and the

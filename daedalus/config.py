@@ -303,6 +303,11 @@ class Settings(BaseSettings):
     browser_host_dir: Path | None = None
     """The same for the ``host`` environment: natively, a directory the launcher gives the browser
     daemon it starts beside the agent."""
+    browser_user_dir: Path | None = None
+    """The same for the ``user`` environment: the daemon that launches no browser and drives the
+    operator's own Chrome through the Daedalus extension. Natively the launcher starts it beside the
+    ``host`` one; on a server it is the ``browser-user`` compose service, whose run directory is
+    mounted here. Unset = no "Your Chrome" on this installation."""
 
     usd_per_day: float = 20.0
     """Daily spend cap. Enforced by the supervisor from its own environment, never from config.toml."""
@@ -424,7 +429,7 @@ class Settings(BaseSettings):
         unlike the rest of the sealed set, a container is no boundary for them: the directories are
         mounted into this container precisely so the app can reach the daemons.
         """
-        dirs = (self.terminals_container_dir, self.terminals_host_dir, self.browser_container_dir, self.browser_host_dir)
+        dirs = (self.terminals_container_dir, self.terminals_host_dir, self.browser_container_dir, self.browser_host_dir, self.browser_user_dir)
         return tuple(p for p in dirs if p is not None)
 
     @property
@@ -2015,6 +2020,43 @@ class BrowserRuleConfig(BaseModel):
     note: str = ""
 
 
+class BrowserUserConfig(BaseModel):
+    """The operator's own Chrome as a browser the agent may be given (``[browser.user]``).
+
+    Stricter than the agent's browser by default, because every site the operator is signed in to is
+    one navigation away from it: the injection monitor and watch mode are on, and a request's response
+    body (a logged-in API's answer is personal data) is refused unless the operator turns it on here.
+    """
+
+    enabled: bool = True
+    """Whether a conversation may be switched to the operator's Chrome at all. Off hides the switch;
+    the daemon and the extension are left as they are."""
+    granted_sites: list[str] = Field(default_factory=list, max_length=200)
+    """Sites (``example.com``, which covers its subdomains) the agent may open in the operator's Chrome
+    in any conversation without asking. Every other site asks once per conversation."""
+    monitor: bool = True
+    """The injection monitor, for pages read in the operator's Chrome, whatever ``[browser]
+    injection_monitor`` says for the agent's own browser."""
+    watch: bool = True
+    """Watch mode on the watched sites (``[browser] watch_domains``), in the operator's Chrome."""
+    bodies: bool = False
+    """Whether BrowserNetwork may read a response body there, and then only on a granted site."""
+
+    @field_validator("granted_sites")
+    @classmethod
+    def _sites(cls, value: list[str]) -> list[str]:
+        out: list[str] = []
+        for item in value:
+            site = item.strip().lower().strip(".")
+            if site.startswith("*."):
+                site = site[2:]
+            if not site or not re.fullmatch(r"[a-z0-9.-]{1,253}", site) or "." not in site:
+                raise ValueError(f"{item!r} is not a site like example.com")
+            if site not in out:
+                out.append(site)
+        return out
+
+
 class BrowserConfig(BaseModel):
     """The agent's browser: Chromium run by a browser daemon per environment."""
 
@@ -2101,6 +2143,8 @@ class BrowserConfig(BaseModel):
     ref, for what the outline does not name (a canvas, a map). Off by default: a point is harder for
     the operator to read in the action log. The element found at the point is hit-tested and
     classified as a ref's would be, so a sensitive one is still asked about."""
+    user: BrowserUserConfig = Field(default_factory=BrowserUserConfig)
+    """The operator's own Chrome (``[browser.user]``)."""
 
 
 NAV_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")

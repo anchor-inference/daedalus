@@ -373,6 +373,10 @@ GATES: dict[str, object] = {
     "/api/browsers/profiles": {"profiles": []},
     "/api/browsers/recordings": {"envs": []},
     "/api/browsers/notes": {"notes": []},
+    # Settings → Browser → Your Chrome: an installation without a daemon for the operator's Chrome,
+    # where the card is not drawn. check_user_browser.py answers the card's routes itself.
+    "/api/browser/user": {"configured": False, "enabled": True, "daemon": False, "reason": "not_configured", "detail": "", "relay": None, "native": False,
+                          "launcher": None, "launcher_error": "", "devices": [], "server_url": "", "consent": ""},
     # Settings → Rules: the categories and levels the host knows, and two review decisions to list.
     "/api/action-rules": ACTION_RULES,
     # Remote identity is optional and empty until a real host is paired.

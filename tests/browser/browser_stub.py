@@ -197,6 +197,9 @@ class BrowserStub:
         self.counter = 0
         self.action_counter = 0
         self.available = True
+        self.user: dict[str, Any] | None = None
+        """A conversation's choice of browser where the operator's Chrome is offered (``user`` in a
+        session's listing); ``None`` on an installation that does not offer it."""
         self.running: list[dict[str, Any]] = []
         """The browsers Settings lists as running (``/api/browsers/running``)."""
         self.profiles: list[dict[str, Any]] = []
@@ -558,7 +561,10 @@ class BrowserStub:
                     if (session and g.owner_kind == "session" and g.owner_id == session) or (staff and g.owner_kind == "staff" and g.owner_id == staff)]
             if query.get("status"):
                 rows = [self.group_view(g) for g in self.groups.values() if g.status != "closed"]
-            return 200, {"available": self.available, "reason": "", "groups": rows, "envs": self.envs, "capacity": {"open": len(rows), "cap": 2, "queued": []}}
+            listing = {"available": self.available, "reason": "", "groups": rows, "envs": self.envs, "capacity": {"open": len(rows), "cap": 2, "queued": []}}
+            if self.user is not None and session:
+                listing["user"] = self.user
+            return 200, listing
         g = self.groups.get(segments[2]) if len(segments) >= 3 else None
         if g is None:
             return 404, {"detail": "no such browser"}

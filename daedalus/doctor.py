@@ -706,7 +706,26 @@ async def _browser(ctx: DoctorContext) -> list[Check]:
         if sandbox not in ("ok", "unknown"):
             out.append(Check(f"browser sandbox ({env})", False, sandbox, "warn", "the browser service needs seccomp=unconfined (deploy/compose.yaml)" if env == "container" else "see the browser section of desktop/README.md"))
         out.append(Check(f"browser walls ({env})", True, BROWSER_WALLS[env], "info"))
+    if ctx.settings.browser_user_dir is not None:
+        out.append(await _user_browser(ctx, service))
     return out
+
+
+async def _user_browser(ctx: DoctorContext, service: Any) -> Check:
+    """The operator's own Chrome: whether the ``user`` daemon answers and a Chrome is connected to it.
+    Not connected is information, not a fault: Chrome is closed half the day."""
+    name = "browser (your Chrome)"
+    status = await service.user_status() if service is not None else None
+    if status is None:
+        return Check(name, True, "the app is not running here, so the connection is not known", "info")
+    if not status["daemon"]:
+        fix = "the desktop launcher starts it; restart the launcher" if ctx.settings.native else "docker compose -f deploy/compose.yaml --env-file .env up -d browser-user"
+        return Check(name, False, f"its browser service is not available: {status['detail'] or status['reason']}", "warn", fix)
+    relay = status.get("relay") or {}
+    if relay.get("connected"):
+        return Check(name, True, f"Chrome «{relay.get('profile_name') or 'Chrome'}» connected ({relay.get('transport') or '?'}), extension {relay.get('ext_version') or '?'}, Chrome {relay.get('chrome_version') or '?'}", "ok")
+    why = str(relay.get("last_error") or "no Chrome has connected since the service started")
+    return Check(name, True, f"no Chrome connected: {why}", "info", "Settings → Browser → Your Chrome")
 
 
 async def _token_counter(ctx: DoctorContext) -> list[Check]:

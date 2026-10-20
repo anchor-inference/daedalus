@@ -41,6 +41,11 @@
 #   browser-state         -> /var/lib/browserd (browser only)  the agent's browser profiles (its
 #                                                       logins), downloads, uploads. Never mounted
 #                                                       into the agent.
+#   browser-user-run      -> /run/daedalus-browser-user the socket and token of the daemon that drives
+#                                                       the operator's own Chrome, shared by the agent
+#                                                       and the browser-user service
+#   browser-user-state    -> /var/lib/browserd-user (browser-user only)  its recordings and the files
+#                                                       it keeps of downloads
 #
 # Host terminal (optional). `bash deploy/setup.sh` can install `ptyd` on the server itself as a
 # systemd user unit of the operator's (deploy/ptyd/daedalus-ptyd.service): a shell on the server as
@@ -122,6 +127,9 @@ services:
       TERMINALS_PORT_RANGE: ${TERMINALS_PORT_RANGE:-8120-8139}
       # The browser service's run directory (the browser-run volume): empty until that service runs.
       BROWSER_CONTAINER_DIR: /run/daedalus-browser
+      # The run directory of the daemon for the operator's own Chrome (the browser-user-run volume):
+      # empty until that service runs. A paired Chrome reaches it through the app's /api/browser/relay.
+      BROWSER_USER_DIR: /run/daedalus-browser-user
       GITHUB_DAEDALUS_TOKEN: ${GITHUB_DAEDALUS_TOKEN:-}
       DAEDALUS_GITHUB_ORG: ${DAEDALUS_GITHUB_ORG:-}
       # Provider keys live in the key proxy, not here (see the note at the top of this file).
@@ -156,6 +164,9 @@ services:
       # The browser daemon's socket and token. Sealed from the agent's commands like the terminal
       # daemons': the token drives a browser that holds the operator's logins for a project.
       - browser-run:/run/daedalus-browser
+      # The socket and token of the daemon for the operator's Chrome, sealed the same way: its token
+      # drives the operator's real, signed-in browser.
+      - browser-user-run:/run/daedalus-browser-user
     entrypoint: ["python3", "/opt/launcher/state_mount_guard.py", "--", "python3", "/opt/launcher/supervisor.py"]
     ports:
       - "127.0.0.1:${API_PORT:-8765}:${API_PORT:-8765}"
@@ -294,6 +305,43 @@ services:
     # sends a page's http://127.0.0.1:<services port> there, and refuses the host's other ports.
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [browser]
+
+  # The operator's own Chrome: a second browserd that launches no browser (--backend attach) and
+  # drives the operator's Chrome through the Daedalus extension, which reaches it only through the
+  # agent's WebSocket (/api/browser/relay, a paired device's token in its first frame); the host
+  # opens the relay on this daemon's socket. A service of its own rather than a second process of
+  # `browser`: it needs no Chromium, no display and no network at all — nothing here dials out or
+  # listens — so it runs from the agent's image (which carries browserd) with no network, and its
+  # restart never touches the agent's browsers.
+  browser-user:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: daedalus:local
+    profiles: [browser]
+    restart: unless-stopped
+    init: true
+    user: "1001:1001"
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    read_only: true
+    network_mode: none
+    entrypoint: ["/usr/local/bin/browserd"]
+    command: ["serve", "--env", "user", "--backend", "attach", "--run-dir", "/run/daedalus-browser-user",
+              "--state-dir", "/var/lib/browserd-user"]
+    stop_grace_period: 10s
+    environment:
+      HOME: /var/lib/browserd-user
+    mem_limit: 512m
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD", "test", "-S", "/run/daedalus-browser-user/browserd.sock"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+    volumes:
+      - browser-user-run:/run/daedalus-browser-user
+      - browser-user-state:/var/lib/browserd-user
 
   # A metasearch over Bing, Brave, DuckDuckGo, Google (CSE), Mojeek and Wikipedia with a JSON API,
   # reachable only from the agent container. Settings in deploy/searxng/settings.yml. Behind the
@@ -438,3 +486,5 @@ volumes:
   terminals-state:
   browser-run:
   browser-state:
+  browser-user-run:
+  browser-user-state:

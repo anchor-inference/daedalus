@@ -2,7 +2,8 @@
 
 The agent's browser is Chromium owned by `browserd`, a small daemon written in Go (`browserd/`).
 There is one daemon per **environment**, like `ptyd`: `container` (a compose service of its own) and
-`host` (a child of the desktop launcher). The Daedalus host talks to each over a local socket, runs
+`host` (a child of the desktop launcher), and a third, `user`, which launches no browser and drives
+the operator's own Chrome through the Daedalus extension (The operator's Chrome, below). The Daedalus host talks to each over a local socket, runs
 the agent's browser tools through it, and relays live views of its pages to the app. `browserd`
 knows browsers, profiles, tabs, pages, pixels and processes; it knows nothing about sessions,
 projects, policies or agents. Everything the host says about an owner travels as `labels` it echoes.
@@ -15,6 +16,8 @@ serve yet; calling it returns `-32601 method not found`.
 
 ```
 browserd serve --env container --run-dir /run/daedalus-browser --state-dir /var/lib/browserd
+browserd serve --env user --backend attach --run-dir <local>/browserd-user/run --state-dir <local>/browserd-user/state
+browserd bridge chrome-extension://<id>/
 browserd version
 ```
 
@@ -28,6 +31,8 @@ browserd version
 | `--mode` | `headless` (the default) or `headed`: real windows, on `$DISPLAY` or, where there is none, on a virtual display (Xvfb) the daemon starts with its first headed browser; see Which Chromium |
 | `--config` | a JSON file: `{"limits": {…}, "chromium": {"path", "args": [], "no_sandbox", "mode", "screen": "<w>x<h>"}, "input": {"human", "budget_ms", "screen_fix"}}`; unknown keys are refused; a flag wins over the file |
 | `--log-file`, `--log-level` | the daemon's own JSON-lines log (stderr, `info`) |
+| `--backend` | `launch` (the default): browsers of the daemon's own on its profiles; `attach`: the operator's Chrome over a relay, no browser launched (The operator's Chrome) |
+| `--install-name` | the installation's name the extension's popup shows (`Daedalus`); `attach` only |
 
 `SIGTERM` or `SIGINT` stops the daemon: the endpoint file is removed first, every browser is asked to
 close (`Browser.close` over its pipe), and after 3 s whatever is left of each browser's process group
@@ -48,7 +53,7 @@ Exactly as `ptyd`'s (terminals.md, Run directory and handshake), with the daemon
 
 A second daemon on the same directory exits with `another browserd holds the run directory`. The
 first frame on channel 0 carries the token; a good one is answered with the notification
-`hello {version, protocol, instance, env}`. `protocol` is 1. The host refuses a protocol it does not
+`hello {version, protocol, instance, env, backend}`. `protocol` is 1. The host refuses a protocol it does not
 know and reports the environment unavailable.
 
 ## Framing
@@ -110,7 +115,7 @@ unknown field is `-32602`. Errors use the JSON-RPC codes plus:
 
 | Method | Params → result |
 |---|---|
-| `daemon.info` | → `{version, protocol, instance, env, os, arch, pid, started_at, uptime_s, chromium{path, version, kind: "bundled" \| "system" \| "none", error?}, capabilities{sandbox, headed: true when `--mode headed`, screencast: true}, limits{…}, counts{browsers, groups, tabs, viewers}, machine}` |
+| `daemon.info` | → `{version, protocol, instance, env, os, arch, pid, started_at, uptime_s, chromium{path, version, kind: "bundled" \| "system" \| "none" \| "relay", error?}, capabilities{sandbox, headed: true when `--mode headed`, screencast: true}, limits{…}, counts{browsers, groups, tabs, viewers}, machine, backend: "launch" \| "attach", relay: Relay \| null}`; `Relay` and the `relay.*` methods are in The operator's Chrome |
 | `browser.open` | `{group_id, profile, labels?, viewport?{w, h}, url?}` → `{group: Group, tab: Tab, created}` |
 | `browser.list` | → `{browsers: [Browser]}` |
 | `browser.close` | `{browser_id}` → `{groups}`: ends the browser and forgets its groups |
@@ -558,11 +563,11 @@ are in `data`. The daemon keeps the last 20 000, no more than 64 MiB. `events.su
 | Type | `data` |
 |---|---|
 | `browser.started` | `{browser_id, profile, pid, chromium_version}` |
-| `browser.exited` | `{browser_id, profile, code, crashed, reason: "closed" \| "idle" \| "crashed" \| "memory" \| "shutdown", groups[]}` |
-| `group.opened`, `group.closed` | `{group_id, browser_id, profile, labels}` |
+| `browser.exited` | `{browser_id, profile, code, crashed, reason: "closed" \| "idle" \| "crashed" \| "memory" \| "shutdown" \| "chrome disconnected (<relay.lost reason>)", groups[]}` |
+| `group.opened`, `group.closed` | `{group_id, browser_id, profile, labels, reason?}` — `reason: "closed_in_chrome"` when the operator closed the group's Chrome tab group |
 | `tab.created` | `{group_id, tab: Tab}` |
 | `tab.updated` | `{group_id, tab_id, url, title, favicon_url, loading}` — at most one per 250 ms per tab, the latest wins. A title a script sets raises no event in Chromium: it is read when the tabs are listed, and once a second while the browser is watched |
-| `tab.closed` | `{group_id, tab_id}` |
+| `tab.closed` | `{group_id, tab_id, reason?}` — `reason` only in the operator's Chrome: `closed` (closed there), `taken_back` (dragged out of the agent's group) or `reattached` (its debugger was attached afresh; the same Chrome tab comes back at once as a new tab) |
 | `tab.refused` | `{group_id, url, reason: "tab_cap"}` |
 | `action` | `{action_id, group_id, tab_id, actor, kind, point{x, y}, box{x, y, w, h}, name, element, text_len?, keys?, at}` |
 | `action_done` | `{action_id, group_id, tab_id, ok, effects, error?}` |
@@ -578,6 +583,9 @@ are in `data`. The daemon keeps the last 20 000, no more than 64 MiB. `events.su
 | `workflow.started` | `{group_id, workflow: Workflow}` without its steps |
 | `workflow.step` | `{group_id, id, step: Step, steps, replaces?}` — `replaces` is the number of a step it takes the place of (a click folded into the typing after it, a press counted again) |
 | `workflow.stopped` | `{group_id, workflow: Workflow}`, whole: what the host keeps |
+| `relay.connected` | `{profile_id, profile_name, ext_version, chrome_version, platform, transport, proto}` — the operator's Chrome connected (The operator's Chrome) |
+| `relay.lost` | `{reason: "closed" \| "no_pong" \| "replaced" \| "shutdown" \| "bad_frame", profile_id, profile_name}` |
+| `relay.check` | `{n, profile_id, profile_name}` — the operator pressed "Check connection" in the extension's popup |
 
 `action.text_len` is the length of the typed text; the text itself is never in an event, a log or the
 daemon's memory past the call. The one exception is a recording of a person's steps whose operator
@@ -812,6 +820,182 @@ proportion to their private figures, and `memory_basis` is `cgroup`. A cgroup wi
 processes (a login session's) is not the daemon's own, and the private figure stands (`private`);
 outside Linux it is the resident size (`rss`). The hard memory limit is judged against the same
 figure.
+
+## The operator's Chrome
+
+A daemon started with `--backend attach` launches no browser. It drives the operator's own Chrome
+through the Daedalus extension installed in it, and only the tabs of the agent's groups: a tab group
+the extension makes in Chrome for each daemon group, in a window of the agent's own. The installation
+runs it as a second daemon, the `user` environment, with its own run directory and token beside the
+`host` one (`<local>/browserd-user/run` natively; a second process of the browserd container on a
+server). Everything the host says to it is the protocol above; what changes is underneath.
+
+```
+                       ┌── this machine: native messaging ── browserd bridge ──┐
+Chrome + extension ────┤                                                        ├── relay.open on the user daemon's socket
+                       └── a server: wss://<server>/api/browser/relay ── host ──┘
+```
+
+The extension's side is a **relay**: it reaches the daemon through `browserd bridge` (Chrome's native
+messaging host, on this machine) or through the host's WebSocket (on a server), and either one opens
+the relay on the daemon's socket with `relay.open`. The daemon never listens on the network, and the
+bridge never listens at all.
+
+### What the user daemon does differently
+
+A real profile is not the agent's to treat as its own. Each of these is the backend's doing, not a
+convention, and `internal/browser/attach_test.go` holds each one:
+
+- A tab is the agent's only if the daemon made it (`tab.create`), it was opened by one of the agent's
+  tabs (a popup), or the operator put it in an agent's group. No other tab is ever attached to,
+  paused, given to a group or closed. There is no browser-level auto-attach, no adoption of stray
+  pages and no closing of them.
+- No download behaviour is set: Chrome saves the operator's downloads where it always does. A
+  download started in an agent tab is announced by the tab (`Page.downloadWillBegin`), and when it
+  finishes the daemon copies the file Chrome saved (found with `downloads.search`) into its own
+  keeping for `download.read`; the file stays in the operator's downloads. A download is never
+  cancelled, past the size limit included: it is the operator's.
+- Nothing is written where a profile would be: there is no profile directory, no preferences file,
+  and `profile.list` answers none.
+- The browser is never closed: not for idling, not for the memory limit, and it is not measured in
+  `browser.stats`, whose processes are the daemon's own. `browser.close` and `group.close` close the
+  agent's own tabs through the extension (`group.close`); the daemon stopping closes nothing and
+  tells the extension with its `bye`.
+- No user agent is rewritten and no screen-position script is put into a page.
+- Refused with `1004 {reason: "user_browser"}`: `profile.clear`, `profile.delete`, `cookies.set`
+  (cookie import), `cookies.clear` (it would delete the operator's real cookies), and `browser.open`
+  on the `ephemeral` profile (a throwaway context is the agent's own browser's).
+- `cookies.list` asks the extension (`cookies.names`): the cookies Chrome would send to the site,
+  without their values, which never leave the extension. Without a `domain` it is the active tab's
+  site.
+- One browser stands for every profile the host names: `browser.list` shows it as profile `user`,
+  `pid` 0, `chromium_version` `Chrome/<version>`, and `daemon.info.chromium` is `{kind: "relay",
+  version: <the connected Chrome's>, path: ""}`.
+- With no Chrome connected, `browser.open` is `1007 {reason: "chrome_not_connected"}`. When the relay
+  ends, the browser ends with it: `browser.exited {reason: "chrome disconnected (<relay.lost reason>)"}`
+  and its groups answer `1108`. A group opened again after the extension reconnects takes up the tabs
+  its Chrome tab group still holds (`window.ensure` lists them), so a worker restart costs the agent
+  nothing but one `1108`.
+- The operator's own input in an agent tab — the extension's content script reports trusted input
+  the daemon did not send (`input`) — gives them control: `control {owner: "human", holder:
+  "chrome"}` for 15 s, renewed while they keep at it, and the agent's calls wait and are refused with
+  `1101` as for a person in the live view. Input the extension reports within 750 ms of the daemon's
+  own input to that tab is taken for its echo (both are trusted events in the page). A pause, or a
+  person already holding control in the live view, is left as it is.
+- A tab's address and title are read from its own history (`Page.getNavigationHistory`), and the
+  window is sized per group with `window.bounds`, since `Target.*` and `Browser.*` above a tab are
+  never sent.
+
+### Methods
+
+| Method | Params → result |
+|---|---|
+| `relay.open` | `{transport: "native" \| "server", install_name?}` → `{channel, proto}`: the connection becomes a relay; channel `channel` carries its frames (The relay channel). `install_name` replaces `--install-name` for this relay (the host's proxy names its installation). On a daemon of the launch backend `1007 {reason: "launch_backend"}` |
+| `relay.status` | → `Relay` |
+| `relay.notify` | `{text? ≤ 200 bytes}` → `{rtt_ms}`: the app's "Check connection". The extension flashes its badge and shows `text`, or its own "Daedalus checked the connection" when empty; `1007 {reason: "chrome_not_connected"}` with no Chrome |
+
+`Relay` is `{connected, profile_id?, profile_name?, ext_version?, chrome_version?, platform?, transport?,
+since, last_seen, last_error?}`: the connected Chrome, or the last one with `connected: false`.
+`last_seen` is the last frame the relay sent; `last_error` is why the daemon last refused or lost
+one, in words the app shows under "Not connected" ("Chrome closed the connection", "Chrome stopped
+answering", "versions differ: …", "another Chrome tried to connect (…) while … was connected"). The
+events are `relay.connected`, `relay.lost` and `relay.check` (Events, above).
+
+### The relay channel
+
+Each socket frame on the relay's channel starts with one byte: `0` when the relay frame ends in it,
+`1` when it continues in the next. A relay frame that fits in a socket frame (1 MiB) is one piece; a
+larger one — a full-page screenshot's `result` — is several. The bridge and the host's proxy split
+and join exactly so. A relay frame from the extension is at most 64 MiB (Chrome's own limit on what an
+extension sends its native host), and one to it at most 1 MB (Chrome drops a native host that sends
+more): a command that would be larger fails in the daemon with the method named. Either side closing
+the channel (an empty frame, as for any channel) ends the relay.
+
+### The relay protocol
+
+Every relay frame is one JSON object with its type in `t`. `browserd/internal/relay/testdata/frames.json`
+holds a golden frame of every kind, which the daemon's and the extension's tests both read; it is the
+contract's example, this table its rules. The protocol's version is `proto`, now 1; a frame of a type
+a side does not know is ignored, so additions keep the version.
+
+| From | Frame | Fields and meaning |
+|---|---|---|
+| extension | `hello` | `{proto, ext_version, chrome_version, platform, profile_id, profile_name, token?}`, the first frame. `profile_id` is random and kept in `chrome.storage.local`; `profile_name` is what the operator typed in the popup ("Chrome" if empty); `token` (a device token) only on the server transport, where the host checks it before any frame reaches the daemon |
+| daemon | `welcome` | `{proto, daemon_version, install_name, install_kind: "native" \| "server"}`: accepted |
+| daemon | `cdp` | `{id, session, method, params?}`: a DevTools command for `chrome.debugger.sendCommand`. `session` is `x<tabId>` for a tab, `x<tabId>/<sessionId>` for a flat child session of it (a frame of another site). The extension sends the commands in the order they arrive without waiting for each one's answer: a paused frame's setup is answered only after the command that lets it run, which comes last |
+| daemon | `call` | `{id, op, args}`: a browser-level operation the extension does with the extension APIs (below) |
+| extension | `result` | `{id, ok, value?}` or `{id, ok: false, error{code, message}}`: the answer to a `cdp` or `call`. `code` is `refused` (the allowlist, or a tab outside the agent's groups), `no_tab`, `detached`, `cdp` (Chrome's own error: `message` is its JSON text `{"code", "message", "data"?}`, whose code the daemon keeps) or `failed` |
+| extension | `event` | `{session, method, params}`: a DevTools event, its params as Chrome sent them. The daemon, not the extension, renames the `sessionId` inside `Target.attachedToTarget` and `Target.detachedFromTarget` from Chrome's id to `x<tabId>/<sessionId>`, and back in `Target.detachFromTarget`'s params |
+| extension | `tabs` | `{op, tab?, group?}`: what the operator changed. `created` (a popup: `tab{id, group, opener, url?, title?}`), `joined` (dragged into an agent's group), `left` (dragged out), `removed` (closed), `updated` (`tab{id, url, title}`), `group_closed` (`group`). A tab the daemon asked for with `tab.create` is in that call's answer and need not be announced; announced anyway, it is taken once. A `created` or `joined` tab whose opener is not an agent tab and whose group is not an agent's is ignored. `joined` for a tab the daemon already has means the extension attached its debugger afresh (it does so after a detach, and replays the tabs it holds after a `welcome`): the attachment's state went with the old one, so the daemon forgets the tab (`tab.closed {reason: "reattached"}`) and sets it up again as a new tab |
+| extension | `input` | `{tab}`: the operator's own trusted input in an agent tab. There is no pause frame: while the operator has paused a group in the popup, the extension sends `input` for its tabs every 2 s (which keeps control with the operator) and refuses `Input.*` itself |
+| daemon | `ping` | `{n}`, every 15 s; the relay is lost after three go unanswered (`bye {reason: "lost"}`) |
+| extension | `pong` | `{n}` |
+| extension | `check` | `{n}`: the popup's "Check connection" |
+| daemon | `check_ok` | `{n, host_seen}`: `host_seen` says the host is listening to the daemon's events, so the app shows its toast ("Chrome «name» checked the connection") at the same moment the popup shows "Daedalus confirmed" |
+| daemon | `bye` | `{reason, message?, proto?}`, the relay's last frame: `shutdown`, `replaced` (the same `profile_id` connected again: the stale relay goes), `another_relay` (another Chrome is connected: "another Chrome is already connected: <name>"), `proto` (versions differ; `proto` is the daemon's, so the popup can say which side to update), `lost`, `bad_frame`. The bridge sends two of its own: `not_running` (no daemon: "Daedalus is not running on this computer") and `unavailable` (the daemon refused `relay.open`; `message` says why) |
+
+One relay at a time per daemon. A second `hello` with another `profile_id` is refused with
+`another_relay` and the first keeps working; the same `profile_id` replaces the first, which is how
+an extension whose worker restarted gets its relay back before the old bridge has noticed. The first
+frame must be `hello`; anything else, or a frame that is not JSON, ends the relay with `bad_frame`.
+
+The calls:
+
+| `op` | `args` → `value` |
+|---|---|
+| `window.ensure` | `{group}` → `{window, tabs: [Tab]}`: the agent's own unfocused window and Chrome tab group for a daemon group, made if missing; `tabs` are the ones that group already holds |
+| `tab.create` | `{group, url}` → `{tab: Tab}`: a tab in the group's window, attached to the debugger before the answer. The extension opens it on `about:blank` whatever `url` says, and the daemon navigates once the tab is set up and its guard is on |
+| `tab.close`, `tab.activate` | `{tab}` → `{}` |
+| `window.bounds` | `{group, bounds?{width, height}}` → `{bounds{left, top, width, height}}`: sizes the group's window when `bounds` is given, then reads it |
+| `downloads.search` | `{id}` → `{path, state, bytes}`: `id` is the DevTools guid of `Page.downloadWillBegin`; the extension finds the `chrome.downloads` item behind it |
+| `cookies.names` | `{url}` → `{cookies: [{name, domain, path, expires, secure, http_only, same_site?, session}]}`: `chrome.cookies.getAll({url})` without values |
+| `group.close` | `{group}` → `{}`: closes the agent's tabs of the group, its tab group and window |
+| `notify` | `{text}` → `{}`: the toast and badge flash of `relay.notify` |
+
+`Tab` is `{id, group?, opener?, url?, title?}`: `id` is Chrome's tab id, `opener` a tab id of the
+agent's.
+
+The **allowlist** of DevTools methods a relay carries, enforced by the extension (so a compromised
+daemon or bridge still cannot read the operator's cookies) and checked by the daemon before it sends:
+the domains Page, Runtime, DOM, DOMDebugger, DOMSnapshot, Input, Accessibility, Log, Fetch and Network;
+from Emulation only `setFocusEmulationEnabled`, `setEmulatedMedia`, `setDeviceMetricsOverride` and
+`clearDeviceMetricsOverride`; from Target only `setAutoAttach` and `detachFromTarget`, on the agent's
+tabs. Always refused: `Network.getCookies`, `getAllCookies`, `setCookie`, `setCookies`,
+`deleteCookies`, `clearBrowserCookies`, `clearBrowserCache`, `Page.setDownloadBehavior`, the Storage
+and Browser domains, every other Target method, and anything aimed at a tab outside the agent's
+groups. The daemon's whole page model runs within it: the rpc suite runs again over a relay that
+enforces it (Testing, in `browserd/README.md`).
+
+### The bridge
+
+The host is registered as `com.daedalus.browser`. Chrome starts it by the `path` in its manifest,
+with the extension's origin as the first argument and, on Windows, `--parent-window=<handle>` after
+it. The manifest's `path` may be the browserd binary itself (an origin as the first argument means the
+bridge) or a launcher's wrapper running `browserd bridge [--run-dir <dir>] <origin>`: the flags before
+the origin are the bridge's, whatever follows it is Chrome's and ignored.
+
+- **The origin** must be `chrome-extension://<id>/` with `id` one of the pinned extension ids. The
+  published extension's id is fixed by the key in its manifest and compiled in
+  (`lkhhklicnjlplokpadpccndipomikoaj`, `bridge.PinnedExtensionIDs`); more ids come from `--allow-extension <id>`,
+  `$BROWSERD_BRIDGE_EXTENSION_IDS` (comma-separated) or `extension_ids` in `browserd-bridge.json`.
+  Any other origin is refused, silently, and the bridge exits.
+- **The daemon** is found in its run directory: `--run-dir`, else `$BROWSERD_BRIDGE_RUN_DIR`, else
+  `run_dir` in `browserd-bridge.json` beside the executable (which a launcher that keeps its data
+  folder elsewhere writes when it registers the connector, since Chrome passes the host no arguments
+  or environment of the launcher's), else `<local>/browserd-user/run` of the standard data folder,
+  worked out as the desktop launcher works out `<local>` (`--data` names another data folder;
+  `DAEDALUS_LOCAL_ROOT` is honoured).
+- **The carrying.** Native messaging is a 4-byte little-endian length and that much JSON on stdin and
+  stdout. The bridge connects with the run directory's token, calls `relay.open {transport:
+  "native"}`, and from then on carries each message to the relay channel as its pieces and each relay
+  frame back as one message, unchanged. Chrome closing the pipe closes the channel; the daemon's `bye`
+  (or its closing the channel) ends the bridge, and the bridge going is how a stopping daemon knows
+  its `bye` was taken. With no daemon it answers `bye {reason: "not_running"}`, with a daemon that
+  refuses the relay `bye {reason: "unavailable"}`, and exits.
+
+On a server the host's `wss://<server>/api/browser/relay` does what the bridge does, after checking the
+`hello`'s device token, with `relay.open {transport: "server"}`, splitting and joining the WebSocket's
+messages into the same pieces.
 
 ## The host side
 
@@ -1397,3 +1581,68 @@ container (Ubuntu 24.04 image, non-root, `seccomp=unconfined`); numbers are medi
 
 The latency a person sees adds the host's relay and the network: a frame is forwarded as it came,
 so on a LAN that is the round trip plus the frame's size over the link.
+
+## The operator's Chrome: the host's side
+
+The `user` environment is the operator's own Chrome, driven through the Daedalus extension by a
+daemon that launches no browser (`--backend attach`). The host reaches it like the others, through a
+run directory: `BROWSER_USER_DIR` (natively the launcher's `<local>/browserd-user/run`; on a server
+the `browser-user` compose service's volume, mounted at `/run/daedalus-browser-user`). It is sealed
+from the agent's commands like the other daemons' directories.
+
+**Who chooses it.** Never the agent and never `[browser] env`: the operator switches a conversation
+in the browser panel's header ("Agent's browser | Your Chrome · <name>"), and the first switch in a
+conversation carries their yes to the consent summary. The choice, the consent and the sites granted
+in the conversation are kept per session (`kv` `browser.user.sessions`) and dropped with it. No tool
+takes an environment; an agent's group there is `s-<session>-u` on the one profile `user`. A switched
+conversation keeps its group in the other browser open, and the agent's calls reach only the
+browser it uses now. With Chrome not connected, `BrowserOpen` says so; it never falls back to the
+agent's browser.
+
+**What changes for the agent there**:
+
+- A site new to the conversation is asked about before it is opened (`BrowserOpen(url)`,
+  `BrowserNavigate`, `BrowserTabs(new)`): a question of kind `site`, always the operator's, a staff
+  member's too. A yes grants the registrable domain and its subdomains for the conversation.
+  `[browser.user] granted_sites` never ask. The daemon's navigation guard is given the same list as
+  `egress_allow`, present even when empty, so a page's own navigation elsewhere is an ask that the
+  host turns into the same question.
+- A purchase, a message sent, a deletion or a sign-in always asks: `[[browser.rules]]` cannot let
+  them through in `user` (`daedalus.host.policy.CONSEQUENTIAL_KINDS`). Other kinds follow the rules.
+- Refused before the daemon is asked: `BrowserCookies` import and clear, `fresh=true`, and clearing
+  or deleting the profile. `BrowserLogin` becomes a hand-over ("sign in in the agent's window").
+- `BrowserNetwork(body=true)` reads a body only when `[browser.user] bodies` is on, and then only
+  from a granted site.
+- The injection monitor and watch mode are on (`[browser.user] monitor`, `watch`) whatever
+  `[browser]` says for the agent's browser.
+- There is no cap and no idle close; only the recording's limits are sent to that daemon.
+- Every result there starts with `[in the operator's own Chrome «<name>»]`; `BrowserOpen` says it in
+  words.
+
+**Routes** (the app's authentication):
+
+| Route | |
+|---|---|
+| `GET /api/browser/user` | `{configured, enabled, daemon, reason, detail, relay, native, launcher, launcher_error, devices, server_url, consent}`. `relay` is the daemon's `relay.status`; `launcher` (natively) the desktop launcher's report on Chrome, the connector and the extension folder |
+| `POST /api/browser/user/register`, `/unregister` | natively, through the launcher (`daedalus.host.launcher_bridge.user_browser`): `{launcher, error}`; 501 on a server |
+| `POST /api/browser/user/check` | host → `relay.notify` → the extension: `{ok, rtt_ms, host_ms}` |
+| `POST /api/browser/user/pairing` | a server's one-time code: `{code: "ABCD-EFGH", expires_at, server_url}`, 10 minutes |
+| `GET /api/browser/user/devices`, `DELETE …/devices/{id}` | paired Chromes `{id, name, last_seen, connected, …}`; a revoke ends a live relay with 4401 |
+| `GET`, `PUT /api/browser/user/sessions/{session}` | `{env: "agent" \| "user", consented, sites, offered, consent}`; `PUT {env, consent}`, 409 `consent_needed` with `consent` on a first switch without it |
+
+`GET /api/browsers?session=<id>` carries `user: {env, consented, connected, name}` where the
+installation offers the operator's Chrome. The events `browser.user {kind: connected | lost | check |
+switched, profile_name, reason?}` follow the relay (a popup's "Check connection" is a toast in the
+app) and a conversation's switch.
+
+**The public doors on a server.** `POST /api/browser/pair {code, profile_id, profile_name,
+ext_version, chrome_version}` → `{token}` spends a code (single use; spending one voids the others)
+for a device token. `wss /api/browser/relay` takes the token in its first frame, the extension's
+`hello`; a socket from a web page (an `http(s)` `Origin`) is refused before anything is read. The
+host opens `relay.open {transport: "server"}` on a connection of its own to the user daemon and
+copies frames both ways, split into pieces and joined as the bridge does, with the token taken out
+of the hello. One relay at a time: another Chrome profile is refused with `bye {reason:
+"another_relay"}` and close 4409 naming the connected one (the same profile replaces its own); a
+wrong, revoked or 90-days-unused token gets `bye {reason: "unauthorized"}` and 4401. Codes and
+tokens are kept as SHA-256 only and compared in constant time; failed attempts at both doors share
+a limit (5 per address and 30 overall in 10 minutes); nothing presented is logged.

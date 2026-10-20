@@ -5,7 +5,7 @@
 // is down, as for every other list.
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { api, telegram, type BrowserActionRow, type BrowserControl, type BrowserDraft, type BrowserGroup, type BrowserList, type BrowserLoginResult, type BrowserRecording, type BrowserSiteNote, type BrowserSkillSaved, type BrowserSkillStep, type BrowserStep, type BrowserWorkflow, type BrowserWorkflows } from "../api";
+import { api, telegram, type BrowserActionRow, type BrowserControl, type BrowserDraft, type BrowserGroup, type BrowserList, type BrowserLoginResult, type BrowserRecording, type BrowserSiteNote, type BrowserSkillSaved, type BrowserSkillStep, type BrowserStep, type BrowserUserChoice, type BrowserWorkflow, type BrowserWorkflows } from "../api";
 import { useEvent, useStreamUp } from "../events";
 import { invalidate, useQuery } from "../store";
 import { LiveView, type LiveSnapshot } from "./live";
@@ -23,7 +23,7 @@ export function browsersKey(owner: BrowserOwner): string {
 }
 
 /** The owner's groups, newest activity first, or an empty list while nothing is known. */
-export function useBrowsers(owner: BrowserOwner | null): { groups: BrowserGroup[]; available: boolean; loaded: boolean } {
+export function useBrowsers(owner: BrowserOwner | null): { groups: BrowserGroup[]; available: boolean; loaded: boolean; user?: BrowserUserChoice } {
   const live = useStreamUp();
   const key = owner ? browsersKey(owner) : null;
   const query = useQuery<BrowserList>(key, { pollMs: live ? 60000 : 8000, staleMs: 1500 });
@@ -35,7 +35,7 @@ export function useBrowsers(owner: BrowserOwner | null): { groups: BrowserGroup[
   }, [key]);
   const data = query.data;
   const groups = data && Array.isArray(data.groups) ? data.groups : [];
-  return { groups, available: !!data?.available, loaded: data !== undefined };
+  return { groups, available: !!data?.available, loaded: data !== undefined, user: data?.user };
 }
 
 /** One group on its own, for the full-page viewer. */

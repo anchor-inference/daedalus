@@ -1,0 +1,4 @@
+{
+  "name": { "message": "Daedalus" },
+  "description": { "message": "Даёт агенту Daedalus работать во вкладках этого Chrome, которые вы ему отдали, в отдельной группе вкладок." }
+}

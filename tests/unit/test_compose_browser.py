@@ -291,3 +291,32 @@ async def test_the_doctor_names_the_profile_for_a_stack_without_the_service(sett
     assert line.message.startswith("not running") and line.severity == "warn" and "up -d browser" in line.fix_hint
     # Nothing configured, nothing said.
     assert await _browser(DoctorContext(settings=settings, config=RuntimeConfig())) == []
+
+
+# -- the daemon of the operator's Chrome ---------------------------------------------------------------
+
+
+USER_RUN_DIR = "/run/daedalus-browser-user"
+
+
+def test_the_operators_chrome_has_a_daemon_of_its_own_with_no_network_and_its_run_directory_where_the_host_finds_it() -> None:
+    services = compose()["services"]
+    user, agent = services["browser-user"], services["daedalus"]
+    command = user["command"]
+    assert user["entrypoint"] == ["/usr/local/bin/browserd"]
+    assert command[:5] == ["serve", "--env", "user", "--backend", "attach"]
+    assert command[command.index("--run-dir") + 1] == USER_RUN_DIR
+    # Nothing in it dials out or listens: Chrome comes through the agent's WebSocket and its socket.
+    assert user["network_mode"] == "none" and "ports" not in user and "networks" not in user
+    assert user["user"] == "1001:1001" and user["cap_drop"] == ["ALL"] and user["read_only"] is True
+    assert user["profiles"] == ["browser"]
+    assert volumes(user)[USER_RUN_DIR] == "browser-user-run" and volumes(agent)[USER_RUN_DIR] == "browser-user-run"
+    assert agent["environment"]["BROWSER_USER_DIR"] == USER_RUN_DIR
+    assert "browser-user-state" not in volumes(agent).values()
+    assert f"{USER_RUN_DIR} " in dockerfile() or f"{USER_RUN_DIR}\n" in dockerfile()
+
+
+def test_the_user_run_directory_is_sealed_from_the_agents_commands() -> None:
+    settings = Settings(browser_user_dir=Path(USER_RUN_DIR))
+    policy = Policy(sealed_paths=settings.sealed_paths, sealed_everywhere=settings.sealed_everywhere)
+    assert policy.evaluate("Exec", {"command": f"cat {USER_RUN_DIR}/token"}).action == DENY

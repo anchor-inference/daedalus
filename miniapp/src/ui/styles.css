@@ -4791,6 +4791,19 @@ button.staff-row:hover { background: var(--surface-2); }
 .bs-code { display: inline-block; margin-top: 8px; padding: 4px 8px; border-radius: var(--radius-sm); background: var(--surface-3); font-family: var(--mono); font-size: var(--fs-13); }
 .bs-env + .bs-env { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
 .bs-env-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; min-width: 0; }
+/* Your Chrome: the connector and extension steps, the connection, pairing, the defaults. */
+.bs-chrome-steps, .bs-chrome-pair, .bs-chrome-defaults { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.bs-chrome-step, .bs-chrome-conn[data-conn="down"], .bs-chrome-conn[data-conn="waiting"] { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.bs-chrome-step .dot, .bs-chrome-conn .dot { margin-top: 6px; flex: none; }
+.bs-chrome-conn { margin-top: 10px; }
+.bs-chrome-howto { margin: 4px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.bs-chrome-howto code { overflow-wrap: anywhere; }
+.bs-chrome-code-value { letter-spacing: 0.08em; }
+.bs-chrome-consent { margin-top: 10px; }
+/* The conversation's switch heads the browser tab, above the toolbar or the empty state. */
+.bp-switch { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px var(--space-3, 8px); border-bottom: 1px solid var(--line); }
+.bp-empty .bp-switch { border-bottom: 0; padding: 0 0 var(--space-3, 8px); justify-content: center; }
+.bp-switch-note { color: var(--warn); }
 .bs-env-head .sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bs-warn { color: var(--warn); }
 .bs-rows { list-style: none; margin: 6px 0 0; padding: 0; display: grid; }

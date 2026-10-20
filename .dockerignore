@@ -3,6 +3,8 @@
 .env
 node_modules
 miniapp/node_modules
+extension/node_modules
+extension/dist
 **/__pycache__
 .pytest_cache
 .ruff_cache

@@ -534,7 +534,9 @@ func TestSnapshotGolden(t *testing.T) {
 		}
 		h.must("browser.list", map[string]any{}, &list)
 		for _, b := range list.Browsers {
-			if b.Profile == "golden" {
+			// The operator's Chrome is one browser under every profile: closing it lets go of the
+			// group, and the next page is again the first of a browser.
+			if b.Profile == "golden" || attachRun() {
 				h.must("browser.close", map[string]any{"browser_id": b.ID}, nil)
 			}
 		}

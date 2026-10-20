@@ -35,13 +35,16 @@ from daedalus import load as load_math
 from daedalus.browser import wire
 from daedalus.browser.agent import fenced, origin_of
 from daedalus.browser.model import (
+    AGENT_ENVS,
     CONTROL_OWNERS,
     ENVS,
     EPHEMERAL,
     GROUP_STATUSES,
+    USER,
     BrowserError,
     BrowserGone,
     EnvUnavailable,
+    Forbidden,
     InvalidRequest,
     LiveBrowsers,
     NoRebuilder,
@@ -55,6 +58,7 @@ from daedalus.browser.model import (
     valid_id,
 )
 from daedalus.browser.owners import BrowserOwners
+from daedalus.browser.user import UserChoices, not_connected
 from daedalus.terminals.client import Channel, PtydClient, Unavailable
 from daedalus.terminals.service import iso, now_iso
 from daedalus.terminals.update import DaemonUpdate
@@ -293,6 +297,8 @@ class Browsers:
         """``group → {socket: visible}``: the live views open now and whether each is in view, for
         watch mode. A view the app hides says so (VIEW ``hidden``), and a closed one is forgotten."""
         self._watch_seq = 0
+        self.choices = UserChoices(db)
+        """Which conversations the operator switched to their own Chrome, and the sites granted there."""
 
     # -- lifecycle --------------------------------------------------------------------------
 
@@ -379,16 +385,17 @@ class Browsers:
         await self._configure_wall(link)
         await self._reconcile(link)
 
-    def _limits(self) -> dict[str, Any]:
+    def _limits(self, env: str = "") -> dict[str, Any]:
         """The daemon's limits that the operator sets here: the cap, the idle close and the recording's
-        size and age. The daemon takes them with ``limits.set``, so Settings is the daemon's own."""
+        size and age. The daemon takes them with ``limits.set``, so Settings is the daemon's own.
+
+        The operator's Chrome has no cap and no idle close: it is one browser that is not the
+        daemon's to close, so only the recording's limits are its."""
         cfg = self.config()
-        return {
-            "max_browsers": cfg.running_cap,
-            "idle_close_ms": cfg.idle_close_minutes * 60_000,
-            "record_max_bytes": cfg.record_max_mb << 20,
-            "record_retention_ms": cfg.record_retention_days * 86_400_000,
-        }
+        record = {"record_max_bytes": cfg.record_max_mb << 20, "record_retention_ms": cfg.record_retention_days * 86_400_000}
+        if env == USER:
+            return record
+        return {"max_browsers": cfg.running_cap, "idle_close_ms": cfg.idle_close_minutes * 60_000, **record}
 
     async def _configure_wall(self, link: Link) -> None:
         """Give the daemon its network wall's rules and its limits. A daemon without a method keeps its
@@ -396,7 +403,7 @@ class Browsers:
         raised. Called on every connection, and again whenever the settings change."""
         if link.client is None:
             return
-        wanted: dict[str, Any] = {"limits.set": self._limits()}
+        wanted: dict[str, Any] = {"limits.set": self._limits(link.env)}
         if self.wall is not None:
             wanted["net.configure"] = self.wall(link.env)
         for method, params in wanted.items():
@@ -476,9 +483,48 @@ class Browsers:
     def agent_env(self) -> str:
         """Where an agent's browser runs: the configured one, else the container's where there is one."""
         wanted = self.config().env
-        if wanted in ENVS:
+        if wanted in AGENT_ENVS:
             return wanted
         return "container" if self.configured("container") else "host"
+
+    def user_offered(self) -> bool:
+        """Whether a conversation may be switched to the operator's Chrome on this installation."""
+        return self.configured(USER) and self.config().user.enabled
+
+    async def env_for(self, owner: Owner) -> str:
+        """Where this owner's browser is now: the operator's Chrome when the operator switched its
+        conversation there, else the agent's own. Only the operator's switch decides it; nothing the
+        owner passes does, which is how an agent can never move itself into the operator's Chrome."""
+        if owner.kind == "session" and owner.session_id and self.user_offered() and await self.choices.env(owner.session_id) == USER:
+            return USER
+        return self.agent_env()
+
+    async def user_status(self) -> dict[str, Any]:
+        """The ``user`` daemon and the Chrome connected to it, as the app's card reads it: whether the
+        daemon answers, and the relay's own report (connected, profile, versions, transport, since,
+        last heard of, and why the last one ended)."""
+        link = self.links[USER]
+        out: dict[str, Any] = {"configured": link.run_dir is not None, "enabled": self.config().user.enabled, "daemon": link.available,
+                               "reason": "" if link.available else link.reason, "detail": "" if link.available else link.detail, "relay": None}
+        if link.available:
+            try:
+                relay = await self._call(USER, "relay.status", {}, what="asking about your Chrome")
+            except BrowserError as exc:
+                out["detail"] = exc.message
+            else:
+                out["relay"] = relay if isinstance(relay, dict) else None
+        return out
+
+    async def check_user(self) -> dict[str, Any]:
+        """The app's "Check connection": host to daemon to the extension and back, with the round trip.
+        The extension flashes "Daedalus checked the connection" as it answers."""
+        if not self.configured(USER):
+            raise EnvUnavailable("this installation has no browser for your Chrome", env=USER, reason="not_configured")
+        started = time.monotonic()
+        result = await self._call(USER, "relay.notify", {}, what="checking the connection to your Chrome", timeout=10.0)
+        took = int((time.monotonic() - started) * 1000)
+        rtt = result.get("rtt_ms") if isinstance(result, dict) else None
+        return {"ok": True, "rtt_ms": int(rtt) if isinstance(rtt, int | float) else took, "host_ms": took}
 
     def environments(self) -> list[dict[str, Any]]:
         image_version = self.daemon_update.image_version if self.daemon_update is not None else ""
@@ -501,6 +547,7 @@ class Browsers:
                     "counts": info.get("counts") or {},
                     "image_version": image_version if env == "container" else "",
                     "update_available": bool(env == "container" and link.available and image_version and info.get("version") and info.get("version") != image_version),
+                    **({"relay": info.get("relay") if isinstance(info.get("relay"), dict) else None} if env == USER else {}),
                 }
             )
         return out
@@ -731,13 +778,21 @@ class Browsers:
         Past the environment's cap an agent waits in line up to ``wait`` seconds (the configured wait
         by default) for a browser to close; the operator is refused at once with ``over_cap``,
         because the daemon never closes a browser to make room and neither does the host.
+
+        The environment is the owner's conversation's (:meth:`env_for`). In the operator's Chrome a
+        throwaway context is refused: it is the agent's own browser's, and quietly opening one
+        there instead would move the work out of the browser the operator chose.
         """
-        env = self.agent_env()
+        env = await self.env_for(owner)
+        if env == USER and fresh:
+            raise Forbidden("a throwaway browser (fresh=true) is the agent's own browser's; the operator gave this conversation their own Chrome, which keeps its own cookies", reason="user_browser")
+        if env == USER and not self.links[USER].available:
+            raise not_connected(self.links[USER].detail or self.links[USER].reason)
         self._client(env)
         if not await self.owners.exists(owner):
             raise NotFound(f"no {owner.kind} {owner.id}")
-        group = group_id(owner, fresh=fresh)
-        profile = profile_id(owner, fresh=fresh)
+        group = group_id(owner, fresh=fresh, env=env)
+        profile = profile_id(owner, fresh=fresh, env=env)
         agent = actor != "operator"
         deadline = time.monotonic() + (self.config().agent_wait_seconds if wait is None else wait)
         params: dict[str, Any] = {"group_id": group, "profile": profile, "labels": owner.labels()}
@@ -752,6 +807,11 @@ class Browsers:
                 try:
                     result = await self._call(env, "browser.open", params, what="opening the browser", timeout=45.0)
                     break
+                except Unsupported as exc:
+                    if exc.details.get("reason") != "chrome_not_connected":
+                        raise
+                    relay = self.links[USER].info.get("relay") if isinstance(self.links[USER].info.get("relay"), dict) else {}
+                    raise not_connected(str(relay.get("last_error") or "")) from None
                 except OverCap as exc:
                     if not agent:
                         raise
@@ -817,9 +877,9 @@ class Browsers:
         owner = str((group_info.get("control") or {}).get("owner") or "agent")
         return owner if owner in CONTROL_OWNERS else "agent"
 
-    async def find(self, owner: Owner, *, fresh: bool = False) -> dict[str, Any] | None:
+    async def find(self, owner: Owner, *, fresh: bool = False, env: str = "") -> dict[str, Any] | None:
         """The owner's open group, or ``None`` when it has none open now."""
-        row = await self.db.fetchone("SELECT * FROM browser_groups WHERE id = ? AND status = 'open'", (group_id(owner, fresh=fresh),))
+        row = await self.db.fetchone("SELECT * FROM browser_groups WHERE id = ? AND status = 'open'", (group_id(owner, fresh=fresh, env=env),))
         return dict(row) if row is not None else None
 
     # -- calls on a group -------------------------------------------------------------------
@@ -836,6 +896,11 @@ class Browsers:
         try:
             result = await self._call(row["env"], method, dict(params or {}), what=what, timeout=timeout + CALL_SLACK)
         except BrowserGone:
+            if row["env"] == USER:
+                # The user daemon ends its browser when the extension's relay is lost; the agent is
+                # told that the operator's Chrome went, not that someone closed its browser.
+                await self._mark_closed(row, "chrome disconnected", status="closed")
+                raise BrowserGone(self._gone_text({**row, "close_reason": "chrome disconnected"}), reason="chrome_disconnected") from None
             await self._mark_closed(row, "closed", status="closed")
             raise
         except NotFound:
@@ -866,7 +931,7 @@ class Browsers:
             "lost": "the browser service restarted",
             "shutdown": "the browser service stopped",
             "owner_gone": "its owner is gone",
-        }.get(str(reason), "it was closed")
+        }.get(str(reason), "the operator's Chrome disconnected from Daedalus" if str(reason).startswith("chrome disconnected") else "it was closed")
         return f"this browser is not open: {why}. Its profile and logins are kept; BrowserOpen starts it again"
 
     def origin(self, *, actor: str, launch_id: str = "") -> dict[str, Any]:
@@ -1042,6 +1107,8 @@ class Browsers:
         """Clear a profile's cookies and storage, or delete it; the daemon refuses while it runs."""
         if action not in ("clear", "delete") or not valid_id(profile):
             raise InvalidRequest("a profile is cleared or deleted by its id")
+        if env == USER:
+            raise Forbidden("the operator's own Chrome profile is never cleared or deleted from Daedalus", reason="user_browser")
         await self._call(env, f"profile.{action}", {"profile": profile}, what=f"{'clearing' if action == 'clear' else 'deleting'} the profile")
         if action == "delete":
             await self.db.execute("DELETE FROM browser_profiles WHERE env = ? AND id = ?", (env, profile))
@@ -1240,6 +1307,9 @@ class Browsers:
         if kind == "browser.exited":
             await self._browser_exited(link, data)
             return
+        if kind.startswith("relay."):
+            await self._on_relay(link, kind, data)
+            return
         row = await self._group_row(data)
         if row is None:
             return
@@ -1265,6 +1335,22 @@ class Browsers:
             download = data.get("download") if isinstance(data.get("download"), dict) else {}
             assert isinstance(download, dict)
             await self.audit(row["id"], row["env"], "page", "download", {"id": download.get("id"), "name": download.get("name"), "size": download.get("size"), "sha256": download.get("sha256"), "state": download.get("state")})
+
+    async def _on_relay(self, link: Link, kind: str, data: dict[str, Any]) -> None:
+        """The operator's Chrome came, went, or checked the connection from its popup. The app hears of
+        each (a popup's check is a toast there, so both sides confirm the same check), and the
+        daemon's report is read again for the card."""
+        self._tasks.append(asyncio.create_task(self._refresh_info(link)))
+        self._tasks = [t for t in self._tasks if not t.done()]
+        if self.bus is None:
+            return
+        payload: dict[str, Any] = {"kind": kind.removeprefix("relay."), "profile_name": str(data.get("profile_name") or "")[:80]}
+        if data.get("reason"):
+            payload["reason"] = str(data["reason"])[:80]
+        try:
+            await self.bus.publish("browser.user", payload)
+        except Exception:  # noqa: BLE001 — the relay does not depend on who hears of it
+            logger.exception("publishing browser.user %s failed", payload["kind"])
 
     async def _navigation_blocked(self, row: dict[str, Any], data: dict[str, Any]) -> None:
         """A page tried to take its tab somewhere the allowlist does not name — a link, a redirect, a

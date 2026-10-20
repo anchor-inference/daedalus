@@ -26,6 +26,8 @@ import (
 	"github.com/ascorblack/daedalus/browserd/internal/netwall"
 	"github.com/ascorblack/daedalus/browserd/internal/page"
 	"github.com/ascorblack/daedalus/browserd/internal/record"
+	"github.com/ascorblack/daedalus/browserd/internal/relay"
+	"github.com/ascorblack/daedalus/browserd/internal/relay/relaytest"
 	"github.com/ascorblack/daedalus/browserd/internal/rpc"
 	"github.com/ascorblack/daedalus/browserd/internal/view"
 	"github.com/ascorblack/daedalus/browserd/internal/wire"
@@ -183,6 +185,8 @@ type harness struct {
 	stop    chan struct{}
 	evlog   *events.Log
 	logged  *lockedBuffer
+	// fake is the Chrome extension the daemon drives in the attach run (attachRun), nil otherwise.
+	fake *relaytest.Fake
 }
 
 // lockedBuffer is the daemon's log, written from many goroutines.
@@ -237,6 +241,9 @@ func startFull(t *testing.T, edit func(*config.Limits), args []string, makeWall 
 	if configure != nil {
 		configure(cfg)
 	}
+	if attachRun() {
+		cfg.Backend = config.BackendAttach
+	}
 	if err := os.MkdirAll(cfg.StateDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +275,13 @@ func startFull(t *testing.T, edit func(*config.Limits), args []string, makeWall 
 			t.Fatal(err)
 		}
 	}
-	m := browser.New(browser.Deps{Config: cfg, Log: log, Events: deb, Wall: wall, Busy: func(b *browser.Browser) bool { return hub != nil && hub.Busy(b) }})
+	var relays *relay.Hub
+	var d *rpc.Daemon
+	if attachRun() {
+		relays = relay.NewHub(relay.Options{InstallName: "test", Log: log, Publish: func(typ string, data any) { deb.Publish(typ, "", data) },
+			HostSeen: func() bool { return d != nil && d.HostSeen() }})
+	}
+	m := browser.New(browser.Deps{Config: cfg, Log: log, Events: deb, Wall: wall, Relay: relays, Busy: func(b *browser.Browser) bool { return hub != nil && hub.Busy(b) }})
 	hub = view.New(m, evlog, log)
 	model := page.New(m, cfg, log)
 	hub.HumanInput = model.HumanInput
@@ -291,7 +304,7 @@ func startFull(t *testing.T, edit func(*config.Limits), args []string, makeWall 
 	model.AfterAction = recorder.AfterAction
 	steps := &workflow.Recorder{Pages: model, Groups: m.Group, Publish: m.Publish, Events: evlog, Log: log}
 	hub.Observe = steps.Before
-	d := &rpc.Daemon{Config: cfg, Instance: "test", StartedAt: time.Now(), Manager: m, Hub: hub, Page: model, Events: evlog, Log: log, Net: wall, Record: recorder, Workflow: steps}
+	d = &rpc.Daemon{Config: cfg, Instance: "test", StartedAt: time.Now(), Manager: m, Hub: hub, Page: model, Events: evlog, Log: log, Net: wall, Record: recorder, Workflow: steps, Relay: relays}
 	srv := server.New(ep.Token, log, d.Hello)
 	d.Register(srv)
 	h := &harness{t: t, manager: m, site: site, stop: make(chan struct{}), evlog: evlog, logged: logged}
@@ -305,10 +318,16 @@ func startFull(t *testing.T, edit func(*config.Limits), args []string, makeWall 
 		t.Fatal(err)
 	}
 	h.client = c
+	if attachRun() {
+		h.fake = startFake(t, cfg, wall, args, dir)
+	}
 	t.Cleanup(func() {
 		c.Close()
 		close(h.stop)
 		m.Shutdown()
+		if h.fake != nil {
+			h.fake.Close()
+		}
 		ep.Release()
 		_ = ep.Listener.Close()
 		srv.Close()

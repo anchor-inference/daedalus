@@ -286,7 +286,9 @@ type Native struct {
 	keyproxy   child
 	ptyd       child
 	browserd   child
-	git        string
+	// browserdUser is the second browser daemon, for the operator's own Chrome (userbrowser.go).
+	browserdUser child
+	git          string
 
 	// bootID is the id the running supervisor was given, which the app echoes (ready.go).
 	bootID string
@@ -757,6 +759,8 @@ func supervisorEnv(p Paths, base []string, settings map[string]string) []string 
 	add("TERMINALS_HOST_DIR", ptydRunDir(p))
 	// The browser daemon, the same way.
 	add("BROWSER_HOST_DIR", browserdRunDir(p))
+	// The user daemon, for the operator's own Chrome, the same way again.
+	add("BROWSER_USER_DIR", browserdUserRunDir(p))
 	// The Mini App as a release archive carries it, beside the launcher. It is not the checkout's
 	// own miniapp/dist: that is the thing this would be a fallback for, and pointing one at the
 	// other makes the fallback a no-op that looks like a copy.
@@ -881,6 +885,17 @@ func (n *Native) Start(ctx context.Context) error {
 	if n.browserd != nil {
 		n.browserd.Start(ctx)
 		waitForPtyd(ctx, browserdRunDir(n.paths), 5*time.Second)
+	}
+	// The operator's own Chrome: the extension folder brought up to this release, a connector the
+	// operator registered pointed at this release's browserd, and the daemon the bridge reaches.
+	// None of it stops a start — the agent's own browser and everything else work without it.
+	n.prepareUserBrowser()
+	if n.browserdUser == nil {
+		n.browserdUser = n.newBrowserdUser()
+	}
+	if n.browserdUser != nil {
+		n.browserdUser.Start(ctx)
+		waitForPtyd(ctx, browserdUserRunDir(n.paths), 5*time.Second)
 	}
 	n.keyproxy.Start(ctx)
 	n.supervisor.Start(ctx)
@@ -1030,11 +1045,12 @@ const nativeReadyTimeout = 90 * time.Second
 // run is snapshotted, and it resumes on the next start.
 //
 // The supervisor goes first, so the agent detaches from its terminals and browsers cleanly and
-// records them as ended rather than finding a daemon gone under it; then the browser daemon, which
+// records them as ended rather than finding a daemon gone under it; then the user browser daemon,
+// which lets go of the operator's Chrome and closes nothing in it; then the browser daemon, which
 // closes every browser; then the terminal daemon, which ends every host terminal; then the key
 // proxy, which the agent needed until it stopped.
 func (n *Native) Stop(ctx context.Context) {
-	for _, c := range []child{n.supervisor, n.browserd, n.ptyd, n.keyproxy} {
+	for _, c := range []child{n.supervisor, n.browserdUser, n.browserd, n.ptyd, n.keyproxy} {
 		if c != nil {
 			c.Stop(ctx)
 		}
@@ -1043,7 +1059,7 @@ func (n *Native) Stop(ctx context.Context) {
 	// once, when it is built, while APIPort and WaitReadyNative read the env file every time: a stop,
 	// an edit to the ports and a start would otherwise bring the old ports back up and then wait on
 	// the new ones, which is a launcher hanging on a port nothing is serving.
-	n.supervisor, n.keyproxy, n.ptyd, n.browserd = nil, nil, nil, nil
+	n.supervisor, n.keyproxy, n.ptyd, n.browserd, n.browserdUser = nil, nil, nil, nil, nil
 }
 
 // Running counts what is answering rather than what this process started. A `status` from a second
@@ -1060,7 +1076,7 @@ func (n *Native) Running() int {
 			count++
 		}
 	}
-	for _, run := range []string{ptydRunDir(n.paths), browserdRunDir(n.paths)} {
+	for _, run := range []string{ptydRunDir(n.paths), browserdRunDir(n.paths), browserdUserRunDir(n.paths)} {
 		if ptydAnswers(run) {
 			count++
 		}

@@ -110,6 +110,16 @@ def test_words_are_reduced_so_that_inflected_russian_still_meets() -> None:
     assert parse_query("как это сделать?").terms == ()
 
 
+def test_what_asks_how_something_works_only_where_the_question_opens() -> None:
+    # Mid-sentence it joins two halves of a request, and reading it as "explain" once let an
+    # architecture page outrank the settings row the request was about.
+    assert parse_query("what is orchestration").explain
+    assert parse_query("а что такое оркестрация").explain
+    assert not parse_query("record what the browser does").explain
+    assert not parse_query("покажи, что агент делает").explain
+    assert parse_query("how does voice mode work").explain
+
+
 def test_a_russian_question_reaches_the_english_documentation_through_the_glossary() -> None:
     query = parse_query("как установить оркестрацию")
     assert "orchestration" in query.added or stem("orchestration") in query.added

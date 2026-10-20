@@ -17,11 +17,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ascorblack/daedalus/browserd/internal/bridge"
 	"github.com/ascorblack/daedalus/browserd/internal/browser"
 	"github.com/ascorblack/daedalus/browserd/internal/config"
 	"github.com/ascorblack/daedalus/browserd/internal/netwall"
 	"github.com/ascorblack/daedalus/browserd/internal/page"
 	"github.com/ascorblack/daedalus/browserd/internal/record"
+	"github.com/ascorblack/daedalus/browserd/internal/relay"
 	"github.com/ascorblack/daedalus/browserd/internal/rpc"
 	"github.com/ascorblack/daedalus/browserd/internal/version"
 	"github.com/ascorblack/daedalus/browserd/internal/view"
@@ -32,6 +34,7 @@ import (
 
 const usage = `usage:
   browserd serve --env <name> --run-dir <dir> --state-dir <dir> [flags]
+  browserd bridge [--run-dir <dir>] [--data <dir>] <chrome-extension://id/>
   browserd version
 
 serve flags:
@@ -40,6 +43,13 @@ serve flags:
   --mode headless|headed               windowless, or real windows (on Xvfb without a display)
   --config <file>                      JSON file with limits, the Chromium and the input
   --log-file <file>, --log-level <lv>  the daemon's own log (default stderr, info)
+  --backend launch|attach              browsers of its own (default), or the operator's Chrome over a relay
+  --install-name <name>                the installation's name the Chrome extension shows (attach)
+
+bridge is Chrome's native messaging host for the Daedalus extension: Chrome starts it with the
+extension's origin, and it carries the extension's relay to the attach daemon whose run directory
+--run-dir, $BROWSERD_BRIDGE_RUN_DIR, browserd-bridge.json beside the executable, or the default
+installation's local state names (see docs/architecture/browser.md, The operator's Chrome).
 `
 
 func main() {
@@ -47,7 +57,15 @@ func main() {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
 	}
+	if bridge.IsOrigin(os.Args[1]) {
+		// Chrome starts a native messaging host by the path in its manifest, with the extension's
+		// origin as the first argument and nothing to say which command is meant: an origin there
+		// is the bridge.
+		os.Exit(bridge.Main(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+	}
 	switch os.Args[1] {
+	case "bridge":
+		os.Exit(bridge.Main(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
 	case "version", "--version":
 		fmt.Printf("browserd %s (protocol %d)\n", version.Version, version.Protocol)
 	case "serve":
@@ -133,11 +151,18 @@ func serve(args []string) error {
 	evlog.SetMaxBytes(config.EventRingBytes)
 	deb := events.NewDebouncer(evlog, tabUpdates)
 	var hub *view.Hub
+	var daemon *rpc.Daemon
+	var relays *relay.Hub
+	if cfg.Backend == config.BackendAttach {
+		relays = relay.NewHub(relay.Options{InstallName: cfg.InstallName, Log: log,
+			Publish:  func(typ string, data any) { deb.Publish(typ, "", data) },
+			HostSeen: func() bool { return daemon != nil && daemon.HostSeen() }})
+	}
 	// The network wall: every browser gets a proxy of its own, at its strictest (the internet only)
 	// until the host sends its rules with net.configure. Its egress events are rate-limited by the
 	// wall itself.
 	wall := netwall.NewBrowsers(netwall.New(netwall.Options{Events: func(e netwall.Egress) { deb.Publish("egress", "", e) }}))
-	manager := browser.New(browser.Deps{Config: cfg, Log: log, Events: deb, Wall: wall,
+	manager := browser.New(browser.Deps{Config: cfg, Log: log, Events: deb, Wall: wall, Relay: relays,
 		Busy: func(b *browser.Browser) bool { return hub != nil && hub.Busy(b) }})
 	hub = view.New(manager, evlog, log)
 	model := page.New(manager, cfg, log)
@@ -155,8 +180,8 @@ func serve(args []string) error {
 	model.AfterAction = recorder.AfterAction
 	steps := &workflow.Recorder{Pages: model, Groups: manager.Group, Publish: manager.Publish, Events: evlog, Log: log}
 	hub.Observe = steps.Before
-	daemon := &rpc.Daemon{Config: cfg, Instance: hex.EncodeToString(instance), StartedAt: time.Now().UTC(),
-		Manager: manager, Hub: hub, Page: model, Events: evlog, Log: log, Net: wall, Record: recorder, Workflow: steps}
+	daemon = &rpc.Daemon{Config: cfg, Instance: hex.EncodeToString(instance), StartedAt: time.Now().UTC(),
+		Manager: manager, Hub: hub, Page: model, Events: evlog, Log: log, Net: wall, Record: recorder, Workflow: steps, Relay: relays}
 	srv := server.New(ep.Token, log, daemon.Hello)
 	daemon.Register(srv)
 
@@ -173,7 +198,7 @@ func serve(args []string) error {
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(ep.Listener) }()
 	found, ok := manager.Chromium()
-	log.Info("browserd serving", "env", cfg.Env, "version", version.Version, "protocol", version.Protocol,
+	log.Info("browserd serving", "env", cfg.Env, "backend", cfg.Backend, "version", version.Version, "protocol", version.Protocol,
 		"instance", daemon.Instance, "run_dir", cfg.RunDir, "chromium", found.Path, "chromium_found", ok)
 
 	var serveErr error
@@ -189,6 +214,10 @@ func serve(args []string) error {
 	ep.Release()
 	_ = ep.Listener.Close()
 	manager.Shutdown()
+	if relays != nil {
+		// After the groups are let go: the relay's last frame tells the extension the daemon stopped.
+		relays.Close()
+	}
 	srv.Close()
 	log.Info("browserd stopped")
 	return serveErr

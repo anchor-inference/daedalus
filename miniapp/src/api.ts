@@ -330,7 +330,53 @@ export type BrowserGroup = {
 };
 
 /** Whether this installation has a browser at all, and the owner's groups. */
-export type BrowserList = { available: boolean; reason: string; groups: BrowserGroup[] };
+export type BrowserList = { available: boolean; reason: string; groups: BrowserGroup[]; user?: BrowserUserChoice };
+
+/** A conversation's browser, where the installation offers the operator's own Chrome (`GET /api/browsers?session=`). */
+export type BrowserUserChoice = { env: "agent" | "user"; consented: boolean; connected: boolean; name: string };
+
+/** The relay of the operator's Chrome as the user daemon reports it (`relay.status`). */
+export type BrowserRelay = {
+  connected: boolean;
+  profile_id?: string;
+  profile_name?: string;
+  ext_version?: string;
+  chrome_version?: string;
+  platform?: string;
+  transport?: "native" | "server" | string;
+  since?: string | null;
+  last_seen?: string | null;
+  last_error?: string;
+};
+
+/** The desktop launcher's report on Chrome, the connector and the extension folder (native only). */
+export type ChromeLauncherReport = {
+  browsers?: { channel: string; name: string; running: boolean; supported: boolean; note?: string; profiles?: { dir: string; name: string }[] }[];
+  connector?: { registered: boolean; stale?: boolean; available?: boolean; reason?: string; restart_chrome?: boolean };
+  extension?: { path: string; ready: boolean; version?: string; error?: string };
+  extension_id?: string;
+  error?: string;
+};
+
+export type BrowserUserDevice = { id: string; name: string; profile_id: string; ext_version: string; chrome_version: string; paired_at: string; last_seen: string; connected: boolean };
+
+/** `GET /api/browser/user`: the card "Your Chrome". */
+export type BrowserUserStatus = {
+  configured: boolean;
+  enabled: boolean;
+  daemon: boolean;
+  reason: string;
+  detail: string;
+  relay: BrowserRelay | null;
+  native: boolean;
+  launcher: ChromeLauncherReport | null;
+  launcher_error: string;
+  devices: BrowserUserDevice[];
+  server_url: string;
+  consent: string;
+};
+
+export type BrowserUserSettings = { enabled: boolean; granted_sites: string[]; monitor: boolean; watch: boolean; bodies: boolean };
 
 /**
  * One row of a group's action log (`GET /api/browsers/{group}/actions`). `text` is what the agent
@@ -423,6 +469,7 @@ export type BrowserSettings = {
   injection_monitor_preset: string;
   extract_preset: string;
   point_clicks: boolean;
+  user?: BrowserUserSettings;
 };
 
 /** A note an agent proposed about a site, or a procedure drafted from the operator's recorded steps

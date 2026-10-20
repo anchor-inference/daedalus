@@ -564,6 +564,9 @@ func (a *App) Uninstall(ctx context.Context, keepData, removeData bool) error {
 	if err != nil {
 		return err
 	}
+	// Whatever is kept, the launcher and its browserd are going: a connector left registered would
+	// have Chrome start a program that is no longer there.
+	removeConnector(a.paths, a.log)
 	// An installation whose setup never finished has no mode, and nothing of it ever ran: no
 	// containers to remove and no runtime beyond what a first start may have begun to download.
 	if a.mode == ModeUnset {
@@ -949,6 +952,13 @@ func (a *App) PrintStatus(ctx context.Context) {
 	}
 	fmt.Printf("telegram     %s\n", telegram)
 	fmt.Printf("app          %s\n", status.AppURL)
+	if a.Native() {
+		// The operator's own Chrome is a native installation's: in Docker there is no bridge on
+		// this machine for Chrome to start.
+		for _, line := range userBrowserLines(a.UserBrowser()) {
+			fmt.Println(line)
+		}
+	}
 	if status.Change.Pending {
 		fmt.Printf("changes      ready — restart to apply: %s\n", status.Change.Summary)
 	} else if status.Change.Commit != "" {

@@ -105,6 +105,9 @@ what why explain explanation works work working concept overview difference
 что зачем почему объясни объяснить работает работают устроен устроено такое разница
 """.split())
 
+OPENING_ONLY = frozenset({"what", "что"})
+"""Words of EXPLAIN that ask how something works only where the question opens."""
+
 # Russian question words → the English the documentation is written in. Keys are stems as `stem`
 # makes them; values are English words, stemmed when the glossary is built. Only words the shipped
 # documentation actually needs: the settings index already speaks Russian.
@@ -182,7 +185,13 @@ class Query:
 def parse_query(text: str) -> Query:
     raw = words(text)
     intent = any(word in INTENT for word in raw)
-    explain = not intent and any(word in EXPLAIN for word in raw)
+    # "what" and "что" ask what a thing is only when they open the question ("what is orchestration",
+    # "а что такое оркестрация" — only words that carry nothing may come first);
+    # inside one they join two halves of a request ("record what the browser does", "покажи, что
+    # агент делает"), and reading them as a question about how something works took the settings
+    # row's lift away and let an architecture page that merely mentions recording outrank it.
+    opening = next((index for index, word in enumerate(raw) if word in OPENING_ONLY or word not in STOP), len(raw))
+    explain = not intent and any(word in EXPLAIN and (word not in OPENING_ONLY or index == opening) for index, word in enumerate(raw))
     subject = [stem(word) for word in raw if word not in STOP and word not in INTENT]
     added: list[str] = []
     groups: list[tuple[str, ...]] = []

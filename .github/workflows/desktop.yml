@@ -31,9 +31,9 @@ on:
   push:
     tags: ["desktop-v*"]
     branches: [main]
-    paths: ["desktop/**", "ptyd/**", "browserd/**", "scripts/desktop_package_evidence.py", ".github/workflows/desktop.yml"]
+    paths: ["desktop/**", "ptyd/**", "browserd/**", "extension/**", "scripts/desktop_package_evidence.py", ".github/workflows/desktop.yml"]
   pull_request:
-    paths: ["desktop/**", "ptyd/**", "browserd/**", "scripts/desktop_package_evidence.py", ".github/workflows/desktop.yml"]
+    paths: ["desktop/**", "ptyd/**", "browserd/**", "extension/**", "scripts/desktop_package_evidence.py", ".github/workflows/desktop.yml"]
   workflow_dispatch:
 
 permissions:
@@ -288,11 +288,27 @@ jobs:
           path: miniapp/dist
           retention-days: 3
 
+  # The Chrome extension, unpacked, with the SHA256SUMS the launcher checks it against before it
+  # copies it where the operator's Chrome loads it from (desktop/userbrowser_extension.go).
+  extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: desktop/stage-extension.sh browser-extension
+      - uses: actions/upload-artifact@v4
+        with:
+          name: browser-extension
+          path: browser-extension
+          retention-days: 3
+
   # Windows: the installer, and the archive of the same files. Then the installer is run the way an
   # operator would, silently: installed, started until the window shows the launcher's page,
   # closed with nothing left running, and uninstalled twice — keeping the data, then deleting it.
   app-windows:
-    needs: [engine, ptyd, browserd, miniapp, seed]
+    needs: [engine, ptyd, browserd, miniapp, seed, extension]
     runs-on: windows-latest
     defaults:
       run:
@@ -307,6 +323,8 @@ jobs:
         with: { name: browserd, path: dl/browserd }
       - uses: actions/download-artifact@v4
         with: { name: miniapp-dist, path: desktop/shell/stage/miniapp-dist }
+      - uses: actions/download-artifact@v4
+        with: { name: browser-extension, path: desktop/shell/stage/browser-extension }
       - uses: actions/download-artifact@v4
         with: { name: seed, path: dl/seed }
       - uses: actions/setup-node@v4
@@ -355,7 +373,7 @@ jobs:
   # x86-64 .deb is then installed on this runner, started under a virtual display until its window
   # shows the launcher's page, closed, and removed — the user's data staying.
   app-linux:
-    needs: [engine, ptyd, browserd, miniapp, seed]
+    needs: [engine, ptyd, browserd, miniapp, seed, extension]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -367,6 +385,8 @@ jobs:
         with: { name: browserd, path: dl/browserd }
       - uses: actions/download-artifact@v4
         with: { name: miniapp-dist, path: desktop/shell/stage/miniapp-dist }
+      - uses: actions/download-artifact@v4
+        with: { name: browser-extension, path: desktop/shell/stage/browser-extension }
       - uses: actions/download-artifact@v4
         with: { name: seed, path: dl/seed }
       - uses: actions/setup-node@v4
@@ -439,7 +459,7 @@ jobs:
   # open it the first time), in a .dmg to drag into Applications and in the zip the launcher's upgrade
   # installs from. The .dmg is then mounted and its application checked and started.
   app-macos:
-    needs: [engine, ptyd, browserd, miniapp, seed]
+    needs: [engine, ptyd, browserd, miniapp, seed, extension]
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -451,6 +471,8 @@ jobs:
         with: { name: browserd, path: dl/browserd }
       - uses: actions/download-artifact@v4
         with: { name: miniapp-dist, path: desktop/shell/stage/miniapp-dist }
+      - uses: actions/download-artifact@v4
+        with: { name: browser-extension, path: desktop/shell/stage/browser-extension }
       - uses: actions/download-artifact@v4
         with: { name: seed, path: dl/seed }
       - uses: actions/setup-node@v4

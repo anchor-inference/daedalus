@@ -177,3 +177,46 @@ func (n *Native) newBrowserd(ctx context.Context) child {
 		PidFile: filepath.Join(pidsDir(n.paths), "browserd.json"),
 	}
 }
+
+// The user daemon: a second browserd, for the operator's own Chrome. It launches no Chromium — it
+// waits for the Daedalus extension to connect through `browserd bridge` and drives tabs over that
+// relay — so it needs no memory scope, no sandbox helper and no browsers folder. It has its own run
+// directory and token, and its own state directory, so nothing of the agent's browser and nothing
+// of the operator's ever share a daemon's limits, reconciliation or `daemon.info`.
+//
+// The bridge Chrome starts is told this run directory by the connector's wrapper
+// (userbrowser_connector.go), and the host by BROWSER_USER_DIR.
+func browserdUserRunDir(p Paths) string   { return filepath.Join(p.Local, "browserd-user", "run") }
+func browserdUserStateDir(p Paths) string { return filepath.Join(p.Local, "browserd-user", "state") }
+
+// browserdUserArgv is the user daemon's command line.
+func browserdUserArgv(binary string, p Paths) []string {
+	run := browserdUserRunDir(p)
+	return []string{binary, "serve", "--env", "user", "--backend", "attach", "--run-dir", run, "--state-dir", browserdUserStateDir(p), "--listen", browserdListen(run)}
+}
+
+// newBrowserdUser is the user daemon's process, or nil when this build carries no browserd; the run
+// directory then says so, as the host daemon's does.
+func (n *Native) newBrowserdUser() child {
+	exe, _ := os.Executable()
+	binary := browserdBinary(exe, os.Getenv, exists)
+	run := browserdUserRunDir(n.paths)
+	if binary == "" {
+		if err := markPtyd(run, noBrowserdReason); err != nil {
+			n.log("the user browser daemon's directory: %v", err)
+		}
+		return nil
+	}
+	if err := markPtyd(run, ""); err != nil {
+		n.log("the user browser daemon's directory: %v", err)
+	}
+	return &Process{
+		Name:    "user browser daemon",
+		Argv:    browserdUserArgv(binary, n.paths),
+		Dir:     n.paths.Local,
+		Env:     environWithout("VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT", "UV_PYTHON_INSTALL_DIR", "UV_CACHE_DIR", "UV_PYTHON", "PYTHONPATH", "PLAYWRIGHT_BROWSERS_PATH"),
+		LogPath: filepath.Join(n.paths.RuntimeLogs, "browserd-user.log"),
+		Log:     n.log,
+		PidFile: filepath.Join(pidsDir(n.paths), "browserd-user.json"),
+	}
+}

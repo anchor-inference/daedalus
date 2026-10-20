@@ -134,6 +134,9 @@ SENSITIVE_KINDS = ("credentials", "purchase", "send", "destroy", "accept", "uplo
 """What the browser daemon calls an action that changes the world: ``docs/architecture/browser.md``."""
 NEVER_ALLOWED_KINDS = frozenset({"credentials"})
 """No operator rule lifts these: typing a sign-in is the operator's, however much the site is trusted."""
+CONSEQUENTIAL_KINDS = frozenset({"credentials", "purchase", "send", "destroy"})
+"""What no rule lifts in the operator's own Chrome: there the agent acts as the operator, signed in
+everywhere they are, and buying, sending, deleting or signing in is always asked about."""
 SENSITIVE_WORDS = {
     "credentials": "submit a sign-in",
     "purchase": "buy or pay",
@@ -1014,14 +1017,16 @@ class Policy:
         return rows
 
 
-def browser_sensitive(*, tool: str, group: str, host: str, page_origin: str, kinds: Iterable[str], action: str, name: str, text: str, rules: Iterable[Any] = ()) -> Decision:
+def browser_sensitive(*, tool: str, group: str, host: str, page_origin: str, kinds: Iterable[str], action: str, name: str, text: str, rules: Iterable[Any] = (), env: str = "") -> Decision:
     """The policy's answer to an action the browser daemon classified as sensitive.
 
     Built in, every such action is asked about. The approval key covers the group, the page's origin,
     the element's accessible name, the action and a hash of the text typed, so a grant lets exactly
     that action through once: the same button on another site, or another message in the same box,
     is a new question. The operator's rules for a site (``[[browser.rules]]``) may refuse the kinds
-    they name there, or let them through; they never let ``credentials`` through.
+    they name there, or let them through; they never let ``credentials`` through, and in the
+    operator's own Chrome (``env="user"``) they never let a purchase, a message, a deletion or a
+    sign-in through.
     """
     wanted = sorted({k for k in kinds if k in SENSITIVE_KINDS})
     if not wanted:
@@ -1036,7 +1041,8 @@ def browser_sensitive(*, tool: str, group: str, host: str, page_origin: str, kin
     for rule in matching:
         if getattr(rule, "action", "") == ALLOW:
             lifted |= set(getattr(rule, "kinds", None) or wanted)
-    remaining = [k for k in wanted if k not in lifted - NEVER_ALLOWED_KINDS]
+    never = (NEVER_ALLOWED_KINDS | CONSEQUENTIAL_KINDS) if env == "user" else NEVER_ALLOWED_KINDS
+    remaining = [k for k in wanted if k not in lifted - never]
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest() if text else ""
     key = approval_key(tool, {"group": group, "origin": page_origin, "name": name, "action": action, "text_sha256": digest})
     if not remaining:
@@ -1047,4 +1053,4 @@ def browser_sensitive(*, tool: str, group: str, host: str, page_origin: str, kin
     return Decision(ASK, f"this would {words} on {host or page_origin}", "browser.sensitive", key=key)
 
 
-__all__ = ["ALLOW", "ASK", "BROWSER_NAV_TOOLS", "DENY", "HANDOFF", "SENSITIVE_KINDS", "SHELL_TOOLS", "browser_sensitive", "Decision", "Policy", "Rule", "approval_key", "argument_paths", "canonical", "expand_home", "host_allowed", "hosts_in", "mentions_sealed", "path_operands", "real_path", "real_under", "sealed_root", "shell_assignments", "shell_segments"]
+__all__ = ["ALLOW", "ASK", "BROWSER_NAV_TOOLS", "CONSEQUENTIAL_KINDS", "DENY", "HANDOFF", "SENSITIVE_KINDS", "SHELL_TOOLS", "browser_sensitive", "Decision", "Policy", "Rule", "approval_key", "argument_paths", "canonical", "expand_home", "host_allowed", "hosts_in", "mentions_sealed", "path_operands", "real_path", "real_under", "sealed_root", "shell_assignments", "shell_segments"]
