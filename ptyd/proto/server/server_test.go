@@ -220,3 +220,37 @@ func TestGarbageDoesNotKillTheConnection(t *testing.T) {
 		t.Fatalf("after garbage: %v", err)
 	}
 }
+
+func TestASecondTokenGrantsItsRole(t *testing.T) {
+	dir := runDir(t)
+	ep, err := server.Prepare(dir, "unix", testDaemon)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operator, err := server.NewToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := server.New(ep.Token, quiet(), nil)
+	srv.AddToken(operator, "operator")
+	srv.RoleHello = func(role string) any { return map[string]any{"role": role} }
+	srv.Handle("whoami", func(ctx context.Context, c *server.Conn, p json.RawMessage) (any, error) {
+		return c.Role(), nil
+	})
+	go srv.Serve(ep.Listener)
+	defer func() { ep.Listener.Close(); srv.Close(); ep.Release() }()
+	sock := filepath.Join(dir, server.SocketName(testDaemon))
+	for token, want := range map[string]string{ep.Token: "", operator: "operator"} {
+		c, err := clienttest.DialWith("unix", sock, token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var hello map[string]string
+		_ = json.Unmarshal(c.Hello, &hello)
+		var got string
+		if err := c.Call(context.Background(), "whoami", nil, &got); err != nil || got != want || hello["role"] != want {
+			t.Errorf("token for %q: role %q, hello %v, %v", want, got, hello, err)
+		}
+		c.Close()
+	}
+}

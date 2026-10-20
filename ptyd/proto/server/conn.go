@@ -44,12 +44,17 @@ type Conn struct {
 	out    chan []byte
 
 	inflight chan struct{}
+	role     string
 
 	mu          sync.Mutex
 	nextChannel uint32
 	channels    map[uint32]*channel
 	values      map[any]any
 }
+
+// Role is the role the connection's token grants: empty for the token given to New, otherwise the
+// one AddToken named.
+func (c *Conn) Role() string { return c.role }
 
 // Context is cancelled when the connection closes. Everything started on behalf of the connection
 // (subscriptions, attachments, waiting requests) hangs off it.
@@ -103,7 +108,8 @@ func (s *Server) serveConn(nc net.Conn) {
 	if err != nil {
 		return
 	}
-	if f.Channel != wire.ControlChannel || subtle.ConstantTimeCompare(trimSpace(f.Payload), []byte(s.token)) != 1 {
+	role, ok := s.authenticate(f)
+	if !ok {
 		s.log.Warn("connection refused: bad token", "remote", nc.RemoteAddr().String())
 		time.Sleep(badTokenDelay)
 		return
@@ -112,7 +118,7 @@ func (s *Server) serveConn(nc net.Conn) {
 
 	ctx, cancel := context.WithCancel(s.ctx)
 	c := &Conn{srv: s, nc: nc, log: s.log, ctx: ctx, cancel: cancel, out: make(chan []byte, outQueue),
-		inflight: make(chan struct{}, maxInflight), channels: map[uint32]*channel{}, values: map[any]any{}}
+		inflight: make(chan struct{}, maxInflight), role: role, channels: map[uint32]*channel{}, values: map[any]any{}}
 	s.track(c, true)
 	defer s.track(c, false)
 
@@ -137,7 +143,13 @@ func (s *Server) serveConn(nc net.Conn) {
 		nc.Close()
 	}()
 
-	if hello := s.hello(); hello != nil {
+	var hello any
+	if s.RoleHello != nil {
+		hello = s.RoleHello(role)
+	} else if s.hello != nil {
+		hello = s.hello()
+	}
+	if hello != nil {
 		_ = c.Notify("hello", hello)
 	}
 	for {
@@ -167,6 +179,23 @@ func (s *Server) serveConn(nc net.Conn) {
 	cancel()
 	<-writerDone
 	c.closeAll()
+}
+
+// authenticate finds the role of the token in the first frame. Every token is compared, in constant
+// time, whether or not an earlier one matched, so the time a guess takes says nothing about which
+// token it came close to.
+func (s *Server) authenticate(f wire.Frame) (string, bool) {
+	if f.Channel != wire.ControlChannel {
+		return "", false
+	}
+	got := trimSpace(f.Payload)
+	role, ok := "", subtle.ConstantTimeCompare(got, []byte(s.token)) == 1
+	for token, r := range s.roles {
+		if subtle.ConstantTimeCompare(got, []byte(token)) == 1 {
+			role, ok = r, true
+		}
+	}
+	return role, ok
 }
 
 func isEOF(err error) bool {
