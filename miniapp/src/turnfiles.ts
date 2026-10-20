@@ -76,20 +76,23 @@ function within(path: string, root: string): string | null {
 
 /**
  * Where a tool's path is among the session's folders. A relative path is the workspace's, as the
- * tools resolve it; an absolute one is placed in the workspace first, then in the project's other
- * folders; anything else has no place, and the row shows it as the tool wrote it.
+ * tools resolve it; an absolute one is placed in the innermost of the workspace and the project's
+ * other folders that holds it; anything else has no place, and the row shows it as the tool wrote it.
  */
 export function placeOf(path: string, workspace: string, folders: readonly Pick<SessionFolder, "id" | "path">[] = []): Place | null {
   const p = normal(path);
   if (!p) return null;
   if (!isAbsolute(p)) return { rel: p.replace(/^(\.\/)+/, ""), folder: "" };
   const home = within(p, normal(workspace));
-  if (home) return { rel: home, folder: "" };
+  let best: Place | null = home ? { rel: home, folder: "" } : null;
+  // The innermost folder wins, whichever order they come in: a staff worktree lives inside the
+  // project folder (`.agents/worktrees/<name>`), and a file the member wrote there, placed in the
+  // project folder, opened the project's copy of the path — a different file, or none at all.
   for (const folder of folders) {
     const rel = within(p, normal(folder.path));
-    if (rel) return { rel, folder: folder.id };
+    if (rel && (!best || rel.length < best.rel.length)) best = { rel, folder: folder.id };
   }
-  return null;
+  return best;
 }
 
 function nameOf(path: string): string {

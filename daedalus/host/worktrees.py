@@ -707,6 +707,34 @@ class StaffWorktrees:
         counts = (await git.run(["rev-list", "--left-right", "--count", f"{worktree.base_ref}...HEAD"], cwd=worktree.path)).split()
         return WorktreeStatus(dirty=dirty, behind=int(counts[0]), ahead=int(counts[1]))
 
+    async def produced(self, folder: ProjectFolder, path: Path, base: str, *, limit: int = 100) -> tuple[list[str], bool]:
+        """The files a staff worktree made, as ``(paths relative to it, whether more were left out)``:
+        what its branch committed since ``base`` and what is uncommitted or untracked in it now.
+
+        A member handed in two scripts and left the document the operator wanted untracked in its
+        worktree; the review packet showed only what was handed in, and nobody could find the
+        document. Deleted files and the host's own ``.agents/`` scratch are left out.
+        """
+        git = self._git(folder.env)
+        lists: list[str] = []
+        if base:
+            try:
+                lists.append(await git.run(["diff", "-z", "--name-only", "--no-renames", "--diff-filter=ACMRT", f"{base}...HEAD"], cwd=path))
+            except GitError:
+                pass
+        # NUL-separated, because git otherwise quotes a name outside ASCII ("\320\220кт.docx" for
+        # a Russian document), and the quoted name is no path anyone can attach.
+        lists.append(await git.run(["diff", "-z", "--name-only", "--no-renames", "--diff-filter=ACMRT", "HEAD"], cwd=path))
+        lists.append(await git.run(["ls-files", "-z", "--others", "--exclude-standard"], cwd=path))
+        seen: dict[str, None] = {}
+        for text in lists:
+            for line in text.split("\0"):
+                name = line.strip("\n")
+                if name and not name.startswith(".agents/"):
+                    seen.setdefault(name, None)
+        names = list(seen)
+        return names[:limit], len(names) > limit
+
     async def merged(self, folder: ProjectFolder, branch: str, into: str = "HEAD") -> bool:
         """Whether every commit of ``branch`` is already in ``into`` (the folder's current branch by default)."""
         git = self._git(folder.env)

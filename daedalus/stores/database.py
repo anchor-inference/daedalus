@@ -2644,6 +2644,33 @@ def _sealed_checkpoint_stores(db: Database) -> DataMigration:
 
 MIGRATIONS.append(_sealed_checkpoint_stores)
 
+# An answer carries any file, not only a picture, clip or sound: AttachMedia keeps a document, a
+# spreadsheet or an archive as an item of kind 'file', drawn as a card in the answer. SQLite cannot
+# widen a CHECK in place, so the table is rebuilt with every row and its index.
+MIGRATIONS.append(("""
+CREATE TABLE media_items_rebuilt (
+    id TEXT PRIMARY KEY,
+    presentation_id TEXT NOT NULL REFERENCES media_presentations(id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL,
+    blob_ref TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('image', 'animation', 'video', 'audio', 'file')),
+    mime_type TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    byte_size INTEGER NOT NULL,
+    width INTEGER,
+    height INTEGER,
+    alt TEXT NOT NULL DEFAULT '',
+    caption TEXT NOT NULL DEFAULT '',
+    source_url TEXT NOT NULL DEFAULT '',
+    UNIQUE(presentation_id, ordinal)
+);
+INSERT INTO media_items_rebuilt(id, presentation_id, ordinal, blob_ref, kind, mime_type, filename, byte_size, width, height, alt, caption, source_url)
+SELECT id, presentation_id, ordinal, blob_ref, kind, mime_type, filename, byte_size, width, height, alt, caption, source_url FROM media_items;
+DROP TABLE media_items;
+ALTER TABLE media_items_rebuilt RENAME TO media_items;
+CREATE INDEX media_items_by_blob ON media_items(blob_ref);
+""", True))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

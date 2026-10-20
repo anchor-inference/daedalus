@@ -216,8 +216,8 @@ function Toolbar({ state, onBack, onForward, onTab, root, downloadUrl, sheet, lo
       <button className="iconbtn small" onClick={html ? html.forward ?? undefined : onForward} disabled={html ? !html.forward : !canGoForward(state)} aria-label={t("panel.forward")} title={t("panel.forward")}><Icon name="forward" size={16} /></button>
       <button className="iconbtn small" onClick={html ? html.reload : local.reload} aria-label={t("panel.reload")} title={t("panel.reload")}><Icon name="reload" size={16} /></button>
       <div className="panel-crumbs" aria-label={t("panel.crumbs")}>
-        {/* The orchestrator previews a file without having a Files tab: its root is a name there,
-            not a way to a tab the panel does not offer. */}
+        {/* A panel without a Files tab shows its root as a name, not a way to a tab it does not
+            offer. */}
         {files !== undefined ? <button className="crumb" onClick={() => onTab("files")} title={t("panel.tab.files")}>{root}</button> : <span className="crumb">{root}</span>}
         {crumbs.map((c, i) => (
           <span key={i} className={i === crumbs.length - 1 ? "crumb last" : "crumb"}>

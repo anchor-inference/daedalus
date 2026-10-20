@@ -1572,10 +1572,15 @@ Names that are not registered on this installation yet are simply absent from ev
 is here too: only the orchestrator hires, and an ordinary session would pay for its description on
 every turn."""
 
-ORCHESTRATOR_TOOLS = [*ORCHESTRATOR_ONLY_TOOLS, "Notify", "StaySilent", "HistorySearch", "HistoryExpand", "Recall"]
+ORCHESTRATOR_TOOLS = [*ORCHESTRATOR_ONLY_TOOLS, "Notify", "StaySilent", "HistorySearch", "HistoryExpand", "Recall", "SendFile", "AttachMedia"]
 """Everything an orchestrator may call. It runs the team and never does the work itself: no shell, no
 file writes, no subagents. An allowlist rather than a list of refusals, so a tool added later is not
-an orchestrator's until someone decides it should be."""
+an orchestrator's until someone decides it should be.
+
+SendFile and AttachMedia only deliver: the operator asked an orchestrator to attach a member's
+document to its answer and it had no way to, so the result sat in a worktree the operator could not
+open. In an orchestrator they read inside the project's folders and its staff's worktrees alone
+(:mod:`daedalus.host.deliverables`)."""
 
 
 DISPATCHER_TOOLS = ["Projects", "Delegate", "Progress", "Cancel", "CreateProject", "Answer", "Files", "Notify", "StaySilent", "HistorySearch", "HistoryExpand", "Recall"]

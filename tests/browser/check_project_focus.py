@@ -179,12 +179,14 @@ def desktop(page: Page, lang: str, width: int) -> None:
     expect(chat.locator(".questions-line")).to_have_count(0)
     fits(page, f"{lang} {width} orchestrator")
 
-    # The panel beside the orchestrator: the questions first, its own Details, then the project's four tabs.
+    # The panel beside the orchestrator: the questions first, its own Details, the project's files,
+    # then the project's four tabs.
     tabs = page.locator(".panel .panel-tab")
-    expect(tabs).to_have_count(6)
+    expect(tabs).to_have_count(7)
     expect(tabs.nth(0)).to_contain_text(words["questions"])
     expect(tabs.nth(1)).to_have_attribute("data-tab", "details")
-    expect(tabs.nth(2)).to_have_text(words["board"])
+    expect(tabs.nth(2)).to_have_attribute("data-tab", "files")
+    expect(tabs.nth(3)).to_have_text(words["board"])
     page.locator(".panel .panel-tab[data-tab='board']").click()
     expect(page.locator(".panel .pboard.embedded .pcard.need")).to_contain_text("q4r8tz")
     page.locator(".panel .panel-tab[data-tab='brief']").click()

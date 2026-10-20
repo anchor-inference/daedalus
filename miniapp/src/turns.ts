@@ -450,8 +450,9 @@ export type Artifact = {
   callId: string;
   path: string;
   name: string;
-  /** Written by the turn, sent by it, or a file kept by handle that the text names (`att:…`). */
-  how: "wrote" | "sent" | "kept";
+  /** Written by the turn, sent by it, a file kept by handle that the text names (`att:…`), or one
+   *  attached into the answer where it stands. */
+  how: "wrote" | "sent" | "kept" | "attached";
   caption: string;
   /** The size as the tool's answer reported it, when it did. */
   size: string | null;

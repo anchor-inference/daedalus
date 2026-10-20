@@ -2885,7 +2885,7 @@ input.field[type="range"] {
 .panel-files .pane-handle { left:auto; right:-3px; }
 .explorer { display:flex; flex-direction:column; min-height:0; height:100%; font-size:var(--fs-13); }
 .explorer-folders { display:flex; align-items:center; gap:4px; padding:8px 8px 0; flex:none; min-width:0; }
-.explorer-folders select { flex:1; min-width:0; margin:0; height:var(--ctl-h); font-size:var(--fs-12); padding:0 4px; }
+.explorer-folders select { flex:1; min-width:0; margin:0; height:var(--ctl-h); font-size:var(--fs-12); padding:0 4px; text-overflow:ellipsis; }
 .explorer-folders .chip { flex:none; }
 .explorer-search { display:flex; gap:4px; padding:8px; flex:none; }
 .explorer-search input { flex:1; min-width:0; }
@@ -4854,6 +4854,9 @@ button.staff-row:hover { background: var(--surface-2); }
 .shared-time { display: block; margin-top: 4px; font-size: var(--fs-11); color: var(--fg-3); }
 .shared .msg.user .shared-time { text-align: right; }
 .shared-audio { display: block; width: 100%; margin: 6px 0; }
+.shared-file { display: flex; align-items: center; gap: 8px; max-width: 100%; margin: 6px 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); color: var(--fg); text-decoration: none; }
+.shared-file .truncate { min-width: 0; }
+.shared-file-size { flex: none; color: var(--fg-3); font-size: var(--fs-12); }
 .shared .inline-media-image video { display: block; width: 100%; height: auto; max-height: min(70dvh, 680px); background: var(--bg); }
 
 /* The desktop update dialog. */

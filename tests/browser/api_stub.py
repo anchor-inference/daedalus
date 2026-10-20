@@ -1856,6 +1856,119 @@ def file_search(path: str, query: str, limit: int = 200) -> dict | None:
     return None
 
 
+def docx_bytes(*paragraphs: str) -> bytes:
+    """A Word document holding ``paragraphs``, as small as a docx can be and still open in Preview.
+
+    Built by hand rather than with a library, so the browser harness needs nothing installed for it,
+    and with a fixed timestamp, so the same text gives the same bytes on every run.
+    """
+    import io
+    import zipfile
+    from xml.sax.saxutils import escape
+    body = "".join(f"<w:p><w:r><w:t xml:space=\"preserve\">{escape(text)}</w:t></w:r></w:p>" for text in paragraphs)
+    parts = {
+        "[Content_Types].xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+        '</Types>',
+        "_rels/.rels": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>'
+        '</Relationships>',
+        "word/document.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        f"<w:body>{body}</w:body></w:document>",
+    }
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, text in parts.items():
+            archive.writestr(zipfile.ZipInfo(name, date_time=(2026, 10, 1, 0, 0, 0)), text)
+    return out.getvalue()
+
+
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+# A staff member's worktree in the bakery project: what the orchestrator's Files tab opens read-only
+# under the pane id the host gives it. The document is the work the member made and has not merged.
+WORKTREE_MEMBER = "hrdrafter"
+WORKTREE_BRANCH = "agent/hrdrafter/t1-act"
+WORKTREE_PANE = "wt~f-bakery-site~hrdrafter"
+WORKTREE_PATH = "/home/operator/work/bakery-site/.agents/worktrees/hrdrafter"
+WORKTREE_DOCX_TEXT = "Акт о приёме на работу: пекарь Иван Петров принят с 1 ноября."
+WORKTREE_FILES: dict[str, bytes] = {
+    "docs/drafts/Акт о приёме на работу.docx": docx_bytes(WORKTREE_DOCX_TEXT, "Подпись: управляющая пекарней."),
+    "docs/drafts/notes.txt": b"The act follows the template the operator gave; the date is still to confirm.\n",
+}
+
+
+def worktree_listing() -> dict:
+    """``GET /api/projects/{id}/worktrees`` for the bakery: one member's worktree, servable as a pane."""
+    return {"worktrees": [{
+        "folder_id": "f-bakery-site", "path": WORKTREE_PATH, "name": WORKTREE_MEMBER,
+        "member": {"id": "st-hrdrafter", "name": WORKTREE_MEMBER, "dismissed": False},
+        "branch": WORKTREE_BRANCH, "base": "main", "size_bytes": 48_000, "changes": 2, "last_commit_at": "2026-10-19T10:00:00Z",
+        "merged": False, "prunable": False, "live": None, "blocked": "changes", "pane": WORKTREE_PANE,
+    }], "problems": []}
+
+
+def worktree_route(rel: str, params: dict[str, list[str]]) -> tuple[str, str | bytes] | None:
+    """A session's file routes under the worktree's pane: ``(content type, body)``, or None."""
+    marker = f"/folders/{WORKTREE_PANE}/"
+    if not rel.startswith("/api/sessions/") or marker not in unquote(rel):
+        return None
+    tail = unquote(rel).split(marker, 1)[1]
+    path = (params.get("path") or [""])[0]
+    query = (params.get("q") or [""])[0].lower()
+    if tail == "files":
+        prefix = f"{path}/" if path else ""
+        entries: dict[str, dict] = {}
+        for name, body in WORKTREE_FILES.items():
+            if name.startswith(prefix):
+                rest = name[len(prefix):]
+                child = rest.split("/", 1)[0]
+                entries[child] = {"name": child, "dir": "/" in rest, "size": 0 if "/" in rest else len(body), "mtime": 0}
+        return "application/json", json.dumps({"path": path, "kind": "dir", "entries": list(entries.values())})
+    if tail == "download" and path in WORKTREE_FILES:
+        return (DOCX_MIME if path.endswith(".docx") else "text/plain"), WORKTREE_FILES[path]
+    if tail == "files/search":
+        names = [name for name in WORKTREE_FILES if query in name.rsplit("/", 1)[-1].lower()]
+        return "application/json", json.dumps({"query": query, "results": [{"path": n, "kind": "file", "size": len(WORKTREE_FILES[n]), "mtime": 0} for n in names], "truncated": False, "engine": "walk"})
+    if tail == "files/grep":
+        hits = [{"path": n, "line": i, "text": line} for n, body in WORKTREE_FILES.items() if n.endswith(".txt") for i, line in enumerate(body.decode().splitlines(), 1) if query in line.lower()]
+        return "application/json", json.dumps({"query": query, "hits": hits, "truncated": False})
+    return None
+
+
+# A file the agent attached into its answer (AttachMedia, kind "file"): one presentation, one item.
+ATTACHED_PRESENTATION = "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b"
+ATTACHED_ITEM = "it-gallery-notes"
+ATTACHED_NAME = "gallery-notes.docx"
+ATTACHED_TEXT = "Gallery notes: the counter photo opens the page, the sign closes it."
+ATTACHED_DOCX = docx_bytes(ATTACHED_TEXT, "Each picture is cropped square at 1200 pixels.")
+
+
+def attached_media() -> list[dict]:
+    """The ``media`` list of the answer that carries the attached document."""
+    return [{"id": ATTACHED_PRESENTATION, "layout": "single", "items": [{
+        "id": ATTACHED_ITEM, "kind": "file", "mime_type": DOCX_MIME, "filename": ATTACHED_NAME, "byte_size": len(ATTACHED_DOCX),
+        "alt": "Gallery notes", "caption": "", "url": "",
+    }]}]
+
+
+def attached_route(rel: str, params: dict[str, list[str]]) -> tuple[str, bytes] | None:
+    """The attached document's bytes, by its content address or by the Preview alias."""
+    parts = rel.split("/")
+    if len(parts) < 7 or parts[2] != "sessions" or parts[4] != "media" or parts[5] != ATTACHED_PRESENTATION:
+        return None
+    if parts[6:] == [ATTACHED_ITEM, "content"]:
+        return DOCX_MIME, ATTACHED_DOCX
+    if parts[6:] == ["download"] and (params.get("path") or [""])[0] == f"{ATTACHED_ITEM}/{ATTACHED_NAME}":
+        return DOCX_MIME, ATTACHED_DOCX
+    return None
+
+
 def question_view(ask: dict, project_name: str, *, asker: str = "", always: bool = False, rules: bool = False) -> dict:
     """One entry of GET /api/questions, as ``daedalus/extensions/questions.py`` draws a request.
     ``rules``: the member's CLI keeps standing rules (Claude Code), so an MCP tool's "Always" may
@@ -2042,6 +2155,8 @@ class FocusStub:
             return 200, self.projects
         if path == "/api/sessions" and method == "GET":
             return 200, self.listing
+        if method == "GET" and path == f"/api/projects/{self.projects[0]['id']}/worktrees" and self.projects[0]["id"] == "b4k3ry20f0c5":
+            return 200, worktree_listing()
         if path.startswith("/api/sessions/") and method == "GET" and path.count("/") == 3:
             sid = path.split("/")[3]
             if sid in self.details:
@@ -2580,10 +2695,14 @@ class FocusStub:
     @staticmethod
     def session_detail(sid: str, title: str, project: dict, messages: list[dict], *, orchestrator_of: str | None = None, staff: dict | None = None, status: str = "idle") -> dict:
         root = project["folders"][0]["path"]
+        # The orchestrator reads every folder of its project and writes none, which is what its file
+        # pane is offered; anyone else's pane stays on its own workspace.
+        readable = [{"id": f["id"], "path": f["path"], "label": f["label"], "env": f["env"], "readonly": f["readonly"], "writable": False}
+                    for f in project["folders"]] if orchestrator_of else []
         return {
             "id": sid, "title": title, "status": status, "run_id": None, "compacting": None, "housekeeping": False, "error": "",
             "workspace": root, "workspace_name": root.rsplit("/", 1)[-1], "workspace_own": False, "workspace_sessions": [],
-            "project": {k: v for k, v in project.items() if k != "sessions"}, "folder_id": project["folders"][0]["id"], "folders": [],
+            "project": {k: v for k, v in project.items() if k != "sessions"}, "folder_id": project["folders"][0]["id"], "folders": readable,
             "pending": None, "model": "Claude Opus 5", "provider": "claude", "thinking": True, "reasoning_effort": "high",
             "messages": messages, "mode": "", "usd_cap": None, "brief": "", "spawned_by": None, "tools_off": [], "loop": None, "services": [], "subagents": [],
             "subagent_of": None, "subagent_name": None, "leader_title": None, "orchestrator_of": orchestrator_of, "staff": staff, "telegram_linked": False,

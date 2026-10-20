@@ -59,6 +59,8 @@ import { AskRecord } from "../questions/AskRecord";
 import { useQuestions, type QuestionScope } from "../questions/data";
 import { StaffHeader, StaffMessages, useMember } from "../project/staff";
 import { BriefPage, FoldersPage, WakeupsPage } from "../project/pages";
+import { worktreesKey, type Listing as WorktreeListing } from "../project/ProjectWorktrees";
+import { worktreeFolders } from "../project/worktreefolders";
 import { ProjectBoard } from "../board/ProjectBoard";
 import { useMain } from "../main/data";
 import { ShareSheet } from "../share";
@@ -220,6 +222,22 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     if (orchestrationPath) navigate(orchestrationPath + window.location.search, { replace: true, keepHash: true });
   }, [orchestrationPath]);
   const staffName = useMember(focus && detail?.staff ? detail.staff.id : null).data?.name ?? "";
+  // The orchestrator's file pane opens the project's folders and, read-only, each staff member's
+  // worktree, where their work stays until it is merged. The listing is read again whenever the Files
+  // tab opens, since a member may have started a worktree since the last look.
+  const worktrees = useQuery<WorktreeListing>(orchestrating ? worktreesKey(focus!.projectId) : null, { staleMs: 5000 });
+  const filesOpen = panel.state.tab === "files";
+  useEffect(() => {
+    if (orchestrating && filesOpen) void worktrees.refresh();
+  }, [orchestrating, filesOpen]); // eslint-disable-line react-hooks/exhaustive-deps -- refresh follows its key
+  const stagedFolders = useMemo(
+    () => (orchestrating ? worktreeFolders(worktrees.data, detail?.folders ?? NO_FOLDERS, detail?.project?.folders ?? []) : NO_FOLDERS),
+    [orchestrating, worktrees.data, detail?.folders, detail?.project?.folders],
+  );
+  // The worktrees follow the project's folders in the pane's switch. The chat's file cards read the
+  // same list, and placeOf picks the innermost folder holding a path, so a file a member wrote opens
+  // from that member's worktree rather than from the project folder around it.
+  const paneFolders = useMemo(() => (stagedFolders.length ? [...(detail?.folders ?? NO_FOLDERS), ...stagedFolders] : detail?.folders ?? NO_FOLDERS), [stagedFolders, detail?.folders]);
   // What waits for the operator: the orchestrator's project's list, every project's in the main chat,
   // or an ordinary session's own side questions. The cards live in the panel's Questions tab; the
   // chat carries one line that opens it.
@@ -1319,7 +1337,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const turnsNow = useRef<Turn[]>([]);
   turnsNow.current = turns;
   const placesNow = useRef({ workspace: "", folders: NO_FOLDERS });
-  placesNow.current = { workspace: detail?.workspace ?? "", folders: detail?.folders ?? NO_FOLDERS };
+  placesNow.current = { workspace: detail?.workspace ?? "", folders: paneFolders };
   const openFromChat = useCallback(
     (src: PreviewSource) => {
       const media = viewerSource(src);
@@ -1376,7 +1394,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     () => ({
       id,
       workspace: detail?.workspace ?? "",
-      folders: detail?.folders ?? NO_FOLDERS,
+      folders: paneFolders,
       preview: openFromChat,
       openJobs: () => panel.open("jobs"),
       toast,
@@ -1388,7 +1406,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         return true;
       },
     }),
-    [id, detail?.workspace, detail?.folders, openFromChat, panel.open, toast, link, detail?.pending?.questions],
+    [id, detail?.workspace, paneFolders, openFromChat, panel.open, toast, link, detail?.pending?.questions],
   );
 
   // What the answer cited, clicked: a file opens at the lines it named, a Verify receipt opens as a
@@ -1819,7 +1837,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                 }}
               />
             : undefined}
-            files={hasDetails && panelTabs.includes("files") ? <Explorer key={id} base={sessionBase(id)} root={detail?.project?.name} upload folders={detail?.folders} home={detail?.folder_id} onPreview={openPreview} toast={toast} refresh={filesGeneration} written={producedFiles(turns.at(-1)?.activity ?? []).filter((f) => f.how === "wrote").map((f) => { const place = placeOf(f.path, detail.workspace); return place && !place.folder ? place.rel : ""; })} /> : undefined}
+            files={hasDetails && panelTabs.includes("files") ? <Explorer key={id} base={sessionBase(id)} root={detail?.project?.name} upload={!orchestrating} folders={paneFolders} home={detail?.folder_id} onPreview={openPreview} toast={toast} refresh={filesGeneration} written={producedFiles(turns.at(-1)?.activity ?? []).filter((f) => f.how === "wrote").map((f) => { const place = placeOf(f.path, detail.workspace); return place && !place.folder ? place.rel : ""; })} /> : undefined}
             jobs={hasDetails ? <JobsTab sessionId={id} messages={detail.messages} onOpen={panel.openFile} onPreview={openPreview} /> : undefined}
           />
         )}
@@ -2158,7 +2176,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
         <div className={`answer answer-with-media ${live ? "streaming" : ""}`}>
           {splitMediaAnswer(turn.answer, turn.media).map((part, index) => part.kind === "text"
             ? <Md key={`text-${index}`} text={part.text} cacheKey={live ? undefined : `a${turn.key}-${index}`} />
-            : <InlineMedia key={part.presentation.id} sessionId={sessionId} presentation={part.presentation} />)}
+            : <InlineMedia key={part.presentation.id} sessionId={sessionId} presentation={part.presentation} onPreview={preview} />)}
         </div>
       ) : <Md className={`answer ${live ? "streaming" : ""}`} text={turn.answer} cacheKey={live ? undefined : `a${turn.key}`} />)}
       {turn.answer && !live && <KeptFiles text={turn.answer} onOpen={preview} />}

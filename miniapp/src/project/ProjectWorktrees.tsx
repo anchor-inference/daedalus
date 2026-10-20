@@ -9,15 +9,18 @@ import { plural, t } from "../i18n";
 import { invalidate, useOffline, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
 
-type WorkerWorktree = {
+/** One worker worktree. `pane` is the folder id a session's file routes open it under, empty when
+ *  the host cannot serve it there. */
+export type WorkerWorktree = {
   folder_id: string; path: string; name: string;
   member: { id: string; name: string; dismissed: boolean } | null;
   branch: string; base: string; size_bytes: number | null; changes: number; last_commit_at: string;
   merged: boolean; prunable: boolean;
   live: { staff_id: string; name: string; status: string } | null;
   blocked: "" | "live" | "changes" | "readonly";
+  pane?: string;
 };
-type Listing = { worktrees: WorkerWorktree[]; problems: { folder_id: string; reason: string }[] };
+export type Listing = { worktrees: WorkerWorktree[]; problems: { folder_id: string; reason: string }[] };
 
 export const worktreesKey = (projectId: string) => `/api/projects/${encodeURIComponent(projectId)}/worktrees`;
 

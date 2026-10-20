@@ -16,8 +16,8 @@ export const PROJECT_TABS: PanelTab[] = ["board", "brief", "wakeups", "folders"]
 export type PanelContext = "session" | "orchestrator" | "member" | "main";
 
 /**
- * The tabs a panel offers, in order. The orchestrator writes no file and runs no job, so its panel
- * is the project's, with what waits for the operator first and then its own Details: it is a session
+ * The tabs a panel offers, in order. The orchestrator runs no job, so its panel is the project's,
+ * with what waits for the operator first and then its own Details: it is a session
  * like any other in what it costs, how full its context is and which model runs it, and a panel
  * without that tab left the operator no way to see any of it. A session inside a project keeps
  * its own tabs and gains the project's, so the board is one click away from whoever is working on
@@ -29,9 +29,14 @@ export type PanelContext = "session" | "orchestrator" | "member" | "main";
  * subagents used to be rows among the jobs, where a helper's conversation was one more click and a
  * whole screen away, and a session that never started one does not need a tab that is always empty.
  *
+ * The orchestrator writes no file, yet it has a Files tab after Details: the project's files, and
+ * what the staff made in their worktrees before it is merged, are what the operator steers it by,
+ * and without the tab the orchestrator's view showed neither anywhere. The tab only reads — nothing
+ * is uploaded from it and a worktree is never written.
+ *
  * The orchestrator has no Preview tab of its own, yet its chat carries file cards — a member's
  * patch, the operator's attachment — that open in Preview. With `preview` (a file has been opened)
- * the tab joins its strip after Details, so the file on screen has a tab to be on.
+ * the tab joins its strip after Files, so the file on screen has a tab to be on.
  *
  * An ordinary session has a Questions tab only while its agent's side questions wait (`questions`),
  * first, where the orchestrator's is: most sessions never leave one, and a tab that is nearly always
@@ -40,7 +45,7 @@ export type PanelContext = "session" | "orchestrator" | "member" | "main";
 export function tabsFor(context: PanelContext, opts: { browser?: boolean; preview?: boolean; subagents?: boolean; questions?: boolean } = {}): PanelTab[] {
   const browser: PanelTab[] = opts.browser ? ["browser"] : [];
   const own: PanelTab[] = [...PANEL_TABS, ...(opts.subagents ? (["subagents"] as PanelTab[]) : [])];
-  if (context === "orchestrator") return ["questions", "details", ...(opts.preview ? (["preview"] as PanelTab[]) : []), ...browser, ...PROJECT_TABS];
+  if (context === "orchestrator") return ["questions", "details", "files", ...(opts.preview ? (["preview"] as PanelTab[]) : []), ...browser, ...PROJECT_TABS];
   if (context === "member") return [...own, ...browser, ...PROJECT_TABS];
   if (context === "main") return ["questions", ...own, ...browser];
   return [...(opts.questions ? (["questions"] as PanelTab[]) : []), ...own, ...browser];
@@ -224,8 +229,7 @@ export function defaultPanelTab(stored: string | null, viewportWidth: number, ta
 }
 
 /** Where the last open tab is kept. A project's focus mode keeps its own: the board it left open
- *  beside the orchestrator is not a tab an ordinary session has, and Files is not the
- *  orchestrator's. */
+ *  beside the orchestrator is not a tab an ordinary session has. */
 export function panelTabKey(context: PanelContext): string {
   return context === "session" ? TAB_KEY : context === "main" ? `${TAB_KEY}.main` : `${TAB_KEY}.project`;
 }

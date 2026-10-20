@@ -773,7 +773,7 @@ export type SubagentView = {
 /** A model answering in place of the configured one: what it replaced, what took over, and why. */
 export type ModelFallback = { from: string; to: string; reason: string };
 
-export type MediaItem = { id: string; kind: "image" | "animation" | "video" | "audio"; mime_type: string; filename: string; byte_size: number; width?: number | null; height?: number | null; alt: string; caption: string; url?: string };
+export type MediaItem = { id: string; kind: "image" | "animation" | "video" | "audio" | "file"; mime_type: string; filename: string; byte_size: number; width?: number | null; height?: number | null; alt: string; caption: string; url?: string };
 export type MediaPresentation = { id: string; layout: "single" | "album"; items: MediaItem[] };
 
 /** How a run that produced no answer ended: the closing line of its turn. The host writes it; the text

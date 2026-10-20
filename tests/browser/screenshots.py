@@ -33,6 +33,7 @@ from playwright.sync_api import Page, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import (  # noqa: E402
+    ATTACHED_PRESENTATION,
     DEFAULT_APP,
     FILE_TEXT,
     FOCUS_WORDS,
@@ -44,6 +45,8 @@ from api_stub import (  # noqa: E402
     MemoryStub,
     TeamStub,
     Unhandled,
+    attached_media,
+    attached_route,
     expect_app,
     file_entries,
     file_search,
@@ -52,6 +55,7 @@ from api_stub import (  # noqa: E402
     notification_preferences,
     session_tasks,
     session_tool_groups,
+    worktree_route,
 )
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -212,7 +216,8 @@ MESSAGES_S2 = [
     {"role": "user", "seq": 12, "text": "Pick the six best photos from photos/raw for the gallery and crop them square.", "thinking": "", "tool_calls": [], "tool_results": [], "created_at": ago(minutes=30)},
     {"role": "assistant", "seq": 13, "text": "", "thinking": "", "tool_calls": [{"id": "t1", "name": "Find", "arguments": {"pattern": "photos/raw/*.jpg"}}], "tool_results": [], "created_at": ago(minutes=30)},
     {"role": "tool", "seq": 14, "text": "", "thinking": "", "tool_calls": [], "tool_results": [{"id": "t1", "content": "38 files", "is_error": False}], "created_at": ago(minutes=29)},
-    {"role": "assistant", "seq": 15, "text": "Six picked and cropped into `photos/gallery/`: the counter, the oven, two loaves, the window at dusk and the sign. The rest were either blurred or too dark for a square crop.", "thinking": "", "tool_calls": [], "tool_results": [], "created_at": ago(minutes=12)},
+    # The answer attaches a document where it speaks of it (AttachMedia with a file): a card in place.
+    {"role": "assistant", "seq": 15, "text": f"Six picked and cropped into `photos/gallery/`: the counter, the oven, two loaves, the window at dusk and the sign. The rest were either blurred or too dark for a square crop. The order and the crops are in the notes:\n\n![Gallery notes](daedalus-media:{ATTACHED_PRESENTATION})", "thinking": "", "tool_calls": [], "tool_results": [], "created_at": ago(minutes=12), "media": attached_media()},
 ]
 
 LOOP_WAKEUP = (
@@ -787,6 +792,11 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
     params = parse_qs(urlsplit(url).query)
     if rel == "/api/pet/react" and request.method == "POST":
         return respond(route, {"line": "I'm here.", "emotion": "joy", "action": "wave", "prop": ""})
+    # A worktree's pane and an attached document answer before the shared file routes, which would
+    # otherwise take a worktree's search for the workspace's.
+    served = worktree_route(rel, params) or attached_route(rel, params)
+    if served is not None:
+        return respond(route, served[1], content_type=served[0])
     search = file_search(rel, params.get("q", [""])[0])
     if search is not None:
         return respond(route, search)

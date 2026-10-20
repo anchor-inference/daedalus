@@ -228,7 +228,7 @@ describe("a file opened beside the orchestrator", () => {
 
   it("offers Preview in the strip only once something was opened", () => {
     expect(tabsFor("orchestrator")).not.toContain("preview");
-    expect(tabsFor("orchestrator", { preview: true })).toEqual(["questions", "details", "preview", "board", "brief", "wakeups", "folders"]);
+    expect(tabsFor("orchestrator", { preview: true })).toEqual(["questions", "details", "files", "preview", "board", "brief", "wakeups", "folders"]);
     expect(routeTabsFor("orchestrator")).toContain("preview");
   });
 });
@@ -248,12 +248,11 @@ describe("the Browser tab", () => {
     expect(tabsFor("session", { browser: true })).toEqual(["details", "files", "preview", "jobs", "browser"]);
     expect(tabsFor("member", { browser: true })).toEqual(["details", "files", "preview", "jobs", "browser", "board", "brief", "wakeups", "folders"]);
     expect(tabsFor("main", { browser: true })).toEqual(["questions", "details", "files", "preview", "jobs", "browser"]);
-    expect(tabsFor("orchestrator", { browser: true })).toEqual(["questions", "details", "browser", "board", "brief", "wakeups", "folders"]);
+    expect(tabsFor("orchestrator", { browser: true })).toEqual(["questions", "details", "files", "browser", "board", "brief", "wakeups", "folders"]);
   });
 
-  it("gives the orchestrator its Details, and neither files nor jobs it does not have", () => {
-    expect(tabsFor("orchestrator")).toEqual(["questions", "details", "board", "brief", "wakeups", "folders"]);
-    expect(tabsFor("orchestrator")).not.toContain("files");
+  it("gives the orchestrator its Details and a Files tab to read the project by, and no jobs it does not have", () => {
+    expect(tabsFor("orchestrator")).toEqual(["questions", "details", "files", "board", "brief", "wakeups", "folders"]);
     expect(tabsFor("orchestrator")).not.toContain("jobs");
   });
 

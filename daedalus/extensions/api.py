@@ -140,6 +140,8 @@ from daedalus.harness.capabilities import CAPABILITIES
 from daedalus.host import capabilities, component_install, launcher_bridge
 from daedalus.host import components as component_list
 from daedalus.host.config_validation import UNKNOWN_REFERENCE_PATHS, ConfigConflict, config_revision, validate_candidate
+from daedalus.host.deliverables import WORKTREE_PANE, parse_worktree_pane, secret_part, worktree_root
+from daedalus.host.deliverables import locate as locate_deliverable
 from daedalus.host.dependencies import DependencyPlanner
 from daedalus.host.depth import AUTO_MODE
 from daedalus.host.events import EventFilter, event_stream, streamed_types
@@ -180,6 +182,7 @@ from daedalus.stores import pairing
 from daedalus.stores.calendar import CalendarStore
 from daedalus.stores.control import ControlConflict, ControlDenied, Principal
 from daedalus.stores.database import Database
+from daedalus.stores.files import FileRefused
 from daedalus.stores.harness import HarnessStore
 from daedalus.stores.inference_budget import InferenceBudget
 from daedalus.stores.media import MEDIA_TENANT
@@ -2283,6 +2286,15 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         else; ``writable`` is the walls' answer, so a folder marked read-only offers no upload.
         """
         services = state.services
+        if state.project is not None and manager.is_orchestrator(state):
+            # The orchestrator's pane is the project's, read-only: every folder it can be shown,
+            # host folders through the bridge, whatever its own walls (an orchestrator of a host
+            # project runs from a directory of its own and has none of the folders in them).
+            return [
+                {"id": f.id, "path": str(f.path), "label": f.label, "env": f.env, "readonly": f.readonly, "writable": False}
+                for f in state.project.folders
+                if f.local(manager.projects.local_env) or f.env == "host"
+            ]
         if state.project is None or services is None or services.walls is None or state.metadata.get("directory"):
             return []
         out = []
@@ -2661,6 +2673,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                         raw = None
                     if not isinstance(raw, str) or not raw.strip():
                         raise HTTPException(404, "the call named no file")
+                    if state.project is not None and manager.is_orchestrator(state):
+                        return await _sent_by_orchestrator(state.project, raw.strip(), request.headers.get("range", ""))
                     if state.services is not None and isinstance(state.services.exec_backend, HostExecBackend):
                         # The call ran on the host and named a file there, which this process cannot open.
                         return await _sent_from_host(state, raw.strip(), request.headers.get("range", ""))
@@ -2674,6 +2688,21 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                         raise HTTPException(404, "the file is gone")
                     return FileResponse(target, media_type=mimetypes.guess_type(target.name)[0] or "application/octet-stream", filename=target.name, headers={"Access-Control-Allow-Origin": "https://web.telegram.org"})
         raise HTTPException(404, "no such call")
+
+    async def _sent_by_orchestrator(project: Any, raw: str, range_header: str) -> Response:
+        """A file an orchestrator sent, read back from the project folder it lies in — a staff
+        worktree in one included, on the host through the bridge — by the same rule its SendFile
+        delivered it under. Its own directory holds nothing it could have sent."""
+        try:
+            folder, path = locate_deliverable(project, raw)
+        except FileRefused as exc:
+            raise HTTPException(403, str(exc)) from exc
+        rel = posixpath.relpath(path, posixpath.normpath(str(folder.path)))
+        if folder.local(manager.projects.local_env):
+            return _file_response(Path(folder.path), rel)
+        if folder.env == "host":
+            return await _host_pane(str(folder.path)).download(rel, range_header)
+        raise HTTPException(404, f"{folder.path} is in the {folder.env}, which nothing here reaches")
 
     async def _sent_from_host(state: Any, raw: str, range_header: str) -> Response:
         """A file a session working on the host sent, read back through the bridge: relative to its
@@ -2698,6 +2727,14 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         response = JSONResponse({"ok": True})
         await sign_in(response, request)
         return response
+
+    @api.get("/api/sessions/{session_id}/media/{presentation_id}/download")
+    async def media_download(session_id: str, presentation_id: str, path: str, _: dict[str, Any] = Depends(auth)) -> Response:
+        """An attached item in the shape every file of the app is fetched in, ``{base}/download?path=…``:
+        ``path`` is ``<item id>/<file name>``, so the panel's preview names the kind by the name (a
+        document, a spreadsheet) and a download link carries the token as any other does."""
+        item_id = path.split("/", 1)[0]
+        return await media_content(session_id, presentation_id, item_id)
 
     @api.get("/api/sessions/{session_id}/media/{presentation_id}/{item_id}/content")
     async def media_content(
@@ -2724,7 +2761,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             path,
             media_type=str(item["mime_type"]),
             filename=str(item["filename"]),
-            content_disposition_type="inline",
+            # A picture or a clip is shown by the page's own element. Any other file is handed over
+            # as a download: an attached HTML page or SVG opened inline would run on the app's origin.
+            content_disposition_type="attachment" if item["kind"] == "file" else "inline",
             headers={"Cache-Control": "private, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff"},
         )
 
@@ -4473,7 +4512,10 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         mime, location = found
         if location.startswith(("https://", "http://")):
             return RedirectResponse(location, status_code=302, headers=noindex)
-        return FileResponse(location, media_type=mime, content_disposition_type="inline", headers={**noindex, **artifact_headers(mime)})
+        # An attached document is a download here as in the app: only a picture, a clip or a sound
+        # is shown in place, and an SVG, which can carry script, is not one of them.
+        shown = mime.split("/", 1)[0] in ("image", "video", "audio") and mime != "image/svg+xml"
+        return FileResponse(location, media_type=mime, content_disposition_type="inline" if shown else "attachment", headers={**noindex, **artifact_headers(mime)})
 
     @api.get("/c/{slug}")
     async def dialog_page(slug: str, request: Request) -> Response:
@@ -5207,6 +5249,52 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         return names
 
     async def _files_root(session_id: str, folder_id: str, *, write: bool = False) -> Path | HostPane:
+        return (await _pane(session_id, folder_id, write=write))[0]
+
+    async def _pane(session_id: str, folder_id: str, *, write: bool = False) -> tuple[Path | HostPane, bool]:
+        """The pane's root and whether it is sealed: whether git's metadata and credential files are
+        kept out of it (:func:`daedalus.host.deliverables.secret_part`). Only the orchestrator's pane
+        is: it shows the operator the project and its staff's worktrees rather than one agent's own
+        work, and what it shows the operator may pass on."""
+        state = await manager.get_state(session_id)
+        if state is None:
+            raise HTTPException(404, "no such session")
+        if state.project is not None and manager.is_orchestrator(state):
+            return _orchestrator_root(state.project, folder_id, write=write), True
+        return await _session_root(state, folder_id, write=write), False
+
+    def _orchestrator_root(project: Any, folder_id: str, *, write: bool) -> Path | HostPane:
+        """A folder of the orchestrator's project, or a staff worktree in one, read-only.
+
+        Its own address (no folder id) is the primary folder, not the session's directory: an
+        orchestrator of a host project runs from an empty directory of its own, and the pane showed
+        that emptiness while the project's files sat on the host. A worktree is named by its pane id
+        (``wt~<folder>~<name>``) and resolved to ``<folder>/.agents/worktrees/<name>`` here, so the
+        app never hands the host a path to open.
+        """
+        if write:
+            raise HTTPException(403, "the orchestrator's file pane is read-only: it shows the project and its staff's work, and writes nothing")
+        worktree = parse_worktree_pane(folder_id) if folder_id.startswith(WORKTREE_PANE) else None
+        if worktree is not None:
+            folder = project.folder(worktree[0])
+        elif folder_id.startswith(WORKTREE_PANE):
+            raise HTTPException(404, "no such worktree in this project")
+        else:
+            folder = project.folder(folder_id) if folder_id else project.primary
+        if folder is None:
+            raise HTTPException(404, "no such folder in this project")
+        root = worktree_root(folder, worktree[1]) if worktree is not None else str(folder.path)
+        if folder.local(manager.projects.local_env):
+            return Path(root)
+        if folder.env == "host":
+            return _host_pane(root)
+        raise HTTPException(404, f"{folder.path} is in the {folder.env}, which nothing here reaches")
+
+    def _sealed_path(path: str) -> None:
+        if (part := secret_part(path)) is not None:
+            raise HTTPException(403, f"{part} holds the repository's metadata or credentials and is not shown here")
+
+    async def _session_root(state: Any, folder_id: str, *, write: bool = False) -> Path | HostPane:
         """The directory a session's file pane is rooted at: its workspace, or another folder of its project.
 
         Another folder opens only when the session's walls let it read that folder — a session with
@@ -5219,9 +5307,6 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         that inbox and nothing the agent made. Such a root is a :class:`HostPane`, which reads it
         through the host terminal bridge in the same shapes.
         """
-        state = await manager.get_state(session_id)
-        if state is None:
-            raise HTTPException(404, "no such session")
         services = state.services
         on_host = False
         if not folder_id:
@@ -5286,7 +5371,14 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     @api.get("/api/sessions/{session_id}/files")
     @api.get("/api/sessions/{session_id}/folders/{folder_id}/files")
     async def list_files(session_id: str, folder_id: str = "", path: str = "", _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        root, where = _pane_target(session_id, folder_id, await _files_root(session_id, folder_id), path)
+        pane, sealed = await _pane(session_id, folder_id)
+        if sealed:
+            _sealed_path(path)
+            listing = await pane.read_path(path) if isinstance(pane, HostPane) else _read_path(pane, path)
+            if listing.get("kind") == "dir":
+                listing["entries"] = [e for e in listing.get("entries") or [] if secret_part(str(e.get("name") or "")) is None]
+            return listing
+        root, where = _pane_target(session_id, folder_id, pane, path)
         if isinstance(root, HostPane):
             return await root.read_path(where)
         return _read_path(root, where)
@@ -5301,7 +5393,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         both work. Every answer goes through the browser's containment, so a symlink out of the
         tree and a path inside the installation are absent rather than refused.
         """
-        root = await _files_root(session_id, folder_id)
+        root, sealed = await _pane(session_id, folder_id)
         query = q.strip()
         if not query:
             return {"query": "", "results": [], "truncated": False, "engine": "none"}
@@ -5310,6 +5402,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             results, truncated, engine = await root.search_names(query, wanted)
         else:
             results, truncated, engine = await _run_search(_search_names, root, query, wanted)
+        if sealed:
+            results = [r for r in results if secret_part(str(r.get("path") or "")) is None]
         return {"query": query, "results": results, "truncated": truncated, "engine": engine}
 
     @api.get("/api/sessions/{session_id}/files/grep")
@@ -5321,7 +5415,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         gets 501 and a sentence saying so, which the panel shows in place of the results instead of
         offering a search that would walk the whole tree in the event loop.
         """
-        root = await _files_root(session_id, folder_id)
+        root, sealed = await _pane(session_id, folder_id)
         if not isinstance(root, HostPane) and shutil.which("rg") is None:
             raise HTTPException(501, "content search needs ripgrep (rg), which is not installed here; search by name instead")
         query = q.strip()
@@ -5333,12 +5427,19 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             hits, truncated = await root.search_content(query, wanted)
         else:
             hits, truncated = await _run_search(_search_content, root, query, wanted)
+        if sealed:
+            hits = [h for h in hits if secret_part(str(h.get("path") or "")) is None]
         return {"query": query, "hits": hits, "truncated": truncated}
 
     @api.get("/api/sessions/{session_id}/download")
     @api.get("/api/sessions/{session_id}/folders/{folder_id}/download")
     async def download(request: Request, session_id: str, path: str, folder_id: str = "", _: dict[str, Any] = Depends(auth)) -> Response:
-        root, where = _pane_target(session_id, folder_id, await _files_root(session_id, folder_id), path)
+        pane, sealed = await _pane(session_id, folder_id)
+        if sealed:
+            _sealed_path(path)
+            root, where = pane, path
+        else:
+            root, where = _pane_target(session_id, folder_id, pane, path)
         if isinstance(root, HostPane):
             return await root.download(where, request.headers.get("range", ""))
         return _file_response(root, where)

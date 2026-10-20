@@ -178,3 +178,59 @@ async def test_content_api_authenticates_native_media_and_serves_ranges(settings
         assert response.headers["content-range"] == f"bytes 0-7/{len(PNG)}"
         assert response.headers["x-content-type-options"] == "nosniff"
     await manager.close()
+
+
+DOCX = b"PK\x03\x04" + b"\x00" * 26 + b"word/document.xml"
+
+
+async def test_any_file_is_attached_as_a_file_and_a_broken_picture_is_still_refused(db: Database, tmp_path) -> None:
+    media, sessions = await _stores(db, tmp_path)
+    document = tmp_path / "Акт о приёме.docx"
+    document.write_bytes(DOCX)
+    staged = await media.stage("media-session", "run-1", [{"path": str(document), "alt": "Акт", "caption": "для проверки"}], layout="single")
+    assert staged["kind"] == "file" and staged["markdown"] == f"![Акт](daedalus-media:{staged['id']})"
+    answer = Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=f"Готово.\n\n{staged['markdown']}")], metadata={"daedalus.run_id": "run-1"})
+    await sessions.append_transcript("media-session", [answer])
+    item = message_view((await sessions.list_transcript("media-session"))[0])["media"][0]["items"][0]
+    assert (item["kind"], item["filename"], item["byte_size"]) == ("file", "Акт о приёме.docx", len(DOCX))
+    assert item["mime_type"] == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+    # kind=file attaches even a picture as a plain file to download.
+    picture = tmp_path / "scan.png"
+    picture.write_bytes(PNG)
+    assert (await media.stage("media-session", "run-1", [{"path": str(picture), "kind": "file", "alt": "", "caption": ""}], layout="single"))["kind"] == "file"
+    # A file named as media that does not decode stays a refusal, not a silent download.
+    broken = tmp_path / "broken.png"
+    broken.write_bytes(b"not a png at all")
+    with pytest.raises(ValueError, match="damaged"):
+        await media.stage("media-session", "run-1", [{"path": str(broken), "alt": "", "caption": ""}], layout="single")
+    # An album is pictures and clips; documents go one per call.
+    with pytest.raises(ValueError, match="one per call"):
+        await media.stage("media-session", "run-1", [{"path": str(picture), "alt": "", "caption": ""}, {"path": str(document), "alt": "", "caption": ""}], layout="album")
+
+
+async def test_an_attached_file_is_a_download_at_both_addresses(settings: Settings, db: Database, tmp_path) -> None:
+    manager = SessionManager(settings, RuntimeConfig(), db=db)
+    await manager.start()
+    try:
+        state = await manager.create_session("file API")
+        document = tmp_path / "page.html"
+        document.write_bytes(b"<script>alert(1)</script>")
+        staged = await manager.media.stage(state.session.id, "run-api", [{"path": str(document), "alt": "page", "caption": ""}], layout="single")
+        answer = Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=staged["markdown"])], metadata={"daedalus.run_id": "run-api"})
+        await manager.sessions.append_transcript(state.session.id, [answer])
+        item = message_view((await manager.sessions.list_transcript(state.session.id))[0])["media"][0]["items"][0]
+        application = SimpleNamespace(settings=settings, config=RuntimeConfig(), db=db, manager=manager, front=None, extensions={})
+        app = build_app(application, "media-token")  # type: ignore[arg-type]
+        base = f"/api/sessions/{state.session.id}/media/{staged['id']}"
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:  # type: ignore[arg-type]
+            content = await client.get(f"{base}/{item['id']}/content", headers={"X-Daedalus-Token": "media-token"})
+            # An attached page opened inline would run on the app's origin.
+            assert content.status_code == 200 and content.headers["content-disposition"].startswith("attachment")
+            # The preview's address: ``{base}/download?path=<item>/<name>``, with the token a link carries.
+            preview = await client.get(f"{base}/download", params={"path": f"{item['id']}/page.html", "token": "media-token"})
+            assert preview.status_code == 200 and preview.content == b"<script>alert(1)</script>"
+            assert preview.headers["content-disposition"].startswith("attachment")
+            assert (await client.get(f"{base}/download", params={"path": "nothing/page.html", "token": "media-token"})).status_code == 404
+    finally:
+        await manager.close()
