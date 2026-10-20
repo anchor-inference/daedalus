@@ -1071,6 +1071,11 @@ class OpenAICompatibleProvider(ILLMProvider):
                 # meeting notes) is booked under its own name, so Usage shows what each one costs
                 # apart from the runs, and a helper's daily cap can be summed from the ledger.
                 purpose = obs.call_purpose
+            elif purpose == "stream" and obs is not None and obs.call_category == "compaction":
+                # The host streams its summaries, and a 'stream' row is what the session's prompt size is
+                # read from: a summary of a 30k-token part booked as one made the next check see a
+                # session of 30k tokens.
+                purpose = "compaction"
             await self._usage_sink.record(
                 UsageRecord(
                     provider_id=self.endpoint.id,

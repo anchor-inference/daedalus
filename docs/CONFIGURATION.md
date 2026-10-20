@@ -78,7 +78,9 @@ run_finished = ""
 preset = ""                  # a cheaper preset for the summariser; empty = the session's model
                              # a model that always reasons (Grok) takes 70-90 s per part, so a fast
                              # non-reasoning preset here also keeps the session from waiting on it
-call_timeout_seconds = 90.0  # one summariser call; a call that runs out is retried once with twice this
+call_timeout_seconds = 90.0  # how long a streamed summariser call may stay silent before it counts
+                             # as stalled and is asked once more; one still writing is never cut
+parallel_calls = 12          # part summaries in flight at once; a rate limit halves it
 
 [self_change]
 mode = "auto"                # auto | off | local | server — see docs/SELF-DEVELOPMENT.md.

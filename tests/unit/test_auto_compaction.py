@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from types import SimpleNamespace
 from typing import Any
 
 import httpx
-from protocore.contracts.llm import LLMResponse
+import pytest
+from protocore.contracts.llm import LLMRequest, LLMResponse, ProviderDelta, ProviderDeltaKind
 from protocore.contracts.types import Message, MessageRole, StopReason, TextBlock, ToolResultBlock, ToolUseBlock
 
 from daedalus.config import Settings
@@ -20,9 +22,11 @@ from daedalus.host.session_runner import (
     operator_quotes,
 )
 from daedalus.host.summaries import split_transcript
+from daedalus.host.summary_calls import SummaryStalled, stream_text
 from daedalus.providers.openai_compat import UsageRecord
 from daedalus.stores.database import Database
 from tests.support.models import model_config
+from tests.support.summariser import streamed
 
 SECTIONED = "## Standing instructions\ns\n## Stable facts\nf\n## Threads\n### t\nx\n## Closed threads\nc\n## Unknowns\nu\n## Identifiers\ni"
 
@@ -82,7 +86,7 @@ async def test_auto_compaction_keeps_the_tail_and_quotes_the_operator(settings: 
         calls.append(request.messages[0].content_blocks[0].text)
         return LLMResponse(message=Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=SECTIONED)]), stop_reason=StopReason.end_turn)
 
-    provider.complete_text = fake_complete  # type: ignore[method-assign]
+    provider.stream_with_tools = streamed(fake_complete)  # type: ignore[method-assign]
     # below the ratio: nothing happens
     await manager.usage.record(UsageRecord(provider_id=provider.endpoint.id, model="m", purpose="stream", raw={}, normalized={"input_tokens": 1000}, cost_usd=0.0, duration_ms=1, run_id="r0", session_id=state.session.id))
     await manager._maybe_auto_compact(state)
@@ -124,45 +128,81 @@ def test_identifiers_are_indexed_by_code() -> None:
     assert "/noise/from/results/only.txt" not in index and "- 2026" not in index
 
 
-async def test_a_stalled_summariser_call_is_retried_then_given_up(settings: Settings, db: Database) -> None:
-    import asyncio
+def _writer(text: str, *, every: float, then_silent: bool = False) -> Any:
+    """A streamed answer that arrives four characters at a time, ``every`` seconds apart; ``then_silent`` stops half-way and never ends."""
 
-    import pytest
+    async def stream(request: Any) -> Any:
+        pieces = [text[i : i + 4] for i in range(0, len(text), 4)]
+        for index, piece in enumerate(pieces):
+            if then_silent and index == len(pieces) // 2:
+                await asyncio.sleep(3600)
+            await asyncio.sleep(every)
+            yield ProviderDelta(kind=ProviderDeltaKind.text, content=piece)
+        yield ProviderDelta(kind=ProviderDeltaKind.finish, finish_reason="stop")
 
-    config = model_config()
-    config.compaction.call_timeout_seconds = 10  # the floor; the fake below never returns
-    manager = SessionManager(settings, config, db=db)
+    return stream
+
+
+async def test_a_summary_still_being_written_is_never_cut(settings: Settings, db: Database) -> None:
+    """A final merge on Opus writes for minutes. A 120 s limit on the whole call killed one two minutes
+    into its answer and started it again from nothing; only silence ends a call now."""
+    manager = SessionManager(settings, model_config(), db=db)
     await manager.start()
     provider = manager.providers.get(manager.providers.available()[0])
+    manager.config.compaction.call_timeout_seconds = 0.5
+    calls = 0
+    steady = _writer(SECTIONED, every=0.05)  # about 1.3 s in all, never 0.5 s quiet
+
+    def counted(request: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        return steady(request)
+
+    provider.stream_with_tools = counted  # type: ignore[method-assign]
+    started = time.monotonic()
+    summary = await manager._summary_call(provider, "m", "prompt", "body", None)  # type: ignore[arg-type]
+    assert time.monotonic() - started > 1.0, "the answer took longer than the silence bound twice over"
+    assert summary == SECTIONED and calls == 1
+    await manager.close()
+
+
+async def test_a_silent_summariser_call_is_asked_once_more_then_given_up(settings: Settings, db: Database) -> None:
+    manager = SessionManager(settings, model_config(), db=db)
+    await manager.start()
+    provider = manager.providers.get(manager.providers.available()[0])
+    manager.config.compaction.call_timeout_seconds = 0.05
     calls = 0
 
-    async def stalled(request: Any) -> LLMResponse:
+    async def silent(request: Any) -> Any:
         nonlocal calls
         calls += 1
         await asyncio.sleep(3600)
-        raise AssertionError("unreachable")
+        yield
 
-    provider.complete_text = stalled  # type: ignore[method-assign]
-    manager.config.compaction.call_timeout_seconds = 10
-    orig = asyncio.wait_for
-
-    limits: list[float] = []
-
-    async def fast_wait_for(coro: Any, timeout: float) -> Any:  # the test cannot wait ten real seconds twice
-        limits.append(timeout)
-        return await orig(coro, timeout=0.05)
-
-    import daedalus.host.session_runner as sr
-
-    sr.asyncio.wait_for = fast_wait_for  # type: ignore[assignment]
-    try:
-        with pytest.raises(TimeoutError):
-            await manager._summary_call(provider, "m", "prompt", "body", None)  # type: ignore[arg-type]
-    finally:
-        sr.asyncio.wait_for = orig  # type: ignore[assignment]
+    provider.stream_with_tools = silent  # type: ignore[method-assign]
+    with pytest.raises(SummaryStalled, match="no byte within"):
+        await manager._summary_call(provider, "m", "prompt", "body", None)  # type: ignore[arg-type]
     assert calls == 2
-    assert limits == [10, 20]  # the retry is not the same request under the same limit
     await manager.close()
+
+
+async def test_a_call_that_goes_quiet_half_way_is_asked_again_and_its_retry_used(settings: Settings, db: Database) -> None:
+    manager = SessionManager(settings, model_config(), db=db)
+    await manager.start()
+    provider = manager.providers.get(manager.providers.available()[0])
+    manager.config.compaction.call_timeout_seconds = 0.3
+    answers = iter([_writer(SECTIONED, every=0.01, then_silent=True), _writer(SECTIONED, every=0.01)])
+    provider.stream_with_tools = lambda request: next(answers)(request)  # type: ignore[method-assign]
+    assert await manager._summary_call(provider, "m", "prompt", "body", None) == SECTIONED  # type: ignore[arg-type]
+    await manager.close()
+
+
+async def test_a_call_that_trickles_past_its_ceiling_ends() -> None:
+    provider = SimpleNamespace(stream_with_tools=_writer("word " * 200, every=0.02))
+    request = LLMRequest(model="m", messages=[], max_tokens=100)
+    with pytest.raises(SummaryStalled, match="past the ceiling") as stalled:
+        await stream_text(provider, request, silence=0.5, ceiling=0.3)
+    assert stalled.value.retryable is False  # the same model would only write as slowly again
 
 
 async def test_a_compaction_does_not_fire_again_on_the_next_turn(settings: Settings, db: Database) -> None:
@@ -187,7 +227,7 @@ async def test_a_compaction_does_not_fire_again_on_the_next_turn(settings: Setti
         calls.append(request.messages[0].content_blocks[0].text)
         return LLMResponse(message=Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=SECTIONED)]), stop_reason=StopReason.end_turn)
 
-    provider.complete_text = fake_complete  # type: ignore[method-assign]
+    provider.stream_with_tools = streamed(fake_complete)  # type: ignore[method-assign]
     await manager.usage.record(UsageRecord(provider_id=provider.endpoint.id, model="m", purpose="stream", raw={}, normalized={"input_tokens": 300_000}, cost_usd=0.0, duration_ms=1, run_id="r1", session_id=state.session.id))
     await manager._maybe_auto_compact(state)
     assert len(calls) == 1  # the history was over the ratio: it is compacted
@@ -290,7 +330,7 @@ async def test_two_callers_over_the_ratio_compact_once(settings: Settings, db: D
         await asyncio.sleep(0.05)
         return LLMResponse(message=Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=SECTIONED)]), stop_reason=StopReason.end_turn)
 
-    provider.complete_text = slow_complete  # type: ignore[method-assign]
+    provider.stream_with_tools = streamed(slow_complete)  # type: ignore[method-assign]
     await manager.usage.record(UsageRecord(provider_id=provider.endpoint.id, model="m", purpose="stream", raw={}, normalized={"input_tokens": 120_000}, cost_usd=0.0, duration_ms=1, run_id="r1", session_id=state.session.id))
 
     await asyncio.gather(manager._maybe_auto_compact(state), manager._maybe_auto_compact(state))
@@ -339,7 +379,7 @@ async def test_deleting_a_session_stops_the_compaction_its_last_run_left(setting
         await asyncio.sleep(3600)
         raise AssertionError("unreachable")
 
-    provider.complete_text = slow_complete  # type: ignore[method-assign]
+    provider.stream_with_tools = streamed(slow_complete)  # type: ignore[method-assign]
     await manager.usage.record(UsageRecord(provider_id=provider.endpoint.id, model="m", purpose="stream", raw={}, normalized={"input_tokens": 120_000}, cost_usd=0.0, duration_ms=1, run_id="r1", session_id=state.session.id))
     state.auto_compaction = manager._spawn_background(manager._maybe_auto_compact(state), "auto-compact:test")
     await asyncio.wait_for(summarising.wait(), 5)
@@ -412,7 +452,7 @@ async def test_a_failing_summariser_is_not_tried_again_after_every_turn(settings
             raise RuntimeError("the summariser gave up")
         return LLMResponse(message=Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=SECTIONED)]), stop_reason=StopReason.end_turn)
 
-    provider.complete_text = summarise  # type: ignore[method-assign]
+    provider.stream_with_tools = streamed(summarise)  # type: ignore[method-assign]
     await _measured(manager, state, 246_702, "r1")  # the prompt that first crossed 0.5 x 490k
     await manager._maybe_auto_compact(state)
     assert calls == 1 and state.compaction_hold is not None and state.compaction_hold["reason"] == "failed"
@@ -490,57 +530,4 @@ async def test_a_compaction_that_frees_nothing_is_reported_and_not_repeated(sett
     await _measured(manager, state, 70_000, "r3")
     await manager._maybe_auto_compact(state)
     assert calls == ["compacted", "compacted"]
-    await manager.close()
-
-
-async def test_a_slow_summariser_finishes_on_its_retry(settings: Settings, db: Database) -> None:
-    """The part that took longer than the limit is given twice the time on its retry, and the compaction
-    succeeds instead of throwing away the parts that did finish."""
-    import daedalus.host.session_runner as sr
-
-    config = model_config()
-    config.compaction.auto_ratio = 0.5
-    config.compaction.keep_recent_messages = 2
-    config.compaction.min_messages = 2
-    config.compaction.chunk_tokens = 5_000  # several parts, summarised side by side
-    manager = SessionManager(settings, config, db=db)
-    await manager.start()
-    state = await manager.create_session("slow")
-    state.context_window = 100_000
-    history = _long_history()
-    await manager.sessions.replace_messages(state.session.id, "daedalus", history)
-    await manager.sessions.append_transcript(state.session.id, history)
-    _, preset = manager.config.preset()
-    provider = manager.providers.get(preset.provider)
-    attempts = 0
-
-    async def slow(request: Any) -> LLMResponse:
-        nonlocal attempts
-        attempts += 1
-        return LLMResponse(message=Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=SECTIONED)]), stop_reason=StopReason.end_turn)
-
-    provider.complete_text = slow  # type: ignore[method-assign]
-    orig = asyncio.wait_for
-    takes = 1.5 * config.compaction.call_timeout_seconds  # longer than one limit, shorter than two
-
-    async def clocked_wait_for(coro: Any, timeout: float) -> Any:
-        # The call's duration is decided here rather than measured. This test once raced a real 30 ms
-        # sleep against real 20 ms and 40 ms deadlines, and on a loaded machine it failed: when the event
-        # loop woke late, both timers were due in the same pass, the deadline's cancel ran before the
-        # finished sleep could resume the call, and the retry timed out as well.
-        if timeout < takes:
-            coro.close()
-            raise TimeoutError
-        return await coro
-
-    await _measured(manager, state, 60_000, "r1")
-    sr.asyncio.wait_for = clocked_wait_for  # type: ignore[assignment]
-    try:
-        await manager._maybe_auto_compact(state)
-    finally:
-        sr.asyncio.wait_for = orig  # type: ignore[assignment]
-    assert state.compaction_hold is None
-    messages = await manager.sessions.list_messages(state.session.id, "daedalus", limit=100)
-    assert messages[0].metadata["daedalus.compaction"]["reason"] == "auto"
-    assert attempts > 2  # every part timed out once and finished on its retry, then the merge did the same
     await manager.close()

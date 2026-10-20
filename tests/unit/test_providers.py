@@ -5,9 +5,10 @@ from typing import Any
 
 import httpx
 import pytest
-from protocore.contracts.llm import LLMRateLimitError, LLMRequest, ProviderDeltaKind
+from protocore.contracts.llm import LLMObservabilityContext, LLMRateLimitError, LLMRequest, ProviderDeltaKind
 from protocore.contracts.types import Message, MessageRole, TextBlock, ToolDefinition, ToolParameterSchema
 
+from daedalus.host.summary_calls import stream_text
 from daedalus.providers.openai_compat import (
     OpenAICompatibleProvider,
     ProviderEndpoint,
@@ -552,3 +553,18 @@ async def test_grok_routes_a_conversation_by_header_and_leaves_the_body_alone(ba
     assert captured[0].headers.get("x-grok-conv-id") == ("sess-42" if sent else None)
     assert "x-grok-conv-id" not in captured[1].headers
     assert captured[0].content == captured[1].content  # the session reaches the wire only as the header
+
+
+async def test_a_streamed_summary_is_not_booked_as_the_sessions_prompt() -> None:
+    """The host streams its summaries; a 'stream' row is what the session's prompt size is read from."""
+    body = _sse([_chunk({"content": "## Threads"}), _chunk({"content": "\nx"}, finish="stop"), {"choices": [], "usage": {"prompt_tokens": 30_000, "completion_tokens": 9}}])
+    sink = RecordingSink()
+    provider = _provider(body, sink=sink)
+    request = LLMRequest(
+        model="deepseek-v4-flash",
+        messages=[Message(role=MessageRole.user, content_blocks=[TextBlock(text="summarise")])],
+        max_tokens=100,
+        observability=LLMObservabilityContext(tenant_id="t", session_id="s", call_purpose="compaction", call_category="compaction"),
+    )
+    assert await stream_text(provider, request, silence=5, ceiling=30) == "## Threads\nx"
+    assert [(r.purpose, r.session_id, r.normalized["input_tokens"]) for r in sink.records] == [("compaction", "s", 30_000)]

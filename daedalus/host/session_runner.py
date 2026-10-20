@@ -79,6 +79,7 @@ from daedalus.host import (
     prompts,
     standing,
     summaries,
+    summary_calls,
     tool_groups,
     user_style,
 )
@@ -2391,14 +2392,15 @@ class SessionManager:
         await report(parts_total=len(parts), parts_done=0, stage="summarising")
         if len(parts) == 1:
             prompt = summaries.compact_prompt(language=language, max_words=words, has_base=bool(base)) + focus
-            return await self._summary_call(provider, model, prompt, summaries.with_base(base, rendered.transcript), observability, max_tokens=summaries.summary_max_tokens(words))
+            return await summary_calls.SummaryGate(1).call(lambda: self._summary_call(provider, model, prompt, summaries.with_base(base, rendered.transcript), observability, max_tokens=summaries.summary_max_tokens(words)))
         part_words = max(400, words // 2)
-        gate = asyncio.Semaphore(SUMMARY_PARALLEL_CALLS)
+        # Wide enough that thirty parts are three waves rather than five, never wider than the parts
+        # themselves; the gate narrows itself when the provider answers with a rate limit.
+        gate = summary_calls.SummaryGate(min(cfg.parallel_calls, len(parts)))
         done = 0
 
         async def note(prompt: str, body: str) -> str:
-            async with gate:
-                return await self._summary_call(provider, model, prompt + focus, body, observability, strict=False, max_tokens=summaries.summary_max_tokens(part_words))
+            return await gate.call(lambda: self._summary_call(provider, model, prompt + focus, body, observability, strict=False, max_tokens=summaries.summary_max_tokens(part_words)))
 
         async def part_note(index: int, part: str) -> str:
             nonlocal done
@@ -2407,7 +2409,7 @@ class SessionManager:
             await report(parts_done=done)
             return text
 
-        notes = [text for text in await asyncio.gather(*(part_note(i, part) for i, part in enumerate(parts))) if text]
+        notes = [text for text in await summary_calls.all_or_nothing(part_note(i, part) for i, part in enumerate(parts)) if text]
         limit = cfg.chunk_tokens * summaries.CHARS_PER_TOKEN
         for _ in range(summaries.MERGE_ROUNDS_MAX):
             # A history of a million tokens leaves thirty parts whose notes alone exceed one call; they
@@ -2417,16 +2419,18 @@ class SessionManager:
             groups = summaries.pack(notes, limit)
             await report(stage="merging")
             prompt = summaries.MERGE_NOTES_PROMPT.format(language=language, max_words=part_words)
-            notes = list(await asyncio.gather(*(note(prompt, summaries.joined_notes(group)) if len(group) > 1 else asyncio.sleep(0, group[0]) for group in groups)))
+            notes = await summary_calls.all_or_nothing(note(prompt, summaries.joined_notes(group)) if len(group) > 1 else asyncio.sleep(0, group[0]) for group in groups)
         await report(stage="merging")
         prompt = summaries.merge_prompt(language=language, max_words=words, has_base=bool(base)) + focus
-        return await self._summary_call(provider, model, prompt, summaries.with_base(base, summaries.joined_notes(notes)), observability, max_tokens=summaries.summary_max_tokens(words))
+        return await gate.call(lambda: self._summary_call(provider, model, prompt, summaries.with_base(base, summaries.joined_notes(notes)), observability, max_tokens=summaries.summary_max_tokens(words)))
 
     async def _summary_call(self, provider: Any, model: str, prompt: str, body: str, observability: LLMObservabilityContext, *, strict: bool = True, max_tokens: int = 6000) -> str:
-        summary = ""
+        """One summariser call; ``strict`` is the final summary, checked for its sections and asked again once.
+
+        A part's note or a merge of notes (``strict`` false) is never checked: it has none of the final
+        summary's sections by design, and checking it logged a rejection and an acceptance for every part."""
         candidate = ""
         problem = ""
-        timeout = self.config.compaction.call_timeout_seconds
         for attempt in range(2 if strict else 1):
             reminder = f"\n\nYour previous attempt was rejected: {problem}. Produce every section, each exactly once, in the given order." if problem else ""
             request = LLMRequest(
@@ -2437,47 +2441,47 @@ class SessionManager:
                 extra={"enable_thinking": False},
                 observability=observability,
             )
-            response = await self._summary_request(provider, request, timeout)
-            candidate = "".join(b.text for b in response.message.content_blocks if isinstance(b, TextBlock)).strip()
+            candidate = (await self._summary_request(provider, request)).strip()
+            if not strict:
+                break
             problem = summaries.validate_summary_sections(candidate)
             if not problem:
-                summary = candidate
-                break
+                return candidate
             logger.warning("compaction summary rejected (attempt %d): %s", attempt + 1, problem)
-        if not summary:
-            if not candidate:
-                raise RuntimeError("the model returned an empty summary")
+        if not candidate:
+            raise RuntimeError("the model returned an empty summary")
+        if problem:
             logger.warning("compaction summary accepted without the fixed sections: %s", problem)
-            summary = candidate  # a usable summary beats a session the operator cannot compact
-        return summary
+        return candidate  # a usable summary beats a session the operator cannot compact
 
-    async def _summary_request(self, provider: Any, request: LLMRequest, timeout: float) -> Any:
-        """One summariser call, asked again when the provider failed in a way that passes.
+    async def _summary_request(self, provider: Any, request: LLMRequest) -> str:
+        """One streamed summariser call, asked again when it stalled or failed in a way that passes.
 
         A compaction once died on a single HTTP 500 from the provider and the session went on
         growing to nine tenths of its window. A transient failure — a 5xx, a dropped stream — is
-        asked again after a pause, twice; what still fails goes back to the caller,
-        which tries the next model of the ladder or reports the compaction as failed with the
-        history untouched."""
-        for attempt, pause in enumerate((*SUMMARY_RETRY_PAUSES, None)):
+        asked again after a pause, twice; a call that went silent is asked again once at once (see
+        :mod:`daedalus.host.summary_calls` for why silence, not length, is what ends one). What
+        still fails goes back to the caller, which tries the next model of the ladder or reports
+        the compaction as failed with the history untouched."""
+        silence = self.config.compaction.call_timeout_seconds
+        ceiling = summary_calls.ceiling_for(request.max_tokens or 6000, silence)
+        stalled = False
+        pauses = list(SUMMARY_RETRY_PAUSES)
+        while True:
             try:
-                try:
-                    return await asyncio.wait_for(provider.complete_text(request), timeout=timeout)
-                except TimeoutError:
-                    # A provider stall must not hold the session: one more try, then the compaction gives up.
-                    # The retry gets twice the time. A model that reasons whether or not it is asked to (Grok
-                    # spends four to six thousand reasoning tokens on a part) takes 70 to 90 s over a 30k-token
-                    # part, and the same request under the same limit failed the same way every time.
-                    logger.warning("compaction summariser call exceeded %.0fs; retrying once with %.0fs", timeout, 2 * timeout)
-                    return await asyncio.wait_for(provider.complete_text(request), timeout=2 * timeout)
-            except LLMError as exc:
-                # A rate limit is a quota, not a hiccup: the next model of the ladder answers sooner than a
-                # pause on this one, and the auto-compaction's own back-off covers the case of none.
-                if pause is None or not exc.retryable or isinstance(exc, LLMRateLimitError):
+                return await summary_calls.stream_text(provider, request, silence=silence, ceiling=ceiling)
+            except summary_calls.SummaryStalled as exc:
+                if stalled or not exc.retryable:
                     raise
-                logger.warning("compaction summariser call failed (%s, attempt %d); asking again in %.0fs", exc, attempt + 1, pause)
+                stalled = True
+                logger.warning("compaction summariser call %s; asking once more", exc)
+            except LLMError as exc:
+                # A rate limit is the gate's to pace (see SummaryGate); it is not a hiccup to retry here.
+                if not pauses or not exc.retryable or isinstance(exc, LLMRateLimitError):
+                    raise
+                pause = pauses.pop(0)
+                logger.warning("compaction summariser call failed (%s); asking again in %.0fs", exc, pause)
                 await asyncio.sleep(pause)
-        raise AssertionError("unreachable")
 
     # -- checkpoints, revert, fork ------------------------------------------------------
 
@@ -6766,9 +6770,6 @@ class SessionManager:
 
 
 VERBATIM_TAIL_MESSAGES = 3
-SUMMARY_PARALLEL_CALLS = 6
-"""Part summaries in flight at once. A long history is thirty parts, and thirty calls at once is what
-a provider answers with a rate limit."""
 SUMMARY_RETRY_PAUSES = (5.0, 20.0)
 """The pauses before a failed summariser call is asked again, one per retry."""
 COMPACTION_RETRY_GROWTH = 0.1

@@ -8,6 +8,8 @@ answers only its own project.
 
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -34,9 +36,11 @@ from daedalus.config import (
 )
 from daedalus.host import session_runner, standing, summaries
 from daedalus.host.session_runner import CompactionFailed, SessionManager
+from daedalus.host.summary_calls import SummaryGate, all_or_nothing
 from daedalus.providers.openai_compat import UsageRecord
 from daedalus.stores.database import Database
 from tests.support.models import DEFAULT_PRESET, model_config
+from tests.support.summariser import streamed
 
 SECTIONED = "## Standing instructions\ns\n## Stable facts\nf\n## Threads\n### t\nx\n## Closed threads\nc\n## Unknowns\nu\n## Identifiers\ni"
 
@@ -123,7 +127,7 @@ async def test_a_long_history_is_summarised_in_parts_merged_onto_the_previous_su
         bodies.append(text)
         return _answer(SECTIONED + "\n" + "note " * 2500)  # long notes: they have to be merged in rounds
 
-    provider.complete_text = complete  # type: ignore[method-assign]
+    provider.stream_with_tools = streamed(complete)  # type: ignore[method-assign]
     base = "### LANGPT-1278\nsearch_2_books holds availability by subscriber_id"
     history = [_summary(base), *[_op(f"part {i} " + "w" * 9000) for i in range(12)]]
     summary = await manager._summarise_history(provider, "m", history, language="English", instructions="", observability=None, window=1_000_000)  # type: ignore[arg-type]
@@ -136,6 +140,83 @@ async def test_a_long_history_is_summarised_in_parts_merged_onto_the_previous_su
     assert "<previous-summary>\n" + base in final and "worst mistake" in final
     assert all(any(f"part {i} " in b for b in parts) for i in range(12)), "every part of the history reached the summariser"
     await manager.close()
+
+
+async def test_part_notes_are_not_held_to_the_summarys_sections_and_the_parts_run_wide(settings: Settings, db: Database, caplog: pytest.LogCaptureFixture) -> None:
+    """Every part's note was checked for the six sections a note never has: a rejection and an acceptance
+    in the log for each part. And six parts at a time made thirty parts five waves of calls."""
+    config = model_config()
+    config.compaction.chunk_tokens = 5_000
+    manager = _manager_with(settings, db, config)
+    await manager.start()
+    provider = manager.providers.get(manager.providers.available()[0])
+    in_flight = widest = 0
+
+    async def complete(request: Any) -> LLMResponse:
+        nonlocal in_flight, widest
+        in_flight += 1
+        widest = max(widest, in_flight)
+        await asyncio.sleep(0.02)
+        in_flight -= 1
+        return _answer(SECTIONED if "previous attempt" in request.messages[0].content_blocks[0].text or "ONE PART" not in request.messages[0].content_blocks[0].text else "a note on this part")
+
+    provider.stream_with_tools = streamed(complete)  # type: ignore[method-assign]
+    history = [_op(f"part {i} " + "w" * 9000) for i in range(14)]
+    summary = await manager._summarise_history(provider, "m", history, language="English", instructions="", observability=None, window=1_000_000)  # type: ignore[arg-type]
+    assert summary == SECTIONED
+    assert not [r for r in caplog.records if "rejected" in r.getMessage() or "without the fixed sections" in r.getMessage()]
+    assert widest == 7 and widest > 6, "seven parts of 20,000 characters went out side by side, not six then one"
+    await manager.close()
+
+
+async def test_a_rate_limit_narrows_the_gate_and_holds_every_call_back() -> None:
+    gate = SummaryGate(4)
+    in_flight = widest = 0
+    refused = False
+    started: list[float] = []
+    loop = asyncio.get_running_loop()
+
+    async def call() -> str:
+        nonlocal in_flight, widest, refused
+        in_flight += 1
+        widest = max(widest, in_flight)
+        try:
+            started.append(loop.time())
+            await asyncio.sleep(0.01)
+            if not refused:
+                refused = True
+                error = LLMRateLimitError("busy")
+                error.classified = SimpleNamespace(retry_after_seconds=0.2)  # type: ignore[attr-defined]
+                raise error
+            return "ok"
+        finally:
+            in_flight -= 1
+
+    assert await all_or_nothing(gate.call(call) for _ in range(8)) == ["ok"] * 8
+    assert gate.width == 2 and widest == 4
+    assert max(started) - min(started) >= 0.2, "the calls after the refusal waited out the stated pause"
+
+    async def spent() -> str:
+        raise LLMRateLimitError("usage limit exceeded", retryable=False)
+
+    with pytest.raises(LLMRateLimitError):
+        await SummaryGate(2).call(spent)  # an allowance that is spent is the ladder's to answer, at once
+
+
+async def test_one_failed_part_stops_the_others() -> None:
+    finished: list[int] = []
+
+    async def part(index: int) -> int:
+        if index == 0:
+            raise LLMProviderError("refused")
+        await asyncio.sleep(0.5)
+        finished.append(index)
+        return index
+
+    with pytest.raises(LLMProviderError):
+        await all_or_nothing(part(i) for i in range(4))
+    await asyncio.sleep(0.6)
+    assert finished == [], "the parts beside a failed one went on being paid for"
 
 
 async def test_a_failed_summary_call_is_asked_again_and_a_rate_limit_is_not(settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -152,7 +233,7 @@ async def test_a_failed_summary_call_is_asked_again_and_a_rate_limit_is_not(sett
             raise LLMProviderError("HTTP 500 from the provider")
         return _answer()
 
-    provider.complete_text = flaky  # type: ignore[method-assign]
+    provider.stream_with_tools = streamed(flaky)  # type: ignore[method-assign]
     assert await manager._summary_call(provider, "m", "p", "b", None) == SECTIONED  # type: ignore[arg-type]
     assert calls == 3
 
@@ -162,7 +243,7 @@ async def test_a_failed_summary_call_is_asked_again_and_a_rate_limit_is_not(sett
         raise LLMRateLimitError("usage limit exceeded")
 
     calls = 0
-    provider.complete_text = limited  # type: ignore[method-assign]
+    provider.stream_with_tools = streamed(limited)  # type: ignore[method-assign]
     with pytest.raises(LLMRateLimitError):
         await manager._summary_call(provider, "m", "p", "b", None)  # type: ignore[arg-type]
     assert calls == 1
@@ -184,7 +265,7 @@ async def test_a_compaction_that_keeps_failing_says_so_and_keeps_the_history(set
         async def broken(request: Any) -> LLMResponse:
             raise LLMProviderError("HTTP 500 from the provider")
 
-        provider.complete_text = broken  # type: ignore[method-assign]
+        provider.stream_with_tools = streamed(broken)  # type: ignore[method-assign]
     notices: list[dict[str, Any]] = []
 
     async def post(session_id: str | None, payload: dict[str, Any]) -> None:
@@ -245,7 +326,7 @@ async def test_moving_to_a_smaller_window_compacts_at_once(settings: Settings, d
         asked.append(request.model)
         return _answer()
 
-    provider.complete_text = complete  # type: ignore[method-assign]
+    provider.stream_with_tools = streamed(complete)  # type: ignore[method-assign]
     await manager.usage.record(UsageRecord(provider_id="deepseek", model="deepseek-flash", purpose="stream", raw={}, normalized={"input_tokens": 300_000}, cost_usd=0.0, duration_ms=1, run_id="r1", session_id=state.session.id))
     await manager._maybe_auto_compact(state)
     assert not asked, "300k of a 1M window is no reason to compact"

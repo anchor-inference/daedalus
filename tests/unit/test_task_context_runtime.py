@@ -15,6 +15,7 @@ from daedalus.stores.database import Database
 from daedalus.stores.runtime_release import no_entry_in
 from daedalus.stores.staff_context import staff_context_packet
 from tests.support.authorized_launch import operator_assignment
+from tests.support.summariser import streamed
 from tests.support.waiting import until_await
 from tests.unit.test_session_runner import ScriptedProvider, _manager
 from tests.unit.test_staff_runtime import BRIEF, board_task, close_team, fake_team, project_with, repository, team_for
@@ -101,7 +102,7 @@ async def test_native_packet_stays_in_system_brief_after_real_history_compaction
                      "## Closed threads\nNone\n## Unknowns\nNone\n"
                      "## Identifiers\nNone")]), stop_reason=StopReason.end_turn)
 
-        summariser.complete_text = summary  # type: ignore[method-assign]
+        summariser.stream_with_tools = streamed(summary)  # type: ignore[method-assign]
         await manager.compact(state.session.id)
         compacted = await manager.sessions.list_messages(state.session.id, "daedalus", limit=100)
         assert len(compacted) < len(original)

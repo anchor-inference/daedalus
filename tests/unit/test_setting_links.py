@@ -36,6 +36,7 @@ from daedalus.host.setting_refs import (
 from daedalus.providers.registry import ProviderUnavailable
 from daedalus.stores.database import Database
 from daedalus.tools import vision
+from tests.support.summariser import streamed
 from tests.unit.test_components import HEAD, FakeApp
 from tests.unit.test_session_runner import SECTIONED, ScriptedProvider, _manager, _wait_finished
 
@@ -76,9 +77,10 @@ class _Cheap:
     def __init__(self) -> None:
         self.asked = 0
 
-    async def complete_text(self, request: Any) -> LLMResponse:
+    async def stream_with_tools(self, request: Any) -> Any:
         self.asked += 1
-        raise LLMRateLimitError("cheap: rate limited: Go usage limit exceeded")
+        raise LLMRateLimitError("cheap: rate limited: Go usage limit exceeded", retryable=False)  # spent, not busy
+        yield
 
 
 async def _session_with_history(settings: Settings, db: Database) -> tuple[Any, Any, ScriptedProvider, list[dict[str, Any]], list[Any]]:
@@ -94,7 +96,7 @@ async def _session_with_history(settings: Settings, db: Database) -> tuple[Any, 
         asked.append(request)
         return LLMResponse(message=Message(role=MessageRole.assistant, content_blocks=[TextBlock(text=SECTIONED)]), stop_reason=StopReason.end_turn)
 
-    provider.complete_text = answers  # type: ignore[method-assign]
+    provider.stream_with_tools = streamed(answers)  # type: ignore[method-assign]
     provider.summaries = asked  # type: ignore[attr-defined]
     posted: list[dict[str, Any]] = []
 
@@ -146,13 +148,14 @@ async def test_with_the_fallback_off_a_deleted_summary_model_refuses_before_any_
     manager.config.compaction.preset = "gone"
     manager.config.model.fallback_to_session = False
     calls: list[Any] = []
-    original = provider.complete_text
+    original = provider.stream_with_tools
 
-    async def counted(request: Any) -> LLMResponse:
+    async def counted(request: Any) -> Any:
         calls.append(request)
-        return await original(request)
+        async for delta in original(request):
+            yield delta
 
-    provider.complete_text = counted  # type: ignore[method-assign]
+    provider.stream_with_tools = counted  # type: ignore[method-assign]
     with pytest.raises(CompactionFailed, match="no longer among the models") as failure:
         await manager.compact(state.session.id)
     assert failure.value.setting == COMPACTION_MODEL and calls == []
