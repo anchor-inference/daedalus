@@ -24,7 +24,7 @@ function Running {
 function Install-Daedalus {
     $p = Start-Process -FilePath $installer -ArgumentList '/S' -Wait -PassThru
     if ($p.ExitCode -ne 0) { Fail "the installer exited with $($p.ExitCode)" }
-    foreach ($file in 'Daedalus.exe', 'daedalus-desktop.exe', 'browserd.exe', 'miniapp-dist\index.html', 'Uninstall Daedalus.exe') {
+    foreach ($file in 'Daedalus.exe', 'daedalus-desktop.exe', 'browserd.exe', 'deskd.exe', 'miniapp-dist\index.html', 'Uninstall Daedalus.exe') {
         if (-not (Test-Path (Join-Path $app $file))) { Fail "the installation has no $file" }
     }
 }

@@ -2,7 +2,7 @@
 #
 # What is built, for each system, is the application (desktop/shell, Electron: the window, the
 # menu entry, the icon) with the launcher beside it (desktop/, Go: the setup, the runtime, the
-# update manager), the launcher's two daemons and the built Mini App — and from that one build both
+# update manager), the launcher's three daemons and the built Mini App — and from that one build both
 # the installer an operator runs and the archive the launcher's own `upgrade` installs from:
 #
 #   Windows  Daedalus-Setup-x64.exe (one window, per user, no administrator), and
@@ -19,9 +19,12 @@
 #
 # The launcher is plain Go and cross-compiled for every system from one Linux runner. ptyd is Go with
 # a C library (the screen emulator, built with the pinned Zig): Linux and Windows cross-compiled on
-# the Linux runner, the Mac on the Mac runner. browserd is plain Go. The application is packaged on
-# each system's own runner — rcedit, NSIS, hdiutil and codesign want their own systems — and its
-# installer is installed, started and removed there before anything is published.
+# the Linux runner, the Mac on the Mac runner. browserd is plain Go. deskd, the desktop daemon, is
+# plain Go on Linux and Windows and needs cgo on the Mac (CoreGraphics and the accessibility API), so
+# it is built like ptyd: Linux and Windows on the Linux runner, both Macs on the Mac runner. The
+# application is packaged on each system's own runner — rcedit, NSIS, hdiutil and codesign want their
+# own systems — and its installer is installed, started and removed there before anything is
+# published.
 name: desktop
 
 # Everything up to the installers' own tests runs on every change to the application, not only on a
@@ -31,9 +34,9 @@ on:
   push:
     tags: ["desktop-v*"]
     branches: [main]
-    paths: ["desktop/**", "ptyd/**", "browserd/**", "scripts/desktop_package_evidence.py", ".github/workflows/desktop.yml"]
+    paths: ["desktop/**", "ptyd/**", "browserd/**", "deskd/**", "scripts/desktop_package_evidence.py", ".github/workflows/desktop.yml"]
   pull_request:
-    paths: ["desktop/**", "ptyd/**", "browserd/**", "scripts/desktop_package_evidence.py", ".github/workflows/desktop.yml"]
+    paths: ["desktop/**", "ptyd/**", "browserd/**", "deskd/**", "scripts/desktop_package_evidence.py", ".github/workflows/desktop.yml"]
   workflow_dispatch:
 
 permissions:
@@ -203,6 +206,65 @@ jobs:
           path: browserd-dist
           retention-days: 3
 
+  # The desktop daemon: its tests and its release builds, on the system each build is for where it
+  # needs one. On Linux the X11 tests start an Xvfb of their own when one is installed and are skipped
+  # otherwise; the Windows half is vetted there. On the Mac the cgo half is compiled and its pure parts
+  # tested; nothing here drives the runner's real screen, which has no grants to give.
+  deskd:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            targets: "linux/amd64 linux/arm64 windows/amd64"
+            cgo: "0"
+          - runner: macos-latest
+            targets: "darwin/amd64 darwin/arm64"
+            cgo: "1"
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: deskd
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: deskd/go.mod
+          cache-dependency-path: deskd/go.sum
+      - name: Test
+        env:
+          CGO_ENABLED: ${{ matrix.cgo }}
+        run: |
+          test -z "$(gofmt -l cmd internal)"
+          go vet ./...
+          go test ./...
+          if [ "$RUNNER_OS" = Linux ]; then
+            GOOS=windows go vet ./...
+            GOOS=darwin go vet ./...
+          fi
+      - name: Build
+        env:
+          CGO_ENABLED: ${{ matrix.cgo }}
+        run: |
+          if [ "$IS_RELEASE" = true ]; then version="$GITHUB_REF_NAME"; else version="dev-${GITHUB_SHA::12}"; fi
+          mkdir -p ../deskd-dist
+          for t in ${{ matrix.targets }}; do
+            goos=${t%/*} goarch=${t#*/}
+            out="$PWD/../deskd-dist/deskd-$goos-$goarch"
+            case "$goos" in windows) out="$out.exe";; esac
+            # On the Mac both architectures are built with cgo from the one runner: the Go toolchain
+            # hands clang the -arch of the target, and the SDK carries both.
+            GOOS=$goos GOARCH=$goarch go build -trimpath \
+              -ldflags "-s -w -X github.com/ascorblack/daedalus/deskd/internal/version.Version=$version" -o "$out" ./cmd/deskd
+          done
+          ls -l ../deskd-dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deskd-${{ runner.os }}
+          path: deskd-dist
+          retention-days: 3
+
   # The launcher, for every system, from here: no C in it.
   engine:
     needs: [test]
@@ -292,7 +354,7 @@ jobs:
   # operator would, silently: installed, started until the window shows the launcher's page,
   # closed with nothing left running, and uninstalled twice — keeping the data, then deleting it.
   app-windows:
-    needs: [engine, ptyd, browserd, miniapp, seed]
+    needs: [engine, ptyd, browserd, deskd, miniapp, seed]
     runs-on: windows-latest
     defaults:
       run:
@@ -305,6 +367,8 @@ jobs:
         with: { name: ptyd-Linux, path: dl/ptyd }
       - uses: actions/download-artifact@v4
         with: { name: browserd, path: dl/browserd }
+      - uses: actions/download-artifact@v4
+        with: { name: deskd-Linux, path: dl/deskd }
       - uses: actions/download-artifact@v4
         with: { name: miniapp-dist, path: desktop/shell/stage/miniapp-dist }
       - uses: actions/download-artifact@v4
@@ -321,6 +385,7 @@ jobs:
           cp ../../dl/engine/daedalus-desktop-windows-amd64.exe stage/win-x64/daedalus-desktop.exe
           cp ../../dl/ptyd/ptyd-windows-amd64.exe stage/win-x64/ptyd.exe
           cp ../../dl/browserd/browserd-windows-amd64.exe stage/win-x64/browserd.exe
+          cp ../../dl/deskd/deskd-windows-amd64.exe stage/win-x64/deskd.exe
           cp ../../docs/brand/avatar-bot.png build/icon.png
           npm ci --no-audit --no-fund
           npx electron-builder --win nsis dir --x64 -c.extraMetadata.version="$version" --publish never
@@ -355,7 +420,7 @@ jobs:
   # x86-64 .deb is then installed on this runner, started under a virtual display until its window
   # shows the launcher's page, closed, and removed — the user's data staying.
   app-linux:
-    needs: [engine, ptyd, browserd, miniapp, seed]
+    needs: [engine, ptyd, browserd, deskd, miniapp, seed]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -365,6 +430,8 @@ jobs:
         with: { name: ptyd-Linux, path: dl/ptyd }
       - uses: actions/download-artifact@v4
         with: { name: browserd, path: dl/browserd }
+      - uses: actions/download-artifact@v4
+        with: { name: deskd-Linux, path: dl/deskd }
       - uses: actions/download-artifact@v4
         with: { name: miniapp-dist, path: desktop/shell/stage/miniapp-dist }
       - uses: actions/download-artifact@v4
@@ -383,6 +450,7 @@ jobs:
             cp "../../dl/engine/daedalus-desktop-linux-$goarch" "stage/linux-$arch/daedalus-desktop"
             cp "../../dl/ptyd/ptyd-linux-$goarch" "stage/linux-$arch/ptyd"
             cp "../../dl/browserd/browserd-linux-$goarch" "stage/linux-$arch/browserd"
+            cp "../../dl/deskd/deskd-linux-$goarch" "stage/linux-$arch/deskd"
             # An artifact does not keep the execute bit; the packages and the archives must.
             chmod +x "stage/linux-$arch"/*
           done
@@ -439,7 +507,7 @@ jobs:
   # open it the first time), in a .dmg to drag into Applications and in the zip the launcher's upgrade
   # installs from. The .dmg is then mounted and its application checked and started.
   app-macos:
-    needs: [engine, ptyd, browserd, miniapp, seed]
+    needs: [engine, ptyd, browserd, deskd, miniapp, seed]
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -449,6 +517,8 @@ jobs:
         with: { name: ptyd-macOS, path: dl/ptyd }
       - uses: actions/download-artifact@v4
         with: { name: browserd, path: dl/browserd }
+      - uses: actions/download-artifact@v4
+        with: { name: deskd-macOS, path: dl/deskd }
       - uses: actions/download-artifact@v4
         with: { name: miniapp-dist, path: desktop/shell/stage/miniapp-dist }
       - uses: actions/download-artifact@v4
@@ -472,6 +542,7 @@ jobs:
           lipo -create ../../dl/engine/daedalus-desktop-darwin-amd64 ../../dl/engine/daedalus-desktop-darwin-arm64 -output stage/mac-universal/daedalus-desktop
           lipo -create ../../dl/ptyd/ptyd-darwin-amd64 ../../dl/ptyd/ptyd-darwin-arm64 -output stage/mac-universal/ptyd
           lipo -create ../../dl/browserd/browserd-darwin-amd64 ../../dl/browserd/browserd-darwin-arm64 -output stage/mac-universal/browserd
+          lipo -create ../../dl/deskd/deskd-darwin-amd64 ../../dl/deskd/deskd-darwin-arm64 -output stage/mac-universal/deskd
           chmod +x stage/mac-universal/*
           cp -R stage/mac-universal stage/mac-x64
           cp -R stage/mac-universal stage/mac-arm64
