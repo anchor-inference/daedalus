@@ -88,6 +88,10 @@ mode = "auto"                # auto | off | local | server — see docs/SELF-DEV
 wip_limit = 3                # tasks one agent (with its subagents) may hold in 'doing' at once
 stale_hours = 6              # a 'doing' task whose session went quiet this long is handed back
 
+[harness]                    # command-line agents hired as staff
+max_output_tokens = 64000    # one call's output ceiling for OpenCode and Claude Code members, whose
+                             # defaults of about 32k cut a large file written in one call; 0 = theirs
+
 [ops]
 provider_retry_max_attempts = 6      # runs driven again after the provider failed one; 0 leaves it failed
 provider_retry_base_seconds = 30.0   # the first wait; it doubles up to provider_retry_max_seconds

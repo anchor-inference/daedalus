@@ -69,6 +69,11 @@ planned again, and their running workers stop. Tick nothing to keep the board as
 
 Services a member starts stop when its session ends.
 
+Codex reads at most 32 KiB of a project's `AGENTS.md` files and silently drops the rest, so the
+doctor warns about a project folder past that and a Codex launch into one is logged. OpenCode and
+Claude Code members get an output ceiling of 64,000 tokens per call (`[harness] max_output_tokens`),
+so a large file written in one call is not cut at their own default.
+
 **Member runtimes** in a project's settings is an ordered route, for example Claude Code, then
 Codex, then a Daedalus member, each with an optional model. A member keeps the runtime it was hired
 on as its first; the route supplies the fallbacks. A launch moves to the next runtime only when one

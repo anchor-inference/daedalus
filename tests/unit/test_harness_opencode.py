@@ -332,3 +332,9 @@ def test_a_malformed_event_is_skipped_and_the_stream_goes_on() -> None:
     assert [e.kind for e in events][0] is EventKind.TURN_STARTED
     [failed] = [e for e in events if e.kind is EventKind.TURN_FAILED]
     assert failed.payload["failure"] == "boom"
+
+
+def test_the_output_token_ceiling_reaches_opencode_and_zero_leaves_its_default() -> None:
+    # A large file written in one call was cut at OpenCode's own default of about 32 k tokens.
+    assert OpenCodeAdapter().launch_plan(spec(max_output_tokens=64_000)).env["OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX"] == "64000"
+    assert "OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX" not in OpenCodeAdapter().launch_plan(spec(max_output_tokens=0)).env

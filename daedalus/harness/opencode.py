@@ -245,6 +245,8 @@ class OpenCodeAdapter:
         if resume:
             argv += ["-s", resume]
         env = {"OPENCODE_SERVER_PASSWORD": server.password, "OPENCODE_CONFIG_CONTENT": json.dumps(config, ensure_ascii=False)}
+        if spec.max_output_tokens:
+            env["OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX"] = str(spec.max_output_tokens)
         return LaunchPlan(
             adapter_state=json.dumps(dataclasses.asdict(server)),
             argv=tuple(argv),

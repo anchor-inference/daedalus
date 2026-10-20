@@ -1827,6 +1827,10 @@ class HarnessConfig(BaseModel):
     tokens of the subscription and is the only proof that a prompt still gets through."""
     opencode_port_range: str = Field(default="18300-18399", pattern=r"^\d{4,5}-\d{4,5}$")
     """Loopback ports OpenCode's embedded server may take, one per launch."""
+    max_output_tokens: int = Field(default=64_000, ge=0, le=1_000_000)
+    """The output-token ceiling of one model call handed to OpenCode
+    (``OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX``) and Claude Code (``CLAUDE_CODE_MAX_OUTPUT_TOKENS``).
+    Their defaults of about 32 k cut a large file written in one call; 0 leaves each CLI its own."""
 
     @field_validator("opencode_port_range")
     @classmethod

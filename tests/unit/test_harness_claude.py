@@ -1151,3 +1151,8 @@ def test_an_agent_named_default_is_not_passed_to_the_cli() -> None:
     assert "--agent" not in argv
     argv = list(ClaudeCodeAdapter().launch_plan(spec(agent="reviewer")).argv)
     assert argv[argv.index("--agent") + 1] == "reviewer"
+
+
+def test_the_output_token_ceiling_reaches_claude_and_zero_leaves_its_default() -> None:
+    assert ClaudeCodeAdapter().launch_plan(spec(max_output_tokens=64_000)).env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] == "64000"
+    assert "CLAUDE_CODE_MAX_OUTPUT_TOKENS" not in ClaudeCodeAdapter().launch_plan(spec(max_output_tokens=0)).env
