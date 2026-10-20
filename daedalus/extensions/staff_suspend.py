@@ -34,6 +34,7 @@ from daedalus.harness.runtime import SuspendUnknown
 from daedalus.staff_runtime import LiveSession, StartRequest
 from daedalus.stores.executions import ACTIVE
 from daedalus.stores.staff import StaffError
+from daedalus.stores.staff_context import staff_context_packet
 from daedalus.stores.writer_leases import WriterLeases
 
 if TYPE_CHECKING:
@@ -197,6 +198,16 @@ async def suspend(team: Team, live: LiveSession, minutes: int, now: datetime) ->
     return True
 
 
+async def _pinned(team: Team, staff_session_id: str) -> str:
+    """The session's pinned task packet for the standing brief of a relaunch, or nothing.
+
+    The first launch's standing brief carried it, and the first message only points at it, so a
+    relaunch that left it out would leave the member with no contract once its history is shortened.
+    """
+    pinned = await staff_context_packet(team.app.db, staff_session_id)
+    return "\n\n" + team.context_brief(staff_session_id, pinned["packet"]) if pinned else ""
+
+
 async def wake(team: Team, live: LiveSession) -> LiveSession:
     """Launch a suspended member's CLI again on its own session, before a message is delivered to it.
 
@@ -226,7 +237,7 @@ async def wake(team: Team, live: LiveSession) -> LiveSession:
         task=task,
         # Nothing as a first prompt: the message that woke it is delivered once the CLI is ready.
         first_message="",
-        brief_text=await team.brief(member, project, folder, worktree),
+        brief_text=await team.brief(member, project, folder, worktree) + await _pinned(team, session.id),
         staff_session_id=session.id,
         env=folder.env,
         model=member.model,

@@ -36,9 +36,11 @@ class QuietResume(StubClaude):
     def __init__(self, script: str = "echo:hello") -> None:
         super().__init__(script)
         self.resumed: list[str] = []
+        self.resumed_briefs: list[str] = []
 
     def resume_plan(self, spec: LaunchSpec, ref: str) -> LaunchPlan:
         self.resumed.append(ref)
+        self.resumed_briefs.append(spec.brief_text)
         plan = super().resume_plan(spec, ref)
         if spec.first_prompt:
             return plan
@@ -205,6 +207,9 @@ async def test_a_message_resumes_the_session_and_is_delivered(settings: Settings
         assert again.id == row.id and again.cli_session_id == row.cli_session_id
         assert again.terminal_id != row.terminal_id
         assert resumed(s) == [row.cli_session_id]
+        # The first message only points at the pinned packet, so the relaunch's standing brief carries it.
+        [brief] = s.runtime.adapter.resumed_briefs  # type: ignore[attr-defined]
+        assert "Current task context (pinned sources" in brief and f"/api/team/{row.id}/context" in brief
         await s.status_event(ada, "working")
         assert await db.kv_get(staff_suspend.KEY + row.id) is None
 

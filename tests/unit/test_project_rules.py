@@ -15,7 +15,7 @@ import pytest
 from daedalus.config import Settings
 from daedalus.extensions.orchestrator_ops import Refused
 from daedalus.stores.database import Database
-from daedalus.stores.projects import RULE_TEXT_MAX, RULES_CHARS, RULES_MAX
+from daedalus.stores.projects import RULE_KIND, RULE_TEXT_MAX, RULES_CHARS, RULES_MAX
 from tests.support.waiting import until
 from tests.unit.test_orchestrator import rig
 from tests.unit.test_orchestrator_team import fake, office, working
@@ -110,6 +110,42 @@ async def test_rules_are_bounded_where_they_are_written_so_all_of_them_always_sh
         # An ordinary entry is what it was: a decision unless said otherwise, and never a rule.
         assert (await r.call(sid, "journal", text="Chose the smaller model for the scouts")).startswith("journal entry #")
         assert (await r.manager.projects.journal(r.project.id, limit=1))[0].kind == "decision"
+    finally:
+        await close_team(r.manager)
+        await r.manager.close()
+
+
+async def test_a_rule_written_twice_is_in_force_once_and_goes_with_its_twin(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """The orchestrator wrote one rule twice within half a minute, and every member's brief listed it twice
+    from then on. A repeat is now refused; a pair already written shows once and is lifted as one."""
+    r = await rig(settings, db, tmp_path)
+    try:
+        runtime = fake(r)
+        sid = await office(r)
+        await r.call(sid, "team", concurrency=2)
+        said = await r.call(sid, "journal", kind="rule", text="Never call the small model.")
+        rule_id = int(said.split("#")[1].split()[0])
+        with pytest.raises(Refused, match=f"rule #{rule_id} says this already"):
+            await r.call(sid, "journal", kind="rule", text="  never call the  small model. ")
+        # The pair as it stands in a journal written before the refusal existed.
+        twin = await r.manager.projects.record(r.project.id, "orchestrator", RULE_KIND, "Never call the small model.")
+
+        assert [rule.id for rule in await r.manager.projects.rules(r.project.id)] == [rule_id]
+        ben = await r.manager.staff.hire(r.project.id, name="Ben", role="Photos", isolation="shared")
+        await r.call(sid, "assign", staff="Ben", title="Photos of the new menu", **BRIEF)
+        await until(lambda: bool(runtime.started and runtime.started[-1].staff.id == ben.id), "Ben's launch")
+        first = runtime.started[-1].first_message
+        assert first.count("Never call the small model.") == 1
+        # The pinned packet is in the standing brief only, and "Done when" does not repeat the checks
+        # made from it: the brief says each part of the contract once.
+        assert first.count(BRIEF["boundaries"]) == 1 and first.count(BRIEF["done_when"]) == 1
+        assert "Done when: every check listed below" in first
+        assert "Current task context (pinned sources" not in first and "is in your standing instructions" in first
+        assert "Current task context (pinned sources" in runtime.started[-1].brief_text
+
+        await r.call(sid, "journal", op="lift", rule=rule_id)
+        assert await r.manager.projects.rules(r.project.id) == []
+        assert twin.id in await r.manager.projects.lifted_rules(r.project.id)
     finally:
         await close_team(r.manager)
         await r.manager.close()

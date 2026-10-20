@@ -24,7 +24,7 @@ import posixpath
 import re
 import secrets
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -158,6 +158,18 @@ because the turn it would wait for has already ended."""
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _done_when(done_when: str, checks: Sequence[str]) -> str:
+    """The brief's "Done when", or a pointer to the checks when they say it already.
+
+    The checks of a card written without its own are made from the lines of its "Done when", so a
+    brief used to say each of them twice, a few lines apart.
+    """
+    lines = {" ".join(line.split()) for line in done_when.splitlines() if line.strip()}
+    if lines and lines <= {" ".join(check.split()) for check in checks}:
+        return "every check listed below"
+    return done_when
 
 
 def _hash(token: str) -> str:
@@ -1054,7 +1066,6 @@ class Team:
                                                          role_hint=member.role)
         except ContextUnavailable as exc:
             raise StaffError(f"the task context cannot be pinned: {exc}") from exc
-        context_text = render_task_context(context_packet)
         token = secrets.token_urlsafe(32)
         session = await self.manager.staff.claim_session(
             member.id,
@@ -1073,15 +1084,19 @@ class Team:
         except ContextPinRefused as exc:
             await self.manager.staff.end_session(session.id, str(exc))
             raise StaffError(str(exc)) from exc
-        context_text += (f"\nTo recover this exact packet after history is shortened, read "
-                         f"http://127.0.0.1:{self.app.settings.api_port}/api/team/{session.id}/context "
-                         "with your existing team token. Its source_current field says whether to refresh the task.")
+        context_text = self.context_brief(session.id, context_packet)
         await self.publish("staff.status", {"status": "starting", "previous": None, "actor": by}, member=member)
         fresh, earlier = await self.brief_files(delivered)
         contract = await self.contract_block(member, task, session.id, delivered)
         first = self.first_message(member, task, folder, worktree, predecessor, by, fresh, earlier,
-                                   rules=await self.rules_block(project.id), contract=contract)
-        first += "\n\n" + context_text
+                                   rules=await self.rules_block(project.id), contract=contract,
+                                   checks=[item["text"] for item in await self.contracts.checks(task.id)])
+        # The packet itself goes in the standing brief, which a CLI keeps when its history is shortened.
+        # Both used to carry it whole, so every brief said its contract three times: in words, then
+        # twice as escaped JSON.
+        first += "\n\n" + prompts.STAFF_CONTEXT_POINTER.format(
+            revision=context_packet["contract_revision"], packet_hash=context_packet["packet_hash"],
+            url=self.context_url(session.id))
         if member.harness != "daedalus" and (store := operator_secrets.shared()) is not None:
             # A Daedalus member is a session and reads its secrets in its turn context; a coding CLI has only this.
             if handed := operator_secrets.staff_section(store.for_staff(member.id, project.id)):
@@ -1246,6 +1261,15 @@ class Team:
         subagents = self.app.extensions.get("subagents")
         return subagents.persona(name) if subagents is not None else None
 
+    def context_url(self, staff_session_id: str) -> str:
+        return f"http://127.0.0.1:{self.app.settings.api_port}/api/team/{staff_session_id}/context"
+
+    def context_brief(self, staff_session_id: str, packet: dict[str, Any]) -> str:
+        """The pinned task packet for a member's standing brief, with where to read it again."""
+        return render_task_context(packet) + (
+            f"\nTo recover this exact packet after history is shortened, read {self.context_url(staff_session_id)} "
+            "with your existing team token. Its source_current field says whether to refresh the task.")
+
     async def rules_block(self, project_id: str) -> str:
         """The operator's rules in force and the brief's constraints, for a member's brief.
 
@@ -1304,7 +1328,7 @@ class Team:
             block += prompts.STAFF_CHECKS.format(lines="\n".join(f"- C{i} {item['text']}" for i, item in enumerate(checks, start=1)))
         return block
 
-    def first_message(self, member: Staff, task: BoardTask, folder: ProjectFolder, worktree: Worktree | None, predecessor: StaffSession | None, by: str, delivered: list[Delivered] | None = None, earlier: list[Delivered] | None = None, *, rules: str = "", contract: str = "") -> str:
+    def first_message(self, member: Staff, task: BoardTask, folder: ProjectFolder, worktree: Worktree | None, predecessor: StaffSession | None, by: str, delivered: list[Delivered] | None = None, earlier: list[Delivered] | None = None, *, rules: str = "", contract: str = "", checks: Sequence[str] = ()) -> str:
         before = ""
         if predecessor is not None:
             why = predecessor.end_reason or predecessor.status
@@ -1323,7 +1347,7 @@ class Team:
             objective=task.objective,
             deliverable=task.deliverable,
             boundaries=task.boundaries,
-            done_when=task.done_when,
+            done_when=_done_when(task.done_when, checks),
             rules=rules,
             contract=contract,
             folder=worktree.cwd if worktree is not None else folder.path,

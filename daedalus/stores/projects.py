@@ -78,6 +78,11 @@ rather than when one is shown, so every rule in force is always shown whole: a c
 what hid the operator's instruction in the first place."""
 
 
+def _rule_key(text: str) -> str:
+    """What makes two rules the same rule: their words, whatever the spacing and case."""
+    return " ".join(text.split()).casefold()
+
+
 class ProjectError(ValueError):
     """A project the store will not keep: a relative folder, a file, or a folder tangled with another's."""
 
@@ -1465,7 +1470,12 @@ class ProjectStore:
             ") ORDER BY id",
             (project_id, RULE_KIND, project_id, RULE_LIFTED_KIND),
         )
-        return [_entry(r) for r in rows]
+        # A rule written twice is in force once. The orchestrator once wrote the same rule twice within
+        # half a minute, and every member's brief listed it twice from then on.
+        standing: dict[str, JournalEntry] = {}
+        for row in rows:
+            standing.setdefault(_rule_key(row["text"]), _entry(row))
+        return list(standing.values())
 
     async def lifted_rules(self, project_id: str) -> set[int]:
         rows = await self._db.fetchall("SELECT json_extract(refs_json, '$.rule_id') AS rule_id FROM project_journal WHERE project_id = ? AND kind = ?", (project_id, RULE_LIFTED_KIND))
@@ -1479,6 +1489,8 @@ class ProjectStore:
         if len(body) > RULE_TEXT_MAX:
             raise ProjectError(f"a rule is at most {RULE_TEXT_MAX} characters: say the instruction, and keep the detail in the brief or a note")
         standing = await self.rules(project_id)
+        if same := next((rule for rule in standing if _rule_key(rule.text) == _rule_key(body)), None):
+            raise ProjectError(f"rule #{same.id} says this already and is in force")
         if len(standing) >= RULES_MAX:
             raise ProjectError(f"{len(standing)} rules are in force already, the most there may be: lift one, or fold two into one, first")
         if sum(len(r.text) for r in standing) + len(body) > RULES_CHARS:
@@ -1495,7 +1507,18 @@ class ProjectStore:
             raise ProjectError(f"rule #{rule.id} was lifted already")
         said = " ".join(rule.text.split())
         text = f"Lifted rule #{rule.id}: {said[:200]}{'…' if len(said) > 200 else ''}" + (f"\nWhy: {why.strip()}" if why.strip() else "")
-        return rule, await self.record(project_id, author, RULE_LIFTED_KIND, text, {"rule_id": rule.id})
+        lifted = await self.record(project_id, author, RULE_LIFTED_KIND, text, {"rule_id": rule.id})
+        # Its twins go with it: ``rules`` shows only the oldest of a rule written twice, so a twin left
+        # standing would come back into force with no one able to see it to lift it.
+        twins = await self._db.fetchall(
+            "SELECT * FROM project_journal WHERE project_id = ? AND kind = ? AND id != ? AND id NOT IN ("
+            "SELECT CAST(json_extract(refs_json, '$.rule_id') AS INTEGER) FROM project_journal WHERE project_id = ? AND kind = ?)",
+            (project_id, RULE_KIND, rule.id, project_id, RULE_LIFTED_KIND),
+        )
+        for twin in twins:
+            if _rule_key(twin["text"]) == _rule_key(rule.text):
+                await self.record(project_id, author, RULE_LIFTED_KIND, f"Lifted rule #{twin['id']} with #{rule.id}, which it repeated", {"rule_id": twin["id"]})
+        return rule, lifted
 
     async def commitments(self, project_id: str) -> list[JournalEntry]:
         """What the orchestrator took on for the operator and has not kept yet, oldest first."""
