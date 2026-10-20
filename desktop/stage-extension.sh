@@ -18,6 +18,9 @@ if [ ! -f "$root/extension/package.json" ]; then
   echo "this tree has no extension/; the application carries none" > "$out/NOT-BUILT"
   exit 0
 fi
+# The build writes into dist/ without emptying it first, so a file a past build left there (a module
+# since renamed or removed) would otherwise be staged, listed in SHA256SUMS and shipped.
+rm -rf "$root/extension/dist"
 (cd "$root/extension" && npm ci --no-audit --no-fund && npm run build)
 cp -R "$root/extension/dist/." "$out/"
 test -f "$out/manifest.json"
