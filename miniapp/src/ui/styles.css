@@ -3006,6 +3006,27 @@ input.field[type="range"] {
 .setting-notice.tone-error > svg { color:var(--bad); }
 .setting-notice-text { flex:1; min-width:0; }
 .setting-notice .setting-go { flex:none; }
+/* The Computer control (computer.tsx). The banner is a conversation notice like the ones above, so it
+   keeps their column and their look; the sheet's rows are list rows at the row token's height, and a
+   long list of windows scrolls inside the sheet rather than pushing the grant button off it. */
+.computer-banner .btn { flex:none; }
+.computer-error { display:block; color:var(--bad); }
+.computer-sheet .sheet-body { display:flex; flex-direction:column; gap:var(--space-2); }
+.computer-sheet .section-title { margin:var(--space-3) 2px 0; }
+.computer-grant, .computer-permissions { display:flex; flex-direction:column; gap:var(--space-2); }
+.computer-line { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2); }
+.computer-label { color:var(--fg-2); font-size:var(--fs-13); min-width:96px; }
+.computer-line input.computer-minutes { width:84px; flex:none; margin:0; padding:6px 10px; text-align:right; font-variant-numeric:tabular-nums; }
+.computer-line input.computer-minutes.invalid { border-color:var(--bad); }
+.computer-list { display:flex; flex-direction:column; max-height:240px; overflow-y:auto; border:1px solid var(--line); border-radius:var(--radius-md); }
+.computer-list > .sub { padding:var(--space-2) var(--space-3); }
+.computer-row { display:flex; align-items:center; gap:var(--space-2); min-height:var(--row-h-2); padding:0 var(--space-3); min-width:0; }
+.computer-list .computer-row + .computer-row { border-top:1px solid var(--line); }
+.computer-list .computer-row { cursor:pointer; }
+.computer-row.off { opacity:0.55; cursor:default; }
+.computer-row-main { display:flex; flex-direction:column; flex:1; min-width:0; }
+.computer-row-main b { font-weight:500; }
+.computer-actions { display:flex; justify-content:flex-end; }
 .run-outcome { display:flex; align-items:flex-start; gap:var(--space-2); margin-top:var(--space-2); padding:var(--space-2) var(--space-3); border:1px solid color-mix(in srgb, var(--bad) 55%, transparent); border-radius:var(--radius-md); background:color-mix(in srgb, var(--bad) 10%, var(--surface-2)); color:var(--fg); font-size:var(--fs-13); overflow-wrap:anywhere; }
 .run-outcome svg { flex:none; margin-top:2px; color:var(--bad); }
 .run-outcome.cause-cancelled { border-color:var(--line-strong); background:var(--surface-2); }

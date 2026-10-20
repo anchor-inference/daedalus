@@ -6,6 +6,7 @@ export type IconName =
   | "folder" | "folderplus" | "settings" | "bots" | "inbox" | "board" | "changes" | "chart" | "loop" | "pause" | "play" | "trash" | "check" | "close" | "send"
   | "download" | "share" | "split" | "key" | "link" | "unlink" | "down" | "copy" | "paste" | "columns" | "eye" | "mic" | "fork" | "undo" | "phone" | "expand" | "external" | "reload" | "forward" | "panel" | "chevron" | "bolt" | "volume" | "mute" | "lock" | "bell" | "shield" | "conductor" | "journal" | "alert" | "compass" | "user" | "ask" | "archive" | "braces" | "sidebar" | "reply" | "flag" | "menu" | "pin" | "pushpin"
   | "compose" | "grid" | "vdots" | "camera" | "region" | "offline" | "logo" | "sliders" | "apps" | "import" | "eyeoff"
+  | "monitor"
   | "utensils" | "cart" | "dumbbell" | "plane" | "home" | "list" | "heart" | "book" | "wand";
 
 const PATHS: Record<IconName, string> = {
@@ -84,6 +85,7 @@ const PATHS: Record<IconName, string> = {
   eyeoff: "M3 3l18 18M10.6 6.1A10.7 10.7 0 0 1 12 6c6 0 10 6 10 6a17.6 17.6 0 0 1-3.2 3.8M6.6 6.6C3.9 8.4 2 12 2 12s4 7 10 7c1.8 0 3.4-.6 4.8-1.4M9.9 9.9a3 3 0 0 0 4.2 4.2",
   eye: "M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
   mic: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM6 11a6 6 0 0 0 12 0M12 17v4M9 21h6",
+  monitor: "M3 4h18v12H3zM8 20h8M12 16v4",
   phone: "M8 3h8a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM11 18h2",
   expand: "M15 4h5v5M20 4l-6 6M9 20H4v-5M4 20l6-6",
   external: "M14 4h6v6M20 4l-9 9M18 13v6H5V6h6",
