@@ -186,8 +186,9 @@ COPY --from=browserd /out/browserd /usr/local/bin/browserd
 # The run directory the agent and the browser service share (the browser-run volume), owned by the
 # browser's user. Docker seeds an empty named volume from the first container that mounts it, and
 # that may be the agent's: made here, the volume starts owned by the user browserd runs as, whichever
-# container comes first. Root in the agent's container reads it all the same.
-RUN install -d -m 0700 -o 1001 -g 1001 /run/daedalus-browser
+# container comes first. Root in the agent's container reads it all the same. The same for the
+# daemon of the operator's Chrome (the browser-user service) and its state.
+RUN install -d -m 0700 -o 1001 -g 1001 /run/daedalus-browser /run/daedalus-browser-user /var/lib/browserd-user
 # The bot and the core are mounted, not installed: pointing the interpreter at the mounted checkouts
 # is what an editable install would have written anyway, and it needs no sync at the first start.
 RUN printf '%s\n' /srv/daedalus /srv/protocore-exp > /srv/venv/lib/python3.12/site-packages/_daedalus_checkouts.pth
