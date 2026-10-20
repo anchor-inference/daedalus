@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
+from daedalus.host.deliverables import parse_worktree_pane, worktree_pane
 from daedalus.host.gitrun import GitError
 from daedalus.host.worktrees import (
     StaffWorktrees,
@@ -119,6 +120,9 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
                     "folder_id": folder.id,
                     "path": str(entry.path),
                     "name": entry.path.name,
+                    # The id an orchestrator's file pane opens this worktree by: the app names the
+                    # worktree, never its path, and the host resolves it under the folder again.
+                    "pane": worktree_pane(folder.id, entry.path.name) if parse_worktree_pane(worktree_pane(folder.id, entry.path.name)) else "",
                     "member": {"id": member.id, "name": member.name, "dismissed": member.archived_at is not None} if member is not None else None,
                     "branch": entry.branch,
                     "base": base,

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
@@ -29,6 +32,9 @@ from daedalus.tools._common import error, local_copy, ok, refuse_protected, serv
 )
 async def send_file(context: ToolContext, path: str, caption: str | None = None) -> ToolResult:
     services = services_for(context)
+    deliver = services.extra.get("deliver")
+    if deliver is not None:
+        return await _send_delivered(context, services, deliver, path, caption)
     target = services.resolve(path)
     if refusal := refuse_protected(context, services, target, "sent"):
         return refusal
@@ -54,6 +60,31 @@ async def send_file(context: ToolContext, path: str, caption: str | None = None)
     if result == NO_CHAT_BOUND:
         return ok(context, f"shown {target.name} ({size} bytes) to the operator as a file card in the app; no Telegram chat is bound to this session, so nothing went there")
     return ok(context, f"sent {target.name} ({size} bytes): {result}")
+
+
+async def _send_delivered(context: ToolContext, services: Any, deliver: Any, path: str, caption: str | None) -> ToolResult:
+    """SendFile for a session that only delivers (an orchestrator): the file is read where the project
+    keeps it, by ``deliver``, rather than resolved through walls the session works inside."""
+    try:
+        local = await deliver(path)
+    except FileNotFoundError:
+        return error(context, f"no such file: {path}")
+    except (OSError, ValueError) as exc:
+        return error(context, str(exc))
+    size = local.stat().st_size
+    if services.send_file is None:
+        return ok(context, f"shown {local.name} ({size} bytes) to the operator as a file card in the app")
+
+    async def fetch() -> Path:
+        return local
+
+    try:
+        result = await services.send_file(fetch, caption)
+    except (OSError, ValueError) as exc:
+        return error(context, str(exc))
+    if result == NO_CHAT_BOUND:
+        return ok(context, f"shown {local.name} ({size} bytes) to the operator as a file card in the app; no Telegram chat is bound to this session, so nothing went there")
+    return ok(context, f"sent {local.name} ({size} bytes): {result}")
 
 
 @search_hint(
@@ -93,13 +124,17 @@ async def attach_media(context: ToolContext, items: list[dict[str, str]], layout
             continue
         if not raw:
             return error(context, "every media item needs a path or a url")
-        target = services.resolve(raw)
-        if refusal := refuse_protected(context, services, target, "attached"):
-            return refusal
+        deliver = services.extra.get("deliver")
         try:
-            local = await local_copy(services, target)
+            if deliver is not None:
+                target = local = await deliver(raw)
+            else:
+                target = services.resolve(raw)
+                if refusal := refuse_protected(context, services, target, "attached"):
+                    return refusal
+                local = await local_copy(services, target)
         except FileNotFoundError:
-            return error(context, f"no such file: {target}")
+            return error(context, f"no such file: {raw}")
         except (OSError, ValueError) as exc:
             return error(context, str(exc))
         if not local.is_file():

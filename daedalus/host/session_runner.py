@@ -10,6 +10,7 @@ import os
 import re
 import shlex
 import shutil
+import tempfile
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
@@ -17,7 +18,7 @@ from contextlib import ExitStack, suppress
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from protocore.contracts.llm import LLMError, LLMObservabilityContext, LLMRateLimitError, LLMRequest
@@ -85,9 +86,12 @@ from daedalus.host.btw import BTW_KEY, btw_of, btws_of
 from daedalus.host.checkpoint_retention import CheckpointRetention, RetentionBounds, RetentionReport
 from daedalus.host.checkpoints import CheckpointError, Checkpoints, scan_workspace, store_dir
 from daedalus.host.containment import Walls, walls_for, worktree_writable_paths
+from daedalus.host.deliverables import locate as locate_deliverable
+from daedalus.host.deliverables import secret_part
 from daedalus.host.engine_factory import TENANT, EngineDeps, PolicyAdapter, build_engine
 from daedalus.host.events import AppEvent, EventBus, EventFilter
 from daedalus.host.foreign_sessions import harness_name
+from daedalus.host.handoff import Handoff
 from daedalus.host.hooks import DaedalusHookManager
 from daedalus.host.host_exec import BRIDGE_DOWN, HostExecBackend
 from daedalus.host.inference_admission import HostInferenceAdmission
@@ -3072,8 +3076,50 @@ class SessionManager:
             # its jobs' output without being able to write into the installation.
             services.log_root = session_scratch_dir(self.settings.state_dir, state.session.id)
             services.walls = Walls(readable=(*services.walls.readable, services.log_root), writable=services.walls.writable)
+        if state.project is not None and self.is_orchestrator(state):
+            # What an orchestrator delivers is read where the project's files are, not through its
+            # walls: an orchestrator of a host project runs from a directory of its own, and the
+            # member's document it was asked to attach was on the host, out of every wall it had.
+            services.extra["deliver"] = _bind(self.deliverable, state.session.id)
         state.services = services
         locator.register(services)
+
+    async def deliverable(self, session_id: str, raw: str) -> Path:
+        """The file an orchestrator delivers, as a file of this process.
+
+        ``raw`` must lie inside one of the project's folders (a staff worktree in one included) and
+        outside git's metadata and credential files, judged on the text by
+        :func:`daedalus.host.deliverables.locate` and again on the real path where the file lives. A
+        local file is handed back as it is; a host file is fetched through the bridge, bounded, into
+        a copy named by its bytes. ``FileRefused`` says why a path is not delivered and
+        ``FileNotFoundError`` that nothing is there.
+        """
+        state = await self.get_state(session_id)
+        project = state.project if state is not None else None
+        if project is None:
+            raise FileRefused("this session has no project to deliver a file from")
+        folder, path = locate_deliverable(project, raw)
+        allowed = [str(f.path) for f in project.folders if f.env == folder.env]
+        if folder.local(self.projects.local_env):
+            real = Path(os.path.realpath(path))
+            root = next((Path(os.path.realpath(r)) for r in allowed if real == Path(os.path.realpath(r)) or Path(os.path.realpath(r)) in real.parents), None)
+            if root is None:
+                raise FileRefused(f"{path} leads outside the project's folders")
+            # A link inside a folder that points into its .git is judged by where it lands.
+            if (part := secret_part(str(real.relative_to(root)))) is not None:
+                raise FileRefused(f"{path} leads into {part}, which holds the repository's metadata or credentials and is never delivered")
+            if not real.is_file():
+                raise FileNotFoundError(path)
+            return real
+        data = await Handoff(self.files, local_env=self.projects.local_env, host=lambda: self.host_bridge).read(folder.env, path, allowed=allowed)
+        keep = Path(tempfile.gettempdir()) / "daedalus-deliveries" / re.sub(r"[^A-Za-z0-9_-]", "_", session_id) / hashlib.sha256(data).hexdigest()[:16]
+        keep.mkdir(parents=True, exist_ok=True)
+        copy = keep / (PurePosixPath(path).name or "file")
+        if not copy.exists():
+            partial = keep / f".{copy.name}.part"
+            partial.write_bytes(data)
+            partial.replace(copy)
+        return copy
 
     def _drive_host(self, services: SessionServices, state: SessionState, folder: ProjectFolder) -> None:
         """Point a session's tools at the host folder it works in, as the benchmark harness points them
