@@ -41,6 +41,7 @@ from daedalus.harness.contract import (
     EnvironmentUnavailable,
     EventKind,
     ExecResult,
+    HandedSkill,
     HarnessAdapter,
     HookPost,
     Launch,
@@ -111,7 +112,7 @@ class Extras:
     """A launch's share of its project's environment."""
 
     tool_sets: tuple[ToolSetSpec, ...] = ()
-    skills: tuple[tuple[str, str], ...] = ()
+    skills: tuple[HandedSkill, ...] = ()
 
 
 LaunchExtras = Callable[[StartRequest, str, int], Awaitable[Extras]]

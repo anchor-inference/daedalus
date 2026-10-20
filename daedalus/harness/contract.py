@@ -14,7 +14,7 @@ against a fake daemon, and keeps every write to a terminal on the one audited pa
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Collection, Mapping
+from collections.abc import AsyncIterator, Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Literal, Protocol, runtime_checkable
@@ -245,6 +245,20 @@ class ToolSetSpec:
         return f'exec "$DAEDALUS_PTYD_BIN" tools-mcp --set {self.name}'
 
 
+
+@dataclass(frozen=True, slots=True)
+class HandedSkill:
+    """One skill as a command-line agent gets it: its directory name, and its files as
+    ``(path inside the directory, bytes)``, ``SKILL.md`` first."""
+
+    name: str
+    files: tuple[tuple[str, bytes], ...]
+
+
+def skill_files(skills: Iterable[HandedSkill], prefix: str) -> dict[str, bytes]:
+    """The launch files of ``skills``, each under ``<prefix>/<name>/``."""
+    return {f"{prefix}/{skill.name}/{path}": data for skill in skills for path, data in skill.files}
+
 @dataclass(frozen=True, slots=True)
 class LaunchSpec:
     """Everything an adapter needs to plan a launch, composed by the host.
@@ -295,10 +309,10 @@ class LaunchSpec:
     allow_rules: tuple[str, ...] = ()
     """The standing grants the operator gave this member ("Always"), as the CLI's allow rules
     (``standing_rule``). Written into every launch, so a grant outlives the session it was given in."""
-    skills: tuple[tuple[str, str], ...] = ()
-    """The skills the project's environment names, as ``(directory name, SKILL.md text)``, for a CLI
-    that loads skills; written beside the team's skill in the launch directory, never into the
-    project folder. Empty when the environment names none, which is how a launch was before."""
+    skills: tuple[HandedSkill, ...] = ()
+    """The skills the project's environment names, each a whole directory, for a CLI that loads
+    skills; written beside the team's skill in the launch directory, never into the project folder.
+    Empty when the environment names none, which is how a launch was before."""
 
     def validate_permissions(self, modes: Collection[str]) -> None:
         """Reject a permission setting the adapter cannot map before reserving launch resources."""

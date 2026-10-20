@@ -29,8 +29,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-from daedalus.harness.contract import ToolSetSpec
+from daedalus.harness.contract import HandedSkill, ToolSetSpec
 from daedalus.host.policy import ASK, DENY
+from daedalus.host.skills import handover_files
 from daedalus.host.worktrees import SetupResult, WorktreeError
 from daedalus.stores.project_environment import (
     EnvironmentRecord,
@@ -97,6 +98,13 @@ def _how(result: SetupResult) -> str:
     how = "timed out" if result.exit_code is None else f"exited with {result.exit_code}"
     tail = "\n".join(result.tail.strip().splitlines()[-8:])[-800:]
     return how + (f": {tail}" if tail else "")
+
+
+SKILL_LAUNCH_FILES = 16
+"""Launch files the skills of one launch may take together. The terminal daemon takes 32 files per
+launch, and the rest are the CLI's own settings, its tool sets and the secrets handed to it."""
+SKILL_LAUNCH_BYTES = 4 << 20
+"""Bytes the skills of one launch may take together: the launch goes to the daemon in one request."""
 
 
 def _skill_dir(name: str) -> str:
@@ -429,15 +437,25 @@ class ProjectEnvironments:
         if spec.mcp:
             made = await self.tools.spec_for(spec.mcp, launch_id, hold_ms)
             tool_sets = (made,) if made is not None else ()
-        skills: list[tuple[str, str]] = []
+        skills: list[HandedSkill] = []
         manager = self.app.manager
         assert manager is not None
-        for name in spec.skills:
-            entry = manager.skills.root / name / "SKILL.md"
+        files, size = SKILL_LAUNCH_FILES, SKILL_LAUNCH_BYTES
+        names = list(spec.skills)
+        for index, name in enumerate(names):
+            slug = _skill_dir(name)
+            # Every skill after this one keeps room for its own SKILL.md, whatever this one carries.
+            later = len(names) - index - 1
             try:
-                skills.append((_skill_dir(name), entry.read_text(encoding="utf-8")))
-            except OSError:
+                handed, left = await asyncio.to_thread(handover_files, manager.skills.root / name, slug, max_files=max(1, files - later), max_bytes=max(0, size))
+            except (OSError, UnicodeDecodeError):
                 logger.warning("skill %s of project %s could not be read for launch %s", name, req.project.id, launch_id)
+                continue
+            if left:
+                logger.warning("skill %s goes to launch %s without %d of its files, past what one launch carries", name, launch_id, len(left))
+            skills.append(HandedSkill(slug, tuple(handed)))
+            files -= len(handed)
+            size -= sum(len(data) for _, data in handed)
         return Extras(tool_sets=tool_sets, skills=tuple(skills))
 
 
