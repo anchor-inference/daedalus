@@ -21,7 +21,7 @@ from daedalus.__main__ import build_parser, cmd_db
 from daedalus.config import RuntimeConfig, Settings
 from daedalus.extensions.api import build_app
 from daedalus.host.checkpoint_retention import RetentionBounds
-from daedalus.host.checkpoints import DIR_NAME, Checkpoints
+from daedalus.host.checkpoints import Checkpoints, store_dir
 from daedalus.host.session_runner import SessionManager
 from daedalus.stores.database import Database
 
@@ -66,8 +66,8 @@ async def _backdate(db: Database, session_id: str, older_than: int, days: float)
         await db.execute("UPDATE checkpoints SET at = ? WHERE id = ?", (stamp, row["id"]))
 
 
-def _store_size(workspace: Path) -> int:
-    return sum(os.lstat(os.path.join(root, name)).st_size for root, _dirs, files in os.walk(workspace / DIR_NAME) for name in files)
+def _store_size(store: Path) -> int:
+    return sum(os.lstat(os.path.join(root, name)).st_size for root, _dirs, files in os.walk(store) for name in files)
 
 
 async def _rows(db: Database, session_id: str) -> list[Any]:
@@ -86,7 +86,7 @@ async def test_the_last_snapshots_of_a_session_survive_both_bounds(manager: Sess
     assert report.dropped == 9 and report.cut == 1
     # And the oldest survivor is still a snapshot the workspace can be put back to.
     (state.workspace / "notes.md").write_text("changed since")
-    await Checkpoints(state.workspace).restore(kept[0]["sha"])
+    await Checkpoints(state.workspace, manager.settings.checkpoints_dir).restore(kept[0]["sha"])
     assert (state.workspace / "notes.md").read_text() == "turn 9\n"
 
 
@@ -106,10 +106,10 @@ async def test_snapshots_older_than_the_age_bound_go(manager: SessionManager, db
 async def test_a_store_over_the_size_bound_loses_its_oldest(manager: SessionManager, db: Database) -> None:
     state = await manager.create_session("fat")
     await _snapshots(manager, state, 8, payload=256_000)
-    before = _store_size(state.workspace)
+    before = _store_size(store_dir(manager.settings.checkpoints_dir, state.workspace))
     assert before > 1_500_000, "the synthetic store is not big enough to say anything about size"
     report = await manager.checkpoint_retention.run(RetentionBounds(keep_days=3650, total_max_gb=before / 2e9, keep_last=2))
-    after = _store_size(state.workspace)
+    after = _store_size(store_dir(manager.settings.checkpoints_dir, state.workspace))
     assert report.dropped > 0, "nothing was dropped for a store at twice its bound"
     assert after < before and report.freed == before - after
     assert len(await _rows(db, state.session.id)) >= 2
@@ -123,10 +123,10 @@ async def test_pruning_gives_the_disk_back(manager: SessionManager, db: Database
     """
     state = await manager.create_session("measured")
     await _snapshots(manager, state, 12, payload=500_000)
-    before = _store_size(state.workspace)
+    before = _store_size(store_dir(manager.settings.checkpoints_dir, state.workspace))
     await _backdate(db, state.session.id, 9, days=90)
     report = await manager.checkpoint_retention.run(RetentionBounds(keep_days=30, total_max_gb=0, keep_last=3))
-    after = _store_size(state.workspace)
+    after = _store_size(store_dir(manager.settings.checkpoints_dir, state.workspace))
     assert report.dropped == 9
     # Nine of twelve snapshots, each carrying half a megabyte that compresses to nothing.
     assert after < before * 0.6, f"{before} -> {after}: the objects were not collected"
@@ -250,7 +250,7 @@ async def test_a_store_the_process_cannot_see_keeps_its_rows(manager: SessionMan
     state = await manager.create_session("unmounted")
     await _snapshots(manager, state, 5)
     await _backdate(db, state.session.id, 5, days=400)
-    os.rename(state.workspace / DIR_NAME, state.workspace / "moved-away")
+    os.rename(store_dir(settings.checkpoints_dir, state.workspace), settings.checkpoints_dir / "moved-away")
     report = await manager.checkpoint_retention.run(RetentionBounds(keep_days=30, total_max_gb=0, keep_last=1))
     assert report.dropped == 0 and report.skipped == 1
     assert len(await _rows(db, state.session.id)) == 5
@@ -260,7 +260,7 @@ async def test_the_cli_runs_the_pass_and_prints_what_it_freed(manager: SessionMa
     state = await manager.create_session("by hand")
     await _snapshots(manager, state, 8, payload=300_000)
     await _backdate(db, state.session.id, 6, days=400)
-    before = _store_size(state.workspace)
+    before = _store_size(store_dir(manager.settings.checkpoints_dir, state.workspace))
     await db.close()
 
     args = build_parser().parse_args(["--state-dir", str(settings.state_dir), "--workspaces-dir", str(settings.workspaces_dir), "db", "checkpoints-prune"])
@@ -270,7 +270,7 @@ async def test_the_cli_runs_the_pass_and_prints_what_it_freed(manager: SessionMa
     # The defaults keep the last fifty, so this store keeps all eight and the pass frees nothing:
     # that it says so, in bytes, is the point.
     assert "0 checkpoint(s) dropped" in printed and "MB freed" in printed
-    assert _store_size(state.workspace) == before
+    assert _store_size(store_dir(manager.settings.checkpoints_dir, state.workspace)) == before
 
     await db.open()
 
@@ -313,6 +313,6 @@ async def test_doctor_shows_the_store_against_its_bounds(manager: SessionManager
     assert line.ok and "GB of workspace snapshots" in line.message and "last 50 per session" in line.message
 
     manager.config.ops.checkpoint_total_max_gb = 0.0000001
-    manager.checkpoint_retention.sizes.forget(state.workspace / DIR_NAME)
+    manager.checkpoint_retention.sizes.forget(store_dir(settings.checkpoints_dir, state.workspace))
     over = next(c for c in await run_checks(DoctorContext(settings=settings, config=manager.config, db=db, manager=manager)) if c.name == "checkpoint store")
     assert not over.ok and over.severity == "warn" and "checkpoints-prune" in over.fix_hint

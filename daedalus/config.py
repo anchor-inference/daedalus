@@ -331,6 +331,12 @@ class Settings(BaseSettings):
         return self.state_dir / "blobs"
 
     @property
+    def checkpoints_dir(self) -> Path:
+        """The workspaces' snapshot stores, one per workspace. Inside the sealed state directory on
+        purpose: a store in the workspace was a git directory the agent could plant hooks in."""
+        return self.state_dir / "checkpoints"
+
+    @property
     def snapshots_dir(self) -> Path:
         return self.state_dir / "snapshots"
 

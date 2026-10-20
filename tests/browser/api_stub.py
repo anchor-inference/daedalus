@@ -578,7 +578,7 @@ def disk_detail() -> dict[str, object]:
                     _disk_entry("_scratch/repo-copy-1", 5 * GIB, 140000), _disk_entry("_scratch/repo-copy-2", 5 * GIB, 140000)]),
                 _disk_entry(".uv-cache", 3 * GIB, 18000, throwaway=True),
                 _disk_entry("src", 4 * GIB, 900, tracked=True),
-                _disk_entry(".checkpoints", GIB, 40, protected=True),
+                _disk_entry("inbox", GIB, 40, protected=True),
             ],
         }],
         "outside": [],

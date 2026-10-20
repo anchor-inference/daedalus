@@ -31,11 +31,11 @@ from pathlib import Path, PurePosixPath
 
 from daedalus.host.gitrun import child_environment, git_argv
 
-PROTECTED_NAMES = frozenset({".checkpoints", "inbox"})
-"""Top-level directories of a workspace no clean-up removes: the snapshot store revert reads, and
-the folder the operator's attachments arrive in."""
+PROTECTED_NAMES = frozenset({"inbox"})
+"""Top-level directories of a workspace no clean-up removes: the folder the operator's attachments
+arrive in. (The snapshot store revert reads is in the state directory, out of every workspace.)"""
 
-SKIP_WHEN_SEARCHING = frozenset({".git", ".checkpoints", "node_modules", ".venv"})
+SKIP_WHEN_SEARCHING = frozenset({".git", "node_modules", ".venv"})
 """Directories the throwaway search does not look inside: nothing there is the agent's scratch, and
 a ``node_modules`` holds packages named ``tmp`` that are anything but throwaway."""
 

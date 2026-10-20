@@ -83,8 +83,7 @@ from daedalus.host import (
 )
 from daedalus.host.btw import BTW_KEY, btw_of, btws_of
 from daedalus.host.checkpoint_retention import CheckpointRetention, RetentionBounds, RetentionReport
-from daedalus.host.checkpoints import DIR_NAME as CHECKPOINT_DIR_NAME
-from daedalus.host.checkpoints import CheckpointError, Checkpoints, scan_workspace
+from daedalus.host.checkpoints import CheckpointError, Checkpoints, scan_workspace, store_dir
 from daedalus.host.containment import Walls, walls_for, worktree_writable_paths
 from daedalus.host.engine_factory import TENANT, EngineDeps, PolicyAdapter, build_engine
 from daedalus.host.events import AppEvent, EventBus, EventFilter
@@ -687,7 +686,7 @@ class SessionManager:
         self.dispatches = DispatchStore(db)
         """The main orchestrator's hand-overs to projects: what a project orchestrator's state lists
         and what its reports close."""
-        self.checkpoint_retention = CheckpointRetention(db, workspaces_dir=settings.workspaces_dir, busy=self.busy_sessions, occupants=self.store_occupants)
+        self.checkpoint_retention = CheckpointRetention(db, workspaces_dir=settings.workspaces_dir, checkpoints_dir=settings.checkpoints_dir, busy=self.busy_sessions, occupants=self.store_occupants)
         self.memory = PersistentMemory(db)
         self.workspace_units = PersistentWorkspace(db)
         self.skills = DirectorySkillStore(settings.skills_dir)
@@ -2455,7 +2454,7 @@ class SessionManager:
 
         A project is not snapshotted unless the operator asked for it. A session workspace holds what
         one agent made; a project root is the operator's own repository, and committing it into
-        ``.checkpoints`` before every turn and after every run is a cost the undo does not repay on a
+        its snapshot store before every turn and after every run is a cost the undo does not repay on a
         tree that already has a history of its own. Switched on in the project's settings, it behaves
         exactly as a workspace does, size cap included.
         """
@@ -2475,7 +2474,7 @@ class SessionManager:
                     logger.warning("session %s: workspace exceeds ops.checkpoint_max_gb=%s; no snapshots, revert restores the history only", state.session.id, limit)
                 return None
             state.checkpoint_capped = False
-            sha = await Checkpoints(state.workspace).snapshot(f"{kind} seq={seq} run={run_id}", scan=scan)
+            sha = await Checkpoints(state.workspace, self.settings.checkpoints_dir).snapshot(f"{kind} seq={seq} run={run_id}", scan=scan)
         except (CheckpointError, OSError) as exc:
             logger.warning("checkpoint failed for %s: %s", state.session.id, exc)
             return None
@@ -2578,7 +2577,7 @@ class SessionManager:
             untouched: list[str] = []
             if sha:
                 try:
-                    untouched = await Checkpoints(state.workspace).restore(sha, record=False)
+                    untouched = await Checkpoints(state.workspace, self.settings.checkpoints_dir).restore(sha, record=False)
                     restored = True
                 except CheckpointError as exc:
                     logger.warning("workspace restore failed: %s", exc)
@@ -2797,8 +2796,8 @@ class SessionManager:
                     )
                 await asyncio.to_thread(shutil.copytree, source.workspace, target.workspace, dirs_exist_ok=True, ignore=shutil.ignore_patterns(".agents"))
                 copied = True
-                checkpoints = Checkpoints(target.workspace)
-                await checkpoints.relocate()
+                # The store is not in the folder any more, so the copy above did not carry it.
+                checkpoints = await Checkpoints(source.workspace, self.settings.checkpoints_dir).copy_to(target.workspace, self.settings.checkpoints_dir)
                 sha = await self.checkpoint_before(source_id, seq)
                 if sha:
                     try:
@@ -3009,7 +3008,7 @@ class SessionManager:
         """
         out: dict[Path, set[str]] = {}
         for session_id, state in self._states.items():
-            out.setdefault(state.workspace / CHECKPOINT_DIR_NAME, set()).add(session_id)
+            out.setdefault(store_dir(self.settings.checkpoints_dir, state.workspace), set()).add(session_id)
         return out
 
     def register_services(self, state: SessionState) -> None:

@@ -194,7 +194,7 @@ class ProjectSettings:
     """What the operator decides per project.
 
     ``snapshots`` is off by default for a folder the operator points at: it may be a large existing
-    repository, and committing a hundred thousand files into ``.checkpoints`` twice a turn costs
+    repository, and committing a hundred thousand files into its snapshot store twice a turn costs
     more than the undo is worth. Automatically created projects opt in because they begin empty.
 
     Only the known keys are loaded and dumped. A key nothing reads is a key nothing keeps honest,

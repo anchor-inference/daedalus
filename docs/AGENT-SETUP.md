@@ -154,11 +154,13 @@ default in a container, so switch it on if the boundary has to hold against a sh
 project a session gets a scratch directory of its own under the workspaces root, which is what every
 session had before and still gets.
 
-Each session writes `inbox/`, `.exec/`, `.jobs/`, `.services/` and — with snapshots on —
-`.checkpoints/` into the folder it works in; where the root is a git checkout these go into
-`.git/info/exclude` the first time an agent starts there.
+Each session writes `inbox/`, `.exec/`, `.jobs/` and `.services/` into the folder it works in;
+where the root is a git checkout these go into `.git/info/exclude` the first time an agent starts
+there.
 
-`.checkpoints/` is what "revert to this turn" restores the files from, and it is kept inside bounds
+With snapshots on, each folder has a snapshot store under `checkpoints/` in the state directory, out
+of the agent's reach: a git directory inside the folder would be one the agent could plant a hook in.
+The store is what "revert to this turn" restores the files from, and it is kept inside bounds
 rather than growing for ever: `[ops]` in `config.toml` carries `checkpoint_keep_days` (30),
 `checkpoint_total_max_gb` (2.0, every store together) and `checkpoint_keep_last` (50 per session,
 kept whatever the other two say). The maintenance tick prunes the oldest past either bound and packs

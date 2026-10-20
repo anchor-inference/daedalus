@@ -21,6 +21,7 @@ from protocore.contracts.tools import ToolContext
 from daedalus.config import RuntimeConfig, Settings
 from daedalus.extensions.api import build_app
 from daedalus.host import prompts
+from daedalus.host.checkpoints import Checkpoints
 from daedalus.host.services import PathOutsideProject, SessionServices, Walls, locator
 from daedalus.host.session_runner import SessionManager
 from daedalus.stores.database import Database
@@ -418,12 +419,14 @@ async def test_a_project_is_not_snapshotted_unless_the_operator_asked(settings: 
         project = await manager.projects.create("Repo", [str(root)])
         state = await manager.create_session("in the project", project_id=project.id)
         assert await manager.checkpoint(state, kind="before") is None
-        assert not (root / ".checkpoints").exists()
+        assert not (root / ".checkpoints").exists() and not Checkpoints(root, settings.checkpoints_dir).git_dir.exists()
 
         updated = await manager.projects.update(project.id, snapshots=True)
         await manager.reload_project(updated, project.id)
         sha = await manager.checkpoint(state, kind="before")
-        assert sha and (root / ".checkpoints" / "HEAD").exists()
+        assert sha and (Checkpoints(root, settings.checkpoints_dir).git_dir / "HEAD").exists()
+        # The store is in the sealed state directory, not in the operator's repository.
+        assert not (root / ".checkpoints").exists()
 
         # A session with a workspace of its own snapshots as it always has, with nothing asked for.
         plain = await manager.create_session("on its own")
@@ -768,7 +771,7 @@ async def test_the_agent_directories_are_excluded_from_the_operators_checkout(se
         project = await manager.projects.create("Repo", [str(root)])
         await manager.create_session("worker", project_id=project.id)
         written = (root / ".git" / "info" / "exclude").read_text(encoding="utf-8")
-        for name in ("inbox/", ".exec/", ".jobs/", ".services/", ".checkpoints/"):
+        for name in ("inbox/", ".exec/", ".jobs/", ".services/"):
             assert f"/{name}" in written
         # Loading another session of the same project does not write the block a second time.
         await manager.create_session("second", project_id=project.id)

@@ -53,7 +53,7 @@ async def test_snapshot_and_restore_never_run_a_planted_hook_or_fsmonitor(tmp_pa
     workspace = tmp_path / "ws"
     workspace.mkdir()
     (workspace / "a.txt").write_text("one")
-    checkpoints = Checkpoints(workspace)
+    checkpoints = Checkpoints(workspace, tmp_path / "checkpoints")
     first = await checkpoints.snapshot("first")
     marker = tmp_path / "ran"
     _plant(checkpoints.git_dir, marker)
@@ -103,7 +103,7 @@ async def test_a_program_git_does_start_sees_none_of_the_host_s_keys(tmp_path: P
         monkeypatch.setenv(name, value)
     workspace = tmp_path / "ws"
     workspace.mkdir()
-    checkpoints = Checkpoints(workspace)
+    checkpoints = Checkpoints(workspace, tmp_path / "checkpoints")
     await checkpoints.snapshot("first")
     seen = tmp_path / "env"
     subprocess.run(["git", "--git-dir", str(checkpoints.git_dir), "config", "filter.witness.clean", f"env > {seen}; cat"], check=True)

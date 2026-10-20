@@ -62,7 +62,7 @@ SETUP_TAIL_LINES = 20
 # up in `git status` or being swept into a commit by `git add -A`.
 # The Board regenerates PLAN.md in the live session workspace; an untracked copy is
 # host output, while a tracked edit is still caught by the tracked-file clean check.
-SESSION_ARTEFACTS = ("inbox/", ".exec/", ".jobs/", ".services/", ".checkpoints/", ".agents/", "PLAN.md")
+SESSION_ARTEFACTS = ("inbox/", ".exec/", ".jobs/", ".services/", ".agents/", "PLAN.md")
 EXCLUDE_MARKER = "# daedalus: what an agent working in this folder writes into it"
 
 

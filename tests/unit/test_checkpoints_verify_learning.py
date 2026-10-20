@@ -25,7 +25,7 @@ async def test_checkpoints_snapshot_and_restore(tmp_path: Path) -> None:
     ws = tmp_path / "ws"
     ws.mkdir()
     (ws / "a.txt").write_text("one")
-    cp = Checkpoints(ws)
+    cp = Checkpoints(ws, tmp_path / "checkpoints")
     first = await cp.snapshot("first")
     (ws / "a.txt").write_text("two")
     (ws / "b.txt").write_text("new")
@@ -33,7 +33,9 @@ async def test_checkpoints_snapshot_and_restore(tmp_path: Path) -> None:
     assert first != second and await cp.head() == second
     await cp.restore(first)
     assert (ws / "a.txt").read_text() == "one" and not (ws / "b.txt").exists()
-    assert (ws / ".checkpoints").is_dir()
+    # The store is in the host's own directory, out of the workspace the agent writes.
+    assert (tmp_path / "checkpoints").is_dir() and cp.git_dir.parent == tmp_path / "checkpoints"
+    assert not (ws / ".checkpoints").exists()
 
 
 async def _manager(settings: Settings, db: Database) -> SessionManager:
@@ -63,11 +65,11 @@ async def test_revert_cuts_history_and_restores_files(settings: Settings, db: Da
     # the second turn: snapshot before it, then the agent changes the workspace
     more = await _seed(manager, state, [("first ask", "first answer"), ("second ask", "second answer")])
     second_seq = more[-1]
-    await db.execute("INSERT INTO checkpoints(session_id, seq, run_id, kind, sha, at) VALUES (?, ?, NULL, 'before', ?, ?)", (state.session.id, second_seq, await Checkpoints(state.workspace).snapshot("before second"), "now"))
+    await db.execute("INSERT INTO checkpoints(session_id, seq, run_id, kind, sha, at) VALUES (?, ?, NULL, 'before', ?, ?)", (state.session.id, second_seq, await Checkpoints(state.workspace, settings.checkpoints_dir).snapshot("before second"), "now"))
     (state.workspace / "notes.md").write_text("draft 2 (after the second turn)")
-    checkpoint_head = await Checkpoints(state.workspace).head()
+    checkpoint_head = await Checkpoints(state.workspace, settings.checkpoints_dir).head()
     result = await manager.revert(state.session.id, second_seq)
-    assert await Checkpoints(state.workspace).head() == checkpoint_head
+    assert await Checkpoints(state.workspace, settings.checkpoints_dir).head() == checkpoint_head
     assert result["dropped"] == 2 and result["kept"] == 2 and result["workspace_restored"] is True
     assert (state.workspace / "notes.md").read_text() == "draft 1"
     working = await manager.sessions.list_messages(state.session.id, "daedalus", limit=100)
@@ -191,7 +193,7 @@ async def test_checkpoints_leave_nested_repositories_alone_and_stay_undoable(tmp
     (ws / "a.txt").write_text("one")
     subprocess.run(["git", "init", "-q", str(ws / "clone")], check=True)
     (ws / "clone" / "n.txt").write_text("n1")
-    cp = Checkpoints(ws)
+    cp = Checkpoints(ws, tmp_path / "checkpoints")
     first = await cp.snapshot("first")
     (ws / "a.txt").write_text("two")
     (ws / "clone" / "n.txt").write_text("n2")
@@ -207,7 +209,7 @@ async def test_fork_skips_reverted_turns_and_repoints_summaries(settings: Settin
     manager = await _manager(settings, db)
     source = await manager.create_session("origin")
     seqs = await _seed(manager, source, [("ask one", "answer one"), ("ask two", "answer two")])
-    await db.execute("INSERT INTO checkpoints(session_id, seq, run_id, kind, sha, at) VALUES (?, ?, NULL, 'before', ?, 'now')", (source.session.id, seqs[1], await Checkpoints(source.workspace).snapshot("s")))
+    await db.execute("INSERT INTO checkpoints(session_id, seq, run_id, kind, sha, at) VALUES (?, ?, NULL, 'before', ?, 'now')", (source.session.id, seqs[1], await Checkpoints(source.workspace, settings.checkpoints_dir).snapshot("s")))
     await manager.revert(source.session.id, seqs[1])
     await _seed(manager, source, [("ask three", "answer three")])
     # a compaction summary standing for the first turn, as the persist path would record it
@@ -374,9 +376,10 @@ async def test_one_walk_answers_both_the_size_cap_and_the_excludes(tmp_path: Pat
         return real_walk(*args, **kwargs)
 
     monkeypatch.setattr(os_module, "walk", counting)
-    sha = await Checkpoints(workspace).snapshot("before", scan=scan_workspace(workspace))
+    checkpoints = Checkpoints(workspace, tmp_path / "checkpoints")
+    sha = await checkpoints.snapshot("before", scan=scan_workspace(workspace))
     assert sha and walks == 1
-    excludes = (workspace / ".checkpoints" / "info" / "exclude").read_text(encoding="utf-8")
+    excludes = (checkpoints.git_dir / "info" / "exclude").read_text(encoding="utf-8")
     assert "/vendor/clone/" in excludes and "node_modules/" in excludes
 
 
@@ -388,34 +391,36 @@ async def test_project_revert_preserves_private_agent_files(settings: Settings, 
         parent = await manager.create_session("project")
         (parent.workspace / "notes.txt").write_text("before")
         seqs = await _seed(manager, parent, [("first", "answer"), ("second", "answer")])
-        sha = await Checkpoints(parent.workspace).snapshot("before second")
+        sha = await Checkpoints(parent.workspace, settings.checkpoints_dir).snapshot("before second")
         await db.execute(
             "INSERT INTO checkpoints(session_id, seq, kind, sha, at) VALUES (?, ?, 'before', ?, 'now')",
             (parent.session.id, seqs[1], sha),
         )
         child = await manager.create_session("private", project_id=parent.project.id, own_directory=True)
         (child.workspace / "work.txt").write_text("saved")
-        await Checkpoints(child.workspace).snapshot("child")
+        await Checkpoints(child.workspace, settings.checkpoints_dir).snapshot("child")
         (child.workspace / "work.txt").write_text("unsaved changes")
         (child.workspace / "new.txt").write_text("untracked")
         assert scan_workspace(parent.workspace).size == len("before")
-        later = await Checkpoints(parent.workspace).snapshot("with child")
-        assert ".agents/" not in await Checkpoints(parent.workspace)._git("ls-tree", "-r", later)
+        later = await Checkpoints(parent.workspace, settings.checkpoints_dir).snapshot("with child")
+        assert ".agents/" not in await Checkpoints(parent.workspace, settings.checkpoints_dir)._git("ls-tree", "-r", later)
         (parent.workspace / "notes.txt").write_text("after")
         result = await manager.revert(parent.session.id, seqs[1])
         assert result["workspace_restored"]
         assert (parent.workspace / "notes.txt").read_text() == "before"
         assert (child.workspace / "work.txt").read_text() == "unsaved changes"
         assert (child.workspace / "new.txt").read_text() == "untracked"
-        assert await Checkpoints(child.workspace).head()
+        assert await Checkpoints(child.workspace, settings.checkpoints_dir).head()
     finally:
         await manager.close()
 
 
 async def test_restore_ignores_private_files_tracked_by_old_snapshots(tmp_path: Path) -> None:
-    cp = Checkpoints(tmp_path)
-    (tmp_path / "public.txt").write_text("before")
-    private = tmp_path / ".agents" / "child" / "private.txt"
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    cp = Checkpoints(ws, tmp_path / "checkpoints")
+    (ws / "public.txt").write_text("before")
+    private = ws / ".agents" / "child" / "private.txt"
     private.parent.mkdir(parents=True)
     private.write_text("old private work")
     await cp.snapshot("initial")

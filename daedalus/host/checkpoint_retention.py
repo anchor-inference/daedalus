@@ -16,9 +16,9 @@ workspace, and both sessions' snapshots are commits in the same chain.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
+import shutil
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -26,7 +26,14 @@ from pathlib import Path
 from typing import Any
 
 from daedalus.config import OpsConfig
-from daedalus.host.checkpoints import DIR_NAME, CheckpointError, Checkpoints
+from daedalus.host.checkpoints import (
+    SESSION_WORKSPACES_SQL,
+    WORKSPACE_FILE,
+    CheckpointError,
+    Checkpoints,
+    session_workspace,
+    store_dir,
+)
 from daedalus.stores.database import Database
 
 logger = logging.getLogger(__name__)
@@ -79,7 +86,7 @@ class RetentionReport:
 
 @dataclass(slots=True)
 class _Store:
-    """One ``.checkpoints`` repository and every checkpoint row committed into it, oldest first."""
+    """One workspace's snapshot store and every checkpoint row committed into it, oldest first."""
 
     git_dir: Path
     workspace: Path
@@ -138,11 +145,13 @@ class CheckpointRetention:
         db: Database,
         *,
         workspaces_dir: Path,
+        checkpoints_dir: Path,
         busy: Callable[[], set[str]] | None = None,
         occupants: Callable[[], dict[Path, set[str]]] | None = None,
     ) -> None:
         self.db = db
         self.workspaces_dir = workspaces_dir
+        self.checkpoints_dir = checkpoints_dir
         self._busy = busy or (lambda: set())
         self._occupants = occupants or (lambda: {})
         self.sizes = StoreSizes()
@@ -153,17 +162,12 @@ class CheckpointRetention:
 
     async def stores(self, keep_last: int = 0) -> list[_Store]:
         """Every store that holds checkpoints, with the rows of all the sessions that share it."""
-        rows = await self.db.fetchall(
-            # The folder the session works in: the one its metadata names, or its project's first.
-            "SELECT s.id AS id, s.metadata AS metadata, COALESCE("
-            "(SELECT f.path FROM project_folders f WHERE f.project_id = s.project_id AND f.id = json_extract(s.metadata, '$.folder_id')), "
-            "(SELECT f.path FROM project_folders f WHERE f.project_id = s.project_id ORDER BY f.position LIMIT 1)) AS root "
-            "FROM sessions s WHERE s.id IN (SELECT session_id FROM checkpoints)"
-        )
-        workspaces = {row["id"]: self._workspace(row) for row in rows}
+        rows = await self.db.fetchall(SESSION_WORKSPACES_SQL + " WHERE s.id IN (SELECT session_id FROM checkpoints)")
+        workspaces = {row["id"]: session_workspace(row, self.workspaces_dir) for row in rows}
         stores: dict[Path, _Store] = {}
         for session_id, workspace in workspaces.items():
-            store = stores.setdefault(workspace / DIR_NAME, _Store(git_dir=workspace / DIR_NAME, workspace=workspace))
+            git_dir = store_dir(self.checkpoints_dir, workspace)
+            store = stores.setdefault(git_dir, _Store(git_dir=git_dir, workspace=workspace))
             store.sessions.add(session_id)
         if not stores:
             return []
@@ -183,6 +187,7 @@ class CheckpointRetention:
 
     async def run(self, bounds: RetentionBounds) -> RetentionReport:
         """Bring the stores inside ``bounds`` and report what that freed."""
+        await asyncio.to_thread(self.remove_dead_stores)
         found = await self.stores(bounds.keep_last)
         stores = [store for store in found if self._usable(store)]
         report = RetentionReport(stores=len(found), skipped=len(found) - len(stores))
@@ -204,6 +209,32 @@ class CheckpointRetention:
             await self._cut(store, store.droppable(SIZE_CUT_BATCH, None), report)
         report.size_after = await self._size_of(found)
         return report
+
+    def remove_dead_stores(self) -> list[Path]:
+        """Delete the stores whose workspace is gone for good; returns what was removed.
+
+        While the store sat inside its workspace, deleting the workspace deleted the undo with it.
+        Out of it, every path that removes a workspace (a deleted chat, a finished schedule, the
+        orphan sweep) would leave its store behind for ever, so the stores are swept here instead of
+        at each of them. Only a workspace under the managed workspaces folder is known to be gone:
+        a project's folder that is missing may be a disk not mounted yet, and its undo stays.
+        """
+        removed: list[Path] = []
+        if not self.checkpoints_dir.is_dir():
+            return removed
+        managed = self.workspaces_dir.resolve()
+        for git_dir in sorted(self.checkpoints_dir.iterdir()):
+            try:
+                named = Path((git_dir / WORKSPACE_FILE).read_text(encoding="utf-8").strip())
+            except OSError:
+                continue
+            if named.is_relative_to(managed) and not named.exists() and not self._occupants().get(git_dir):
+                shutil.rmtree(git_dir, ignore_errors=True)
+                self.sizes.forget(git_dir)
+                removed.append(git_dir)
+        if removed:
+            logger.info("removed %d checkpoint store(s) whose workspace was deleted", len(removed))
+        return removed
 
     def _usable(self, store: _Store) -> bool:
         """A store a pass may touch: nobody is working in it and this process can actually see it.
@@ -277,7 +308,7 @@ class CheckpointRetention:
             return
         boundary = kept[0]
         try:
-            cut = await Checkpoints(store.workspace).truncate(boundary["sha"])
+            cut = await Checkpoints(store.workspace, self.checkpoints_dir).truncate(boundary["sha"])
         except (CheckpointError, OSError) as exc:
             logger.warning("checkpoint store %s could not be cut: %s", store.git_dir, exc)
             cut = False
@@ -311,16 +342,6 @@ class CheckpointRetention:
                 "removed = checkpoint_retention.removed + excluded.removed, at = excluded.at",
                 (session_id, boundary["at"], count, now),
             )
-
-    def _workspace(self, row: Any) -> Path:
-        """Where a session works, the same three answers ``create_session`` gives, out of the rows."""
-        if row["root"]:
-            return Path(str(row["root"]))
-        try:
-            named = json.loads(row["metadata"] or "{}").get("workspace")
-        except (TypeError, ValueError):
-            named = None
-        return Path(str(named)) if named else self.workspaces_dir / str(row["id"])
 
 
 def _at(row: Any) -> datetime | None:

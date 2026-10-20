@@ -1182,7 +1182,7 @@ EVENT_TYPE_RE = re.compile(r"^[a-z_]+(\.[a-z_]+)*\.?$")
 MAX_TRANSCRIPT_PAGE = 2000
 """Turns one request may ask for. Beyond this a client is asking for a session, not a page."""
 
-FILE_SEARCH_SKIP = frozenset({".git", "__pycache__", "node_modules", ".venv", ".checkpoints", ".mypy_cache", ".ruff_cache", ".pytest_cache"})
+FILE_SEARCH_SKIP = frozenset({".git", "__pycache__", "node_modules", ".venv", ".mypy_cache", ".ruff_cache", ".pytest_cache"})
 """Folders the explorer never shows and neither search walks into; the tree hides the same names."""
 
 FILE_SEARCH_MAX_ENTRIES = 20_000
