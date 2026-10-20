@@ -38,6 +38,13 @@ describe("the manifest", () => {
     expect(existsSync(new URL("../static/popup.html", import.meta.url))).toBe(false);
   });
 
+  it("has a page of its own that asks for the microphone, since a side panel cannot show the question", () => {
+    expect(existsSync(new URL("../static/mic.html", import.meta.url))).toBe(true);
+    expect(existsSync(new URL("../src/mic.ts", import.meta.url))).toBe(true);
+    // The frame is let use what the extension was granted.
+    expect(readFileSync(new URL("../static/panel.html", import.meta.url), "utf8")).toMatch(/allow="[^"]*microphone/);
+  });
+
   it("has the build draw every icon it names, which a notification needs", async () => {
     const { ICON_SIZES, iconPng } = await import("../scripts/icons.mjs");
     const named = new Set([...Object.values(manifest.icons), ...Object.values(manifest.action.default_icon)] as string[]);

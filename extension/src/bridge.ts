@@ -33,12 +33,13 @@ export const OPS = [
   "group.pause",
   "open.app",
   "token.refresh",
+  "mic.grant",
 ] as const;
 export type Op = (typeof OPS)[number];
 
 /** Reads of the operator's page, and giving a tab away, need the operator's own click in the panel a
  *  moment before: a frame that was taken over still cannot photograph or read a page silently. */
-export const GESTURE_OPS: ReadonlySet<Op> = new Set<Op>(["capture.visible", "page.text", "page.selection", "tab.grant"]);
+export const GESTURE_OPS: ReadonlySet<Op> = new Set<Op>(["capture.visible", "page.text", "page.selection", "tab.grant", "mic.grant"]);
 
 export type Hello = Record<string, unknown>;
 

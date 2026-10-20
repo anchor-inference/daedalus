@@ -20,6 +20,7 @@ import { messageBody } from "../project/goalmodel";
 import { Icon } from "../icons";
 import { setLang, t, useLang } from "../i18n";
 import { sessionPath } from "../router";
+import { onMicRefused } from "../voicebar";
 import { LiveBar, TranscriptView } from "../screens/Session";
 import { buildTurns, createLiveStore, liveAfter, liveBase, type LiveStore, type Turn } from "../turns";
 import { followSession } from "../sessionstream";
@@ -66,6 +67,15 @@ export function SidePanel() {
     setNotes((all) => [...all.filter((n) => n.text !== text), { id, text }].slice(-3));
     window.setTimeout(() => dismiss(id), NOTE_MS);
   }, [dismiss]);
+
+  useEffect(() => {
+    if (!shell) return;
+    onMicRefused(() => {
+      // The extension opens its own page, where Chrome asks once; the panel's frame then has it.
+      shell.request("mic.grant").then(() => toast(t("sidepanel.mic.grant"))).catch((e) => toast(t("sidepanel.tab.failed", { reason: shellReason(e) })));
+    });
+    return () => onMicRefused(null);
+  }, [shell, toast]);
 
   useEffect(() => {
     applyAppearance();

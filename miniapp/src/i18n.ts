@@ -3964,6 +3964,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "approvals.skip.confirm.title": { en: "Skip all approvals?", ru: "Отключить все подтверждения?" },
   "approvals.skip.confirm.body": { en: "The agent will act in your signed-in Chrome without asking: it opens any site and buys, sends and deletes on its own. Refusals still hold, and every action stays in the conversation and the action log.", ru: "Агент будет действовать в вашем Chrome, где вы вошли в аккаунты, не спрашивая: открывать любые сайты, покупать, отправлять и удалять сам. Запреты остаются в силе, а каждое действие видно в разговоре и журнале действий." },
   "approvals.skip.confirm.action": { en: "Skip approvals", ru: "Отключить подтверждения" },
+  "sidepanel.mic.grant": { en: "Chrome asks for the microphone once, in the tab that opened. Allow it there, then press the microphone again.", ru: "Chrome спросит про микрофон один раз — во вкладке, которая открылась. Разрешите там и снова нажмите микрофон." },
   "sidepanel.paused.short": { en: "Paused", ru: "На паузе" },
   "sidepanel.stop": { en: "Stop", ru: "Остановить" },
   "sidepanel.pause": { en: "Pause", ru: "Пауза" },

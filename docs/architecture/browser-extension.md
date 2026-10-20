@@ -150,8 +150,16 @@ requests to loopback, private, link-local, shared and metadata addresses written
 - **Notifications**: a conversation in this Chrome that waits for the operator or finished, unless
   the operator is looking at the panel of the window they are in; a click opens the panel on it and
   shows the agent's tab.
-- **The border**: a thin frame drawn in a closed shadow root of a `<daedalus-agent-border>` element
-  with pointer events off, hidden for the length of a `Page.captureScreenshot`.
+- **The border and the agent's cursor**: a thin pulsing frame and a cursor labelled "Daedalus", drawn
+  in a closed shadow root of a `<daedalus-agent-border>` element with pointer events off, so the page's
+  scripts cannot read them and hit testing passes through. The cursor glides to the point of each
+  `Input.dispatchMouseEvent`, drag or touch the daemon sends into the tab (viewport CSS pixels, the
+  coordinates a fixed box takes), rings on a press and shows typing for key input; a frame of another
+  site is left out. Both are hidden for the length of a `Page.captureScreenshot`: the relay waits for
+  the page to say it painted (at most 400 ms) before the screenshot, so the agent never sees its marks.
+- **The microphone**: a side panel cannot show Chrome's permission question, so when dictation in the
+  panel is refused the frame asks for `mic.grant` and the extension opens its own `mic.html` in a tab,
+  where Chrome asks once; the frame then has the permission through `allow="microphone"`.
 - **The operator's own input** in an agent tab (trusted pointer, key and wheel events) is reported as
   `input {tab}`, at most once a second per tab, and not within a second of the daemon dispatching
   input into that tab, since `Input.dispatch*` events reach the page as trusted too.

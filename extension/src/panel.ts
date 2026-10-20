@@ -117,6 +117,11 @@ async function handle(op: Op, args: Record<string, unknown>): Promise<unknown> {
       await chrome.tabs.create({ url: grant.base + path });
       return {};
     }
+    case "mic.grant":
+      // Chrome asks for the microphone only in a tab, never in a side panel: the extension's own page
+      // asks once, and the frame then has it through `allow="microphone"`.
+      await chrome.tabs.create({ url: chrome.runtime.getURL("mic.html") });
+      return {};
     case "token.refresh":
       grant = (await ask<{ grant: PanelGrant | null }>({ kind: "panel-state" })).grant;
       return grant ? { token: grant.token, expires: grant.expires } : null;

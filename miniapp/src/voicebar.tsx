@@ -36,6 +36,14 @@ export type VoiceNote = {
   toMeeting: () => void;
 };
 
+let micRefused: (() => void) | null = null;
+
+/** What to do when the browser refuses the microphone, in place of saying so: Chrome's side panel can
+ *  never show the permission question, and the panel has the extension ask for it in a tab instead. */
+export function onMicRefused(handler: (() => void) | null): void {
+  micRefused = handler;
+}
+
 /** How long a recording runs before the bar offers to make it a meeting rather than dictation. */
 export const MEETING_AFTER_SECONDS = 60;
 
@@ -156,7 +164,8 @@ export function useVoiceNote({ sessionId, asr, onWords, onAttach, onMeeting, toa
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch {
-      live.current.toast(t("voicenote.denied"));
+      if (micRefused) micRefused();
+      else live.current.toast(t("voicenote.denied"));
       return;
     }
     const type = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"].find((x) => MediaRecorder.isTypeSupported?.(x));

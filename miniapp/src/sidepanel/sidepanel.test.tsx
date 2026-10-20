@@ -273,6 +273,19 @@ describe("the screen", { timeout: 20_000 }, () => {
     expect(box.querySelectorAll(".sp-attach .chip").length).toBe(3);
   });
 
+  it("has the extension ask for the microphone in a tab when the panel is refused it", async () => {
+    listing = { ...listing, sessions: [], consented: true };
+    vi.stubGlobal("MediaRecorder", class { static isTypeSupported() { return true; } });
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: async () => { throw new DOMException("dismissed", "NotAllowedError"); } } });
+    act(() => root.render(<SidePanel />));
+    await settle();
+    await act(async () => { host.querySelector<HTMLButtonElement>(".sp-new .composer .mic")!.click(); });
+    await settle();
+    expect(requests.map((r) => r.op)).toContain("mic.grant");
+    expect(host.querySelector(".sp-toast")?.textContent).toBe(t("sidepanel.mic.grant"));
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: undefined });
+  });
+
   it("makes the conversation, gives it the tab and only then sends the first message", async () => {
     listing = { ...listing, sessions: [], consented: false };
     act(() => root.render(<SidePanel />));
