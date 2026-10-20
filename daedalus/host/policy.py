@@ -20,7 +20,7 @@ import os
 import posixpath
 import re
 import shlex
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -751,7 +751,7 @@ def similar_covers(grant: dict[str, Any], tool: str, rule: str, family: dict[str
 class Policy:
     """The rule set: built-ins plus the operator's, evaluated per call."""
 
-    def __init__(self, *, protected_paths: Iterable[Path] = (), egress_allow: Iterable[str] = (), rules: Iterable[Rule] = (), workspace_roots: Iterable[Path] = (), operator_checkouts: Iterable[Path] = (), selfdev_mode: str = "server", native: bool = False, home_dir: Path | str = "", project_roots: Iterable[Path] = (), worktrees_root: Path | str = "", sealed_paths: Iterable[Path] = (), sealed_everywhere: Iterable[Path] = (), sealed_ports: Iterable[int] = (), base_dir: Path | str = "") -> None:
+    def __init__(self, *, protected_paths: Iterable[Path] = (), egress_allow: Iterable[str] = (), rules: Iterable[Rule] = (), workspace_roots: Iterable[Path] = (), operator_checkouts: Iterable[Path] = (), selfdev_mode: str = "server", native: bool = False, home_dir: Path | str = "", project_roots: Iterable[Path] = (), worktrees_root: Path | str = "", sealed_paths: Iterable[Path] = (), sealed_everywhere: Iterable[Path] = (), sealed_ports: Iterable[int] = (), base_dir: Path | str = "", mcp_approvals: Mapping[str, str] | None = None) -> None:
         self.protected = [str(p) for p in protected_paths]
         self.egress_allow = [e for e in egress_allow if e.strip()]
         # The installation's own doors on the loopback interface: the app's API and the launcher's
@@ -777,6 +777,9 @@ class Policy:
         self.base_dir = str(base_dir) if base_dir else ""
         """Where a relative path is resolved from when the call does not say: the session's own
         workspace, which is where the file tools resolve theirs and where Exec runs by default."""
+        self.mcp_approvals = dict(mcp_approvals or {})
+        """An MCP tool's answer when nothing else here decides its call, by tool name: ``ask`` for one
+        whose annotations say it may destroy or reach the world (:func:`daedalus.mcp.manager.annotation_approval`)."""
 
     # -- the machine's own paths ------------------------------------------------------
 
@@ -949,7 +952,7 @@ class Policy:
             except re.error:
                 continue
             if rule.action == ALLOW:
-                if current.action == ASK and (current.rule.startswith("egress.") or current.rule.startswith("config.") or current.rule in {r.id for r in self.rules}):
+                if current.action == ASK and (current.rule.startswith("egress.") or current.rule.startswith("config.") or current.rule == "mcp.annotations" or current.rule in {r.id for r in self.rules}):
                     current = Decision(ALLOW, f"allowed by rule {rule.id}", rule.id, hosts=current.hosts)
                 continue
             if _SEVERITY[rule.action] > _SEVERITY[current.action]:
@@ -967,6 +970,8 @@ class Policy:
             decision = self._browser_url(text)
         else:
             decision = self._host_paths(argument_paths(arguments)) or Decision(ALLOW)
+            if decision.action == ALLOW and self.mcp_approvals.get(tool) == ASK:
+                decision = Decision(ASK, "an MCP tool that may change or reach the outside world, and no rule allows it", "mcp.annotations")
         decision = self._config_rules(tool, text, decision)
         if decision.action == ASK:
             decision.key = approval_key(tool, arguments)
@@ -1000,6 +1005,7 @@ class Policy:
             ("git.operator_repo", "Exec", DENY, "a git command that changes the operator's checkouts: a worktree, a branch, a commit, a fetch, a config write"),
             ("egress.allowlist", "Exec, WebFetch, BrowserOpen, BrowserNavigate", ASK, "a host outside the egress allowlist (when one is configured)"),
             ("browser.scheme", "BrowserOpen, BrowserNavigate", DENY, "an address that is not an http or https page: file:, data:, blob:, javascript:, chrome:"),
+            ("mcp.annotations", "MCP tools", ASK, "an MCP tool whose annotations do not say it only reads, or say it may destroy or reach the outside world, unless the server's settings or an operator rule allow it"),
             ("browser.sensitive", "BrowserAct", ASK, "an action that changes the world: a sign-in submitted, a purchase, a message sent, a deletion, terms accepted, a file uploaded, a form sent to another site"),
         ]
         if self.native:

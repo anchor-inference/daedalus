@@ -839,6 +839,9 @@ class McpOAuthConfig(BaseModel):
     """That client's secret, when the server issued one."""
 
 
+McpApproval = Literal["auto", "ask", "allow"]
+
+
 class McpServerConfig(BaseModel):
     transport: Literal["stdio", "http"] = "stdio"
     command: str = ""
@@ -850,6 +853,14 @@ class McpServerConfig(BaseModel):
     timeout_seconds: float = 120.0
     oauth: McpOAuthConfig | None = None
     """When set, the HTTP transport authenticates with OAuth bearer tokens instead of static headers."""
+    approval: McpApproval = "auto"
+    """Whether a call to this server's tools is asked about first. ``auto`` reads each tool's own
+    annotations (:func:`daedalus.mcp.manager.annotation_approval`): a tool that says it only reads
+    runs, and one that may destroy or reach the outside world — or says nothing, which by the
+    protocol means it may — is asked about. ``ask`` and ``allow`` decide every tool of the server."""
+    tool_approval: dict[str, McpApproval] = Field(default_factory=dict)
+    """The same, for one tool by its name on the server; it beats ``approval``, and ``auto`` here
+    hands the tool back to the server's setting."""
 
 
 class McpConfig(BaseModel):

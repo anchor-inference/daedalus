@@ -120,14 +120,39 @@ def loosen_for_refs(properties: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def annotation_approval(annotations: Any, *, server: str = "auto", tool: str = "auto") -> str:
+    """``allow`` or ``ask`` for one MCP tool: the operator's rule for the tool, else for its server,
+    else what the tool's annotations say.
+
+    The annotations are read with the protocol's own defaults, and those are the cautious ones: a
+    hint left out means the tool *may* destroy and *may* reach the world, so a server that annotates
+    nothing is asked about tool by tool until the operator says otherwise. Reading a missing hint as
+    harmless would let a new server act on the first call without anyone having looked at it.
+    ``read_only_hint`` settles it the other way, because a destructive hint means nothing for a tool
+    that only reads."""
+    for rule in (tool, server):
+        if rule in ("allow", "ask"):
+            return rule
+    def hint(name: str) -> bool | None:
+        value = getattr(annotations, name, None) if annotations is not None else None
+        return value if isinstance(value, bool) else None
+    if hint("read_only_hint") is True:
+        return "allow"
+    destructive = hint("destructive_hint") is not False
+    open_world = hint("open_world_hint") is not False
+    return "ask" if destructive or open_world else "allow"
+
+
 class McpToolProxy(Tool):
     """A core ``Tool`` that forwards to a remote MCP tool."""
 
-    def __init__(self, connection: McpConnection, remote_name: str, definition: ToolDefinition) -> None:
+    def __init__(self, connection: McpConnection, remote_name: str, definition: ToolDefinition, *, approval: str = "ask") -> None:
         self._connection = connection
         self._remote = remote_name
         self._definition = definition
         self.server = connection.name
+        self.approval = approval
+        """``allow`` or ``ask``: what the policy answers for a call no other rule decides (:func:`annotation_approval`)."""
 
     @property
     def name(self) -> str:
@@ -395,7 +420,9 @@ class McpConnection:
             description=f"[MCP {self.name}] {remote.description or remote.name}",
             parameters=ToolParameterSchema(properties=loosen_for_refs(dict(schema.get("properties") or {})), required=list(schema.get("required") or [])),
         )
-        return McpToolProxy(self, remote.name, definition)
+        approval = annotation_approval(getattr(remote, "annotations", None), server=self.config.approval,
+                                       tool=self.config.tool_approval.get(remote.name, "auto"))
+        return McpToolProxy(self, remote.name, definition, approval=approval)
 
     async def _watch_response(self, response: httpx.Response) -> None:
         if response.status_code == 401:
@@ -664,6 +691,10 @@ class McpManager:
             connection.state = "auth_required"
             connection.last_error_code = "authorization_required"
         return True
+
+    def approvals(self) -> dict[str, str]:
+        """Every live MCP tool's default answer, by the name a session calls it, for the policy."""
+        return {name: tool.approval for catalog in self._registered_tools.values() for name, tool in catalog.items()}
 
     def all_tool_names(self) -> set[str]:
         return {name for catalog in self._registered_tools.values() for name in catalog}

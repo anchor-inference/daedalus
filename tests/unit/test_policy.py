@@ -318,3 +318,20 @@ def test_the_terminal_daemons_run_directories_are_sealed_in_a_container_too(tmp_
 def test_a_terminal_daemons_hook_port_is_refused_like_the_apps_own() -> None:
     policy = Policy(sealed_ports=[8765, 47003])
     assert policy.evaluate("Exec", {"command": "curl -X POST http://127.0.0.1:47003/hook/x/stop"}).action == DENY
+
+
+def test_an_mcp_tool_its_annotations_ask_about_is_a_question_an_operator_rule_can_lift() -> None:
+    approvals = {"Mcp_notes_append": "ask", "Mcp_notes_search": "allow"}
+    policy = Policy(mcp_approvals=approvals)
+    asked = policy.evaluate("Mcp_notes_append", {"text": "hi"})
+    assert asked.action == ASK and asked.rule == "mcp.annotations" and asked.key
+    assert policy.evaluate("Mcp_notes_search", {"q": "hi"}).action == "allow"
+    # A key the operator granted lets the same call through once, as any other question.
+    assert policy.evaluate("Mcp_notes_append", {"text": "hi"}, grants=[asked.key]).action == "allow"
+    lifted = Policy(mcp_approvals=approvals, rules=[Rule(id="notes-ok", tool="Mcp_notes_append", action="allow", note="", pattern=".", source="config")])
+    assert lifted.evaluate("Mcp_notes_append", {"text": "hi"}).action == "allow"
+
+
+def test_an_mcp_tool_its_annotations_allow_still_meets_the_path_rules() -> None:
+    policy = Policy(mcp_approvals={"Mcp_files_read": "allow"}, sealed_paths=[Path("/sealed")], native=True)
+    assert policy.evaluate("Mcp_files_read", {"path": "/sealed/key"}).action == DENY

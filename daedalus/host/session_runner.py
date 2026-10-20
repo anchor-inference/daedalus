@@ -6099,6 +6099,7 @@ class SessionManager:
             # Where a relative path is resolved from, so that `../../daedalus-secrets/keyproxy.env`
             # is read as the file it names rather than as a word with no slash at the front.
             base_dir=base_dir,
+            mcp_approvals=self.mcp.approvals(),
         )
 
     def sealed_ports(self) -> tuple[int, ...]:

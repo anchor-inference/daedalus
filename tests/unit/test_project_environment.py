@@ -14,6 +14,7 @@ from typing import Any
 
 import httpx
 import pytest
+from protocore.contracts.types import ToolDefinition, ToolParameterSchema
 
 from daedalus.config import RuntimeConfig, Settings
 from daedalus.extensions import project_environment as environment_module
@@ -22,6 +23,7 @@ from daedalus.extensions.project_environment import (
     SKILL_LAUNCH_FILES,
     PrepareFailed,
     ProjectEnvironments,
+    ProjectMcpTools,
     _verdict,
     _write_absent,
 )
@@ -386,3 +388,12 @@ async def test_a_launch_waits_for_the_environment_and_starts_once_it_is_ready(db
     finally:
         team.queue.close()
         app.executions.release()
+
+
+def test_only_the_mcp_tools_the_host_would_let_through_skip_the_clis_own_dialog() -> None:
+    def proxy(name: str, approval: str) -> SimpleNamespace:
+        return SimpleNamespace(name=name, approval=approval, definition=ToolDefinition(name=name, description=name, parameters=ToolParameterSchema()))
+
+    spec = ProjectMcpTools(SimpleNamespace())._spec([proxy("Mcp_notes_search", "allow"), proxy("Mcp_notes_append", "ask")], 1000)  # type: ignore[arg-type]
+    assert spec.read_only == ("Mcp_notes_search",)
+    assert spec.tools == ("Mcp_notes_search", "Mcp_notes_append")
