@@ -127,6 +127,33 @@ def error(context: ToolContext, content: str, **metadata: object) -> ToolResult:
     )
 
 
+_ESCAPE_RE = re.compile(
+    r"\x1b\[[0-?]*[ -/]*[@-~]"  # CSI: colours, cursor moves, erase-line
+    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC: window titles, hyperlinks
+    r"|\x1b[@-Z\\-_]"  # the other two-character escapes
+    r"|[\x00-\x08\x0b\x0c\x0e-\x1a\x1c-\x1f\x7f]",  # stray controls a terminal would not print
+)
+
+
+def plain_output(text: str) -> str:
+    """Command output as a terminal would have left it on screen: escapes gone, each redrawn line at its last drawing.
+
+    A test runner's colours and a progress bar redrawn with carriage returns used to reach the model
+    verbatim, and one install spent most of its result on escape codes and a hundred copies of one
+    line. Only what the model reads is cleaned; the job's log and the terminal's stream stay raw for
+    the app, which renders them itself."""
+    if "\x1b" not in text and "\r" not in text and not _ESCAPE_RE.search(text):
+        return text
+    text = _ESCAPE_RE.sub("", text.replace("\r\n", "\n"))
+    if "\r" not in text:
+        return text
+    lines = []
+    for line in text.split("\n"):
+        drawings = [part for part in line.split("\r") if part]
+        lines.append(drawings[-1] if drawings else "")
+    return "\n".join(lines)
+
+
 def clip(text: str, limit: int, *, note: str = "") -> str:
     """Keep the head and the tail of an over-long output."""
     if len(text) <= limit:
@@ -138,7 +165,7 @@ def clip(text: str, limit: int, *, note: str = "") -> str:
     return head + marker + tail
 
 
-__all__ = ["FRAME_CHARS", "call_id", "clip", "error", "ok", "output_limit", "refuse_protected", "services_for", "tool_config"]
+__all__ = ["FRAME_CHARS", "call_id", "clip", "error", "ok", "output_limit", "plain_output", "refuse_protected", "services_for", "tool_config"]
 
 def idle_words(seconds: float) -> str:
     """A span as a person says it in a status line: "4 min", "3 h", "2 days"."""

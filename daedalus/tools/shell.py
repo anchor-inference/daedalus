@@ -25,7 +25,7 @@ from protocore.tools.decorator import tool
 from daedalus.processes import end_tree, read_until_exit
 from daedalus.security import operator_secrets
 from daedalus.tools import search_hint
-from daedalus.tools._common import FRAME_CHARS, clip, error, ok, services_for, tool_config
+from daedalus.tools._common import FRAME_CHARS, clip, error, ok, plain_output, services_for, tool_config
 from daedalus.tools.job_guard import WAIT_TIMED_OUT, orphan_note, self_match_reason, wait_script
 
 _warned_missing_bwrap = False
@@ -423,7 +423,7 @@ async def _run(context: ToolContext, command: str, cwd: str | None, timeout_seco
     if services.exec_backend is not None:
         outcome = await services.exec_backend.run(command, cwd=str(workdir), env=env, timeout=limit)
         elapsed = time.monotonic() - started
-        body = clip(outcome.output, max(services.max_tool_output_chars - FRAME_CHARS, FRAME_CHARS), note="write to a file for the full output")
+        body = clip(plain_output(outcome.output), max(services.max_tool_output_chars - FRAME_CHARS, FRAME_CHARS), note="write to a file for the full output")
         header = f"exit_code={outcome.exit_code} elapsed={elapsed:.1f}s cwd={workdir}" + (f" TIMED OUT after {limit:.0f}s" if outcome.timed_out else "")
         if outcome.timed_out:
             header += REMOTE_TIMEOUT_HINT
@@ -538,6 +538,7 @@ async def _run(context: ToolContext, command: str, cwd: str | None, timeout_seco
     # What the model is actually shown, measured back in bytes so the figure
     # below and the spill file speak the same unit as the stream they describe.
     shown = len(head_text.encode("utf-8", "replace")) + len(tail_text.encode("utf-8", "replace"))
+    head_text, tail_text = plain_output(head_text), plain_output(tail_text)  # after the count: the figure speaks of the raw stream
     if total > shown:
         where = f"full output in {spill}" if spill_written else "the rest was not kept; write the output to a file"
         if spill_written and spill_written < total:
@@ -738,7 +739,7 @@ class RemoteJob:
 
     async def tail(self, lines: int) -> str:
         outcome = await self.backend.run(f"tail -n {max(1, lines)} {shlex.quote(str(self.log))} 2>/dev/null", cwd=None, env=None, timeout=30.0)
-        return outcome.output.rstrip("\n")
+        return plain_output(outcome.output).rstrip("\n")
 
 
 def grew(job: Job | RemoteJob, size: int) -> None:
@@ -887,7 +888,9 @@ def _tail(path: Path, lines: int) -> str:
         data = path.read_bytes()
     except OSError:
         return ""
-    return "\n".join(data.decode("utf-8", "replace").splitlines()[-max(1, lines):])
+    # Cleaned before the split: splitlines() also splits on a carriage return, so every redraw of a
+    # progress bar used to take one of the lines asked for.
+    return "\n".join(plain_output(data.decode("utf-8", "replace")).splitlines()[-max(1, lines):])
 
 
 def _age(job: Job | RemoteJob) -> float:
