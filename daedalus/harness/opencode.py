@@ -133,9 +133,16 @@ class _Launch:
     last_message: str = ""
     requests: dict[str, dict[str, Any]] = field(default_factory=dict)
     answered: set[str] = field(default_factory=set)
+    unreadable: set[str] = field(default_factory=set)
+    """The event types already logged as unreadable, so a stream of them is one line in the log."""
     stopping: bool = False
     connected: asyncio.Event = field(default_factory=asyncio.Event)
     tasks: list[asyncio.Task[Any]] = field(default_factory=list)
+
+
+def _obj(value: Any) -> Mapping[str, Any]:
+    """``value`` when it is an object, else an empty one: what an event says is read, never trusted."""
+    return value if isinstance(value, dict) else {}
 
 
 def _server_from(stored: str) -> _Server | None:
@@ -369,8 +376,7 @@ class OpenCodeAdapter:
             state.queue.put_nowait(StaffEvent(EventKind.TRANSCRIPT, _now(), {"ref": state.session, "session_ref": state.session}))
             state.queue.put_nowait(StaffEvent(EventKind.READY, _now(), {"session": state.session}))
             async for event in events:
-                if isinstance(event, dict):
-                    self._event(state, str(event.get("type") or ""), event.get("properties") or {})
+                self._handle(state, event)
         finally:
             await stream.close()
         if not state.stopping:
@@ -383,12 +389,26 @@ class OpenCodeAdapter:
             return
         state.queue.put_nowait(StaffEvent(kind, _now(), dict(payload or {}), native_id=native_id))
 
+    def _handle(self, state: _Launch, event: Any) -> None:
+        """One event of the stream. One the adapter cannot read is logged, once per type, and skipped:
+        a string where an object belonged once raised out of the loop, the stream closed, and the
+        launch failed with "'str' object has no attribute 'get'"."""
+        if not isinstance(event, dict):
+            return
+        kind = str(event.get("type") or "")
+        try:
+            self._event(state, kind, _obj(event.get("properties")))
+        except Exception:  # noqa: BLE001 — see the description
+            if kind not in state.unreadable:
+                state.unreadable.add(kind)
+                logger.warning("an OpenCode %s event could not be read; skipped", kind, exc_info=True)
+
     def _event(self, state: _Launch, kind: str, props: Mapping[str, Any]) -> None:
-        session = props.get("sessionID") or ((props.get("info") or {}).get("sessionID") if isinstance(props.get("info"), dict) else None) or ((props.get("part") or {}).get("sessionID") if isinstance(props.get("part"), dict) else None)
+        session = props.get("sessionID") or _obj(props.get("info")).get("sessionID") or _obj(props.get("part")).get("sessionID")
         if session and session != state.session:
             return
         if kind == "session.status":
-            if (props.get("status") or {}).get("type") == "busy" and not state.busy:
+            if _obj(props.get("status")).get("type") == "busy" and not state.busy:
                 state.busy, state.failure, state.cancelled, state.last_message = True, "", False, ""
                 self._put(state, EventKind.TURN_STARTED, {})
         elif kind == "session.idle":
@@ -396,13 +416,15 @@ class OpenCodeAdapter:
                 state.busy = False
                 self._turn_ended(state)
         elif kind == "session.error":
-            error = props.get("error") or {}
-            if error.get("name") == "MessageAbortedError":
+            error = props.get("error")
+            if not isinstance(error, dict):
+                state.failure = str(error or "the turn failed")
+            elif error.get("name") == "MessageAbortedError":
                 state.cancelled = True
             else:
-                state.failure = str((error.get("data") or {}).get("message") or error.get("name") or "the turn failed")
+                state.failure = str(_obj(error.get("data")).get("message") or error.get("name") or "the turn failed")
         elif kind == "message.updated":
-            info = props.get("info") or {}
+            info = _obj(props.get("info"))
             ident = str(info.get("id") or "")
             if info.get("role") == "assistant":
                 state.assistant.add(ident)
@@ -414,10 +436,10 @@ class OpenCodeAdapter:
                 else:
                     self._put(state, EventKind.ACTIVITY, {"user_message": ident})
         elif kind == "message.part.updated":
-            self._part(state, props.get("part") or {})
+            self._part(state, _obj(props.get("part")))
         elif kind == "permission.asked":
             ref = str(props.get("id") or "")
-            metadata = props.get("metadata") or {}
+            metadata = _obj(props.get("metadata"))
             summary = str(metadata.get("command") or metadata.get("filePath") or " ".join(str(p) for p in props.get("patterns") or []) or props.get("permission") or "a permission")
             state.requests[ref] = {"kind": "permission"}
             self._put(state, EventKind.PERMISSION_REQUESTED, {"tool": str(props.get("permission") or ""), "summary": " ".join(summary.split())[:300], "options": ["allow_once", "allow_always", "deny"]}, ref)
@@ -440,7 +462,7 @@ class OpenCodeAdapter:
         kind = part.get("type")
         if kind == "tool":
             call = str(part.get("callID") or part.get("id") or "")
-            status = str((part.get("state") or {}).get("status") or "")
+            status = str(_obj(part.get("state")).get("status") or "")
             tool = str(part.get("tool") or "")
             if status in ("running", "pending") and call not in state.tools:
                 state.tools.add(call)
@@ -448,7 +470,7 @@ class OpenCodeAdapter:
             elif status in ("completed", "error"):
                 state.tools.discard(call)
                 finished: dict[str, Any] = {"tool": tool, "ok": status == "completed"}
-                tool_input = (part.get("state") or {}).get("input")
+                tool_input = _obj(part.get("state")).get("input")
                 if status == "completed" and (edited := edited_paths(tool, tool_input if isinstance(tool_input, dict) else None)):
                     finished["edited"] = edited
                 self._put(state, EventKind.TOOL_FINISHED, finished, call)

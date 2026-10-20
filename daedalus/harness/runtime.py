@@ -28,7 +28,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 from daedalus.config import HarnessConfig
@@ -139,6 +139,13 @@ EXIT_SCREEN_CHARS = 400
 the frame around it."""
 EXIT_SCREEN_TIMEOUT = 3.0
 CALLS_REMEMBERED = 256
+RESET_SLACK_S = 30.0
+"""Waited past the reset a CLI reported for its usage window, so the first turn after it is not
+refused by a clock a few seconds behind the provider's."""
+OUTAGE_NOTE = (
+    "[The previous turn stopped because the model provider refused it for a while (a usage limit, a "
+    "rate limit or an overloaded service). That has passed; continue the work from where it stopped.]"
+)
 """Team call ids a session keeps for spotting a repeat; a replay is of the latest posts."""
 PORT_ATTEMPTS = 3
 """Plans tried for a CLI that serves on a port of its own before its start fails: each chooses a port
@@ -181,6 +188,14 @@ def _said(lines: list[str]) -> str:
     kept = ["".join(c for c in line if c.isprintable()).strip() for line in lines]
     said = " / ".join([line for line in kept if any(c.isalnum() for c in line)][-EXIT_SCREEN_LINES:])
     return "…" + said[-EXIT_SCREEN_CHARS:] if len(said) > EXIT_SCREEN_CHARS else said
+
+
+def _parse_time(stamp: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(stamp)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 
 def _now() -> str:
@@ -428,6 +443,12 @@ class CliSession:
     tool_grants: dict[str, bool] = field(default_factory=dict)
     """Answers to tool questions that came after their call gave up waiting, by the question's key:
     the same call made again takes its answer once, as a policy grant is taken by a session."""
+    outage_streak: int = 0
+    """Turns in a row the CLI's provider or account refused; a completed turn clears it."""
+    usage: UsageSnapshot | None = None
+    """The spend last reported for the session, live or from its transcript."""
+    resume: asyncio.Task[None] | None = None
+    """The wait after such a refusal, at whose end the turn is driven again."""
 
 
 class CliStaffRuntime:
@@ -858,6 +879,11 @@ class CliStaffRuntime:
                 if event.kind is EventKind.FILES_EDITED:
                     await self._edited(session, event)
                     continue
+                if event.kind is EventKind.USAGE:
+                    # A reading, never a status: through the state machine it would refresh the
+                    # signal clock and take a finished turn for a working one.
+                    await self._live_usage(session, event)
+                    continue
                 await self._apply(session, event)
                 if event.payload.get("edited"):
                     # In line, not spawned: the turn's end that follows purges the member's leases,
@@ -936,6 +962,15 @@ class CliStaffRuntime:
     async def _apply_locked(self, session: CliSession, live: LiveSession, event: StaffEvent) -> None:
         kind = event.kind
         session.changed.set()
+        if kind is EventKind.TURN_FAILED and event.payload.get("outage") and session.ready.is_set():
+            event = self._paused(session, event)
+        elif kind is EventKind.TURN_COMPLETED:
+            session.outage_streak = 0
+        elif kind is EventKind.PROMPT_ACKNOWLEDGED and session.resume is not None:
+            # Someone gave it work during the wait: that turn is the resumption, and a wait left
+            # running would drive a later, unrelated failure again.
+            session.resume.cancel()
+            session.resume = None
         if kind is EventKind.PERMISSION_REQUESTED and event.native_id and not event.payload.get("team_allow_failed") and protocol.is_team_tool(str(event.payload.get("tool") or "")):
             # The team's own tools are allowed by the host, never asked of anyone: the request opens
             # no ask, wakes nobody and leaves the status alone. Answered off the lock, since an
@@ -1029,6 +1064,42 @@ class CliStaffRuntime:
         if step.reconcile:
             self._spawn(self._reconcile_screen(session), f"harness-reconcile-{session.staff_session_id}")
 
+    def _paused(self, session: CliSession, event: StaffEvent) -> StaffEvent:
+        """A turn the CLI's provider or account refused (``outage`` in the failure): wait, then drive
+        the turn again, as the host does for its own sessions after an outage. The wait is until the
+        reset the CLI reported (``resets_at``), else a back-off that doubles with every refusal in a
+        row, and the attempts are bounded. The failure says which, and the member's row shows it.
+
+        A member at its usage limit was simply failed, and stayed so until someone wrote to it."""
+        cfg = self.config()
+        failure = str(event.payload.get("failure") or "the turn failed")
+        if session.resume is not None:
+            session.resume.cancel()
+            session.resume = None
+        if session.outage_streak >= cfg.outage_retry_attempts:
+            said = f"not resumed after {session.outage_streak} refusals in a row: {failure}" if session.outage_streak else failure
+            return replace(event, payload={**event.payload, "failure": said})
+        session.outage_streak += 1
+        delay = min(cfg.outage_retry_base_s * 2 ** (session.outage_streak - 1), cfg.outage_retry_max_s)
+        resets = _parse_time(str(event.payload.get("resets_at") or ""))
+        if resets is not None:
+            ahead = (resets - datetime.now(UTC)).total_seconds()
+            if ahead <= cfg.quota_wait_max_h * 3600:
+                delay = max(ahead, 0.0) + RESET_SLACK_S
+        until = datetime.now(UTC) + timedelta(seconds=delay)
+        session.resume = self._spawn(self._resume_after_outage(session, delay), f"harness-resume-{session.staff_session_id}")
+        return replace(event, payload={**event.payload, "failure": f"paused until {until:%Y-%m-%d %H:%M:%S} UTC, then resumed: {failure}"})
+
+    async def _resume_after_outage(self, session: CliSession, delay: float) -> None:
+        await asyncio.sleep(delay)
+        session.resume = None
+        if session.finished or session.stopping or session.worker is None:
+            return
+        live = await self.lookup(session.staff_session_id)
+        if live is None or live.session.status != StaffState.ERROR.value:
+            return  # someone gave it work meanwhile, or let it go
+        session.worker.put(Pending("", OUTAGE_NOTE, "after_turn", "system"))
+
     @staticmethod
     def _forget_question(session: CliSession, ref: str) -> None:
         for text, known in list(session.asked.items()):
@@ -1101,7 +1172,33 @@ class CliStaffRuntime:
             logger.info("the usage of %s could not be read", session.staff_session_id, exc_info=True)
             return
         if snapshot is not None:
-            await self.ingress.usage(live, snapshot)
+            session.usage = snapshot.over(session.usage or UsageSnapshot.from_view(live.session.usage))
+            await self.ingress.usage(live, session.usage)
+
+    async def _live_usage(self, session: CliSession, event: StaffEvent) -> None:
+        """A reading the CLI sent while it worked (``EventKind.USAGE``), laid over what is known, so a
+        reading that says only part — a rate-limit update has no token counts — keeps the rest."""
+        live = await self.lookup(session.staff_session_id)
+        if live is None:
+            return
+        said = event.payload
+        windows = tuple((int(w[0]), float(w[1])) for w in said.get("windows") or [] if isinstance(w, list | tuple) and len(w) == 2)
+        reading = UsageSnapshot(
+            input_tokens=int(said.get("input_tokens") or 0),
+            output_tokens=int(said.get("output_tokens") or 0),
+            cost_usd=None,
+            window_used_pct=None,
+            source="subscription",
+            context_tokens=int(said.get("context_tokens") or 0) or None,
+            context_window=int(said.get("context_window") or 0) or None,
+            windows=windows,
+            at=event.at,
+        )
+        session.usage = reading.over(session.usage or UsageSnapshot.from_view(live.session.usage))
+        try:
+            await self.ingress.usage(live, session.usage)
+        except Exception:  # noqa: BLE001 — a reading that cannot be kept must not stop the CLI's events
+            logger.warning("the live usage of %s could not be kept", session.staff_session_id, exc_info=True)
 
     async def _allow_team_tool(self, session: CliSession, event: StaffEvent) -> None:
         """Answer a CLI's permission request for a team tool with "allow". Should the CLI not take the

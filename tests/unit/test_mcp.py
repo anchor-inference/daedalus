@@ -169,7 +169,7 @@ async def test_expired_token_refresh_is_single_flight() -> None:
         def needs_refresh(self) -> bool:
             return self.expired
 
-        async def refresh(self) -> None:
+        async def refresh(self, *, rejected: str = "") -> None:
             self.refreshes += 1
             self.expired = False
 
@@ -193,6 +193,60 @@ async def test_expired_token_refresh_is_single_flight() -> None:
     connection.start = start
     await asyncio.gather(*(connection.call("read", {}) for _ in range(10)))
     assert oauth.refreshes == 1
+    assert connection.in_flight == 0
+
+
+async def test_a_401_in_the_middle_of_a_call_asks_for_authorization_and_is_not_replayed() -> None:
+    import httpx
+    from mcp.shared.exceptions import MCPError
+    from mcp.types import ErrorData
+
+    class OAuth:
+        def __init__(self) -> None:
+            self.rejected: list[str] = []
+
+        def needs_refresh(self) -> bool:
+            return False
+
+        async def refresh(self, *, rejected: str = "") -> None:
+            self.rejected.append(rejected)
+
+    calls: list[str] = []
+    challenge = 'Bearer error="invalid_token", resource_metadata="https://example.test/.well-known/oauth-protected-resource"'
+
+    class Session:
+        async def call_tool(self, tool: str, arguments: dict[str, object]) -> object:
+            calls.append(tool)
+            # What the transport does with a 401 to the call's POST: the response hook sees it, and
+            # the session gets a status-less "Server returned an error response".
+            await connection._watch_response(httpx.Response(401, headers={"www-authenticate": challenge}, request=httpx.Request("POST", "https://example.test/mcp")))
+            raise MCPError.from_error_data(ErrorData(code=-32603, message="Server returned an error response"))
+
+    oauth = OAuth()
+    connection = McpConnection("remote", McpServerConfig(transport="http", url="https://example.test/mcp"), oauth=oauth)  # type: ignore[arg-type]
+    connection.session = Session()  # type: ignore[assignment]
+    connection._token = "at-refused"
+
+    async def stop() -> None:
+        connection.session = None
+
+    async def start() -> None:
+        connection.session = Session()  # type: ignore[assignment]
+
+    connection.stop = stop  # type: ignore[method-assign]
+    connection.start = start  # type: ignore[method-assign]
+    try:
+        await connection.call("send_mail", {})
+    except Exception as exc:  # noqa: BLE001
+        said = str(exc)
+    else:
+        raise AssertionError("a refused call reported success")
+    # The call went once: a tool with an effect is never sent a second time on the host's own
+    # initiative. The token the server refused is renewed for the next call, and the challenge is
+    # in the answer, so whoever reads it knows why and what to do.
+    assert calls == ["send_mail"]
+    assert oauth.rejected == ["at-refused"]
+    assert "authorization required" in said and 'error="invalid_token"' in said and "not repeated" in said
     assert connection.in_flight == 0
 
 

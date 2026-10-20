@@ -23,12 +23,20 @@ it. What matters here:
   ``userMessage`` item that follows echoes it as ``clientId``.
 - **Steer** is ``turn/steer`` with the running turn's id; a turn that just ended refuses it ("no
   active turn to steer") and the message starts a turn instead.
-- **Requests.** Approvals and questions are server requests to the subscribed clients; the answer is
-  the JSON-RPC response, and ``serverRequest/resolved`` says one was settled (by whoever answered).
-  Which clients receive them could not be measured (the account was at its usage limit, so no model
-  turn ran); the host is subscribed from the thread's start, so it receives them whether they go to
-  every client or to the thread's first one. When the thread says it waits on an approval and no
+- **Requests.** Approvals and questions are server requests to every client subscribed to the thread
+  when the request is sent (Codex's ``app-server/src/outgoing_message.rs``, the recipients from the
+  thread's subscribed connections); the first answer wins and the others hear
+  ``serverRequest/resolved``. The host is subscribed from the thread's start, so it receives every
+  one the TUI does. The exception is Codex's experimental user-verification elicitation, which goes
+  to one verification-capable connection only: when the thread says it waits on an approval and no
   request reached the host, the operator is told to answer in the terminal.
+- **Model and effort** are named on every thread the host starts or resumes: the member's own, else
+  the operator's Codex configuration (``config/read``). Left to Codex, a member ran on its bundled
+  default, which 0.161 changed to a new model at "low".
+- **Remote control** is off for every staff server, by Codex's
+  ``CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED``: a server started without a choice takes the
+  one stored for the Codex home, and an operator who paired the phone app would have every staff
+  server enrol with the relay. The variable changes no stored choice; Codex has no setting for it.
 - **Switches.** ``check_for_update_on_startup=false`` is the TUI's own setting (the update prompt
   appeared with it only on the server); the rate-limit model nudge is a dialog too and is switched off
   the same way. The MCP servers Codex starts get a filtered environment, so the team bridge's
@@ -99,6 +107,7 @@ TEAM_ENV = ("DAEDALUS_HOOK_URL", "DAEDALUS_HOOK_TOKEN", "DAEDALUS_LAUNCH_ID", "D
 """What the team bridge needs from the launch's environment. Codex starts its MCP servers with a
 filtered environment, so each is passed through by name."""
 SANDBOXES = ("read-only", "workspace-write", "danger-full-access")
+NO_REMOTE_CONTROL = {"CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED": "1"}
 LEVELS = {"ask": ("workspace-write", "untrusted"), "edits": ("workspace-write", "on-request"), "all": ("danger-full-access", "never")}
 """The project's autonomy as Codex's sandbox and approval policy. ``untrusted`` asks before anything
 that is not known to be safe, which is what "ask" means for Claude as well."""
@@ -128,19 +137,58 @@ WAITING_GRACE_S = 1.5
 """How long the thread may say it waits on an approval before the host, having received no request,
 tells the operator to answer in the terminal."""
 TIMEOUT_SLACK_S = 60
+OUTAGES = frozenset({"usageLimitExceeded", "rateLimitExceeded", "serverOverloaded"})
+"""The ``codexErrorInfo`` tags that say the account or the service failed, not the work: the turn is
+driven again once the wait is over, as the host does for its own providers."""
+QUOTAS = frozenset({"usageLimitExceeded", "rateLimitExceeded"})
+"""Of those, the ones a rate-limit window's reset ends."""
 TRANSCRIPT_MAX_BYTES = 32 << 20
 DIALOG_MARKERS = (
     "Update available!",
     "Press enter to continue",
-    "Press enter to confirm",
+    "Approaching rate limits",
+    "Trust this folder?",
     "Would you like to run the following command",
     "Would you like to make the following edits",
-    "Approaching rate limits",
-    "Do you trust the contents of this directory",
-    "Allow Codex to",
+    "Would you like to grant these permissions?",
+    "Do you want to approve network access to",
+    "Would you like to send input to",
+    " needs your approval.",
+    "Allow this request",
 )
-BUSY_HINT = "esc to interrupt"
-STARTUP_NOISE = ("<environment_context>", "<recommended_plugins>", "<user_instructions>", "# AGENTS.md", "<skills_instructions>", "<permissions")
+"""What Codex 0.163 draws when it waits for a choice: the update and rate-limit prompts, the folder
+trust question (``tui/src/onboarding/trust_directory.rs``), the approval overlay's titles
+(``tui/src/bottom_pane/approval_overlay.rs``) and an MCP server's request
+(``mcp_server_elicitation.rs``). The trust question once read "Do you trust the contents of this
+directory", and three of the approval titles were never here, so ``stop`` typed into them."""
+BUSY_HINT = " to interrupt)"
+"""The end of the busy line, "Working (0s • esc to interrupt)". The key is drawn from the operator's
+key map since 0.163, so the line is matched without it."""
+CONNECT_FAILED = "failed to connect to remote app server"
+"""What the TUI prints when it cannot reach the app server, wrapped as "Error: failed to connect to
+remote app server" around the client's own "… at `<url>`: <cause>" (``tui/src/lib.rs``,
+``app-server-client/src/remote.rs``). The words once matched here were the fake's invention, so a TUI
+that never attached went unnoticed until its terminal exited."""
+DISMISS_ATTEMPTS = 3
+INJECTED = (
+    "<environment_context", "<recommended_plugins", "<user_instructions", "# AGENTS.md",
+    "<skills_instructions", "<permissions", "<turn_aborted", "<user_action", "<subagent_notification",
+    "<codex_internal_context", "<goal_context", "<collaboration_mode", "<multi_agent", "<model_switch",
+    "<apps_instructions", "<codex_apps", "<external_", "<skill>", "<plugins_instructions",
+    "<user_shell_command", "<realtime_delegation", "<hook_prompt", "Warning: apply_patch was requested via ",
+    "Warning: The maximum number of unified exec processes you can keep open is",
+    "Warning: Your account was flagged for potentially high-risk cyber activity",
+)
+"""The starts of the messages Codex writes into the conversation as the user's for its model to read:
+the environment, the instructions files, skills and plugins, an interrupted turn, a helper agent's
+notice, a shell command typed with ``!``, a goal, a hook's prompt, its own warnings. None is anything
+anyone said. From its ``CONTEXTUAL_USER_FRAGMENT_MATCHERS`` (``core/src/context/contextual_user_message.rs``)
+and the fragments they match, plus the older names earlier rollouts carry.
+
+The terminal daemon's session import reads the same rollouts and keeps the same list
+(``codexNoise`` in ``ptyd/internal/sidechan/sessions/codex.go``); a test holds the two equal. The
+host's copy had fallen to six entries, and a member interrupted by the orchestrator showed a "user"
+turn ``<turn_aborted>…`` that nobody typed."""
 
 
 def _now() -> str:
@@ -197,6 +245,8 @@ class _Launch:
     stopping: bool = False
     connected: asyncio.Event = field(default_factory=asyncio.Event)
     tasks: list[asyncio.Task[Any]] = field(default_factory=list)
+    rate_limits: dict[str, Any] = field(default_factory=dict)
+    """The account's rate-limit windows as ``account/rateLimits/updated`` last gave them."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -299,15 +349,17 @@ class CodexAdapter:
             env={},
             cwd=spec.cwd,
             files=files,
-            companions=(CompanionSpec("app-server", server),),
+            companions=(CompanionSpec("app-server", server, env=NO_REMOTE_CONTROL),),
             session_ref=resume,
             first_prompt=spec.first_prompt,
             first_prompt_via="channel",
         )
 
     def readiness(self, screen: str) -> ReadyStep:
-        if "Failed to resume session" in screen or "Failed to connect to the app server" in screen:
+        if "Failed to resume session" in screen:
             return ReadyStep("fail", reason="Codex could not attach to its session: " + _last_line_with(screen, "Failed"))
+        if CONNECT_FAILED in screen.lower():
+            return ReadyStep("fail", reason="Codex could not attach to its session: " + _last_line_with(screen, CONNECT_FAILED, any_case=True))
         if "Sign in with ChatGPT" in screen or "Not logged in" in screen:
             return ReadyStep("fail", reason="Codex is not signed in here: sign in from the Harnesses screen or in this terminal")
         if "Update available!" in screen:
@@ -430,12 +482,13 @@ class CodexAdapter:
         settings: dict[str, Any] = {}
         if planned is not None:
             settings = {"cwd": planned.cwd, "sandbox": planned.sandbox, "approvalPolicy": planned.approval}
-            if planned.model:
-                settings["model"] = planned.model
+            model, effort = await self._model_and_effort(state, planned)
+            if model:
+                settings["model"] = model
             if planned.instructions:
                 settings["developerInstructions"] = planned.instructions
-            if planned.effort:
-                settings["config"] = {"model_reasoning_effort": planned.effort}
+            if effort:
+                settings["config"] = {"model_reasoning_effort": effort}
         if resume:
             result = await self._call(state, "thread/resume", {"threadId": resume, "excludeTurns": True, **settings})
         elif planned is None:
@@ -464,6 +517,25 @@ class CodexAdapter:
         await self._tui_attached(term)
         state.queue.put_nowait(StaffEvent(EventKind.READY, _now(), {"thread": state.thread_id}))
 
+    async def _model_and_effort(self, state: _Launch, planned: _Thread) -> tuple[str, str]:
+        """The member's model and effort, each completed from the operator's Codex configuration as
+        the server reads it for the member's folder. Empty only where neither names one, and then
+        Codex's own default stands, which is logged: nothing in Daedalus is a better guess."""
+        model, effort = planned.model, planned.effort
+        if model and effort:
+            return model, effort
+        configured: Mapping[str, Any] = {}
+        with contextlib.suppress(CodexError, TimeoutError):
+            answer = await self._call(state, "config/read", {"cwd": planned.cwd})
+            found = (answer or {}).get("config") if isinstance(answer, dict) else None
+            configured = found if isinstance(found, dict) else {}
+        model = model or str(configured.get("model") or "")
+        effort = effort or str(configured.get("model_reasoning_effort") or "")
+        if not model or not effort:
+            logger.warning("a codex member names no %s and the operator's codex configuration none either; codex's own default applies",
+                           "model or effort" if not model and not effort else "model" if not model else "effort")
+        return model, effort
+
     async def _tui_attached(self, term: TerminalPort) -> None:
         """Ready means the TUI shows the thread, not only that the server has it: a request sent
         before the TUI subscribed never reaches its screen, so the operator could not answer it there.
@@ -488,30 +560,62 @@ class CodexAdapter:
         return ""
 
     async def _read(self, state: _Launch) -> None:
+        """Read the app server until the connection ends, then release every call still waiting and,
+        unless the host is stopping the member, say the side channel is lost.
+
+        Both happen however the reading ends. An exception other than a closed stream once ended the
+        reader without a word: the member looked busy, and every call waiting on an answer waited
+        out its whole timeout."""
         assert state.socket is not None
+        why = "the connection to Codex's app server closed"
+        cancelled = False
         try:
             while (text := await state.socket.receive()) is not None:
                 try:
                     message = json.loads(text)
                 except ValueError:
                     continue
-                if not isinstance(message, dict):
-                    continue
-                if "method" in message and "id" in message:
-                    await self._server_request(state, message)
-                elif "method" in message:
-                    self._notification(state, str(message["method"]), message.get("params") or {})
-                else:
-                    future = state.pending.get(message.get("id"))  # type: ignore[arg-type]
-                    if future is not None and not future.done():
-                        future.set_result(message)
+                if isinstance(message, dict):
+                    await self._handle(state, message)
         except (StreamClosed, ConnectionError):
             pass
-        for future in state.pending.values():
-            if not future.done():
-                future.set_result({"error": {"code": -1, "message": "the app server closed the connection"}})
-        if not state.stopping:
-            state.queue.put_nowait(StaffEvent(EventKind.TURN_FAILED, _now(), {"failure": "side channel lost: the connection to Codex's app server closed"}))
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
+        except Exception as exc:  # noqa: BLE001 — the channel is gone either way; the reason is the member's error
+            logger.warning("reading codex's app server failed", exc_info=True)
+            why = f"reading Codex's app server failed: {exc}"
+        finally:
+            for future in state.pending.values():
+                if not future.done():
+                    future.set_result({"error": {"code": -1, "message": why}})
+            if not state.stopping and not cancelled:
+                state.queue.put_nowait(StaffEvent(EventKind.TURN_FAILED, _now(), {"failure": f"side channel lost: {why}"}))
+
+    async def _handle(self, state: _Launch, message: dict[str, Any]) -> None:
+        """One message from the app server. One the adapter cannot read is logged and skipped: a
+        single malformed notification must not cost the member its channel."""
+        method = message.get("method")
+        params = message.get("params")
+        try:
+            if method is not None and params is not None and not isinstance(params, dict):
+                raise TypeError(f"params of {method} are {type(params).__name__}, not an object")
+            if method is not None and "id" in message:
+                await self._server_request(state, message)
+            elif method is not None:
+                self._notification(state, str(method), params or {})
+            else:
+                future = state.pending.get(message.get("id"))  # type: ignore[arg-type]
+                if future is not None and not future.done():
+                    future.set_result(message)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 — see the description
+            logger.warning("a %s message from codex's app server could not be handled; skipped", method or "reply", exc_info=True)
+            if method is not None and "id" in message:
+                # Unanswered, the request would hold the turn for good.
+                with contextlib.suppress(Exception):
+                    await self._respond(state, message["id"], error={"code": -32603, "message": f"{method} could not be read by this client"})
 
     def _put(self, state: _Launch, kind: EventKind, payload: Mapping[str, Any] | None = None, native_id: str = "") -> None:
         if kind is EventKind.ACTIVITY and not state.turn_id:
@@ -544,9 +648,14 @@ class CodexAdapter:
             state.requests[ref] = _Request(message["id"], method, params)
             self._put(state, EventKind.QUESTION_ASKED, {"tool": "question", "summary": text[:200], "text": text, "options": options}, ref)
         elif method == "mcpServer/elicitation/request":
+            form = _form(params)
             text = str(params.get("message") or "An MCP server asks for input")
+            if form.kind == "url":
+                text += f"\n\n{params.get('url') or ''}".rstrip()
+            elif form.kind == "terminal":
+                text += "\n\nThis form can only be filled in Codex's terminal; here it can only be declined."
             state.requests[ref] = _Request(message["id"], method, params)
-            self._put(state, EventKind.QUESTION_ASKED, {"tool": "elicitation", "summary": text[:200], "text": text, "options": ["accept", "decline"]}, ref)
+            self._put(state, EventKind.QUESTION_ASKED, {"tool": "elicitation", "summary": text[:200], "text": text, "options": list(form.options)}, ref)
         else:
             await self._respond(state, message["id"], error={"code": -32601, "message": f"{method} is not handled by this client"})
 
@@ -560,10 +669,12 @@ class CodexAdapter:
             state.last_message = ""
             self._put(state, EventKind.TURN_STARTED, {"turn": state.turn_id})
         elif method in ("item/started", "item/completed"):
-            self._item(state, method == "item/started", params.get("item") or {})
+            item = params.get("item")
+            self._item(state, method == "item/started", item if isinstance(item, dict) else {})
         elif method == "error":
             if not params.get("willRetry"):
-                state.failure = str((params.get("error") or {}).get("message") or "")
+                error = params.get("error")
+                state.failure = str(error.get("message") or "") if isinstance(error, dict) else str(error or "")
         elif method == "turn/completed":
             self._turn_completed(state, params.get("turn") or {})
         elif method == "serverRequest/resolved":
@@ -575,8 +686,37 @@ class CodexAdapter:
                     self._put(state, EventKind.REQUEST_RESOLVED, {}, ref)
         elif method == "thread/status/changed":
             self._status(state, params.get("status") or {})
+        elif method == "account/rateLimits/updated":
+            limits = params.get("rateLimits")
+            state.rate_limits = limits if isinstance(limits, dict) else {}
+            windows = [state.rate_limits.get(name) for name in ("primary", "secondary")]
+            readings = [[int(w.get("windowDurationMins") or 0), float(w["usedPercent"])] for w in windows if isinstance(w, dict) and isinstance(w.get("usedPercent"), int | float)]
+            if readings:
+                self._put(state, EventKind.USAGE, {"windows": readings})
+        elif method == "thread/tokenUsage/updated":
+            self._token_usage(state, params.get("tokenUsage"))
         else:
             self._put(state, EventKind.ACTIVITY, {"method": method})
+
+    def _token_usage(self, state: _Launch, usage: Any) -> None:
+        """The thread's spend after a model call, as the board shows it: the whole prompt sent so
+        far (the cached part included, as the transcript counts it), the output, the cached part,
+        and the last call's prompt against the window. Codex sends one after every call of a turn;
+        read only from the rollout after the turn, the numbers stood still while the member worked."""
+        if not isinstance(usage, dict):
+            return
+        total = usage.get("total") if isinstance(usage.get("total"), dict) else {}
+        last = usage.get("last") if isinstance(usage.get("last"), dict) else {}
+        assert isinstance(total, dict) and isinstance(last, dict)
+        reading = {
+            "input_tokens": int(total.get("inputTokens") or 0),
+            "output_tokens": int(total.get("outputTokens") or 0),
+            "cache_read_tokens": int(total.get("cachedInputTokens") or 0),
+            "context_tokens": int(last.get("inputTokens") or 0),
+            "context_window": int(usage.get("modelContextWindow") or 0),
+        }
+        if any(reading.values()):
+            self._put(state, EventKind.USAGE, reading)
 
     def _item(self, state: _Launch, started: bool, item: Mapping[str, Any]) -> None:
         kind = str(item.get("type") or "")
@@ -624,7 +764,14 @@ class CodexAdapter:
         elif status == "failed":
             error = turn.get("error") or {}
             failure = str(error.get("message") or state.failure or "the turn failed") if isinstance(error, dict) else state.failure or "the turn failed"
-            self._put(state, EventKind.TURN_FAILED, {"failure": failure, "code": str(error.get("codexErrorInfo") or "") if isinstance(error, dict) else ""})
+            code = _error_tag(error.get("codexErrorInfo")) if isinstance(error, dict) else ""
+            payload: dict[str, Any] = {"failure": failure, "code": code}
+            if code in OUTAGES:
+                payload["outage"] = True
+                resets = _resets_at(state.rate_limits) if code in QUOTAS else ""
+                if resets:
+                    payload["resets_at"] = resets
+            self._put(state, EventKind.TURN_FAILED, payload)
         else:
             self._put(state, EventKind.TURN_COMPLETED, {"last_message": state.last_message})
 
@@ -698,7 +845,7 @@ class CodexAdapter:
             chosen = answer.said
             result = {"answers": {str(q.get("id") or ""): {"answers": [chosen]} for q in request.params.get("questions") or [] if isinstance(q, dict)}}
         else:
-            result = {"action": "accept" if answer.choice in ("accept", "allow_once", "allow_always") else "decline", "content": None}
+            result = _form(request.params).answer(answer)
         request.ours = True
         await self._respond(state, request.rpc_id, result)
         with contextlib.suppress(TimeoutError):
@@ -711,9 +858,16 @@ class CodexAdapter:
         if state.turn_id:
             with contextlib.suppress(Exception):
                 await self._call(state, "turn/interrupt", {"threadId": state.thread_id, "turnId": state.turn_id}, timeout=5)
-        screen = await term.screen()
-        if self.classify_screen(screen) is ScreenClass.DIALOG:
-            return  # typing would answer the dialog; the runtime ends the terminal after its grace
+        # Never type into a dialog: Enter chooses its highlighted row, which on an approval is "Yes,
+        # proceed". Esc is the dialog's own way out (an approval's "No", an MCP request's cancel); a
+        # dialog that will not go is left for the runtime to end with the terminal after its grace.
+        for _ in range(DISMISS_ATTEMPTS):
+            if self.classify_screen(await term.screen()) is not ScreenClass.DIALOG:
+                break
+            await term.write(keys=["Esc"])
+            await asyncio.sleep(0.3)
+        else:
+            return
         await term.write(text="/exit")
         await asyncio.sleep(0.3)
         await term.write(keys=["Enter"])
@@ -754,6 +908,91 @@ class CodexAdapter:
         return parse_rollout(text)[since:]
 
 
+def _error_tag(info: Any) -> str:
+    """A ``codexErrorInfo`` as one name: a string as it is, an object by its one key
+    (``{"httpConnectionFailed": {"httpStatusCode": 502}}``). Stringified whole, an object was a
+    Python dict's repr, which nothing could match."""
+    if isinstance(info, str):
+        return info
+    if isinstance(info, dict) and len(info) == 1:
+        return str(next(iter(info)))
+    return ""
+
+
+def _resets_at(limits: Mapping[str, Any]) -> str:
+    """When the exhausted rate-limit window resets, as an ISO time; empty when no window is full or
+    none says. Codex gives ``resetsAt`` in seconds since the epoch; of two full windows the later
+    reset is the one that ends the wait."""
+    resets = []
+    for name in ("primary", "secondary"):
+        window = limits.get(name)
+        if isinstance(window, dict) and float(window.get("usedPercent") or 0) >= 100 and isinstance(window.get("resetsAt"), int | float):
+            resets.append(float(window["resetsAt"]))
+    return datetime.fromtimestamp(max(resets), UTC).isoformat() if resets else ""
+
+
+ACCEPTING = ("accept", "allow_once", "allow_always")
+DECLINED = {"action": "decline", "content": None}
+
+
+@dataclass(frozen=True, slots=True)
+class _Form:
+    """What an MCP elicitation asks for, as far as a question to the team can carry it.
+
+    ``kind`` is ``url`` (a page to open; accepting carries no content), ``empty`` (a form with no
+    fields), ``choice`` and ``text`` (one field, filled with the option chosen or the words
+    written), or ``terminal`` (anything more, which only Codex's own form can fill). An accept with
+    no content once answered every form, and a server that requires its fields was handed none."""
+
+    kind: str
+    name: str = ""
+    """The one field's name, for ``choice`` and ``text``."""
+    values: Mapping[str, str] = field(default_factory=dict)
+    """For ``choice``: each option's label to the value it stands for."""
+
+    @property
+    def options(self) -> tuple[str, ...]:
+        if self.kind in ("url", "empty"):
+            return ("accept", "decline")
+        return (*self.values, "decline")
+
+    def answer(self, answer: Answer) -> dict[str, Any]:
+        if answer.choice in ("decline", "deny", "deny_with_note"):
+            return DECLINED
+        if self.kind == "url" and answer.choice in ACCEPTING:
+            return {"action": "accept", "content": None}
+        if self.kind == "empty" and answer.choice in ACCEPTING:
+            return {"action": "accept", "content": {}}
+        if self.kind == "choice" and answer.choice in self.values:
+            return {"action": "accept", "content": {self.name: self.values[answer.choice]}}
+        if self.kind == "text" and answer.choice not in ACCEPTING and answer.said.strip():
+            return {"action": "accept", "content": {self.name: answer.said.strip()}}
+        return DECLINED
+
+
+def _form(params: Mapping[str, Any]) -> _Form:
+    if params.get("mode") == "url":
+        return _Form("url")
+    schema = params.get("requestedSchema")
+    properties = schema.get("properties") if isinstance(schema, dict) else None
+    if not isinstance(properties, dict) or not properties:
+        return _Form("empty") if isinstance(properties, dict) else _Form("terminal")
+    if len(properties) != 1:
+        return _Form("terminal")
+    [(name, spec)] = properties.items()
+    if not isinstance(spec, dict):
+        return _Form("terminal")
+    labelled = [(str(o.get("title") or o.get("const")), str(o.get("const"))) for o in spec.get("oneOf") or [] if isinstance(o, dict) and o.get("const") is not None]
+    if not labelled and isinstance(spec.get("enum"), list):
+        names = spec.get("enumNames") if isinstance(spec.get("enumNames"), list) else []
+        labelled = [(str(names[i]) if i < len(names) else str(v), str(v)) for i, v in enumerate(spec["enum"])]
+    if labelled:
+        return _Form("choice", str(name), dict(labelled))
+    if spec.get("type") == "string":
+        return _Form("text", str(name))
+    return _Form("terminal")
+
+
 def _highlighted(screen: str) -> str:
     for line in reversed(screen.splitlines()):
         stripped = line.strip()
@@ -762,9 +1001,9 @@ def _highlighted(screen: str) -> str:
     return ""
 
 
-def _last_line_with(screen: str, word: str) -> str:
+def _last_line_with(screen: str, word: str, *, any_case: bool = False) -> str:
     for line in reversed(screen.splitlines()):
-        if word in line:
+        if word in (line.lower() if any_case else line):
             return line.strip()[:300]
     return ""
 
@@ -800,7 +1039,7 @@ def parse_rollout(text: str) -> list[Turn]:
             role = payload.get("role")
             words = "".join(str(c.get("text") or "") for c in payload.get("content") or [] if isinstance(c, dict) and c.get("type") in ("input_text", "output_text", "text")).strip()
             if role == "user":
-                if not words or words.startswith(STARTUP_NOISE):
+                if not words or words.startswith(INJECTED):
                     continue
                 close()
                 turns.append(Turn(len(turns), "orchestrator" if words.startswith("[orchestrator]") else "user", words, started_at=at, ended_at=at))

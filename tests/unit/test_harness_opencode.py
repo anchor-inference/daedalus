@@ -310,3 +310,25 @@ async def test_the_self_check_runs_an_opencode_session_through_every_channel(set
         result = await session_check(adapter, s.terminals, lambda: s.harness, env, "", True)
         assert result.ok, result.steps
         assert [step.name for step in result.steps] == ["launch", "ready", "team", "deliver", "reply", "exit"]
+
+
+def test_a_malformed_event_is_skipped_and_the_stream_goes_on() -> None:
+    # One event with a string where an object belongs raised out of the event loop, the stream
+    # closed, and the launch failed with "'str' object has no attribute 'get'".
+    adapter = OpenCodeAdapter()
+    state = _Launch(session="s1")
+    for event in [
+        {"type": "session.status", "properties": {"sessionID": "s1", "status": {"type": "busy"}}},
+        {"type": "session.error", "properties": {"sessionID": "s1", "error": "boom"}},
+        {"type": "message.updated", "properties": {"info": "x"}},
+        {"type": "message.part.updated", "properties": {"part": ["x"]}},
+        {"type": "permission.asked", "properties": {"sessionID": "s1", "id": "per_1", "metadata": "x", "patterns": 5}},
+        {"type": "session.status", "properties": "busy"},
+        "not an event",
+        {"type": "session.idle", "properties": {"sessionID": "s1"}},
+    ]:
+        adapter._handle(state, event)
+    events = drain(state)
+    assert [e.kind for e in events][0] is EventKind.TURN_STARTED
+    [failed] = [e for e in events if e.kind is EventKind.TURN_FAILED]
+    assert failed.payload["failure"] == "boom"

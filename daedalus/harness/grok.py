@@ -74,6 +74,7 @@ from daedalus.harness.contract import (
     Turn,
     TurnUsage,
     UpdateResult,
+    mapped,
 )
 from daedalus.harness.edits import edited_paths
 from daedalus.harness.tools import tooling
@@ -334,7 +335,7 @@ class GrokAdapter:
                 if isinstance(item, StaffEvent):
                     yield item
                     continue
-                for event in self._map(state, item):
+                for event in mapped(lambda post=item: self._map(state, post), item):
                     yield event
         finally:
             feeder.cancel()

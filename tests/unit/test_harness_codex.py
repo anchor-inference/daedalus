@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -75,6 +76,9 @@ def test_the_adapter_is_registered_and_its_plan_runs_the_server_beside_the_tui()
     tui = overrides(plan.argv[6:])
     assert tui == {"check_for_update_on_startup": False, "notice": {"hide_rate_limit_model_nudge": True}}
     assert plan.files[SKILL_FILE].startswith(b"---\nname: daedalus-team") and plan.first_prompt_via == "channel" and plan.session_ref == ""
+    # A staff server never enrols with the remote-control relay, whatever the operator chose for
+    # this Codex home: the variable starts it with remote control off and changes no stored choice.
+    assert server.env == {"CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED": "1"}
 
 
 def test_modes_follow_the_projects_autonomy_and_a_resume_names_the_thread() -> None:
@@ -131,7 +135,8 @@ async def test_resume_requires_the_server_to_confirm_the_thread(monkeypatch: pyt
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await task
-    assert calls == ["initialize", "thread/resume"]
+    # The member names a model and no effort: the effort is read from the operator's configuration.
+    assert calls == ["initialize", "config/read", "thread/resume"]
     assert files == [] and state.thread_id == "" and state.queue.empty()
 
 
@@ -158,6 +163,45 @@ def test_the_readiness_gate_and_the_screen_reading_on_the_real_screens() -> None
     assert adapter.classify_screen(screen("resumed-idle")) is ScreenClass.IDLE_COMPOSER
     assert adapter.classify_screen(update) is ScreenClass.DIALOG
     assert adapter.classify_screen(screen("rate-limit-nudge")) is ScreenClass.DIALOG
+
+
+# What Codex 0.163's TUI draws, by its source: the folder-trust question
+# (tui/src/onboarding/trust_directory.rs), the approval overlay's titles
+# (tui/src/bottom_pane/approval_overlay.rs) and an MCP server's request (mcp_server_elicitation.rs).
+DIALOGS_0163 = (
+    "> Trust this folder? Codex can read, edit, and run files here, subject to your approval settings.",
+    "  Would you like to run the following command?",
+    "  Would you like to make the following edits?",
+    "  Would you like to grant these permissions?",
+    '  Do you want to approve network access to "registry.npmjs.org"?',
+    "  Would you like to send input to terminal 4?",
+    "  Would you like to send input to the existing terminal?",
+    "  mail needs your approval.",
+    "  › 1. Allow this request and continue",
+)
+
+
+@pytest.mark.parametrize("title", DIALOGS_0163)
+def test_every_dialog_of_codex_0163_is_read_as_a_dialog(title: str) -> None:
+    drawn = "\n".join(["• Working on it", "", title, "", "› 1. Yes, proceed (y)", "  2. No, and tell Codex what to do differently (esc)", "", "  enter to confirm   esc to cancel"])
+    assert CodexAdapter().classify_screen(drawn) is ScreenClass.DIALOG
+
+
+def test_the_busy_line_is_read_whatever_key_interrupts() -> None:
+    adapter = CodexAdapter()
+    # The interrupt key is drawn from the operator's key map since 0.163; Esc is only the default.
+    for line in ("• Working (0s • esc to interrupt)", "• Working (12s • ctrl+g to interrupt)"):
+        assert adapter.classify_screen(f"› earlier prompt\n\n{line}") is ScreenClass.BUSY
+
+
+@pytest.mark.parametrize("said", [
+    # How the TUI reports it (tui/src/lib.rs wraps the client's own error, app-server-client/src/remote.rs).
+    "Error: failed to connect to remote app server\n\nCaused by:\n    failed to connect to remote app server at `unix:///tmp/d/codex.sock`: No such file or directory (os error 2)",
+    "failed to connect to remote app server at `unix:///tmp/d/codex.sock`: Connection refused (os error 111)",
+])
+def test_a_tui_that_cannot_reach_its_app_server_fails_the_start(said: str) -> None:
+    step = CodexAdapter().readiness(said)
+    assert step.action == "fail" and "failed to connect to remote app server" in step.reason
 
 
 def drain(state: _Launch) -> list[StaffEvent]:
@@ -362,11 +406,75 @@ async def test_after_a_host_restart_the_thread_is_taken_up_again(settings: Setti
         assert texts.count("echo:once only") == 1 and texts.count("echo:still to go") == 1
 
 
+async def test_stopping_a_member_with_an_approval_on_screen_dismisses_it_and_never_answers_it_yes(settings: Settings, db: Database) -> None:
+    # Typing /exit and Enter into an approval dialog chose its highlighted first row, "Yes, proceed".
+    # A dialog the screen reading did not know (network access, here) got exactly that.
+    async with stand(settings, db, extra_env={"FAKE_CODEX_APPROVALS": "all"}, stop_grace_s=8.0, **codex()) as s:
+        ada = await started(s, "net:registry.npmjs.org")
+        await s.status_event(ada, "permission")
+        row = await s.session_row(ada)
+        assert (await s.terminals.wait_for(row.terminal_id, regex="Do you want to approve network access", timeout=10))["matched"] == "regex"
+        assert await s.team.release(ada)
+        answered = [e for e in read_log(s.log) if e["event"] == "dialog_answered"]
+        assert answered == [], answered
+        assert [e["kind"] for e in read_log(s.log) if e["event"] == "dialog_escaped"] == ["permission"]
+        # Dismissed, the dialog let the TUI take its /exit: it left on its own, not killed at the grace.
+        assert (await s.terminals.get(row.terminal_id))["exit_code"] == 0
+
+
+async def test_a_member_without_a_model_of_its_own_runs_on_the_operators_configured_one(settings: Settings, db: Database) -> None:
+    # A member hired without a model or an effort ran on whatever Codex's own default was, which
+    # 0.161 turned into a new model at "low". The thread now starts with both named, from the
+    # operator's Codex configuration where the member names neither.
+    async with stand(settings, db, **codex()) as s:
+        (s.home / ".codex").mkdir(exist_ok=True)
+        (s.home / ".codex" / "config.toml").write_text('model = "gpt-6-sol"\nmodel_reasoning_effort = "high"\n', encoding="utf-8")
+        ada = await started(s, "echo:the menu is written")
+        await s.status_event(ada, "turn_done_unseen")
+        [thread] = log(s, "thread_started")
+        assert thread["model"] == "gpt-6-sol" and thread["config"] == {"model_reasoning_effort": "high"}
+        # And the server itself was started with remote control off.
+        [listening] = log(s, "app_server_started")
+        assert listening["remote_control"] is False
+
+
 async def test_a_failed_turn_is_an_error_in_codexs_words(settings: Settings, db: Database) -> None:
     async with stand(settings, db, **codex()) as s:
         ada = await started(s, "fail:usageLimitExceeded")
         failed = await s.status_event(ada, "error")
         assert "usageLimitExceeded" in failed.payload["detail"]
+
+
+async def test_a_member_out_of_quota_is_paused_and_takes_its_work_up_again_once_the_window_resets(settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A member that hit its ChatGPT usage limit was simply "failed", and stayed so until someone
+    # wrote to it, while the host's own sessions wait out an outage and drive the turn again.
+    from daedalus.harness import runtime as runtime_module
+
+    monkeypatch.setattr(runtime_module, "RESET_SLACK_S", 0.0)
+    async with stand(settings, db, extra_env={"FAKE_CODEX_RESET_S": "1.5"}, **codex()) as s:
+        ada = await started(s, "fail:usageLimitExceeded")
+        paused = await s.status_event(ada, "error")
+        assert paused.payload["detail"].startswith("paused until ") and "usageLimitExceeded" in paused.payload["detail"]
+        await s.status_event(ada, "turn_done_unseen", timeout=30)
+        assert await s.statuses(ada) == ["starting", "working", "error", "working", "turn_done_unseen"]
+        live = await s.team.live((await s.session_row(ada)).id)
+        said = [t.text for t in await s.runtime.turns(live) if t.role == "user"]  # type: ignore[arg-type]
+        assert any("usage limit" in text and "continue" in text for text in said), said
+
+
+async def test_a_member_whose_provider_keeps_failing_is_resumed_only_so_many_times(settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    from daedalus.harness import runtime as runtime_module
+
+    monkeypatch.setattr(runtime_module, "OUTAGE_NOTE", "[orchestrator] fail:serverOverloaded")
+    async with stand(settings, db, outage_retry_attempts=2, outage_retry_base_s=0.2, outage_retry_max_s=0.2, **codex()) as s:
+        ada = await started(s, "fail:serverOverloaded")
+
+        async def given_up() -> bool:
+            errors = [e for e in await s.events("staff.status", staff_id=ada.id) if e.payload["status"] == "error"]
+            return any("not resumed" in e.payload["detail"] for e in errors)
+
+        await eventually(given_up, "the third failure in a row is left failed", timeout=30)
+        assert (await s.statuses(ada)).count("error") == 3
 
 
 async def test_a_codex_that_leaves_a_link_at_its_socket_is_reached_through_it(settings: Settings, db: Database) -> None:
@@ -437,3 +545,225 @@ async def test_installing_the_extension_registers_the_codex_and_opencode_runtime
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+
+
+# -- MCP elicitations -------------------------------------------------------------------------------
+
+
+class Sent:
+    """The adapter's socket, keeping what it sent."""
+
+    def __init__(self) -> None:
+        self.messages: list[dict[str, Any]] = []
+
+    async def send_text(self, text: str) -> None:
+        self.messages.append(json.loads(text))
+
+
+def elicitation(**request: Any) -> dict[str, Any]:
+    return {"id": 7, "method": "mcpServer/elicitation/request", "params": {"threadId": "t1", "turnId": "u1", "serverName": "mail", **request}}
+
+
+@pytest.mark.parametrize(
+    ("request_", "options", "answer", "result"),
+    [
+        # A form that asks for nothing is accepted with an empty object.
+        ({"mode": "form", "message": "Proceed?", "requestedSchema": {"type": "object", "properties": {}}}, ["accept", "decline"], ("accept", ""), {"action": "accept", "content": {}}),
+        # One choice: its options are the question's, and the chosen one is the field's value.
+        ({"mode": "form", "message": "Which folder?", "requestedSchema": {"type": "object", "properties": {"folder": {"type": "string", "oneOf": [{"const": "in", "title": "Inbox"}, {"const": "arch", "title": "Archive"}]}}, "required": ["folder"]}},
+         ["Inbox", "Archive", "decline"], ("Archive", ""), {"action": "accept", "content": {"folder": "arch"}}),
+        # One line of text: the words written are the field's value.
+        ({"mode": "form", "message": "Subject?", "requestedSchema": {"type": "object", "properties": {"subject": {"type": "string"}}, "required": ["subject"]}}, ["decline"], ("text", "Weekly report"), {"action": "accept", "content": {"subject": "Weekly report"}}),
+        # A form the host cannot fill is never accepted with nothing in it: it is declined, and the
+        # question says it can be filled in Codex's terminal, which shows the same form.
+        ({"mode": "form", "message": "Your address", "requestedSchema": {"type": "object", "properties": {"street": {"type": "string"}, "zip": {"type": "integer"}}, "required": ["street", "zip"]}}, ["decline"], ("accept", ""), {"action": "decline", "content": None}),
+        # A page to open: accepting it carries no content.
+        ({"mode": "url", "message": "Sign in to the mail service", "url": "https://mail.example/auth", "elicitationId": "e1"}, ["accept", "decline"], ("accept", ""), {"action": "accept", "content": None}),
+        ({"mode": "form", "message": "Subject?", "requestedSchema": {"type": "object", "properties": {"subject": {"type": "string"}}, "required": ["subject"]}}, ["decline"], ("decline", ""), {"action": "decline", "content": None}),
+    ],
+)
+async def test_an_elicitation_is_answered_only_with_what_its_form_asks_for(monkeypatch: pytest.MonkeyPatch, request_: dict[str, Any], options: list[str], answer: tuple[str, str], result: dict[str, Any]) -> None:
+    from daedalus.harness import codex as codex_module
+    from daedalus.harness.contract import Answer
+
+    monkeypatch.setattr(codex_module, "ANSWER_CONFIRM_S", 0.01)
+    adapter = CodexAdapter()
+    socket = Sent()
+    term = SimpleNamespace(id="term-1")
+    state = adapter._state(term)  # type: ignore[arg-type]
+    state.thread_id, state.turn_id, state.socket = "t1", "u1", socket  # type: ignore[assignment]
+    await adapter._server_request(state, elicitation(**request_))
+    [asked] = drain(state)
+    assert asked.kind is EventKind.QUESTION_ASKED and asked.payload["options"] == options
+    if request_.get("mode") == "url":
+        assert "https://mail.example/auth" in asked.payload["text"]
+    # Only the form nobody here can fill sends the reader to the terminal.
+    assert ("terminal" in asked.payload["text"]) is (options == ["decline"] and answer[0] == "accept")
+    await adapter.answer(term, asked.native_id, Answer(answer[0], note=answer[1]))  # type: ignore[arg-type]
+    assert socket.messages == [{"id": 7, "result": result}]
+
+
+# -- the side channel -------------------------------------------------------------------------------
+
+
+class Received:
+    """The adapter's socket, saying the given messages and then ending as ``end`` says."""
+
+    def __init__(self, messages: list[Any], end: BaseException | None = None) -> None:
+        self.messages = [m if isinstance(m, str) else json.dumps(m) for m in messages]
+        self.end = end
+
+    async def receive(self) -> str | None:
+        await asyncio.sleep(0)
+        if self.messages:
+            return self.messages.pop(0)
+        if self.end is not None:
+            raise self.end
+        return None
+
+
+async def test_a_malformed_message_is_skipped_and_the_side_channel_goes_on() -> None:
+    # A notification whose params were not the expected object raised in the reader, which ended
+    # without a word: no "side channel lost", and the calls waiting on an answer waited out their
+    # thirty seconds.
+    adapter = CodexAdapter()
+    state = _Launch(thread_id="t1")
+    state.socket = Received([  # type: ignore[assignment]
+        {"method": "turn/started", "params": {"threadId": "t1", "turn": {"id": "u1"}}},
+        {"method": "turn/started", "params": ["x"]},
+        {"method": "error", "params": {"threadId": "t1", "error": "boom"}},
+        {"method": "item/completed", "params": {"threadId": "t1", "item": "x"}},
+        {"id": 9, "method": "item/commandExecution/requestApproval", "params": "x"},
+        {"method": "turn/completed", "params": {"threadId": "t1", "turn": {"id": "u1", "status": "failed", "error": None}}},
+    ])
+    await adapter._read(state)
+    events = drain(state)
+    failures = [e.payload["failure"] for e in events if e.kind is EventKind.TURN_FAILED]
+    assert failures == ["boom", "side channel lost: the connection to Codex's app server closed"]
+
+
+async def test_a_side_channel_lost_to_an_unexpected_failure_says_so_and_fails_the_waiting_calls() -> None:
+    adapter = CodexAdapter()
+    state = _Launch(thread_id="t1")
+    state.socket = Received([], end=ValueError("a frame that is not WebSocket"))  # type: ignore[assignment]
+    waiting: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+    state.pending[3] = waiting
+    await adapter._read(state)
+    assert waiting.done() and "error" in waiting.result()
+    [lost] = drain(state)
+    assert lost.kind is EventKind.TURN_FAILED and lost.payload["failure"].startswith("side channel lost") and "not WebSocket" in lost.payload["failure"]
+
+
+# -- what Codex writes into the conversation for its model ------------------------------------------
+
+
+@pytest.mark.parametrize("text", [
+    "<turn_aborted>\nThe user interrupted the previous turn on purpose.\n</turn_aborted>",
+    "<subagent_notification>\n{\"agent_id\":\"a1\",\"status\":\"completed\"}\n</subagent_notification>",
+    "<user_shell_command>\n<command>ls</command>\n</user_shell_command>",
+    "<realtime_delegation>\n<input>book it</input>\n</realtime_delegation>",
+    "<codex_internal_context source=\"user_goal\">ship it</codex_internal_context>",
+    "  <environment_context>\n  <cwd>/work</cwd>\n</environment_context>",
+    "<external_calendar>today</external_calendar>",
+    "<hook_prompt hook_run_id=\"h1\">check the build</hook_prompt>",
+    "Warning: The maximum number of unified exec processes you can keep open is 8.",
+])
+def test_what_codex_injects_as_a_user_message_is_not_an_operator_turn(text: str) -> None:
+    # After the orchestrator interrupted a Codex member, its transcript showed a "user" message
+    # <turn_aborted>… that nobody typed.
+    lines = [
+        {"type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": text}]}},
+        {"type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "[orchestrator] go on"}]}},
+    ]
+    turns = parse_rollout("\n".join(json.dumps(line) for line in lines))
+    assert [t.text for t in turns] == ["[orchestrator] go on"]
+
+
+def test_the_host_and_the_terminal_daemon_skip_the_same_injected_fragments() -> None:
+    # Two readers of one rollout format, the staff transcript here and the session import in the
+    # daemon, each kept a list of its own, and the host's had fallen to six entries of eighteen.
+    import re
+
+    from daedalus.harness.codex import INJECTED
+
+    source = (Path(__file__).resolve().parents[2] / "ptyd" / "internal" / "sidechan" / "sessions" / "codex.go").read_text(encoding="utf-8")
+    block = re.search(r"var codexNoise = \[\]string\{(.*?)\}\n", source, re.S)
+    assert block is not None
+    daemon = tuple(json.loads(f"[{block.group(1).strip().rstrip(',')}]"))
+    assert daemon == INJECTED
+
+
+# -- a member out of quota --------------------------------------------------------------------------
+
+
+def test_a_turn_refused_for_quota_says_so_with_the_reset_codex_reported() -> None:
+    adapter = CodexAdapter()
+    state = _Launch(thread_id="t1")
+    resets = 1_790_000_000
+    adapter._notification(state, "account/rateLimits/updated", {"rateLimits": {"primary": {"usedPercent": 100, "windowDurationMins": 300, "resetsAt": resets}, "secondary": {"usedPercent": 40, "windowDurationMins": 10080, "resetsAt": resets + 86400}}})
+    adapter._notification(state, "turn/started", {"threadId": "t1", "turn": {"id": "u1"}})
+    adapter._notification(state, "turn/completed", {"threadId": "t1", "turn": {"id": "u1", "status": "failed", "error": {"message": "You've hit your usage limit.", "codexErrorInfo": "usageLimitExceeded"}}})
+    [failed] = [e for e in drain(state) if e.kind is EventKind.TURN_FAILED]
+    # The account, not the work, failed: the runtime pauses the member until the window resets.
+    assert failed.payload["code"] == "usageLimitExceeded" and failed.payload["outage"] is True
+    assert failed.payload["resets_at"] == datetime.fromtimestamp(resets, UTC).isoformat()
+
+
+def test_an_error_info_given_as_an_object_is_named_by_its_key_and_is_no_outage() -> None:
+    adapter = CodexAdapter()
+    state = _Launch(thread_id="t1")
+    adapter._notification(state, "turn/started", {"threadId": "t1", "turn": {"id": "u1"}})
+    adapter._notification(state, "turn/completed", {"threadId": "t1", "turn": {"id": "u1", "status": "failed", "error": {"message": "unauthorized", "codexErrorInfo": {"httpConnectionFailed": {"httpStatusCode": 401}}}}})
+    [failed] = [e for e in drain(state) if e.kind is EventKind.TURN_FAILED]
+    # Once the dict's repr, "{'httpConnectionFailed': {'httpStatusCode': 401}}", which nothing could match.
+    assert failed.payload["code"] == "httpConnectionFailed" and not failed.payload.get("outage")
+    overloaded = _Launch(thread_id="t1")
+    adapter._notification(overloaded, "turn/started", {"threadId": "t1", "turn": {"id": "u2"}})
+    adapter._notification(overloaded, "turn/completed", {"threadId": "t1", "turn": {"id": "u2", "status": "failed", "error": {"message": "busy", "codexErrorInfo": "serverOverloaded"}}})
+    [busy] = [e for e in drain(overloaded) if e.kind is EventKind.TURN_FAILED]
+    assert busy.payload["outage"] is True and "resets_at" not in busy.payload
+
+
+# -- live usage -------------------------------------------------------------------------------------
+
+
+def test_token_counts_and_rate_limits_are_reported_as_they_arrive() -> None:
+    adapter = CodexAdapter()
+    state = _Launch(thread_id="t1")
+    total = {"totalTokens": 5300, "inputTokens": 5000, "cachedInputTokens": 3000, "outputTokens": 300, "reasoningOutputTokens": 40}
+    last = {"totalTokens": 2100, "inputTokens": 2000, "cachedInputTokens": 1500, "outputTokens": 100, "reasoningOutputTokens": 10}
+    # Between turns as well: a reading is not work, and it is never taken for it.
+    adapter._notification(state, "account/rateLimits/updated", {"rateLimits": {"primary": {"usedPercent": 12, "windowDurationMins": 300, "resetsAt": 1_790_000_000}, "secondary": None}})
+    adapter._notification(state, "thread/tokenUsage/updated", {"threadId": "t1", "turnId": "u1", "tokenUsage": {"total": total, "last": last, "modelContextWindow": 258400}})
+    adapter._notification(state, "thread/tokenUsage/updated", {"threadId": "someone-else", "turnId": "u9", "tokenUsage": {"total": total, "last": last}})
+    events = drain(state)
+    assert [e.kind for e in events] == [EventKind.USAGE, EventKind.USAGE]
+    assert events[0].payload == {"windows": [[300, 12.0]]}
+    assert events[1].payload == {"input_tokens": 5000, "output_tokens": 300, "cache_read_tokens": 3000, "context_tokens": 2000, "context_window": 258400}
+
+
+def test_a_zero_reading_never_overwrites_a_number_already_known() -> None:
+    from daedalus.staff_runtime import UsageSnapshot
+
+    known = UsageSnapshot(5000, 300, None, None, "subscription", context_tokens=2000, context_window=258400, windows=((300, 12.0),), replies=3, at="2026-10-20T10:00:00+00:00")
+    windows_only = UsageSnapshot(0, 0, None, None, "subscription", windows=((300, 14.0),), at="2026-10-20T10:05:00+00:00")
+    merged = windows_only.over(known)
+    assert (merged.input_tokens, merged.output_tokens, merged.context_tokens, merged.context_window, merged.replies) == (5000, 300, 2000, 258400, 3)
+    assert merged.windows == ((300, 14.0),) and merged.at == "2026-10-20T10:05:00+00:00"
+    assert UsageSnapshot.from_view(known.view()) == known and UsageSnapshot.from_view({}) is None
+
+
+async def test_a_members_spend_moves_during_its_turn(settings: Settings, db: Database) -> None:
+    # The board's numbers moved only once a turn had ended and its rollout was read.
+    async with stand(settings, db, **codex()) as s:
+        ada = await started(s, "slow:160")
+        await s.status_event(ada, "working")
+        row = await s.session_row(ada)
+
+        async def counted() -> bool:
+            current = await s.manager.staff.session(row.id)
+            return current is not None and int((current.usage or {}).get("input_tokens") or 0) > 0
+
+        await eventually(counted, "tokens counted before the turn ended", timeout=10)
+        assert (await s.session_row(ada)).status == "working"
+        await s.status_event(ada, "turn_done_unseen", timeout=30)

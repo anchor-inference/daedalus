@@ -231,6 +231,8 @@ class CursorAdapter:
                     message = json.loads(line)
                 except ValueError:
                     continue
+                if not isinstance(message, dict):
+                    continue  # one line that is not an object must not end the bridge's channel
                 if message.get("type") == "hello":
                     state.session_id = str(message.get("session_id") or "")
                     state.transcript = str(message.get("transcript") or "")

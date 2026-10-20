@@ -91,13 +91,21 @@ func codexWalk(dir string, depth int, emit func(Candidate)) error {
 	return nil
 }
 
-// codexNoise are the starts of messages the CLI wrote into the conversation for its model: the
-// environment, the instructions files, permission text, the notice that a sub-agent finished.
-// They become notes, not words.
-var codexNoise = []string{"<environment_context", "<recommended_plugins", "<user_instructions", "# AGENTS.md",
+// codexNoise are the starts of messages the CLI wrote into the conversation as the user's, for its
+// model: the environment, the instructions files, skills and plugins, an interrupted turn, a
+// sub-agent's notice, a shell command typed with "!", a goal, a hook's prompt, its own warnings.
+// They become notes, not words. The host's staff transcript keeps the same list (INJECTED in
+// daedalus/harness/codex.py), and a test there holds the two equal.
+var codexNoise = []string{
+	"<environment_context", "<recommended_plugins", "<user_instructions", "# AGENTS.md",
 	"<skills_instructions", "<permissions", "<turn_aborted", "<user_action", "<subagent_notification",
-	"<codex_internal_context", "<collaboration_mode", "<multi_agent", "<model_switch", "<apps_instructions",
-	"<codex_apps", "<external_codex_apps", "<skill>", "<plugins_instructions"}
+	"<codex_internal_context", "<goal_context", "<collaboration_mode", "<multi_agent", "<model_switch",
+	"<apps_instructions", "<codex_apps", "<external_", "<skill>", "<plugins_instructions",
+	"<user_shell_command", "<realtime_delegation", "<hook_prompt",
+	"Warning: apply_patch was requested via ",
+	"Warning: The maximum number of unified exec processes you can keep open is",
+	"Warning: Your account was flagged for potentially high-risk cyber activity",
+}
 
 func codexIsNoise(text string) bool {
 	t := strings.TrimLeft(text, " \n\t")

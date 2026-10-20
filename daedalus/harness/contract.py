@@ -14,12 +14,15 @@ against a fake daemon, and keeps every write to a terminal on the one audited pa
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Collection, Mapping
+import logging
+from collections.abc import AsyncIterator, Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from daedalus.harness.capabilities import Capabilities
+
+logger = logging.getLogger(__name__)
 
 Environment = Literal["container", "host"]
 SendMode = Literal["now", "after_turn", "interrupt"]
@@ -105,8 +108,10 @@ class StaffEvent:
 
     The payload keys the state machine reads: ``summary`` (what a permission or question is about),
     ``failure`` (why a turn failed), ``screen`` (a ``ScreenClass`` value for ``reconciled``),
-    ``exit_code``. ``edited`` (the files a finished tool wrote) is for the edit board. Anything else
-    is for the log and the feed.
+    ``exit_code``. ``edited`` (the files a finished tool wrote) is for the edit board. A failure with
+    ``outage`` was the provider's or the account's, not the work's (a usage limit, an overloaded
+    service): the runtime waits, until ``resets_at`` (an ISO time) when the CLI said, and drives the
+    turn again. Anything else is for the log and the feed.
     """
 
     kind: EventKind
@@ -366,6 +371,18 @@ class HookPost:
     at: str = ""
     reply_id: str | None = None
     hold_ms: int = 0
+
+
+def mapped(map_post: Callable[[], list[StaffEvent]], post: HookPost) -> list[StaffEvent]:
+    """The events ``map_post`` makes of ``post``, or none when it cannot read it, which is logged.
+
+    The hook-driven adapters mapped each post inside the loop that fed the runtime, so one post
+    that raised ended the member's events for good: every later hook reached nobody."""
+    try:
+        return map_post()
+    except Exception:  # noqa: BLE001 — see the description
+        logger.warning("a %s hook post could not be read; skipped", post.name, exc_info=True)
+        return []
 
 
 @dataclass(frozen=True, slots=True)
@@ -671,6 +688,7 @@ __all__ = [
     "Turn",
     "TurnUsage",
     "UpdateResult",
+    "mapped",
     "mcp_server",
     "standing_rule",
 ]

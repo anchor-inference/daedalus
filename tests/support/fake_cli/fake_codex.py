@@ -26,9 +26,10 @@ The app server (``codex app-server --listen unix://<path> [-c key=value]…``):
   ``error``, ``thread/tokenUsage/updated``, ``turn/diff/updated``, ``serverRequest/resolved``.
 - Server requests for decisions: ``item/commandExecution/requestApproval`` (``accept``,
   ``acceptForSession``, ``decline``, ``cancel``) and ``item/tool/requestUserInput``. Which clients
-  receive them is ``FAKE_CODEX_APPROVALS``: ``all`` (the default; every subscribed client, the first
-  answer wins and the others are told ``serverRequest/resolved``) or ``owner`` (only the client that
-  started the thread). The real routing could not be measured: the account was at its usage limit.
+  receive them is ``FAKE_CODEX_APPROVALS``: ``all`` (the default, and what Codex does by its source:
+  every subscribed client, the first answer wins and the others are told ``serverRequest/resolved``)
+  or ``owner`` (only the client that started the thread, as Codex sends only its experimental
+  user-verification request to one connection).
 - The ``fail_at_start`` fault makes the app server print a configuration error and exit with 1.
 - ``FAKE_CODEX_SOCKET=link`` binds the socket in a private directory and leaves a link at the path
   it was told to listen on, as Codex 0.157 and later do.
@@ -194,6 +195,9 @@ class AppServer:
         self.approvals = os.environ.get("FAKE_CODEX_APPROVALS", "all")
         self.faults = Faults.from_env()
         self.turns_done = 0
+        # As Codex does (app-server-transport/src/transport/remote_control/mod.rs): the variable is
+        # read once and taken out of the environment, so nothing the server starts inherits it.
+        self.remote_control = os.environ.pop("CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED", "") != "1"
 
     def say(self, text: str) -> None:
         sys.stdout.write(text + "\r\n")
@@ -221,6 +225,7 @@ class AppServer:
         if bound != self.path:
             os.symlink(bound, self.path)
         self.say(f"codex app-server listening on unix://{self.path}")
+        self.log("app_server_started", remote_control=self.remote_control)
         stop = asyncio.Event()
         loop = asyncio.get_running_loop()
         for sig in (15, 1, 2):
@@ -301,6 +306,7 @@ class AppServer:
         if method == "thread/start":
             thread = Thread(new_id(), str(params.get("cwd") or os.getcwd()), conn, params)
             self.threads[thread.id] = thread
+            self.log("thread_started", by=conn.name, model=params.get("model"), config=params.get("config"))
             if params.get("developerInstructions"):
                 self.log("developer_instructions", text=str(params["developerInstructions"]))
             # Every client hears that a thread started; only its subscribers hear what happens in it.
@@ -453,6 +459,10 @@ class AppServer:
         except TurnFailure as failure:
             outcome = "failed"
             error = {"message": FAILURE_TEXT.get(failure.kind, failure.kind), "codexErrorInfo": failure.kind}
+            if failure.kind in ("usageLimitExceeded", "rateLimitExceeded"):
+                # Codex reports the exhausted window, with its reset, to every client before the
+                # turn ends; ``FAKE_CODEX_RESET_S`` is how far ahead that reset lies.
+                await self.rate_limits(100, time.time() + float(os.environ.get("FAKE_CODEX_RESET_S") or 3600))
             await self.notify(thread, "error", {"threadId": thread.id, "turnId": turn["id"], "error": error, "willRetry": False})
         turn["status"], turn["error"] = outcome, error
         thread.active = None
@@ -468,6 +478,11 @@ class AppServer:
             self.log("exit", code=3, crash=True)
             os._exit(3)
 
+    async def rate_limits(self, used: int, resets_at: float) -> None:
+        """``account/rateLimits/updated``: about the account, so to every client, with no thread."""
+        window = {"usedPercent": used, "windowDurationMins": 300, "resetsAt": int(resets_at)}
+        await self.broadcast("account/rateLimits/updated", {"rateLimits": {"limitId": "codex", "primary": window, "secondary": {"usedPercent": 40, "windowDurationMins": 10080, "resetsAt": int(resets_at) + 86400}}})
+
     async def take_steers(self, thread: Thread, turn: dict[str, Any]) -> None:
         """Steered messages join the running turn between tool calls, each with its own ``clientId``."""
         while thread.steers:
@@ -481,28 +496,34 @@ class AppServer:
         if kind == "echo":
             await pause(0.3)
             await self.item(thread, turn, {"type": "agentMessage", "text": arg})
-        elif kind == "perm":
-            item = {"type": "commandExecution", "id": new_id(), "command": arg, "cwd": thread.cwd, "status": "inProgress", "aggregatedOutput": None, "exitCode": None}
+        elif kind in ("perm", "net"):
+            # ``net:<host>`` is a command that wants the network: the same request, with the host it
+            # would reach, which the TUI asks about in words of its own.
+            command = f"curl -sI https://{arg}" if kind == "net" else arg
+            item = {"type": "commandExecution", "id": new_id(), "command": command, "cwd": thread.cwd, "status": "inProgress", "aggregatedOutput": None, "exitCode": None}
             await self.item(thread, turn, item, completed=False)
             if thread.params.get("approvalPolicy") == "never" or thread.params.get("sandbox") == "danger-full-access":
                 decision = "accept"
             else:
                 await self.status(thread, {"type": "active", "activeFlags": ["waitingOnApproval"]})
-                answer = await self.ask_clients(thread, "item/commandExecution/requestApproval", {"threadId": thread.id, "turnId": turn["id"], "itemId": item["id"], "command": arg, "cwd": thread.cwd, "reason": f"run {arg}"})
+                request = {"threadId": thread.id, "turnId": turn["id"], "itemId": item["id"], "command": command, "cwd": thread.cwd, "reason": f"run {command}"}
+                if kind == "net":
+                    request["networkApprovalContext"] = {"host": arg, "protocol": "https"}
+                answer = await self.ask_clients(thread, "item/commandExecution/requestApproval", request)
                 decision = str(answer.get("decision") or "decline")
                 await self.status(thread, {"type": "active", "activeFlags": []})
             if decision == "cancel":
                 raise asyncio.CancelledError
             if decision in ("accept", "acceptForSession"):
                 await pause(0.2)
-                item.update(status="completed", aggregatedOutput=f"(the fake did not run {arg})", exitCode=0)
+                item.update(status="completed", aggregatedOutput=f"(the fake did not run {command})", exitCode=0)
                 await self.item(thread, turn, item, started=False)
-                await self.notify(thread, "turn/diff/updated", {"threadId": thread.id, "turnId": turn["id"], "diff": f"--- a/fake\n+++ b/fake\n@@\n+{arg}\n"})
-                await self.item(thread, turn, {"type": "agentMessage", "text": f"Ran {arg}."})
+                await self.notify(thread, "turn/diff/updated", {"threadId": thread.id, "turnId": turn["id"], "diff": f"--- a/fake\n+++ b/fake\n@@\n+{command}\n"})
+                await self.item(thread, turn, {"type": "agentMessage", "text": f"Ran {command}."})
             else:
                 item.update(status="declined")
                 await self.item(thread, turn, item, started=False)
-                await self.item(thread, turn, {"type": "agentMessage", "text": f"Understood, I did not run {arg}."})
+                await self.item(thread, turn, {"type": "agentMessage", "text": f"Understood, I did not run {command}."})
         elif kind == "ask":
             spec = ask_arguments(arg)
             await self.status(thread, {"type": "active", "activeFlags": ["waitingOnUserInput"]})
@@ -524,6 +545,9 @@ class AppServer:
                 await pause(0.5)
                 item.update(status="completed", aggregatedOutput=f"line {n}", exitCode=0)
                 await self.item(thread, turn, item, started=False)
+                # As Codex does after every model call of a turn, not only at its end.
+                spent = {"inputTokens": 1200 * n, "cachedInputTokens": 800 * n, "outputTokens": 90 * n, "reasoningOutputTokens": 10 * n, "totalTokens": 1290 * n}
+                await self.notify(thread, "thread/tokenUsage/updated", {"threadId": thread.id, "turnId": turn["id"], "tokenUsage": {"total": spent, "last": {"inputTokens": 1200, "cachedInputTokens": 800, "outputTokens": 90, "reasoningOutputTokens": 10, "totalTokens": 1290}, "modelContextWindow": 258400}})
                 await self.take_steers(thread, turn)
             await self.item(thread, turn, {"type": "agentMessage", "text": f"Worked through {n} files."})
         elif kind == "silent":
@@ -611,7 +635,8 @@ class CodexTui:
             try:
                 self.socket = await Socket.connect(self.path)
             except (OSError, Closed) as exc:
-                self.tui.say(f"■ Failed to connect to the app server at unix://{self.path}: {exc}")
+                # What 0.163 prints (tui/src/lib.rs over app-server-client/src/remote.rs).
+                self.tui.say("Error: failed to connect to remote app server", "", "Caused by:", f"    failed to connect to remote app server at `unix://{self.path}`: {exc}")
                 await asyncio.sleep(0.2)
                 return 1
             asyncio.ensure_future(self.read())
@@ -718,7 +743,10 @@ class CodexTui:
         self.open_requests[message["id"]] = future
         if method == "item/commandExecution/requestApproval":
             meanings = ["accept", "acceptForSession", "decline"]
-            self.tui.open_dialog(Dialog("permission", "Would you like to run the following command?", [f"  $ {params.get('command')}"], ["Yes, proceed", "Yes, and don't ask again for this command", "No, and tell Codex what to do differently"],
+            network = params.get("networkApprovalContext") or {}
+            # The titles 0.163 draws (tui/src/bottom_pane/approval_overlay.rs).
+            title = f'Do you want to approve network access to "{network["host"]}"?' if network.get("host") else "Would you like to run the following command?"
+            self.tui.open_dialog(Dialog("permission", title, [f"  $ {params.get('command')}"], ["Yes, proceed", "Yes, and don't ask again for this command", "No, and tell Codex what to do differently"],
                                         on_choose=lambda i: settle(future, {"decision": meanings[i]}), on_escape=lambda: settle(future, {"decision": "decline"})))
         elif method == "item/tool/requestUserInput":
             question = (params.get("questions") or [{}])[0]

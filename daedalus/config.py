@@ -1789,6 +1789,16 @@ class HarnessConfig(BaseModel):
     shown with its team tools not connected."""
     stop_grace_s: float = Field(default=10.0, ge=0, le=120)
     """Between asking a CLI to exit and killing its terminal."""
+    outage_retry_attempts: int = Field(default=6, ge=0, le=20)
+    """Turns a member's CLI is given again, in a row, after its provider or its account refused one
+    (a usage limit, a rate limit, an overloaded service); 0 leaves such a turn failed."""
+    outage_retry_base_s: float = Field(default=30.0, ge=0.1, le=3600)
+    """The wait before the first of those when the CLI named no reset; it doubles each time up to
+    ``outage_retry_max_s``."""
+    outage_retry_max_s: float = Field(default=600.0, ge=0.1, le=86_400)
+    quota_wait_max_h: float = Field(default=192.0, ge=1, le=744)
+    """The longest a member waits for a usage window the CLI said resets later: a weekly window can
+    be days away, and a reset further out than this is taken for a misreading and not waited for."""
     idle_suspend_minutes: int = Field(default=20, ge=0, le=1440)
     """A command-line member idle this long, with nothing assigned, asked or on its way to it, has
     its CLI stopped and its native session kept; the next message or assignment launches it again on
