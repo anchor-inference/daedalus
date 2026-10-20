@@ -184,6 +184,9 @@ describe("the screen", { timeout: 20_000 }, () => {
       if (url.includes("/policy/similar/")) return new Response(JSON.stringify({ similar: null }));
       if (url.includes("/stream")) return new Response(new ReadableStream({ start() {} }));
       if (url === "/api/panel/modes") return new Response(JSON.stringify({}));
+      if (url === "/api/panel/asr") return new Response(JSON.stringify({ configured: true, reason: "", provider: "local", model: "whisper", max_seconds: 300, autosend: false }));
+      if (url === "/api/panel/settings") return new Response(JSON.stringify({ presets: { opus: { label: "Claude Opus" }, flash: { label: "Flash" } }, providers: {}, model: { preset: "opus" } }));
+      if (url.endsWith("/browser-approvals")) return new Response(JSON.stringify({ mode: "manual", env: "user" }));
       return new Response(JSON.stringify({ ok: true, receipt: { status: "consumed" } }));
     }));
     host = document.createElement("div");
@@ -256,19 +259,32 @@ describe("the screen", { timeout: 20_000 }, () => {
     expect(host.querySelector(".sp-title")?.textContent).toContain("Flights");
   });
 
-  it("starts a new conversation that takes the tab before its first message", async () => {
+  it("starts a new conversation with the app's whole composer: dictation, files, the model, the approvals, the page", async () => {
     listing = { ...listing, sessions: [], consented: false };
     act(() => root.render(<SidePanel />));
     await settle();
     expect(host.querySelector(".sp-consent")?.textContent).toContain("CONSENT");
-    const field = host.querySelector<HTMLTextAreaElement>(".sp-new-field")!;
+    const box = host.querySelector(".sp-new .composer")!;
+    expect(box).not.toBeNull();
+    expect(box.querySelector(".mic")).not.toBeNull();
+    expect(box.querySelector(".iconbtn.plus")).not.toBeNull();
+    expect(box.querySelector(".model-select")?.textContent).toContain("Claude Opus");
+    expect(box.querySelector(".approvals-chip")).not.toBeNull();
+    expect(box.querySelectorAll(".sp-attach .chip").length).toBe(3);
+  });
+
+  it("makes the conversation, gives it the tab and only then sends the first message", async () => {
+    listing = { ...listing, sessions: [], consented: false };
+    act(() => root.render(<SidePanel />));
+    await settle();
+    const field = host.querySelector<HTMLTextAreaElement>(".sp-new .composer textarea")!;
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
       setter.call(field, "find a gift");
       field.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await act(async () => {
-      host.querySelector<HTMLButtonElement>(".sp-new-actions .primary")!.click();
+      host.querySelector<HTMLButtonElement>('.sp-new .composer .roundbtn.primary[data-action="send"]')!.click();
     });
     await settle();
     expect(posted[0]).toEqual({ url: "/api/panel/sessions", body: { title: "find a gift", consent: true } });
@@ -285,7 +301,7 @@ describe("the screen", { timeout: 20_000 }, () => {
     fakeShell.current = { ...fakeShell.current!, hello: { ...fakeShell.current!.hello, show: "new" } };
     act(() => root.render(<SidePanel />));
     await settle();
-    expect(host.querySelector(".sp-new-field")).not.toBeNull();
+    expect(host.querySelector(".sp-new .composer textarea")).not.toBeNull();
     expect(host.querySelector(".sp-new-tab")?.textContent).toContain("Bank");
   });
 });

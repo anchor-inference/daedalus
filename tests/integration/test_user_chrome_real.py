@@ -478,13 +478,13 @@ async def test_the_side_panel_end_to_end(settings: Any, db: Database, site: str,
         )
         panel = await opening
         frame = panel.frame_locator("#frame")
-        await frame.locator(".sp-new-field").wait_for(timeout=20000)
+        await frame.locator(".sp-new .composer textarea").wait_for(timeout=20000)
         assert "Fixture shop" in await frame.locator(".sp-new-tab").inner_text()
         assert "signed in as you" in await frame.locator(".sp-consent").inner_text()
 
         # A new conversation from the panel: the operator's words, and the tab in front of them.
-        await frame.locator(".sp-new-field").fill("What does this shop sell?")
-        await frame.get_by_role("button", name="Agree and start").click()
+        await frame.locator(".sp-new .composer textarea").fill("What does this shop sell?")
+        await frame.locator(".sp-new .composer textarea").press("Enter")
         # The panel moves to the conversation (the model names it as it likes after the first turn).
         await frame.locator(".sp-body").wait_for(timeout=20000)
         sessions = await service.choices.using_user()

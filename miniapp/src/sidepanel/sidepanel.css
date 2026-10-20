@@ -132,7 +132,7 @@ body:has(.sidepanel) #root { height: 100%; min-height: 0; }
 .sp-live-warn .truncate { flex: 1 1 auto; min-width: 0; }
 .sp-live-warn .link { flex: none; padding: 0; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }
 .sp-live-warn .link:hover { text-decoration: underline; }
-.sp-card-actions, .sp-new-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.sp-card-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .sp-card-actions .btn { display: inline-flex; align-items: center; gap: var(--space-1); }
 
 .sp-give { display: flex; align-items: center; gap: var(--space-2); }
@@ -159,22 +159,15 @@ body:has(.sidepanel) #root { height: 100%; min-height: 0; }
 .sp-attach .chip:hover:not(:disabled) { background: var(--surface-3); color: var(--fg); }
 .sp-attach .chip:disabled { opacity: 0.5; cursor: default; }
 
-.sp-new { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); }
+/* A new conversation: what it will work on above, the app's whole composer at the foot, as in an
+   open conversation, so dictation, files, the model and the approval mode are all there from the start. */
+.sp-new { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.sp-new-intro { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; justify-content: flex-end; gap: var(--space-2); padding: var(--space-3); }
 .sp-consent { padding: var(--space-2) var(--space-3); border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-2); font-size: var(--fs-13); }
 .sp-consent p { margin: var(--space-1) 0 0; color: var(--fg-2); }
 .sp-new-tab { display: flex; align-items: center; gap: var(--space-1); min-width: 0; font-size: var(--fs-12); color: var(--fg-2); }
-.sp-new-field {
-  width: 100%;
-  box-sizing: border-box;
-  resize: vertical;
-  padding: var(--space-2);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-md);
-  background: var(--surface-2);
-  color: var(--fg);
-  font: inherit;
-}
-.sp-new-actions { justify-content: flex-end; }
+.sp-new-tab .truncate { flex: 1 1 auto; min-width: 0; }
+.sp-new-cancel { flex: none; padding: 0; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }
 
 /* Under the header, never at the foot: there a note covered the composer's controls. */
 .sp-toasts {

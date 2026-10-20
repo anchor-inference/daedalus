@@ -111,6 +111,8 @@ export function panelPath(path: string): string {
   if (panelToken === null) return path;
   if (path === "/api/settings") return "/api/panel/settings";
   if (path === "/api/modes") return "/api/panel/modes";
+  // Dictation before a conversation exists: the app's start page path, through the panel's door.
+  if (path === "/api/asr" || path === "/api/transcribe" || path.startsWith("/api/transcribe/")) return "/api/panel" + path.slice(4);
   if (path === "/api/sessions" || path.startsWith("/api/sessions/") || path.startsWith("/api/sessions?")) return "/api/panel" + path.slice(4);
   return path;
 }

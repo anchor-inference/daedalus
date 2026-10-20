@@ -18,35 +18,45 @@ export const APPROVAL_MODES: { id: ApprovalMode; icon: IconName; label: string; 
 
 /** The chip and its menu, for a conversation the caller knows is in the operator's Chrome (the app
  *  from the conversation's browser choice; the side panel lists no other). A read that fails shows
- *  the default rather than nothing: the composer is not the place to report an unavailable browser. */
-export function ApprovalChip({ sessionId, toast }: { sessionId: string; toast: (text: string) => void }) {
-  const [mode, setMode] = useState<ApprovalMode | null>(null);
+ *  the default rather than nothing: the composer is not the place to report an unavailable browser.
+ *  With no `sessionId` (a conversation about to be made) it holds `value` and reports a pick through
+ *  `onPick`; skipping still asks first, and the maker sends the mode with that yes. */
+export function ApprovalChip({ sessionId, value, onPick, toast }: { sessionId: string | null; value?: ApprovalMode; onPick?: (mode: ApprovalMode) => void; toast: (text: string) => void }) {
+  const [read, setRead] = useState<ApprovalMode | null>(null);
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
-  const path = `/api/sessions/${encodeURIComponent(sessionId)}/browser-approvals`;
+  const path = sessionId ? `/api/sessions/${encodeURIComponent(sessionId)}/browser-approvals` : "";
+  const mode = sessionId ? read : value ?? "manual";
 
   useEffect(() => {
+    if (!path) return;
     let gone = false;
     api.get<{ mode?: ApprovalMode }>(path)
-      .then((r) => { if (!gone) setMode(r.mode && APPROVAL_MODES.some((m) => m.id === r.mode) ? r.mode : "manual"); })
-      .catch(() => { if (!gone) setMode("manual"); });
+      .then((r) => { if (!gone) setRead(r.mode && APPROVAL_MODES.some((m) => m.id === r.mode) ? r.mode : "manual"); })
+      .catch(() => { if (!gone) setRead("manual"); });
     return () => { gone = true; };
   }, [path]);
+
+  const confirmSkip = () => confirmAsync(t("approvals.skip.confirm.title"), { body: t("approvals.skip.confirm.body"), action: t("approvals.skip.confirm.action"), danger: true });
 
   async function choose(next: ApprovalMode) {
     setOpen(false);
     if (next === mode) return;
+    if (!path) {
+      if (next === "skip" && !(await confirmSkip())) return;
+      onPick?.(next);
+      return;
+    }
     try {
       await api.put(path, { mode: next });
-      setMode(next);
+      setRead(next);
     } catch (e) {
       // The first skip on an installation asks once what it means, as the host requires.
       if (next !== "skip" || !(e instanceof ApiError) || e.data.code !== "skip_confirm_needed") return toast(errorText(e));
-      const agreed = await confirmAsync(t("approvals.skip.confirm.title"), { body: t("approvals.skip.confirm.body"), action: t("approvals.skip.confirm.action"), danger: true });
-      if (!agreed) return;
+      if (!(await confirmSkip())) return;
       try {
         await api.put(path, { mode: next, confirm: true });
-        setMode(next);
+        setRead(next);
       } catch (again) {
         toast(errorText(again));
       }

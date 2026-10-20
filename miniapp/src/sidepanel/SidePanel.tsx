@@ -9,9 +9,9 @@
 // with the panel's credential.
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { api, setPanelCredential, type SessionDetail } from "../api";
+import { api, setPanelCredential, type AsrStatus, type SessionDetail } from "../api";
 import { applyAppearance } from "../appearance";
-import { ApprovalChip } from "../browser/approvals";
+import { ApprovalChip, type ApprovalMode } from "../browser/approvals";
 import { type Approval, pendingApproval } from "../composer";
 import { Composer, type ComposerHandle } from "../composerbox";
 import type { ModelChoice } from "../modelselect";
@@ -208,73 +208,169 @@ function Dot({ status, needsYou }: { status: string; needsYou: boolean }) {
 
 // ── a new conversation ─────────────────────────────────────────────────────────────────────
 
+/** What a new conversation's composer holds until the conversation exists: the model, the effort and
+ *  the approval mode the operator picked, applied right after it is made and before the first message. */
+type NewChoices = { model: ModelChoice | null; label: string; effort: string | null; approvals: ApprovalMode };
+
 /**
  * Starts a conversation in this Chrome, as the app's own "new chat" does (the default model, no
- * project), and gives it the tab in front of the operator at once: pressing Start here is their
- * explicit act. The first time, the consent summary is shown above the field, and Start is the yes.
+ * project), with the app's whole composer: dictation, files and pictures (picked, dropped or pasted),
+ * the model and its effort, the approval mode, and the page's text, a screenshot or the selection. It
+ * gives the conversation the tab in front of the operator at once: sending here is their explicit act.
+ * The first time, the consent summary stands above the composer, and the first message is the yes.
  */
 function NewConversation({ shell, current, listing, toast, onCreated, onCancel }: { shell: Shell; current: Current | null; listing: PanelListing; toast: (text: string) => void; onCreated: (id: string) => Promise<void>; onCancel?: () => void }) {
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const field = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => field.current?.focus(), []);
+  const composer = useRef<ComposerHandle>(null);
   const tab = current?.tab?.readable ? current.tab : null;
+  const asr = useAsr();
+  const settings = usePanelSettings();
+  const [choices, setChoices] = useState<NewChoices>({ model: null, label: "", effort: null, approvals: "manual" });
+  const { attach, shot, setShot } = useAttach(shell, composer, toast);
+  useEffect(() => composer.current?.focus(), []);
 
-  async function start() {
-    const words = text.trim();
-    if (!words || busy) return;
-    setBusy(true);
-    try {
-      const made = await api.post<{ id: string; group: string; title: string }>("/api/panel/sessions", { title: words, consent: !listing.consented });
-      let gave = false;
-      if (tab) {
-        try {
-          await shell.request("tab.grant", { group: made.group, session: made.id, title: made.title || words.slice(0, 80) });
-          await api.post(`/api/panel/sessions/${made.id}/tab`);
-          gave = true;
-        } catch (e) {
-          toast(t("sidepanel.tab.failed", { reason: shellReason(e) }));
-        }
-      }
-      const said = gave && tab ? `${words}\n\n${t("sidepanel.message.tab", { title: tab.title || tab.url, url: tab.url })}` : words;
-      await api.post(`/api/sessions/${made.id}/messages`, messageBody(said, { clientMessageId: crypto.randomUUID() }));
-      setText("");
-      await onCreated(made.id);
-    } catch (e) {
-      toast(errorText(e));
-    } finally {
-      setBusy(false);
+  async function send(text: string, files: File[]): Promise<"sent" | "queued"> {
+    const words = text.trim() || files.map((file) => file.name).join(", ");
+    const made = await api.post<{ id: string; group: string; title: string }>("/api/panel/sessions", { title: words.slice(0, 400), consent: !listing.consented });
+    // What was picked before the conversation existed lands before its first message, so the first
+    // turn already runs on that model and under that approval mode.
+    if (choices.model) await api.post(`/api/sessions/${made.id}/model`, choices.model).catch((e) => toast(errorText(e)));
+    if (choices.effort) await api.post(`/api/sessions/${made.id}/model`, choices.effort === "off" ? { thinking: false } : { thinking: true, reasoning_effort: choices.effort }).catch((e) => toast(errorText(e)));
+    if (choices.approvals !== "manual") {
+      await api.put(`/api/sessions/${made.id}/browser-approvals`, { mode: choices.approvals, confirm: choices.approvals === "skip" }).catch((e) => toast(errorText(e)));
     }
+    let gave = false;
+    if (tab) {
+      try {
+        await shell.request("tab.grant", { group: made.group, session: made.id, title: made.title || words.slice(0, 80) });
+        await api.post(`/api/panel/sessions/${made.id}/tab`);
+        gave = true;
+      } catch (e) {
+        toast(t("sidepanel.tab.failed", { reason: shellReason(e) }));
+      }
+    }
+    const said = gave && tab ? `${text.trim()}\n\n${t("sidepanel.message.tab", { title: tab.title || tab.url, url: tab.url })}`.trim() : text.trim();
+    if (files.length) {
+      const form = new FormData();
+      form.append("text", said);
+      form.append("client_message_id", crypto.randomUUID());
+      form.append("expected_running", "false");
+      for (const file of files) form.append("files", file, file.name);
+      await api.upload(`/api/sessions/${made.id}/upload`, form);
+    } else {
+      await api.post(`/api/sessions/${made.id}/messages`, messageBody(said, { clientMessageId: crypto.randomUUID() }));
+    }
+    await onCreated(made.id);
+    return "sent";
   }
 
+  const defaultLabel = settings ? settings.presets[settings.model.preset]?.label ?? settings.model.preset : "";
   return (
-    <div className="sp-new">
-      {!listing.consented && (
-        <div className="sp-consent">
-          <b>{t("sidepanel.consent.title")}</b>
-          <p>{listing.consent}</p>
+    <div className="sp-new" onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }}
+      onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); composer.current?.addFiles(e.dataTransfer.files); } }}>
+      <div className="sp-new-intro">
+        {!listing.consented && (
+          <div className="sp-consent">
+            <b>{t("sidepanel.consent.title")}</b>
+            <p>{listing.consent}</p>
+            <p className="sub">{t("sidepanel.consent.send")}</p>
+          </div>
+        )}
+        <div className="sp-new-tab">
+          {tab ? <><Icon name="globe" size={14} /><span className="truncate">{t("sidepanel.new.tab", { title: tab.title || tab.url })}</span></> : <span className="sub">{t("sidepanel.new.notab")}</span>}
+          {onCancel && <button type="button" className="link sp-new-cancel" onClick={onCancel}>{t("sidepanel.cancel")}</button>}
         </div>
-      )}
-      <div className="sp-new-tab">
-        {tab ? <><Icon name="globe" size={14} /><span className="truncate">{t("sidepanel.new.tab", { title: tab.title || tab.url })}</span></> : <span className="sub">{t("sidepanel.new.notab")}</span>}
       </div>
-      <textarea ref={field} className="sp-new-field" rows={4} value={text} placeholder={t("sidepanel.new.placeholder")} aria-label={t("sidepanel.new.placeholder")}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-            e.preventDefault();
-            void start();
-          }
-          if (e.key === "Escape" && onCancel) onCancel();
-        }} />
-      <div className="sp-new-actions">
-        {onCancel && <button type="button" className="btn small" onClick={onCancel}>{t("sidepanel.cancel")}</button>}
-        <button type="button" className="btn small primary" disabled={busy || !text.trim()} onClick={() => void start()}>
-          {listing.consented ? t("sidepanel.start") : t("sidepanel.consent.start")}
-        </button>
-      </div>
+      {shot && <ShotCrop shot={shot} onCancel={() => setShot(null)} onAttach={(file) => { composer.current?.addFiles([file]); setShot(null); }} />}
+      <Composer
+        ref={composer}
+        above={<AttachChips tab={tab} attach={attach} />}
+        beside={<ApprovalChip sessionId={null} value={choices.approvals} onPick={(approvals) => setChoices((c) => ({ ...c, approvals }))} toast={toast} />}
+        sessionId=""
+        status="idle"
+        idlePlaceholder={t("sidepanel.new.placeholder")}
+        onSend={(text, files) => send(text, files)}
+        onStop={() => {}}
+        commands={[]}
+        onCommand={async () => toast(t("sidepanel.commands.app"))}
+        model={choices.label || defaultLabel}
+        fallback={null}
+        onChooseModel={async (choice) => {
+          const label = "preset" in choice ? settings?.presets[choice.preset]?.label ?? choice.preset : "model" in choice ? choice.model : "";
+          setChoices((c) => ({ ...c, model: "clear" in choice ? null : choice, label }));
+        }}
+        thinking={choices.effort !== "off"}
+        reasoningEffort={choices.effort && choices.effort !== "off" ? choices.effort : undefined}
+        onChooseEffort={async (effort) => setChoices((c) => ({ ...c, effort }))}
+        mode=""
+        modes={[]}
+        queued={[]}
+        questions={null}
+        answered={null}
+        onAnswer={async () => {}}
+        approval={null}
+        asr={asr}
+        phone={false}
+        toast={toast}
+      />
     </div>
   );
+}
+
+/** The page's own offers over the composer: its text as a file, a screenshot, the selection quoted. */
+function AttachChips({ tab, attach }: { tab: { readable?: boolean } | null; attach: (kind: "page" | "screenshot" | "selection") => void }) {
+  return (
+    <div className="sp-attach" role="group" aria-label={t("sidepanel.attach")}>
+      <button type="button" className="chip" disabled={!tab?.readable} onClick={() => attach("page")}><Icon name="file" size={13} />{t("sidepanel.attach.page")}</button>
+      <button type="button" className="chip" disabled={!tab?.readable} onClick={() => attach("screenshot")}><Icon name="camera" size={13} />{t("sidepanel.attach.screenshot")}</button>
+      <button type="button" className="chip" disabled={!tab?.readable} onClick={() => attach("selection")}><Icon name="reply" size={13} />{t("sidepanel.attach.selection")}</button>
+    </div>
+  );
+}
+
+/** Taking the page into the composer, for a new conversation and an open one alike. */
+function useAttach(shell: Shell, composer: React.RefObject<ComposerHandle | null>, toast: (text: string) => void) {
+  const [shot, setShot] = useState<(PageInfo & { image: string }) | null>(null);
+  const attach = useCallback(async (kind: "page" | "screenshot" | "selection") => {
+    try {
+      if (kind === "page") {
+        const page = await shell.request<PageInfo & { text: string }>("page.text");
+        composer.current?.addFiles([pageFile(page)]);
+      } else if (kind === "selection") {
+        const picked = await shell.request<PageInfo & { text: string }>("page.selection");
+        if (!picked.text.trim()) toast(t("sidepanel.attach.noselection"));
+        else composer.current?.insert(selectionQuote(picked));
+      } else {
+        setShot(await shell.request<PageInfo & { image: string }>("capture.visible"));
+      }
+    } catch (e) {
+      toast(t("sidepanel.attach.failed", { reason: shellReason(e) }));
+    }
+  }, [shell, composer, toast]);
+  return { attach: (kind: "page" | "screenshot" | "selection") => void attach(kind), shot, setShot };
+}
+
+/** Whether dictation is offered: the app's own answer, through the panel's door. */
+function useAsr(): AsrStatus | null {
+  const [asr, setAsr] = useState<AsrStatus | null>(null);
+  useEffect(() => {
+    let gone = false;
+    api.get<AsrStatus>("/api/asr").then((a) => { if (!gone) setAsr(a); }).catch(() => { if (!gone) setAsr(null); });
+    return () => { gone = true; };
+  }, []);
+  return asr;
+}
+
+type PanelSettings = { presets: Record<string, { label?: string }>; model: { preset: string } };
+
+/** The model list's default, for a conversation that does not exist yet. */
+function usePanelSettings(): PanelSettings | null {
+  const [found, setFound] = useState<PanelSettings | null>(null);
+  useEffect(() => {
+    let gone = false;
+    api.get<PanelSettings>("/api/settings").then((s) => { if (!gone) setFound(s); }).catch(() => {});
+    return () => { gone = true; };
+  }, []);
+  return found;
 }
 
 function shellReason(e: unknown): string {
@@ -296,9 +392,10 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
   const [modes, setModes] = useState<ModeInfo[]>([]);
   const [stopAt, setStopAt] = useState<number | null>(null);
   const [paused, setPaused] = useState(false);
-  const [shot, setShot] = useState<(PageInfo & { image: string }) | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const composer = useRef<ComposerHandle>(null);
+  const { attach, shot, setShot } = useAttach(shell, composer, toast);
+  const asr = useAsr();
   const scroller = useRef<HTMLDivElement>(null);
   const liveRef = useRef<LiveStore | null>(null);
   if (!liveRef.current) liveRef.current = createLiveStore();
@@ -462,23 +559,6 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
     }
   }
 
-  async function attach(kind: "page" | "screenshot" | "selection") {
-    try {
-      if (kind === "page") {
-        const page = await shell.request<PageInfo & { text: string }>("page.text");
-        composer.current?.addFiles([pageFile(page)]);
-      } else if (kind === "selection") {
-        const picked = await shell.request<PageInfo & { text: string }>("page.selection");
-        if (!picked.text.trim()) toast(t("sidepanel.attach.noselection"));
-        else composer.current?.insert(selectionQuote(picked));
-      } else {
-        setShot(await shell.request<PageInfo & { image: string }>("capture.visible"));
-      }
-    } catch (e) {
-      toast(t("sidepanel.attach.failed", { reason: shellReason(e) }));
-    }
-  }
-
   async function giveTab() {
     try {
       await shell.request("tab.grant", { group: session.group, session: id, title: session.title });
@@ -495,7 +575,8 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
 
   return (
     <>
-      <div className="sp-body" ref={scroller}>
+      <div className="sp-body" ref={scroller} onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }}
+        onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); composer.current?.addFiles(e.dataTransfer.files); } }}>
         {detail ? (
           <TranscriptView key={detail.id} detail={detail} live={live} onPreview={() => toast(t("sidepanel.preview.app"))} toast={toast} onRender={follow} />
         ) : failed ? (
@@ -523,11 +604,7 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
                 onShowTab={() => void shell.request("tab.focus", { session: id }).catch((e) => toast(t("sidepanel.tab.failed", { reason: shellReason(e) })))}
                 onOpenApp={() => void shell.request("open.app", { path: sessionPath(id) })} />
             )}
-            <div className="sp-attach" role="group" aria-label={t("sidepanel.attach")}>
-              <button type="button" className="chip" disabled={!tab?.readable} onClick={() => void attach("page")}><Icon name="file" size={13} />{t("sidepanel.attach.page")}</button>
-              <button type="button" className="chip" disabled={!tab?.readable} onClick={() => void attach("screenshot")}><Icon name="camera" size={13} />{t("sidepanel.attach.screenshot")}</button>
-              <button type="button" className="chip" disabled={!tab?.readable} onClick={() => void attach("selection")}><Icon name="reply" size={13} />{t("sidepanel.attach.selection")}</button>
-            </div>
+            <AttachChips tab={tab} attach={attach} />
             </>
           }
           beside={<ApprovalChip key={id} sessionId={id} toast={toast} />}
@@ -557,6 +634,7 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
             }
           }}
           approval={null}
+          asr={asr}
           phone={false}
           toast={toast}
         />

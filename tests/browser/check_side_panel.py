@@ -18,8 +18,9 @@ side panel's width:
   own; the composer's Stop goes to the door, and a stop the stream never confirms says so after three
   seconds; the line stays one row at 360 and 420 px; Take over pauses the group and shows its tab,
   and the note it leaves sits under the header, clear of the composer, until clicked away;
-- a new conversation shows the consent summary once, starts on the operator's words, gives the
-  current tab to its group before the first message, and sends that message;
+- a new conversation shows the consent summary once and the app's whole composer (attach, dictation,
+  the model, the approval mode, the page's offers) on one row at 360 and 420 px, starts on the
+  operator's words, gives the current tab to its group before the first message, and sends it;
 - no request leaves for an operator's route, and the page carries the panel's credential only;
 - no sideways scroll at 360 px; the words follow the language the extension says, ru and en.
 
@@ -143,6 +144,8 @@ class Door:
             return self.json(route, {"id": "s9", "title": made["title"], "group": "s-s9-u", "model": "Claude Opus"})
         if rel == "/api/panel/settings":
             return self.json(route, {"presets": {"opus": {"label": "Claude Opus", "provider": "anthropic", "model": "claude-opus"}}, "providers": {"anthropic": {"kind": "anthropic", "name": "Anthropic", "billing": ""}}, "model": {"preset": "opus"}})
+        if rel == "/api/panel/asr":
+            return self.json(route, {"configured": True, "reason": "", "provider": "local", "model": "whisper", "max_seconds": 300, "autosend": False})
         if rel == "/api/panel/modes":
             return self.json(route, {})
         if len(parts) >= 5 and parts[3] == "sessions":
@@ -326,8 +329,26 @@ def run() -> int:
         expect(page.locator(".sp-consent")).to_contain_text("signed in as you")
         expect(page.locator(".sp-new-tab")).to_contain_text("Gift ideas")
         page.screenshot(path=str(SHOTS / "side-panel-new.png"))
-        page.locator(".sp-new-field").fill("Find a birthday gift under 50 euros")
-        page.get_by_role("button", name="Agree and start").click()
+        # The app's whole composer, every control of it on one row at a narrow panel.
+        new = page.locator(".sp-new .composer")
+        for selector in (".iconbtn.plus", ".mic", ".model-select", ".approvals-chip"):
+            expect(new.locator(selector)).to_be_visible()
+        expect(new.locator(".sp-attach .chip")).to_have_count(3)
+        for width in (360, 420):
+            page.set_viewport_size({"width": width, "height": 760})
+            page.wait_for_timeout(50)
+            fit = page.evaluate("""() => {
+              const row = document.querySelector('.sp-new .composer-row');
+              const box = row.getBoundingClientRect();
+              const out = [...row.querySelectorAll('button')].filter((b) => { const r = b.getBoundingClientRect(); return r.width > 0 && (r.right > box.right + 0.5 || r.left < box.left - 0.5); });
+              return { spill: row.scrollWidth - row.clientWidth, out: out.length, page: document.documentElement.scrollWidth - document.documentElement.clientWidth };
+            }""")
+            assert fit["spill"] <= 0 and fit["out"] == 0 and fit["page"] <= 0, (width, fit)
+            page.screenshot(path=str(SHOTS / f"side-panel-new-{width}.png"))
+        page.set_viewport_size({"width": 400, "height": 760})
+        field = new.locator("textarea")
+        field.fill("Find a birthday gift under 50 euros")
+        field.press("Enter")
         expect(page.locator(".sp-title")).to_contain_text("Find a birthday gift")
         assert door.posted("/api/panel/sessions") == [{"title": "Find a birthday gift under 50 euros", "consent": True}], door.posts
         grant = requests(page, "tab.grant")

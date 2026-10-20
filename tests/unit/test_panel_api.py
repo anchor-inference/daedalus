@@ -397,3 +397,36 @@ async def test_the_panel_sets_the_approval_mode_of_its_own_conversations_only(ri
         assert (await client.put(f"/api/sessions/{mine}/browser-approvals", headers=panel(token), json={"mode": "manual"})).status_code == 401
     assert (await rig.service.choices.get(mine))["approvals"] == "auto"
     assert (await rig.service.choices.get(other))["approvals"] == "manual"
+
+
+async def test_the_panel_uploads_into_its_own_conversations_only_new_ones_included_and_within_its_cap(rig: Rig, chrome: FakeBrowserd, monkeypatch: pytest.MonkeyPatch) -> None:
+    other = await rig.session(chrome=False)
+    token, _ = await rig.grants.mint("dev1")
+    files = {"files": ("bill.png", b"\x89PNG" + b"0" * 2000, "image/png")}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=build_app(rig.app, "tok")), base_url="http://test") as client:  # type: ignore[arg-type]
+        # A conversation made from the panel takes its first message with files, before any other.
+        made = await client.post("/api/panel/sessions", headers=panel(token), json={"title": "what is this bill", "consent": True})
+        sid = made.json()["id"]
+        sent = await client.post(f"/api/panel/sessions/{sid}/upload", headers=panel(token), data={"text": "what is this bill"}, files=files)
+        # Past the door to the operator's handler, which stages the file; no model here, so the turn is refused.
+        assert sent.status_code in (200, 409), sent.text
+        assert "not a side panel route" not in sent.text and "no such conversation" not in sent.text
+        assert (await client.post(f"/api/panel/sessions/{other}/upload", headers=panel(token), data={"text": "x"}, files=files)).status_code == 404
+        # Dictation goes through the same door, before a conversation and in one (this rig has no
+        # speech, so the door's list says it rather than the handler).
+        for method, path in (("GET", "/api/panel/asr"), ("POST", "/api/panel/transcribe"), ("POST", f"/api/panel/sessions/{sid}/transcribe"), ("DELETE", "/api/panel/transcribe/ab12cd.webm")):
+            assert any(m == method and rx.fullmatch(path) for m, rx in api_panel.FORWARDED), path
+        assert (await client.post(f"/api/panel/sessions/{other}/transcribe", headers=panel(token), files={"audio": ("n.webm", b"x", "audio/webm")})).status_code == 404
+        # Past the cap, refused at the door before the handler reads a byte.
+        monkeypatch.setattr(api_panel, "PANEL_UPLOAD_MAX", 1000)
+        big = await client.post(f"/api/panel/sessions/{sid}/upload", headers=panel(token), data={"text": "x"}, files=files)
+        assert big.status_code == 413, big.text
+    # A body sent without a true length is cut off at the cap all the same.
+    chunks = [{"type": "http.request", "body": b"a" * 600, "more_body": True}, {"type": "http.request", "body": b"a" * 600, "more_body": False}]
+
+    async def receive() -> dict[str, Any]:
+        return chunks.pop(0)
+
+    capped = api_panel._capped(receive, 1000)
+    assert (await capped())["type"] == "http.request"
+    assert (await capped())["type"] == "http.disconnect"

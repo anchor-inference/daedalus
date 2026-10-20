@@ -67,9 +67,22 @@ FORWARDED: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         ("GET", _SESSION + "/browser-approvals"),
         ("PUT", _SESSION + "/browser-approvals"),
         ("GET", "/api/panel/modes"),
+        # Dictation: whether it is offered, and a voice note heard in a conversation or before one.
+        ("GET", "/api/panel/asr"),
+        ("POST", _SESSION + "/transcribe"),
+        ("DELETE", _SESSION + r"/transcribe/[A-Za-z0-9_.-]{1,80}"),
+        ("POST", "/api/panel/transcribe"),
+        ("DELETE", r"/api/panel/transcribe/[A-Za-z0-9_.-]{1,80}"),
     )
 )
 """The operator's routes the panel reaches, each the same path without ``/panel``."""
+
+PANEL_UPLOAD_MAX = 64 << 20
+"""The most a side panel may send in one request: files for a message, a voice note. The app's own
+upload has no cap of its own, but a panel token is a credential living in an extension's frame, and a
+stolen one must not be a way to fill this host's disk; a message's pictures and documents fit."""
+
+_BODY_ROUTES = re.compile(_SESSION + r"/(upload|transcribe)|/api/panel/transcribe")
 
 OWN: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
     (method, re.compile(pattern))
@@ -126,6 +139,12 @@ class PanelDoor:
         if sid and not await self.in_scope(sid):
             await _answer(send, 404, "no such conversation in this Chrome")
             return
+        if method == "POST" and _BODY_ROUTES.fullmatch(path):
+            declared = next((value.decode("latin-1") for key, value in scope.get("headers") or [] if key == b"content-length"), "")
+            if declared.isdigit() and int(declared) > PANEL_UPLOAD_MAX:
+                await _answer(send, 413, f"the side panel sends up to {PANEL_UPLOAD_MAX >> 20} MB at a time; larger files go through the app")
+                return
+            receive = _capped(receive, PANEL_UPLOAD_MAX)
         inner = dict(scope)
         inner[SCOPE_KEY] = {"device": device}
         if forwarded:
@@ -133,6 +152,24 @@ class PanelDoor:
             inner["path"] = target
             inner["raw_path"] = target.encode()
         await self.asgi(inner, receive, send)
+
+
+def _capped(receive: Any, limit: int) -> Callable[[], Awaitable[dict[str, Any]]]:
+    """``receive`` that ends the request once more than ``limit`` bytes came, for a body sent without
+    a length (chunked) or with a false one: the handler sees the client gone, and nothing past the
+    cap is read or written."""
+    seen = 0
+
+    async def wrapped() -> dict[str, Any]:
+        nonlocal seen
+        message = await receive()
+        if message.get("type") == "http.request":
+            seen += len(message.get("body") or b"")
+            if seen > limit:
+                return {"type": "http.disconnect"}
+        return cast("dict[str, Any]", message)
+
+    return wrapped
 
 
 class NewBody(BaseModel):
@@ -245,4 +282,4 @@ def register(api: FastAPI, app: Application, *, new_body: type[BaseModel]) -> No
         return {"presets": raw.get("presets") or {}, "providers": providers, "model": {"preset": (raw.get("model") or {}).get("preset", "")}}
 
 
-__all__ = ["FORWARDED", "OWN", "SCOPE_KEY", "PanelDoor", "panel_token", "register"]
+__all__ = ["FORWARDED", "OWN", "PANEL_UPLOAD_MAX", "SCOPE_KEY", "PanelDoor", "panel_token", "register"]
