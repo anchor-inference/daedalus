@@ -515,6 +515,7 @@ export class Relay {
       this.lastDispatch.set(member.tab, this.now());
     }
     let params = frame.params ?? {};
+    if (frame.method.startsWith("Input.") && !target.child) void this.cursor(member.tab, frame.method, params);
     // Child sessions reach the extension only in flat mode; a nested session would be invisible to it.
     if (frame.method === "Target.setAutoAttach") params = { ...params, flatten: true };
     const screenshot = frame.method === "Page.captureScreenshot" && !target.child;
@@ -1190,11 +1191,48 @@ export class Relay {
     }
   }
 
+  /** Moves the agent's cursor in the tab to where the daemon acts. A child session (a frame of another
+   *  site) is left out: its points are in that frame, not in the page the cursor is drawn over. */
+  private async cursor(tabId: number, method: string, params: Record<string, unknown>): Promise<void> {
+    const at = cursorPoint(method, params);
+    if (!at) return;
+    await chrome.tabs.sendMessage(tabId, { kind: "daedalus-cursor", ...at }).catch(() => undefined);
+  }
+
   /** Shows, hides (for a screenshot) or removes (null, the tab left) the border on an agent tab. */
   private async border(tabId: number, visible: boolean | null): Promise<void> {
-    await chrome.tabs.sendMessage(tabId, { kind: "daedalus-border", visible }).catch(() => undefined);
+    // Hiding waits for the page to say it painted, never longer than BORDER_HIDE_MS: a page that does
+    // not answer must not hold the daemon's screenshot.
+    const told = chrome.tabs.sendMessage(tabId, { kind: "daedalus-border", visible }).catch(() => undefined);
+    await (visible === false ? Promise.race([told, new Promise((done) => setTimeout(done, BORDER_HIDE_MS))]) : told);
   }
 }
+
+/** Where an `Input.*` command acts, for the cursor: a point and whether it presses, or typing at the
+ *  last point. A move without a button is followed too, so the cursor glides to what is clicked next;
+ *  a release says nothing new. */
+export function cursorPoint(method: string, params: Record<string, unknown>): { x?: number; y?: number; click: boolean; typing: boolean } | null {
+  const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : NaN);
+  if (method === "Input.dispatchMouseEvent" || method === "Input.dispatchDragEvent") {
+    if (params.type === "mouseReleased") return null;
+    const x = num(params.x);
+    const y = num(params.y);
+    if (Number.isNaN(x) || Number.isNaN(y)) return null;
+    return { x, y, click: params.type === "mousePressed", typing: false };
+  }
+  if (method === "Input.dispatchTouchEvent" && params.type === "touchStart") {
+    const first = Array.isArray(params.touchPoints) ? (params.touchPoints[0] as Record<string, unknown> | undefined) : undefined;
+    const x = num(first?.x);
+    const y = num(first?.y);
+    return Number.isNaN(x) || Number.isNaN(y) ? null : { x, y, click: true, typing: false };
+  }
+  // No point of its own: a NaN would cross the message as null and read as the corner.
+  if (method === "Input.dispatchKeyEvent" || method === "Input.insertText") return { click: false, typing: true };
+  return null;
+}
+
+/** The longest a screenshot waits for the agent's marks to leave the picture. */
+export const BORDER_HIDE_MS = 400;
 
 class CallError extends Error {
   constructor(readonly code: string, message: string) {

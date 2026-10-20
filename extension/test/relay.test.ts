@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CHECK_TIMEOUT_MS, HEARTBEAT_TIMEOUT_MS, OWN_INPUT_MS, PAUSE_RENEW_MS, REATTACH_MS } from "../src/relay.js";
+import { CHECK_TIMEOUT_MS, HEARTBEAT_TIMEOUT_MS, OWN_INPUT_MS, PAUSE_RENEW_MS, REATTACH_MS, cursorPoint } from "../src/relay.js";
 import { PRIVATE_ADDRESS } from "../src/guard.js";
 import { flush, harness, shape } from "./harness.js";
 
@@ -507,6 +507,37 @@ describe("the DevTools proxy", () => {
     h.take();
     h.fake.events.debuggerEvent.emit({ tabId: 4242 }, "Page.loadEventFired", {});
     expect(h.take()).toEqual([]);
+  });
+
+  it("draws the agent's cursor where the daemon acts, in that tab only", async () => {
+    const h = await harness();
+    const tab = await h.withAgentTab();
+    const cursor = () => h.fake.tabMessages.filter((m) => m.message.kind === "daedalus-cursor");
+    await h.cdp(`x${tab}`, "Input.dispatchMouseEvent", { type: "mouseMoved", x: 40, y: 30 });
+    await h.cdp(`x${tab}`, "Input.dispatchMouseEvent", { type: "mousePressed", x: 120.5, y: 80, button: "left" });
+    await h.cdp(`x${tab}`, "Input.dispatchMouseEvent", { type: "mouseReleased", x: 120.5, y: 80, button: "left" });
+    await h.cdp(`x${tab}`, "Input.insertText", { text: "hello" });
+    await flush();
+    expect(cursor()).toEqual([
+      { tabId: tab, message: { kind: "daedalus-cursor", x: 40, y: 30, click: false, typing: false } },
+      { tabId: tab, message: { kind: "daedalus-cursor", x: 120.5, y: 80, click: true, typing: false } },
+      { tabId: tab, message: { kind: "daedalus-cursor", click: false, typing: true } },
+    ]);
+    // A frame of another site has its own coordinates, and a tab outside the groups is never driven.
+    h.fake.events.debuggerEvent.emit({ tabId: tab }, "Target.attachedToTarget", { sessionId: "CHILD1" });
+    await flush();
+    await h.cdp(`x${tab}:CHILD1`, "Input.dispatchMouseEvent", { type: "mousePressed", x: 5, y: 5 });
+    expect((await h.cdp("x4242", "Input.dispatchMouseEvent", { type: "mousePressed", x: 5, y: 5 })).ok).toBe(false);
+    await flush();
+    expect(cursor()).toHaveLength(3);
+  });
+
+  it("reads a point from every kind of input the daemon sends", () => {
+    expect(cursorPoint("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: 3, y: 4 }] })).toEqual({ x: 3, y: 4, click: true, typing: false });
+    expect(cursorPoint("Input.dispatchDragEvent", { type: "drop", x: 9, y: 8 })).toEqual({ x: 9, y: 8, click: false, typing: false });
+    expect(cursorPoint("Input.dispatchMouseEvent", { type: "mouseWheel", x: 1, y: 2, deltaY: 100 })).toEqual({ x: 1, y: 2, click: false, typing: false });
+    expect(cursorPoint("Input.dispatchMouseEvent", { type: "mousePressed" })).toBeNull();
+    expect(cursorPoint("Input.setIgnoreInputEvents", {})).toBeNull();
   });
 
   it("hides the border for a screenshot and shows it again", async () => {
