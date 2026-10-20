@@ -21,7 +21,7 @@ from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
-from daedalus.processes import end_tree
+from daedalus.processes import end_tree, read_until_exit
 from daedalus.security import operator_secrets
 from daedalus.tools import search_hint
 from daedalus.tools._common import FRAME_CHARS, clip, error, ok, services_for, tool_config
@@ -472,14 +472,17 @@ async def _run(context: ToolContext, command: str, cwd: str | None, timeout_seco
                     await services.progress(tail[-1][:160])
 
     timed_out = False
+    output_ended = True
+    pump = asyncio.create_task(_pump())
     try:
         try:
-            await asyncio.wait_for(_pump(), timeout=limit)
-            remaining = max(1.0, limit - (time.monotonic() - started))
-            await asyncio.wait_for(proc.wait(), timeout=remaining)
+            output_ended = await asyncio.wait_for(read_until_exit(proc, pump), timeout=limit)
         except TimeoutError:
             timed_out = True
     finally:
+        if not pump.done():
+            pump.cancel()
+            await asyncio.gather(pump, return_exceptions=True)
         if proc.returncode is None:
             # A timeout, a cancelled run or a failed write: the process group never outlives the call.
             try:
@@ -505,11 +508,22 @@ async def _run(context: ToolContext, command: str, cwd: str | None, timeout_seco
     header = f"exit_code={proc.returncode} elapsed={elapsed:.1f}s cwd={workdir}" + (" sandbox=workspace" if sandboxed else "")
     if timed_out:
         header += f" TIMED OUT after {limit:.0f}s (process group killed)" + LOCAL_TIMEOUT_HINT
+    if not output_ended:
+        body = (body + "\n" if body else "") + BACKGROUND_HOLDER_NOTE.format(group=proc.pid)
     text = f"{header}\n{body}" if body else header
     if timed_out or (proc.returncode or 0) != 0:
         return error(context, text, exit_code=proc.returncode, timed_out=timed_out)
     return ok(context, text, exit_code=proc.returncode)
 
+
+BACKGROUND_HOLDER_NOTE = (
+    "[the shell exited, but a background process it started (process group {group}) still holds its output, "
+    "so the output was read no further and the pipe was closed; a process that writes to it now may die of SIGPIPE. "
+    "To keep something running, start it with background=true (a job you are woken about), or send its output "
+    "to a file (`cmd > log 2>&1 &`); to stop it, `kill -- -{group}`]"
+)
+"""Said when a command's ``&`` child outlives the shell: the call returns instead of waiting for the
+child to close the pipe, which a server never does."""
 
 LOCAL_TIMEOUT_HINT = " — waiting this long in the foreground is the mistake, not the command: start it again with background=true and end your turn (you are woken when it ends), or pass a larger timeout_seconds if it must block"
 REMOTE_TIMEOUT_HINT = LOCAL_TIMEOUT_HINT

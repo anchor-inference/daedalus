@@ -24,7 +24,7 @@ from typing import Any
 from protocore.contracts.hooks import HookActionKind, HookResult, HookSpec, IHookManager
 from protocore.contracts.types import HookEvent
 
-from daedalus.processes import end_tree
+from daedalus.processes import end_tree, read_until_exit
 from daedalus.security.redact import Redactor
 from daedalus.tools.shell import shell_argv, shell_environment
 
@@ -34,6 +34,38 @@ DENY_EXIT = 2
 """A pre-tool script exits with this to refuse the call; its output is the reason the model sees."""
 
 _EVENT_TO_SCRIPT = {HookEvent.pre_tool_use: "pre_tool", HookEvent.post_tool_use: "post_tool", HookEvent.run_finalize: "run_finished"}
+
+
+async def _answer(proc: asyncio.subprocess.Process, stdin: bytes, script: str) -> bytes:
+    """The script's output, read until it ends or shortly after the script exits.
+
+    ``communicate`` waited for every holder of stdout to close it, so a script that started a
+    notifier with ``&`` and exited at once was waited on for the whole timeout, logged as "timed
+    out" and had its child killed. The child is now left running and the script's answer is used.
+    """
+    assert proc.stdin is not None and proc.stdout is not None
+    stdout = proc.stdout
+    try:
+        proc.stdin.write(stdin)
+        await proc.stdin.drain()
+    except (BrokenPipeError, ConnectionResetError):
+        pass  # A script that does not read its input has still answered.
+    proc.stdin.close()
+    chunks: list[bytes] = []
+
+    async def _read() -> None:
+        while chunk := await stdout.read(65536):
+            chunks.append(chunk)
+
+    reader = asyncio.create_task(_read())
+    try:
+        if not await read_until_exit(proc, reader):
+            logger.info("hook script exited while a process it started still holds its output: %s", script[:80])
+    finally:
+        if not reader.done():
+            reader.cancel()
+            await asyncio.gather(reader, return_exceptions=True)
+    return b"".join(chunks)
 
 
 class DaedalusHookManager(IHookManager):
@@ -62,7 +94,7 @@ class DaedalusHookManager(IHookManager):
                 *shell_argv(script), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
                 env=shell_environment(str(payload.get("session_id") or "hook")), start_new_session=True,
             )
-            out, _ = await asyncio.wait_for(proc.communicate(json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")), timeout=timeout)
+            out = await asyncio.wait_for(_answer(proc, json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8"), script), timeout=timeout)
         except TimeoutError:
             logger.warning("hook script timed out after %.0fs: %s", timeout, script[:80])
             if proc is not None and proc.returncode is None:
