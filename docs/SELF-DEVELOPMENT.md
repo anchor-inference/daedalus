@@ -40,6 +40,8 @@ made by the app itself, which fetches the agent's branch and fast-forwards yours
 the old way, from the checkout, are moved into the agent's repository on the next start with their
 branches and uncommitted edits intact; the entries they leave in your checkout's `.git/worktrees` are
 removed by `git worktree prune` run on the machine, where their container paths do not exist.
+A new worktree also receives the ignored files your checkout's `.worktreeinclude` names, read from the
+checkout and copied under the same rules as a staff member's worktree (see `ORCHESTRATION.md`).
 
 The same gates decide in both modes: a changed host module needs a passing `Verify` receipt that covers
 the bytes in the branch, an `execution_path` that names the code running it, and a summary that says what

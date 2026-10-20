@@ -256,3 +256,19 @@ def test_the_policy_refuses_git_that_would_change_the_operators_checkout(tmp_pat
     ]
     for command in allowed:
         assert policy.evaluate("Exec", {"command": command}).action == ALLOW, command
+
+
+async def test_a_new_self_development_worktree_gets_what_the_checkouts_include_names(tmp_path: Path, db: Database) -> None:
+    repo, _origin = _checkout(tmp_path)
+    (repo / ".gitignore").write_text(".env\n", encoding="utf-8")
+    (repo / ".worktreeinclude").write_text(".env\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "ignore the environment file")
+    _git(repo, "push", "-q", "origin", "main")
+    (repo / ".env").write_text("API_PORT=1\n", encoding="utf-8")
+    selfdev = _selfdev(tmp_path, repo, db)
+
+    worktree = await selfdev.workspace("bot", "greeting")
+
+    assert (worktree / ".env").read_text(encoding="utf-8") == "API_PORT=1\n"
+    assert _git(worktree, "status", "--porcelain") == ""

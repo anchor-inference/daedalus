@@ -25,6 +25,7 @@ from daedalus.extensions.notifications import Draft
 from daedalus.host import reachability
 from daedalus.host.forge import RestForge, remote_slug
 from daedalus.host.gitrun import GitError, nul_names, numstat_entries, run_command, run_git
+from daedalus.host.worktrees import WORKTREE_INCLUDE, copy_included
 from daedalus.security import redact
 
 # A command that runs Python tests. Such a run prints how many it executed, so a receipt for one that
@@ -600,6 +601,12 @@ class SelfDevelopment:
         except GitError:
             await self.git(repo, "worktree", "prune")
             await self.git(repo, "worktree", "add", "-B", full_branch, str(target), base)
+        try:
+            # The checkout is only read: the ignored files its .worktreeinclude names (.env among them)
+            # are what a worktree of the agent's repository otherwise starts without.
+            await copy_included(repo.checkout, target)
+        except (GitError, OSError) as exc:
+            logger.warning("the files named in the checkout's %s were not copied into %s: %s", WORKTREE_INCLUDE, target, exc)
         return target
 
     async def adopt_worktrees(self) -> list[str]:
