@@ -585,3 +585,19 @@ async def test_grok_routes_a_conversation_by_header_and_leaves_the_body_alone(ba
     assert captured[0].headers.get("x-grok-conv-id") == ("sess-42" if sent else None)
     assert "x-grok-conv-id" not in captured[1].headers
     assert captured[0].content == captured[1].content  # the session reaches the wire only as the header
+
+
+def test_a_strict_tool_schema_stays_strict_on_the_wire() -> None:
+    """The core spells ``additionalProperties`` as ``additional_properties``; copying only ``properties`` and
+    ``required`` dropped it, so the strict forced ``plan`` tool reached the model as a permissive one."""
+    from daedalus.providers.llamacpp import tools_to_llamacpp_wire
+    from daedalus.providers.wire import tools_to_wire
+
+    strict = ToolDefinition(name="plan", description="d", parameters=ToolParameterSchema(
+        properties={"steps": {"type": "array", "items": {"type": "string"}}}, required=["steps"], additional_properties=False))
+    loose = ToolDefinition(name="t", description="d", parameters=ToolParameterSchema(properties={"a": {"type": "string"}}))
+    sent = tools_to_wire([strict, loose])
+    assert sent[0]["function"]["parameters"] == {"type": "object", "properties": {"steps": {"type": "array", "items": {"type": "string"}}},
+                                                 "required": ["steps"], "additionalProperties": False}
+    assert "additionalProperties" not in sent[1]["function"]["parameters"], "a tool that states nothing is sent as before"
+    assert tools_to_llamacpp_wire([strict])[0]["function"]["parameters"]["additionalProperties"] is False

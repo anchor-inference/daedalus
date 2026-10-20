@@ -27,6 +27,12 @@ logger = logging.getLogger(__name__)
 
 
 def tools_to_wire(tools: Sequence[ToolDefinition]) -> list[dict[str, Any]]:
+    """The ``tools`` array, each schema as the tool states it.
+
+    ``additionalProperties`` goes on the wire whenever the tool sets it. The core spells the flag
+    ``additional_properties``, and copying only ``properties`` and ``required`` dropped it: the strict
+    forced ``plan`` tool then reached the model as a permissive one that would take any field.
+    """
     wire: list[dict[str, Any]] = []
     for tool in tools:
         params = tool.parameters.model_dump(mode="json") if tool.parameters is not None else {}
@@ -35,6 +41,8 @@ def tools_to_wire(tools: Sequence[ToolDefinition]) -> list[dict[str, Any]]:
             "properties": params.get("properties", {}),
             "required": params.get("required", []),
         }
+        if params.get("additional_properties") is not None:
+            schema["additionalProperties"] = params["additional_properties"]
         wire.append(
             {
                 "type": "function",
