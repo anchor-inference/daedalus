@@ -4,15 +4,18 @@ daemon (``serve --env user --backend attach``) behind it, and the host's browser
 
 What a person would check by hand, in order:
 
-- the relay connects, and both sides say so (the daemon's ``relay.status``, the popup's phase);
-- the connection check runs both ways: the popup's check reaches the host as an event and comes back
-  confirmed, and the host's check flashes in the popup;
+- the relay connects, and both sides say so (the daemon's ``relay.status``, the side panel's phase);
+- the connection check runs both ways: the panel's check reaches the host as an event and comes back
+  confirmed, and the host's check flashes in the panel;
 - a conversation switched to the operator's Chrome opens its group there, reads a local page and
   clicks on it, while a tab the operator opened on the same site is never grouped, never debugged
   and never moved;
 - cookie values never leave Chrome, and writing or clearing cookies is refused;
 - the same again over a server's door: the host's relay WebSocket on loopback, paired with a one-time
-  code typed into the popup.
+  code typed into the side panel's settings;
+- the side panel against the whole host: the credential handed over the relay, a new conversation
+  started from the panel on the operator's current tab, a scripted model reading that very tab, and
+  the agent's request for a new site approved inline from the keyboard.
 
 Opt in with ``DAEDALUS_CHROME_E2E=1``, and give it ``DAEDALUS_BROWSERD_BIN`` (a built browserd) and
 ``CHROMIUM`` (an unbranded Chromium: branded Chrome ignores ``--load-extension`` since 137, so
@@ -193,17 +196,17 @@ async def connected(service: Browsers, transport: str) -> dict[str, Any] | None:
     return found if found.get("connected") and found.get("transport") == transport else None
 
 
-async def check_both_ways(service: Browsers, bus: Bus, popup: Any) -> None:
-    # The popup's check: it reaches the host as an event, and the popup shows it confirmed.
+async def check_both_ways(service: Browsers, bus: Bus, panel: Any) -> None:
+    # The panel's check: it reaches the host as an event, and the panel shows it confirmed.
     before = len(bus.user("check"))
-    await popup.click("#check")
-    await popup.wait_for_selector("#check-result[data-ok='true']", timeout=8000)
-    assert "✓" in await popup.inner_text("#check-result")
-    await until(lambda: len(bus.user("check")) > before, "the popup's check reaching the host")
-    # The host's check: relay.notify answers with a round trip and flashes in the popup.
+    await panel.click("#check")
+    await panel.wait_for_selector("#check-result[data-ok='true']", timeout=8000)
+    assert "✓" in await panel.inner_text("#check-result")
+    await until(lambda: len(bus.user("check")) > before, "the panel's check reaching the host")
+    # The host's check: relay.notify answers with a round trip and flashes in the panel.
     checked = await service.check_user()
     assert checked["ok"] and checked["rtt_ms"] >= 0
-    await popup.wait_for_selector("#notice:not([hidden])", timeout=8000)
+    await panel.wait_for_selector("#notice:not([hidden])", timeout=8000)
 
 
 async def drive(service: Browsers, owner: Owner, site: str) -> tuple[str, str]:
@@ -273,8 +276,8 @@ async def test_the_operators_chrome_end_to_end(db: Database, site: str, daemon: 
     operator = await context.new_page()
     operator_url = f"{site}/steps.html"
     await operator.goto(operator_url)
-    popup = context.pages[0]
-    await popup.goto(f"chrome-extension://{EXTENSION_ID}/popup.html")
+    panel = context.pages[0]
+    await panel.goto(f"chrome-extension://{EXTENSION_ID}/panel.html")
     await service.start()
     server_task: asyncio.Task[None] | None = None
     uvicorn_server: Any = None
@@ -284,9 +287,9 @@ async def test_the_operators_chrome_end_to_end(db: Database, site: str, daemon: 
         # Local: through native messaging and the real bridge.
         native = await until(lambda: connected(service, "native"), "the relay through the bridge")
         assert native["profile_name"] == "Chrome" and native["ext_version"], native
-        await popup.wait_for_selector("#phase[data-phase='connected']", timeout=10000)
-        assert await popup.inner_text("#install") == "E2E"
-        await check_both_ways(service, bus, popup)
+        await panel.wait_for_selector("#phase[data-phase='connected']", timeout=10000)
+        assert await panel.inner_text("#install") == "E2E"
+        await check_both_ways(service, bus, panel)
 
         owner = Owner("session", "uc1", session_id="uc1")
         # The agent's browser until the operator switches: with none configured, open must not fall
@@ -329,16 +332,16 @@ async def test_the_operators_chrome_end_to_end(db: Database, site: str, daemon: 
         server_port = uvicorn_server.servers[0].sockets[0].getsockname()[1]
 
         code = (await pairing.mint())["code"]
-        await popup.fill("#server", f"http://127.0.0.1:{server_port}")
-        await popup.fill("#code", code)
-        await popup.click("#pair")
+        await panel.fill("#server", f"http://127.0.0.1:{server_port}")
+        await panel.fill("#code", code)
+        await panel.click("#pair")
         served = await until(lambda: connected(service, "server"), "the relay through the host's WebSocket", timeout=30)
         assert served["profile_name"] == "Chrome", served
         assert desk.connected_device(), "the desk holds no relay"
-        await popup.wait_for_selector("#phase[data-phase='connected']", timeout=10000)
-        await until(lambda: popup.inner_text("#install"), "the popup to name the installation")
-        assert await popup.inner_text("#install") == "E2E server"
-        await check_both_ways(service, bus, popup)
+        await panel.wait_for_selector("#phase[data-phase='connected']", timeout=10000)
+        await until(lambda: panel.inner_text("#install"), "the panel to name the installation")
+        assert await panel.inner_text("#install") == "E2E server"
+        await check_both_ways(service, bus, panel)
         # The relay through the bridge ended when the extension moved to the server, and the group
         # with it; the conversation opens again in the same Chrome.
         last: BrowserError | None = None
@@ -360,3 +363,154 @@ async def test_the_operators_chrome_end_to_end(db: Database, site: str, daemon: 
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(server_task, 10)
         await service.close()
+
+
+class ScriptedModel:
+    """A model that answers from a script, one step per request: a tool call or a final text."""
+
+    def __init__(self, script: list[dict[str, Any]]) -> None:
+        from daedalus.providers.pricing import ModelPricing  # noqa: PLC0415
+
+        self.script = list(script)
+        self.requests: list[Any] = []
+        self.endpoint = SimpleNamespace(id="scripted", kind="scripted", pricing={"scripted-model": ModelPricing(input_limit=128_000, limit_source="scripted")})
+
+    async def stream_with_tools(self, request: Any) -> AsyncIterator[Any]:
+        from protocore.contracts.llm import ProviderDelta, ProviderDeltaKind  # noqa: PLC0415
+
+        self.requests.append(request)
+        step = self.script.pop(0) if self.script else {"text": "nothing left to do"}
+        usage = {"input_tokens": 10, "output_tokens": 5, "cache_read_tokens": 0}
+        if "tool" in step:
+            call = f"call_{len(self.requests)}"
+            yield ProviderDelta(kind=ProviderDeltaKind.tool_use_start, tool_call_id=call, tool_name=step["tool"])
+            yield ProviderDelta(kind=ProviderDeltaKind.tool_use_input, tool_call_id=call, tool_input_delta=json.dumps(step["args"]))
+            yield ProviderDelta(kind=ProviderDeltaKind.tool_use_stop, tool_call_id=call, tool_name=step["tool"], tool_input_final=step["args"], is_block_end=True)
+            yield ProviderDelta(kind=ProviderDeltaKind.usage, usage=usage)
+            yield ProviderDelta(kind=ProviderDeltaKind.finish, finish_reason="tool_use")
+            return
+        yield ProviderDelta(kind=ProviderDeltaKind.text, content=step["text"])
+        yield ProviderDelta(kind=ProviderDeltaKind.usage, usage=usage)
+        yield ProviderDelta(kind=ProviderDeltaKind.finish, finish_reason="stop")
+
+    async def complete_structured(self, request: Any, response_schema: dict[str, Any]) -> Any:
+        return await self.complete_text(request)
+
+    async def complete_text(self, request: Any) -> Any:
+        from protocore.contracts.llm import LLMResponse  # noqa: PLC0415
+        from protocore.contracts.types import Message, MessageRole, StopReason, TextBlock  # noqa: PLC0415
+
+        return LLMResponse(message=Message(role=MessageRole.assistant, content_blocks=[TextBlock(text='{"title": "Shop", "summary": "s"}')]), stop_reason=StopReason.end_turn)
+
+    def count_tokens(self, text: str, model: str | None = None) -> int:
+        return len(text) // 4
+
+    async def aclose(self) -> None:
+        return None
+
+    def results(self) -> str:
+        """Every tool result the model was shown, as text."""
+        return json.dumps([str(m) for request in self.requests for m in request.messages])
+
+
+@pytest.mark.skipif(not (REPO / "miniapp" / "dist" / "index.html").is_file(), reason="build the app: cd miniapp && npm run build")
+async def test_the_side_panel_end_to_end(settings: Any, db: Database, site: str, daemon: Path, chrome: Any) -> None:
+    """The side panel against the whole host on this computer. The panel page is opened in a tab of
+    the operator's window rather than as Chrome's own side panel, which only the operator's gesture
+    opens; it is the same page, and the operator's page stays the window's active tab beside it."""
+    import socket  # noqa: PLC0415
+
+    import uvicorn  # noqa: PLC0415
+
+    from daedalus.config import BrowserUserConfig  # noqa: PLC0415
+    from daedalus.extensions import browser as browser_extension  # noqa: PLC0415
+    from daedalus.extensions.api import build_app  # noqa: PLC0415
+    from daedalus.host.session_runner import SessionManager  # noqa: PLC0415
+    from tests.support.models import model_config  # noqa: PLC0415
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        api_port = probe.getsockname()[1]
+    port = int(site.rsplit(":", 1)[1])
+    elsewhere = f"http://localhost:{port}/steps.html"
+    model = ScriptedModel([
+        # The browser's tools are a group the agent loads when it needs them.
+        {"tool": "ToolSearch", "args": {"group": "browser"}},
+        {"tool": "BrowserSnapshot", "args": {}},
+        {"tool": "BrowserNavigate", "args": {"url": elsewhere}},
+        {"text": "I need your yes to open localhost."},
+        {"tool": "BrowserNavigate", "args": {"url": elsewhere}},
+        {"text": "Done."},
+    ])
+    # An agent's browser of its own is configured, unstarted: an installation registers the browser's
+    # tools only when it has one, and this conversation never uses it.
+    configured = settings.model_copy(update={"native": True, "browser_user_dir": daemon, "browser_container_dir": daemon.parent / "no-agent-browser",
+                                             "api_port": api_port, "miniapp_public_url": ""})
+    manager = SessionManager(configured, model_config(browser=BrowserConfig(user=BrowserUserConfig())), db=db)
+    await manager.start()
+    manager.providers.rungs_for = lambda config, preset_id=None: [(model, "scripted-model")]  # type: ignore[method-assign]
+    app = SimpleNamespace(settings=configured, config=manager.config, db=db, manager=manager, front=None, extensions={}, guard=None, create_session=manager.create_session)
+    tasks = await browser_extension.install(app)  # type: ignore[arg-type]
+    server = uvicorn.Server(uvicorn.Config(build_app(app, "tok"), host="127.0.0.1", port=api_port, log_level="warning", lifespan="off"))  # type: ignore[arg-type]
+    serving = asyncio.create_task(server.serve())
+    context, worker = chrome.context, chrome.worker
+    try:
+        await until(lambda: server.started, "the host's server")
+        service = app.extensions["browser"]
+        assert await service.wait_available(USER, timeout=20)
+        await until(lambda: connected(service, "native"), "the relay through the bridge")
+        # The credential, over the relay: what the host does on every connection.
+        await browser_extension.relay_changed(app.extensions["browser_panel_herald"], "relay.connected")
+        grant = await until(lambda: worker.evaluate("async () => (await chrome.storage.session.get('panelGrant')).panelGrant"), "the panel's credential in the extension")
+        assert grant["base"] == f"http://127.0.0.1:{api_port}" and grant["token"].startswith("pnl_"), grant
+        assert grant["token"] not in json.dumps(await worker.evaluate("async () => chrome.storage.local.get(null)"))
+
+        # The operator's page, the active tab of their window, and the panel beside it.
+        operator = context.pages[0]
+        await operator.goto(f"{site}/shop/index.html")
+        await operator.bring_to_front()
+        opening = asyncio.ensure_future(context.wait_for_event("page"))
+        await worker.evaluate(
+            """async () => {
+                const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+                await chrome.tabs.create({ windowId: tab.windowId, url: chrome.runtime.getURL("panel.html"), active: false });
+            }"""
+        )
+        panel = await opening
+        frame = panel.frame_locator("#frame")
+        await frame.locator(".sp-new-field").wait_for(timeout=20000)
+        assert "Fixture shop" in await frame.locator(".sp-new-tab").inner_text()
+        assert "signed in as you" in await frame.locator(".sp-consent").inner_text()
+
+        # A new conversation from the panel: the operator's words, and the tab in front of them.
+        await frame.locator(".sp-new-field").fill("What does this shop sell?")
+        await frame.get_by_role("button", name="Agree and start").click()
+        # The panel moves to the conversation (the model names it as it likes after the first turn).
+        await frame.locator(".sp-body").wait_for(timeout=20000)
+        sessions = await service.choices.using_user()
+        assert len(sessions) == 1, sessions
+        sid = sessions[0]
+        # The agent read the operator's own tab: its snapshot is the shop's page.
+        await until(lambda: "Find something" in model.results(), "the agent reading the operator's tab", timeout=40)
+        in_group = await worker.evaluate("async (url) => (await chrome.tabs.query({})).filter((t) => t.url === url).map((t) => t.groupId)", f"{site}/shop/index.html")
+        assert in_group and in_group[0] != -1, f"the operator's tab did not join the conversation's group: {in_group}"
+
+        # Its next step asks for a new site; the card takes the focus and Enter allows it once.
+        card = frame.locator(".sp-card")
+        await card.wait_for(timeout=40000)
+        assert "localhost" in (await card.inner_text())
+        await card.press("Enter")
+        await until(lambda: "repeat the call now" in model.results(), "the grant resuming the agent", timeout=40)
+        await until(lambda: _granted(service, sid, "localhost"), "the site granted for the conversation", timeout=40)
+    finally:
+        server.should_exit = True
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(serving, 10)
+        for task in tasks:
+            task.cancel()
+        await app.extensions["browser"].close()
+        await manager.close()
+
+
+async def _granted(service: Browsers, session_id: str, site: str) -> bool:
+    return site in (await service.choices.get(session_id))["sites"]

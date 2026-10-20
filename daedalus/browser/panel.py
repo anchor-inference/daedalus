@@ -189,14 +189,18 @@ class PanelHerald:
         with contextlib.suppress(Exception):
             await self.call("panel.event", args)
 
-    async def keep_fresh(self, every: float = 600.0) -> None:
-        """Runs for the life of the host: a connected Chrome's token is renewed before it lapses."""
+    async def keep_fresh(self, *, first: float = 15.0, every: float = 600.0) -> None:
+        """Runs for the life of the host: a connected Chrome's token is renewed before it lapses. The
+        first round is soon after the start and hands one over whatever the Chrome holds: a Chrome that
+        connected before the host listened never had a connection to be handed a token on."""
+        delay, force = first, True
         while True:
-            await asyncio.sleep(every)
+            await asyncio.sleep(delay)
             try:
-                await self.grant(force=False)
+                await self.grant(force=force)
             except Exception:  # noqa: BLE001 — the next round tries again
                 logger.exception("renewing the side panel's grant failed")
+            delay, force = every, False
 
 
 __all__ = ["EXTENSION_ID", "IDLE", "NATIVE_DEVICE", "PanelGrants", "PanelHerald"]
