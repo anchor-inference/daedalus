@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
+import pytest
 from protocore.contracts.hooks import HookActionKind
 from protocore.contracts.types import HookEvent
 
@@ -141,29 +144,45 @@ def test_tool_argument_repairs() -> None:
     assert parse_json_arguments("") == {}
 
 
-async def test_failed_tool_result_is_masked_in_event_and_history() -> None:
-    """A tool that raised skips the core hook; the session runner masks the event and the history."""
-    from types import SimpleNamespace
-
-    from protocore.contracts.types import Message, MessageRole, ToolResultBlock
-    from protocore.runtime.events.envelope import TurnEvent
+async def test_a_tool_that_raised_is_masked_in_the_event_the_history_and_the_next_request(
+        settings: Any, db: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A tool that raised used to skip the core's ``post_tool_use`` hook, and the session runner patched
+    the result already in the history after the fact. The core now runs the hook on every failure, so
+    the redacting hook masks the error text before it enters the history at all."""
+    from protocore.contracts.types import ToolResultBlock
     from protocore.runtime.events.types import EventType
 
-    from daedalus.host.session_runner import SessionManager
+    from daedalus.tools import shell
+    from tests.unit.test_session_runner import ScriptedProvider, _manager, _wait_finished
 
-    raw = "tool 'WebFetch' execution failed: 401 for https://api.x.test/?key=sk-proj-abcdefghijklmnopqrstuvwxyz"
-    engine = SimpleNamespace(history=[Message(role=MessageRole.tool, content_blocks=[ToolResultBlock(tool_call_id="c9", content=raw, is_error=True)])])
-    state = SimpleNamespace(engine=engine, last_error_kind="")
-    manager = SimpleNamespace(redactor=Redactor(), _redact_history_result=SessionManager._redact_history_result)
-    manager._redact_tool_result_payload = lambda payload: SessionManager._redact_tool_result_payload(manager, payload)
-    event = TurnEvent(type=EventType.ERROR, run_id="r", payload={"message": raw})
-    SessionManager._redact_event(manager, state, event)  # type: ignore[arg-type]
-    assert "sk-proj-" not in event.payload["message"]
-    event = TurnEvent(type=EventType.TOOL_RESULT, run_id="r", payload={"tool_call_id": "c9", "content": raw})
-    SessionManager._redact_event(manager, state, event)  # type: ignore[arg-type]
-    assert "sk-proj-" not in event.payload["content"]
-    block = engine.history[0].content_blocks[0]
-    assert isinstance(block, ToolResultBlock) and "sk-proj-" not in block.content and block.is_error
+    secret = "sk-proj-abcdefghijklmnopqrstuvwxyz"
+
+    async def refused(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError(f"401 for https://api.x.test/?key={secret}")
+
+    monkeypatch.setattr(shell, "_run", refused)
+    provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "true"}}, {"text": "done"}])
+    manager = await _manager(settings, db, provider)
+    events: list[Any] = []
+
+    async def sink(_session_id: str, event: Any) -> None:
+        events.append(event)
+
+    manager.add_sink(sink)
+    try:
+        state = await manager.create_session("t")
+        waiter = asyncio.create_task(_wait_finished(manager))
+        await manager.submit(state.session.id, "run it")
+        await waiter
+        [result] = [e for e in events if e.type is EventType.TOOL_RESULT]
+        assert result.payload.get("is_error") and secret not in json.dumps(result.payload, default=str)
+        history = await manager.sessions.list_messages(state.session.id, "daedalus", limit=100)
+        [block] = [b for m in history for b in m.content_blocks if isinstance(b, ToolResultBlock)]
+        assert block.is_error and secret not in block.content and MASK in block.content
+        sent = json.dumps([m.model_dump(mode="json") for m in provider.requests[-1].messages], ensure_ascii=False)
+        assert secret not in sent and MASK in sent
+    finally:
+        await manager.close()
 
 
 def test_nested_containers_inherit_the_secret_key_context() -> None:

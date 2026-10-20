@@ -5166,24 +5166,22 @@ class SessionManager:
     def _model_change(self, state: SessionState, event: TurnEvent) -> TurnEvent | None:
         """The event that says the model answering has changed — or ``None`` when it has not.
 
-        Two kinds of event feed this, and both are needed. The core's ``model_fallback_triggered``
-        is the demotion itself: it names the rung the run moved to and why, and it is the only
-        notice there is, because the retry re-opens the stream inside the assistant message that
-        was already started — no second ``message_start`` announces it. And ``message_start`` is
-        what catches every other way the model can differ from the configured one without a
-        demotion ever being announced: a chain position restored from a snapshot, a model rebound
-        by a live override.
+        Two kinds of event feed this, and both are needed. The core's ``model_changed`` is a demotion
+        down the chain or a restore that re-seated the run on a later rung: it names the rung and
+        why, and for a demotion it is the only notice there is, because the retry re-opens the
+        stream inside the assistant message that was already started — no second ``message_start``
+        announces it. And ``message_start`` is what catches the one way the model can differ from
+        the configured one that the core does not announce: a model rebound by a live override.
         """
         payload = event.payload
         engine = state.engine
         if engine is None:
             return None
-        if event.type is EventType.STATE_CHANGED and payload.get("reason") == "model_fallback_triggered":
-            # ``from``/``to`` here are the loop's own state, not models; the rung is the other field.
+        if event.type is EventType.MODEL_CHANGED and "configured" not in payload:
             return self._observe_model(
                 state,
                 event.run_id,
-                str(payload.get("fallback_model_id") or ""),
+                str(payload.get("to") or ""),
                 FALLBACK_REASONS.get(str(payload.get("error_class") or ""), "chain_step"),
             )
         if event.type is EventType.MESSAGE_START:
@@ -5249,10 +5247,13 @@ class SessionManager:
 
     async def _dispatch_event(self, state: SessionState, event: TurnEvent) -> None:
         if event.type is EventType.MODEL_CHANGED and "configured" not in event.payload:
-            # The core now says itself when the chain advances or a restore lands on a later rung.
-            # The host's own event (see ``_model_change``) already covers both and names the
-            # provider, the configured model and whether it is a fallback; passing the core's on as
-            # well put two model changes in front of the app for one demotion.
+            # The core's own notice of a chain advance or a restore on a later rung is read, not
+            # passed on: the app is sent the host's event in its place (see ``_model_change``),
+            # which also names the provider, the configured model and whether it is a fallback.
+            # Passing both put two model changes in front of the app for one demotion.
+            change = self._model_change(state, event)
+            if change is not None:
+                await self._dispatch_event(state, change)
             return
         if event.type is EventType.QUEUE_UPDATE and event.payload.get("placed") and state.engine is not None:
             # The core yields immediately after appending the received prompt. Submission time
@@ -5265,10 +5266,9 @@ class SessionManager:
                 origin = str(items[0].get("origin") or "operator") if items else "operator"
                 message.metadata.update({"daedalus.origin": origin, "daedalus.delivery": event.payload.get("kind"), "daedalus.run_id": event.run_id})
                 if items:
+                    # The images came with the items: the core places each one's ``blob_ref`` on the
+                    # message under its own key, so only the words need saying here.
                     message.metadata.update(_merged_words(items))
-                    # The core joins the placed items into one text block and leaves their files
-                    # behind; the images go back on here, before the model call this event precedes.
-                    message.metadata.update(_image_refs_metadata(_queued_image_refs(items)))
                 else:
                     # A placed prompt the queue no longer lists: its words are the operator's only
                     # when the operator sent it, and the text as placed is the best copy there is.
@@ -5360,34 +5360,18 @@ class SessionManager:
             p["duration_ms"] = duration_ms
 
     def _redact_event(self, state: SessionState, event: TurnEvent) -> None:
-        """Mask secrets the core's hook did not see: failure results, error text, tool arguments.
+        """Mask what the core's hook did not see before any store or front gets the event: a result's
+        envelope, error text, tool arguments.
 
-        A tool that returned normally was masked by the PostToolUse hook before its result
-        entered the history. A tool that raised takes the dispatcher's failure path, which
-        skips the hook, so its message is masked here — in the event every consumer sees and
-        in the history message the core already appended.
+        Every result, a failed call's included, went through the ``post_tool_use`` hook before it
+        entered the history, so the history needs nothing here. The event carries more than the
+        text the hook was shown (a tool's UI payload and metadata), and that is masked here.
         """
         p = event.payload
         if event.type is EventType.TOOL_RESULT:
-            original = p.get("content")
-            if not isinstance(original, str):
-                original = "".join(
-                    str(block.get("text") or "") for block in p.get("content_blocks") or ()
-                    if isinstance(block, dict)
-                )
-            # The core sends normal results in content_blocks, and tools can attach UI payloads
-            # and metadata. Mask the whole envelope before either durable event store sees it.
             cleaned = self._redact_tool_result_payload(p)
             p.clear()
             p.update(cleaned)
-            content = p.get("content")
-            if not isinstance(content, str):
-                content = "".join(
-                    str(block.get("text") or "") for block in p.get("content_blocks") or ()
-                    if isinstance(block, dict)
-                )
-            if content != original:
-                self._redact_history_result(state, str(p.get("tool_call_id")), content)
         elif event.type is EventType.TOOL_USE_INPUT_DELTA:
             # A credential or home path can be split across provider chunks, so a fragment cannot
             # be redacted reliably. The completed input is retained by TOOL_USE_STOP below.
@@ -5421,25 +5405,6 @@ class SessionManager:
         machine's account name in durable events or their exports.
         """
         return self.redactor.redact_tool_data(payload)
-
-    @staticmethod
-    def _redact_history_result(state: SessionState, tool_call_id: str, cleaned: str) -> None:
-        engine = state.engine
-        if engine is None:
-            return
-        for index in range(len(engine.history) - 1, -1, -1):
-            message = engine.history[index]
-            if message.role is not MessageRole.tool:
-                continue
-            blocks = list(message.content_blocks)
-            changed = False
-            for bi, block in enumerate(blocks):
-                if isinstance(block, ToolResultBlock) and block.tool_call_id == tool_call_id:
-                    blocks[bi] = block.model_copy(update={"content": cleaned})
-                    changed = True
-            if changed:
-                engine.history[index] = message.model_copy(update={"content_blocks": blocks})
-                return
 
     async def spend_with_subagents(self, session_id: str) -> float:
         """A session's priced spend plus that of every subagent it started: the cap is the leader's."""
