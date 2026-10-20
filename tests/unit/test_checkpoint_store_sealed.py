@@ -17,7 +17,7 @@ from daedalus.config import RuntimeConfig, Settings
 from daedalus.host.checkpoint_retention import RetentionBounds
 from daedalus.host.checkpoints import WORKSPACE_FILE, Checkpoints, store_dir
 from daedalus.host.session_runner import SessionManager
-from daedalus.stores.database import MIGRATIONS, Database
+from daedalus.stores.database import MIGRATIONS, Database, _sealed_checkpoint_stores
 
 IDENTITY = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@localhost", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@localhost"}
 
@@ -35,8 +35,12 @@ def _legacy_store(workspace: Path, text: str) -> str:
     return subprocess.run([*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
 
 
+SEALED = MIGRATIONS.index(_sealed_checkpoint_stores)
+"""The schema the move upgrades from, found by what it does: migrations added after it must not hide it."""
+
+
 async def _reopen_one_schema_back(settings: Settings, db: Database) -> Database:
-    await db.execute(f"UPDATE schema_version SET version = {len(MIGRATIONS) - 1}")
+    await db.execute(f"UPDATE schema_version SET version = {SEALED}")
     await db.close()
     reopened = Database(settings.db_path, workspaces_dir=settings.workspaces_dir)
     await reopened.open()
