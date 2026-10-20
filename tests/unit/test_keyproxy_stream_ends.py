@@ -173,3 +173,16 @@ async def test_codex_refusal_passes_its_retry_after_on(monkeypatch: pytest.Monke
         refused = await client.post("/codex/v1/chat/completions", json={"model": "m", "stream": True, "messages": [{"role": "user", "content": "hi"}]})
         assert refused.status == 429 and refused.headers["Retry-After"] == "42"
 
+
+async def test_codex_models_name_the_new_default_with_its_window(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def upstream(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503)
+
+    app = _codex_app(monkeypatch, tmp_path, upstream)
+    await app["client"].aclose()
+    app["client"] = app.pop("upstream")
+    async with TestClient(TestServer(app)) as client:
+        models = {m["id"]: m for m in (await (await client.get("/codex/v1/models")).json())["data"]}
+    sol = models["gpt-6.1-sol"]
+    assert sol["context_window"] == 272000 and sol["max_context_window"] == 872000
+    assert sol["default_reasoning_effort"] == "low" and "ultra" in sol["reasoning_efforts"]

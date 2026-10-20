@@ -56,6 +56,7 @@ from claude import (
 )
 from subscriptions import (
     CODEX_BASE,
+    CODEX_FALLBACK_CATALOGUE,
     CODEX_FALLBACK_MODELS,
     GROK_BASE,
     OPENCODE_GO_BASE,
@@ -859,7 +860,7 @@ async def handle_codex(request: web.Request, rest: str) -> web.StreamResponse:
             models = sorted(set(models) | set(usage.get("models") or []))  # the plan's usage table names only some of them
         except SubscriptionError:
             pass
-        windows = codex_cached_windows(CODEX_AUTH.path.parent / "models_cache.json")
+        windows = {**CODEX_FALLBACK_CATALOGUE, **codex_cached_windows(CODEX_AUTH.path.parent / "models_cache.json")}
         models = sorted(set(models) | {m for m, w in windows.items() if w.get("listed")})
         return web.json_response({"object": "list", "data": [{"id": m, "object": "model", "owned_by": "openai", **{k: v for k, v in windows.get(m, {}).items() if k != "listed"}} for m in models]})
     if tail != "chat/completions":
@@ -932,7 +933,8 @@ def codex_cached_windows(path: Path) -> dict[str, dict[str, Any]]:
     here for the login's sake: each model's ``context_window`` (the length the CLI runs it at) and
     ``max_context_window`` (the most the backend accepts). Read rather than asked again, because it
     is the CLI's request to make and this one would need to pass for the CLI to make it. ``listed`` says
-    the CLI offers the model in its picker. A file that is missing or unreadable is no windows.
+    the CLI offers the model in its picker; ``reasoning_efforts`` and ``default_reasoning_effort`` are the
+    efforts it offers for the model. A file that is missing or unreadable is no windows.
     """
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -943,6 +945,11 @@ def codex_cached_windows(path: Path) -> dict[str, dict[str, Any]]:
         if not isinstance(row, dict) or not row.get("slug"):
             continue
         entry: dict[str, Any] = {k: row[k] for k in ("context_window", "max_context_window") if type(row.get(k)) is int and row[k] > 0}
+        efforts = [str(level["effort"]) for level in row.get("supported_reasoning_levels") or [] if isinstance(level, dict) and level.get("effort")]
+        if efforts:
+            entry["reasoning_efforts"] = efforts
+        if isinstance(row.get("default_reasoning_level"), str) and row["default_reasoning_level"]:
+            entry["default_reasoning_effort"] = row["default_reasoning_level"]
         entry["listed"] = row.get("visibility") == "list"
         out[str(row["slug"])] = entry
     return out

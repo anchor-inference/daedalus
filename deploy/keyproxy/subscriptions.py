@@ -40,8 +40,17 @@ MODELS_CACHE_SECONDS = 300
 # was missing from this list, so a usage call that failed hid it.
 # The models ``codex debug models`` offered with visibility "list" on 0.157.1. The usage table
 # names only models that have already been called, so a new one stays invisible until it is here.
-CODEX_FALLBACK_MODELS = ("gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5")
-
+CODEX_FALLBACK_MODELS = ("gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5")
+CODEX_FALLBACK_CATALOGUE: dict[str, dict[str, Any]] = {
+    # The CLI's default since 0.161, as its models_cache.json states it. Used only when that file is not
+    # mounted or does not name the model, so the window is known before the CLI has ever listed it.
+    "gpt-6.1-sol": {
+        "context_window": 272000,
+        "max_context_window": 872000,
+        "default_reasoning_effort": "low",
+        "reasoning_efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+    },
+}
 
 
 class SubscriptionError(RuntimeError):
@@ -679,6 +688,7 @@ def grok_usage_view(billing: dict[str, Any]) -> dict[str, Any]:
 
 __all__ = [
     "CODEX_BASE",
+    "CODEX_FALLBACK_CATALOGUE",
     "CODEX_FALLBACK_MODELS",
     "GROK_BASE",
     "CodexAuth",
