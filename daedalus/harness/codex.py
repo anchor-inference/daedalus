@@ -156,7 +156,25 @@ remote app server" around the client's own "… at `<url>`: <cause>" (``tui/src/
 ``app-server-client/src/remote.rs``). The words once matched here were the fake's invention, so a TUI
 that never attached went unnoticed until its terminal exited."""
 DISMISS_ATTEMPTS = 3
-STARTUP_NOISE = ("<environment_context>", "<recommended_plugins>", "<user_instructions>", "# AGENTS.md", "<skills_instructions>", "<permissions")
+INJECTED = (
+    "<environment_context", "<recommended_plugins", "<user_instructions", "# AGENTS.md",
+    "<skills_instructions", "<permissions", "<turn_aborted", "<user_action", "<subagent_notification",
+    "<codex_internal_context", "<goal_context", "<collaboration_mode", "<multi_agent", "<model_switch",
+    "<apps_instructions", "<codex_apps", "<external_", "<skill>", "<plugins_instructions",
+    "<user_shell_command", "<realtime_delegation", "<hook_prompt", "Warning: apply_patch was requested via ",
+    "Warning: The maximum number of unified exec processes you can keep open is",
+    "Warning: Your account was flagged for potentially high-risk cyber activity",
+)
+"""The starts of the messages Codex writes into the conversation as the user's for its model to read:
+the environment, the instructions files, skills and plugins, an interrupted turn, a helper agent's
+notice, a shell command typed with ``!``, a goal, a hook's prompt, its own warnings. None is anything
+anyone said. From its ``CONTEXTUAL_USER_FRAGMENT_MATCHERS`` (``core/src/context/contextual_user_message.rs``)
+and the fragments they match, plus the older names earlier rollouts carry.
+
+The terminal daemon's session import reads the same rollouts and keeps the same list
+(``codexNoise`` in ``ptyd/internal/sidechan/sessions/codex.go``); a test holds the two equal. The
+host's copy had fallen to six entries, and a member interrupted by the orchestrator showed a "user"
+turn ``<turn_aborted>…`` that nobody typed."""
 
 
 def _now() -> str:
@@ -926,7 +944,7 @@ def parse_rollout(text: str) -> list[Turn]:
             role = payload.get("role")
             words = "".join(str(c.get("text") or "") for c in payload.get("content") or [] if isinstance(c, dict) and c.get("type") in ("input_text", "output_text", "text")).strip()
             if role == "user":
-                if not words or words.startswith(STARTUP_NOISE):
+                if not words or words.startswith(INJECTED):
                     continue
                 close()
                 turns.append(Turn(len(turns), "orchestrator" if words.startswith("[orchestrator]") else "user", words, started_at=at, ended_at=at))

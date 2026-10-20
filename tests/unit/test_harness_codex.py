@@ -599,3 +599,42 @@ async def test_a_side_channel_lost_to_an_unexpected_failure_says_so_and_fails_th
     assert waiting.done() and "error" in waiting.result()
     [lost] = drain(state)
     assert lost.kind is EventKind.TURN_FAILED and lost.payload["failure"].startswith("side channel lost") and "not WebSocket" in lost.payload["failure"]
+
+
+# -- what Codex writes into the conversation for its model ------------------------------------------
+
+
+@pytest.mark.parametrize("text", [
+    "<turn_aborted>\nThe user interrupted the previous turn on purpose.\n</turn_aborted>",
+    "<subagent_notification>\n{\"agent_id\":\"a1\",\"status\":\"completed\"}\n</subagent_notification>",
+    "<user_shell_command>\n<command>ls</command>\n</user_shell_command>",
+    "<realtime_delegation>\n<input>book it</input>\n</realtime_delegation>",
+    "<codex_internal_context source=\"user_goal\">ship it</codex_internal_context>",
+    "  <environment_context>\n  <cwd>/work</cwd>\n</environment_context>",
+    "<external_calendar>today</external_calendar>",
+    "<hook_prompt hook_run_id=\"h1\">check the build</hook_prompt>",
+    "Warning: The maximum number of unified exec processes you can keep open is 8.",
+])
+def test_what_codex_injects_as_a_user_message_is_not_an_operator_turn(text: str) -> None:
+    # After the orchestrator interrupted a Codex member, its transcript showed a "user" message
+    # <turn_aborted>… that nobody typed.
+    lines = [
+        {"type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": text}]}},
+        {"type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "[orchestrator] go on"}]}},
+    ]
+    turns = parse_rollout("\n".join(json.dumps(line) for line in lines))
+    assert [t.text for t in turns] == ["[orchestrator] go on"]
+
+
+def test_the_host_and_the_terminal_daemon_skip_the_same_injected_fragments() -> None:
+    # Two readers of one rollout format, the staff transcript here and the session import in the
+    # daemon, each kept a list of its own, and the host's had fallen to six entries of eighteen.
+    import re
+
+    from daedalus.harness.codex import INJECTED
+
+    source = (Path(__file__).resolve().parents[2] / "ptyd" / "internal" / "sidechan" / "sessions" / "codex.go").read_text(encoding="utf-8")
+    block = re.search(r"var codexNoise = \[\]string\{(.*?)\}\n", source, re.S)
+    assert block is not None
+    daemon = tuple(json.loads(f"[{block.group(1).strip().rstrip(',')}]"))
+    assert daemon == INJECTED
