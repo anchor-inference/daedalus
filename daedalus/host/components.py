@@ -429,14 +429,14 @@ class Registry:
                       detail_key="comp.detail.searxng.missing", installable=True, how="service")
 
     def _bwrap(self) -> Status:
-        from daedalus.tools.shell import bwrap_status  # Lazy: the probe is a subprocess, cached
+        from daedalus.tools.shell import bwrap_path, bwrap_status  # Lazy: the probe is a subprocess, cached
 
         answer = bwrap_status()
         if answer == "ok":
             return Status(BWRAP, "installed", "bubblewrap can create the namespaces the sandbox needs", detail_key="comp.detail.bwrap.ok")
         if not sys.platform.startswith("linux"):
             return Status(BWRAP, "unavailable", answer, detail_key="comp.detail.bwrap.platform", detail_args={"platform": sys.platform})
-        if shutil.which("bwrap") is None:
+        if bwrap_path() is None:
             return Status(BWRAP, "missing", answer, detail_key="comp.detail.bwrap.missing",
                           fix="install bubblewrap with this machine's package manager")
         # Installed and refused: a kernel that forbids unprivileged user namespaces, or a seccomp

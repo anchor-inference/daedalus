@@ -186,7 +186,7 @@ async def test_expired_token_refresh_is_single_flight() -> None:
     async def stop() -> None:
         connection.session = None
 
-    async def start() -> None:
+    async def start(**_: object) -> None:
         connection.session = Session()
 
     connection.stop = stop
@@ -215,7 +215,7 @@ async def test_cancelling_a_call_while_it_reconnects_stays_cancelled() -> None:
     connection = McpConnection("remote", McpServerConfig(transport="http", url="https://example.test/mcp"))
     waiting = asyncio.Event()
 
-    async def start() -> None:
+    async def start(**_: object) -> None:
         waiting.set()
         await asyncio.Event().wait()
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import difflib
 import logging
+import re
 import shlex
 import unicodedata
 from pathlib import Path
@@ -28,6 +29,59 @@ _MAX_LINE_CHARS = 2000
 #: does not carry one; a compiled object, an archive or an image carries one
 #: early, and 8 KiB is past every plausible text header.
 _BINARY_SNIFF_CHARS = 8192
+
+
+_LINE_BREAK = re.compile(r"\r\n|\r|\n")
+
+
+def split_lines(text: str, *, keepends: bool = False) -> list[str]:
+    """The file's lines, broken only at CRLF, CR and LF, the way an editor and ``grep -n`` count them.
+
+    ``str.splitlines`` also breaks at U+2028, U+0085, form feed and a few more; one such character in
+    a file shifted every later line number Read printed, so an Edit aimed at "line 40" missed.
+    """
+    lines: list[str] = []
+    start = 0
+    for match in _LINE_BREAK.finditer(text):
+        lines.append(text[start : match.end() if keepends else match.start()])
+        start = match.end()
+    if start < len(text):
+        lines.append(text[start:])
+    return lines
+
+
+def dominant_newline(text: str) -> str:
+    """The line ending most of the file uses; LF for a file with none, or on a tie."""
+    crlf = text.count("\r\n")
+    counts = {"\n": text.count("\n") - crlf, "\r\n": crlf, "\r": text.count("\r") - crlf}
+    best = max(counts, key=lambda ending: (counts[ending], ending == "\n"))
+    return best if counts[best] else "\n"
+
+
+def with_newline(text: str, ending: str) -> str:
+    """``text`` with every line break spelled ``ending``; untouched when that is LF.
+
+    A model writes LF whatever the file holds. Left alone for LF so a deliberate CR in new text for
+    an LF file still lands as written.
+    """
+    if ending == "\n":
+        return text
+    return _LINE_BREAK.sub(ending, text)
+
+
+def edit_keeping_newlines(text: str, old: str, new: str, *, replace_all: bool = False) -> tuple[str, int, str]:
+    """:func:`apply_edit` on the file as it is, with ``old`` and ``new`` spelled in its line ending.
+
+    In a mixed file the text the model means may sit in the minority ending, so the spelling it sent
+    is tried as well before the loose matches.
+    """
+    ending = dominant_newline(text)
+    if ending == "\n":
+        return apply_edit(text, old, new, replace_all=replace_all)
+    native_old, native_new = with_newline(old, ending), with_newline(new, ending)
+    if native_old in text or old not in text:
+        return apply_edit(text, native_old, native_new, replace_all=replace_all)
+    return apply_edit(text, old, new, replace_all=replace_all)
 
 
 def _resolve_path(context: ToolContext, services: Any, path: str | None, action: str) -> tuple[Path | None, ToolResult | None]:
@@ -124,7 +178,7 @@ async def read_file(
     if "\x00" in text[:_BINARY_SNIFF_CHARS]:
         return error(context, _binary_refusal(target, size))
     budget = output_limit(context)
-    lines = text.splitlines()
+    lines = split_lines(text)
     start = max(offset, 1) - 1
     window = lines[start : start + max(1, min(max(limit, 1), _line_allowance(text, len(lines), budget)))]
     numbered = "\n".join(
@@ -176,8 +230,15 @@ async def write_file(context: ToolContext, path: str, content: str) -> ToolResul
     if refusal is not None:
         return refusal
     assert target is not None
+    fs = services.fs
     try:
-        await services.fs.write_text(target, content)
+        # Overwriting a CRLF file keeps it CRLF; a new file is LF, as the model wrote it.
+        if "\r" not in content and await fs.is_file(target):
+            content = with_newline(content, dominant_newline(await fs.read_text(target)))
+    except (OSError, UnicodeDecodeError):
+        pass
+    try:
+        await fs.write_text(target, content)
     except (OSError, ControlConflict, ControlDenied) as exc:
         return error(context, f"could not write {target}: {exc}")
     return ok(context, f"wrote {len(content)} characters to {target}" + await diagnostics(services, target) + await board_note(context, services, target), path=str(target))
@@ -210,7 +271,7 @@ async def edit_file(
         return error(context, f"no such file: {target}")
     text = await fs.read_text(target)
     try:
-        updated, count, how = apply_edit(text, old_string, new_string, replace_all=replace_all)
+        updated, count, how = edit_keeping_newlines(text, old_string, new_string, replace_all=replace_all)
     except EditMiss as miss:
         return error(context, str(miss))
     try:
@@ -227,8 +288,8 @@ class EditMiss(ValueError):
 
 def _loose_hits(text: str, old: str) -> tuple[list[int], int, str]:
     """Line indices where ``old`` occurs ignoring trailing whitespace, then ignoring indentation: ``(hits, n_lines, how)``."""
-    lines = text.splitlines(keepends=True)
-    old_lines = old.splitlines()
+    lines = split_lines(text, keepends=True)
+    old_lines = split_lines(old)
     if not old_lines:
         raise EditMiss("old_string is empty")
     for how, norm in (("ignoring trailing whitespace", lambda x: x.rstrip()), ("ignoring indentation", lambda x: x.strip())):
@@ -249,8 +310,8 @@ def nearest_window(text: str, old: str, *, context_lines: int = 2) -> str:
     Bounded: candidate windows are the lines closest to ``old``'s first line (a cheap per-line ratio), and only
     the best few are scored as whole windows.
     """
-    lines = text.splitlines()
-    old_lines = old.splitlines() or [old]
+    lines = split_lines(text)
+    old_lines = split_lines(old) or [old]
     size = max(1, len(old_lines))
     if not lines or len(lines) > NEAREST_MAX_LINES:
         return ""
@@ -299,11 +360,11 @@ def apply_edit(text: str, old: str, new: str, *, replace_all: bool = False) -> t
     hits = kept
     if len(hits) > 1 and not replace_all:
         raise EditMiss(f"old_string matches {len(hits)} times when {how} (lines {', '.join(str(h + 1) for h in hits[:8])}); make it unique or set replace_all")
-    lines = text.splitlines(keepends=True)
+    lines = split_lines(text, keepends=True)
     chosen = hits if replace_all else hits[:1]
     for i in reversed(chosen):  # from the bottom, so earlier indices stay valid
         block = "".join(lines[i : i + n])
-        ending = "\r\n" if block.endswith("\r\n") else ("\n" if block.endswith("\n") else "")
+        ending = next((mark for mark in ("\r\n", "\n", "\r") if block.endswith(mark)), "")
         body = block[: len(block) - len(ending)] if ending else block
         replacement = _reindent(new, old, body) if how == "ignoring indentation" else new
         lines[i : i + n] = [replacement + ending]
@@ -338,7 +399,7 @@ async def multi_edit(context: ToolContext, path: str, edits: list[dict[str, Any]
     for index, edit in enumerate(edits, 1):
         old, new = str(edit.get("old_string", "")), str(edit.get("new_string", ""))
         try:
-            text, count, _ = apply_edit(text, old, new, replace_all=bool(edit.get("replace_all", False)))
+            text, count, _ = edit_keeping_newlines(text, old, new, replace_all=bool(edit.get("replace_all", False)))
         except EditMiss as miss:
             return error(context, f"edit {index} of {len(edits)} failed, file unchanged: {miss}")
         total += count
@@ -463,7 +524,8 @@ async def search_files(
         return ok(context, "(no matches)", count=0)
     if code not in (0, 1):
         return error(context, err or f"search exited {code}")
-    lines = text.splitlines()[:limit]
+    # ripgrep ends each match with LF; a matched line may itself hold a CR or U+2028.
+    lines = [line for line in text.split("\n") if line][:limit]
     rel = [line.replace(str(root) + "/", "", 1) for line in lines]
     return ok(context, clip("\n".join(rel), services.max_tool_output_chars), count=len(rel))
 

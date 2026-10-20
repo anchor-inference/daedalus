@@ -128,7 +128,7 @@ class ProjectMcpTools:
             if server not in manager.mcp.available():
                 continue
             try:
-                await asyncio.wait_for(manager.mcp.ensure(server), timeout=MCP_CONNECT_TIMEOUT)
+                await manager.mcp.ensure(server, deadline=MCP_CONNECT_TIMEOUT)
             except Exception:  # noqa: BLE001 — a server that does not connect is left out of this launch, not the launch
                 logger.warning("MCP server %s did not connect for launch %s; it is left out", server, launch_id, exc_info=True)
                 continue

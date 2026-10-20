@@ -97,8 +97,18 @@ def snippet(text: str, query: str, *, window: int = 160) -> str:
     flat = " ".join(text.split())
     if not words or not flat:
         return flat[:window]
-    lowered = flat.lower()
-    at = min((p for p in (lowered.find(w) for w in words) if p >= 0), default=-1)
+    # Lowered a character at a time, remembering where each lowered character came from: ``lower``
+    # can lengthen a string ("İ" becomes two characters), and an offset found in the lowered text
+    # used as an offset into the original cut the window from somewhere past the word.
+    lowered_chars: list[str] = []
+    origin: list[int] = []
+    for index, char in enumerate(flat):
+        low = char.lower()
+        lowered_chars.append(low)
+        origin.extend([index] * len(low))
+    lowered = "".join(lowered_chars)
+    found = min((p for p in (lowered.find(w) for w in words) if p >= 0), default=-1)
+    at = origin[found] if found >= 0 else -1
     start = max(0, at - window // 3) if at >= 0 else 0
     start = flat.rfind(" ", 0, start) + 1 if start else 0
     cut = flat[start : start + window]

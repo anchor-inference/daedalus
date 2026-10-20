@@ -207,7 +207,7 @@ async def test_write_edit_and_multiedit_refuse_a_read_only_folder_while_read_wor
 
 async def test_the_sandbox_binds_exactly_the_writable_walls(tree: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(shell, "bwrap_status", lambda: "ok")
-    monkeypatch.setattr(shell.shutil, "which", lambda name: "/usr/bin/bwrap")
+    monkeypatch.setattr(shell, "bwrap_path", lambda: "/usr/bin/bwrap")
     services = _services(tree)
     opened = tmp_path / "worktrees" / "fix"
     opened.mkdir(parents=True)

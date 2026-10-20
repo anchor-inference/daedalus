@@ -23,10 +23,13 @@ describe("the pages a turn showed", () => {
       show("d", "gone", { error: true }),
       show("e", "later", { running: true }),
       show("f", "../evil"),
+      show("g", "калькулятор"),
+      show("h", "Калькулятор"),
     ];
     expect(turnPages(items)).toEqual([
       { callId: "b", slug: "cad", draft: true },
       { callId: "c", slug: "orders", draft: true },
+      { callId: "g", slug: "калькулятор", draft: false },
     ]);
   });
 

@@ -175,7 +175,7 @@ async def test_sandbox_argv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     ws.mkdir()
     argv, sandboxed = await shell.sandbox_argv("ls", ExecToolsConfig(sandbox="off"), writable=[ws])
     assert argv == ["bash", "-lc", "ls"] and not sandboxed
-    monkeypatch.setattr(shell.shutil, "which", lambda name: "/usr/bin/bwrap" if name == "bwrap" else None)
+    monkeypatch.setattr(shell, "bwrap_path", lambda: "/usr/bin/bwrap")
     monkeypatch.setattr(shell, "bwrap_status", lambda: "ok")
     argv, sandboxed = await shell.sandbox_argv("ls", ExecToolsConfig(sandbox="workspace"), writable=[ws])
     assert sandboxed and argv[0] == "/usr/bin/bwrap" and "--unshare-pid" in argv and argv[argv.index("--bind") + 1] == str(ws) and argv[-3:] == ["bash", "-lc", "ls"]
@@ -275,7 +275,7 @@ async def test_sandbox_never_widens_to_the_working_directory(tmp_path: Path, mon
 
     ws = tmp_path / "ws"
     ws.mkdir()
-    monkeypatch.setattr(shell.shutil, "which", lambda name: "/usr/bin/bwrap" if name == "bwrap" else None)
+    monkeypatch.setattr(shell, "bwrap_path", lambda: "/usr/bin/bwrap")
     monkeypatch.setattr(shell, "_bwrap_state", "ok")
     argv, sandboxed = await shell.sandbox_argv("ls", ExecToolsConfig(sandbox="workspace"), writable=[ws])
     assert sandboxed and argv.count("--bind") == 1 and argv[argv.index("--bind") + 1] == str(ws)

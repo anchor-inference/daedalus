@@ -73,3 +73,10 @@ async def test_the_index_is_rebuilt_from_the_transcript_and_deleting_a_session_t
     assert await manager.sessions.search_transcript("zaphodbeeblebrox", session_id=None) == []
     assert (await db.fetchone("SELECT count(*) c FROM transcript_fts"))["c"] == 4  # only the seeded rows are left
     await manager.close()
+
+
+def test_a_snippet_finds_its_word_after_letters_that_lengthen_when_lowered() -> None:
+    # "İ".lower() is two characters, so an offset found in the lowered text pointed past the word in
+    # the original, and the window was cut from somewhere after it.
+    text = "İ" * 100 + " needle " + "x " * 200
+    assert "[needle]" in snippet(text, "needle")

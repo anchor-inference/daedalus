@@ -15,6 +15,7 @@ running.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import signal
 import subprocess
@@ -103,4 +104,57 @@ def _windows_alive(pid: int) -> bool:
         kernel32.CloseHandle(handle)
 
 
-__all__ = ["end_tree", "pid_alive"]
+DRAIN_AFTER_EXIT_SECONDS = 1.5
+"""How long a command's output is still read after its shell has exited: long enough for the last
+lines a just-finished child flushes, short enough that a server started with ``&`` does not hold the
+call. Python's ``Process.wait`` and ``communicate`` wait for every pipe to close, so a backgrounded
+child that inherited stdout kept a one-line command waiting for its whole timeout and was then
+killed as "timed out"."""
+
+EXIT_POLL_SECONDS = 0.05
+
+
+async def shell_exited(proc: asyncio.subprocess.Process) -> int:
+    """Return the exit code once the process itself has exited, whatever still holds its pipes.
+
+    ``proc.wait()`` resolves only when the pipes are closed as well; ``returncode`` is set the moment
+    the child watcher reaps the process, so it is polled.
+    """
+    while proc.returncode is None:
+        await asyncio.sleep(EXIT_POLL_SECONDS)
+    return proc.returncode
+
+
+async def read_until_exit(proc: asyncio.subprocess.Process, reader: asyncio.Task[object], *,
+                          grace: float = DRAIN_AFTER_EXIT_SECONDS) -> bool:
+    """Wait for ``reader`` (which reads ``proc``'s output to the end) and for ``proc`` to exit.
+
+    True when the output ended. False when the process exited and something it left behind still
+    held the output after ``grace`` seconds: the reader is then cancelled and the pipes are closed,
+    so the leftover child is not killed but its next write to the closed pipe may end it. An
+    exception from the reader is raised here. The caller bounds the whole wait.
+    """
+    exited = asyncio.ensure_future(shell_exited(proc))
+    try:
+        await asyncio.wait({reader, exited}, return_when=asyncio.FIRST_COMPLETED)
+        if reader.done():
+            reader.result()
+            await exited
+            return True
+        done, _ = await asyncio.wait({reader}, timeout=grace)
+        if done:
+            reader.result()
+            return True
+        reader.cancel()
+        await asyncio.gather(reader, return_exceptions=True)
+        # The transport is the only handle on the pipes; with the process already reaped, closing it
+        # closes them and kills nothing.
+        transport = getattr(proc, "_transport", None)
+        if transport is not None:
+            transport.close()
+        return False
+    finally:
+        exited.cancel()
+
+
+__all__ = ["DRAIN_AFTER_EXIT_SECONDS", "end_tree", "pid_alive", "read_until_exit", "shell_exited"]

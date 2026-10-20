@@ -54,7 +54,7 @@ forwarded to the server.
   versions/<n>/      each published version, exactly as published
 ```
 
-A slug is 1 to 63 lower-case letters, digits and hyphens, starting with a letter or a digit. A file's
+A slug is 1 to 63 lower-case letters of any script, digits and hyphens, starting with a letter or a digit. A file's
 path inside a page is relative and may not leave the page's folder.
 
 Publishing copies the draft into a new version directory and switches the manifest to it in one

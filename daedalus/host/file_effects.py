@@ -6,7 +6,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from daedalus.host.filesystem import LocalFS
+from daedalus.host.filesystem import LocalFS, write_untranslated
 from daedalus.stores.control import ControlConflict
 from daedalus.stores.writer_leases import WriterEffect, WriterLease, WriterLeases
 
@@ -43,8 +43,7 @@ class ClaimedLocalFS(LocalFS):
 
     @staticmethod
     def _write_text(path: Path, content: str) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        write_untranslated(path, content)
 
     async def write_text(self, path: Path, content: str) -> None:
         async with self._lock:

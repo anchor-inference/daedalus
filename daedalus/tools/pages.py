@@ -177,7 +177,7 @@ def _join(dest: str, rel: str) -> str:
     description=(
         "Create a custom page: a screen of the operator's own inside the Daedalus app, at /app/p/<slug>, which can sit "
         "in the rail and the phone drawer. Anything goes inside it — any framework, CDN, WebAssembly, WebSockets, the "
-        "whole /api — and nothing restarts. slug: 1-63 lower-case letters, digits, hyphens. title: a string or one per "
+        "whole /api — and nothing restarts. slug: 1-63 lower-case letters (any script), digits, hyphens. title: a string or one per "
         "language ({\"en\": …, \"ru\": …}). kind: 'static' (files you write or import), 'service' (a web app you run, "
         "proxied; target = a port of the services range or the name of a service from ServiceStart), 'link' (another "
         "site in a frame; target = its https URL). template (static only) is a starting point in the draft: blank, "

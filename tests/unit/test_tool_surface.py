@@ -69,7 +69,7 @@ async def _manager(settings: Settings, db: Database, config: RuntimeConfig | Non
     manager = SessionManager(settings.model_copy(update=settings_update) if settings_update else settings, config or model_config(), db=db)
     await manager.start()
 
-    async def connected(name: str) -> None:
+    async def connected(name: str, **_: Any) -> None:
         return None  # the catalogue is published by the test; nothing is spawned
 
     manager.mcp.ensure = connected  # type: ignore[method-assign, assignment]
