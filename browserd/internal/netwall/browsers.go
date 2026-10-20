@@ -40,6 +40,18 @@ func (b *Browsers) Open(browserID string) (string, error) {
 	return p.Addr(), nil
 }
 
+// Track gives a browser with no proxy of its own a place for the operator's grants, so a
+// navigation the operator allowed is judged as allowed (see Wall.Unlistened).
+func (b *Browsers) Track(browserID string) {
+	p := b.Wall.Unlistened(browserID)
+	b.mu.Lock()
+	if old := b.proxies[browserID]; old != nil {
+		old.Close()
+	}
+	b.proxies[browserID] = p
+	b.mu.Unlock()
+}
+
 // Close ends a browser's proxy, and with it every connection the browser still had.
 func (b *Browsers) Close(browserID string) {
 	b.mu.Lock()

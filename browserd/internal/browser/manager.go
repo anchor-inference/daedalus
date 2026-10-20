@@ -66,6 +66,9 @@ type Deps struct {
 // answer as it stands.
 type Wall interface {
 	Open(browserID string) (addr string, err error)
+	// Track keeps the grants of a browser that has no proxy of its own: the operator's Chrome, whose
+	// pages leave from the operator's machine. Close ends them with the browser.
+	Track(browserID string)
 	Close(browserID string)
 	Navigation(ctx context.Context, browserID, url string) error
 	// Allowlist reports whether the operator has an allowlist, which a page's own navigations are

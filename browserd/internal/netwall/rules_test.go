@@ -611,3 +611,35 @@ func TestNamesAreNotLookedUpForABrowserOnAnotherMachine(t *testing.T) {
 		}
 	}
 }
+
+// A grant for the operator's Chrome, which has no proxy, was refused with "has no network wall
+// running", so a site the operator allowed was asked about again on every try.
+func TestABrowserWithNoProxyKeepsItsGrants(t *testing.T) {
+	allow := []string{"github.com"}
+	c := nativeConfig
+	c.EgressAllow = &allow
+	w := New(Options{Resolver: &fakeResolver{answers: map[string][]string{}}, NamesUnresolved: true,
+		LocalAddrs: func() []netip.Addr { return nil }})
+	if err := w.Configure(c); err != nil {
+		t.Fatal(err)
+	}
+	b := NewBrowsers(w)
+	ctx := context.Background()
+	if err := b.Navigation(ctx, "u1", "https://anchorinference.com/"); err == nil {
+		t.Fatal("a site outside the allowlist opened before the operator allowed it")
+	}
+	if b.Grant("u1", "anchorinference.com", 443, time.Minute) {
+		t.Fatal("a grant was kept for a browser nobody tracks")
+	}
+	b.Track("u1")
+	if !b.Grant("u1", "anchorinference.com", 443, time.Minute) {
+		t.Fatal("the grant was refused")
+	}
+	if err := b.Navigation(ctx, "u1", "https://anchorinference.com/ru/"); err != nil {
+		t.Fatalf("the granted site was refused: %v", err)
+	}
+	b.Close("u1")
+	if err := b.Navigation(ctx, "u1", "https://anchorinference.com/"); err == nil {
+		t.Fatal("the grant outlived the browser")
+	}
+}

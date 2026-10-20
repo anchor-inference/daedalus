@@ -141,6 +141,11 @@ func (a *attach) start(ctx context.Context, profile string) (*Browser, error) {
 	// any page asks.
 	b.screenAsked = true
 	close(b.screenKnown)
+	if m.deps.Wall != nil {
+		// The operator's yes to a site is kept here; there is no proxy to keep it in. Without this a
+		// granted site was refused again ("has no network wall running") and never opened.
+		m.deps.Wall.Track(b.ID)
+	}
 	conn, drop := s.NewConn(func(e cdp.Event) { m.onEvent(b, e) }, a.markDispatch)
 	b.conn = conn
 	p := &attachProc{a: a, b: b, s: s, drop: drop, done: make(chan struct{})}

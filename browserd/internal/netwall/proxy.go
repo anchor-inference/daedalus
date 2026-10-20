@@ -49,6 +49,14 @@ type Proxy struct {
 	closed  bool
 }
 
+// Unlistened is a proxy that listens nowhere and carries nothing: only the grants of a browser
+// whose pages leave from another machine (the operator's Chrome), so CheckNavigation reads them
+// as it reads a running proxy's. Its port is 0, which no destination has.
+func (w *Wall) Unlistened(browser string) *Proxy {
+	return &Proxy{wall: w, browser: browser, grants: map[string]time.Time{}, tunnels: map[net.Conn]bool{},
+		tr: &http.Transport{}, srv: &http.Server{ReadHeaderTimeout: time.Second}}
+}
+
 // Listen starts a proxy for one browser. browser is the daemon's id for it; it is the browser_id
 // of the egress events the proxy publishes. Start the browser with ChromiumArgs(p.Addr()), and
 // Close the proxy when the browser has exited.
