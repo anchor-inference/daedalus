@@ -21,7 +21,14 @@ from typing import Any
 from urllib.parse import urlencode
 
 import httpx
-from subscriptions import KEEPALIVE, SubscriptionError, _write_json, failure_chunk, truncated_chunk
+from subscriptions import (
+    KEEPALIVE,
+    TOOL_IMAGES_CARRIER_HEADER,
+    SubscriptionError,
+    _write_json,
+    failure_chunk,
+    truncated_chunk,
+)
 
 logger = logging.getLogger("keyproxy.claude")
 
@@ -229,6 +236,63 @@ def _user_content(content: Any) -> list[dict[str, Any]]:
     return out or [{"type": "text", "text": ""}]
 
 
+_CARRIED_CALL_PREFIX = "[images returned by tool call "
+
+
+def _carried_images(content: Any) -> dict[str, list[dict[str, Any]]] | None:
+    """The blocks a carrier message holds for each tool call, or ``None`` when ``content`` is no carrier.
+
+    After the header, each call's part opens with ``[images returned by tool call <id>]`` and runs to the
+    next such line: a size line and the image itself, both kept in order.
+    """
+    if not isinstance(content, list) or not content:
+        return None
+    first = content[0]
+    if not isinstance(first, dict) or first.get("type") != "text" or first.get("text") != TOOL_IMAGES_CARRIER_HEADER:
+        return None
+    by_call: dict[str, list[dict[str, Any]]] = {}
+    current: list[dict[str, Any]] | None = None
+    for part in content[1:]:
+        if not isinstance(part, dict):
+            continue
+        text = part.get("text") if part.get("type") == "text" else None
+        if isinstance(text, str) and text.startswith(_CARRIED_CALL_PREFIX) and text.endswith("]"):
+            current = by_call.setdefault(text[len(_CARRIED_CALL_PREFIX):-1], [])
+            continue
+        if current is None:
+            return None  # not the shape the core writes: left as the user message it says it is
+        current.extend(block for block in _user_content([part]) if block.get("type") == "image" or block.get("text"))
+    return by_call
+
+
+def _tool_result_content(content: Any) -> str | list[dict[str, Any]]:
+    """A tool message's content as a ``tool_result`` takes it: its text, and its pictures when it has any.
+
+    A tool message whose content is a list of parts (the native shape some adapters send) keeps its images
+    inside the result instead of losing them to the text join.
+    """
+    if not isinstance(content, list) or not any(isinstance(p, dict) and p.get("type") == "image_url" for p in content):
+        return _text_of(content)
+    return [block for block in _user_content(content) if block.get("type") == "image" or block.get("text")]
+
+
+def _fold_into_results(results: list[dict[str, Any]], carried: dict[str, list[dict[str, Any]]]) -> bool:
+    """Put each call's carried pictures inside its own ``tool_result``; ``False`` when a call is not among them.
+
+    Claude reads a picture inside the result of the call that made it as that call's output; the same
+    picture in a user turn after the results reads as something the operator sent.
+    """
+    by_id = {result["tool_use_id"]: result for result in results}
+    if not carried or any(call not in by_id for call in carried):
+        return False
+    for call, blocks in carried.items():
+        result = by_id[call]
+        content = result["content"]
+        text = [{"type": "text", "text": content}] if isinstance(content, str) and content else (content if isinstance(content, list) else [])
+        result["content"] = [*text, *blocks]
+    return True
+
+
 def _wire_tool_name(name: str) -> str:
     name = str(name or "")
     if not name or name.startswith(TOOL_PREFIX) or name.startswith("mcp__"):
@@ -331,6 +395,9 @@ def chat_to_messages(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, st
             if text.strip():
                 instructions.append(text)
         elif role == "user":
+            carried = _carried_images(message.get("content")) if pending_results else None
+            if carried is not None and _fold_into_results(pending_results, carried):
+                continue
             flush_results()
             items.append({"role": "user", "content": _user_content(message.get("content"))})
         elif role == "assistant":
@@ -349,7 +416,7 @@ def chat_to_messages(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, st
             if content:
                 items.append({"role": "assistant", "content": content})
         elif role == "tool":
-            pending_results.append({"type": "tool_result", "tool_use_id": str(message.get("tool_call_id") or ""), "content": _text_of(message.get("content"))})
+            pending_results.append({"type": "tool_result", "tool_use_id": str(message.get("tool_call_id") or ""), "content": _tool_result_content(message.get("content"))})
     flush_results()
     if not items:
         items.append({"role": "user", "content": [{"type": "text", "text": ""}]})
