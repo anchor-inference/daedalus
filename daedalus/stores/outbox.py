@@ -51,6 +51,21 @@ class OutboxStore:
         )
         return action_id
 
+    @staticmethod
+    async def cancel_waiting_launches_in(conn: aiosqlite.Connection, task_id: str, reason: str) -> list[str]:
+        """Cancel the task's launches that still wait for admission; returns their ids.
+
+        A pending launch has reached no runtime, so cancelling it needs no proof. A claimed one is
+        being admitted right now, and only its own outcome says whether a worker started."""
+        async with conn.execute("SELECT id FROM effect_outbox WHERE kind = 'task.launch' AND state = 'pending'"
+                                " AND json_extract(payload_json,'$.control.task_id') = ?", (task_id,)) as cursor:
+            ids = [row["id"] for row in await cursor.fetchall()]
+        if ids:
+            await conn.execute("UPDATE effect_outbox SET state = 'cancelled',error = ?,completed_at = ?"
+                               " WHERE kind = 'task.launch' AND state = 'pending'"
+                               " AND json_extract(payload_json,'$.control.task_id') = ?", (reason, now(), task_id))
+        return ids
+
     async def _decode(self, conn: aiosqlite.Connection, row: aiosqlite.Row) -> Claim:
         receipt = await one(conn, "SELECT * FROM operation_receipts WHERE id = ?", (row["receipt_id"],))
         if receipt is None:

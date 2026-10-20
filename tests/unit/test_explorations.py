@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from daedalus.config import Settings
+from daedalus.extensions import explorations as explorations_module
 from daedalus.extensions.explorations import Explorations
 from daedalus.extensions.orchestrator_ops import Refused
 from daedalus.extensions.runtime_observations import admit_native_run, observe_exit
@@ -90,10 +91,12 @@ async def attempts_of(r: Rig, exploration_id: str) -> list[dict[str, Any]]:
         "SELECT * FROM exploration_attempts WHERE exploration_id = ? ORDER BY slot", (exploration_id,))]
 
 
-async def started(r: Rig, call: str = "call-explore", **kwargs: Any) -> tuple[str, str, Any]:
+async def started(r: Rig, call: str = "call-explore", *, held: bool = False, **kwargs: Any) -> tuple[str, str, Any]:
     """An office, a source member who worked an earlier card in its own session, and an exploration
-    of a new card with two attempts."""
+    of a new card with two attempts; ``held`` holds the attempts' starts at the runtime's door."""
     runtime = fake(r)
+    if held:
+        runtime.gate, runtime.entered, runtime.gated = asyncio.Event(), asyncio.Event(), "Ada-"
     sid = await office(r)
     await r.call(sid, "team", concurrency=4)
     source = await r.manager.staff.hire(r.project.id, name="Ada", role="Menu", isolation="worktree")
@@ -220,7 +223,60 @@ async def test_keeping_none_releases_every_attempt_and_puts_the_task_back(settin
         said = await r.call(sid, "explore", op="pick", exploration=row["id"], winner="none", why="Neither got far enough.")
         assert "Kept none" in said, said
         assert (await task_row(r.manager, task_id))["status"] == "todo"
-        assert all(a["cleaned_at"] for a in await attempts_of(r, row["id"]))
+        assert all(a["cleaned_at"] for a in await attempts_of(r, row["id"])), said
+    finally:
+        await close_team(r.manager)
+        await r.manager.close()
+
+
+async def launches(r: Rig, card_id: str) -> list[str]:
+    return [row["state"] for row in await r.manager.db.fetchall(
+        "SELECT state FROM effect_outbox WHERE kind = 'task.launch' AND json_extract(payload_json,'$.control.task_id') = ?"
+        " ORDER BY created_at", (card_id,))]
+
+
+async def test_a_deadline_during_the_starts_withdraws_them_and_a_second_pick_finishes(settings: Settings, db: Database, tmp_path: Path,
+                                                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    """The deadline came while one attempt's start was half admitted and the other's still waited for
+    a place. Dismissing the members under those starts made them fail afterwards, taking the cards'
+    assignees back between the read and the write of the drop, or ended the session a start was
+    entering: the cards could not be dropped and the orchestrator was told they "stay todo"."""
+    r = await rig(settings, db, tmp_path)
+    try:
+        service = explorations(r)
+        sid, task_id, (runtime, _) = await started(r, held=True)
+        await asyncio.wait_for(runtime.entered.wait(), timeout=30)
+        [row] = await r.manager.db.fetchall("SELECT * FROM explorations")
+        first, second = [a["task_id"] for a in await attempts_of(r, row["id"])]
+        assert (await launches(r, first), await launches(r, second)) == (["claimed"], ["pending"])
+        await r.manager.db.execute("UPDATE explorations SET deadline_at = '2000-01-01' WHERE id = ?", (row["id"],))
+        await service.sweep()
+        [news] = await events(r.manager, "orchestrator.exploration")
+        assert news.payload["reason"] == "the deadline passed"
+        # The start still waiting is withdrawn: nobody waits for that attempt's work any more.
+        assert await launches(r, second) == ["cancelled"]
+
+        # The start being admitted is waited for, briefly; still held, the card is named and kept.
+        monkeypatch.setattr(explorations_module, "SETTLE_SECONDS", 0.3)
+        said = await r.call(sid, "explore", op="pick", exploration=row["id"], winner="none", why="Neither got far enough.")
+        assert "Kept none" in said and f"{first} is held" in said and second not in said, said
+        assert [bool(a["cleaned_at"]) for a in await attempts_of(r, row["id"])] == [False, True], said
+        assert (await task_row(r.manager, second))["status"] == "dropped"
+        assert (await task_row(r.manager, task_id))["status"] == "todo"
+
+        # Once it is through, the same pick again releases the member it started and drops the card.
+        monkeypatch.setattr(explorations_module, "SETTLE_SECONDS", 30.0)
+        runtime.gate.set()
+        again = await r.call(sid, "explore", op="pick", exploration=row["id"], winner="none", why="Neither got far enough.")
+        assert "decided already" in again and "held" not in again, again
+        attempts = await attempts_of(r, row["id"])
+        assert all(a["cleaned_at"] for a in attempts), again
+        assert (await task_row(r.manager, first))["status"] == "dropped"
+        execution = await r.manager.db.fetchone("SELECT a.state FROM execution_attempts a JOIN board_tasks t"
+                                                " ON t.current_attempt_id = a.id WHERE t.id = ?", (first,))
+        assert execution["state"] == "cancelled"
+        assert (await r.manager.staff.get(attempts[0]["staff_id"])).archived_at is not None  # type: ignore[union-attr]
+        assert [req.staff.name.startswith("Ada-") for req in runtime.started].count(True) == 1, "the withdrawn start never ran"
     finally:
         await close_team(r.manager)
         await r.manager.close()

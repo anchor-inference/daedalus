@@ -29,15 +29,8 @@ async def queue_stop(app: Application, task_id: str, principal: Principal, *, cl
     async def effect(conn: Any, mutation: Any) -> dict[str, Any]:
         task = await one(conn, "SELECT * FROM board_tasks WHERE id = ?", (task_id,))
         assert task is not None
-        async with conn.execute("SELECT id FROM effect_outbox WHERE kind = 'task.launch' AND state = 'pending'"
-                                " AND json_extract(payload_json,'$.control.task_id') = ?", (task_id,)) as cursor:
-            waiting = await cursor.fetchall()
-        if waiting:
-            ids = [row["id"] for row in waiting]
-            await conn.execute("UPDATE effect_outbox SET state = 'cancelled',error = ?,completed_at = ?"
-                               " WHERE kind = 'task.launch' AND state = 'pending'"
-                               " AND json_extract(payload_json,'$.control.task_id') = ?",
-                               (reason or "the operator stopped the queued launch", now(), task_id))
+        ids = await OutboxStore.cancel_waiting_launches_in(conn, task_id, reason or "the operator stopped the queued launch")
+        if ids:
             return {"task_id": task_id, "cancelled_launches": ids, "state": "completed"}
         async with conn.execute("SELECT id,staff_id,kind,session_id,terminal_id FROM staff_sessions WHERE task_id = ? AND ended_at IS NULL", (task_id,)) as cursor:
             staff = await cursor.fetchall()
