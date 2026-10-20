@@ -19,6 +19,7 @@ from protocore.contracts.types import (
     ToolUseBlock,
     message_image_refs,
 )
+from protocore.providers.openai_compat import ReasoningReplay
 
 from daedalus.security.redact import redact
 
@@ -107,6 +108,8 @@ async def messages_to_wire(
     image_loader: Any | None = None,
     supports_images: bool = False,
     images_omitted: Container[str] = (),
+    reasoning_replay: ReasoningReplay = ReasoningReplay.when_present,
+    thinking: bool = False,
 ) -> list[dict[str, Any]]:
     """Flatten core messages into OpenAI ``messages``.
 
@@ -114,6 +117,13 @@ async def messages_to_wire(
     endpoint cannot take images the block degrades to a text placeholder so the
     model still knows a file was attached. A picture named in ``images_omitted``
     (see :func:`images_left_out`) degrades the same way, saying it was left out.
+
+    ``reasoning_replay`` is the endpoint's policy for an assistant turn's reasoning text, in the
+    core's terms: ``never`` sends none (a server that refuses a field it does not know),
+    ``when_present`` sends it on the turns that have some, and ``required`` (DeepSeek) gives every
+    assistant turn the field while ``thinking`` is on — empty when the turn has none, since DeepSeek
+    refuses a thinking request whose earlier turns lack it — and leaves out a turn that is nothing
+    but reasoning, the partial a stream left when it died mid-thought, which it cannot use.
     """
     wire: list[dict[str, Any]] = []
     for message in messages:
@@ -155,10 +165,13 @@ async def messages_to_wire(
             entry["content"] = "".join(text_parts) or None
             if tool_calls:
                 entry["tool_calls"] = tool_calls
-            if message.reasoning_content:
-                entry["reasoning_content"] = message.reasoning_content
-            elif reasoning:
-                entry["reasoning_content"] = "".join(reasoning)
+            reasoning_text = message.reasoning_content or "".join(reasoning)
+            if reasoning_replay is ReasoningReplay.required and thinking:
+                if entry["content"] is None and not tool_calls:
+                    continue
+                entry["reasoning_content"] = reasoning_text
+            elif reasoning_replay is not ReasoningReplay.never and reasoning_text:
+                entry["reasoning_content"] = reasoning_text
             if entry["content"] is None and not tool_calls:
                 entry["content"] = ""
             wire.append(entry)

@@ -9,7 +9,10 @@ from pathlib import Path
 from protocore.contracts.types import IMAGE_REFS_METADATA_KEY, Message, MessageRole, TextBlock, message_image_refs
 
 from daedalus.stores.core_image_keys import rewritten
-from daedalus.stores.database import MIGRATIONS, Database
+from daedalus.stores.database import MIGRATIONS, Database, DataMigration, _core_image_keys
+
+BEFORE = next(index for index, migration in enumerate(MIGRATIONS) if isinstance(migration, DataMigration) and migration.step is _core_image_keys)
+"""The schema this migration upgrades from, found by what it does rather than by its number."""
 
 AT = "2026-10-01T00:00:00+00:00"
 
@@ -49,7 +52,7 @@ async def test_every_stored_copy_is_renamed_once_and_nothing_else_moves(tmp_path
         snapshot = {"schema_version": 7, "history": [OLD_USER, OLD_TOOL_TEXT], "steer_queue": [], "follow_up_queue": [OLD_QUEUE_ITEM]}
         await db.execute("INSERT INTO snapshots(run_id, tenant_id, session_id, state, snapshot, updated_at) VALUES ('r1', 't', 's1', 'running', ?, ?)", (json.dumps(snapshot), AT))
         await db.execute("INSERT INTO live_control(session_id, steer_queue, follow_up_queue, updated_at) VALUES ('s1', '[]', ?, ?)", (json.dumps([OLD_QUEUE_ITEM]), AT))
-        await db.execute("UPDATE schema_version SET version = ?", (len(MIGRATIONS) - 1,))
+        await db.execute("UPDATE schema_version SET version = ?", (BEFORE,))
     finally:
         await db.close()
 

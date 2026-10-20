@@ -29,6 +29,7 @@ from daedalus.stores.contract_change_schema import MIGRATION as CONTRACT_CHANGE_
 from daedalus.stores.control_schema import MIGRATION as CONTROL_MIGRATION
 from daedalus.stores.coordinator_handoff_schema import MIGRATION as COORDINATOR_HANDOFF_MIGRATION
 from daedalus.stores.core_image_keys import move_image_keys
+from daedalus.stores.core_reasoning_records import move_reasoning_records
 from daedalus.stores.edit_board import SCHEMA as EDIT_BOARD_SCHEMA
 from daedalus.stores.execution_schema import MIGRATION as EXECUTION_MIGRATION
 from daedalus.stores.exploration_schema import MIGRATION as EXPLORATION_MIGRATION
@@ -2655,6 +2656,17 @@ async def _core_image_keys(conn: aiosqlite.Connection) -> None:
 
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _core_image_keys))
+
+
+async def _core_reasoning_records(conn: aiosqlite.Connection) -> None:
+    """Opaque reasoning already on stored turns takes the core's record format (see
+    ``stores.core_reasoning_records``); without it the next request of every open session lost it."""
+    moved = await move_reasoning_records(conn)
+    if moved:
+        logger.info("moved the reasoning records of %d stored row(s) onto the core's format", moved)
+
+
+MIGRATIONS.append(DataMigration("SELECT 1;", _core_reasoning_records))
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session

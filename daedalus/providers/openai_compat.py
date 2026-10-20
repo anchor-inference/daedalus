@@ -40,6 +40,8 @@ from protocore.contracts.llm import (
     classify_transport_exception,
 )
 from protocore.contracts.types import Message, MessageRole, StopReason, TextBlock
+from protocore.providers.openai_compat import ReasoningReplay
+from protocore.providers.openai_compat.wire import reasoning_envelope, replayed_details
 
 from daedalus import __version__
 from daedalus.config import keyproxy_upstream
@@ -268,10 +270,6 @@ def message_shape(messages: list[dict[str, Any]]) -> str:
     return " ".join(parts)
 
 
-REASONING_ENVELOPE = "chat.reasoning_details"
-"""The ``format`` of the record this adapter keeps on an assistant message for a provider's
-``reasoning_details``: which endpoint and model produced them, and the entries as they arrived."""
-
 REASONING_REPLAY_UPSTREAMS = ("codex",)
 """Key-proxy upstreams whose ``reasoning_details`` are kept and sent back.
 
@@ -317,32 +315,9 @@ def takes_cache_key(endpoint: ProviderEndpoint) -> bool:
     return keyproxy_upstream(endpoint.base_url) in CACHE_KEY_UPSTREAMS or host == "api.openai.com"
 
 
-def reasoning_envelope(endpoint_id: str, model: str, details: list[dict[str, Any]], tokens: int) -> dict[str, Any]:
-    """The record kept on an assistant message for the ``reasoning_details`` its stream carried.
-
-    ``tokens`` is the provider's count of the reasoning, which is what sending the entries back
-    costs; the core's estimate reads it instead of the size of an encrypted blob.
-    """
-    return {"format": REASONING_ENVELOPE, "endpoint": endpoint_id, "model": model, "details": details, "tokens": max(0, int(tokens))}
-
-
-def replayed_details(message: Message, endpoint_id: str, model: str) -> list[dict[str, Any]]:
-    """The ``reasoning_details`` to send back with an assistant message, for this endpoint and model only.
-
-    Encrypted reasoning is readable only by the model it came from. A session that switched
-    model, or went through another endpoint, keeps the records on its earlier turns, and they go
-    back only if the session returns to the model that wrote them.
-    """
-    out: list[dict[str, Any]] = []
-    for item in message.reasoning_items or ():
-        if item.get("format") == REASONING_ENVELOPE and item.get("endpoint") == endpoint_id and item.get("model") == model:
-            out.extend(d for d in item.get("details") or [] if isinstance(d, dict))
-    return out
-
-
 DEEPSEEK_SHAPED = ("deepseek", "opencode")
-"""Endpoints that speak DeepSeek's thinking dialect: the ``thinking`` object, ``reasoning_effort`` in DeepSeek's
-names, ``reasoning_content`` on every assistant turn of a tool-call round."""
+"""Endpoints that speak DeepSeek's thinking dialect: the ``thinking`` object and ``reasoning_effort`` in DeepSeek's
+names. Their reasoning replay is ``required`` unless configured otherwise (see ``config.reasoning_replay_for``)."""
 
 DEEPSEEK_EFFORTS = {"minimal": "low", "low": "low", "medium": "high", "high": "high", "xhigh": "max"}
 """DeepSeek knows ``low``, ``high`` and ``max`` and treats anything else as ``high``: a preset that asks for
@@ -399,6 +374,9 @@ class ProviderEndpoint:
     """How long a streamed request may get no byte back at all before it is abandoned and sent again; 0 never."""
     first_byte_retries: int = 1
     """How many times such a request is sent again before the silence is raised as a timeout."""
+    reasoning_replay: ReasoningReplay = ReasoningReplay.when_present
+    """Whether an assistant turn's reasoning text goes back to this endpoint, in the core's terms (see
+    ``providers.wire.messages_to_wire``)."""
 
     def source_digest(self) -> str:
         """Bind a saved provider decision to this connection without retaining its credentials."""
@@ -780,8 +758,10 @@ class OpenAICompatibleProvider(ILLMProvider):
         images = self.accepts_images(model)
         loader = _remembering(self._image_loader) if images and self._image_loader is not None else self._image_loader
         omitted = await images_left_out(request.messages, loader) if images and loader is not None else frozenset()
+        thinking = bool(extra.get("enable_thinking", False))
         for message in request.messages:
-            entries = await messages_to_wire([message], image_loader=loader, supports_images=images, images_omitted=omitted)
+            entries = await messages_to_wire([message], image_loader=loader, supports_images=images, images_omitted=omitted,
+                                             reasoning_replay=self.endpoint.reasoning_replay, thinking=thinking)
             if keep_reasoning and entries and message.reasoning_items:
                 # An assistant message is one wire entry; its reasoning goes back on it, in order.
                 details = replayed_details(message, self.endpoint.id, model)
@@ -813,24 +793,8 @@ class OpenAICompatibleProvider(ILLMProvider):
                 body["tool_choice"] = "required"
             elif isinstance(extra.get("tool_choice"), dict):
                 body["tool_choice"] = extra["tool_choice"]
-        thinking = bool(extra.get("enable_thinking", False))
         effort = str(extra.get("reasoning_effort") or "medium")
         self._apply_thinking(body, thinking=thinking, effort=effort)
-        if thinking and self.endpoint.kind in DEEPSEEK_SHAPED:
-            # DeepSeek refuses a thinking-mode request whose earlier assistant turns carry no
-            # reasoning_content; a turn produced with thinking off (a recovery retry, an operator
-            # toggle) has none, and an empty one is accepted. An assistant turn with nothing but
-            # reasoning — the partial the core keeps when a stream dies mid-thought — is not a turn
-            # DeepSeek can use (reasoning is only read back on a completed tool-call turn), so it
-            # is left off the wire.
-            kept: list[dict[str, Any]] = []
-            for entry in wire:
-                if entry.get("role") == "assistant":
-                    if not entry.get("content") and not entry.get("tool_calls"):
-                        continue
-                    entry.setdefault("reasoning_content", "")
-                kept.append(entry)
-            body["messages"] = wire = kept
         breakpoints = extra.get("cache_breakpoints")
         if breakpoints and self.endpoint.kind == "openrouter":
             apply_cache_control(body["messages"], breakpoints, index_map=wire_index)

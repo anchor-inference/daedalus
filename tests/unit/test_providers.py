@@ -7,6 +7,7 @@ import httpx
 import pytest
 from protocore.contracts.llm import LLMRateLimitError, LLMRequest, ProviderDeltaKind
 from protocore.contracts.types import Message, MessageRole, TextBlock, ToolDefinition, ToolParameterSchema
+from protocore.providers.openai_compat import ReasoningReplay
 
 from daedalus.providers.openai_compat import (
     OpenAICompatibleProvider,
@@ -34,14 +35,15 @@ class RecordingSink:
         self.records.append(record)
 
 
-def _provider(body: str, status: int = 200, sink: RecordingSink | None = None) -> OpenAICompatibleProvider:
+def _provider(body: str, status: int = 200, sink: RecordingSink | None = None,
+              replay: ReasoningReplay = ReasoningReplay.required) -> OpenAICompatibleProvider:
     captured: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured["json"] = json.loads(request.content)
         return httpx.Response(status, text=body, headers={"content-type": "text/event-stream"})
 
-    endpoint = ProviderEndpoint(id="deepseek", kind="deepseek", base_url="https://x.test", api_key="k")
+    endpoint = ProviderEndpoint(id="deepseek", kind="deepseek", base_url="https://x.test", api_key="k", reasoning_replay=replay)
     provider = OpenAICompatibleProvider(endpoint, client=httpx.AsyncClient(transport=httpx.MockTransport(handler)), usage_sink=sink)
     provider.captured = captured  # type: ignore[attr-defined]
     return provider
@@ -429,6 +431,37 @@ async def test_deepseek_thinking_request_leaves_a_reasoning_only_turn_off_the_wi
     sent = provider.captured["json"]["messages"]  # type: ignore[attr-defined]
     assert [m["role"] for m in sent][-2:] == ["assistant", "tool"]
     assert all("reasoning_content" in m for m in sent if m["role"] == "assistant")
+
+
+@pytest.mark.parametrize(
+    ("kind", "configured", "expected"),
+    [("deepseek", None, "required"), ("opencode", None, "required"), ("openai_compat", None, "when_present"),
+     ("vllm", None, "when_present"), ("openai_compat", "never", "never"), ("deepseek", "when_present", "when_present")],
+)
+def test_the_reasoning_replay_is_the_providers_own_setting_else_its_dialects(kind: str, configured: str | None, expected: str) -> None:
+    from daedalus.config import ProviderConfig, reasoning_replay_for
+
+    assert reasoning_replay_for(ProviderConfig(kind=kind, base_url="https://x.test", reasoning_replay=configured)) == expected  # type: ignore[arg-type]
+
+
+async def test_an_endpoint_set_to_never_is_sent_no_reasoning_and_one_set_to_when_present_only_what_there_is() -> None:
+    """A server that refuses a field it does not know is set to ``never``; nothing else changes for it."""
+    from protocore.contracts.types import Message, MessageRole, TextBlock, ToolResultBlock, ToolUseBlock
+
+    history = [
+        Message(role=MessageRole.assistant, content_blocks=[ToolUseBlock(tool_call_id="c1", name="t", arguments_json="{}")], reasoning_content="why"),
+        Message(role=MessageRole.tool, content_blocks=[ToolResultBlock(tool_call_id="c1", content="hello")]),
+        Message(role=MessageRole.assistant, content_blocks=[TextBlock(text="Read it."), ToolUseBlock(tool_call_id="c2", name="t", arguments_json="{}")]),
+        Message(role=MessageRole.tool, content_blocks=[ToolResultBlock(tool_call_id="c2", content="again")]),
+    ]
+    for replay, expected in ((ReasoningReplay.never, [None, None]), (ReasoningReplay.when_present, ["why", None])):
+        provider = _provider(_sse([_chunk({"content": "ok"}), _chunk({}, finish="stop")]), replay=replay)
+        request = _request(enable_thinking=True, reasoning_effort="low")
+        request = request.model_copy(update={"messages": [*request.messages, *history]})
+        async for _ in provider.stream_with_tools(request):
+            pass
+        sent = provider.captured["json"]["messages"]  # type: ignore[attr-defined]
+        assert [m.get("reasoning_content") for m in sent if m["role"] == "assistant"] == expected, replay
 
 
 async def test_opencode_sends_the_session_id_and_deepseek_shaped_thinking() -> None:

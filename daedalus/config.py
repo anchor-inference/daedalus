@@ -532,6 +532,11 @@ class ProviderConfig(BaseModel):
     """Per-model USD per 1M tokens overriding the built-in table (``daedalus.providers.pricing``):
     ``{"model": {"input", "output", "cache_hit"[, "*_off_peak", "peak_utc", "peak_weekdays_only"]}}``.
     A model with no price anywhere is recorded with an unknown cost."""
+    reasoning_replay: Literal["never", "when_present", "required"] | None = None
+    """Whether an assistant turn's reasoning text (``reasoning_content``) goes back to this endpoint on later
+    requests: ``never`` for a server that refuses a field it does not know, ``when_present`` on the turns that
+    have some, ``required`` on every turn while thinking is on (DeepSeek refuses a thinking request whose earlier
+    turns lack it). ``None`` takes :func:`reasoning_replay_for`."""
     billing: ProviderBilling = "metered"
     """``subscription`` is a prepaid plan (OpenCode Go, Z.AI Coding Plan, MiniMax Token Plan, Kimi Code): its calls are recorded at $0, never count against a
     dollar cap, and the plan's own allowance is what limits them, read from the key proxy beside the other
@@ -560,6 +565,15 @@ def first_byte_timeout_for(provider: ProviderConfig) -> float:
     if provider.kind in ("llamacpp", "vllm") or keyproxy_upstream(provider.base_url) == "local":
         return 0.0
     return FIRST_BYTE_TIMEOUT_SECONDS
+
+
+def reasoning_replay_for(provider: ProviderConfig) -> str:
+    """The reasoning replay for ``provider``: its own setting, else ``required`` for the DeepSeek dialect
+    (DeepSeek and OpenCode Go, which passes DeepSeek's fields through) and ``when_present`` for the rest, which
+    is what every endpoint was sent before the setting existed."""
+    if provider.reasoning_replay is not None:
+        return provider.reasoning_replay
+    return "required" if provider.kind in ("deepseek", "opencode") else "when_present"
 
 
 KNOWN_TOOL_LIMITS: tuple[tuple[str, int], ...] = (("grok", 350), ("gemini", 128))
