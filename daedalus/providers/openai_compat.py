@@ -46,7 +46,13 @@ from daedalus.providers.dsml import DsmlGuard
 from daedalus.providers.failure_evidence import FailureEvidence, failure_evidence
 from daedalus.providers.llamacpp import tools_to_llamacpp_wire
 from daedalus.providers.pricing import ModelPricing, complete_usage
-from daedalus.providers.wire import arguments_cut, messages_to_wire, parse_json_arguments, tools_to_wire
+from daedalus.providers.wire import (
+    arguments_cut,
+    images_left_out,
+    messages_to_wire,
+    parse_json_arguments,
+    tools_to_wire,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -783,8 +789,11 @@ class OpenAICompatibleProvider(ILLMProvider):
         wire: list[dict[str, Any]] = []
         wire_index: list[int] = []  # core message index -> index of its LAST wire entry (a tool message fans out into several)
         keep_reasoning = replays_reasoning(self.endpoint)
+        images = self.accepts_images(model)
+        loader = _remembering(self._image_loader) if images and self._image_loader is not None else self._image_loader
+        omitted = await images_left_out(request.messages, loader) if images and loader is not None else frozenset()
         for message in request.messages:
-            entries = await messages_to_wire([message], image_loader=self._image_loader, supports_images=self.accepts_images(model))
+            entries = await messages_to_wire([message], image_loader=loader, supports_images=images, images_omitted=omitted)
             if keep_reasoning and entries and message.reasoning_items:
                 # An assistant message is one wire entry; its reasoning goes back on it, in order.
                 details = replayed_details(message, self.endpoint.id, model)
@@ -1142,6 +1151,18 @@ def parse_json_text(text: str) -> dict[str, Any] | None:
         if isinstance(value, dict):
             return value
     return None
+
+
+def _remembering(loader: ImageLoader) -> ImageLoader:
+    """``loader`` for one request, reading each picture once: measured for the window, then sent."""
+    loaded: dict[str, tuple[bytes, str]] = {}
+
+    async def load(blob_ref: str) -> tuple[bytes, str]:
+        if blob_ref not in loaded:
+            loaded[blob_ref] = await loader(blob_ref)
+        return loaded[blob_ref]
+
+    return load
 
 
 async def _after(first: str | None, rest: AsyncIterator[str]) -> AsyncIterator[str]:
