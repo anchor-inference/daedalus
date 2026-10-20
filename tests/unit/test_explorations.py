@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import subprocess
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -11,12 +14,64 @@ import pytest
 from daedalus.config import Settings
 from daedalus.extensions.explorations import Explorations
 from daedalus.extensions.orchestrator_ops import Refused
+from daedalus.extensions.runtime_observations import admit_native_run, observe_exit
+from daedalus.staff_runtime import Started
 from daedalus.stores.database import Database
 from tests.support.authorized_launch import operator_assignment
 from tests.support.waiting import until_await
 from tests.unit.test_orchestrator import Rig, events, rig
-from tests.unit.test_orchestrator_team import fake, office
-from tests.unit.test_staff_runtime import board_task, close_team, task_row
+from tests.unit.test_orchestrator_team import office
+from tests.unit.test_staff_runtime import ObservedFakeStaffRuntime, board_task, close_team, task_row
+
+
+class Running(ObservedFakeStaffRuntime):
+    """A Daedalus runtime whose member is at work in a native run from its start, and whose interrupt
+    or stop cancels that run and has its exit observed, as the host's own runtime does: that exit is
+    what closes the attempt's execution. ``gate``, when set, holds a start half admitted until it
+    opens, the way a loaded machine does."""
+
+    app: Any = None
+    gate: asyncio.Event | None = None
+    gated: str = ""
+    """Whose starts the gate holds: members whose name begins so."""
+    entered: asyncio.Event | None = None
+
+    async def start(self, req: Any) -> Started:
+        if self.gate is not None and req.staff.name.startswith(self.gated):
+            if self.entered is not None:
+                self.entered.set()
+            await self.gate.wait()
+        started = await super().start(req)
+        source = await self.app.db.fetchone("SELECT tenant_id FROM sessions WHERE id = ?", (started.session_id,))
+        run_id, at = uuid.uuid4().hex, datetime.now(UTC).isoformat()
+        await self.app.db.execute("INSERT INTO runs(id,tenant_id,session_id,status,created_at,updated_at)"
+                                  " VALUES (?,?,?,'running',?,?)", (run_id, source["tenant_id"], started.session_id, at, at))
+        await admit_native_run(self.app, req.staff_session_id, started.session_id, run_id)
+        return started
+
+    async def _cancel_run(self, live: Any) -> None:
+        row = await self.app.db.fetchone("SELECT a.native_run_id FROM execution_attempts a JOIN runs r ON r.id = a.native_run_id"
+                                         " WHERE a.staff_session_id = ? AND r.status = 'running'", (live.id,))
+        if row is None:
+            return
+        await self.app.db.execute("UPDATE runs SET status = 'cancelled' WHERE id = ?", (row["native_run_id"],))
+        await observe_exit(self.app, staff_session_id=live.id, runtime_ref=row["native_run_id"],
+                           observed_status="cancelled", bus=self.manager.bus)  # type: ignore[union-attr]
+
+    async def interrupt(self, live: Any) -> None:
+        await super().interrupt(live)
+        await self._cancel_run(live)
+
+    async def stop(self, live: Any) -> None:
+        await super().stop(live)
+        await self._cancel_run(live)
+
+
+def fake(r: Rig) -> Running:
+    runtime = Running(kind="daedalus")
+    runtime.manager, runtime.app = r.manager, r.team.app
+    r.team.runtimes["daedalus"] = runtime
+    return runtime
 
 
 def explorations(r: Rig) -> Explorations:

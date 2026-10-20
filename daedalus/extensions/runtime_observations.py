@@ -215,6 +215,8 @@ async def observe_exit(app: Application, *, staff_session_id: str, runtime_ref: 
                     await record_fault(conn, row["id"], "runtime_error")
                 await conn.execute("UPDATE staff_sessions SET ended_at = COALESCE(ended_at,?),status = 'exited',"
                                    "status_at = ?,waiting_for = '' WHERE id = ?", (now(), now(), staff_session_id))
+            elif row["runtime_kind"] == "daedalus":
+                await _settle_ended_in(app, conn, staff_session_id)
             after = await one(conn, "SELECT status FROM staff_sessions WHERE id = ?", (staff_session_id,))
             if (bus is not None and row["runtime_kind"] != "cli" and before is not None
                     and before["status"] != "exited" and after["status"] == "exited"):
@@ -277,6 +279,42 @@ async def settle_previous_host(app: Application, task_id: str) -> bool:
             return False
         await record_fault(conn, row["id"], "cancelled", cancelled_by="system")
     logger.info("closed attempt %s of task %s, left recovering by host generation %s", row["id"], task_id, row["host_generation"])
+    return True
+
+
+async def settle_ended(app: Application, staff_session_id: str) -> bool:
+    """Close the native execution of a session that has ended, once its current run is over.
+
+    A release ended the member's session and stopped its run, but the execution stayed running:
+    the run's exit, seen afterwards, closed only an execution someone had asked to stop, so the
+    card stayed bound to it and dropping or blocking it was refused with "stop or reconcile the
+    current execution". An ended session runs nothing more, and the observed exit of the
+    execution's current run, or no run at all, is the proof that nothing runs now. Called when the
+    session ends and when a run's exit is observed, since either can come last; marking the
+    execution recovering before the stop instead let the exit end the session in the system's
+    words, and the release's own end, with who released it, was never announced."""
+    async with app.db.transaction() as conn:
+        return await _settle_ended_in(app, conn, staff_session_id)
+
+
+async def _settle_ended_in(app: Application, conn: aiosqlite.Connection, staff_session_id: str) -> bool:
+    generation = await app.executions._host(conn)
+    row = await one(conn, "SELECT a.id,a.native_run_id FROM execution_attempts a JOIN staff_sessions s ON s.id = a.staff_session_id"
+                    " WHERE a.staff_session_id = ? AND a.state IN ('queued','starting','running','waiting')"
+                    " AND a.runtime_kind = 'daedalus' AND a.host_generation = ? AND s.ended_at IS NOT NULL",
+                    (staff_session_id, generation))
+    if row is None:
+        return False
+    if row["native_run_id"]:
+        proof = await one(conn, "SELECT 1 FROM runtime_exit_observations WHERE attempt_id = ? AND runtime_ref = ?",
+                          (row["id"], row["native_run_id"]))
+        if proof is None:
+            return False
+    changed = await conn.execute("UPDATE execution_attempts SET state = 'cancelled',updated_at = ?"
+                                 " WHERE id = ? AND state IN ('queued','starting','running','waiting')", (now(), row["id"]))
+    if changed.rowcount != 1:
+        return False
+    await record_fault(conn, row["id"], "cancelled", cancelled_by="system")
     return True
 
 
