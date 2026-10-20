@@ -76,3 +76,16 @@ def test_an_exhausted_opencode_allowance_is_a_quota_and_not_retried_in_place() -
     verdict = classify_failure(429, GO_USAGE_LIMIT)
     assert (verdict.reason, verdict.retryable) == ("billing", False)
     assert classify_failure(429, '{"error":{"type":"rate_limit_error"}}').retryable is True
+
+
+def test_a_spent_chatgpt_window_is_a_quota_and_not_retried_in_place() -> None:
+    body = '{"error":{"type":"usage_limit_reached","message":"The usage limit has been reached","plan_type":"plus"}}'
+    evidence = failure_evidence(429, body, {}, provider_kind="openai_compat", observed_at=OBSERVED)
+    assert (evidence.failure_class, evidence.provider_code) == ("quota", "usage_limit_reached")
+    assert (classify_failure(429, body).reason, classify_failure(429, body).retryable) == ("billing", False)
+
+
+def test_a_model_the_chatgpt_plan_does_not_include_moves_the_chain_on() -> None:
+    body = '{"detail": "The \'gpt-6-sol\' model is not supported when using Codex with a ChatGPT account."}'
+    verdict = classify_failure(400, body)
+    assert (verdict.reason, verdict.retryable) == ("model_not_found", False)

@@ -167,6 +167,29 @@ IMAGE_TOKEN_FLOOR = 64
 """Fewer prompt tokens than the text alone plus this, and the picture cannot have been in the prompt."""
 
 
+_SIGNATURES = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+)
+
+
+def image_mime(data: bytes, claimed: str) -> str:
+    """The type the picture's own bytes declare, else the one its name claimed.
+
+    Anthropic checks the bytes against the declared type and refuses a mismatch with a 400: a JPEG
+    an image tool had saved as ``24.png`` failed on both vision models in turn, and the agent was told
+    no model could look at the picture.
+    """
+    for signature, mime in _SIGNATURES:
+        if data.startswith(signature):
+            return mime
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return claimed
+
+
 async def _ask(vision: Any, manager: Any, data: bytes, mime: str, task: str, *, detail: str, instruction: str) -> tuple[str, str]:
     """One vision route asked, and asked again once if thinking ate the answer.
 
@@ -186,6 +209,7 @@ async def _ask(vision: Any, manager: Any, data: bytes, mime: str, task: str, *, 
     accepts = getattr(provider, "accepts_images", None)
     if accepts is None or not accepts(model):
         raise VisionUnavailable(f"the vision model {model} is not marked as taking images; enable 'images' on it in Settings → Models")
+    mime = image_mime(data, mime)
     try:
         meta = await blobs.put(tenant, data, content_type=mime)
     except OSError as exc:

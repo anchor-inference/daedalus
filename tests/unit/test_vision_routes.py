@@ -212,3 +212,22 @@ def test_the_empty_answer_says_which_of_the_causes_it_was() -> None:
     assert "picture reached it (1600 prompt tokens)" in reached and "dropped" not in reached
     unknown = vision.empty_answer_reason("m", _empty(StopReason.end_turn), 16384, 60)
     assert "reported no usage" in unknown and "cannot be told" in unknown
+
+
+async def test_a_picture_named_for_another_type_is_sent_as_what_its_bytes_are(tmp_path: Path) -> None:
+    # A JPEG saved as 24.png was declared image/png and Anthropic refused it on both vision models.
+    jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 32
+    store = FileBlobStore(tmp_path / "blobs")
+    seen: list[str] = []
+
+    class Looking(_Provider):
+        async def complete_text(self, request: Any) -> Any:
+            refs = request.messages[-1].metadata["image_refs"]
+            seen.extend([refs[0]["mime"], (await store.head(TENANT, refs[0]["ref"])).content_type])
+            return await super().complete_text(request)
+
+    await vision.look((Looking("a planet"), "claude-sonnet-5-5", store, TENANT), None, jpeg, "image/png", "describe")
+    assert seen == ["image/jpeg", "image/jpeg"]
+    assert vision.image_mime(PICTURE, "image/jpeg") == "image/png"
+    assert vision.image_mime(b"RIFF\x00\x00\x00\x00WEBPVP8 ", "image/png") == "image/webp"
+    assert vision.image_mime(b"not a picture", "image/png") == "image/png"

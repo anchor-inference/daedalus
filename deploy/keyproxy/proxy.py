@@ -56,6 +56,7 @@ from claude import (
 )
 from subscriptions import (
     CODEX_BASE,
+    CODEX_FALLBACK_CATALOGUE,
     CODEX_FALLBACK_MODELS,
     GROK_BASE,
     OPENCODE_GO_BASE,
@@ -760,6 +761,15 @@ def served_headers(upstream: str, model: str) -> dict[str, str]:
     return {"x-keyproxy-upstream": upstream, **({"x-keyproxy-model": model} if model else {})}
 
 
+def refusal_headers(headers: httpx.Headers) -> dict[str, str]:
+    """The upstream's stated wait, passed on with a refusal the proxy re-wraps.
+
+    The bot waits out a rate limit for as long as ``Retry-After`` says; dropped here, it retried a 429
+    on its own short backoff and spent the attempts before the window reopened."""
+    wait = headers.get("retry-after")
+    return {"Retry-After": wait} if wait else {}
+
+
 async def handle_claude(request: web.Request, rest: str) -> web.StreamResponse:
     """Anthropic Messages behind the Claude Code login, presented as chat completions."""
     client: httpx.AsyncClient = request.app["client"]
@@ -810,7 +820,7 @@ async def handle_claude(request: web.Request, rest: str) -> web.StreamResponse:
             payload_err = json.loads(raw)
         except ValueError:
             payload_err = {"error": {"message": raw[:400], "type": "upstream_error"}}
-        return web.json_response(payload_err, status=response.status_code)
+        return web.json_response(payload_err, status=response.status_code, headers=refusal_headers(response.headers))
     if windows := claude_header_windows(response.headers):
         _claude_header_snapshot.update(windows=windows, at=time.monotonic())
     chunks = messages_events_to_chunks(_sse_lines(response, timing), model=model, names=names)
@@ -850,7 +860,7 @@ async def handle_codex(request: web.Request, rest: str) -> web.StreamResponse:
             models = sorted(set(models) | set(usage.get("models") or []))  # the plan's usage table names only some of them
         except SubscriptionError:
             pass
-        windows = codex_cached_windows(CODEX_AUTH.path.parent / "models_cache.json")
+        windows = {**CODEX_FALLBACK_CATALOGUE, **codex_cached_windows(CODEX_AUTH.path.parent / "models_cache.json")}
         models = sorted(set(models) | {m for m, w in windows.items() if w.get("listed")})
         return web.json_response({"object": "list", "data": [{"id": m, "object": "model", "owned_by": "openai", **{k: v for k, v in windows.get(m, {}).items() if k != "listed"}} for m in models]})
     if tail != "chat/completions":
@@ -893,7 +903,7 @@ async def handle_codex(request: web.Request, rest: str) -> web.StreamResponse:
             payload = json.loads(raw)
         except ValueError:
             payload = {"error": {"message": raw[:400], "type": "upstream_error"}}
-        return web.json_response(payload, status=response.status_code)
+        return web.json_response(payload, status=response.status_code, headers=refusal_headers(response.headers))
     chunks = responses_events_to_chunks(_sse_lines(response, timing), model=model)
     served = served_headers("codex", str(sent.get("model") or model))
     try:
@@ -923,7 +933,8 @@ def codex_cached_windows(path: Path) -> dict[str, dict[str, Any]]:
     here for the login's sake: each model's ``context_window`` (the length the CLI runs it at) and
     ``max_context_window`` (the most the backend accepts). Read rather than asked again, because it
     is the CLI's request to make and this one would need to pass for the CLI to make it. ``listed`` says
-    the CLI offers the model in its picker. A file that is missing or unreadable is no windows.
+    the CLI offers the model in its picker; ``reasoning_efforts`` and ``default_reasoning_effort`` are the
+    efforts it offers for the model. A file that is missing or unreadable is no windows.
     """
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -934,6 +945,11 @@ def codex_cached_windows(path: Path) -> dict[str, dict[str, Any]]:
         if not isinstance(row, dict) or not row.get("slug"):
             continue
         entry: dict[str, Any] = {k: row[k] for k in ("context_window", "max_context_window") if type(row.get(k)) is int and row[k] > 0}
+        efforts = [str(level["effort"]) for level in row.get("supported_reasoning_levels") or [] if isinstance(level, dict) and level.get("effort")]
+        if efforts:
+            entry["reasoning_efforts"] = efforts
+        if isinstance(row.get("default_reasoning_level"), str) and row["default_reasoning_level"]:
+            entry["default_reasoning_effort"] = row["default_reasoning_level"]
         entry["listed"] = row.get("visibility") == "list"
         out[str(row["slug"])] = entry
     return out

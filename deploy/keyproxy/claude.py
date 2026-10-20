@@ -21,7 +21,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 import httpx
-from subscriptions import KEEPALIVE, SubscriptionError, _write_json
+from subscriptions import KEEPALIVE, SubscriptionError, _write_json, failure_chunk, truncated_chunk
 
 logger = logging.getLogger("keyproxy.claude")
 
@@ -434,13 +434,19 @@ async def messages_events_to_chunks(lines: AsyncIterator[str], *, model: str, na
     block stops) becomes a keepalive comment instead, so the caller still sees the stream is alive
     while the model thinks silently. It follows real upstream events only, never a timer: a hung
     upstream stays silent and is still caught by the caller's idle watchdog.
+
+    Only ``message_stop`` finishes the answer. A body that ends without it was cut in transit, and
+    becomes a ``stream_truncated`` error with no ``[DONE]``; a ``tool_use`` block that never got its
+    ``content_block_stop`` finishes the answer as ``length``, so the bot never runs the cut call.
     """
     names = names or {}
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     calls: dict[int, int] = {}
     finish = "stop"
     input_tokens = output_tokens = cache_read = cache_write = 0
-    failed: str | None = None
+    failed: Any = None
+    stopped = False
+    open_calls: set[int] = set()
     event_name = ""
     async for raw in lines:
         line = raw.strip()
@@ -461,8 +467,13 @@ async def messages_events_to_chunks(lines: AsyncIterator[str], *, model: str, na
         kind = event.get("type") or event_name
         spoke = False
         if kind == "error":
-            err = event.get("error") or event
-            failed = str(err.get("message") or err or "the backend reported a failure")
+            # The error object keeps its ``type`` (overloaded_error, rate_limit_error), which is how
+            # the bot tells a busy server from a refused request.
+            failed = event.get("error") or event
+        elif kind == "message_stop":
+            stopped = True
+        elif kind == "content_block_stop":
+            open_calls.discard(int(event.get("index") or 0))
         elif kind == "message_start":
             usage = (event.get("message") or {}).get("usage") or {}
             input_tokens = int(usage.get("input_tokens") or 0)
@@ -473,6 +484,7 @@ async def messages_events_to_chunks(lines: AsyncIterator[str], *, model: str, na
             if block.get("type") == "tool_use":
                 index = int(event.get("index") or len(calls))
                 calls[index] = index
+                open_calls.add(index)
                 original = names.get(str(block.get("name") or ""), str(block.get("name") or ""))
                 finish = "tool_calls"
                 spoke = True
@@ -497,21 +509,25 @@ async def messages_events_to_chunks(lines: AsyncIterator[str], *, model: str, na
             if usage.get("input_tokens") is not None:
                 input_tokens = int(usage.get("input_tokens") or input_tokens)
             reason = (event.get("delta") or {}).get("stop_reason")
-            if reason == "max_tokens":
+            if reason in ("max_tokens", "model_context_window_exceeded"):
                 finish = "length"
+            elif reason == "refusal":
+                finish = "content_filter"
             elif reason == "tool_use":
                 finish = "tool_calls"
             elif reason in ("end_turn", "stop_sequence"):
                 finish = "stop"
-        elif kind in ("error",) or event_name == "error":
-            err = event.get("error") or event
-            failed = str(err.get("message") or err or "the backend reported a failure")
         if not spoke:
             yield KEEPALIVE
-    if failed:
-        yield f"data: {json.dumps({'error': {'message': failed, 'type': 'upstream_error'}})}\n\n"
-    else:
-        yield _chunk(completion_id, model, {}, finish=finish, usage=_usage(input_tokens, output_tokens, cache_read, cache_write))
+    if failed is not None:
+        yield failure_chunk(failed, "the backend reported a failure")
+        return
+    if not stopped:
+        yield truncated_chunk("Claude")
+        return
+    if open_calls and finish != "length":
+        finish = "length"
+    yield _chunk(completion_id, model, {}, finish=finish, usage=_usage(input_tokens, output_tokens, cache_read, cache_write))
     yield "data: [DONE]\n\n"
 
 

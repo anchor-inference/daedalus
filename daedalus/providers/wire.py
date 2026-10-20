@@ -6,7 +6,7 @@ import base64
 import json
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Container, Sequence
 from typing import Any
 
 from protocore.contracts.types import (
@@ -47,17 +47,76 @@ def tools_to_wire(tools: Sequence[ToolDefinition]) -> list[dict[str, Any]]:
     return wire
 
 
+MAX_REQUEST_IMAGES = 20
+MAX_REQUEST_IMAGE_BYTES = 20 * 1024 * 1024
+"""How many pictures, and how many bytes of them as encoded on the wire, one request carries.
+
+Every picture of the session used to go out on every request. Anthropic refuses a request over 32 MB,
+and shrinks pictures once one holds more than 20, so a session past that point had every following
+request refused until a compaction removed them; before it, every step re-sent tens of megabytes."""
+
+IMAGE_WINDOW_STEP = 5
+"""The cut between pictures left out and pictures sent falls only on a multiple of this.
+
+The pictures left out sit early in the history, so moving the cut changes the prompt from that point
+on and costs the prompt cache everything after it. Moved one picture at a time it would cost that on
+every new picture; in steps of five it costs it once in five. A larger step was rejected because the
+step is also how many pictures that would fit can be left out: with large pictures the byte bound
+keeps only a handful, and a step of ten could leave out every one of them."""
+
+
+def _image_refs_of(message: Message) -> list[tuple[str, str]]:
+    """``(blob_ref, mime)`` of every picture a user message carries, as blocks or in ``metadata["image_refs"]``."""
+    refs = [(block.blob_ref, block.mime_type) for block in message.content_blocks if isinstance(block, ImageRefBlock)]
+    for ref in message.metadata.get("image_refs") or []:
+        if isinstance(ref, dict) and ref.get("ref"):
+            refs.append((str(ref["ref"]), str(ref.get("mime") or "image/png")))
+    return refs
+
+
+async def images_left_out(
+    messages: Sequence[Message],
+    image_loader: Callable[[str], Awaitable[tuple[bytes, str]]],
+) -> frozenset[str]:
+    """The pictures one request leaves out: all but the newest that fit :data:`MAX_REQUEST_IMAGES` and
+    :data:`MAX_REQUEST_IMAGE_BYTES`, the cut rounded up to :data:`IMAGE_WINDOW_STEP` but never past the
+    newest picture when that one fits on its own.
+
+    Only the newest pictures are loaded to be measured, at most :data:`MAX_REQUEST_IMAGES` of them; pass
+    a loader that remembers what it loaded, so the pictures that are sent are not read twice.
+    """
+    order: list[str] = []
+    for message in messages:
+        if message.role is MessageRole.user:
+            for blob_ref, _mime in _image_refs_of(message):
+                if blob_ref not in order:
+                    order.append(blob_ref)
+    cut = max(0, len(order) - MAX_REQUEST_IMAGES)
+    total = 0
+    for index in range(len(order) - 1, cut - 1, -1):
+        data, _mime = await image_loader(order[index])
+        total += 4 * ((len(data) + 2) // 3)  # its base64 length, which is what the request carries
+        if total > MAX_REQUEST_IMAGE_BYTES:
+            cut = index + 1
+            break
+    if 0 < cut < len(order):
+        cut = min(len(order) - 1, -(-cut // IMAGE_WINDOW_STEP) * IMAGE_WINDOW_STEP)
+    return frozenset(order[:cut])
+
+
 async def messages_to_wire(
     messages: Sequence[Message],
     *,
     image_loader: Any | None = None,
     supports_images: bool = False,
+    images_omitted: Container[str] = (),
 ) -> list[dict[str, Any]]:
     """Flatten core messages into OpenAI ``messages``.
 
     ``image_loader`` is an async callable ``(blob_ref) -> (bytes, mime)``; when the
     endpoint cannot take images the block degrades to a text placeholder so the
-    model still knows a file was attached.
+    model still knows a file was attached. A picture named in ``images_omitted``
+    (see :func:`images_left_out`) degrades the same way, saying it was left out.
     """
     wire: list[dict[str, Any]] = []
     for message in messages:
@@ -108,20 +167,13 @@ async def messages_to_wire(
             wire.append(entry)
             continue
         # user: one text block; images ride in ``metadata["image_refs"]`` (the core allows a single block)
-        refs: list[tuple[str, str]] = []
-        texts: list[str] = []
-        for block in message.content_blocks:
-            if isinstance(block, TextBlock):
-                texts.append(block.text)
-            elif isinstance(block, ImageRefBlock):
-                refs.append((block.blob_ref, block.mime_type))
-        for ref in message.metadata.get("image_refs") or []:
-            if isinstance(ref, dict) and ref.get("ref"):
-                refs.append((str(ref["ref"]), str(ref.get("mime") or "image/png")))
+        texts = [block.text for block in message.content_blocks if isinstance(block, TextBlock)]
         content: list[dict[str, Any]] = [{"type": "text", "text": t} for t in texts]
         has_image = False
-        for blob_ref, mime_hint in refs:
-            if supports_images and image_loader is not None:
+        for blob_ref, mime_hint in _image_refs_of(message):
+            if blob_ref in images_omitted:
+                content.append({"type": "text", "text": f"[image left out of this request, only the newest are sent: {blob_ref}]"})
+            elif supports_images and image_loader is not None:
                 data, mime = await image_loader(blob_ref)
                 b64 = base64.b64encode(data).decode("ascii")
                 content.append({"type": "image_url", "image_url": {"url": f"data:{mime or mime_hint};base64,{b64}"}})
@@ -156,6 +208,23 @@ def parse_json_arguments(raw: str) -> dict[str, Any]:
         value, how = _repair_arguments(text)
         logger.debug("tool-call arguments repaired (%s): %.200r", how, redact(raw))
     return value if isinstance(value, dict) else {"value": value}
+
+
+def arguments_cut(raw: str) -> bool:
+    """Whether tool-call arguments stop part-way, as opposed to being whole JSON written slightly wrong.
+
+    A fence, a trailing comma or single quotes are a model's sloppiness over a call it finished, and
+    the repaired call is the one it meant. Only braces or quotes left open are the mark of a call the
+    stream cut, whose repaired arguments are not what the model would have sent.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return False
+    try:
+        json.loads(text)
+        return False
+    except json.JSONDecodeError:
+        return _repair_arguments(text)[1] == "truncated"
 
 
 _ARGS_FENCE_RE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
@@ -217,4 +286,4 @@ def _repair_json(text: str) -> Any:
         return {}
 
 
-__all__ = ["messages_to_wire", "parse_json_arguments", "tools_to_wire"]
+__all__ = ["arguments_cut", "images_left_out", "messages_to_wire", "parse_json_arguments", "tools_to_wire"]

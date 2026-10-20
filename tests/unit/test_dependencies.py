@@ -351,7 +351,8 @@ async def test_planner_drains_usage_but_never_executes_an_incomplete_batch(tmp_p
 
     planner.rpc = rpc
     try:
-        with pytest.raises(ValueError, match="2500-token" if finish == "length" else "incomplete"):
+        # Arguments cut part-way are the response limit's doing, whichever finish the stream reported.
+        with pytest.raises(ValueError, match="2500-token"):
             await planner._run({"id": "a" * 32, "preset": "test", "request": "Compiler"})
         assert len(sink.records) == 1
         assert sink.records[0].normalized["output_tokens"] == 2500

@@ -24,6 +24,9 @@ _CODES = {
     # opencode's subscription gateway answers a spent monthly allowance with a plain 429 whose only
     # marker is this error type; without it the refusal reads as a blip and the chain keeps coming back.
     "gousagelimiterror": "quota",
+    # The ChatGPT plan behind the key proxy's Codex route: a spent window, refused with a 429.
+    "usage_limit_reached": "quota",
+    "usage_not_included": "quota",
 }
 
 

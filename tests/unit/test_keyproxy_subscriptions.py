@@ -45,10 +45,12 @@ def test_chat_body_becomes_a_responses_body() -> None:
         "reasoning_effort": "high",
     }
     out = subs.chat_to_responses(body)
-    assert out["instructions"] == "Be terse." and out["store"] is False and out["stream"] is True and "max_output_tokens" not in out
-    assert [i["type"] for i in out["input"]] == ["message", "function_call", "function_call_output"]
-    assert out["input"][0]["content"][1]["type"] == "input_image"
-    assert out["input"][1] == {"type": "function_call", "call_id": "c1", "name": "Read", "arguments": "{\"path\": \"x\"}"}
+    assert "instructions" not in out and out["store"] is False and out["stream"] is True and "max_output_tokens" not in out
+    assert [i["type"] for i in out["input"]] == ["message", "message", "function_call", "function_call_output"]
+    developer = out["input"][0]
+    assert developer["role"] == "developer" and developer["content"] == [{"type": "input_text", "text": "Be terse."}]
+    assert out["input"][1]["content"][1]["type"] == "input_image"
+    assert out["input"][2] == {"type": "function_call", "call_id": "c1", "name": "Read", "arguments": "{\"path\": \"x\"}"}
     assert out["tools"][0]["name"] == "Read" and out["tool_choice"] == {"type": "function", "name": "Read"} and out["reasoning"] == {"effort": "high", "summary": "auto"}
 
 
@@ -87,6 +89,7 @@ async def test_codex_function_call_final_item_recovers_missing_arguments() -> No
         {"type": "response.function_call_arguments.delta", "item_id": "fc_1", "delta": "{\"path\":"},
         {"type": "response.function_call_arguments.done", "item_id": "fc_1", "arguments": "{\"path\":\"file\"}"},
         {"type": "response.output_item.done", "item": {"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "Read", "arguments": "{\"path\":\"file\"}"}},
+        {"type": "response.completed", "response": {"status": "completed", "usage": {}}},
     ]
     full = await subs.collect_completion(subs.responses_events_to_chunks(_lines(events), model="m"), model="m")
     assert full["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"] == '{"path":"file"}'
@@ -251,6 +254,7 @@ async def test_claude_usage_counts_cache_write_inside_prompt_tokens() -> None:
         {"type": "message_start", "message": {"usage": {"input_tokens": 3, "cache_creation_input_tokens": 4990, "cache_read_input_tokens": 0}}},
         {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "pong"}},
         {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 1}},
+        {"type": "message_stop"},
     ]
     full = await subs.collect_completion(claude_mod.messages_events_to_chunks(_lines(events), model="m"), model="m")
     assert full["usage"]["prompt_tokens"] == 4993 and full["usage"]["cache_creation_input_tokens"] == 4990
@@ -258,12 +262,14 @@ async def test_claude_usage_counts_cache_write_inside_prompt_tokens() -> None:
         {"type": "message_start", "message": {"usage": {"input_tokens": 3, "cache_creation_input_tokens": 16, "cache_read_input_tokens": 4990}}},
         {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "pong"}},
         {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 1}},
+        {"type": "message_stop"},
     ]
     second = await subs.collect_completion(claude_mod.messages_events_to_chunks(_lines(hit), model="m"), model="m")
     assert second["usage"]["prompt_tokens"] == 5009 and second["usage"]["prompt_tokens_details"]["cached_tokens"] == 4990
     already_total = [
         {"type": "message_start", "message": {"usage": {"input_tokens": 67550, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 22078}}},
         {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 1}},
+        {"type": "message_stop"},
     ]
     third = await subs.collect_completion(claude_mod.messages_events_to_chunks(_lines(already_total), model="m"), model="m")
     assert third["usage"]["prompt_tokens"] == 67550
@@ -295,6 +301,7 @@ async def test_a_vision_request_reaches_claude_with_its_picture_its_budget_and_n
     stopped = [
         {"type": "message_start", "message": {"usage": {"input_tokens": 1600}}},
         {"type": "message_delta", "delta": {"stop_reason": "max_tokens"}, "usage": {"output_tokens": 800}},
+        {"type": "message_stop"},
     ]
     full = await subs.collect_completion(claude_mod.messages_events_to_chunks(_lines(stopped), model="m"), model="m")
     # Thinking that filled the budget arrives as a cut-off reply with no text, told apart by its reason.
@@ -365,6 +372,7 @@ async def test_proxy_routes_claude(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
             sse = "\n".join([
                 "event: content_block_delta", "data: " + json.dumps({"type": "content_block_delta", "delta": {"type": "text_delta", "text": "PONG"}}), "",
                 "event: message_delta", "data: " + json.dumps({"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 1}}), "",
+                "event: message_stop", "data: " + json.dumps({"type": "message_stop"}), "",
                 "event: message_start", "data: " + json.dumps({"type": "message_start", "message": {"usage": {"input_tokens": 5}}}), "",
             ])
             return httpx.Response(200, content=sse.encode(), headers={"content-type": "text/event-stream"})
@@ -555,7 +563,9 @@ async def test_claude_silent_thinking_forwards_keepalive_comments() -> None:
         {"type": "content_block_stop", "index": 0},
         {"type": "content_block_start", "index": 1, "content_block": {"type": "tool_use", "id": "t1", "name": "Read"}},
         {"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": "{}"}},
+        {"type": "content_block_stop", "index": 1},
         {"type": "message_delta", "delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 2}},
+        {"type": "message_stop"},
     ]
     out = [c async for c in claude_mod.messages_events_to_chunks(_lines(events), model="m")]
     keepalives = [i for i, c in enumerate(out) if c == subs.KEEPALIVE]
