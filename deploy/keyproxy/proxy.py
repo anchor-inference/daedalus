@@ -760,6 +760,15 @@ def served_headers(upstream: str, model: str) -> dict[str, str]:
     return {"x-keyproxy-upstream": upstream, **({"x-keyproxy-model": model} if model else {})}
 
 
+def refusal_headers(headers: httpx.Headers) -> dict[str, str]:
+    """The upstream's stated wait, passed on with a refusal the proxy re-wraps.
+
+    The bot waits out a rate limit for as long as ``Retry-After`` says; dropped here, it retried a 429
+    on its own short backoff and spent the attempts before the window reopened."""
+    wait = headers.get("retry-after")
+    return {"Retry-After": wait} if wait else {}
+
+
 async def handle_claude(request: web.Request, rest: str) -> web.StreamResponse:
     """Anthropic Messages behind the Claude Code login, presented as chat completions."""
     client: httpx.AsyncClient = request.app["client"]
@@ -810,7 +819,7 @@ async def handle_claude(request: web.Request, rest: str) -> web.StreamResponse:
             payload_err = json.loads(raw)
         except ValueError:
             payload_err = {"error": {"message": raw[:400], "type": "upstream_error"}}
-        return web.json_response(payload_err, status=response.status_code)
+        return web.json_response(payload_err, status=response.status_code, headers=refusal_headers(response.headers))
     if windows := claude_header_windows(response.headers):
         _claude_header_snapshot.update(windows=windows, at=time.monotonic())
     chunks = messages_events_to_chunks(_sse_lines(response, timing), model=model, names=names)
@@ -893,7 +902,7 @@ async def handle_codex(request: web.Request, rest: str) -> web.StreamResponse:
             payload = json.loads(raw)
         except ValueError:
             payload = {"error": {"message": raw[:400], "type": "upstream_error"}}
-        return web.json_response(payload, status=response.status_code)
+        return web.json_response(payload, status=response.status_code, headers=refusal_headers(response.headers))
     chunks = responses_events_to_chunks(_sse_lines(response, timing), model=model)
     served = served_headers("codex", str(sent.get("model") or model))
     try:

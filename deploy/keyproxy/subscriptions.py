@@ -43,6 +43,7 @@ MODELS_CACHE_SECONDS = 300
 CODEX_FALLBACK_MODELS = ("gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5")
 
 
+
 class SubscriptionError(RuntimeError):
     pass
 
@@ -404,6 +405,70 @@ def responses_usage(usage: dict[str, Any]) -> dict[str, Any]:
 KEEPALIVE = ": keepalive\n\n"
 
 
+STREAM_TRUNCATED = "stream_truncated"
+"""The error ``code`` of a stream whose upstream ended before its final event.
+
+The bot reads it as a dropped connection and asks again. Before it the proxy wrote a normal finish and
+``[DONE]`` after any end of the upstream body, so a cut answer read as a complete one and a half-written
+tool call ran with its braces repaired."""
+
+_RETRY_IN = re.compile(r"try again in\s*(\d+(?:\.\d+)?)\s*(ms|s|seconds?)\b", re.IGNORECASE)
+
+
+def retry_after_seconds(error: dict[str, Any], *, now: float | None = None) -> float | None:
+    """The wait a refusal states, in seconds from now; ``None`` when it states none.
+
+    Read the way the Codex CLI reads a failed response: a ``retry-after`` among the headers the error
+    carries, then the reset time of a spent window, then the "try again in 11.054s" its rate-limit
+    message spells out. Passed on so a rate limit is retried after the wait it named rather than on
+    the bot's own short backoff, which only collected more refusals.
+    """
+    headers = error.get("headers") if isinstance(error.get("headers"), dict) else {}
+    for key, value in headers.items():
+        if str(key).lower() == "retry-after":
+            try:
+                seconds = float(value)
+            except (TypeError, ValueError):
+                break
+            if seconds > 0:
+                return seconds
+    resets = error.get("resets_at")
+    if isinstance(resets, (int, float)) and not isinstance(resets, bool):
+        left = float(resets) - (time.time() if now is None else now)
+        if left > 0:
+            return left
+    found = _RETRY_IN.search(str(error.get("message") or ""))
+    if found:
+        value = float(found.group(1))
+        return value / 1000 if found.group(2).lower() == "ms" else value
+    return None
+
+
+def failure_chunk(error: Any, fallback: str) -> str:
+    """An upstream failure as the one error chunk the bot classifies: its ``type``, ``code``, message and wait.
+
+    The code is what tells a spent quota from a rate limit from an overloaded server. Only the message
+    used to travel, so the bot filed every failure as a server error and retried a spent quota."""
+    error = error if isinstance(error, dict) else {"message": str(error or fallback)}
+    out: dict[str, Any] = {"message": str(error.get("message") or fallback), "type": str(error.get("type") or "upstream_error")}
+    if isinstance(error.get("code"), (str, int)) and not isinstance(error.get("code"), bool) and str(error["code"]):
+        out["code"] = error["code"]
+    wait = retry_after_seconds(error)
+    if wait is not None:
+        out["retry_after_seconds"] = round(wait, 3)
+    return f"data: {json.dumps({'error': out}, ensure_ascii=False)}\n\n"
+
+
+def truncated_chunk(upstream: str) -> str:
+    return f"data: {json.dumps({'error': {'message': f'the {upstream} stream ended before its final event', 'type': STREAM_TRUNCATED, 'code': STREAM_TRUNCATED}})}\n\n"
+
+
+def _incomplete_finish(response: dict[str, Any]) -> str:
+    """The chat finish for a response the backend stopped short: a filtered answer, otherwise a cut one."""
+    reason = (response.get("incomplete_details") or {}).get("reason")
+    return "content_filter" if reason == "content_filter" else "length"
+
+
 async def responses_events_to_chunks(lines: AsyncIterator[str], *, model: str) -> AsyncIterator[str]:
     """Responses SSE lines → chat-completion chunks (text, reasoning summaries, tool calls, usage, finish).
 
@@ -413,6 +478,10 @@ async def responses_events_to_chunks(lines: AsyncIterator[str], *, model: str) -
     Events with nothing to translate (created, in_progress, reasoning item boundaries) become a
     keepalive comment, so a long silent reasoning phase is not mistaken for a dead stream. These
     follow real upstream events, never a timer.
+
+    The answer is finished only by a terminal event. ``response.incomplete`` (or a call item that
+    ended ``incomplete``) finishes it as ``length``, so the bot never runs the cut call; a body that
+    ends with no terminal event at all becomes a :data:`STREAM_TRUNCATED` error and no ``[DONE]``.
     """
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     calls: dict[str, int] = {}
@@ -420,7 +489,9 @@ async def responses_events_to_chunks(lines: AsyncIterator[str], *, model: str) -
     reasoning_items = 0
     finish = "stop"
     usage: dict[str, Any] | None = None
-    failed: str | None = None
+    failed: Any = None
+    terminal = False
+    cut_call = False
     async for raw in lines:
         line = raw.strip()
         if not line.startswith("data:"):
@@ -462,6 +533,10 @@ async def responses_events_to_chunks(lines: AsyncIterator[str], *, model: str) -
                 yield _chunk(completion_id, model, {"reasoning_details": [detail]})
         elif kind in ("response.function_call_arguments.done", "response.output_item.done"):
             item = event.get("item") or {}
+            if kind == "response.output_item.done" and item.get("type") == "function_call" and item.get("status") == "incomplete":
+                # The backend stopped this call part-way (the output budget, a filter): its arguments
+                # are not the ones the model meant, whatever the response says at the end.
+                cut_call = True
             if kind == "response.function_call_arguments.done" or item.get("type") == "function_call":
                 index = calls.get(str(event.get("item_id") or item.get("id")))
                 final = event.get("arguments") if kind == "response.function_call_arguments.done" else item.get("arguments")
@@ -476,20 +551,27 @@ async def responses_events_to_chunks(lines: AsyncIterator[str], *, model: str) -
                             logger.warning("Codex function call %d omitted %d streamed argument characters; recovered from final item", index, len(missing))
                         spoke = True
                         yield _chunk(completion_id, model, {"tool_calls": [{"index": index, "function": {"arguments": missing}}]})
-        elif kind == "response.completed":
-            usage = responses_usage((event.get("response") or {}).get("usage") or {})
-            status = (event.get("response") or {}).get("status")
-            if status == "incomplete":
-                finish = "length"
+        elif kind in ("response.completed", "response.incomplete"):
+            terminal = True
+            response = event.get("response") or {}
+            usage = responses_usage(response.get("usage") or {})
+            if kind == "response.incomplete" or response.get("status") == "incomplete":
+                finish = _incomplete_finish(response)
         elif kind in ("response.failed", "error"):
-            err = (event.get("response") or {}).get("error") or event.get("error") or {}
-            failed = str(err.get("message") or err or "the backend reported a failure")
+            terminal = True
+            # A bare ``error`` event carries its code and message at the top level, not under ``error``.
+            failed = (event.get("response") or {}).get("error") or event.get("error") or {k: event[k] for k in ("code", "message") if k in event}
         if not spoke:
             yield KEEPALIVE
-    if failed:
-        yield f"data: {json.dumps({'error': {'message': failed, 'type': 'upstream_error'}})}\n\n"
-    else:
-        yield _chunk(completion_id, model, {}, finish=finish, usage=usage)
+    if failed is not None:
+        yield failure_chunk(failed, "the backend reported a failure")
+        return
+    if not terminal:
+        yield truncated_chunk("Codex")
+        return
+    if cut_call and finish not in ("length", "content_filter"):
+        finish = "length"
+    yield _chunk(completion_id, model, {}, finish=finish, usage=usage)
     yield "data: [DONE]\n\n"
 
 
@@ -604,6 +686,10 @@ __all__ = [
     "reasoning_items_of",
     "refused_reasoning",
     "responses_events_to_chunks",
+    "retry_after_seconds",
+    "STREAM_TRUNCATED",
+    "failure_chunk",
+    "truncated_chunk",
     "without_reasoning",
 ]
 
