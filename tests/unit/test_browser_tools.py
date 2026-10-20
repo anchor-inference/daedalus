@@ -156,6 +156,8 @@ async def test_a_scripted_agent_shops_by_refs_and_is_stopped_at_the_purchase(rig
     # The purchase is asked about, with a key; nothing was clicked.
     text, failed = await rig.call(sid, "BrowserAct", action="click", ref="e20", element="the Buy now button")
     assert failed and "needs the operator's approval" in text and "Approval key:" in text and "rule browser.sensitive" in text
+    # The card is the question: the agent is told to wait for it, not to ask the operator again.
+    assert "AskUser" not in text and "/allow" not in text and "Do not ask about it yourself" in text
     key = text.split("Approval key: ")[1].split(".")[0]
     assert not [a for a in rig.daemon.events if a["type"] == "action" and a["data"]["name"] == "Buy now"]
     pending = await rig.events("permission.pending")

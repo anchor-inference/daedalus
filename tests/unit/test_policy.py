@@ -290,7 +290,10 @@ def test_the_policy_adapter_shapes_a_refusal_the_model_can_act_on() -> None:
 
     adapter = PolicyAdapter(lambda tool, args: Decision(ASK, "outside the allowlist", "egress.allowlist", key="abcdef012345"))
     decision = adapter.evaluate(T(), {"command": "curl x"}, None)
-    assert decision.denied and "Approval key: abcdef012345" in decision.reason and "AskUser" in decision.reason
+    # The operator has the card already; the agent is told to wait for it, not to ask a second time.
+    assert decision.denied and "Approval key: abcdef012345" in decision.reason
+    assert "AskUser" not in decision.reason and "Do not ask about it yourself" in decision.reason and "/allow" not in decision.reason
+    assert "Allow and Deny" in decision.reason and "end your turn" in decision.reason
     adapter = PolicyAdapter(lambda tool, args: Decision(DENY, "a fork bomb", "shell.forkbomb"))
     assert "refused by policy" in adapter.evaluate(T(), {}, None).reason
     adapter = PolicyAdapter(lambda tool, args: Decision("allow"))
@@ -318,3 +321,34 @@ def test_the_terminal_daemons_run_directories_are_sealed_in_a_container_too(tmp_
 def test_a_terminal_daemons_hook_port_is_refused_like_the_apps_own() -> None:
     policy = Policy(sealed_ports=[8765, 47003])
     assert policy.evaluate("Exec", {"command": "curl -X POST http://127.0.0.1:47003/hook/x/stop"}).action == DENY
+
+
+async def test_an_askuser_about_a_request_already_on_the_operators_card_is_refused(settings, db) -> None:  # type: ignore[no-untyped-def]
+    from daedalus.host.engine_factory import refusal_text
+    from daedalus.host.session_runner import SessionManager
+
+    manager = SessionManager(settings, RuntimeConfig(), db=db)
+    await manager.start()
+    try:
+        state = await manager.create_session("duplicate ask")
+        sid = state.session.id
+        manager.config.policy.egress_allow = ["github.com"]
+        gate = manager.policy_gate(sid, "run-1")
+        refused = gate.decide("Exec", {"command": "curl https://other.example/"})
+        assert refused.action == "ask" and refused.key in state.metadata["policy_pending"]
+        assert "AskUser" not in refusal_text(refused) and "/allow" not in refusal_text(refused)
+
+        def ask(question: str) -> object:
+            return gate.decide("AskUser", {"questions": [{"question": question, "options": [{"label": "Разрешить"}, {"label": "Запретить"}]}]})
+
+        quoted = ask(f"May I reach other.example? Approval key {refused.key.upper()}")
+        assert quoted.action == "deny" and quoted.rule == "approval.duplicate"
+        assert refused.key in quoted.told and "only that card grants it" in quoted.told
+        assert ask("Please type /allow so I can go on").action == "deny"
+        # Any other question still goes to the operator.
+        assert ask("Which of the two invoices should I pay first?").action == "allow"
+        # Once answered, the key is no longer open, and a question naming it is ordinary again.
+        await manager.grant(sid, refused.key, via="app")
+        assert ask(f"About {refused.key}: anything else?").action == "allow"
+    finally:
+        await manager.close()

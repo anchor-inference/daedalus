@@ -94,10 +94,7 @@ def refusal_text(decision: Any, hint: str | None = None) -> str:
     if hint and decision.action == "ask":
         return f"needs approval: {decision.reason} (rule {decision.rule}). Approval key: {decision.key}. {hint}"
     if decision.action == "ask":
-        return (
-            f"needs the operator's approval: {decision.reason} (rule {decision.rule}). Approval key: {decision.key}. "
-            "Ask the operator with AskUser, quoting the key; once they grant it (/allow <key>, or the Mini App), the same call passes."
-        )
+        return f"needs the operator's approval: {decision.reason} (rule {decision.rule}). Approval key: {decision.key}. {prompts.OPERATOR_APPROVAL_HINT}"
     return f"refused by policy: {decision.reason} (rule {decision.rule}). This is not a question for the operator; do the task another way."
 
 

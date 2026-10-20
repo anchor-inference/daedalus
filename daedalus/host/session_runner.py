@@ -6362,6 +6362,8 @@ class SessionManager:
             state = self._states.get(session_id)
             if state is not None and tool in self.tool_policy_for(state).blocked:
                 return Decision("deny", "the tool is outside this session's effective capability set", "session.capabilities")
+            if state is not None and tool == "AskUser" and (asked := self._asks_about_pending(state, arguments)):
+                return asked
             policy = self.policy(base_dir=state.workspace if state is not None else self.workspace_for(session_id))
             now = time.time()
             grants = {k for k, until in (state.metadata.get("policy_grants") or {}).items() if float(until) > now} if state is not None else set()
@@ -6390,6 +6392,30 @@ class SessionManager:
             self.action_rules.due(session_id, run, tool, arguments, ruled)
 
         return PolicyAdapter(decide, ask_hint=ask_hint, review_due=review_due)
+
+    @staticmethod
+    def _asks_about_pending(state: SessionState, arguments: dict[str, Any]) -> Decision | None:
+        """A refusal of an AskUser that asks the operator about a request already waiting on its card.
+
+        The refusals used to tell the agent to ask with AskUser, and an agent may still do it by habit.
+        The operator then had two questions about one thing, and the answer to the agent's ("Allow")
+        granted nothing: only the card's Allow does. So the question is refused with a pointer to the
+        card, rather than linking its free-text answer to a grant, which would let the agent word a
+        question that an unrelated answer approves. A question that quotes an open key, or tells the
+        operator to type /allow, is about one."""
+        pending = list((state.metadata.get("policy_pending") or {}).keys())
+        if not pending:
+            return None
+        said = json.dumps(arguments, ensure_ascii=False).lower()
+        quoted = [key for key in pending if key in said]
+        if not quoted and "/allow" not in said:
+            return None
+        key = quoted[0] if quoted else pending[-1]
+        return Decision("deny", "the request is already on the operator's card", "approval.duplicate", told=(
+            f"AskUser was not sent: the request with approval key {key} is already in front of the operator as a card "
+            "with Allow and Deny, in the app, the Chrome side panel and Telegram, and only that card grants it. "
+            "Do not ask about it yourself: end your turn, or continue with other work. A message tells you when they allow it."
+        ))
 
     def record_question(self, state: SessionState, decision: Decision, tool: str, arguments: dict[str, Any]) -> None:
         """An ``ask`` the operator is to answer: kept open on the session and announced once.
@@ -6454,7 +6480,7 @@ class SessionManager:
         head = f"needs the operator's approval: {decision.reason} (rule {decision.rule}). Approval key: {decision.key}. "
         if staff:
             return False, head + prompts.STAFF_BROWSER_HINT
-        return False, head + "Ask the operator with AskUser, quoting the key and what the action does; once they grant it (/allow <key>, or the Mini App), the same action passes once."
+        return False, head + prompts.OPERATOR_APPROVAL_HINT
 
     def ask_operator(self, session_id: str, *, key: str, tool: str, text: str, on_answer: str, card: dict[str, Any] | None = None) -> bool:
         """Put a request on the session that only the operator answers and the host carries out.

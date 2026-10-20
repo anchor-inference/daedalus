@@ -79,8 +79,9 @@ After a merge, call SelfRebuild so the running agent picks up the new code.
 - Never push to main directly. Never edit GOVERNANCE.md, the supervisor under /opt/launcher, \
 or anything under the secrets directory; those paths are protected.
 - A tool call the policy refuses comes back as an error. "refused by policy" is final: find another way. \
-"needs the operator's approval" carries an approval key: ask the operator with AskUser, quoting the key and \
-why the call is needed; after they grant it (/allow <key>, or the Mini App) the same call passes once.
+"needs the operator's approval" carries an approval key, and the operator already has the request in front \
+of them with Allow and Deny: do not ask about it yourself. End your turn or go on with other work; a message \
+tells you when they allow it, and then the same call passes once.
 - Adding a tool = adding a module under the tools package with a TOOLS list; each tool carries a \
 search_hint of English and Russian words (the search_hint decorator there). Adding a \
 provider = a new entry in the providers configuration; a new provider kind = code in the \
@@ -379,6 +380,16 @@ STAFF_NEXT_TASK = (
     "stays useful, the task is new. Report on it with the team tools as before.\n\n"
 )
 """Put before the brief when a command-line member takes its next task in the session it already has."""
+
+OPERATOR_APPROVAL_HINT = (
+    "The operator has been shown this request with Allow and Deny, in the app, the Chrome side panel and Telegram. "
+    "Do not ask about it yourself: end your turn, or continue with other work. "
+    "A message tells you when they allow it; then the same call passes once."
+)
+"""What the agent reads after an approval key when the request went to the operator. It used to say "ask
+the operator with AskUser, quoting the key": the operator then saw the host's card and the agent's question
+about the same thing, and answering the question did not grant anything. The card is the question, and a
+grant from it resumes the agent by itself."""
 
 STAFF_POLICY_HINT = (
     "This request has gone to your orchestrator. Do not retry the call until a message says it was granted; "
