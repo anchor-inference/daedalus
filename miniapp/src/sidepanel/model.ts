@@ -39,6 +39,13 @@ export function stopUnconfirmed(askedAt: number | null, status: string, now: num
   return askedAt !== null && now - askedAt >= STOP_CONFIRM_MS && (status === "running" || status === "compacting");
 }
 
+/** Whether the activity line carries a Stop of its own. The composer's round button is Stop while a run
+ *  is on, and a second red Stop beside it made the panel's foot a block of two; the line keeps one only
+ *  while the history is being compacted, when the composer's button is Send. */
+export function lineStops(status: string): boolean {
+  return status === "compacting";
+}
+
 /** The page's text as a file the conversation receives, headed by where it came from. */
 export function pageFile(page: { url: string; title: string; text: string }): File {
   const head = [page.title, page.url].filter(Boolean).join("\n");

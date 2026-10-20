@@ -94,7 +94,7 @@ body:has(.sidepanel) #root { height: 100%; min-height: 0; }
 .sp-body { flex: 1; min-height: 0; overflow: auto; padding: var(--space-2) var(--space-3); }
 .sp-body .timeline { max-width: none; }
 
-.sp-strip, .sp-give, .sp-card, .sp-shot {
+.sp-give, .sp-card, .sp-shot {
   flex: none;
   margin: 0 var(--space-2) var(--space-2);
   padding: var(--space-2);
@@ -102,12 +102,19 @@ body:has(.sidepanel) #root { height: 100%; min-height: 0; }
   border-radius: var(--radius-md);
   background: var(--surface-2);
 }
-.sp-strip { display: grid; gap: var(--space-2); }
-.sp-strip .livebar { width: 100%; }
-.sp-strip-line { font-size: var(--fs-12); }
-.sp-strip-warn { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: var(--fs-12); color: var(--bad); }
-.sp-strip-actions, .sp-card-actions, .sp-new-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
-.sp-strip-actions .btn, .sp-card-actions .btn { display: inline-flex; align-items: center; gap: var(--space-1); }
+/* What the agent is doing: one line at the top of the composer, never two. The step gives way to the
+   buttons, which keep their size, so the line holds from 320 px up without wrapping. */
+.sp-live-wrap { display: grid; gap: 2px; padding-bottom: var(--space-1); }
+.sp-live { display: flex; align-items: center; gap: 2px; min-width: 0; height: var(--ctl-h-sm); }
+.sp-live .livebar, .sp-live-paused { flex: 1 1 auto; min-width: 0; max-width: none; height: var(--ctl-h-sm); padding: 0 var(--space-1); font-size: var(--fs-12); }
+.sp-live-paused { display: inline-flex; align-items: center; gap: 6px; color: var(--warn); white-space: nowrap; }
+.sp-live .iconbtn { background: transparent; color: var(--fg-2); }
+.sp-live .iconbtn:hover { background: var(--surface-2); color: var(--fg); }
+.sp-live .iconbtn.danger { color: var(--bad); }
+.sp-live-warn { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 0 var(--space-1); font-size: var(--fs-12); color: var(--bad); white-space: nowrap; }
+.sp-live-warn .truncate { flex: 1 1 auto; min-width: 0; }
+.sp-card-actions, .sp-new-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.sp-card-actions .btn { display: inline-flex; align-items: center; gap: var(--space-1); }
 
 .sp-give { display: flex; align-items: center; gap: var(--space-2); }
 .sp-give .truncate { flex: 1; min-width: 0; }

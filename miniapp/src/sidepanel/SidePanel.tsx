@@ -24,7 +24,7 @@ import { buildTurns, createLiveStore, liveAfter, liveBase, type LiveStore, type 
 import { followSession } from "../sessionstream";
 import { errorText } from "../ui";
 import { connectShell, ShellError, type Current, type PageInfo, type Shell } from "./bridge";
-import { cardKey, cropRect, dataFile, pageFile, pickSession, selectionQuote, stopUnconfirmed, type PanelListing, type PanelSession, type Rect } from "./model";
+import { cardKey, cropRect, dataFile, lineStops, pageFile, pickSession, selectionQuote, stopUnconfirmed, type PanelListing, type PanelSession, type Rect } from "./model";
 import "./sidepanel.css";
 
 type Status = "idle" | "running" | "waiting" | "failed" | "compacting";
@@ -493,12 +493,6 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
           <div className="skeleton sk-line" />
         )}
       </div>
-      {detail && (busy || paused) && (
-        <ActivityStrip detail={detail} live={live} status={status} paused={paused} stopUnconfirmed={stopUnconfirmed(stopAt, status, now)} hasTab={tabIsTheirs || !!current?.owner}
-          onStop={() => void stop()} onPause={() => void pause(!paused)} onTakeOver={() => void pause(true, true)}
-          onShowTab={() => void shell.request("tab.focus", { session: id }).catch((e) => toast(t("sidepanel.tab.failed", { reason: shellReason(e) })))}
-          onOpenApp={() => void shell.request("open.app", { path: sessionPath(id) })} />
-      )}
       {canGive && (
         <div className="sp-give">
           <span className="truncate sub">{tab!.title || tab!.url}</span>
@@ -511,11 +505,19 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
         <Composer
           ref={composer}
           above={
+            <>
+            {(busy || paused) && (
+              <ActivityLine detail={detail} live={live} status={status} paused={paused} stopUnconfirmed={stopUnconfirmed(stopAt, status, now)} hasTab={tabIsTheirs || !!current?.owner}
+                onStop={() => void stop()} onPause={() => void pause(!paused)} onTakeOver={() => void pause(true, true)}
+                onShowTab={() => void shell.request("tab.focus", { session: id }).catch((e) => toast(t("sidepanel.tab.failed", { reason: shellReason(e) })))}
+                onOpenApp={() => void shell.request("open.app", { path: sessionPath(id) })} />
+            )}
             <div className="sp-attach" role="group" aria-label={t("sidepanel.attach")}>
               <button type="button" className="chip" disabled={!tab?.readable} onClick={() => void attach("page")}><Icon name="file" size={13} />{t("sidepanel.attach.page")}</button>
               <button type="button" className="chip" disabled={!tab?.readable} onClick={() => void attach("screenshot")}><Icon name="camera" size={13} />{t("sidepanel.attach.screenshot")}</button>
               <button type="button" className="chip" disabled={!tab?.readable} onClick={() => void attach("selection")}><Icon name="reply" size={13} />{t("sidepanel.attach.selection")}</button>
             </div>
+            </>
           }
           sessionId={id}
           status={status}
@@ -551,9 +553,14 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
   );
 }
 
-// ── the activity strip ─────────────────────────────────────────────────────────────────────
+// ── the activity line ──────────────────────────────────────────────────────────────────────
 
-function ActivityStrip({ detail, live, status, paused, stopUnconfirmed: unconfirmed, hasTab, onStop, onPause, onTakeOver, onShowTab, onOpenApp }: {
+/** What the agent is doing, as one line at the top of the composer: the dot, the current step cut to
+ *  fit, and small buttons for the tabs. It was a bordered block with its own row of labelled buttons
+ *  and a red Stop beside the composer's red Stop; in a 360 px panel that read as a second panel. Stop
+ *  stays the composer's (see `lineStops`), and the warning that a stop went unanswered sits here,
+ *  right over that button. */
+function ActivityLine({ detail, live, status, paused, stopUnconfirmed: unconfirmed, hasTab, onStop, onPause, onTakeOver, onShowTab, onOpenApp }: {
   detail: SessionDetail; live: LiveStore; status: Status; paused: boolean; stopUnconfirmed: boolean; hasTab: boolean;
   onStop: () => void; onPause: () => void; onTakeOver: () => void; onShowTab: () => void; onOpenApp: () => void;
 }) {
@@ -564,22 +571,27 @@ function ActivityStrip({ detail, live, status, paused, stopUnconfirmed: unconfir
     return built.current;
   }, [detail.messages]);
   const base = liveBase(turns, detail.run_id);
+  const resumeLabel = t(paused ? "sidepanel.resume" : "sidepanel.pause");
   return (
-    <div className="sp-strip" role="region" aria-label={t("sidepanel.strip")}>
-      {paused ? <div className="sp-strip-line"><b>{t("sidepanel.paused")}</b></div> : <LiveBar status={status === "compacting" ? "running" : status} saving={false} base={base} live={live} workspace={detail.workspace} onJump={onShowTab} />}
+    <div className="sp-live-wrap" role="region" aria-label={t("sidepanel.strip")}>
+      <div className="sp-live">
+        {paused ? (
+          <span className="sp-live-paused" role="status" title={t("sidepanel.paused")}><span className="sp-dot waiting" /><span className="truncate">{t("sidepanel.paused.short")}</span></span>
+        ) : (
+          <LiveBar compact status={status === "compacting" ? "running" : status} saving={false} base={base} live={live} workspace={detail.workspace} onJump={onShowTab} />
+        )}
+        {hasTab && <button type="button" className="iconbtn small" onClick={onPause} aria-label={resumeLabel} title={resumeLabel}><Icon name={paused ? "play" : "pause"} size={14} /></button>}
+        {hasTab && !paused && <button type="button" className="iconbtn small" onClick={onTakeOver} aria-label={t("sidepanel.takeover")} title={t("sidepanel.takeover")}><Icon name="user" size={14} /></button>}
+        {hasTab && <button type="button" className="iconbtn small" onClick={onShowTab} aria-label={t("sidepanel.showtab")} title={t("sidepanel.showtab")}><Icon name="eye" size={14} /></button>}
+        {lineStops(status) && <button type="button" className="iconbtn small danger" onClick={onStop} aria-label={t("sidepanel.stop")} title={t("sidepanel.stop")}><Icon name="stop" size={14} /></button>}
+      </div>
       {unconfirmed && (
-        <div className="sp-strip-warn" role="alert">
-          {t("sidepanel.stop.unconfirmed")}
+        <div className="sp-live-warn" role="alert">
+          <span className="truncate">{t("sidepanel.stop.unconfirmed")}</span>
           <button type="button" className="link" onClick={onStop}>{t("sidepanel.retry")}</button>
           <button type="button" className="link" onClick={onOpenApp}>{t("sidepanel.open_app")}</button>
         </div>
       )}
-      <div className="sp-strip-actions">
-        {(status === "running" || status === "compacting") && <button type="button" className="btn small danger" onClick={onStop}><Icon name="stop" size={13} />{t("sidepanel.stop")}</button>}
-        {hasTab && <button type="button" className="btn small" onClick={onPause}><Icon name={paused ? "play" : "pause"} size={13} />{t(paused ? "sidepanel.resume" : "sidepanel.pause")}</button>}
-        {hasTab && !paused && <button type="button" className="btn small" onClick={onTakeOver}>{t("sidepanel.takeover")}</button>}
-        {hasTab && <button type="button" className="btn small" onClick={onShowTab}><Icon name="eye" size={13} />{t("sidepanel.showtab")}</button>}
-      </div>
     </div>
   );
 }

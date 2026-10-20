@@ -3954,6 +3954,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "sidepanel.tab.failed": { en: "The tab was not given: {reason}", ru: "Вкладка не отдана: {reason}" },
   "sidepanel.strip": { en: "What the agent is doing", ru: "Что делает агент" },
   "sidepanel.paused": { en: "Paused: the agent waits until you give the tabs back.", ru: "Пауза: агент ждёт, пока вы не вернёте вкладки." },
+  "sidepanel.paused.short": { en: "Paused", ru: "На паузе" },
   "sidepanel.stop": { en: "Stop", ru: "Остановить" },
   "sidepanel.pause": { en: "Pause", ru: "Пауза" },
   "sidepanel.resume": { en: "Give back", ru: "Вернуть агенту" },

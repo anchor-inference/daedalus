@@ -12,8 +12,9 @@ side panel's width:
   Enter allows it once through the panel's door, Esc refuses the next one;
 - the active tab moving to another conversation's group moves the panel there; pinned, it stays;
 - "This page" asks the extension for the page's text and attaches it as a file;
-- a running conversation shows the activity strip; Stop goes to the door, and a stop the stream
-  never confirms says so after three seconds; Take over pauses the group and shows its tab;
+- a running conversation shows one compact activity line inside the composer, with no Stop of its
+  own; the composer's Stop goes to the door, and a stop the stream never confirms says so after three
+  seconds; the line stays one row at 360 and 420 px; Take over pauses the group and shows its tab;
 - a new conversation shows the consent summary once, starts on the operator's words, gives the
   current tab to its group before the first message, and sends that message;
 - no request leaves for an operator's route, and the page carries the panel's credential only;
@@ -244,14 +245,29 @@ def run() -> int:
         page.evaluate("window.__shell.emit('current', " + json.dumps(tab("s2", "Flights", "https://air.example/")) + ")")
         expect(page.locator(".sp-title")).to_contain_text("Find flights to Lisbon")
         page.evaluate("window.__shell.emit('current', " + json.dumps(tab("s1", "Your bill", "https://bank.example/bill")) + ")")
-        strip = page.locator(".sp-strip")
-        expect(strip).to_be_visible()
-        strip.get_by_role("button", name="Stop").click()
+        line = page.locator(".sp-live")
+        expect(line).to_be_visible()
+        # One Stop only: the composer's round button. The line carries the tab buttons as icons.
+        assert line.get_by_role("button", name="Stop").count() == 0, "the activity line has a Stop of its own beside the composer's"
+        expect(line.get_by_role("button", name="Take over")).to_be_visible()
+        page.locator(".composer .roundbtn.primary[data-action=stop]").click()
         assert door.posted("/api/panel/sessions/s1/stop"), door.posts
-        expect(page.locator(".sp-strip-warn")).to_contain_text("did not reach Daedalus", timeout=6000)
+        expect(page.locator(".sp-live-warn")).to_contain_text("did not reach Daedalus", timeout=6000)
         page.screenshot(path=str(SHOTS / "side-panel-running.png"))
-        strip.get_by_role("button", name="Take over").click()
-        expect(page.locator(".sp-strip")).to_contain_text("Paused")
+        # The line stays one row across the widths a side panel takes, and sits inside the composer.
+        for width in (360, 420):
+            page.set_viewport_size({"width": width, "height": 760})
+            page.wait_for_timeout(100)
+            rows = page.evaluate("""() => {
+              const line = document.querySelector('.sp-live');
+              const tops = new Set([...line.children].map((el) => Math.round(el.getBoundingClientRect().top)));
+              return { tops: tops.size, height: line.getBoundingClientRect().height, inside: !!line.closest('.composer') };
+            }""")
+            assert rows["tops"] == 1 and rows["height"] <= 32 and rows["inside"], (width, rows)
+            page.screenshot(path=str(SHOTS / f"side-panel-running-{width}.png"))
+        page.set_viewport_size({"width": 400, "height": 760})
+        line.get_by_role("button", name="Take over").click()
+        expect(page.locator(".sp-live")).to_contain_text("Paused")
         assert requests(page, "group.pause")[-1]["args"] == {"session": "s1", "paused": True}
         assert requests(page, "tab.focus")[-1]["args"] == {"session": "s1"}
 

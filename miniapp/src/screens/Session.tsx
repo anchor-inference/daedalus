@@ -2512,8 +2512,10 @@ export function SubagentTranscript({ id, onPreview, toast }: { id: string; onPre
  *  same turn, and a line that appears somewhere else would read as a new event.
  */
 /** The run, as one line in the header: dot, word, elapsed, step, what the agent is doing. Clicking it
- *  brings the newest content back into view. The `livebar` classes are what the settle harness watches. */
-export function LiveBar({ status, saving, base, live, workspace, onJump }: { status: Status; saving: boolean; base: Turn | null; live: LiveStore; workspace?: string; onJump: () => void }) {
+ *  brings the newest content back into view. The `livebar` classes are what the settle harness watches.
+ *  `compact` drops the word and the step count for the side panel, whose line also holds its buttons
+ *  in 360 px: the dot already says the state, and the step is what the operator reads. */
+export function LiveBar({ status, saving, base, live, workspace, onJump, compact = false }: { status: Status; saving: boolean; base: Turn | null; live: LiveStore; workspace?: string; onJump: () => void; compact?: boolean }) {
   const state = useSyncExternalStore(live.subscribe, live.get);
   useClock(1000);
   if (saving) {
@@ -2543,6 +2545,15 @@ export function LiveBar({ status, saving, base, live, workspace, onJump }: { sta
             : state.thinking
               ? t("session.reasoning")
               : t("session.livebar.thinking");
+  if (compact) {
+    return (
+      <button className={`livebar head-status compact ${status}`} onClick={onJump} role="status" aria-live="polite" title={step || t("session.jump.step")}>
+        <Dot status={status} />
+        <span className="truncate">{step}</span>
+        <span className="num">{duration(Date.now() - turn.startedAt)}</span>
+      </button>
+    );
+  }
   return (
     <button className={`livebar head-status ${status}`} onClick={onJump} role="status" aria-live="polite" title={t("session.jump.step")}>
       <Dot status={status} />

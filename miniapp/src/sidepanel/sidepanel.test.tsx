@@ -8,9 +8,9 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, panelPath, setPanelCredential } from "../api";
-import { setLang } from "../i18n";
+import { setLang, t } from "../i18n";
 import { connectShell, EXTENSION_ORIGIN, HELLO, PANEL_PROTO, READY, type Current, type Shell } from "./bridge";
-import { cardKey, cropRect, pageFile, pickSession, selectionQuote, stopUnconfirmed, type PanelSession } from "./model";
+import { cardKey, cropRect, lineStops, pageFile, pickSession, selectionQuote, stopUnconfirmed, type PanelSession } from "./model";
 import { SidePanel } from "./SidePanel";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -89,6 +89,12 @@ describe("what the panel decides", () => {
     expect(cardKey({ key: "Escape" })).toBe("deny");
     expect(cardKey({ key: "Enter", isComposing: true })).toBeNull();
     expect(cardKey({ key: "a" })).toBeNull();
+  });
+
+  it("leaves Stop to the composer while its button is one", () => {
+    expect(lineStops("running")).toBe(false);
+    expect(lineStops("waiting")).toBe(false);
+    expect(lineStops("compacting")).toBe(true);
   });
 
   it("calls a stop unconfirmed only after three seconds of the run going on", () => {
@@ -218,6 +224,25 @@ describe("the screen", { timeout: 20_000 }, () => {
       await new Promise((r) => setTimeout(r, 200));
     });
     expect(posted).toContainEqual({ url: "/api/panel/sessions/s1/policy/refuse", body: { key: "0123456789ab" } });
+  });
+
+  it("shows a running agent as one line in the composer, with the tab buttons and no second Stop", async () => {
+    detail = { ...detail, status: "running", run_id: "r1", messages: refusal("0123456789ab").slice(0, 2) };
+    act(() => root.render(<SidePanel />));
+    await settle();
+    const line = host.querySelector(".composer .sp-live");
+    expect(line).not.toBeNull();
+    expect(host.querySelector(".sp-strip")).toBeNull();
+    const labels = [...line!.querySelectorAll("button")].map((b) => b.getAttribute("aria-label")).filter(Boolean);
+    expect(labels).toEqual([t("sidepanel.pause"), t("sidepanel.takeover"), t("sidepanel.showtab")]);
+    expect(host.querySelectorAll('.composer [data-action="stop"]').length).toBe(1);
+    expect(line!.querySelector(".danger")).toBeNull();
+    await act(async () => {
+      line!.querySelector<HTMLButtonElement>(`[aria-label="${t("sidepanel.takeover")}"]`)!.click();
+    });
+    await settle();
+    expect(requests).toContainEqual({ op: "group.pause", args: { session: "s1", paused: true } });
+    expect(host.querySelector(".sp-live")?.textContent).toContain(t("sidepanel.paused.short"));
   });
 
   it("follows the tab to another conversation", async () => {
