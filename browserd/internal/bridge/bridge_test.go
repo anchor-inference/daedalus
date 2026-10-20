@@ -8,7 +8,9 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -313,5 +315,29 @@ func TestBridgeRefusesAnOrigin(t *testing.T) {
 	err := Run(Options{Origin: "chrome-extension://" + strings.Repeat("b", 32) + "/", RunDir: run, Allowed: []string{testID}}, strings.NewReader(""), &out)
 	if err == nil || out.Len() != 0 || hub.Current() != nil {
 		t.Fatalf("%v, %d bytes out", err, out.Len())
+	}
+}
+
+// The bridge, the extension and the launcher each spell the extension's id and the host's name, and
+// a difference between any two is a Chrome that silently never starts the bridge. The extension's
+// own tests tie its id to its manifest key, so the bridge only has to agree with the extension's
+// source; the launcher's tests check the same pair from its side.
+func TestTheBridgeNamesWhatTheExtensionDeclares(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "..", "extension", "src", "protocol.ts"))
+	if err != nil {
+		t.Skipf("no extension beside this tree: %v", err)
+	}
+	declared := func(name string) string {
+		m := regexp.MustCompile(`export const ` + name + ` = "([^"]+)"`).FindSubmatch(src)
+		if m == nil {
+			t.Fatalf("extension/src/protocol.ts declares no %s", name)
+		}
+		return string(m[1])
+	}
+	if id := declared("EXTENSION_ID"); len(PinnedExtensionIDs) == 0 || PinnedExtensionIDs[0] != id {
+		t.Fatalf("the bridge pins %v, the extension is %q", PinnedExtensionIDs, id)
+	}
+	if host := declared("NATIVE_HOST"); HostName != host {
+		t.Fatalf("the bridge is host %q, the extension asks for %q", HostName, host)
 	}
 }
