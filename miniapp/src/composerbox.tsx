@@ -454,6 +454,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   }
   // ⌘M and ⌘⇧S reach the composer from anywhere on the screen; y / n answer the dock when nobody is typing.
   const approval = props.approval ?? null;
+  // The agent's ask for the operator's Chrome is a switch of this conversation, not a call let through
+  // once: it names that Chrome and carries the consent summary the panel's first switch shows.
+  const approvalTitle = !approval ? "" : approval.chrome ? t("composer.chrome.title", { name: approval.chrome.name }) : t("composer.approval.title", { tool: approval.tool || "tool" });
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Ctrl+M is Enter in a terminal and Ctrl+Shift+S nothing the composer should hear.
@@ -562,37 +565,41 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         // The phone's tray: the same place and shape as the queue above the field, the narrowest
         // grant first and white, the session-wide grant apart from it, and refusal in red words so a
         // tired thumb does not take it for the primary.
-        <div ref={dock} className="dock approval ph-tray" role="group" aria-label={t("composer.approval.title", { tool: approval.tool })}>
+        <div ref={dock} className="dock approval ph-tray" role="group" aria-label={approvalTitle} data-kind={approval.chrome ? "chrome" : "policy"}>
           <div className="ph-tray-head warn"><Icon name="shield" size={14} /><span>{t("composer.tray.permission")}</span></div>
-          <div className="ph-tray-title">{t("composer.approval.title", { tool: approval.tool || "tool" })}</div>
-          {approval.detail && <div className="ph-tray-detail mono">{approval.detail}</div>}
+          <div className="ph-tray-title">{approvalTitle}</div>
+          {approval.detail && <div className={`ph-tray-detail ${approval.chrome ? "" : "mono"}`}>{approval.detail}</div>}
+          {approval.chrome && <div className="ph-tray-detail sub" data-chrome-consent>{t("uc.switch.consent.body")}</div>}
           <div className="ph-tray-actions">
-            <button type="button" className="ph-btn primary" onClick={() => props.onApprove?.(approval)}>{t("composer.approve")}</button>
-            {props.similar && props.onApproveSimilar && (
+            <button type="button" className="ph-btn primary" onClick={() => props.onApprove?.(approval)}>{t(approval.chrome ? "composer.chrome.allow" : "composer.approve")}</button>
+            {props.similar && props.onApproveSimilar && !approval.chrome && (
               <button type="button" className="ph-btn" data-action="allow-similar" title={t("composer.approve.similar.title")} onClick={() => props.onApproveSimilar?.(approval)}>
                 <span className="truncate">{t("composer.approve.similar", { label: props.similar })}</span>
               </button>
             )}
-            <button type="button" className="ph-btn ph-deny" onClick={() => props.onDeny?.(approval)}>{t("composer.deny")}</button>
+            <button type="button" className="ph-btn ph-deny" onClick={() => props.onDeny?.(approval)}>{t(approval.chrome ? "composer.chrome.deny" : "composer.deny")}</button>
           </div>
         </div>
       )}
       {approval && !phone && (
-        <div ref={dock} className="dock approval" role="group" aria-label={t("composer.approval.title", { tool: approval.tool })}>
+        <div ref={dock} className="dock approval" role="group" aria-label={approvalTitle} data-kind={approval.chrome ? "chrome" : "policy"}>
           <div className="dock-title">
-            <Icon name="wrench" size={16} />
-            <span className="grow">{t("composer.approval.title", { tool: approval.tool || "tool" })}</span>
+            <Icon name={approval.chrome ? "shield" : "wrench"} size={16} />
+            <span className="grow">{approvalTitle}</span>
             <kbd className="sub">{t("composer.approval.hint")}</kbd>
           </div>
-          {approval.detail && <div className="dock-detail mono truncate" title={approval.detail}>{approval.detail}</div>}
+          {approval.detail && (approval.chrome
+            ? <div className="dock-detail">{approval.detail}</div>
+            : <div className="dock-detail mono truncate" title={approval.detail}>{approval.detail}</div>)}
+          {approval.chrome && <div className="dock-detail sub" data-chrome-consent>{t("uc.switch.consent.body")}</div>}
           <div className="dock-actions">
-            <button type="button" className="btn small primary" onClick={() => props.onApprove?.(approval)}>{t("composer.approve")}</button>
-            {props.similar && props.onApproveSimilar && (
+            <button type="button" className="btn small primary" onClick={() => props.onApprove?.(approval)}>{t(approval.chrome ? "composer.chrome.allow" : "composer.approve")}</button>
+            {props.similar && props.onApproveSimilar && !approval.chrome && (
               <button type="button" className="btn small" data-action="allow-similar" title={t("composer.approve.similar.title")} onClick={() => props.onApproveSimilar?.(approval)}>
                 {t("composer.approve.similar", { label: props.similar })}
               </button>
             )}
-            <button type="button" className="btn small" onClick={() => props.onDeny?.(approval)}>{t("composer.deny")}</button>
+            <button type="button" className="btn small" onClick={() => props.onDeny?.(approval)}>{t(approval.chrome ? "composer.chrome.deny" : "composer.deny")}</button>
           </div>
         </div>
       )}

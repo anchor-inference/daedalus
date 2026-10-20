@@ -499,6 +499,28 @@ class Browsers:
             return USER
         return self.agent_env()
 
+    def user_connection(self) -> tuple[bool, str, str]:
+        """``(connected, name, why not)`` of the operator's Chrome, from the user daemon's last report:
+        whether a Chrome is connected now, the name its popup gives it, and the reason the last
+        connection ended. Read from memory, so a turn's context and a tool's answer ask nobody."""
+        link = self.links.get(USER)
+        relay = link.info.get("relay") if link is not None and link.available else None
+        if not isinstance(relay, dict):
+            return False, "", link.detail if link is not None and link.run_dir is not None else ""
+        return bool(relay.get("connected")), str(relay.get("profile_name") or "")[:80], str(relay.get("last_error") or "")[:200]
+
+    async def switch_conversation(self, session_id: str, env: str, *, consent: bool) -> dict[str, Any]:
+        """Move a conversation between the agent's browser and the operator's Chrome, as the operator
+        decided: their switch in the panel, or their yes to the agent's ask. One path for both, so the
+        consent record and the event the app redraws on are the same whichever way they said it."""
+        if env == USER and not self.user_offered():
+            raise Unsupported("this installation does not offer your Chrome (Settings → Environments → Your Chrome)")
+        choice = await self.choices.switch(session_id, env, consent=consent)
+        if self.bus is not None:
+            with contextlib.suppress(Exception):
+                await self.bus.publish("browser.user", {"kind": "switched", "profile_name": "", "reason": env}, session_id=session_id)
+        return choice
+
     async def user_status(self) -> dict[str, Any]:
         """The ``user`` daemon and the Chrome connected to it, as the app's card reads it: whether the
         daemon answers, and the relay's own report (connected, profile, versions, transport, since,

@@ -22,9 +22,9 @@ from protocore.contracts.llm import LLMObservabilityContext, LLMRequest
 from protocore.contracts.types import Message, MessageRole, TextBlock
 
 from daedalus.browser import login
-from daedalus.browser.agent import BrowserAgent
+from daedalus.browser.agent import SWITCH_ASK, BrowserAgent
 from daedalus.browser.cli import TOOL_SET, StaffBrowser
-from daedalus.browser.model import USER, Owner
+from daedalus.browser.model import USER, BrowserError, Owner
 from daedalus.browser.monitor import TIMEOUT_SECONDS, InjectionMonitor
 from daedalus.browser.notes import SiteNotes
 from daedalus.browser.owners import DatabaseOwners
@@ -116,6 +116,53 @@ def build(app: Application) -> Browsers:
         wall=wall,
         daemon_update=update,
     )
+
+
+async def chrome_answered(app: Application, service: Browsers, session_id: str, allowed: bool) -> None:
+    """The operator answered the agent's ask to work in their Chrome. A yes switches the conversation
+    through the panel's own path, consent recorded as the panel records it; either way the agent is
+    woken with the answer, since it ended its turn to wait for it."""
+    assert app.manager is not None
+    state = await app.manager.get_state(session_id)
+    staff_id = str(state.metadata.get("staff_id") or "") if state is not None else ""
+    owner = Owner("session", session_id, session_id=session_id, staff_id=staff_id or None)
+    _, name, _ = service.user_connection()
+    name = name or "Chrome"
+    if allowed:
+        try:
+            await service.switch_conversation(session_id, USER, consent=True)
+        except BrowserError as exc:
+            text = f"[browser] The operator said yes to their Chrome, but the conversation could not be switched: {exc.message}. Tell them, or use your own browser if they agree."
+        else:
+            text = (
+                f"[browser] The operator switched this conversation to their own Chrome «{name}». BrowserOpen now opens your tabs there, "
+                "signed in as them; every new site still asks them first."
+            )
+    else:
+        text = "[browser] The operator declined to let you work in their Chrome. Use your own browser (BrowserOpen) for the task, or stop and tell them what it needs."
+    if service.wake is not None:
+        await service.wake(owner, text)
+
+
+async def chrome_line(manager: Any, service: Browsers, state: Any) -> str:
+    """The turn context's line on the operator's Chrome, for a session that has the browser tools on
+    an installation that offers it: whether it is connected, and whether this conversation is in it.
+    The same words while nothing changes, and no clock or count in them, so they cost one line and
+    never a cache miss; in the turn context rather than the prompt because a Chrome comes and goes."""
+    if not service.user_offered():
+        return ""
+    if manager.registry_for(state).get("BrowserOpen") is None or "BrowserOpen" in manager.blocked_tools_for(state):
+        return ""
+    connected, name, _ = service.user_connection()
+    name = name or "Chrome"
+    if await service.choices.env(state.session.id) == USER:
+        return f"- Browser: the operator gave this conversation their own Chrome «{name}»; the browser tools work there" + ("." if connected else ", which is not connected now.")
+    if connected:
+        return (
+            f"- Browser: the operator's Chrome «{name}» is connected, but this conversation uses your own browser, not theirs. "
+            "Only the operator moves it there: when they ask for their browser, call BrowserAskOperatorChrome(reason)."
+        )
+    return "- Browser: the operator's Chrome is offered here but not connected now; this conversation uses your own browser."
 
 
 def _port_range(text: str) -> list[int] | None:
@@ -222,6 +269,8 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
             sets[TOOL_SET] = staff
 
     manager.delete_hooks.append(session_deleted)
+    manager.answer_hooks[SWITCH_ASK] = lambda session_id, request, allowed: chrome_answered(app, service, session_id, allowed)
+    manager.turn_line_hooks.append(lambda state: chrome_line(manager, service, state))
     tasks = await service.start()
     if service.daemon_update is not None:
         # In the background: it runs a program, and nothing about the start waits for its answer.

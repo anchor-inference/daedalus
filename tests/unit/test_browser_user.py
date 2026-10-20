@@ -347,3 +347,157 @@ async def test_a_popup_check_and_the_relay_coming_and_going_reach_the_app(rig: R
             if len(seen) == 2:
                 break
     assert seen == [{"kind": "check", "profile_name": "Work"}, {"kind": "lost", "profile_name": "Work", "reason": "closed"}]
+
+
+# -- the agent asks for the operator's Chrome --------------------------------------------------------
+
+
+def woken(rig: Rig) -> list[tuple[Owner, str]]:
+    """What the agent is woken with, kept instead of starting a run."""
+    told: list[tuple[Owner, str]] = []
+
+    async def wake(owner: Owner, text: str) -> None:
+        told.append((owner, text))
+
+    rig.service.wake = wake
+    return told
+
+
+async def asked(rig: Rig, sid: str) -> str:
+    text, failed = await rig.call(sid, "BrowserAskOperatorChrome", reason="read the anchorinference page signed in as you")
+    assert failed and "Approval key" in text and "End your turn" in text, text
+    (key, request), = rig.pending(sid).items()
+    assert key in text
+    assert request["on_answer"] == "browser.user.switch"
+    assert "The agent asks to work in your Chrome «Work»: read the anchorinference page signed in as you" in request["text"]
+    assert CONSENT in request["text"], "the card carries the consent summary the panel's first switch shows"
+    return str(key)
+
+
+async def test_the_agents_ask_switches_nothing_until_the_operator_says_yes(rig: Rig, chrome: FakeBrowserd, agents_browser: FakeBrowserd) -> None:
+    sid = await rig.session()
+    key = await asked(rig, sid)
+    assert await rig.service.choices.get(sid) == {"env": "agent", "consented": False, "sites": []}
+    # Asking again, or opening the browser meanwhile, moves nothing either; the result names the browser.
+    await rig.call(sid, "BrowserAskOperatorChrome", reason="read the anchorinference page signed in as you")
+    text, failed = await rig.call(sid, "BrowserOpen")
+    assert not failed, text
+    assert "the agent's own browser (not the operator's Chrome «Work»)" in text
+    assert not chrome.groups and await rig.service.choices.env(sid) == "agent"
+    # The yes is the operator's alone: an orchestrator answering it is refused and nothing changes.
+    with pytest.raises(ValueError, match="only the operator"):
+        await rig.manager.grant(sid, key, via="orchestrator")
+    assert await rig.service.choices.env(sid) == "agent" and key in rig.pending(sid)
+
+
+async def test_the_operators_yes_switches_the_conversation_as_the_panel_does(rig: Rig, chrome: FakeBrowserd) -> None:
+    from daedalus.host.events import EventFilter  # noqa: PLC0415
+
+    told = woken(rig)
+    subscription = rig.manager.bus.subscribe(EventFilter(types=("browser.user",)), name="test")
+    sid = await rig.session()
+    key = await asked(rig, sid)
+    await rig.manager.grant(sid, key, via="app")
+    # The state the panel's switch writes, consent recorded with it.
+    panel = await rig.session()
+    await rig.service.switch_conversation(panel, USER, consent=True)
+    assert await rig.service.choices.get(sid) == await rig.service.choices.get(panel) == {"env": USER, "consented": True, "sites": []}
+    async with asyncio.timeout(5):
+        async for event in subscription:
+            assert event.payload["kind"] == "switched" and event.session_id == sid
+            break
+    # No grant is left for the agent's next call to spend, and the agent hears the answer.
+    state = rig.manager.live_state(sid)
+    assert state is not None and not state.metadata.get("policy_grants") and not rig.pending(sid)
+    assert told and told[-1][0].session_id == sid and "switched this conversation to their own Chrome «Work»" in told[-1][1]
+    text, failed = await rig.call(sid, "BrowserOpen")
+    assert not failed, text
+    assert "operator's own Chrome «Work»" in text and group_id(Owner("session", sid), env=USER) in chrome.groups
+
+
+async def test_the_operators_no_leaves_the_conversation_in_the_agents_browser(rig: Rig, chrome: FakeBrowserd) -> None:
+    told = woken(rig)
+    sid = await rig.session()
+    key = await asked(rig, sid)
+    await rig.manager.refuse(sid, key, via="app")
+    assert await rig.service.choices.get(sid) == {"env": "agent", "consented": False, "sites": []}
+    assert not rig.pending(sid)
+    assert "declined" in told[-1][1] and "your own browser" in told[-1][1]
+
+
+async def test_a_chrome_that_is_not_connected_is_said_plainly_and_nothing_is_asked(rig: Rig, chrome: FakeBrowserd, agents_browser: FakeBrowserd) -> None:
+    sid = await rig.session()
+    chrome.relay_status = {"connected": False, "last_error": "Chrome closed the connection", "since": None, "last_seen": None}
+    chrome.emit("relay.lost", {"reason": "closed", "profile_id": "p1", "profile_name": "Work"})
+    async with asyncio.timeout(5):
+        while rig.service.user_connection()[0]:
+            await asyncio.sleep(0.02)
+    text, failed = await rig.call(sid, "BrowserAskOperatorChrome", reason="read a page")
+    assert failed and "not connected" in text and "Settings → Environments → Your Chrome" in text and "Chrome closed the connection" in text
+    assert not rig.pending(sid) and not agents_browser.groups and not chrome.groups
+
+
+@pytest.mark.parametrize("runtime", [user_config(enabled=False)])
+async def test_an_installation_that_does_not_offer_the_operators_chrome_says_so(rig: Rig) -> None:
+    sid = await rig.session()
+    text, failed = await rig.call(sid, "BrowserAskOperatorChrome", reason="read a page")
+    assert failed and "not offered" in text and "Settings → Environments → Your Chrome" in text
+    assert not rig.pending(sid)
+    state = await rig.manager.get_state(sid)
+    assert state is not None
+    assert [await hook(state) for hook in rig.manager.turn_line_hooks] == [""]
+
+
+async def test_the_turn_line_says_where_the_conversation_is_and_stays_the_same_between_turns(rig: Rig, chrome: FakeBrowserd) -> None:
+    from protocore.contracts.types import Message, MessageRole, TextBlock  # noqa: PLC0415
+
+    sid = await rig.session()
+    state = await rig.manager.get_state(sid)
+    assert state is not None
+    message = Message(role=MessageRole.user, content_blocks=[TextBlock(text="Попробуй зайти на сайт в моём браузере")])
+    first = (await rig.manager._with_turn_context(state, message)).content_blocks[0].text  # type: ignore[union-attr]
+    second = (await rig.manager._with_turn_context(state, message)).content_blocks[0].text  # type: ignore[union-attr]
+    line = "- Browser: the operator's Chrome «Work» is connected, but this conversation uses your own browser, not theirs."
+    assert line in first and line in second
+    assert [x for x in first.splitlines() if x.startswith("- Browser:")] == [x for x in second.splitlines() if x.startswith("- Browser:")]
+    assert "BrowserAskOperatorChrome" in first
+    await rig.switch(sid)
+    third = (await rig.manager._with_turn_context(state, message)).content_blocks[0].text  # type: ignore[union-attr]
+    assert "- Browser: the operator gave this conversation their own Chrome «Work»; the browser tools work there." in third
+    # The static rules point at the ask, with both languages' words, and keep the conversation's state out.
+    assert "BrowserAskOperatorChrome" in prompts.BROWSER and "в моём браузере" in prompts.BROWSER and "«Work»" not in prompts.BROWSER
+    hint = rig.manager.tools.get("BrowserAskOperatorChrome").search_hint  # type: ignore[union-attr]
+    assert "my browser" in hint and "мой браузер" in hint and "моём браузере" in hint
+
+
+async def test_a_staff_members_ask_goes_to_the_operator(rig: Rig, chrome: FakeBrowserd) -> None:
+    from daedalus.host.events import EventFilter  # noqa: PLC0415
+
+    told = woken(rig)
+    subscription = rig.manager.bus.subscribe(EventFilter(types=("permission.pending",)), name="test")
+    sid = await rig.session()
+    state = rig.manager.live_state(sid)
+    assert state is not None
+    state.metadata.update({"staff_session_id": "live-1", "staff_id": "m1"})
+    key = await asked(rig, sid)
+    async with asyncio.timeout(5):
+        async for event in subscription:
+            payload = dict(event.payload)
+            break
+    assert payload["request_id"] == key and payload["routed_to"] == "operator" and payload["chrome"]["name"] == "Work"
+    with pytest.raises(ValueError, match="only the operator"):
+        await rig.manager.refuse(sid, key, via="orchestrator")
+    await rig.manager.grant(sid, key, via="app")
+    assert await rig.service.choices.env(sid) == USER
+    assert told[-1][0].staff_id == "m1"
+
+
+async def test_a_command_line_members_browser_cannot_ask_to_move(rig: Rig, chrome: FakeBrowserd) -> None:
+    from daedalus.browser.agent import Caller  # noqa: PLC0415 — the command-line member's caller, by hand
+
+    async def never(ask: SensitiveAsk) -> tuple[bool, str]:
+        raise AssertionError("nothing here should ask")
+
+    caller = Caller(owner=Owner("staff", "m1", staff_id="m1"), actor="staff:m1", gate=never, files=None)  # type: ignore[arg-type]
+    text, failed = await rig.app.extensions["browser_agent"].run("BrowserAskOperatorChrome", {"reason": "read a page"}, caller)
+    assert failed and "cannot move into the operator's Chrome" in text

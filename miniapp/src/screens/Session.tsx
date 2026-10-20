@@ -664,7 +664,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       try {
         await api.post(`/api/sessions/${id}/policy/grant`, { key: a.key });
         setSeenKeys((k) => new Set(k).add(a.key));
-        toast(t("composer.approved"));
+        toast(a.chrome ? t("composer.chrome.switched", { name: a.chrome.name }) : t("composer.approved"));
       } catch (e) {
         toast(errorText(e));
       }

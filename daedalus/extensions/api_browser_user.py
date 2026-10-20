@@ -193,15 +193,10 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     async def user_session_switch(session_id: str, body: SwitchBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """The operator's switch of a conversation between the agent's browser and their own Chrome.
         The first switch there answers 409 ``consent_needed`` with the summary until it carries
-        ``consent: true``. Nothing the agent can call reaches this."""
-        found = service()
+        ``consent: true``. Nothing the agent can call reaches this; the agent's ask comes to the same
+        switch only through the operator's yes on its card."""
         await session_choice(session_id)
-        if body.env == USER and not found.user_offered():
-            raise Unsupported("this installation does not offer your Chrome (Settings → Environments → Your Chrome)")
-        await found.choices.switch(session_id, body.env, consent=body.consent)
-        if found.bus is not None:
-            with suppress(Exception):
-                await found.bus.publish("browser.user", {"kind": "switched", "profile_name": "", "reason": body.env}, session_id=session_id)
+        await service().switch_conversation(session_id, body.env, consent=body.consent)
         return await session_choice(session_id)
 
     # -- the public doors ---------------------------------------------------------------------

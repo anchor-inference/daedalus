@@ -21,7 +21,7 @@ from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
-from daedalus.browser.agent import LOOK_INSTRUCTION, BrowserAgent, Caller, SensitiveAsk
+from daedalus.browser.agent import LOOK_INSTRUCTION, SWITCH_ASK, BrowserAgent, Caller, SensitiveAsk
 from daedalus.browser.model import EnvUnavailable, Forbidden, NotFound, Owner
 from daedalus.host.filesystem import ShellFS
 from daedalus.host.services import SessionServices
@@ -33,7 +33,7 @@ from daedalus.tools.vision import VisionUnavailable, look
 BROWSER_TOOLS = (
     "BrowserOpen", "BrowserNavigate", "BrowserSnapshot", "BrowserText", "BrowserLook", "BrowserAct",
     "BrowserTabs", "BrowserWait", "BrowserDialog", "BrowserHandoff", "BrowserClose", "BrowserDownload", "BrowserNote",
-    "BrowserLogs", "BrowserNetwork", "BrowserInspect", "BrowserCookies", "BrowserLogin", "BrowserReplay",
+    "BrowserLogs", "BrowserNetwork", "BrowserInspect", "BrowserCookies", "BrowserLogin", "BrowserReplay", "BrowserAskOperatorChrome",
 )
 READ_ONLY_TOOLS = ("BrowserSnapshot", "BrowserText", "BrowserLook", "BrowserTabs", "BrowserWait", "BrowserLogs", "BrowserNetwork", "BrowserInspect")
 """The tools that only read the page or wait on it: a command-line agent's own permission rules may
@@ -177,8 +177,14 @@ def _caller(context: ToolContext) -> Caller | None:
             raise EnvUnavailable(str(exc)) from None
         return answer
 
+    async def ask_operator(key: str, text: str, card: dict[str, Any]) -> bool:
+        return bool(manager.ask_operator(context.session_id, key=key, tool="BrowserAskOperatorChrome", text=text, on_answer=SWITCH_ASK, card=card))
+
     budget = max(4000, output_limit(context) - FRAME_CHARS - 600)
-    return Caller(owner=owner, actor=f"agent:{context.session_id}", gate=gate, files=SessionFiles(services, manager, owner), look=looked, budget=budget, note_scope=lasting, rules=rules)
+    return Caller(
+        owner=owner, actor=f"agent:{context.session_id}", gate=gate, files=SessionFiles(services, manager, owner), look=looked, budget=budget, note_scope=lasting, rules=rules,
+        ask_operator=ask_operator,
+    )
 
 
 async def _run(context: ToolContext, name: str, arguments: dict[str, Any]) -> ToolResult:
@@ -200,11 +206,32 @@ async def _run(context: ToolContext, name: str, arguments: dict[str, Any]) -> To
     description=(
         "Start your browser, or come back to it: a real Chromium the operator can watch live and take over. It keeps "
         "your project's logins between sessions. url opens a page at once; fresh=true gives a throwaway browser whose "
-        "cookies are wiped when it closes. Returns the tabs. Next: BrowserSnapshot to see the page. " + NETWORK_ASK
+        "cookies are wiped when it closes. Returns the tabs. Next: BrowserSnapshot to see the page. It opens the operator's "
+        "own Chrome only when they switched this conversation there; when they ask for their browser and have not, call "
+        "BrowserAskOperatorChrome instead. " + NETWORK_ASK
     ),
 )
 async def browser_open(context: ToolContext, url: str | None = None, fresh: bool = False, why: str | None = None) -> ToolResult:
     return await _run(context, "BrowserOpen", {"url": url, "fresh": fresh, "why": why})
+
+
+@tool_group("browser")
+@search_hint(
+    "my browser my chrome use my chrome operator's chrome signed in as me switch to my browser "
+    "мой браузер моём браузере моем браузере моего браузера моём хроме мой хром моём chrome моем chrome мой профиль"
+)
+@tool(
+    name="BrowserAskOperatorChrome",
+    description=(
+        "Ask the operator to let you work in their own Chrome, signed in as them. Use it when they ask for their browser "
+        "(\"my browser\", \"in my Chrome\", \"в моём браузере\") and this conversation still uses yours: do not open your own "
+        "instead. reason is one sentence they read on the card: what you need their Chrome for. Only their yes switches "
+        "the conversation; end your turn after asking — a message brings the answer. When their Chrome is not connected "
+        "it says so and asks nothing."
+    ),
+)
+async def browser_ask_operator_chrome(context: ToolContext, reason: str) -> ToolResult:
+    return await _run(context, "BrowserAskOperatorChrome", {"reason": reason})
 
 
 @tool_group("browser")
@@ -575,7 +602,7 @@ async def browser_replay(context: ToolContext, skill: str | None = None, params:
 
 TOOLS = [
     browser_open, browser_navigate, browser_snapshot, browser_text, browser_look, browser_act, browser_tabs, browser_wait, browser_dialog, browser_handoff, browser_close,
-    browser_download, browser_note, browser_logs, browser_network, browser_inspect, browser_cookies, browser_login, browser_replay,
+    browser_download, browser_note, browser_logs, browser_network, browser_inspect, browser_cookies, browser_login, browser_replay, browser_ask_operator_chrome,
 ]
 
 __all__ = ["BROWSER_TOOLS", "READ_ONLY_TOOLS", "TOOLS", "SessionFiles"]

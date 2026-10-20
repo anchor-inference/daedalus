@@ -181,6 +181,13 @@ class DaedalusStaffRuntime:
             return
         key = ask.request_ref
         reason = f": {decision.text.strip()}" if decision.text and decision.text.strip() else ""
+        state = self.manager.live_state(session_id)
+        request = ((state.metadata.get("policy_pending") or {}).get(key) or {}) if state is not None else {}
+        if request.get("on_answer") in self.manager.answer_hooks:
+            # The host carries this request out itself and tells the member how it went; a "retry the
+            # call" note beside that would send it to make a call that has nothing left to pass.
+            await (self.manager.grant if decision.allow else self.manager.refuse)(session_id, key, via=via)
+            return
         if decision.allow:
             await self.manager.grant(session_id, key, via=via)
             note = f"[the {decision.by} granted request {key}{reason}] Retry the call now; the same call passes once."

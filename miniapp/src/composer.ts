@@ -222,7 +222,18 @@ export function readQueued(raw: unknown): QueuedMessage[] {
 // ── the approval dock ────────────────────────────────────────────────────────────────────
 
 /** A tool call the policy refused, with the key that lets it through once. */
-export type Approval = { key: string; callId: string; tool: string; detail: string };
+export type Approval = {
+  key: string;
+  callId: string;
+  tool: string;
+  detail: string;
+  /** The agent's ask to work in the operator's Chrome: the name of that Chrome and the agent's reason.
+   *  The operator's yes switches the conversation, so the card says that rather than "allow once". */
+  chrome?: { name: string; reason: string };
+};
+
+/** The tool by which the agent asks for the operator's Chrome; its card is the switch, not a grant. */
+export const CHROME_ASK_TOOL = "BrowserAskOperatorChrome";
 
 const APPROVAL_RE = /Approval key: ([0-9a-f]{12})/;
 
@@ -245,6 +256,10 @@ export function pendingApproval(messages: readonly MessageLike[], seen: Readonly
       if (!key || seen.has(key)) continue;
       const call = calls.get(r.id);
       const a = call?.arguments ?? {};
+      if (call?.name === CHROME_ASK_TOOL) {
+        const reason = typeof a.reason === "string" ? a.reason.trim().slice(0, 300) : "";
+        return { key, callId: r.id, tool: call.name, detail: reason, chrome: { name: /«([^»]{1,80})»/.exec(r.content)?.[1] ?? "Chrome", reason } };
+      }
       const detail = typeof a.command === "string" ? a.command : typeof a.path === "string" ? a.path : typeof a.url === "string" ? a.url : "";
       return { key, callId: r.id, tool: call?.name ?? "", detail: detail.split("\n")[0].slice(0, 160) };
     }
