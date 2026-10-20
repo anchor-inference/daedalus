@@ -262,3 +262,32 @@ async def test_a_session_made_or_deleted_anywhere_is_told_to_the_open_lists(sett
         assert gone.session_id == child.session.id and gone.payload == {"title": "[sub] helper"}
     finally:
         await manager.close()
+
+
+async def test_a_grant_starts_the_agent_on_the_call_it_was_refused(settings: Settings, db: Database) -> None:
+    """The operator allowed a refused call in the app and the agent sat idle until they also wrote
+    "go on". The grant now tells the agent, which starts its turn."""
+    provider = ScriptedProvider([{"text": "done"}])
+    manager = await _manager(settings, db, provider)
+    try:
+        state = await manager.create_session("granted")
+        sid = state.session.id
+        manager.config.policy.egress_allow = ["github.com"]
+        refused = manager.policy_gate(sid, "run-1").decide("Exec", {"command": "curl https://other.example/"})
+        assert refused.action == "ask"
+        await manager.flush_background()
+
+        await manager.grant(sid, refused.key, via="app")
+
+        def told() -> bool:
+            return any("The operator allowed" in str(r.messages) and "other.example" in str(r.messages) for r in provider.requests)
+
+        await until_await(lambda: asyncio.sleep(0, told()), "the agent was told about the grant")
+        asked = len(provider.requests)
+
+        # A key the host never saw refused grants on trust and resumes nothing.
+        await manager.grant(sid, "0123456789ab", via="app")
+        await asyncio.sleep(0.2)
+        assert len(provider.requests) == asked
+    finally:
+        await manager.close()

@@ -6534,7 +6534,25 @@ class SessionManager:
             meta["policy_grants"] = dict(list(grants.items())[-20:])
         await self.sessions.update_metadata(session_id, state.session.metadata)
         await self._publish(state, "permission.resolved", {"request_id": key, "request_ref": f"policy:{session_id}:{key}", "decision": "allow", "via": via})
+        if via != "orchestrator":  # the orchestrator's grant tells the member itself, with its basis
+            await self._resume_after_grant(session_id, [approves] if approves else [])
         return {"key": key, "approves": approves, "grants": list(state.metadata["policy_grants"]), "expires_in_minutes": GRANT_TTL_SECONDS // 60}
+
+    async def _resume_after_grant(self, session_id: str, approved: Sequence[dict[str, Any]]) -> None:
+        """Tell the agent the calls it was refused may go through now, which starts its turn if it ended.
+
+        A refusal ends the agent's turn with "ask the operator", and the operator's grant only opened
+        the way: the agent sat idle until the operator also wrote "go on", after pressing Allow in the
+        app or typing /allow — they took the button for the whole answer, which it should be.
+        A grant for a call this host never saw refused (a key taken on trust) has nothing to resume."""
+        lines = [f"- {item.get('tool')}: {item.get('text')}" for item in approved if item and item.get("tool")]
+        if not lines:
+            return
+        text = ("The operator allowed what was refused; repeat the call now — it passes once:\n" + "\n".join(lines))
+        try:
+            await self.submit(session_id, text, steer=True, as_answer=False, origin="events")
+        except Exception:  # noqa: BLE001 — the grant stands; only the nudge to use it failed
+            logger.exception("could not tell session %s about a grant", session_id)
 
     def similar_of(self, session_id: str, key: str) -> dict[str, Any] | None:
         """What "Allow similar" would grant for an open request, for the app to say before it asks."""
@@ -6571,6 +6589,8 @@ class SessionManager:
         await self.sessions.update_metadata(session_id, state.session.metadata)
         for k in resolved:
             await self._publish(state, "permission.resolved", {"request_id": k, "request_ref": f"policy:{session_id}:{k}", "decision": "allow", "via": via})
+        if via != "orchestrator":
+            await self._resume_after_grant(session_id, [item for item in approves if item])
         return {"key": key, "similar": family, "resolved": resolved, "approves": approves,
                 "standing": list(state.metadata["policy_similar"])}
 
