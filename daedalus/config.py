@@ -303,6 +303,10 @@ class Settings(BaseSettings):
     browser_host_dir: Path | None = None
     """The same for the ``host`` environment: natively, a directory the launcher gives the browser
     daemon it starts beside the agent."""
+    computer_host_dir: Path | None = None
+    """The run directory of the desktop daemon (``deskd``) the launcher starts in a native installation:
+    its endpoint, the host's token and its socket. Unset or empty = no computer use. The operator's own
+    token, the one that grants control, is never here: the launcher keeps it in its own state."""
 
     usd_per_day: float = 20.0
     """Daily spend cap. Enforced by the supervisor from its own environment, never from config.toml."""
@@ -420,11 +424,12 @@ class Settings(BaseSettings):
         The terminal daemons' and the browser daemons' run directories. A terminal daemon's token
         opens a shell — on the host environment, a shell on the operator's own machine, outside every
         wall the agent's container is. A browser daemon's token drives browsers holding the logins
-        made in them, with none of the policy's confirmations, and reads what any of them shows. So
+        made in them, with none of the policy's confirmations, and reads what any of them shows. The
+        desktop daemon's token sees the operator's screens and, inside a lease, moves their mouse. So
         unlike the rest of the sealed set, a container is no boundary for them: the directories are
         mounted into this container precisely so the app can reach the daemons.
         """
-        dirs = (self.terminals_container_dir, self.terminals_host_dir, self.browser_container_dir, self.browser_host_dir)
+        dirs = (self.terminals_container_dir, self.terminals_host_dir, self.browser_container_dir, self.browser_host_dir, self.computer_host_dir)
         return tuple(p for p in dirs if p is not None)
 
     @property
