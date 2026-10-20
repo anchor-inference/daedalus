@@ -467,7 +467,7 @@ class FakeBrowserd:
         self.channels[cid] = channel
         self.relays.append(channel)
         self.relay_opens.append(dict(params))
-        return {"channel": cid, "proto": 1}
+        return {"channel": cid, "proto": 2}
 
     async def relay_send(self, channel: ViewChannel, frame: dict[str, Any]) -> None:
         """One relay frame to the extension, as one piece (``browserd/internal/relay/pieces.go``)."""
