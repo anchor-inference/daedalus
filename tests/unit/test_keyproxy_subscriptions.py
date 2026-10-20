@@ -45,10 +45,12 @@ def test_chat_body_becomes_a_responses_body() -> None:
         "reasoning_effort": "high",
     }
     out = subs.chat_to_responses(body)
-    assert out["instructions"] == "Be terse." and out["store"] is False and out["stream"] is True and "max_output_tokens" not in out
-    assert [i["type"] for i in out["input"]] == ["message", "function_call", "function_call_output"]
-    assert out["input"][0]["content"][1]["type"] == "input_image"
-    assert out["input"][1] == {"type": "function_call", "call_id": "c1", "name": "Read", "arguments": "{\"path\": \"x\"}"}
+    assert "instructions" not in out and out["store"] is False and out["stream"] is True and "max_output_tokens" not in out
+    assert [i["type"] for i in out["input"]] == ["message", "message", "function_call", "function_call_output"]
+    developer = out["input"][0]
+    assert developer["role"] == "developer" and developer["content"] == [{"type": "input_text", "text": "Be terse."}]
+    assert out["input"][1]["content"][1]["type"] == "input_image"
+    assert out["input"][2] == {"type": "function_call", "call_id": "c1", "name": "Read", "arguments": "{\"path\": \"x\"}"}
     assert out["tools"][0]["name"] == "Read" and out["tool_choice"] == {"type": "function", "name": "Read"} and out["reasoning"] == {"effort": "high", "summary": "auto"}
 
 

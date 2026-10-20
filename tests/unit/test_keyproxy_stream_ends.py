@@ -138,6 +138,19 @@ async def test_claude_error_keeps_its_type() -> None:
     assert "data: [DONE]\n\n" not in chunks
 
 
+def test_codex_system_prompt_is_a_developer_message_with_a_stable_id() -> None:
+    body = {"model": "gpt-6.1-sol", "prompt_cache_key": "session-1", "messages": [{"role": "system", "content": "Be terse."}, {"role": "user", "content": "hi"}]}
+    first, second = subs.chat_to_responses(body), subs.chat_to_responses(body)
+    assert "instructions" not in first
+    head = first["input"][0]
+    assert head["role"] == "developer" and head["content"] == [{"type": "input_text", "text": "Be terse."}]
+    assert head["id"].startswith("msg_") and head["id"] == second["input"][0]["id"]
+    other = subs.chat_to_responses({**body, "prompt_cache_key": "session-2"})
+    assert other["input"][0]["id"] != head["id"]
+    bare = subs.chat_to_responses({"model": "m", "messages": [{"role": "user", "content": "hi"}]})
+    assert [i["role"] for i in bare["input"]] == ["user"]
+
+
 def _codex_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, upstream: Any) -> Any:
     codex_file = tmp_path / "codex.json"
     codex_file.write_text(json.dumps({"tokens": {"access_token": "eyJ.e30.x", "refresh_token": "r", "account_id": "acct"}}))

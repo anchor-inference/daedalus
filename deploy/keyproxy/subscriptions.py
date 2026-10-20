@@ -328,6 +328,11 @@ def chat_to_responses(body: dict[str, Any]) -> dict[str, Any]:
     replays it on every request, and this does the same: ``include`` asks for it, and the reasoning
     items an assistant turn carries in ``reasoning_details`` go back in front of that turn's output,
     in the order the backend produced them.
+
+    The system prompt travels as a ``developer`` message at the head of ``input``, not in the
+    top-level ``instructions`` field: the CLI stopped sending that field (0.162) and the backend is
+    free to refuse it once the older CLIs are gone. The message gets the CLI's stable id, derived from
+    the conversation and the text, so the same prompt names the same item on every request.
     """
     instructions: list[str] = []
     items: list[dict[str, Any]] = []
@@ -347,16 +352,19 @@ def chat_to_responses(body: dict[str, Any]) -> dict[str, Any]:
                 items.append({"type": "function_call", "call_id": str(call.get("id") or ""), "name": str(fn.get("name") or ""), "arguments": fn.get("arguments") if isinstance(fn.get("arguments"), str) else json.dumps(fn.get("arguments") or {})})
         elif role == "tool":
             items.append({"type": "function_call_output", "call_id": str(message.get("tool_call_id") or ""), "output": _text_of(message.get("content"))})
+    cache_key = body.get("prompt_cache_key")
+    base = "\n\n".join(i for i in instructions if i.strip())
+    if base:
+        thread = uuid.uuid5(uuid.NAMESPACE_OID, cache_key if isinstance(cache_key, str) else "")
+        items.insert(0, {"type": "message", "id": f"msg_{uuid.uuid5(thread, base)}", "role": "developer", "content": [{"type": "input_text", "text": base}]})
     out: dict[str, Any] = {
         "model": str(body.get("model") or ""),
-        "instructions": "\n\n".join(i for i in instructions if i.strip()) or "You are a helpful assistant.",
         "input": items,
         "store": False,
         "stream": True,
         "parallel_tool_calls": True,
         "include": ["reasoning.encrypted_content"],
     }
-    cache_key = body.get("prompt_cache_key")
     if isinstance(cache_key, str) and cache_key:
         # The backend routes requests that share a key to the same cache; the CLI sends its
         # conversation id here, and without one most requests of a long session missed the cache.
