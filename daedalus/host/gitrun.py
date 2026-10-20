@@ -80,6 +80,38 @@ def git_argv(*args: str) -> list[str]:
     return ["git", *GIT_SAFE, *args]
 
 
+def nul_names(text: str) -> list[str]:
+    """The names of a ``-z`` listing (``ls-files -z``, ``diff --name-only -z``), in order.
+
+    Listings are always read with ``-z``: one name per line breaks on a name that holds a newline, and
+    git quotes a name with a quote or a backslash in it even with ``core.quotepath`` off."""
+    return [name for name in text.split("\0") if name]
+
+
+def numstat_entries(text: str) -> list[tuple[int | None, int | None, str]]:
+    """``git diff --numstat -z`` as ``(added, removed, path)``; a binary file has None for both counts.
+
+    A rename is a record of its own shape: the counts, an empty path, then the old and the new name
+    as two more fields. The new name is the one kept: it is the file that is there to open. Read
+    line by line, the same rename came out as ``dir/{old => new}``, a path no file has."""
+    fields = text.split("\0")
+    out: list[tuple[int | None, int | None, str]] = []
+    i = 0
+    while i < len(fields):
+        record = fields[i]
+        i += 1
+        parts = record.split("\t", 2)
+        if len(parts) != 3:
+            continue
+        added, removed, path = parts
+        if not path:
+            path = fields[i + 1] if i + 1 < len(fields) else ""
+            i += 2
+        if path:
+            out.append((int(added) if added.isdigit() else None, int(removed) if removed.isdigit() else None, path))
+    return out
+
+
 _SECRET_ENV = re.compile(r"^(TELEGRAM_.*|KEYPROXY_.*|.*_API_KEY|.*_SECRET|.*_PASSWORD|.*_TOKEN)$")
 
 

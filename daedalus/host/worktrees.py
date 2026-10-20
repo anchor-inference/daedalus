@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from daedalus.host.gitrun import GitError, git_argv, mask_credentials, run_git, setup_environment
+from daedalus.host.gitrun import GitError, git_argv, mask_credentials, numstat_entries, run_git, setup_environment
 from daedalus.stores.projects import ProjectFolder
 
 logger = logging.getLogger(__name__)
@@ -772,12 +772,8 @@ class StaffWorktrees:
 
     async def _bounded_patch(self, git: _Git, where: Path, spec: str, *, max_files: int, max_lines: int, max_chars: int) -> tuple[list[BranchFile], str, bool]:
         """The files ``git diff <spec>`` touches, and its patch cut to the files and characters allowed."""
-        numstat = await git.run(["diff", "--no-color", "--no-ext-diff", "--no-textconv", "--numstat", spec], cwd=where)
-        files: list[BranchFile] = []
-        for line in numstat.splitlines():
-            parts = line.split("\t", 2)
-            if len(parts) == 3:
-                files.append(BranchFile(parts[2], None if parts[0] == "-" else int(parts[0]), None if parts[1] == "-" else int(parts[1])))
+        numstat = await git.run(["diff", "--no-color", "--no-ext-diff", "--no-textconv", "--numstat", "-z", spec], cwd=where)
+        files = [BranchFile(path, added, removed) for added, removed, path in numstat_entries(numstat)]
         kept: list[str] = []
         lines = 0
         for f in files:
