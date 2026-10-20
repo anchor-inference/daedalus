@@ -32,20 +32,35 @@ class ExecBackend(Protocol):
     async def run(self, command: str, *, cwd: str | None, env: dict[str, str] | None, timeout: float) -> ExecOutcome: ...
 
 
+def write_untranslated(path: Path, content: str) -> None:
+    """Write ``content`` exactly, creating the parent folders.
+
+    ``newline=""`` stops Python translating ``\\n``: on native Windows every LF file came back CRLF
+    after a single edit, the mirror of the read side losing CRLF on Linux.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8", newline="")
+
+
 class LocalFS:
     """The local filesystem; the default."""
 
     remote = False
 
     async def read_text(self, path: Path) -> str:
-        return await asyncio.to_thread(path.read_text, "utf-8")
+        """The file's text with its line endings as they are on disk.
+
+        Universal newlines turned every CRLF into LF on the way in, so one Edit of a Windows file
+        rewrote all its lines; the file tools now see the real endings and choose what to write.
+        """
+        def _read() -> str:
+            with open(path, encoding="utf-8", newline="") as handle:
+                return handle.read()
+
+        return await asyncio.to_thread(_read)
 
     async def write_text(self, path: Path, content: str) -> None:
-        def _write() -> None:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
-
-        await asyncio.to_thread(_write)
+        await asyncio.to_thread(write_untranslated, path, content)
 
     async def exists(self, path: Path) -> bool:
         return path.exists()
@@ -220,4 +235,4 @@ class ShellFS:
         return code, outcome.output, ""
 
 
-__all__ = ["ExecBackend", "ExecOutcome", "LocalFS", "ShellFS"]
+__all__ = ["ExecBackend", "ExecOutcome", "LocalFS", "ShellFS", "write_untranslated"]
