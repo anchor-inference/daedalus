@@ -107,8 +107,8 @@ async def _run(context: ToolContext, which: str, arguments: dict[str, Any]) -> T
 @tool_group("computer")
 @search_hint(
     "desktop computer screen mouse click type keyboard app window native program dialog file manager screenshot "
-    "control my computer computer use "
-    "компьютер рабочий стол экран мышь мышкой кликнуть кликни нажать нажми напечатать напечатай клавиатура "
+    "control my computer "
+    "компьютер рабочий стол экран мышь мышкой кликни нажать нажми напечатать напечатай клавиатура "
     "приложение окно программа диалог проводник скриншот управлять управляй"
 )
 @tool(
