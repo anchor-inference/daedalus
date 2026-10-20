@@ -1,0 +1,87 @@
+// Which tabs the agent may touch. Scope is a set of daemon groups, each shown to the operator as a
+// Chrome tab group; a tab is in scope when it is a member here, never because of where it sits. The
+// record lives in `chrome.storage.session` so that a service worker Chrome stopped and started again
+// still knows which tabs are the agent's, and so that it forgets them all when the browser closes.
+
+export type Member = {
+  tab: number;
+  group: string;
+  // Whether the tab sits in the group's Chrome tab group. A popup the agent opened is a member but
+  // cannot be grouped (Chrome keeps tab groups out of popup windows), and must not be read as having
+  // been dragged out of a group it was never in.
+  grouped: boolean;
+  attached: boolean;
+  // Flat child sessions seen attached inside this tab; a command may address only one of these.
+  children: string[];
+  opener?: number;
+};
+
+export type Group = {
+  id: string;
+  title: string;
+  color: chrome.tabGroups.Color;
+  paused: boolean;
+  chromeGroupId?: number;
+  windowId?: number;
+  // The blank tab Chrome opens with a new window. It is never the agent's, and it is closed once the
+  // first real agent tab arrives, so the window does not carry a stray tab the daemon never asked for.
+  placeholderTab?: number;
+};
+
+const COLORS: chrome.tabGroups.Color[] = ["blue", "purple", "cyan", "green", "orange", "pink", "yellow", "red"];
+const KEY = "scope";
+
+export class Scope {
+  groups = new Map<string, Group>();
+  members = new Map<number, Member>();
+
+  async load(): Promise<void> {
+    const stored = (await chrome.storage.session.get(KEY))[KEY] as { groups?: Group[]; members?: Member[] } | undefined;
+    this.groups = new Map((stored?.groups ?? []).map((group) => [group.id, group]));
+    this.members = new Map((stored?.members ?? []).map((member) => [member.tab, member]));
+  }
+
+  async save(): Promise<void> {
+    await chrome.storage.session.set({ [KEY]: { groups: [...this.groups.values()], members: [...this.members.values()] } });
+  }
+
+  ensureGroup(id: string, title?: string): Group {
+    let group = this.groups.get(id);
+    if (!group) {
+      group = { id, title: title ?? "", color: COLORS[this.groups.size % COLORS.length], paused: false };
+      this.groups.set(id, group);
+    } else if (title) {
+      group.title = title;
+    }
+    return group;
+  }
+
+  byChromeGroup(chromeGroupId: number): Group | undefined {
+    if (chromeGroupId < 0) return undefined;
+    for (const group of this.groups.values()) if (group.chromeGroupId === chromeGroupId) return group;
+    return undefined;
+  }
+
+  tabsOf(groupId: string): Member[] {
+    return [...this.members.values()].filter((member) => member.group === groupId);
+  }
+
+  add(tab: number, group: string, grouped: boolean, opener?: number): Member {
+    const member: Member = { tab, group, grouped, attached: false, children: [], ...(opener === undefined ? {} : { opener }) };
+    this.members.set(tab, member);
+    return member;
+  }
+
+  remove(tab: number): Member | undefined {
+    const member = this.members.get(tab);
+    this.members.delete(tab);
+    return member;
+  }
+
+  dropGroup(id: string): Member[] {
+    const members = this.tabsOf(id);
+    for (const member of members) this.members.delete(member.tab);
+    this.groups.delete(id);
+    return members;
+  }
+}
