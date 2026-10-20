@@ -437,3 +437,59 @@ async def test_installing_the_extension_registers_the_codex_and_opencode_runtime
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+
+
+# -- MCP elicitations -------------------------------------------------------------------------------
+
+
+class Sent:
+    """The adapter's socket, keeping what it sent."""
+
+    def __init__(self) -> None:
+        self.messages: list[dict[str, Any]] = []
+
+    async def send_text(self, text: str) -> None:
+        self.messages.append(json.loads(text))
+
+
+def elicitation(**request: Any) -> dict[str, Any]:
+    return {"id": 7, "method": "mcpServer/elicitation/request", "params": {"threadId": "t1", "turnId": "u1", "serverName": "mail", **request}}
+
+
+@pytest.mark.parametrize(
+    ("request_", "options", "answer", "result"),
+    [
+        # A form that asks for nothing is accepted with an empty object.
+        ({"mode": "form", "message": "Proceed?", "requestedSchema": {"type": "object", "properties": {}}}, ["accept", "decline"], ("accept", ""), {"action": "accept", "content": {}}),
+        # One choice: its options are the question's, and the chosen one is the field's value.
+        ({"mode": "form", "message": "Which folder?", "requestedSchema": {"type": "object", "properties": {"folder": {"type": "string", "oneOf": [{"const": "in", "title": "Inbox"}, {"const": "arch", "title": "Archive"}]}}, "required": ["folder"]}},
+         ["Inbox", "Archive", "decline"], ("Archive", ""), {"action": "accept", "content": {"folder": "arch"}}),
+        # One line of text: the words written are the field's value.
+        ({"mode": "form", "message": "Subject?", "requestedSchema": {"type": "object", "properties": {"subject": {"type": "string"}}, "required": ["subject"]}}, ["decline"], ("text", "Weekly report"), {"action": "accept", "content": {"subject": "Weekly report"}}),
+        # A form the host cannot fill is never accepted with nothing in it: it is declined, and the
+        # question says it can be filled in Codex's terminal, which shows the same form.
+        ({"mode": "form", "message": "Your address", "requestedSchema": {"type": "object", "properties": {"street": {"type": "string"}, "zip": {"type": "integer"}}, "required": ["street", "zip"]}}, ["decline"], ("accept", ""), {"action": "decline", "content": None}),
+        # A page to open: accepting it carries no content.
+        ({"mode": "url", "message": "Sign in to the mail service", "url": "https://mail.example/auth", "elicitationId": "e1"}, ["accept", "decline"], ("accept", ""), {"action": "accept", "content": None}),
+        ({"mode": "form", "message": "Subject?", "requestedSchema": {"type": "object", "properties": {"subject": {"type": "string"}}, "required": ["subject"]}}, ["decline"], ("decline", ""), {"action": "decline", "content": None}),
+    ],
+)
+async def test_an_elicitation_is_answered_only_with_what_its_form_asks_for(monkeypatch: pytest.MonkeyPatch, request_: dict[str, Any], options: list[str], answer: tuple[str, str], result: dict[str, Any]) -> None:
+    from daedalus.harness import codex as codex_module
+    from daedalus.harness.contract import Answer
+
+    monkeypatch.setattr(codex_module, "ANSWER_CONFIRM_S", 0.01)
+    adapter = CodexAdapter()
+    socket = Sent()
+    term = SimpleNamespace(id="term-1")
+    state = adapter._state(term)  # type: ignore[arg-type]
+    state.thread_id, state.turn_id, state.socket = "t1", "u1", socket  # type: ignore[assignment]
+    await adapter._server_request(state, elicitation(**request_))
+    [asked] = drain(state)
+    assert asked.kind is EventKind.QUESTION_ASKED and asked.payload["options"] == options
+    if request_.get("mode") == "url":
+        assert "https://mail.example/auth" in asked.payload["text"]
+    # Only the form nobody here can fill sends the reader to the terminal.
+    assert ("terminal" in asked.payload["text"]) is (options == ["decline"] and answer[0] == "accept")
+    await adapter.answer(term, asked.native_id, Answer(answer[0], note=answer[1]))  # type: ignore[arg-type]
+    assert socket.messages == [{"id": 7, "result": result}]

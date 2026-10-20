@@ -544,9 +544,14 @@ class CodexAdapter:
             state.requests[ref] = _Request(message["id"], method, params)
             self._put(state, EventKind.QUESTION_ASKED, {"tool": "question", "summary": text[:200], "text": text, "options": options}, ref)
         elif method == "mcpServer/elicitation/request":
+            form = _form(params)
             text = str(params.get("message") or "An MCP server asks for input")
+            if form.kind == "url":
+                text += f"\n\n{params.get('url') or ''}".rstrip()
+            elif form.kind == "terminal":
+                text += "\n\nThis form can only be filled in Codex's terminal; here it can only be declined."
             state.requests[ref] = _Request(message["id"], method, params)
-            self._put(state, EventKind.QUESTION_ASKED, {"tool": "elicitation", "summary": text[:200], "text": text, "options": ["accept", "decline"]}, ref)
+            self._put(state, EventKind.QUESTION_ASKED, {"tool": "elicitation", "summary": text[:200], "text": text, "options": list(form.options)}, ref)
         else:
             await self._respond(state, message["id"], error={"code": -32601, "message": f"{method} is not handled by this client"})
 
@@ -698,7 +703,7 @@ class CodexAdapter:
             chosen = answer.said
             result = {"answers": {str(q.get("id") or ""): {"answers": [chosen]} for q in request.params.get("questions") or [] if isinstance(q, dict)}}
         else:
-            result = {"action": "accept" if answer.choice in ("accept", "allow_once", "allow_always") else "decline", "content": None}
+            result = _form(request.params).answer(answer)
         request.ours = True
         await self._respond(state, request.rpc_id, result)
         with contextlib.suppress(TimeoutError):
@@ -752,6 +757,68 @@ class CodexAdapter:
         if offset:
             text = text.split("\n", 1)[1] if "\n" in text else ""
         return parse_rollout(text)[since:]
+
+
+ACCEPTING = ("accept", "allow_once", "allow_always")
+DECLINED = {"action": "decline", "content": None}
+
+
+@dataclass(frozen=True, slots=True)
+class _Form:
+    """What an MCP elicitation asks for, as far as a question to the team can carry it.
+
+    ``kind`` is ``url`` (a page to open; accepting carries no content), ``empty`` (a form with no
+    fields), ``choice`` and ``text`` (one field, filled with the option chosen or the words
+    written), or ``terminal`` (anything more, which only Codex's own form can fill). An accept with
+    no content once answered every form, and a server that requires its fields was handed none."""
+
+    kind: str
+    name: str = ""
+    """The one field's name, for ``choice`` and ``text``."""
+    values: Mapping[str, str] = field(default_factory=dict)
+    """For ``choice``: each option's label to the value it stands for."""
+
+    @property
+    def options(self) -> tuple[str, ...]:
+        if self.kind in ("url", "empty"):
+            return ("accept", "decline")
+        return (*self.values, "decline")
+
+    def answer(self, answer: Answer) -> dict[str, Any]:
+        if answer.choice in ("decline", "deny", "deny_with_note"):
+            return DECLINED
+        if self.kind == "url" and answer.choice in ACCEPTING:
+            return {"action": "accept", "content": None}
+        if self.kind == "empty" and answer.choice in ACCEPTING:
+            return {"action": "accept", "content": {}}
+        if self.kind == "choice" and answer.choice in self.values:
+            return {"action": "accept", "content": {self.name: self.values[answer.choice]}}
+        if self.kind == "text" and answer.choice not in ACCEPTING and answer.said.strip():
+            return {"action": "accept", "content": {self.name: answer.said.strip()}}
+        return DECLINED
+
+
+def _form(params: Mapping[str, Any]) -> _Form:
+    if params.get("mode") == "url":
+        return _Form("url")
+    schema = params.get("requestedSchema")
+    properties = schema.get("properties") if isinstance(schema, dict) else None
+    if not isinstance(properties, dict) or not properties:
+        return _Form("empty") if isinstance(properties, dict) else _Form("terminal")
+    if len(properties) != 1:
+        return _Form("terminal")
+    [(name, spec)] = properties.items()
+    if not isinstance(spec, dict):
+        return _Form("terminal")
+    labelled = [(str(o.get("title") or o.get("const")), str(o.get("const"))) for o in spec.get("oneOf") or [] if isinstance(o, dict) and o.get("const") is not None]
+    if not labelled and isinstance(spec.get("enum"), list):
+        names = spec.get("enumNames") if isinstance(spec.get("enumNames"), list) else []
+        labelled = [(str(names[i]) if i < len(names) else str(v), str(v)) for i, v in enumerate(spec["enum"])]
+    if labelled:
+        return _Form("choice", str(name), dict(labelled))
+    if spec.get("type") == "string":
+        return _Form("text", str(name))
+    return _Form("terminal")
 
 
 def _highlighted(screen: str) -> str:
