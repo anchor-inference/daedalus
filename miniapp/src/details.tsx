@@ -41,7 +41,8 @@ export type SessionDetailsProps = {
   /** What the session is: an ordinary one, a project's orchestrator, or the main orchestrator. The
    *  two orchestrators are the same Details less what would break them or has no place beside
    *  them: a loop, the tool switches their role fixes, moving or deleting the session from here,
-   *  and (for a project's, whose panel has no Files tab) the workspace row that opens one. */
+   *  and (for a project's, which has no workspace of its own and reads every folder of the
+   *  project from its Files tab) the workspace row. */
   role?: "session" | "orchestrator" | "main";
   detail: SessionDetail;
   busy: boolean;

@@ -5232,6 +5232,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "turn.artifact.wrote": { en: "written", ru: "записан" },
   "turn.artifact.sent": { en: "sent to you", ru: "прислан вам" },
   "turn.artifact.kept": { en: "kept by handle", ru: "хранится по ссылке" },
+  "turn.artifact.attached": { en: "attached", ru: "приложен" },
   "files.kept": { en: "files named in this message", ru: "файлы из этого сообщения" },
   "files.origin.operator": { en: "from you", ru: "от вас" },
   "files.origin.staff": { en: "from staff", ru: "от сотрудника" },

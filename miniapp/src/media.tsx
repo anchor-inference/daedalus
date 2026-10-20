@@ -5,7 +5,9 @@ import { api } from "./api";
 import { Overlay, useLayer } from "./ui/dialogs";
 import { Icon } from "./icons";
 import { t } from "./i18n";
-import { downloadHref, useBlobUrl } from "./preview";
+import { downloadHref, useBlobUrl, type PreviewSource } from "./preview";
+import { ArtifactCard } from "./artifact";
+import { bytes } from "./format";
 import { sourceKey, viewerKind, type HostSource } from "./mediaroute";
 export { mediaCopyText, splitMediaAnswer } from "./mediaformat";
 
@@ -314,15 +316,46 @@ function albumRatio(items: MediaItem[]): string | undefined {
   return photo?.width && photo.height ? `${photo.width} / ${photo.height}` : undefined;
 }
 
-export function InlineMedia({ sessionId, presentation }: { sessionId: string; presentation: MediaPresentation }) {
+/**
+ * Where the Preview tab reads an attached file from. The host serves the item under a path that ends
+ * in the file's own name, so Preview, which names the kind of a file by its name, draws a docx as a
+ * document and a pdf as pages without being told the mime type.
+ */
+export function attachedSource(sessionId: string, presentationId: string, item: MediaItem): { base: string; path: string } {
+  return { base: `/api/sessions/${encodeURIComponent(sessionId)}/media/${encodeURIComponent(presentationId)}`, path: `${item.id}/${item.filename}` };
+}
+
+/** An attached file, drawn where the answer placed it, as the same card a sent file gets under a turn. */
+function AttachedFile({ sessionId, presentation, item, onPreview }: { sessionId: string; presentation: MediaPresentation; item: MediaItem; onPreview?: (src: PreviewSource) => void }) {
+  const src = attachedSource(sessionId, presentation.id, item);
+  const download = downloadHref(src.base, src.path);
+  return <div className="artifacts inline-file">
+    <ArtifactCard
+      item={{ callId: item.id, path: item.filename, name: item.filename, how: "attached", caption: item.caption, size: item.byte_size ? bytes(item.byte_size) : null }}
+      src={src}
+      downloadUrl={download}
+      // Without a panel to open it in, the press still gets the file: a card that did nothing would
+      // read as broken.
+      onOpen={onPreview ?? (() => window.open(download, "_blank", "noreferrer"))}
+    />
+  </div>;
+}
+
+export function InlineMedia({ sessionId, presentation, onPreview }: { sessionId: string; presentation: MediaPresentation; onPreview?: (src: PreviewSource) => void }) {
+  // A file is read through the download address with the session token, as the files panel reads
+  // it, so it needs none of the cookie upgrade a picture's <img> needs, and waiting for one would
+  // only hold the card back behind a spinner, or behind a retry button if the upgrade failed.
+  const file = presentation.items.length === 1 && presentation.items[0].kind === "file" ? presentation.items[0] : null;
   const [open, setOpen] = useState<number | null>(null);
-  const [access, setAccess] = useState<"loading" | "ready" | "error">("loading");
+  const [access, setAccess] = useState<"loading" | "ready" | "error">(file ? "ready" : "loading");
   const rail = useRef<HTMLDivElement>(null);
   const load = () => {
+    if (file) return;
     setAccess("loading");
     requestMediaAccess().then(() => setAccess("ready")).catch(() => setAccess("error"));
   };
   useEffect(load, []); // eslint-disable-line react-hooks/exhaustive-deps -- one credential upgrade per mount
+  if (file) return <AttachedFile sessionId={sessionId} presentation={presentation} item={file} onPreview={onPreview} />;
   if (access === "loading") return <div className="inline-media-loading" aria-label={t("media.loading")} />;
   if (access === "error") return <button type="button" className="inline-media-error" onClick={load}>{t("media.retry")}</button>;
   const ratio = presentation.layout === "album" ? albumRatio(presentation.items) : undefined;

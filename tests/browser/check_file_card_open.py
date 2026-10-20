@@ -9,8 +9,8 @@ and stayed. What is checked:
 - after one press the panel (a sheet on a phone) is open on the file, and still open a second later;
 - the host was asked for the file's bytes exactly once — a second press, or two presses in a row
   before the first answer, ask for nothing more;
-- beside the orchestrator the strip gains a Preview tab, selected, and the file's root is a name,
-  not a way to a Files tab the orchestrator does not have.
+- beside the orchestrator the strip gains a Preview tab, selected, and the file's root leads to the
+  orchestrator's Files tab, where the project's files and the staff worktrees are read.
 
     APP_URL=http://127.0.0.1:8163/app python3 tests/browser/check_file_card_open.py
 """
@@ -84,8 +84,8 @@ def orchestrator(page: Page, lang: str, phone: bool, where: str, problems: list[
         tab = page.locator(".panel.shown .panel-tab[data-tab='preview']")
         if tab.count() != 1 or tab.get_attribute("aria-selected") != "true":
             problems.append(f"{where}: the orchestrator's strip has no selected Preview tab")
-        if page.locator(".panel.shown .panel-crumbs button.crumb").count():
-            problems.append(f"{where}: the file's root offers a Files tab the orchestrator does not have")
+        if page.locator(".panel.shown .panel-crumbs button.crumb").count() != 1:
+            problems.append(f"{where}: the file's root does not lead to the orchestrator's Files tab")
         if "panel=preview" not in page.url:
             problems.append(f"{where}: the address does not name the preview: {page.url}")
 

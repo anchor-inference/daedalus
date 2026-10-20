@@ -10,6 +10,7 @@ import { t, useLang } from "../i18n";
 import { renderMarkdown } from "../md";
 import { RawHtml } from "../rawhtml";
 import { splitMediaAnswer, type AnswerPart } from "../mediaformat";
+import { bytes } from "../format";
 import "../widget.css";
 
 type SharedMessage = { role: "user" | "assistant"; text: string; at: string; via?: string; media?: MediaPresentation[]; widgets?: string[] };
@@ -30,6 +31,16 @@ function albumRatio(items: MediaPresentation["items"]): string | undefined {
 }
 
 function Pictures({ presentation }: { presentation: MediaPresentation }) {
+  // An attached document is served to a guest as a download, never inline, so it is a link with its
+  // name and size; drawn as an <img> it was a broken picture.
+  const file = presentation.items.length === 1 && presentation.items[0].kind === "file" ? presentation.items[0] : null;
+  if (file) return (
+    <a className="shared-file" href={file.url} download={file.filename}>
+      <Icon name="download" size={15} />
+      <span className="truncate">{file.filename}</span>
+      {file.byte_size ? <span className="shared-file-size">{bytes(file.byte_size)}</span> : null}
+    </a>
+  );
   const ratio = presentation.layout === "album" ? albumRatio(presentation.items) : undefined;
   return (
     <div className={`inline-media ${presentation.layout} items-${Math.min(4, presentation.items.length)}`} style={ratio ? ({ "--album-ratio": ratio } as CSSProperties) : undefined}>
