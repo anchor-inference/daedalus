@@ -572,3 +572,42 @@ func TestTheStrictestRulesUntilConfigured(t *testing.T) {
 		}
 	}
 }
+
+// The daemon of the operator's Chrome runs with no network: its own resolver answers nothing, and
+// every page it was asked to open was refused as unresolvable. A name is now judged without a lookup
+// there; numbers and names of this machine still are.
+func TestNamesAreNotLookedUpForABrowserOnAnotherMachine(t *testing.T) {
+	res := &fakeResolver{answers: map[string][]string{"localhost": {"127.0.0.1"}}}
+	w := New(Options{Resolver: res, NamesUnresolved: true,
+		LocalAddrs: func() []netip.Addr { return []netip.Addr{netip.MustParseAddr("172.20.1.5")} }})
+	if err := w.Configure(nativeConfig); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := w.Listen("b1")
+	defer p.Close()
+	ctx := context.Background()
+	for _, c := range []struct {
+		url    string
+		d      Decision
+		reason string
+	}{
+		{"https://anchorinference.com/", Allow, ""},
+		{"https://unknown.example/", Allow, ""},
+		{"http://169.254.169.254/latest/meta-data/", Deny, ReasonMetadata},
+		{"http://127.0.0.1:8765/api", Deny, ReasonSealedPort},
+		{"http://localhost:8765/api", Deny, ReasonSealedPort},
+		{"file:///etc/passwd", Deny, ReasonScheme},
+	} {
+		v := w.CheckNavigation(ctx, p, c.url)
+		if v.Decision != c.d || (c.reason != "" && v.Reason != c.reason) {
+			t.Errorf("%s: got %s/%s, want %s/%s", c.url, v.Decision, v.Reason, c.d, c.reason)
+		}
+	}
+	res.mu.Lock()
+	defer res.mu.Unlock()
+	for _, name := range res.asked {
+		if name == "anchorinference.com" || name == "unknown.example" {
+			t.Errorf("%s was looked up", name)
+		}
+	}
+}

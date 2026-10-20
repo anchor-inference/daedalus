@@ -39,6 +39,12 @@ type Options struct {
 	LocalAddrs func() []netip.Addr
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
+	// NamesUnresolved judges a name without looking it up, for a daemon whose pages are loaded by a
+	// browser on another machine (the operator's Chrome, through the extension). Such a daemon may
+	// have no network at all, and its own resolver says nothing about what that browser reaches:
+	// every name was refused as unresolvable. Addresses written as numbers and names of this machine
+	// are still judged; the extension's request rules keep the operator's network from the agent's tabs.
+	NamesUnresolved bool
 }
 
 // Wall holds the rules and judges destinations against them. One per daemon; each browser gets a
@@ -242,6 +248,12 @@ func (w *Wall) judge(ctx context.Context, p *Proxy, host string, port int) Verdi
 	// refusal still names the loopback address the agent asked for.
 	if r.rewrite != "" && isLoopbackName(host) && (r.inServices(port) || r.local != LocalServices) {
 		target = r.rewrite
+	}
+	if w.opts.NamesUnresolved {
+		if _, err := netip.ParseAddr(target); err != nil && !isLoopbackName(target) {
+			v.Decision = Allow
+			return v
+		}
 	}
 	addrs, err := w.lookup(ctx, target)
 	if err != nil || len(addrs) == 0 {

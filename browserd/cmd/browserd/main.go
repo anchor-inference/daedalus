@@ -161,7 +161,8 @@ func serve(args []string) error {
 	// The network wall: every browser gets a proxy of its own, at its strictest (the internet only)
 	// until the host sends its rules with net.configure. Its egress events are rate-limited by the
 	// wall itself.
-	wall := netwall.NewBrowsers(netwall.New(netwall.Options{Events: func(e netwall.Egress) { deb.Publish("egress", "", e) }}))
+	wall := netwall.NewBrowsers(netwall.New(netwall.Options{Events: func(e netwall.Egress) { deb.Publish("egress", "", e) },
+		NamesUnresolved: cfg.Backend == config.BackendAttach}))
 	manager := browser.New(browser.Deps{Config: cfg, Log: log, Events: deb, Wall: wall, Relay: relays,
 		Busy: func(b *browser.Browser) bool { return hub != nil && hub.Busy(b) }})
 	hub = view.New(manager, evlog, log)
