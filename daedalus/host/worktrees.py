@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from daedalus.host.gitrun import GitError, mask_credentials, run_git, setup_environment
+from daedalus.host.gitrun import GitError, git_argv, mask_credentials, run_git, setup_environment
 from daedalus.stores.projects import ProjectFolder
 
 logger = logging.getLogger(__name__)
@@ -354,7 +354,7 @@ class RemoteGit:
         self.env = env
 
     async def run(self, args: Sequence[str], *, cwd: Path, env: dict[str, str] | None = None) -> str:
-        argv = ["git", *args]
+        argv = git_argv(*args)
         try:
             result = await self.host.exec_run(self.env, argv, cwd=str(cwd), env_vars={**_QUIET, **(env or {})}, timeout=GIT_TIMEOUT)
         except OSError as exc:

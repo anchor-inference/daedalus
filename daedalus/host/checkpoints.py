@@ -15,6 +15,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from daedalus.host.gitrun import child_environment, git_argv
+
 logger = logging.getLogger(__name__)
 
 DIR_NAME = ".checkpoints"
@@ -33,19 +35,18 @@ class Checkpoints:
         self.git_dir = workspace / DIR_NAME
 
     async def _git(self, *args: str, index: Path | None = None) -> str:
-        env = {
-            **os.environ,
+        env = child_environment({
             "GIT_DIR": str(self.git_dir),
             "GIT_WORK_TREE": str(self.workspace),
             "GIT_AUTHOR_NAME": "daedalus",
             "GIT_AUTHOR_EMAIL": "daedalus@localhost",
             "GIT_COMMITTER_NAME": "daedalus",
             "GIT_COMMITTER_EMAIL": "daedalus@localhost",
-        }
+        })
         if index is not None:
             env["GIT_INDEX_FILE"] = str(index)
         proc = await asyncio.create_subprocess_exec(
-            "git", *args, cwd=str(self.workspace), env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            *git_argv(*args), cwd=str(self.workspace), env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
         out, err = await asyncio.wait_for(proc.communicate(), timeout=300)
         if proc.returncode != 0:

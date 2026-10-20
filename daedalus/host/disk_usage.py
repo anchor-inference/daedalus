@@ -29,6 +29,8 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
+from daedalus.host.gitrun import child_environment, git_argv
+
 PROTECTED_NAMES = frozenset({".checkpoints", "inbox"})
 """Top-level directories of a workspace no clean-up removes: the snapshot store revert reads, and
 the folder the operator's attachments arrive in."""
@@ -262,7 +264,7 @@ def git_tracked(path: Path, stop_at: Path) -> bool:
     try:
         relative = path.relative_to(repo).as_posix()
         done = subprocess.run(
-            ["git", "-c", "safe.directory=*", "-C", str(repo), "ls-files", "--error-unmatch", "--", relative],
+            git_argv("-c", "safe.directory=*", "-C", str(repo), "ls-files", "--error-unmatch", "--", relative), env=child_environment(),
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=GIT_TIMEOUT_SECONDS, check=False,
         )
     except (OSError, ValueError, subprocess.TimeoutExpired):

@@ -22,6 +22,7 @@ from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
+from daedalus.host.gitrun import child_environment, git_argv
 from daedalus.processes import end_tree
 from daedalus.security import redact
 from daedalus.tools import search_hint
@@ -182,7 +183,7 @@ async def _tree_state(workdir: Path) -> str:
     async def git(*args: str) -> str | None:
         try:
             proc = await asyncio.create_subprocess_exec(
-                "git", "-C", str(workdir), *args,
+                *git_argv("-C", str(workdir), *args), env=child_environment({"GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0"}),
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
             )
             out, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
@@ -258,7 +259,7 @@ async def _content_digests(workdir: Path) -> dict[str, str]:
     async def git(*args: str) -> bytes | None:
         try:
             proc = await asyncio.create_subprocess_exec(
-                "git", "-C", str(workdir), *args,
+                *git_argv("-C", str(workdir), *args), env=child_environment({"GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0"}),
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
             )
             out, _ = await asyncio.wait_for(proc.communicate(), timeout=20)

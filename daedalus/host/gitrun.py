@@ -4,6 +4,11 @@ Self-development and the staff worktrees both drive git in repositories they do 
 so both need the same two things from a failed command: the exit code, because some git commands
 answer a yes-or-no question with it (``merge-base --is-ancestor``), and the tail of what git said,
 with any credential in a remote URL masked before it reaches a log or a chat.
+
+Every repository the host runs git in is one the agent can write: a session workspace, a staff
+worktree, a project folder. A repository's own configuration can name programs git runs on its
+behalf, so every git command here starts with :data:`GIT_SAFE` and runs with
+:func:`child_environment` rather than this process's environment.
 """
 
 from __future__ import annotations
@@ -23,6 +28,56 @@ class GitError(RuntimeError):
     def __init__(self, message: str, *, returncode: int | None = None) -> None:
         super().__init__(message)
         self.returncode = returncode
+
+
+GIT_SAFE = (
+    "-c", "core.fsmonitor=false",
+    "-c", "core.hooksPath=/dev/null",
+    "-c", "diff.external=",
+    "-c", "core.pager=cat",
+    "-c", "core.quotepath=off",
+    "--no-pager",
+)
+"""What goes between ``git`` and its subcommand, everywhere the host runs one.
+
+The first four close the ways a read or a snapshot runs a program the repository names: a
+``core.fsmonitor`` script runs on ``git status`` and ``git add``, a hook on ``git commit``, an external
+diff on ``git diff``, a pager on anything that prints. A planted ``.git/config`` or ``hooks/pre-commit``
+used to execute as the host, with the host's provider and Telegram keys in its environment.
+``core.quotepath=off`` is for the readers: with it on, git prints ``отчёт.md`` as
+``"\\320\\276..."`` and a list built from that output names a file that does not exist.
+
+What this cannot close is a driver a repository names for one path pattern (a ``filter`` or
+``textconv`` of ``.gitattributes``): its name is the repository's choice, so it cannot be switched
+off by name. :func:`child_environment` is what limits what such a program could take with it."""
+
+CHILD_ENV_NAMES = frozenset({
+    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LANGUAGE", "TZ", "TERM", "TMPDIR", "TEMP", "TMP",
+    "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR", "SSH_AUTH_SOCK", "SSL_CERT_FILE", "SSL_CERT_DIR",
+    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy",
+    "GH_CONFIG_DIR", "GH_HOST",
+    # What a Windows program cannot start without, or finds its profile by.
+    "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+    "PROGRAMDATA", "PROGRAMFILES", "HOMEDRIVE", "HOMEPATH",
+})
+CHILD_ENV_PREFIXES = ("LC_", "GIT_")
+
+
+def child_environment(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """The environment git (and ``gh``, ``rg``) runs with: what finds the program, the operator's own git
+    configuration and the network, and nothing else.
+
+    An allowlist rather than a list of secrets to remove: the host's environment holds provider keys,
+    the Telegram token and the keyproxy secret under names nobody enumerates in advance, and a program
+    a repository smuggled in through :data:`GIT_SAFE`'s gap would read every one of them. A credential a
+    command does need (the GitHub token of a push) is passed in ``extra`` by the caller that needs it."""
+    kept = {k: v for k, v in os.environ.items() if k in CHILD_ENV_NAMES or k.startswith(CHILD_ENV_PREFIXES)}
+    return {**kept, **(extra or {})}
+
+
+def git_argv(*args: str) -> list[str]:
+    """``git`` with :data:`GIT_SAFE` in front of ``args``: the argv for a git run anywhere, a bridge included."""
+    return ["git", *GIT_SAFE, *args]
 
 
 _SECRET_ENV = re.compile(r"^(TELEGRAM_.*|KEYPROXY_.*|.*_API_KEY|.*_SECRET|.*_PASSWORD|.*_TOKEN)$")
@@ -46,7 +101,7 @@ async def run_command(cmd: Sequence[str], *, cwd: Path | None = None, env: dict[
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         cwd=str(cwd) if cwd else None,
-        env={**os.environ, **(env or {})},
+        env=child_environment(env),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -63,5 +118,5 @@ async def run_command(cmd: Sequence[str], *, cwd: Path | None = None, env: dict[
 
 
 async def run_git(args: Sequence[str], *, cwd: Path | None = None, env: dict[str, str] | None = None, timeout: float = 600) -> str:
-    """``git <args>`` in ``cwd``; see :func:`run_command`."""
-    return await run_command(["git", *args], cwd=cwd, env=env, timeout=timeout)
+    """``git <args>`` in ``cwd``, behind :data:`GIT_SAFE`; see :func:`run_command`."""
+    return await run_command(git_argv(*args), cwd=cwd, env=env, timeout=timeout)

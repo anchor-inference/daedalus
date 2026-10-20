@@ -55,6 +55,7 @@ from daedalus.harness.contract import (
 from daedalus.harness.delivery import DeliveryWorker, Pending, normalised, pending_of, same_prompt
 from daedalus.harness.env import terminal_environment
 from daedalus.harness.state import OpenRequest, StaffState, StateContext, next_state
+from daedalus.host.gitrun import git_argv
 from daedalus.security import operator_secrets
 from daedalus.staff_runtime import (
     AskRef,
@@ -1629,9 +1630,9 @@ class CliStaffRuntime:
         base = live.session.base_ref or "HEAD"
         port = RuntimeEnvironment(self.terminals, env, actor=f"agent:{self._actor(live.id)}")
         try:
-            stat = await port.run(["git", "-C", cwd, "diff", "--stat", base], timeout=DIFF_TIMEOUT)
-            patch = await port.run(["git", "-C", cwd, "diff", base], timeout=DIFF_TIMEOUT)
-            untracked = await port.run(["git", "-C", cwd, "ls-files", "--others", "--exclude-standard"], timeout=DIFF_TIMEOUT)
+            stat = await port.run(git_argv("-C", cwd, "diff", "--stat", base), timeout=DIFF_TIMEOUT)
+            patch = await port.run(git_argv("-C", cwd, "diff", base), timeout=DIFF_TIMEOUT)
+            untracked = await port.run(git_argv("-C", cwd, "ls-files", "--others", "--exclude-standard"), timeout=DIFF_TIMEOUT)
         except TerminalError as exc:
             return ReadPage(f"no diff: {exc.message}", None, False)
         except (ProgramNotFound, EnvironmentUnavailable) as exc:

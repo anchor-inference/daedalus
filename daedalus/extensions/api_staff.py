@@ -23,6 +23,7 @@ from daedalus.extensions.staff import Team
 from daedalus.extensions.staff_kept import how_kept
 from daedalus.harness import conditions as member_conditions
 from daedalus.harness.capabilities import CAPABILITIES
+from daedalus.host.gitrun import git_argv
 from daedalus.stores.harness import HarnessStore
 from daedalus.stores.staff import Staff, StaffBusy, StaffError
 
@@ -204,8 +205,8 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         base = session.base_ref or "HEAD"
         try:
             numstat, untracked = await asyncio.gather(
-                terminals.exec_run(env, ["git", "-C", session.worktree_path, "diff", "--numstat", base], timeout=CHANGES_TIMEOUT_S, actor="operator"),
-                terminals.exec_run(env, ["git", "-C", session.worktree_path, "ls-files", "--others", "--exclude-standard"], timeout=CHANGES_TIMEOUT_S, actor="operator"),
+                terminals.exec_run(env, git_argv("-C", session.worktree_path, "diff", "--numstat", base), timeout=CHANGES_TIMEOUT_S, actor="operator"),
+                terminals.exec_run(env, git_argv("-C", session.worktree_path, "ls-files", "--others", "--exclude-standard"), timeout=CHANGES_TIMEOUT_S, actor="operator"),
             )
         except Exception as exc:  # noqa: BLE001 — the daemon's refusal is the answer the view shows
             raise HTTPException(503, f"the changes could not be read: {getattr(exc, 'message', exc)}") from exc

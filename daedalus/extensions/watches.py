@@ -51,7 +51,7 @@ from daedalus.extensions.inbound import _NESTED_QUANTIFIER, search_bounded
 from daedalus.extensions.watch_authority import authorized as watch_authorized
 from daedalus.extensions.watch_delivery import WatchDeliveries
 from daedalus.host.events import AppEvent, EventFilter
-from daedalus.host.gitrun import GitError, run_command
+from daedalus.host.gitrun import GIT_SAFE, GitError, run_command
 from daedalus.stores.staff import MESSAGE_MODES
 from daedalus.terminals.bridge import HostBridge
 from daedalus.terminals.model import EnvUnavailable, InvalidRequest, TerminalError
@@ -91,7 +91,7 @@ GIT_TIMEOUT_SECONDS = 20.0
 _RE2_MISSING = re.compile(r"\(\?<?[=!]|\\[1-9]|\(\?P=|\(\?[aiLmsux]*-?[aiLmsux]*\)")
 """Lookarounds, back-references and inline flag groups: Python has them, the daemon's RE2 does not."""
 _BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
-_GIT_SAFE = ("git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "--no-pager")
+_GIT_SAFE = ("git", *GIT_SAFE)
 _GIT_ENV = {"GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0"}
 
 
