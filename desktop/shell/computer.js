@@ -2,8 +2,8 @@
 
 // What the shell does while the agent holds the screen, as decisions without Electron in them: the
 // launcher says the lease changed ({"event":"computer"}), and from that follow the border around
-// each display, the note saying how to stop, the global Stop shortcut and the tray's Stop item.
-// computer-main.js is the Electron around it.
+// what the lease covers, the note saying how to stop, the global Stop shortcut and the tray's Stop
+// item. computer-main.js is the Electron around it.
 //
 // The Stop shortcut is armed only while a lease is held. Held all the time it would take a chord
 // from every other program on the machine for a feature most sessions never use, and a press with
@@ -14,14 +14,32 @@
 // and Ctrl+Option+Esc is free. KDE binds Ctrl+Alt+Esc to xkill, so there is a second choice.
 const STOP_CHORDS = ['Control+Alt+Escape', 'Control+Alt+Shift+Escape'];
 
-// The border's thickness in device-independent pixels: enough to be seen at the edge of the eye,
-// thin enough to sit on a display's outermost pixels where nothing is ever aimed.
-const BORDER = 4;
+// The border's thickness in device-independent pixels, the same on all four sides: enough to be
+// seen at the edge of the eye, thin enough to sit on a display's outermost pixels where nothing is
+// ever aimed. On Windows the strips once came out thick on the left and top and thin on the right
+// and bottom: the system held each strip window to its minimum size for a resizable frame, so the
+// left and top strips grew inwards and the right and bottom ones grew off the screen. The strip
+// windows are made without that frame (computer-main.js), and this number is now the whole story.
+const BORDER = 3;
 
-// The note's size. Wide enough for the longest translation on one line at the system's font.
-const NOTE_WIDTH = 460;
-const NOTE_HEIGHT = 34;
-const NOTE_MARGIN = 8;
+// The note's window. The pill inside sizes to its words; the window is wide enough for the longest
+// translation on one line, and the transparent rest of it lets clicks through.
+const NOTE_WIDTH = 560;
+const NOTE_HEIGHT = 44;
+const NOTE_MARGIN = 10;
+
+// readTargets keeps the rectangles the launcher sent that are whole, finite and not empty.
+function readTargets(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const t of raw) {
+    if (!t || (t.kind !== 'display' && t.kind !== 'window')) continue;
+    const { x, y, w, h } = t;
+    if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) continue;
+    out.push({ kind: t.kind, x, y, width: w, height: h });
+  }
+  return out;
+}
 
 // normaliseComputer reads the launcher's event; anything it cannot read is no lease, so nothing is
 // drawn on a guess.
@@ -32,6 +50,7 @@ function normaliseComputer(raw) {
     active,
     paused: active && value.paused === true,
     scope: active && typeof value.scope === 'string' ? value.scope : '',
+    targets: active ? readTargets(value.targets) : [],
   };
 }
 
@@ -40,7 +59,7 @@ function normaliseComputer(raw) {
 // always-on-top note is the topmost window, so a click the model aimed at what lay beneath it would
 // be refused as a click on Daedalus. On Windows a click-through window is skipped by the system's
 // own hit test, and on macOS the daemon lists only ordinary windows. The border stays everywhere: it
-// lies on the outermost pixels of a display, where nothing is ever aimed.
+// lies on a display's outermost pixels, or just outside the window the agent works in.
 function computerPlan(state, platform) {
   const computer = normaliseComputer(state);
   return {
@@ -52,8 +71,93 @@ function computerPlan(state, platform) {
   };
 }
 
-// edgeRects are the four strips of a display's border, in its own bounds: top, bottom, left, right.
-// Four solid windows rather than one transparent window over the whole display: a transparent window
+// toDip turns a rectangle in the desktop daemon's units into the shell's device-independent pixels.
+// The daemon counts physical pixels on Windows (it is per-monitor DPI aware) and X11, and points on
+// macOS, which are already Electron's units. On Windows each display has its own scale and Electron
+// lays the displays out in its own way, so only Electron can convert: screenToDipRect, passed in as
+// convert. On Linux Electron applies one scale to the whole screen. The result is widened to whole
+// pixels, never narrowed, so a border drawn outside it never covers the window's edge.
+function toDip(rect, platform, { convert, scale = 1 } = {}) {
+  if (platform === 'win32' && typeof convert === 'function') {
+    const r = convert({ x: Math.floor(rect.x), y: Math.floor(rect.y), width: Math.ceil(rect.width), height: Math.ceil(rect.height) });
+    return { x: r.x, y: r.y, width: r.width, height: r.height };
+  }
+  const s = platform === 'linux' && scale > 0 ? scale : 1;
+  const x0 = Math.floor(rect.x / s);
+  const y0 = Math.floor(rect.y / s);
+  return { x: x0, y: y0, width: Math.ceil((rect.x + rect.width) / s) - x0, height: Math.ceil((rect.y + rect.height) / s) - y0 };
+}
+
+function overlap(a, b) {
+  const w = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+  const h = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+  return w > 0 && h > 0 ? w * h : 0;
+}
+
+// displayOf is the Electron display holding the larger part of a rectangle, as the daemon decides
+// where a window is; null when it is on none.
+function displayOf(rect, displays) {
+  let best = null;
+  let area = 0;
+  for (const d of displays) {
+    const a = overlap(rect, d.bounds);
+    if (a > area) {
+      best = d;
+      area = a;
+    }
+  }
+  return best;
+}
+
+// borderRects are the strips for every target, in device-independent pixels. A display's border is
+// that Electron display's own bounds, inset: the daemon's rectangle only picks which display, so a
+// rounding in the conversion cannot leave a gap or push a strip off the edge. A window's border lies
+// just outside the window, so no strip ever sits on what the agent clicks; where the window meets
+// the edge of its display (maximised, or pushed against it) the strip comes inside instead of
+// vanishing off the screen. Every strip is the same thickness.
+function borderRects(targets, displays, thickness = BORDER) {
+  const strips = [];
+  const seen = new Set();
+  for (const target of targets) {
+    const display = displayOf(target, displays);
+    if (!display) continue;
+    let outer;
+    if (target.kind === 'display') {
+      outer = display.bounds;
+    } else {
+      outer = clamp(
+        { x: target.x - thickness, y: target.y - thickness, width: target.width + 2 * thickness, height: target.height + 2 * thickness },
+        display.bounds,
+      );
+    }
+    const key = [outer.x, outer.y, outer.width, outer.height].join(',');
+    if (outer.width <= 0 || outer.height <= 0 || seen.has(key)) continue;
+    seen.add(key);
+    strips.push(...edgeRects(outer, thickness));
+  }
+  return strips;
+}
+
+function clamp(rect, bounds) {
+  const x0 = Math.max(rect.x, bounds.x);
+  const y0 = Math.max(rect.y, bounds.y);
+  const x1 = Math.min(rect.x + rect.width, bounds.x + bounds.width);
+  const y1 = Math.min(rect.y + rect.height, bounds.y + bounds.height);
+  return { x: x0, y: y0, width: Math.max(0, x1 - x0), height: Math.max(0, y1 - y0) };
+}
+
+// noteDisplay is where the note goes: the display of the first target (the window, the leased
+// display), else the primary one.
+function noteDisplay(targets, displays, primary) {
+  for (const target of targets) {
+    const display = displayOf(target, displays);
+    if (display) return display;
+  }
+  return primary;
+}
+
+// edgeRects are the four strips of a border just inside bounds: top, bottom, left, right. Four
+// solid windows rather than one transparent window over the whole area: a transparent window
 // without a compositor (plain X11) is drawn black, and that would black out the operator's screen.
 function edgeRects(bounds, thickness = BORDER) {
   const t = Math.max(1, Math.min(thickness, Math.floor(bounds.width / 2), Math.floor(bounds.height / 2)));
@@ -108,4 +212,6 @@ function disarmStop(globalShortcut, chord) {
   } catch {}
 }
 
-module.exports = { STOP_CHORDS, BORDER, NOTE_WIDTH, NOTE_HEIGHT, normaliseComputer, computerPlan, edgeRects, noteBounds, chordLabel, armStop, disarmStop };
+module.exports = {
+  STOP_CHORDS, BORDER, NOTE_WIDTH, NOTE_HEIGHT, normaliseComputer, computerPlan, toDip, displayOf, borderRects, noteDisplay, edgeRects, noteBounds, chordLabel, armStop, disarmStop,
+};

@@ -358,8 +358,14 @@ its own. Touching the mouse during the run pauses it, and the report says so.
   host. The shell's consent dialog becomes `lease.grant`, its Stop button and hotkey `stop`, its
   "give back" `resume`, its permissions page `info.permissions` and `permissions.request`. The
   shell's border, note and Stop shortcut follow `lease.status`, which the launcher asks once a second
-  while the shell is attached and passes on over their stdio link only when it changes; the shell's
-  Stop reaches the daemon the same way.
+  while the shell is attached (twice while a lease lasts) and passes on over their stdio link only
+  when it changes, with the rectangles the lease covers in desktop units: the leased display's
+  bounds, every display's for the whole desktop, from `info`; the leased window's, or every window
+  of the leased app on screen, from `apps.list`. The shell converts them to its own units (on
+  Windows with Electron's `screenToDipRect`, since each display has its own scale) and draws the
+  border inside a display and just outside a window. The shell's Stop reaches the daemon the same
+  way. The grant picker's thumbnails are `preview`, served by the launcher as
+  `GET /api/computer/preview` with the JPEG's own bytes.
 - **The host** connects with the run directory's token, reads `info` (protocol, platform, units,
   displays, limits), and acts only while `lease.status` says its session holds the lease. It keeps
   the screenshot id with every picture it gives the model and passes it back with every point. It

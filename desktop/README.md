@@ -902,6 +902,7 @@ whatever the agent held down.
   |---|---|---|
   | `GET /api/computer` | — | `available`, `platform`, `permissions`, `secure`, `lease`, `human`, `displays`, `limits`, `version` |
   | `GET /api/computer/apps` | — | the apps and windows on screen, protected ones marked, to choose a scope from |
+  | `GET /api/computer/preview?display=…\|window=…&max=…` | — | a JPEG thumbnail (`image/jpeg`, never cached) of a display or a window, 480 pixels on the long edge by default and 960 at most; no lease needed, Daedalus's own windows refused |
   | `POST /api/computer/grant` | `{session, scope: {kind: window\|app\|display\|desktop, window?, app?, display?}, ttl_ms}` | `{lease}` |
   | `POST /api/computer/revoke` | `{session?}` | `{revoked}` |
   | `POST /api/computer/stop` | `{}` | `{stopped: true}` |
@@ -910,16 +911,19 @@ whatever the agent held down.
 
   The protocol behind it is in [`docs/architecture/computer.md`](../docs/architecture/computer.md).
 - **While the agent has the screen** the application shows it on the desktop itself, not only in
-  the app: a red border around every display (amber while your own input has paused the agent), a
-  note at the top of the main display saying how to stop, and **Stop the agent** at the top of the
-  tray's menu. **Ctrl+Alt+Esc** (⌃⌥Esc on a Mac; Ctrl+Alt+Shift+Esc where that is taken, as KDE takes
+  the app: a thin red border, three points on every side, around exactly what you granted (amber
+  while your own input has paused the agent) — just outside the window, around each window of the
+  app, along the edge of the display, or along every display for the whole desktop — following the
+  window as it moves; a small dark note at the top of that display saying how to stop; and **Stop
+  the agent** at the top of the tray's menu. **Ctrl+Alt+Esc** (⌃⌥Esc on a Mac; Ctrl+Alt+Shift+Esc where that is taken, as KDE takes
   it for xkill) stops the agent from anywhere. The chord is registered only while a lease lasts, so
   it takes nothing from other programs the rest of the time. These windows ignore the mouse, never
   take the focus and ask to be left out of screen captures (honoured on Windows 10 2004 and later and
   on macOS), so the agent's screenshots do not show them. On Linux there is no note, only the border:
   the X11 daemon finds the window under a point by the stacking order, where an always-on-top note
   would turn a click aimed beneath it into a refusal. The launcher tells the application about the
-  lease over their stdio link (`{"event":"computer"}`, checked once a second) and carries the Stop
+  lease and the rectangles it covers over their stdio link (`{"event":"computer"}`, checked once
+  a second, twice while a lease lasts) and carries the Stop
   the same way (`{"command":"computer-stop"}`), so the application never holds the launcher's token.
 - **macOS permissions.** The daemon needs **Screen Recording** to see and **Accessibility** to act,
   both in System Settings → Privacy & Security. The application is signed ad hoc, and macOS ties
