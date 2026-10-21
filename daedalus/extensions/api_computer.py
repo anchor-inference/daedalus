@@ -19,8 +19,8 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
-from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from daedalus.computer import refusals
@@ -34,6 +34,11 @@ logger = logging.getLogger(__name__)
 MAX_MINUTES = 240
 """The daemon's own ceiling on a lease (``max_lease_ms``, four hours by default). Refused here first,
 so a mistyped number is a plain form error rather than a refusal from the desktop."""
+
+PREVIEW_EDGE = 480
+PREVIEW_MAX_EDGE = 960
+"""A preview's long edge in pixels: the daemon's default and its cap. Larger is refused here as a form
+error rather than shrunk without saying."""
 
 SETTINGS_LINKS = {
     "screen": "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
@@ -196,6 +201,28 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
                 logger.exception("after granting the computer to session %s", body.session_id)
         return answer
 
+    @api.get("/api/computer/preview")
+    async def computer_preview(
+        display: str | None = Query(default=None, min_length=1, max_length=64),
+        window: str | None = Query(default=None, min_length=1, max_length=64),
+        max: int = Query(default=PREVIEW_EDGE, ge=64, le=PREVIEW_MAX_EDGE),
+        _: dict[str, Any] = Depends(auth),
+    ) -> Response:
+        """A small JPEG of one display or one window, for the grant form's choice; no lease needed.
+        Never cached: it is the operator's screen as it is now, and a stale one would mislead the choice."""
+        if (display is None) == (window is None):
+            raise HTTPException(400, "a preview names one display or one window")
+        found = await launcher()
+        params = {"display": display} if display is not None else {"window": str(window)}
+        params["max"] = str(max)
+        try:
+            image = await launcher_bridge.computer_preview(found, params)
+        except launcher_bridge.DesktopRefused as exc:
+            return refused(exc)
+        except (launcher_bridge.DesktopUnavailable, launcher_bridge.LauncherUnavailable) as exc:
+            raise HTTPException(503, str(exc)) from None
+        return Response(content=image, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
     @api.post("/api/computer/revoke")
     async def computer_revoke(body: RevokeBody, _: dict[str, Any] = Depends(auth)) -> Any:
         """Take control back: from the named conversation only, or from whichever holds it."""
@@ -218,4 +245,4 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         return await call("POST", "/api/computer/permissions", {"which": body.which})
 
 
-__all__ = ["MAX_MINUTES", "SETTINGS_LINKS", "register", "without_protected"]
+__all__ = ["MAX_MINUTES", "PREVIEW_EDGE", "PREVIEW_MAX_EDGE", "SETTINGS_LINKS", "register", "without_protected"]

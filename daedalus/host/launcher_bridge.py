@@ -315,8 +315,50 @@ async def computer(launcher: Launcher, method: str, path: str, body: dict[str, A
     return answer
 
 
+PREVIEW_MAX_BYTES = 4 << 20
+"""Far above a 960-pixel JPEG (a few hundred kilobytes): a body larger than this is not a preview."""
+
+
+async def computer_preview(launcher: Launcher, params: dict[str, str]) -> bytes:
+    """A small picture of one display or window for the grant form: the launcher's
+    ``/api/computer/preview``, a JPEG body rather than an object, the one route of the desktop's that
+    answers with bytes. Its errors are the other routes': 503 :class:`DesktopUnavailable`, 409
+    :class:`DesktopRefused` (a protected window shows nothing), anything else :class:`LauncherUnavailable`.
+    """
+    async with httpx.AsyncClient(timeout=COMPUTER_TIMEOUT) as client:
+        try:
+            response = await client.get(f"{launcher.base}/api/computer/preview", headers={HEADER: launcher.token}, params=params)
+        except httpx.HTTPError as exc:
+            raise LauncherUnavailable(f"the launcher on port {launcher.port} did not answer: {type(exc).__name__}") from None
+    if response.status_code in (401, 403):
+        raise LauncherUnavailable("the launcher refused the request; it may have been restarted since this process started")
+    if response.status_code == 404:
+        raise LauncherUnavailable("this launcher shows no previews; it is older than this build of the app")
+    if response.status_code == 501:
+        raise LauncherUnavailable("the launcher offers computer use only in a native installation")
+    if response.status_code == 200:
+        if not response.headers.get("content-type", "").startswith("image/jpeg"):
+            raise LauncherUnavailable("the launcher answered the preview with something that is not a JPEG picture")
+        if len(response.content) > PREVIEW_MAX_BYTES:
+            raise LauncherUnavailable("the launcher answered the preview with a picture far larger than a preview")
+        return response.content
+    try:
+        answer = response.json()
+    except ValueError:
+        raise LauncherUnavailable(f"the launcher answered {response.status_code}: {_sentence(response)}".rstrip(": ")) from None
+    answer = answer if isinstance(answer, dict) else {}
+    if response.status_code == 503:
+        raise DesktopUnavailable(str(answer.get("reason") or "the desktop daemon is not running"))
+    if response.status_code == 409:
+        error = answer.get("error") if isinstance(answer.get("error"), dict) else {}
+        code = error.get("code")
+        raise DesktopRefused(code if isinstance(code, int) else 0, str(error.get("message") or ""), error.get("data"))
+    raise LauncherUnavailable(f"the launcher answered {response.status_code} to the preview")
+
+
 __all__ = [
     "HEADER",
+    "PREVIEW_MAX_BYTES",
     "DesktopRefused",
     "DesktopUnavailable",
     "Launcher",
@@ -326,6 +368,7 @@ __all__ = [
     "act",
     "busy",
     "computer",
+    "computer_preview",
     "instance_path",
     "job",
     "read",

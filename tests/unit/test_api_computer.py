@@ -197,6 +197,36 @@ async def test_a_refused_grant_tells_the_session_nothing(launcher: Any) -> None:
     assert response.status_code == 409 and manager.granted == []
 
 
+async def test_a_preview_is_the_launchers_picture_never_cached(launcher: Any) -> None:
+    picture = b"\xff\xd8\xff\xe0 a jpeg"
+    launcher.fake.answers[("GET", "/api/computer/preview?display=1&max=480")] = (200, picture)
+    launcher.fake.answers[("GET", "/api/computer/preview?window=10&max=960")] = (200, picture)
+    api = mount(launcher.state)
+    response = await ask(api, "GET", "/api/computer/preview?display=1")
+    assert response.status_code == 200 and response.content == picture
+    assert response.headers["content-type"] == "image/jpeg" and response.headers["cache-control"] == "no-store"
+    assert (await ask(api, "GET", "/api/computer/preview?window=10&max=960")).content == picture
+    assert TOKEN not in response.text
+
+
+@pytest.mark.parametrize("query", ["", "?display=1&window=10", "?display=1&max=2000", "?window=10&max=10"])
+async def test_a_preview_names_one_target_within_the_size_cap(launcher: Any, query: str) -> None:
+    assert (await ask(mount(launcher.state), "GET", "/api/computer/preview" + query)).status_code in (400, 422)
+    assert launcher.fake.seen == []
+
+
+async def test_a_preview_refused_or_without_a_daemon_says_so_as_the_other_routes_do(launcher: Any) -> None:
+    launcher.fake.answers[("GET", "/api/computer/preview?window=11&max=480")] = (409, {"error": {"code": 1203, "message": "protected", "data": {}}})
+    launcher.fake.answers[("GET", "/api/computer/preview?display=1&max=480")] = (503, {"available": False, "reason": "The desktop daemon is not running."})
+    api = mount(launcher.state)
+    refused = await ask(api, "GET", "/api/computer/preview?window=11")
+    assert refused.status_code == 409 and refused.json()["error"]["code"] == 1203
+    assert refused.json()["detail"] == refusals.explain(1203, "protected", {})
+    gone = await ask(api, "GET", "/api/computer/preview?display=1")
+    assert gone.status_code == 503 and "not running" in gone.json()["detail"]
+    assert (await ask(mount(launcher.state, native=False), "GET", "/api/computer/preview?display=1")).status_code == 503
+
+
 @pytest.mark.parametrize("body", [
     {"session_id": "s1", "scope": {"kind": "desktop"}, "minutes": 0},
     {"session_id": "s1", "scope": {"kind": "desktop"}, "minutes": 241},
