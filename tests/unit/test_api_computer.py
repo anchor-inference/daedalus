@@ -66,9 +66,10 @@ class FakeLauncher:
                 else:
                     outer.seen.append((method, self.path, json.loads(raw) if raw else None))
                     status, body = outer.answers.get((method, self.path), (200, {}))
-                data = json.dumps(body).encode()
+                # A preview answers with the picture itself; every other route with an object.
+                data = body if isinstance(body, bytes) else json.dumps(body).encode()
                 self.send_response(status)
-                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Type", "image/jpeg" if isinstance(body, bytes) else "application/json")
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
@@ -92,13 +93,19 @@ class FakeLauncher:
 
 
 class Manager:
+    def __init__(self) -> None:
+        self.granted: list[str] = []
+
     async def get_state(self, session_id: str) -> object | None:
         return object() if session_id == "s1" else None
 
+    async def computer_granted(self, session_id: str) -> None:
+        self.granted.append(session_id)
 
-def mount(state_dir: Path, *, native: bool = True) -> FastAPI:
+
+def mount(state_dir: Path, *, native: bool = True, manager: Manager | None = None) -> FastAPI:
     api = FastAPI()
-    app = SimpleNamespace(settings=SimpleNamespace(native=native, state_dir=state_dir), manager=Manager())
+    app = SimpleNamespace(settings=SimpleNamespace(native=native, state_dir=state_dir), manager=manager or Manager())
 
     async def auth() -> dict[str, Any]:
         return {"user_id": 1}
@@ -175,9 +182,19 @@ async def test_protected_apps_and_their_foreground_window_never_reach_the_app(la
 
 async def test_a_grant_is_passed_on_in_the_launchers_terms(launcher: Any) -> None:
     launcher.fake.answers[("POST", "/api/computer/grant")] = (200, {"lease": {"id": "l1", "session": "s1"}})
-    response = await ask(mount(launcher.state), "POST", "/api/computer/grant", {"session_id": "s1", "scope": {"kind": "window", "window": "10"}, "minutes": 30})
+    manager = Manager()
+    response = await ask(mount(launcher.state, manager=manager), "POST", "/api/computer/grant", {"session_id": "s1", "scope": {"kind": "window", "window": "10"}, "minutes": 30})
     assert response.status_code == 200 and response.json() == {"lease": {"id": "l1", "session": "s1"}}
     assert launcher.fake.seen[-1] == ("POST", "/api/computer/grant", {"session": "s1", "scope": {"kind": "window", "window": "10"}, "ttl_ms": 1_800_000})
+    # The session hears of it: its kind, its tools, and a run already going.
+    assert manager.granted == ["s1"]
+
+
+async def test_a_refused_grant_tells_the_session_nothing(launcher: Any) -> None:
+    launcher.fake.answers[("POST", "/api/computer/grant")] = (409, {"error": {"code": 1203, "message": "protected", "data": {}}})
+    manager = Manager()
+    response = await ask(mount(launcher.state, manager=manager), "POST", "/api/computer/grant", {"session_id": "s1", "scope": {"kind": "desktop"}, "minutes": 5})
+    assert response.status_code == 409 and manager.granted == []
 
 
 @pytest.mark.parametrize("body", [

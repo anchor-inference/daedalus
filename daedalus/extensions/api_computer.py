@@ -15,6 +15,7 @@ reason the same way (``reason_words``), with the English ``reason`` kept as the 
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -27,6 +28,8 @@ from daedalus.host import launcher_bridge
 
 if TYPE_CHECKING:
     from daedalus.app import Application
+
+logger = logging.getLogger(__name__)
 
 MAX_MINUTES = 240
 """The daemon's own ceiling on a lease (``max_lease_ms``, four hours by default). Refused here first,
@@ -117,20 +120,20 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             raise HTTPException(503, NO_LAUNCHER)
         return found
 
+    def refused(exc: launcher_bridge.DesktopRefused) -> JSONResponse:
+        explanation = refusals.explain(exc.code, exc.message, exc.data)
+        # `detail` carries the sentence too, so every error path of the app reads it without
+        # knowing this route; `error` is the contract's whole refusal, and `words` is what the
+        # Computer control shows in the operator's language.
+        error = {"code": exc.code, "message": exc.message, "data": exc.data, "explanation": explanation, "words": refusals.words(exc.code, exc.data)}
+        return JSONResponse({"detail": explanation, "error": error}, status_code=409)
+
     async def call(method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any] | JSONResponse:
         found = await launcher()
         try:
             return await launcher_bridge.computer(found, method, path, body)
         except launcher_bridge.DesktopRefused as exc:
-            explanation = refusals.explain(exc.code, exc.message, exc.data)
-            # `detail` carries the sentence too, so every error path of the app reads it without
-            # knowing this route; `error` is the contract's whole refusal, and `words` is what the
-            # Computer control shows in the operator's language.
-            error = {"code": exc.code, "message": exc.message, "data": exc.data, "explanation": explanation, "words": refusals.words(exc.code, exc.data)}
-            return JSONResponse(
-                {"detail": explanation, "error": error},
-                status_code=409,
-            )
+            return refused(exc)
         except (launcher_bridge.DesktopUnavailable, launcher_bridge.LauncherUnavailable) as exc:
             raise HTTPException(503, str(exc)) from None
 
@@ -183,7 +186,15 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         if manager is None or await manager.get_state(body.session_id) is None:
             raise HTTPException(404, "no such session")
         scope = body.scope.model_dump(exclude_none=True)
-        return await call("POST", "/api/computer/grant", {"session": body.session_id, "scope": scope, "ttl_ms": body.minutes * 60_000})
+        answer = await call("POST", "/api/computer/grant", {"session": body.session_id, "scope": scope, "ttl_ms": body.minutes * 60_000})
+        if not isinstance(answer, JSONResponse):
+            # The conversation becomes a computer one, its next run starts with the tools loaded, and a
+            # run already going is told; a failure there leaves the grant standing.
+            try:
+                await manager.computer_granted(body.session_id)
+            except Exception:  # noqa: BLE001 — the grant is the operator's and it was made
+                logger.exception("after granting the computer to session %s", body.session_id)
+        return answer
 
     @api.post("/api/computer/revoke")
     async def computer_revoke(body: RevokeBody, _: dict[str, Any] = Depends(auth)) -> Any:
