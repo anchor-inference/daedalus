@@ -1290,7 +1290,11 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
 
   async function remove() {
     const ends = endsTerminals(sessionTerminals.running.length);
-    if (!(await confirmAsync(t("session.delete.title"), { body: ends ? `${t("session.delete.body")} ${ends}` : t("session.delete.body"), action: t("session.delete.action") }))) return;
+    // Deleting the orchestrator's chat switches the orchestrator off and moves the project to the
+    // Agents list, team and board included; taken for removing the project, it once left the
+    // operator with a project they had meant to be rid of, so the dialog says which is which.
+    const said = orchestrating ? t("session.delete.orchestrator") : t("session.delete.body");
+    if (!(await confirmAsync(t("session.delete.title"), { body: ends ? `${said} ${ends}` : said, action: t("session.delete.action") }))) return;
     try {
       await api.delete(`/api/sessions/${id}`);
       onBack();

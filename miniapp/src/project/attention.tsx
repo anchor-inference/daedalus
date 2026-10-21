@@ -13,7 +13,7 @@ import { DecisionSheet } from "./needs";
 import { useStreamUp } from "../events";
 import { clock, relTime } from "../format";
 import { plural, t } from "../i18n";
-import { back as goBack, navigate, projectPagePath } from "../router";
+import { back as goBack, navigate, ORCHESTRATION, projectPagePath } from "../router";
 import { ProjectSettingsSheet } from "../projects";
 import { PageHeader } from "../shell";
 import { useOffline, useQuery } from "../store";
@@ -47,7 +47,7 @@ export function AttentionPage({ projectId, back, toast, phone = false }: { proje
   if (phone) return <PhoneAttention projectId={projectId} name={project?.name ?? ""} back={back} toast={toast} open={open} review={review} actions={otherActions}
     budgetIssue={budgetIssue} titles={titles} known={known} uncertain={uncertain} failed={!!(asks.error || board.error || next.error || budget.error)}
     lastConfirmed={lastConfirmed} refresh={refresh} onBudget={project ? () => setSettingsOpen(true) : undefined}
-    settings={settingsOpen && project ? <ProjectSettingsSheet project={project} onClose={() => setSettingsOpen(false)} onRemoved={() => setSettingsOpen(false)} toast={toast} /> : null} />;
+    settings={settingsOpen && project ? <ProjectSettingsSheet project={project} onClose={() => setSettingsOpen(false)} onRemoved={() => { setSettingsOpen(false); navigate(ORCHESTRATION); }} toast={toast} /> : null} />;
 
   return <>
     <PageHeader title={t("focus.nav.attention")} subtitle={project?.name} back={back ?? undefined} />
@@ -84,7 +84,7 @@ export function AttentionPage({ projectId, back, toast, phone = false }: { proje
       </section>}
       {known && !uncertain && open.length === 0 && review.length === 0 && otherActions.length === 0 && !budgetIssue && <div className="empty"><b>{t("focus.attention.empty")}</b></div>}
       {!known && (asks.error || board.error || next.error || budget.error) && <button type="button" className="btn" onClick={refresh}>{t("common.retry")}</button>}
-      {settingsOpen && project && <ProjectSettingsSheet project={project} onClose={() => setSettingsOpen(false)} onRemoved={() => setSettingsOpen(false)} toast={toast} />}
+      {settingsOpen && project && <ProjectSettingsSheet project={project} onClose={() => setSettingsOpen(false)} onRemoved={() => { setSettingsOpen(false); navigate(ORCHESTRATION); }} toast={toast} />}
     </main>
   </>;
 }

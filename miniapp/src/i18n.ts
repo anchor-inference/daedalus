@@ -1549,10 +1549,17 @@ export const DICT: Record<string, Record<Lang, string>> = {
     en: "{names} is working in it right now, so this will be refused until it stops: removing the project mid-turn would move the folder under it.|{names} are working in it right now, so this will be refused until they stop: removing the project mid-turn would move the folder under them.",
     ru: "{names} работает в нём прямо сейчас, поэтому запрос отклонят, пока агент не остановится: убрать проект на середине хода — значит увести папку у него из-под ног.|{names} работают в нём прямо сейчас, поэтому запрос отклонят, пока они не остановятся: убрать проект на середине хода — значит увести папку у них из-под ног.|{names} работают в нём прямо сейчас, поэтому запрос отклонят, пока они не остановятся: убрать проект на середине хода — значит увести папку у них из-под ног.",
   },
-  "project.remove.agents": {
-    en: "{n} agent works in it. It keeps its history and goes back to a directory of its own, which is empty. Not one file of the folder is deleted.|{n} agents work in it. They keep their history and go back to a directory of their own, which is empty. Not one file of the folder is deleted.",
-    ru: "В нём работает {n} агент. Он сохранит историю и вернётся в собственную пустую папку. Ни один файл проекта не удаляется.|В нём работают {n} агента. Они сохранят историю и вернутся в собственные пустые папки. Ни один файл проекта не удаляется.|В нём работают {n} агентов. Они сохранят историю и вернутся в собственные пустые папки. Ни один файл проекта не удаляется.",
+  "project.remove.chats": {
+    en: "{names} works in it, so this will be refused: move that chat to another project or delete it first.|{names} work in it, so this will be refused: move those chats to another project or delete them first.",
+    ru: "В нём работает {names}, поэтому запрос отклонят: сначала перенесите этот чат в другой проект или удалите его.|В нём работают {names}, поэтому запрос отклонят: сначала перенесите эти чаты в другой проект или удалите их.|В нём работают {names}, поэтому запрос отклонят: сначала перенесите эти чаты в другой проект или удалите их.",
   },
+  "project.remove.machinery": {
+    en: "Goes with it: {what}, with its journal, schedules and history. Not one file of its folders is deleted.",
+    ru: "Вместе с ним уйдут: {what}, а также журнал, расписания и история. Ни один файл в его папках не удаляется.",
+  },
+  "project.remove.part.orchestrator": { en: "the orchestrator", ru: "оркестратор" },
+  "project.remove.part.staff": { en: "{n} team member|{n} team members", ru: "{n} сотрудник команды|{n} сотрудника команды|{n} сотрудников команды" },
+  "project.remove.part.tasks": { en: "{n} task on the board|{n} tasks on the board", ru: "{n} задача на доске|{n} задачи на доске|{n} задач на доске" },
   "project.remove.empty": {
     en: "The folder and everything in it stays exactly as it is; only the project is forgotten.",
     ru: "Папка и всё, что в ней есть, останутся как были; забудется только сам проект.",
@@ -5148,6 +5155,10 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "session.clear.action": { en: "Clear history", ru: "Очистить" },
   "session.cleared": { en: "history cleared: {n} message dropped|history cleared: {n} messages dropped", ru: "история очищена: убрано {n} сообщение|история очищена: убрано {n} сообщения|история очищена: убрано {n} сообщений" },
   "session.delete.title": { en: "Delete this session?", ru: "Удалить эту сессию?" },
+  "session.delete.orchestrator": {
+    en: "This is the project's orchestrator. Deleting its chat switches the orchestrator off, and the project moves to the Agents list with its team and board. To remove the whole project, use Remove in the project's settings.",
+    ru: "Это оркестратор проекта. Если удалить его чат, оркестратор выключится, а проект с командой и доской переедет в список агентов. Чтобы убрать весь проект, нажмите «Убрать» в настройках проекта.",
+  },
   "session.delete.body": { en: "Its Telegram topic and transcript go with it. Shared project files stay; a private agent directory is removed.", ru: "Вместе с ней уйдут тема в Telegram и переписка. Общие файлы проекта останутся; личная папка агента будет удалена." },
   "session.delete.action": { en: "Delete session", ru: "Удалить сессию" },
   "session.revert.title": { en: "Revert to this turn?", ru: "Вернуться к этому ходу?" },

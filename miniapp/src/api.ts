@@ -1141,7 +1141,10 @@ export type Project = {
   system?: string;
   /** In order; the first is the primary folder, where an agent works unless it is given another. */
   folders: ProjectDir[];
+  /** The operator's own chats, as the sidebar shows them; the orchestrator's and the staff's sessions are not here. */
   sessions: { id: string; title: string; running?: boolean }[];
+  /** What a removal takes with it, for the confirmation to say. */
+  machinery?: { orchestrator: boolean; staff: number; tasks: number; archived_chats: number };
   /** "dispatcher" while the main orchestrator is setting the project up. */
   setup_by?: string;
 };

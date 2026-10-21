@@ -440,13 +440,23 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
   }
   async function remove() {
     if (writes.offline || !writes.readCurrent || writes.pending || writes.busy) return;
-    const agents = project.sessions.length;
-    const running = project.sessions.filter((s) => s.running);
+    // The sessions are the operator's own chats, the ones the sidebar shows: a chat keeps the
+    // project, and the orchestrator, the team and the board go with it, so the dialog says both.
+    const chats = project.sessions;
+    const running = chats.filter((s) => s.running);
+    const goes = project.machinery;
+    const parts = [
+      goes?.orchestrator ? t("project.remove.part.orchestrator") : "",
+      goes?.staff ? plural("project.remove.part.staff", goes.staff) : "",
+      goes?.tasks ? plural("project.remove.part.tasks", goes.tasks) : "",
+    ].filter(Boolean);
     const body = running.length
       ? plural("project.remove.running", running.length, { names: running.map((s) => s.title).join(", ") })
-      : agents
-        ? plural("project.remove.agents", agents)
-        : t("project.remove.empty");
+      : chats.length
+        ? plural("project.remove.chats", chats.length, { names: chats.map((s) => s.title).join(", ") })
+        : parts.length
+          ? t("project.remove.machinery", { what: parts.join(", ") })
+          : t("project.remove.empty");
     if (!(await confirmAsync(t("project.remove.title", { name: project.name }), { body, action: t("common.remove") }))) return;
     try {
       await api.delete(`/api/projects/${encodeURIComponent(project.id)}`);

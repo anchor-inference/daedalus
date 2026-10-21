@@ -13,7 +13,7 @@ import { Icon } from "../icons";
 import { ProjectSettingsSheet } from "../projects";
 import { folderName, reachIsProblem, reachKey } from "../folders";
 import { RevealButton } from "../reveal";
-import { navigate, pathFor, projectPagePath } from "../router";
+import { navigate, ORCHESTRATION, pathFor, projectPagePath } from "../router";
 import { go, PageHeader } from "../shell";
 import { invalidate, useQuery } from "../store";
 import { EnvPill } from "../envpill";
@@ -286,7 +286,7 @@ export function FoldersPage({ projectId, back, compact, toast }: { projectId: st
         </div>
       ))}
       <button className="btn small" onClick={() => setManaging(true)}><Icon name="settings" size={14} /> {t("focus.folders.manage")}</button>
-      {managing && <ProjectSettingsSheet project={project} onClose={() => setManaging(false)} onRemoved={() => setManaging(false)} toast={toast} />}
+      {managing && <ProjectSettingsSheet project={project} onClose={() => setManaging(false)} onRemoved={() => { setManaging(false); navigate(ORCHESTRATION); }} toast={toast} />}
     </div>
   );
   if (compact) return body;
