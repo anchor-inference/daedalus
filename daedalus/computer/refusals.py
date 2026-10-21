@@ -5,6 +5,11 @@ The daemon answers a refused call with a JSON-RPC error whose code and ``data`` 
 stale screenshot, or kept clicking while the operator had taken the mouse; and the app showed a number.
 Each sentence here says what happened and the one thing to do next. The tool and the app's routes use
 the same table, so the two never disagree about what a code means.
+
+The model reads :func:`explain`, in English. The operator reads :func:`words`: a key of the app's
+dictionary (``miniapp/src/i18n.ts``) and the values for its holes, because a sentence built here in
+English stayed English on the Russian page. The two speak to different readers — the model is told to
+ask the operator, the operator is told what to do — so they are separate texts with one choice of case.
 """
 
 from __future__ import annotations
@@ -117,6 +122,54 @@ def explain(code: int, message: str = "", data: Any = None) -> str:
     return said or f"The desktop refused the request (code {code})."
 
 
+_NO_LEASE_KEYS = frozenset(_NO_LEASE_REASONS)
+_SECURE_KEYS = frozenset(_SECURE_REASONS)
+_PERMISSION_KEYS = frozenset(_PERMISSIONS)
+_NAMES = {
+    HUMAN_DRIVING: "human",
+    STALE_SCREENSHOT: "stale",
+    OUT_OF_SCOPE: "scope",
+    PROTECTED_TARGET: "protected",
+    UNREACHABLE: "elevated",
+    OPERATOR_ONLY: "operator_only",
+    NOT_FOUND: "not_found",
+    LIMIT: "limit",
+    UNSUPPORTED: "unsupported",
+}
+
+
+def words(code: int, data: Any = None) -> dict[str, Any]:
+    """The operator's sentence for a refusal as ``{"key": "cu.refusal.…", "vars": {...}}``.
+
+    The app renders the key in the reader's language and falls back to :func:`explain`'s English for
+    a key it does not know, so a newer host never shows the operator a bare key."""
+    detail = data if isinstance(data, dict) else {}
+    if code == NO_LEASE:
+        reason = str(detail.get("reason") or "none")
+        return {"key": f"cu.refusal.no_lease.{reason if reason in _NO_LEASE_KEYS else 'none'}", "vars": {}}
+    if code == SECURE_DESKTOP:
+        reason = str(detail.get("reason") or "")
+        return {"key": f"cu.refusal.secure.{reason if reason in _SECURE_KEYS else 'other'}", "vars": {}}
+    if code == NO_PERMISSION:
+        which = str(detail.get("which") or "")
+        return {"key": f"cu.refusal.permission.{which if which in _PERMISSION_KEYS else 'other'}", "vars": {}}
+    if code == RATE:
+        return {"key": "cu.refusal.rate.actions" if str(detail.get("limit") or "") == "lease_actions" else "cu.refusal.rate", "vars": {}}
+    if code in _NAMES:
+        return {"key": f"cu.refusal.{_NAMES[code]}", "vars": {}}
+    return {"key": "cu.refusal.unknown", "vars": {"code": code}}
+
+
+def every_key() -> set[str]:
+    """Every key :func:`words` can answer with, for the test that holds the app's dictionary to it."""
+    keys = {f"cu.refusal.{name}" for name in _NAMES.values()}
+    keys |= {f"cu.refusal.no_lease.{reason}" for reason in _NO_LEASE_KEYS}
+    keys |= {f"cu.refusal.secure.{reason}" for reason in (*_SECURE_KEYS, "other")}
+    keys |= {f"cu.refusal.permission.{which}" for which in (*_PERMISSION_KEYS, "other")}
+    keys |= {"cu.refusal.rate", "cu.refusal.rate.actions", "cu.refusal.unknown"}
+    return keys
+
+
 __all__ = [
     "HUMAN_DRIVING",
     "LIMIT",
@@ -131,5 +184,7 @@ __all__ = [
     "STALE_SCREENSHOT",
     "UNREACHABLE",
     "UNSUPPORTED",
+    "every_key",
     "explain",
+    "words",
 ]

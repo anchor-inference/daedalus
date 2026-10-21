@@ -4,8 +4,10 @@
 // Only the native application offers it (`GET /api/computer` says `native: true`); everywhere else
 // nothing here is drawn. The rules that must hold even when the agent misbehaves are the desktop
 // daemon's — the lease, its scope, the pause on the operator's own hand, Stop — and this control
-// only asks for them through the host, which asks the launcher. A refusal is shown in the words the
-// host sends beside its code (`error.explanation`), never as the number.
+// only asks for them through the host, which asks the launcher. A refusal is shown by the key the
+// host sends beside its code (`error.words`), rendered in the reader's language, and never as the
+// number; the host's English sentence (`error.explanation`) is the fallback for a key this build
+// does not know yet, so a newer host never puts a bare key on the page.
 //
 // Pause and Resume, honestly mapped. The daemon has no "pause" an operator can call: the agent is
 // paused by the operator's own hand — any mouse movement or key press — and the pause ends by itself
@@ -19,7 +21,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "./api";
-import { t } from "./i18n";
+import { DICT, t } from "./i18n";
 import { Icon } from "./icons";
 import { invalidate, useQuery } from "./store";
 import { errorText } from "./ui";
@@ -47,6 +49,7 @@ export type ComputerState = {
   native: boolean;
   available: boolean;
   reason?: string;
+  reason_words?: Words;
   os?: string;
   session_type?: string;
   permissions?: { screen?: PermissionState; accessibility?: PermissionState; input_monitoring?: PermissionState };
@@ -57,6 +60,17 @@ export type ComputerState = {
 };
 export type ComputerWindow = { id: string; title: string; focused?: boolean; minimized?: boolean };
 export type ComputerApp = { id: string; name: string; reachable?: boolean; elevated?: boolean; windows: ComputerWindow[] };
+
+/** A sentence the host names by a key of the dictionary and the values for its holes. */
+export type Words = { key: string; vars?: Record<string, string | number> };
+
+/** The host's words in the reader's language, or nothing when this build has no such key. */
+export function wordsText(words: unknown): string {
+  if (!words || typeof words !== "object") return "";
+  const { key, vars } = words as { key?: unknown; vars?: unknown };
+  if (typeof key !== "string" || !DICT[key]) return "";
+  return t(key, vars && typeof vars === "object" ? (vars as Record<string, string | number>) : undefined);
+}
 
 /** Where this conversation stands: nothing to draw, a desktop that cannot be driven, control here
  *  (and paused by the operator's hand), control in another conversation, or nobody's. */
@@ -71,10 +85,13 @@ export function computerView(state: ComputerState | undefined, sessionId: string
   return state.human?.paused ? "paused" : "mine";
 }
 
-/** The sentence for a failed request: a desktop refusal's explanation, otherwise the usual text. */
+/** The sentence for a failed request: a desktop refusal in the reader's language, else its English
+ *  explanation, otherwise the usual text. */
 export function refusalText(e: unknown): string {
   if (e instanceof ApiError) {
     const error = e.data.error;
+    const said = error && typeof error === "object" ? wordsText((error as { words?: unknown }).words) : "";
+    if (said) return said;
     if (error && typeof error === "object" && typeof (error as { explanation?: unknown }).explanation === "string") {
       const explanation = (error as { explanation: string }).explanation.trim();
       if (explanation) return explanation;
@@ -184,6 +201,23 @@ export function ComputerBanner({ sessionId }: { sessionId: string }) {
   );
 }
 
+/** Why the computer cannot be driven: one sentence in the reader's language, and under it the
+ *  launcher's own English reason (no daemon in this build, a Wayland session) as the detail that
+ *  tells the operator what to change. Without a key, the reason is all there is. */
+function Unavailable({ state }: { state: ComputerState | undefined }) {
+  const said = wordsText(state?.reason_words);
+  const detail = state?.reason || "";
+  // The host's own reasons are the key's English word for word; repeating one under its translation
+  // would only put the English back on the page.
+  const english = state?.reason_words && DICT[state.reason_words.key]?.en;
+  return (
+    <div className="sub computer-reason">
+      {said || detail || t("cu.unavailable")}
+      {said && detail && detail !== english && <div className="sub computer-reason-detail">{detail}</div>}
+    </div>
+  );
+}
+
 /** The control itself: where control stands, the grant, and what the system allows. */
 export function ComputerSheet({ sessionId, toast, onClose }: { sessionId: string; toast: (text: string) => void; onClose: () => void }) {
   const query = useQuery<ComputerState>(COMPUTER, { pollMs: POLL_MS, staleMs: 2000 });
@@ -204,7 +238,7 @@ export function ComputerSheet({ sessionId, toast, onClose }: { sessionId: string
   return (
     <Sheet title={t("cu.title")} onClose={onClose} className="computer-sheet">
       {view === "unavailable" || view === "hidden" ? (
-        <div className="sub computer-reason">{state?.reason || t("cu.unavailable")}</div>
+        <Unavailable state={state} />
       ) : (
         <>
           <div className="sub">{t("cu.sub")}</div>

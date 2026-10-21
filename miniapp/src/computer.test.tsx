@@ -51,6 +51,15 @@ describe("where a conversation stands", () => {
     expect(refusalText(refusal)).toBe("That is one of Daedalus's own windows.");
     expect(refusalText(new ApiError(503, "the desktop daemon is not running"))).toBe("The desktop daemon is not running");
   });
+
+  it("says a refusal in the reader's language by its key, and in English only for a key it does not know", () => {
+    setLang("ru");
+    const words = (key: string, vars?: Record<string, number>) => new ApiError(409, "x", { error: { code: 1200, message: "", data: null, explanation: "The time ran out.", words: { key, vars } } });
+    expect(refusalText(words("cu.refusal.no_lease.expired"))).toBe("Время, выданное этому разговору, истекло. Чтобы продолжить, дайте управление снова.");
+    expect(refusalText(words("cu.refusal.unknown", { code: 4242 }))).toBe("Рабочий стол отказал в запросе (код 4242).");
+    expect(refusalText(words("cu.refusal.from_a_newer_host"))).toBe("The time ran out.");
+    setLang("en");
+  });
 });
 
 describe("the control", () => {
@@ -216,5 +225,16 @@ describe("the control", () => {
     expect(host.querySelector<HTMLElement>(".computer-button")?.dataset.computer).toBe("unavailable");
     expect(sheet()!.textContent).toContain("Управление этим компьютером");
     expect(sheet()!.textContent).toContain("The desktop launcher is not running.");
+  });
+
+  it("says why by its key in Russian, with the launcher's own reason as the detail", async () => {
+    setLang("ru");
+    await show(state({ available: false, reason: "this build carries no deskd; computer use is unavailable", reason_words: { key: "cu.reason.no_daemon" } }), <ComputerSheet sessionId={SESSION} toast={() => undefined} onClose={() => undefined} />);
+    const reason = sheet()!.querySelector<HTMLElement>(".computer-reason")!;
+    expect(reason.firstChild?.textContent).toBe("Часть Daedalus, которая управляет рабочим столом, на этом компьютере не запущена.");
+    expect(reason.querySelector(".computer-reason-detail")?.textContent).toBe("this build carries no deskd; computer use is unavailable");
+    await show(state({ available: false, reason: "The desktop launcher is not running, so nothing can reach this computer's desktop.", reason_words: { key: "cu.reason.no_launcher" } }), <ComputerSheet sessionId={SESSION} toast={() => undefined} onClose={() => undefined} />);
+    expect(sheet()!.querySelector(".computer-reason-detail")).toBeNull();
+    expect(sheet()!.textContent).not.toContain("nothing can reach");
   });
 });
