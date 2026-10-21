@@ -87,7 +87,7 @@ platform{os, session_type, units}}`. `protocol` is 1. The host refuses a protoco
 |---|---|---|
 | `info`, `lease.status`, `apps.list`, `events.subscribe`, `events.unsubscribe` | yes | yes |
 | `screenshot`, `act`, `cursor`, `apps.focus` | yes, within its lease | no |
-| `lease.grant`, `resume`, `permissions.request` | no | yes |
+| `lease.grant`, `resume`, `permissions.request`, `preview` | no | yes |
 | `lease.revoke` | its own session's lease | any |
 | `stop` | yes | yes |
 | `fake.simulate` (the fake desktop only) | no | yes |
@@ -163,7 +163,10 @@ Otherwise the action is refused with `1201` and the reason.
 
 ## Objects
 
-- **Display** `{id, name, bounds{x, y, w, h}, primary, pixels_per_unit, scale}`. `scale` is the
+- **Display** `{id, name, bounds{x, y, w, h}, primary, pixels_per_unit, scale}`. `name` is for people:
+  the monitor's own name on Windows (from its EDID, "DELL U2720Q", with the display's number added when
+  two match) or "Display N" when Windows has none; macOS's screen name ("Built-in Retina Display");
+  the XRandR output on X11 ("HDMI-1"). `scale` is the
   factor the system shows (Windows' 125 %, macOS's backing scale, 1 on X11), for people; the
   arithmetic uses `pixels_per_unit`. The primary display is first.
 - **App** `{id, name, pid?, bundle_id?, exe_path?, wm_class?, elevated?}`. `id` is stable for the
@@ -195,6 +198,7 @@ Otherwise the action is refused with `1201` and the reason.
 | `info` | → `{version, protocol, instance, role, os, arch, pid, started_at, uptime_s, platform{os, session_type: "x11" \| "win32" \| "quartz" \| "fake", units}, backend, displays: [Display], permissions, secure, lease: LeaseStatus, human: Human, limits{…}}`. It never raises a system prompt |
 | `screenshot` | `{session, display? \| window?, max_edge? (64–8192, default 1568), format?: "jpeg" \| "png" (jpeg), quality? (1–100, 80)}` → `{screenshot_id, format, data (base64), width, height, display, window?, region, units_per_pixel[2], pixels_per_unit, scale, units, cursor?[2]}`. With neither `display` nor `window` the target is the lease's window or display, else the primary display. `cursor` is the pointer in picture pixels when it is on the picture. A JPEG too large for a frame steps its quality down; a PNG too large is `1003` (ask for JPEG or a smaller `max_edge`) |
 | `act` | see Actions |
+| `preview` | `{display? \| window?, max_edge? (64 up; default 480, larger asks get 960)}` → `{image (base64 JPEG), width, height, display, window?}`: a thumbnail for the operator choosing what to grant. No lease is needed and no screenshot id is handed out, so nothing can be aimed with it; it is not audited. With neither, the primary display. A protected window is `1203`, a locked screen `1204`. On Windows a window is drawn by itself (`PrintWindow` with full content), so a half-covered window shows whole; elsewhere, or when that draws nothing, it is the screen region the window covers |
 | `cursor` | `{session, screenshot_id?}` → `{x, y, in_screenshot?[2]}` |
 | `apps.list` | `{session?}` → `{apps: [App + {protected?, reachable, in_scope, windows: [{id, title, bounds, display, focused, minimized?, in_scope, order}]}], foreground?}`, front to back. The host must hold the lease and never sees protected apps; the operator sees everything, to choose a scope from |
 | `apps.focus` | `{session, app? \| window?}` → `{window}`: raises the window (an app's frontmost) and gives it the keyboard. Judged like an action (scope, protected, elevated) and counted as one |

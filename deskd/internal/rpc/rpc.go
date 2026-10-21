@@ -82,6 +82,7 @@ func (d *Daemon) Register(s *server.Server) {
 	for name, h := range map[string]server.Handler{
 		"info":                only(d.info, both...),
 		"screenshot":          only(d.screenshot, RoleHost),
+		"preview":             only(d.preview, RoleOperator),
 		"act":                 only(d.act, RoleHost),
 		"cursor":              only(d.cursor, RoleHost),
 		"apps.list":           only(d.apps, both...),
@@ -139,6 +140,16 @@ func (d *Daemon) screenshot(ctx context.Context, c *server.Conn, params json.Raw
 		return nil, err
 	}
 	return d.Desk.Screenshot(ctx, p)
+}
+
+// preview is the operator's thumbnail of a display or a window, for choosing what to grant. It is
+// the operator's alone: the host sees the screen only through a lease's screenshots.
+func (d *Daemon) preview(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p desk.PreviewParams
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	return d.Desk.Preview(ctx, p)
 }
 
 func (d *Daemon) act(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {

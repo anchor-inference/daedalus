@@ -151,12 +151,12 @@ func (d *desktop) Displays(ctx context.Context) ([]geom.Display, error) {
 			}
 		}
 		// The device name ("\\.\DISPLAY1") is the id: an HMONITOR is a handle that changes when the
-		// display configuration does, while the name stays with the output.
+		// display configuration does, while the name stays with the output. The name for people is
+		// filled in below, once every device is known.
 		name := windows.UTF16ToString(mi.Device[:])
 		r := mi.Monitor
 		out = append(out, geom.Display{
 			ID:            name,
-			Name:          name,
 			Bounds:        geom.Rect{X: float64(r.Left), Y: float64(r.Top), W: float64(r.Right - r.Left), H: float64(r.Bottom - r.Top)},
 			Primary:       mi.Flags&monitorInfoFPrimary != 0,
 			PixelsPerUnit: 1,
@@ -165,6 +165,13 @@ func (d *desktop) Displays(ctx context.Context) ([]geom.Display, error) {
 	}
 	if len(out) == 0 {
 		return nil, errors.New("the system reports no display")
+	}
+	devices := make([]string, len(out))
+	for i := range out {
+		devices[i] = out[i].ID
+	}
+	for i, name := range displayNames(devices, monitorNames()) {
+		out[i].Name = name
 	}
 	// The primary first, then left to right and top to bottom, so the order does not follow the
 	// enumeration's, which is undocumented.
@@ -200,6 +207,19 @@ func (d *desktop) Capture(ctx context.Context, display geom.Display, region geom
 	if w <= 0 || h <= 0 {
 		return nil, errors.New("the region to capture is empty")
 	}
+	return withDIB(w, h, func(screen, mem uintptr) error {
+		if r, _, err := procBitBlt.Call(mem, 0, 0, uintptr(w), uintptr(h), screen,
+			uintptr(int32(x)), uintptr(int32(y)), srcCopy|captureBlt); r == 0 {
+			// A secure desktop (UAC, the lock screen) refuses the copy with access denied.
+			return callErr("BitBlt", err)
+		}
+		return nil
+	})
+}
+
+// withDIB hands draw a memory device context holding a fresh w×h 32-bit bitmap, then reads the
+// bitmap back as a picture. The screen capture and the window capture differ only in what draws.
+func withDIB(w, h int, draw func(screen, mem uintptr) error) (*image.RGBA, error) {
 	screen, _, err := procGetDC.Call(0)
 	if screen == 0 {
 		return nil, callErr("GetDC", err)
@@ -232,12 +252,10 @@ func (d *desktop) Capture(ctx context.Context, display geom.Display, region geom
 	// leaks; defers run last in first out, so this runs before the DeleteObject above.
 	defer procSelectObject.Call(mem, old)
 
-	if r, _, err := procBitBlt.Call(mem, 0, 0, uintptr(w), uintptr(h), screen,
-		uintptr(int32(x)), uintptr(int32(y)), srcCopy|captureBlt); r == 0 {
-		// A secure desktop (UAC, the lock screen) refuses the copy with access denied.
-		return nil, callErr("BitBlt", err)
+	if err := draw(screen, mem); err != nil {
+		return nil, err
 	}
-	// GDI may batch the copy; the bits are only final once the batch is flushed.
+	// GDI may batch the drawing; the bits are only final once the batch is flushed.
 	procGdiFlush.Call()
 
 	img := image.NewRGBA(image.Rect(0, 0, w, h))

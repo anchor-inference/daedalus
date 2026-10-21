@@ -616,3 +616,64 @@ func TestFocusAndAppsFollowTheScope(t *testing.T) {
 		t.Fatalf("after focus: %+v", apps)
 	}
 }
+
+func TestTheOperatorPreviewsWithoutALease(t *testing.T) {
+	h := start(t, desk.Config{})
+	var res desk.PreviewResult
+	// No lease, no display named: the primary display, a 2880×1800 picture fitted to 480.
+	if err := h.op.Call(h.ctx, "preview", map[string]any{}, &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Display != "1" || res.Width != 480 || res.Height != 300 || res.Window != "" {
+		t.Fatalf("display preview %+v", res)
+	}
+	raw, err := base64.StdEncoding.DecodeString(res.Image)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := jpeg.Decode(strings.NewReader(string(raw))); err != nil {
+		t.Fatalf("not a JPEG: %v", err)
+	}
+	// The terminal's 1000×700 window on the 1080p display, at its own edge.
+	if err := h.op.Call(h.ctx, "preview", map[string]any{"window": "12", "max_edge": 200}, &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Display != "2" || res.Window != "12" || res.Width != 200 || res.Height != 140 {
+		t.Fatalf("window preview %+v", res)
+	}
+	raw, _ = base64.StdEncoding.DecodeString(res.Image)
+	img, err := jpeg.Decode(strings.NewReader(string(raw)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, g, _, _ := img.At(100, 70).RGBA(); g>>8 < 150 || r>>8 > 60 {
+		t.Errorf("the terminal is not green in its own preview")
+	}
+	// The edge is capped, not refused: a picker asking for more gets the largest preview there is.
+	if err := h.op.Call(h.ctx, "preview", map[string]any{"display": "2", "max_edge": 5000}, &res); err != nil || res.Width != desk.MaxPreviewEdge {
+		t.Fatalf("capped preview %+v %v", res, err)
+	}
+	// Daedalus's own window is never pictured on its own.
+	if err := h.op.Call(h.ctx, "preview", map[string]any{"window": "11"}, nil); code(err) != desk.CodeProtected {
+		t.Fatalf("previewing Daedalus: %v", err)
+	}
+	for _, params := range []map[string]any{{"display": "9"}, {"window": "99"}} {
+		if err := h.op.Call(h.ctx, "preview", params, nil); code(err) != wire.CodeNotFound {
+			t.Errorf("preview %v: %v", params, err)
+		}
+	}
+	if err := h.op.Call(h.ctx, "preview", map[string]any{"display": "1", "window": "10"}, nil); code(err) != wire.CodeInvalidParams {
+		t.Errorf("both a display and a window: %v", err)
+	}
+	if err := h.op.Call(h.ctx, "preview", map[string]any{"max_edge": 10}, nil); code(err) != wire.CodeInvalidParams {
+		t.Errorf("a tiny edge: %v", err)
+	}
+	// The host sees the screen only through a lease's screenshots.
+	if err := h.host.Call(h.ctx, "preview", map[string]any{}, nil); code(err) != desk.CodeOperatorOnly {
+		t.Errorf("host preview: %v", err)
+	}
+	h.simulate(map[string]any{"secure": backend.Secure{Locked: true, Reason: "lock_screen"}})
+	if err := h.op.Call(h.ctx, "preview", map[string]any{}, nil); code(err) != desk.CodeSecure {
+		t.Errorf("a preview of the lock screen: %v", err)
+	}
+}

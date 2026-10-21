@@ -213,6 +213,25 @@ static char *dk_nsstring(NSString *s) {
 	return u != NULL ? strdup(u) : NULL;
 }
 
+// dk_display_name is the screen's name as System Settings shows it ("DELL U2720Q", "Built-in Retina
+// Display"), or NULL. Core Graphics has no name for a display; AppKit's NSScreen does, keyed by the
+// same CGDirectDisplayID under NSScreenNumber. The caller frees the result.
+static char *dk_display_name(uint32_t id) {
+	char *out = NULL;
+	@autoreleasepool {
+		if (@available(macOS 10.15, *)) {
+			for (NSScreen *screen in [NSScreen screens]) {
+				NSNumber *number = screen.deviceDescription[@"NSScreenNumber"];
+				if (number != nil && number.unsignedIntValue == id) {
+					out = dk_nsstring(screen.localizedName);
+					break;
+				}
+			}
+		}
+	}
+	return out;
+}
+
 static int dk_dict_number(CFDictionaryRef d, CFStringRef key, CFNumberType type, void *out) {
 	CFTypeRef v = CFDictionaryGetValue(d, key);
 	if (v == NULL || CFGetTypeID(v) != CFNumberGetTypeID()) {
@@ -609,7 +628,11 @@ func (q *quartz) Displays(ctx context.Context) ([]geom.Display, error) {
 	out := make([]geom.Display, 0, n)
 	for _, d := range list[:n] {
 		name := ""
-		if d.builtin != 0 {
+		if c := C.dk_display_name(d.id); c != nil {
+			name = C.GoString(c)
+			C.free(unsafe.Pointer(c))
+		}
+		if name == "" && d.builtin != 0 {
 			name = "built-in display"
 		}
 		ppp := float64(d.pixels_per_point)

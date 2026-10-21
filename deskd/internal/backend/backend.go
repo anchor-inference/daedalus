@@ -174,6 +174,16 @@ type Backend interface {
 	Close() error
 }
 
+// WindowCapturer is a backend that can draw one window by itself, as the window would look with
+// nothing in front of it. The operator's preview uses it so a thumbnail of a half-covered window shows
+// that window rather than whatever covers it; a backend without it (or whose attempt fails) is
+// captured as the screen region the window occupies. Agent screenshots never use it: what the agent
+// acts on is what the screen shows.
+type WindowCapturer interface {
+	// CaptureWindow returns the window's bounds (w.Bounds) at the display's own resolution.
+	CaptureWindow(ctx context.Context, w Window) (*image.RGBA, error)
+}
+
 // ErrUnsupported is an operation this backend cannot do here.
 var ErrUnsupported = errors.New("not supported by this desktop")
 
