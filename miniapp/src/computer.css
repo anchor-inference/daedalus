@@ -1,0 +1,265 @@
+/* The Computer control (computer.tsx) and its scope picker (computerpicker.tsx), in the
+   conversation's sheet and, compact, in Quick Chat. Cards over a raised track; the chosen one is ringed in the accent rather than filled,
+   so its picture stays readable. Every motion here is a CSS transition or keyframe, and the app's
+   reduced-motion rule (ui/styles.css) switches all of them off. */
+
+.cu-picker {
+  --cu-raised: var(--surface-3);
+  --cu-well: var(--surface-2);
+  --cu-glow: color-mix(in srgb, var(--accent) 22%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 12px);
+  min-width: 0;
+}
+:root[data-scheme="light"] .cu-picker { --cu-raised: var(--surface-1); }
+
+/* Four tabs on one track, the lit one marked by a thumb that slides under the labels. */
+.cu-tabs {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--cu-well);
+}
+.cu-tabs-thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / 4);
+  border-radius: calc(var(--radius-md) - 3px);
+  background: var(--cu-raised);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18), 0 0 0 1px var(--line);
+  transform: translateX(calc(var(--i, 0) * 100%));
+  transition: transform 260ms var(--ease-out);
+}
+.cu-tabs button {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  height: var(--ctl-h);
+  padding: 0 8px;
+  border: 0;
+  background: none;
+  color: var(--fg-2);
+  font-size: var(--fs-13);
+  cursor: pointer;
+  transition: color var(--t-fast) ease;
+}
+.cu-tabs button:hover { color: var(--fg); }
+.cu-tabs button.on { color: var(--fg); font-weight: 600; }
+.cu-tabs button svg { flex: none; }
+
+.cu-pane { display: flex; flex-direction: column; gap: var(--space-3, 12px); min-width: 0; animation: cu-fade 220ms var(--ease-out); }
+
+/* The large picture of the choice, or the monitors as they stand on the desk. */
+.cu-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--cu-well);
+  animation: cu-fade 240ms var(--ease-out);
+}
+.cu-stage .cu-thumb.large { width: 100%; max-height: 220px; aspect-ratio: 16 / 9; border-radius: 0; background: var(--surface-3); }
+.cu-stage .cu-thumb.large img { object-fit: contain; object-position: center; filter: drop-shadow(0 8px 20px rgba(0, 0, 0, 0.35)); }
+/* The same picture blurred behind it fills the bars a window of another shape leaves at the sides. */
+.cu-stage .cu-thumb.large img.cu-thumb-backdrop { object-fit: cover; filter: blur(22px) saturate(1.2); }
+.cu-stage .cu-thumb.large.ready img.cu-thumb-backdrop { opacity: 0.45; }
+.cu-stage-caption { display: flex; align-items: baseline; gap: 8px; min-width: 0; padding: 8px 12px; font-size: var(--fs-12); color: var(--fg-3); border-top: 1px solid var(--line); }
+.cu-stage-caption b { color: var(--fg); font-size: var(--fs-13); font-weight: 600; min-width: 0; }
+.cu-stage.empty { flex-direction: row; align-items: center; justify-content: center; gap: 10px; padding: 18px 12px; color: var(--fg-3); font-size: var(--fs-13); border-style: dashed; background: transparent; }
+.cu-stage-glyph { display: inline-grid; place-items: center; width: var(--ctl-h); height: var(--ctl-h); border-radius: var(--radius-sm); background: var(--cu-well); color: var(--fg-2); }
+.cu-stage.map {
+  align-items: center;
+  gap: 10px;
+  padding: 16px 14px 12px;
+  background:
+    radial-gradient(120% 80% at 50% 0%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 70%),
+    var(--cu-well);
+}
+.cu-stage.map .cu-stage-caption { border: 0; padding: 0; justify-content: center; font-size: var(--fs-12); color: var(--fg-2); }
+
+.cu-map { position: relative; margin: 0 auto; max-width: 100%; }
+.cu-map-tile { position: absolute; display: block; padding: 0; margin: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; container-type: size; }
+button.cu-map-tile { cursor: pointer; }
+.cu-map-tile .cu-thumb {
+  position: absolute;
+  inset: 3px;
+  aspect-ratio: auto;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 1px var(--line-strong), 0 4px 14px rgba(0, 0, 0, 0.22);
+  transition: box-shadow 200ms var(--ease-out), opacity 200ms ease, transform 200ms var(--ease-out);
+}
+button.cu-map-tile:hover .cu-thumb { transform: translateY(-1px); }
+.cu-map-tile.on .cu-thumb { box-shadow: 0 0 0 2px var(--accent), 0 0 0 6px var(--cu-glow), 0 6px 18px rgba(0, 0, 0, 0.26); }
+.cu-map:has(button.cu-map-tile.on) button.cu-map-tile:not(.on) .cu-thumb { opacity: 0.6; }
+.cu-map-label {
+  position: absolute;
+  left: 9px;
+  bottom: 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 18px);
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: rgba(10, 10, 12, 0.62);
+  color: #fff;
+  font-size: var(--fs-12);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+.cu-map-label b { font-weight: 600; min-width: 0; }
+.cu-map-label .cu-badge { background: rgba(255, 255, 255, 0.18); color: #fff; }
+/* On a small tile the name matters more than the badge; the caption under the map still says it. */
+@container (max-width: 200px) { .cu-map-label .cu-badge { display: none; } }
+
+/* The cards: a grid in the sheet, one scrolling row in Quick Chat. */
+.cu-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(156px, 1fr)); gap: 10px; min-width: 0; }
+.cu-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--cu-well);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease, box-shadow 200ms var(--ease-out), transform 200ms var(--ease-out), background-color 160ms ease;
+  animation: cu-rise 280ms var(--ease-out) both;
+  animation-delay: calc(var(--n, 0) * 28ms);
+}
+.cu-card:hover:not(:disabled) { border-color: var(--line-strong); transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16); }
+.cu-card:active:not(:disabled) { transform: translateY(0) scale(0.99); }
+.cu-card.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 8px 22px var(--cu-glow); }
+.cu-card.off { opacity: 0.55; cursor: not-allowed; }
+.cu-card.off .cu-card-sub { color: var(--warn); }
+.cu-card.ghost { pointer-events: none; }
+.cu-card-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: 0 3px 2px; }
+.cu-card-text b { font-size: var(--fs-13); font-weight: 500; }
+.cu-card-sub { font-size: var(--fs-12); color: var(--fg-3); }
+.cu-line { display: block; height: 10px; width: 80%; margin: 3px 0; border-radius: 4px; background: var(--surface-3); }
+.cu-line.short { width: 50%; }
+
+.cu-thumb {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  aspect-ratio: 16 / 10;
+  border-radius: calc(var(--radius-md) - 5px);
+  background: var(--surface-3);
+}
+.cu-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: top center; opacity: 0; transform: scale(1.015); transition: opacity 260ms ease, transform 320ms var(--ease-out); }
+.cu-thumb.ready img { opacity: 1; transform: none; }
+.cu-shimmer {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 25%, color-mix(in srgb, var(--fg) 8%, transparent) 50%, transparent 75%) var(--surface-3);
+  background-size: 220% 100%;
+  animation: cu-shimmer 1.4s linear infinite;
+}
+.cu-thumb-glyph { position: absolute; inset: 0; display: grid; place-items: center; color: var(--fg-3); }
+
+.cu-check {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  animation: cu-pop 220ms var(--ease-out);
+}
+.cu-badge { display: inline-flex; align-items: center; flex: none; padding: 1px 6px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); font-size: var(--fs-11); font-weight: 600; }
+
+.cu-empty { grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 18px 12px; color: var(--fg-3); font-size: var(--fs-13); border: 1px dashed var(--line-strong); border-radius: var(--radius-md); }
+.cu-warn { display: flex; align-items: flex-start; gap: 8px; align-self: stretch; padding: 8px 10px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--warn) 10%, transparent); color: var(--warn); font-size: var(--fs-12); }
+.cu-warn svg { flex: none; margin-top: 1px; }
+
+/* How long: presets as pills, and a field of its own for any other number of minutes. */
+.cu-duration { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.cu-label { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-2); font-size: var(--fs-13); }
+.cu-pills { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.cu-pill {
+  height: var(--chip-h);
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--fg-2);
+  font-size: var(--fs-13);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+.cu-pill:hover { background: var(--cu-well); color: var(--fg); }
+.cu-pill.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--fg); font-weight: 600; }
+.cu-custom { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-3); font-size: var(--fs-12); animation: cu-rise 200ms var(--ease-out); }
+.cu-custom input {
+  width: 68px;
+  height: var(--chip-h);
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  background: var(--cu-well);
+  color: var(--fg);
+  font-size: var(--fs-13);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.cu-custom.invalid input { border-color: var(--bad); }
+.cu-bound { font-size: var(--fs-12); color: var(--bad); }
+
+.cu-actions { display: flex; align-items: center; gap: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.cu-summary { flex: 1; min-width: 0; color: var(--fg-3); font-size: var(--fs-12); }
+.cu-cta { flex: none; height: var(--ctl-h-lg); gap: 8px; padding: 0 18px; border-radius: var(--radius-pill); font-weight: 600; transition: transform 160ms var(--ease-out), opacity 160ms ease, box-shadow 200ms ease; }
+.cu-cta:not(:disabled):hover { box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22); }
+.cu-cta:not(:disabled):active { transform: scale(0.98); }
+
+/* Compact: Quick Chat's window is short, so no large picture and the cards scroll sideways. */
+.cu-picker.compact { gap: 8px; }
+/* Quick Chat's window is narrower than a desktop's breakpoint, so the phone's stacked tab labels are
+   undone here: the window is driven with a mouse, and the row must stay one line high. */
+.cu-picker.compact .cu-tabs button { flex-direction: row; gap: 6px; height: var(--ctl-h-sm); font-size: var(--fs-12); }
+.cu-picker.compact .cu-pane { gap: 8px; }
+.cu-picker.compact .cu-cards { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 140px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; padding: 2px 2px 6px; scrollbar-width: thin; }
+.cu-picker.compact .cu-card { scroll-snap-align: start; padding: 5px; }
+.cu-picker.compact .cu-check { top: 8px; right: 8px; }
+.cu-picker.compact .cu-stage.map { padding: 10px; gap: 8px; }
+.cu-picker.compact .cu-empty { padding: 12px; }
+
+@keyframes cu-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes cu-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes cu-pop { from { opacity: 0; transform: scale(0.5); } to { opacity: 1; transform: none; } }
+@keyframes cu-shimmer { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+
+@media (max-width: 1023px) {
+  .cu-stage .cu-thumb.large { max-height: 150px; }
+  /* The permission rows: two buttons beside a two-line label ran over it on a phone. */
+  .computer-permissions .computer-row { flex-wrap: wrap; row-gap: 6px; padding-block: 8px; }
+  .computer-permissions .computer-row-main { flex-basis: calc(100% - 24px); }
+  .cu-tabs button { flex-direction: column; gap: 2px; font-size: var(--fs-12); }
+  .cu-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cu-actions { flex-direction: column; align-items: stretch; }
+  .cu-cta { justify-content: center; }
+  .cu-summary { text-align: center; }
+}

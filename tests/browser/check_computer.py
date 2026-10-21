@@ -3,10 +3,12 @@
 The unit tests pin the host's routes and the component's states. What only a browser shows is the
 whole flow on a drawn page: the header's button opens the control; on macOS it lists Screen
 Recording and Accessibility with their state, Ask and the System Settings link, and says that the
-grants are lost on every update; one window is chosen and control granted to this conversation; the
+grants are lost on every update; the scope picker shows a live picture on every window's card and a
+lock on the protected one, and its Monitor tab draws both monitors of the desk, the primary marked,
+one of them chosen with its resolution; one window is chosen and control granted to this conversation; the
 banner above the composer says the agent is controlling the computer, with the time left; the
 operator's hand pausing the agent brings Resume; Stop ends it and the banner goes. On a phone the
-control is a tile of the ⋮ sheet and the banner fits the screen. On a server (the shared stub's
+control is a tile of the ⋮ sheet, the banner fits the screen and so does the picker. On a server (the shared stub's
 default) nothing of it is drawn. In English and Russian.
 
     cd miniapp && npm run build
@@ -14,7 +16,8 @@ default) nothing of it is drawn. In English and Russian.
     python3 tests/browser/serve_app.py 8163 /tmp/app-root &
     APP_URL=http://127.0.0.1:8163/app python3 tests/browser/check_computer.py
 
-``SHOTS=<dir>`` also writes screenshots of the control and the banner there. Exit status is the
+``SHOTS=<dir>`` also writes screenshots of the control, each tab of the picker (dark and light) and
+the banner there. Exit status is the
 number of failed checks.
 """
 from __future__ import annotations
@@ -35,10 +38,10 @@ CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 SHOTS = os.environ.get("SHOTS", "")
 CHAT = "chat-1"
 WORDS = {
-    "en": {"button": "Computer", "title": "Control of this computer", "grant": "Give control for 10 min", "preset": "10 min", "banner": "The agent is controlling your computer",
+    "en": {"monitor": "Monitor", "window": "Window", "desktop": "Whole desktop", "primary": "Primary", "button": "Computer", "title": "Control of this computer", "grant": "Give control for 10 min", "preset": "10 min", "banner": "The agent is controlling your computer",
            "paused": "The agent is paused", "resume": "Resume", "stop": "Stop", "denied": "Not granted", "granted": "Granted", "open": "Open System Settings",
            "adhoc": "macOS forgets these permissions after every update", "left": "min left"},
-    "ru": {"button": "Компьютер", "title": "Управление этим компьютером", "grant": "Дать управление на 10 мин", "preset": "10 мин", "banner": "Агент управляет вашим компьютером",
+    "ru": {"monitor": "Монитор", "window": "Окно", "desktop": "Рабочий стол", "primary": "Основной", "button": "Компьютер", "title": "Управление этим компьютером", "grant": "Дать управление на 10 мин", "preset": "10 мин", "banner": "Агент управляет вашим компьютером",
            "paused": "Агент на паузе", "resume": "Продолжить", "stop": "Остановить", "denied": "Не разрешено", "granted": "Разрешено", "open": "Открыть Системные настройки",
            "adhoc": "macOS забывает эти разрешения после каждого обновления", "left": "осталось"},
 }
@@ -80,11 +83,8 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
     rel = path[path.index("/api/"):]
     if rel.endswith("/stream"):
         return route.fulfill(status=200, content_type="text/event-stream", body="event: hello\ndata: {}\n\n")
-    if HOST.native and rel.startswith("/api/computer"):
-        body = json.loads(req.post_data) if req.post_data else None
-        answered = HOST.desk.answer(req.method, rel, body)
-        if answered is not None:
-            return route.fulfill(status=answered[0], content_type="application/json", body=json.dumps(answered[1]))
+    if HOST.native and HOST.desk.fulfil(route):
+        return
     reply: object
     if req.method == "GET" and rel == "/api/auth/me":
         reply = {"user_id": 1, "via": "token"}
@@ -124,17 +124,17 @@ def overflow(page: Page, root: str) -> list[str]:
     )
 
 
-def open_page(browser, lang: str, phone: bool, native: bool = True):  # type: ignore[no-untyped-def]
+def open_page(browser, lang: str, phone: bool, native: bool = True, scheme: str = "dark"):  # type: ignore[no-untyped-def]
     global HOST
     HOST = Host(lang, native=native)
     viewport = {"width": 390, "height": 844} if phone else {"width": 1440, "height": 900}
-    context = browser.new_context(viewport=viewport, color_scheme="dark", is_mobile=phone, has_touch=phone, device_scale_factor=2 if phone else 1)
+    context = browser.new_context(viewport=viewport, color_scheme=scheme, is_mobile=phone, has_touch=phone, device_scale_factor=2 if phone else 1)
     context.add_init_script("try { localStorage.setItem('daedalus.session.panel', '0'); } catch (e) {}")
     page = context.new_page()
     errors: list[str] = []
     page.on("pageerror", lambda error: errors.append(str(error)))
     page.route("**/api/**", stub)
-    page.goto(f"{BASE}/agents/{CHAT}?token=t&scheme=dark&lang={lang}")
+    page.goto(f"{BASE}/agents/{CHAT}?token=t&scheme={scheme}&lang={lang}")
     page.wait_for_selector(".composer textarea", timeout=15000)
     return context, page, errors
 
@@ -181,14 +181,47 @@ def run_desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignor
     if ("permissions", {"which": "screen"}) not in HOST.desk.posts:
         say(f"Ask did not ask for Screen Recording ({HOST.desk.posts})")
 
+    # Every window's card shows its picture once it is on screen; the protected one shows a lock.
+    try:
+        page.wait_for_function("document.querySelectorAll('.computer-sheet .cu-card .cu-thumb.ready img').length >= 3", timeout=6000)
+    except Exception:  # noqa: BLE001 - reported
+        say(f"the window cards show no pictures ({sheet.locator('.cu-card .cu-thumb.ready').count()} ready)")
+    vault = sheet.locator(".cu-card[data-value='16'] .cu-thumb")
+    if vault.get_attribute("data-preview") != "protected":
+        say(f"the protected window's card is not shown as protected ({vault.get_attribute('data-preview')!r})")
+    if not any(p.startswith("window=10") for p in HOST.desk.previews):
+        say(f"no picture of notes.txt was asked for ({HOST.desk.previews[:6]})")
+
+    # The Monitor tab: both monitors on the map, the primary marked; choosing one names its resolution.
+    sheet.locator(".cu-tabs button", has_text=words["monitor"]).click()
+    tiles = sheet.locator("button.cu-map-tile")
+    if tiles.count() != 2:
+        say(f"the Monitor tab shows {tiles.count()} monitors, not 2")
+    elif words["primary"] not in tiles.nth(0).inner_text():
+        say(f"the first monitor is not marked primary ({tiles.nth(0).inner_text()!r})")
+    else:
+        tiles.nth(1).click()
+        caption = sheet.locator(".cu-stage-caption").inner_text()
+        if "3840 × 2160" not in caption:
+            say(f"the chosen monitor's caption does not give its resolution ({caption!r})")
+        try:
+            page.wait_for_function("document.querySelectorAll('.computer-sheet .cu-map-tile .cu-thumb.ready img').length == 2", timeout=6000)
+        except Exception:  # noqa: BLE001 - reported
+            say("the monitors on the map show no pictures")
+        if tiles.nth(1).get_attribute("aria-checked") != "true":
+            say("the chosen monitor is not marked chosen")
+    sheet.locator(".cu-tabs button", has_text=words["window"]).click()
+
     # Grant one window for ten minutes.
-    sheet.locator(".segmented button", has_text=words["preset"]).first.click()
-    row = sheet.locator(".computer-row", has_text="notes.txt")
-    if not row.count():
-        say("the window list does not show notes.txt")
+    sheet.locator(".cu-pill", has_text=words["preset"]).first.click()
+    row = sheet.locator(".cu-card[data-value='10']")
+    if not row.count() or "notes.txt" not in row.inner_text():
+        say("the window cards do not show notes.txt")
         context.close()
         return
-    row.locator("input[type=radio]").check()
+    row.click()
+    if row.get_attribute("aria-checked") != "true":
+        say("the chosen window's card is not marked chosen")
     off = overflow(page, ".computer-sheet")
     if off:
         say(f"the control runs off the side: {off}")
@@ -285,6 +318,42 @@ def run_phone(browser, lang: str, problems: list[str]) -> None:  # type: ignore[
     context.close()
 
 
+def run_picker(browser, lang: str, phone: bool, scheme: str, problems: list[str]) -> None:  # type: ignore[no-untyped-def]
+    """The picker alone, tab by tab: nothing runs off the side, and with SHOTS a picture of each."""
+    where = f"{lang} {'390px' if phone else '1440px'} {scheme}"
+    say = lambda text: problems.append(f"{where}: {text}")  # noqa: E731
+    context, page, errors = open_page(browser, lang, phone, scheme=scheme)
+    try:
+        if phone:
+            page.locator(".ph-ib[aria-haspopup=menu]").last.click()
+            page.locator(".ph-session-menu [data-tile=computer]").click()
+        else:
+            page.locator(".chat-head .computer-button").click()
+        sheet = page.locator(".computer-sheet")
+        sheet.wait_for(timeout=5000)
+    except Exception:  # noqa: BLE001 - reported
+        say("the control did not open")
+        context.close()
+        return
+    stem = f"{SHOTS}/picker-{'phone' if phone else 'wide'}-{lang}-{scheme}"
+    sheet.locator(".cu-card[data-value='14']").click()
+    page.wait_for_timeout(900)
+    for tab in ("window", "display", "desktop"):
+        if tab != "window":
+            sheet.locator(f".cu-tabs button[data-tab={tab}]").click()
+            if tab == "display":
+                sheet.locator("button.cu-map-tile").nth(1).click()
+            page.wait_for_timeout(900)
+        off = overflow(page, ".computer-sheet")
+        if off:
+            say(f"the {tab} tab runs off the side: {off}")
+        if SHOTS:
+            sheet.screenshot(path=f"{stem}-{tab}.png")
+    if errors:
+        say(f"page errors: {errors[:3]}")
+    context.close()
+
+
 def run_server(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-def]
     context, page, errors = open_page(browser, "en", False, native=False)
     page.wait_for_timeout(800)
@@ -303,6 +372,10 @@ def main() -> int:
         for lang in ("en", "ru"):
             run_desktop(browser, lang, problems)
             run_phone(browser, lang, problems)
+            run_picker(browser, lang, False, "dark", problems)
+            run_picker(browser, lang, True, "dark", problems)
+        run_picker(browser, "en", False, "light", problems)
+        run_picker(browser, "ru", True, "light", problems)
         run_server(browser, problems)
         browser.close()
     for problem in problems:
