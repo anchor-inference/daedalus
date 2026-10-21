@@ -19,6 +19,7 @@ import { screenTitle } from "./shell";
 import { useQuery } from "./store";
 import { useStreamUp } from "./events";
 import { LangPicker } from "./ui/components";
+import { KindMark, sessionKind } from "./chatkind";
 import { BottomSheet, Drawer, IconButton, NewChatPill, SegmentedControl, SheetRow, closeDrawer, navigateFromDrawer, useDrawerOpen } from "./ui/phone";
 
 /** Where Chats lives: the agents screen with its list open, since /app/agents/<id> is a session. */
@@ -154,6 +155,7 @@ export function AppDrawer({ mode, nav: layout, waiting, selfdev, projects, onPro
                 <button key={f.key} type="button" className={`ph-drow ${route.session === s.id ? "on" : ""}`} data-pinned="" data-session={s.id} onClick={() => navigateFromDrawer(sessionPath(s.id))}>
                   <span className={`ph-dot ${s.status}`} aria-hidden />
                   <span className="ph-drow-t">{agentName(s)}</span>
+                  <KindMark kind={sessionKind(s)} />
                   <span className="ph-drow-tm">{relTime(s.last_message_at)}</span>
                 </button>
               ) : (
@@ -186,6 +188,7 @@ export function AppDrawer({ mode, nav: layout, waiting, selfdev, projects, onPro
               <button key={s.id} type="button" className={`ph-drow ${route.session === s.id ? "on" : ""}`} data-session={s.id} onClick={() => navigateFromDrawer(sessionPath(s.id))}>
                 <span className={`ph-dot ${s.status}`} aria-hidden />
                 <span className="ph-drow-t">{agentName(s)}</span>
+                <KindMark kind={sessionKind(s)} />
                 <span className="ph-drow-tm">{relTime(s.last_message_at)}</span>
               </button>
             ))}

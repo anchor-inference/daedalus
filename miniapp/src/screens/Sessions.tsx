@@ -44,6 +44,7 @@ import { plural, t } from "../i18n";
 import { useReveal } from "../reveal";
 import { pinCommand, setPinned } from "../pins";
 import { HostMark, RunEnv, useRunOn } from "../runon";
+import { KindTabs, byTab, kindIcon, sessionKind, tabCounts, useKindTab } from "../chatkind";
 
 type SearchList = SessionList & { semantic: boolean; reason: string; partial: boolean; indexing: boolean };
 type View = "all" | "attention" | "working" | "loops" | "archive";
@@ -60,6 +61,9 @@ function typing(target: EventTarget | null): boolean {
 
 export function SessionsScreen({ onOpen, toast, current, project = "", projects = [], onProjects, onClearProject }: { onOpen: (id: string) => void; toast: (t: string) => void; current?: string; project?: string; projects?: Project[]; onProjects?: () => void; onClearProject?: () => void }) {
   const [view, setView] = useState<View>("all");
+  // Which kind of chat the column shows (chatkind.tsx): remembered in this browser, and the mode New
+  // chat starts in. A search looks through every kind, the way it looks past the status chips.
+  const [tab, setTab] = useKindTab();
   // Loops is a cut of the whole list the server has no view for; the chip filters it here.
   const serverView = view === "loops" ? "all" : view;
   const listUrl = `/api/sessions?view=${serverView}`;
@@ -125,12 +129,14 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
   // A row a later page brought that has since moved up into the first page is drawn once.
   const raw = searching ? results : data ? { ...data, sessions: [...data.sessions, ...extra.filter((row) => !data.sessions.some((first) => first.id === row.id))], next_cursor: next } : data;
   const listing = useMemo(() => (raw ? agentsListing(raw) : raw), [raw]);
-  const sessions = listing?.sessions ?? [];
+  const kindShown = searching ? "all" : tab;
+  const sessions = useMemo(() => byTab(listing?.sessions ?? [], kindShown), [listing, kindShown]);
   const arranged = useMemo(
     () => arrange(sessions, listing?.projects ?? [], { project, results: searching, filter: view === "loops" ? "loops" : "all" }),
-    [listing, project, searching, view],
+    [sessions, listing, project, searching, view],
   );
-  const filtered = searching || view !== "all";
+  // A kind tab is a filter like a status chip: a project is listed while it holds such a chat.
+  const filtered = searching || view !== "all" || kindShown !== "all";
   // A chat's own project by its id, for "Make a project" on the chat's row: the day groups draw rows,
   // and a row has no other way to the project it would become.
   const chatProjects = useMemo(() => new Map(arranged.folders.filter((f) => f.chat).map((f) => [f.key, f.project])), [arranged]);
@@ -142,10 +148,20 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
       all: top.length,
       attention: top.filter((s) => s.needs_attention || s.status === "waiting").length,
       working: top.filter((s) => kindOf(s, false) === "working").length,
+      kinds: tabCounts(top),
     };
   }, [everything.data, project]);
 
   const list = useRef<HTMLDivElement>(null);
+  // The rows sliding in when the tab changes say the list was replaced, not scrolled; skipped for a
+  // reader who asked for less motion, and where the browser has no animations (the tests' DOM).
+  const firstTab = useRef(true);
+  useEffect(() => {
+    if (firstTab.current) { firstTab.current = false; return; }
+    const el = list.current;
+    if (!el || typeof el.animate !== "function" || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    el.animate([{ opacity: 0.25, transform: "translateY(6px)" }, { opacity: 1, transform: "none" }], { duration: 200, easing: "cubic-bezier(.2,.7,.2,1)" });
+  }, [tab]);
   // Past the first page the list goes on by itself: the "More" button loads the next page as soon as
   // it scrolls into sight, and stays a button for a keyboard and for a failed page.
   const more = useRef<HTMLButtonElement>(null);
@@ -259,6 +275,7 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
             ? <button type="button" className="sb-clear" onClick={() => { setQuery(""); searchRef.current?.focus(); }} aria-label={t("ph.search.clear")} title={t("ph.search.clear")}><Icon name="close" size={14} /></button>
             : <kbd title={t("side.search.key")}>/</kbd>}
         </label>
+        {!searching && <KindTabs tab={tab} onChange={setTab} counts={everything.data ? counts.kinds : undefined} className="sb-kinds" />}
         {!searching && (
           <div className="sb-chips" role="group" aria-label={t("agents.filter.label")}>
             {chip("all", t("agents.filter.all"), everything.data ? counts.all : undefined)}
@@ -290,7 +307,13 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
             <div>{lens ? t("agents.empty.project.sub", { root: projectPath(lens) }) : t("agents.empty.sub")}</div>
           </div>
         )}
-        {((results && !pending && arranged.shown === 0) || (!searching && data && filtered && arranged.shown === 0)) && <div className="empty">{t("common.nothing")}</div>}
+        {!searching && data && kindShown !== "all" && view === "all" && arranged.shown === 0 ? (
+          <div className="empty sb-kind-empty" data-kind-empty={kindShown}>
+            {kindIcon(kindShown) && <span className={`sb-kind-empty-icon kind-${kindShown}`}><Icon name={kindIcon(kindShown)!} size={18} /></span>}
+            <b>{t(`kind.empty.${kindShown}`)}</b>
+            {kindShown !== "chat" && <div>{t(`kind.empty.${kindShown}.sub`)}</div>}
+          </div>
+        ) : ((results && !pending && arranged.shown === 0) || (!searching && data && filtered && arranged.shown === 0)) && <div className="empty">{t("common.nothing")}</div>}
         {pinnedCount > 0 && (
           <>
             <div className="sb-sec first sb-pinsec"><Icon name="pushpin" size={12} /><span>{t("side.pinned")}</span><span className="n num">{pinnedCount}</span></div>
@@ -593,7 +616,7 @@ type RowProps = {
  *  run that finishes unseen changes nothing else a row shows. */
 function sameRow(a: RowProps, b: RowProps): boolean {
   const l = a.row.s, r = b.row.s;
-  if (l.id !== r.id || l.title !== r.title || l.status !== r.status || !!l.unread_result !== !!r.unread_result || l.last_message_at !== r.last_message_at || l.model !== r.model || l.env !== r.env || !!l.archived !== !!r.archived) return false;
+  if (l.id !== r.id || l.title !== r.title || l.status !== r.status || !!l.unread_result !== !!r.unread_result || l.last_message_at !== r.last_message_at || l.model !== r.model || l.env !== r.env || !!l.archived !== !!r.archived || l.kind !== r.kind) return false;
   if ((l.terminals ?? 0) !== (r.terminals ?? 0) || l.match?.snippet !== r.match?.snippet || l.project_id !== r.project_id) return false;
   if (a.projectName !== b.projectName || a.onNewIn !== b.onNewIn || a.onOpen !== b.onOpen) return false;
   if ((a.current === l.id || a.row.kids.some((k) => k.id === a.current)) !== (b.current === r.id || b.row.kids.some((k) => k.id === b.current))) return false;
@@ -628,7 +651,12 @@ const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, proj
   const unread = !!s.unread_result;
   const state = rowState(s, kids);
   const imported = importedHarness(s);
-  const icon: IconName = s.archived ? "archive" : s.metadata?.loop ? "loop" : fork || s.metadata?.forked_from ? "fork" : system ? "mic" : "bots";
+  // A computer or Chrome chat says so on its plate, where a loop says it is a loop: the mark that lets
+  // the mixed list of the All tab, or a search, be read without opening the chat.
+  const kind = sessionKind(s);
+  const icon: IconName = s.archived ? "archive" : s.metadata?.loop ? "loop" : kindIcon(kind) ?? (fork || s.metadata?.forked_from ? "fork" : system ? "mic" : "bots");
+  const kindClass = kind === "chat" ? "" : ` kind-${kind}`;
+  const kindTitle = kind === "chat" ? undefined : t(`kind.mark.${kind}`);
   const open = () => onOpen(s.id);
   const beside = () => {
     const route = parse();
@@ -678,7 +706,7 @@ const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, proj
       {kids.length ? (
         // The left of a leader's row folds its helpers: the plate turns into the disclosure, with
         // their number on it, so the row says it has them without a word in its meta line.
-        <button type="button" className={`sb-plate sb-subs ${subsOpen ? "open" : ""}`} aria-expanded={!!subsOpen}
+        <button type="button" className={`sb-plate sb-subs ${subsOpen ? "open" : ""}${kindClass}`} aria-expanded={!!subsOpen}
           aria-label={t(subsOpen ? "side.subs.hide" : "side.subs.show", { name: agentName(s) })} title={t(subsOpen ? "side.subs.hide" : "side.subs.show", { name: agentName(s) })}
           onClick={(e) => { e.stopPropagation(); toggleSubagents(s.id); }} onKeyDown={(e) => e.stopPropagation()}>
           <span className="sb-subs-icon"><Icon name={icon} size={nested ? 12 : 14} /></span>
@@ -687,7 +715,7 @@ const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, proj
           {state && <span className={`sb-st ${state}`} />}{imported && <PlateMark harness={imported} />}
         </button>
       ) : (
-        <span className="sb-plate"><Icon name={icon} size={nested ? 12 : 14} />{state && <span className={`sb-st ${state}`} />}{imported && <PlateMark harness={imported} />}</span>
+        <span className={`sb-plate${kindClass}`} data-kind={kind === "chat" ? undefined : kind} title={kindTitle} role={kindTitle ? "img" : undefined} aria-label={kindTitle}><Icon name={icon} size={nested ? 12 : 14} />{state && <span className={`sb-st ${state}`} />}{imported && <PlateMark harness={imported} />}</span>
       )}
       <span className="sb-main">
         <span className="sb-l1">

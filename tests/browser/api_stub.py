@@ -825,6 +825,25 @@ def meeting_job(session_id: str, status: str) -> dict:
     }
 
 
+SESSION_KINDS = ("chat", "computer", "chrome")
+CREATED_SESSIONS: list[dict] = []
+"""Every ``POST /api/sessions`` answered by ``create_session``, in order, with the body as sent: a check
+of New chat reads the kind the app asked for here."""
+KIND_CHANGES: list[tuple[str, str]] = []
+"""Every ``POST /api/sessions/{id}/kind`` answered here, as ``(session id, kind)``."""
+
+
+def create_session(body: object, id_: str = "9a8b7c6d5e4f") -> tuple[int, dict]:
+    """``POST /api/sessions`` as the host answers it: the new session's id, with its kind. A kind the
+    host does not know is refused as the host refuses it, so a typo in the app fails the check."""
+    sent = body if isinstance(body, dict) else {}
+    kind = sent.get("kind") or "chat"
+    if kind not in SESSION_KINDS:
+        return 422, {"detail": f"unknown session kind: {kind}"}
+    CREATED_SESSIONS.append(dict(sent))
+    return 200, {"id": id_, "kind": kind}
+
+
 def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str, str | bytes] | None:
     """The answer every harness gives the same way: ``(status, content type, body)``, or ``None``.
 
@@ -838,6 +857,16 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     if method.upper() == "GET" and path == EVENTS:
         return 200, "text/event-stream", event_stream_hello()
     parts = path.split("/")
+    if path == "/api/sessions" and method.upper() == "POST":
+        status, created = create_session(body)
+        return status, "application/json", json.dumps(created)
+    if len(parts) == 5 and parts[2] == "sessions" and parts[4] == "kind" and method.upper() == "POST":
+        # The operator's own change of a chat's kind; a grant or a switch to their Chrome makes it too.
+        kind = (body or {}).get("kind") if isinstance(body, dict) else None
+        if kind not in SESSION_KINDS:
+            return 422, "application/json", json.dumps({"detail": f"unknown session kind: {kind}"})
+        KIND_CHANGES.append((parts[3], str(kind)))
+        return 200, "application/json", json.dumps({"id": parts[3], "kind": kind})
     if len(parts) == 5 and parts[2] == "sessions" and parts[4] == "tasks" and method.upper() == "GET":
         return 200, "application/json", json.dumps(session_tasks(parts[3]))
     if len(parts) == 7 and parts[2] == "sessions" and parts[4] == "tasks" and parts[6] == "stop" and method.upper() == "POST":

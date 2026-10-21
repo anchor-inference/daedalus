@@ -47,6 +47,7 @@ from api_stub import (  # noqa: E402
     Unhandled,
     attached_media,
     attached_route,
+    create_session,
     expect_app,
     file_entries,
     file_search,
@@ -125,23 +126,25 @@ def _team() -> TeamStub:
     return TeamStub({**bakery, "folders": listed}, staff=staff, presets=[{"id": "strong", "label": "Claude Opus 5"}, {"id": "fast", "label": "DeepSeek Flash"}], personas=["builder", "reviewer", "tester"])
 
 
-def session(id_: str, title: str, model: str, *, status: str = "idle", last: str, own: bool = False, meta: dict | None = None, project: str) -> dict:
+def session(id_: str, title: str, model: str, *, status: str = "idle", last: str, own: bool = False, meta: dict | None = None, project: str, kind: str = "chat") -> dict:
     row = next(p for p in PROJECTS if p["id"] == project)
     root = row["folders"][0]["path"]
     path = f"{root}/.agents/{id_}" if own else root
-    return {"id": id_, "title": title, "status": status, "created_at": ago(days=3), "last_message_at": last, "run_id": "run1" if status == "running" else None, "model": model, "workspace": path.rsplit("/", 1)[-1], "workspace_path": path, "workspace_own": own, "metadata": meta or {}, "project_id": project, "project": row["name"]}
+    return {"id": id_, "title": title, "status": status, "created_at": ago(days=3), "last_message_at": last, "run_id": "run1" if status == "running" else None, "model": model, "workspace": path.rsplit("/", 1)[-1], "workspace_path": path, "workspace_own": own, "metadata": meta or {}, "project_id": project, "project": row["name"], "kind": kind}
 
 
 SESSIONS = [
     session(S1, "Bakery site", "Claude Opus 5", status="running", last=ago(seconds=40), project=P1),
-    session(S2, "Bakery site: photos", "Local Qwen3.8", last=ago(minutes=12), project=P1),
+    # The kinds mixed as an operator's list has them: a chat that sorted photos on the operator's own
+    # computer, and one that gathers the digest in their Chrome; the rest are ordinary chats.
+    session(S2, "Bakery site: photos", "Local Qwen3.8", last=ago(minutes=12), project=P1, kind="computer"),
     session(S3, "Support inbox", "GPT-5.6 Luna", last=ago(minutes=52), meta={"loop": LOOP}, project=P3),
     session(S7, "[sub] triage", "GPT-5.6 Luna", last=ago(minutes=53), meta={"subagent_of": S3, "subagent_name": "triage"}, project=P3),
     session(S8, "[sub] reply-drafts", "GPT-5.6 Luna", last=ago(minutes=51), meta={"subagent_of": S3, "subagent_name": "reply-drafts"}, project=P3),
     session(S12, "[sub] link-check", "Local Qwen3.8", status="running", last=ago(seconds=12), meta={"subagent_of": S1, "subagent_name": "link-check", "subagent_task": "Check every link on the site and list the broken ones"}, project=P1),
     session(S13, "[sub] photo-alt", "Claude Opus 5", last=ago(minutes=18), meta={"subagent_of": S1, "subagent_name": "photo-alt", "subagent_keep": True, "subagent_task": "Write alt text for the 24 product photos"}, project=P1),
     session(S14, "[sub] price-audit", "DeepSeek Flash", status="failed", last=ago(hours=2), meta={"subagent_of": S1, "subagent_name": "price-audit", "subagent_task": "Compare the price list with the menu page"}, project=P1),
-    session(S4, "Weekly digest", "DeepSeek Flash", status="waiting", last=ago(minutes=4), project=P4),
+    session(S4, "Weekly digest", "DeepSeek Flash", status="waiting", last=ago(minutes=4), project=P4, kind="chrome"),
     session(S5, "Bakery site (fork @412)", "DeepSeek Flash", last=ago(hours=1), meta={"forked_from": {"session_id": S1, "seq": 412}}, project=P1),
     session(S6, "Expense tracker", "Local Qwen3.8", last=ago(days=1), project=P2),
     # Started by talking: the concierge itself, one agent in the folder they share and one with its own.
@@ -845,6 +848,10 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
     if rel.startswith("/api/mcp/") and fulfil_shared(route):
         # Settings → MCP servers answers its writes with the list as it now stands, like the host.
         return None
+    if request.method == "POST" and rel == "/api/sessions":
+        # New chat: the id of a chat the pictures already have, so the app lands on a drawn page.
+        status, created = create_session(json.loads(request.post_data or "{}"), S6)
+        return respond(route, created, status=status)
     if request.method != "GET":
         return respond(route, {"ok": True})
     if rel == "/api/events" and getattr(stub, "events", ""):
