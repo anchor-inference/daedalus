@@ -144,6 +144,7 @@ from daedalus.stores.provider_holds import (
     resting_providers_in,
     resume_target_in,
 )
+from daedalus.stores.purge import Purge
 from daedalus.stores.sqlite import (
     LENT_KEY,
     LiveControlStore,
@@ -1953,7 +1954,12 @@ class SessionManager:
             for row in runs:
                 await conn.execute("DELETE FROM events WHERE run_id = ?", (row["id"],))
                 await conn.execute("DELETE FROM snapshots WHERE run_id = ?", (row["id"],))
-            await conn.execute("DELETE FROM runs WHERE session_id = ?", (session_id,))
+            # The runs and the session row go through the purge, with every record that references
+            # them: a provider refusal's record refuses a plain DELETE and named its run without a
+            # cascade, so a chat that had once met one could never be deleted, and its deletion
+            # failed only after the hooks above had already acted on it.
+            purge = Purge(conn)
+            await purge.rows("runs", "session_id = ?", (session_id,))
             await conn.execute("DELETE FROM session_messages WHERE session_id = ?", (session_id,))
             # The index points at transcript rows by number; it goes with them, or it answers for rows that are gone.
             await conn.execute("DELETE FROM transcript_fts WHERE rowid IN (SELECT seq FROM transcript WHERE session_id = ?)", (session_id,))
@@ -1966,7 +1972,8 @@ class SessionManager:
             await conn.execute("DELETE FROM checkpoint_retention WHERE session_id = ?", (session_id,))
             await conn.execute("DELETE FROM verifications WHERE session_id = ?", (session_id,))
             await conn.execute("DELETE FROM learning_records WHERE session_id = ?", (session_id,))
-            await conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+            await purge.rows("sessions", "id = ?", (session_id,))
+            await purge.finish()
             project = state.project
             # A chat's scratch project goes with its last chat while it is still ephemeral, whatever
             # its folder is: the installation's own scratch, a host chat's, or a folder the chat was

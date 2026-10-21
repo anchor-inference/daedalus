@@ -2996,7 +2996,17 @@ class Database:
 
         async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
             try:
-                await self.db.conn.execute("ROLLBACK" if exc_type else "COMMIT")
+                if exc_type:
+                    await self.db.conn.execute("ROLLBACK")
+                else:
+                    try:
+                        await self.db.conn.execute("COMMIT")
+                    except BaseException:
+                        # A COMMIT refused by a deferred foreign key leaves the transaction open, and
+                        # the next writer's BEGIN would fail on it for as long as the process lives.
+                        with suppress(Exception):
+                            await self.db.conn.execute("ROLLBACK")
+                        raise
             finally:
                 self.db._lock.release()
 
