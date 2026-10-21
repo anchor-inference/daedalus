@@ -5,8 +5,9 @@ window's app gets window.daedalus.desk. Both bridges are faked here, recording w
 the shell, and the API answers what the companion's contract says. What is checked:
 
 - dictation is offered where the host can transcribe;
-- the companion is the default target: Enter sends the words to POST /api/companion/message, the
-  confirmation line names it, and "Open" asks the shell to show its conversation;
+- a new chat is the default target, companion or not; chosen, the companion takes the words at
+  POST /api/companion/message, the confirmation line names it, and "Open" asks the shell to show
+  its conversation;
 - `$` picks a skill and the message asks for it in words; `@` attaches a conversation, and a message
   to the last chat goes to its own messages route as a follow-up, with the context listed by id;
 - the appshot button asks the shell for a picture, which is previewed and uploaded through the
@@ -16,6 +17,10 @@ the shell, and the API answers what the companion's contract says. What is check
   field; a host without speech recognition is said to be one;
 - Esc closes an open list first and hides the window only then;
 - with GET /api/companion answering 404 the companion is no target at all;
+- the Computer chip unfolds the scope picker with a picture per window; Enter without a choice says
+  what is missing; with one monitor and an hour chosen it creates a chat of kind 'computer', grants
+  that monitor to it for 60 minutes, sends the words and asks the shell to show the chat, the window
+  growing in steps as the picker unfolds;
 - signed out, the page says so and offers the main window; the words follow ?lang=ru;
 - Settings → Desktop app is listed only in the desktop window, records a shortcut from the physical
   key and shows the Wayland note; the app in the main window reports what runs to the tray, does the
@@ -40,7 +45,7 @@ from playwright.sync_api import expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import screenshots  # noqa: E402
-from api_stub import COMPANION, DEFAULT_APP, expect_app  # noqa: E402
+from api_stub import COMPANION, DEFAULT_APP, ComputerStub, expect_app  # noqa: E402
 from screenshots import INBOX_SUMMARY, respond, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -107,11 +112,14 @@ class Api:
         self.no_companion = False
         self.no_asr = False
         self.transcribed = 0
+        self.desk = ComputerStub()
 
     def __call__(self, route) -> None:  # type: ignore[no-untyped-def]
         request = route.request
         path = request.url.split("?", 1)[0]
         rel = path[path.index("/api/"):]
+        if self.desk.fulfil(route):
+            return
         if rel == "/api/sessions" and request.method == "GET":
             return respond(route, SESSIONS)
         if rel == "/api/asr" and self.no_asr:
@@ -161,13 +169,16 @@ def run() -> int:
         page.route("**/api/**", api)
         page.goto(f"{BASE}/quick?lang=en")
         target = page.locator(".quick-target")
-        expect(target).to_contain_text("Daedalus")
+        expect(target).to_contain_text("New chat")
         field = page.locator(".quick-field")
         expect(field).to_be_focused()
         assert calls(page, "resize"), "the page never told the window its height"
         expect(page.locator(".quick-actions .mic")).to_be_visible()
 
-        # Words to the companion.
+        # Words to the companion, once chosen on the chip.
+        target.click()
+        page.get_by_role("option", name="Companion").click()
+        expect(target).to_contain_text("Daedalus")
         field.fill("hello there")
         field.press("Enter")
         expect(page.locator(".quick-status")).to_contain_text("Sent to Daedalus.")
@@ -284,10 +295,10 @@ def run() -> int:
         # Without the companion it is no target.
         api.no_companion = True
         page.reload()
-        expect(page.locator(".quick-target")).to_contain_text("Deploy the site")
+        expect(page.locator(".quick-target")).to_contain_text("New chat")
         page.locator(".quick-target").click()
         expect(page.get_by_role("option", name="Companion")).to_have_count(0)
-        expect(page.get_by_role("option", name="New chat")).to_be_visible()
+        expect(page.get_by_role("option", name="Last chat")).to_be_visible()
         page.get_by_role("option", name="New chat").click()
         page.locator(".quick-field").fill("start something")
         page.locator(".quick-field").press("Enter")
@@ -297,10 +308,59 @@ def run() -> int:
         api.last("/api/sessions/s-new/messages")
         api.no_companion = False
 
+        # Computer mode: the picker unfolds, a monitor and an hour are chosen, and Enter makes a
+        # computer chat, grants it that monitor, sends the words and shows the chat.
+        page.set_viewport_size({"width": 680, "height": 640})
+        page.reload()
+        field = page.locator(".quick-field")
+        mode = page.locator(".quick-mode")
+        expect(mode).to_contain_text("Computer")
+        before = len(calls(page, "resize"))
+        mode.click()
+        expect(mode).to_have_attribute("aria-pressed", "true")
+        expect(page.locator(".quick-computer.open .cu-picker.compact")).to_be_visible()
+        expect(target).to_contain_text("New computer chat")
+        expect(field).to_have_attribute("placeholder", "What should the agent do on the screen?")
+        page.wait_for_function("document.querySelectorAll('.quick .cu-card .cu-thumb.ready img').length >= 3", timeout=6000)
+        page.wait_for_timeout(400)
+        heights = [c[1] for c in calls(page, "resize")[before:]]
+        assert len(set(heights)) >= 3 and max(heights) > heights[0], f"the window did not grow in steps with the picker: {heights}"
+        page.locator(".quick").screenshot(path=str(SHOTS / "quick-computer.png"))
+        field.fill("turn off do not disturb")
+        expect(page.locator(".quick-send")).to_be_disabled()
+        field.press("Enter")
+        expect(page.locator(".quick-status.bad")).to_contain_text("Choose what the agent may control")
+        page.locator(".quick .cu-tabs button[data-tab=display]").click()
+        page.locator(".quick button.cu-map-tile[data-display='2']").click()
+        page.locator(".quick .cu-pill", has_text="1 h").click()
+        page.wait_for_timeout(500)
+        page.locator(".quick").screenshot(path=str(SHOTS / "quick-computer-display.png"))
+        posted = len(api.posts)
+        field.press("Enter")
+        expect(page.locator(".quick-status")).to_contain_text("Sent to New computer chat.")
+        method, created = api.last("/api/sessions")
+        assert method == "POST" and created == {"autotitle": True, "title": "turn off do not disturb", "kind": "computer"}, created
+        grants = [body for action, body in api.desk.posts if action == "grant"]
+        assert grants == [{"session_id": "s-new", "scope": {"kind": "display", "display": "2"}, "minutes": 60}], grants
+        _, sent = api.last("/api/sessions/s-new/messages")
+        assert sent["text"] == "turn off do not disturb" and sent["follow_up"] is True, sent
+        assert [p for _, p, _ in api.posts[posted:]] == ["/api/sessions", "/api/sessions/s-new/messages"], api.posts[posted:]
+        assert calls(page, "open")[-1] == ["open", "/app/agents/s-new"], calls(page, "open")
+        expect(mode).to_have_attribute("aria-pressed", "false")
+        expect(page.locator(".quick-computer")).to_have_count(0)
+        page.set_viewport_size({"width": 680, "height": 420})
+
         # Russian, and signed out.
         page.goto(f"{BASE}/quick?lang=ru")
         expect(page.locator(".quick-field")).to_have_attribute("placeholder", "Спросите что угодно — @ добавит контекст, $ выберет навык")
+        expect(page.locator(".quick-target")).to_contain_text("Новый чат")
         page.screenshot(path=str(SHOTS / "quick-ru.png"))
+        page.set_viewport_size({"width": 680, "height": 640})
+        page.locator(".quick-mode").click()
+        page.wait_for_function("document.querySelectorAll('.quick .cu-card .cu-thumb.ready img').length >= 3", timeout=6000)
+        page.wait_for_timeout(400)
+        page.locator(".quick").screenshot(path=str(SHOTS / "quick-computer-ru.png"))
+        page.set_viewport_size({"width": 680, "height": 420})
         stub.signedout = True  # type: ignore[attr-defined]
         try:
             page.goto(f"{BASE}/quick?lang=en")
@@ -350,7 +410,7 @@ def run() -> int:
         expect(other.locator(".settings-index")).not_to_contain_text("Desktop app")
         plain.close()
         browser.close()
-    print("quick chat: sends to the companion, the last chat and a new one; $ and @; appshot, area and dictation; Esc; settings; tray status")
+    print("quick chat: sends to a new chat by default, the companion and the last chat; computer mode grants and sends; $ and @; appshot, area and dictation; Esc; settings; tray status")
     return 0
 
 

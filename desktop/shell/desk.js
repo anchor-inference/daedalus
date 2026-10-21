@@ -254,10 +254,11 @@ function quickBounds(workArea, width, height) {
   };
 }
 
-// The height Quick Chat may ask for: its box alone up to the box with a list of thumbnails open.
+// The height Quick Chat may ask for: its box alone up to the box with a list of thumbnails or the
+// Computer scope picker open.
 const QUICK_WIDTH = 680;
 const QUICK_MIN_HEIGHT = 96;
-const QUICK_MAX_HEIGHT = 560;
+const QUICK_MAX_HEIGHT = 640;
 
 function quickHeight(asked) {
   const n = Number(asked);

@@ -7,6 +7,13 @@
 // the chip at the top picks where Enter sends. Esc hides the window; the draft stays for next time.
 // The shell's voice shortcut opens the box already dictating, and its area appshot attaches a
 // rectangle dragged on the screen.
+//
+// The Computer chip, offered where this computer can be driven, turns the request into on-screen
+// work: the scope picker opens inline, and Enter starts a new conversation of kind 'computer', gives
+// it control within the chosen window, app, monitor or desktop for the chosen time, sends the words
+// and shows that conversation in the main window, where its banner carries Stop. A grant refused
+// after the conversation was made keeps that conversation for the next try, so a retry does not
+// leave an empty chat behind for every refusal.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, type AsrStatus, type Project, type SessionList, type SkillEntry } from "../api";
@@ -15,6 +22,8 @@ import { t, useLang } from "../i18n";
 import { sessionPath } from "../router";
 import { invalidate, useQuery } from "../store";
 import { errorText } from "../ui";
+import { COMPUTER, refusalText, type ComputerState } from "../computer";
+import { ComputerScopePicker, type ScopeChoice } from "../computerpicker";
 import { MicButton, VoiceBar, VoiceNoteFailed, useVoiceNote } from "../voicebar";
 import { landWords } from "../voicenote";
 import type { AppshotResult, WindowChoice } from "./bridge";
@@ -24,7 +33,9 @@ import {
   composeMessage,
   contextKey,
   contextLabel,
-  defaultTarget,
+  computerGrant,
+  computerSession,
+  DEFAULT_TARGET,
   delivery,
   lastSession,
   mentionChoices,
@@ -69,14 +80,22 @@ export function QuickChat() {
   const [dismissed, setDismissed] = useState<number | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
+  // Computer mode: on, the picker kept mounted until its closing transition ends, and its choice.
+  const [computer, setComputer] = useState(false);
+  const [pickerMounted, setPickerMounted] = useState(false);
+  const [unfolded, setUnfolded] = useState(false);
+  const [choice, setChoice] = useState<ScopeChoice | null>(null);
+  const computerSessionMade = useRef("");
 
   const sessions = useQuery<SessionList>(authed ? "/api/sessions" : null, { staleMs: 5000 });
   const projects = useQuery<Project[]>(authed ? "/api/projects" : null, { staleMs: 15000 });
   const skills = useQuery<SkillEntry[]>(authed ? "/api/skills" : null, { staleMs: 60000 });
   const asr = useQuery<AsrStatus>(authed ? "/api/asr" : null, { staleMs: 60000 });
+  const desktop = useQuery<ComputerState>(authed ? COMPUTER : null, { staleMs: 5000 });
+  const canDrive = !!desktop.data?.native && !!desktop.data.available;
   const list = sessions.data?.sessions ?? [];
   const last = useMemo(() => lastSession(list, companion?.session_id ?? ""), [list, companion]);
-  const shown = target ?? (companion === undefined || sessions.loading ? null : defaultTarget(!!companion, last));
+  const shown: TargetKind = target ?? DEFAULT_TARGET;
 
   useEffect(() => {
     api.get("/api/auth/me").then(() => setAuthed(true)).catch((e) => setAuthed(e instanceof ApiError && (e.status === 401 || e.status === 403) ? false : true));
@@ -127,6 +146,7 @@ export function QuickChat() {
     return quick.onShown(() => {
       setSent(null);
       invalidate("/api/sessions");
+      invalidate(COMPUTER);
       loadCompanion();
       void quick.pending().then(take).catch(() => undefined);
       collectVoice(quick);
@@ -326,6 +346,34 @@ export function QuickChat() {
     });
   }
 
+  // The fold opens a frame after the picker is mounted, so it has a closed height to grow from; it
+  // is unmounted when the closing transition ends, or after it at the latest where motion is off and
+  // no transition runs.
+  useEffect(() => {
+    if (computer) {
+      let second = 0;
+      const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => setUnfolded(true)); });
+      return () => { cancelAnimationFrame(first); cancelAnimationFrame(second); };
+    }
+    setUnfolded(false);
+    const timer = window.setTimeout(() => setPickerMounted(false), 400);
+    return () => window.clearTimeout(timer);
+  }, [computer]);
+
+  // The line asking for a choice goes once one is made.
+  const choiceReady = !!choice?.ready;
+  useEffect(() => {
+    if (choiceReady) setError((now) => (now === t("quick.computer.need") ? "" : now));
+  }, [choiceReady]);
+
+  function toggleComputer() {
+    const next = !computer;
+    if (next) setPickerMounted(true);
+    setComputer(next);
+    setPicker(null);
+    focus();
+  }
+
   function targetLabel(kind: TargetKind): string {
     if (kind === "companion") return companion?.name || t("quick.target.companion");
     if (kind === "last") return last?.title || t("quick.target.last");
@@ -334,7 +382,8 @@ export function QuickChat() {
 
   async function send(override?: string) {
     const words = (override ?? text).trim();
-    if (sending || !shown || (!words && !files.length)) return;
+    if (sending || (!words && !files.length)) return;
+    if (computer) return sendComputer(words);
     const plan = delivery(shown, files.length, companion ?? null, last);
     if (!plan) return setError(t("quick.error.target"));
     const body = composeMessage(words, skill, context);
@@ -350,28 +399,67 @@ export function QuickChat() {
         session = plan.kind === "new"
           ? (await api.post<{ id: string }>("/api/sessions", { autotitle: true, title: words.slice(0, 80) || t("quick.title.appshot"), project_id: projectForNew(context) })).id
           : plan.session;
-        const clientMessageId = crypto.randomUUID();
-        if (files.length) {
-          const form = new FormData();
-          form.append("text", body);
-          form.append("client_message_id", clientMessageId);
-          form.append("follow_up", "true");
-          for (const item of files) form.append("files", item.file, item.file.name);
-          await api.upload(`/api/sessions/${encodeURIComponent(session)}/upload`, form);
-        } else {
-          await api.post(`/api/sessions/${encodeURIComponent(session)}/messages`, { text: body, follow_up: true, client_message_id: clientMessageId });
-        }
+        await post(session, body);
       }
-      for (const item of files) if (item.url) URL.revokeObjectURL(item.url);
-      setText("");
-      setCaret(0);
-      setFiles([]);
-      setContext([]);
-      setSkill(null);
+      cleared();
       setSent({ to, path: session ? sessionPath(session) : "" });
       invalidate("/api/sessions");
     } catch (e) {
       setError(errorText(e));
+    } finally {
+      setSending(false);
+      focus();
+    }
+  }
+
+  async function post(session: string, body: string) {
+    const clientMessageId = crypto.randomUUID();
+    if (files.length) {
+      const form = new FormData();
+      form.append("text", body);
+      form.append("client_message_id", clientMessageId);
+      form.append("follow_up", "true");
+      for (const item of files) form.append("files", item.file, item.file.name);
+      await api.upload(`/api/sessions/${encodeURIComponent(session)}/upload`, form);
+    } else {
+      await api.post(`/api/sessions/${encodeURIComponent(session)}/messages`, { text: body, follow_up: true, client_message_id: clientMessageId });
+    }
+  }
+
+  function cleared() {
+    for (const item of files) if (item.url) URL.revokeObjectURL(item.url);
+    setText("");
+    setCaret(0);
+    setFiles([]);
+    setContext([]);
+    setSkill(null);
+  }
+
+  /** A Computer request: a new conversation of kind 'computer', control given to it, then the words. */
+  async function sendComputer(words: string) {
+    if (!choice?.ready || !choice.scope) return setError(t("quick.computer.need"));
+    const body = composeMessage(words, skill, context);
+    setSending(true);
+    setError("");
+    let stage: "session" | "grant" | "message" = "session";
+    try {
+      const session = computerSessionMade.current || (await api.post<{ id: string }>("/api/sessions", computerSession(words, context))).id;
+      computerSessionMade.current = session;
+      stage = "grant";
+      await api.post(`${COMPUTER}/grant`, computerGrant(session, choice.scope, choice.minutes));
+      stage = "message";
+      await post(session, body);
+      computerSessionMade.current = "";
+      cleared();
+      setComputer(false);
+      const path = sessionPath(session);
+      setSent({ to: t("quick.target.computer"), path });
+      invalidate("/api/sessions");
+      invalidate(COMPUTER);
+      // The agent is about to work on the screen: its conversation, with the banner and Stop, is shown.
+      open(path);
+    } catch (e) {
+      setError(stage === "grant" ? refusalText(e) : errorText(e));
     } finally {
       setSending(false);
       focus();
@@ -396,7 +484,7 @@ export function QuickChat() {
   }
 
   const targets: TargetKind[] = [...(companion ? ["companion" as const] : []), ...(last ? ["last" as const] : []), "new"];
-  const canSend = !!shown && !sending && (!!text.trim() || files.length > 0);
+  const canSend = !sending && (!!text.trim() || files.length > 0) && (!computer || !!choice?.ready);
   const hasBridge = !!bridge();
   const hasRegion = !!bridge()?.region;
 
@@ -404,12 +492,18 @@ export function QuickChat() {
     <div className="quick" ref={root}>
       <div className="quick-top">
         <button type="button" className="quick-target" aria-haspopup="listbox" aria-expanded={picker === "target"} onClick={() => setPicker(picker === "target" ? null : "target")}
-          title={t("quick.target.title")} disabled={!shown}>
-          <Icon name={shown === "companion" ? "bots" : shown === "new" ? "compose" : "inbox"} size={14} />
-          <span className="quick-target-name">{shown ? targetLabel(shown) : t("common.loading")}</span>
-          <Icon name="down" size={12} />
+          title={t("quick.target.title")} disabled={computer}>
+          <Icon name={computer ? "monitor" : shown === "companion" ? "bots" : shown === "new" ? "compose" : "inbox"} size={14} />
+          <span className="quick-target-name">{computer ? t("quick.target.computer") : targetLabel(shown)}</span>
+          {!computer && <Icon name="down" size={12} />}
         </button>
-        {companion?.paused && shown === "companion" && <span className="quick-paused">{t("quick.companion.paused")}</span>}
+        {canDrive && (
+          <button type="button" className={`quick-mode ${computer ? "on" : ""}`} aria-pressed={computer} onClick={toggleComputer} title={t("quick.mode.computer.title")}>
+            <Icon name="monitor" size={14} />
+            <span>{t("quick.mode.computer")}</span>
+          </button>
+        )}
+        {companion?.paused && shown === "companion" && !computer && <span className="quick-paused">{t("quick.companion.paused")}</span>}
         <span className="quick-hint" aria-hidden>{t("quick.hint")}</span>
       </div>
       {picker === "target" && (
@@ -421,6 +515,13 @@ export function QuickChat() {
               {kind !== "new" && <span className="quick-option-sub">{targetLabel(kind)}</span>}
             </button>
           ))}
+        </div>
+      )}
+      {(pickerMounted || computer) && (
+        <div className={`quick-computer ${unfolded ? "open" : ""}`} inert={!computer || undefined}>
+          <div className="quick-computer-inner">
+            <ComputerScopePicker compact busy={sending} onChange={setChoice} />
+          </div>
         </div>
       )}
       {(context.length > 0 || skill || files.length > 0) && (
@@ -458,8 +559,8 @@ export function QuickChat() {
             className="quick-field"
             rows={1}
             value={text}
-            placeholder={t("quick.placeholder")}
-            aria-label={t("quick.placeholder")}
+            placeholder={t(computer ? "quick.computer.placeholder" : "quick.placeholder")}
+            aria-label={t(computer ? "quick.computer.placeholder" : "quick.placeholder")}
             onChange={(e) => edit(e.target.value, e.target.selectionStart ?? e.target.value.length)}
             onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
             onKeyDown={onKeyDown}

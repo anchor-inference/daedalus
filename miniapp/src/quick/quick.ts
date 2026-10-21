@@ -39,10 +39,11 @@ function stamp(value: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** The companion when there is one, else the last conversation, else a new one. */
-export function defaultTarget(companion: boolean, last: SessionSummary | null): TargetKind {
-  return companion ? "companion" : last ? "last" : "new";
-}
+/** Where Enter sends when the operator has not picked: a new conversation. The companion was the
+ *  default once, and a quick question typed over another program then landed in the companion's
+ *  long-running thread, where it was neither found again nor started clean; the companion and the
+ *  last chat stay one press away on the chip. */
+export const DEFAULT_TARGET: TargetKind = "new";
 
 /** The `@word` or `$word` the caret is at the end of, when it starts a word: an address in an email or
  *  a price in a sentence is typed, not a request for a picker. */
@@ -134,6 +135,20 @@ export function delivery(target: TargetKind, files: number, companion: Companion
     return files ? { kind: "upload", session: last.id } : { kind: "message", session: last.id };
   }
   return { kind: "new" };
+}
+
+/** The new conversation a Computer request starts: of kind 'computer', titled by its words, in the
+ *  project `@` named when exactly one was. */
+export function computerSession(words: string, context: ContextItem[]): { autotitle: true; title: string; kind: "computer"; project_id?: string } {
+  const body: { autotitle: true; title: string; kind: "computer"; project_id?: string } = { autotitle: true, title: words.slice(0, 80) || t("quick.target.computer"), kind: "computer" };
+  const project = projectForNew(context);
+  if (project) body.project_id = project;
+  return body;
+}
+
+/** The grant a Computer request makes for its new conversation, in the host's terms. */
+export function computerGrant(session: string, scope: { kind: string; window?: string; app?: string; display?: string }, minutes: number): { session_id: string; scope: typeof scope; minutes: number } {
+  return { session_id: session, scope, minutes };
 }
 
 /** What the desktop's tray shows: agents at work and decisions waiting for the operator. */
