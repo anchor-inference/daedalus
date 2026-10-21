@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Daedalus</title>
+<style>
+  /* The note over the desktop while the agent holds it. A solid window, never a transparent one:
+     without a compositor a transparent window is drawn black. The colours are the border's. */
+  html, body { height: 100%; margin: 0; overflow: hidden; cursor: default; user-select: none; }
+  body { background: #d93a3f; color: #fff; font: 600 13px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
+         display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 12px; box-sizing: border-box; }
+  body.paused { background: #c27c0e; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; flex: none; animation: pulse 1.6s ease-in-out infinite; }
+  body.paused .dot { animation: none; }
+  #text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) { .dot { animation: none; } }
+</style>
+</head>
+<body>
+<span class="dot"></span><span id="text"></span>
+<script>
+  const query = new URLSearchParams(location.search);
+  document.getElementById('text').textContent = query.get('text') || 'Daedalus';
+  if (query.get('paused') === '1') document.body.classList.add('paused');
+</script>
+</body>
+</html>

@@ -909,6 +909,18 @@ whatever the agent held down.
   | `POST /api/computer/permissions` | `{which: screen\|accessibility\|input_monitoring}` | `{which, state, permissions, hint}` |
 
   The protocol behind it is in [`docs/architecture/computer.md`](../docs/architecture/computer.md).
+- **While the agent has the screen** the application shows it on the desktop itself, not only in
+  the app: a red border around every display (amber while your own input has paused the agent), a
+  note at the top of the main display saying how to stop, and **Stop the agent** at the top of the
+  tray's menu. **Ctrl+Alt+Esc** (⌃⌥Esc on a Mac; Ctrl+Alt+Shift+Esc where that is taken, as KDE takes
+  it for xkill) stops the agent from anywhere. The chord is registered only while a lease lasts, so
+  it takes nothing from other programs the rest of the time. These windows ignore the mouse, never
+  take the focus and ask to be left out of screen captures (honoured on Windows 10 2004 and later and
+  on macOS), so the agent's screenshots do not show them. On Linux there is no note, only the border:
+  the X11 daemon finds the window under a point by the stacking order, where an always-on-top note
+  would turn a click aimed beneath it into a refusal. The launcher tells the application about the
+  lease over their stdio link (`{"event":"computer"}`, checked once a second) and carries the Stop
+  the same way (`{"command":"computer-stop"}`), so the application never holds the launcher's token.
 - **macOS permissions.** The daemon needs **Screen Recording** to see and **Accessibility** to act,
   both in System Settings → Privacy & Security. The application is signed ad hoc, and macOS ties
   these grants to the exact build. **Every update loses them**, even though System Settings may

@@ -198,17 +198,25 @@ function trayView(raw, strings) {
 }
 
 // trayTemplate is the tray's menu. Pause appears only when the app reported a companion: an
-// installation without one has nothing to pause, and an item that does nothing is a lie.
-function trayTemplate(view, strings, settings, actions) {
-  const items = [
-    { label: view.summary, enabled: false },
+// installation without one has nothing to pause, and an item that does nothing is a lie. Stop the
+// agent appears only while it holds the screen, first after the summary, where a hurried hand finds
+// it; its chord is shown but registered by computer-main.js, and only while the lease lasts.
+function trayTemplate(view, strings, settings, actions, computer) {
+  const items = [{ label: view.summary, enabled: false }];
+  if (computer && computer.active) {
+    items.push(
+      { label: strings.trayControlling, enabled: false },
+      { label: strings.trayStopAgent, accelerator: computer.chord || undefined, registerAccelerator: false, click: actions.stopComputer },
+    );
+  }
+  items.push(
     { type: 'separator' },
     { label: strings.trayOpen, click: actions.open },
     { label: strings.trayQuickChat, accelerator: settings.quickChat || undefined, registerAccelerator: false, click: actions.quickChat },
     { label: strings.trayAppshot, accelerator: settings.appshot || undefined, registerAccelerator: false, click: actions.appshot },
     { label: strings.trayRegion, accelerator: settings.region || undefined, registerAccelerator: false, click: actions.region },
     { label: strings.trayVoice, accelerator: settings.voice || undefined, registerAccelerator: false, click: actions.voice },
-  ];
+  );
   if (view.status.companion.present) {
     items.push({ type: 'separator' });
     items.push(view.status.companion.paused

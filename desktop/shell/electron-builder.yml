@@ -19,6 +19,8 @@ files:
   - desk.js
   - desk-main.js
   - appshot.js
+  - computer.js
+  - computer-main.js
   - tray/**
   - pet/**
   - pages/**

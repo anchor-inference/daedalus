@@ -126,6 +126,7 @@ async def test_outside_the_native_app_there_is_nothing_to_drive(launcher: Any) -
     api = mount(launcher.state, native=False)
     answer = (await ask(api, "GET", "/api/computer")).json()
     assert answer["native"] is False and answer["available"] is False and "desktop app" in answer["reason"]
+    assert answer["reason_words"] == {"key": "cu.reason.not_native", "vars": {}}
     assert (await ask(api, "POST", "/api/computer/stop", {})).status_code == 503
     assert launcher.fake.seen == []
 
@@ -134,13 +135,13 @@ async def test_without_a_launcher_the_state_says_so(tmp_path: Path) -> None:
     state = tmp_path / "state"
     state.mkdir()
     answer = (await ask(mount(state), "GET", "/api/computer")).json()
-    assert answer == {"native": True, "available": False, "reason": api_computer.NO_LAUNCHER}
+    assert answer == {"native": True, "available": False, "reason": api_computer.NO_LAUNCHER, "reason_words": {"key": "cu.reason.no_launcher", "vars": {}}}
 
 
 async def test_the_launchers_503_is_unavailable_with_its_reason(launcher: Any) -> None:
     launcher.fake.answers[("GET", "/api/computer")] = (503, {"available": False, "reason": "This build carries no desktop daemon."})
     answer = (await ask(mount(launcher.state), "GET", "/api/computer")).json()
-    assert answer == {"native": True, "available": False, "reason": "This build carries no desktop daemon."}
+    assert answer == {"native": True, "available": False, "reason": "This build carries no desktop daemon.", "reason_words": {"key": "cu.reason.no_daemon", "vars": {}}}
 
 
 async def test_the_state_on_macos_carries_the_settings_links_and_no_token(launcher: Any) -> None:
@@ -203,7 +204,8 @@ async def test_a_refusal_reaches_the_app_with_its_explanation(launcher: Any) -> 
     response = await ask(mount(launcher.state), "POST", "/api/computer/grant", {"session_id": "s1", "scope": {"kind": "app", "app": "com.example.daedalus"}, "minutes": 10})
     assert response.status_code == 409
     explanation = refusals.explain(1203, "that app is one the daemon never touches", data)
-    assert response.json() == {"detail": explanation, "error": {"code": 1203, "message": "that app is one the daemon never touches", "data": data, "explanation": explanation}}
+    words = {"key": "cu.refusal.protected", "vars": {}}
+    assert response.json() == {"detail": explanation, "error": {"code": 1203, "message": "that app is one the daemon never touches", "data": data, "explanation": explanation, "words": words}}
 
 
 async def test_revoke_stop_resume_and_permissions_go_through(launcher: Any) -> None:
@@ -231,3 +233,33 @@ async def test_a_launcher_that_lost_its_desktop_midway_is_503_not_a_crash(launch
     launcher.fake.answers[("POST", "/api/computer/stop")] = (503, {"available": False, "reason": "The desktop daemon stopped."})
     response = await ask(mount(launcher.state), "POST", "/api/computer/stop", {})
     assert response.status_code == 503 and response.json()["detail"] == "The desktop daemon stopped."
+
+
+@pytest.mark.parametrize(("code", "data", "key"), [
+    (1200, {"reason": "expired"}, "cu.refusal.no_lease.expired"),
+    (1200, {"reason": "something newer"}, "cu.refusal.no_lease.none"),
+    (1204, {"reason": "lock_screen"}, "cu.refusal.secure.lock_screen"),
+    (1204, None, "cu.refusal.secure.other"),
+    (1205, {"which": "accessibility"}, "cu.refusal.permission.accessibility"),
+    (1206, {"limit": "lease_actions"}, "cu.refusal.rate.actions"),
+    (1206, {"retry_after_ms": 400}, "cu.refusal.rate"),
+    (1101, None, "cu.refusal.human"),
+])
+def test_the_operators_words_pick_the_key_by_code_and_reason(code: int, data: Any, key: str) -> None:
+    assert refusals.words(code, data) == {"key": key, "vars": {}}
+    assert key in refusals.every_key()
+
+
+def test_an_unknown_code_keeps_its_number_for_the_operator() -> None:
+    assert refusals.words(4242, {"reason": "new"}) == {"key": "cu.refusal.unknown", "vars": {"code": 4242}}
+
+
+def test_every_key_the_host_can_send_is_in_both_languages_of_the_app() -> None:
+    # The app shows a key it does not know as the English explanation, so a missing entry would not
+    # break the page; it would quietly put English back on the Russian one, which is the defect the
+    # keys exist to end.
+    table = (Path(__file__).resolve().parents[2] / "miniapp" / "src" / "i18n.ts").read_text(encoding="utf-8")
+    keys = refusals.every_key() | {w["key"] for w in (api_computer.NOT_NATIVE_WORDS, api_computer.NO_LAUNCHER_WORDS, api_computer.NO_DAEMON_WORDS)}
+    for key in sorted(keys):
+        line = next((row for row in table.splitlines() if row.strip().startswith(f'"{key}":')), "")
+        assert "en:" in line and "ru:" in line, key

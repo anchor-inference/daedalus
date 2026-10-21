@@ -453,7 +453,7 @@ GATES: dict[str, object] = {
                           "launcher": None, "launcher_error": "", "devices": [], "server_url": "", "consent": ""},
     # The Computer control is the native application's alone: here a server, where nothing of it is
     # drawn. check_computer.py installs ComputerStub for the native case.
-    "/api/computer": {"native": False, "available": False, "reason": "Computer use is offered only in the Daedalus desktop app, on the computer it runs on."},
+    "/api/computer": {"native": False, "available": False, "reason": "Computer use is offered only in the Daedalus desktop app, on the computer it runs on.", "reason_words": {"key": "cu.reason.not_native", "vars": {}}},
     "/api/computer/apps": {"apps": []},
     # Settings → Rules: the categories and levels the host knows, and two review decisions to list.
     "/api/action-rules": ACTION_RULES,

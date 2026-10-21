@@ -7,7 +7,9 @@ for the desktop daemon is the launcher's alone, and the launcher speaks for the 
 (``launcher_bridge.computer``). The host never reads that token and never sees the launcher's in a
 log, an answer or an error. A refusal from the daemon reaches the app as 409 with the daemon's code
 and, beside it, the sentence the agent's tool would read for the same code (``refusals.explain``), so
-the app and the model never disagree about what happened.
+the app and the model never disagree about what happened. Beside the English sentence goes the key
+the app renders in the operator's language (``refusals.words``); an unavailable desktop says its
+reason the same way (``reason_words``), with the English ``reason`` kept as the detail.
 """
 
 from __future__ import annotations
@@ -39,6 +41,13 @@ so macOS forgets both after every update and the operator has to come back to th
 
 NOT_NATIVE = "Computer use is offered only in the Daedalus desktop app, on the computer it runs on."
 NO_LAUNCHER = "The desktop launcher is not running, so nothing can reach this computer's desktop."
+
+NOT_NATIVE_WORDS = {"key": "cu.reason.not_native", "vars": {}}
+NO_LAUNCHER_WORDS = {"key": "cu.reason.no_launcher", "vars": {}}
+NO_DAEMON_WORDS = {"key": "cu.reason.no_daemon", "vars": {}}
+"""The operator's words for each way the desktop can be out of reach, as keys of the app's dictionary.
+The launcher's own reasons (no daemon in this build, a Wayland session, a daemon that stopped) are
+English sentences from another program; they stay as the detail under the one translated sentence."""
 
 
 class Scope(BaseModel):
@@ -115,9 +124,11 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         except launcher_bridge.DesktopRefused as exc:
             explanation = refusals.explain(exc.code, exc.message, exc.data)
             # `detail` carries the sentence too, so every error path of the app reads it without
-            # knowing this route; `error` is the contract's whole refusal.
+            # knowing this route; `error` is the contract's whole refusal, and `words` is what the
+            # Computer control shows in the operator's language.
+            error = {"code": exc.code, "message": exc.message, "data": exc.data, "explanation": explanation, "words": refusals.words(exc.code, exc.data)}
             return JSONResponse(
-                {"detail": explanation, "error": {"code": exc.code, "message": exc.message, "data": exc.data, "explanation": explanation}},
+                {"detail": explanation, "error": error},
                 status_code=409,
             )
         except (launcher_bridge.DesktopUnavailable, launcher_bridge.LauncherUnavailable) as exc:
@@ -127,20 +138,20 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     async def computer_state(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """Whether this computer can be driven, and if so its permissions, the lease, the operator's
         pause and the displays. Never an error: an unavailable desktop is ``available: false`` with a
-        sentence the app shows as it is."""
+        sentence, and the key the app shows it by in the operator's language."""
         if not settings.native:
-            return {"native": False, "available": False, "reason": NOT_NATIVE}
+            return {"native": False, "available": False, "reason": NOT_NATIVE, "reason_words": NOT_NATIVE_WORDS}
         found = await asyncio.to_thread(launcher_bridge.read, settings.state_dir)
         if found is None:
-            return {"native": True, "available": False, "reason": NO_LAUNCHER}
+            return {"native": True, "available": False, "reason": NO_LAUNCHER, "reason_words": NO_LAUNCHER_WORDS}
         try:
             state = await launcher_bridge.computer(found, "GET", "/api/computer")
         except launcher_bridge.DesktopRefused as exc:
-            return {"native": True, "available": False, "reason": refusals.explain(exc.code, exc.message, exc.data)}
+            return {"native": True, "available": False, "reason": refusals.explain(exc.code, exc.message, exc.data), "reason_words": refusals.words(exc.code, exc.data)}
         except (launcher_bridge.DesktopUnavailable, launcher_bridge.LauncherUnavailable) as exc:
-            return {"native": True, "available": False, "reason": str(exc)}
+            return {"native": True, "available": False, "reason": str(exc), "reason_words": NO_DAEMON_WORDS}
         if not state.get("available", True):
-            return {"native": True, "available": False, "reason": str(state.get("reason") or NO_LAUNCHER)}
+            return {"native": True, "available": False, "reason": str(state.get("reason") or NO_LAUNCHER), "reason_words": NO_DAEMON_WORDS}
         platform = state.get("platform") if isinstance(state.get("platform"), dict) else {}
         os_name = str(platform.get("os") or "")
         out: dict[str, Any] = {

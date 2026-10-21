@@ -352,8 +352,10 @@ its own. Touching the mouse during the run pauses it, and the report says so.
   --config <file>` as a child (like `browserd`), with Daedalus on the protected list, reads
   `operator.token`, connects with it, subscribes to events, and passes `COMPUTER_HOST_DIR` to the
   host. The shell's consent dialog becomes `lease.grant`, its Stop button and hotkey `stop`, its
-  "give back" `resume`, its permissions page `info.permissions` and `permissions.request`; the
-  overlay follows `lease.granted`, `lease.ended`, `human.input` and `stopped`.
+  "give back" `resume`, its permissions page `info.permissions` and `permissions.request`. The
+  shell's border, note and Stop shortcut follow `lease.status`, which the launcher asks once a second
+  while the shell is attached and passes on over their stdio link only when it changes; the shell's
+  Stop reaches the daemon the same way.
 - **The host** connects with the run directory's token, reads `info` (protocol, platform, units,
   displays, limits), and acts only while `lease.status` says its session holds the lease. It keeps
   the screenshot id with every picture it gives the model and passes it back with every point. It
