@@ -56,7 +56,6 @@ DETAIL = {
     "project": {"id": "p", "name": "Project", "folders": folders("/workspace"), "settings": {"snapshots": True}},
     "pending": None,
     "model": "some-model",
-    "mode": "",
     "brief": "",
     "tools_off": [],
     "loop": None,

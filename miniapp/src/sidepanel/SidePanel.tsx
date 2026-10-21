@@ -15,7 +15,6 @@ import { ApprovalChip, type ApprovalMode } from "../browser/approvals";
 import { type Approval, pendingApproval } from "../composer";
 import { Composer, type ComposerHandle } from "../composerbox";
 import type { ModelChoice } from "../modelselect";
-import type { ModeInfo } from "../modeselect";
 import { messageBody } from "../project/goalmodel";
 import { Icon } from "../icons";
 import { setLang, t, useLang } from "../i18n";
@@ -311,8 +310,6 @@ function NewConversation({ shell, current, listing, toast, onCreated, onCancel }
         thinking={choices.effort !== "off"}
         reasoningEffort={choices.effort && choices.effort !== "off" ? choices.effort : undefined}
         onChooseEffort={async (effort) => setChoices((c) => ({ ...c, effort }))}
-        mode=""
-        modes={[]}
         queued={[]}
         questions={null}
         answered={null}
@@ -399,7 +396,6 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
   const [seenKeys, setSeenKeys] = useState<Set<string>>(() => answered.get(id) ?? new Set());
   useEffect(() => void answered.set(id, seenKeys), [answered, id, seenKeys]);
   const [similar, setSimilar] = useState<string | null>(null);
-  const [modes, setModes] = useState<ModeInfo[]>([]);
   const [stopAt, setStopAt] = useState<number | null>(null);
   const [paused, setPaused] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -422,7 +418,6 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
 
   useEffect(() => {
     void load();
-    api.get<Record<string, { description?: string }>>("/api/modes").then((m) => setModes(Object.entries(m).map(([name, v]) => ({ name, description: v?.description ?? "" })))).catch(() => setModes([]));
     let soon: number | null = null;
     const stop = followSession(id, {
       handle: (event, p) => {
@@ -560,15 +555,6 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
     }
   }
 
-  async function chooseMode(mode: string) {
-    try {
-      await api.post(`/api/sessions/${id}/mode`, { mode: mode || null });
-      void load();
-    } catch (e) {
-      toast(errorText(e));
-    }
-  }
-
   async function giveTab() {
     try {
       await shell.request("tab.grant", { group: session.group, session: id, title: session.title });
@@ -630,9 +616,6 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
           thinking={detail.thinking}
           reasoningEffort={detail.reasoning_effort}
           onChooseEffort={chooseEffort}
-          mode={detail.mode ?? ""}
-          modes={modes}
-          onChooseMode={chooseMode}
           queued={[]}
           questions={detail.pending?.questions ?? null}
           answered={detail.pending?.answered ?? null}

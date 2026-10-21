@@ -673,7 +673,7 @@
   .composer[data-shape] .composer-mode, .composer[data-shape] .model-select { position: relative; height: var(--ctl-round); min-height: var(--ctl-round); padding: 0 12px; gap: 4px; border: 0; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--fg); font-size: var(--fs-14); }
   .composer[data-shape] .composer-mode::after, .composer[data-shape] .model-select::after { content: ""; position: absolute; inset: -5px 0; }
   .composer[data-shape] .composer-mode { flex: none; max-width: 40%; }
-  .composer[data-shape] .composer-mode .mode-yagni { font-size: var(--fs-12); }
+  .composer[data-shape] .composer-mode .mode-yagni, .composer[data-shape] .composer-mode .mode-autopilot { font-size: var(--fs-12); }
   .composer[data-shape] .model-select { flex: 0 1 auto; min-width: 0; }
   .composer[data-shape] .model-select > .ic:first-child { display: none; }
   /* A long name gives way before the effort does, and never below a readable prefix: a clipped

@@ -411,13 +411,6 @@ GATES: dict[str, object] = {
     # Settings → Notifications: the host's defaults, and a machine to draw the terminal load bar for.
     "/api/notifications/preferences": notification_preferences(),
     "/api/terminals/load": terminal_load(),
-    # The built-in modes as a fresh installation configures them; the composer's mode chip lists them.
-    "/api/modes": {
-        "plan": {"description": "read and plan only; nothing is changed until the operator switches the mode"},
-        "quick": {"description": "short answers, few tool calls, cheap"},
-        "deep": {"description": "long autonomous work with a high budget"},
-        "careful": {"description": "ask before anything irreversible"},
-    },
     "/api/commands": [],
     # The composer's palette offers these next to the slash commands.
     "/api/skills": [{"id": "web-design-reviewer", "name": "web-design-reviewer", "description": "Review a page's layout and accessibility"}],
@@ -850,11 +843,11 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
                                               "last_safe_url": None, "reconnectable": False, "instance_generation": "", "authorization_state": "authenticated_operator"})
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "artifact-manifests" and parts[4] == "transfer-readiness":
         return 200, "application/json", json.dumps({"manifest_id": parts[3], "project_id": "", "available": False, "reason": "file_unavailable", "transfers": []})
-    if method.upper() == "POST" and len(parts) == 5 and parts[2] == "sessions" and parts[4] in ("mode", "yagni"):
-        # The composer's mode chip: a harness that reads the switch back answers these itself.
+    if method.upper() == "POST" and len(parts) == 5 and parts[2] == "sessions" and parts[4] == "yagni":
+        # The composer's toggles chip: a harness that reads the switch back answers this itself.
         return 200, "application/json", "{}"
     if len(parts) == 5 and parts[2] == "sessions" and parts[4] == "autopilot":
-        # The session's autopilot switch, in the mode menu: on as asked, the installation's master switch on.
+        # The session's autopilot switch, in the toggles menu: on as asked, the installation's master switch on.
         on = bool(body.get("on")) if method.upper() == "POST" and isinstance(body, dict) else False
         return 200, "application/json", json.dumps({"on": on, "enabled": True, "eligible": True, "used": 0, "allowed": 3})
     if method.upper() == "GET" and path == "/api/autopilot":
@@ -878,10 +871,6 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     if method.upper() == "GET" and len(parts) == 5 and parts[2] == "sessions" and parts[4] == "suggestion":
         # The guessed next message after an answer settles: none here; check_assist.py offers one.
         return 200, "application/json", json.dumps({"text": "", "skipped": "off"})
-    if method.upper() == "POST" and len(parts) == 5 and parts[2] == "sessions" and parts[4] == "depth":
-        # The correction on a turn's auto-mode chip: the level is taken for the next message.
-        level = body.get("level") if isinstance(body, dict) else ""
-        return 200, "application/json", json.dumps({"depth_next": level or ""})
     if method.upper() == "GET" and len(parts) == 7 and parts[2] == "sessions" and parts[4:6] == ["policy", "similar"]:
         # The approval dock asks what "Allow similar" would grant; nothing a harness did not refuse has a family.
         return 200, "application/json", json.dumps({"similar": None})
@@ -2790,7 +2779,7 @@ class FocusStub:
             "workspace": root, "workspace_name": root.rsplit("/", 1)[-1], "workspace_own": False, "workspace_sessions": [],
             "project": {k: v for k, v in project.items() if k != "sessions"}, "folder_id": project["folders"][0]["id"], "folders": readable,
             "pending": None, "model": "Claude Opus 5", "provider": "claude", "thinking": True, "reasoning_effort": "high",
-            "messages": messages, "mode": "", "usd_cap": None, "brief": "", "spawned_by": None, "tools_off": [], "loop": None, "services": [], "subagents": [],
+            "messages": messages, "usd_cap": None, "brief": "", "spawned_by": None, "tools_off": [], "loop": None, "services": [], "subagents": [],
             "subagent_of": None, "subagent_name": None, "leader_title": None, "orchestrator_of": orchestrator_of, "staff": staff, "telegram_linked": False,
             "verifications": {}, "first_seq": messages[0]["seq"] if messages else 0, "has_older": False,
             "context": {"tokens": 18400, "window": 200000, "messages": len(messages), "summaries": 1, "operator_turns": 1, "last_compaction": {"at": "2026-09-24T08:10:00Z", "reason": "auto"}},

@@ -44,7 +44,7 @@ DETAIL = {
     "id": SESSION, "title": "Media answer", "status": "idle", "run_id": None,
     "workspace": "/workspace", "workspace_name": "ws", "workspace_own": True,
     "workspace_sessions": [], "project": {"id": "p", "name": "Project", "folders": folders("/workspace"), "settings": {"snapshots": True}},
-    "pending": None, "model": "some-model", "mode": "", "brief": "", "tools_off": [], "loop": None,
+    "pending": None, "model": "some-model", "brief": "", "tools_off": [], "loop": None,
     "services": [], "subagents": [], "usage": {}, "context": {"tokens": 30, "window": 100000, "messages": 2, "summaries": 0, "operator_turns": 1},
     "messages": [
         {"role": "user", "summary": False, "internal": False, "origin": "operator", "seq": 10, "compaction": None, "archived": None, "headline": "", "text": "Show the result", "thinking": "", "tool_calls": [], "tool_results": [], "created_at": "2026-09-21T00:00:00+00:00", "media": []},

@@ -87,7 +87,7 @@ def serve(route) -> None:  # type: ignore[no-untyped-def]
 FACTS = {
     "en": {
         "origin": ["Claude Code", "claude-opus-5", "feature/menu-prices", "10,121", "whole", "3", "4", "179.3 MB", "64.0 MB"],
-        "session": ["Change", "Mode"],
+        "session": ["Model", "Change"],
         "context": ["50%", "491k", "980k", "Last model request", "1,075", "26", "3 hours ago", "auto", "Instructions", "Tools", "Conversation", "Attachments", "Reserved response", "398k", "100%", "tool set", "Compact history"],
         "usage": ["$41.70", "220.9M", "405k", "212.9M", "787", "$6.12", "31.4M", "58k", "112", "Tool time"],
         "workspace": ["Files"],
@@ -97,7 +97,7 @@ FACTS = {
     },
     "ru": {
         "origin": ["Claude Code", "claude-opus-5", "feature/menu-prices", "10 121", "целиком", "3", "4", "179.3 МБ", "64.0 МБ"],
-        "session": ["Сменить", "Режим"],
+        "session": ["Модель", "Сменить"],
         "context": ["50%", "491 тыс", "980 тыс", "Последний запрос к модели", "1 075", "26", "3 часа назад", "auto", "Инструкции", "Инструменты", "Диалог", "Вложения", "Резерв ответа", "398 тыс", "100%", "набор инструментов", "Сжать историю"],
         "usage": ["$41.70", "220.9 млн", "405 тыс", "212.9 млн", "787", "$6.12", "31.4 млн", "58 тыс", "112", "Время инструментов"],
         "workspace": ["Файлы"],

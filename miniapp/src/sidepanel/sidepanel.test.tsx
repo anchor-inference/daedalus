@@ -164,7 +164,7 @@ describe("the screen", { timeout: 20_000 }, () => {
     requests = [];
     listeners = new Map();
     listing = { sessions: [session("s1", { title: "Pay the bill" }), session("s2", { title: "Flights" })], consented: true, consent: "CONSENT", chrome: { connected: true, name: "Work" } };
-    detail = { id: "s1", title: "Pay the bill", status: "idle", messages: refusal("0123456789ab"), model: "m", mode: "", workspace: "/w", folders: [], pending: null };
+    detail = { id: "s1", title: "Pay the bill", status: "idle", messages: refusal("0123456789ab"), model: "m", workspace: "/w", folders: [], pending: null };
     fakeShell.current = {
       hello: { lang: "en", token: "pnl_x", expires: "", current: { tab: { id: 7, url: "https://bank.example/", title: "Bank", readable: true }, owner: { group: "s-s1-u", session: "s1", title: "Pay the bill", paused: false } }, show: null, profile: "Work", connected: true, generation: 1 },
       request: async (op: string, args: Record<string, unknown> = {}) => {
@@ -183,7 +183,6 @@ describe("the screen", { timeout: 20_000 }, () => {
       if (url.startsWith("/api/panel/sessions/s1?")) return new Response(JSON.stringify(detail));
       if (url.includes("/policy/similar/")) return new Response(JSON.stringify({ similar: null }));
       if (url.includes("/stream")) return new Response(new ReadableStream({ start() {} }));
-      if (url === "/api/panel/modes") return new Response(JSON.stringify({}));
       if (url === "/api/panel/asr") return new Response(JSON.stringify({ configured: true, reason: "", provider: "local", model: "whisper", max_seconds: 300, autosend: false }));
       if (url === "/api/panel/settings") return new Response(JSON.stringify({ presets: { opus: { label: "Claude Opus" }, flash: { label: "Flash" } }, providers: {}, model: { preset: "opus" } }));
       if (url.endsWith("/browser-approvals")) return new Response(JSON.stringify({ mode: "manual", env: "user" }));

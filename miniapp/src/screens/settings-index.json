@@ -509,7 +509,7 @@
     {
       "section": "limits", "anchor": "limits.max_iterations", "config": "limits.max_iterations",
       "title": { "en": "Max iterations per run", "ru": "Максимум итераций за запуск" },
-      "about": { "en": "How many model steps one run may take before it stops.", "ru": "Сколько шагов модели может сделать один запуск, прежде чем остановится." },
+      "about": { "en": "How many model steps one run may take before it stops; 0 is no cap.", "ru": "Сколько шагов модели может сделать один запуск, прежде чем остановится; 0 — без лимита." },
       "synonyms": ["iterations", "steps", "max steps", "turn limit", "loop limit", "итерации", "шаги", "лимит шагов"]
     },
     {

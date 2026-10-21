@@ -1,8 +1,4 @@
-"""The auto mode's chip on a turn and the guessed next message in the composer, in a real browser.
-
-A message the auto mode ran says at what level, in a word on the message; clicking it offers the
-three levels and the one picked goes to the host for the next message, re-running nothing. The
-composer's mode chip names the mode and the model pill says the effort is the mode's to choose.
+"""The guessed next message in the composer and meeting notes from audio, in a real browser.
 
 Once an answer settles, the app asks the host for the operator's likely next message and shows it
 as the empty field's placeholder. Tab puts it in the field; nothing is sent by itself; and once it is
@@ -19,7 +15,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 
 from api_stub import meeting_job
 from check_composer import BASE, CHROMIUM, HOST, SESSION, UNHANDLED, message
@@ -36,10 +31,6 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
     if rel == f"/api/sessions/{SESSION}/suggestion":
         ASKED.append(rel)
         return route.fulfill(status=200, content_type="application/json", body=json.dumps({"text": GUESS}))
-    if rel == f"/api/sessions/{SESSION}/depth" and route.request.method == "POST":
-        data = json.loads(route.request.post_data or "{}")
-        HOST.posted.append(("POST", rel, data))
-        return route.fulfill(status=200, content_type="application/json", body=json.dumps({"depth_next": data.get("level") or ""}))
     if rel.startswith(f"/api/sessions/{SESSION}/meeting"):
         method = route.request.method
         if method == "POST" and rel.endswith("/meeting"):
@@ -56,9 +47,7 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
 
 def main() -> None:
     HOST.status = "idle"
-    HOST.mode = "auto"
-    depth = {"level": "long", "mode": "deep", "effort": "high", "source": "heuristic", "ms": 0}
-    HOST.messages = [message(101, "user", "Refactor the storage layer and migrate every caller.", run_id="old", depth=depth),
+    HOST.messages = [message(101, "user", "Refactor the storage layer and migrate every caller.", run_id="old"),
                      message(102, "assistant", "Done; every caller now uses the pool.", run_id="old")]
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=CHROMIUM)
@@ -74,23 +63,7 @@ def main() -> None:
         page.goto(f"{BASE}/agents/{SESSION}?token=t&lang=en&scheme=dark")
         page.wait_for_function("typeof window.sendEvent === 'function'")
 
-        # The chip on the message, and the correction for the next one.
-        chip = page.locator(".msg.user .msg-depth")
-        expect(chip).to_have_text("Deep")
-        expect(chip).to_have_attribute("data-depth", "long")
-        chip.click()
-        menu = page.locator(".depth-menu")
-        expect(menu).to_be_visible()
-        expect(menu.locator("[data-level]")).to_have_count(3)
-        menu.locator("[data-level='quick']").click()
-        expect(menu).to_have_count(0)
-        assert ("POST", f"/api/sessions/{SESSION}/depth", {"level": "quick"}) in HOST.posted, HOST.posted
-        expect(page.get_by_text("The next message runs as Quick")).to_be_visible()
-
-        # The composer names the mode, and the effort the mode moves each message from: a bare "auto"
-        # read as an effort of its own beside a model whose settings name one.
-        expect(page.locator(".composer .composer-mode")).to_contain_text("Auto")
-        expect(page.locator(".composer .model-effort")).to_have_text(re.compile(r"^auto · (low|medium|high|max)$"))
+        expect(page.locator(".msg.user").first).to_contain_text("Refactor the storage layer")
 
         # The answer settles; the guess arrives as the empty field's placeholder.
         field = page.locator(".composer textarea")

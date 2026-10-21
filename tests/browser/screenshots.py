@@ -291,8 +291,8 @@ def detail(id_: str) -> dict:
     # A project session works in the project root, and the server answers exactly that: the folder is
     # not a directory of the session's own, and its name is the folder's.
     workspace = s["workspace_path"]
-    # The composer's mode pictures (``ONLY=modes``): YAGNI on, the opening message marked as
-    # the one that told the agent, and a phone mid-run, where the mode chip has to stay.
+    # The composer's toggles pictures (``ONLY=modes``): YAGNI on, the opening message marked as
+    # the one that told the agent, and a phone mid-run, where the toggles chip has to stay.
     yagni = id_ == S1 and getattr(stub, "yagni", False)
     if yagni:
         messages = [{**m, "yagni": "on"} if m["seq"] == 401 else m for m in messages]
@@ -307,7 +307,7 @@ def detail(id_: str) -> dict:
         "workspace_sessions": [{"id": S2, "title": "Bakery site: photos"}] if id_ == S1 else [{"id": S1, "title": "Bakery site"}] if id_ == S2 else [],
         "pending": QUESTION if id_ == S4 else None, "model": (id_ == S1 and getattr(stub, "model", None)) or s["model"], "provider": "claude" if id_ == S1 else "opencode",
         "thinking": True, "reasoning_effort": "high",
-        "messages": messages, "mode": "", "usd_cap": 4.0, "brief": "Site of a small bakery. Static HTML, no frameworks; the owner edits data files, never markup.", "spawned_by": None, "tools_off": [],
+        "messages": messages, "usd_cap": 4.0, "brief": "Site of a small bakery. Static HTML, no frameworks; the owner edits data files, never markup.", "spawned_by": None, "tools_off": [],
         "loop": LOOP if id_ == S3 else None, "services": SERVICES_S1 if id_ == S1 else [], "subagents": subagents_of(id_),
         "subagent_of": s["metadata"].get("subagent_of"), "subagent_name": s["metadata"].get("subagent_name"), "leader_title": "Bakery site" if s["metadata"].get("subagent_of") == S1 else None,
         "context": {"tokens": 41200, "window": 200000, "messages": len(messages), "summaries": 1, "operator_turns": 6},
@@ -961,8 +961,6 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return respond(route, {"since": "", "total": {"spent_usd": 3.42, "unmetered": 2, "cap_usd": 0, "reserved_usd": 1.12, "uncertain_usd": 0.35, "reserved_count": 3, "uncertain_count": 1}, "per_provider": {}})
     if rel == "/api/onboarding":
         return respond(route, FRESH if getattr(stub, "fresh", False) else ONBOARDING)
-    if rel == "/api/modes":
-        return respond(route, GATES["/api/modes"])
     if rel == "/api/commands":
         return respond(route, [])
     if rel == "/api/skills":
@@ -2475,8 +2473,8 @@ def run_browser() -> int:
     return UNHANDLED.report()
 
 
-def open_modes(page: Page) -> None:
-    """The composer's mode chip, opened: the modes, and the YAGNI switch under them."""
+def open_toggles(page: Page) -> None:
+    """The composer's toggles chip, opened: the YAGNI and autopilot switches."""
     if not page.locator(".composer .composer-mode").is_visible():
         open_phone_composer(page)
     page.locator(".composer .composer-mode").click()
@@ -2497,7 +2495,7 @@ def queued_messages() -> list[dict]:
 
 
 def run_modes() -> int:
-    """The mode chip and its menu, with YAGNI on, on a desktop and on a phone, and the card a message
+    """The toggles chip and its menu, with YAGNI on, on a desktop and on a phone, and the card a message
     written during a run waits in (``ONLY=modes``)."""
     OUT.mkdir(parents=True, exist_ok=True)
     stub.yagni = True  # type: ignore[attr-defined]
@@ -2508,12 +2506,12 @@ def run_modes() -> int:
             desk.add_init_script("try { localStorage.setItem('daedalus.session.panel', '0'); } catch (e) {}")
             page = desk.new_page()
             page.route("**/api/**", stub)
-            shot(page, "composer-modes", f"agents/{S1}", wait=".composer .composer-mode", before=open_modes)
+            shot(page, "composer-modes", f"agents/{S1}", wait=".composer .composer-mode", before=open_toggles)
             desk.close()
             phone = browser.new_context(viewport=PHONE, device_scale_factor=3, color_scheme="dark", is_mobile=True, has_touch=True)
             page = phone.new_page()
             page.route("**/api/**", stub)
-            shot(page, "phone-composer-modes", f"agents/{S1}", wait=".composer textarea", before=open_modes)
+            shot(page, "phone-composer-modes", f"agents/{S1}", wait=".composer textarea", before=open_toggles)
             stub.running = True  # type: ignore[attr-defined]
             shot(page, "phone-composer-yagni", f"agents/{S1}", wait=".composer textarea", before=open_phone_composer)
             # A message written during the run waits for the end of the turn as a card above the
@@ -2528,7 +2526,7 @@ def run_modes() -> int:
             shot(page, "composer-queued", f"agents/{S1}", wait=".steers .steer .steer-now")
             desk.close()
             # The narrowest phone, idle, with a model whose name does not fit: the name is cut inside
-            # its pill, the effort beside it and the mode chip keep their words.
+            # its pill, the effort beside it and the toggles chip keep their words.
             stub.running = False  # type: ignore[attr-defined]
             stub.model = "DeepSeek Flash long-context preview"  # type: ignore[attr-defined]
             narrow = browser.new_context(viewport={"width": 360, "height": 780}, device_scale_factor=3, color_scheme="dark", is_mobile=True, has_touch=True)

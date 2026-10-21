@@ -158,7 +158,7 @@ describe("the panels", () => {
       usage: { c: 12, i: 90_000, o: 4_000, usd: 3.5, c_today: 4, i_today: 20_000, o_today: 1_000, usd_today: 0.75 },
     } as unknown as SessionDetail;
     const on = new Proxy({}, { get: () => () => {} }) as DetailsActions;
-    const render = (role: "session" | "orchestrator" | "main") => act(async () => root.render(<SessionDetails ids={`d-${role}`} id="o1" role={role} detail={detail} busy={false} modes={[]} schedules={[]} provider="" providerUsage={null} toast={() => {}} reload={() => {}} on={on} />));
+    const render = (role: "session" | "orchestrator" | "main") => act(async () => root.render(<SessionDetails ids={`d-${role}`} id="o1" role={role} detail={detail} busy={false} schedules={[]} provider="" providerUsage={null} toast={() => {}} reload={() => {}} on={on} />));
     await render("orchestrator");
     const sections = () => [...host.querySelectorAll(".dt-section")].map((s) => s.id.replace(/^d-\w+-info-/, ""));
     expect(sections()).toEqual(["session", "context", "usage", "mcp", "toolgroups", "brief", "spend", "advanced"]);
