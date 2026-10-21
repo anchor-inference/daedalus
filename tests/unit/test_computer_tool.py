@@ -118,6 +118,26 @@ async def test_a_screenshot_is_sized_for_the_model_and_said_to_be_screen_content
     assert desk.calls[-2][1]["max_edge"] == 1568 and desk.calls[-2][1]["format"] == "jpeg"
 
 
+async def test_a_missing_pillow_is_said_in_a_sentence_not_an_import_error(desk: FakeDeskd, agent: ComputerAgent, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A native installation once lacked Pillow, and the model read only "No module named 'PIL'".
+    import builtins
+
+    from daedalus.computer.agent import NO_PILLOW
+
+    real_import = builtins.__import__
+
+    def without_pillow(name: str, globals: Any = None, *args: Any, **kwargs: Any) -> Any:
+        # Only the agent's import fails: the fake daemon draws its screen with Pillow too.
+        if name == "PIL" and (globals or {}).get("__name__") == "daedalus.computer.agent":
+            raise ImportError("No module named 'PIL'")
+        return real_import(name, globals, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_pillow)
+    desk.grant(SESSION)
+    outcome = await agent.computer(caller(), {"action": "screenshot"})
+    assert outcome.failed and outcome.text == NO_PILLOW and "updating or reinstalling" in outcome.text
+
+
 async def test_a_click_converts_the_point_names_its_screenshot_and_returns_the_screen_after(desk: FakeDeskd, agent: ComputerAgent) -> None:
     desk.grant(SESSION)
     first = await agent.computer(caller(), {"action": "screenshot"})

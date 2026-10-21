@@ -28,7 +28,14 @@ from daedalus.browser.model import USER, BrowserError, Owner
 from daedalus.browser.monitor import TIMEOUT_SECONDS, InjectionMonitor
 from daedalus.browser.notes import SiteNotes
 from daedalus.browser.owners import DatabaseOwners
-from daedalus.browser.panel import NATIVE_DEVICE, PANEL_LINE, PANEL_SESSION_KEY, PanelGrants, PanelHerald
+from daedalus.browser.panel import (
+    CHROME_CHAT_LINE,
+    NATIVE_DEVICE,
+    PANEL_LINE,
+    PANEL_SESSION_KEY,
+    PanelGrants,
+    PanelHerald,
+)
 from daedalus.browser.replay import RecordedSkills
 from daedalus.browser.service import Browsers
 from daedalus.browser.user import Pairing, RelayDesk
@@ -160,7 +167,9 @@ async def chrome_line(manager: Any, service: Browsers, state: Any) -> str:
         line = f"- Browser: the operator gave this conversation their own Chrome «{name}»; the browser tools work there" + ("." if connected else ", which is not connected now.")
         # Only while the conversation is in their Chrome: switched back to the agent's browser, "work in
         # their Chrome" would send the agent somewhere it cannot go.
-        return line + ("\n" + PANEL_LINE if state.metadata.get(PANEL_SESSION_KEY) else "")
+        if state.metadata.get(PANEL_SESSION_KEY):
+            return line + "\n" + PANEL_LINE
+        return line + ("\n" + CHROME_CHAT_LINE if getattr(state, "kind", "chat") == "chrome" else "")
     if connected:
         return (
             f"- Browser: the operator's Chrome «{name}» is connected, but this conversation uses your own browser, not theirs. "
@@ -331,6 +340,14 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     manager.project_delete_hooks.append(project_deleted)
     manager.answer_hooks[SWITCH_ASK] = lambda session_id, request, allowed: chrome_answered(app, service, session_id, allowed)
     manager.turn_line_hooks.append(lambda state: chrome_line(manager, service, state))
+
+    async def switched(session_id: str, env: str) -> None:
+        # The mark sticks: moved back to the agent's browser, the conversation stays a Chrome one,
+        # and a computer conversation moved to their Chrome stays a computer one.
+        if env == USER:
+            await manager.set_session_kind(session_id, "chrome", only_from="chat")
+
+    service.switch_hooks.append(switched)
     tasks = await service.start()
     if herald is not None:
         tasks.append(asyncio.create_task(herald.keep_fresh(), name="browser-panel-grants"))

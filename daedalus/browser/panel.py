@@ -219,6 +219,15 @@ flight on this site" with a web search, as it would in the app; from the panel t
 page in front of them. Fixed words, so it costs one line and never a cache miss."""
 
 
+CHROME_CHAT_LINE = (
+    "- Chrome chat: the operator made this a conversation for work in their own Chrome. For anything about pages, "
+    "sites, accounts or actions on the web, work in their Chrome with the browser tools rather than WebSearch or "
+    "WebFetch; a plain knowledge question may use search."
+)
+"""The side panel's browser-first rule for a Chrome conversation the operator holds from the app: the
+same expectation, without the claim that they are looking at the page beside the panel."""
+
+
 async def mark_panel_session(manager: Any, session_id: str) -> None:
     """Mark a conversation as one the operator holds from the side panel, and have its runs start with
     the browser's tools loaded: the group is on demand elsewhere, and an agent told to work in the
@@ -235,4 +244,4 @@ async def mark_panel_session(manager: Any, session_id: str) -> None:
     await manager.sessions.update_metadata(session_id, state.session.metadata)
 
 
-__all__ = ["EXTENSION_ID", "IDLE", "NATIVE_DEVICE", "PANEL_LINE", "PANEL_SESSION_KEY", "PanelGrants", "PanelHerald", "mark_panel_session"]
+__all__ = ["CHROME_CHAT_LINE", "EXTENSION_ID", "IDLE", "NATIVE_DEVICE", "PANEL_LINE", "PANEL_SESSION_KEY", "PanelGrants", "PanelHerald", "mark_panel_session"]

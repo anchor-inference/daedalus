@@ -24,6 +24,7 @@ class FakeLauncher:
     def __init__(self) -> None:
         self.answers: dict[tuple[str, str], tuple[int, Any]] = {}
         self.seen: list[tuple[str, str, str | None, Any]] = []
+        self.content_type = "application/json"
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -34,7 +35,7 @@ class FakeLauncher:
                 status, body = outer.answers.get((method, self.path), (404, {"error": {"message": "no such route"}}))
                 data = body if isinstance(body, bytes) else json.dumps(body).encode()
                 self.send_response(status)
-                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Type", outer.content_type if isinstance(body, bytes) else "application/json")
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
@@ -115,3 +116,33 @@ async def test_only_the_desktop_routes_and_two_methods_are_reachable(fake: FakeL
     with pytest.raises(ValueError):
         await launcher_bridge.computer(fake.launcher, "DELETE", "/api/computer")
     assert fake.seen == []
+
+
+async def test_a_preview_is_the_picture_with_the_token_and_the_query(fake: FakeLauncher) -> None:
+    fake.content_type = "image/jpeg"
+    fake.answers[("GET", "/api/computer/preview?display=2&max=480")] = (200, b"\xff\xd8 picture")
+    assert await launcher_bridge.computer_preview(fake.launcher, {"display": "2", "max": "480"}) == b"\xff\xd8 picture"
+    assert fake.seen == [("GET", "/api/computer/preview?display=2&max=480", TOKEN, None)]
+
+
+async def test_a_preview_that_is_not_a_jpeg_or_too_large_is_not_passed_on(fake: FakeLauncher) -> None:
+    fake.content_type = "text/html"
+    fake.answers[("GET", "/api/computer/preview?window=7")] = (200, b"<html>")
+    with pytest.raises(launcher_bridge.LauncherUnavailable, match="not a JPEG"):
+        await launcher_bridge.computer_preview(fake.launcher, {"window": "7"})
+    fake.content_type = "image/jpeg"
+    fake.answers[("GET", "/api/computer/preview?window=7")] = (200, b"x" * (launcher_bridge.PREVIEW_MAX_BYTES + 1))
+    with pytest.raises(launcher_bridge.LauncherUnavailable, match="larger than a preview"):
+        await launcher_bridge.computer_preview(fake.launcher, {"window": "7"})
+
+
+async def test_a_preview_refusal_and_no_desktop_are_the_other_routes_errors(fake: FakeLauncher) -> None:
+    fake.answers[("GET", "/api/computer/preview?window=7")] = (409, {"error": {"code": 1203, "message": "protected", "data": {}}})
+    with pytest.raises(launcher_bridge.DesktopRefused) as caught:
+        await launcher_bridge.computer_preview(fake.launcher, {"window": "7"})
+    assert caught.value.code == 1203
+    fake.answers[("GET", "/api/computer/preview?display=1")] = (503, {"available": False, "reason": "The desktop daemon is not running."})
+    with pytest.raises(launcher_bridge.DesktopUnavailable, match="not running"):
+        await launcher_bridge.computer_preview(fake.launcher, {"display": "1"})
+    with pytest.raises(launcher_bridge.LauncherUnavailable, match="no previews"):
+        await launcher_bridge.computer_preview(fake.launcher, {"display": "9"})

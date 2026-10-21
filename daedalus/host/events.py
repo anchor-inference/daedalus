@@ -79,6 +79,13 @@ class SessionUnreadResult(TypedDict):
     run_id: NotRequired[str]
 
 
+class SessionKind(TypedDict):
+    """What the conversation is for changed (``chat``, ``computer``, ``chrome``): the sidebar moves it
+    to its tab without waiting for the next poll."""
+
+    kind: str
+
+
 class SessionCreated(TypedDict):
     """A session exists. Without it a chat the agent, a subagent, an import or a fork made, or one
     made without a first message, reached the open lists only at their next minute's poll."""
@@ -659,6 +666,7 @@ REGISTRY: dict[str, EventSpec] = {
     "run.finished": EventSpec(RunFinished),
     "session.status": EventSpec(SessionStatus),
     "session.unread_result": EventSpec(SessionUnreadResult),
+    "session.kind": EventSpec(SessionKind),
     "session.created": EventSpec(SessionCreated),
     "session.deleted": EventSpec(SessionDeleted),
     "session.jobs": EventSpec(SessionJobs),

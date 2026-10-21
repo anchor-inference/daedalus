@@ -58,6 +58,8 @@ from protocore.runtime.tool_registry import ToolRegistry
 from protocore.tools.tool_search import TOOL_SEARCH_TOOL_NAME, ToolSearchTool
 
 from daedalus.browser import cookies as cookie_files
+from daedalus.computer import agent as computer_agent
+from daedalus.computer import awareness as computer_awareness
 from daedalus.computer import wire as computer_wire
 from daedalus.config import (
     BTW_TOOLS,
@@ -350,6 +352,9 @@ class SessionState:
     """Per-session override; ``None`` follows the configured model window."""
     extra_notes: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
+    kind: str = "chat"
+    """What the conversation is for (``sessions.kind``): ``chat``, ``computer`` or ``chrome``. Read when
+    the state loads and changed only through :meth:`SessionManager.set_session_kind`, which writes both."""
     turn_depth: dict[str, Any] | None = None
     """The level the ``auto`` mode chose for the current run (``depth.Depth.metadata``): its mode is
     what :meth:`SessionManager.mode_for` answers while the run lasts. Not stored: after a restart a
@@ -1711,6 +1716,7 @@ class SessionManager:
             return None
         self.unloadable_sessions.pop(session_id, None)
         state = SessionState(session=session, workspace=workspace, metadata=dict(session.metadata), project=project)
+        state.kind = await self.sessions.kind(session_id)
         measurement = await self.db.kv_get(f"context_measurement:{session_id}", {})
         state.usage_floor_seq = int(measurement.get("floor", 0))
         state.observed_prompt_tokens = int(measurement.get("tokens", 0))
@@ -1799,6 +1805,7 @@ class SessionManager:
     async def list_sessions(self, limit: int = 100, *, ids: list[str] | None = None) -> list[dict[str, Any]]:
         rows = await self.sessions.list_sessions(TENANT, limit=limit, ids=ids)
         projects = await self.projects.by_session()
+        kinds = await self.sessions.kinds([session.id for session in rows] if ids is not None else None)
         out: list[dict[str, Any]] = []
         for session in rows:
             if prompt_coach.hidden(session.metadata):
@@ -1817,9 +1824,33 @@ class SessionManager:
                     "run_id": state.run_id if state else None,
                     "metadata": session.metadata,
                     "project_id": projects.get(session.id),
+                    "kind": kinds.get(session.id, "chat"),
                 }
             )
         return out
+
+    async def set_session_kind(self, session_id: str, kind: str, *, only_from: str | None = None) -> bool:
+        """Change what a conversation is for; with ``only_from``, only from that kind (a mark that sticks
+        leaves the operator's own choice alone). ``True`` when it changed, and then the fronts hear of it.
+
+        A conversation that becomes a Chrome conversation starts its runs with the browser's tools
+        loaded, as one the side panel started does: the agent is told to work in the operator's Chrome
+        and should not have to search for the tools first."""
+        state = await self.get_state(session_id)
+        if state is None:
+            raise KeyError(session_id)
+        changed = await self.sessions.set_kind(session_id, kind, only_from=only_from)
+        if not changed:
+            return False
+        state.kind = kind
+        if kind == "chrome":
+            carried = [str(g) for g in (state.metadata.get(tool_groups.CARRIED_KEY) or ()) if isinstance(g, str)]
+            if "browser" not in carried:
+                for meta in (state.metadata, state.session.metadata):
+                    meta[tool_groups.CARRIED_KEY] = list(dict.fromkeys([*carried, "browser"]))
+                await self.sessions.update_metadata(session_id, state.session.metadata)
+        await self._publish(state, "session.kind", {"kind": kind})
+        return True
 
     async def session_catalog(self) -> list[dict[str, Any]]:
         """Return the cheap session read model without opening any transcript.
@@ -4904,6 +4935,8 @@ class SessionManager:
             volatile.append("\n" + waiting)
         if asked := await self._side_questions_note(state.session.id):
             volatile.append("\n" + asked)
+        if computer := await self._computer_note(state):
+            volatile.append("\n" + computer)
         for line_hook in self.turn_line_hooks:
             try:
                 line = await line_hook(state)
@@ -5846,6 +5879,67 @@ class SessionManager:
                 name = str(entry)
                 blocked |= {t for t in known if t.startswith(name[:-1])} if name.endswith("*") else {name}
         return blocked
+
+    def _computer_agent(self) -> Any:
+        """The process's agent for the desktop daemon, the one the computer tools use, or ``None``."""
+        hooked = self.service_hooks.get("computer")
+        if hooked is not None:
+            return hooked
+        run_dir = self.settings.computer_host_dir
+        return computer_agent.agent_for(run_dir) if run_dir is not None else None
+
+    async def _computer_lease(self, state: SessionState) -> tuple[Any, dict[str, Any] | None]:
+        """The desktop agent and the lease this session holds now (``None`` when it holds none)."""
+        if not self.capabilities.computer.configured or not computer_wire.endpoint_live(self.settings.computer_host_dir):
+            return None, None
+        agent = self._computer_agent()
+        if agent is None:
+            return None, None
+        return agent, await computer_awareness.held_lease(agent.client, state.session.id)
+
+    async def _computer_note(self, state: SessionState) -> str:
+        """The turn context's line on the operator's computer, and the tools loaded to match it.
+
+        While this session holds the lease, the line says what it may drive and until when, and the
+        ``computer`` group is queued to load with the run about to start, so the agent never has to
+        search for the tools the line names. A conversation made for the computer that holds no lease
+        is told control is not granted now. Any other conversation without a lease gets no line."""
+        if not self.capabilities.computer.configured:
+            return ""
+        try:
+            agent, lease = await self._computer_lease(state)
+            if lease is None:
+                return computer_awareness.NOT_GRANTED if state.kind == "computer" else ""
+            scope = await computer_awareness.describe(agent.client, state.session.id, lease)
+        except Exception:  # noqa: BLE001 — a turn starts without the line rather than not at all
+            logger.exception("could not read the computer lease for session %s", state.session.id)
+            return ""
+        sight = state.computer_sight
+        if "computer" not in (state.metadata.get(tool_groups.CARRIED_KEY) or ()):
+            await self.load_tool_group_now(state.session.id, "computer")
+        return computer_awareness.granted_line(scope, lease, loaded=True, sees=sight is None or bool(sight[1]))
+
+    async def computer_granted(self, session_id: str) -> None:
+        """The operator granted this conversation control of their computer through the app.
+
+        The mark sticks: a plain chat becomes a computer conversation. The tools are queued for the
+        next run, and a run already going is steered with the news, the way an allowed call is: its
+        turn context was written before the grant and says nothing of it."""
+        state = await self.get_state(session_id)
+        if state is None:
+            return
+        await self.set_session_kind(session_id, "computer", only_from="chat")
+        await self.load_tool_group_now(session_id, "computer")
+        if not state.running:
+            return
+        try:
+            agent, lease = await self._computer_lease(state)
+            if lease is None:
+                return
+            scope = await computer_awareness.describe(agent.client, session_id, lease)
+            await self.submit(session_id, computer_awareness.grant_steer(scope, lease), steer=True, expected_running=True, as_answer=False, origin="events")
+        except Exception:  # noqa: BLE001 — the grant stands; only the note about it failed
+            logger.exception("could not tell session %s about a computer grant", session_id)
 
     def computer_offered(self, state: SessionState) -> bool:
         """Whether this session is offered the computer tools now: a native installation with a desktop

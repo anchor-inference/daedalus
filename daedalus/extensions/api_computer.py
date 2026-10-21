@@ -15,11 +15,12 @@ reason the same way (``reason_words``), with the English ``reason`` kept as the 
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
-from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from daedalus.computer import refusals
@@ -28,9 +29,16 @@ from daedalus.host import launcher_bridge
 if TYPE_CHECKING:
     from daedalus.app import Application
 
+logger = logging.getLogger(__name__)
+
 MAX_MINUTES = 240
 """The daemon's own ceiling on a lease (``max_lease_ms``, four hours by default). Refused here first,
 so a mistyped number is a plain form error rather than a refusal from the desktop."""
+
+PREVIEW_EDGE = 480
+PREVIEW_MAX_EDGE = 960
+"""A preview's long edge in pixels: the daemon's default and its cap. Larger is refused here as a form
+error rather than shrunk without saying."""
 
 SETTINGS_LINKS = {
     "screen": "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
@@ -117,20 +125,20 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             raise HTTPException(503, NO_LAUNCHER)
         return found
 
+    def refused(exc: launcher_bridge.DesktopRefused) -> JSONResponse:
+        explanation = refusals.explain(exc.code, exc.message, exc.data)
+        # `detail` carries the sentence too, so every error path of the app reads it without
+        # knowing this route; `error` is the contract's whole refusal, and `words` is what the
+        # Computer control shows in the operator's language.
+        error = {"code": exc.code, "message": exc.message, "data": exc.data, "explanation": explanation, "words": refusals.words(exc.code, exc.data)}
+        return JSONResponse({"detail": explanation, "error": error}, status_code=409)
+
     async def call(method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any] | JSONResponse:
         found = await launcher()
         try:
             return await launcher_bridge.computer(found, method, path, body)
         except launcher_bridge.DesktopRefused as exc:
-            explanation = refusals.explain(exc.code, exc.message, exc.data)
-            # `detail` carries the sentence too, so every error path of the app reads it without
-            # knowing this route; `error` is the contract's whole refusal, and `words` is what the
-            # Computer control shows in the operator's language.
-            error = {"code": exc.code, "message": exc.message, "data": exc.data, "explanation": explanation, "words": refusals.words(exc.code, exc.data)}
-            return JSONResponse(
-                {"detail": explanation, "error": error},
-                status_code=409,
-            )
+            return refused(exc)
         except (launcher_bridge.DesktopUnavailable, launcher_bridge.LauncherUnavailable) as exc:
             raise HTTPException(503, str(exc)) from None
 
@@ -183,7 +191,37 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         if manager is None or await manager.get_state(body.session_id) is None:
             raise HTTPException(404, "no such session")
         scope = body.scope.model_dump(exclude_none=True)
-        return await call("POST", "/api/computer/grant", {"session": body.session_id, "scope": scope, "ttl_ms": body.minutes * 60_000})
+        answer = await call("POST", "/api/computer/grant", {"session": body.session_id, "scope": scope, "ttl_ms": body.minutes * 60_000})
+        if not isinstance(answer, JSONResponse):
+            # The conversation becomes a computer one, its next run starts with the tools loaded, and a
+            # run already going is told; a failure there leaves the grant standing.
+            try:
+                await manager.computer_granted(body.session_id)
+            except Exception:  # noqa: BLE001 — the grant is the operator's and it was made
+                logger.exception("after granting the computer to session %s", body.session_id)
+        return answer
+
+    @api.get("/api/computer/preview")
+    async def computer_preview(
+        display: str | None = Query(default=None, min_length=1, max_length=64),
+        window: str | None = Query(default=None, min_length=1, max_length=64),
+        max: int = Query(default=PREVIEW_EDGE, ge=64, le=PREVIEW_MAX_EDGE),
+        _: dict[str, Any] = Depends(auth),
+    ) -> Response:
+        """A small JPEG of one display or one window, for the grant form's choice; no lease needed.
+        Never cached: it is the operator's screen as it is now, and a stale one would mislead the choice."""
+        if (display is None) == (window is None):
+            raise HTTPException(400, "a preview names one display or one window")
+        found = await launcher()
+        params = {"display": display} if display is not None else {"window": str(window)}
+        params["max"] = str(max)
+        try:
+            image = await launcher_bridge.computer_preview(found, params)
+        except launcher_bridge.DesktopRefused as exc:
+            return refused(exc)
+        except (launcher_bridge.DesktopUnavailable, launcher_bridge.LauncherUnavailable) as exc:
+            raise HTTPException(503, str(exc)) from None
+        return Response(content=image, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
     @api.post("/api/computer/revoke")
     async def computer_revoke(body: RevokeBody, _: dict[str, Any] = Depends(auth)) -> Any:
@@ -207,4 +245,4 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         return await call("POST", "/api/computer/permissions", {"which": body.which})
 
 
-__all__ = ["MAX_MINUTES", "SETTINGS_LINKS", "register", "without_protected"]
+__all__ = ["MAX_MINUTES", "PREVIEW_EDGE", "PREVIEW_MAX_EDGE", "SETTINGS_LINKS", "register", "without_protected"]
