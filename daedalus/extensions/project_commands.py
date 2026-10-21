@@ -13,6 +13,7 @@ from daedalus.host.events import AppEvent, EventBus
 from daedalus.stores.control import ControlConflict, ControlStore, Entity, Mutation, Principal, Scope, now, one
 from daedalus.stores.projects import (
     ENVIRONMENTS,
+    FINISHED_MACHINERY,
     ProjectError,
     ProjectStore,
     normalise_root,
@@ -328,7 +329,7 @@ class ProjectCommands:
             predicate, params = f"({named} = '' OR {named} = ?)", (project_id, folder_id)
         else:
             predicate, params = f"{named} = ?", (project_id, folder_id)
-        return await _rows(conn, f"SELECT id,title FROM sessions WHERE project_id = ? AND {predicate}", params)
+        return await _rows(conn, f"SELECT id,title FROM sessions WHERE project_id = ? AND {predicate} AND NOT {FINISHED_MACHINERY}", params)
 
     @staticmethod
     async def _journal(conn: aiosqlite.Connection, project_id: str, folder_id: str, text: str) -> None:

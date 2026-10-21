@@ -194,6 +194,21 @@ async def test_a_folder_an_agent_works_in_is_not_taken_from_under_it(running: An
     assert (await _write(client, "PATCH", f"/api/projects/{pid}/folders/{primary_id}", {"label": "Site"})).status_code == 200
 
 
+async def test_finished_staff_and_a_retired_orchestrator_do_not_hold_a_folder(running: Any, tmp_path: Path) -> None:
+    """Counted, every task a staff member had ever done in a folder held it for good: the members'
+    ended sessions stay in the project, archived, and name the folder they worked in."""
+    manager, client = running
+    site, docs = _dirs(tmp_path, "site", "docs")
+    project = (await client.post("/api/projects", headers=HEADERS, json={"name": "Firm", "folders": [{"path": str(site)}, {"path": str(docs)}]})).json()
+    pid, docs_id = project["id"], project["folders"][1]["id"]
+    await manager.create_session("clerk · old task", project_id=pid,
+                                 metadata={"staff_id": "st-clerk", "staff_session_id": "ss-ended", "folder_id": docs_id, "archived": True})
+    await manager.create_session("Orchestrator · Firm", project_id=pid, metadata={"orchestrator_retired_of": pid, "folder_id": docs_id})
+    assert await manager.projects.sessions_in_folder(pid, docs_id) == []
+    removed = await _write(client, "DELETE", f"/api/projects/{pid}/folders/{docs_id}")
+    assert removed.status_code == 200, removed.text
+
+
 async def test_an_agent_is_started_in_a_named_folder_or_refused_clearly(running: Any, tmp_path: Path) -> None:
     _, client = running
     site, docs = _dirs(tmp_path, "site", "docs")

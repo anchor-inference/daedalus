@@ -472,6 +472,17 @@ def top_level_sessions(rows: Iterable[tuple[str, str | None, Any]]) -> dict[str,
             if project_id and not _nested_under(session_id, metadata, known)}
 
 
+_META = "CASE WHEN json_valid(sessions.metadata) THEN sessions.metadata ELSE '{}' END"
+FINISHED_MACHINERY = (
+    f"(COALESCE(json_extract({_META}, '$.orchestrator_retired_of'), '') != ''"
+    f" OR (COALESCE(json_extract({_META}, '$.staff_id'), '') != ''"
+    " AND NOT EXISTS (SELECT 1 FROM staff_sessions AS live WHERE live.session_id = sessions.id AND live.ended_at IS NULL)))"
+)
+"""A SQL condition on a ``sessions`` row: a retired orchestrator's session or a staff session that has
+ended. Neither works in a folder any more, so neither keeps one from being removed or demoted; counted,
+every task a member had ever done in a folder held it for good."""
+
+
 LEFTOVER_GRACE = timedelta(hours=1)
 """How long a chat's project emptied by a move is kept: the move's Undo lasts seconds, and an hour
 also covers moving the chat back by hand after a change of mind."""
@@ -1720,7 +1731,7 @@ class ProjectStore:
 
     async def _named_folders(self, project_id: str) -> Sequence[tuple[str, str, str]]:
         """``(session id, title, the folder it names or "")`` for every session of the project, newest first."""
-        rows = await self._db.fetchall("SELECT id, title, metadata FROM sessions WHERE project_id = ? ORDER BY last_message_at DESC", (project_id,))
+        rows = await self._db.fetchall(f"SELECT id, title, metadata FROM sessions WHERE project_id = ? AND NOT {FINISHED_MACHINERY} ORDER BY last_message_at DESC", (project_id,))
         out = []
         for row in rows:
             try:
