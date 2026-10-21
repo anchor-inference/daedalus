@@ -36,7 +36,7 @@ signing is out of scope for the preview.
 **What it does not cover: the checkouts.** The code the stack runs — the two checkouts — is not in
 the release. `update`, and the last step of every upgrade, fetch the tip of `main` from GitHub's
 archive service (`repos.go`) over TLS, and nothing signs that: it is exactly as trustworthy as
-GitHub and TLS. The release signature covers the launcher, `ptyd`, `browserd` and the app's build,
+GitHub and TLS. The release signature covers the launcher, `ptyd`, `browserd`, `deskd` and the app's build,
 and nothing the launcher downloads afterwards.
 
 ## Format

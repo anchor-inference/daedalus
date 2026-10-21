@@ -308,6 +308,10 @@ class Settings(BaseSettings):
     operator's own Chrome through the Daedalus extension. Natively the launcher starts it beside the
     ``host`` one; on a server it is the ``browser-user`` compose service, whose run directory is
     mounted here. Unset = no "Your Chrome" on this installation."""
+    computer_host_dir: Path | None = None
+    """The run directory of the desktop daemon (``deskd``) the launcher starts in a native installation:
+    its endpoint, the host's token and its socket. Unset or empty = no computer use. The operator's own
+    token, the one that grants control, is never here: the launcher keeps it in its own state."""
 
     usd_per_day: float = 20.0
     """Daily spend cap. Enforced by the supervisor from its own environment, never from config.toml."""
@@ -425,11 +429,12 @@ class Settings(BaseSettings):
         The terminal daemons' and the browser daemons' run directories. A terminal daemon's token
         opens a shell — on the host environment, a shell on the operator's own machine, outside every
         wall the agent's container is. A browser daemon's token drives browsers holding the logins
-        made in them, with none of the policy's confirmations, and reads what any of them shows. So
+        made in them, with none of the policy's confirmations, and reads what any of them shows. The
+        desktop daemon's token sees the operator's screens and, inside a lease, moves their mouse. So
         unlike the rest of the sealed set, a container is no boundary for them: the directories are
         mounted into this container precisely so the app can reach the daemons.
         """
-        dirs = (self.terminals_container_dir, self.terminals_host_dir, self.browser_container_dir, self.browser_host_dir, self.browser_user_dir)
+        dirs = (self.terminals_container_dir, self.terminals_host_dir, self.browser_container_dir, self.browser_host_dir, self.browser_user_dir, self.computer_host_dir)
         return tuple(p for p in dirs if p is not None)
 
     @property
@@ -537,6 +542,11 @@ class ProviderConfig(BaseModel):
     """Per-model USD per 1M tokens overriding the built-in table (``daedalus.providers.pricing``):
     ``{"model": {"input", "output", "cache_hit"[, "*_off_peak", "peak_utc", "peak_weekdays_only"]}}``.
     A model with no price anywhere is recorded with an unknown cost."""
+    reasoning_replay: Literal["never", "when_present", "required"] | None = None
+    """Whether an assistant turn's reasoning text (``reasoning_content``) goes back to this endpoint on later
+    requests: ``never`` for a server that refuses a field it does not know, ``when_present`` on the turns that
+    have some, ``required`` on every turn while thinking is on (DeepSeek refuses a thinking request whose earlier
+    turns lack it). ``None`` takes :func:`reasoning_replay_for`."""
     billing: ProviderBilling = "metered"
     """``subscription`` is a prepaid plan (OpenCode Go, Z.AI Coding Plan, MiniMax Token Plan, Kimi Code): its calls are recorded at $0, never count against a
     dollar cap, and the plan's own allowance is what limits them, read from the key proxy beside the other
@@ -565,6 +575,15 @@ def first_byte_timeout_for(provider: ProviderConfig) -> float:
     if provider.kind in ("llamacpp", "vllm") or keyproxy_upstream(provider.base_url) == "local":
         return 0.0
     return FIRST_BYTE_TIMEOUT_SECONDS
+
+
+def reasoning_replay_for(provider: ProviderConfig) -> str:
+    """The reasoning replay for ``provider``: its own setting, else ``required`` for the DeepSeek dialect
+    (DeepSeek and OpenCode Go, which passes DeepSeek's fields through) and ``when_present`` for the rest, which
+    is what every endpoint was sent before the setting existed."""
+    if provider.reasoning_replay is not None:
+        return provider.reasoning_replay
+    return "required" if provider.kind in ("deepseek", "opencode") else "when_present"
 
 
 KNOWN_TOOL_LIMITS: tuple[tuple[str, int], ...] = (("grok", 350), ("gemini", 128))

@@ -946,6 +946,7 @@ func (a *App) PrintStatus(ctx context.Context) {
 	if a.Native() {
 		fmt.Printf("processes    %d running\n", status.Running)
 		fmt.Printf("ports        %s\n", status.Ports)
+		fmt.Printf("computer     %s\n", computerStatusLine(deskdRunDir(a.paths)))
 	} else {
 		fmt.Printf("docker       %s\n", docker)
 		fmt.Printf("containers   %d running\n", status.Running)

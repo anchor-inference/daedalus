@@ -76,6 +76,7 @@ from daedalus.extensions import (
     api_capacity,
     api_ci,
     api_comparisons,
+    api_computer,
     api_control,
     api_coordinator_authority,
     api_diagrams,
@@ -1719,6 +1720,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_browsers.register(api, app, auth)
     # The operator's own Chrome: its card, a conversation's switch, and a server's pairing and relay.
     api_browser_user.register(api, app, auth)
+    # The operator's own desktop, natively: the Computer control's state, its grant, Stop and Resume.
+    api_computer.register(api, app, auth)
 
     # -- staff: the named members of a project's team ------------------------------------------
 

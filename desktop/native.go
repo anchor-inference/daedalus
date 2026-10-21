@@ -277,7 +277,7 @@ type child interface {
 }
 
 // Native is the whole of the native installation the launcher owns: the runtime it downloads, the
-// supervisor it keeps alive, the key proxy beside it, and the terminal and browser daemons.
+// supervisor it keeps alive, the key proxy beside it, and the terminal, browser and desktop daemons.
 type Native struct {
 	paths Paths
 	log   func(string, ...any)
@@ -288,6 +288,7 @@ type Native struct {
 	browserd   child
 	// browserdUser is the second browser daemon, for the operator's own Chrome (userbrowser.go).
 	browserdUser child
+	deskd        child
 	git          string
 
 	// bootID is the id the running supervisor was given, which the app echoes (ready.go).
@@ -761,6 +762,9 @@ func supervisorEnv(p Paths, base []string, settings map[string]string) []string 
 	add("BROWSER_HOST_DIR", browserdRunDir(p))
 	// The user daemon, for the operator's own Chrome, the same way again.
 	add("BROWSER_USER_DIR", browserdUserRunDir(p))
+	// The desktop daemon, the same way. Only its run directory: the operator's token, which grants
+	// the leases, is in its state directory, which the agent is never told about.
+	add("COMPUTER_HOST_DIR", deskdRunDir(p))
 	// The Mini App as a release archive carries it, beside the launcher. It is not the checkout's
 	// own miniapp/dist: that is the thing this would be a fallback for, and pointing one at the
 	// other makes the fallback a no-op that looks like a copy.
@@ -896,6 +900,15 @@ func (n *Native) Start(ctx context.Context) error {
 	if n.browserdUser != nil {
 		n.browserdUser.Start(ctx)
 		waitForPtyd(ctx, browserdUserRunDir(n.paths), 5*time.Second)
+	}
+	// The desktop daemon after them. It touches nothing on the screen until the operator grants a
+	// lease, so it is up in a moment too.
+	if n.deskd == nil {
+		n.deskd = n.newDeskd()
+	}
+	if n.deskd != nil {
+		n.deskd.Start(ctx)
+		waitForPtyd(ctx, deskdRunDir(n.paths), 5*time.Second)
 	}
 	n.keyproxy.Start(ctx)
 	n.supervisor.Start(ctx)
@@ -1045,12 +1058,13 @@ const nativeReadyTimeout = 90 * time.Second
 // run is snapshotted, and it resumes on the next start.
 //
 // The supervisor goes first, so the agent detaches from its terminals and browsers cleanly and
-// records them as ended rather than finding a daemon gone under it; then the user browser daemon,
-// which lets go of the operator's Chrome and closes nothing in it; then the browser daemon, which
-// closes every browser; then the terminal daemon, which ends every host terminal; then the key
-// proxy, which the agent needed until it stopped.
+// records them as ended rather than finding a daemon gone under it; then the desktop daemon, which
+// ends any lease and lets go of every key and button it holds; then the user browser daemon, which
+// lets go of the operator's Chrome and closes nothing in it; then the browser daemon, which closes
+// every browser; then the terminal daemon, which ends every host terminal; then the key proxy,
+// which the agent needed until it stopped.
 func (n *Native) Stop(ctx context.Context) {
-	for _, c := range []child{n.supervisor, n.browserdUser, n.browserd, n.ptyd, n.keyproxy} {
+	for _, c := range []child{n.supervisor, n.deskd, n.browserdUser, n.browserd, n.ptyd, n.keyproxy} {
 		if c != nil {
 			c.Stop(ctx)
 		}
@@ -1059,7 +1073,7 @@ func (n *Native) Stop(ctx context.Context) {
 	// once, when it is built, while APIPort and WaitReadyNative read the env file every time: a stop,
 	// an edit to the ports and a start would otherwise bring the old ports back up and then wait on
 	// the new ones, which is a launcher hanging on a port nothing is serving.
-	n.supervisor, n.keyproxy, n.ptyd, n.browserd, n.browserdUser = nil, nil, nil, nil, nil
+	n.supervisor, n.keyproxy, n.ptyd, n.browserd, n.browserdUser, n.deskd = nil, nil, nil, nil, nil, nil
 }
 
 // Running counts what is answering rather than what this process started. A `status` from a second
@@ -1076,7 +1090,7 @@ func (n *Native) Running() int {
 			count++
 		}
 	}
-	for _, run := range []string{ptydRunDir(n.paths), browserdRunDir(n.paths), browserdUserRunDir(n.paths)} {
+	for _, run := range []string{ptydRunDir(n.paths), browserdRunDir(n.paths), browserdUserRunDir(n.paths), deskdRunDir(n.paths)} {
 		if ptydAnswers(run) {
 			count++
 		}

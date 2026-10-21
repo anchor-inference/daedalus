@@ -11,7 +11,17 @@ from typing import Any
 
 import httpx
 import pytest
-from protocore.contracts.llm import LLMProviderError, LLMRateLimitError, LLMRequest, ProviderDeltaKind
+from protocore.conformance import assert_adapter_failure
+from protocore.contracts.llm import (
+    PROVIDER_ADVANCE_REASONS,
+    LLMProviderError,
+    LLMRateLimitError,
+    LLMRequest,
+    ProviderDeltaKind,
+    ProviderFailure,
+    ProviderFailureReason,
+    provider_failure_of,
+)
 from protocore.contracts.types import Message, MessageRole, TextBlock
 
 from daedalus.providers.openai_compat import OpenAICompatibleProvider, ProviderEndpoint
@@ -148,3 +158,27 @@ async def test_a_context_overflow_in_a_stream_chunk_is_a_context_error() -> None
 
     with pytest.raises(LLMContextWindowExceeded):
         await _drain(_provider(_frames([{"error": {"message": "Your input exceeds the context window of this model.", "code": "context_length_exceeded"}}])))
+
+
+async def test_an_endpoint_that_cannot_be_reached_carries_the_cores_connection_verdict() -> None:
+    """A refused connection used to be raised bare, and an error without a verdict never moves the
+    fallback chain: a dead endpoint with a healthy fallback ended the run instead of stepping down."""
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request) from ConnectionRefusedError(111, "Connection refused")
+
+    endpoint = ProviderEndpoint(id="direct", kind="openai_compat", base_url="https://x.test", api_key="k")
+    provider = OpenAICompatibleProvider(endpoint, client=httpx.AsyncClient(transport=httpx.MockTransport(refuse)))
+    with pytest.raises(LLMProviderError) as caught:
+        await _drain(provider)
+    assert_adapter_failure(caught.value)
+    verdict = provider_failure_of(caught.value)
+    assert verdict is not None and verdict.reason is ProviderFailureReason.connection and verdict.retryable
+    assert verdict.reason in PROVIDER_ADVANCE_REASONS
+
+
+async def test_every_refusal_carries_the_cores_own_verdict_type() -> None:
+    with pytest.raises(LLMProviderError) as caught:
+        await _drain(_provider(json.dumps({"error": {"type": "billing_error", "message": "no credit"}}), status=402))
+    assert_adapter_failure(caught.value)
+    assert isinstance(caught.value.classified, ProviderFailure)

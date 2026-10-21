@@ -333,6 +333,8 @@ platform):
     browserd-user/          the user browser daemon's endpoint and token, for your own Chrome (sealed)
     browser-extension/      the Chrome extension you load unpacked, refreshed in place on each release
     browser-connector/      the wrapper Chrome starts the bridge through (and its manifest on Windows)
+    deskd/                  the desktop daemon's endpoint, its configuration, the operator's token
+                            and the audit of what the agent did on the screen (sealed)
     supervisor.sock         the supervisor's socket
 ```
 
@@ -857,6 +859,66 @@ the Daedalus extension. Chrome only, whatever its version. The launcher's part:
 The app reaches all of it over the launcher's loopback page with the token from the handover file:
 `GET /api/browser/user` (the report), `POST /api/browser/user/register` and
 `POST /api/browser/user/unregister` (each answers the new report).
+
+### Computer use
+
+Computer use is the agent seeing and driving your own screen, in the native application only.
+`deskd`, the desktop daemon, does the capturing and the input. Each release archive carries it beside
+`browserd` (`deskd`, `deskd.exe`, or `Contents/MacOS/deskd` in the Mac bundle), and the launcher
+starts it after the browser daemon as another child of its own. It starts directly, never through
+launchd or a systemd scope, because macOS gives its privacy grants to the program that started it,
+which is Daedalus. It touches nothing until you grant a lease: one window, one app, one display or
+the whole desktop, for a time you choose. Moving the mouse or pressing a key pauses the agent. A
+locked screen stops it, and so does **Stop**. Quitting the launcher ends any lease and releases
+whatever the agent held down.
+
+- **Files.** These live in the local state's `deskd/`. `run/` holds the endpoint and the token the
+  agent's host connects with (the host is told this folder as `COMPUTER_HOST_DIR`). `state/` holds
+  `operator.token` and `audit.jsonl`. `config.json` is written by the launcher before every start.
+  The operator's token grants leases, so only the launcher reads it. The agent is never told where it
+  is, and its policy seals the local state folder whole. The audit records metadata only: which
+  action, where, how many characters were typed (never which), and never a picture. The daemon's log
+  is `deskd.log` in the launcher's logs, and what it printed before that log was open is in
+  `deskd-output.log`.
+- **What the agent can never touch.** `config.json` names Daedalus itself on the daemon's protected
+  list, so the agent cannot press "allow" on its own approval card or type into its own composer:
+  - on macOS, the bundle id `io.github.anchor-inference.daedalus` and the executable `Daedalus`;
+  - on Windows, the executable `Daedalus` (the `.exe` is ignored);
+  - on Linux, the executable `daedalus` and the window class `daedalus` (Electron's; compared
+    without case, so it also covers `Daedalus`);
+  - everywhere, the launcher's own executable `daedalus-desktop`, the launcher's pid, and the
+    application's pid when the launcher runs under it.
+
+  **What it does not cover:** the app opened in an ordinary browser tab. The daemon tells apps apart
+  by process, and that tab belongs to your browser, which a lease can reach. Use the application's
+  own window while the agent has the screen.
+- **The launcher's API.** The host reaches the daemon only through the launcher, on the launcher's
+  loopback port. Every route needs the launcher's token (`X-Daedalus-Desktop`, from `launcher.json`),
+  reads included, since window titles are yours. Every route answers in native mode only (501
+  otherwise). A launcher with no daemon running answers 503 with `{available: false, reason}`. A
+  refusal from the daemon comes back as 409 with its `{code, message, data}` unchanged.
+
+  | Route | Body | Answer |
+  |---|---|---|
+  | `GET /api/computer` | — | `available`, `platform`, `permissions`, `secure`, `lease`, `human`, `displays`, `limits`, `version` |
+  | `GET /api/computer/apps` | — | the apps and windows on screen, protected ones marked, to choose a scope from |
+  | `POST /api/computer/grant` | `{session, scope: {kind: window\|app\|display\|desktop, window?, app?, display?}, ttl_ms}` | `{lease}` |
+  | `POST /api/computer/revoke` | `{session?}` | `{revoked}` |
+  | `POST /api/computer/stop` | `{}` | `{stopped: true}` |
+  | `POST /api/computer/resume` | `{}` | `{resumed}` (after the pause your own input caused) |
+  | `POST /api/computer/permissions` | `{which: screen\|accessibility\|input_monitoring}` | `{which, state, permissions, hint}` |
+
+  The protocol behind it is in [`docs/architecture/computer.md`](../docs/architecture/computer.md).
+- **macOS permissions.** The daemon needs **Screen Recording** to see and **Accessibility** to act,
+  both in System Settings → Privacy & Security. The application is signed ad hoc, and macOS ties
+  these grants to the exact build. **Every update loses them**, even though System Settings may
+  still show Daedalus switched on. After an update, remove Daedalus from both lists and add it again.
+- **Linux** works on X11 sessions. On a Wayland session the launcher starts no daemon, and the app
+  says computer use is unavailable there. `DAEDALUS_DESKD=/path/to/deskd` names a daemon built by
+  hand. A build without one shows computer use unavailable with "this build carries no deskd".
+- **Not yet proven:** the Windows and macOS daemons on real machines. The Windows build is compiled
+  and vetted only, and the macOS build is compiled on the release runner and has not driven a real
+  screen.
 
 ### Windows
 

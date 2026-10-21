@@ -290,7 +290,7 @@ if [ -e "$launcher" ]; then
   else
     items="$(tar -tzf "$work/$asset" | sed 's|^\./||; s|/.*||' | sort -u)"
   fi
-  for item in $items daedalus-desktop ptyd browserd miniapp-dist browser-extension; do
+  for item in $items daedalus-desktop ptyd browserd deskd miniapp-dist browser-extension; do
     case "$item" in "" | data | .daedalus-upgrade) continue ;; esac
     if [ -e "$target/$item" ] && [ ! -e "$kept/$item" ]; then mv "$target/$item" "$kept/"; fi
   done

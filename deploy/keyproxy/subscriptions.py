@@ -251,6 +251,15 @@ def _text_of(content: Any) -> str:
     return "\n".join(parts)
 
 
+TOOL_IMAGES_CARRIER_HEADER = (
+    "[Tool output, not a message from the user: the images below were returned "
+    "by the tool calls above.]"
+)
+"""The first text of the user turn the agent core's adapter adds after a batch of tool results to carry
+their pictures, since a chat-completions ``tool`` message takes only a string. The proxy cannot import the
+core, so the words are repeated here; a test holds them to the core's own constant."""
+
+
 def _user_content(content: Any) -> list[dict[str, Any]]:
     if isinstance(content, str):
         return [{"type": "input_text", "text": content}]
@@ -345,8 +354,22 @@ def chat_to_responses(body: dict[str, Any]) -> dict[str, Any]:
     """
     instructions: list[str] = []
     items: list[dict[str, Any]] = []
+    # Pictures a tool message carried as parts of its own (the native shape), held until its batch of
+    # outputs ends. The agent core's default is already a user message after the batch, opened by a line
+    # saying it is tool output, and that one passes through as the user message below: the Codex CLI shows
+    # the model a picture the same way, as an ``input_image`` in a user turn after the call's output,
+    # rather than inside ``function_call_output``, which is not known to take one on this backend.
+    held_images: list[dict[str, Any]] = []
+
+    def release_images() -> None:
+        if held_images:
+            items.append({"type": "message", "role": "user", "content": [{"type": "input_text", "text": TOOL_IMAGES_CARRIER_HEADER}, *held_images]})
+            held_images.clear()
+
     for message in body.get("messages") or []:
         role = message.get("role")
+        if role != "tool":
+            release_images()
         if role == "system":
             instructions.append(_text_of(message.get("content")))
         elif role == "user":
@@ -360,7 +383,11 @@ def chat_to_responses(body: dict[str, Any]) -> dict[str, Any]:
                 fn = call.get("function") or {}
                 items.append({"type": "function_call", "call_id": str(call.get("id") or ""), "name": str(fn.get("name") or ""), "arguments": fn.get("arguments") if isinstance(fn.get("arguments"), str) else json.dumps(fn.get("arguments") or {})})
         elif role == "tool":
-            items.append({"type": "function_call_output", "call_id": str(message.get("tool_call_id") or ""), "output": _text_of(message.get("content"))})
+            content = message.get("content")
+            items.append({"type": "function_call_output", "call_id": str(message.get("tool_call_id") or ""), "output": _text_of(content)})
+            if isinstance(content, list):
+                held_images.extend(part for part in _user_content(content) if part.get("type") == "input_image")
+    release_images()
     cache_key = body.get("prompt_cache_key")
     base = "\n\n".join(i for i in instructions if i.strip())
     if base:

@@ -28,9 +28,15 @@ type Then struct {
 // Server accepts connections and dispatches their requests.
 type Server struct {
 	token   string
+	roles   map[string]string // further tokens and the role each one grants
 	log     *slog.Logger
 	methods map[string]Handler
 	hello   func() any
+
+	// RoleHello, when set, builds the hello for a client by the role its token grants, in place of
+	// hello: a daemon with more than one role says which one a client holds, so a client that holds
+	// the wrong token learns it at the handshake rather than from its first refused call.
+	RoleHello func(role string) any
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -44,9 +50,15 @@ type Server struct {
 // notification sent after a good handshake.
 func New(token string, log *slog.Logger, hello func() any) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Server{token: token, log: log, methods: map[string]Handler{}, hello: hello, ctx: ctx, cancel: cancel,
-		conns: map[*Conn]bool{}}
+	return &Server{token: token, roles: map[string]string{}, log: log, methods: map[string]Handler{}, hello: hello,
+		ctx: ctx, cancel: cancel, conns: map[*Conn]bool{}}
 }
+
+// AddToken accepts a further token, whose connections carry role (Conn.Role). The token given to New
+// grants the empty role. A daemon whose clients differ in what they may do (the desktop daemon's host
+// and operator) tells them apart by the token they present, so a role can never be claimed in a
+// request. It must be called before Serve.
+func (s *Server) AddToken(token, role string) { s.roles[token] = role }
 
 // Handle registers a method.
 func (s *Server) Handle(method string, h Handler) { s.methods[method] = h }

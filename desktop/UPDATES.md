@@ -19,7 +19,7 @@ promise it yet and is refused by all three.
 
 | What | Version | Moved by |
 |---|---|---|
-| the application (the Electron window, `Daedalus.exe`/`Daedalus.app`/`daedalus`) and the launcher beside it (`daedalus-desktop`, `ptyd`, `browserd`, the Mini App build) | the `desktop-vX.Y.Z` release it came from | an installer (`Daedalus-Setup-x64.exe`, the `.dmg`, the `.deb`, the AppImage) or `install.sh` / `install.ps1` on a fresh machine; `daedalus-desktop upgrade` (the application's **Install and restart**, or the installers' bridge) afterwards |
+| the application (the Electron window, `Daedalus.exe`/`Daedalus.app`/`daedalus`) and the launcher beside it (`daedalus-desktop`, `ptyd`, `browserd`, `deskd`, the Mini App build) | the `desktop-vX.Y.Z` release it came from | an installer (`Daedalus-Setup-x64.exe`, the `.dmg`, the `.deb`, the AppImage) or `install.sh` / `install.ps1` on a fresh machine; `daedalus-desktop upgrade` (the application's **Install and restart**, or the installers' bridge) afterwards |
 | the code the stack runs (the two checkouts, and in Docker mode the images) | on the first start, the release's own commit from the seed it carries (`seed.go`) — the tip of `main` for a launcher without one; afterwards the tip of `main` and `:latest` when fetched (`repos.go`, `docker.go`) | the first start; `daedalus-desktop update`; the last step of an upgrade |
 
 A release pins only where a first run starts: the seed in every package holds both checkouts at

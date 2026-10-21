@@ -1,0 +1,204 @@
+{
+ "run_id": "0a618684e3be",
+ "session_id": "9da59a01c6c7",
+ "snapshot": {
+  "active_rule_paths": [],
+  "background_task_ids": [],
+  "circuit_breaker_notified_tools": [],
+  "circuit_breaker_streak": null,
+  "circuit_broken_tools": [],
+  "compact_checkpoint": null,
+  "compaction": {
+   "blob_refs_created": [],
+   "failed_anchor_keys": {},
+   "reactive_retry_count": 0,
+   "retry_count": 0,
+   "summarised_turn_ids": []
+  },
+  "deferred_tool_groups": [
+   "calendar",
+   "pages",
+   "scheduling",
+   "diagrams",
+   "self_development",
+   "loop",
+   "mcp_oauth",
+   "settings",
+   "learning",
+   "docs"
+  ],
+  "discovered_rules": [],
+  "discovered_tools": [],
+  "finalize_prose_gate_used": false,
+  "follow_up_queue": [],
+  "has_final_answer": false,
+  "history": [
+   {
+    "content_blocks": [
+     {
+      "kind": "text",
+      "text": "long job\n\n<turn-context>\nThe state of things as this turn starts (not part of the request):\n- Date/time: 2026-10-20 10:58 UTC\n</turn-context>"
+     }
+    ],
+    "created_at": "2026-10-20T10:58:47.603884Z",
+    "metadata": {
+     "daedalus.origin": "operator",
+     "daedalus.run_id": "0a618684e3be",
+     "protocore.operator_words": [
+      "long job"
+     ]
+    },
+    "reasoning_content": null,
+    "role": "user"
+   },
+   {
+    "content_blocks": [
+     {
+      "arguments_json": "{\"command\": \"echo first-step\"}",
+      "kind": "tool_use",
+      "name": "Exec",
+      "tool_call_id": "call_1"
+     }
+    ],
+    "created_at": "2026-10-20T10:58:47.942739Z",
+    "metadata": {},
+    "reasoning_content": null,
+    "role": "assistant"
+   },
+   {
+    "content_blocks": [
+     {
+      "canonical_content": null,
+      "canonical_ref": null,
+      "content": "exit_code=0 elapsed=0.1s cwd=/workspace\nfirst-step\n",
+      "is_error": false,
+      "kind": "tool_result",
+      "metadata": {
+       "exit_code": 0
+      },
+      "path": null,
+      "tool_call_id": "call_1"
+     }
+    ],
+    "created_at": "2026-10-20T10:58:48.012846Z",
+    "metadata": {},
+    "reasoning_content": null,
+    "role": "tool"
+   }
+  ],
+  "identical_tool_counts": {
+   "Exec:{\"command\":\"echo first-step\"}": 1
+  },
+  "lanes": [],
+  "last_heartbeat_ms": 0,
+  "last_observed_prompt_tokens": 10,
+  "last_request_manifest": {
+   "attempt_id": "0a618684e3be/turn-0a618684e3be-1-1/run/8c4b795507349b8c",
+   "manifest_id": "8f5942fc9f279a429d454fdb94adc80d264a4c75b9b185d5870d806d44e5efba",
+   "manifest_schema_version": 1
+  },
+  "live_model_name": null,
+  "live_reasoning_effort": null,
+  "live_thinking_enabled": null,
+  "longfile_active_file_bytes": 0,
+  "longfile_active_file_lines": 0,
+  "longfile_active_path": null,
+  "longfile_appends_per_path": {},
+  "longfile_finalized": false,
+  "longfile_forced_appends": 0,
+  "longfile_forced_finalizes": 0,
+  "longfile_last_mutation_truncated": false,
+  "longfile_mutation_deltas": [],
+  "longfile_salvage_seq": 0,
+  "longfile_truncated_paths": [],
+  "longfile_voluntary_seal_used": false,
+  "loop_guard_nudge_count": 0,
+  "model_name": "scripted-model",
+  "open_intents": [],
+  "parent_run_id": null,
+  "pending_interrupts": [],
+  "pending_read_paths": [],
+  "pending_reads_abandoned": [],
+  "pending_reads_forced_attempts": 0,
+  "pending_reads_satisfied": [],
+  "pinned_tool_result_ids": [],
+  "pointer_answer_repair_attempts": 0,
+  "pointer_answer_repair_released": false,
+  "pre_dispatch_terminal_verify_used": false,
+  "pre_terminal_self_verify_used": false,
+  "profile_audit": [],
+  "provider_chain_advances": 0,
+  "provider_chain_model_name": null,
+  "reasoning_length_cut_count": 0,
+  "reasoning_recovery_effort": null,
+  "reasoning_recovery_thinking_enabled": null,
+  "request_overhead_tokens_raw": 17984,
+  "root_run_id": "0a618684e3be",
+  "run_deadline_elapsed_seconds": 0.27320469194091856,
+  "run_delegated": false,
+  "run_id": "0a618684e3be",
+  "run_scoped_state": {
+   "run_work_ledger": {
+    "charged_call_ids": [],
+    "child_runs_started": 0,
+    "max_child_runs": 24,
+    "max_tokens": 20000000,
+    "tokens_charged": 15
+   },
+   "subagent_tree_budget": null
+  },
+  "run_settled_emitted": false,
+  "run_started_epoch": 1792493927.740086,
+  "schema_version": 7,
+  "self_verify_extra_turns_used": 0,
+  "session_grants": [],
+  "session_id": "9da59a01c6c7",
+  "skill_catalog_block_sha256": "27eceeda1652f10f0884a939bf1680937a7064967eb8bc356776574af70b4964",
+  "soft_stop_cause": null,
+  "soft_stop_stage": "",
+  "spans": [],
+  "state": "running",
+  "steer_queue": [],
+  "stop_requested": false,
+  "subagent_id": null,
+  "tenant_id": "daedalus",
+  "terminal_call_forced": false,
+  "terminal_call_forced_attempts": 0,
+  "terminal_call_forced_mode": null,
+  "terminal_candidate": null,
+  "terminal_candidate_reveto_used": false,
+  "terminal_only_active": false,
+  "token_estimate_calibration": 1.0,
+  "token_estimate_calibration_model": "scripted-model",
+  "tool_call_ledger": [
+   {
+    "name": "Exec",
+    "ok": true,
+    "seq": 1
+   }
+  ],
+  "tool_call_ledger_seq": 1,
+  "tool_call_ledger_truncated": false,
+  "tool_group_rules_given": [],
+  "tool_group_rules_mark": "ec9d627f",
+  "tool_precondition_attempts": 0,
+  "tool_precondition_calls": 0,
+  "tool_precondition_index": 0,
+  "tool_precondition_last_error": null,
+  "trimmed_tool_result_ids": [],
+  "turn_count": 1,
+  "turns_since_last_byte_adding_mutation": 0,
+  "usage": {
+   "cache_creation_tokens": 0,
+   "cache_read_tokens": 0,
+   "input_tokens": 10,
+   "output_tokens": 5,
+   "this_turn_cache_creation": 0,
+   "this_turn_cache_read": 0,
+   "this_turn_input": 10,
+   "this_turn_output": 5
+  },
+  "usage_rows": [],
+  "verification_delivery": null
+ }
+}

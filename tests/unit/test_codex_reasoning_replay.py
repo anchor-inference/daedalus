@@ -20,9 +20,10 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 from protocore.contracts.llm import LLMObservabilityContext, LLMRequest, ProviderDeltaKind
 from protocore.contracts.types import Message, MessageRole, TextBlock, ToolResultBlock, ToolUseBlock
+from protocore.providers.openai_compat import REASONING_ENVELOPE
 
 from daedalus.config import keyproxy_base
-from daedalus.providers.openai_compat import REASONING_ENVELOPE, OpenAICompatibleProvider, ProviderEndpoint
+from daedalus.providers.openai_compat import OpenAICompatibleProvider, ProviderEndpoint
 
 KEYPROXY_DIR = Path(__file__).resolve().parents[2] / "deploy" / "keyproxy"
 if str(KEYPROXY_DIR) not in sys.path:

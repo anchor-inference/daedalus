@@ -35,9 +35,12 @@ def _legacy_store(workspace: Path, text: str) -> str:
     return subprocess.run([*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
 
 
+SEALED = MIGRATIONS.index(_sealed_checkpoint_stores)
+"""The schema the move upgrades from, found by what it does: migrations added after it must not hide it."""
+
+
 async def _reopen_one_schema_back(settings: Settings, db: Database) -> Database:
-    # Back to just before the store migration, wherever later migrations have put it in the list.
-    await db.execute(f"UPDATE schema_version SET version = {MIGRATIONS.index(_sealed_checkpoint_stores)}")
+    await db.execute(f"UPDATE schema_version SET version = {SEALED}")
     await db.close()
     reopened = Database(settings.db_path, workspaces_dir=settings.workspaces_dir)
     await reopened.open()

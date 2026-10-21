@@ -282,7 +282,7 @@ function Install-Daedalus {
             New-Item -ItemType Directory -Force -Path $kept | Out-Null
             # Whatever the new archive brings is moved aside where it already stands: the launcher and its
             # daemons, and since the application came with it, the application's own files too.
-            $items = @(Get-ChildItem -Path $staged | ForEach-Object { $_.Name }) + @('daedalus-desktop.exe', 'ptyd.exe', 'browserd.exe', 'miniapp-dist', 'browser-extension')
+            $items = @(Get-ChildItem -Path $staged | ForEach-Object { $_.Name }) + @('daedalus-desktop.exe', 'ptyd.exe', 'browserd.exe', 'deskd.exe', 'miniapp-dist', 'browser-extension')
             foreach ($item in ($items | Select-Object -Unique)) {
                 if ($item -eq 'data' -or $item -eq '.daedalus-upgrade') { continue }
                 $path = Join-Path $target $item

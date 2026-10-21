@@ -13,6 +13,8 @@ from typing import Any
 
 import httpx
 import pytest
+from protocore.contracts.llm import ProviderFailure, ProviderFailureReason
+from protocore.contracts.outcome import RunCause, RunOutcome
 from protocore.runtime.events.envelope import TurnEvent
 from protocore.runtime.events.types import EventType
 from protocore.runtime.soft_stop import CAUSE_PROVIDER_ERROR
@@ -157,12 +159,21 @@ async def test_a_cap_that_ends_a_run_midway_is_not_reported_as_the_provider(
             events.append(event)
 
         manager.add_sink(sink)
-        state.soft_stop_cause = CAUSE_PROVIDER_ERROR
-        state.soft_stop_detail = "inference budget: run:r: the available balance under this run's spending cap"
+        # Told apart by the verdict the core carries, not by the words of the detail: a vendor that
+        # happens to write "inference budget:" is still the vendor, and the cap needs no phrase.
+        state.run_outcome = RunOutcome.failed
+        state.run_cause = RunCause(kind=CAUSE_PROVIDER_ERROR, detail="run:r: the available balance under this run's spending cap",
+                                   failure=ProviderFailure(reason=ProviderFailureReason.budget, retryable=False))
         assert await manager._report_provider_refusal(state, "r")
         payload = events[-1].payload
         assert payload["kind"] == "spending_cap"
         assert "a spending cap stopped this run" in payload["message"] and "provider refused" not in payload["message"]
+        state.run_cause = RunCause(kind=CAUSE_PROVIDER_ERROR, detail="inference budget: the vendor's own words",
+                                   failure=ProviderFailure(reason=ProviderFailureReason.billing, retryable=False))
+        assert await manager._report_provider_refusal(state, "r")
+        assert events[-1].payload["kind"] == "llm_provider_error"
+        state.run_outcome = RunOutcome.wound_down
+        assert not await manager._report_provider_refusal(state, "r"), "a bound the run was given is not a failure"
     finally:
         await manager.close()
 

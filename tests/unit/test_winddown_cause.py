@@ -21,6 +21,7 @@ from typing import Any
 
 import httpx
 from protocore.contracts.llm import LLMProviderError, LLMRequest, ProviderDelta, ProviderDeltaKind
+from protocore.contracts.outcome import RunOutcome
 from protocore.runtime.events.envelope import TurnEvent
 from protocore.runtime.events.types import EventType
 
@@ -134,7 +135,7 @@ async def test_reasoning_only_exhaustion_is_failed_even_after_a_closing_answer(s
     waiter = asyncio.create_task(_wait_finished(manager))
     await manager.submit(state.session.id, "Explain the result")
     assert (await waiter)[0][2] == "failed"
-    assert state.soft_stop_cause == "model_no_progress"
+    assert state.run_outcome is RunOutcome.failed and state.run_cause is not None and state.run_cause.kind == "model_no_progress"
     assert state.last_error_kind == "model_no_progress"
     assert state.outage_task is None
     assert (await manager.list_sessions(ids=[state.session.id]))[0]["status"] == "failed"
@@ -207,7 +208,8 @@ async def test_a_run_that_did_work_is_wound_down_without_claiming_a_budget(
     notified = _notified(events)
     assert notified and notified[0]["soft_stop_cause"] == "provider_error"
     assert "failed to parse grammar" in str(notified[0].get("soft_stop_detail") or "")
-    assert state.soft_stop_cause == "provider_error"
+    assert state.run_outcome is RunOutcome.failed and state.run_cause is not None and state.run_cause.kind == "provider_error"
+    assert "failed to parse grammar" in state.run_cause.detail
 
     notice = _wind_down_notice(manager, state)
     assert notice, "the model is told what happened"

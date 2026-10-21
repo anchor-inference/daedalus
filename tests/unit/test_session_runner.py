@@ -592,3 +592,39 @@ async def test_compact_falls_back_to_the_sessions_model_when_the_compaction_mode
     with pytest.raises(CompactionFailed, match="usage limit exceeded"):
         await manager.compact(state.session.id)
     await manager.close()
+
+
+SCHEMA7_SNAPSHOT = Path(__file__).parents[1] / "fixtures" / "snapshots" / "schema7_mid_turn.json"
+"""A snapshot the core of the previous release (schema 7) wrote for a host run that went down between two
+tool calls: the operator's message, the first call and its result. Recorded once from that release."""
+
+
+async def test_a_snapshot_the_previous_core_wrote_resumes_on_this_one(settings: Settings, db: Database) -> None:
+    """A run in flight at the upgrade is resumed from what the old core wrote: the core lifts the payload
+    to its own schema on load, and refusing it would have cost the run its only copy of the work."""
+    from protocore.contracts.snapshot import SNAPSHOT_SCHEMA_VERSION
+
+    recorded = json.loads(SCHEMA7_SNAPSHOT.read_text())
+    assert recorded["snapshot"]["schema_version"] == 7 < SNAPSHOT_SCHEMA_VERSION
+    provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "sleep 5"}}])
+    manager = await _manager(settings, db, provider)
+    state = await manager.create_session("t")
+    await manager.submit(state.session.id, "long job")
+    await until_await(manager.events.unfinished_snapshots, "the turn's snapshot was written")
+    await manager.close()
+    [entry] = await manager.events.unfinished_snapshots()
+    # The recorded run stands in for this one: same session and run, the old core's payload.
+    old = json.dumps(recorded["snapshot"]).replace(recorded["session_id"], entry["session_id"]).replace(recorded["run_id"], entry["run_id"])
+    await db.execute("UPDATE snapshots SET snapshot = ? WHERE run_id = ?", (old, entry["run_id"]))
+
+    provider2 = ScriptedProvider([{"text": "after restart"}])
+    manager2 = await _manager(settings, db, provider2)
+    waiter = asyncio.create_task(_wait_finished(manager2))
+    assert await manager2.resume_unfinished() == [entry["run_id"]]
+    assert (await waiter)[0][2] == "completed"
+    sent = provider2.requests[0].messages
+    [result] = [b for m in sent for b in m.content_blocks if isinstance(b, ToolResultBlock)]
+    assert "first-step" in result.content and result.images == (), "the recorded tool result came through, lifted"
+    history = await manager2.sessions.list_messages(state.session.id, "daedalus", limit=100)
+    assert history[-1].content_blocks[0].text == "after restart"  # type: ignore[union-attr]
+    await manager2.close()

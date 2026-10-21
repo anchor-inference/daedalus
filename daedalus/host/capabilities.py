@@ -98,6 +98,34 @@ def resolve_browser(settings: Settings) -> Browser:
 
 
 @dataclass(frozen=True, slots=True)
+class Computer:
+    """Whether this installation may offer computer use: a native one the launcher told of a desktop
+    daemon's run directory. Docker mode never does — the daemon drives the screen of the machine it
+    runs on, and a container's agent has none of its own — and the operator chose the native
+    application as the only home of the feature. Decided at startup, because the tools are registered
+    then; whether the daemon is up, and whether a session's model can see, is judged per run."""
+
+    native: bool = False
+    run_dir: str = ""
+
+    @property
+    def configured(self) -> bool:
+        return self.native and bool(self.run_dir)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"configured": self.configured, "native": self.native}
+
+
+COMPUTER_TOOLS: frozenset[str] = frozenset({"Computer", "ComputerApps"})
+"""The computer tools; an installation that cannot offer computer use registers none of them."""
+
+
+def resolve_computer(settings: Settings) -> Computer:
+    run_dir = settings.computer_host_dir
+    return Computer(native=bool(settings.native), run_dir=str(run_dir) if run_dir is not None and str(run_dir).strip() else "")
+
+
+@dataclass(frozen=True, slots=True)
 class Capabilities:
     """Everything the app tells its surfaces about what this installation can do.
 
@@ -108,6 +136,7 @@ class Capabilities:
 
     selfdev: SelfDev
     browser: Browser = field(default_factory=Browser)
+    computer: Computer = field(default_factory=Computer)
     restart_required: dict[str, Any] | None = None
     """The change committed to the checkout and waiting for a restart, or ``None``."""
     last_change: dict[str, Any] | None = None
@@ -115,7 +144,7 @@ class Capabilities:
     not boot. What the app shows once the restart is over."""
 
     def as_dict(self) -> dict[str, Any]:
-        return {"selfdev": self.selfdev.as_dict(), "browser": self.browser.as_dict(), "restart_required": self.restart_required, "last_change": self.last_change}
+        return {"selfdev": self.selfdev.as_dict(), "browser": self.browser.as_dict(), "computer": self.computer.as_dict(), "restart_required": self.restart_required, "last_change": self.last_change}
 
 
 # -- prerequisite probes ------------------------------------------------------------------
@@ -262,17 +291,19 @@ def resolve_selfdev(settings: Settings, config: RuntimeConfig) -> SelfDev:
 
 
 def resolve(settings: Settings, config: RuntimeConfig) -> Capabilities:
-    return Capabilities(selfdev=resolve_selfdev(settings, config), browser=resolve_browser(settings))
+    return Capabilities(selfdev=resolve_selfdev(settings, config), browser=resolve_browser(settings), computer=resolve_computer(settings))
 
 
 __all__ = [
     "ALL_SELFDEV_TOOLS",
     "BROWSER_TOOL_PREFIX",
+    "COMPUTER_TOOLS",
     "PUBLISHED_FILE",
     "SELFDEV_MODES",
     "SELFDEV_TOOLS",
     "Browser",
     "Capabilities",
+    "Computer",
     "SelfDev",
     "SelfDevMode",
     "has_origin",
@@ -280,6 +311,7 @@ __all__ = [
     "rebuild_channel",
     "resolve",
     "resolve_browser",
+    "resolve_computer",
     "resolve_selfdev",
     "writable_checkout",
 ]

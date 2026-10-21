@@ -10,15 +10,18 @@ from collections.abc import Awaitable, Callable, Container, Sequence
 from typing import Any
 
 from protocore.contracts.types import (
-    ImageRefBlock,
     Message,
     MessageRole,
     TextBlock,
     ThinkingBlock,
     ToolDefinition,
     ToolResultBlock,
+    ToolResultImage,
     ToolUseBlock,
+    message_image_refs,
 )
+from protocore.providers.openai_compat import ReasoningReplay
+from protocore.providers.openai_compat.wire import TOOL_IMAGES_CARRIER_HEADER
 
 from daedalus.security.redact import redact
 
@@ -26,6 +29,12 @@ logger = logging.getLogger(__name__)
 
 
 def tools_to_wire(tools: Sequence[ToolDefinition]) -> list[dict[str, Any]]:
+    """The ``tools`` array, each schema as the tool states it.
+
+    ``additionalProperties`` goes on the wire whenever the tool sets it. The core spells the flag
+    ``additional_properties``, and copying only ``properties`` and ``required`` dropped it: the strict
+    forced ``plan`` tool then reached the model as a permissive one that would take any field.
+    """
     wire: list[dict[str, Any]] = []
     for tool in tools:
         params = tool.parameters.model_dump(mode="json") if tool.parameters is not None else {}
@@ -34,6 +43,8 @@ def tools_to_wire(tools: Sequence[ToolDefinition]) -> list[dict[str, Any]]:
             "properties": params.get("properties", {}),
             "required": params.get("required", []),
         }
+        if params.get("additional_properties") is not None:
+            schema["additionalProperties"] = params["additional_properties"]
         wire.append(
             {
                 "type": "function",
@@ -66,12 +77,9 @@ keeps only a handful, and a step of ten could leave out every one of them."""
 
 
 def _image_refs_of(message: Message) -> list[tuple[str, str]]:
-    """``(blob_ref, mime)`` of every picture a user message carries, as blocks or in ``metadata["image_refs"]``."""
-    refs = [(block.blob_ref, block.mime_type) for block in message.content_blocks if isinstance(block, ImageRefBlock)]
-    for ref in message.metadata.get("image_refs") or []:
-        if isinstance(ref, dict) and ref.get("ref"):
-            refs.append((str(ref["ref"]), str(ref.get("mime") or "image/png")))
-    return refs
+    """``(blob_ref, mime)`` of every picture a user message carries, read the core's way: its image
+    blocks, then the list under ``protocore.image_refs`` (a user turn holds a single text block)."""
+    return [(image.blob_ref, image.mime_type) for image in message_image_refs(message)]
 
 
 async def images_left_out(
@@ -110,6 +118,8 @@ async def messages_to_wire(
     image_loader: Any | None = None,
     supports_images: bool = False,
     images_omitted: Container[str] = (),
+    reasoning_replay: ReasoningReplay = ReasoningReplay.when_present,
+    thinking: bool = False,
 ) -> list[dict[str, Any]]:
     """Flatten core messages into OpenAI ``messages``.
 
@@ -117,6 +127,13 @@ async def messages_to_wire(
     endpoint cannot take images the block degrades to a text placeholder so the
     model still knows a file was attached. A picture named in ``images_omitted``
     (see :func:`images_left_out`) degrades the same way, saying it was left out.
+
+    ``reasoning_replay`` is the endpoint's policy for an assistant turn's reasoning text, in the
+    core's terms: ``never`` sends none (a server that refuses a field it does not know),
+    ``when_present`` sends it on the turns that have some, and ``required`` (DeepSeek) gives every
+    assistant turn the field while ``thinking`` is on — empty when the turn has none, since DeepSeek
+    refuses a thinking request whose earlier turns lack it — and leaves out a turn that is nothing
+    but reasoning, the partial a stream left when it died mid-thought, which it cannot use.
     """
     wire: list[dict[str, Any]] = []
     for message in messages:
@@ -126,13 +143,14 @@ async def messages_to_wire(
         if message.role is MessageRole.tool:
             for block in message.content_blocks:
                 if isinstance(block, ToolResultBlock):
-                    wire.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": block.tool_call_id,
-                            "content": block.content or "",
-                        }
-                    )
+                    entry = {"role": "tool", "tool_call_id": block.tool_call_id, "content": block.content or ""}
+                    if block.images:
+                        carried, notes = await _tool_image_parts(block, image_loader=image_loader, supports_images=supports_images)
+                        if notes:
+                            entry["content"] = "\n".join([entry["content"], *notes])
+                        if carried:
+                            entry[CARRIED_IMAGES] = [{"type": "text", "text": f"[images returned by tool call {block.tool_call_id}]"}, *carried]
+                    wire.append(entry)
             continue
         if message.role is MessageRole.assistant:
             entry: dict[str, Any] = {"role": "assistant"}
@@ -158,15 +176,18 @@ async def messages_to_wire(
             entry["content"] = "".join(text_parts) or None
             if tool_calls:
                 entry["tool_calls"] = tool_calls
-            if message.reasoning_content:
-                entry["reasoning_content"] = message.reasoning_content
-            elif reasoning:
-                entry["reasoning_content"] = "".join(reasoning)
+            reasoning_text = message.reasoning_content or "".join(reasoning)
+            if reasoning_replay is ReasoningReplay.required and thinking:
+                if entry["content"] is None and not tool_calls:
+                    continue
+                entry["reasoning_content"] = reasoning_text
+            elif reasoning_replay is not ReasoningReplay.never and reasoning_text:
+                entry["reasoning_content"] = reasoning_text
             if entry["content"] is None and not tool_calls:
                 entry["content"] = ""
             wire.append(entry)
             continue
-        # user: one text block; images ride in ``metadata["image_refs"]`` (the core allows a single block)
+        # user: one text block; images ride under ``protocore.image_refs`` (the core allows a single block)
         texts = [block.text for block in message.content_blocks if isinstance(block, TextBlock)]
         content: list[dict[str, Any]] = [{"type": "text", "text": t} for t in texts]
         has_image = False
@@ -185,6 +206,85 @@ async def messages_to_wire(
         else:
             wire.append({"role": "user", "content": "\n".join(p["text"] for p in content)})
     return wire
+
+
+CARRIED_IMAGES = "daedalus.carried_images"
+"""The key a tool entry holds its images under until :func:`place_carried_images` moves them out.
+
+Most chat-completions servers take only a string in a ``tool`` message, so a tool's pictures ride in
+one ``user`` message after the whole run of results, opened by the core's
+``TOOL_IMAGES_CARRIER_HEADER`` exactly as the core's own adapter does it. A user turn between two
+results of one batch would close the batch and leave the calls after it unanswered, so the carrier
+can only be placed once every message of the request is on the wire."""
+
+
+async def _tool_image_parts(
+    block: ToolResultBlock, *, image_loader: Any | None, supports_images: bool,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """The content parts for a result's images, and a line for each one that cannot be sent.
+
+    A model that takes no images gets the lines in the result's own text and no extra turn. The size a
+    tool gave goes beside its image: a model that points at coordinates in a screenshot needs the size
+    it was shown to turn them back into screen positions.
+    """
+    parts: list[dict[str, Any]] = []
+    notes: list[str] = []
+    for number, image in enumerate(block.images, start=1):
+        name = image.blob_ref or "inline image"
+        if not supports_images or (image.data is None and image_loader is None):
+            notes.append(f"[image not sent, this model does not take images: {name}]")
+            continue
+        loaded = await _tool_image_bytes(image, image_loader)
+        if loaded is None:
+            notes.append(f"[image not sent, it could not be loaded: {name}]")
+            continue
+        data, mime = loaded
+        if image.width is not None and image.height is not None:
+            parts.append({"type": "text", "text": f"[image {number} of tool call {block.tool_call_id}: {image.width}x{image.height} pixels]"})
+        parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"}})
+    return parts, notes
+
+
+async def _tool_image_bytes(image: ToolResultImage, image_loader: Any | None) -> tuple[bytes, str] | None:
+    if image.data is not None:
+        return image.data, image.mime_type
+    try:
+        data, mime = await image_loader(image.blob_ref)
+    except Exception as exc:  # noqa: BLE001 — one unreadable picture must not fail the whole request
+        logger.warning("tool image %s could not be loaded: %s", image.blob_ref, exc)
+        return None
+    return data, mime or image.mime_type
+
+
+def place_carried_images(entries: list[dict[str, Any]], index_map: list[int]) -> tuple[list[dict[str, Any]], list[int]]:
+    """Move every tool entry's carried images into one ``user`` message after its run of results.
+
+    ``index_map`` names, for each core message, the wire entry it ended on (``-1`` for none); the
+    returned map names the same entries in the new list, except that a run's last result now names
+    its carrier, so a cache breakpoint set on that result covers the images sent after it.
+    """
+    out: list[dict[str, Any]] = []
+    moved: dict[int, int] = {}
+    carrier: list[dict[str, Any]] = []
+    last_tool = -1
+
+    def close_run() -> None:
+        nonlocal carrier
+        if carrier:
+            out.append({"role": "user", "content": [{"type": "text", "text": TOOL_IMAGES_CARRIER_HEADER}, *carrier]})
+            moved[last_tool] = len(out) - 1
+        carrier = []
+
+    for index, entry in enumerate(entries):
+        if entry.get("role") != "tool":
+            close_run()
+        else:
+            carrier.extend(entry.pop(CARRIED_IMAGES, None) or [])
+            last_tool = index
+        out.append(entry)
+        moved.setdefault(index, len(out) - 1)
+    close_run()
+    return out, [moved.get(index, -1) if index >= 0 else -1 for index in index_map]
 
 
 def _text_of(message: Message) -> str:
@@ -286,4 +386,4 @@ def _repair_json(text: str) -> Any:
         return {}
 
 
-__all__ = ["arguments_cut", "images_left_out", "messages_to_wire", "parse_json_arguments", "tools_to_wire"]
+__all__ = ["arguments_cut", "images_left_out", "messages_to_wire", "parse_json_arguments", "place_carried_images", "tools_to_wire"]

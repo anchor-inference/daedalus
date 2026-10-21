@@ -48,3 +48,7 @@ ptyd/*.test
 browserd/browserd
 browserd/.cache/
 browserd/*.test
+# the desktop daemon, the same
+deskd/deskd
+deskd/.cache/
+deskd/*.test

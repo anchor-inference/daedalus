@@ -11,16 +11,33 @@ from typing import Any
 
 import httpx
 from protocore.contracts.llm import LLMRequest
-from protocore.contracts.types import Message, MessageRole, TextBlock
+from protocore.contracts.types import (
+    IMAGE_REFS_METADATA_KEY,
+    ImageRefBlock,
+    Message,
+    MessageRole,
+    TextBlock,
+    ToolResultBlock,
+    ToolResultImage,
+    ToolUseBlock,
+)
+from protocore.providers.openai_compat.wire import TOOL_IMAGES_CARRIER_HEADER
 
 from daedalus.providers.openai_compat import OpenAICompatibleProvider, ProviderEndpoint
-from daedalus.providers.wire import IMAGE_WINDOW_STEP, MAX_REQUEST_IMAGE_BYTES, MAX_REQUEST_IMAGES, images_left_out
+from daedalus.providers.wire import (
+    CARRIED_IMAGES,
+    IMAGE_WINDOW_STEP,
+    MAX_REQUEST_IMAGE_BYTES,
+    MAX_REQUEST_IMAGES,
+    images_left_out,
+    place_carried_images,
+)
 
 
 def _pictures(count: int) -> list[Message]:
     messages = []
     for index in range(count):
-        messages.append(Message(role=MessageRole.user, content_blocks=[TextBlock(text=f"shot {index}")], metadata={"image_refs": [{"ref": f"blob-{index}", "mime": "image/png"}]}))
+        messages.append(Message(role=MessageRole.user, content_blocks=[TextBlock(text=f"shot {index}")], metadata={IMAGE_REFS_METADATA_KEY: [ImageRefBlock(blob_ref=f"blob-{index}").model_dump(mode="json")]}))
         messages.append(Message(role=MessageRole.assistant, content_blocks=[TextBlock(text="seen")]))
     return messages
 
@@ -81,3 +98,61 @@ async def test_the_request_names_what_it_left_out_and_reads_each_kept_picture_on
     assert "left out" in users[0]["content"] and "blob-0" in users[0]["content"]
     # The twenty sent were read once each, to be measured and then sent; the five left out never.
     assert len(loader.loaded) == len(set(loader.loaded)) == 20
+
+
+def _tool_round() -> list[Message]:
+    """A batch of two calls whose second result carries a screenshot, then the model's reply."""
+    calls = [ToolUseBlock(tool_call_id=f"c{i}", name="Screen", arguments_json="{}") for i in (1, 2)]
+    shot = ToolResultImage(blob_ref="blob-shot", width=1280, height=800)
+    return [
+        Message(role=MessageRole.user, content_blocks=[TextBlock(text="click it")]),
+        Message(role=MessageRole.assistant, content_blocks=calls),
+        Message(role=MessageRole.tool, content_blocks=[
+            ToolResultBlock(tool_call_id="c1", content="clicked"),
+            ToolResultBlock(tool_call_id="c2", content="captured", images=(shot,)),
+        ]),
+        Message(role=MessageRole.assistant, content_blocks=[TextBlock(text="I see the dialog.")]),
+    ]
+
+
+async def _sent(images: bool) -> list[dict[str, Any]]:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        chunk = {"choices": [{"index": 0, "delta": {"content": "ok"}, "finish_reason": "stop"}]}
+        return httpx.Response(200, text=f"data: {json.dumps(chunk)}\n\ndata: [DONE]\n\n", headers={"content-type": "text/event-stream"})
+
+    endpoint = ProviderEndpoint(id="claude", kind="openai_compat", base_url="https://x.test", api_key="k")
+    provider = OpenAICompatibleProvider(endpoint, client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+                                        image_loader=Loader(), images_for=lambda _model: images)
+    async for _ in provider.stream_with_tools(LLMRequest(model="m", messages=_tool_round())):
+        pass
+    return captured["body"]["messages"]
+
+
+async def test_a_tool_result_shows_its_picture_in_one_turn_after_the_whole_batch() -> None:
+    """A tool's pictures used to be dropped on the way to the model. They ride after the last result of
+    the batch, in the core's carrier shape, which the key proxy folds back into the results for Claude."""
+    sent = await _sent(images=True)
+    assert [m["role"] for m in sent] == ["user", "assistant", "tool", "tool", "user", "assistant"]
+    assert [m["content"] for m in sent[2:4]] == ["clicked", "captured"], "the results keep their own text"
+    carrier = sent[4]["content"]
+    assert carrier[0] == {"type": "text", "text": TOOL_IMAGES_CARRIER_HEADER}
+    assert carrier[1]["text"] == "[images returned by tool call c2]"
+    assert carrier[2]["text"] == "[image 1 of tool call c2: 1280x800 pixels]"
+    assert carrier[3]["type"] == "image_url" and carrier[3]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert not any("daedalus.carried_images" in m for m in sent)
+
+
+async def test_a_model_that_takes_no_images_is_told_in_the_result_and_given_no_extra_turn() -> None:
+    sent = await _sent(images=False)
+    assert [m["role"] for m in sent] == ["user", "assistant", "tool", "tool", "assistant"]
+    assert sent[3]["content"] == "captured\n[image not sent, this model does not take images: blob-shot]"
+
+
+def test_a_breakpoint_on_the_last_result_lands_on_the_carrier_after_it() -> None:
+    entries = [{"role": "user"}, {"role": "assistant"}, {"role": "tool", CARRIED_IMAGES: [{"type": "text", "text": "x"}]}, {"role": "assistant"}]
+    placed, index_map = place_carried_images(entries, [0, 1, 2, 3, -1])
+    assert [e["role"] for e in placed] == ["user", "assistant", "tool", "user", "assistant"]
+    assert index_map == [0, 1, 3, 4, -1]

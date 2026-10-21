@@ -21,12 +21,21 @@ from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from protocore.contracts.llm import LLMError, LLMObservabilityContext, LLMRateLimitError, LLMRequest
+from protocore.contracts.llm import (
+    LLMError,
+    LLMObservabilityContext,
+    LLMRateLimitError,
+    LLMRequest,
+    ProviderFailureReason,
+)
+from protocore.contracts.outcome import RUN_CAUSE_FIELD, RUN_OUTCOME_FIELD, RunCause, RunOutcome
 from protocore.contracts.runtime_constants import LoopConstants
 from protocore.contracts.tool_registry import ToolVisibilityPolicy, policy_admits, tool_group_of
 from protocore.contracts.types import (
     COMPACTION_SUMMARY_METADATA_KEY,
+    IMAGE_REFS_METADATA_KEY,
     OPERATOR_WORDS_METADATA_KEY,
+    ImageRefBlock,
     Message,
     MessageRole,
     Run,
@@ -49,6 +58,7 @@ from protocore.runtime.tool_registry import ToolRegistry
 from protocore.tools.tool_search import TOOL_SEARCH_TOOL_NAME, ToolSearchTool
 
 from daedalus.browser import cookies as cookie_files
+from daedalus.computer import wire as computer_wire
 from daedalus.config import (
     BTW_TOOLS,
     COMPANION_ONLY_TOOLS,
@@ -168,6 +178,8 @@ logger = logging.getLogger(__name__)
 
 TOOL_RULES_KEY_FILE = "tool-rules-mark.key"
 """Beside the operator's sealing key in the secrets directory, which no command the agent runs can read."""
+COMPUTER_LIVE_SECONDS = 3.0
+"""How long the answer to "is the desktop daemon up" is reused by the tool policy."""
 
 PROVIDER_OUTAGE_KINDS = frozenset({"llm_provider_error", "llm_timeout", "llm_stream_idle", "llm_rate_limit"})
 """Terminal error kinds that mean the endpoint, not the request, failed: the run is driven again once the wait is over."""
@@ -350,12 +362,13 @@ class SessionState:
     """The text of that error, masked, as the fronts were shown it: what the inbox entry quotes."""
     last_error_permanent: bool = False
     """The provider's verdict on that error said asking again cannot help (a refused request, key or model)."""
-    soft_stop_cause: str = ""
-    """Which bound wound the current run down, from the core's ``soft_stop_notified`` state change; empty when none did."""
-    soft_stop_detail: str = ""
-    """What that bound said in its own words — the upstream's error text for a provider failure. The operator is shown this,
-    not an inference from the reply: a run the provider refused ends with the model writing a closing message, and without
-    this the message is the only trace of a failure that produced nothing."""
+    run_outcome: RunOutcome | None = None
+    """How the core says the current run ended, from its terminal ``message_stop``; ``None`` until it has."""
+    run_cause: RunCause | None = None
+    """Why the current run did not simply complete, from the same event: the bound that wound it down or the failure
+    that ended it, with the provider's verdict and its own words (masked). The operator is shown this, not an inference
+    from the reply: a run the provider refused ends with the model writing a closing message, and without this the
+    message is the only trace of a failure that produced nothing."""
     last_compaction: dict[str, Any] | None = None
     """The current run's latest ``compaction_completed`` payload: when the run dies of size, what says which tier gave out."""
     last_outcome: dict[str, Any] | None = None
@@ -442,6 +455,10 @@ class SessionState:
     """``provider:model`` the session is set to answer with: the first rung of the chain this run was built on.
     A live override (a preset chosen for the session, the companion pointing at its own) is part of it —
     what the operator chose is never a fallback, however far it is from the global default."""
+    computer_sight: tuple[str, bool] | None = None
+    """The model this run was built on and whether it takes images: what decides whether the computer
+    tools are offered and how their screenshots are sized and their points read. ``None`` until a run
+    was built; the tools are not offered before."""
     effective_model: str = ""
     """``provider:model`` that actually answered last, as the core reported it at the message it started."""
     model_change_reason: str = ""
@@ -758,6 +775,8 @@ class SessionManager:
         self.secrets.project_of = self._project_of
         self.secrets.staff_of = self._staff_of
         self._tool_rules_key: bytes | None = None
+        self._computer_live: tuple[float, bool] = (0.0, False)
+        """When the desktop daemon's endpoint was last looked at, and whether it was there."""
         self.hooks = DaedalusHookManager(self.redactor, hooks_config=lambda: self.config.hooks)
         self.action_rules = RulesGate(self)
         """The operator's action rules over this host's sessions: levels in the policy gate, the review in the hook."""
@@ -888,8 +907,11 @@ class SessionManager:
         # list is an invitation the model accepts and a failure it cannot understand.
         disabled = self.capabilities.selfdev.disabled_tools
         browser = self.capabilities.browser.configured
+        computer = self.capabilities.computer.configured
         for tool in discover_tools():
             if tool.name in disabled or (not browser and tool.name.startswith(capabilities.BROWSER_TOOL_PREFIX)):
+                continue
+            if not computer and tool.name in capabilities.COMPUTER_TOOLS:
                 continue
             self.tools.register(tool)
         for tool in build_memory_tools(self.memory, tenant_allowed=lambda: self.config.memory.sensitive_allowed, classifier=self.memory_classifier):
@@ -2797,8 +2819,8 @@ class SessionManager:
             state.last_error_kind = ""
             state.last_error_message = ""
             state.last_error_permanent = False
-            state.soft_stop_cause = ""
-            state.soft_stop_detail = ""
+            state.run_outcome = None
+            state.run_cause = None
             result = {"seq": seq, "through": through, "dropped": dropped, "workspace_restored": restored, "untouched": untouched, "kept": len(kept)}
             await self._notify_sinks(session_id, HostEvent(HostEventType.HISTORY_CUT, state.run_id or "", result))
             if retry:
@@ -4367,6 +4389,9 @@ class SessionManager:
         # so it is read once here, from the same rungs the chain is built on, and not re-derived later
         # from a configuration the operator may have changed while the run was going.
         state.configured_model = self._rung_label(rungs[0][0], rungs[0][1])
+        # Read before the tool policy below, which offers the computer tools only to a model that sees.
+        accepts = getattr(rungs[0][0], "accepts_images", None) if rungs else None
+        state.computer_sight = (rungs[0][1], bool(accepts(rungs[0][1]))) if rungs and accepts is not None else None
         # The primary's switch: a fallback runs on the surface the primary was given, as the tool limit
         # is not, because a surface too big is refused and one decided for another model is only worse.
         state.on_demand_groups = on_demand_tool_groups_for(preset, rungs[0][1]) if rungs else True
@@ -4733,8 +4758,8 @@ class SessionManager:
         state.last_error_kind = ""
         state.last_error_message = ""
         state.last_error_permanent = False
-        state.soft_stop_cause = ""
-        state.soft_stop_detail = ""
+        state.run_outcome = None
+        state.run_cause = None
         state.last_compaction = None
         if message is not None:
             state.run_origin = str(message.metadata.get("daedalus.origin") or "operator")
@@ -5073,9 +5098,13 @@ class SessionManager:
         endpoint is back — the same path a run that failed outright already takes.
 
         Nothing is claimed without the provider's own words: a wind-down with no detail behind it is
-        some other kind of stop and is left alone.
+        some other kind of stop and is left alone. What ended the run is the core's word on its
+        terminal event (``outcome`` and ``cause``), not a reading of the wind-down's text.
         """
-        if state.soft_stop_cause == CAUSE_MODEL_NO_PROGRESS:
+        cause = state.run_cause
+        if state.run_outcome is not RunOutcome.failed or cause is None:
+            return False
+        if cause.kind == CAUSE_MODEL_NO_PROGRESS:
             await self._dispatch_event(
                 state,
                 TurnEvent(type=EventType.ERROR, run_id=run_id, payload={
@@ -5084,11 +5113,12 @@ class SessionManager:
                 }),
             )
             return True
-        if state.soft_stop_cause != CAUSE_PROVIDER_ERROR or not state.soft_stop_detail:
+        if cause.kind != CAUSE_PROVIDER_ERROR or not cause.detail:
             return False
         # The host's own spending cap is not the provider: saying the provider refused sent the
-        # operator to check a key or an outage when the fix was a limit in the settings.
-        capped = "inference budget:" in state.soft_stop_detail
+        # operator to check a key or an outage when the fix was a limit in the settings. The cap
+        # raises with a ``budget`` verdict, which the core carries to here.
+        capped = cause.failure is not None and cause.failure.reason is ProviderFailureReason.budget
         note = self.SPENDING_CAP_NOTE if capped else self.PROVIDER_REFUSED_NOTE
         await self._dispatch_event(
             state,
@@ -5096,7 +5126,7 @@ class SessionManager:
                 type=EventType.ERROR,
                 run_id=run_id,
                 payload={"kind": "spending_cap" if capped else "llm_provider_error",
-                         "message": note.format(detail=state.soft_stop_detail)},
+                         "message": note.format(detail=cause.detail)},
             ),
         )
         return True
@@ -5208,7 +5238,7 @@ class SessionManager:
         outcome = run_outcome(
             status,
             error_kind=state.last_error_kind,
-            error_message=state.last_error_message or state.soft_stop_detail,
+            error_message=state.last_error_message or (state.run_cause.detail if state.run_cause is not None else ""),
             compaction=state.last_compaction,
             steps=steps,
             last_tool=last_tool,
@@ -5373,24 +5403,22 @@ class SessionManager:
     def _model_change(self, state: SessionState, event: TurnEvent) -> TurnEvent | None:
         """The event that says the model answering has changed — or ``None`` when it has not.
 
-        Two kinds of event feed this, and both are needed. The core's ``model_fallback_triggered``
-        is the demotion itself: it names the rung the run moved to and why, and it is the only
-        notice there is, because the retry re-opens the stream inside the assistant message that
-        was already started — no second ``message_start`` announces it. And ``message_start`` is
-        what catches every other way the model can differ from the configured one without a
-        demotion ever being announced: a chain position restored from a snapshot, a model rebound
-        by a live override.
+        Two kinds of event feed this, and both are needed. The core's ``model_changed`` is a demotion
+        down the chain or a restore that re-seated the run on a later rung: it names the rung and
+        why, and for a demotion it is the only notice there is, because the retry re-opens the
+        stream inside the assistant message that was already started — no second ``message_start``
+        announces it. And ``message_start`` is what catches the one way the model can differ from
+        the configured one that the core does not announce: a model rebound by a live override.
         """
         payload = event.payload
         engine = state.engine
         if engine is None:
             return None
-        if event.type is EventType.STATE_CHANGED and payload.get("reason") == "model_fallback_triggered":
-            # ``from``/``to`` here are the loop's own state, not models; the rung is the other field.
+        if event.type is EventType.MODEL_CHANGED and "configured" not in payload:
             return self._observe_model(
                 state,
                 event.run_id,
-                str(payload.get("fallback_model_id") or ""),
+                str(payload.get("to") or ""),
                 FALLBACK_REASONS.get(str(payload.get("error_class") or ""), "chain_step"),
             )
         if event.type is EventType.MESSAGE_START:
@@ -5455,6 +5483,15 @@ class SessionManager:
             state.model_stamps.pop(next(iter(state.model_stamps)))
 
     async def _dispatch_event(self, state: SessionState, event: TurnEvent) -> None:
+        if event.type is EventType.MODEL_CHANGED and "configured" not in event.payload:
+            # The core's own notice of a chain advance or a restore on a later rung is read, not
+            # passed on: the app is sent the host's event in its place (see ``_model_change``),
+            # which also names the provider, the configured model and whether it is a fallback.
+            # Passing both put two model changes in front of the app for one demotion.
+            change = self._model_change(state, event)
+            if change is not None:
+                await self._dispatch_event(state, change)
+            return
         if event.type is EventType.QUEUE_UPDATE and event.payload.get("placed") and state.engine is not None:
             # The core yields immediately after appending the received prompt. Submission time
             # belongs to the queue; this message's place in history is when the model received it.
@@ -5466,10 +5503,9 @@ class SessionManager:
                 origin = str(items[0].get("origin") or "operator") if items else "operator"
                 message.metadata.update({"daedalus.origin": origin, "daedalus.delivery": event.payload.get("kind"), "daedalus.run_id": event.run_id})
                 if items:
+                    # The images came with the items: the core places each one's ``blob_ref`` on the
+                    # message under its own key, so only the words need saying here.
                     message.metadata.update(_merged_words(items))
-                    # The core joins the placed items into one text block and leaves their files
-                    # behind; the images go back on here, before the model call this event precedes.
-                    message.metadata.update(_image_refs_metadata(_queued_image_refs(items)))
                 else:
                     # A placed prompt the queue no longer lists: its words are the operator's only
                     # when the operator sent it, and the text as placed is the best copy there is.
@@ -5561,34 +5597,18 @@ class SessionManager:
             p["duration_ms"] = duration_ms
 
     def _redact_event(self, state: SessionState, event: TurnEvent) -> None:
-        """Mask secrets the core's hook did not see: failure results, error text, tool arguments.
+        """Mask what the core's hook did not see before any store or front gets the event: a result's
+        envelope, error text, tool arguments.
 
-        A tool that returned normally was masked by the PostToolUse hook before its result
-        entered the history. A tool that raised takes the dispatcher's failure path, which
-        skips the hook, so its message is masked here — in the event every consumer sees and
-        in the history message the core already appended.
+        Every result, a failed call's included, went through the ``post_tool_use`` hook before it
+        entered the history, so the history needs nothing here. The event carries more than the
+        text the hook was shown (a tool's UI payload and metadata), and that is masked here.
         """
         p = event.payload
         if event.type is EventType.TOOL_RESULT:
-            original = p.get("content")
-            if not isinstance(original, str):
-                original = "".join(
-                    str(block.get("text") or "") for block in p.get("content_blocks") or ()
-                    if isinstance(block, dict)
-                )
-            # The core sends normal results in content_blocks, and tools can attach UI payloads
-            # and metadata. Mask the whole envelope before either durable event store sees it.
             cleaned = self._redact_tool_result_payload(p)
             p.clear()
             p.update(cleaned)
-            content = p.get("content")
-            if not isinstance(content, str):
-                content = "".join(
-                    str(block.get("text") or "") for block in p.get("content_blocks") or ()
-                    if isinstance(block, dict)
-                )
-            if content != original:
-                self._redact_history_result(state, str(p.get("tool_call_id")), content)
         elif event.type is EventType.TOOL_USE_INPUT_DELTA:
             # A credential or home path can be split across provider chunks, so a fragment cannot
             # be redacted reliably. The completed input is retained by TOOL_USE_STOP below.
@@ -5603,10 +5623,15 @@ class SessionManager:
             logger.warning("run error in session %s (%s): %s", getattr(getattr(state, "session", None), "id", "?"), p.get("kind") or "-", p["message"][:500])
         elif event.type is EventType.COMPACTION_COMPLETED:
             state.last_compaction = dict(p)
+        elif event.type is EventType.MESSAGE_STOP and RUN_OUTCOME_FIELD in p:
+            # The terminal stop: the cause's detail is usually the provider's own error text, which
+            # can echo a key, so it is masked before any store or front sees the event.
+            cause = p.get(RUN_CAUSE_FIELD)
+            if isinstance(cause, dict) and isinstance(cause.get("detail"), str):
+                cause["detail"] = self.redactor.redact(cause["detail"])
+            state.run_outcome = RunOutcome(p[RUN_OUTCOME_FIELD])
+            state.run_cause = RunCause.model_validate(cause) if isinstance(cause, dict) else None
         elif event.type is EventType.STATE_CHANGED and p.get("reason") in RECOVERY_REASONS:
-            if p.get("reason") == "soft_stop_notified":
-                state.soft_stop_cause = str(p.get("soft_stop_cause") or "")
-                state.soft_stop_detail = self.redactor.redact(str(p.get("soft_stop_detail") or ""))
             detail = {k: v for k, v in p.items() if k not in ("from", "to", "reason")}
             logger.warning("run recovery in session %s: %s %s", getattr(getattr(state, "session", None), "id", "?"), p.get("reason"), self.redactor.redact(json.dumps(detail, ensure_ascii=False, default=str)[:400]))
 
@@ -5617,25 +5642,6 @@ class SessionManager:
         machine's account name in durable events or their exports.
         """
         return self.redactor.redact_tool_data(payload)
-
-    @staticmethod
-    def _redact_history_result(state: SessionState, tool_call_id: str, cleaned: str) -> None:
-        engine = state.engine
-        if engine is None:
-            return
-        for index in range(len(engine.history) - 1, -1, -1):
-            message = engine.history[index]
-            if message.role is not MessageRole.tool:
-                continue
-            blocks = list(message.content_blocks)
-            changed = False
-            for bi, block in enumerate(blocks):
-                if isinstance(block, ToolResultBlock) and block.tool_call_id == tool_call_id:
-                    blocks[bi] = block.model_copy(update={"content": cleaned})
-                    changed = True
-            if changed:
-                engine.history[index] = message.model_copy(update={"content_blocks": blocks})
-                return
 
     async def spend_with_subagents(self, session_id: str) -> float:
         """A session's priced spend plus that of every subagent it started: the cap is the leader's."""
@@ -5830,6 +5836,8 @@ class SessionManager:
         # An orchestrator runs a team and does none of the work: everything outside its allowlist is
         # off, and its control tools are nobody else's. Beside the two rules above, for their reason.
         blocked |= (known - set(ORCHESTRATOR_TOOLS)) if self.is_orchestrator(state) else (known & set(ORCHESTRATOR_ONLY_TOOLS))
+        if not self.computer_offered(state):
+            blocked |= known & capabilities.COMPUTER_TOOLS
         mode = self.mode_for(state)
         if mode is not None:
             if mode.tools_only:
@@ -5838,6 +5846,27 @@ class SessionManager:
                 name = str(entry)
                 blocked |= {t for t in known if t.startswith(name[:-1])} if name.endswith("*") else {name}
         return blocked
+
+    def computer_offered(self, state: SessionState) -> bool:
+        """Whether this session is offered the computer tools now: a native installation with a desktop
+        daemon that is up, and a run built on a model that takes images.
+
+        A model without images is not offered them at all rather than offered tools that answer with
+        pictures it cannot see; describing the screen through the vision model and pointing through a
+        grounding model is the later route for such a model. The daemon's endpoint is looked at once
+        every few seconds: the policy is asked many times a run, and a daemon coming or going within
+        that moment is caught by the tool's own first call."""
+        if not self.capabilities.computer.configured:
+            return False
+        sight = state.computer_sight
+        if not sight or not sight[1]:
+            return False
+        now = time.monotonic()
+        checked, live = self._computer_live
+        if now - checked > COMPUTER_LIVE_SECONDS or checked == 0.0:
+            live = computer_wire.endpoint_live(self.settings.computer_host_dir)
+            self._computer_live = (now, live)
+        return live
 
     def blocked_tools_for(self, state: SessionState) -> set[str]:
         """Everything this session may not call under its own and every loaded parent's current rules.
@@ -6521,6 +6550,39 @@ class SessionManager:
             raise ValueError("only the operator answers this request")
         return hook
 
+    def computer_gate(self, session_id: str, ask: Any) -> tuple[bool, str]:
+        """A sensitive action on the operator's desktop, asked about as :meth:`browser_gate` asks.
+
+        The same rules: a grant for the key lets that one action through once, otherwise the request is
+        recorded and announced once and the agent is refused with the key. Always the operator's to
+        answer, a staff member's included — it is their screen, their mail and their files — and always in
+        the app, never from a lock screen or a notification's button."""
+        state = self._states.get(session_id)
+        decision = ask.decision
+        if state is None:
+            return False, "this session is not loaded; the action was not taken"
+        now = time.time()
+        grants = {k for k, until in (state.metadata.get("policy_grants") or {}).items() if float(until) > now}
+        if decision.key in grants:
+            self._consume_grant(state, decision.key)
+            return True, ""
+        pending = dict(state.metadata.get("policy_pending") or {})
+        fresh = decision.key not in pending
+        pending[decision.key] = {"tool": ask.tool, "text": self.redactor.redact(ask.said())[:500], "at": datetime.now(UTC).isoformat()}
+        for meta in (state.metadata, state.session.metadata):
+            meta["policy_pending"] = dict(list(pending.items())[-20:])
+        if fresh:
+            payload = self._permission_payload(state, decision, pending[decision.key])
+            # No thumbnail yet: the browser's is a route the app fetches the element's picture from, and
+            # the desktop has no such route; the card names the app and the window instead.
+            payload.update({
+                "risk": "elevated", "quick": False, "routed_to": "operator",
+                "computer": {"kinds": list(ask.kinds), "action": ask.action, "app": ask.app, "window": ask.window, "element": ask.element, "thumbnail": ask.thumbnail},
+            })
+            self._publish_soon(state, "permission.pending", payload)
+        head = f"needs the operator's approval: {decision.reason} (rule {decision.rule}). Approval key: {decision.key}. "
+        return False, head + "Ask the operator with AskUser, quoting the key and what the action does; once they grant it (/allow <key>, or the Mini App), the same action passes once."
+
     async def flush_background(self) -> None:
         """Wait for the fire-and-forget writes (timing rows, egress rows, grant updates) to land."""
         if self._background:
@@ -7073,14 +7135,15 @@ def operator_words_metadata(origin: str, text: str, passages: Sequence[str] | No
 
 def _queued_attachments(attachments: Sequence[Attachment]) -> list[dict[str, Any]]:
     """The files of a message that waits in a queue, as the item carries them: each kept file's name
-    and type, and the blob an image was kept as. A file the store refused was never kept and is not listed."""
+    and type, and the blob an image was kept as, under the core's ``blob_ref`` so the core places the image
+    with the words. A file the store refused was never kept and is not listed."""
     out: list[dict[str, Any]] = []
     for item in attachments:
         if not item.stored_name:
             continue
         entry: dict[str, Any] = {"name": item.stored_name, "mime_type": item.mime_type}
         if item.image_ref:
-            entry["image_ref"] = item.image_ref
+            entry["blob_ref"] = item.image_ref
         out.append(entry)
     return out
 
@@ -7097,14 +7160,17 @@ def _queued_image_refs(items: Sequence[dict[str, Any]]) -> list[tuple[str, str]]
     refs: list[tuple[str, str]] = []
     for item in items:
         for entry in item.get("attachments") or []:
-            if isinstance(entry, dict) and entry.get("image_ref"):
-                refs.append((str(entry["image_ref"]), str(entry.get("mime_type") or "image/png")))
+            if isinstance(entry, dict) and entry.get("blob_ref"):
+                refs.append((str(entry["blob_ref"]), str(entry.get("mime_type") or "image/png")))
     return refs
 
 
 def _image_refs_metadata(image_refs: Sequence[tuple[str, str]]) -> dict[str, Any]:
-    """The mark that makes the wire send a user message's images with it (see ``providers.wire``)."""
-    return {"image_refs": [{"ref": ref, "mime": mime} for ref, mime in image_refs]} if image_refs else {}
+    """The mark that makes the wire send a user message's images with it, in the core's own key and
+    shape, so the core prices them and anything built on the core reads them (see ``providers.wire``)."""
+    if not image_refs:
+        return {}
+    return {IMAGE_REFS_METADATA_KEY: [ImageRefBlock(blob_ref=ref, mime_type=mime).model_dump(mode="json") for ref, mime in image_refs]}
 
 
 # What the app draws a message from besides its text. The queued row has it from ``submit``; the copy the

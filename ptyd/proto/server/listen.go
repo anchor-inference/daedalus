@@ -113,12 +113,11 @@ func Prepare(runDir, listen, daemon string) (*Endpoint, error) {
 		}
 		endpoint = "tcp:" + ln.Addr().String()
 	}
-	raw := make([]byte, 32)
-	if _, err := rand.Read(raw); err != nil {
+	token, err := NewToken()
+	if err != nil {
 		ln.Close()
 		return nil, err
 	}
-	token := hex.EncodeToString(raw)
 	if err := writeAtomic(filepath.Join(runDir, TokenFile), []byte(token+"\n")); err != nil {
 		ln.Close()
 		return nil, err
@@ -147,6 +146,20 @@ func (e *Endpoint) Release() {
 		e.release()
 		e.release = nil
 	}
+}
+
+// WriteSecret writes a file only this user may read (0600, and on Windows an access list to match)
+// through a temporary name, so a reader never sees half of it: a second token a daemon hands to one
+// client alone.
+func WriteSecret(path string, data []byte) error { return writeAtomic(path, data) }
+
+// NewToken is a fresh token in the form the run directory's token has: 32 random bytes in hex.
+func NewToken() (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(raw), nil
 }
 
 // writeAtomic writes a 0600 file through a temporary name, so a reader never sees half of it.

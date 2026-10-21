@@ -7,6 +7,7 @@ import httpx
 import pytest
 from protocore.contracts.llm import LLMObservabilityContext, LLMRateLimitError, LLMRequest, ProviderDeltaKind
 from protocore.contracts.types import Message, MessageRole, TextBlock, ToolDefinition, ToolParameterSchema
+from protocore.providers.openai_compat import ReasoningReplay
 
 from daedalus.host.summary_calls import stream_text
 from daedalus.providers.openai_compat import (
@@ -35,14 +36,15 @@ class RecordingSink:
         self.records.append(record)
 
 
-def _provider(body: str, status: int = 200, sink: RecordingSink | None = None) -> OpenAICompatibleProvider:
+def _provider(body: str, status: int = 200, sink: RecordingSink | None = None,
+              replay: ReasoningReplay = ReasoningReplay.required) -> OpenAICompatibleProvider:
     captured: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured["json"] = json.loads(request.content)
         return httpx.Response(status, text=body, headers={"content-type": "text/event-stream"})
 
-    endpoint = ProviderEndpoint(id="deepseek", kind="deepseek", base_url="https://x.test", api_key="k")
+    endpoint = ProviderEndpoint(id="deepseek", kind="deepseek", base_url="https://x.test", api_key="k", reasoning_replay=replay)
     provider = OpenAICompatibleProvider(endpoint, client=httpx.AsyncClient(transport=httpx.MockTransport(handler)), usage_sink=sink)
     provider.captured = captured  # type: ignore[attr-defined]
     return provider
@@ -432,6 +434,37 @@ async def test_deepseek_thinking_request_leaves_a_reasoning_only_turn_off_the_wi
     assert all("reasoning_content" in m for m in sent if m["role"] == "assistant")
 
 
+@pytest.mark.parametrize(
+    ("kind", "configured", "expected"),
+    [("deepseek", None, "required"), ("opencode", None, "required"), ("openai_compat", None, "when_present"),
+     ("vllm", None, "when_present"), ("openai_compat", "never", "never"), ("deepseek", "when_present", "when_present")],
+)
+def test_the_reasoning_replay_is_the_providers_own_setting_else_its_dialects(kind: str, configured: str | None, expected: str) -> None:
+    from daedalus.config import ProviderConfig, reasoning_replay_for
+
+    assert reasoning_replay_for(ProviderConfig(kind=kind, base_url="https://x.test", reasoning_replay=configured)) == expected  # type: ignore[arg-type]
+
+
+async def test_an_endpoint_set_to_never_is_sent_no_reasoning_and_one_set_to_when_present_only_what_there_is() -> None:
+    """A server that refuses a field it does not know is set to ``never``; nothing else changes for it."""
+    from protocore.contracts.types import Message, MessageRole, TextBlock, ToolResultBlock, ToolUseBlock
+
+    history = [
+        Message(role=MessageRole.assistant, content_blocks=[ToolUseBlock(tool_call_id="c1", name="t", arguments_json="{}")], reasoning_content="why"),
+        Message(role=MessageRole.tool, content_blocks=[ToolResultBlock(tool_call_id="c1", content="hello")]),
+        Message(role=MessageRole.assistant, content_blocks=[TextBlock(text="Read it."), ToolUseBlock(tool_call_id="c2", name="t", arguments_json="{}")]),
+        Message(role=MessageRole.tool, content_blocks=[ToolResultBlock(tool_call_id="c2", content="again")]),
+    ]
+    for replay, expected in ((ReasoningReplay.never, [None, None]), (ReasoningReplay.when_present, ["why", None])):
+        provider = _provider(_sse([_chunk({"content": "ok"}), _chunk({}, finish="stop")]), replay=replay)
+        request = _request(enable_thinking=True, reasoning_effort="low")
+        request = request.model_copy(update={"messages": [*request.messages, *history]})
+        async for _ in provider.stream_with_tools(request):
+            pass
+        sent = provider.captured["json"]["messages"]  # type: ignore[attr-defined]
+        assert [m.get("reasoning_content") for m in sent if m["role"] == "assistant"] == expected, replay
+
+
 async def test_opencode_sends_the_session_id_and_deepseek_shaped_thinking() -> None:
     """OpenCode Go routes and caches by conversation and passes DeepSeek's thinking fields through as they are."""
     from protocore.contracts.llm import LLMObservabilityContext
@@ -568,3 +601,19 @@ async def test_a_streamed_summary_is_not_booked_as_the_sessions_prompt() -> None
     )
     assert await stream_text(provider, request, silence=5, ceiling=30) == "## Threads\nx"
     assert [(r.purpose, r.session_id, r.normalized["input_tokens"]) for r in sink.records] == [("compaction", "s", 30_000)]
+
+
+def test_a_strict_tool_schema_stays_strict_on_the_wire() -> None:
+    """The core spells ``additionalProperties`` as ``additional_properties``; copying only ``properties`` and
+    ``required`` dropped it, so the strict forced ``plan`` tool reached the model as a permissive one."""
+    from daedalus.providers.llamacpp import tools_to_llamacpp_wire
+    from daedalus.providers.wire import tools_to_wire
+
+    strict = ToolDefinition(name="plan", description="d", parameters=ToolParameterSchema(
+        properties={"steps": {"type": "array", "items": {"type": "string"}}}, required=["steps"], additional_properties=False))
+    loose = ToolDefinition(name="t", description="d", parameters=ToolParameterSchema(properties={"a": {"type": "string"}}))
+    sent = tools_to_wire([strict, loose])
+    assert sent[0]["function"]["parameters"] == {"type": "object", "properties": {"steps": {"type": "array", "items": {"type": "string"}}},
+                                                 "required": ["steps"], "additionalProperties": False}
+    assert "additionalProperties" not in sent[1]["function"]["parameters"], "a tool that states nothing is sent as before"
+    assert tools_to_llamacpp_wire([strict])[0]["function"]["parameters"]["additionalProperties"] is False

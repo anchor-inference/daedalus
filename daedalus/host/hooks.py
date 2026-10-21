@@ -1,9 +1,9 @@
 """The hook manager the engine calls around every tool: redaction on the way in, the operator's scripts around it.
 
 ``PostToolUse`` fires inside the core dispatcher before a result is appended to the history, so masking
-there covers the transcript, snapshots, compaction summaries and every later model call at once — for
-tools that returned. A tool that *raised* takes the dispatcher's failure path, which does not fire the
-hook; the session runner masks that text when the event reaches it.
+there covers the transcript, snapshots, compaction summaries and every later model call at once. It
+fires for a call that failed as well, a tool that raised included, so an exception that echoes a key is
+masked the same way; a rewrite also drops the tool's own copy of the value and its UI payload.
 
 The operator's own scripts (``[hooks]`` in config.toml) run at ``pre_tool_use`` (may deny the call or
 rewrite its arguments), ``post_tool_use`` (may rewrite the output) and ``run_finalize`` (fire and forget).

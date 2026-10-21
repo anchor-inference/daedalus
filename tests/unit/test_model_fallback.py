@@ -14,7 +14,15 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from protocore.contracts.llm import LLMRateLimitError, LLMRequest, LLMStreamIdleError, ProviderDelta, ProviderDeltaKind
+from protocore.contracts.llm import (
+    LLMRateLimitError,
+    LLMRequest,
+    LLMStreamIdleError,
+    ProviderDelta,
+    ProviderDeltaKind,
+    ProviderFailure,
+    ProviderFailureReason,
+)
 from protocore.contracts.runtime_constants import LoopConstants
 from protocore.runtime.events.envelope import TurnEvent
 from protocore.runtime.events.types import EventType
@@ -215,12 +223,6 @@ async def test_telegram_says_nothing_when_the_configured_model_answered(tmp_path
     renderer.close()
 
 
-class _Verdict:
-    """What the core's idle watchdog pins on the error it raises; nothing above the core can label it."""
-
-    reason = "timeout"
-
-
 class SilentProvider(ScriptedProvider):
     """A model that thinks past the idle budget on its first ``silences`` calls, then answers.
 
@@ -237,9 +239,9 @@ class SilentProvider(ScriptedProvider):
     async def stream_with_tools(self, request: LLMRequest) -> AsyncIterator[ProviderDelta]:
         self.attempts += 1
         if self.attempts <= self.silences:
-            error = LLMStreamIdleError("LLM stream idle for >90.0s (window=baseline, last_delta_seen=thinking=False)")
-            object.__setattr__(error, "classified", _Verdict())
-            raise error
+            # What the core's idle watchdog raises: nothing above the core can label it.
+            raise LLMStreamIdleError("LLM stream idle for >90.0s (window=baseline, last_delta_seen=thinking=False)",
+                                     classified=ProviderFailure(reason=ProviderFailureReason.timeout, retryable=True))
         async for delta in super().stream_with_tools(request):
             yield delta
 

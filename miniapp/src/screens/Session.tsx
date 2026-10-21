@@ -43,6 +43,7 @@ import { JobsTab } from "../jobs";
 import { markAnchor, navigate, pathFor, projectHome, projectSessionPath, sessionPath, useAnchor, useRoute } from "../router";
 import { turnFor, withOlder } from "../anchor";
 import { ChatSearch } from "../chatsearch";
+import { ComputerBanner, ComputerButton, ComputerSheet, useComputer } from "../computer";
 import { useMedia } from "../ui/index";
 import { SCROLL_KEYS, Windowed, keepOpened, openedLine, stillAtEnd, type OpenedLine, type WindowedHandle } from "../virtual";
 import { DICT, plural, t } from "../i18n";
@@ -268,6 +269,10 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const [editingTitle, setEditingTitle] = useState<string | null>(null);
   // The phone's sheets: the ⋮ menu and the three it leads to that the desktop shows in place.
   const [phoneSheet, setPhoneSheet] = useState<"menu" | "search" | "rename" | null>(null);
+  // The Computer control: its sheet is opened from the header's button or the phone's menu, and the
+  // state behind both is drawn only in the native application.
+  const [computerOpen, setComputerOpen] = useState(false);
+  const computer = useComputer(id, computerOpen);
   const [modes, setModes] = useState<ModeInfo[]>([]);
   // The guessed next message the composer offers once an answer has settled; empty when there is none.
   const [suggestion, setSuggestion] = useState("");
@@ -1474,6 +1479,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const phoneTiles: SessionTile[] = phone && !pane ? [
     { id: "search", icon: "search", label: t("session.phone.search"), onSelect: () => setPhoneSheet("search") },
     { id: "terminal", icon: "terminal", label: t("session.phone.terminal"), count: sessionTerminals.running.length, disabled: !!terminalDock.reason && sessionTerminals.running.length === 0, onSelect: () => terminalDock.setSheet(true) },
+    ...(computer.view !== "hidden" ? [{ id: "computer", icon: "monitor" as IconName, label: t("cu.button"), attn: computer.view === "mine" || computer.view === "paused", onSelect: () => setComputerOpen(true) }] : []),
     ...(hasBrowser ? [{ id: "browser", icon: "globe" as IconName, label: t("panel.tab.browser"), attn: !!browserShown?.needs_you, onSelect: openBrowser }] : []),
     ...(questionsShown ? [{ id: "questions", icon: "ask" as IconName, label: t("panel.tab.questions"), count: waiting, attn: waiting > 0, onSelect: () => panel.open("questions") }] : []),
     ...(panelTabs.includes("files") && hasDetails ? [{ id: "files", icon: "folder" as IconName, label: t("panel.tab.files"), onSelect: () => panel.open("files") }] : []),
@@ -1608,6 +1614,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           {phone && browserShown && <BrowserHeadButton groups={browsers.groups} onOpen={openBrowser} streaming={panel.state.tab !== "browser"} saving={deviceSaving(true)} />}
           <ChatSearch sessionId={id} onPick={openMessage} />
           {!!sessionDiagrams?.length && <a className="btn small" href={pathFor("diagrams", null, { session: id })} aria-label={`${t("diagrams.session")} (${sessionDiagrams.length})`} onClick={(event) => { event.preventDefault(); navigate(pathFor("diagrams", null, { session: id })); }}><Icon name="pen" size={16} /> {phone ? sessionDiagrams.length : `${t("diagrams.session")} (${sessionDiagrams.length})`}</a>}
+          <ComputerButton view={computer.view} onOpen={() => setComputerOpen(true)} />
           <TerminalButton dock={terminalDock} phone={phone} />
           {!phone && <button className={`iconbtn ${panel.state.tab ? "on" : ""}`} onClick={panel.toggle} aria-label={t("panel.toggle")} title={t("panel.toggle.title")} aria-pressed={!!panel.state.tab}>
             <Icon name="panel" />
@@ -1729,6 +1736,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               <Icon name="question" size={14} /><span><b>{t("session.runerror")}: </b>{detail.error}</span>
             </div>
           )}
+          <ComputerBanner sessionId={id} />
           <SettingNoticeLines sessionId={id} />
           {staffId && <StaffMessages staffId={staffId} />}
           {/* A draft written before the first session read would bind to an empty model and workspace,
@@ -1883,6 +1891,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
 
       {receipt && <ReceiptDialog sessionId={id} receipt={receipt} onClose={() => setReceipt(null)} />}
 
+      {computerOpen && <ComputerSheet sessionId={id} toast={toast} onClose={() => setComputerOpen(false)} />}
       {phoneSheet === "menu" && <SessionMenuSheet tiles={phoneTiles} rows={phoneRows} onClose={() => setPhoneSheet(null)} />}
       {phoneSheet === "search" && <SearchSheet sessionId={id} onPick={openMessage} onClose={() => setPhoneSheet(null)} />}
       {phoneSheet === "rename" && <RenameSheet title={detail?.title ?? ""} onSave={(title) => { setPhoneSheet(null); void rename(title); }} onClose={() => setPhoneSheet(null)} />}

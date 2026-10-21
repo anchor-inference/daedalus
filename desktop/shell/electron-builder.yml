@@ -1,5 +1,5 @@
 # The installers and the update archives of the desktop application, one configuration for the
-# three systems. The launcher (daedalus-desktop), its two daemons, the built Mini App and the Chrome
+# three systems. The launcher (daedalus-desktop), its three daemons, the built Mini App and the Chrome
 # extension are not
 # compiled here: the release workflow (and build.sh for a local build) puts them in stage/ first,
 # per system and architecture, and they are copied in beside the shell's own executable — where
@@ -104,7 +104,7 @@ mac:
       to: seed
   # The launcher and its daemons are one universal binary each already (lipo in the workflow), so
   # the two halves of the application carry the same file and nothing is merged.
-  x64ArchFiles: "Contents/MacOS/{daedalus-desktop,ptyd,browserd}"
+  x64ArchFiles: "Contents/MacOS/{daedalus-desktop,ptyd,browserd,deskd}"
 
 linux:
   icon: build/icon.png
