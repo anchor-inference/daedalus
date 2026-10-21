@@ -7,8 +7,9 @@
 # It stages what the application carries beside the shell — the launcher, browserd and deskd built
 # from this tree (CGO off, so from any machine), the Mini App built from miniapp/, the Chrome
 # extension built from extension/ — and runs
-# electron-builder. ptyd is left out: it needs Zig, and the application runs without it (host
-# terminals are then unavailable). So is the seed unless SEED= names a folder made by
+# electron-builder. ptyd is left out unless PTYD= names one built by ptyd/release.sh for the same
+# system: it needs Zig, and the application runs without it (host terminals are then
+# unavailable). So is the seed unless SEED= names a folder made by
 # `daedalus-desktop make-seed`: without one the first run downloads, as a launcher built from source
 # does. The release workflow stages every piece; this is for a quick look.
 # macOS needs a Mac (the .dmg and the signature are Apple's tools); the workflow builds it.
@@ -32,6 +33,9 @@ fi
 (cd "$root/desktop" && CGO_ENABLED=0 GOOS=$goos GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=desktop-v$version" -o "$stage/daedalus-desktop$exe" .)
 (cd "$root/browserd" && CGO_ENABLED=0 GOOS=$goos GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o "$stage/browserd$exe" ./cmd/browserd)
 (cd "$root/deskd" && CGO_ENABLED=0 GOOS=$goos GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o "$stage/deskd$exe" ./cmd/deskd)
+if [ -n "${PTYD:-}" ]; then
+  cp "$PTYD" "$stage/ptyd$exe"
+fi
 (cd "$root/miniapp" && npm ci --no-audit --no-fund && npm run build)
 cp -R "$root/miniapp/dist" "$here/stage/miniapp-dist"
 "$root/desktop/stage-extension.sh" "$here/stage/browser-extension"
