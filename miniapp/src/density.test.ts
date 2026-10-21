@@ -417,6 +417,15 @@ describe("the sidebar", () => {
     expect(wide(".sb-chip")).toContain("height: var(--chip-h-dense)");
   });
 
+  it("gives the kind tabs over the lists a small control's height, and a finger's on a phone", () => {
+    // A tab bar above the chips, not a fifth chip: the small control's 28 px with an underline, which
+    // keeps the column's tools one row taller than before and no more. The phone's Chats page gives
+    // each tab the 44 px a finger needs.
+    const rule = (selector: string) => all.filter((r) => !r.media && selectors(r).includes(selector)).map((r) => r.body).join(";");
+    expect(rule(".kind-tab")).toContain("height: var(--ctl-h-sm)");
+    expect(rule(".ph-kinds .kind-tab")).toContain("height: var(--row-h-touch)");
+  });
+
   it("shows a project's + and a row's menu on hover or focus, not always", () => {
     // The + used to stand on every project row; with a project row of 36 px it is a hover action,
     // and it is also the first item of the row's menu and of its right click.

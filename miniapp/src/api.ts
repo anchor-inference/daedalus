@@ -732,6 +732,9 @@ export type SessionSummary = {
   terminals?: number;
   /** The program the session was imported from, for its plate's corner mark. */
   imported_from?: string | null;
+  /** An ordinary chat, one about the operator's computer, or one in their Chrome (chatkind.tsx);
+   *  absent from a host older than the column, which is the same as "chat". */
+  kind?: "chat" | "computer" | "chrome";
 };
 
 export type TaskView = {
