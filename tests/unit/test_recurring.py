@@ -20,7 +20,6 @@ from daedalus.host.session_runner import SessionManager
 from daedalus.stores.control import ControlDenied, Principal
 from daedalus.stores.database import Database
 from daedalus.stores.outbox import OutboxStore
-from daedalus.stores.projects import ProjectError
 
 
 class Front:
@@ -348,7 +347,9 @@ async def test_project_handoff_revokes_old_schedule_and_preserves_cycle_history(
     assert not await system.extensions["effects"].step()
 
 
-async def test_project_with_automation_history_cannot_be_hard_deleted(system: Any) -> None:
+async def test_a_removed_project_takes_its_automation_history_with_it(system: Any) -> None:
+    """A schedule names its project without a cascade, so a project that had ever had one could
+    never be removed; its schedules and their cycles are the project's own and go with it."""
     project = await system.manager.projects.create("Workspace")
     rev = await system.db.fetchone("SELECT revision FROM domain_collection_revisions WHERE scope_kind='project' AND scope_id=?", (project.id,))
     await system.extensions["recurring"].create(
@@ -357,5 +358,6 @@ async def test_project_with_automation_history_cannot_be_hard_deleted(system: An
         project_id=project.id, expires_at=(datetime.now(UTC) + timedelta(days=1)).isoformat(),
         expected_collection_revision=rev["revision"], client_operation_id="project-reminder",
     )
-    with pytest.raises(ProjectError, match="automation history"):
-        await system.manager.projects.delete(project.id)
+    await system.manager.projects.delete(project.id)
+    assert await system.manager.projects.get(project.id) is None
+    assert await system.db.fetchone("SELECT 1 FROM schedules WHERE project_id = ?", (project.id,)) is None

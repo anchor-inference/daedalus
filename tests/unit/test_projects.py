@@ -261,7 +261,7 @@ async def test_project_crud_and_a_session_that_works_in_one(settings: Settings, 
             assert manager.live_state(sid).project.settings.snapshots is True, "a live session must see the change, not the next one to open"
 
             busy = await client.delete(f"/api/projects/{project['id']}", headers=HEADERS)
-            assert busy.status_code == 409 and "2 agents work in" in busy.json()["detail"]
+            assert busy.status_code == 409 and "2 chats work in" in busy.json()["detail"]
             gone = await client.delete(f"/api/projects/{project['id']}", headers=HEADERS)
             assert gone.status_code == 409
             # Not one file of it was touched.

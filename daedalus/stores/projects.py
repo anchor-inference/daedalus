@@ -15,6 +15,7 @@ from typing import Any
 
 from daedalus.stores.control import ControlStore
 from daedalus.stores.database import Database
+from daedalus.stores.purge import Purge
 
 ENVIRONMENTS = ("container", "host")
 """Where a folder lives: inside the container the agent runs in, or on the machine around it. In
@@ -338,6 +339,20 @@ class ProjectFolder:
 
 
 @dataclass(frozen=True, slots=True)
+class Occupants:
+    """Who is in a project (:meth:`ProjectStore.occupants`): the operator's chats, each with
+    ``archived``, and the project's machinery, each with its ``role``."""
+
+    chats: tuple[dict[str, Any], ...]
+    machinery: tuple[dict[str, Any], ...]
+
+    @property
+    def visible(self) -> list[dict[str, Any]]:
+        """The chats the sidebar shows: the ones a removal names and counts."""
+        return [chat for chat in self.chats if not chat["archived"]]
+
+
+@dataclass(frozen=True, slots=True)
 class Project:
     """A project and its folders, the first of which is the primary: where a session works when it
     names no other folder, and where an ephemeral project's scratch lives."""
@@ -513,8 +528,7 @@ async def why_not_a_chat(conn: Any, project_id: str) -> str:
     is decided by that removal. A row that cascades with it would be lost without a word — a team,
     a board, a brief — and a row whose foreign key does not cascade (a schedule, a budget) would make
     the removal fail, and with it the deletion of the chat. Both are refused here (:func:`held_work`),
-    where the operator can still be told. :meth:`ProjectStore.delete` refuses automation history for
-    the second reason.
+    where the operator can still be told.
     """
     project = await (await conn.execute("SELECT name, settings, system, setup_by FROM projects WHERE id = ?", (project_id,))).fetchone()
     if project is None:
@@ -1226,20 +1240,29 @@ class ProjectStore:
         return changed
 
     async def delete(self, project_id: str) -> None:
-        """Forget an empty project, with its folders, brief and journal. Nothing on disk is touched."""
+        """Forget a project whose sessions are already gone, with every row that is its own: folders,
+        brief, journal, board, team, schedules and the records of their work. Nothing on disk is touched.
+
+        The sessions are deleted first, one by one, by the caller (``project_removal``), because a
+        session's deletion runs hooks that end what it holds; the check here is repeated inside the
+        transaction so a chat started in the meantime is refused rather than wiped without them.
+        """
         project = await self.get(project_id)
         if project is not None and project.settings.system:
             raise ProjectError(f"{project.name} is the installation's own project and cannot be removed")
-        if await self.sessions_of(project_id):
-            raise ProjectError(f"{project.name if project else 'this project'} still has sessions")
-        history = await self._db.fetchone(
-            "SELECT id FROM schedules WHERE project_id = ? UNION ALL"
-            " SELECT id FROM recurring_cycles WHERE project_id = ? LIMIT 1",
-            (project_id, project_id),
-        )
-        if history is not None:
-            raise ProjectError("this project contains automation history; deletion is unavailable")
-        await self._db.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        async with self._db.transaction() as conn:
+            cursor = await conn.execute("SELECT title FROM sessions WHERE project_id = ? ORDER BY last_message_at DESC", (project_id,))
+            left = [row["title"] for row in await cursor.fetchall()]
+            await cursor.close()
+            if left:
+                raise ProjectError(f"{project.name if project else 'this project'} still has sessions: {', '.join(left)}")
+            # The inbox entries and the browser groups name the project without a foreign key; left
+            # behind, they would open a project that no longer exists.
+            await conn.execute("DELETE FROM notifications WHERE project_id = ?", (project_id,))
+            await conn.execute("DELETE FROM browser_groups WHERE project_id = ? AND status != 'open'", (project_id,))
+            purge = Purge(conn)
+            await purge.rows("projects", "id = ?", (project_id,))
+            await purge.finish()
         await self.list()
 
     # -- folders ---------------------------------------------------------------------
@@ -1621,6 +1644,61 @@ class ProjectStore:
         if removed:
             await self.list()
         return removed
+
+    async def occupants(self, project_id: str) -> Occupants:
+        """The project's sessions, sorted into the operator's chats and the project's own machinery.
+
+        A chat is what the operator talks to and would lose: the sidebar's rows (an archived one
+        included, kept apart because the sidebar does not show it), a fork, a subagent whose leader
+        is gone. The machinery is the orchestrator's sessions, current and retired, and every staff
+        member's; a subagent, prompt coach or side question goes with the session it serves. Counting
+        every row as an agent made a project with an orchestrator and nineteen finished staff
+        sessions refuse removal for "20 agents" while the sidebar showed one.
+        """
+        rows = await self._db.fetchall("SELECT id, title, project_id, metadata FROM sessions ORDER BY last_message_at DESC")
+        parsed: dict[str, tuple[Any, dict[str, Any]]] = {}
+        for row in rows:
+            try:
+                metadata = json.loads(row["metadata"] or "{}")
+            except (TypeError, ValueError):
+                metadata = {}
+            parsed[row["id"]] = (row, metadata if isinstance(metadata, dict) else {})
+
+        def role(session_id: str, seen: frozenset[str] = frozenset()) -> str:
+            _, metadata = parsed[session_id]
+            if metadata.get("orchestrator_of") or metadata.get("orchestrator_retired_of"):
+                return "orchestrator"
+            if metadata.get("staff_id") or metadata.get("staff_session_id"):
+                return "staff"
+            if metadata.get("dispatcher"):
+                return "dispatcher"
+            served = next((str(metadata[key]) for key in ("prompt_coach_of", "btw_of", "subagent_of") if metadata.get(key)), "")
+            if served:
+                if served in parsed and served not in seen:
+                    # A helper is what its leader is: a staff member's subagent goes with the member.
+                    leader = role(served, seen | {session_id})
+                    return leader if leader != "chat" else "helper"
+                if not metadata.get("subagent_of"):
+                    return "helper"  # a coach or side question whose chat is gone serves nobody
+            return "chat"
+
+        chats: list[dict[str, Any]] = []
+        machinery: list[dict[str, Any]] = []
+        for session_id, (row, metadata) in parsed.items():
+            if row["project_id"] != project_id:
+                continue
+            kind = role(session_id)
+            entry = {"id": session_id, "title": row["title"] or session_id}
+            if kind == "chat":
+                chats.append({**entry, "archived": bool(metadata.get("archived"))})
+            elif kind == "helper":
+                served = next((str(metadata[key]) for key in ("prompt_coach_of", "btw_of", "subagent_of") if metadata.get(key)), "")
+                # A helper of one of this project's chats stays with that chat, which blocks anyway.
+                if served not in parsed or parsed[served][0]["project_id"] != project_id:
+                    machinery.append({**entry, "role": kind})
+            else:
+                machinery.append({**entry, "role": kind})
+        return Occupants(chats=tuple(chats), machinery=tuple(machinery))
 
     async def sessions_of(self, project_id: str) -> list[dict[str, str]]:
         rows = await self._db.fetchall("SELECT id, title FROM sessions WHERE project_id = ? ORDER BY last_message_at DESC", (project_id,))

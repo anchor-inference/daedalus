@@ -324,7 +324,11 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
         if isinstance(sets, dict):
             sets[TOOL_SET] = staff
 
+    async def project_deleted(project_id: str) -> None:
+        await service.close_project(project_id)
+
     manager.delete_hooks.append(session_deleted)
+    manager.project_delete_hooks.append(project_deleted)
     manager.answer_hooks[SWITCH_ASK] = lambda session_id, request, allowed: chrome_answered(app, service, session_id, allowed)
     manager.turn_line_hooks.append(lambda state: chrome_line(manager, service, state))
     tasks = await service.start()

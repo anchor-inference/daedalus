@@ -23,6 +23,7 @@ from starlette.datastructures import UploadFile
 from daedalus.extensions import questions, side_questions, wakeups
 from daedalus.extensions.coordinator_handoff import CoordinatorHandoff
 from daedalus.extensions.project_commands import ProjectCommands
+from daedalus.extensions.project_removal import RemovalRefused, remove_project
 from daedalus.extensions.project_usage import ProjectUsage
 from daedalus.extensions.watch_authority import status as watch_authority_status
 from daedalus.extensions.watch_commands import WatchCommands
@@ -319,11 +320,32 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         return {**body, "sessions": sessions}
 
     async def sessions_of(project_id: str) -> list[dict[str, Any]]:
-        # The narrower question on purpose: a session whose run has ended and whose snapshot is
-        # still being written may not be rewritten, but it is not working, and a list that draws it
-        # as running contradicts its own screen — which says idle, because it is.
+        """The operator's chats in the project, as the sidebar shows them: not the orchestrator's
+        sessions nor a staff member's, which made a project with a team read "20 agents" over one.
+
+        ``running`` is the narrower question on purpose: a session whose run has ended and whose
+        snapshot is still being written may not be rewritten, but it is not working, and a list that
+        draws it as running contradicts its own screen — which says idle, because it is.
+        """
         busy = manager.active_sessions()
-        return [{**s, "running": s["id"] in busy} for s in await manager.projects.sessions_of(project_id)]
+        found = await manager.projects.occupants(project_id)
+        return [{"id": s["id"], "title": s["title"], "running": s["id"] in busy} for s in found.visible]
+
+    async def machinery_of(project: Project) -> dict[str, Any]:
+        """What goes with the project when it is removed, for the confirmation to say."""
+        row = await app.db.fetchone(
+            "SELECT (SELECT COUNT(*) FROM staff WHERE project_id = ?) AS staff,"
+            " (SELECT COUNT(*) FROM board_tasks WHERE project_id = ?) AS tasks",
+            (project.id, project.id),
+        )
+        found = await manager.projects.occupants(project.id)
+        office = project.settings.orchestrator
+        return {
+            "orchestrator": bool(office.enabled or office.session_id or any(m["role"] == "orchestrator" for m in found.machinery)),
+            "staff": int(row["staff"]) if row else 0,
+            "tasks": int(row["tasks"]) if row else 0,
+            "archived_chats": sum(1 for chat in found.chats if chat["archived"]),
+        }
 
     async def existing(project_id: str) -> Project:
         project = await manager.projects.get(project_id)
@@ -365,12 +387,11 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         """
         out = []
         for project in await manager.projects.list():
-            sessions = await sessions_of(project.id)
             # A chat's project a moved chat left behind is nobody's to pick: kept a while only so the
             # move can be undone, and swept later (ProjectStore.sweep_leftovers).
-            if project.settings.ephemeral and not sessions:
+            if project.settings.ephemeral and not await manager.projects.sessions_of(project.id):
                 continue
-            out.append(view(project, sessions))
+            out.append({**view(project, await sessions_of(project.id)), "machinery": await machinery_of(project)})
         return out
 
     @api.get("/api/project-environments")
@@ -467,25 +488,15 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
 
     @api.delete("/api/projects/{project_id}")
     async def delete_project(project_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        """Forget an empty project. Files are never deleted."""
-        project = await existing(project_id)
-        sessions = await manager.projects.sessions_of(project_id)
-        if sessions:
-            one = len(sessions) == 1
-            raise HTTPException(409, f"{len(sessions)} agent{'' if one else 's'} {'works' if one else 'work'} in {project.name}; move or remove {'it' if one else 'them'} first")
-        # What the project itself holds (its terminals) ends before the row goes, so nothing is left
-        # running for an owner that no longer exists.
-        for hook in manager.project_delete_hooks:
-            try:
-                await hook(project_id)
-            except Exception:  # noqa: BLE001 — a hook that fails must not keep the project
-                logger.exception("project delete hook failed for %s", project_id)
+        """Remove a project with its orchestrator, team, board and journal. Files are never deleted.
+        A 409 names what keeps it: a chat of the operator's, or something still at work."""
+        await existing(project_id)
         try:
-            await manager.projects.delete(project_id)
-        except ProjectError as exc:
+            await remove_project(app, project_id)
+        except RemovalRefused as exc:
             raise HTTPException(409, str(exc)) from exc
-        await manager.reload_project(None, project_id)
-        await manager.bus.publish("project.changed", {"change": "removed", "actor": "operator"}, project_id=project_id)
+        except KeyError as exc:
+            raise HTTPException(404, "no such project") from exc
         return {"ok": True}
 
     # -- folders -----------------------------------------------------------------------

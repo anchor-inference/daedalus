@@ -1098,6 +1098,13 @@ class Browsers:
                 logger.warning("browser %s of %s %s not closed: %s", row["id"], owner_kind, owner_id, exc.message)
         return len(rows)
 
+    async def close_project(self, project_id: str, *, actor: str = "system") -> int:
+        """Close every open group of a project being removed, whoever in it opened the group: the
+        project, a staff member or one of its sessions; returns how many were open."""
+        rows = await self.db.fetchall("SELECT owner_kind, owner_id FROM browser_groups WHERE status = 'open' AND project_id = ?", (project_id,))
+        owners = {(row["owner_kind"], row["owner_id"]) for row in rows}
+        return sum([await self.close_owned(kind, owner, actor=actor) for kind, owner in sorted(owners)])
+
     async def _mark_closed(self, row: dict[str, Any], reason: str, *, status: str, by: str = "system") -> bool:
         async with self._state_lock:
             current = await self.db.fetchone("SELECT status FROM browser_groups WHERE id = ?", (row["id"],))
