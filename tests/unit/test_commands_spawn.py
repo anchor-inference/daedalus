@@ -100,8 +100,6 @@ async def test_the_chat_commands_are_not_the_chat_s_to_run(settings: Settings, d
     assert "thinking=True effort=xhigh" in await run("/thinking xhigh")
     assert "usage: /thinking" in await run("/thinking perhaps")
     assert "xhigh" in await run("/thinking perhaps")
-    assert "mode: default" in await run("/mode")
-    assert "no such mode" in await run("/mode nonesuch")
 
     assert "Renamed to: kept" in await run("/rename kept")
     renamed = await manager.get_state(sid)
@@ -189,9 +187,9 @@ async def test_spawn_agent_tool_hands_over_brief_files_and_settings(settings: Se
     assert missing.is_error and "do not exist" in missing.content
     empty = await spawn_agent().invoke(ctx, {"title": "x", "brief": "  "})
     assert empty.is_error
-    result = await spawn_agent().invoke(ctx, {"title": "Changelog keeper", "brief": "Keep the changelog current.", "files": ["howto.md"], "peer_name": "changelog", "mode": "careful", "mcp": ["postingboard"]})
+    result = await spawn_agent().invoke(ctx, {"title": "Changelog keeper", "brief": "Keep the changelog current.", "files": ["howto.md"], "peer_name": "changelog", "mcp": ["postingboard"]})
     assert not result.is_error and result.metadata["session_id"] == "child123" and "peer 'changelog'" in result.content
-    assert calls[0]["files"] == [str(parent.workspace / "howto.md")] and calls[0]["mode"] == "careful" and calls[0]["mcp"] == ["postingboard"]
+    assert calls[0]["files"] == [str(parent.workspace / "howto.md")] and calls[0]["mcp"] == ["postingboard"]
     await manager.close()
 
 
@@ -216,7 +214,7 @@ def test_core_compaction_trigger_stays_below_the_output_reservation() -> None:
     from daedalus.host.engine_factory import runtime_constants
 
     config = model_config()
-    rc = runtime_constants(config, context_window=128_000, max_output_tokens=32_000, thinking=False, mode=None)
+    rc = runtime_constants(config, context_window=128_000, max_output_tokens=32_000, thinking=False)
     assert rc.compaction_trigger_ratio == 0.7  # 1 − 32k/128k − 0.05: below the vLLM cliff by the estimate's error, under the 0.85 default
-    rc = runtime_constants(config, context_window=128_000, max_output_tokens=4_000, thinking=False, mode=None)
+    rc = runtime_constants(config, context_window=128_000, max_output_tokens=4_000, thinking=False)
     assert rc.compaction_trigger_ratio == 0.85  # 1 − 4k/128k − 0.05 is above the 0.85 default, which caps it

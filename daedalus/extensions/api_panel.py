@@ -60,13 +60,11 @@ FORWARDED: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         ("POST", _SESSION + "/stop"),
         ("POST", _SESSION + "/answer"),
         ("POST", _SESSION + "/model"),
-        ("POST", _SESSION + "/mode"),
         ("POST", _SESSION + "/policy/grant"),
         ("POST", _SESSION + "/policy/grant-similar"),
         ("POST", _SESSION + "/policy/refuse"),
         ("GET", _SESSION + "/browser-approvals"),
         ("PUT", _SESSION + "/browser-approvals"),
-        ("GET", "/api/panel/modes"),
         # Dictation: whether it is offered, and a voice note heard in a conversation or before one.
         ("GET", "/api/panel/asr"),
         ("POST", _SESSION + "/transcribe"),

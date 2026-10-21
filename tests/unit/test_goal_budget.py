@@ -227,7 +227,7 @@ async def test_native_provider_reserves_project_goal_before_transport(db: Databa
     config.limits.usd_total = 0
     config.limits.usd_per_run = 0
     manager = SimpleNamespace(db=db, config=config, settings=SimpleNamespace(usd_per_day=0),
-                              live_state=lambda _: None, mode_for=lambda _: None)
+                              live_state=lambda _: None, run_bounds=lambda _: None)
     sends = []
     adapter = provider(manager, lambda sent: sends.append(sent) or answer(), configured=endpoint())
     observed = request(observability=LLMObservabilityContext(tenant_id="tenant", session_id="worker", run_id="run"))
@@ -253,7 +253,7 @@ async def test_unpriced_project_model_runs_unreserved_under_a_goal_budget(db: Da
     config = RuntimeConfig()
     config.limits.usd_total = 0
     manager = SimpleNamespace(db=db, config=config, settings=SimpleNamespace(usd_per_day=0),
-                              live_state=lambda _: None, mode_for=lambda _: None)
+                              live_state=lambda _: None, run_bounds=lambda _: None)
     sends = []
     unpriced = endpoint()
     unpriced.pricing = {}

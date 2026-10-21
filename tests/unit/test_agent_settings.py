@@ -93,11 +93,11 @@ async def test_anything_else_waits_for_apply_and_the_agent_hears_the_outcome(db:
     app.notifications.register_resolver(ext.PREFIX, service.resolve_action)
     record = await propose(service, {"limits": {"max_iterations": 300}})
     assert record["status"] == "pending" and record["kind"] == "approval"
-    assert app.config.limits.max_iterations == 200 and app.saves == 0
+    assert app.config.limits.max_iterations == 0 and app.saves == 0
     assert "Waiting for the operator" in rules.result_text(record)
     shown = await entry(app, record)
     assert shown["needs_you"] and [a["id"] for a in shown["actions"]] == ["apply", "reject", "open"]
-    assert "limits.max_iterations: 200 → 300 (next step)" in shown["body"] and "the operator asked for it" in shown["body"]
+    assert "limits.max_iterations: 0 → 300 (next step)" in shown["body"] and "the operator asked for it" in shown["body"]
     # The same change proposed twice is the same card, not a second one.
     assert (await propose(service, {"limits": {"max_iterations": 300}}, call="c2"))["id"] == record["id"]
 
@@ -106,7 +106,7 @@ async def test_anything_else_waits_for_apply_and_the_agent_hears_the_outcome(db:
     assert app.config.limits.max_iterations == 300
     [(session, text, kw)] = app.manager.told
     assert session == "s1" and kw["origin"] == "settings" and kw["as_answer"] is False
-    assert "applied your settings change" in text and "limits.max_iterations: 200 → 300" in text
+    assert "applied your settings change" in text and "limits.max_iterations: 0 → 300" in text
     stored = await service.view(record["id"])
     assert stored["status"] == "applied" and stored["told"] and stored["via"] == "app"
     # The second answer is told what the first one was.
@@ -136,7 +136,7 @@ async def test_apply_is_not_a_lock_screen_action(db: Database) -> None:
 
     with pytest.raises(ActionRefused):
         await app.notifications.act(shown["id"], "apply", via="push", quick_only=True)
-    assert app.config.limits.max_iterations == 200
+    assert app.config.limits.max_iterations == 0
 
 
 async def test_apply_after_the_settings_moved_is_stale_and_asks_for_a_new_proposal(db: Database) -> None:
@@ -148,7 +148,7 @@ async def test_apply_after_the_settings_moved_is_stale_and_asks_for_a_new_propos
     await app.save_config(moved)
     decided = await service.decide(record["id"], "apply", via="app")
     assert decided["status"] == "stale"
-    assert app.config.limits.max_iterations == 200 and app.config.answer_language == "Russian"
+    assert app.config.limits.max_iterations == 0 and app.config.answer_language == "Russian"
     text = app.manager.told[0][1]
     assert "the settings changed after you proposed it" in text and "SettingsGet" in text
 
@@ -162,7 +162,7 @@ async def test_an_unanswered_change_expires_and_the_agent_is_told(db: Database) 
     assert stored["status"] == "expired" and stored["told"]
     assert (await entry(app, record))["resolved"] == "expired"
     assert "expired without an answer" in app.manager.told[0][1]
-    assert app.config.limits.max_iterations == 200
+    assert app.config.limits.max_iterations == 0
 
 
 async def tick_after(service: ext.SettingsChanges, record: dict[str, Any], *, hours: float) -> None:
@@ -267,12 +267,12 @@ async def test_null_resets_a_field_and_a_map_entry_can_be_added_and_removed(db: 
     service = ext.SettingsChanges(app)
     assert (await propose(service, {"compaction": {"auto_ratio": None}}))["status"] == "applied"
     assert app.config.compaction.auto_ratio == 0.8
-    added = await propose(service, {"modes": {"brief": {"description": "terse answers", "max_iterations": 10}}})
+    added = await propose(service, {"tools": {"groups": {"browser": {"load": "eager"}}}})
     await service.decide(added["id"], "apply", via="app")
-    assert app.config.modes["brief"].max_iterations == 10
-    removed = await propose(service, {"modes": {"brief": None}}, call="c3")
+    assert app.config.tools.groups["browser"].load == "eager"
+    removed = await propose(service, {"tools": {"groups": {"browser": None}}}, call="c3")
     await service.decide(removed["id"], "apply", via="app")
-    assert "brief" not in app.config.modes
+    assert "browser" not in app.config.tools.groups
 
 
 async def test_settings_get_masks_credentials_and_describes_each_field(db: Database) -> None:

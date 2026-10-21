@@ -214,9 +214,9 @@ async def test_the_orchestrator_is_given_its_allowlist_and_nobody_else_its_tools
         system = "".join(b.text for m in request.messages if m.role is MessageRole.system for b in m.content_blocks if isinstance(b, TextBlock))
         assert "You are the orchestrator of one project" in system and "You are Daedalus" not in system
         assert r.project.name not in system, "the static prompt names no project, so every orchestrator shares its cache"
-        # Its turn is bounded by its own limits, without a mode anyone had to set.
-        mode = r.manager.mode_for(state)
-        assert mode is not None and mode.max_iterations == r.manager.config.orchestrator.max_iterations
+        # Its turn is bounded by its own limits, which no operator's chat has.
+        bounds = r.manager.run_bounds(state)
+        assert bounds is not None and bounds.max_iterations == r.manager.config.orchestrator.max_iterations
     finally:
         await close_team(r.manager)
         await r.manager.close()

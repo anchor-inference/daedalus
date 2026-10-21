@@ -331,7 +331,7 @@ async def test_child_mcp_policy_cannot_outlive_parent_access(settings: Settings,
         assert denied.action == "deny" and denied.rule == "session.capabilities"
 
         await manager.set_mcp(leader.session.id, "echo", True)
-        await manager.set_mode(leader.session.id, "plan")
+        await manager.set_tools_off(leader.session.id, [tool])  # a leader that switches the tool off takes it from the child too
         assert tool in manager.tool_policy_for(child).blocked
         assert manager.policy_gate(child.session.id, "run-child").decide(tool, {"a": 2, "b": 3}).action == "deny"
     finally:

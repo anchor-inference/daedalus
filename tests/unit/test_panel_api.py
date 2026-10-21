@@ -237,7 +237,6 @@ OWNER_ROUTES = [
     ("GET", "/api/terminals"),
     ("GET", "/api/projects"),
     ("GET", "/api/auth/me"),
-    ("GET", "/api/modes"),
 ]
 
 
@@ -261,10 +260,8 @@ async def test_the_door_matrix(rig: Rig, chrome: FakeBrowserd) -> None:
         page = await client.get(f"/api/panel/sessions/{mine}", headers=panel(token))
         assert page.status_code == 200 and page.json()["id"] == mine
         assert (await client.post(f"/api/panel/sessions/{mine}/stop", headers=panel(token))).status_code == 200
-        assert (await client.post(f"/api/panel/sessions/{mine}/mode", headers=panel(token), json={"mode": ""})).status_code == 200
         refused = await client.post(f"/api/panel/sessions/{mine}/policy/refuse", headers=panel(token), json={"key": ""})
         assert refused.status_code == 400  # the operator's handler judged it
-        assert (await client.get("/api/panel/modes", headers=panel(token))).status_code == 200
         # Another conversation does not exist, whatever is asked of it.
         for method, suffix in (("GET", ""), ("POST", "/messages"), ("POST", "/stop"), ("POST", "/policy/grant"), ("POST", "/tab")):
             answer = await client.request(method, f"/api/panel/sessions/{other}{suffix}", headers=panel(token), json={"text": "hi", "key": "k"})

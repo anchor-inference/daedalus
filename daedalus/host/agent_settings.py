@@ -275,7 +275,7 @@ def _field_info(info: FieldInfo, doc: str) -> dict[str, Any]:
 
 
 def _model_of(annotation: Any) -> tuple[type[BaseModel] | None, bool]:
-    """The model a field holds, and whether it is a map of named entries of it (``modes``, ``mcp.servers``)."""
+    """The model a field holds, and whether it is a map of named entries of it (``mcp.servers``, ``webhooks``)."""
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
         return annotation, False
     if get_origin(annotation) is dict:

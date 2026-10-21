@@ -74,10 +74,6 @@ async def test_a_side_question_reads_the_chats_conversation_and_may_only_look(ma
     assert manager.blocked_tools_for(side) == known - set(BTW_TOOLS)
     for name in ("Write", "Edit", "Exec", "AskUser", "SavePrompt", "SubAgent", "WebFetch", "Notify", "Remember"):
         assert name in manager.blocked_tools_for(side), name
-    # A mode cannot widen it.
-    manager.config.modes["loose"] = manager.config.modes["quick"].model_copy(update={"tools_only": ["Exec", "Write", "Read"]})
-    await manager.set_mode(side.session.id, "loose")
-    assert {"Exec", "Write"} <= manager.blocked_tools_for(side)
     # Its folder is the chat's, read-only.
     assert side.workspace == chat.workspace
     assert side.services.walls is not None and side.services.walls.writable == ()

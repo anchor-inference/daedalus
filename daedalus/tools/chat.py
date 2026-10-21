@@ -157,7 +157,7 @@ async def attach_media(context: ToolContext, items: list[dict[str, str]], layout
     description=(
         "Create an independent agent: a new session (its own chat topic and workspace) that keeps a brief "
         "you write in its system prompt, gets copies of the files it needs, and optionally a model "
-        "preset, a mode, MCP servers, a peer name (so you can AskPeer it later), tools to withhold "
+        "preset, MCP servers, a peer name (so you can AskPeer it later), tools to withhold "
         "(tools_off), and a loop: loop_instruction makes it a loop agent woken up for that task every "
         "loop_interval_minutes, or at delays it picks itself when no interval is given. A first_message "
         "starts it on a one-off job at once. Use it when another "
@@ -173,7 +173,6 @@ async def spawn_agent(
     files: list[str] | None = None,
     first_message: str | None = None,
     preset: str | None = None,
-    mode: str | None = None,
     mcp: list[str] | None = None,
     peer_name: str | None = None,
     tools_off: list[str] | None = None,
@@ -208,7 +207,7 @@ async def spawn_agent(
         return error(context, "these files do not exist: " + ", ".join(missing))
     try:
         session_id = await services.spawn_agent(
-            title=title, brief=brief, files=paths, first_message=first_message, preset=preset, mode=mode, mcp=list(mcp or []), peer_name=peer_name, tools_off=list(tools_off or []), loop=loop
+            title=title, brief=brief, files=paths, first_message=first_message, preset=preset, mcp=list(mcp or []), peer_name=peer_name, tools_off=list(tools_off or []), loop=loop
         )
     except (ValueError, KeyError) as exc:
         return error(context, str(exc))

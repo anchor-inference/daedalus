@@ -896,7 +896,10 @@ class SelfChangeConfig(BaseModel):
 
 
 class LimitsConfig(BaseModel):
-    max_iterations: int = 200
+    max_iterations: int = Field(default=0, ge=0)
+    """Model calls in one run; 0 = no cap. The agent is not told how far to go: a run ends when the
+    work is done, the operator stops it, or a spend, time or token cap below is reached. A default
+    cap here once stopped real work part-way, which is why it is off unless the operator sets one."""
     tool_timeout_seconds: float = 900.0
     usd_per_run: float = Field(default=5.0, ge=0)
     """Spend cap for one run; the run is stopped after the model call that crosses it. 0 = no cap.
@@ -1397,16 +1400,9 @@ class CompanionConfig(BaseModel):
 
 
 class AssistConfig(BaseModel):
-    """The small helpers around the operator's own messages: the depth a message is run at in the
-    ``auto`` mode, the next message guessed after an answer, and notes made from a meeting's audio."""
+    """The small helpers around the operator's own messages: the next message guessed after an
+    answer, and notes made from a meeting's audio."""
 
-    depth_preset: str = ""
-    """The model preset that sorts a message into quick, normal or long; empty = the heuristic alone,
-    which costs nothing and answers at once. A preset here is a quality knob: the heuristic still
-    decides whenever the model is slow or fails."""
-    depth_timeout_seconds: float = Field(default=0.9, gt=0, le=5)
-    """How long the operator's message waits for that model before the heuristic decides. The run
-    is held behind it, so it stays under a second."""
     predict: bool = True
     """Whether the composer offers the operator's likely next message after an answer settles."""
     predict_preset: str = ""
@@ -1441,47 +1437,6 @@ class AutopilotConfig(BaseModel):
     usd_per_day: float = Field(default=0.2, ge=0)
     """What the judge's own calls may cost in a day, summed from Usage under their label. Reached,
     no session is judged until tomorrow; ``0`` turns the judge off for paid models."""
-
-
-class ModeConfig(BaseModel):
-    """A named bundle of run limits and behaviour a session can switch to."""
-
-    max_iterations: int | None = Field(default=None, ge=1)
-    usd_per_run: float | None = Field(default=None, ge=0)
-    """``0`` means spend nothing (the run stops at its first priced call); ``None`` inherits ``limits.usd_per_run``."""
-    tool_timeout_seconds: float | None = Field(default=None, gt=0)
-    verbosity: int | None = Field(default=None, ge=0, le=2)
-    prompt: str = ""
-    """Extra rules appended to the system prompt while the mode is active."""
-    tools_off: list[str] = Field(default_factory=list)
-    """Tools the session does not get while the mode is active; a trailing ``*`` matches a prefix (``Mcp_*``)."""
-    tools_only: list[str] = Field(default_factory=list)
-    """When set, the only tools the session gets while the mode is active: everything else, including tools added
-    later and every MCP tool, is off. A plan mode is an allow-list, so a new tool is blocked until someone decides."""
-    description: str = ""
-
-
-PLAN_MODE_TOOLS_ONLY = ["Read", "Find", "Search", "WebFetch", "WebSearch", "HistorySearch", "HistoryExpand", "Recall", "Remember", "Skill", "ImageView", "BoardList", "BoardGet", "ScheduleList", "LoopStatus", "JobOutput", "JobList", "ServiceList", "ServiceLogs", "TerminalRead", "McpList", "PeerList", "SubAgentList", "IntentList", "LearningReport", "AskUser", "SideQuestion", "DropSideQuestion", "StaySilent", "ToolSearch"]
-"""What a plan may do: read, search, look, remember and ask. Everything else — files, commands, Verify, sending,
-starting, peers, MCP tools — is off until the operator switches the mode."""
-
-DEFAULT_MODES: dict[str, ModeConfig] = {
-    "plan": ModeConfig(
-        max_iterations=60,
-        usd_per_run=1.0,
-        tools_only=PLAN_MODE_TOOLS_ONLY,
-        description="read and plan only; nothing is changed until the operator switches the mode",
-        prompt=(
-            "Mode: plan. You may read files, search, fetch and think; the tools that change anything are off. "
-            "Investigate, then reply with a plan the operator can approve: the goal, the steps in order with the files each touches, "
-            "what you will verify and how, the risks, and the open questions. End by asking the operator to switch the mode "
-            "(/mode default or another mode) to carry it out; do not attempt work-arounds for the blocked tools."
-        ),
-    ),
-    "quick": ModeConfig(max_iterations=25, usd_per_run=0.5, description="short answers, few tool calls, cheap", prompt="Mode: quick. Answer briefly, prefer a direct answer over investigation, at most a handful of tool calls."),
-    "deep": ModeConfig(max_iterations=400, usd_per_run=15.0, description="long autonomous work with a high budget", prompt="Mode: deep. Work autonomously to completion; verify with Verify; ask only when a choice is genuinely the operator's."),
-    "careful": ModeConfig(max_iterations=100, description="ask before anything irreversible", prompt="Mode: careful. Before any irreversible action (deleting, pushing, sending, paying, changing configuration) ask with AskUser and wait."),
-}
 
 
 COMPANION_ONLY_TOOLS = ["Delegate", "Agents", "AgentResult", "StopAgent", "Projects", "GoalCreate", "GoalUpdate", "GoalList", "GoalReport"]
@@ -2372,7 +2327,6 @@ class RuntimeConfig(BaseModel):
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
     navigation: NavigationConfig = Field(default_factory=NavigationConfig)
     pages: PagesConfig = Field(default_factory=PagesConfig)
-    modes: dict[str, ModeConfig] = Field(default_factory=lambda: {k: v.model_copy() for k, v in DEFAULT_MODES.items()})
     webhooks: dict[str, WebhookConfig] = Field(default_factory=dict)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     agent_settings: AgentSettingsConfig = Field(default_factory=AgentSettingsConfig)
@@ -3078,6 +3032,22 @@ def _migrate_voice_to_companion(raw: dict[str, Any]) -> bool:
     return changed
 
 
+def _drop_session_modes(raw: dict[str, Any]) -> bool:
+    """Session modes and the per-message depth sort are gone; their tables leave the file.
+
+    Every default used to be written on the first save, so ``[modes.*]`` and the ``[assist]`` depth
+    keys sit in files that never chose them. The loader would ignore them, but the file would keep
+    advertising limits nothing applies, so they are removed and the file is written again.
+    """
+    changed = raw.pop("modes", None) is not None
+    assist = raw.get("assist")
+    if isinstance(assist, dict):
+        for key in ("depth_preset", "depth_timeout_seconds"):
+            if assist.pop(key, None) is not None:
+                changed = True
+    return changed
+
+
 def _migrate(raw: dict[str, Any]) -> bool:
     """Rewrite config shapes older versions wrote; returns True when something changed."""
     changed = _seed_presets(raw)
@@ -3094,6 +3064,7 @@ def _migrate(raw: dict[str, Any]) -> bool:
     changed = _seed_from_setup(raw) or changed
     changed = _migrate_web_search(raw) or changed
     changed = _migrate_voice_to_companion(raw) or changed
+    changed = _drop_session_modes(raw) or changed
     for provider in (raw.get("providers") or {}).values():
         pricing = provider.get("pricing") if isinstance(provider, dict) else None
         if not isinstance(pricing, dict):
@@ -3147,9 +3118,7 @@ __all__ = [
     "DispatcherConfig",
     "DISPATCHER_TOOLS",
     "HarnessConfig",
-    "DEFAULT_MODES",
     "HeartbeatConfig",
-    "ModeConfig",
     "OpsConfig",
     "DiskConfig",
     "WebhookConfig",

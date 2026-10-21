@@ -29,7 +29,7 @@ def manager(db: Database):
     config.limits.usd_per_run = 0
     config.limits.usd_total = 0.0001
     return SimpleNamespace(db=db, config=config, settings=SimpleNamespace(usd_per_day=0),
-                           live_state=lambda _: None, mode_for=lambda _: None)
+                           live_state=lambda _: None, run_bounds=lambda _: None)
 
 
 def request(**kwargs) -> LLMRequest:

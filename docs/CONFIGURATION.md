@@ -21,6 +21,7 @@ Beyond the app's settings, `config.toml` holds the guard rails:
 
 ```toml
 [limits]
+max_iterations = 0           # cap on model calls per run (0 = none)
 max_run_minutes = 0          # cap on active minutes per run (0 = none)
 max_run_tokens = 0           # cap on tokens per run, every call counted (0 = none)
 
@@ -118,10 +119,6 @@ auto_apply = ["navigation", "answer_language", "compaction"]
                              # action_rules, self_change, ops, webhooks, the sandbox and the browser's network wall are
                              # never the agent's to change (daedalus/host/agent_settings.py)
 proposal_hours = 24          # a change nobody answered expires and the agent is told
-
-[modes.review]               # your own mode; the built-in ones (quick, deep, careful, plan) stay unless you redefine the whole table
-tools_only = ["Read", "Find", "Search", "WebFetch", "AskUser"]
-prompt = "Mode: review. Read and report; change nothing."
 ```
 
 A refused call comes back to the agent as an error. `refused by policy` is final; `needs the operator's approval`
