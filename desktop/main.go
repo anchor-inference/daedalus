@@ -434,8 +434,13 @@ func startCommand(ctx context.Context, app *App, opts options) error {
 	announceLastUpgrade(app)
 	surface := OpenSurface(app.paths, server.URL(), shell)
 	server.OnFocus(surface.Focus)
+	var watch *computerWatch
 	if shell != nil {
 		app.show = func(url string) { surface.Show(ctx, url) }
+		watch = newComputerWatch(server.computer(), app.Native, func(state shellComputer) {
+			shell.emit(shellEvent{Event: "computer", Computer: &state})
+		})
+		go watch.Run(ctx)
 		go shell.listen(os.Stdin, func(link string) {
 			target := ""
 			if IsDeepLink(link) {
@@ -455,7 +460,7 @@ func startCommand(ctx context.Context, app *App, opts options) error {
 				}
 				surface.Show(ctx, url)
 			}()
-		}, shellQuit)
+		}, watch.Stop, shellQuit)
 	}
 	go bringUp(ctx, app, server, surface, opts)
 	surface.Run(ctx)

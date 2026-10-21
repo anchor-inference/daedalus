@@ -34,11 +34,13 @@ import (
 //	{"event":"notify","title":T,"body":B,"url":U}   a desktop notification; a click shows U
 //	{"event":"upgrade","data":D}                    the operator asked for the newer release: close this launcher, then run `upgrade --yes --data D`
 //	{"event":"fatal","message":M,"log":L}           the launcher stopped before it could show anything; M says why, L is its log
+//	{"event":"computer","computer":C}               the agent's hold on the screen changed (computer_shell.go); C is {active, paused, scope}
 //
 // Commands, shell to launcher:
 //
 //	{"command":"focus","link":L}   the app was opened again, with the daedalus:// link L when there was one
 //	{"command":"sign-in"}          the app in the window is on its login screen: mint a link that signs it in
+//	{"command":"computer-stop"}    the operator pressed the shell's Stop shortcut or tray item: stop the agent on the desktop
 //	{"command":"quit"}             the window was closed: stop, as Ctrl+C would
 //
 // The end of standard input is a quit as well. A shell that crashed or was killed by an uninstaller
@@ -85,6 +87,8 @@ type shellEvent struct {
 	Data    string `json:"data,omitempty"`
 	Message string `json:"message,omitempty"`
 	Log     string `json:"log,omitempty"`
+	// Computer is set on a "computer" event only; a pointer so every other event leaves it out.
+	Computer *shellComputer `json:"computer,omitempty"`
 }
 
 type shellCommand struct {
@@ -108,7 +112,7 @@ func (l *shellLink) emit(event shellEvent) {
 }
 
 // listen reads the shell's commands until its input ends, and quits then.
-func (l *shellLink) listen(in io.Reader, focus func(link string), signIn func(), quit func()) {
+func (l *shellLink) listen(in io.Reader, focus func(link string), signIn func(), stopComputer func(), quit func()) {
 	scanner := bufio.NewScanner(in)
 	for scanner.Scan() {
 		var command shellCommand
@@ -120,6 +124,8 @@ func (l *shellLink) listen(in io.Reader, focus func(link string), signIn func(),
 			focus(command.Link)
 		case "sign-in":
 			signIn()
+		case "computer-stop":
+			stopComputer()
 		case "quit":
 			quit()
 			return
