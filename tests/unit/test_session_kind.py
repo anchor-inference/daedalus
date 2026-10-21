@@ -27,7 +27,7 @@ from daedalus.config import Settings
 from daedalus.host import capabilities, tool_groups
 from daedalus.host.events import EventFilter
 from daedalus.host.session_runner import SessionManager
-from daedalus.stores.database import MIGRATIONS, Database
+from daedalus.stores.database import MIGRATIONS, Database, _session_kinds
 from tests.support.fake_deskd import FakeDeskd
 from tests.support.models import model_config
 
@@ -81,7 +81,9 @@ async def test_the_migration_marks_panel_and_operator_chrome_conversations(tmp_p
     for sid, metadata in (("panel", '{"browser.panel": true}'), ("switched", "{}"), ("plain", "{}"), ("broken", "not json")):
         raw.execute("INSERT INTO sessions(id, tenant_id, title, created_at, last_message_at, metadata, project_id) VALUES (?, 't', '', 'now', 'now', ?, 'p')", (sid, metadata))
     raw.execute("""INSERT INTO kv(key, value) VALUES ('browser.user.sessions', '{"switched": {"env": "user"}, "plain": {"env": "agent"}, "gone": {"env": "user"}}')""")
-    raw.execute(f"UPDATE schema_version SET version = {len(MIGRATIONS) - 1}")
+    # Back to just before the kind migration, found by what it does: later migrations must not hide it.
+    before = next(i for i, m in enumerate(MIGRATIONS) if getattr(m, "step", None) is _session_kinds)
+    raw.execute(f"UPDATE schema_version SET version = {before}")
     raw.commit()
     raw.close()
     db = Database(path, workspaces_dir=tmp_path / "ws")

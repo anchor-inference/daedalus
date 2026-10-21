@@ -70,7 +70,7 @@
   background: var(--cu-well);
   animation: cu-fade 240ms var(--ease-out);
 }
-.cu-stage .cu-thumb.large { width: 100%; max-height: 220px; aspect-ratio: 16 / 9; border-radius: 0; background: var(--surface-3); }
+.cu-stage .cu-thumb.large { width: 100%; max-height: 168px; aspect-ratio: 16 / 9; border-radius: 0; background: var(--surface-3); }
 .cu-stage .cu-thumb.large img { object-fit: contain; object-position: center; filter: drop-shadow(0 8px 20px rgba(0, 0, 0, 0.35)); }
 /* The same picture blurred behind it fills the bars a window of another shape leaves at the sides. */
 .cu-stage .cu-thumb.large img.cu-thumb-backdrop { object-fit: cover; filter: blur(22px) saturate(1.2); }
