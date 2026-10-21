@@ -11,10 +11,12 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -108,6 +110,68 @@ func (s *Server) handleComputerApps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.computerCall(w, r, "apps.list", nil, computerCallTimeout)
+}
+
+// computerMaxPreviewAsk bounds the max the preview route accepts. The daemon caps a preview at 960
+// pixels itself; this only stops a nonsense number before it travels.
+const computerMaxPreviewAsk = 8192
+
+// handleComputerPreview answers a thumbnail of a display or a window as JPEG bytes, for the grant
+// picker's <img>. The daemon carries it base64 inside JSON; the launcher unwraps it so the host can
+// pass it on without decoding anything. A refusal (a protected window, a locked screen) stays JSON.
+func (s *Server) handleComputerPreview(w http.ResponseWriter, r *http.Request) {
+	if !s.computerGuard(w, r, http.MethodGet) {
+		return
+	}
+	q := r.URL.Query()
+	params := map[string]any{}
+	display, window := q.Get("display"), q.Get("window")
+	if display != "" && window != "" {
+		writeComputerError(w, http.StatusBadRequest, "give display or window, not both")
+		return
+	}
+	if len(display) > computerMaxScopeRef || len(window) > computerMaxScopeRef {
+		writeComputerError(w, http.StatusBadRequest, "display or window is too long")
+		return
+	}
+	if display != "" {
+		params["display"] = display
+	}
+	if window != "" {
+		params["window"] = window
+	}
+	if raw := q.Get("max"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > computerMaxPreviewAsk {
+			writeComputerError(w, http.StatusBadRequest, "max must be a whole number of pixels between 1 and 8192")
+			return
+		}
+		params["max_edge"] = n
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), computerCallTimeout)
+	defer cancel()
+	result, err := s.computer().Call(ctx, "preview", params)
+	if err != nil {
+		writeComputerFailure(w, err)
+		return
+	}
+	var preview struct {
+		Image string `json:"image"`
+	}
+	picture, decodeErr := []byte(nil), json.Unmarshal(result, &preview)
+	if decodeErr == nil {
+		picture, decodeErr = base64.StdEncoding.DecodeString(preview.Image)
+	}
+	if decodeErr != nil || len(picture) == 0 {
+		writeComputerError(w, http.StatusBadGateway, "the desktop daemon answered something the launcher cannot read")
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	// The operator's screen, as it was a moment ago: never worth keeping, never worth reusing.
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Length", strconv.Itoa(len(picture)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(picture)
 }
 
 // computerScope is a lease's scope as the daemon takes it.

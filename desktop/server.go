@@ -102,6 +102,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/browser/user/unregister", s.handleUserBrowserChange)
 	mux.HandleFunc("/api/computer", s.handleComputer)
 	mux.HandleFunc("/api/computer/apps", s.handleComputerApps)
+	mux.HandleFunc("/api/computer/preview", s.handleComputerPreview)
 	mux.HandleFunc("/api/computer/grant", s.handleComputerGrant)
 	mux.HandleFunc("/api/computer/revoke", s.handleComputerRevoke)
 	mux.HandleFunc("/api/computer/stop", s.handleComputerBare("stop"))

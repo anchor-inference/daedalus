@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -186,6 +187,7 @@ func computerRequest(t *testing.T, server *Server, method, route string, token s
 var computerRoutes = []struct{ method, route, body string }{
 	{http.MethodGet, "api/computer", ""},
 	{http.MethodGet, "api/computer/apps", ""},
+	{http.MethodGet, "api/computer/preview?display=1&max=320", ""},
 	{http.MethodPost, "api/computer/grant", `{"session":"s1","scope":{"kind":"desktop"},"ttl_ms":60000}`},
 	{http.MethodPost, "api/computer/revoke", `{}`},
 	{http.MethodPost, "api/computer/stop", `{}`},
@@ -470,3 +472,52 @@ func TestTheClientReconnectsToARestartedDaemon(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// A preview reaches the daemon as preview with the display or window and the edge, and comes back as
+// the JPEG's own bytes, never cached; a refusal stays the JSON 409 the other routes give.
+func TestAPreviewComesBackAsAPicture(t *testing.T) {
+	server, paths := computerServer(t, ModeNative)
+	jpegBytes := []byte{0xFF, 0xD8, 0xFF, 0xE0, 'p', 'i', 'c', 0xFF, 0xD9}
+	fake := startFakeDeskd(t, paths, "tcp", func(method string, params json.RawMessage) (any, *deskdError) {
+		if method != "preview" {
+			return map[string]any{}, nil
+		}
+		if strings.Contains(string(params), `"window":"0x2a"`) {
+			return nil, &deskdError{Code: 1203, Message: "that window belongs to an app the daemon never touches"}
+		}
+		return map[string]any{"image": base64Std(jpegBytes), "width": 320, "height": 200, "display": "1"}, nil
+	})
+	req, _ := http.NewRequest(http.MethodGet, server.URL()+"api/computer/preview?display=%5C%5C.%5CDISPLAY2&max=320", nil)
+	req.Header.Set(csrfHeader, server.csrf)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "image/jpeg" ||
+		resp.Header.Get("Cache-Control") != "no-store" || !bytes.Equal(body, jpegBytes) {
+		t.Fatalf("preview answered %d %q %q %v", resp.StatusCode, resp.Header.Get("Content-Type"), resp.Header.Get("Cache-Control"), body)
+	}
+	calls := fake.seen()
+	if len(calls) != 1 || calls[0].method != "preview" || calls[0].params != `{"display":"\\\\.\\DISPLAY2","max_edge":320}` {
+		t.Fatalf("the daemon was asked %v", calls)
+	}
+	if got := computerRequest(t, server, http.MethodGet, "api/computer/preview?window=0x2a", server.csrf, ""); got.status != http.StatusConflict ||
+		got.body["error"].(map[string]any)["code"] != float64(1203) {
+		t.Fatalf("a refused preview answered %d %s", got.status, got.raw)
+	}
+	for _, query := range []string{"display=1&window=0x2a", "max=0", "max=big", "max=9000"} {
+		if got := computerRequest(t, server, http.MethodGet, "api/computer/preview?"+query, server.csrf, ""); got.status != http.StatusBadRequest {
+			t.Errorf("preview?%s answered %d %s", query, got.status, got.raw)
+		}
+	}
+	if got := computerRequest(t, server, http.MethodPost, "api/computer/preview", server.csrf, ""); got.status != http.StatusMethodNotAllowed {
+		t.Errorf("a POST preview answered %d", got.status)
+	}
+	if n := len(fake.seen()); n != 2 {
+		t.Errorf("bad requests reached the daemon: %d calls", n)
+	}
+}
+
+func base64Std(b []byte) string { return base64.StdEncoding.EncodeToString(b) }
