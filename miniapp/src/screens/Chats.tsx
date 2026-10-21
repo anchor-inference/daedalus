@@ -24,6 +24,7 @@ import type { MenuItem } from "../ui/dialogs";
 import { ActionSheet, Banner, Chip, ChipBar, EmptyState, IconButton, ListRow, NewChatPill, SectionHeader, TopBar } from "../ui/phone";
 import { NewAgentSheet, useSessionCommands } from "./Sessions";
 import { asChatCommand } from "../chatproject";
+import { KindTabs, byTab, kindIcon, sessionKind, tabCounts, useKindTab } from "../chatkind";
 
 type View = "all" | "attention" | "working" | "loops" | "archive";
 type SearchList = SessionList & { semantic: boolean; reason: string; partial: boolean; indexing: boolean };
@@ -67,9 +68,12 @@ function loopLine(s: SessionSummary): string {
 
 /** The status icon of a row: what kind of chat it is, and a dot for its state. */
 function RowIcon({ s, fork }: { s: SessionSummary; fork?: boolean }) {
-  const icon = s.archived ? "archive" : s.metadata?.loop ? "loop" : fork || s.metadata?.forked_from ? "fork" : "bots";
+  // A computer or Chrome chat says so on its icon, as on the desktop's plate (chatkind.tsx).
+  const kind = sessionKind(s);
+  const icon = s.archived ? "archive" : s.metadata?.loop ? "loop" : kindIcon(kind) ?? (fork || s.metadata?.forked_from ? "fork" : "bots");
   const state = s.status === "waiting" || s.status === "running" || s.status === "failed" ? s.status : s.status === "compacting" ? "running" : "";
-  return <span className="ph-sicon"><Icon name={icon} size={18} />{state && <span className={`ph-st ${state}`} />}</span>;
+  const label = kind === "chat" ? undefined : t(`kind.mark.${kind}`);
+  return <span className={`ph-sicon ${kind === "chat" ? "" : `kind-${kind}`}`} data-kind={kind === "chat" ? undefined : kind} title={label} role={label ? "img" : undefined} aria-label={label}><Icon name={icon} size={18} />{state && <span className={`ph-st ${state}`} />}</span>;
 }
 
 /** The meta line: the state in its colour when it asks for attention, then the model and what hangs off the chat. */
@@ -251,6 +255,7 @@ export function ChatsScreen({ onOpen, toast, project: kept = "", projects = [], 
     if (kept) onPickProject?.("");
   };
   const [view, setView] = useState<View>("all");
+  const [tab, setTab] = useKindTab();
   const [searching, setSearching] = useState(route.query.get("search") === "1");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchList | null>(null);
@@ -291,7 +296,7 @@ export function ChatsScreen({ onOpen, toast, project: kept = "", projects = [], 
   }, [typed, project]);
 
   const listing = useMemo(() => (data && Array.isArray(data.sessions) ? agentsListingOf({ ...data, sessions: [...data.sessions, ...extra] }) : null), [data, extra]);
-  const arranged = useMemo(() => (listing ? arrange(listing.sessions, listing.projects, { project, filter: view === "loops" ? "loops" : "all" }) : null), [listing, project, view]);
+  const arranged = useMemo(() => (listing ? arrange(byTab(listing.sessions, tab), listing.projects, { project, filter: view === "loops" ? "loops" : "all" }) : null), [listing, project, view, tab]);
   // The archive lists what was put away in its own order, with nothing lifted out of it.
   const sections = useMemo(() => (arranged ? chatSections(arranged.folders, new Date(), { pins: view !== "archive" }) : []), [arranged, view]);
   // The chips count over the whole list, whichever chip is on, so a number never changes under the
@@ -305,6 +310,7 @@ export function ChatsScreen({ onOpen, toast, project: kept = "", projects = [], 
       loops: top.filter((s) => kindOf(s, false) === "loop").length,
     };
   }, [all.data, project]);
+  const kindCounts = useMemo(() => tabCounts((agentsListingOf(all.data)?.sessions ?? []).filter((s) => !project || s.project_id === project)), [all.data, project]);
   const found = useMemo(() => agentsListingOf(results)?.sessions ?? [], [results]);
   const newChat = () => navigate(pathFor("agents"));
   const projectName = (id: string) => listing?.projects.find((p) => p.id === id)?.name ?? "";
@@ -348,6 +354,9 @@ export function ChatsScreen({ onOpen, toast, project: kept = "", projects = [], 
     body = <EmptyState icon="alert" tone="bad" title={t("agents.error")} body={error} action={<button type="button" className="ph-btn primary" onClick={() => refresh()}>{t("common.retry")}</button>} />;
   } else if (loading && !data) {
     body = <Skeleton />;
+  } else if (arranged && arranged.shown === 0 && tab !== "all" && view === "all") {
+    body = <EmptyState icon={kindIcon(tab) ?? "bots"} title={t(`kind.empty.${tab}`)} body={tab === "chat" ? undefined : t(`kind.empty.${tab}.sub`)}
+      action={<button type="button" className="ph-btn" onClick={() => setTab("all")}>{t("ph.showall")}</button>} />;
   } else if (arranged && arranged.total === 0 && view === "all") {
     body = <EmptyState icon="bots" title={lens ? t("agents.empty.project", { name: lens.name }) : t("agents.empty")} body={t("agents.empty.sub")}
       action={<button type="button" className="ph-btn accent" onClick={newChat}><Icon name="compose" size={18} />{t("ph.newchat")}</button>} />;
@@ -358,9 +367,9 @@ export function ChatsScreen({ onOpen, toast, project: kept = "", projects = [], 
       <>
         {view === "archive" && arranged && <SectionHeader count={arranged.shown}>{t("ph.archived")}</SectionHeader>}
         {sections.map((section) => section.pinned
-          ? <PinnedSection key={section.key} folders={section.pinned} toast={toast} onOpen={onOpen} onNewIn={setAdding} filtered={view !== "all"} />
+          ? <PinnedSection key={section.key} folders={section.pinned} toast={toast} onOpen={onOpen} onNewIn={setAdding} filtered={view !== "all" || tab !== "all"} />
           : section.folder && view !== "archive"
-          ? <ProjectSection key={section.key} folder={section.folder} rows={section.rows} toast={toast} onOpen={onOpen} filtered={view !== "all"} />
+          ? <ProjectSection key={section.key} folder={section.folder} rows={section.rows} toast={toast} onOpen={onOpen} filtered={view !== "all" || tab !== "all"} />
           : (
             <section key={section.key}>
               {view !== "archive" && <SectionHeader count={section.day === "week" || section.day === "month" || section.day === "older" ? section.rows.length : undefined}>{section.folder ? section.folder.name : t(`ph.day.${section.day}`)}</SectionHeader>}
@@ -388,6 +397,7 @@ export function ChatsScreen({ onOpen, toast, project: kept = "", projects = [], 
     <div className="ph-page ph-chats">
       {top}
       {offline && <Banner strip tone="bad" icon="offline">{t("app.offline")}</Banner>}
+      {!searching && <KindTabs tab={tab} onChange={setTab} counts={all.data ? kindCounts : undefined} className="ph-kinds" />}
       {!searching && (
         <ChipBar label={t("agents.filter.label")}>
           {lens && (visit || onPickProject) && <Chip on onClick={clearLens} label={t("ph.lens.clear", { name: lens.name })}><span className="ph-lens"><Icon name="folder" size={16} />{lens.name}<Icon name="close" size={14} /></span></Chip>}
