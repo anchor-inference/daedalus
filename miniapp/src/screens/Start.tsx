@@ -35,6 +35,9 @@ import { ProjectsPage } from "./Projects";
 import { PhoneImportCard, StartImportCard } from "../imports/ImportedChat";
 import { Sheet } from "../ui/dialogs";
 import { ProjectPickList } from "../projectpick";
+import { type ChatKind, type KindOffers, KindSelect, kindIcon, requestComputerSheet, sessionKind, useKindOffers, useNewChatKind } from "../chatkind";
+import { USER_STATUS } from "../browser/yourchrome";
+import { confirmAsync } from "../ui";
 
 /** Every project a chat could start in, the most recently used first and the installation's own last;
  *  a scratch folder of a single chat is not one. */
@@ -103,6 +106,8 @@ function DesktopStart({ onOpen, toast, project, projects, model }: { onOpen: (id
   const startable = useMemo(() => choosable.filter(projectReachable), [choosable]);
   const known = !target || startable.some((p) => p.id === target);
   const run = useRunOn(known ? target : "");
+  const offers = useKindOffers();
+  const [kind, setKind] = useNewChatKind(offers);
   return (
     <div className="start">
       <div className="start-hero">
@@ -110,7 +115,7 @@ function DesktopStart({ onOpen, toast, project, projects, model }: { onOpen: (id
           <Icon name="logo" size={34} />
           <h1 className="start-greeting">{t("start.greeting")}</h1>
         </div>
-        <StartComposer phone={false} project={known ? target : ""} toast={toast} model={model} run={run} />
+        <StartComposer phone={false} project={known ? target : ""} toast={toast} model={model} run={run} kind={kind} onKind={setKind} offers={offers} />
         {startable.length > 0 && <StartWhere projects={startable} all={choosable} target={known ? target : ""} onPick={setTarget} />}
         <LiveNow listing={listing} project={project} onOpen={onOpen} />
         <StartImportCard />
@@ -187,7 +192,7 @@ function LiveNow({ listing, project, onOpen }: { listing: SessionList | null; pr
         return (
           <div key={s.id} data-session={s.id} className={`start-live-row ${s.status}`} role="link" tabIndex={0} onClick={() => onOpen(s.id)}
             onKeyDown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(s.id); } }}>
-            <span className="start-live-plate"><Icon name={s.metadata?.loop ? "loop" : "bots"} size={15} />{s.status !== "idle" && <Dot status={s.status} />}</span>
+            <span className={`start-live-plate kind-${sessionKind(s)}`} title={sessionKind(s) === "chat" ? undefined : t(`kind.mark.${sessionKind(s)}`)}><Icon name={s.metadata?.loop ? "loop" : kindIcon(sessionKind(s)) ?? "bots"} size={15} />{s.status !== "idle" && <Dot status={s.status} />}</span>
             <span className="start-live-main">
               <span className="start-live-title truncate">{agentName(s)}</span>
               <span className="start-live-meta"><DesktopLiveMeta s={s} where={where} /></span>
@@ -235,6 +240,8 @@ function PhoneHome({ onOpen, toast, project, projects, model }: { onOpen: (id: s
   const [picking, setPicking] = useState(false);
   const picked = choosable.find((p) => p.id === target && projectReachable(p));
   const run = useRunOn(picked ? target : "");
+  const offers = useKindOffers();
+  const [kind, setKind] = useNewChatKind(offers);
   const rows = useMemo(() => {
     const listing = agentsListingOf(data);
     const rank = (s: SessionSummary) => ({ waiting: 0, working: 1, loop: 2, idle: 3 })[kindOf(s, false)];
@@ -260,11 +267,16 @@ function PhoneHome({ onOpen, toast, project, projects, model }: { onOpen: (id: s
         <div className={`ph-hero ${offline ? "offline" : ""}`}>
           <Icon name="logo" size={36} />
           <h1>{t("start.greeting")}</h1>
-          <button type="button" className="ph-btn sm ph-where" onClick={() => setPicking(true)} aria-haspopup="dialog" aria-label={`${t("start.where.label")}: ${picked ? picked.name : t("start.pick.none")}`}>
-            <Icon name={picked ? (picked.system === "companion" ? "mic" : "folder") : "bots"} size={16} />
-            <span className="truncate">{picked ? picked.name : t("start.pick.none")}</span>
-            <Icon name="chevron" size={14} />
-          </button>
+          <div className="ph-hero-picks">
+            <button type="button" className="ph-btn sm ph-where" onClick={() => setPicking(true)} aria-haspopup="dialog" aria-label={`${t("start.where.label")}: ${picked ? picked.name : t("start.pick.none")}`}>
+              <Icon name={picked ? (picked.system === "companion" ? "mic" : "folder") : "bots"} size={16} />
+              <span className="truncate">{picked ? picked.name : t("start.pick.none")}</span>
+              <Icon name="chevron" size={14} />
+            </button>
+            {/* The new chat's mode stands beside where it starts: at rest the phone's composer is one
+                row with no room for it, and a computer chat begun unawares as a plain one is a wasted turn. */}
+            <KindSelect kind={kind} offers={offers} onChoose={setKind} sheet className="ph-btn sm ph-kind" />
+          </div>
           {/* The host is picked in the + sheet; said here too, since the composer at rest has no room for it. */}
           {run.env === "host" && <span className="runon-hero" aria-label={`${t("runon.label")}: ${t("term.env.host")}`}><EnvPill env="host" /></span>}
         </div>
@@ -275,7 +287,7 @@ function PhoneHome({ onOpen, toast, project, projects, model }: { onOpen: (id: s
             <div className={`ph-list ph-live ${offline ? "stale" : ""}`}>
               {shown.map((s) => (
                 <ListRow key={s.id} data={{ session: s.id }} title={agentName(s)} onOpen={() => onOpen(s.id)}
-                  lead={<span className="ph-sicon"><Icon name={s.metadata?.loop ? "loop" : "bots"} size={18} />{s.status !== "idle" && <span className={`ph-st ${s.status}`} />}</span>}
+                  lead={<span className={`ph-sicon kind-${sessionKind(s)}`} title={sessionKind(s) === "chat" ? undefined : t(`kind.mark.${sessionKind(s)}`)}><Icon name={s.metadata?.loop ? "loop" : kindIcon(sessionKind(s)) ?? "bots"} size={18} />{s.status !== "idle" && <span className={`ph-st ${s.status}`} />}</span>}
                   meta={<LiveMeta s={s} />}
                   trail={relTime(s.last_message_at)} />
               ))}
@@ -284,7 +296,7 @@ function PhoneHome({ onOpen, toast, project, projects, model }: { onOpen: (id: s
         )}
         <PhoneImportCard />
       </div>
-      <StartComposer phone project={picked ? target : ""} toast={toast} model={model} run={run} />
+      <StartComposer phone project={picked ? target : ""} toast={toast} model={model} run={run} kind={kind} onKind={setKind} offers={offers} />
       {picking && (
         <Sheet title={t("start.pick")} onClose={() => setPicking(false)} size="narrow">
           <ProjectPickList projects={choosable} target={picked ? target : ""} onPick={(id) => { setTarget(id); setPicking(false); }} />
@@ -335,7 +347,7 @@ function useStartModel() {
   return { chosen, label, effort, setEffort, shownEffort, choose, open, setOpen };
 }
 
-function StartComposer({ phone, project, toast, model, run }: { phone: boolean; project: string; toast: (t: string) => void; model: StartModel; run: RunOn }) {
+function StartComposer({ phone, project, toast, model, run, kind, onKind, offers }: { phone: boolean; project: string; toast: (t: string) => void; model: StartModel; run: RunOn; kind: ChatKind; onKind: (kind: ChatKind) => void; offers: KindOffers }) {
   const { chosen, effort, setEffort, shownEffort, choose } = model;
   const modelLabel = model.label;
   const modelOpen = model.open;
@@ -372,7 +384,12 @@ function StartComposer({ phone, project, toast, model, run }: { phone: boolean; 
 
   async function send(words?: string) {
     const text = (words ?? draft).trim();
-    if (busy || (!text && files.length === 0)) return;
+    // A computer or Chrome chat may begin with nothing typed: what it may control is chosen first, in
+    // the sheet that opens on arrival, and the task is said after.
+    if (busy || (!text && files.length === 0 && kind === "chat")) return;
+    // The operator's Chrome is theirs, signed in as them: the same question the chat's own switch asks
+    // before the first move to it, asked here because this chat starts there.
+    if (kind === "chrome" && !(await confirmAsync(t("uc.switch.consent.title"), { body: t("uc.switch.consent.body"), action: t("uc.switch.consent.action"), danger: false }))) return;
     setBusy(true);
     let created: { id: string } | null = null;
     let sent = false;
@@ -381,7 +398,8 @@ function StartComposer({ phone, project, toast, model, run }: { phone: boolean; 
       // reads it. Sending both in the create call would start the run on the default model.
       created = await api.post<{ id: string }>("/api/sessions", {
         autotitle: true,
-        title: text || files[0]?.name,
+        title: text || files[0]?.name || (kind === "chat" ? undefined : t(`kind.title.${kind}`)),
+        kind: kind === "chat" ? undefined : kind,
         preset: chosen && "preset" in chosen ? chosen.preset : undefined,
         project_id: project || undefined,
         ...run.body,
@@ -392,7 +410,11 @@ function StartComposer({ phone, project, toast, model, run }: { phone: boolean; 
       if (model || effort) {
         await api.post(`/api/sessions/${created.id}/model`, { ...model, ...(effort ? effortBody(effort) : {}) });
       }
-      if (files.length) {
+      // The consent the operator just gave, recorded on the chat as its own switch records it.
+      if (kind === "chrome") await api.put(`${USER_STATUS}/sessions/${encodeURIComponent(created.id)}`, { env: "user", consent: true });
+      if (!text && files.length === 0) {
+        // Nothing to send yet: a computer or Chrome chat opened empty.
+      } else if (files.length) {
         const form = new FormData();
         if (text) form.append("text", text);
         for (const file of files) form.append("files", file);
@@ -413,6 +435,8 @@ function StartComposer({ phone, project, toast, model, run }: { phone: boolean; 
     }
     if (created && sent) {
       invalidate("/api/sessions");
+      if (kind === "computer") requestComputerSheet(created.id);
+      if (kind === "chrome" && !offers.chromeConnected) toast(t("uc.switch.offline"));
       navigate(sessionPath(created.id));
     } else if (created) {
       // A 150 MB video refused mid-upload used to leave the screen for the new, empty session: the
@@ -460,7 +484,7 @@ function StartComposer({ phone, project, toast, model, run }: { phone: boolean; 
       ref={field}
       value={draft}
       rows={1}
-      placeholder={t("session.composer.idle")}
+      placeholder={kind === "chat" ? t("session.composer.idle") : t(`kind.placeholder.${kind}`)}
       aria-label={t("session.composer.idle")}
       onChange={(event) => setDraft(event.target.value)}
       onPaste={(event) => {
@@ -479,6 +503,8 @@ function StartComposer({ phone, project, toast, model, run }: { phone: boolean; 
   );
 
   const empty = !draft.trim() && files.length === 0;
+  // Send stays live on an empty field for a computer or Chrome chat, which may open with nothing typed.
+  const idle = empty && kind === "chat";
   const plusItems = (
     <>
       <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); fileInput.current?.click(); }}><Icon name="attach" size={16} />{t("session.attach")}</button>
@@ -507,7 +533,7 @@ function StartComposer({ phone, project, toast, model, run }: { phone: boolean; 
             {plusOpen && <Popover anchor={plusButton.current} onClose={() => setPlusOpen(false)} className="plus-menu" label={t("composer.plus")}>{plusItems}</Popover>}
             {/* What the chat will be and where it runs read together on the left, as the chat's own
                 composer has its mode there; the model and the circle keep the right. */}
-            <span className="composer-mode">{t("composer.mode.agent")}</span>
+            <KindSelect kind={kind} offers={offers} onChoose={onKind} sheet={false} />
             <RunOnSelect run={run} />
             <div className="composer-tools">
               <ModelSelect model={modelLabel} fallback={null} open={modelOpen} onOpenChange={setModelOpen} onChoose={choose} sheet={phone}
@@ -515,7 +541,7 @@ function StartComposer({ phone, project, toast, model, run }: { phone: boolean; 
               {asr?.configured && <MicButton note={note} />}
               {/* One white circle, as on the phone: Send, greyed while the field is empty. Voice mode is
                   not offered here: it is a beta with a chat of its own, and a new chat offers dictation. */}
-              <button type="button" className="roundbtn primary" data-action="send" onClick={() => void send()} disabled={busy || empty} aria-label={t("session.send")} title={t("session.send")}><Icon name="up" /></button>
+              <button type="button" className="roundbtn primary" data-action="send" onClick={() => void send()} disabled={busy || idle} aria-label={t("session.send")} title={t("session.send")}><Icon name="up" /></button>
             </div>
           </div>
         </div>
@@ -552,7 +578,7 @@ function StartComposer({ phone, project, toast, model, run }: { phone: boolean; 
             <ModelSelect model={modelLabel} fallback={null} open={modelOpen} onOpenChange={setModelOpen} onChoose={choose} sheet
               effort={shownEffort.thinking ? shownEffort.effort : undefined} thinking={shownEffort.thinking} onChooseEffort={chooseEffort} />
             {asr?.configured && <MicButton note={note} />}
-            <button type="button" className="roundbtn primary" data-action="send" onClick={() => void send()} disabled={busy || offline || empty} aria-label={t("session.send")} title={t("session.send")}><Icon name="up" /></button>
+            <button type="button" className="roundbtn primary" data-action="send" onClick={() => void send()} disabled={busy || offline || idle} aria-label={t("session.send")} title={t("session.send")}><Icon name="up" /></button>
           </div>
         </div>
       </div>

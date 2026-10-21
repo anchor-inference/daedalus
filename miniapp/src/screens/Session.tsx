@@ -44,6 +44,7 @@ import { markAnchor, navigate, pathFor, projectHome, projectSessionPath, session
 import { turnFor, withOlder } from "../anchor";
 import { ChatSearch } from "../chatsearch";
 import { ComputerBanner, ComputerButton, ComputerSheet, useComputer } from "../computer";
+import { takeComputerSheet } from "../chatkind";
 import { useMedia } from "../ui/index";
 import { SCROLL_KEYS, Windowed, keepOpened, openedLine, stillAtEnd, type OpenedLine, type WindowedHandle } from "../virtual";
 import { DICT, plural, t } from "../i18n";
@@ -272,6 +273,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // The Computer control: its sheet is opened from the header's button or the phone's menu, and the
   // state behind both is drawn only in the native application.
   const [computerOpen, setComputerOpen] = useState(false);
+  // A chat started from New chat in Computer mode arrives with its sheet open, to say what it may control.
+  useEffect(() => { if (takeComputerSheet(id)) setComputerOpen(true); }, [id]);
   const computer = useComputer(id, computerOpen);
   const [modes, setModes] = useState<ModeInfo[]>([]);
   // The guessed next message the composer offers once an answer has settled; empty when there is none.
