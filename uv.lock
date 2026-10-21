@@ -456,6 +456,7 @@ dependencies = [
     { name = "httpx" },
     { name = "icalendar" },
     { name = "mcp" },
+    { name = "pillow" },
     { name = "protocore" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -468,7 +469,6 @@ dependencies = [
 
 [package.optional-dependencies]
 browser = [
-    { name = "pillow" },
     { name = "playwright" },
 ]
 dev = [
@@ -498,7 +498,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=2.1.1" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11" },
     { name = "onnxruntime", marker = "extra == 'speech'", specifier = ">=1.20" },
-    { name = "pillow", marker = "extra == 'browser'", specifier = ">=11.0" },
+    { name = "pillow", specifier = ">=11.0" },
     { name = "playwright", marker = "extra == 'browser'", specifier = "==1.62.0" },
     { name = "protocore", editable = "../protocore-exp" },
     { name = "pydantic", specifier = ">=2.7" },

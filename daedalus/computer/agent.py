@@ -668,9 +668,26 @@ class ComputerAgent:
         return "\n".join(parts)
 
 
-def _resized(data: bytes, width: int, height: int) -> tuple[bytes, str]:
-    from PIL import Image  # Lazy: only a screenshot that must be resized needs it
+NO_PILLOW = (
+    "The screenshot could not be prepared: the Pillow library (the Python module PIL) is missing from this "
+    "Daedalus installation, though the app depends on it. Tell the operator that updating or reinstalling "
+    "Daedalus brings it back; no Computer action can be seen until then."
+)
 
+
+def _image_module() -> Any:
+    """Pillow's ``Image``, or a refusal that says what is missing. Pillow is a main dependency now; a
+    native installation built before that lacked it, and every Computer call failed with a bare
+    ``No module named 'PIL'`` that told neither the model nor the operator what to do."""
+    try:
+        from PIL import Image  # Lazy: only a screenshot that must be resized or cropped needs it
+    except ImportError:
+        raise Refused(NO_PILLOW) from None
+    return Image
+
+
+def _resized(data: bytes, width: int, height: int) -> tuple[bytes, str]:
+    Image = _image_module()
     with Image.open(io.BytesIO(data)) as image:
         out = image.convert("RGB").resize((width, height), Image.Resampling.LANCZOS)
     buffer = io.BytesIO()
@@ -679,8 +696,7 @@ def _resized(data: bytes, width: int, height: int) -> tuple[bytes, str]:
 
 
 def _cropped(data: bytes, box: tuple[int, int, int, int], width: int, height: int) -> tuple[bytes, str]:
-    from PIL import Image  # Lazy: as above
-
+    Image = _image_module()
     with Image.open(io.BytesIO(data)) as image:
         out = image.convert("RGB").crop(box)
         if out.size != (width, height):
@@ -706,6 +722,7 @@ def agent_for(run_dir: Any) -> ComputerAgent:
 __all__ = [
     "ACTIONS",
     "IMAGE_IS_DATA",
+    "NO_PILLOW",
     "SCREEN_CLOSE",
     "UNKNOWN_ACCURACY",
     "Caller",

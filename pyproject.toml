@@ -23,16 +23,19 @@ dependencies = [
     "icalendar>=6,<7",
     "defusedxml>=0.7,<1",
     "segno>=1.6,<2",  # the two-factor enrolment QR code, drawn here so the secret never leaves the host to be drawn
+    # The computer tools resize and crop every screenshot before the model sees it. It was in the
+    # browser extra, which a native installation does not carry, and every Computer call there failed
+    # on the import until the agent installed it by hand.
+    "pillow>=11.0",
 ]
 
 [project.optional-dependencies]
-# What the skills that drive a browser or draw pixels need, and nothing else does: no module under
-# daedalus/ imports either of these. Playwright plus its Chromium is a third of the runtime image and
-# most sessions never open a page, so both are an opt-in — the published ":browser" image tag carries
-# them, the default one says they are not installed.
+# What the skills that drive a browser need, and nothing else does: no module under daedalus/ imports
+# it. Playwright plus its Chromium is a third of the runtime image and most sessions never open a page,
+# so it is an opt-in — the published ":browser" image tag carries it, the default one says it is not
+# installed. Pillow, which canvas-design also draws with, is a main dependency now.
 browser = [
     "playwright==1.62.0",  # webapp-testing, web-design-reviewer, accessibility, core-web-vitals
-    "pillow>=11.0",        # canvas-design
 ]
 # Local speech-to-text. sherpa-onnx carries its own ONNX Runtime, so nothing else is needed to
 # run a downloaded model on the CPU; the wheels are small (about 15 MB for the pair on Linux x86_64)
