@@ -52,7 +52,7 @@ class Host:
             "id": SESSION, "title": "Router", "status": "idle", "error": "", "run_id": None, "workspace": "/workspace", "workspace_name": "ws", "workspace_own": True,
             "workspace_sessions": [], "pending": None, "model": "Claude Opus 5", "provider": "claude",
             "project": {"id": "p", "name": "Home network", "folders": folders("/workspace"), "settings": {"snapshots": True}},
-            "configured_model": "claude-opus-5", "effective_model": "claude-opus-5", "fallback": None, "thinking": False, "reasoning_effort": "", "mode": "", "yagni": False, "brief": "",
+            "configured_model": "claude-opus-5", "effective_model": "claude-opus-5", "fallback": None, "thinking": False, "reasoning_effort": "", "yagni": False, "brief": "",
             "tools_off": [], "loop": None, "services": [], "subagents": [], "usage": {}, "context": None, "messages": self.messages,
         }
 

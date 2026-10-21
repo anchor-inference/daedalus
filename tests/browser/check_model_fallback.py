@@ -75,7 +75,6 @@ DETAIL = {
     "effective_model": STANDBY,
     "effective_provider": "deepseek",
     "fallback": {"from": CONFIGURED, "to": STANDBY, "reason": "rate_limit"},
-    "mode": "",
     "brief": "",
     "tools_off": [],
     "loop": None,

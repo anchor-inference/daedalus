@@ -2818,6 +2818,16 @@ WHERE CASE WHEN json_valid(metadata) THEN json_extract(metadata, '$."browser.pan
 
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _session_kinds))
+# Session modes and the per-message depth sort are gone: a session's chosen mode and its pending
+# depth correction leave its metadata, and the level a message was sorted at leaves the message, so
+# nothing stored still names a limit the host no longer has. The filters keep it to the rows that
+# carry one, which on a long history is a handful among thousands.
+MIGRATIONS.append("""
+UPDATE sessions SET metadata = json_remove(metadata, '$.mode', '$.depth_next')
+WHERE json_valid(metadata) AND (json_type(metadata, '$.mode') IS NOT NULL OR json_type(metadata, '$.depth_next') IS NOT NULL);
+UPDATE session_messages SET message = json_remove(message, '$.metadata."daedalus.depth"')
+WHERE instr(message, 'daedalus.depth') > 0 AND json_valid(message) AND json_type(message, '$.metadata."daedalus.depth"') IS NOT NULL;
+""")
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session

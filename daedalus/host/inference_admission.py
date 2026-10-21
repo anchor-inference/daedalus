@@ -158,10 +158,10 @@ class HostInferenceAdmission:
             if run is None or run["session_id"] != observer.session_id:
                 raise BudgetRefused("the charged run belongs to another session")
             state = manager.live_state(observer.session_id)
-            mode = manager.mode_for(state) if state is not None else None
-            mode_cap = mode.usd_per_run if mode is not None else None
-            cap = mode_cap if mode_cap is not None else limits.usd_per_run
-            if cap > 0 or mode_cap is not None:
+            bounds = manager.run_bounds(state) if state is not None else None
+            role_cap = bounds.usd_per_run if bounds is not None else None
+            cap = role_cap if role_cap is not None else limits.usd_per_run
+            if cap > 0 or role_cap is not None:
                 result.append(Constraint(f"run:{observer.run_id}", microusd(cap), run_id=observer.run_id))
         return tuple(result)
 

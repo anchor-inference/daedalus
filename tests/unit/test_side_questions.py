@@ -76,9 +76,6 @@ async def test_every_working_session_has_them_and_no_other_role_does(app: Any) -
             await ask(app, state.session.id, "Which colour?")
     dispatcher = await manager.create_session("main", metadata={"dispatcher": True})
     assert not side_questions.may_ask(manager, dispatcher)
-    # Plan mode reads and asks; leaving a question is asking.
-    await manager.set_mode(work.session.id, "plan")
-    assert "SideQuestion" not in manager.blocked_tools_for(work)
 
 
 async def test_the_prompt_teaches_the_two_ways_of_asking_only_where_the_tool_is_admitted() -> None:

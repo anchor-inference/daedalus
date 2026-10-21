@@ -11,7 +11,7 @@ import { Icon } from "./icons";
 import { fileGlyph, previewKind, canPreview } from "./preview";
 import { enterSends, errorText, fmtBytes, fmtTok, haptic } from "./ui";
 import { ModelChoice, ModelSelect } from "./modelselect";
-import { ModeInfo, ModeSelect } from "./modeselect";
+import { TogglesSelect } from "./toggles";
 import { MicButton, VoiceBar, VoiceNoteFailed, useVoiceNote } from "./voicebar";
 import { landWords } from "./voicenote";
 import { MeetingCard, MeetingOffer, isAudio, useMeeting } from "./meeting";
@@ -81,20 +81,15 @@ export type ComposerProps = {
   /** Effective thinking for this session (override or the preset). */
   thinking?: boolean;
   reasoningEffort?: string;
-  /** The session's auto mode moves the effort per message from ``reasoningEffort``. */
-  effortAuto?: boolean;
   onChooseEffort?: (effort: string) => void;
   /** The operator's likely next message, shown in the empty field and taken with Tab; empty for none. */
   suggestion?: string;
   /** The suggestion went into the field: the screen stops offering it. */
   onSuggestionUsed?: () => void;
-  /** The session's mode (empty: the plain agent), the configured ones, and the YAGNI switch. */
-  mode?: string;
-  modes?: ModeInfo[];
+  /** The session's YAGNI switch; absent where the composer offers no switches and names the agent only. */
   yagni?: boolean;
-  onChooseMode?: (mode: string) => void;
   onYagni?: (on: boolean) => void;
-  /** The session's autopilot switch, beside YAGNI in the mode menu. */
+  /** The session's autopilot switch, beside YAGNI in the toggles menu. */
   autopilot?: AutopilotStatus | null;
   onAutopilot?: (on: boolean) => void;
   place?: ComposerPlace;
@@ -188,7 +183,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     });
     return () => { active = false; };
   }, [sessionId]);
-  const currentTarget: DraftTarget = { session: sessionId, project: props.targetProject ?? "", workspace: props.targetWorkspace ?? "", model: props.model, mode: props.mode ?? "", effort: props.effortAuto ? "auto" : props.reasoningEffort ?? "", reply: replyTarget ? `${replyTarget.seq}:${replyTarget.excerpt}` : "" };
+  const currentTarget: DraftTarget = { session: sessionId, project: props.targetProject ?? "", workspace: props.targetWorkspace ?? "", model: props.model, effort: props.reasoningEffort ?? "", reply: replyTarget ? `${replyTarget.seq}:${replyTarget.excerpt}` : "" };
   const needsReview = draftTargetChanged(savedTarget, currentTarget);
   const rememberTarget = () => {
     const target = savedTarget ?? currentTarget;
@@ -727,14 +722,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           )}
           {secretOpen && <SecretSheet sessionId={sessionId} phone={phone} attached={secrets.map((secret) => secret.name)} onClose={() => setSecretOpen(false)}
             onAttach={(secret) => setSecrets((list) => [...list.filter((other) => other.name !== secret.name), secret])} />}
-          {props.onChooseMode && props.onYagni
-            ? <ModeSelect mode={props.mode ?? ""} modes={props.modes ?? []} yagni={!!props.yagni} onChooseMode={props.onChooseMode} onYagni={props.onYagni} autopilot={props.autopilot} onAutopilot={props.onAutopilot} sheet={phone} />
+          {props.onYagni
+            ? <TogglesSelect yagni={!!props.yagni} onYagni={props.onYagni} autopilot={props.autopilot} onAutopilot={props.onAutopilot} sheet={phone} />
             : <span className="composer-mode">{t("composer.mode.agent")}</span>}
           {props.beside}
           {phone && offline && shape === "open" && <span className="grow ph-hint">{t("ph.offline.kept")}</span>}
           <div className="composer-tools">
             {(!phone || status !== "running") && <ModelSelect model={props.model} fallback={props.fallback} open={modelOpen} onOpenChange={setModelOpen} onChoose={props.onChooseModel} sheet={phone}
-              effort={props.reasoningEffort} effortAuto={props.effortAuto} thinking={props.thinking} onChooseEffort={props.onChooseEffort} />}
+              effort={props.reasoningEffort} thinking={props.thinking} onChooseEffort={props.onChooseEffort} />}
             {pct !== null && ctx && (
               <button type="button" className={`ctx-ring ${pct >= 90 ? "bad" : pct >= 60 ? "attn" : ""}`} onClick={props.onContext} title={t("composer.context", { pct, used: fmtTok(ctx.tokens), window: fmtTok(ctx.window), n: fmtInt(ctx.messages) })} aria-label={t("composer.context.label")}>
                 <Ring pct={pct} />

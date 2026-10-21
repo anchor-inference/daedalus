@@ -45,7 +45,7 @@ def test_settings_validation_and_save_use_one_revision(tmp_path) -> None:
             json={"base_revision": revision, "candidate": {"compaction": {"auto_ratio": 2}}},
         ).json()
         assert not invalid["valid"] and invalid["problems"][0]["path"] == "compaction.auto_ratio"
-        assert app.config.limits.max_iterations > 0
+        assert app.config.limits.max_iterations == 0  # the default, untouched by a validation
         assert client.put("/api/settings", headers=HEAD, json={"limits": {"max_iterations": 9}}).status_code == 409
         saved = client.put(
             "/api/settings",

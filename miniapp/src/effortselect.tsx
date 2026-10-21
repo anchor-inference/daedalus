@@ -7,38 +7,29 @@ import { REASONING_EFFORTS, effortIndex } from "./models";
 
 export type EffortOptionsProps = {
   effort?: string;
-  /** The session's auto mode moves this effort per message: no fixed effort is checked. */
-  effortAuto?: boolean;
   thinking?: boolean;
   onChoose: (effort: string) => void;
 };
 
-/**
- * The effort as the composer names it. Under the auto mode it says what each message is moved from:
- * a bare "auto" read as an effort of its own, beside a model whose settings say medium.
- */
-export function effortWord(effort: string | undefined, thinking: boolean | undefined, auto?: boolean): string {
-  const level = t(`add.effort.${REASONING_EFFORTS[effortIndex(effort)]}`);
-  if (auto) return t("add.effort.auto", { effort:level });
-  return thinking ? level : t("add.effort.off");
+/** The effort as the composer names it: the level, or off when the model is not thinking. */
+export function effortWord(effort: string | undefined, thinking: boolean | undefined): string {
+  if (!thinking) return t("add.effort.off");
+  return t(`add.effort.${REASONING_EFFORTS[effortIndex(effort)]}`);
 }
 
 /**
- * The efforts as rows drawn like the mode's and the model's: a small heading, the name over its hint,
+ * The efforts as rows drawn like the toggles' and the model's: a small heading, the name over its hint,
  * and a check on the chosen one. The three composer menus had three headings and two marks (a radio
  * here, a check there), so each had to be learned apart. The radio input stays for its keyboard and
  * its semantics, laid invisibly over the whole row, which is also the row's tap target.
  */
-export function EffortOptions({ effort, effortAuto, thinking, onChoose }: EffortOptionsProps) {
+export function EffortOptions({ effort, thinking, onChoose }: EffortOptionsProps) {
   const name = useId();
-  // Auto: the session's mode moves the effort per message, so no fixed one is checked; choosing
-  // one here leaves the auto mode (Session.chooseEffort).
-  const auto = !!effortAuto;
   const current = REASONING_EFFORTS[effortIndex(effort)];
   return <fieldset className="effort-options">
     <legend className="menu-heading sub">{t("composer.effort.heading")}</legend>
     {["off", ...REASONING_EFFORTS].map((value) => {
-      const checked = !auto && (value === "off" ? !thinking : !!thinking && value === current);
+      const checked = value === "off" ? !thinking : !!thinking && value === current;
       return <label key={value} className={`model-row mode-row effort-option ${checked ? "on" : ""}`}>
         <input type="radio" name={name} value={value} checked={checked} onChange={() => onChoose(value)} onClick={() => { if (checked) onChoose(value); }} />
         <span className="grow model-text">
@@ -52,7 +43,7 @@ export function EffortOptions({ effort, effortAuto, thinking, onChoose }: Effort
 }
 
 /** Effort belongs to the model picker; its child panel stays in the same owned menu layer. */
-export function EffortMenu({ effort, effortAuto, thinking, onChoose, inline }: EffortOptionsProps & { inline: boolean }) {
+export function EffortMenu({ effort, thinking, onChoose, inline }: EffortOptionsProps & { inline: boolean }) {
   const owner = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -68,9 +59,9 @@ export function EffortMenu({ effort, effortAuto, thinking, onChoose, inline }: E
     <button ref={trigger} type="button" role="menuitem" className={`model-row effort-entry ${open ? "on" : ""}`} aria-haspopup="dialog" aria-expanded={open}
       onClick={() => setOpen(!open)} onKeyDown={(e) => { if (e.key === "ArrowRight") { e.preventDefault(); setOpen(true); } }}>
       <span className="grow">{t("composer.effort.short")}</span>
-      <span className="sub">{effortWord(effort, thinking, effortAuto)}</span><Icon name="chevron" size={14} />
+      <span className="sub">{effortWord(effort, thinking)}</span><Icon name="chevron" size={14} />
     </button>
-    {open && <EffortPanel anchor={trigger.current} inline={inline} onClose={close} effort={effort} effortAuto={effortAuto} thinking={thinking} onChoose={onChoose} />}
+    {open && <EffortPanel anchor={trigger.current} inline={inline} onClose={close} effort={effort} thinking={thinking} onChoose={onChoose} />}
   </div>;
 }
 

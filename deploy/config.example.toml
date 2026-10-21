@@ -145,7 +145,7 @@ approval = "manual"
 auto_rebuild = true
 
 [limits]
-max_iterations = 200
+# max_iterations = 0      # model calls per run, 0 = none
 tool_timeout_seconds = 900.0
 # max_run_minutes = 0     # active minutes per run, 0 = none
 # max_run_tokens = 0      # tokens per run, every call counted, 0 = none

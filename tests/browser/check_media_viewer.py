@@ -52,7 +52,7 @@ DETAIL = {
     "id": SESSION, "title": "Screens", "status": "idle", "run_id": None,
     "workspace": "/workspace", "workspace_name": "ws", "workspace_own": True,
     "workspace_sessions": [], "project": {"id": "p", "name": "Project", "folders": folders("/workspace"), "settings": {"snapshots": True}},
-    "pending": None, "model": "some-model", "mode": "", "brief": "", "tools_off": [], "loop": None,
+    "pending": None, "model": "some-model", "brief": "", "tools_off": [], "loop": None,
     "services": [], "subagents": [], "usage": {}, "context": {"tokens": 30, "window": 100000, "messages": 6, "summaries": 0, "operator_turns": 1},
     "messages": [
         message(10, "user", "Look at the screens and send me the clip"),

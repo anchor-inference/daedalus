@@ -19,7 +19,6 @@ from daedalus.doctor import DoctorContext, render_text, run_checks
 from daedalus.extensions.notifications import format_entries
 from daedalus.host import standing
 from daedalus.host.config_validation import ConfigConflict, patched
-from daedalus.host.depth import AUTO_MODE
 from daedalus.host.prompts import DEFAULT_RULES
 from daedalus.security import redact
 from daedalus.transport.telegram.front import SESSION_LIST_LIMIT, yagni_argument
@@ -45,7 +44,6 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("stop", "", "stop the current run"),
     CommandSpec("model", "[preset | provider/model | default]", "the model for this session (no argument: list)"),
     CommandSpec("thinking", "on|off|low|medium|high|xhigh", "thinking for this session"),
-    CommandSpec("mode", "[auto|quick|deep|careful|default]", "limits and rules for this session (no argument: list)"),
     CommandSpec("yagni", "[on|off]", "YAGNI rules for this session: the smallest change that does the job (no argument: switch)"),
     CommandSpec("rename", "<title>", "rename this session and its topic"),
     CommandSpec("cap", "<usd | none>", "spend cap for this session over all of its runs"),
@@ -203,20 +201,6 @@ async def run_command(app: Application, session_id: str, line: str) -> str:  # n
             )
         await manager.set_model(session_id, thinking=thinking, reasoning_effort=effort)
         return f"Session thinking={thinking} effort={effort or default.reasoning_effort}"
-    if name == "mode":
-        arg = args.lower()
-        if not arg:
-            current = state.metadata.get("mode") or "default"
-            lines = [
-                f"  {mode_name} — {m.description or ''} (iterations {m.max_iterations or app.config.limits.max_iterations}, cap ${m.usd_per_run if m.usd_per_run is not None else app.config.limits.usd_per_run})"
-                for mode_name, m in app.config.modes.items()
-            ]
-            return f"mode: {current}\navailable:\n" + "\n".join(lines) + f"\n  {AUTO_MODE} — each message sorted into quick, normal or deep work" + "\nusage: /mode <name> · /mode default"
-        try:
-            chosen = await manager.set_mode(session_id, None if arg in ("default", "off", "reset") else arg)
-        except ValueError as exc:
-            return str(exc)
-        return f"mode: {chosen or 'default'} (applies from the next run)"
     if name == "yagni":
         wanted = yagni_argument(args, bool(state.metadata.get("yagni")))
         if wanted is None:
@@ -269,7 +253,7 @@ async def run_command(app: Application, session_id: str, line: str) -> str:  # n
         title = args.strip() or datetime.now(UTC).strftime("session %m-%d %H:%M")
         # Typed on the site, not sent as a Telegram command: the session stays on the site.
         # Pointing the private chat at it would deliver the answer somewhere the operator is not looking.
-        created = await manager.create_session(title, metadata={"telegram_detached": True, "mode": AUTO_MODE})
+        created = await manager.create_session(title, metadata={"telegram_detached": True})
         return f"New session '{title}' ({created.session.id})."
     if name == "delete":
         target = args.strip()
@@ -476,7 +460,7 @@ async def run_command(app: Application, session_id: str, line: str) -> str:  # n
             f"model: {model_line}\n"
             f"fallback: {(', '.join(c.model.chain) or 'none') if c.model.auto_fallback else 'off'}\n"
             f"self-change approval: {c.self_change.approval}, auto_rebuild={c.self_change.auto_rebuild}\n"
-            f"limits: ${app.settings.usd_per_day}/day (env), {c.limits.max_iterations} iterations, tool timeout {c.limits.tool_timeout_seconds:.0f}s\n"
+            f"limits: ${app.settings.usd_per_day}/day (env), {c.limits.max_iterations or 'no cap on'} iterations, tool timeout {c.limits.tool_timeout_seconds:.0f}s\n"
             f"balance thresholds: {c.balance.thresholds_usd} (every {c.balance.poll_seconds}s)\n"
             f"verbosity: {c.telegram.verbosity}\n"
             f"chat: {chat}"

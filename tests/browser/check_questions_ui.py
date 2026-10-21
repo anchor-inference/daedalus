@@ -66,7 +66,7 @@ class Host:
             "id": SESSION, "title": "Weekly digest", "status": self.status, "error": "", "run_id": "r1" if self.status != "idle" else None, "workspace": "/workspace",
             "workspace_name": "digest", "workspace_own": True, "workspace_sessions": [], "pending": self.pending, "model": "Claude Opus 5", "provider": "claude",
             "project": {"id": "p", "name": "Digest", "folders": folders("/workspace"), "settings": {"snapshots": True}},
-            "thinking": True, "reasoning_effort": "high", "mode": "", "yagni": False, "brief": "",
+            "thinking": True, "reasoning_effort": "high", "yagni": False, "brief": "",
             "tools_off": [], "loop": None, "services": [], "subagents": [], "usage": {}, "context": {"tokens": 21000, "window": 200000, "messages": 12, "summaries": 0, "operator_turns": 2},
             "messages": self.messages,
         }

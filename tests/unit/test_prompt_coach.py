@@ -69,14 +69,6 @@ async def test_the_coach_may_ask_read_and_save_and_nothing_else(manager: Session
     assert set(PROMPT_COACH_ONLY_TOOLS) <= manager.blocked_tools_for(chat)
 
 
-async def test_a_mode_cannot_give_the_coach_a_shell(manager: SessionManager) -> None:
-    chat = await _chat(manager)
-    coach = await manager.get_state((await open_coach(manager, chat.session.id, "draft"))["session_id"])
-    manager.config.modes["loose"] = manager.config.modes["quick"].model_copy(update={"tools_only": ["Exec", "Write", "Read"]})
-    await manager.set_mode(coach.session.id, "loose")
-    assert {"Exec", "Write"} <= manager.blocked_tools_for(coach)
-
-
 async def test_the_coach_is_told_who_it_is_and_answers_nobody_in_the_lists(manager: SessionManager) -> None:
     chat = await _chat(manager)
     coach = await manager.get_state((await open_coach(manager, chat.session.id, "draft"))["session_id"])

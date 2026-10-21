@@ -4469,6 +4469,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "settings.limits.title": { en: "Limits & alerts", ru: "Лимиты и предупреждения" },
   "settings.limits.daily": { en: "daily cap: ${n} — set in the environment, enforced by the supervisor", ru: "потолок в день: ${n} — задан в окружении, следит супервизор" },
   "settings.limits.iterations": { en: "Max iterations per run", ru: "Максимум итераций за запуск" },
+  "settings.limits.iterations.sub": { en: "0 = no cap.", ru: "0 — без лимита." },
   "settings.limits.perrun": { en: "Spend cap per run", ru: "Потолок трат за запуск" },
   "settings.limits.perrun.sub": { en: "0 = no cap. A capped hosted call needs a known price and provider input ceiling before it starts.", ru: "0 — без лимита. Для запуска облачного вызова с лимитом нужны известный тариф и предел входных токенов у провайдера." },
   "settings.limits.total": { en: "Total spend cap", ru: "Общий потолок трат" },
@@ -5028,8 +5029,6 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "session.model": { en: "Model", ru: "Модель" },
   "session.model.global": { en: "Global default", ru: "Основная модель" },
   "session.model.change": { en: "Change", ru: "Сменить" },
-  "session.mode": { en: "Mode", ru: "Режим" },
-  "session.mode.toast": { en: "mode: {mode} (from the next run)", ru: "режим: {mode} (со следующего запуска)" },
   "session.usage": { en: "Usage", ru: "Расход" },
   "session.usage.in": { en: "Tokens in", ru: "Токенов на вход" },
   "session.usage.out": { en: "Tokens out", ru: "Токенов на выход" },
@@ -6034,16 +6033,7 @@ markDocument();
 
 Object.assign(DICT, {
   "composer.mode.agent": { en: "Agent", ru: "Агент" },
-  "composer.mode.for": { en: "Mode for this session", ru: "Режим этой сессии" },
-  "composer.mode.name.plan": { en: "Plan", ru: "План" },
-  "composer.mode.name.quick": { en: "Quick", ru: "Быстрый" },
-  "composer.mode.name.deep": { en: "Deep", ru: "Глубокий" },
-  "composer.mode.name.careful": { en: "Careful", ru: "Осторожный" },
-  "composer.mode.hint.agent": { en: "The agent as configured, with no extra limits or rules", ru: "Агент как настроен, без дополнительных ограничений и правил" },
-  "composer.mode.hint.plan": { en: "Reads and plans; changes nothing until you switch the mode", ru: "Читает и планирует; ничего не меняет, пока вы не смените режим" },
-  "composer.mode.hint.quick": { en: "Short answers, few tool calls, cheap", ru: "Короткие ответы, мало вызовов инструментов, дёшево" },
-  "composer.mode.hint.deep": { en: "Long autonomous work with a high budget", ru: "Долгая самостоятельная работа с большим бюджетом" },
-  "composer.mode.hint.careful": { en: "Asks before anything irreversible", ru: "Спрашивает перед любым необратимым действием" },
+  "composer.toggles.for": { en: "Switches for this session", ru: "Переключатели этой сессии" },
   "composer.yagni": { en: "YAGNI", ru: "YAGNI" },
   "composer.autopilot": { en: "Autopilot", ru: "Автопилот" },
   "composer.autopilot.hint": { en: "After each turn, a small model decides whether to go on, report done or ask you", ru: "После каждого хода небольшая модель решает: продолжить, сообщить о готовности или спросить вас" },
@@ -8278,22 +8268,6 @@ Object.assign(DICT, {
 
 // The auto mode: the level each message ran at, on its turn, and the correction for the next one.
 Object.assign(DICT, {
-  "composer.mode.name.auto": { en: "Auto", ru: "Авто" },
-  "composer.mode.hint.auto": { en: "Each message is sorted into quick, normal or deep work and run at that level", ru: "Каждое сообщение оценивается как быстрое, обычное или глубокое и выполняется на этом уровне" },
-  "add.effort.auto": { en: "auto · {effort}", ru: "авто · {effort}" },
-  "turn.depth.quick": { en: "Quick", ru: "Быстро" },
-  "turn.depth.normal": { en: "Normal", ru: "Обычно" },
-  "turn.depth.long": { en: "Deep", ru: "Глубоко" },
-  "turn.depth.quick.hint": { en: "Short answer, few tool calls, low effort", ru: "Короткий ответ, мало вызовов, низкое усилие" },
-  "turn.depth.normal.hint": { en: "The agent as configured, medium effort", ru: "Агент как настроен, среднее усилие" },
-  "turn.depth.long.hint": { en: "Long autonomous work, high effort", ru: "Долгая самостоятельная работа, высокое усилие" },
-  "turn.depth.source.model": { en: "the model", ru: "моделью" },
-  "turn.depth.source.heuristic": { en: "the message's words", ru: "по словам сообщения" },
-  "turn.depth.source.override": { en: "you", ru: "вами" },
-  "turn.depth.title": { en: "Ran as {level}, chosen by {how}. Click to set the level of the next message", ru: "Выполнено как «{level}», выбрано {how}. Нажмите, чтобы задать уровень следующего сообщения" },
-  "turn.depth.menu": { en: "Next message runs as", ru: "Следующее сообщение выполнить как" },
-  "turn.depth.next": { en: "The next message runs as {level}", ru: "Следующее сообщение выполнится как «{level}»" },
-  "usage.purpose.depth": { en: "depth sort", ru: "оценка глубины" },
 });
 
 // The guessed next message in the empty composer, and its switch in Settings → Chat.

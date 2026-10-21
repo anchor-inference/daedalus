@@ -110,7 +110,6 @@ export function inPanel(): boolean {
 export function panelPath(path: string): string {
   if (panelToken === null) return path;
   if (path === "/api/settings") return "/api/panel/settings";
-  if (path === "/api/modes") return "/api/panel/modes";
   // Dictation before a conversation exists: the app's start page path, through the panel's door.
   if (path === "/api/asr" || path === "/api/transcribe" || path.startsWith("/api/transcribe/")) return "/api/panel" + path.slice(4);
   if (path === "/api/sessions" || path.startsWith("/api/sessions/") || path.startsWith("/api/sessions?")) return "/api/panel" + path.slice(4);
@@ -207,9 +206,6 @@ function upload<T>(path: string, form: FormData, onProgress?: (fraction: number)
     xhr.send(form);
   });
 }
-
-/** The auto mode's sort of one message: its level, the mode and effort that run got, and who decided. */
-export type TurnDepth = { level: "quick" | "normal" | "long"; mode: string; source: "model" | "heuristic" | "override"; ms: number };
 
 export const api = {
   get: <T>(path: string) => call<T>("GET", path),
@@ -927,8 +923,6 @@ export type MessageView = {
   /** A message autopilot sent on the operator's behalf: a continuation, a chosen option, or the
    *  operator's answer to autopilot's question (with that question). */
   autopilot?: AutopilotMark | null;
-  /** The level the auto mode ran this message at; absent on a session with a fixed mode. */
-  depth?: TurnDepth | null;
   /** How an operator's message reached the model: placed into a turn under way (`steer`), opening the
    *  turn after the one it was written during (`drained`), or after it (`follow_up`). */
   delivery?: "steer" | "drained" | "follow_up" | null;
@@ -995,10 +989,7 @@ export type SessionDetail = {
   effective_provider?: string;
   fallback?: ModelFallback | null;
   messages: MessageView[];
-  mode?: string;
-  /** The level the operator chose from a turn's chip for the next message; empty sorts it. */
-  depth_next?: string;
-  /** YAGNI mode: the host tells the model in the next turn, never in the system prompt. */
+  /** YAGNI: the host tells the model in the next turn, never in the system prompt. */
   yagni?: boolean;
   /** The session's autopilot switch; null for a host without autopilot. */
   autopilot?: AutopilotStatus | null;
@@ -1660,7 +1651,7 @@ export type Settings = {
   /** The rail, its More menu and the phone drawer (navconfig.ts reads it). Missing on an older host. */
   navigation?: NavConfig;
   /** The helpers around the operator's messages; absent from a host older than them. */
-  assist?: { predict: boolean; predict_preset?: string; predict_usd_per_day?: number; depth_preset?: string };
+  assist?: { predict: boolean; predict_preset?: string; predict_usd_per_day?: number };
   /** Autopilot: the master switch, the judge's model, the turns after one message, the daily allowance. */
   autopilot?: { enabled: boolean; preset?: string; max_continuations: number; usd_per_day: number };
   telegram: {

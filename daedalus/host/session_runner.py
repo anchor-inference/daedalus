@@ -75,7 +75,6 @@ from daedalus.config import (
     STAFF_ONLY_TOOLS,
     SUBAGENT_BLOCKED_TOOLS,
     SUBAGENT_ONLY_TOOLS,
-    ModeConfig,
     NoModelConfigured,
     RuntimeConfig,
     Settings,
@@ -85,7 +84,6 @@ from daedalus.config import (
 )
 from daedalus.host import (
     capabilities,
-    depth,
     launcher_bridge,
     prompt_coach,
     prompts,
@@ -338,6 +336,17 @@ class PendingQuestion:
     payload: dict[str, Any]
 
 
+@dataclass(frozen=True, slots=True)
+class RunBounds:
+    """What bounds one turn of an orchestration role (see :meth:`SessionManager.run_bounds`)."""
+
+    max_iterations: int
+    usd_per_run: float | None
+    """``None`` is ``limits.usd_per_run``."""
+    setting: str
+    """The setting the spend cap comes from, named in the note that stops a run at it."""
+
+
 @dataclass(slots=True)
 class SessionState:
     session: Session
@@ -355,10 +364,6 @@ class SessionState:
     kind: str = "chat"
     """What the conversation is for (``sessions.kind``): ``chat``, ``computer`` or ``chrome``. Read when
     the state loads and changed only through :meth:`SessionManager.set_session_kind`, which writes both."""
-    turn_depth: dict[str, Any] | None = None
-    """The level the ``auto`` mode chose for the current run (``depth.Depth.metadata``): its mode is
-    what :meth:`SessionManager.mode_for` answers while the run lasts. Not stored: after a restart a
-    resumed run is the plain agent until the next message is sorted."""
     run_origin: str = "operator"
     """Who started the current run (``operator``, ``schedule``, ``reminder``, ``subagent:…``): StaySilent and the reply routing read it."""
     last_error_kind: str = ""
@@ -3869,8 +3874,6 @@ class SessionManager:
                     content_blocks=[TextBlock(text=body)],
                     metadata={"daedalus.origin": origin, **words, **({"daedalus.client_message_id": client_message_id} if client_message_id else {}), **_image_refs_metadata(image_refs)},
                 )
-                if origin == "operator" and _provider_resume is None and state.metadata.get("mode") == depth.AUTO_MODE:
-                    message.metadata["daedalus.depth"] = (await self.sort_depth(state, text)).metadata()
                 if _provider_resume is not None:
                     message.metadata["daedalus.provider_resume"] = {
                         "failed_run_id": _provider_resume[0], "provider_id": _provider_resume[1],
@@ -4066,68 +4069,6 @@ class SessionManager:
         await self._publish(state, "ask.answered", {"request_id": pending.tool_call_id, "request_ref": f"ask:{session_id}:{pending.tool_call_id}", "via": via})
         return await self._start_run(state, None, continue_turn=True)
 
-    async def set_mode(self, session_id: str, mode: str | None) -> str:
-        """Switch a session to a configured mode (limits, prompt rules, verbosity); empty = default."""
-        state = await self.get_state(session_id)
-        if state is None:
-            raise KeyError(session_id)
-        name = (mode or "").strip()
-        if name and name != depth.AUTO_MODE and name not in self.config.modes:
-            raise ValueError(f"no such mode {name!r}; configured: {', '.join(self.config.modes) or 'none'}")
-        if name:
-            state.metadata["mode"] = name
-            state.session.metadata["mode"] = name
-        else:
-            state.metadata.pop("mode", None)
-            state.session.metadata.pop("mode", None)
-        await self.sessions.update_metadata(session_id, state.session.metadata)
-        self._apply_tool_visibility_all()  # a running child also inherits a parent's narrower mode from the next call on
-        return name
-
-    async def set_next_depth(self, session_id: str, level: str | None) -> str:
-        """The level the session's next message runs at, whatever the sort would say; empty sorts it again.
-
-        The operator's correction of a turn's chip: it re-runs nothing, and it is spent by the next
-        message, so a wrong guess costs one click and not a mode switched on and forgotten.
-        """
-        state = await self.get_state(session_id)
-        if state is None:
-            raise KeyError(session_id)
-        chosen = (level or "").strip()
-        if chosen and chosen not in depth.LEVELS:
-            raise ValueError(f"level must be one of {', '.join(depth.LEVELS)}")
-        for meta in (state.metadata, state.session.metadata):
-            if chosen:
-                meta["depth_next"] = chosen
-            else:
-                meta.pop("depth_next", None)
-        await self.sessions.update_metadata(session_id, state.session.metadata)
-        return chosen
-
-    async def sort_depth(self, state: SessionState, text: str) -> depth.Depth:
-        """The level one operator message of an ``auto`` session runs at.
-
-        The operator's correction wins and is spent; otherwise the small model sorts it within the
-        configured timeout when one is configured, and the heuristic when none is, it is slow, or
-        the day's budget is spent on a paid one.
-        """
-        chosen = str(state.metadata.get("depth_next") or "")
-        if chosen in depth.LEVELS:
-            for meta in (state.metadata, state.session.metadata):
-                meta.pop("depth_next", None)
-            await self.sessions.update_metadata(state.session.id, state.session.metadata)
-            return depth.Depth(chosen, "override", 0)  # type: ignore[arg-type]
-        settings = self.config.assist
-        ask = None
-        if settings.depth_preset in self.config.presets:
-
-            async def ask(prompt: str) -> str:
-                return await self.small_model(prompt, settings.depth_preset, purpose="depth", session_id=state.session.id, max_tokens=8)
-
-        sorted_as = await depth.classify(text, ask, timeout=float(settings.depth_timeout_seconds))
-        logger.info("session %s: message sorted %s by the %s in %d ms", state.session.id, sorted_as.level, sorted_as.source, sorted_as.milliseconds)
-        return sorted_as
-
     async def small_model(self, prompt: str, preset: str, *, purpose: str, session_id: str | None = None, max_tokens: int = 200, temperature: float = 0.0, instructions: str = "") -> str:
         """One short request to a preset for a helper around the operator's messages.
 
@@ -4192,23 +4133,19 @@ class SessionManager:
                 break
         return "" if told == wanted else prompts.yagni_note(wanted)
 
-    def mode_for(self, state: SessionState) -> Any:
-        name = str(state.metadata.get("mode") or "")
-        if name == depth.AUTO_MODE:
-            # The session leaves the mode to each message; the run in progress has the one its
-            # message was sorted into, and between runs it is the plain agent.
-            chosen = str((state.turn_depth or {}).get("mode") or "")
-            return self.config.modes.get(chosen) if chosen else None
-        if name:
-            return self.config.modes.get(name)
+    def run_bounds(self, state: SessionState) -> RunBounds | None:
+        """An orchestration role's own bounds on one turn, or ``None`` for every other session.
+
+        An orchestrator's turn hands work over and ends, and it is woken by events with nobody
+        watching; its bounds stop one that does not end from spending unattended. They are not a
+        mode: no operator's chat has any, and nothing here tells the agent how far to go.
+        """
         if self.is_orchestrator(state):
-            # An orchestrator's turn hands work over and ends; its own limits bound one that does not,
-            # without a mode the operator would have to remember to set.
             limits = self.config.orchestrator
-            return ModeConfig(max_iterations=limits.max_iterations, usd_per_run=limits.usd_per_run, description="orchestrator")
+            return RunBounds(limits.max_iterations, limits.usd_per_run, "orchestrator.usd_per_run")
         if self.is_dispatcher(state):
             bounds = self.config.dispatcher
-            return ModeConfig(max_iterations=bounds.max_iterations, usd_per_run=bounds.usd_per_run, description="main orchestrator")
+            return RunBounds(bounds.max_iterations, bounds.usd_per_run, "dispatcher.usd_per_run")
         return None
 
     async def stop(self, session_id: str) -> bool:
@@ -4303,17 +4240,6 @@ class SessionManager:
         self, state: SessionState, run_id: str, *, message: Message | None = None,
     ) -> QueryEngine:
         overrides = await self.live.load(state.session.id)
-        if state.metadata.get("mode") == depth.AUTO_MODE:
-            if message is not None:
-                # A run opened by anything but a sorted message (a wake-up, a queued follow-up) is the
-                # plain agent, not whatever the last sorted message happened to be.
-                sorted_as = message.metadata.get("daedalus.depth")
-                state.turn_depth = sorted_as if isinstance(sorted_as, dict) else None
-            if state.turn_depth and state.turn_depth.get("level"):
-                # For this run only: the operator's own effort in the live controls is untouched, and
-                # the next message is sorted afresh. The effort itself is settled once the model is
-                # known, because the level moves that model's own effort.
-                overrides = {**overrides, "depth_level": str(state.turn_depth["level"])}
         for hook in self.preset_hooks:
             chosen = hook(state)
             if chosen:
@@ -4403,9 +4329,7 @@ class SessionManager:
             request_manifest_sink=self.request_manifests,
             tool_rules_key=self.tool_rules_key(),
         )
-        mode = self.mode_for(state)
-        if mode is not None and state.metadata.get("mode") == depth.AUTO_MODE:
-            mode = mode.model_copy(update={"prompt": ""})  # in the turn context instead; see _with_turn_context
+        bounds = self.run_bounds(state)
         enabled = self.mcp_enabled(state)
         if enabled:
             # Re-establish connections for servers this session left enabled (e.g. after a
@@ -4433,7 +4357,7 @@ class SessionManager:
         engine = build_engine(
             deps=deps,
             config=self.config,
-            mode=mode,
+            max_iterations=bounds.max_iterations if bounds is not None else 0,
             run_id=run_id,
             session_id=state.session.id,
             session_title=pinned["title"] if pinned else state.session.title,
@@ -4443,8 +4367,7 @@ class SessionManager:
             provider_chain=chain,
             model_name=rungs[0][1],
             thinking=preset.thinking if overrides.get("thinking_enabled") is None else bool(overrides["thinking_enabled"]),
-            reasoning_effort=depth.effort_for(overrides["depth_level"], overrides.get("reasoning_effort") or preset.reasoning_effort)
-            if overrides.get("depth_level") else overrides.get("reasoning_effort") or preset.reasoning_effort,
+            reasoning_effort=overrides.get("reasoning_effort") or preset.reasoning_effort,
             context_window=state.context_window or preset.context_window,
             max_output_tokens=preset.max_output_tokens,
             extra_notes=pinned["notes"] if pinned else self.notes_for(state, window=int(state.context_window or preset.context_window or 0)),
@@ -4925,12 +4848,6 @@ class SessionManager:
         yagni = await self._yagni_note(state)
         if yagni:
             volatile.append("\n- " + yagni)
-        sorted_as = message.metadata.get("daedalus.depth")
-        if isinstance(sorted_as, dict) and (chosen := self.config.modes.get(str(sorted_as.get("mode") or ""))) is not None and chosen.prompt.strip():
-            # The ``auto`` mode's rules for this run ride in the turn context, not the system prompt:
-            # the level changes from message to message, and the system prompt is what every later
-            # call is cached on.
-            volatile.append("\n- " + chosen.prompt.strip())
         if waiting := self._running_jobs_note(state.session.id):
             volatile.append("\n" + waiting)
         if asked := await self._side_questions_note(state.session.id):
@@ -5871,13 +5788,6 @@ class SessionManager:
         blocked |= (known - set(ORCHESTRATOR_TOOLS)) if self.is_orchestrator(state) else (known & set(ORCHESTRATOR_ONLY_TOOLS))
         if not self.computer_offered(state):
             blocked |= known & capabilities.COMPUTER_TOOLS
-        mode = self.mode_for(state)
-        if mode is not None:
-            if mode.tools_only:
-                blocked |= known - {str(n) for n in mode.tools_only}
-            for entry in mode.tools_off:
-                name = str(entry)
-                blocked |= {t for t in known if t.startswith(name[:-1])} if name.endswith("*") else {name}
         return blocked
 
     def _computer_agent(self) -> Any:
@@ -6007,7 +5917,7 @@ class SessionManager:
         Only refusals: what a session may call is its registry minus ``blocked``. Nothing is pinned,
         because a pin is what the core never holds back — every tool used to be pinned here, which kept
         the whole of a connected MCP server on the surface however large it was. The role allowlists
-        (voice, orchestrator, plan mode) arrive as refusals of everything outside them.
+        (voice, orchestrator) arrive as refusals of everything outside them.
         """
         if self.is_dispatcher(state):
             # Its own registry is its whole allowlist; the operator may still switch a tool off.
@@ -6915,9 +6825,9 @@ class SessionManager:
         """Stop a run that crossed a spend cap: its own, the session's, its provider's or the total."""
         if state.engine is None or not state.running or run_id in self._capped_runs:
             return
-        mode = self.mode_for(state)
-        mode_cap = mode.usd_per_run if mode is not None else None
-        run_cap = mode_cap if mode_cap is not None else self.config.limits.usd_per_run
+        bounds = self.run_bounds(state)
+        role_cap = bounds.usd_per_run if bounds is not None else None
+        run_cap = role_cap if role_cap is not None else self.config.limits.usd_per_run
         spent, unmetered = await self.spend(run_id=run_id)
         note: str | None = None
         kind = "run_cap"
@@ -6934,10 +6844,10 @@ class SessionManager:
                 kind, note = "run_minutes", f"⏱ time cap reached: {minutes:.0f} min of active work in this run of {limits.max_run_minutes} (limits.max_run_minutes); stopping this run. Send a message to continue in a new run."
         if note is not None:
             pass
-        elif (run_cap > 0 or mode_cap is not None) and spent >= run_cap:
-            source = (f"mode {state.metadata.get('mode')}" if state.metadata.get("mode") else "orchestrator.usd_per_run") if mode_cap is not None else "limits.usd_per_run"
+        elif (run_cap > 0 or role_cap is not None) and spent >= run_cap:
+            source = bounds.setting if bounds is not None and role_cap is not None else "limits.usd_per_run"
             note = f"💸 per-run cap reached: ${spent:.2f} spent of ${run_cap:.2f} ({source}); stopping this run. Send a message to continue in a new run."
-            setting = RUN_SPEND_CAP if mode_cap is None else None
+            setting = RUN_SPEND_CAP if role_cap is None else None
             if unmetered:
                 note += f" {unmetered} call(s) had no known price and are not counted."
         else:

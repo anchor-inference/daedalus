@@ -44,7 +44,7 @@ def describe(key: str) -> str:
     if kind == "provider":
         return f"the total cap for provider {rest.rsplit(':', 1)[0]!r} (limits.usd_total_per_provider in Settings → Limits)"
     if kind == "run":
-        return "this run's spending cap (limits.usd_per_run, or its mode's); a new message starts a new run"
+        return "this run's spending cap (limits.usd_per_run, or the orchestrator's own); a new message starts a new run"
     if kind == "session":
         return "this session's spending cap (in the session settings)"
     if kind == "goal":

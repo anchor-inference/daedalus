@@ -29,9 +29,7 @@ import { conversationMedia, galleryFor, toolSource, viewerSource, type HostSourc
 import { Answer, Composer, ComposerHandle } from "../composerbox";
 import { Approval, QueuedMessage, pendingApproval, queuedAfter, questionsKey, readQueued } from "../composer";
 import { ModelChoice } from "../modelselect";
-import { AUTO_MODE, ModeInfo, modeName } from "../modeselect";
 import { effortWord } from "../effortselect";
-import { DepthChip } from "../depthchip";
 import { MoveSessionSheet } from "../projects";
 import { MakeProjectSheet, makeProjectCommand } from "../chatproject";
 import { panelShortcut } from "../panel";
@@ -276,7 +274,6 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // A chat started from New chat in Computer mode arrives with its sheet open, to say what it may control.
   useEffect(() => { if (takeComputerSheet(id)) setComputerOpen(true); }, [id]);
   const computer = useComputer(id, computerOpen);
-  const [modes, setModes] = useState<ModeInfo[]>([]);
   // The guessed next message the composer offers once an answer has settled; empty when there is none.
   const [suggestion, setSuggestion] = useState("");
   useEffect(() => setSuggestion(""), [id]);
@@ -313,16 +310,6 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       await api.post(`/api/sessions/${id}/loop/action`, { action: a });
       toast(t("session.loop.action", { action: a }));
       load(true);
-    } catch (e) {
-      toast(errorText(e));
-    }
-  }
-
-  async function setMode(mode: string) {
-    try {
-      await api.post(`/api/sessions/${id}/mode`, { mode: mode === "default" || !mode ? null : mode });
-      toast(t("session.mode.toast", { mode: modeName(mode === "default" ? "" : mode) }));
-      load();
     } catch (e) {
       toast(errorText(e));
     }
@@ -545,7 +532,6 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
 
   useEffect(() => {
     load();
-    api.get<Record<string, { description?: string }>>("/api/modes").then((m) => setModes(Object.entries(m).map(([name, v]) => ({ name, description: v?.description ?? "" })))).catch(() => setModes([]));
     api.get<SlashCommand[]>("/api/commands").then(setCommands).catch(() => setCommands([]));
     api.get<SkillEntry[]>("/api/skills").then(setSkills).catch(() => setSkills([]));
     api.get<AsrStatus>("/api/asr").then(setAsr).catch(() => setAsr(null));
@@ -1286,8 +1272,6 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
 
   async function chooseEffort(effort: string) {
     try {
-      // A fixed effort is a choice the auto mode would overrule on the next message, so it leaves it.
-      if (detail?.mode === AUTO_MODE) await api.post(`/api/sessions/${id}/mode`, { mode:null });
       const r = await api.post<{ reasoning_effort?: string }>(`/api/sessions/${id}/model`, effort === "off" ? { thinking: false } : { thinking: true, reasoning_effort: effort });
       toast(t("session.effort.picked", { effort: t(`add.effort.${effort === "off" ? "off" : r.reasoning_effort || effort}`) }));
       load();
@@ -1514,7 +1498,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   ] : [];
   // An idle session with jobs still running has not finished: say what it waits for rather than look done.
   const jobsPending = !busy && !saving && !compacting && status !== "failed" ? detail?.background_count ?? 0 : 0;
-  const effortText = detail ? effortWord(detail.reasoning_effort, detail.thinking !== false, detail.mode === AUTO_MODE) : "";
+  const effortText = detail ? effortWord(detail.reasoning_effort, detail.thinking !== false) : "";
   const phoneSub = offline ? <StateSub tone="offline">{t("session.phone.reconnecting")}</StateSub>
     : compacting ? <StateSub tone="compacting">{t("session.compacting.bar")}</StateSub>
     : busy ? <LiveSub status={status} base={tail} live={live} />
@@ -1759,14 +1743,11 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             fallback={detail?.fallback ?? null}
             onChooseModel={chooseModel}
             thinking={detail?.thinking}
-            reasoningEffort={detail?.reasoning_effort} effortAuto={detail?.mode === AUTO_MODE}
+            reasoningEffort={detail?.reasoning_effort}
             onChooseEffort={chooseEffort}
             suggestion={suggestion}
             onSuggestionUsed={() => setSuggestion("")}
-            mode={detail?.mode ?? ""}
-            modes={modes}
             yagni={!!detail?.yagni}
-            onChooseMode={bare ? undefined : setMode}
             onYagni={bare ? undefined : setYagni}
             autopilot={detail?.autopilot}
             onAutopilot={bare || embedded || main || orchestrating ? undefined : setAutopilot}
@@ -1838,7 +1819,6 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                 role={orchestrating ? "orchestrator" : main ? "main" : "session"}
                 detail={detail}
                 busy={busy}
-                modes={modes.map((m) => m.name)}
                 schedules={schedules}
                 provider={provider}
                 providerUsage={providerUsage}
@@ -1848,7 +1828,6 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                 focus={detailsFocus}
                 on={{
                   rename,
-                  setMode,
                   openPicker,
                   compact,
                   clearHistory,
@@ -2151,7 +2130,6 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
             {fromPage && <span className="msg-origin" data-from-page={fromPage}>{t("turn.origin.page", { slug: fromPage })}</span>}
             {turn.user.autopilot && <span className="msg-origin msg-autopilot" data-autopilot={turn.user.autopilot.kind} title={autopilotTitle(turn.user.autopilot)}>{t(`turn.autopilot.${turn.user.autopilot.kind}`)}</span>}
             {turn.user.yagni && <span className="msg-origin msg-yagni" title={t("turn.yagni.title")}>{t(turn.user.yagni === "on" ? "turn.yagni.on" : "turn.yagni.off")}</span>}
-            {turn.user.depth && <DepthChip depth={turn.user.depth} sessionId={sessionId} toast={toast} />}
             {turn.user.reply_to && <ReplyQuote reply={turn.user.reply_to} />}
             <Md className="msg-text" text={withoutAttachedList(turn.user.text)} cacheKey={live ? undefined : `u${seq ?? turn.key}`} />
             {turn.user.secrets?.length ? <div className="msg-secrets">{turn.user.secrets.map((secret) => <SecretChip key={secret.name} name={secret.name} scope={secret.scope} />)}</div> : null}

@@ -145,7 +145,7 @@ How local mode checks a change before it restarts on it, the gates both modes sh
 | Planning | `BoardAdd` / `BoardUpdate` / `BoardList` / `BoardGet` — the agent's own board (shared with its subagents; tasks you post to nobody in particular are on every board), with acceptance criteria, checklists, dependencies and a per-agent work-in-progress limit; `PLAN.md` in the workspace is its rendering |
 | Extensions | `Skill` (37 bundled skills: design systems, web QA, writing, scheduling, comparable variants, figures, search discipline…), `Mcp*` with OAuth, `SendFile` (attached under the answer in the app too), `StaySilent`, `Notify` — tells you something outside the chat, routed like any notification and limited per session |
 
-Every tool can be switched off per session from the app, and a **mode** (`quick`, `deep`, `careful`) bundles limits and extra rules.
+Every tool can be switched off per session from the app. There are no answer modes: the agent works until the job is done, bounded only by the spend caps you set, and the two switches beside the model are YAGNI (the smallest change that does the job) and Autopilot.
 
 ## What the agent may do
 
@@ -253,7 +253,7 @@ More in [docs/INSTALL.md](docs/INSTALL.md): [terminals](docs/INSTALL.md#terminal
 | `/stop`, `/close` | stop the current run; put this session away (closing its topic when it has one) |
 | `/rename <title>` | rename the session and its topic |
 | `/compact [focus]`, `/clear` | replace the history with a summary; start over with an empty history (files, brief and settings stay) |
-| `/model [preset]`, `/thinking …`, `/mode …` | model, thinking and mode for this session |
+| `/model [preset]`, `/thinking …` | model and thinking for this session |
 | `/yagni [on\|off]` | ask for the smallest change that does the job; the next turn is told, the system prompt stays as it is |
 | `/loop [10m] <instruction>` | make this session a loop agent; `status`, `pause`, `resume`, `stop`, `remove` |
 | `/brief [text]`, `/cap <usd>` | standing instructions; spend cap for the session |

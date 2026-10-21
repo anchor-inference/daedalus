@@ -138,14 +138,14 @@ export function clearDraft(sessionId: string, storage: StorageLike | null = safe
   writeDraft(sessionId, "", storage);
 }
 
-export type DraftTarget = { session: string; project: string; workspace: string; model: string; mode: string; effort: string; reply: string };
+export type DraftTarget = { session: string; project: string; workspace: string; model: string; effort: string; reply: string };
 const TARGET_PREFIX = "daedalus.draft-target.";
 
 /** Keep the settings the words were written for, so a later move of the chat can be pointed out. */
 export function readDraftTarget(sessionId: string, storage: StorageLike | null = safeStorage()): DraftTarget | null {
   try {
     const value = JSON.parse(storage?.getItem(`${TARGET_PREFIX}${sessionId}`) ?? "null") as DraftTarget | null;
-    return value && value.session === sessionId && [value.project, value.workspace, value.model, value.mode, value.effort, value.reply].every((part) => typeof part === "string") ? value : null;
+    return value && value.session === sessionId && [value.project, value.workspace, value.model, value.effort, value.reply].every((part) => typeof part === "string") ? value : null;
   } catch { return null; }
 }
 
@@ -159,7 +159,7 @@ export function writeDraftTarget(sessionId: string, target: DraftTarget | null, 
 /**
  * Whether the place a draft goes to moved since it was written: the chat was taken to another
  * project or folder. Only that is worth a word, and the word never blocks the send. The model, the
- * mode, the effort and the quoted reply are all in the composer next to the words, and changing
+ * effort and the quoted reply are all in the composer next to the words, and changing
  * them is the operator's own act; asking to confirm a model just picked hid the send button behind
  * a notice nobody could make sense of.
  */

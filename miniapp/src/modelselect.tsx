@@ -35,7 +35,6 @@ export type ModelSelectProps = {
   /** Phones: a sheet instead of a popover. */
   sheet: boolean;
   effort?: string;
-  effortAuto?: boolean;
   thinking?: boolean;
   onChooseEffort?: (effort: string) => void;
 };
@@ -46,7 +45,7 @@ function isCurrent(id: string, p: Preset, model: string): boolean {
   return model === id || model === p.label || model === p.model || model === `${p.provider}/${p.model}`;
 }
 
-export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, sheet, effort, effortAuto, thinking, onChooseEffort }: ModelSelectProps) {
+export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, sheet, effort, thinking, onChooseEffort }: ModelSelectProps) {
   const trigger = useRef<HTMLButtonElement>(null);
   const [cat, setCat] = useState<Catalogue | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -84,7 +83,7 @@ export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, she
   ) : shortModel(model, 22);
   const reason = fallback ? (DICT[`session.model.reason.${fallback.reason}`] ? t(`session.model.reason.${fallback.reason}`) : fallback.reason) : "";
   const title = fallback ? `${t("session.model.fallback.turn", { to: fallback.to, from: fallback.from })} — ${reason}` : t("composer.model.title");
-  const list = <ModelList cat={cat} failed={failed} model={model} fallback={fallback} onPick={pick} onClose={() => onOpenChange(false)} effort={effort} effortAuto={effortAuto} thinking={thinking} onChooseEffort={onChooseEffort ? (value) => { onChooseEffort(value); onOpenChange(false); } : undefined} sheet={sheet} />;
+  const list = <ModelList cat={cat} failed={failed} model={model} fallback={fallback} onPick={pick} onClose={() => onOpenChange(false)} effort={effort} thinking={thinking} onChooseEffort={onChooseEffort ? (value) => { onChooseEffort(value); onOpenChange(false); } : undefined} sheet={sheet} />;
   return (
     <>
       <ControlTrigger ref={trigger} type="button" className={`model-select ${fallback ? "attn" : ""} ${open ? "on" : ""}`} onClick={() => onOpenChange(!open)} title={title} aria-label={t("session.model.for")} aria-haspopup="menu" aria-expanded={open}>
@@ -92,7 +91,7 @@ export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, she
         {/* The effort is its own span so a long model name is what gives way: in one span the
             ellipsis ate the effort first and the pill read "DeepSeek Flash · l…". */}
         <span className={`model-label truncate ${fallback ? "model-fallback" : ""}`}>{label}</span>
-        {onChooseEffort && <span className="model-effort">{effortWord(effort, thinking, effortAuto)}</span>}
+        {onChooseEffort && <span className="model-effort">{effortWord(effort, thinking)}</span>}
 
       </ControlTrigger>
       {open && sheet && (
@@ -110,7 +109,7 @@ export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, she
   );
 }
 
-function ModelList({ cat, failed, model, fallback, onPick, onClose, effort, effortAuto, thinking, onChooseEffort, sheet }: { cat: Catalogue | null; failed: string | null; model: string; fallback: ModelFallback | null; onPick: (c: ModelChoice) => void; onClose: () => void; effort?: string; effortAuto?: boolean; thinking?: boolean; onChooseEffort?: (value: string) => void; sheet: boolean }) {
+function ModelList({ cat, failed, model, fallback, onPick, onClose, effort, thinking, onChooseEffort, sheet }: { cat: Catalogue | null; failed: string | null; model: string; fallback: ModelFallback | null; onPick: (c: ModelChoice) => void; onClose: () => void; effort?: string; thinking?: boolean; onChooseEffort?: (value: string) => void; sheet: boolean }) {
   const [query, setQuery] = useState("");
   const [provider, setProvider] = useState<string | null>(null);
   const [freeGroup, setFreeGroup] = useState(false);
@@ -146,7 +145,7 @@ function ModelList({ cat, failed, model, fallback, onPick, onClose, effort, effo
       listRef={list} cat={cat} model={model} fallback={fallback} configured={configured} onPick={onPick}
       query={query} setQuery={setQuery} provider={provider} setProvider={setProvider} freeGroup={freeGroup} setFreeGroup={setFreeGroup}
       browsing={browsing} matched={matched} providers={providers} entries={entries} back={back}
-      effort={effort} effortAuto={effortAuto} thinking={thinking} onChooseEffort={onChooseEffort}
+      effort={effort} thinking={thinking} onChooseEffort={onChooseEffort}
       showGlobal={showGlobal} addModel={addModel}
     />
   );
@@ -215,7 +214,7 @@ function ModelList({ cat, failed, model, fallback, onPick, onClose, effort, effo
         );
       })}
       <div className="menu-sep" />
-      {onChooseEffort && <EffortMenu effort={effort} effortAuto={effortAuto} thinking={thinking} onChoose={onChooseEffort} inline={sheet} />}
+      {onChooseEffort && <EffortMenu effort={effort} thinking={thinking} onChoose={onChooseEffort} inline={sheet} />}
       <button type="button" role="menuitem" className="model-row model-add" onClick={addModel}><Icon name="plus" size={16} /><span className="grow">{t("composer.model.add")}</span><Icon name="chevron" size={14} /></button>
     </div>
   );
@@ -225,7 +224,7 @@ type PhoneListProps = {
   listRef: React.RefObject<HTMLDivElement | null>; cat: Catalogue; model: string; fallback: ModelFallback | null; configured: [string, Preset] | null; onPick: (c: ModelChoice) => void;
   query: string; setQuery: (q: string) => void; provider: string | null; setProvider: (p: string | null) => void; freeGroup: boolean; setFreeGroup: (on: boolean) => void;
   browsing: boolean; matched: [string, Preset][]; providers: string[]; entries: [string, Preset][]; back: () => void;
-  effort?: string; effortAuto?: boolean; thinking?: boolean; onChooseEffort?: (value: string) => void;
+  effort?: string; thinking?: boolean; onChooseEffort?: (value: string) => void;
   showGlobal: boolean; addModel: () => void;
 };
 
@@ -290,7 +289,7 @@ function PhoneModelList(p: PhoneListProps) {
         <>
           <div className="ph-model-sec">{t("composer.effort.short")}</div>
           <SegmentedControl className="ph-model-effort" label={t("composer.effort.short")}
-            value={p.effortAuto ? "" : p.thinking ? REASONING_EFFORTS[effortIndex(p.effort)] : "off"}
+            value={p.thinking ? REASONING_EFFORTS[effortIndex(p.effort)] : "off"}
             options={["off", ...REASONING_EFFORTS].map((value) => ({ id: value, label: t(value === "off" ? "composer.effort.offShort" : `add.effort.${value}`) }))}
             onChange={(value) => p.onChooseEffort!(value)} />
         </>

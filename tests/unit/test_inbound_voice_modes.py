@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -136,24 +135,29 @@ async def test_transcribe_uses_an_openai_compatible_endpoint(tmp_path: Path) -> 
         await transcribe(audio, AsrConfig())
 
 
-async def test_modes_override_limits_and_prompt(settings: Settings, db: Database) -> None:
+def test_one_configuration_caps_no_run_unless_the_operator_or_a_role_does() -> None:
+    from daedalus.host.engine_factory import UNCAPPED_TURNS
+
     config = RuntimeConfig()
-    rc = runtime_constants(config, context_window=100_000, max_output_tokens=8_000, thinking=False, mode=config.modes["quick"])
-    assert rc.max_turns_per_run == 25
-    rc = runtime_constants(config, context_window=100_000, max_output_tokens=8_000, thinking=False, mode=None)
-    assert rc.max_turns_per_run == config.limits.max_iterations
-    manager = SessionManager(settings, config, db=db)
-    await manager.start()
-    state = await manager.create_session("m")
-    assert await manager.set_mode(state.session.id, "deep") == "deep"
-    assert manager.mode_for(state) is config.modes["deep"]
-    with pytest.raises(ValueError):
-        await manager.set_mode(state.session.id, "nonsense")
-    assert await manager.set_mode(state.session.id, None) == "" and manager.mode_for(state) is None
-    refreshed = await manager.sessions.get(state.session.id, "daedalus")
-    assert "mode" not in refreshed.metadata
-    await manager.close()
-    assert json.dumps(config.modes["careful"].model_dump())
+    assert config.limits.max_iterations == 0
+    assert runtime_constants(config, context_window=100_000, max_output_tokens=8_000, thinking=False).max_turns_per_run == UNCAPPED_TURNS
+    config.limits.max_iterations = 300
+    assert runtime_constants(config, context_window=100_000, max_output_tokens=8_000, thinking=False).max_turns_per_run == 300
+    # An orchestrator's turn carries its own bound, which wins over the operator's general one.
+    assert runtime_constants(config, context_window=100_000, max_output_tokens=8_000, thinking=False, max_iterations=40).max_turns_per_run == 40
+
+
+def test_a_file_written_with_session_modes_loads_and_loses_them(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[assist]\npredict = false\ndepth_preset = "small"\ndepth_timeout_seconds = 0.9\n\n'
+        '[modes.quick]\nmax_iterations = 25\nusd_per_run = 0.5\nprompt = "Mode: quick."\n'
+    )
+    config = RuntimeConfig.load(path)
+    assert config.assist.predict is False
+    written = path.read_text()
+    assert "modes" not in written and "depth_" not in written and "predict = false" in written
+    assert RuntimeConfig.load(path).model_dump() == config.model_dump()
 
 
 def test_keyless_vendor_kinds_are_allowed_only_behind_a_proxy(settings: Settings) -> None:
@@ -255,18 +259,6 @@ def test_flatten_payload_stays_linear_on_wide_dicts() -> None:
     # Linear against quadratic, which on two hundred thousand keys is minutes: a generous bound
     # answers that question and a tight one only measures how busy the host is.
     assert time.monotonic() - started < 10.0 and len(text) <= 2100
-
-
-def test_mode_limits_are_bounded_and_zero_means_nothing() -> None:
-    from pydantic import ValidationError
-
-    from daedalus.config import ModeConfig
-
-    with pytest.raises(ValidationError):
-        ModeConfig(max_iterations=0)
-    with pytest.raises(ValidationError):
-        ModeConfig(usd_per_run=-1)
-    assert ModeConfig(usd_per_run=0).usd_per_run == 0
 
 
 async def test_sandbox_never_widens_to_the_working_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

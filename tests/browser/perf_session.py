@@ -130,7 +130,6 @@ def detail(messages: int, tail: int, before: int | None) -> dict:
         "model": "Claude Opus 5",
         "provider": "claude",
         "messages": rows,
-        "mode": "",
         "usd_cap": None,
         "brief": "",
         "spawned_by": None,

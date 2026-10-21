@@ -204,8 +204,6 @@ describe("the keys the code asks for", () => {
       ["sched.group.", ["upcoming", "paused", "done"]],
       ["sched.when.", ["once", "daily", "weekdays", "weekly", "hours", "cron"]],
       ["usage.purpose.", listed("./screens/Usage.tsx", "PURPOSES")],
-      ["turn.depth.", ["quick", "normal", "long"]],
-      ["turn.depth.source.", ["model", "heuristic", "override"]],
       ["memory.cat.", ["person", "project", "preference", "fact", "procedure", "other"]],
       ["memory.view.", ["list", "topics", "categories"]],
       ["memory.suggest.", ["duplicate", "contradiction"]],

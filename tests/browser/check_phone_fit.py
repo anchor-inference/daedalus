@@ -6,10 +6,10 @@ the whole sheet scrolled sideways, a card border crossing the chips and the Send
 it. Every option now wraps inside its card, and nothing in the sheet scrolls sideways; the same card
 is looked at beside a project's orchestrator on a desktop and in the Main orchestrator's list.
 
-The composer: the mode chip, the one pill for the model and its effort, the microphone and the
-circle, at 360, 375, 390 and 430 px, with a short and a long model name, idle and running. The mode
-chip once hugged its label and was cut to "Age…" beside a long model name; now the mode keeps its
-whole name, each pill has room inside it, the model name is what gives way (never the effort), every
+The composer: the toggles chip, the one pill for the model and its effort, the microphone and the
+circle, at 360, 375, 390 and 430 px, with a short and a long model name, idle and running. The chip
+once hugged its label and was cut to "Age…" beside a long model name; now it keeps its
+whole word, each pill has room inside it, the model name is what gives way (never the effort), every
 control stays inside the pill and at least 40 px tall.
 
     APP_URL=http://127.0.0.1:<port>/app python tests/browser/check_phone_fit.py
@@ -144,7 +144,7 @@ def composer_fits(browser, lang: str, width: int, model: str, running: bool) -> 
     page.goto(f"{BASE}/agents/{composer.SESSION}?token=t&scheme=dark&lang={lang}")
     page.wait_for_selector(".composer .roundbtn.primary", timeout=15000)
     page.wait_for_timeout(300)
-    # The phone's composer rests as one row; its toolbar (mode, model, effort) is the open shape's.
+    # The phone's composer rests as one row; its toolbar (toggles, model, effort) is the open shape's.
     reveal_composer(page)
     try:
         facts = page.evaluate("""() => {
@@ -183,14 +183,14 @@ def composer_fits(browser, lang: str, width: int, model: str, running: bool) -> 
         problems.append(f"{where}: {facts['short']} are under the 44 px target")
     mode, pill = facts["mode"], facts["model"]
     if not mode:
-        problems.append(f"{where}: no mode chip")
+        problems.append(f"{where}: no toggles chip")
     else:
         if facts["modeCut"]:
-            problems.append(f"{where}: the mode chip's name is cut")
+            problems.append(f"{where}: the toggles chip's word is cut")
         # The phone's pills are the design's: 14 px type with room inside (15 until the phone's scale
         # came down a step, a size too large beside the chat apps on the same phone).
         if mode["pad"] < 8 or mode["fs"] != 14:
-            problems.append(f"{where}: the mode chip has {mode['pad']}px inside and {mode['fs']}px type")
+            problems.append(f"{where}: the toggles chip has {mode['pad']}px inside and {mode['fs']}px type")
     if running:
         if pill:
             problems.append(f"{where}: the model pill did not give way to steering")

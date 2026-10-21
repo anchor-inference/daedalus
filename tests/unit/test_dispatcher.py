@@ -86,8 +86,10 @@ async def test_the_main_orchestrator_sees_its_own_tools_and_nobody_else_sees_the
         assert "Progress" not in ordinary_tools and "Cancel" not in ordinary_tools and "CreateProject" not in ordinary_tools
         with pytest.raises(NotCurrent, match="not the main orchestrator"):
             await m.call(ordinary.session.id, "projects")
-        mode = m.r.manager.mode_for(state)
-        assert mode is not None and mode.max_iterations == m.r.manager.config.dispatcher.max_iterations
+        bounds = m.r.manager.run_bounds(state)
+        assert bounds is not None and bounds.max_iterations == m.r.manager.config.dispatcher.max_iterations
+        assert bounds.setting == "dispatcher.usd_per_run"
+        assert m.r.manager.run_bounds(ordinary) is None, "an operator's chat has no bounds of its own"
     finally:
         await m.r.manager.close()
 

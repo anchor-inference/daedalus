@@ -75,7 +75,7 @@ class Host:
             "workspace": "/workspace/bakery", "workspace_name": "bakery", "workspace_own": False, "workspace_sessions": [], "pending": None,
             "model": "Claude Opus 5", "provider": "claude", "project": {"id": "p", "name": "Bakery", "folders": folders("/workspace/bakery"), "settings": {"snapshots": True}},
             "folders": [], "configured_model": "claude-opus-5", "effective_model": "claude-opus-5", "fallback": None, "thinking": True, "reasoning_effort": "high",
-            "mode": "", "yagni": False, "brief": "", "tools_off": [], "loop": None, "services": [], "subagents": [], "usage": {},
+            "yagni": False, "brief": "", "tools_off": [], "loop": None, "services": [], "subagents": [], "usage": {},
             "context": {"tokens": 4000, "window": 200000, "messages": len(messages), "summaries": 0, "operator_turns": 1},
             "prompt_coach_of": None, "btw_of": CHAT if side else None, "messages": messages,
         }

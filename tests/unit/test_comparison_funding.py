@@ -87,7 +87,7 @@ async def native_worker(db: Database, pair, *, launch: bool = True):
     config.limits.usd_per_run = 0
     config.limits.usd_total = 0.0002
     manager = SimpleNamespace(db=db, execution_store=store, config=config, settings=SimpleNamespace(usd_per_day=0),
-                              live_state=lambda _: None, mode_for=lambda _: None)
+                              live_state=lambda _: None, run_bounds=lambda _: None)
     return manager, request(observability=LLMObservabilityContext(tenant_id='tenant', session_id='native', run_id='run'))
 
 

@@ -18,11 +18,9 @@ import { plural, t } from "./i18n";
 import { SessionToolGroups } from "./toolgroupsview";
 import { HostMark } from "./runon";
 import { DiskUsage } from "./diskusage";
-import { AUTO_MODE, modeName } from "./modeselect";
 
 export type DetailsActions = {
   rename: (title: string) => void;
-  setMode: (mode: string) => void;
   openPicker: () => void;
   compact: () => void;
   clearHistory: () => void;
@@ -46,7 +44,6 @@ export type SessionDetailsProps = {
   role?: "session" | "orchestrator" | "main";
   detail: SessionDetail;
   busy: boolean;
-  modes: string[];
   schedules: Schedule[];
   provider: string;
   providerUsage: ProviderUsage | null;
@@ -58,7 +55,7 @@ export type SessionDetailsProps = {
   focus?: string | null;
 };
 
-export function SessionDetails({ ids, id, role = "session", detail, busy, modes, schedules, provider, providerUsage, onOpen, toast, reload, on, focus }: SessionDetailsProps) {
+export function SessionDetails({ ids, id, role = "session", detail, busy, schedules, provider, providerUsage, onOpen, toast, reload, on, focus }: SessionDetailsProps) {
   const container = useRef<HTMLDivElement>(null);
   const conductor = role !== "session";
   const ctxPct = detail.context && detail.context.window > 0 ? Math.round((100 * detail.context.tokens) / detail.context.window) : null;
@@ -81,14 +78,6 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, modes,
           <button className="linkbtn grow truncate" onClick={on.openPicker} title={detail.model}>{detail.model || t("session.model.global")}</button>
           <button className="btn small" onClick={on.openPicker}>{t("session.model.change")}</button>
         </div>
-        <label className="dt-control">
-          <span className="dt-control-label">{t("session.mode")}</span>
-          <select className="field grow" value={detail.mode || "default"} onChange={(e) => on.setMode(e.target.value)}>
-            {["default", AUTO_MODE, ...modes.filter((m) => m !== AUTO_MODE)].map((m) => (
-              <option key={m} value={m}>{m === "default" ? m : modeName(m)}</option>
-            ))}
-          </select>
-        </label>
       </Section>
 
       {detail.context && (

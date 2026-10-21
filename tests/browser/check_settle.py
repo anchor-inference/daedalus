@@ -83,7 +83,7 @@ class Stub(BaseHTTPRequestHandler):
             "housekeeping": Stub.housekeeping, "run_id": None if done else "r1",
             "workspace": "/workspace", "workspace_name": "ws", "workspace_own": True, "workspace_sessions": [],
             "project": {"id": "p", "name": "Project", "folders": folders("/workspace"), "settings": {"snapshots": True}},
-            "pending": None, "model": "some-model", "mode": "", "brief": "", "tools_off": [], "loop": None,
+            "pending": None, "model": "some-model", "brief": "", "tools_off": [], "loop": None,
             "services": [], "subagents": [], "usage": {}, "first_seq": 101, "has_older": False,
             "context": {"tokens": 10, "window": 100000, "messages": 2, "summaries": 0, "operator_turns": 1},
             "messages": messages,

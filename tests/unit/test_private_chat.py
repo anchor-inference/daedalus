@@ -112,7 +112,7 @@ async def test_a_site_session_s_spawned_agent_stays_off_telegram(front: Telegram
     front.config.telegram.mode = "private"
     parent = await front.manager.create_session("from the site", metadata={"telegram_detached": True})
     child_id = await front._service_spawn_agent(
-        parent.session.id, title="helper", brief="help", files=[], first_message=None, preset=None, mode=None, mcp=[], peer_name=None
+        parent.session.id, title="helper", brief="help", files=[], first_message=None, preset=None, mcp=[], peer_name=None
     )
     child = await front.manager.get_state(child_id)
     assert child is not None and child.metadata.get("telegram_detached") is True

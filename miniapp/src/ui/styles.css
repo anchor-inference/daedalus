@@ -319,10 +319,6 @@ button.more-item { border: 0; font-family: inherit; cursor: pointer; }
 .msg-origin.msg-yagni { display:flex; align-items:center; gap:var(--space-1); color:var(--accent); }
 .msg-origin.msg-autopilot { display:flex; align-items:center; gap:var(--space-1); color:var(--accent); }
 /* The auto mode's level on the message: a word, quiet like the other origins, that opens the correction. */
-.msg-origin.msg-depth { display:inline-flex; align-items:center; background:none; border:0; padding:0; font:inherit; font-size:var(--fs-11); cursor:pointer; color:var(--fg-3); }
-.msg-origin.msg-depth:hover, .msg-origin.msg-depth[aria-expanded="true"] { color:var(--accent); }
-.msg-origin.msg-depth.long { color:var(--accent); }
-.msg-origin.msg-depth + .msg-text { margin-top:2px; }
 
 .thinking-head { align-self:flex-start; display:flex; align-items:center; gap:8px; max-width:100%; min-width:0; background:none; border:0; border-radius:var(--radius-xs); color:var(--fg-2); font-size:var(--fs-14); min-height:28px; padding:2px 0; cursor:pointer; text-align:left; }
 .thinking-head .worked, .thinking-head .steps { white-space:nowrap; flex:none; }
@@ -3051,17 +3047,18 @@ input.field[type="range"] {
 .composer-mode { display:inline-flex; align-items:center; gap:var(--space-1); flex:0 1 auto; min-width:0; max-width:180px; height:var(--ctl-h-sm); padding-inline:var(--space-2); border:0; border-radius:var(--radius-lg); background:var(--surface-2); color:var(--fg-2); font:inherit; font-size:var(--fs-13); cursor:pointer; }
 .composer-mode:hover, .composer-mode.on { color:var(--fg); }
 .composer-mode .ic { flex:none; color:var(--fg-3); }
-.composer-mode.yagni { background:color-mix(in srgb, var(--accent) 14%, var(--surface-2)); }
-.composer-mode .mode-yagni { flex:none; color:var(--accent); font-size:var(--fs-11); font-weight:600; }
+.composer-mode.yagni, .composer-mode.autopilot { background:color-mix(in srgb, var(--accent) 14%, var(--surface-2)); }
+.composer-mode .mode-yagni, .composer-mode .mode-autopilot { flex:none; color:var(--accent); font-size:var(--fs-11); font-weight:600; }
+/* The longer word is the one that gives way when both switches are on in a narrow composer. */
+.composer-mode .mode-autopilot { flex:0 1 auto; min-width:0; }
 .mode-menu { width:min(340px, 92vw); max-height:70vh; overflow-y:auto; }
 .mode-list { display:flex; flex-direction:column; }
-/* The one heading of the composer's menus: mode, model and effort open under the same small title. */
+/* The one heading of the composer's menus: model and effort open under the same small title. */
 .menu-heading { padding:var(--space-1) 10px; font-size:var(--fs-12); font-weight:400; }
 .model-heading { display:flex; align-items:center; gap:10px; }
 .model-legend { display:inline-flex; align-items:center; gap:3px; color:var(--fg-3); font-size:var(--fs-11); white-space:nowrap; }
 .model-legend .model-kind { width:auto; height:auto; min-width:0; font-size:var(--fs-11); }
 .mode-row .model-text .sub { white-space:normal; }
-.mode-row[aria-checked="true"] > .ic { color:var(--accent); }
 .mode-switch { flex:none; position:relative; width:28px; height:16px; border-radius:8px; background:var(--line-strong); transition:background var(--t-fast); }
 .mode-switch i { position:absolute; top:2px; left:2px; width:12px; height:12px; border-radius:50%; background:var(--surface-1); transition:transform var(--t-fast); }
 .mode-switch.on { background:var(--accent); }

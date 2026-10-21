@@ -114,8 +114,8 @@ class Door:
         ]
         self.consented = True
         self.details = {
-            "s1": {"id": "s1", "title": "Pay the electricity bill", "status": "idle", "messages": messages(refusal="0123456789ab"), "model": "Claude Opus", "mode": "", "workspace": "/w", "folders": [], "pending": None, "thinking": True, "reasoning_effort": "medium"},
-            "s2": {"id": "s2", "title": "Find flights to Lisbon", "status": "idle", "messages": messages()[:1], "model": "Claude Opus", "mode": "", "workspace": "/w", "folders": [], "pending": None, "thinking": True, "reasoning_effort": "medium"},
+            "s1": {"id": "s1", "title": "Pay the electricity bill", "status": "idle", "messages": messages(refusal="0123456789ab"), "model": "Claude Opus", "workspace": "/w", "folders": [], "pending": None, "thinking": True, "reasoning_effort": "medium"},
+            "s2": {"id": "s2", "title": "Find flights to Lisbon", "status": "idle", "messages": messages()[:1], "model": "Claude Opus", "workspace": "/w", "folders": [], "pending": None, "thinking": True, "reasoning_effort": "medium"},
         }
         self.posts: list[tuple[str, object]] = []
         self.foreign: list[str] = []
@@ -146,8 +146,6 @@ class Door:
             return self.json(route, {"presets": {"opus": {"label": "Claude Opus", "provider": "anthropic", "model": "claude-opus"}}, "providers": {"anthropic": {"kind": "anthropic", "name": "Anthropic", "billing": ""}}, "model": {"preset": "opus"}})
         if rel == "/api/panel/asr":
             return self.json(route, {"configured": True, "reason": "", "provider": "local", "model": "whisper", "max_seconds": 300, "autosend": False})
-        if rel == "/api/panel/modes":
-            return self.json(route, {})
         if len(parts) >= 5 and parts[3] == "sessions":
             sid = parts[4]
             tail = "/".join(parts[5:])

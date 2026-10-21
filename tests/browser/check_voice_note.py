@@ -64,7 +64,7 @@ def detail() -> dict:
         "workspace_name": "ws", "workspace_own": True, "workspace_sessions": [], "pending": None, "model": "Claude Opus 5", "provider": "claude",
         "project": {"id": "p", "name": "Project", "folders": folders("/workspace"), "settings": {"snapshots": True}},
         "configured_model": "opus", "effective_model": "opus", "fallback": None,
-        "thinking": False, "reasoning_effort": "", "mode": "", "yagni": False, "brief": "",
+        "thinking": False, "reasoning_effort": "", "yagni": False, "brief": "",
         "tools_off": [], "loop": None, "services": [], "subagents": [], "usage": {}, "context": None, "messages": [],
     }
 

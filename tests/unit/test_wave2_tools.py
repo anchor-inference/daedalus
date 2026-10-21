@@ -12,7 +12,6 @@ from protocore.contracts.tools import ToolContext
 
 from daedalus.config import (
     COMPANION_ONLY_TOOLS,
-    DEFAULT_MODES,
     ORCHESTRATOR_ONLY_TOOLS,
     PROMPT_COACH_ONLY_TOOLS,
     STAFF_ONLY_TOOLS,
@@ -103,27 +102,21 @@ async def test_exec_keeps_the_tail_and_spills_the_whole_output(tmp_path: Path) -
         locator.unregister("w2-spill")
 
 
-async def test_plan_mode_is_an_allow_list_that_a_settings_toggle_cannot_disarm(settings, db) -> None:  # type: ignore[no-untyped-def]
+async def test_a_working_session_is_blocked_only_from_other_roles_tools_and_what_it_switched_off(settings, db) -> None:  # type: ignore[no-untyped-def]
     from daedalus.host.session_runner import SessionManager
 
-    plan = DEFAULT_MODES["plan"]
-    assert {"Read", "Search", "WebFetch", "AskUser"} <= set(plan.tools_only) and "plan" in RuntimeConfig().modes
     manager = SessionManager(settings, RuntimeConfig(), db=db)
     await manager.start()
     try:
-        state = await manager.create_session("plan")
+        state = await manager.create_session("work")
         known = {t.name for t in manager.tools.list_all()}
         # A working session is blocked from the concierge's, staff's, orchestrator's, subagents' and prompt coach's own tools and from nothing else.
         others = set(COMPANION_ONLY_TOOLS) | set(STAFF_ONLY_TOOLS) | (known & set(ORCHESTRATOR_ONLY_TOOLS)) | set(SUBAGENT_ONLY_TOOLS) | set(PROMPT_COACH_ONLY_TOOLS)
         assert manager.blocked_tools_for(state) == others
-        await manager.set_mode(state.session.id, "plan")
-        blocked = manager.blocked_tools_for(state)
-        assert {"Exec", "Verify", "Write", "Edit", "MultiEdit", "SendFile", "SelfPropose", "SubAgent", "AskPeer", "McpEnable", "ServiceStart"} <= blocked
-        assert blocked == (known - set(plan.tools_only)) | others
         await manager.set_tools_off(state.session.id, ["WebSearch"])
-        assert "Exec" in manager.blocked_tools_for(state) and "WebSearch" in manager.blocked_tools_for(state)
-        await manager.set_mode(state.session.id, "")
         assert manager.blocked_tools_for(state) == {"WebSearch"} | others
+        await manager.set_tools_off(state.session.id, [])
+        assert manager.blocked_tools_for(state) == others
     finally:
         await manager.close()
 
@@ -140,7 +133,7 @@ async def test_child_effective_policy_tracks_parent_revocation_for_advertisement
         advertised_before_revoke = manager.tool_policy_for(child)
         assert policy_admits(advertised_before_revoke, "Exec")
 
-        await manager.set_mode(leader.session.id, "plan")
+        await manager.set_tools_off(leader.session.id, ["Exec", "Verify", "ServiceStart"])
         advertised = manager.tool_policy_for(child)
         assert {"Exec", "Verify", "ServiceStart"} <= advertised.blocked
         assert not any(policy_admits(advertised, name) for name in ("Exec", "Verify", "ServiceStart"))
@@ -152,7 +145,7 @@ async def test_child_effective_policy_tracks_parent_revocation_for_advertisement
         # A task-local update may narrow the child, but cannot restore a capability its parent removed.
         await manager.set_tools_off(child.session.id, [])
         assert "Exec" in manager.tool_policy_for(child).blocked
-        await manager.set_mode(leader.session.id, "")
+        await manager.set_tools_off(leader.session.id, [])
         assert "Exec" not in manager.tool_policy_for(child).blocked
         await manager.set_tools_off(child.session.id, ["Exec"])
         assert manager.policy_gate(child.session.id, "run-child").decide("Exec", {"command": "true"}).action == "deny"

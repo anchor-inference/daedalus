@@ -255,9 +255,8 @@ class Subagents:
         }
         if withheld:
             metadata["tools_off"] = withheld
-        for key in ("mode", "mcp"):
-            if leader.metadata.get(key) is not None:
-                metadata[key] = leader.metadata[key]
+        if leader.metadata.get("mcp") is not None:
+            metadata["mcp"] = leader.metadata["mcp"]
         # A subagent works beside its leader, which in a project means inside the project: the same
         # folder and the same wall. The project is passed rather than the directory, because the
         # directory alone would give the child the leader's files with none of the containment —

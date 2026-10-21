@@ -1024,7 +1024,7 @@ class OpenAICompatibleProvider(ILLMProvider):
         if self._usage_sink is not None:
             obs = request.observability
             if obs is not None and obs.call_category == "assist" and obs.call_purpose:
-                # A helper around the operator's messages (the depth sort, the next-message guess,
+                # A helper around the operator's messages (the next-message guess, the autopilot judge,
                 # meeting notes) is booked under its own name, so Usage shows what each one costs
                 # apart from the runs, and a helper's daily cap can be summed from the ledger.
                 purpose = obs.call_purpose

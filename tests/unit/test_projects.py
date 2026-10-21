@@ -593,7 +593,7 @@ async def test_a_spawned_agent_of_a_project_session_stays_in_the_project(setting
         parent = await manager.create_session("parent", project_id=project.id)
         child_id = await front._service_spawn_agent(
             parent.session.id, title="Helper", brief="help", files=[str(root / "howto.md")],
-            first_message=None, preset=None, mode=None, mcp=[], peer_name=None,
+            first_message=None, preset=None, mcp=[], peer_name=None,
         )
         child = await manager.get_state(child_id)
         assert child is not None and child.project is not None and child.project.id == project.id

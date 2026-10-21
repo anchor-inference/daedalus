@@ -1,6 +1,6 @@
 """Autopilot and the style profile in a real browser.
 
-A turn autopilot sent is labelled on the message, and the label names what it was. The mode menu
+A turn autopilot sent is labelled on the message, and the label names what it was. The toggles menu
 offers the session's autopilot switch beside YAGNI with the turns it took since the operator's last
 message, and switching it off goes to the host at once. Settings → Chat shows autopilot's settings
 with the day's spend and verdicts, and the learned style profile with a Forget button that asks first.
@@ -59,8 +59,10 @@ def main() -> None:
         expect(labels.nth(1)).to_have_text("Autopilot · your choice")
         expect(labels.nth(1)).to_have_attribute("title", "You chose: Changelog")
 
-        # The switch in the mode menu, with the turns taken, and off at once.
-        page.locator(".composer .composer-mode").click()
+        # The switch in the toggles menu, with the turns taken, and off at once; the chip names it while on.
+        chip = page.locator(".composer .composer-mode")
+        expect(chip).to_have_text("Autopilot")
+        chip.click()
         row = page.locator(".autopilot-row")
         expect(row).to_have_attribute("aria-checked", "true")
         expect(row).to_contain_text("1 of 3 turns used since your last message")
@@ -68,6 +70,7 @@ def main() -> None:
         expect(row).to_have_attribute("aria-checked", "false")
         assert SWITCHED == [{"on": False}], SWITCHED
         page.keyboard.press("Escape")
+        expect(chip).to_have_text("Agent")
 
         # Settings → Chat: autopilot's settings and today's numbers, and the profile with Forget.
         settings = browser.new_page(viewport={"width": 1440, "height": 900})

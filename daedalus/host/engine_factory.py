@@ -18,7 +18,7 @@ from protocore.runtime.tool_permission import (
     ToolPermissionOutcome,
 )
 
-from daedalus.config import ModeConfig, RuntimeConfig, core_compaction_trigger
+from daedalus.config import RuntimeConfig, core_compaction_trigger
 from daedalus.host import prompts
 from daedalus.host.hooks import DaedalusHookManager
 from daedalus.providers.openai_compat import OpenAICompatibleProvider
@@ -113,19 +113,25 @@ def stale_trim_batch_chars(config: RuntimeConfig, context_window: int) -> int:
     return max(results.trim_batch_chars, by_window)
 
 
-def runtime_constants(config: RuntimeConfig, *, context_window: int, max_output_tokens: int, thinking: bool, mode: ModeConfig | None = None, max_advertised_tools: int = 0) -> Any:
-    """``max_advertised_tools`` is the provider's cap on the number of tools in one request, 0 for none."""
+UNCAPPED_TURNS = 1_000_000
+"""What the core is given when nothing caps a run's model calls: it insists on a positive cap, and
+this one is never reached by work, only by a loop no other guard caught."""
+
+
+def runtime_constants(config: RuntimeConfig, *, context_window: int, max_output_tokens: int, thinking: bool, max_iterations: int = 0, max_advertised_tools: int = 0) -> Any:
+    """``max_iterations`` is a role's own bound on model calls (an orchestrator's turn), 0 for the
+    operator's ``limits.max_iterations``, itself 0 for none; ``max_advertised_tools`` is the
+    provider's cap on the number of tools in one request, 0 for none."""
     context_window = max(8_000, int(context_window))
     output_cap = max(1024, min(max_output_tokens, context_window))
-    max_iterations = mode.max_iterations if mode is not None and mode.max_iterations else config.limits.max_iterations
-    tool_timeout = mode.tool_timeout_seconds if mode is not None and mode.tool_timeout_seconds else config.limits.tool_timeout_seconds
+    turns = max_iterations or config.limits.max_iterations or UNCAPPED_TURNS
     return default_runtime_constants(
         model_context_window=context_window,
         llm_output_max_tokens_ratio=min(1.0, max(0.01, output_cap / context_window)),
-        max_turns_per_run=max_iterations,
+        max_turns_per_run=turns,
         # Long runs are the point: no cumulative output-token budget per run; turns, spend and the operator bound it.
         run_max_output_tokens_budget=0,
-        tool_timeout_seconds=int(tool_timeout),
+        tool_timeout_seconds=int(config.limits.tool_timeout_seconds),
         steer_follow_up_enabled=True,
         # The core's session work pool is not used here: Exec runs background jobs itself and the job
         # watcher (daedalus/extensions/jobs.py) wakes the session when one ends. Left on, the core
@@ -182,14 +188,13 @@ def runtime_constants(config: RuntimeConfig, *, context_window: int, max_output_
 Role = Literal["agent", "companion", "coach", "btw", "orchestrator", "dispatcher"]
 
 
-def _agent_sections(deps: EngineDeps, config: RuntimeConfig, *, mode: ModeConfig | None, workspace: Path, session_title: str, model: str, extra_notes: str, project: str, advertised: Collection[str], admitted: Collection[str]) -> tuple[str, ...]:
+def _agent_sections(deps: EngineDeps, config: RuntimeConfig, *, workspace: Path, session_title: str, model: str, extra_notes: str, project: str, advertised: Collection[str], admitted: Collection[str]) -> tuple[str, ...]:
     return (
         prompts.PERSONA,
         prompts.rules_section(config.prompt.rules),
         prompts.language_section(config.answer_language),
         prompts.governance_section(deps.governance_path),
         *prompts.tool_sections(advertised, admitted=admitted),
-        (mode.prompt.strip() + "\n") if mode is not None and mode.prompt.strip() else "",
         prompts.environment_section(
             workspace=workspace,
             bot_repo=deps.bot_repo,
@@ -246,7 +251,7 @@ def build_engine(
     max_output_tokens: int = 32_000,
     extra_notes: str = "",
     tool_visibility_policy: ToolVisibilityPolicy | None = None,
-    mode: ModeConfig | None = None,
+    max_iterations: int = 0,
     role: Role = "agent",
     project: str = "",
     max_advertised_tools: int = 0,
@@ -293,7 +298,7 @@ def build_engine(
         system_prompt_sections=tuple(s for s in sections if s),
         tool_visibility_policy=tool_visibility_policy or ToolVisibilityPolicy(),
         rc=runtime_constants(
-            config, context_window=context_window, max_output_tokens=max_output_tokens, thinking=thinking, mode=mode, max_advertised_tools=max_advertised_tools,
+            config, context_window=context_window, max_output_tokens=max_output_tokens, thinking=thinking, max_iterations=max_iterations, max_advertised_tools=max_advertised_tools,
         ),
         thinking_enabled=thinking,
         reasoning_effort=reasoning_effort,
@@ -327,7 +332,7 @@ def build_engine(
         # sections that carry rules follow what the policy admits and the ones that only teach follow
         # the surface; ``prompts.tool_sections`` says which is which.
         sections = _agent_sections(
-            deps, config, mode=mode, workspace=workspace, session_title=session_title, model=model, extra_notes=extra_notes, project=project, advertised=advertised_tools(engine), admitted=admitted_tools(engine),
+            deps, config, workspace=workspace, session_title=session_title, model=model, extra_notes=extra_notes, project=project, advertised=advertised_tools(engine), admitted=admitted_tools(engine),
         )
         engine.config = replace(engine.config, system_prompt_sections=tuple(s for s in sections if s))
     deps.event_stream.bind_run(run_id, session_id)
