@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 // The Computer control in each of its states: nothing outside the native application; the grant form
-// when nobody holds the computer; the banner with Stop while this conversation does; Resume only while
-// the operator's own hand has paused the agent; another conversation's grant said as such; the macOS
-// permission rows with Ask and the settings link; and a refusal shown in its words, never its code.
+// when nobody holds the computer, with a picture per window and a monitor chosen on a map of the
+// desk; the banner with Stop while this conversation does; Resume only while the operator's own hand
+// has paused the agent; another conversation's grant said as such; the macOS permission rows with
+// Ask and the settings link; and a refusal shown in its words, never its code.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -31,6 +32,11 @@ const APPS = {
     { id: "pid:504", name: "setup", reachable: false, elevated: true, windows: [{ id: "13", title: "Administrator: setup" }] },
   ],
 };
+
+const DISPLAYS = [
+  { id: "2", bounds: { x: 1920, y: 0, w: 2560, h: 1440 }, primary: false, pixels_per_unit: 1.5, scale: 1.5 },
+  { id: "1", name: "Built-in", bounds: { x: 0, y: 0, w: 1920, h: 1080 }, primary: true, pixels_per_unit: 1, scale: 1 },
+];
 
 describe("where a conversation stands", () => {
   it("reads the state", () => {
@@ -121,25 +127,53 @@ describe("the control", () => {
     expect(box.textContent).toContain("Give control");
     // A window's title is shown as plain text, whatever it contains.
     expect(box.textContent).toContain("<b>todo</b>");
-    expect(box.querySelector("b b")).toBeNull();
-    // An app the system will not let input reach cannot be chosen.
-    const elevated = [...box.querySelectorAll<HTMLInputElement>("input[type=radio]")].find((r) => r.value === "13")!;
+    expect(box.querySelector(".cu-card b b")).toBeNull();
+    // An app the system will not let input reach cannot be chosen, and says why.
+    const elevated = box.querySelector<HTMLButtonElement>(".cu-card[data-value='13']")!;
     expect(elevated.disabled).toBe(true);
+    expect(elevated.textContent).toContain("runs as administrator");
+    // Each card asks for its own picture, small; the elevated one asks for none.
+    const asked = (fetch as unknown as { mock: { calls: [string][] } }).mock.calls.map(([url]) => String(url));
+    expect(asked).toContain("/api/computer/preview?window=10&max=320");
+    expect(asked.some((url) => url.includes("window=13"))).toBe(false);
     const grant = button(box, "Give control for 30 min")!;
     expect(grant.disabled).toBe(true);
+    expect(box.textContent).toContain("Choose a window below");
     await act(async () => button(box, "10 min")!.click());
-    const radio = [...box.querySelectorAll<HTMLInputElement>("input[type=radio]")].find((r) => r.value === "10")!;
-    await act(async () => radio.click());
+    await act(async () => box.querySelector<HTMLButtonElement>(".cu-card[data-value='10']")!.click());
+    expect(box.querySelector(".cu-card[data-value='10']")?.getAttribute("aria-checked")).toBe("true");
+    expect(box.textContent).toContain("notes.txt · 10 min");
     await act(async () => button(box, "Give control for 10 min")!.click());
     expect(sent).toEqual([{ url: "/api/computer/grant", method: "POST", body: { session_id: SESSION, scope: { kind: "window", window: "10" }, minutes: 10 } }]);
+  });
+
+  it("grants one of two monitors, chosen on the map of the desk", async () => {
+    await show(state({ displays: DISPLAYS }), <ComputerSheet sessionId={SESSION} toast={() => undefined} onClose={() => undefined} />);
+    const box = sheet()!;
+    await act(async () => button(box, "Monitor")!.click());
+    const tiles = [...box.querySelectorAll<HTMLButtonElement>(".cu-map-tile")];
+    // The primary monitor comes first and says so; the second has no name and is numbered.
+    expect(tiles.map((tile) => tile.dataset.display)).toEqual(["1", "2"]);
+    expect(tiles[0].textContent).toContain("Primary");
+    expect(tiles[1].textContent).toContain("Display 2");
+    expect(button(box, "Give control for 30 min")!.disabled).toBe(true);
+    await act(async () => tiles[1].click());
+    expect(box.querySelector(".cu-stage-caption")?.textContent).toBe("Display 2 · 3840 × 2160 · 150 %");
+    await act(async () => tiles[0].click());
+    expect(box.querySelector(".cu-stage-caption")?.textContent).toBe("Built-in · Primary · 1920 × 1080");
+    await act(async () => tiles[1].click());
+    await act(async () => button(box, "1 h")!.click());
+    await act(async () => button(box, "Give control for 60 min")!.click());
+    expect(sent).toEqual([{ url: "/api/computer/grant", method: "POST", body: { session_id: SESSION, scope: { kind: "display", display: "2" }, minutes: 60 } }]);
   });
 
   it("refuses a number of minutes out of bounds before anything is sent", async () => {
     await show(state(), <ComputerSheet sessionId={SESSION} toast={() => undefined} onClose={() => undefined} />);
     const box = sheet()!;
     await act(async () => button(box, "Whole desktop")!.click());
+    await act(async () => button(box, "Other")!.click());
     const field = box.querySelector<HTMLInputElement>(".computer-minutes")!;
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(field), "value")!.set!;
     await act(async () => {
       setter.call(field, "500");
       field.dispatchEvent(new Event("input", { bubbles: true }));

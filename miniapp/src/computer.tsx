@@ -1,5 +1,6 @@
 // The Computer control of a conversation: control of the operator's own desktop given to this
-// conversation for a while, within one window, one app or the whole desktop, and taken back.
+// conversation for a while, within one window, one app, one monitor or the whole desktop, and taken
+// back. What a grant covers is chosen in the scope picker (computerpicker.tsx).
 //
 // Only the native application offers it (`GET /api/computer` says `native: true`); everywhere else
 // nothing here is drawn. The rules that must hold even when the agent misbehaves are the desktop
@@ -25,15 +26,13 @@ import { DICT, t } from "./i18n";
 import { Icon } from "./icons";
 import { invalidate, useQuery } from "./store";
 import { errorText } from "./ui";
-import { Segmented } from "./ui/components";
 import { Sheet } from "./ui/dialogs";
+import { COMPUTER, type ComputerDisplay, type ComputerScope } from "./computerscope";
+import { ComputerScopePicker } from "./computerpicker";
 
-export const COMPUTER = "/api/computer";
-export const COMPUTER_APPS = "/api/computer/apps";
-
-/** The choices of how long, in minutes, and the bound the host holds a grant to. */
-export const PRESETS = [10, 30, 60] as const;
-export const MAX_MINUTES = 240;
+export { COMPUTER, COMPUTER_APPS, MAX_MINUTES, PRESETS } from "./computerscope";
+export type { ComputerApp, ComputerDisplay, ComputerScope, ComputerWindow, ScopeKind } from "./computerscope";
+export { ComputerScopePicker } from "./computerpicker";
 
 /** While the control or the banner is on screen the state is read this often, so a pause, a Stop
  *  from the shell or the end of the grant shows within moments. */
@@ -42,8 +41,6 @@ export const POLL_MS = 3000;
 export const IDLE_POLL_MS = 20000;
 
 export type PermissionState = "granted" | "denied" | "unknown" | "not_applicable";
-export type ScopeKind = "window" | "app" | "display" | "desktop";
-export type ComputerScope = { kind: ScopeKind; window?: string; app?: string; display?: string };
 export type ComputerLease = { id: string; session: string; expires_at?: string; scope?: ComputerScope; max_actions?: number; actions?: number };
 export type ComputerState = {
   native: boolean;
@@ -57,9 +54,8 @@ export type ComputerState = {
   lease?: { active: boolean; lease?: ComputerLease; remaining_ms?: number };
   human?: { paused: boolean; since?: string; resumes_at?: string };
   settings_links?: { screen?: string; accessibility?: string };
+  displays?: ComputerDisplay[];
 };
-export type ComputerWindow = { id: string; title: string; focused?: boolean; minimized?: boolean };
-export type ComputerApp = { id: string; name: string; reachable?: boolean; elevated?: boolean; windows: ComputerWindow[] };
 
 /** A sentence the host names by a key of the dictionary and the values for its holes. */
 export type Words = { key: string; vars?: Record<string, string | number> };
@@ -266,7 +262,11 @@ export function ComputerSheet({ sessionId, toast, onClose }: { sessionId: string
           )}
           {error && <div className="runerror computer-error" role="alert"><Icon name="alert" size={14} /><span>{error}</span></div>}
           {view !== "mine" && view !== "paused" && (
-            <GrantForm busy={busy} onGrant={(scope, minutes) => void act(`${COMPUTER}/grant`, { session_id: sessionId, scope, minutes }, t("cu.granted", { n: minutes }))} />
+            <div className="computer-grant">
+              <div className="section-title">{t("cu.grant.title")}</div>
+              <ComputerScopePicker busy={busy} onGrant={(scope, minutes) => void act(`${COMPUTER}/grant`, { session_id: sessionId, scope, minutes }, t("cu.granted", { n: minutes }))} />
+              <div className="sub computer-grant-note">{t("cu.grant.note")}</div>
+            </div>
           )}
           {state && <Permissions state={state} busy={busy} onAsk={(which) => void act(`${COMPUTER}/permissions`, { which })} />}
         </>
@@ -278,74 +278,6 @@ export function ComputerSheet({ sessionId, toast, onClose }: { sessionId: string
 function scopeWords(scope: ComputerScope | undefined): string {
   if (!scope) return "";
   return t(`cu.scope.now.${scope.kind}`);
-}
-
-function GrantForm({ busy, onGrant }: { busy: boolean; onGrant: (scope: ComputerScope, minutes: number) => void }) {
-  const [minutes, setMinutes] = useState<number>(30);
-  const [typed, setTyped] = useState("30");
-  const [kind, setKind] = useState<"window" | "app" | "desktop">("window");
-  const [picked, setPicked] = useState("");
-  const apps = useQuery<{ apps: ComputerApp[] }>(kind === "desktop" ? null : COMPUTER_APPS, { pollMs: POLL_MS * 2 });
-  const list = apps.data?.apps ?? [];
-  useEffect(() => setPicked(""), [kind]);
-  const valid = Number.isInteger(minutes) && minutes >= 1 && minutes <= MAX_MINUTES;
-  const ready = valid && (kind === "desktop" || !!picked);
-  function choose(value: number) {
-    setMinutes(value);
-    setTyped(String(value));
-  }
-  function grant() {
-    if (!ready) return;
-    const scope: ComputerScope = kind === "desktop" ? { kind } : kind === "app" ? { kind, app: picked } : { kind, window: picked };
-    onGrant(scope, minutes);
-  }
-  return (
-    <div className="computer-grant">
-      <div className="section-title">{t("cu.grant.title")}</div>
-      <div className="computer-line">
-        <span className="computer-label">{t("cu.minutes")}</span>
-        <Segmented<string> value={PRESETS.includes(minutes as 10) ? String(minutes) : ""} label={t("cu.minutes")}
-          options={PRESETS.map((n) => ({ id: String(n), label: t("cu.preset", { n }) }))} onChange={(id) => choose(Number(id))} />
-        <input className={`field computer-minutes ${valid ? "" : "invalid"}`} type="number" inputMode="numeric" min={1} max={MAX_MINUTES} step={1}
-          value={typed} aria-label={t("cu.minutes.custom")} aria-invalid={!valid}
-          onChange={(e) => { setTyped(e.target.value); setMinutes(Number(e.target.value)); }} />
-      </div>
-      {!valid && <div className="sub attn">{t("cu.minutes.bound", { n: MAX_MINUTES })}</div>}
-      <div className="computer-line">
-        <span className="computer-label">{t("cu.scope")}</span>
-        <Segmented<"window" | "app" | "desktop"> value={kind} label={t("cu.scope")}
-          options={[{ id: "window", label: t("cu.scope.window") }, { id: "app", label: t("cu.scope.app") }, { id: "desktop", label: t("cu.scope.desktop") }]} onChange={setKind} />
-      </div>
-      {kind === "desktop" ? (
-        <div className="sub attn">{t("cu.scope.desktop.warn")}</div>
-      ) : (
-        <div className="computer-list" role="radiogroup" aria-label={t(kind === "window" ? "cu.pick.window" : "cu.pick.app")}>
-          {apps.loading && <div className="sub">{t("cu.apps.loading")}</div>}
-          {apps.error && !list.length && <div className="sub attn">{apps.error}</div>}
-          {!apps.loading && !apps.error && !list.length && <div className="sub">{t("cu.apps.none")}</div>}
-          {kind === "app"
-            ? list.map((app) => (
-              <label key={app.id} className={`computer-row ${app.reachable === false ? "off" : ""}`}>
-                <input type="radio" name="computer-target" value={app.id} checked={picked === app.id} disabled={app.reachable === false} onChange={() => setPicked(app.id)} />
-                <span className="computer-row-main"><b className="truncate">{app.name}</b>
-                  <span className="sub truncate">{app.reachable === false ? t("cu.app.elevated") : t("cu.app.windows", { n: app.windows.length })}</span></span>
-              </label>
-            ))
-            : list.flatMap((app) => app.windows.map((w) => (
-              <label key={`${app.id}/${w.id}`} className={`computer-row ${app.reachable === false ? "off" : ""}`}>
-                <input type="radio" name="computer-target" value={w.id} checked={picked === w.id} disabled={app.reachable === false} onChange={() => setPicked(w.id)} />
-                <span className="computer-row-main"><b className="truncate">{w.title || t("cu.window.untitled")}</b>
-                  <span className="sub truncate">{[app.name, w.minimized ? t("cu.window.minimized") : "", app.reachable === false ? t("cu.app.elevated") : ""].filter(Boolean).join(" · ")}</span></span>
-              </label>
-            )))}
-        </div>
-      )}
-      <div className="computer-actions">
-        <button type="button" className="btn primary" disabled={busy || !ready} onClick={grant}>{t("cu.grant", { n: valid ? minutes : "…" })}</button>
-      </div>
-      <div className="sub">{t("cu.grant.note")}</div>
-    </div>
-  );
 }
 
 function Permissions({ state, busy, onAsk }: { state: ComputerState; busy: boolean; onAsk: (which: "screen" | "accessibility") => void }) {

@@ -180,3 +180,35 @@ body:has(.quick) #root { min-height: 0; }
 .quick-status-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 
 .quick-signedout { display: flex; align-items: center; gap: var(--space-3); justify-content: space-between; color: var(--fg-2); font-size: var(--fs-13); }
+
+/* The Computer chip beside the target, and the scope picker it opens. The picker unfolds by its grid
+   row going from nothing to its own height, so the window — sized to the page by a ResizeObserver —
+   grows with it frame by frame instead of jumping; it stays mounted until the fold has closed. */
+.quick-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--ctl-h-sm);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--fg-2);
+  font: inherit;
+  font-size: var(--fs-12);
+  cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+.quick-mode:hover { background: var(--surface-2); color: var(--fg); }
+.quick-mode.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--fg); }
+.quick-target:disabled { cursor: default; opacity: 1; }
+
+.quick-computer {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 280ms var(--ease-out), opacity 200ms ease;
+}
+.quick-computer.open { grid-template-rows: 1fr; opacity: 1; }
+.quick-computer-inner { min-height: 0; overflow: hidden; }
+.quick-computer.open .quick-computer-inner { padding-bottom: 2px; }

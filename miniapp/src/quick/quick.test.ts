@@ -5,7 +5,9 @@ import { acceleratorFrom, showAccelerator } from "./accelerator";
 import {
   appshotError,
   composeMessage,
-  defaultTarget,
+  DEFAULT_TARGET,
+  computerGrant,
+  computerSession,
   delivery,
   deskStatus,
   lastSession,
@@ -36,10 +38,15 @@ describe("where Quick Chat sends", () => {
     expect(lastSession([], "")).toBeNull();
   });
 
-  it("defaults to the companion, then the last chat, then a new one", () => {
-    expect(defaultTarget(true, session("a"))).toBe("companion");
-    expect(defaultTarget(false, session("a"))).toBe("last");
-    expect(defaultTarget(false, null)).toBe("new");
+  it("defaults to a new chat, whether or not there is a companion or a last chat", () => {
+    expect(DEFAULT_TARGET).toBe("new");
+  });
+
+  it("starts a Computer request in a new chat of kind computer, granted in the host's terms", () => {
+    expect(computerSession("Fill in the table", [])).toEqual({ autotitle: true, title: "Fill in the table", kind: "computer" });
+    expect(computerSession("x".repeat(100), [{ kind: "project", id: "p1", name: "Report" }])).toEqual({ autotitle: true, title: "x".repeat(80), kind: "computer", project_id: "p1" });
+    expect(computerSession("", []).title).toBe("New computer chat");
+    expect(computerGrant("s9", { kind: "display", display: "2" }, 30)).toEqual({ session_id: "s9", scope: { kind: "display", display: "2" }, minutes: 30 });
   });
 
   it("sends words to the companion's endpoint and a picture through its session's upload", () => {

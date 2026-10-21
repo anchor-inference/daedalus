@@ -24,8 +24,9 @@ import json
 import sys
 import urllib.error
 import urllib.request
+import zlib
 from datetime import UTC, datetime, timedelta
-from urllib.parse import unquote, unquote_plus
+from urllib.parse import parse_qs, unquote, unquote_plus, urlsplit
 
 from calendar_stub import CalendarStub
 from companion_stub import CompanionStub
@@ -242,13 +243,52 @@ class LauncherStub:
         return None
 
 
+def preview_png(key: str, width: int, height: int) -> bytes:
+    """A small picture of a window or a screen for the Computer control's previews, made here so no
+    image file has to live beside the stubs: a backdrop in a colour of its own per ``key``, a title
+    bar, a side column and a few lines of "text", so two cards never look alike and a card plainly
+    shows a picture rather than a blank."""
+    palette = [(46, 74, 128), (30, 110, 98), (120, 64, 110), (148, 96, 40), (60, 60, 72), (36, 92, 140)]
+    seed = sum(key.encode()) % len(palette)
+    base = palette[seed]
+    width, height = max(16, width), max(16, height)
+
+    def shade(colour: tuple[int, int, int], by: float) -> bytes:
+        return bytes(max(0, min(255, int(c * by))) for c in colour)
+
+    backdrop, bar, column, line, accent = shade(base, 1.0), shade(base, 0.55), shade(base, 0.8), shade((236, 236, 240), 1.0), shade((45, 212, 191), 1.0)
+    bar_h = max(3, height // 12)
+    column_w = width // 4 if not key.startswith("display") else width // 14
+    rects: list[tuple[int, int, int, int, bytes]] = [(0, 0, width, bar_h, bar), (0, bar_h, column_w, height, column)]
+    for n in range(6):
+        y = bar_h + (n + 1) * max(4, height // 9)
+        if y + 3 > height:
+            break
+        rects.append((column_w + width // 16, y, column_w + width // 16 + (width - column_w) * (40 + (n * 13 + seed * 7) % 45) // 100, y + max(2, height // 40), line))
+    rects.append((width - width // 6, bar_h // 3, width - width // 20, bar_h - bar_h // 3, accent))
+    raw = bytearray()
+    for y in range(height):
+        row = bytearray(backdrop * width)
+        for x0, y0, x1, y1, colour in rects:
+            if y0 <= y < y1:
+                row[x0 * 3:x1 * 3] = colour * (x1 - x0)
+        raw += b"\x00" + row
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return len(data).to_bytes(4, "big") + kind + data + zlib.crc32(kind + data).to_bytes(4, "big")
+
+    header = width.to_bytes(4, "big") + height.to_bytes(4, "big") + bytes([8, 2, 0, 0, 0])
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(bytes(raw), 6)) + chunk(b"IEND", b"")
+
+
 class ComputerStub:
-    """The Computer control of a native installation: a macOS desktop with two apps beside Daedalus,
-    no grant until the app makes one, and the writes kept in ``posts``.
+    """The Computer control of a native installation: a macOS desktop with three apps beside Daedalus
+    on two monitors, no grant until the app makes one, and the writes kept in ``posts``.
 
     A grant becomes the lease the state reports, Stop and Revoke end it, ``paused`` stands for the
     operator's hand on the mouse until Resume. The host filters protected apps out, so the apps here
-    are the ones the app is ever shown."""
+    are the ones the app is ever shown; the password manager's window is protected all the same, and
+    its preview is refused as the daemon refuses it. Every preview read is kept in ``previews``."""
 
     LINKS = {
         "screen": "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
@@ -260,7 +300,14 @@ class ComputerStub:
             {"id": "14", "title": "Quarterly report — draft", "focused": False, "in_scope": False, "order": 3}]},
         {"id": "com.example.terminal", "name": "Terminal", "reachable": True, "in_scope": False, "windows": [
             {"id": "12", "title": "shell", "focused": False, "in_scope": False, "order": 2}]},
+        {"id": "com.example.vault", "name": "Vault", "reachable": True, "in_scope": False, "windows": [
+            {"id": "16", "title": "Vault — passwords", "focused": False, "in_scope": False, "order": 4}]},
     ]}
+    DISPLAYS = [
+        {"id": "1", "name": "Built-in Retina Display", "bounds": {"x": 0, "y": 0, "w": 1512, "h": 982}, "primary": True, "pixels_per_unit": 2, "scale": 2},
+        {"id": "2", "name": "DELL U2723QE", "bounds": {"x": 1512, "y": -200, "w": 1920, "h": 1080}, "primary": False, "pixels_per_unit": 2, "scale": 2},
+    ]
+    PROTECTED_WINDOWS = {"16"}
 
     def __init__(self, *, os_name: str = "darwin") -> None:
         self.os_name = os_name
@@ -269,6 +316,7 @@ class ComputerStub:
         self.paused = False
         self.permissions = {"screen": "denied", "accessibility": "granted", "input_monitoring": "unknown"}
         self.posts: list[tuple[str, object]] = []
+        self.previews: list[str] = []
 
     def state(self) -> dict[str, object]:
         remaining = int((self.expires - datetime.now(UTC)).total_seconds() * 1000)
@@ -279,11 +327,50 @@ class ComputerStub:
         out: dict[str, object] = {
             "native": True, "available": True, "os": self.os_name, "session_type": session_type, "permissions": self.permissions,
             "secure": {"locked": False}, "lease": lease, "human": {"paused": bool(self.lease) and self.paused},
-            "displays": [{"id": "1", "name": "Built-in", "bounds": {"x": 0, "y": 0, "w": 1440, "h": 900}, "primary": True, "pixels_per_unit": 2, "scale": 2}],
+            "displays": self.DISPLAYS,
         }
         if self.os_name == "darwin":
             out["settings_links"] = self.LINKS
         return out
+
+    def preview(self, query: str) -> tuple[int, str, bytes]:
+        """``GET /api/computer/preview``: a picture of a window or a display at most ``max`` px on its
+        long edge, a refusal for a protected window, 404 for one that is not on the screen."""
+        params = {k: v[0] for k, v in parse_qs(query).items()}
+        edge = max(16, min(960, int(params.get("max") or 480)))
+        window, display = params.get("window"), params.get("display")
+        self.previews.append(f"window={window}" if window else f"display={display}")
+        refusal = lambda status, code, why: (status, "application/json", json.dumps({"detail": why, "error": {"code": code, "message": why, "data": None, "explanation": why}}).encode())  # noqa: E731
+        if window:
+            if window in self.PROTECTED_WINDOWS:
+                return refusal(409, 1203, "That is a protected window; nothing of it is shown.")
+            if not any(w["id"] == window for app in self.APPS["apps"] for w in app["windows"]):  # type: ignore[index, union-attr]
+                return refusal(404, 1210, "That window is no longer on the screen.")
+            return 200, "image/png", preview_png(f"window{window}", edge, edge * 10 // 16)
+        found = next((d for d in self.DISPLAYS if d["id"] == display), None)
+        if found is None:
+            return refusal(404, 1210, "No such display.")
+        bounds = found["bounds"]
+        w, h = bounds["w"], bounds["h"]  # type: ignore[index]
+        scale = edge / max(w, h)
+        return 200, "image/png", preview_png(f"display{display}", int(w * scale), int(h * scale))
+
+    def fulfil(self, route) -> bool:  # type: ignore[no-untyped-def]
+        """Answer a Playwright route of the Computer control, pictures included; ``False`` for any other."""
+        request = route.request
+        parts = urlsplit(request.url)
+        if "/api/computer" not in parts.path:
+            return False
+        if request.method == "GET" and parts.path.endswith("/api/computer/preview"):
+            status, content_type, body = self.preview(parts.query)
+            route.fulfill(status=status, content_type=content_type, body=body, headers={"Cache-Control": "no-store"})
+            return True
+        sent = json.loads(request.post_data) if request.post_data else None
+        answered = self.answer(request.method, parts.path, sent)
+        if answered is None:
+            return False
+        route.fulfill(status=answered[0], content_type="application/json", body=json.dumps(answered[1]))
+        return True
 
     def answer(self, method: str, path: str, body: object) -> tuple[int, object] | None:
         path = path.split("?", 1)[0]
@@ -770,6 +857,16 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         if method.upper() == "DELETE":
             return 200, "application/json", json.dumps({"deleted": 1})
         return 200, "application/json", json.dumps({"btw": {"session_id": f"btw-{parts[3]}", "parent_id": parts[3], "lent": 2}})
+    if method.upper() == "GET" and path == "/api/computer/preview":
+        # A picture for the Computer control's cards; a harness with a native desktop installs
+        # ComputerStub, which also refuses a protected window and counts the reads.
+        return ComputerStub().preview(query)
+    if method.upper() == "POST" and path == "/api/sessions":
+        # A new conversation of the kind asked for ('chat', 'computer' or 'chrome'); a harness that lists
+        # the new chat afterwards answers this itself.
+        sent = body if isinstance(body, dict) else {}
+        kind = sent.get("kind") if sent.get("kind") in ("chat", "computer", "chrome") else "chat"
+        return 200, "application/json", json.dumps({"id": "new-session", "title": sent.get("title") or "", "kind": kind, "project_id": sent.get("project_id")})
     write = SHARED_WRITES.get((method.upper(), path))
     if write is not None:
         return write
