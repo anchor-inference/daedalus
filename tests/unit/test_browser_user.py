@@ -593,3 +593,48 @@ async def test_only_the_operator_sets_the_mode_and_the_agent_has_no_way_to(rig: 
     for tool in rig.manager.tools.list_all():
         assert "approvals" not in repr(tool.definition).lower(), tool.name
     assert (await rig.service.choices.get(sid))["approvals"] == "auto"
+
+
+# -- Chrome conversations -----------------------------------------------------------------------------
+
+
+async def test_a_chrome_conversation_is_made_moved_and_marked_through_the_api(rig: Rig, chrome: FakeBrowserd) -> None:
+    from daedalus.browser.panel import CHROME_CHAT_LINE  # noqa: PLC0415
+
+    headers = {"x-daedalus-token": "tok"}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=build_app(rig.app, "tok")), base_url="http://test") as client:  # type: ignore[arg-type]
+        made = (await client.post("/api/sessions", json={"title": "Shop", "kind": "chrome"}, headers=headers)).json()
+        assert made["kind"] == "chrome"
+        # Choosing a Chrome conversation is the operator's yes: it is in their Chrome already.
+        assert await rig.service.choices.env(made["id"]) == USER
+        assert (await client.get(f"/api/sessions/{made['id']}", headers=headers)).json()["kind"] == "chrome"
+        listed = {row["id"]: row["kind"] for row in (await client.get("/api/sessions", headers=headers)).json()["sessions"]}
+        assert listed[made["id"]] == "chrome"
+        computer = (await client.post("/api/sessions", json={"title": "Desk", "kind": "computer"}, headers=headers)).json()
+        assert computer["kind"] == "computer" and await rig.service.choices.env(computer["id"]) != USER
+        changed = await client.post(f"/api/sessions/{computer['id']}/kind", json={"kind": "chat"}, headers=headers)
+        assert changed.status_code == 200 and changed.json() == {"id": computer["id"], "kind": "chat"}
+        assert (await client.post(f"/api/sessions/{computer['id']}/kind", json={"kind": "robot"}, headers=headers)).status_code == 422
+        assert (await client.post("/api/sessions/nope/kind", json={"kind": "chat"}, headers=headers)).status_code == 404
+        # A plain chat the operator moves to their Chrome becomes a Chrome conversation, and stays one.
+        plain = await rig.session()
+        await client.put(f"/api/browser/user/sessions/{plain}", json={"env": "user", "consent": True}, headers=headers)
+        state = await rig.manager.get_state(plain)
+        assert state is not None and state.kind == "chrome"
+        await client.put(f"/api/browser/user/sessions/{plain}", json={"env": "agent"}, headers=headers)
+        assert state.kind == "chrome"
+    # Its turns carry the side panel's browser-first rule, in words fit for the app.
+    lines = [await hook(state) for hook in rig.manager.turn_line_hooks]
+    assert not any(CHROME_CHAT_LINE in line for line in lines)
+    await rig.switch(plain)
+    lines = [await hook(state) for hook in rig.manager.turn_line_hooks]
+    assert any(CHROME_CHAT_LINE in line for line in lines)
+
+
+@pytest.mark.parametrize("runtime", [user_config(enabled=False)])
+async def test_a_chrome_conversation_is_refused_where_chrome_is_not_offered(rig: Rig) -> None:
+    headers = {"x-daedalus-token": "tok"}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=build_app(rig.app, "tok")), base_url="http://test") as client:  # type: ignore[arg-type]
+        refused = await client.post("/api/sessions", json={"title": "Shop", "kind": "chrome"}, headers=headers)
+        assert refused.status_code == 409 and "Your Chrome" in refused.json()["detail"]
+        assert all(row["title"] != "Shop" for row in (await client.get("/api/sessions", headers=headers)).json()["sessions"])

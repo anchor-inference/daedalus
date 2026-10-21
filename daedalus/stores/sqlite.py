@@ -39,6 +39,11 @@ LENT_KEY = "daedalus.lent_from"
 what the app draws — never holds it, so the window shows the question and its answers, not a second copy
 of the conversation they are about."""
 
+SESSION_KINDS = ("chat", "computer", "chrome")
+"""What a conversation is for, as the ``sessions.kind`` column's check allows: an ordinary chat, work on
+the operator's own computer under their grant, or work in their Chrome. The sidebar sorts by it; the
+agent's turn context and preloaded tools follow from it."""
+
 UNFINISHED_RUN_STATUSES = ", ".join(f"'{status.value}'" for status in (RunStatus.queued, RunStatus.running, RunStatus.paused))
 """The statuses of a run that is not over. Its events are what the live view reads and what a resume
 replays, so nothing sweeps them by age."""
@@ -221,6 +226,34 @@ class SqliteSessionStore(ISessionStore):
 
     async def update_title(self, session_id: str, title: str) -> None:
         await self._db.execute("UPDATE sessions SET title = ? WHERE id = ?", (title, session_id))
+
+    async def kind(self, session_id: str) -> str:
+        """What the conversation is for: ``chat``, ``computer`` or ``chrome`` (see :data:`SESSION_KINDS`)."""
+        row = await self._db.fetchone("SELECT kind FROM sessions WHERE id = ?", (session_id,))
+        return str(row["kind"]) if row is not None else "chat"
+
+    async def kinds(self, ids: Sequence[str] | None = None) -> dict[str, str]:
+        """Every session's kind, or those of ``ids``: one indexed read for a whole listing."""
+        if ids is None:
+            rows = await self._db.fetchall("SELECT id, kind FROM sessions")
+        elif not ids:
+            return {}
+        else:
+            rows = await self._db.fetchall("SELECT id, kind FROM sessions WHERE id IN (" + ",".join("?" for _ in ids) + ")", tuple(ids))
+        return {str(r["id"]): str(r["kind"]) for r in rows}
+
+    async def set_kind(self, session_id: str, kind: str, *, only_from: str | None = None) -> bool:
+        """Change the kind; with ``only_from``, only a session of that kind changes, which is how a
+        mark that sticks (a computer grant, a switch to the operator's Chrome) leaves a kind the
+        operator chose alone. ``True`` when the row changed."""
+        if kind not in SESSION_KINDS:
+            raise ValueError(f"a session's kind is one of {', '.join(SESSION_KINDS)}, not {kind!r}")
+        async with self._db.transaction() as conn:
+            if only_from is None:
+                cursor = await conn.execute("UPDATE sessions SET kind = ? WHERE id = ? AND kind != ?", (kind, session_id, kind))
+            else:
+                cursor = await conn.execute("UPDATE sessions SET kind = ? WHERE id = ? AND kind = ?", (kind, session_id, only_from))
+            return bool(cursor.rowcount)
 
     # -- transcript (display history, append-only) ------------------------------
 
@@ -1580,6 +1613,7 @@ class LiveControlStore:
 
 
 __all__ = [
+    "SESSION_KINDS",
     "LiveControlStore",
     "ReceiptConflict",
     "SqliteEventStream",

@@ -252,7 +252,8 @@ def register(api: FastAPI, app: Application, *, new_body: type[BaseModel]) -> No
         title = " ".join(body.title.split())[:400]
         if not title:
             raise HTTPException(400, "a conversation started in the panel starts with the operator's first words")
-        created = await new_session(body=new_body(title=title, autotitle=True), _=who)
+        # A Chrome conversation: made in their Chrome by the operator's own create, which also moves it.
+        created = await new_session(body=new_body(title=title, autotitle=True, kind="chrome"), _=who)
         session_id = str(created["id"])
         await found.switch_conversation(session_id, USER, consent=True)
         await mark_panel_session(manager, session_id)

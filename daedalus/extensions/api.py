@@ -48,6 +48,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
+from daedalus.browser.model import USER as BROWSER_USER
 from daedalus.browser.panel import EXTENSION_ID, mark_panel_session
 from daedalus.config import (
     NO_MODEL_MESSAGE,
@@ -581,6 +582,14 @@ class NewSessionBody(BaseModel):
     env: Literal["container", "host"] | None = None
     """Where a chat that names no project runs: ``host`` puts its scratch folder on the host and runs
     every command there through the host terminal daemon. Only a Docker installation offers it."""
+    kind: Literal["chat", "computer", "chrome"] = "chat"
+    """What the conversation is for. ``chrome`` also moves it to the operator's Chrome: choosing a
+    Chrome conversation is their yes, as pressing "new" in the side panel is."""
+
+
+class SessionKindBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["chat", "computer", "chrome"]
 
 
 class MoveSessionBody(BaseModel):
@@ -2235,6 +2244,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 raise HTTPException(409, f"the folder of {project.name} ({folder.path}) is not reachable from here yet; mount it and restart before starting an agent in it")
         elif body.folder_id:
             raise HTTPException(400, "a folder is named within a project")
+        if body.kind == "chrome":
+            chrome_offered()
         on_host = body.env == "host"
         if on_host:
             # Refused here with the reason rather than as a chat that fails its first command.
@@ -2266,6 +2277,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 await manager.set_model(state.session.id, preset=body.preset)
             except ValueError as exc:
                 raise HTTPException(400, str(exc)) from exc
+        if body.kind != "chat":
+            # Before the first message, so its turn already carries what the kind tells the agent.
+            await into_kind(state.session.id, body.kind)
         if body.prompt:
             await manager.submit(state.session.id, body.prompt)
         if body.loop is not None:
@@ -2276,7 +2290,32 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 await loops.create(state.session.id, instruction=body.loop.instruction, mode=body.loop.mode, interval_seconds=(body.loop.interval_minutes or 0) * 60 or None, max_runs=body.loop.max_runs, start_now=body.loop.start_now)
             except ValueError as exc:
                 raise HTTPException(422, str(exc)) from exc
-        return {"id": state.session.id, "title": title, "model": await session_model_label(state)}
+        return {"id": state.session.id, "title": title, "model": await session_model_label(state), "kind": state.kind}
+
+    def chrome_offered() -> Any:
+        """The browser service, when this installation offers the operator's Chrome; 409 otherwise,
+        before anything is made."""
+        found = app.extensions.get("browser")
+        if found is None or not found.user_offered():  # type: ignore[attr-defined]
+            raise HTTPException(409, "this installation does not offer your Chrome (Settings → Environments → Your Chrome)")
+        return found
+
+    async def into_kind(session_id: str, kind: str) -> None:
+        """Make the conversation that kind; a Chrome one is moved to the operator's Chrome as their own
+        switch moves it, which is the same path, event and record whichever way they chose it."""
+        if kind == "chrome":
+            await chrome_offered().switch_conversation(session_id, BROWSER_USER, consent=True)
+        await manager.set_session_kind(session_id, kind)
+
+    @api.post("/api/sessions/{session_id}/kind")
+    async def change_session_kind(session_id: str, body: SessionKindBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Change what the conversation is for. Back to ``chat`` leaves its browser where it is; the
+        operator moves it with the chat's own switch."""
+        state = await manager.get_state(session_id)
+        if state is None:
+            raise HTTPException(404, "no such session")
+        await into_kind(session_id, body.kind)
+        return {"id": session_id, "kind": state.kind}
 
     async def session_model_label(state: Any) -> str:
         overrides = await manager.live.load(state.session.id)
@@ -2431,6 +2470,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             # on its own instead of waiting for the session to be reopened.
             **manager.model_status(state),
             "mode": state.metadata.get("mode") or "",
+            "kind": state.kind,
             "depth_next": state.metadata.get("depth_next") or "",
             "yagni": bool(state.metadata.get("yagni")),
             "autopilot": await app.extensions["autopilot"].status(session_id, state) if "autopilot" in app.extensions else None,

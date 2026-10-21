@@ -302,6 +302,9 @@ class Browsers:
         self.relay_hooks: list[Callable[[str, dict[str, Any]], Awaitable[None]]] = []
         """Told when the operator's Chrome connects, goes or checks (``relay.connected``, ``relay.lost``,
         ``relay.check``): the side panel's grant is handed over on a connection."""
+        self.switch_hooks: list[Callable[[str, str], Awaitable[None]]] = []
+        """``(session_id, env)`` after the operator moved a conversation between browsers: the session
+        manager marks a plain chat moved to their Chrome as a Chrome conversation."""
 
     # -- lifecycle --------------------------------------------------------------------------
 
@@ -519,6 +522,11 @@ class Browsers:
         if env == USER and not self.user_offered():
             raise Unsupported("this installation does not offer your Chrome (Settings → Environments → Your Chrome)")
         choice = await self.choices.switch(session_id, env, consent=consent)
+        for hook in self.switch_hooks:
+            try:
+                await hook(session_id, env)
+            except Exception:  # noqa: BLE001 — the switch stands; only what follows from it failed
+                logger.exception("a hook after switching session %s to %s failed", session_id, env)
         if self.bus is not None:
             with contextlib.suppress(Exception):
                 await self.bus.publish("browser.user", {"kind": "switched", "profile_name": "", "reason": env}, session_id=session_id)

@@ -350,6 +350,9 @@ class SessionState:
     """Per-session override; ``None`` follows the configured model window."""
     extra_notes: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
+    kind: str = "chat"
+    """What the conversation is for (``sessions.kind``): ``chat``, ``computer`` or ``chrome``. Read when
+    the state loads and changed only through :meth:`SessionManager.set_session_kind`, which writes both."""
     turn_depth: dict[str, Any] | None = None
     """The level the ``auto`` mode chose for the current run (``depth.Depth.metadata``): its mode is
     what :meth:`SessionManager.mode_for` answers while the run lasts. Not stored: after a restart a
@@ -1711,6 +1714,7 @@ class SessionManager:
             return None
         self.unloadable_sessions.pop(session_id, None)
         state = SessionState(session=session, workspace=workspace, metadata=dict(session.metadata), project=project)
+        state.kind = await self.sessions.kind(session_id)
         measurement = await self.db.kv_get(f"context_measurement:{session_id}", {})
         state.usage_floor_seq = int(measurement.get("floor", 0))
         state.observed_prompt_tokens = int(measurement.get("tokens", 0))
@@ -1799,6 +1803,7 @@ class SessionManager:
     async def list_sessions(self, limit: int = 100, *, ids: list[str] | None = None) -> list[dict[str, Any]]:
         rows = await self.sessions.list_sessions(TENANT, limit=limit, ids=ids)
         projects = await self.projects.by_session()
+        kinds = await self.sessions.kinds([session.id for session in rows] if ids is not None else None)
         out: list[dict[str, Any]] = []
         for session in rows:
             if prompt_coach.hidden(session.metadata):
@@ -1817,9 +1822,33 @@ class SessionManager:
                     "run_id": state.run_id if state else None,
                     "metadata": session.metadata,
                     "project_id": projects.get(session.id),
+                    "kind": kinds.get(session.id, "chat"),
                 }
             )
         return out
+
+    async def set_session_kind(self, session_id: str, kind: str, *, only_from: str | None = None) -> bool:
+        """Change what a conversation is for; with ``only_from``, only from that kind (a mark that sticks
+        leaves the operator's own choice alone). ``True`` when it changed, and then the fronts hear of it.
+
+        A conversation that becomes a Chrome conversation starts its runs with the browser's tools
+        loaded, as one the side panel started does: the agent is told to work in the operator's Chrome
+        and should not have to search for the tools first."""
+        state = await self.get_state(session_id)
+        if state is None:
+            raise KeyError(session_id)
+        changed = await self.sessions.set_kind(session_id, kind, only_from=only_from)
+        if not changed:
+            return False
+        state.kind = kind
+        if kind == "chrome":
+            carried = [str(g) for g in (state.metadata.get(tool_groups.CARRIED_KEY) or ()) if isinstance(g, str)]
+            if "browser" not in carried:
+                for meta in (state.metadata, state.session.metadata):
+                    meta[tool_groups.CARRIED_KEY] = list(dict.fromkeys([*carried, "browser"]))
+                await self.sessions.update_metadata(session_id, state.session.metadata)
+        await self._publish(state, "session.kind", {"kind": kind})
+        return True
 
     async def session_catalog(self) -> list[dict[str, Any]]:
         """Return the cheap session read model without opening any transcript.

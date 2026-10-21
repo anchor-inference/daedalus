@@ -2792,6 +2792,33 @@ async def _core_reasoning_records(conn: aiosqlite.Connection) -> None:
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _core_reasoning_records))
 
+async def _session_kinds(conn: aiosqlite.Connection) -> None:
+    """What a conversation is for: an ordinary chat, work on the operator's own computer, or work in
+    their Chrome. The sidebar sorts by it and the agent is told by it what is expected; kept in a column
+    rather than the metadata because every listing reads it and a metadata rewrite must not lose it.
+
+    A conversation the side panel started, or one whose browser is the operator's Chrome, already is a
+    Chrome conversation. The per-conversation browser lives in one kv row as a JSON object keyed by
+    session; both reads are guarded so a malformed value marks nothing rather than failing the start.
+    The column is added only when missing, so a run over a database that has it changes nothing."""
+    columns = {row[1] for row in await (await conn.execute("PRAGMA table_info(sessions)")).fetchall()}
+    if "kind" in columns:
+        return
+    await conn.execute("ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat' CHECK (kind IN ('chat', 'computer', 'chrome'))")
+    cursor = await conn.execute("""
+UPDATE sessions SET kind = 'chrome'
+WHERE CASE WHEN json_valid(metadata) THEN json_extract(metadata, '$."browser.panel"') ELSE NULL END
+   OR id IN (
+       SELECT chosen.key FROM kv, json_each(CASE WHEN json_valid(kv.value) AND json_type(kv.value) = 'object' THEN kv.value ELSE '{}' END) AS chosen
+       WHERE kv.key = 'browser.user.sessions'
+         AND chosen.type = 'object' AND json_extract(chosen.value, '$.env') = 'user'
+   )""")
+    if cursor.rowcount:
+        logger.info("marked %d conversation(s) in the operator's Chrome as Chrome conversations", cursor.rowcount)
+
+
+MIGRATIONS.append(DataMigration("SELECT 1;", _session_kinds))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""
