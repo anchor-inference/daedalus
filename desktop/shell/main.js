@@ -9,7 +9,8 @@
 // speaks one JSON object per line in each direction (desktop/shell.go has the protocol). Its own
 // output goes to its log, not here; it has no console window on any platform.
 
-const { app, BrowserWindow, Menu, Notification, dialog, ipcMain, screen, shell } = require('electron');
+const electron = require('electron');
+const { app, BrowserWindow, Menu, Notification, dialog, ipcMain, screen, shell } = electron;
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -55,6 +56,8 @@ let win = null;
 let hideCompanion = null;
 // Quick Chat, the appshot and the tray (desk-main.js), once the application is ready.
 let quickDesk = null;
+// The border, the note and the Stop shortcut while the agent holds the screen (computer-main.js).
+let computerSigns = null;
 let engine = null;
 let quitting = false;
 let upgrading = false;
@@ -150,7 +153,14 @@ function start() {
   });
   hideCompanion = require('./pet-window')(() => win, showWindow, app.getLocale());
   createWindow();
-  quickDesk = require('./desk-main')({ app, dir: __dirname, getMain: () => win, showMain: showWindow, getStrings: () => strings, guard, language: app.getLocale() });
+  quickDesk = require('./desk-main')({ app, dir: __dirname, getMain: () => win, showMain: showWindow, getStrings: () => strings, guard, language: app.getLocale(), stopComputer: () => send({ command: 'computer-stop' }) });
+  computerSigns = require('./computer-main')({
+    electron,
+    dir: __dirname,
+    getStrings: () => strings,
+    sendStop: () => send({ command: 'computer-stop' }),
+    onChange: (state) => quickDesk && quickDesk.setComputer(state),
+  });
   win.loadFile(path.join(__dirname, 'pages', 'starting.html'), { query: { text: strings.starting } });
   startEngine();
 }
@@ -197,6 +207,8 @@ function startEngine() {
     if (log) log.end(`${new Date().toISOString()} the launcher exited (${code === null ? signal : code})\n`);
     if (child !== engine) return;
     engine = null;
+    // The daemon is the launcher's child and went with it: no lease, so no border and no shortcut.
+    if (computerSigns) computerSigns.reset();
     if (quitting || upgrading) return;
     if (!lastFatal) fatal(strings.engineExited, '');
   });
@@ -225,6 +237,9 @@ function handle(event) {
       break;
     case 'upgrade':
       upgrade(event.data);
+      break;
+    case 'computer':
+      if (computerSigns) computerSigns.update(event.computer);
       break;
     case 'sign-in-failed':
       if (win && !win.isDestroyed()) win.webContents.send('daedalus:sign-in-failed', event.message || '');

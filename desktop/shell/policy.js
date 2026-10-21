@@ -136,6 +136,12 @@ const dictionary = {
     trayIdle: 'Nothing running',
     trayRunning: 'Agents running: {n}',
     trayWaiting: 'Waiting for you: {n}',
+    trayControlling: 'The agent is controlling the computer',
+    trayStopAgent: 'Stop the agent',
+    computerNote: 'Daedalus is controlling the computer — {chord} to stop',
+    computerNoteTray: 'Daedalus is controlling the computer — Stop is in the tray',
+    computerPaused: 'Daedalus is paused while you use the computer — {chord} to stop',
+    computerPausedTray: 'Daedalus is paused while you use the computer',
   },
   ru: {
     starting: 'Daedalus запускается…',
@@ -158,6 +164,12 @@ const dictionary = {
     trayIdle: 'Ничего не выполняется',
     trayRunning: 'Агентов в работе: {n}',
     trayWaiting: 'Ждут вашего ответа: {n}',
+    trayControlling: 'Агент управляет компьютером',
+    trayStopAgent: 'Остановить агента',
+    computerNote: 'Daedalus управляет компьютером — {chord}, чтобы остановить',
+    computerNoteTray: 'Daedalus управляет компьютером — остановить можно в трее',
+    computerPaused: 'Daedalus на паузе, пока вы пользуетесь компьютером — {chord}, чтобы остановить',
+    computerPausedTray: 'Daedalus на паузе, пока вы пользуетесь компьютером',
   },
 };
 

@@ -26,7 +26,7 @@ const HIDE_SETTLE_MS = 250;
 // refused until the application restarts.
 const REGION_READY_MS = 10000;
 
-module.exports = function startDesk({ app, dir, getMain, showMain, getStrings, guard, language }) {
+module.exports = function startDesk({ app, dir, getMain, showMain, getStrings, guard, language, stopComputer }) {
   const settingsFile = path.join(app.getPath('userData'), 'desk.json');
   let settings = desk.normaliseSettings(readJSON(settingsFile));
   const held = new Set();
@@ -46,6 +46,8 @@ module.exports = function startDesk({ app, dir, getMain, showMain, getStrings, g
   let tray = null;
   let trayIcon = '';
   let status = desk.normaliseStatus(null);
+  // The agent's hold on the screen, as computer-main.js last said it: { active, paused, chord }.
+  let computer = { active: false, chord: '' };
   const env = process.env;
   const deps = { screen, desktopCapturer, systemPreferences, platform: process.platform };
   const actions = {
@@ -56,6 +58,7 @@ module.exports = function startDesk({ app, dir, getMain, showMain, getStrings, g
     voice: () => voiceNow(),
     pauseCompanion: () => tellMain('desk:action', 'pause-companion'),
     resumeCompanion: () => tellMain('desk:action', 'resume-companion'),
+    stopComputer: () => (stopComputer ? stopComputer() : undefined),
     quit: () => app.quit(),
   };
 
@@ -342,7 +345,7 @@ module.exports = function startDesk({ app, dir, getMain, showMain, getStrings, g
     }
     tray.setToolTip(view.tooltip);
     if (process.platform === 'darwin') tray.setTitle(view.title);
-    tray.setContextMenu(Menu.buildFromTemplate(desk.trayTemplate(view, strings, settings, actions)));
+    tray.setContextMenu(Menu.buildFromTemplate(desk.trayTemplate(view, strings, settings, actions, computer)));
   }
 
   // A tray that may draw nothing (plain GNOME) is no tray to hide the window into: the window would
@@ -467,6 +470,10 @@ module.exports = function startDesk({ app, dir, getMain, showMain, getStrings, g
 
   return {
     noteAddress,
+    setComputer: (next) => {
+      computer = { active: Boolean(next && next.active), chord: (next && next.chord) || '' };
+      updateTray();
+    },
     run: (name) => (actions[name] ? actions[name]() : undefined),
     keepOnClose: (quitting) => desk.hideOnClose({ hideToTray: settings.hideToTray, trayReady: trayShown(), quitting }),
   };
