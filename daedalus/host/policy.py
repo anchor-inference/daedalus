@@ -130,13 +130,14 @@ SHELL_TOOLS = ("Exec", "Verify", "ServiceStart")
 BROWSER_NAV_TOOLS = ("BrowserOpen", "BrowserNavigate")
 """The browser tools that take the agent to a URL; the address is judged before the page is asked for."""
 BROWSER_SCHEMES = ("http", "https")
-SENSITIVE_KINDS = ("credentials", "purchase", "send", "destroy", "accept", "upload", "cross_origin_post")
+SENSITIVE_KINDS = ("credentials", "purchase", "send", "destroy", "accept", "upload", "cross_origin_post", "submit")
 """What the browser daemon calls an action that changes the world: ``docs/architecture/browser.md``."""
 NEVER_ALLOWED_KINDS = frozenset({"credentials"})
 """No operator rule lifts these: typing a sign-in is the operator's, however much the site is trusted."""
-CONSEQUENTIAL_KINDS = frozenset({"credentials", "purchase", "send", "destroy"})
+CONSEQUENTIAL_KINDS = frozenset({"credentials", "purchase", "send", "destroy", "submit"})
 """What no rule lifts in the operator's own Chrome: there the agent acts as the operator, signed in
-everywhere they are, and buying, sending, deleting or signing in is always asked about."""
+everywhere they are, and buying, sending, deleting, signing in or (read-only there) submitting a form
+is always asked about."""
 APPROVAL_MODES = ("manual", "auto", "skip")
 """How the operator's own Chrome asks, per conversation, as the operator set it in the composer:
 ``manual`` asks about every new site and every sensitive action (the default); ``auto`` lets new sites
@@ -165,6 +166,7 @@ SENSITIVE_WORDS = {
     "accept": "accept terms or consent",
     "upload": "upload a file",
     "cross_origin_post": "send a form to another site",
+    "submit": "submit a form (the agent works read-only in your Chrome)",
 }
 
 

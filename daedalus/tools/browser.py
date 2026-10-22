@@ -243,7 +243,8 @@ async def browser_ask_operator_chrome(context: ToolContext, reason: str) -> Tool
     name="BrowserNavigate",
     description=(
         "Go to a URL in the current tab (http and https only), or go='back', 'forward' or 'reload'. tab picks another "
-        "tab by id. Next: BrowserSnapshot to see where you are. " + NETWORK_ASK
+        "tab by id. Every ref of the tab is stale afterwards: do not send BrowserAct for it in the same batch. Next: "
+        "BrowserSnapshot to see where you are. " + NETWORK_ASK
     ),
 )
 async def browser_navigate(context: ToolContext, url: str | None = None, go: str | None = None, tab: str | None = None, why: str | None = None) -> ToolResult:
@@ -278,7 +279,8 @@ async def browser_snapshot(context: ToolContext, tab: str | None = None, scope: 
     description=(
         "Read the page's main text as a reader view gives it — an article, documentation, a result list — without "
         "the outline. ref reads one element's text; max_chars bounds it. find searches the visible text like Ctrl+F "
-        "(regex=true for a regular expression) and returns each match with the ref of the control it is in or beside. "
+        "(regex=true for a regular expression) and returns each match with the ref of the control it is in or beside; "
+        "that control may be a whole menu or list, so for an item inside it take BrowserSnapshot(scope=<ref>) first. "
         "query pulls out only what you ask ('every product with its price') through a smaller model reading the page "
         "part by part; schema (a JSON schema of one item) shapes the items; the same query on the next page adds to "
         "what was collected. For acting on the page use BrowserSnapshot."
@@ -331,7 +333,8 @@ async def browser_look(context: ToolContext, question: str, tab: str | None = No
         "button'). x and y (CSS pixels of the viewport) click or hover at a point instead of a ref, where the operator "
         "allows it. steps=[{action, ref, element, …}, …] does up to 5 actions planned from one snapshot, stopping at a "
         "navigation, a new tab, a dialog, a failure or a question. A purchase, a message sent, a deletion, terms "
-        "accepted or an upload is held for the operator's approval when you try it (do not ask first); a password, code or payment field refuses you (use "
+        "accepted, an upload, or a form posted in the operator's Chrome while they keep it read-only is held for the "
+        "operator's approval when you try it (do not ask first); a password, code or payment field refuses you (use "
         "BrowserLogin to sign in, BrowserHandoff for the rest). Returns what changed."
     ),
 )
@@ -365,7 +368,11 @@ async def browser_act(
 )
 @tool(
     name="BrowserTabs",
-    description="Your browser's tabs: action='list' (the default), 'new' (url opens in it), 'select' or 'close' (tab = its id).",
+    description=(
+        "Your browser's tabs: action='list' (the default), 'new' (url opens in it), 'select' or 'close' (tab = its id). "
+        "Prefer BrowserNavigate in the current tab; 'new' is for a second page you need at the same time, and an "
+        "address already open in a tab switches to that tab instead. Close the tabs you no longer need."
+    ),
 )
 async def browser_tabs(context: ToolContext, action: str = "list", tab: str | None = None, url: str | None = None) -> ToolResult:
     return await _run(context, "BrowserTabs", {"action": action, "tab": tab, "url": url})
@@ -428,7 +435,10 @@ async def browser_handoff(context: ToolContext, reason: str, what: str) -> ToolR
 )
 @tool(
     name="BrowserClose",
-    description="Close one tab (tab = its id), or the whole browser (all=true, or no tab). The profile and its logins stay for the next BrowserOpen.",
+    description=(
+        "Close one tab (tab = its id), or the whole browser (all=true, or no tab). The profile and its logins stay for "
+        "the next BrowserOpen. In the operator's own Chrome no tab closes all of yours and none of theirs."
+    ),
 )
 async def browser_close(context: ToolContext, tab: str | None = None, all: bool = False) -> ToolResult:  # noqa: A002 — the tool's argument name
     return await _run(context, "BrowserClose", {"tab": tab, "all": all})
@@ -442,7 +452,8 @@ async def browser_close(context: ToolContext, tab: str | None = None, all: bool 
 @tool(
     name="BrowserDownload",
     description=(
-        "Copy a file the browser downloaded into your workspace: name as the action's result gave it. to is the path "
+        "Copy a file the browser downloaded into your workspace: name as the action's result gave it (a PDF a click or "
+        "an address opens in the operator's Chrome arrives as a download). to is the path "
         "(default downloads/<name>). In a project the file is also kept by handle for the team."
     ),
 )

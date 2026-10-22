@@ -1998,7 +1998,7 @@ class BrowserRuleConfig(BaseModel):
 
     domain: str = Field(min_length=1, max_length=253)
     """A host (``shop.example.com``) or every host under one (``*.example.com``)."""
-    kinds: list[Literal["credentials", "purchase", "send", "destroy", "accept", "upload", "cross_origin_post"]] = Field(default_factory=list)
+    kinds: list[Literal["credentials", "purchase", "send", "destroy", "accept", "upload", "cross_origin_post", "submit"]] = Field(default_factory=list)
     """Empty = every kind."""
     action: Literal["allow", "ask", "deny"] = "deny"
     note: str = ""
@@ -2025,6 +2025,14 @@ class BrowserUserConfig(BaseModel):
     """Watch mode on the watched sites (``[browser] watch_domains``), in the operator's Chrome."""
     bodies: bool = False
     """Whether BrowserNetwork may read a response body there, and then only on a granted site."""
+    read_only: bool = True
+    """Whether a form the agent submits by POST there waits for the operator's approval, as a purchase
+    does. Reading and moving between pages stay free; what a posted form does is filed under the
+    operator's name (an application, a draft), whatever the agent meant to do."""
+    close_tabs: bool = True
+    """Whether the agent's tabs there are closed when its turn ends, unless it waits for the operator
+    (a question, an approval, a handoff) or the operator holds the browser. They sit in the operator's
+    own window, and a turn that ends leaves nobody to close them."""
 
     @field_validator("granted_sites")
     @classmethod

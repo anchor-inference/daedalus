@@ -167,6 +167,23 @@ class NoSuchTab(BrowserError):
     status, code = 404, "no_such_tab"
 
 
+class Detached(BrowserError):
+    """A tab of the operator's Chrome that no longer answers: its debugger let go of it, most often
+    because it opened a page the extension cannot drive (Chrome's PDF viewer, a browser page). Every
+    later call to it fails the same way, so the agent is told to close it rather than retry."""
+
+    status, code = 410, "detached"
+
+
+def detached(exc: BrowserError) -> bool:
+    """Whether a daemon's refusal says the tab lost its debugger. A daemon that knows it says so in
+    its data; an older one passes Chrome's own words on, which name the state the same way."""
+    if exc.details.get("reason") == "detached":
+        return True
+    text = exc.message.lower()
+    return "(detached)" in text or "debugger is not attached" in text
+
+
 class FieldForbidden(BrowserError):
     status, code = 403, "field_forbidden"
 
@@ -233,6 +250,7 @@ __all__ = [
     "BrowserError",
     "BrowserGone",
     "Conflict",
+    "Detached",
     "DialogOpen",
     "EnvUnavailable",
     "FieldForbidden",
@@ -249,6 +267,7 @@ __all__ = [
     "StaleRef",
     "TimedOut",
     "Unsupported",
+    "detached",
     "group_id",
     "profile_id",
     "rpc_failure",

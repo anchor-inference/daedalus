@@ -33,6 +33,8 @@ from daedalus.browser.model import (
     Blocked,
     BrowserError,
     BrowserGone,
+    Conflict,
+    Detached,
     DialogOpen,
     EnvUnavailable,
     FieldForbidden,
@@ -75,6 +77,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 ACTIONS = ("click", "double_click", "right_click", "hover", "type", "press", "select", "check", "uncheck", "scroll", "drag", "upload")
+TEXT_ACTIONS = ("type", "scroll")
+"""The actions that read ``text``: what is typed, and the words a scroll looks for."""
 NEEDS_REF = ("click", "double_click", "right_click", "hover", "type", "select", "check", "uncheck", "drag", "upload")
 WAIT_FOR = ("load", "idle", "text", "gone", "url")
 TAB_ACTIONS = ("list", "new", "select", "close")
@@ -114,6 +118,11 @@ NOT_A_REF = (
     "gives the ref beside each match; an element the outline shows without a ref cannot be acted on by ref."
 )
 FIND_MATCHES = 30
+USER_TABS = 3
+"""Tabs the agent keeps open in the operator's Chrome. Its tabs sit in their window among their own: a
+session that opened five, three of them the same page, left the operator to close them by hand."""
+DEADLY_SECONDS = 120
+"""How soon after an action a tab found dead is put down to that action."""
 LOG_LEVELS = ("error", "warning", "info", "debug")
 LOGS_SHOWN = 60
 """Console entries one BrowserLogs shows; the rest wait for the next call, as the daemon pages them."""
@@ -248,6 +257,13 @@ class Step:
                 raise InvalidRequest(NOT_A_REF.format(ref=ref))
         if action == "type" and self.text is None:
             raise InvalidRequest("type needs text")
+        if action not in TEXT_ACTIONS and (self.text or "").strip():
+            # Refused rather than dropped: a click with text="Смотреть" on a list's ref landed in the
+            # middle of the list and opened a form, while the model believed it had picked the item.
+            raise InvalidRequest(
+                f"text is read by type and scroll only, and {action} would have ignored it: an action lands on the ref's element "
+                "as a whole. For an item inside a menu, list or dropdown take BrowserSnapshot(scope=<ref>) and act on the item's own ref"
+            )
         if self.text is not None and len(self.text) > TEXT_MAX:
             raise InvalidRequest(f"type carries at most {TEXT_MAX} characters")
         if action == "press" and not self.keys:
@@ -572,6 +588,15 @@ def explain(exc: BrowserError) -> str:
     if isinstance(exc, DialogOpen):
         dialog = exc.details.get("dialog") or {}
         return f"The page shows a {dialog.get('type') or 'dialog'}: \"{str(dialog.get('message') or '')[:300]}\". Answer it with BrowserDialog(accept=true or false) first."
+    if isinstance(exc, Detached):
+        # The session this was written for retried a dead tab four times with four tools and then
+        # opened the same page in a new tab, three times over: the words say what it is and what not to do.
+        tab = str(exc.details.get("tab_id") or "")
+        return (
+            f"Tab {tab or 'that tab'} no longer answers: it opened something the browser cannot drive (a PDF viewer, a browser page), "
+            f"or the operator detached it. Close it with BrowserClose(tab='{tab or '…'}'); if it showed a document, get the file with "
+            "BrowserNetwork (the request that loaded it) or BrowserDownload. Do not retry this tab, and do not repeat the action that led here."
+        )
     if isinstance(exc, NoSuchTab):
         return f"There is no tab {exc.details.get('tab_id') or ''} in your browser; BrowserTabs(action='list') lists them."
     if isinstance(exc, Blocked) and exc.details.get("reason") == "private":
@@ -643,6 +668,16 @@ class BrowserAgent:
         """Where each owner last read a tab's console and its requests (``logs|network\x00owner\x00group\x00tab``
         → the daemon's sequence number), so each call says only what came since. Lost with the host,
         which only means the next call reads from the start."""
+        self.dead: OrderedDict[str, set[str]] = OrderedDict()
+        """The tabs of each group found no longer answering (detached), so a listing marks them and the
+        tab cap closes them first. The daemon marks them too where it knows; this covers one that does not."""
+        self.last_acts: OrderedDict[str, tuple[str, float]] = OrderedDict()
+        """Each owner's last action on each tab (``owner\x00group\x00tab`` → its deadly key and when), so a
+        tab found dead right after can be put down to that action."""
+        self.deadly: OrderedDict[str, dict[str, int]] = OrderedDict()
+        """Per owner, the actions that left a tab dead (by :func:`_deadly_key`) and how often a repeat was
+        held back. The session this is for clicked the same document row three times, in three tabs,
+        losing each one."""
 
     # -- the group and the tab -----------------------------------------------------------------
 
@@ -727,13 +762,50 @@ class BrowserAgent:
         return self.service.origin(actor="agent", launch_id=caller.launch_id)
 
     @staticmethod
-    def _tab_line(tab: dict[str, Any]) -> str:
-        return f"- {tab.get('id')} · {str(tab.get('title') or '(untitled)')[:120]} — {tab.get('url') or 'about:blank'}" + (" (active)" if tab.get("active") else "")
+    def _tab_line(tab: dict[str, Any], *, new: bool = False, dead: bool = False, twin: str = "") -> str:
+        marks = [m for m, on in (("active", tab.get("active")), ("new", new), ("dead: close it", dead), (f"the same address as {twin}", twin)) if on]
+        return f"- {tab.get('id')} · {str(tab.get('title') or '(untitled)')[:120]} — {tab.get('url') or 'about:blank'}" + (f" ({'; '.join(marks)})" if marks else "")
 
-    async def _tabs_text(self, group: str) -> str:
+    async def _tab_list(self, group: str) -> list[dict[str, Any]]:
         listing = await self.service.call(group, "tab.list", {"group_id": group}, what="listing the tabs")
-        tabs = [t for t in listing.get("tabs") or [] if isinstance(t, dict)]
-        return "\n".join(self._tab_line(t) for t in tabs) or "(no tabs)"
+        return [t for t in listing.get("tabs") or [] if isinstance(t, dict)]
+
+    def _is_dead(self, group: str, tab: dict[str, Any]) -> bool:
+        return bool(tab.get("detached")) or str(tab.get("id") or "") in self.dead.get(group, set())
+
+    def _mark_dead(self, group: str, tab: str) -> None:
+        if not group or not tab:
+            return
+        dead = self.dead.pop(group, None) or set()
+        dead.add(tab)
+        self.dead[group] = dead
+        while len(self.dead) > 256:
+            self.dead.popitem(last=False)
+
+    async def _tabs_text(self, group: str, *, new: str = "", tabs: list[dict[str, Any]] | None = None) -> str:
+        """The tabs, one a line, with what the agent should do about any of them said beside it: a dead
+        one to close, a second tab on an address another already shows."""
+        tabs = await self._tab_list(group) if tabs is None else tabs
+        seen: dict[str, str] = {}
+        lines: list[str] = []
+        for tab in tabs:
+            tid = str(tab.get("id") or "")
+            address = _address(str(tab.get("url") or ""))
+            twin = seen.get(address, "") if address else ""
+            if address and not twin:
+                seen[address] = tid
+            lines.append(self._tab_line(tab, new=tid == new, dead=self._is_dead(group, tab), twin=twin))
+        return "\n".join(lines) or "(no tabs)"
+
+    def _showing(self, group: str, tabs: list[dict[str, Any]], url: str) -> dict[str, Any] | None:
+        """A live tab already on ``url``, the active one first: opening the address again would make a
+        second copy of a page the agent has."""
+        wanted = _address(url)
+        if not wanted:
+            return None
+        same = [t for t in tabs if _address(str(t.get("url") or "")) == wanted and not self._is_dead(group, t)]
+        same.sort(key=lambda t: not t.get("active"))
+        return same[0] if same else None
 
     async def _audit(self, group: dict[str, Any], caller: Caller, action: str, detail: dict[str, Any], *, typed: str | None = None) -> None:
         try:
@@ -822,12 +894,21 @@ class BrowserAgent:
         # navigation does: an ask becomes the operator's question, not a failed start.
         opened = await self.service.open(caller.owner, fresh=fresh, actor=caller.actor)
         group = opened["group"]
-        if url:
+        found = ""
+        if url and not opened["created"] and (same := self._showing(group["id"], await self._tab_list(group["id"]), url)) is not None:
+            # The browser was open and a tab of it is on that address already: that tab is brought
+            # forward instead of the active one being taken away from what it shows.
+            await self.service.call(group["id"], "tab.select", {"tab_id": same["id"], "origin": self._origin(caller)}, what="switching to the tab", timeout=40.0)
+            found = str(same["id"])
+        elif url:
             tab = opened.get("tab") or {}
             row = await self._group(caller)
             await self._through_wall(caller, row, lambda: self.service.call(group["id"], "page.navigate", {"tab_id": tab.get("id"), "url": url, "origin": self._origin(caller), "timeout_ms": NAVIGATE_TIMEOUT_MS}, what="opening the page", timeout=NAVIGATE_TIMEOUT_MS / 1000 + 25), url=url, why=why or "")
         if url:
             await self._site_notes(caller, url)
+        if found:
+            where = f" in the operator's own Chrome «{self._user_name()}»" if group.get("env") == USER_ENV else ""
+            return f"Browser already open{where}. Tab {found} already shows {url}: switched to it rather than opening the page twice.\nTabs:\n{await self._tabs_text(group['id'])}\nNext: BrowserSnapshot to see it."
         if group.get("env") == USER_ENV:
             head = (
                 f"Browser {'opened' if opened['created'] else 'already open'} in the operator's own Chrome «{self._user_name()}», which they gave this conversation: "
@@ -901,6 +982,8 @@ class BrowserAgent:
         title = str(result.get("title") or "").strip()
         self._told(group, current, result.get("dialogs_auto"))
         said = self._page_said(result, reached)
+        if download := _downloaded(result):
+            return f"{download} Tab {current['id']} stayed on {result.get('url') or current.get('url') or 'its page'}." + "".join(f"\n{line}" for line in said)
         return f"Tab {current['id']} is on {result.get('url') or url}{status}{failed}." + (f" Its title: {fenced(origin_of(str(result.get('url') or '')), title)}" if title else "") + "".join(f"\n{line}" for line in said) + "\nNext: BrowserSnapshot to see it."
 
     async def _through_wall(self, caller: Caller, group: dict[str, Any], go: Callable[[], Awaitable[Any]], *, url: str = "", why: str = "") -> Any:
@@ -1150,6 +1233,8 @@ class BrowserAgent:
                 result, name = await self._act_one(caller, group, current, step, label=f"{index}/{total}")
             except BrowserError as exc:
                 self._acted(caller, step, current, None)
+                if isinstance(exc, Detached):
+                    self._found_dead(caller, exc)
                 said.append(f"{index}. {step.action} on “{step.element.strip()[:120]}” was not done: {exc.message if isinstance(exc, OverCap | BrowserGone) else explain(exc)}")
                 if index < total:
                     said.append(f"Steps {index + 1}–{total} were not tried.")
@@ -1183,6 +1268,8 @@ class BrowserAgent:
             return "a new tab opened"
         if effects.get("dialog"):
             return "the page opened a dialog"
+        if effects.get("detached"):
+            return "the tab stopped answering"
         return ""
 
     def _stalled(self, caller: Caller) -> None:
@@ -1286,6 +1373,16 @@ class BrowserAgent:
                 # with a secret field: every form lists its fields, and a site's search box was asked
                 # about as a sign-in on every search.
                 kinds.append("credentials")
+            if group.get("env") == USER_ENV and self.service.config().user.read_only and _posts_form(step, sensitive.get("evidence")):
+                # Read-only in the operator's Chrome: what a form posts changes something on the site
+                # under their name (an application filed, a draft created), and a promise of the
+                # agent's to only look is no guarantee. A form that only searches (GET) is reading.
+                kinds.append("submit")
+            try:
+                self._held_deadly(caller, url, action, name or element)
+            except Forbidden as exc:
+                await refused(exc.message)
+                raise
             if kinds:
                 typed = text or "".join(n for n, _ in uploads)
                 decision = browser_sensitive(
@@ -1335,6 +1432,7 @@ class BrowserAgent:
             detail["decision"] = decided
         if grant:
             detail["grant"] = grant
+        self._remember_act(caller, group, current, _deadly_key(url, action, name or element), result)
         # The words typed into a field that is not secret are shown in the operator's action log while
         # the session exists; the audit's own record is their length and hash.
         shown = text if text is not None and action == "type" and not (secret or done.get("secret")) else None
@@ -1363,6 +1461,49 @@ class BrowserAgent:
         if operator_secrets.is_whole_placeholder(text):
             base["operator_secret"] = True
         return [secret.name for secret in used]
+
+    def _held_deadly(self, caller: Caller, url: str, action: str, name: str) -> None:
+        """Hold back, once, an action that earlier left a tab of this owner dead. Once: the agent is told
+        what it did, and a second try is its own informed choice."""
+        if action not in ("click", "double_click", "press"):
+            return
+        key = _deadly_key(url, action, name)
+        known = self.deadly.get(self._who(caller)) or {}
+        if key not in known or known[key] > 0:
+            return
+        known[key] += 1
+        raise Forbidden(
+            f"Not done: the same {action} on “{name.strip()[:120]}” on {host_of(url) or 'this site'} earlier left its tab dead (it opened a page "
+            "the browser cannot drive, such as a PDF viewer), and it would lose this tab too. Get the document another way: BrowserNetwork "
+            "shows the request that loads it, BrowserDownload copies a file the browser downloaded. If you still need this exact action, send it again."
+        )
+
+    def _remember_act(self, caller: Caller, group: dict[str, Any], tab: dict[str, Any], key: str, result: dict[str, Any]) -> None:
+        place = f"{self._who(caller)}\x00{group['id']}\x00{tab['id']}"
+        self.last_acts.pop(place, None)
+        self.last_acts[place] = (key, time.monotonic())
+        while len(self.last_acts) > CURSORS:
+            self.last_acts.popitem(last=False)
+        if (result.get("effects") or {}).get("detached"):
+            self._mark_dead(group["id"], str(tab["id"]))
+            self._deadly(caller, key)
+
+    def _deadly(self, caller: Caller, key: str) -> None:
+        who = self._who(caller)
+        known = self.deadly.pop(who, None) or {}
+        known.setdefault(key, 0)
+        self.deadly[who] = known
+        while len(self.deadly) > 256:
+            self.deadly.popitem(last=False)
+
+    def _found_dead(self, caller: Caller, exc: Detached) -> None:
+        """A tab refused as detached: marked dead, and the owner's last action on it, when it was a
+        moment ago, remembered as what did it."""
+        gid, tid = str(exc.details.get("group_id") or ""), str(exc.details.get("tab_id") or "")
+        self._mark_dead(gid, tid)
+        last = self.last_acts.get(f"{self._who(caller)}\x00{gid}\x00{tid}")
+        if last is not None and time.monotonic() - last[1] < DEADLY_SECONDS:
+            self._deadly(caller, last[0])
 
     def _act_lines(self, action: str, tab: dict[str, Any], result: dict[str, Any], name: str, *, diff: bool) -> list[str]:
         """What an action did, a sentence each: the first says it was done, the rest what followed."""
@@ -1398,6 +1539,12 @@ class BrowserAgent:
         if effects.get("download"):
             download = effects["download"]
             said.append(f"It downloaded {download.get('name')} ({_size(int(download.get('size') or 0))}); BrowserDownload(name) copies it to you.")
+        if effects.get("detached"):
+            said.append(
+                f"Tab {tab.get('id')} stopped answering right after this: it opened a page the browser cannot drive (a PDF viewer, a browser page). "
+                f"Close it (BrowserClose(tab='{tab.get('id')}')); for a document use BrowserNetwork or BrowserDownload. Do not repeat this action."
+            )
+            return said
         said.extend(self._page_said(effects, str(effects.get("url") or tab.get("url") or "")))
         changes = str(result.get("diff") or "").strip()
         if diff and changes:
@@ -1657,13 +1804,86 @@ class BrowserAgent:
         group = await self._group(caller)
         origin = self._origin(caller)
         if action == "new":
-            created = await self._through_wall(caller, group, lambda: self.service.call(group["id"], "tab.new", {"group_id": group["id"], "url": url or "about:blank", "origin": origin}, what="opening a tab", timeout=40.0), url=url or "")
-            await self._audit(group, caller, "tab_new", {"tab": created.get("id"), "url": (url or "")[:2000]})
-        elif action in ("select", "close"):
+            return await self._new_tab(caller, group, url)
+        if action in ("select", "close"):
             if not tab:
                 raise InvalidRequest(f"{action} needs the tab's id (BrowserTabs lists them)")
             await self.service.call(group["id"], f"tab.{action}", {"tab_id": tab, "origin": origin}, what=f"{'switching to' if action == 'select' else 'closing'} the tab", timeout=40.0)
+            if action == "close":
+                self.dead.get(group["id"], set()).discard(tab)
         return "Tabs:\n" + await self._tabs_text(group["id"])
+
+    async def _new_tab(self, caller: Caller, group: dict[str, Any], url: str | None) -> str:
+        """A new tab, or the one already on that address. Opened blank and then sent to the address,
+        as BrowserOpen does: given the address, the daemon made the tab before its guard refused the
+        navigation, and the retry after the operator's yes made a second one, leaving a blank tab in
+        their window on every first visit to a site."""
+        gid = group["id"]
+        origin = self._origin(caller)
+        tabs = await self._tab_list(gid)
+        if url and (same := self._showing(gid, tabs, url)) is not None:
+            await self.service.call(gid, "tab.select", {"tab_id": same["id"], "origin": origin}, what="switching to the tab", timeout=40.0)
+            return (
+                f"Tab {same['id']} already shows {url[:300]}: switched to it rather than opening the page twice. BrowserNavigate moves it "
+                "elsewhere.\nTabs:\n" + await self._tabs_text(gid)
+            )
+        closed: list[str] = []
+        if group.get("env") == USER_ENV:
+            tabs, closed = await self._make_room(caller, group, tabs)
+        if url:
+            # Asked before the tab exists, so a site the operator has not answered about yet leaves
+            # nothing behind in their window while the question waits.
+            await self._watch(group, caller, url)
+            await self._site_ask(caller, group, url, "")
+        created = await self.service.call(gid, "tab.new", {"group_id": gid, "url": "about:blank", "origin": origin}, what="opening a tab", timeout=40.0)
+        tid = str(created.get("id") or "")
+        await self._audit(group, caller, "tab_new", {"tab": tid, "url": (url or "")[:2000]})
+        said = [f"Opened tab {tid}."]
+        if url:
+            try:
+                result = await self._through_wall(
+                    caller, group, lambda: self.service.call(gid, "page.navigate", {"tab_id": tid, "url": url, "origin": origin, "timeout_ms": NAVIGATE_TIMEOUT_MS}, what="opening the page", timeout=NAVIGATE_TIMEOUT_MS / 1000 + 25),
+                    url=url,
+                )
+            except BrowserError:
+                # A tab that never reached its page is no use to anyone: it goes with the refusal.
+                with contextlib.suppress(BrowserError):
+                    await self.service.call(gid, "tab.close", {"tab_id": tid, "origin": origin}, what="closing the tab")
+                raise
+            reached = str(result.get("url") or url)
+            await self._site_notes(caller, reached)
+            failed = f"; the page did not load: {result['error']}" if result.get("error") else ""
+            said = [f"Opened tab {tid} on {reached}{failed}."]
+            if download := _downloaded(result):
+                said = [f"Opened tab {tid}. {download}"]
+        if closed:
+            said.append(f"Closed {', '.join(closed)} first (dead or blank): you keep at most {USER_TABS} tabs in the operator's Chrome.")
+        return "\n".join(said) + "\nTabs:\n" + await self._tabs_text(gid, new=tid)
+
+    async def _make_room(self, caller: Caller, group: dict[str, Any], tabs: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
+        """Room for one more tab under the cap in the operator's Chrome: dead and blank tabs go first,
+        since nobody loses anything with them; past that the agent is refused, with its tabs named,
+        rather than a page it may still need closed behind its back."""
+        gid = group["id"]
+        closed: list[str] = []
+        for tab in sorted(tabs, key=lambda t: (not self._is_dead(gid, t), bool(t.get("active")))):
+            if len(tabs) - len(closed) < USER_TABS:
+                break
+            blank = not _address(str(tab.get("url") or "")) and not tab.get("active")
+            if not (self._is_dead(gid, tab) or blank):
+                continue
+            with contextlib.suppress(BrowserError):
+                await self.service.call(gid, "tab.close", {"tab_id": tab["id"], "origin": self._origin(caller)}, what="closing the tab")
+                closed.append(str(tab["id"]))
+                self.dead.get(gid, set()).discard(str(tab["id"]))
+        left = [t for t in tabs if str(t.get("id")) not in closed]
+        if len(left) >= USER_TABS:
+            raise Conflict(
+                f"You already have {len(left)} tabs in the operator's Chrome, the most you keep there; nothing was opened. Move one of them with "
+                f"BrowserNavigate(tab=…, url=…), or close one you are done with (BrowserClose(tab=…)) first.\nTabs:\n" + await self._tabs_text(gid, tabs=left),
+                reason="tab_cap",
+            )
+        return left, closed
 
     async def wait(self, caller: Caller, *, until: str, value: str | None = None, timeout_s: float = 10.0, tab: str | None = None) -> str:
         for_ = until
@@ -1772,8 +1992,12 @@ class BrowserAgent:
         group = await self._group(caller)
         if all or not tab:
             await self.service.close_group(group["id"], actor=caller.actor, reason="closed")
+            self.dead.pop(group["id"], None)
+            if group.get("env") == USER_ENV:
+                return "Your tabs in the operator's Chrome were closed; none of their own tabs was touched. BrowserOpen opens a new one."
             return "The browser was closed; its profile and logins are kept for the next BrowserOpen."
         await self.service.call(group["id"], "tab.close", {"tab_id": tab, "origin": self._origin(caller)}, what="closing the tab")
+        self.dead.get(group["id"], set()).discard(tab)
         return "Tabs:\n" + await self._tabs_text(group["id"])
 
     async def download(self, caller: Caller, *, name: str, to: str | None = None) -> str:
@@ -2031,11 +2255,40 @@ class BrowserAgent:
             return exc.message, True
         except BrowserGone as exc:
             return exc.message, True
+        except Detached as exc:
+            self._found_dead(caller, exc)
+            return explain(exc), True
         except BrowserError as exc:
             return explain(exc), True
         except (TypeError, ValueError) as exc:
             return f"{tool}: {exc}", True
         return f"there is no browser tool {tool!r}", True
+
+
+def _address(url: str) -> str:
+    """An address as two tabs are compared: without its fragment or a trailing slash, the scheme and
+    host in lower case; ``""`` for a blank page, which is no page to have twice."""
+    parts = urlsplit(url.strip())
+    if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
+        return ""
+    path = parts.path.rstrip("/")
+    return f"{parts.scheme.lower()}://{parts.netloc.lower()}{path}" + (f"?{parts.query}" if parts.query else "")
+
+
+def _downloaded(result: dict[str, Any]) -> str:
+    """What a navigation that the daemon turned into a download says (a PDF in the operator's Chrome,
+    whose viewer the agent cannot drive), or ``""``."""
+    download = result.get("download")
+    if not isinstance(download, dict) or not download.get("name"):
+        return ""
+    return f"The address is a document: it was saved as the download {download['name']} ({_size(int(download.get('size') or 0))}); BrowserDownload(name) copies it to you."
+
+
+def _deadly_key(url: str, action: str, name: str) -> str:
+    """What an action that left its tab dead is remembered by: the site, a click of either kind, and
+    the element's words, so the same row clicked in another tab is known for what it does."""
+    kind = "click" if action in ("click", "double_click") else action
+    return f"{host_of(url)}\x00{kind}\x00{' '.join(name.casefold().split())[:200]}"
 
 
 def _str(arguments: dict[str, Any], key: str) -> str | None:
@@ -2055,6 +2308,15 @@ def _secret_field(field: Any) -> bool:
         return False
     autocomplete = str(field.get("autocomplete") or "").lower()
     return str(field.get("type") or "").lower() == "password" or autocomplete in SECRET_AUTOCOMPLETE or autocomplete.startswith("cc-")
+
+
+def _posts_form(step: Step, evidence: Any) -> bool:
+    """Whether the action submits a form by POST, as the daemon's evidence of the element says: a
+    click or Enter on its submit control, or typing with submit=true into one of its fields."""
+    if not isinstance(evidence, dict) or not evidence.get("submits"):
+        return False
+    acts = step.action in ("click", "double_click", "press") or (step.action == "type" and step.submit)
+    return acts and str(evidence.get("form_method") or "").lower() == "post"
 
 
 def _float(arguments: dict[str, Any], key: str) -> float | None:

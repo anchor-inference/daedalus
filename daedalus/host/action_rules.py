@@ -79,6 +79,7 @@ BROWSER_KINDS: dict[str, str] = {
     "accept": "external_write",
     "upload": "external_write",
     "cross_origin_post": "external_write",
+    "submit": "external_write",
 }
 """What the browser daemon calls a sensitive action, as a category. ``credentials`` is absent: a sign-in
 is the operator's whatever any rule says (:data:`daedalus.host.policy.NEVER_ALLOWED_KINDS`). The desktop's
