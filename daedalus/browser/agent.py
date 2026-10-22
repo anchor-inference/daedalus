@@ -2267,12 +2267,17 @@ class BrowserAgent:
 
 def _address(url: str) -> str:
     """An address as two tabs are compared: without its fragment or a trailing slash, the scheme and
-    host in lower case; ``""`` for a blank page, which is no page to have twice."""
+    host in lower case; ``""`` for a blank page, which is no page to have twice.
+
+    A fragment that is a route (``#/settings``, ``#!/inbox``) is kept: a single-page app routes by it,
+    and dropping it told the agent a tab on ``#/inbox`` already showed ``#/settings``. An anchor on a
+    page (``#section-2``) is the same page and is still dropped."""
     parts = urlsplit(url.strip())
     if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
         return ""
     path = parts.path.rstrip("/")
-    return f"{parts.scheme.lower()}://{parts.netloc.lower()}{path}" + (f"?{parts.query}" if parts.query else "")
+    route = parts.fragment if parts.fragment.startswith(("/", "!")) else ""
+    return f"{parts.scheme.lower()}://{parts.netloc.lower()}{path}" + (f"?{parts.query}" if parts.query else "") + (f"#{route.rstrip('/')}" if route.rstrip("/") else "")
 
 
 def _downloaded(result: dict[str, Any]) -> str:

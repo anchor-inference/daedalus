@@ -18,7 +18,7 @@ import httpx
 import pytest
 from protocore.contracts.tools import ToolContext
 
-from daedalus.browser.agent import SensitiveAsk, Step
+from daedalus.browser.agent import SensitiveAsk, Step, _address
 from daedalus.browser.model import USER, InvalidRequest, Owner, group_id
 from daedalus.browser.user import CONSENT, ConsentNeeded, SkipNeedsConfirm, site_granted, site_of
 from daedalus.config import BrowserConfig, BrowserRuleConfig, BrowserUserConfig, RuntimeConfig, Settings
@@ -686,6 +686,21 @@ async def test_a_new_tab_on_an_open_address_switches_to_it_and_the_result_marks_
     assert not failed and "Tab t1 already shows" in text, text
     assert tabs_of(chrome, sid) == ["https://tax.example.com/documents", "https://mail.example.com/"]
     assert chrome.groups[group_id(Owner("session", sid), env=USER)].active == "t1"
+
+
+def test_a_route_in_the_fragment_is_a_different_page_and_an_anchor_is_not() -> None:
+    assert _address("https://mail.example.com/#/inbox") != _address("https://mail.example.com/#/settings")
+    assert _address("https://mail.example.com/#!/inbox") != _address("https://mail.example.com/#!/settings")
+    assert _address("https://mail.example.com/#/inbox/") == _address("https://mail.example.com/#/inbox")
+    assert _address("https://example.com/guide#install") == _address("https://example.com/guide#usage") == _address("https://example.com/guide/")
+    assert _address("https://Example.com/a/") == _address("https://example.com/a")
+
+
+@pytest.mark.parametrize("runtime", [GRANTED])
+async def test_a_tab_on_another_route_of_the_same_app_is_not_taken_for_it(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await opened(rig, chrome, "https://mail.example.com/#/inbox")
+    text, failed = await rig.call(sid, "BrowserTabs", action="new", url="https://mail.example.com/#/settings")
+    assert not failed and "already shows" not in text and "Opened tab t2" in text, text
 
 
 @pytest.mark.parametrize("runtime", [GRANTED])
