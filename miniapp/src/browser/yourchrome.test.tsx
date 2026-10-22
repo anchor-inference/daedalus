@@ -85,6 +85,19 @@ describe("the card", () => {
     expect(card.querySelector<HTMLElement>(".bs-chrome-rtt")?.textContent).toBe("Chrome answered in 14 ms");
   });
 
+  it("offers read-only and closing the agent's tabs at the end of its turn, both on by default", async () => {
+    const changed: Partial<typeof DEFAULT_USER>[] = [];
+    current = status();
+    prime(USER_STATUS, current);
+    await act(async () => root.render(<YourChrome user={DEFAULT_USER} setUser={(patch) => changed.push(patch)} toast={() => undefined} />));
+    for (const [setting, key] of [["browser.user.read_only", "read_only"], ["browser.user.close_tabs", "close_tabs"]] as const) {
+      const toggle = host.querySelector<HTMLElement>(`[data-setting='${setting}'] [role=switch]`)!;
+      expect(toggle.getAttribute("aria-checked")).toBe("true");
+      await act(async () => toggle.click());
+      expect(changed.at(-1)).toEqual({ [key]: false });
+    }
+  });
+
   it("says why no Chrome is connected, and on this computer how to install and register", async () => {
     const card = (await show(status({ relay: { connected: false, last_error: "Chrome closed the connection" }, launcher: { connector: { registered: false }, extension: { path: "/data/browser-extension", ready: true } } })))!;
     expect(card.dataset.state).toBe("waiting");

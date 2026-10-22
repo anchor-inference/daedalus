@@ -62,7 +62,7 @@ class Host:
     def __init__(self, bs: BrowserStub, card: dict[str, object]) -> None:
         self.bs = bs
         self.card = card
-        self.settings = {"revision": "s1", "browser": {**copy.deepcopy(BROWSER), "user": {"enabled": True, "granted_sites": [], "monitor": True, "watch": True, "bodies": False}},
+        self.settings = {"revision": "s1", "browser": {**copy.deepcopy(BROWSER), "user": {"enabled": True, "granted_sites": [], "monitor": True, "watch": True, "bodies": False, "read_only": True, "close_tabs": True}},
                          "presets": {"p": {}}, "providers": {}, "model": {"preset": "p", "chain": []}}
         self.calls: list[tuple[str, str, str]] = []
 
