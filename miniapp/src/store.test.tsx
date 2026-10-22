@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-// A first read that fails is tried again within seconds, not at the next poll.
+// A first read that fails is tried again within seconds, not at the next poll, and a screen that
+// mounts while another reader's request is on the way shows its answer.
 
-import { act } from "react";
+import { act, useLayoutEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, api } from "./api";
-import { invalidate, retryDelay, useQuery } from "./store";
+import { invalidate, prime, retryDelay, useQuery } from "./store";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -98,5 +99,32 @@ describe("a change made while a read is on the way", () => {
     expect(box.textContent).toBe("with the new chat");
     await act(async () => { answerOld({ name: "before the chat" }); });
     expect(box.textContent).toBe("with the new chat");
+  });
+});
+
+describe("a screen that mounts while another reader's request is on the way", () => {
+  let box: HTMLDivElement;
+  let root: ReturnType<typeof createRoot>;
+  beforeEach(() => {
+    box = document.createElement("div");
+    root = createRoot(box);
+  });
+  afterEach(() => {
+    act(() => root.unmount());
+    vi.restoreAllMocks();
+  });
+
+  it("shows an answer that lands after it rendered but before its effects ran", () => {
+    // A layout effect runs after the commit and before the passive effects, which is where a late
+    // lazily loaded screen sat when the header's request for the same key answered. The screen then
+    // finds the entry fresh, asks for nothing, and must still show it rather than "loading".
+    const get = vi.spyOn(api, "get").mockResolvedValue({ name: "from a second request" });
+    function Answer() {
+      useLayoutEffect(() => prime("/api/projects/p1/budget?gap", { name: "Ira" }), []);
+      return null;
+    }
+    act(() => root.render(<><Member path="/api/projects/p1/budget?gap" pollMs={0} /><Answer /></>));
+    expect(get).not.toHaveBeenCalled();
+    expect(box.textContent).toBe("Ira");
   });
 });

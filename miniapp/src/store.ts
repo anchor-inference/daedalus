@@ -2,7 +2,7 @@
 // opens, refreshes in the background, and polls while it stays open. Nothing here survives a
 // reload; the point is that switching screens never flashes an empty frame.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { ApiError, api } from "./api";
 import { asSentence } from "./format";
 
@@ -107,16 +107,14 @@ function setOffline(v: boolean) {
   offline = v;
   for (const l of offlineListeners) l();
 }
+function subscribeOffline(onChange: () => void): () => void {
+  offlineListeners.add(onChange);
+  return () => {
+    offlineListeners.delete(onChange);
+  };
+}
 export function useOffline(): boolean {
-  const [, force] = useState(0);
-  useEffect(() => {
-    const on = () => force((n) => n + 1);
-    offlineListeners.add(on);
-    return () => {
-      offlineListeners.delete(on);
-    };
-  }, []);
-  return offline;
+  return useSyncExternalStore(subscribeOffline, () => offline);
 }
 
 export type Query<T> = { data: T | undefined; error: string | null; loading: boolean; updatedAt: number | null; refresh: () => Promise<void> };
@@ -127,14 +125,24 @@ export type Query<T> = { data: T | undefined; error: string | null; loading: boo
  */
 export function useQuery<T>(key: string | null, opts: { pollMs?: number; staleMs?: number } = {}): Query<T> {
   const { pollMs = 0, staleMs = 0 } = opts;
-  const [, force] = useState(0);
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
+  // The entry is read through useSyncExternalStore, not a listener added in an effect beside a
+  // forced re-render. That listener was added only after the screen had painted, so an answer that
+  // landed in between (asked for by another reader of the same key, a header or the tab bar) told
+  // nobody, and the effect then found the entry fresh and asked for nothing: the screen kept the
+  // empty frame it first rendered until some other change re-rendered it. That is how a phone board
+  // whose chunk loaded late showed no budget chip for a whole poll while the More tab beside it
+  // already counted the budget. useSyncExternalStore compares the entry again once it subscribes.
+  const subscribe = useCallback((onChange: () => void) => {
+    if (!key) return () => {};
+    const set = listeners.get(key) ?? new Set();
+    set.add(onChange);
+    listeners.set(key, set);
     return () => {
-      mounted.current = false;
+      set.delete(onChange);
+      if (!set.size) listeners.delete(key);
     };
-  }, []);
+  }, [key]);
+  const entry = useSyncExternalStore(subscribe, () => (key ? cache.get(key) : undefined));
   const refresh = useCallback(async () => {
     if (!key) return;
     try {
@@ -145,10 +153,6 @@ export function useQuery<T>(key: string | null, opts: { pollMs?: number; staleMs
   }, [key]);
   useEffect(() => {
     if (!key) return;
-    const on = () => mounted.current && force((n) => n + 1);
-    const set = listeners.get(key) ?? new Set();
-    set.add(on);
-    listeners.set(key, set);
     const refreshers = listeners.get(`refresh:${key}`) ?? new Set();
     const onRefresh = () => void refresh();
     refreshers.add(onRefresh);
@@ -166,9 +170,7 @@ export function useQuery<T>(key: string | null, opts: { pollMs?: number; staleMs
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
-      set.delete(on);
       refreshers.delete(onRefresh);
-      if (!set.size) listeners.delete(key);
       if (!refreshers.size) listeners.delete(`refresh:${key}`);
       if (timer) window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
@@ -182,6 +184,5 @@ export function useQuery<T>(key: string | null, opts: { pollMs?: number; staleMs
     const timer = window.setTimeout(() => void refresh(), retryDelay(miss, pollMs));
     return () => window.clearTimeout(timer);
   }, [key, miss, pollMs, refresh]);
-  const entry = key ? cache.get(key) : undefined;
   return { data: entry?.data as T | undefined, error: entry?.error ?? null, loading: !!key && !entry, updatedAt: entry?.at || null, refresh };
 }
