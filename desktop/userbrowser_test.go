@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -146,7 +147,8 @@ const twoProfiles = `{"profile":{"last_used":"Profile 1","info_cache":{"Default"
 // listed as unsupported with the reason, not left out.
 func TestChromeIsDetectedOnLinuxWithItsProfiles(t *testing.T) {
 	home := t.TempDir()
-	udd := filepath.Join(home, ".config", "google-chrome")
+	// The probe joins Linux paths with forward slashes on every system, so the expected one does too.
+	udd := path.Join(home, ".config", "google-chrome")
 	writeLocalState(t, udd, twoProfiles)
 	if err := os.MkdirAll(filepath.Join(home, ".local/share/flatpak/app/com.google.Chrome"), 0o755); err != nil {
 		t.Fatal(err)

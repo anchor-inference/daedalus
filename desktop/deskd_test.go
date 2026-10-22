@@ -133,6 +133,8 @@ func TestDaedalusIsProtectedOnEverySystem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A Windows checkout ends the lines with CRLF.
+	builder = bytes.ReplaceAll(builder, []byte("\r\n"), []byte("\n"))
 	if !bytes.Contains(builder, []byte("appId: "+shellAppID+"\n")) {
 		t.Fatalf("electron-builder.yml no longer names %s as the appId; the protected bundle id must follow it", shellAppID)
 	}

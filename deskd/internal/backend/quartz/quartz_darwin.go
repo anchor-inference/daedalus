@@ -3,13 +3,16 @@
 package quartz
 
 /*
-#cgo CFLAGS: -x objective-c -fobjc-arc
-#cgo LDFLAGS: -framework CoreGraphics -framework ApplicationServices -framework AppKit -framework CoreFoundation
+#cgo CFLAGS: -x objective-c -fobjc-arc -mmacosx-version-min=12.0
+#cgo LDFLAGS: -mmacosx-version-min=12.0 -framework CoreGraphics -framework ApplicationServices -framework AppKit -framework CoreFoundation
 
 // CGDisplayCreateImageForRect and NSApplicationActivateIgnoringOtherApps are deprecated in the
 // macOS 14 and 15 SDKs and still work there. The warning is silenced rather than the calls replaced
 // because the replacements change the program's shape: ScreenCaptureKit's SCScreenshotManager is
 // asynchronous, needs a run loop and asks for a newer system, and is the capture to adopt next.
+// The deployment target is pinned to macOS 12, the oldest the app supports: left to the compiler it
+// follows the build machine, and on a macOS 15 runner the capture call stops being deprecated and
+// becomes unavailable, which fails the build outright.
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
 #import <AppKit/AppKit.h>
