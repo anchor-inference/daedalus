@@ -671,6 +671,10 @@ class BrowserAgent:
         self.dead: OrderedDict[str, set[str]] = OrderedDict()
         """The tabs of each group found no longer answering (detached), so a listing marks them and the
         tab cap closes them first. The daemon marks them too where it knows; this covers one that does not."""
+        self.opening: dict[str, set[str]] = {}
+        """The tabs of each group just made and still on their way to their page. Blank until then, they
+        looked like the litter the tab cap clears first, and a second BrowserTabs(new) in the same batch
+        closed the first one's tab under its navigation."""
         self.last_acts: OrderedDict[str, tuple[str, float]] = OrderedDict()
         """Each owner's last action on each tab (``owner\x00group\x00tab`` → its deadly key and when), so a
         tab found dead right after can be put down to that action."""
@@ -763,7 +767,11 @@ class BrowserAgent:
 
     @staticmethod
     def _tab_line(tab: dict[str, Any], *, new: bool = False, dead: bool = False, twin: str = "") -> str:
-        marks = [m for m, on in (("active", tab.get("active")), ("new", new), ("dead: close it", dead), (f"the same address as {twin}", twin)) if on]
+        given = bool(tab.get("given"))
+        marks = [m for m, on in (
+            ("active", tab.get("active")), ("new", new), ("the operator's own, given to you: closing it hands it back", given),
+            ("dead: close it", dead), (f"the same address as {twin}", twin),
+        ) if on]
         return f"- {tab.get('id')} · {str(tab.get('title') or '(untitled)')[:120]} — {tab.get('url') or 'about:blank'}" + (f" ({'; '.join(marks)})" if marks else "")
 
     async def _tab_list(self, group: str) -> list[dict[str, Any]]:
@@ -898,7 +906,7 @@ class BrowserAgent:
         if url and not opened["created"] and (same := self._showing(group["id"], await self._tab_list(group["id"]), url)) is not None:
             # The browser was open and a tab of it is on that address already: that tab is brought
             # forward instead of the active one being taken away from what it shows.
-            await self.service.call(group["id"], "tab.select", {"tab_id": same["id"], "origin": self._origin(caller)}, what="switching to the tab", timeout=40.0)
+            await self.service.call(group["id"], "tab.select", {"tab_id": same["id"], "origin": self._origin(caller), "quiet": True}, what="switching to the tab", timeout=40.0)
             found = str(same["id"])
         elif url:
             tab = opened.get("tab") or {}
@@ -1808,9 +1816,11 @@ class BrowserAgent:
         if action in ("select", "close"):
             if not tab:
                 raise InvalidRequest(f"{action} needs the tab's id (BrowserTabs lists them)")
-            await self.service.call(group["id"], f"tab.{action}", {"tab_id": tab, "origin": origin}, what=f"{'switching to' if action == 'select' else 'closing'} the tab", timeout=40.0)
+            done = await self.service.call(group["id"], f"tab.{action}", {"tab_id": tab, "origin": origin}, what=f"{'switching to' if action == 'select' else 'closing'} the tab", timeout=40.0)
             if action == "close":
                 self.dead.get(group["id"], set()).discard(tab)
+                if (done or {}).get("released"):
+                    return _released(tab) + "\nTabs:\n" + await self._tabs_text(group["id"])
         return "Tabs:\n" + await self._tabs_text(group["id"])
 
     async def _new_tab(self, caller: Caller, group: dict[str, Any], url: str | None) -> str:
@@ -1822,7 +1832,9 @@ class BrowserAgent:
         origin = self._origin(caller)
         tabs = await self._tab_list(gid)
         if url and (same := self._showing(gid, tabs, url)) is not None:
-            await self.service.call(gid, "tab.select", {"tab_id": same["id"], "origin": origin}, what="switching to the tab", timeout=40.0)
+            # Quiet: the agent's own switch, which in the operator's window must not take the tab they
+            # are on away from them, any more than a tab it opens there does.
+            await self.service.call(gid, "tab.select", {"tab_id": same["id"], "origin": origin, "quiet": True}, what="switching to the tab", timeout=40.0)
             return (
                 f"Tab {same['id']} already shows {url[:300]}: switched to it rather than opening the page twice. BrowserNavigate moves it "
                 "elsewhere.\nTabs:\n" + await self._tabs_text(gid)
@@ -1840,6 +1852,8 @@ class BrowserAgent:
         await self._audit(group, caller, "tab_new", {"tab": tid, "url": (url or "")[:2000]})
         said = [f"Opened tab {tid}."]
         if url:
+            opening = self.opening.setdefault(gid, set())
+            opening.add(tid)
             try:
                 result = await self._through_wall(
                     caller, group, lambda: self.service.call(gid, "page.navigate", {"tab_id": tid, "url": url, "origin": origin, "timeout_ms": NAVIGATE_TIMEOUT_MS}, what="opening the page", timeout=NAVIGATE_TIMEOUT_MS / 1000 + 25),
@@ -1850,6 +1864,10 @@ class BrowserAgent:
                 with contextlib.suppress(BrowserError):
                     await self.service.call(gid, "tab.close", {"tab_id": tid, "origin": origin}, what="closing the tab")
                 raise
+            finally:
+                opening.discard(tid)
+                if not opening:
+                    self.opening.pop(gid, None)
             reached = str(result.get("url") or url)
             await self._site_notes(caller, reached)
             failed = f"; the page did not load: {result['error']}" if result.get("error") else ""
@@ -1863,13 +1881,17 @@ class BrowserAgent:
     async def _make_room(self, caller: Caller, group: dict[str, Any], tabs: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
         """Room for one more tab under the cap in the operator's Chrome: dead and blank tabs go first,
         since nobody loses anything with them; past that the agent is refused, with its tabs named,
-        rather than a page it may still need closed behind its back."""
+        rather than a page it may still need closed behind its back. The tabs the operator gave are
+        neither counted nor ever closed here: the cap is on the agent's own litter in their window, and
+        a given tab that died on a PDF is still their tab, which this used to close."""
         gid = group["id"]
+        tabs = [t for t in tabs if not t.get("given")]
+        opening = self.opening.get(gid, set())
         closed: list[str] = []
         for tab in sorted(tabs, key=lambda t: (not self._is_dead(gid, t), bool(t.get("active")))):
             if len(tabs) - len(closed) < USER_TABS:
                 break
-            blank = not _address(str(tab.get("url") or "")) and not tab.get("active")
+            blank = not _address(str(tab.get("url") or "")) and not tab.get("active") and str(tab.get("id")) not in opening
             if not (self._is_dead(gid, tab) or blank):
                 continue
             with contextlib.suppress(BrowserError):
@@ -1991,13 +2013,23 @@ class BrowserAgent:
     async def close(self, caller: Caller, *, tab: str | None = None, all: bool = False) -> str:  # noqa: A002 — the tool's own argument name
         group = await self._group(caller)
         if all or not tab:
+            given: list[str] = []
+            if group.get("env") == USER_ENV:
+                with contextlib.suppress(BrowserError):
+                    given = [str(t.get("id")) for t in await self._tab_list(group["id"]) if t.get("given")]
             await self.service.close_group(group["id"], actor=caller.actor, reason="closed")
             self.dead.pop(group["id"], None)
             if group.get("env") == USER_ENV:
-                return "Your tabs in the operator's Chrome were closed; none of their own tabs was touched. BrowserOpen opens a new one."
+                # The tabs the operator gave were in the group, and the extension lets them go rather
+                # than closing them; said so, since "none of theirs was touched" was once said while
+                # their tab was being closed.
+                kept = f" The operator's own {'tab' if len(given) == 1 else 'tabs'} {', '.join(given)} {'was' if len(given) == 1 else 'were'} handed back to them, still open." if given else ""
+                return f"The tabs you opened in the operator's Chrome were closed.{kept} BrowserOpen opens a new one."
             return "The browser was closed; its profile and logins are kept for the next BrowserOpen."
-        await self.service.call(group["id"], "tab.close", {"tab_id": tab, "origin": self._origin(caller)}, what="closing the tab")
+        done = await self.service.call(group["id"], "tab.close", {"tab_id": tab, "origin": self._origin(caller)}, what="closing the tab")
         self.dead.get(group["id"], set()).discard(tab)
+        if (done or {}).get("released"):
+            return _released(tab) + "\nTabs:\n" + await self._tabs_text(group["id"])
         return "Tabs:\n" + await self._tabs_text(group["id"])
 
     async def download(self, caller: Caller, *, name: str, to: str | None = None) -> str:
@@ -2265,14 +2297,24 @@ class BrowserAgent:
         return f"there is no browser tool {tool!r}", True
 
 
+def _released(tab: str) -> str:
+    """What the agent is told when the tab it closed was the operator's and was handed back instead."""
+    return f"Tab {tab} was the operator's own, given to you: it was handed back to them, still open, not closed. It is no longer yours to use."
+
+
 def _address(url: str) -> str:
     """An address as two tabs are compared: without its fragment or a trailing slash, the scheme and
-    host in lower case; ``""`` for a blank page, which is no page to have twice."""
+    host in lower case; ``""`` for a blank page, which is no page to have twice.
+
+    A fragment that is a route (``#/settings``, ``#!/inbox``) is kept: a single-page app routes by it,
+    and dropping it told the agent a tab on ``#/inbox`` already showed ``#/settings``. An anchor on a
+    page (``#section-2``) is the same page and is still dropped."""
     parts = urlsplit(url.strip())
     if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
         return ""
     path = parts.path.rstrip("/")
-    return f"{parts.scheme.lower()}://{parts.netloc.lower()}{path}" + (f"?{parts.query}" if parts.query else "")
+    route = parts.fragment if parts.fragment.startswith(("/", "!")) else ""
+    return f"{parts.scheme.lower()}://{parts.netloc.lower()}{path}" + (f"?{parts.query}" if parts.query else "") + (f"#{route.rstrip('/')}" if route.rstrip("/") else "")
 
 
 def _downloaded(result: dict[str, Any]) -> str:

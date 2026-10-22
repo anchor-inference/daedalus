@@ -76,6 +76,19 @@ func fixture(t *testing.T) *httptest.Server {
 	page("/confirm-writes", "Confirm", `<button onclick="if (confirm('Reset?')) document.getElementById('m').textContent = 'Filters reset.'">Reset</button><p id="m">Four filters.</p>`)
 	page("/dialog", "Dialog", `<button id="b" style="position:absolute;left:100px;top:100px;width:200px;height:60px" onclick="document.title=confirm('Leave?')?'yes':'no'">Ask</button>`)
 	mux.Handle("/site/", http.StripPrefix("/site/", http.FileServer(http.Dir("testdata/site"))))
+	// A PDF sent in chunks with no Content-Length, as a generated report is (attach_rpc_test.go).
+	mux.HandleFunc("/chunked/statement.pdf", func(w http.ResponseWriter, r *http.Request) {
+		data, err := os.ReadFile("testdata/site/statement.pdf")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/pdf")
+		half := len(data) / 2
+		w.Write(data[:half])
+		w.(http.Flusher).Flush()
+		w.Write(data[half:])
+	})
 	mux.HandleFunc("/file.txt", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.Header().Set("Content-Disposition", `attachment; filename="report.txt"`)

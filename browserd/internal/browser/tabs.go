@@ -110,7 +110,7 @@ func (m *Manager) setupTab(g *Group, session string, info targetInfo, opener str
 	}
 	m.tabSeq++
 	t := &Tab{ID: "t" + strconv.Itoa(m.tabSeq), Group: g, TargetID: info.TargetID, Session: session, Opener: opener,
-		CreatedAt: time.Now().UTC(), url: info.URL, title: info.Title, life: map[string]bool{}, wake: make(chan struct{})}
+		CreatedAt: time.Now().UTC(), Given: info.given, url: info.URL, title: info.Title, life: map[string]bool{}, wake: make(chan struct{})}
 	m.settingUp[session] = t
 	m.mu.Unlock()
 	defer func() {
@@ -164,7 +164,7 @@ func (m *Manager) setupTab(g *Group, session string, info targetInfo, opener str
 		}
 	}
 	// Before the page runs, so its first navigation (a popup's) meets the guard too.
-	fetch := m.fetchWanted(b)
+	fetch := m.fetchWanted(b, info.given)
 	if fetch.on() {
 		replies = append(replies, b.conn.Send(ctx, session, "Fetch.enable", fetch.params()))
 		methods = append(methods, "Fetch.enable")
@@ -241,10 +241,10 @@ func (m *Manager) CloseTab(ctx context.Context, t *Tab) error {
 	return m.backend.closeTab(ctx, t)
 }
 
-// SelectTab makes t the group's active tab and brings it forward.
-func (m *Manager) SelectTab(ctx context.Context, t *Tab) error {
+// SelectTab makes t the group's active tab and brings it forward; quiet, see backend.activate.
+func (m *Manager) SelectTab(ctx context.Context, t *Tab, quiet bool) error {
 	t.Group.SetActive(t)
-	return m.backend.activate(ctx, t)
+	return m.backend.activate(ctx, t, quiet)
 }
 
 // NavResult is what a navigation gives back.

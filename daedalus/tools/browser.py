@@ -437,7 +437,8 @@ async def browser_handoff(context: ToolContext, reason: str, what: str) -> ToolR
     name="BrowserClose",
     description=(
         "Close one tab (tab = its id), or the whole browser (all=true, or no tab). The profile and its logins stay for "
-        "the next BrowserOpen. In the operator's own Chrome no tab closes all of yours and none of theirs."
+        "the next BrowserOpen. In the operator's own Chrome no tab closes every tab you opened; a tab the operator gave you "
+        "is handed back to them, open, never closed."
     ),
 )
 async def browser_close(context: ToolContext, tab: str | None = None, all: bool = False) -> ToolResult:  # noqa: A002 — the tool's argument name

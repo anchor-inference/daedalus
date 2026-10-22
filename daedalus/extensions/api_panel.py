@@ -251,9 +251,9 @@ def register(api: FastAPI, app: Application, *, new_body: type[BaseModel]) -> No
         if not title:
             raise HTTPException(400, "a conversation started in the panel starts with the operator's first words")
         # A Chrome conversation: made in their Chrome by the operator's own create, which also moves it.
+        # Moving it again here announced the switch twice, and the app redrew the conversation twice.
         created = await new_session(body=new_body(title=title, autotitle=True, kind="chrome"), _=who)
         session_id = str(created["id"])
-        await found.switch_conversation(session_id, USER, consent=True)
         await mark_panel_session(manager, session_id)
         await app.db.kv_set(CONSENTED_KEY, True)
         return {**created, "group": group_id(Owner("session", session_id, session_id=session_id), env=USER)}

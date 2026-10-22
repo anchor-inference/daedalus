@@ -13,6 +13,7 @@ type OAuthView = { scopes: string[]; issuer: string; client_id: string; client_s
 export type McpServerView = {
   name: string; transport: "stdio" | "http"; command: string; args: string[]; url: string; description: string;
   headers: Record<string, string>; env: Record<string, string>; oauth: OAuthView | null;
+  approval: string; tool_approval: Record<string, string>;
   state: string; error: string | null; tools: string[];
 };
 type Probe = { state: string; error: string | null; tools: string[] };
@@ -40,6 +41,9 @@ const draftOf = (s: McpServerView): Draft => ({
   headers: lines(s.headers, ": "), description: s.description, oauth: !!s.oauth, scopes: (s.oauth?.scopes ?? []).join(" "),
   clientId: s.oauth?.client_id ?? "", clientSecret: s.oauth?.client_secret ?? "",
 });
+// No approval and no per-tool approval: the form has no fields for them, and the host keeps a
+// stored server's own when they are left out. Before it did, editing a description here put a server
+// the operator had allowed back to "auto" and dropped its per-tool answers.
 function body(d: Draft) {
   const stdio = d.transport === "stdio";
   return {

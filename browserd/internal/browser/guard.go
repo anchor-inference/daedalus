@@ -51,9 +51,11 @@ func (m *Manager) guarding() bool {
 
 // fetchWanted is what the Fetch domain of a page of b should pause now. The PDF pattern is the
 // operator's Chrome's only: a browser of the daemon's own has no PDF viewer to lose a tab to, and
-// every paused response is a round trip on the pipe.
-func (m *Manager) fetchWanted(b *Browser) fetchState {
-	return fetchState{guard: m.guarding(), pdf: b.attached}
+// every paused response is a round trip on the pipe. Nor is it a given tab's (Tab.Given): a PDF the
+// operator opens in their own tab was silently taken away into the agent's downloads, and they saw
+// neither the document nor a file in their own downloads.
+func (m *Manager) fetchWanted(b *Browser, given bool) fetchState {
+	return fetchState{guard: m.guarding(), pdf: b.attached && !given}
 }
 
 // SyncGuard turns the guard on or off in every open tab, after the wall's rules changed.
@@ -65,7 +67,7 @@ func (m *Manager) SyncGuard(ctx context.Context) {
 	}
 	m.mu.Unlock()
 	for _, t := range tabs {
-		want := m.fetchWanted(t.Group.Browser)
+		want := m.fetchWanted(t.Group.Browser, t.Given)
 		was, _ := t.Value(fetchKey{}).(fetchState)
 		if was == want {
 			continue

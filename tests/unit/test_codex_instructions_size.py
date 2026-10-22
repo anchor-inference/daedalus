@@ -88,9 +88,9 @@ def test_the_configured_output_ceiling_reaches_the_launch_spec(tmp_path: Path) -
     assert spec.max_output_tokens == 100_000
 
 
-def test_a_codex_launch_into_a_folder_with_oversized_instructions_is_logged(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+async def test_a_codex_launch_into_a_folder_with_oversized_instructions_is_logged(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     repo = _repo(tmp_path / "repo")
     (repo / "AGENTS.md").write_bytes(b"x" * (INSTRUCTIONS_LIMIT + 1))
     with caplog.at_level(logging.WARNING):
-        _runtime(CodexAdapter())._spec(_request(repo), "l1", "")
+        await _runtime(CodexAdapter())._warn_long_instructions(_request(repo))
     assert any("AGENTS.md" in r.getMessage() and "32" in r.getMessage() for r in caplog.records)

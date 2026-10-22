@@ -381,7 +381,12 @@ func actor(o *browser.Origin) string {
 }
 
 func (d *Daemon) tabSelect(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
-	var p tabParams
+	var p struct {
+		tabParams
+		// Quiet is the host switching to a tab the agent already had, rather than the agent naming
+		// one: in the operator's own window it must not take the active tab away from them.
+		Quiet bool `json:"quiet,omitempty"`
+	}
 	if err := decode(params, &p); err != nil {
 		return nil, err
 	}
@@ -389,7 +394,7 @@ func (d *Daemon) tabSelect(ctx context.Context, c *server.Conn, params json.RawM
 	if err != nil {
 		return nil, err
 	}
-	if err := d.Manager.SelectTab(ctx, t); err != nil {
+	if err := d.Manager.SelectTab(ctx, t, p.Quiet); err != nil {
 		return nil, err
 	}
 	return t.View(), nil
@@ -406,6 +411,11 @@ func (d *Daemon) tabClose(ctx context.Context, c *server.Conn, params json.RawMe
 	}
 	if err := d.Manager.CloseTab(ctx, t); err != nil {
 		return nil, err
+	}
+	if t.Given {
+		// The operator's own tab is let go by the extension, never closed: the host says so rather
+		// than telling the agent it closed something of theirs.
+		return map[string]any{"released": true}, nil
 	}
 	return map[string]any{}, nil
 }

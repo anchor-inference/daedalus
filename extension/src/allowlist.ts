@@ -32,6 +32,10 @@ const EMULATION = new Set([
 // the browser-level session does, and the extension has none to give.
 const TARGET = new Set(["Target.setAutoAttach", "Target.detachFromTarget"]);
 
+// IO is allowed only to read and close a stream: the body of a PDF the tab's own Fetch domain took as
+// a stream, read a piece at a time so that a large one never crosses as one message.
+const IO = new Set(["IO.read", "IO.close"]);
+
 // Refused by name even though their domain is allowed. Anything mentioning a cookie is refused as
 // well, whatever domain it is in, so that a method Chrome adds later (`Network.setCookieControls`,
 // `Page.getCookies` of old) is closed before anyone has to remember to close it.
@@ -48,5 +52,6 @@ export function refusal(method: string): string | null {
   if (domain === "Browser") return "the Browser domain is refused";
   if (domain === "Emulation") return EMULATION.has(method) ? null : `${method} is refused`;
   if (domain === "Target") return TARGET.has(method) ? null : `${method} is refused`;
+  if (domain === "IO") return IO.has(method) ? null : `${method} is refused`;
   return DOMAINS.has(domain) ? null : `the ${domain} domain is not on the extension's allowlist`;
 }

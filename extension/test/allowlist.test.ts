@@ -22,6 +22,8 @@ describe("the method allowlist", () => {
     "Emulation.clearDeviceMetricsOverride",
     "Target.setAutoAttach",
     "Target.detachFromTarget",
+    "IO.read",
+    "IO.close",
   ])("lets %s through", (method) => {
     expect(refusal(method)).toBeNull();
   });
@@ -57,6 +59,8 @@ describe("the method allowlist", () => {
     "Target.setDiscoverTargets",
     "Target.closeTarget",
     "Target.attachToBrowserTarget",
+    // IO beyond reading the stream of a response the tab's own Fetch domain took.
+    "IO.resolveBlob",
     // Emulation that changes how the operator's browser presents itself.
     "Emulation.setUserAgentOverride",
     "Emulation.setGeolocationOverride",

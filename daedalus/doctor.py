@@ -806,16 +806,13 @@ async def _project_instructions(ctx: DoctorContext) -> list[Check]:
     Codex member silently never sees the rules written last."""
     if ctx.db is None:
         return []
-    from daedalus.harness.codex import (  # Lazy: the other checks have no use for the adapter
-        INSTRUCTIONS_LIMIT,
-        instructions_size,
-    )
+    from daedalus.harness import codex  # Lazy: the other checks have no use for the adapter.
 
     rows = await ctx.db.fetchall(
         "SELECT p.name, f.path FROM project_folders f JOIN projects p ON p.id = f.project_id WHERE f.env = ? ORDER BY p.name, f.position",
         (ctx.db.local_env,),
     )
-    over = [(row["name"], row["path"], size) for row in rows if (size := await asyncio.to_thread(instructions_size, Path(row["path"]))) > INSTRUCTIONS_LIMIT]
+    over = [(row["name"], row["path"], size) for row in rows if (size := await asyncio.to_thread(codex.instructions_size, Path(row["path"]))) > codex.INSTRUCTIONS_LIMIT]
     if not over:
         return []
     listed = ", ".join(f"{name} ({path}, {size // 1024} KiB)" for name, path, size in over[:5])

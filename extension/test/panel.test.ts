@@ -83,11 +83,11 @@ describe("giving the operator's tab to a conversation", () => {
     const given = await h.relay.adoptTab(page.id, "s-7-u", "7", "Compare prices");
     expect(given).toMatchObject({ id: page.id, group: "s-7-u", url: "https://shop.example/cart" });
     expect(h.fake.attached.has(page.id)).toBe(true);
-    expect(h.take()).toContainEqual({ t: "tabs", op: "joined", tab: { id: page.id, group: "s-7-u", url: "https://shop.example/cart", title: "Cart" } });
+    expect(h.take()).toContainEqual({ t: "tabs", op: "joined", tab: { id: page.id, group: "s-7-u", url: "https://shop.example/cart", title: "Cart", given: true } });
     expect(h.relay.tabOwner(page.id)?.session).toBe("7");
     const windows = h.fake.windows.size;
     const ensured = await h.call("window.ensure", { group: "s-7-u", session: "7" });
-    expect(ensured.value).toEqual({ window: h.fake.operatorWindow, tabs: [{ id: page.id, group: "s-7-u", url: "https://shop.example/cart", title: "Cart" }] });
+    expect(ensured.value).toEqual({ window: h.fake.operatorWindow, tabs: [{ id: page.id, group: "s-7-u", url: "https://shop.example/cart", title: "Cart", given: true }] });
     expect(h.fake.windows.size).toBe(windows);
   });
 

@@ -366,6 +366,20 @@ def test_an_mcp_tool_its_annotations_ask_about_is_a_question_an_operator_rule_ca
     assert lifted.evaluate("Mcp_notes_append", {"text": "hi"}).action == "allow"
 
 
+def test_an_mcp_tool_its_annotations_ask_about_can_be_allowed_for_the_session() -> None:
+    """Such a tool names no path, address or command, so "allow similar" once had no family to
+    offer and every later call asked again; its family is the tool itself."""
+    policy = Policy(mcp_approvals={"Mcp_notes_append": "ask", "Mcp_notes_delete": "ask"})
+    asked = policy.evaluate("Mcp_notes_append", {"text": "hi"})
+    assert asked.rule == "mcp.annotations"
+    family = similar_grant("Mcp_notes_append", {"text": "hi"}, asked.rule)
+    assert family is not None and family["kind"] == "tool" and family["label"] == "Mcp_notes_append(*)"
+    assert policy.evaluate("Mcp_notes_append", {"text": "something else entirely"}, similar=[family]).action == "allow"
+    # Another tool of the same server, or the same tool asked about for another reason, still asks.
+    assert policy.evaluate("Mcp_notes_delete", {"id": 1}, similar=[family]).action == ASK
+    assert not similar_covers(family, "Mcp_notes_append", "home.read", {**family, "rule": "home.read"})
+
+
 def test_an_mcp_tool_its_annotations_allow_still_meets_the_path_rules() -> None:
     policy = Policy(mcp_approvals={"Mcp_files_read": "allow"}, sealed_paths=[Path("/sealed")], native=True)
     assert policy.evaluate("Mcp_files_read", {"path": "/sealed/key"}).action == DENY

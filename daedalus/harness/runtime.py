@@ -572,11 +572,6 @@ class CliStaffRuntime:
 
     def _spec(self, req: StartRequest, launch_id: str, resume_ref: str, extras: Extras | None = None) -> LaunchSpec:
         cfg = self.config()
-        if self.kind == "codex" and (size := instructions_size(Path(req.cwd))) > INSTRUCTIONS_LIMIT:
-            # Codex cuts the rest off without telling the model; the operator at least can read why a
-            # rule from the end of the file was never followed.
-            logger.warning("%s works in %s, whose AGENTS.md files come to %d bytes; Codex reads only the first %d (32 KiB) and drops the rest",
-                           req.staff.name, req.cwd, size, INSTRUCTIONS_LIMIT)
         facts = protocol.TeamFacts(
             staff_name=req.staff.name,
             project_name=req.project.name,
@@ -644,11 +639,24 @@ class CliStaffRuntime:
             return port
         return None
 
+    async def _warn_long_instructions(self, req: StartRequest) -> None:
+        """Codex cuts a project's AGENTS.md text off after 32 KiB without telling the model; the
+        operator at least can read why a rule from the end of the file was never followed. The walk
+        up to the repository's top touches the disk once per directory, so it runs off the loop."""
+        if self.kind != "codex":
+            return
+        size = await asyncio.to_thread(instructions_size, Path(req.cwd))
+        if size > INSTRUCTIONS_LIMIT:
+            logger.warning("%s works in %s, whose AGENTS.md files come to %d bytes; Codex reads only the first %d (32 KiB) and drops the rest",
+                           req.staff.name, req.cwd, size, INSTRUCTIONS_LIMIT)
+
     async def _launch_once(self, req: StartRequest, *, resume_ref: str) -> Started:
         actor = self._actor(req.staff_session_id)
         launch_id = "l" + secrets.token_hex(8)
         spec = self._spec(req, launch_id, resume_ref, await self._extras(req, launch_id))
         plan = self.adapter.resume_plan(spec, resume_ref) if resume_ref else self.adapter.launch_plan(spec)
+        # After the plan, so a launch refused for its permissions touches nothing first.
+        await self._warn_long_instructions(req)
         from daedalus.harness.observation import observe  # Lazy: observe imports the launch contract used by adapters.
         effective = observe(self.adapter, spec, plan)
         row = await self.store.catalog_row(req.env, self.kind)

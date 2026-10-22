@@ -18,7 +18,7 @@ import httpx
 import pytest
 from protocore.contracts.tools import ToolContext
 
-from daedalus.browser.agent import SensitiveAsk, Step
+from daedalus.browser.agent import SensitiveAsk, Step, _address
 from daedalus.browser.model import USER, InvalidRequest, Owner, group_id
 from daedalus.browser.user import CONSENT, ConsentNeeded, SkipNeedsConfirm, site_granted, site_of
 from daedalus.config import BrowserConfig, BrowserRuleConfig, BrowserUserConfig, RuntimeConfig, Settings
@@ -686,6 +686,26 @@ async def test_a_new_tab_on_an_open_address_switches_to_it_and_the_result_marks_
     assert not failed and "Tab t1 already shows" in text, text
     assert tabs_of(chrome, sid) == ["https://tax.example.com/documents", "https://mail.example.com/"]
     assert chrome.groups[group_id(Owner("session", sid), env=USER)].active == "t1"
+    # Both switches were the host's own, which in the operator's window leaves their active tab alone;
+    # a tab the agent names is brought forward.
+    assert chrome.selects == [("t1", True), ("t1", True)]
+    await rig.call(sid, "BrowserTabs", action="select", tab="t2")
+    assert chrome.selects[-1] == ("t2", False)
+
+
+def test_a_route_in_the_fragment_is_a_different_page_and_an_anchor_is_not() -> None:
+    assert _address("https://mail.example.com/#/inbox") != _address("https://mail.example.com/#/settings")
+    assert _address("https://mail.example.com/#!/inbox") != _address("https://mail.example.com/#!/settings")
+    assert _address("https://mail.example.com/#/inbox/") == _address("https://mail.example.com/#/inbox")
+    assert _address("https://example.com/guide#install") == _address("https://example.com/guide#usage") == _address("https://example.com/guide/")
+    assert _address("https://Example.com/a/") == _address("https://example.com/a")
+
+
+@pytest.mark.parametrize("runtime", [GRANTED])
+async def test_a_tab_on_another_route_of_the_same_app_is_not_taken_for_it(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await opened(rig, chrome, "https://mail.example.com/#/inbox")
+    text, failed = await rig.call(sid, "BrowserTabs", action="new", url="https://mail.example.com/#/settings")
+    assert not failed and "already shows" not in text and "Opened tab t2" in text, text
 
 
 @pytest.mark.parametrize("runtime", [GRANTED])
@@ -716,6 +736,64 @@ async def test_three_tabs_are_the_most_kept_and_blank_ones_make_room_first(rig: 
     assert failed and "You already have 3 tabs" in text and "nothing was opened" in text, text
     assert "https://news.example.com/" in text
     assert len(tabs_of(chrome, sid)) == 3
+
+
+@pytest.mark.parametrize("runtime", [GRANTED])
+async def test_a_blank_tab_still_on_its_way_to_its_page_is_not_closed_to_make_room(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await opened(rig, chrome)
+    gid = group_id(Owner("session", sid), env=USER)
+    await rig.call(sid, "BrowserTabs", action="new")
+    await rig.call(sid, "BrowserTabs", action="select", tab="t1")
+    await rig.call(sid, "BrowserTabs", action="new", url="https://mail.example.com/")
+    # t2 as another BrowserTabs(new) of the same batch holds it: made, blank, its navigation waiting.
+    rig.app.extensions["browser_agent"].opening[gid] = {"t2"}
+    text, failed = await rig.call(sid, "BrowserTabs", action="new", url="https://news.example.com/")
+    assert failed and "You already have 3 tabs" in text, text
+    assert len(tabs_of(chrome, sid)) == 3
+
+
+@pytest.mark.parametrize("runtime", [GRANTED])
+async def test_a_tab_the_operator_gave_is_never_closed_to_make_room_nor_counted(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await opened(rig, chrome)
+    gid = group_id(Owner("session", sid), env=USER)
+    given = chrome.give(gid, "https://mail.example.com/inbox")
+    # Dead on a page the debugger cannot drive, and not active: what the cap used to close first.
+    given.detached = True
+    listing, _ = await rig.call(sid, "BrowserTabs")
+    assert f"{given.id} · " in listing and "the operator's own, given to you" in listing, listing
+    for url in ("https://news.example.com/", "https://docs.example.com/"):
+        text, failed = await rig.call(sid, "BrowserTabs", action="new", url=url)
+        assert not failed and "Closed" not in text, text
+    text, failed = await rig.call(sid, "BrowserTabs", action="new", url="https://shop.example.com/")
+    assert failed and "You already have 3 tabs" in text, text
+    assert given in chrome.groups[gid].tabs and chrome.released == []
+
+
+@pytest.mark.parametrize("runtime", [GRANTED])
+async def test_closing_a_tab_the_operator_gave_hands_it_back(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await opened(rig, chrome)
+    gid = group_id(Owner("session", sid), env=USER)
+    given = chrome.give(gid, "https://mail.example.com/inbox")
+    text, failed = await rig.call(sid, "BrowserClose", tab=given.id)
+    assert not failed and "handed back to them, still open, not closed" in text, text
+    assert chrome.released == [given.id]
+    again = chrome.give(gid, "https://forms.example.com/apply")
+    text, failed = await rig.call(sid, "BrowserTabs", action="close", tab=again.id)
+    assert not failed and "handed back" in text, text
+    third = chrome.give(gid, "https://bank.example.com/")
+    text, failed = await rig.call(sid, "BrowserClose")
+    assert not failed and "The tabs you opened in the operator's Chrome were closed" in text and f"tab {third.id} was handed back" in text, text
+    assert "none of their own" not in text
+    assert chrome.released == [given.id, again.id, third.id]
+
+
+@pytest.mark.parametrize("runtime", [GRANTED])
+async def test_the_turn_end_hands_back_the_operators_tab_with_the_group(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await opened(rig, chrome)
+    gid = group_id(Owner("session", sid), env=USER)
+    given = chrome.give(gid, "https://mail.example.com/inbox")
+    assert await browser_extension.close_turn_tabs(rig.service, sid)
+    assert chrome.released == [given.id]
 
 
 @pytest.mark.parametrize("runtime", [GRANTED])

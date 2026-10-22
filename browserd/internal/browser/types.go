@@ -441,6 +441,10 @@ type Tab struct {
 	Session   string
 	Opener    string
 	CreatedAt time.Time
+	// Given is a tab of the operator's that they handed to the agent in their Chrome. The host never
+	// closes one to make room, and closing the agent's tabs lets go of it instead; no PDF is taken
+	// out of it either, since what the operator opens there is theirs to see.
+	Given bool
 
 	mu      sync.Mutex
 	url     string
@@ -710,6 +714,9 @@ func (t *Tab) View() map[string]any {
 		"loading": loading, "active": active, "opener": opener, "created_at": t.CreatedAt}
 	if detached {
 		v["detached"] = true
+	}
+	if t.Given {
+		v["given"] = true
 	}
 	return v
 }
