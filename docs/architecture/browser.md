@@ -101,9 +101,11 @@ unknown field is `-32602`. Errors use the JSON-RPC codes plus:
   project share cookies but never see each other's tabs. `Group {id, browser_id, profile, viewport{w,
   h}, tabs, active_tab, control, labels, created_at, last_activity_at}`.
 - **Tab.** One page target. `Tab {id, group_id, url, title, favicon_url, loading, active, opener,
-  created_at}`. The id is the daemon's (`t` and a counter), stable for the tab's life, never the CDP
+  created_at, detached?, given?}`. The id is the daemon's (`t` and a counter), stable for the tab's life, never the CDP
   target id. Popups and `target=_blank` links open as tabs in the opener's group, subject to its tab
-  cap (past it the popup is closed and `tab.refused` is published).
+  cap (past it the popup is closed and `tab.refused` is published). `given` marks, in the operator's
+  Chrome, a tab of theirs they handed to the agent: closing it, or its group, lets it go and leaves it
+  open, and no PDF is taken out of it.
 - **Control**, per group: `Control {owner: "agent" | "human" | "paused", holder, until, reason}`.
   `holder` is the live-view client that holds human control; `until` is in milliseconds since the
   epoch, or null.
@@ -130,8 +132,8 @@ unknown field is `-32602`. Errors use the JSON-RPC codes plus:
 | `page.login` | `{tab_id, site, username?, password?, otp?, selectors?{username?, password?, otp?, submit?}, probe?, origin?}` → `{url, title, signed_in: yes \| no \| unknown, filled: [username \| password \| otp], found{username, password, otp, submit}, waiting?: "code", stopped?}`: the operator's private sign-in (The host side, The private sign-in). The page script finds the fields (or the CSS selectors name them; one that matches nothing is `-32602`), and the values are typed as key presses, never passed to a script; each filled field is then marked secret, so the outline shows the username as `[secret]`. The form is sent by its button, else Enter, and a value whose field is not on the page yet is waited for on the page the submit led to (ten seconds a step, three steps: the password after the address, the code after the password). Nothing is typed while the tab is off `site` (the host, or a host under it; an address only as itself): `1004` before the first value, `stopped` between steps. `signed_in` is a guess from the page after the last submit: a password field still asked for is `no`, a code asked for that was not given is `unknown` with `waiting: "code"`, no sign-in field left on another address is `yes`. `probe` only finds, typing nothing. No value reaches the reply, an event, the log or the recording; the operator's origin passes a pause |
 | `tab.list` | `{group_id}` → `{tabs: [Tab], active_tab}` |
 | `tab.new` | `{group_id, url?, origin?}` → `Tab`; it becomes the active tab |
-| `tab.select` | `{tab_id, origin?}` → `Tab` |
-| `tab.close` | `{tab_id, origin?}` → `{}` |
+| `tab.select` | `{tab_id, origin?, quiet?}` → `Tab`. `quiet` is the host's own switch to a tab the agent already had: in the operator's Chrome, while the agent works in the operator's own window, the tab becomes the group's active one without being brought forward |
+| `tab.close` | `{tab_id, origin?}` → `{released?}`: `released` for a given tab, let go rather than closed |
 | `page.navigate` | `{tab_id, url, origin?, timeout_ms? ≤ 60000 = 30000}` → `{url, title, status?, error?, dialogs_auto?, logged?}`: `status` is the HTTP status of the document now shown; `dialogs_auto` and `logged` as in an action's reply (Actions, below) |
 | `page.back`, `page.forward`, `page.reload` | `{tab_id, origin?}` → as `page.navigate`'s; no `status` for a page the back-forward cache restored |
 | `page.snapshot` | `{tab_id, scope_ref?, max_chars? ≤ 200000 = 40000, view? "page" \| "viewport", origin?}` → `{url, title, text, refs, truncated, frames, viewport{w, h}, scroll{top, height, view, above, below, pane?}, loading}` |
@@ -567,7 +569,7 @@ are in `data`. The daemon keeps the last 20 000, no more than 64 MiB. `events.su
 | `group.opened`, `group.closed` | `{group_id, browser_id, profile, labels, reason?}` — `reason: "closed_in_chrome"` when the operator closed the group's Chrome tab group |
 | `tab.created` | `{group_id, tab: Tab}` |
 | `tab.updated` | `{group_id, tab_id, url, title, favicon_url, loading}` — at most one per 250 ms per tab, the latest wins. A title a script sets raises no event in Chromium: it is read when the tabs are listed, and once a second while the browser is watched |
-| `tab.closed` | `{group_id, tab_id, reason?}` — `reason` only in the operator's Chrome: `closed` (closed there), `taken_back` (dragged out of the agent's group) or `reattached` (its debugger was attached afresh; the same Chrome tab comes back at once as a new tab) |
+| `tab.closed` | `{group_id, tab_id, reason?}` — `reason` only in the operator's Chrome: `closed` (closed there), `taken_back` (dragged out of the agent's group), `released` (a given tab the agent let go of with `tab.close`) or `reattached` (its debugger was attached afresh; the same Chrome tab comes back at once as a new tab) |
 | `tab.refused` | `{group_id, url, reason: "tab_cap"}` |
 | `action` | `{action_id, group_id, tab_id, actor, kind, point{x, y}, box{x, y, w, h}, name, element, text_len?, keys?, at}` |
 | `action_done` | `{action_id, group_id, tab_id, ok, effects, error?}` |
@@ -928,7 +930,7 @@ adds the side panel's calls); a frame of a type a side does not know is ignored.
 | daemon | `call` | `{id, op, args}`: a browser-level operation the extension does with the extension APIs (below) |
 | extension | `result` | `{id, ok, value?}` or `{id, ok: false, error{code, message}}`: the answer to a `cdp` or `call`. `code` is `refused` (the allowlist, or a tab outside the agent's groups), `no_tab`, `detached`, `cdp` (Chrome's own error: `message` is its JSON text `{"code", "message", "data"?}`, whose code the daemon keeps) or `failed` |
 | extension | `event` | `{session, method, params}`: a DevTools event, its params as Chrome sent them. The daemon, not the extension, renames the `sessionId` inside `Target.attachedToTarget` and `Target.detachedFromTarget` from Chrome's id to `x<tabId>/<sessionId>`, and back in `Target.detachFromTarget`'s params |
-| extension | `tabs` | `{op, tab?, group?}`: what the operator changed. `created` (a popup: `tab{id, group, opener, url?, title?}`), `joined` (dragged into an agent's group), `left` (dragged out), `removed` (closed), `updated` (`tab{id, url, title}`), `group_closed` (`group`). A tab the daemon asked for with `tab.create` is in that call's answer and need not be announced; announced anyway, it is taken once. A `created` or `joined` tab whose opener is not an agent tab and whose group is not an agent's is ignored. `joined` for a tab the daemon already has means the extension attached its debugger afresh (it does so after a detach, and replays the tabs it holds after a `welcome`): the attachment's state went with the old one, so the daemon forgets the tab (`tab.closed {reason: "reattached"}`) and sets it up again as a new tab |
+| extension | `tabs` | `{op, tab?, group?}`: what the operator changed. `created` (a popup: `tab{id, group, opener, url?, title?}`), `joined` (dragged into an agent's group; `tab.given` says the operator put it there, which a tab the extension attached afresh also carries when it was theirs), `left` (dragged out), `removed` (closed), `updated` (`tab{id, url, title}`), `group_closed` (`group`). A tab the daemon asked for with `tab.create` is in that call's answer and need not be announced; announced anyway, it is taken once. A `created` or `joined` tab whose opener is not an agent tab and whose group is not an agent's is ignored. `joined` for a tab the daemon already has means the extension attached its debugger afresh (it does so after a detach, and replays the tabs it holds after a `welcome`): the attachment's state went with the old one, so the daemon forgets the tab (`tab.closed {reason: "reattached"}`) and sets it up again as a new tab |
 | extension | `input` | `{tab}`: the operator's own trusted input in an agent tab. There is no pause frame: while the operator has paused a group in the side panel, the extension sends `input` for its tabs every 2 s (which keeps control with the operator) and refuses `Input.*` itself |
 | daemon | `ping` | `{n}`, every 15 s; the relay is lost after three go unanswered (`bye {reason: "lost"}`) |
 | extension | `pong` | `{n}` |
@@ -947,11 +949,11 @@ The calls:
 |---|---|
 | `window.ensure` | `{group, session?, title?}` → `{window, tabs: [Tab]}`: the agent's own unfocused window and Chrome tab group for a daemon group, made if missing; `tabs` are the ones that group already holds. `session` and `title` are the host conversation the group works for and its name, from the group's labels (`session_id`, `title`): the tab group is titled with it, and the side panel shows the conversation whose group holds the active tab. A group the side panel made for the operator's tab (below) already has its window, the operator's, and is answered with that tab |
 | `tab.create` | `{group, url, session?, title?}` → `{tab: Tab}`: a tab in the group's window, attached to the debugger before the answer. The extension opens it on `about:blank` whatever `url` says, and the daemon navigates once the tab is set up and its guard is on |
-| `tab.close`, `tab.activate` | `{tab}` → `{}` |
+| `tab.close`, `tab.activate` | `{tab, quiet?}` → `{}`. A tab the operator gave is let go on `tab.close` (detached, its border and Chrome tab group taken off, left open) and answered `{released: true}`. `quiet` (`tab.activate` only) leaves the operator's window as it is while the agent works there (`windowMode` current) |
 | `window.bounds` | `{group, bounds?{width, height}}` → `{bounds{left, top, width, height}}`: sizes the group's window when `bounds` is given, then reads it |
 | `downloads.search` | `{id}` → `{path, state, bytes}`: `id` is the DevTools guid of `Page.downloadWillBegin`; the extension finds the `chrome.downloads` item behind it |
 | `cookies.names` | `{url}` → `{cookies: [{name, domain, path, expires, secure, http_only, same_site?, session}]}`: `chrome.cookies.getAll({url})` without values |
-| `group.close` | `{group}` → `{}`: closes the agent's tabs of the group, its tab group and window |
+| `group.close` | `{group}` → `{}`: closes the agent's tabs of the group, its tab group and window; the tabs the operator gave are let go and stay open |
 | `notify` | `{text}` → `{}`: the toast and badge flash of `relay.notify` |
 | `panel.grant` | `{base, token, expires}` → `{}`: the side panel's credential, from the host through `relay.call`. The extension keeps it in `chrome.storage.session` and gives it to the panel's frame alone. A paired Chrome frames the server it was paired with, whatever `base` says; natively `base` must be a loopback address or the grant is refused |
 | `panel.event` | `{session, kind: "needs_you" \| "done", title, waiting, tab?}` → `{}`: a conversation in this Chrome waits for the operator or finished its turn; a notification (unless the operator is looking at that window's panel) whose click opens the panel on it, and the badge counts `waiting` |

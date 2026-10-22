@@ -26,6 +26,7 @@ export type TabInfo = {
   opener?: number;
   url?: string;
   title?: string;
+  given?: boolean;
 };
 
 export type TabsOp = "created" | "removed" | "updated" | "joined" | "left" | "group_closed";

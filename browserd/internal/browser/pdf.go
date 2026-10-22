@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"mime"
 	"net/url"
 	"path"
@@ -35,7 +36,8 @@ type FileKeeper interface {
 
 // pdfRelayBytes bounds a PDF taken out of a response. Its body comes back from the extension as
 // base64 in one relay frame, at most relay.MaxFromExtension (64 MiB) of JSON, and base64 grows by a
-// third: 32 MiB stays well under. A larger one is left to Chrome.
+// third: 32 MiB stays well under. A larger one is left to Chrome when its Content-Length says so up
+// front; one of no stated length is read as a stream and given up past the limit (streamBody).
 const pdfRelayBytes = 32 << 20
 
 func (m *Manager) keeper() FileKeeper {
@@ -45,6 +47,54 @@ func (m *Manager) keeper() FileKeeper {
 		}
 	}
 	return nil
+}
+
+// pdfChunkBytes is how much of a streamed PDF one IO.read asks for: one relay frame each, well
+// under the frame's limit once in base64.
+const pdfChunkBytes = 1 << 20
+
+// errPDFTooLarge is a streamed PDF that went past the limit.
+var errPDFTooLarge = errors.New("the PDF is larger than can be kept")
+
+// streamBody reads a paused response's body as a stream, a chunk at a time, and stops past limit. A
+// response with no Content-Length (one sent in chunks, a generated report) used to be read whole
+// with Fetch.getResponseBody and measured afterwards: a very large one crossed the extension as one
+// base64 string and failed on the relay's frame limit, after holding all of it in the service
+// worker. taken says the body was taken from Chrome, after which the request can only be failed or
+// fulfilled, never continued.
+func streamBody(ctx context.Context, t *Tab, requestID string, limit int64) ([]byte, bool, error) {
+	var stream struct {
+		Stream string `json:"stream"`
+	}
+	if err := t.Call(ctx, "Fetch.takeResponseBodyAsStream", map[string]any{"requestId": requestID}, &stream); err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = t.Call(ctx, "IO.close", map[string]any{"handle": stream.Stream}, nil) }()
+	var data []byte
+	for {
+		var chunk struct {
+			Data          string `json:"data"`
+			Base64Encoded bool   `json:"base64Encoded"`
+			EOF           bool   `json:"eof"`
+		}
+		if err := t.Call(ctx, "IO.read", map[string]any{"handle": stream.Stream, "size": pdfChunkBytes}, &chunk); err != nil {
+			return nil, true, err
+		}
+		piece := []byte(chunk.Data)
+		if chunk.Base64Encoded {
+			var err error
+			if piece, err = base64.StdEncoding.DecodeString(chunk.Data); err != nil {
+				return nil, true, err
+			}
+		}
+		if int64(len(data)+len(piece)) > limit {
+			return nil, true, errPDFTooLarge
+		}
+		data = append(data, piece...)
+		if chunk.EOF {
+			return data, true, nil
+		}
+	}
 }
 
 // pausedResponse is a Fetch.requestPaused at the response stage.
@@ -134,11 +184,20 @@ func (m *Manager) responsePaused(t *Tab, raw json.RawMessage) {
 		carryOn()
 		return
 	}
+	// Only while the agent drives: a PDF the operator opens while control is theirs (their own input
+	// in the tab, the live view, a pause) is theirs to read in Chrome's viewer, and taking it away
+	// left them with an aborted navigation and the file in the agent's downloads.
+	if t.Given || t.Group.Control().Owner != OwnerAgent {
+		carryOn()
+		return
+	}
 	limit := int64(pdfRelayBytes)
 	if most := m.Limits().MaxDownloadBytes; most > 0 && most < limit {
 		limit = most
 	}
-	if n, err := strconv.ParseInt(strings.TrimSpace(p.header("Content-Length")), 10, 64); err == nil && n > limit {
+	n, lengthErr := strconv.ParseInt(strings.TrimSpace(p.header("Content-Length")), 10, 64)
+	sized := lengthErr == nil
+	if sized && n > limit {
 		m.log.Info("a PDF too large to keep is left to Chrome", "tab", t.ID, "bytes", n)
 		carryOn()
 		return
@@ -150,26 +209,45 @@ func (m *Manager) responsePaused(t *Tab, raw json.RawMessage) {
 	}
 	t.beginKeeping()
 	defer t.endKeeping()
-	var body struct {
-		Body          string `json:"body"`
-		Base64Encoded bool   `json:"base64Encoded"`
-	}
-	if err := t.Call(ctx, "Fetch.getResponseBody", map[string]any{"requestId": p.RequestID}, &body); err != nil {
-		m.log.Warn("reading a PDF response", "tab", t.ID, "error", err.Error())
-		carryOn()
-		return
-	}
-	data := []byte(body.Body)
-	if body.Base64Encoded {
-		var err error
-		if data, err = base64.StdEncoding.DecodeString(body.Body); err != nil {
+	var data []byte
+	if sized {
+		var body struct {
+			Body          string `json:"body"`
+			Base64Encoded bool   `json:"base64Encoded"`
+		}
+		if err := t.Call(ctx, "Fetch.getResponseBody", map[string]any{"requestId": p.RequestID}, &body); err != nil {
+			m.log.Warn("reading a PDF response", "tab", t.ID, "error", err.Error())
 			carryOn()
 			return
 		}
-	}
-	if int64(len(data)) > limit {
-		carryOn()
-		return
+		data = []byte(body.Body)
+		if body.Base64Encoded {
+			var err error
+			if data, err = base64.StdEncoding.DecodeString(body.Body); err != nil {
+				carryOn()
+				return
+			}
+		}
+		if int64(len(data)) > limit {
+			carryOn()
+			return
+		}
+	} else {
+		var taken bool
+		var err error
+		data, taken, err = streamBody(ctx, t, p.RequestID, limit)
+		if err != nil {
+			if !taken {
+				m.log.Warn("reading a PDF response", "tab", t.ID, "error", err.Error())
+				carryOn()
+				return
+			}
+			// A body taken as a stream cannot be handed back to Chrome, so past the limit, or broken
+			// off, the navigation fails rather than hangs.
+			m.log.Info("a PDF of no stated length could not be kept", "tab", t.ID, "error", err.Error())
+			_ = t.Call(ctx, "Fetch.failRequest", map[string]any{"requestId": p.RequestID, "errorReason": "Aborted"}, nil)
+			return
+		}
 	}
 	got, err := k.KeepFile(t, pdfName(p.header("Content-Disposition"), p.Request.URL), p.Request.URL, "application/pdf", data)
 	if err != nil {

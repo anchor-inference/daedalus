@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/ascorblack/daedalus/browserd/internal/browser"
+	"github.com/ascorblack/daedalus/browserd/internal/config"
 	"github.com/ascorblack/daedalus/browserd/internal/page"
 	"github.com/ascorblack/daedalus/browserd/internal/relay"
 	protowire "github.com/ascorblack/daedalus/ptyd/proto/wire"
@@ -456,6 +457,65 @@ func TestAttachPDFBecomesADownload(t *testing.T) {
 	h.must("page.navigate", map[string]any{"tab_id": tab, "url": h.site.URL + "/still"}, &still)
 	if still["download"] != nil || still["error"] != nil || !strings.HasSuffix(fmt.Sprint(still["url"]), "/still") {
 		t.Fatalf("an ordinary navigation: %v", still)
+	}
+}
+
+// A PDF of no stated length is read as a stream and kept as the one that says its length is, and one
+// past the limit fails its navigation rather than being read whole first.
+func TestAttachPDFOfNoStatedLength(t *testing.T) {
+	attachOnly(t)
+	want, err := os.ReadFile("testdata/site/statement.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type navigation struct {
+		URL      string `json:"url"`
+		Error    string `json:"error"`
+		Download *struct {
+			Name string `json:"name"`
+			Size int64  `json:"size"`
+		} `json:"download"`
+	}
+	h := start(t, nil)
+	o := h.open("g1", "project-a", "/site/docs.html")
+	var nav navigation
+	h.must("page.navigate", map[string]any{"tab_id": o.Tab.ID, "url": h.site.URL + "/chunked/statement.pdf"}, &nav)
+	if nav.Download == nil || nav.Download.Name != "statement.pdf" || nav.Download.Size != int64(len(want)) {
+		t.Fatalf("the navigation: %+v %+v", nav, nav.Download)
+	}
+
+	small := start(t, func(l *config.Limits) { l.MaxDownloadBytes = int64(len(want) / 2) })
+	o = small.open("g1", "project-a", "/site/docs.html")
+	nav = navigation{}
+	small.must("page.navigate", map[string]any{"tab_id": o.Tab.ID, "url": small.site.URL + "/chunked/statement.pdf"}, &nav)
+	if nav.Download != nil || nav.Error == "" {
+		t.Fatalf("a PDF past the limit: %+v %+v", nav, nav.Download)
+	}
+	var list struct {
+		Downloads []page.Download `json:"downloads"`
+	}
+	small.must("download.list", map[string]any{"group_id": "g1"}, &list)
+	for _, d := range list.Downloads {
+		if d.Mime == "application/pdf" && d.Size > 0 {
+			t.Fatalf("a PDF past the limit was kept: %+v", d)
+		}
+	}
+}
+
+// While control is the operator's, a PDF they open is theirs to see: the daemon keeps nothing and
+// the navigation is not turned into a download of the agent's.
+func TestAttachPDFIsLeftAloneWhileTheOperatorDrives(t *testing.T) {
+	attachOnly(t)
+	h := start(t, nil)
+	o := h.open("g1", "project-a", "/site/docs.html")
+	h.must("control.set", map[string]any{"group_id": "g1", "owner": "paused", "reason": "the operator reads"}, nil)
+	var nav struct {
+		Download any `json:"download"`
+	}
+	_ = h.call("page.navigate", map[string]any{"tab_id": o.Tab.ID, "url": h.site.URL + "/site/statement.pdf",
+		"origin": map[string]any{"actor": "operator"}, "timeout_ms": 5000}, &nav)
+	if nav.Download != nil {
+		t.Fatalf("the operator's PDF became a download of the agent's: %v", nav.Download)
 	}
 }
 

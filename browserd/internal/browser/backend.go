@@ -42,8 +42,9 @@ type Backend interface {
 	closeTab(ctx context.Context, t *Tab) error
 	// closeRefused closes a page that would put its group past its tab cap: a popup.
 	closeRefused(ctx context.Context, b *Browser, target, session string)
-	// activate brings a tab forward.
-	activate(ctx context.Context, t *Tab) error
+	// activate brings a tab forward. quiet is the agent's own switch to a tab it had, which the
+	// operator's Chrome does not bring forward in the operator's own window (relay.TabArgs.Quiet).
+	activate(ctx context.Context, t *Tab, quiet bool) error
 	// refreshTab reads a tab's address and title afresh; refresh does every tab of a browser.
 	refreshTab(ctx context.Context, t *Tab)
 	refresh(ctx context.Context, b *Browser)

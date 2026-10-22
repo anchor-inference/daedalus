@@ -176,6 +176,8 @@ func valueOf(op string) any {
 		return &WindowEnsured{}
 	case OpTabCreate:
 		return &TabCreated{}
+	case OpTabClose:
+		return &TabClosed{}
 	case OpWindowBounds:
 		return &WindowBounds{}
 	case OpDownloadsSearch:
@@ -246,7 +248,8 @@ func TestPieces(t *testing.T) {
 func TestAllowed(t *testing.T) {
 	for _, m := range []string{"Page.navigate", "Runtime.evaluate", "DOM.describeNode", "DOMSnapshot.captureSnapshot", "Input.dispatchMouseEvent",
 		"Accessibility.getFullAXTree", "Log.enable", "Fetch.enable", "Network.getResponseBody", "Emulation.setFocusEmulationEnabled",
-		"Emulation.setDeviceMetricsOverride", "Target.setAutoAttach", "Target.detachFromTarget", "DOMDebugger.getEventListeners"} {
+		"Emulation.setDeviceMetricsOverride", "Target.setAutoAttach", "Target.detachFromTarget", "DOMDebugger.getEventListeners",
+		"IO.read", "IO.close"} {
 		if err := Allowed(m); err != nil {
 			t.Errorf("%s refused: %v", m, err)
 		}
@@ -255,7 +258,7 @@ func TestAllowed(t *testing.T) {
 		"Network.clearBrowserCookies", "Network.clearBrowserCache", "Storage.getCookies", "Storage.clearDataForOrigin", "Browser.getVersion",
 		"Browser.setDownloadBehavior", "Page.setDownloadBehavior", "Target.createTarget", "Target.closeTarget", "Target.getTargets",
 		"Target.attachToTarget", "Target.createBrowserContext", "Emulation.setUserAgentOverride", "Emulation.setGeolocationOverride",
-		"Security.setIgnoreCertificateErrors", "SystemInfo.getInfo", "nonsense", ".x"} {
+		"Security.setIgnoreCertificateErrors", "SystemInfo.getInfo", "IO.resolveBlob", "nonsense", ".x"} {
 		if Allowed(m) == nil {
 			t.Errorf("%s carried", m)
 		}

@@ -989,6 +989,9 @@ type targetInfo struct {
 	Title            string `json:"title"`
 	OpenerID         string `json:"openerId"`
 	BrowserContextID string `json:"browserContextId"`
+	// given is the operator's tab handed to the agent (relay.Tab.Given), which only the operator's
+	// Chrome has; Chromium's own target info never says so.
+	given bool
 }
 
 func (m *Manager) browserEvent(b *Browser, e cdp.Event) {

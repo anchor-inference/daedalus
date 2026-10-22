@@ -9,11 +9,13 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/ascorblack/daedalus/browserd/internal/cdp"
 	"github.com/ascorblack/daedalus/browserd/internal/config"
 	"github.com/ascorblack/daedalus/browserd/internal/relay"
 	"github.com/ascorblack/daedalus/ptyd/proto/procstat"
@@ -38,6 +40,11 @@ type scripted struct {
 	// the operator's window; inner is then the page's size, which no resize changes.
 	fixedWindow bool
 	inner       []int
+	// reply answers a DevTools method of the test's own; ok false leaves it to the defaults.
+	reply func(method string, params map[string]any) (value any, ok bool)
+	// given are the tabs tab.close lets go of rather than closes, as the extension does with a tab
+	// the operator gave.
+	given map[int]bool
 }
 
 func (s *scripted) Send(p []byte) error {
@@ -83,6 +90,16 @@ func (s *scripted) answer(f map[string]any) {
 		s.send(relay.Pong{T: relay.TPong, N: int64(f["n"].(float64))})
 	case relay.TCDP:
 		session, _ := f["session"].(string)
+		s.mu.Lock()
+		reply := s.reply
+		s.mu.Unlock()
+		if reply != nil {
+			params, _ := f["params"].(map[string]any)
+			if v, ok := reply(f["method"].(string), params); ok {
+				result(v)
+				return
+			}
+		}
 		switch f["method"] {
 		case "Page.getFrameTree":
 			result(map[string]any{"frameTree": map[string]any{"frame": map[string]any{"id": "F" + session, "url": "about:blank"}}})
@@ -120,6 +137,13 @@ func (s *scripted) answer(f map[string]any) {
 				return
 			}
 			result(relay.WindowBounds{Bounds: relay.Bounds{Width: config.DefaultViewportW, Height: config.DefaultViewportH}})
+		case relay.OpTabClose:
+			args, _ := f["args"].(map[string]any)
+			tab, _ := args["tab"].(float64)
+			s.mu.Lock()
+			given := s.given[int(tab)]
+			s.mu.Unlock()
+			result(relay.TabClosed{Released: given})
 		default:
 			result(map[string]any{})
 		}
@@ -567,5 +591,187 @@ func TestPDFResponses(t *testing.T) {
 		if got := pdfName(c.disposition, c.url); got != c.want {
 			t.Errorf("pdfName(%q, %q) = %q, want %q", c.disposition, c.url, got, c.want)
 		}
+	}
+}
+
+// keeperStub keeps the files the PDF path hands it, in memory.
+type keeperStub struct {
+	mu   sync.Mutex
+	kept [][]byte
+}
+
+func (k *keeperStub) TabEvent(t *Tab, e cdp.Event)         {}
+func (k *keeperStub) BrowserEvent(b *Browser, e cdp.Event) {}
+func (k *keeperStub) TabGone(t *Tab)                       {}
+func (k *keeperStub) KeepFile(t *Tab, name, url, mime string, data []byte) (Kept, error) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.kept = append(k.kept, data)
+	return Kept{ID: fmt.Sprintf("d%d", len(k.kept)), Name: name, Size: int64(len(data)), Mime: mime}, nil
+}
+
+func (k *keeperStub) count() int {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return len(k.kept)
+}
+
+// methods lists the DevTools methods the daemon sent to a session, in order.
+func (s *scripted) methods(session string) []string {
+	var out []string
+	for _, f := range s.seen(relay.TCDP) {
+		if f["session"] == session {
+			out = append(out, fmt.Sprint(f["method"]))
+		}
+	}
+	return out
+}
+
+func pdfPaused(tab *Tab, length string) json.RawMessage {
+	headers := `[{"name":"Content-Type","value":"application/pdf"}`
+	if length != "" {
+		headers += `,{"name":"Content-Length","value":"` + length + `"}`
+	}
+	return json.RawMessage(`{"requestId":"r1","frameId":"` + tab.TargetID + `","request":{"url":"https://a.test/report.pdf"},"responseStatusCode":200,"responseHeaders":` + headers + `]}`)
+}
+
+func waitTabs(t *testing.T, g *Group, n int) []*Tab {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if tabs := g.Tabs(); len(tabs) == n {
+			return tabs
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the group has %d tabs, not %d", len(g.Tabs()), n)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// A tab the operator gave is known for it: listed as given, never paused for a PDF, and let go by
+// tab.close, which the extension answers as released.
+func TestAttachGivenTab(t *testing.T) {
+	m, s, _ := attachManager(t)
+	g, own := openAttached(t, m, "s-1")
+	s.mu.Lock()
+	s.given = map[int]bool{50: true}
+	s.mu.Unlock()
+	obs := &attachObserver{a: m.backend.(*attach), b: g.Browser}
+	obs.RelayTabs(relay.Tabs{T: relay.TTabs, Op: relay.TabsJoined, Tab: &relay.Tab{ID: 50, Group: "s-1", URL: "https://mail.example/", Given: true}})
+	tabs := waitTabs(t, g, 2)
+	given := tabs[1]
+	if !given.Given || given.View()["given"] != true || own.Given || own.View()["given"] != nil {
+		t.Fatalf("given %v, the agent's own %v", given.View(), own.View())
+	}
+	for _, method := range s.methods(given.Session) {
+		if method == "Fetch.enable" {
+			t.Fatal("the operator's tab pauses its document responses for PDFs")
+		}
+	}
+	if st, _ := given.Value(fetchKey{}).(fetchState); st.pdf {
+		t.Fatalf("the given tab's fetch state %+v", st)
+	}
+	// A tab announced afresh after a reattach is the agent's when the extension does not say given.
+	obs.RelayTabs(relay.Tabs{T: relay.TTabs, Op: relay.TabsJoined, Tab: &relay.Tab{ID: 1, Group: "s-1"}})
+	for _, tab := range waitTabs(t, g, 2) {
+		if tab.Session == own.Session && tab.Given {
+			t.Fatal("a reattached tab of the agent's became given")
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := m.CloseTab(ctx, given); err != nil {
+		t.Fatal(err)
+	}
+	if len(g.Tabs()) != 1 {
+		t.Fatalf("after letting go of the given tab: %d tabs", len(g.Tabs()))
+	}
+}
+
+// A PDF is taken out of a response only in a tab of the agent's while the agent drives; the operator's
+// own tab, and any tab while control is theirs, gets it in Chrome as before.
+func TestPDFIsKeptOnlyWhileTheAgentDrives(t *testing.T) {
+	m, s, _ := attachManager(t)
+	k := &keeperStub{}
+	m.Listen(k)
+	g, tab := openAttached(t, m, "s-1")
+	s.mu.Lock()
+	s.reply = func(method string, params map[string]any) (any, bool) {
+		if method == "Fetch.getResponseBody" {
+			return map[string]any{"body": "JVBERi0xLjcK", "base64Encoded": true}, true
+		}
+		return nil, false
+	}
+	s.mu.Unlock()
+	if _, err := g.SetControl(OwnerPaused, "", 0, "the operator reads"); err != nil {
+		t.Fatal(err)
+	}
+	m.responsePaused(tab, pdfPaused(tab, "8"))
+	if k.count() != 0 || !slices.Contains(s.methods(tab.Session), "Fetch.continueRequest") {
+		t.Fatalf("while paused: kept %d, sent %v", k.count(), s.methods(tab.Session))
+	}
+	if _, err := g.SetControl(OwnerAgent, "", 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	given := &Tab{ID: "t9", Group: g, TargetID: tab.TargetID, Session: tab.Session, Given: true}
+	m.responsePaused(given, pdfPaused(given, "8"))
+	if k.count() != 0 {
+		t.Fatal("a PDF of the operator's own tab was kept")
+	}
+	m.responsePaused(tab, pdfPaused(tab, "8"))
+	if k.count() != 1 || !slices.Contains(s.methods(tab.Session), "Fetch.failRequest") {
+		t.Fatalf("while the agent drives: kept %d, sent %v", k.count(), s.methods(tab.Session))
+	}
+}
+
+// A PDF of no stated length is read as a stream a piece at a time, and given up past the limit
+// without reading the rest; a body taken as a stream cannot go back to Chrome, so the request fails.
+func TestPDFOfNoStatedLengthIsStreamed(t *testing.T) {
+	m, s, _ := attachManager(t)
+	k := &keeperStub{}
+	m.Listen(k)
+	_, tab := openAttached(t, m, "s-1")
+	piece := strings.Repeat("x", 1000)
+	var mu sync.Mutex
+	reads, pieces := 0, 3
+	s.mu.Lock()
+	s.reply = func(method string, params map[string]any) (any, bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch method {
+		case "Fetch.getResponseBody":
+			t.Error("a body of no stated length was read whole")
+			return map[string]any{}, true
+		case "Fetch.takeResponseBodyAsStream":
+			return map[string]any{"stream": "st1"}, true
+		case "IO.read":
+			reads++
+			return map[string]any{"data": piece, "eof": reads >= pieces}, true
+		}
+		return nil, false
+	}
+	s.mu.Unlock()
+	m.responsePaused(tab, pdfPaused(tab, ""))
+	if k.count() != 1 || len(k.kept[0]) != 3000 {
+		t.Fatalf("kept %d files", k.count())
+	}
+	if !slices.Contains(s.methods(tab.Session), "IO.close") {
+		t.Fatal("the stream was left open")
+	}
+	m.mu.Lock()
+	m.lim.MaxDownloadBytes = 2500
+	m.mu.Unlock()
+	mu.Lock()
+	reads, pieces = 0, 1000
+	mu.Unlock()
+	before := len(s.methods(tab.Session))
+	m.responsePaused(tab, pdfPaused(tab, ""))
+	mu.Lock()
+	n := reads
+	mu.Unlock()
+	sent := s.methods(tab.Session)[before:]
+	if k.count() != 1 || n != 3 || !slices.Contains(sent, "Fetch.failRequest") || slices.Contains(sent, "Fetch.continueRequest") {
+		t.Fatalf("past the limit: kept %d, %d reads, sent %v", k.count(), n, sent)
 	}
 }

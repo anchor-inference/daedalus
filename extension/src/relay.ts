@@ -744,6 +744,13 @@ export class Relay {
         return this.createTab(requireString(args, "group"), optionalString(args, "title"), optionalString(args, "session"));
       case "tab.close": {
         const member = this.requireMember(args);
+        // A tab the operator gave is theirs: the agent closing it lets it go, open where it was. It
+        // used to be closed with whatever the operator had half typed in it.
+        if (member.given) {
+          await this.release(member);
+          await this.refreshScopeViews();
+          return { released: true };
+        }
         // Forgotten before it is closed, so its removal, the answer to the daemon's own call, is not
         // reported back as if the operator had closed it.
         await this.detach(member);
@@ -757,6 +764,10 @@ export class Relay {
         // Active within its own window only: focusing the window would pull the operator's keyboard
         // into the agent's window in the middle of whatever they are typing.
         const member = this.requireMember(args);
+        // The agent going back to a tab it already had, in the operator's own window, leaves their
+        // active tab alone, as a tab the agent opens there is made in the background: the page they
+        // were reading or typing in must not be swapped out from under them.
+        if (args.quiet === true && this.settings.windowMode === "current") return {};
         await chrome.tabs.update(member.tab, { active: true });
         return {};
       }
@@ -889,14 +900,20 @@ export class Relay {
     return { bounds: { left: window.left ?? 0, top: window.top ?? 0, width: window.width ?? 0, height: window.height ?? 0 } };
   }
 
-  /** Forgets the group before closing its tabs, so their removal is not reported as the operator's. */
+  /**
+   * Forgets the group before closing its tabs, so their removal is not reported as the operator's.
+   * The tabs the operator gave are let go instead, left open in their window: the group closes at the
+   * end of every turn, and it used to take the operator's own mail or half-filled form with it.
+   */
   private async closeGroup(group: Group): Promise<void> {
     const members = this.scope.dropGroup(group.id);
     for (const member of members) {
       await this.detach(member);
     }
     await this.scope.save();
-    const tabs = members.map((member) => member.tab);
+    const given = members.filter((member) => member.given);
+    for (const member of given) await this.letGo(member);
+    const tabs = members.filter((member) => !member.given).map((member) => member.tab);
     if (group.placeholderTab !== undefined) tabs.push(group.placeholderTab);
     if (tabs.length) await chrome.tabs.remove(tabs).catch(() => undefined);
     await this.refreshScopeViews();
@@ -1102,6 +1119,27 @@ export class Relay {
     await this.refreshScopeViews();
   }
 
+  /**
+   * The agent letting go of a tab the operator gave (`tab.close`): forgotten, detached and handed back
+   * as it is, not reported as the operator taking it back, since the daemon asked. The group's Chrome
+   * tab group loses it; when it was the last grouped tab there, the Chrome group goes with it, which
+   * must not read as the operator closing the agent's group.
+   */
+  private async release(member: Member): Promise<void> {
+    await this.detach(member);
+    this.scope.remove(member.tab);
+    const group = this.scope.groups.get(member.group);
+    if (group && member.grouped && !this.scope.tabsOf(group.id).some((other) => other.grouped)) group.chromeGroupId = undefined;
+    await this.scope.save();
+    await this.letGo(member);
+  }
+
+  /** What handing a tab back leaves on it: no border, and no longer in the agent's Chrome tab group. */
+  private async letGo(member: Member): Promise<void> {
+    await this.border(member.tab, null);
+    if (member.grouped) await chrome.tabs.ungroup(member.tab).catch(() => undefined);
+  }
+
   private async leave(tabId: number, op: "left"): Promise<void> {
     const member = this.scope.members.get(tabId);
     if (!member) return;
@@ -1165,6 +1203,9 @@ export class Relay {
       ...(member.opener === undefined ? {} : { opener: member.opener }),
       ...(url ? { url } : {}),
       ...(tab?.title ? { title: tab.title } : {}),
+      // The daemon learns from this alone which tabs are the operator's: a tab attached afresh is
+      // announced as joined whether the operator gave it or the agent opened it.
+      ...(member.given ? { given: true } : {}),
     };
   }
 

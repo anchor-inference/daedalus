@@ -301,6 +301,7 @@ func (a *attach) prepare(ctx context.Context, g *Group, tab relay.Tab, opener st
 	if info.URL == "" {
 		info.URL = tree.FrameTree.Frame.URL
 	}
+	info.given = tab.Given
 	if claimed {
 		m.mu.Lock()
 		b.claims[info.TargetID] = make(chan *Tab, 1)
@@ -346,12 +347,18 @@ func (a *attach) closeTab(ctx context.Context, t *Tab) error {
 	if err != nil {
 		return err
 	}
-	if err := s.Call(ctx, relay.OpTabClose, relay.TabArgs{Tab: tabID(t)}, nil); err != nil {
+	var r relay.TabClosed
+	if err := s.Call(ctx, relay.OpTabClose, relay.TabArgs{Tab: tabID(t)}, &r); err != nil {
 		return relayErr(err)
 	}
 	// No target event follows a tab the extension closed: the tab is forgotten here, and the
-	// extension's own report of it, if any, finds nothing.
-	a.forgetTab(t, "")
+	// extension's own report of it, if any, finds nothing. A tab the operator gave is let go rather
+	// than closed, and the event says so, so nobody reads it as gone from their window.
+	why := ""
+	if r.Released {
+		why = "released"
+	}
+	a.forgetTab(t, why)
 	return nil
 }
 
@@ -367,12 +374,12 @@ func (a *attach) closeRefused(ctx context.Context, b *Browser, target, session s
 	_ = s.Call(ctx, relay.OpTabClose, relay.TabArgs{Tab: id}, nil)
 }
 
-func (a *attach) activate(ctx context.Context, t *Tab) error {
+func (a *attach) activate(ctx context.Context, t *Tab, quiet bool) error {
 	s, err := a.sessionOf(t.Group.Browser)
 	if err != nil {
 		return err
 	}
-	return relayErr(s.Call(ctx, relay.OpTabActivate, relay.TabArgs{Tab: tabID(t)}, nil))
+	return relayErr(s.Call(ctx, relay.OpTabActivate, relay.TabArgs{Tab: tabID(t), Quiet: quiet}, nil))
 }
 
 // refreshTab reads the address and title from the tab's own history: Target.getTargetInfo is a

@@ -310,7 +310,7 @@ describe("the agent's tabs", () => {
     h.fake.setGroup(own.id, groupId);
     await flush();
     let frames = h.take();
-    expect(frames).toEqual([{ t: "tabs", op: "joined", tab: { id: own.id, group: "g1", url: "https://example.org/", title: "Example" } }]);
+    expect(frames).toEqual([{ t: "tabs", op: "joined", tab: { id: own.id, group: "g1", url: "https://example.org/", title: "Example", given: true } }]);
     expect(shape(frames[0])).toEqual(shape(goldenFrame("tabs: the operator dragged a tab in")));
     expect(h.fake.attached.has(own.id)).toBe(true);
 
@@ -324,6 +324,63 @@ describe("the agent's tabs", () => {
     expect(h.fake.attached.has(own.id)).toBe(false);
     expect(h.fake.tabMessages).toContainEqual({ tabId: own.id, message: { kind: "daedalus-border", visible: null } });
     expect(h.fake.dnrRules[0].condition.tabIds).toEqual([agent]);
+  });
+
+  it("lets go of a tab the operator gave when the daemon closes it, never closing it", async () => {
+    const h = await harness();
+    const agent = await h.withAgentTab();
+    const groupId = h.fake.tabs.get(agent)!.groupId;
+    const own = h.fake.addTab(h.fake.operatorWindow, "https://mail.example/", { title: "Inbox" });
+    h.fake.setGroup(own.id, groupId);
+    await flush();
+    h.take();
+    const closed = await h.call("tab.close", { tab: own.id });
+    expect(closed).toMatchObject({ ok: true, value: { released: true } });
+    expect(h.fake.tabs.has(own.id)).toBe(true);
+    expect(h.fake.tabs.get(own.id)!.groupId).toBe(-1);
+    expect(h.fake.attached.has(own.id)).toBe(false);
+    expect(h.fake.tabMessages).toContainEqual({ tabId: own.id, message: { kind: "daedalus-border", visible: null } });
+    // The daemon asked: no frame says the operator took it back, and the agent's group stays.
+    expect(h.take().filter((f) => f.t === "tabs")).toEqual([]);
+    expect(h.relay.status().groups).toHaveLength(1);
+    expect(h.fake.tabs.has(agent)).toBe(true);
+  });
+
+  it("closes the agent's tabs with its group and lets go of the operator's", async () => {
+    const h = await harness();
+    const agent = await h.withAgentTab();
+    const groupId = h.fake.tabs.get(agent)!.groupId;
+    const own = h.fake.addTab(h.fake.operatorWindow, "https://forms.example/apply", { title: "Application" });
+    h.fake.setGroup(own.id, groupId);
+    await flush();
+    h.take();
+    expect((await h.call("group.close", { group: "g1" })).ok).toBe(true);
+    expect(h.fake.tabs.has(agent)).toBe(false);
+    expect(h.fake.tabs.has(own.id)).toBe(true);
+    expect(h.fake.tabs.get(own.id)!.groupId).toBe(-1);
+    expect(h.fake.attached.has(own.id)).toBe(false);
+    expect(h.take().filter((f) => f.t === "tabs")).toEqual([]);
+  });
+
+  it("does not bring a tab forward over the operator's in their own window when the agent only goes back to it", async () => {
+    const h = await harness({ settings: { windowMode: "current" } });
+    const first = await h.withAgentTab();
+    const second = (await h.call("tab.create", { group: "g1" })).value.tab.id;
+    const own = h.fake.addTab(h.fake.tabs.get(first)!.windowId, "https://example.org/");
+    await h.fake.chrome.tabs.update(own.id, { active: true });
+    for (const tab of [first, second]) await h.fake.chrome.tabs.update(tab, { active: false });
+    expect((await h.call("tab.activate", { tab: second, quiet: true })).ok).toBe(true);
+    expect(h.fake.tabs.get(second)!.active).toBe(false);
+    expect((await h.call("tab.activate", { tab: second })).ok).toBe(true);
+    expect(h.fake.tabs.get(second)!.active).toBe(true);
+  });
+
+  it("brings a tab forward in the agent's own window even when the agent only goes back to it", async () => {
+    const h = await harness();
+    const first = await h.withAgentTab();
+    await h.fake.chrome.tabs.update(first, { active: false });
+    expect((await h.call("tab.activate", { tab: first, quiet: true })).ok).toBe(true);
+    expect(h.fake.tabs.get(first)!.active).toBe(true);
   });
 
   it("gives a tab through the context menu, in the operator's language", async () => {

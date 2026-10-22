@@ -141,6 +141,8 @@ class Tab:
     request_seq: int = 0
     dialog_seq: int = 0
     detached: bool = False
+    given: bool = False
+    """A tab the operator handed to the agent in their Chrome: closing it, or its group, lets it go."""
 
     def log(self, entry: dict[str, Any]) -> None:
         self.log_seq += 1
@@ -156,7 +158,7 @@ class Tab:
 
     def view(self, active: bool) -> dict[str, Any]:
         return {"id": self.id, "group_id": self.group_id, "url": self.page.url, "title": self.page.title, "favicon_url": "", "loading": False, "active": active, "opener": None, "created_at": self.created_at,
-                **({"detached": True} if self.detached else {})}
+                **({"detached": True} if self.detached else {}), **({"given": True} if self.given else {})}
 
 
 @dataclass
@@ -264,6 +266,10 @@ class FakeBrowserd:
         self.notified: list[dict[str, Any]] = []
         self.extension_calls: list[dict[str, Any]] = []
         """``relay.call``s the host made: the side panel's grant and news, as the extension got them."""
+        self.released: list[str] = []
+        """Tabs the operator gave that a ``tab.close`` or ``group.close`` let go of, still open in their Chrome."""
+        self.selects: list[tuple[str, bool]] = []
+        """(tab, quiet) of each ``tab.select``: quiet is the host's own switch, which leaves the operator's window alone."""
         self.legacy = False
         """A daemon older than the host: no ``page.find``, no point, no scroll to a text or sideways, and
         unknown parameters refused as the real daemon's strict decoding refuses them."""
@@ -581,6 +587,16 @@ class FakeBrowserd:
         if tab.dialog is not None:
             raise _Fail(1107, "a dialog is open", {"dialog": {"type": tab.dialog.get("type"), "message": tab.dialog.get("message")}})
 
+    def give(self, group_id: str, url: str) -> Tab:
+        """The operator hands a tab of theirs to the agent's group, as the side panel does."""
+        group = self._group(group_id)
+        self._next["tab"] += 1
+        tab = Tab(f"t{self._next['tab']}", group.id, given=True)
+        tab.page = self._page_at(url)
+        group.tabs.append(tab)
+        self.emit("tab.created", {"group_id": group.id, "tab": tab.view(False)})
+        return tab
+
     def _new_tab(self, group: Group, url: str) -> Tab:
         self._next["tab"] += 1
         tab = Tab(f"t{self._next['tab']}", group.id)
@@ -669,6 +685,7 @@ class FakeBrowserd:
         if method == "group.close":
             group = self._group(str(params.get("group_id")))
             del self.groups[group.id]
+            self.released += [t.id for t in group.tabs if t.given]
             self.emit("group.closed", {"group_id": group.id, "browser_id": group.browser_id, "profile": group.profile, "labels": group.labels})
             if not any(g.browser_id == group.browser_id for g in self.groups.values()) and group.browser_id in self.browsers:
                 self.crash(group.browser_id, "closed")
@@ -698,6 +715,7 @@ class FakeBrowserd:
             group, tab = self._tab(params)
             await self._held_back(group, params)
             group.active = tab.id
+            self.selects.append((tab.id, bool(params.get("quiet"))))
             return tab.view(True)
         if method == "tab.close":
             group, tab = self._tab(params)
@@ -705,6 +723,10 @@ class FakeBrowserd:
             group.tabs.remove(tab)
             if group.active == tab.id:
                 group.active = group.tabs[-1].id if group.tabs else ""
+            if tab.given:
+                self.released.append(tab.id)
+                self.emit("tab.closed", {"group_id": group.id, "tab_id": tab.id, "reason": "released"})
+                return {"released": True}
             self.emit("tab.closed", {"group_id": group.id, "tab_id": tab.id})
             return {}
         if method == "page.navigate":

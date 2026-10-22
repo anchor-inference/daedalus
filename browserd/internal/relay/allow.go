@@ -38,6 +38,10 @@ var allowedEmulation = map[string]bool{
 // Target is allowed on the agent's own tabs only for following their frames of other sites.
 var allowedTarget = map[string]bool{"Target.setAutoAttach": true, "Target.detachFromTarget": true}
 
+// IO is allowed only to read and close a stream: the body of a PDF the tab's own Fetch domain took
+// as a stream, read a piece at a time so a large one never crosses as one frame.
+var allowedIO = map[string]bool{"IO.read": true, "IO.close": true}
+
 // Allowed reports whether a relay carries method, and why not.
 func Allowed(method string) error {
 	domain, _, ok := strings.Cut(method, ".")
@@ -51,6 +55,8 @@ func Allowed(method string) error {
 	case domain == "Emulation" && allowedEmulation[method]:
 		return nil
 	case domain == "Target" && allowedTarget[method]:
+		return nil
+	case domain == "IO" && allowedIO[method]:
 		return nil
 	}
 	return fmt.Errorf("%s is not carried to the operator's Chrome", method)

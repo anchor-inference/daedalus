@@ -195,13 +195,18 @@ type Event struct {
 }
 
 // Tab is a tab as the extension describes it. ID is Chrome's tab id; Group the daemon group whose
-// Chrome tab group holds it; Opener the tab that opened it, when that is one of the agent's.
+// Chrome tab group holds it; Opener the tab that opened it, when that is one of the agent's. Given
+// says the operator put it in the group (dragged it in, gave it from the side panel or the menu)
+// rather than the agent opening it: such a tab is theirs, and closing the agent's tabs only lets go
+// of it. The extension is the one that knows, since a tab it attaches again after losing the
+// debugger is announced as joined too, given or not.
 type Tab struct {
 	ID     int    `json:"id"`
 	Group  string `json:"group,omitempty"`
 	Opener int    `json:"opener,omitempty"`
 	URL    string `json:"url,omitempty"`
 	Title  string `json:"title,omitempty"`
+	Given  bool   `json:"given,omitempty"`
 }
 
 // Tabs is a change of scope the operator made.
@@ -275,9 +280,18 @@ type TabCreated struct {
 	Tab Tab `json:"tab"`
 }
 
-// TabArgs names a tab: tab.close, tab.activate.
+// TabArgs names a tab: tab.close, tab.activate. Quiet, on tab.activate, is the agent switching to a
+// tab it already had rather than the operator asking: in the operator's own window the tab becomes
+// the agent's current one without being brought forward over the page the operator is on.
 type TabArgs struct {
-	Tab int `json:"tab"`
+	Tab   int  `json:"tab"`
+	Quiet bool `json:"quiet,omitempty"`
+}
+
+// TabClosed is tab.close's answer. Released says the tab was the operator's (Tab.Given) and was let
+// go, left open in their window, instead of being closed.
+type TabClosed struct {
+	Released bool `json:"released,omitempty"`
 }
 
 // Bounds are a window's, in screen pixels.

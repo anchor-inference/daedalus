@@ -227,7 +227,7 @@ func (l *launch) closeRefused(ctx context.Context, b *Browser, target, session s
 	_ = b.conn.Call(ctx, "", "Target.closeTarget", map[string]any{"targetId": target}, nil)
 }
 
-func (l *launch) activate(ctx context.Context, t *Tab) error {
+func (l *launch) activate(ctx context.Context, t *Tab, quiet bool) error {
 	return t.Group.Browser.conn.Call(ctx, "", "Target.activateTarget", map[string]any{"targetId": t.TargetID}, nil)
 }
 
