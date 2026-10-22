@@ -38,8 +38,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 EXTENSION_ID = "lkhhklicnjlplokpadpccndipomikoaj"
-"""The Daedalus extension's id, fixed by the public key in its manifest (``extension/src/protocol.ts``):
-the one origin allowed to frame the side panel's page."""
+"""The Daedalus extension's id, fixed by the public key in its manifest (``src/protocol.ts`` in the
+daedalus-chrome-extension repository): the one origin allowed to frame the side panel's page."""
 IDLE = timedelta(hours=12)
 """A panel token unused for this long stops working; each use moves the end along."""
 REFRESH_AHEAD = timedelta(hours=2)

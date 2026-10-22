@@ -91,7 +91,7 @@ In the native app a chat can see and drive your screen while you grant it: one w
 <td valign="top">
 
 **🌐 Your own Chrome**<br/>
-The Daedalus extension lets the agent work in your Chrome with your sign-ins, in a tab group of its own, asking about new sites and sensitive actions as you choose per conversation, and before it posts a form while read-only is on. A side panel shows this Chrome's conversations with the whole composer. Setting it up: [desktop/README.md](../desktop/README.md#your-own-chrome).
+The Daedalus extension ([anchor-inference/daedalus-chrome-extension](https://github.com/anchor-inference/daedalus-chrome-extension), built and released there) lets the agent work in your Chrome with your sign-ins, in a tab group of its own, asking about new sites and sensitive actions as you choose per conversation, and before it posts a form while read-only is on. A side panel shows this Chrome's conversations with the whole composer. Setting it up: [desktop/README.md](../desktop/README.md#your-own-chrome).
 
 </td>
 <td valign="top">

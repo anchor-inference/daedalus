@@ -27,8 +27,8 @@ import (
 const (
 	// chromeHostName is the native-messaging host the extension connects to with
 	// chrome.runtime.connectNative. It has to match the extension's own constant (NATIVE_HOST in
-	// extension/src/protocol.ts) letter for letter, and Chrome allows only lowercase letters,
-	// digits, dots and underscores in it.
+	// src/protocol.ts of the daedalus-chrome-extension repository) letter for letter, and Chrome
+	// allows only lowercase letters, digits, dots and underscores in it.
 	chromeHostName = "com.daedalus.browser"
 
 	// chromeExtensionID is the extension's id, pinned by the public key in its manifest. It is the

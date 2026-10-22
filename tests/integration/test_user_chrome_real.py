@@ -19,11 +19,13 @@ What a person would check by hand, in order:
 
 Opt in with ``DAEDALUS_CHROME_E2E=1``, and give it ``DAEDALUS_BROWSERD_BIN`` (a built browserd) and
 ``CHROMIUM`` (an unbranded Chromium: branded Chrome ignores ``--load-extension`` since 137, so
-Playwright's under ``~/.cache/ms-playwright`` is the one to use). Build the extension first
-(``cd extension && npm ci && npm run build``). Everything stays on loopback. Run it under a memory cap::
+Playwright's under ``~/.cache/ms-playwright`` is the one to use), and ``DAEDALUS_EXTENSION_DIR``: the
+extension unpacked, as ``desktop/stage-extension.sh <dir>`` stages the release the lock pins, or a
+``dist/`` built in the daedalus-chrome-extension repository. Everything stays on loopback. Run it
+under a memory cap::
 
     systemd-run --user --scope -p MemoryMax=4G -p MemorySwapMax=0 \\
-      env DAEDALUS_CHROME_E2E=1 DAEDALUS_BROWSERD_BIN=... CHROMIUM=... \\
+      env DAEDALUS_CHROME_E2E=1 DAEDALUS_BROWSERD_BIN=... CHROMIUM=... DAEDALUS_EXTENSION_DIR=... \\
       uv run --frozen pytest tests/integration/test_user_chrome_real.py -q
 """
 
@@ -35,7 +37,6 @@ import functools
 import http.server
 import json
 import os
-import re
 import shutil
 import tempfile
 import threading
@@ -47,6 +48,7 @@ from typing import Any
 import pytest
 
 from daedalus.browser.model import USER, BrowserError, Owner
+from daedalus.browser.panel import EXTENSION_ID
 from daedalus.browser.service import Browsers
 from daedalus.browser.user import Pairing, RelayDesk
 from daedalus.config import BrowserConfig
@@ -55,19 +57,21 @@ from daedalus.stores.database import Database
 REPO = Path(__file__).resolve().parents[2]
 BINARY = os.environ.get("DAEDALUS_BROWSERD_BIN", "")
 CHROMIUM = os.environ.get("CHROMIUM", "")
-EXTENSION = REPO / "extension" / "dist"
+EXTENSION_DIR = os.environ.get("DAEDALUS_EXTENSION_DIR", "")
+EXTENSION = Path(EXTENSION_DIR).resolve()
 SITE = REPO / "browserd" / "internal" / "rpc" / "testdata" / "site"
-# The id and the host name as the extension declares them, so this run cannot drift from it.
-PROTOCOL = (REPO / "extension" / "src" / "protocol.ts").read_text()
-EXTENSION_ID = re.search(r'EXTENSION_ID = "([a-p]{32})"', PROTOCOL).group(1)  # type: ignore[union-attr]
-HOST_NAME = re.search(r'NATIVE_HOST = "([a-z0-9_.]+)"', PROTOCOL).group(1)  # type: ignore[union-attr]
+# The extension lives in its own repository, so its src/protocol.ts is not here to read. The id is
+# the host's own constant, and the run below still proves the loaded extension has it: the worker's
+# address is checked against it. The host name is the bridge's (browserd's bridge.HostName); a
+# mismatch shows as a relay that never connects.
+HOST_NAME = "com.daedalus.browser"
 SECRET = "s3cr3t-cookie-value"
 
 pytestmark = [
     pytest.mark.skipif(os.environ.get("DAEDALUS_CHROME_E2E") != "1", reason="set DAEDALUS_CHROME_E2E=1 to run"),
     pytest.mark.skipif(not BINARY or not Path(BINARY).is_file(), reason="set DAEDALUS_BROWSERD_BIN to a built browserd"),
     pytest.mark.skipif(not CHROMIUM or not Path(CHROMIUM).is_file(), reason="set CHROMIUM to an unbranded Chromium"),
-    pytest.mark.skipif(not (EXTENSION / "manifest.json").is_file(), reason="build the extension: cd extension && npm run build"),
+    pytest.mark.skipif(not EXTENSION_DIR or not (EXTENSION / "manifest.json").is_file(), reason="set DAEDALUS_EXTENSION_DIR to the unpacked extension: desktop/stage-extension.sh <dir>"),
 ]
 
 

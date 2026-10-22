@@ -1,5 +1,0 @@
-{
-  "name": { "message": "Daedalus" },
-  "description": { "message": "Даёт агенту Daedalus работать во вкладках этого Chrome, которые вы ему отдали, в отдельной группе вкладок." },
-  "open_panel": { "message": "Открыть боковую панель Daedalus" }
-}

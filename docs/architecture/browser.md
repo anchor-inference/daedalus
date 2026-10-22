@@ -917,10 +917,11 @@ the channel (an empty frame, as for any channel) ends the relay.
 ### The relay protocol
 
 Every relay frame is one JSON object with its type in `t`. `browserd/internal/relay/testdata/frames.json`
-holds a golden frame of every kind, which the daemon's and the extension's tests both read; it is the
-contract's example, this table its rules. The protocol's version is `proto`, now 2 (2 names the
-conversation that owns each group, which the extension's side panel follows the active tab by, and
-adds the side panel's calls); a frame of a type a side does not know is ignored.
+holds a golden frame of every kind, which the daemon's tests read and the extension's repository
+checks its own against (its `DAEDALUS_FRAMES`); it is the contract's example, this table its rules.
+The protocol's version is `proto`, now 2 (2 names the conversation that owns each group, which the
+extension's side panel follows the active tab by, and adds the side panel's calls); a frame of a type
+a side does not know is ignored.
 
 | From | Frame | Fields and meaning |
 |---|---|---|

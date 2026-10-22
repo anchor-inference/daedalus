@@ -1,4 +1,5 @@
-// The app's half of the side panel's bridge (the extension's half is `extension/src/bridge.ts`).
+// The app's half of the side panel's bridge (the extension's half is `src/bridge.ts` in the
+// daedalus-chrome-extension repository).
 //
 // The app is framed by the extension's panel page. It announces itself to its parent with a nonce of
 // its own, addressed to the extension's origin so no other parent ever hears it, and takes the
