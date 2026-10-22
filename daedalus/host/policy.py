@@ -730,7 +730,13 @@ def similar_grant(tool: str, arguments: dict[str, Any], rule: str) -> dict[str, 
     allowed past the egress question still asks again when it turns into a force push. ``None``
     when no family is narrow enough to offer: a wrapper or a shell as the command, a chain, a path
     straight under a system directory, or a tool that names no path at all.
+
+    An MCP tool asked about for lacking safe annotations is the exception to the last: it names no
+    path, url or command to narrow by, so it had no family and could only be allowed one call at a
+    time. Its family is the tool itself, which already names the one server and the one tool.
     """
+    if rule == "mcp.annotations":
+        return {"tool": tool, "rule": rule, "kind": "tool", "value": tool, "label": f"{tool}(*)"}
     if tool in SHELL_TOOLS:
         words = _simple_words(str(arguments.get("command") or ""))
         if not words or words[0] in WRAPPERS or words[0] in SHELLS or words[0] in KEYWORDS or "=" in words[0]:
@@ -770,7 +776,7 @@ def similar_covers(grant: dict[str, Any], tool: str, rule: str, family: dict[str
                 and set(family.get("hosts") or []) <= set(grant.get("hosts") or []))
     if grant["kind"] == "dir":
         return _under(theirs, [value])
-    return grant["kind"] == "host" and theirs == value
+    return grant["kind"] in ("host", "tool") and theirs == value
 
 
 class Policy:
