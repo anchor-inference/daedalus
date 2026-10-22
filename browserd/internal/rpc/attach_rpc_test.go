@@ -3,13 +3,21 @@
 package rpc_test
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/ascorblack/daedalus/browserd/internal/browser"
+	"github.com/ascorblack/daedalus/browserd/internal/page"
 	"github.com/ascorblack/daedalus/browserd/internal/relay"
 	protowire "github.com/ascorblack/daedalus/ptyd/proto/wire"
 )
@@ -375,5 +383,125 @@ func TestAttachPanelCalls(t *testing.T) {
 	}
 	if !ensured || !granted || !evented {
 		t.Fatalf("ensured %v, granted %v, evented %v", ensured, granted, evented)
+	}
+}
+
+// A PDF in the operator's Chrome never reaches Chrome's viewer, which would take the tab's debugger
+// with it: a click that leads to one, and a navigation to one, keep it as a download of the group, and
+// the tab stays on its page and keeps answering.
+func TestAttachPDFBecomesADownload(t *testing.T) {
+	attachOnly(t)
+	h := start(t, nil)
+	o := h.open("g1", "project-a", "/site/docs.html")
+	tab := o.Tab.ID
+	want, err := os.ReadFile("testdata/site/statement.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := h.snapshot(tab)
+	r := h.mustAct(tab, map[string]any{"action": "click", "ref": refOf(t, s, "link", "The quarterly statement"), "element": "statement"})
+	dl, _ := r.Effects["download"].(map[string]any)
+	if dl == nil || dl["name"] != "statement.pdf" || dl["size"] != float64(len(want)) || dl["state"] != "completed" {
+		t.Fatalf("the click's effects: %+v", r.Effects)
+	}
+	if r.Effects["detached"] != nil || r.Effects["navigated"] != nil {
+		t.Fatalf("the tab left its page: %+v", r.Effects)
+	}
+	if s := h.snapshot(tab); !strings.Contains(s.Text, `heading "Documents"`) {
+		t.Fatalf("the tab after the click:\n%s", s.Text)
+	}
+	var list struct {
+		Downloads []page.Download `json:"downloads"`
+	}
+	h.must("download.list", map[string]any{"group_id": "g1"}, &list)
+	sum := sha256.Sum256(want)
+	if len(list.Downloads) != 1 || list.Downloads[0].ID != dl["id"] || list.Downloads[0].Mime != "application/pdf" ||
+		list.Downloads[0].SHA256 != hex.EncodeToString(sum[:]) || list.Downloads[0].TabID != tab {
+		t.Fatalf("downloads %+v", list.Downloads)
+	}
+	var chunk struct {
+		Data string `json:"data_b64"`
+	}
+	h.must("download.read", map[string]any{"id": dl["id"], "offset": 0}, &chunk)
+	if got, _ := base64.StdEncoding.DecodeString(chunk.Data); !bytes.Equal(got, want) {
+		t.Fatalf("the kept file is %d bytes, not the PDF", len(got))
+	}
+	if e := h.eventOf("download.done"); e == nil {
+		t.Fatal("no download.done")
+	}
+
+	var nav struct {
+		URL      string `json:"url"`
+		Error    string `json:"error"`
+		Download *struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+			Size int64  `json:"size"`
+			Mime string `json:"mime"`
+		} `json:"download"`
+	}
+	h.must("page.navigate", map[string]any{"tab_id": tab, "url": h.site.URL + "/site/statement.pdf"}, &nav)
+	if nav.Download == nil || nav.Download.Name != "statement.pdf" || nav.Download.Size != int64(len(want)) ||
+		nav.Download.Mime != "application/pdf" || nav.Download.ID == dl["id"] {
+		t.Fatalf("the navigation: %+v %+v", nav, nav.Download)
+	}
+	if nav.Error != "" || !strings.HasSuffix(nav.URL, "/site/docs.html") {
+		t.Fatalf("the navigation reported %q at %s", nav.Error, nav.URL)
+	}
+	if s := h.snapshot(tab); !strings.Contains(s.Text, `heading "Documents"`) {
+		t.Fatalf("the tab after the navigation:\n%s", s.Text)
+	}
+	// Any other document still loads as a page.
+	var still map[string]any
+	h.must("page.navigate", map[string]any{"tab_id": tab, "url": h.site.URL + "/still"}, &still)
+	if still["download"] != nil || still["error"] != nil || !strings.HasSuffix(fmt.Sprint(still["url"]), "/still") {
+		t.Fatalf("an ordinary navigation: %v", still)
+	}
+}
+
+// A tab whose debugger the extension lost is listed as detached, and every call that needs its page
+// says so at once, while it can still be closed; the action that took it there reports it done.
+func TestAttachDetachedTabAnswersAtOnce(t *testing.T) {
+	attachOnly(t)
+	h := start(t, nil)
+	o := h.open("g1", "project-a", "/site/docs.html")
+	tab := o.Tab.ID
+	h.fake.DetachOn("viewer")
+	s := h.snapshot(tab)
+	r := h.mustAct(tab, map[string]any{"action": "click", "ref": refOf(t, s, "link", "A page the extension cannot drive"), "element": "viewer"})
+	if r.Effects["detached"] != true || r.Diff != "" {
+		t.Fatalf("the click's result: %+v (diff %q)", r.Effects, r.Diff)
+	}
+	for _, c := range []struct {
+		method string
+		params map[string]any
+	}{
+		{"page.snapshot", map[string]any{"tab_id": tab}},
+		{"page.text", map[string]any{"tab_id": tab}},
+		{"page.navigate", map[string]any{"tab_id": tab, "url": h.site.URL + "/still"}},
+	} {
+		err := h.call(c.method, c.params, nil)
+		var we *protowire.Error
+		if !errors.As(err, &we) || we.Code != browser.CodeNoSuchTab || !strings.Contains(we.Message, "debugger was detached") {
+			t.Fatalf("%s on a detached tab: %v", c.method, err)
+		}
+		raw, _ := json.Marshal(we.Data)
+		var data map[string]any
+		_ = json.Unmarshal(raw, &data)
+		if data["tab_id"] != tab || data["reason"] != "detached" {
+			t.Fatalf("%s: the error's data %s", c.method, raw)
+		}
+	}
+	var list struct {
+		Tabs []map[string]any `json:"tabs"`
+	}
+	h.must("tab.list", map[string]any{"group_id": "g1"}, &list)
+	if len(list.Tabs) != 1 || list.Tabs[0]["detached"] != true {
+		t.Fatalf("tabs %v", list.Tabs)
+	}
+	h.must("tab.close", map[string]any{"tab_id": tab}, nil)
+	h.must("tab.list", map[string]any{"group_id": "g1"}, &list)
+	if len(list.Tabs) != 0 {
+		t.Fatalf("after closing it: %v", list.Tabs)
 	}
 }

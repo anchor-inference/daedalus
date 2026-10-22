@@ -83,6 +83,7 @@ type Fake struct {
 	byes      []relay.Bye
 	welcome   chan relay.Welcome
 	closed    chan struct{}
+	detachOn  string
 }
 
 // Start runs the browser, connects to the daemon as a relay and waits for its welcome.
@@ -446,7 +447,19 @@ func (f *Fake) browserEvent(e cdp.Event) {
 	case "Target.targetInfoChanged":
 		f.mu.Lock()
 		id, ok := f.byTarget[p.TargetInfo.TargetID]
+		detach := ok && f.detachOn != "" && strings.Contains(p.TargetInfo.URL, f.detachOn) && f.tabs[id].session != ""
+		if detach {
+			// Its events stop here, before any of the new page's reach the daemon, as chrome.debugger's
+			// do once it lets go; the tab stays open and listed.
+			t := f.tabs[id]
+			delete(f.bySession, t.session)
+			t.session = ""
+		}
 		f.mu.Unlock()
+		if detach {
+			_ = f.Send(relay.Event{T: relay.TEvent, Session: relay.SessionOf(id), Method: "Inspector.detached",
+				Params: json.RawMessage(`{"reason":"page_not_drivable"}`)})
+		}
 		if ok {
 			_ = f.Send(relay.Tabs{T: relay.TTabs, Op: relay.TabsUpdated, Tab: &relay.Tab{ID: id, URL: p.TargetInfo.URL, Title: p.TargetInfo.Title}})
 		}
@@ -707,6 +720,16 @@ func (f *Fake) TabOf(target string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.byTarget[target]
+}
+
+// DetachOn makes the fake let go of a tab whose address comes to hold substr, as chrome.debugger
+// lets go of a tab that shows a page the extension cannot drive (Chrome's PDF viewer, a browser
+// page), and tell the daemon with Inspector.detached as the extension does. Commands to the tab fail
+// after it.
+func (f *Fake) DetachOn(substr string) {
+	f.mu.Lock()
+	f.detachOn = substr
+	f.mu.Unlock()
 }
 
 // Conn is the fake's own hold on the browser, for a test that plays the operator.

@@ -292,8 +292,23 @@ type tabParams struct {
 	Origin *browser.Origin `json:"origin,omitempty"`
 }
 
-// gatedTab resolves a tab and lets the call through its group's control.
+// gatedTab resolves a tab for a call that drives its page, and lets the call through its group's
+// control. A tab whose debugger was detached fails at once with why, rather than with every
+// command's own "not attached" after a wait.
 func (d *Daemon) gatedTab(ctx context.Context, id string, o *browser.Origin) (*browser.Tab, error) {
+	t, err := d.gatedAnyTab(ctx, id, o)
+	if err != nil {
+		return nil, err
+	}
+	if _, detached := t.Detached(); detached {
+		return nil, browser.ErrDetached(t)
+	}
+	return t, nil
+}
+
+// gatedAnyTab is gatedTab for the calls that need nothing of the page itself, which a detached tab
+// still answers: closing it, and reading what the daemon kept of it.
+func (d *Daemon) gatedAnyTab(ctx context.Context, id string, o *browser.Origin) (*browser.Tab, error) {
 	if o != nil && o.WaitMs != nil && (*o.WaitMs < 0 || time.Duration(*o.WaitMs)*time.Millisecond > config.MaxControlWait) {
 		return nil, wire.Errorf(wire.CodeInvalidParams, "origin.wait_ms must be 0-60000")
 	}
@@ -385,7 +400,7 @@ func (d *Daemon) tabClose(ctx context.Context, c *server.Conn, params json.RawMe
 	if err := decode(params, &p); err != nil {
 		return nil, err
 	}
-	t, err := d.gatedTab(ctx, p.TabID, p.Origin)
+	t, err := d.gatedAnyTab(ctx, p.TabID, p.Origin)
 	if err != nil {
 		return nil, err
 	}

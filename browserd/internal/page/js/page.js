@@ -1324,13 +1324,21 @@
     }
     const isSubmitControl = (tag(el) === "button" && (el.getAttribute("type") || "submit").toLowerCase() === "submit" && !!form) ||
       (tag(el) === "input" && ["submit", "image"].includes(inputType(el)));
+    // Enter submits a form from one of its fields (implicit submission) or on its submit control; in
+    // a text area it types a line, and on any other button it presses that button.
+    const enterSubmits = !!form && (isSubmitControl || (tag(el) === "input" && !["button", "reset", "file", "hidden"].includes(inputType(el))));
+    // A submit control's formmethod overrides its form's, and either is "get" when unset or invalid,
+    // as the browser reads them. The attribute and not form.method: a field named "method" hides the
+    // property behind itself.
+    const methodAttr = isSubmitControl && el.hasAttribute("formmethod") ? el.getAttribute("formmethod") : (form ? form.getAttribute("method") : "");
+    const method = !form ? "" : (["post", "dialog"].includes((methodAttr || "").trim().toLowerCase()) ? methodAttr.trim().toLowerCase() : "get");
     const text = collapse(d.name + " " + (el.getAttribute("title") || ""));
     return {
       name: d.name, role: d.role, tag: tag(el), type: d.type || "", text,
       value: tag(el) === "input" && ["submit", "button"].includes(inputType(el)) ? el.value : "",
       heading: clip(nearestHeading(el), 120),
-      form: !!form, form_action: form ? (form.action || location.href) : "", form_method: form ? (form.method || "get") : "",
-      submits: isSubmitControl || (!!submit && !!form) || (action === "press" && !!form),
+      form: !!form, form_action: form ? (form.action || location.href) : "", form_method: method,
+      submits: isSubmitControl || ((!!submit || action === "press") && enterSubmits),
       password, payment, otp, file: d.file,
       page_origin: location.origin, fields,
     };

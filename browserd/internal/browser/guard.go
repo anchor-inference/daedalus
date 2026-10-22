@@ -14,31 +14,50 @@ import (
 // when the operator has an allowlist. The proxy's address rules already refuse the LAN and this
 // machine's ports on every request; what they cannot see is the allowlist, which names hosts the
 // agent may be taken to, and a page leading the agent off it is exactly what an injected
-// instruction does. Without an allowlist nothing is intercepted: every navigation costs a round
+// instruction does. Without an allowlist no request is intercepted: every navigation costs a round
 // trip on the pipe while the guard is on.
 
-type guardKey struct{}
+// fetchKey keys, among a tab's values, the fetchState its Fetch domain was last enabled with.
+type fetchKey struct{}
 
-// guardPattern pauses main-frame and frame documents at the request; frames are let through at
-// once, only a tab's own document is judged.
-var guardPattern = map[string]any{"patterns": []map[string]any{{"urlPattern": "*", "resourceType": "Document", "requestStage": "Request"}}}
+// fetchState is what a tab's Fetch domain pauses: documents at the request for the guard, and, in
+// the operator's Chrome, documents at the response so a PDF never reaches Chrome's viewer (pdf.go).
+// Fetch.enable replaces the patterns it was given before, so the two are always enabled together,
+// and the domain is disabled only when neither is wanted.
+type fetchState struct {
+	guard bool
+	pdf   bool
+}
+
+func (s fetchState) on() bool { return s.guard || s.pdf }
+
+// params is the Fetch.enable of the state. The guard's pattern pauses main-frame and frame
+// documents at the request; frames are let through at once, only a tab's own document is judged.
+func (s fetchState) params() map[string]any {
+	patterns := []map[string]any{}
+	if s.guard {
+		patterns = append(patterns, map[string]any{"urlPattern": "*", "resourceType": "Document", "requestStage": "Request"})
+	}
+	if s.pdf {
+		patterns = append(patterns, map[string]any{"urlPattern": "*", "resourceType": "Document", "requestStage": "Response"})
+	}
+	return map[string]any{"patterns": patterns}
+}
 
 // guarding reports whether the wall wants page navigations judged.
 func (m *Manager) guarding() bool {
 	return m.deps.Wall != nil && m.deps.Wall.Allowlist()
 }
 
-// guardSetup is the call a new page gets during its setup when the guard is on.
-func (m *Manager) guardSetup() (string, any, bool) {
-	if !m.guarding() {
-		return "", nil, false
-	}
-	return "Fetch.enable", guardPattern, true
+// fetchWanted is what the Fetch domain of a page of b should pause now. The PDF pattern is the
+// operator's Chrome's only: a browser of the daemon's own has no PDF viewer to lose a tab to, and
+// every paused response is a round trip on the pipe.
+func (m *Manager) fetchWanted(b *Browser) fetchState {
+	return fetchState{guard: m.guarding(), pdf: b.attached}
 }
 
 // SyncGuard turns the guard on or off in every open tab, after the wall's rules changed.
 func (m *Manager) SyncGuard(ctx context.Context) {
-	on := m.guarding()
 	m.mu.Lock()
 	tabs := make([]*Tab, 0, len(m.tabs))
 	for _, t := range m.tabs {
@@ -46,16 +65,17 @@ func (m *Manager) SyncGuard(ctx context.Context) {
 	}
 	m.mu.Unlock()
 	for _, t := range tabs {
-		was, _ := t.Value(guardKey{}).(bool)
-		if was == on {
+		want := m.fetchWanted(t.Group.Browser)
+		was, _ := t.Value(fetchKey{}).(fetchState)
+		if was == want {
 			continue
 		}
 		method, params := "Fetch.disable", any(nil)
-		if on {
-			method, params = "Fetch.enable", guardPattern
+		if want.on() {
+			method, params = "Fetch.enable", want.params()
 		}
 		if err := t.Call(ctx, method, params, nil); err == nil {
-			t.SetValue(guardKey{}, on)
+			t.SetValue(fetchKey{}, want)
 		}
 	}
 }

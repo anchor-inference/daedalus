@@ -879,7 +879,11 @@ func (m *Manager) onEvent(b *Browser, e cdp.Event) {
 	switch e.Method {
 	case "Fetch.requestPaused":
 		if t != nil && !frame {
-			go m.guardPaused(t, e.Params)
+			if atResponse(e.Params) {
+				go m.responsePaused(t, e.Params)
+			} else {
+				go m.guardPaused(t, e.Params)
+			}
 		}
 		return
 	case "Target.attachedToTarget":

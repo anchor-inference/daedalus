@@ -2,6 +2,7 @@ package browser
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"time"
 
@@ -119,7 +120,7 @@ func (m *Manager) setupTab(g *Group, session string, info targetInfo, opener str
 	}()
 	// The page's size is its window's: in the pinned Chromium the screencast shows the window whatever
 	// Emulation says, so an emulated viewport would put every click beside what the frame shows.
-	m.sizeWindow(ctx, g, info.TargetID, g.ViewportNow())
+	_ = m.sizeWindow(ctx, g, info.TargetID, g.ViewportNow())
 	var replies []<-chan error
 	var methods []string
 	type call struct {
@@ -163,11 +164,10 @@ func (m *Manager) setupTab(g *Group, session string, info targetInfo, opener str
 		}
 	}
 	// Before the page runs, so its first navigation (a popup's) meets the guard too.
-	guarded := false
-	if method, params, ok := m.guardSetup(); ok {
-		replies = append(replies, b.conn.Send(ctx, session, method, params))
-		methods = append(methods, method)
-		guarded = true
+	fetch := m.fetchWanted(b)
+	if fetch.on() {
+		replies = append(replies, b.conn.Send(ctx, session, "Fetch.enable", fetch.params()))
+		methods = append(methods, "Fetch.enable")
 	}
 	replies = append(replies, b.conn.Send(ctx, session, "Runtime.runIfWaitingForDebugger", nil))
 	methods = append(methods, "Runtime.runIfWaitingForDebugger")
@@ -190,8 +190,8 @@ func (m *Manager) setupTab(g *Group, session string, info targetInfo, opener str
 		m.mu.Unlock()
 		return nil
 	}
-	if guarded {
-		t.values = map[any]any{guardKey{}: true}
+	if fetch.on() {
+		t.values = map[any]any{fetchKey{}: fetch}
 	}
 	m.tabs[t.ID] = t
 	m.bySession[session] = t
@@ -252,6 +252,9 @@ type NavResult struct {
 	URL   string `json:"url"`
 	Title string `json:"title"`
 	Error string `json:"error,omitempty"`
+	// Download is the file the navigation turned into instead of a page (pdf.go): the tab stayed
+	// where it was.
+	Download *Kept `json:"download,omitempty"`
 }
 
 // Navigate loads url in t and waits for its load event, at most timeout. A page that failed to load
@@ -273,8 +276,16 @@ func (m *Manager) Navigate(ctx context.Context, t *Tab, url string, timeout time
 	}
 	nctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	kept := t.keptMark()
 	if err := t.Call(nctx, "Page.navigate", map[string]any{"url": url}, &r); err != nil {
 		return NavResult{}, err
+	}
+	if k := t.keptSince(kept); k != nil {
+		// The navigation was aborted on purpose once its PDF was kept, and Chromium reports that as
+		// net::ERR_ABORTED: not the page's failure, so not passed on as one.
+		res := m.result(ctx, t, "")
+		res.Download = k
+		return res, nil
 	}
 	if r.ErrorText != "" {
 		return m.result(ctx, t, r.ErrorText), nil
@@ -404,7 +415,7 @@ func (m *Manager) Resize(ctx context.Context, groupID string, vp Viewport) (View
 		if t.Closed() {
 			continue
 		}
-		m.sizeWindow(ctx, g, t.TargetID, vp)
+		_ = m.sizeWindow(ctx, g, t.TargetID, vp)
 		// Chromium can accept new window bounds before its page has the new size. A restart
 		// of the watched screencast before that point can send only the old picture.
 		m.settledInner(ctx, g.Browser, t.Session)
@@ -416,14 +427,18 @@ func (m *Manager) Resize(ctx context.Context, groupID string, vp Viewport) (View
 	return vp, nil
 }
 
+// errWindowFixed is a window the daemon may not size: in the operator's Chrome, the operator's own
+// window, which the extension refuses to resize.
+var errWindowFixed = errors.New("the window is the operator's to size")
+
 // sizeWindow gives a page's window the size that makes its viewport vp, once the browser knows how
 // much of a window its frame takes (measureFrame).
-func (m *Manager) sizeWindow(ctx context.Context, g *Group, target string, vp Viewport) {
+func (m *Manager) sizeWindow(ctx context.Context, g *Group, target string, vp Viewport) error {
 	b := g.Browser
 	b.mu.Lock()
 	dx, dy := b.frameW, b.frameH
 	b.mu.Unlock()
-	_ = m.backend.setWindowSize(ctx, g, target, vp.W+dx, vp.H+dy)
+	return m.backend.setWindowSize(ctx, g, target, vp.W+dx, vp.H+dy)
 }
 
 // measureFrame learns, on a browser's first page, how much of a window is not page: a window of
@@ -457,7 +472,14 @@ func (m *Manager) measureFrame(ctx context.Context, g *Group, session, target st
 		b.mu.Lock()
 		b.frameW, b.frameH = max(0, ww-inner[0]), max(0, wh-inner[1])
 		b.mu.Unlock()
-		m.sizeWindow(ctx, g, target, vp)
+		if err := m.sizeWindow(ctx, g, target, vp); errors.Is(err, errWindowFixed) {
+			// The page will never be resized to match, so the frame is what this one read: retrying
+			// only asked the extension again and warned that the sizes never matched.
+			b.mu.Lock()
+			b.frameKnown = true
+			b.mu.Unlock()
+			return
+		}
 	}
 	m.log.Warn("a page's size never matched its window", "browser", b.ID)
 }

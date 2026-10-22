@@ -175,9 +175,16 @@ func Classify(action string, ev Evidence, submit bool) Result {
 	if ev.File || action == "upload" {
 		kinds[Upload] = true
 	}
+	// submits and form_method let the host hold a form's submission for the operator by how it is
+	// sent: a POST changes something on the site, a GET only asks.
 	out := Result{Kinds: []string{}, Evidence: map[string]any{"name": ev.Name, "role": ev.Role, "words": matched,
-		"page_origin": ev.PageOrigin, "fields": fieldsOrEmpty(ev.Fields)}}
+		"page_origin": ev.PageOrigin, "fields": fieldsOrEmpty(ev.Fields), "submits": ev.Submits}}
 	if ev.Form {
+		method := strings.ToLower(strings.TrimSpace(ev.FormMethod))
+		if method == "" {
+			method = "get"
+		}
+		out.Evidence["form_method"] = method
 		out.Evidence["form_action"] = ev.FormAction
 		if u, err := url.Parse(ev.FormAction); err == nil && u.Host != "" {
 			out.Evidence["form_origin"] = u.Scheme + "://" + u.Host

@@ -39,6 +39,14 @@ func errNoSuchTab(id string) *wire.Error {
 	return errWith(CodeNoSuchTab, map[string]any{"tab_id": id}, "no tab %q in this browser; list the tabs", id)
 }
 
+// ErrDetached is a call to a tab whose debugger was detached (Tab.Detached): the tab is still open in
+// the operator's Chrome, and still listed and closable, but nothing on it can be read or done.
+func ErrDetached(t *Tab) *wire.Error {
+	return errWith(CodeNoSuchTab, map[string]any{"tab_id": t.ID, "reason": "detached"},
+		"tab %s no longer answers: its debugger was detached (it opened a page the extension cannot drive, such as a PDF viewer "+
+			"or a browser page); close it with tab.close and open another tab", t.ID)
+}
+
 func errBrowserGone(reason string) *wire.Error {
 	return errWith(CodeBrowserGone, map[string]any{"reason": reason},
 		"the browser behind this group has exited (%s); open it again", reason)
