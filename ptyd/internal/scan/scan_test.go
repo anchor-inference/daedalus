@@ -230,7 +230,9 @@ func TestStrip(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"\x1b[1;31mred\x1b[0m plain\r\n", "red plain\n"},
 		{"\x1b]0;title\x07after", "after"},
-		{"line\rover\r\n", "line\nover\n"},
+		{"line\rover\r\n", "over\n"},
+		{"get 10%\rget 50%\rget 100%\ndone\n", "get 100%\ndone\n"},
+		{"a\nspin |\rspin /\r", "a\nspin /\n"},
 		{"a\tb\x08c\x07d", "a\tbcd"},
 		{"\x1b[?2004hprompt$ ", "prompt$ "},
 		{"trailing\r", "trailing\n"},

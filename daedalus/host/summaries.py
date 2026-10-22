@@ -35,6 +35,11 @@ SUMMARY_SECTIONS = ("Standing instructions", "Stable facts", "Threads", "Closed 
 
 _HEADINGS = " · ".join(f"## {name}" for name in SUMMARY_SECTIONS)
 
+OMISSION_RULE = """A marker `… [N chars left out] …` is where the host shortened a long message to fit \
+this text; it is not part of the tool output and not a failure — never record it as truncation or as an error."""
+"""Without it a summariser reads the host's own cut as the tool's and records a command as truncated
+or failed when it was neither."""
+
 SECTION_RULES = f"""Markdown with exactly these six level-2 sections, each once, in this order, titles in \
 English verbatim whatever the language of the body: {_HEADINGS}.
 Standing instructions: every rule, preference, boundary and way of working the operator stated that still \
@@ -54,7 +59,8 @@ outcome is UNKNOWN, not that it happened or failed; such items go here rather th
 Identifiers: one line per path, id, URL, port, command, name or number later work may need, exactly as it \
 appeared.
 Never write a secret value (password, token, key); name where it is kept instead. Every identifier \
-verbatim, never rounded or guessed. No commentary outside the sections."""
+verbatim, never rounded or guessed. No commentary outside the sections.
+""" + OMISSION_RULE
 
 BASE_RULE = """The text starts with <previous-summary>: the memory of this conversation as it stood \
 before the transcript that follows it. It is the base you update, not material to condense again. Carry \
@@ -103,7 +109,11 @@ NOTE_TEXT_CHARS = 12_000
 """A user-role message that is not the operator's — a subagent's report, an event batch — is cut in
 the middle past this. Reports run to thirteen thousand characters and carry the result of a thread."""
 TOOL_ARGUMENTS_CHARS = 1000
-RESULT_CHARS = 1500
+RESULT_CHARS = 8000
+"""A tool result is cut in the middle past this. At 1,500 an id or a verdict a third of the way into
+a result never reached the summariser, which then recorded the outcome as unknown; the history is
+already summarised in parts of ``chunk_tokens``, so a longer result costs summariser tokens, not a
+call that does not fit."""
 MEMORY_RESULT_CHARS = 12_000
 """A read of an instruction or memory file is the agent learning the operator's standing knowledge;
 it is shown nearly whole rather than as its first and last lines."""
@@ -123,7 +133,8 @@ class SummaryInput:
     transcript: str
 
 
-def _clip_middle(text: str, limit: int) -> str:
+def clip_middle(text: str, limit: int) -> str:
+    """``text`` cut in its middle to about ``limit`` characters: a result's verdict sits at its start or its end."""
     if len(text) <= limit:
         return text
     half = limit // 2
@@ -180,17 +191,17 @@ def summary_input(history: Sequence[Message], *, result_chars: int = RESULT_CHAR
                 elif operator:
                     lines.append(f"[operator] {text}")
                 elif message.role is MessageRole.assistant:
-                    lines.append(f"[assistant] {_clip_middle(text, ASSISTANT_TEXT_CHARS)}")
+                    lines.append(f"[assistant] {clip_middle(text, ASSISTANT_TEXT_CHARS)}")
                 else:
-                    lines.append(f"[{message.role.value}] {_clip_middle(text, NOTE_TEXT_CHARS)}")
+                    lines.append(f"[{message.role.value}] {clip_middle(text, NOTE_TEXT_CHARS)}")
             elif isinstance(block, ToolUseBlock):
                 arguments = block.arguments_json or ""
                 calls[block.tool_call_id] = arguments
-                lines.append(f"[tool call] {block.name} {_clip_middle(arguments, TOOL_ARGUMENTS_CHARS)}")
+                lines.append(f"[tool call] {block.name} {clip_middle(arguments, TOOL_ARGUMENTS_CHARS)}")
             elif isinstance(block, ToolResultBlock):
                 body = (block.content or "").strip()
                 memory = bool(MEMORY_FILE_RE.search(calls.get(block.tool_call_id, "") + " " + str(block.path or "")))
-                lines.append(f"[tool result{' ERROR' if block.is_error else ''}] {_clip_middle(body, MEMORY_RESULT_CHARS if memory else result_chars)}")
+                lines.append(f"[tool result{' ERROR' if block.is_error else ''}] {clip_middle(body, MEMORY_RESULT_CHARS if memory else result_chars)}")
             elif isinstance(block, ThinkingBlock):
                 continue
     return SummaryInput(previous=previous, transcript="\n".join(lines))

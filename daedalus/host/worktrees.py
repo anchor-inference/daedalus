@@ -31,13 +31,22 @@ import logging
 import os
 import re
 import signal
+import stat
 import unicodedata
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from daedalus.host.gitrun import GitError, git_argv, mask_credentials, numstat_entries, run_git, setup_environment
+from daedalus.host.gitrun import (
+    GitError,
+    git_argv,
+    mask_credentials,
+    nul_names,
+    numstat_entries,
+    run_git,
+    setup_environment,
+)
 from daedalus.stores.projects import ProjectFolder
 
 logger = logging.getLogger(__name__)
@@ -64,6 +73,16 @@ SETUP_TAIL_LINES = 20
 # host output, while a tracked edit is still caught by the tracked-file clean check.
 SESSION_ARTEFACTS = ("inbox/", ".exec/", ".jobs/", ".services/", ".agents/", "PLAN.md")
 EXCLUDE_MARKER = "# daedalus: what an agent working in this folder writes into it"
+
+
+WORKTREE_INCLUDE = ".worktreeinclude"
+"""The file at a repository's top that names, in ``.gitignore`` syntax, the ignored files a new worktree
+needs (``.env``, a local MCP configuration, ``secrets/``): git does not carry them, so a member's fresh
+worktree otherwise starts without the configuration the project runs on. Claude Code's convention."""
+INCLUDE_MAX_FILES = 200
+INCLUDE_MAX_BYTES = 32 << 20
+"""How much one worktree may receive. The include is for configuration, not data: a pattern that
+matches a dataset or a cache would otherwise copy gigabytes into every member's worktree."""
 
 
 class WorktreeError(RuntimeError):
@@ -390,6 +409,109 @@ class RemoteGit:
             ) from None
 
 
+async def copy_included(source: Path, target: Path) -> list[str]:
+    """Copy into the worktree ``target`` the files of ``source`` that its ``.worktreeinclude`` names.
+
+    Both are tops of a checkout of one repository, in this process's own environment. A file is copied
+    only when git ignores it in ``source`` and in ``target`` alike, so nothing copied ever shows in the
+    member's ``git status`` or is swept into its commit. Nothing is overwritten, its mode is kept, and
+    no symbolic link is followed on either side: a link in the folder, or a tracked link in the
+    worktree's branch, could otherwise carry a file in from outside the repository or write one out of
+    it. ``.agents/`` is never a source, since the other members' worktrees live there. Stops at
+    :data:`INCLUDE_MAX_FILES` and :data:`INCLUDE_MAX_BYTES`. Answers the paths copied.
+    """
+    include = source / WORKTREE_INCLUDE
+    try:
+        if not stat.S_ISREG(include.lstat().st_mode):
+            logger.warning("%s is not a regular file, so nothing it names is copied into new worktrees", include)
+            return []
+    except FileNotFoundError:
+        return []
+    listing = await run_git(["ls-files", "-z", "--others", "--ignored", f"--exclude-from={include}"], cwd=source, env=_QUIET, timeout=GIT_TIMEOUT)
+    # A name with a line break cannot be read back from check-ignore's answer, which is one per line.
+    named = [p for p in nul_names(listing) if "\n" not in p and not p.startswith(f"{WORKTREES_DIR.parts[0]}/")]
+    # A name under a link of the worktree's branch is refused by check-ignore for the whole batch; it is
+    # one the copy would refuse anyway, so it is dropped before asking.
+    named = [p for p in named if not _through_link(target, p)][:INCLUDE_MAX_FILES]
+    if not named:
+        return []
+    try:
+        answer = await run_git(["-c", "core.quotepath=off", "check-ignore", "--", *named], cwd=target, env=_QUIET, timeout=GIT_TIMEOUT)
+    except GitError as exc:
+        if exc.returncode != 1:  # 1 is git's way of saying none of them is ignored
+            raise
+        return []
+    ignored = [p for p in answer.split("\n") if p]
+    source_root, target_root = os.path.realpath(source), os.path.realpath(target)
+    copied: list[str] = []
+    total = 0
+    for rel in ignored:
+        origin = Path(source_root, rel)
+        destination = Path(target_root, rel)
+        try:
+            info = origin.lstat()
+            # A link in a parent directory is caught by comparing where the path really leads.
+            if not stat.S_ISREG(info.st_mode) or os.path.realpath(origin) != str(origin):
+                continue
+            if total + info.st_size > INCLUDE_MAX_BYTES:
+                logger.warning("%s was not copied into %s: the worktree include stops at %d bytes", rel, target, INCLUDE_MAX_BYTES)
+                continue
+            if os.path.lexists(destination):
+                continue
+            _make_parents(destination.parent, target_root)
+            _copy_file(origin, destination, stat.S_IMODE(info.st_mode))
+        except (OSError, ValueError) as exc:
+            logger.warning("%s was not copied into %s: %s", rel, target, exc)
+            continue
+        total += info.st_size
+        copied.append(rel)
+    if copied:
+        logger.info("copied %d file(s) named in %s into %s", len(copied), WORKTREE_INCLUDE, target)
+    return copied
+
+
+def _through_link(root: Path, rel: str) -> bool:
+    """Whether a directory on the way to ``rel`` under ``root`` is a symbolic link."""
+    current = root
+    for part in Path(rel).parts[:-1]:
+        current = current / part
+        if current.is_symlink():
+            return True
+    return False
+
+
+def _make_parents(directory: Path, root: str) -> None:
+    """Create ``directory`` under ``root`` one level at a time, refusing any level that is a link."""
+    relative = Path(os.path.relpath(directory, root))
+    if relative.parts and relative.parts[0] == "..":
+        raise ValueError(f"{directory} is outside {root}")
+    current = Path(root)
+    for part in relative.parts if str(relative) != "." else ():
+        current = current / part
+        try:
+            os.mkdir(current)
+        except FileExistsError:
+            pass
+        if not stat.S_ISDIR(current.lstat().st_mode):
+            raise ValueError(f"{current} is a link or a file, not a directory")
+
+
+def _copy_file(origin: Path, destination: Path, mode: int) -> None:
+    """Copy one file without following a link at either end and without replacing anything."""
+    flags = os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    source_fd = os.open(origin, os.O_RDONLY | flags)
+    try:
+        target_fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | flags, mode)
+        try:
+            while chunk := os.read(source_fd, 1 << 20):
+                os.write(target_fd, chunk)
+            os.fchmod(target_fd, mode)
+        finally:
+            os.close(target_fd)
+    finally:
+        os.close(source_fd)
+
+
 _COMMIT_ID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
 
@@ -628,7 +750,21 @@ class StaffWorktrees:
                 except GitError as exc:
                     raise WorktreeError(f"could not prepare the worktree of {slug_} in {where}: {exc}") from exc
             await self._identity(git, path)
+            if created:
+                await self._include(git, where, path)
         return Worktree(path=path, branch=branch, base_ref=base, folder=where, env=folder.env, subdir=prefix.rstrip("/"), created=created)
+
+    async def _include(self, git: _Git, folder: Path, path: Path) -> None:
+        """Copy what ``.worktreeinclude`` names into a worktree just made. A copy that fails is logged and
+        the worktree used as it is: the member can still work, and its setup command or the operator
+        can supply the file. A host folder is skipped, since the bridge runs git and writes no file."""
+        if not isinstance(git, LocalGit):
+            return
+        try:
+            top = Path((await git.run(["rev-parse", "--show-toplevel"], cwd=folder)).strip())
+            await copy_included(top, path)
+        except (GitError, OSError) as exc:
+            logger.warning("the files named in %s were not copied into %s: %s", WORKTREE_INCLUDE, path, exc)
 
     async def _place(self, git: _Git, folder: Path, path: Path, branch: str, base: str) -> bool:
         """Put the worktree at ``path`` on ``branch``; whether it had to be made."""

@@ -151,7 +151,11 @@ class ProjectMcpTools:
                   "inputSchema": p.definition.parameters.model_dump(exclude_none=True, by_alias=True)} for p in proxies]
         body = json.dumps({"server": SERVER, "instructions": INSTRUCTIONS, "hold_ms": hold_ms, "unanswered": UNANSWERED, "tools": tools},
                           ensure_ascii=False, indent=1).encode()
-        return ToolSetSpec(name=TOOL_SET, server=SERVER, file=body, hold_ms=hold_ms, tools=tuple(t["name"] for t in tools))
+        # The tools no question would be asked about here go to the CLI as read-only, so its own dialog
+        # does not ask the operator about a call the host would let through anyway; every other tool
+        # keeps the CLI's dialog in front of the host's question.
+        allowed = tuple(p.name for p in proxies if getattr(p, "approval", "ask") == "allow")
+        return ToolSetSpec(name=TOOL_SET, server=SERVER, file=body, hold_ms=hold_ms, read_only=allowed, tools=tuple(t["name"] for t in tools))
 
     async def call(self, live: LiveSession, tool: str, arguments: dict[str, Any], *, ask: Any, launch_id: str, cwd: str) -> tuple[str, bool]:
         manager = self.app.manager

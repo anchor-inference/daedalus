@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { setLang } from "../i18n";
-import { ProjectUsage, UsageLine, chipText, spendLine, tokens, totalsLine, usd } from "./usage";
+import { ProjectUsage, UsageLine, chipText, spendLine, steadyUsage, tokens, totalsLine, usd } from "./usage";
 
 const none = { usd: 0, tokens: 0, unpriced: 0, subscriptions: 0 };
 const line = (today: Partial<typeof none>, subscription: UsageLine["subscription"] = null): UsageLine => ({ today: { ...none, ...today }, week: { ...none, ...today }, all: { ...none, ...today }, subscription });
@@ -40,5 +40,31 @@ describe("project spend in words", () => {
     expect(totalsLine(usage)).toContain("1 subscription session (USD unavailable)");
     expect(chipText(usage)).toBe("Known $0.40 today + unknown price");
     expect(chipText({ ...usage, total: line({ tokens: 1000, subscriptions: 1 }) })).toBe("Known $0.00 today + unknown price");
+  });
+});
+
+describe("a usage reading of zero", () => {
+  const reading = (all: Partial<typeof none>, staff: Partial<typeof none> = {}): ProjectUsage => ({
+    project_id: "p", orchestrator: line(all), other: line({}), total: line(all),
+    staff: [{ ...line(staff), staff_id: "ada", name: "Ada", harness: "codex", archived: false }],
+  });
+  it("never overwrites a non-zero one: spend to date only grows, so a zero is a reading that failed", () => {
+    const before = reading({ usd: 2, tokens: 5000 }, { usd: 1, tokens: 2000 });
+    const after = steadyUsage(before, reading({}, {}));
+    expect(after.total.all.tokens).toBe(5000);
+    expect(after.orchestrator.all.usd).toBe(2);
+    expect(after.staff[0].all.tokens).toBe(2000);
+  });
+  it("takes a non-zero reading, and a zero one when nothing was known before", () => {
+    const before = reading({ usd: 2, tokens: 5000 });
+    expect(steadyUsage(before, reading({ usd: 3, tokens: 7000 })).total.all.tokens).toBe(7000);
+    expect(steadyUsage(null, reading({})).total.all.tokens).toBe(0);
+    expect(steadyUsage(reading({}), reading({})).total.all.tokens).toBe(0);
+  });
+  it("keeps a member's line by the member, whatever order the host lists them in", () => {
+    const before = { ...reading({ tokens: 10 }), staff: [{ ...line({ tokens: 4 }), staff_id: "ada", name: "Ada", harness: "codex", archived: false }, { ...line({ tokens: 6 }), staff_id: "bo", name: "Bo", harness: "claude", archived: false }] };
+    const next = { ...reading({ tokens: 12 }), staff: [{ ...line({ tokens: 8 }), staff_id: "bo", name: "Bo", harness: "claude", archived: false }, { ...line({}), staff_id: "ada", name: "Ada", harness: "codex", archived: false }] };
+    const kept = steadyUsage(before, next);
+    expect(kept.staff.map((row) => [row.staff_id, row.all.tokens])).toEqual([["bo", 8], ["ada", 4]]);
   });
 });

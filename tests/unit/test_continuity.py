@@ -92,6 +92,28 @@ def test_reads_of_memory_files_keep_far_more_than_other_results() -> None:
     assert len(memory_line) > 10_000 > summaries.RESULT_CHARS + 100 > len(other_line)
 
 
+def test_a_long_tool_result_keeps_what_sits_in_its_middle_third() -> None:
+    # A 5 kB result was cut to 1,500 characters, so an id halfway through never reached the
+    # summariser, which then recorded the outcome as unknown or invented one.
+    body = "x" * 2500 + " deploy id DPL-4471 " + "x" * 2500
+    history = [
+        _op("go"),
+        Message(role=MessageRole.assistant, content_blocks=[ToolUseBlock(tool_call_id="d", name="Exec", arguments_json='{"command": "deploy"}')]),
+        Message(role=MessageRole.tool, content_blocks=[ToolResultBlock(tool_call_id="d", content=body)]),
+    ]
+    assert "DPL-4471" in summaries.summary_input(history).transcript
+
+
+def test_every_summariser_prompt_says_the_omission_marker_is_the_hosts() -> None:
+    prompts = [
+        summaries.compact_prompt(language="English", max_words=4000, has_base=False),
+        summaries.merge_prompt(language="English", max_words=4000, has_base=True),
+        summaries.CHUNK_PROMPT,
+        summaries.MERGE_NOTES_PROMPT,
+    ]
+    assert all("chars left out" in prompt and "not part of the tool output" in prompt for prompt in prompts)
+
+
 def test_a_summary_in_the_middle_is_read_in_its_place_uncut() -> None:
     middle = "core summary " * 1000
     history = [_op("first"), _summary(middle), _op("after")]

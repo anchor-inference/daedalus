@@ -56,6 +56,7 @@ import secrets
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from daedalus.harness import register
@@ -144,6 +145,11 @@ driven again once the wait is over, as the host does for its own providers."""
 QUOTAS = frozenset({"usageLimitExceeded", "rateLimitExceeded"})
 """Of those, the ones a rate-limit window's reset ends."""
 TRANSCRIPT_MAX_BYTES = 32 << 20
+INSTRUCTIONS_LIMIT = 32 << 10
+"""How much of a project's AGENTS.md files Codex reads (its ``project_doc_max_bytes``): the files from
+the repository's top down to the working folder, joined, and cut at this many bytes without a word to
+the model or to anyone. Our own team block goes as developer instructions and is not counted."""
+INSTRUCTION_FILES = ("AGENTS.override.md", "AGENTS.md")
 DIALOG_MARKERS = (
     "Update available!",
     "Press enter to continue",
@@ -261,6 +267,35 @@ class _Thread:
     approval: str
     instructions: str
     resume: str
+
+
+def instructions_size(folder: Path) -> int:
+    """The bytes of AGENTS.md text Codex would gather for a session working in ``folder``: one file per
+    directory from the repository's top (the nearest ``.git`` above) down to ``folder``, the override
+    taking the place of AGENTS.md where there is one. Without a repository only ``folder`` itself is
+    read, as Codex does. 0 for a folder this process cannot see."""
+    try:
+        here = folder.resolve()
+    except OSError:
+        return 0
+    if not here.is_dir():
+        return 0
+    chain = [here]
+    for parent in here.parents:
+        if (chain[-1] / ".git").exists():
+            break
+        chain.append(parent)
+    else:
+        chain = [here]
+    total = 0
+    for directory in chain:
+        for name in INSTRUCTION_FILES:
+            try:
+                total += (directory / name).stat().st_size
+                break
+            except OSError:
+                continue
+    return total
 
 
 @register

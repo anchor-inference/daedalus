@@ -17,6 +17,18 @@ headers = { Authorization = "Bearer ..." }
 
 Every session starts with MCP servers off; the agent enables one with `McpEnable`, you toggle them in the app.
 
+A call to an MCP tool is asked about first unless the tool says it is safe. With no setting, the tool's own annotations decide: one marked read-only runs, and one that may destroy something or reach the outside world is asked about — and so is one that says nothing, because the protocol reads a missing hint as "it may". A server's `approval` (`auto`, `ask` or `allow`) decides all its tools at once, and `tool_approval` decides one tool by its name on the server, beating the server's setting:
+
+```toml
+[mcp.servers.notes]
+transport = "stdio"
+command = "notes-mcp"
+approval = "allow"                       # a server you trust: none of its tools asks
+tool_approval = { delete_note = "ask" }  # except this one
+```
+
+An operator rule in `[policy]` that names the tool with `action = "allow"` lifts the question as well.
+
 Beyond the app's settings, `config.toml` holds the guard rails:
 
 ```toml
@@ -92,6 +104,10 @@ mode = "auto"                # auto | off | local | server — see docs/SELF-DEV
 [board]
 wip_limit = 3                # tasks one agent (with its subagents) may hold in 'doing' at once
 stale_hours = 6              # a 'doing' task whose session went quiet this long is handed back
+
+[harness]                    # command-line agents hired as staff
+max_output_tokens = 64000    # one call's output ceiling for OpenCode and Claude Code members, whose
+                             # defaults of about 32k cut a large file written in one call; 0 = theirs
 
 [ops]
 provider_retry_max_attempts = 6      # runs driven again after the provider failed one; 0 leaves it failed

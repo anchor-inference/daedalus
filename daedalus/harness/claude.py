@@ -394,6 +394,8 @@ class ClaudeCodeAdapter:
         if prompt:
             argv += ["--", prompt]
         env = {"MCP_TOOL_TIMEOUT": str(max(spec.ask_hold_ms, spec.report_hold_ms, *(t.hold_ms for t in spec.tool_sets)) + MCP_TIMEOUT_SLACK_MS)}
+        if spec.max_output_tokens:
+            env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = str(spec.max_output_tokens)
         return LaunchPlan(
             argv=tuple(argv),
             env=env,

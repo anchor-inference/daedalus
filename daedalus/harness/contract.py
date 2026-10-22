@@ -314,6 +314,9 @@ class LaunchSpec:
     allow_rules: tuple[str, ...] = ()
     """The standing grants the operator gave this member ("Always"), as the CLI's allow rules
     (``standing_rule``). Written into every launch, so a grant outlives the session it was given in."""
+    max_output_tokens: int = 0
+    """``harness.max_output_tokens``, for a CLI whose ceiling on one call's output can be raised; 0
+    leaves the CLI's own."""
     skills: tuple[HandedSkill, ...] = ()
     """The skills the project's environment names, each a whole directory, for a CLI that loads
     skills; written beside the team's skill in the launch directory, never into the project folder.

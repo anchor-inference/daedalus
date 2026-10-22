@@ -2,6 +2,7 @@
 // member hired in the sidebar shows on the team page and a task moved on the board moves in the panel
 // without a second request. One subscription to the event stream keeps all of it current.
 
+import { useMemo, useRef } from "react";
 import type { Project, SessionList, TerminalList, Wakeup, WatchList } from "../api";
 import type { ProjectBoardData } from "../board/board";
 import { useEvent, useStreamUp } from "../events";
@@ -9,7 +10,7 @@ import { useProjects } from "../projects";
 import { invalidate, useQuery } from "../store";
 import type { Team } from "../team/team";
 import { isFocusState, type FocusState } from "./goalmodel";
-import { ProjectUsage, usageKey } from "./usage";
+import { ProjectUsage, steadyUsage, usageKey } from "./usage";
 
 const enc = encodeURIComponent;
 
@@ -89,7 +90,13 @@ export function useUsage(projectId: string) {
   useEvent(["run.finished", "staff.status"], (event) => {
     if (event.project_id === projectId) invalidate(usageKey(projectId));
   }, [projectId]);
-  return data && data.total ? data : null;
+  const shown = useRef<ProjectUsage | null>(null);
+  return useMemo(() => {
+    const next = data && data.total ? data : null;
+    const steady = next ? steadyUsage(shown.current?.project_id === next.project_id ? shown.current : null, next) : null;
+    shown.current = steady;
+    return steady;
+  }, [data]);
 }
 
 /** The project as the orchestrator's chat reads it: the counts over the composer, the list they open,

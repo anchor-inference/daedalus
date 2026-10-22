@@ -26,6 +26,7 @@ import { useFocus } from "../project/data";
 import { MessageRow, StaffHeader, useMember, useStaffMessages } from "../project/staff";
 import { navigate, pathFor, projectPagePath } from "../router";
 import { invalidate, useOffline, useQuery } from "../store";
+import { steadySession } from "./details";
 import { HarnessBadge, StaffAvatar } from "../team/parts";
 import { HARNESS_BADGES, HARNESS_NAMES, type Staff } from "../team/team";
 import { act } from "../team/phone";
@@ -74,7 +75,13 @@ function useStaffSession(staffId: string) {
   useEvent(["staff.", "permission.", "ask."], (event) => {
     if (event.staff_id === staffId) invalidate(key);
   }, [staffId]);
-  return query;
+  const shown = useRef<StaffSessionView | undefined>(undefined);
+  const data = useMemo(() => {
+    const steady = steadySession(shown.current?.staff.id === staffId ? shown.current : undefined, query.data ?? undefined);
+    shown.current = steady;
+    return steady;
+  }, [query.data, staffId]);
+  return { ...query, data };
 }
 
 /** The member's open requests, oldest first, whoever they are routed to: the first answer wins. */

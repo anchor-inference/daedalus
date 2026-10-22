@@ -863,6 +863,9 @@ class McpOAuthConfig(BaseModel):
     """That client's secret, when the server issued one."""
 
 
+McpApproval = Literal["auto", "ask", "allow"]
+
+
 class McpServerConfig(BaseModel):
     transport: Literal["stdio", "http"] = "stdio"
     command: str = ""
@@ -874,6 +877,14 @@ class McpServerConfig(BaseModel):
     timeout_seconds: float = 120.0
     oauth: McpOAuthConfig | None = None
     """When set, the HTTP transport authenticates with OAuth bearer tokens instead of static headers."""
+    approval: McpApproval = "auto"
+    """Whether a call to this server's tools is asked about first. ``auto`` reads each tool's own
+    annotations (:func:`daedalus.mcp.manager.annotation_approval`): a tool that says it only reads
+    runs, and one that may destroy or reach the outside world — or says nothing, which by the
+    protocol means it may — is asked about. ``ask`` and ``allow`` decide every tool of the server."""
+    tool_approval: dict[str, McpApproval] = Field(default_factory=dict)
+    """The same, for one tool by its name on the server; it beats ``approval``, and ``auto`` here
+    hands the tool back to the server's setting."""
 
 
 class McpConfig(BaseModel):
@@ -1821,6 +1832,10 @@ class HarnessConfig(BaseModel):
     tokens of the subscription and is the only proof that a prompt still gets through."""
     opencode_port_range: str = Field(default="18300-18399", pattern=r"^\d{4,5}-\d{4,5}$")
     """Loopback ports OpenCode's embedded server may take, one per launch."""
+    max_output_tokens: int = Field(default=64_000, ge=0, le=1_000_000)
+    """The output-token ceiling of one model call handed to OpenCode
+    (``OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX``) and Claude Code (``CLAUDE_CODE_MAX_OUTPUT_TOKENS``).
+    Their defaults of about 32 k cut a large file written in one call; 0 leaves each CLI its own."""
 
     @field_validator("opencode_port_range")
     @classmethod

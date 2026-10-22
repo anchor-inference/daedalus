@@ -29,11 +29,13 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, Protocol
 
 from daedalus.config import HarnessConfig
 from daedalus.extensions.watch_egress import watch_message_guard
 from daedalus.harness import team as protocol
+from daedalus.harness.codex import INSTRUCTIONS_LIMIT, instructions_size
 from daedalus.harness.contract import (
     DIAL_DIR,
     LAUNCH_DIR,
@@ -570,6 +572,11 @@ class CliStaffRuntime:
 
     def _spec(self, req: StartRequest, launch_id: str, resume_ref: str, extras: Extras | None = None) -> LaunchSpec:
         cfg = self.config()
+        if self.kind == "codex" and (size := instructions_size(Path(req.cwd))) > INSTRUCTIONS_LIMIT:
+            # Codex cuts the rest off without telling the model; the operator at least can read why a
+            # rule from the end of the file was never followed.
+            logger.warning("%s works in %s, whose AGENTS.md files come to %d bytes; Codex reads only the first %d (32 KiB) and drops the rest",
+                           req.staff.name, req.cwd, size, INSTRUCTIONS_LIMIT)
         facts = protocol.TeamFacts(
             staff_name=req.staff.name,
             project_name=req.project.name,
@@ -606,6 +613,7 @@ class CliStaffRuntime:
             tool_sets=tuple(tools.spec(self._tools_hold_ms()) for tools in self.tool_sets.values()) + (extras.tool_sets if extras else ()),
             allow_rules=req.allow_rules,
             skills=extras.skills if extras else (),
+            max_output_tokens=cfg.max_output_tokens,
         )
 
     def _tools_hold_ms(self) -> int:

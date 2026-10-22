@@ -476,6 +476,27 @@ class Board:
             out.append(view)
         return out
 
+    async def mark_needs_you(self, tasks: list[dict[str, Any]]) -> None:
+        """Set each task's ``needs_you`` to why it waits on the operator, or ``None``.
+
+        ``question`` and ``approval`` are an open request routed to the operator and tied to the task
+        (a permission or a folder is an approval); ``review`` is a card in review, which only the
+        operator takes out of it. Read from the requests every time, like :meth:`needs_you`, so an
+        answer given anywhere takes the card out of the filter on the next read."""
+        ids = [task["id"] for task in tasks]
+        waiting: dict[str, str] = {}
+        if ids:
+            marks = ",".join("?" * len(ids))
+            rows = await self.app.db.fetchall(
+                f"SELECT task_id, kind FROM asks WHERE resolved_at IS NULL AND routed_to = 'operator' AND task_id IN ({marks}) ORDER BY created_at, rowid", tuple(ids))
+            for row in rows:
+                # A question outranks an approval on one card: it is the one that needs words.
+                reason = "question" if row["kind"] == "question" else "approval"
+                if waiting.get(row["task_id"]) != "question":
+                    waiting[row["task_id"]] = reason
+        for task in tasks:
+            task["needs_you"] = waiting.get(task["id"]) or ("review" if task.get("status") == "review" else None)
+
     async def project_board(self, project_id: str, *, include_done: bool = False) -> dict[str, Any]:
         """A project's board as the app draws it: the tasks with their assignees, "Needs you", and the counts."""
         tasks = await self.list(None, include_done=include_done, project_id=project_id)

@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from daedalus.host.host_exec import HostExecBackend
+from daedalus.tools._common import plain_output
 from daedalus.tools.shell import Job, RemoteJob, grew, outcome, outcome_words, title
 
 if TYPE_CHECKING:
@@ -359,7 +360,7 @@ class JobWatch:
         except Exception:  # noqa: BLE001 — the note goes without the lines; the log stays where it is
             logger.debug("could not read the tail of job %s", job.id, exc_info=True)
             return ""
-        rows = [row if len(row) <= TAIL_LINE_CHARS else row[: TAIL_LINE_CHARS - 1] + "…" for row in text.splitlines()[-TAIL_LINES:]]
+        rows = [row if len(row) <= TAIL_LINE_CHARS else row[: TAIL_LINE_CHARS - 1] + "…" for row in plain_output(text).splitlines()[-TAIL_LINES:]]
         return "\n".join(rows)[-TAIL_CHARS:].strip("\n")
 
     async def service(self, op: str, **kwargs: Any) -> Any:

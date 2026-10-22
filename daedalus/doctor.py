@@ -70,7 +70,7 @@ class DoctorContext:
 
 async def run_checks(ctx: DoctorContext) -> list[Check]:
     checks: list[Check] = []
-    for probe in (_config, _telegram, _state, _selfdev, _git_probe, _supervisor, _native, _token_counter, _runtime, _terminals, _browser, _components, _keyproxy, _providers, _github_org):
+    for probe in (_config, _telegram, _state, _selfdev, _git_probe, _supervisor, _native, _token_counter, _runtime, _project_instructions, _terminals, _browser, _components, _keyproxy, _providers, _github_org):
         try:
             checks.extend(await probe(ctx))
         except Exception as exc:  # noqa: BLE001 — one broken probe must not hide the others
@@ -799,6 +799,26 @@ async def _runtime(ctx: DoctorContext) -> list[Check]:
         broken = ctx.manager.unloadable_sessions
         out.append(Check("sessions", False, f"{len(broken)} session(s) cannot be opened: {', '.join(f'{k} ({v})' for k, v in list(broken.items())[:3])}", "warn", "the session's directory is no longer inside its project; move the folder back or re-point the session's project"))
     return out
+
+
+async def _project_instructions(ctx: DoctorContext) -> list[Check]:
+    """Projects whose AGENTS.md Codex would cut: past 32 KiB it drops the rest without a word, so a
+    Codex member silently never sees the rules written last."""
+    if ctx.db is None:
+        return []
+    # Lazy: the other checks have no use for the adapter.
+    from daedalus.harness.codex import INSTRUCTIONS_LIMIT, instructions_size
+
+    rows = await ctx.db.fetchall(
+        "SELECT p.name, f.path FROM project_folders f JOIN projects p ON p.id = f.project_id WHERE f.env = ? ORDER BY p.name, f.position",
+        (ctx.db.local_env,),
+    )
+    over = [(row["name"], row["path"], size) for row in rows if (size := await asyncio.to_thread(instructions_size, Path(row["path"]))) > INSTRUCTIONS_LIMIT]
+    if not over:
+        return []
+    listed = ", ".join(f"{name} ({path}, {size // 1024} KiB)" for name, path, size in over[:5])
+    return [Check("project instructions", False, f"AGENTS.md longer than Codex reads (32 KiB): {listed}", "warn",
+                  "Codex members see only the first 32 KiB; move detail into skills or files the instructions point at")]
 
 
 async def _keyproxy(ctx: DoctorContext) -> list[Check]:

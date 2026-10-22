@@ -54,7 +54,12 @@ planned again, and their running workers stop. Tick nothing to keep the board as
 - **Own worktree** — the member works on a branch of its own; the board merges it when you accept.
   A project may name a **setup command** (`uv sync --frozen && npm ci`) that runs in each new
   worktree before the member starts; if it fails, the task stays unstarted with the last lines of
-  its output on the card.
+  its output on the card. Files git ignores do not come with a new worktree, so a repository may list
+  the ones a worktree needs (`.env`, a local MCP configuration, `secrets/`) in a `.worktreeinclude` at
+  its top, in `.gitignore` syntax. They are copied from the folder into each new worktree before the
+  setup command: only files the branch ignores too, never over a file already there, with their
+  permissions, never through a symbolic link, at most 200 files and 32 MiB. A host folder reached
+  through the terminal bridge gets no copy, since the bridge writes no files.
 - **Shared folder** — the member works directly in the folder. Where the machine can contain a
   command-line writer (delegated cgroup v2), it does; elsewhere the member runs as an ordinary
   process.
@@ -63,6 +68,11 @@ planned again, and their running workers stop. Tick nothing to keep the board as
   be read only, and the launch says so.
 
 Services a member starts stop when its session ends.
+
+Codex reads at most 32 KiB of a project's `AGENTS.md` files and silently drops the rest, so the
+doctor warns about a project folder past that and a Codex launch into one is logged. OpenCode and
+Claude Code members get an output ceiling of 64,000 tokens per call (`[harness] max_output_tokens`),
+so a large file written in one call is not cut at their own default.
 
 **Member runtimes** in a project's settings is an ordered route, for example Claude Code, then
 Codex, then a Daedalus member, each with an optional model. A member keeps the runtime it was hired
