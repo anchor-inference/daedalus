@@ -203,3 +203,23 @@ async def test_a_server_changed_and_checked_at_once_stays_connected(tmp_path: Pa
     await asyncio.gather(*app.manager.mcp._retiring)
     assert app.manager.mcp.status()[0]["state"] == "ready"
     await app.manager.mcp.close()
+    await app.manager.mcp.close()
+
+
+async def test_editing_a_server_in_the_app_keeps_its_approval(tmp_path: Path) -> None:
+    """The app's form sends no approval: a description changed there once put the server back to
+    "auto" and dropped every per-tool rule."""
+    app = FakeApp(tmp_path)
+    await app.save_config(app.config.model_copy(update={"mcp": app.config.mcp.model_copy(update={"servers": {
+        "notes": McpServerConfig(transport="stdio", command="notes-mcp", approval="allow", tool_approval={"delete_note": "ask"})}})}))
+    listed = mcp_admin.describe(app)  # type: ignore[arg-type]
+    assert listed[0]["approval"] == "allow" and listed[0]["tool_approval"] == {"delete_note": "ask"}
+    # Exactly what the app's form sends for a stdio server.
+    await mcp_admin.put(app, "notes", {"transport": "stdio", "description": "my notes", "command": "notes-mcp", "args": [], "env": {},
+                                       "url": "", "headers": {}, "oauth": None})
+    saved = app.config.mcp.servers["notes"]
+    assert saved.description == "my notes" and saved.approval == "allow" and saved.tool_approval == {"delete_note": "ask"}
+    # Said outright, the new value wins.
+    await mcp_admin.put(app, "notes", {"transport": "stdio", "command": "notes-mcp", "approval": "ask", "tool_approval": {}})
+    assert app.config.mcp.servers["notes"].approval == "ask" and app.config.mcp.servers["notes"].tool_approval == {}
+    await app.manager.mcp.close()

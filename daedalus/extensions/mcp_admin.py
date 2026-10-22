@@ -69,6 +69,7 @@ def describe(app: Application) -> list[dict[str, Any]]:
             "name": name, "transport": config.transport, "command": config.command, "args": list(config.args),
             "url": config.url, "description": config.description, "timeout_seconds": config.timeout_seconds,
             "headers": _masked(config.headers), "env": _masked(config.env), "oauth": oauth,
+            "approval": config.approval, "tool_approval": dict(config.tool_approval),
             "state": live.get("state", "disabled"), "error": live.get("error"), "tools": live.get("tools", []),
         })
     return rows
@@ -83,6 +84,10 @@ def build(name: str, spec: dict[str, Any], stored: McpServerConfig | None) -> Mc
     if stored is not None:
         body["headers"] = _keep_masked(dict(body.get("headers") or {}), stored.headers)
         body["env"] = _keep_masked(dict(body.get("env") or {}), stored.env)
+        # The app's form has no fields for these, so a save from it left them out and a description
+        # edited there put a server the operator had allowed, or held to ask, back to "auto".
+        body.setdefault("approval", stored.approval)
+        body.setdefault("tool_approval", dict(stored.tool_approval))
     oauth = body.get("oauth")
     if isinstance(oauth, dict):
         oauth = dict(oauth)
