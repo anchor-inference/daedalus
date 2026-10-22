@@ -1,5 +1,0 @@
-{
-  "name": { "message": "Daedalus" },
-  "description": { "message": "Lets your Daedalus agent work in tabs of this Chrome that you give it, in a tab group of its own." },
-  "open_panel": { "message": "Open the Daedalus side panel" }
-}

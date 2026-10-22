@@ -8,9 +8,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -319,25 +317,17 @@ func TestBridgeRefusesAnOrigin(t *testing.T) {
 }
 
 // The bridge, the extension and the launcher each spell the extension's id and the host's name, and
-// a difference between any two is a Chrome that silently never starts the bridge. The extension's
-// own tests tie its id to its manifest key, so the bridge only has to agree with the extension's
-// source; the launcher's tests check the same pair from its side.
+// a difference between any two is a Chrome that silently never starts the bridge. The extension
+// lives in its own repository (daedalus-chrome-extension), whose tests tie its id to its manifest
+// key; these are the values its src/protocol.ts declares as EXTENSION_ID and NATIVE_HOST. This test
+// once read that file from a folder beside this tree and skipped quietly when it was missing, which
+// is every checkout now, so the pair is written out here and the launcher's tests check it again.
 func TestTheBridgeNamesWhatTheExtensionDeclares(t *testing.T) {
-	src, err := os.ReadFile(filepath.Join("..", "..", "..", "extension", "src", "protocol.ts"))
-	if err != nil {
-		t.Skipf("no extension beside this tree: %v", err)
+	const extensionID, nativeHost = "lkhhklicnjlplokpadpccndipomikoaj", "com.daedalus.browser"
+	if len(PinnedExtensionIDs) == 0 || PinnedExtensionIDs[0] != extensionID {
+		t.Fatalf("the bridge pins %v, the extension is %q", PinnedExtensionIDs, extensionID)
 	}
-	declared := func(name string) string {
-		m := regexp.MustCompile(`export const ` + name + ` = "([^"]+)"`).FindSubmatch(src)
-		if m == nil {
-			t.Fatalf("extension/src/protocol.ts declares no %s", name)
-		}
-		return string(m[1])
-	}
-	if id := declared("EXTENSION_ID"); len(PinnedExtensionIDs) == 0 || PinnedExtensionIDs[0] != id {
-		t.Fatalf("the bridge pins %v, the extension is %q", PinnedExtensionIDs, id)
-	}
-	if host := declared("NATIVE_HOST"); HostName != host {
-		t.Fatalf("the bridge is host %q, the extension asks for %q", HostName, host)
+	if HostName != nativeHost {
+		t.Fatalf("the bridge is host %q, the extension asks for %q", HostName, nativeHost)
 	}
 }

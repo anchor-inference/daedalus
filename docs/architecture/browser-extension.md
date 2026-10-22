@@ -2,9 +2,14 @@
 
 The agent normally browses in a Chromium of its own, owned by `browserd` (browser.md). To work in the
 operator's own Chrome, where the operator is already signed in, it goes through the Daedalus
-extension in `extension/`. The extension relays between Chrome's `chrome.debugger` API and a
-`browserd` started with `--env user --backend attach`, which launches no browser and drives the tabs
-the extension hands it.
+extension. The extension relays between Chrome's `chrome.debugger` API and a `browserd` started with
+`--env user --backend attach`, which launches no browser and drives the tabs the extension hands it.
+
+The extension is built, tested and released in its own repository,
+[anchor-inference/daedalus-chrome-extension](https://github.com/anchor-inference/daedalus-chrome-extension).
+The desktop application carries the release that `desktop/extension.lock` pins by version and
+sha256; `desktop/stage-extension.sh` downloads it and refuses any other bytes. A change on both sides
+therefore goes in order: this tree first, then an extension release, then the lock raised.
 
 ```
                        ┌── this computer: native messaging ── browserd bridge ──┐
@@ -55,9 +60,9 @@ its name). "Disconnect" forgets the token.
 ## The relay protocol
 
 The frames, their fields and their directions are fixed by the specification shared with
-`browserd/internal/relay`, whose `testdata/frames.json` holds one golden frame of every kind. The
-extension keeps a byte-for-byte copy in `extension/test/frames.json`, and a test fails when the two
-differ. What the extension does with them, beyond the bare list:
+`browserd/internal/relay`, whose `testdata/frames.json` holds one golden frame of every kind. That
+file is the only copy: the extension's tests compare their own frames with it byte for byte when
+`DAEDALUS_FRAMES` points at it, and fail when the two differ. What the extension does with them, beyond the bare list:
 
 - **`bye`** ends the relay and the side panel explains its `reason` in its own words: `shutdown`,
   `replaced`, `another_relay` (the other Chrome's name is the end of `message`), `proto` (with the
@@ -168,7 +173,7 @@ requests to loopback, private, link-local, shared and metadata addresses written
   `input {tab}`, at most once a second per tab, and not within a second of the daemon dispatching
   input into that tab, since `Input.dispatch*` events reach the page as trusted too.
 
-Every word is in `extension/src/i18n.ts` in Russian and English, chosen by Chrome's interface
+Every word is in the extension's `src/i18n.ts` in Russian and English, chosen by Chrome's interface
 language; a test fails on a sentence written anywhere else.
 
 ## The side panel
@@ -195,7 +200,7 @@ Esc refuses).
   conversation outside them answers 404, every other route 401).
 - **Framing**: `/app/panel` answers `frame-ancestors chrome-extension://lkhhklicnjlplokpadpccndipomikoaj`;
   the rest of the app is framed only by itself and Telegram's web client.
-- **The bridge** (`src/bridge.ts`, and `miniapp/src/sidepanel/bridge.ts` on the app's side): the frame
+- **The bridge** (the extension's `src/bridge.ts`, and `miniapp/src/sidepanel/bridge.ts` on the app's side): the frame
   posts `DAEDALUS_PANEL_READY {proto, nonce}` to the extension's origin; the panel accepts it only from
   the frame's own window and the host's origin and answers `DAEDALUS_PANEL_HELLO` with the nonce, the
   credential and a `MessageChannel` port, addressed to the host's origin. Each READY starts a new

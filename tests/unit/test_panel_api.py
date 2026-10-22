@@ -120,8 +120,15 @@ async def test_the_herald_renews_only_a_token_that_runs_out_soon_and_survives_a_
 
 
 def test_the_extension_id_is_the_one_the_extension_declares() -> None:
-    protocol = (REPO / "extension" / "src" / "protocol.ts").read_text()
-    assert re.search(r'EXTENSION_ID = "([a-p]{32})"', protocol).group(1) == EXTENSION_ID  # type: ignore[union-attr]
+    # The extension is built in its own repository (daedalus-chrome-extension), whose src/protocol.ts
+    # declares this id and whose tests tie it to the manifest key. This test once read that file from
+    # a folder of this tree; now the id is held to the extension's value and to the two other places
+    # here that spell it, the app's half of the panel bridge and the bridge browserd pins.
+    assert EXTENSION_ID == "lkhhklicnjlplokpadpccndipomikoaj"
+    app = (REPO / "miniapp" / "src" / "sidepanel" / "bridge.ts").read_text()
+    assert re.search(r'export const EXTENSION_ID = "([a-p]{32})"', app).group(1) == EXTENSION_ID  # type: ignore[union-attr]
+    daemon = (REPO / "browserd" / "internal" / "bridge" / "where.go").read_text()
+    assert re.search(r'PinnedExtensionIDs = \[\]string\{"([a-p]{32})"', daemon).group(1) == EXTENSION_ID  # type: ignore[union-attr]
 
 
 # -- framing ----------------------------------------------------------------------------------------

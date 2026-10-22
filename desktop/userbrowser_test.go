@@ -499,18 +499,13 @@ func TestTheExtensionKeyGivesThePinnedID(t *testing.T) {
 	if err != nil || id != chromeExtensionID {
 		t.Fatalf("the key gives %q (%v), the connector allows %q", id, err, chromeExtensionID)
 	}
-	// The repository's own extension, when it is there, carries the same key. Its manifest lives in
-	// extension/static/ (the build copies it into dist/); this check once read extension/manifest.json,
-	// a file that never exists, and so silently compared nothing. The Go gate mounts only desktop/,
-	// so there the file is absent and the check is skipped; a full checkout runs it.
-	if body, err := os.ReadFile(filepath.Join("..", "extension", "static", "manifest.json")); err == nil {
-		var m struct{ Key string }
-		if err := json.Unmarshal(body, &m); err != nil || m.Key == "" {
-			t.Fatalf("extension/static/manifest.json carries no key (%v)", err)
-		}
-		if got, _ := extensionIDFromKey(m.Key); got != chromeExtensionID {
-			t.Fatalf("extension/static/manifest.json gives %q", got)
-		}
+	// The extension is built in its own repository (daedalus-chrome-extension), and the release zip
+	// desktop/extension.lock pins carries this key in its manifest; the payload copy refuses any
+	// other. This check once read the manifest from a folder beside this tree and skipped when it was
+	// missing, so the values its src/protocol.ts declares are written out here instead, the same pair
+	// the bridge's tests hold browserd to.
+	if chromeExtensionID != "lkhhklicnjlplokpadpccndipomikoaj" || chromeHostName != "com.daedalus.browser" {
+		t.Fatalf("the connector names %q for %q, the extension declares another pair", chromeHostName, chromeExtensionID)
 	}
 }
 

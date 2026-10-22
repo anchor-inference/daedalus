@@ -15,7 +15,7 @@ import (
 
 // PinnedExtensionIDs are the Daedalus extensions the bridge carries. An extension's id is derived
 // from the public key in its manifest, so it is fixed with the key: this is the published
-// extension's (extension/static/manifest.json). More can be given with --allow-extension,
+// extension's (static/manifest.json in the daedalus-chrome-extension repository). More can be given with --allow-extension,
 // $BROWSERD_BRIDGE_EXTENSION_IDS or the extension_ids of browserd-bridge.json, for an extension
 // loaded unpacked without the key.
 var PinnedExtensionIDs = []string{"lkhhklicnjlplokpadpccndipomikoaj"}

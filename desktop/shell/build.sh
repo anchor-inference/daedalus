@@ -6,10 +6,10 @@
 #
 # It stages what the application carries beside the shell — the launcher, browserd and deskd built
 # from this tree (CGO off, so from any machine), the Mini App built from miniapp/, the Chrome
-# extension built from extension/ — and runs
-# electron-builder. ptyd is left out unless PTYD= names one built by ptyd/release.sh for the same
-# system: it needs Zig, and the application runs without it (host terminals are then
-# unavailable). So is the seed unless SEED= names a folder made by
+# extension's release pinned by desktop/extension.lock (downloaded, or DAEDALUS_EXTENSION_ZIP= for a
+# build without the network) — and runs electron-builder. ptyd is left out unless PTYD= names one
+# built by ptyd/release.sh for the same system: it needs Zig, and the application runs without it
+# (host terminals are then unavailable). So is the seed unless SEED= names a folder made by
 # `daedalus-desktop make-seed`: without one the first run downloads, as a launcher built from source
 # does. The release workflow stages every piece; this is for a quick look.
 # macOS needs a Mac (the .dmg and the signature are Apple's tools); the workflow builds it.

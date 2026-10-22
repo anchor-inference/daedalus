@@ -838,8 +838,10 @@ the Daedalus extension. Chrome only, whatever its version. The launcher's part:
 - **A second daemon.** `browserd serve --env user --backend attach` starts beside the first, with its
   own run directory (`browserd-user/run`, handed to the agent as `BROWSER_USER_DIR`) and token. It
   launches no Chromium; it waits for the extension.
-- **The extension folder.** Each release carries the extension unpacked; on every start the launcher
-  checks it file by file against its `SHA256SUMS` and its key against the pinned id, and copies it
+- **The extension folder.** Each release carries the extension unpacked: the release of
+  [anchor-inference/daedalus-chrome-extension](https://github.com/anchor-inference/daedalus-chrome-extension)
+  that `desktop/extension.lock` pins, its zip checked against the pinned sha256 when the release is
+  built. On every start the launcher checks it file by file against its `SHA256SUMS` and its key against the pinned id, and copies it
   into the local state's `browser-extension/`. That folder keeps its path across releases, which is
   what Chrome remembers an unpacked extension by. You load it once: `chrome://extensions`, Developer
   mode, *Load unpacked*.
