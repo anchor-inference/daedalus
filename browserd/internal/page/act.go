@@ -254,14 +254,17 @@ func (p *Model) Act(ctx context.Context, t *browser.Tab, ap ActParams) (*ActResu
 	if ref != "" {
 		kind := ap.Action
 		if ap.Action == "press" {
-			if c, err := parseKeys(ap.Keys); err == nil && c.key.Key == "Enter" && c.modBits == 0 {
+			// Enter with any modifier held counts as Enter: Chrome submits a form on Shift, Ctrl, Alt
+			// or Meta+Enter as on Enter alone, since the key event carries "\r" either way. Only a
+			// plain Enter was counted once, and a chord walked a posted form past read-only.
+			if c, err := parseKeys(ap.Keys); err == nil && c.key.Key == "Enter" {
 				kind = "press"
 			} else {
 				kind = "keys"
 			}
 		}
-		// The page is told the kind, not the action: only a plain Enter submits a form, and a Tab
-		// pressed in a field of one was reported as submitting it.
+		// The page is told the kind, not the action: only Enter submits a form, and a Tab pressed in
+		// a field of one was reported as submitting it.
 		raw, err := p.callIn(ctx, t, d, "evidence", ref, kind, ap.Submit)
 		if err != nil {
 			return nil, err

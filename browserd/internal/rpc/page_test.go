@@ -230,14 +230,14 @@ func TestSecretsNeverLeaveThePage(t *testing.T) {
 }
 
 // The evidence of an action on a form's element says whether it submits the form and how, which is
-// what the host holds a POST's submission for: Enter in a field and a submit button submit, a key
-// other than Enter, Enter in a text area and a plain button do not, and a form that names no method is sent as a GET.
+// what the host holds a POST's submission for: Enter in a field (with or without a modifier held) and a
+// submit button submit, a key other than Enter, Enter in a text area and a plain button do not, and a form that names no method is sent as a GET.
 func TestEvidenceSaysWhetherAFormIsSubmitted(t *testing.T) {
 	h := start(t, nil)
 	o := h.open("g1", "project-a", "/site/docs.html")
 	tab := o.Tab.ID
 	s := h.snapshot(tab)
-	search, note := refOf(t, s, "textbox", "Search"), refOf(t, s, "textbox", "Note")
+	search, note, subject := refOf(t, s, "textbox", "Search"), refOf(t, s, "textbox", "Note"), refOf(t, s, "textbox", "Subject")
 	for _, c := range []struct {
 		name    string
 		act     map[string]any
@@ -246,6 +246,14 @@ func TestEvidenceSaysWhetherAFormIsSubmitted(t *testing.T) {
 	}{
 		{"Enter in a field of a form without a method", map[string]any{"action": "press", "ref": search, "keys": "Enter"}, true, "get"},
 		{"Tab in it", map[string]any{"action": "press", "ref": search, "keys": "Tab"}, false, "get"},
+		{"Ctrl+A in it", map[string]any{"action": "press", "ref": search, "keys": "Ctrl+A"}, false, "get"},
+		// Chrome submits on Enter whatever modifier is held, so each chord counts as the submission
+		// it is; read-only holds a posted form on exactly this.
+		{"Shift+Enter in a field of a post form", map[string]any{"action": "press", "ref": subject, "keys": "Shift+Enter"}, true, "post"},
+		{"Ctrl+Enter in it", map[string]any{"action": "press", "ref": subject, "keys": "Ctrl+Enter"}, true, "post"},
+		{"Alt+Enter in it", map[string]any{"action": "press", "ref": subject, "keys": "Alt+Enter"}, true, "post"},
+		{"Meta+Enter in it", map[string]any{"action": "press", "ref": subject, "keys": "Meta+Enter"}, true, "post"},
+		{"Ctrl+Shift+Enter in a field of a form without a method", map[string]any{"action": "press", "ref": search, "keys": "Ctrl+Shift+Enter"}, true, "get"},
 		{"typing with submit", map[string]any{"action": "type", "ref": search, "text": "x", "submit": true}, true, "get"},
 		{"typing without", map[string]any{"action": "type", "ref": search, "text": "x"}, false, "get"},
 		{"its button", map[string]any{"action": "click", "ref": refOf(t, s, "button", "Find")}, true, "get"},
