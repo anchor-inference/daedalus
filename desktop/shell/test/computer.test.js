@@ -13,8 +13,8 @@ const policy = require('../policy');
 const startComputer = require('../computer-main');
 
 test('a lease arms everything, no lease nothing, and anything unreadable is no lease', () => {
-  assert.deepEqual(computer.computerPlan({ active: true, paused: false, scope: 'window' }, 'win32'), { hotkey: true, border: true, note: true, trayStop: true, paused: false });
-  assert.deepEqual(computer.computerPlan({ active: false, paused: true }, 'win32'), { hotkey: false, border: false, note: false, trayStop: false, paused: false });
+  assert.deepEqual(computer.computerPlan({ active: true, paused: false, scope: 'window' }, 'win32'), { hotkey: true, border: true, note: true, frame: true, trayStop: true, paused: false });
+  assert.deepEqual(computer.computerPlan({ active: false, paused: true }, 'win32'), { hotkey: false, border: false, note: false, frame: false, trayStop: false, paused: false });
   for (const junk of [null, undefined, 'yes', { active: 'true' }, { active: 1 }]) {
     assert.equal(computer.computerPlan(junk, 'darwin').border, false);
   }
@@ -22,6 +22,9 @@ test('a lease arms everything, no lease nothing, and anything unreadable is no l
   // On X11 the daemon would take the note for the window under a point and refuse the click.
   assert.equal(computer.computerPlan({ active: true }, 'linux').note, false);
   assert.equal(computer.computerPlan({ active: true }, 'linux').border, true);
+  // Without a compositor a transparent frame is drawn black, so Linux keeps the solid strips.
+  assert.equal(computer.computerPlan({ active: true }, 'linux').frame, false);
+  assert.equal(computer.computerPlan({ active: true }, 'darwin').frame, true);
   assert.equal(computer.computerPlan({ active: true }, 'linux').hotkey, true);
 });
 
@@ -37,34 +40,33 @@ test("the border is four strips on a display's outermost pixels, and the note si
   assert.equal(computer.noteBounds({ x: 0, y: 0, width: 300, height: 600 }).width, 280);
 });
 
-test('the border is the same thickness on every side, inside a display and outside a window', () => {
-  assert.equal(computer.BORDER, 3);
+test('the border is the same thin line on every side, inside a display and outside a window', () => {
+  assert.equal(computer.BORDER, 2);
   const displays = [
     { bounds: { x: 0, y: 0, width: 1536, height: 864 }, workArea: { x: 0, y: 0, width: 1536, height: 824 } },
     { bounds: { x: 1536, y: -200, width: 1280, height: 1024 }, workArea: { x: 1536, y: -200, width: 1280, height: 1024 } },
   ];
   // A display: its own Electron bounds, whatever rounding the conversion left in the target.
-  const display = computer.borderRects([{ kind: 'display', x: 1537, y: -199, width: 1279, height: 1023 }], displays);
-  assert.deepEqual(display, computer.edgeRects(displays[1].bounds, 3));
-  // A window in the middle of a display: the strips lie just outside it, three pixels each way.
+  assert.deepEqual(computer.frameRects([{ kind: 'display', x: 1537, y: -199, width: 1279, height: 1023 }], displays), [displays[1].bounds]);
+  assert.deepEqual(computer.borderRects([{ kind: 'display', x: 1537, y: -199, width: 1279, height: 1023 }], displays), computer.edgeRects(displays[1].bounds, 2));
+  // A window in the middle of a display: the frame lies just outside it, two pixels each way.
+  assert.deepEqual(computer.frameRects([{ kind: 'window', x: 100, y: 100, width: 400, height: 300 }], displays), [{ x: 98, y: 98, width: 404, height: 304 }]);
   const win = computer.borderRects([{ kind: 'window', x: 100, y: 100, width: 400, height: 300 }], displays);
   assert.deepEqual(win, [
-    { x: 97, y: 97, width: 406, height: 3 },
-    { x: 97, y: 400, width: 406, height: 3 },
-    { x: 97, y: 100, width: 3, height: 300 },
-    { x: 500, y: 100, width: 3, height: 300 },
+    { x: 98, y: 98, width: 404, height: 2 },
+    { x: 98, y: 400, width: 404, height: 2 },
+    { x: 98, y: 100, width: 2, height: 300 },
+    { x: 500, y: 100, width: 2, height: 300 },
   ]);
-  for (const strip of win) assert.equal(Math.min(strip.width, strip.height), 3);
-  // A maximised window: the strips come inside rather than off the screen, still three thick.
-  const max = computer.borderRects([{ kind: 'window', x: 0, y: 0, width: 1536, height: 824 }], displays);
-  assert.deepEqual(max[0], { x: 0, y: 0, width: 1536, height: 3 });
-  assert.deepEqual(max[1], { x: 0, y: 824, width: 1536, height: 3 });
-  assert.deepEqual(max[2], { x: 0, y: 3, width: 3, height: 821 });
-  // Only the targets get a border: one display of two is four strips, not eight; a window on no
+  for (const strip of win) assert.equal(Math.min(strip.width, strip.height), 2);
+  // A maximised window: the border comes inside rather than off the screen.
+  assert.deepEqual(computer.frameRects([{ kind: 'window', x: 0, y: 0, width: 1536, height: 824 }], displays), [{ x: 0, y: 0, width: 1536, height: 826 }]);
+  // Only the targets get a border: one display of two is one frame, not two; a window on no
   // display (minimised, off screen) none; the same display twice once.
+  assert.equal(computer.frameRects([{ kind: 'display', x: 0, y: 0, width: 1536, height: 864 }], displays).length, 1);
   assert.equal(computer.borderRects([{ kind: 'display', x: 0, y: 0, width: 1536, height: 864 }], displays).length, 4);
-  assert.equal(computer.borderRects([{ kind: 'window', x: -32000, y: -32000, width: 160, height: 28 }], displays).length, 0);
-  assert.equal(computer.borderRects([{ kind: 'display', ...displays[0].bounds }, { kind: 'display', ...displays[0].bounds }], displays).length, 4);
+  assert.equal(computer.frameRects([{ kind: 'window', x: -32000, y: -32000, width: 160, height: 28 }], displays).length, 0);
+  assert.equal(computer.frameRects([{ kind: 'display', ...displays[0].bounds }, { kind: 'display', ...displays[0].bounds }], displays).length, 1);
 });
 
 test("the daemon's pixels become Electron's units the way each platform lays out its displays", () => {
@@ -217,24 +219,24 @@ test('a lease draws the signs around its target only and the shortcut stops it; 
 
   signs.update(windowLease());
   const live = fake.windows.filter((w) => !w.destroyed);
-  // Four strips around the one window on the second display, and the note; nothing on the first.
-  assert.equal(live.length, 5);
+  // One frame around the one window on the second display, and the note; nothing on the first.
+  assert.equal(live.length, 2);
   for (const window of live) {
     assert.equal(window.ignoresMouse, true);
     assert.equal(window.protected, true);
     assert.equal(window.level, 'screen-saver');
     assert.equal(window.options.focusable, false);
     assert.equal(window.options.skipTaskbar, true);
-    // No resizable frame, so Windows imposes no minimum size on a 3-pixel strip.
-    assert.equal(window.options.thickFrame, false);
-    assert.equal(window.options.minWidth, 0);
-    assert.equal(window.options.minHeight, 0);
+    assert.equal(window.options.transparent, true);
   }
-  const strips = live.filter((w) => !w.file);
-  assert.ok(strips.every((w) => w.options.transparent === false && w.bounds.x >= 1920));
-  assert.deepEqual(strips[0].bounds, { x: 2097, y: 97, width: 606, height: 3 });
-  const note = live.find((w) => w.file);
-  assert.match(note.file, /pages[\\/]computer\.html$/);
+  const frame = live.find((w) => /frame\.html$/.test(w.file));
+  assert.deepEqual(frame.bounds, { x: 2098, y: 98, width: 604, height: 404 });
+  assert.deepEqual(frame.query, { color: '#d93a3f', width: '2' });
+  // Shown only once its outline is drawn.
+  assert.equal(frame.shown, false);
+  frame.ready();
+  assert.equal(frame.shown, true);
+  const note = live.find((w) => /computer\.html$/.test(w.file));
   assert.equal(note.query.text, 'Daedalus is controlling the computer — Ctrl+Alt+Esc to stop');
   // At the top centre of the window's display, not the primary one.
   assert.ok(note.bounds.x > 1920 && note.bounds.y === 10);
@@ -243,12 +245,12 @@ test('a lease draws the signs around its target only and the shortcut stops it; 
 
   // The same lease said again (the launcher's answer after a Stop that failed) redraws nothing.
   signs.update(windowLease());
-  assert.equal(fake.windows.length, 5);
+  assert.equal(fake.windows.length, 2);
 
-  // The window moved: the same strips follow it, none made anew.
+  // The window moved: the same frame follows it, none made anew.
   signs.update(windowLease({ targets: [{ kind: 'window', x: 2200, y: 150, w: 600, h: 400 }] }));
-  assert.equal(fake.windows.length, 5);
-  assert.deepEqual(strips[0].bounds, { x: 2197, y: 147, width: 606, height: 3 });
+  assert.equal(fake.windows.length, 2);
+  assert.deepEqual(frame.bounds, { x: 2198, y: 148, width: 604, height: 404 });
 
   fake.registered.get('Control+Alt+Escape')();
   assert.deepEqual(stops, ['stop']);
@@ -256,9 +258,9 @@ test('a lease draws the signs around its target only and the shortcut stops it; 
   // Paused by the operator's own hand: the signs stay, in the pause's colour and words.
   signs.update(windowLease({ paused: true, targets: [{ kind: 'window', x: 2200, y: 150, w: 600, h: 400 }] }));
   const paused = fake.windows.filter((w) => !w.destroyed);
-  assert.equal(paused.length, 5);
-  assert.ok(paused.filter((w) => !w.file).every((w) => w.options.backgroundColor === '#c27c0e'));
-  assert.equal(paused.find((w) => w.file).query.paused, '1');
+  assert.equal(paused.length, 2);
+  assert.equal(frame.query.color, '#c27c0e');
+  assert.equal(paused.find((w) => /computer\.html$/.test(w.file)).query.paused, '1');
 
   signs.update({ active: false });
   assert.equal(fake.windows.filter((w) => !w.destroyed).length, 0);

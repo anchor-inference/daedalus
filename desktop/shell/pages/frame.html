@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Daedalus</title>
+<style>
+  /* The border around what the agent holds, as one outline inside a transparent window laid over it.
+     The window lets every click through and its middle is empty, so only the outline is seen. The
+     soft glow inside the line keeps it visible against a background of its own colour. */
+  html, body { height: 100%; margin: 0; overflow: hidden; background: transparent; }
+  .frame { position: fixed; inset: 0; box-sizing: border-box; border: var(--width, 2px) solid var(--color, #d93a3f);
+           box-shadow: inset 0 0 10px -2px var(--glow, rgba(217, 58, 63, .45)); }
+</style>
+</head>
+<body>
+<div class="frame"></div>
+<script>
+  const query = new URLSearchParams(location.search);
+  const frame = document.querySelector('.frame');
+  // Only a plain hex colour and a small whole width are taken from the query; anything else leaves
+  // the defaults.
+  const color = query.get('color') || '';
+  if (/^#[0-9a-f]{6}$/i.test(color)) {
+    frame.style.setProperty('--color', color);
+    frame.style.setProperty('--glow', color + '73');
+  }
+  const width = Number(query.get('width'));
+  if (Number.isInteger(width) && width > 0 && width <= 8) frame.style.setProperty('--width', width + 'px');
+</script>
+</body>
+</html>

@@ -38,8 +38,8 @@ module.exports = function startComputer({ electron, dir, getStrings, sendStop, o
       ...bounds,
       show: false,
       frame: false,
-      // Without the resizable frame Windows holds a window to no minimum size; with it, a 3-pixel
-      // strip was widened to the system's minimum track size and the border came out lopsided.
+      // No resizable frame: nothing here is resized by hand, and the frame is what Windows hangs
+      // its snapping and minimum track size on.
       thickFrame: false,
       resizable: false,
       movable: false,
@@ -63,6 +63,12 @@ module.exports = function startComputer({ electron, dir, getStrings, sendStop, o
   // transparent window is drawn black.
   function stripOptions(bounds, color) {
     return { ...baseOptions(bounds), transparent: false, backgroundColor: color };
+  }
+
+  // A frame is the whole border in one transparent window over the target, the outline drawn by
+  // pages/frame.html; only on Windows and macOS (computerPlan), where transparency is composed.
+  function frameOptions(bounds) {
+    return { ...baseOptions(bounds), transparent: true, backgroundColor: '#00000000' };
   }
 
   // The note is transparent around its rounded pill. It is never shown on Linux (computerPlan), so
@@ -168,26 +174,44 @@ module.exports = function startComputer({ electron, dir, getStrings, sendStop, o
     return String(text).replace('{chord}', computer.chordLabel(value, platform));
   }
 
-  function layoutStrips(rects, color) {
+  // layoutStrips puts up the border's windows: the frames on Windows and macOS, the four strips of
+  // each frame on Linux. Windows already up are moved rather than made anew, so a window being
+  // dragged does not make its border blink.
+  function layoutStrips(rects, color, framed) {
     for (let i = 0; i < rects.length; i += 1) {
       const existing = strips[i];
-      if (existing && !existing.isDestroyed()) {
+      if (existing && !existing.isDestroyed() && existing.framed === framed) {
         if (existing.stripColor !== color) {
-          existing.setBackgroundColor(color);
           existing.stripColor = color;
+          if (framed) loadFrame(existing, color);
+          else existing.setBackgroundColor(color);
         }
         place(existing, rects[i]);
         continue;
       }
-      const strip = decorate(new BrowserWindow(stripOptions(rects[i], color)));
+      if (existing) destroy(existing);
+      const strip = decorate(new BrowserWindow(framed ? frameOptions(rects[i]) : stripOptions(rects[i], color)));
       strip.stripColor = color;
+      strip.framed = framed;
       place(strip, rects[i]);
       strips[i] = strip;
-      show(strip);
+      if (framed) {
+        // Shown once the outline is drawn, so a frame never appears as an empty window first.
+        strip.once('ready-to-show', () => {
+          if (!strip.isDestroyed() && strips.includes(strip)) show(strip);
+        });
+        loadFrame(strip, color);
+      } else {
+        show(strip);
+      }
     }
-    // Fewer strips than before (a window of the app closed): the rest go at once, since the ones
+    // Fewer windows than before (a window of the app closed): the rest go at once, since the ones
     // left on screen still say the agent holds it.
     for (const extra of strips.splice(rects.length)) destroy(extra);
+  }
+
+  function loadFrame(window, color) {
+    window.loadFile(path.join(dir, 'pages', 'frame.html'), { query: { color, width: String(computer.BORDER) } });
   }
 
   function layoutNote(bounds, text, paused) {
@@ -220,13 +244,13 @@ module.exports = function startComputer({ electron, dir, getStrings, sendStop, o
     const primary = screen.getPrimaryDisplay();
     const convert = platform === 'win32' && typeof screen.screenToDipRect === 'function' ? (rect) => screen.screenToDipRect(null, rect) : null;
     const targets = state.targets.map((t) => ({ kind: t.kind, ...computer.toDip(t, platform, { convert, scale: primary.scaleFactor }) }));
-    const rects = computer.borderRects(targets, displays);
+    const rects = plan.frame ? computer.frameRects(targets, displays) : computer.borderRects(targets, displays);
     const color = plan.paused ? '#c27c0e' : '#d93a3f';
     const area = computer.noteDisplay(targets, displays, primary).workArea;
-    const key = JSON.stringify([rects, color, plan.note, chord, area]);
+    const key = JSON.stringify([rects, color, plan.frame, plan.note, chord, area]);
     if (key === drawn) return;
     drawn = key;
-    layoutStrips(rects, color);
+    layoutStrips(rects, color, plan.frame);
     if (plan.note) {
       layoutNote(computer.noteBounds(area), noteText(getStrings()), plan.paused);
     } else if (note) {

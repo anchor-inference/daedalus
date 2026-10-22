@@ -14,13 +14,15 @@
 // and Ctrl+Option+Esc is free. KDE binds Ctrl+Alt+Esc to xkill, so there is a second choice.
 const STOP_CHORDS = ['Control+Alt+Escape', 'Control+Alt+Shift+Escape'];
 
-// The border's thickness in device-independent pixels, the same on all four sides: enough to be
-// seen at the edge of the eye, thin enough to sit on a display's outermost pixels where nothing is
-// ever aimed. On Windows the strips once came out thick on the left and top and thin on the right
-// and bottom: the system held each strip window to its minimum size for a resizable frame, so the
-// left and top strips grew inwards and the right and bottom ones grew off the screen. The strip
-// windows are made without that frame (computer-main.js), and this number is now the whole story.
-const BORDER = 3;
+// The border's thickness in device-independent pixels, the same on all four sides: thin enough to
+// read as an outline around what the agent holds, the way a screen recorder marks what it records.
+// On Windows and macOS the border is one transparent click-through window over the target with the
+// outline drawn inside it (pages/frame.html). It was four solid strip windows there too, and on
+// Windows they came out thick on the left and top and spilled off the right and bottom onto the
+// next display: the system holds a top-level window to a minimum size whatever its frame, so a
+// strip a few pixels wide grew to that minimum. Removing the resizable frame did not lift it. On
+// Linux the strips stay: there a transparent window without a compositor is drawn black.
+const BORDER = 2;
 
 // The note's window. The pill inside sizes to its words; the window is wide enough for the longest
 // translation on one line, and the transparent rest of it lets clicks through.
@@ -66,6 +68,7 @@ function computerPlan(state, platform) {
     hotkey: computer.active,
     border: computer.active,
     note: computer.active && platform !== 'linux',
+    frame: computer.active && platform !== 'linux',
     trayStop: computer.active,
     paused: computer.paused,
   };
@@ -109,21 +112,21 @@ function displayOf(rect, displays) {
   return best;
 }
 
-// borderRects are the strips for every target, in device-independent pixels. A display's border is
-// that Electron display's own bounds, inset: the daemon's rectangle only picks which display, so a
-// rounding in the conversion cannot leave a gap or push a strip off the edge. A window's border lies
-// just outside the window, so no strip ever sits on what the agent clicks; where the window meets
-// the edge of its display (maximised, or pushed against it) the strip comes inside instead of
-// vanishing off the screen. Every strip is the same thickness.
-function borderRects(targets, displays, thickness = BORDER) {
-  const strips = [];
+// frameRects are the outer edges of the border, one rectangle per target, in device-independent
+// pixels. A display's border is that Electron display's own bounds: the daemon's rectangle only picks
+// which display, so a rounding in the conversion cannot leave a gap or push the border off the edge.
+// A window's border lies just outside the window, so the outline never sits on what the agent
+// clicks; where the window meets the edge of its display (maximised, or pushed against it) the
+// border comes inside instead of vanishing off the screen.
+function frameRects(targets, displays, thickness = BORDER) {
+  const frames = [];
   const seen = new Set();
   for (const target of targets) {
     const display = displayOf(target, displays);
     if (!display) continue;
     let outer;
     if (target.kind === 'display') {
-      outer = display.bounds;
+      outer = { ...display.bounds };
     } else {
       outer = clamp(
         { x: target.x - thickness, y: target.y - thickness, width: target.width + 2 * thickness, height: target.height + 2 * thickness },
@@ -133,9 +136,15 @@ function borderRects(targets, displays, thickness = BORDER) {
     const key = [outer.x, outer.y, outer.width, outer.height].join(',');
     if (outer.width <= 0 || outer.height <= 0 || seen.has(key)) continue;
     seen.add(key);
-    strips.push(...edgeRects(outer, thickness));
+    frames.push(outer);
   }
-  return strips;
+  return frames;
+}
+
+// borderRects are the four strips of every frame, for Linux, where the border is drawn as solid
+// strip windows. Every strip is the same thickness.
+function borderRects(targets, displays, thickness = BORDER) {
+  return frameRects(targets, displays, thickness).flatMap((outer) => edgeRects(outer, thickness));
 }
 
 function clamp(rect, bounds) {
@@ -213,5 +222,5 @@ function disarmStop(globalShortcut, chord) {
 }
 
 module.exports = {
-  STOP_CHORDS, BORDER, NOTE_WIDTH, NOTE_HEIGHT, normaliseComputer, computerPlan, toDip, displayOf, borderRects, noteDisplay, edgeRects, noteBounds, chordLabel, armStop, disarmStop,
+  STOP_CHORDS, BORDER, NOTE_WIDTH, NOTE_HEIGHT, normaliseComputer, computerPlan, toDip, displayOf, frameRects, borderRects, noteDisplay, edgeRects, noteBounds, chordLabel, armStop, disarmStop,
 };
