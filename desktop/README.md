@@ -466,10 +466,13 @@ default browser, as the launcher always did before there was an application.
 
 **Quick Chat** opens over whatever program is in front with a global shortcut — Alt+Space, which is
 Option+Space on a Mac — as a small box on the screen the pointer is on: Enter sends, Esc hides it and
-keeps the draft. The chip at its top picks where the words go: the companion (when the installation
-has one), the conversation you were last in, or a new one; the confirmation line under the box has
-an **Open** button that shows that conversation in the window. `@` attaches a conversation, a project
-or a file from the last conversation's folder as context; `$` asks for a skill; the microphone uses
+keeps the draft. The chip at its top picks where the words go: a new conversation, which is where
+they go unless you pick otherwise, the conversation you were last in, or the companion (when the
+installation has one); the confirmation line under the box has an **Open** button that shows that
+conversation in the window. In the native application a **Computer** button beside it unfolds the
+picker of [computer use](#computer-use): choose a window, an app or a display, type the task, and
+the agent starts in a new computer chat with control of what you chose, opened in the main window.
+`@` attaches a conversation, a project or a file from the last conversation's folder as context; `$` asks for a skill; the microphone uses
 the same speech recognition as the composer. A shortcut of its own, Alt+Shift+V, opens Quick Chat
 already listening; pressed again it stops, and the words land in the field. The box is the app's own page (`/app/quick`), signed in
 by the window's session, so nothing new on the host serves it.

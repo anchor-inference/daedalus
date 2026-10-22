@@ -25,7 +25,7 @@ Shell, files, search, web fetch and search (keyless out of the box, self-hosted 
 <td valign="top">
 
 **🔁 Autonomy that stays on a leash**<br/>
-Loop agents wake up on an interval or when they say so; cron tasks run in fresh or standing sessions; a heartbeat checks in; every agent keeps its own task board and an inbox keeps you informed. Every run has turn, spend and time limits, and a provider outage pauses the work instead of ending it.
+Loop agents wake up on an interval or when they say so; cron tasks run in fresh or standing sessions; a heartbeat checks in; every agent keeps its own task board and an inbox keeps you informed. Every run is bounded by the spend and time limits you set, and by a cap on model calls if you set one; a provider outage pauses the work instead of ending it.
 
 </td>
 <td valign="top">
@@ -78,6 +78,26 @@ A single tool result is clipped to a limit you set; the twenty results already b
 
 **🧩 An installation that says what it is**<br/>
 `GET /api/capabilities` answers what *this* install can do — which self-development mode it resolved and why, whether a change is waiting for a restart — and the app, the prompt, the tool registry and the doctor all read that one answer. A tool the installation cannot honour is not registered at all, so the model is never offered a name that fails.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**🖱️ Computer use**<br/>
+In the native app a chat can see and drive your screen while you grant it: one window, one app, one display or the whole desktop, picked from live previews, for a time you choose. A thin border marks what it holds, your own mouse or keyboard pauses it, and Ctrl+Alt+Esc or *Stop* ends it. Daedalus's own windows are out of its reach. How it works: [desktop/README.md](../desktop/README.md#computer-use).
+
+</td>
+<td valign="top">
+
+**🌐 Your own Chrome**<br/>
+The Daedalus extension lets the agent work in your Chrome with your sign-ins, in a tab group of its own, asking about new sites and sensitive actions as you choose per conversation, and before it posts a form while read-only is on. A side panel shows this Chrome's conversations with the whole composer. Setting it up: [desktop/README.md](../desktop/README.md#your-own-chrome).
+
+</td>
+<td valign="top">
+
+**🗂️ Chats of three kinds**<br/>
+A conversation is an ordinary chat, a computer chat or a browser chat. Tabs over the chat lists narrow them by kind on the desktop and the phone, the new-chat composer starts any of the three, and Quick Chat can hand the screen to a new computer chat from over any program.
 
 </td>
 </tr>
