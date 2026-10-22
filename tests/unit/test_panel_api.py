@@ -281,9 +281,17 @@ async def test_a_new_conversation_is_born_in_chrome_after_one_consent_and_takes_
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=build_app(rig.app, "tok")), base_url="http://test") as client:  # type: ignore[arg-type]
         asked = await client.post("/api/panel/sessions", headers=panel(token), json={"title": "compare these prices"})
         assert asked.status_code == 409 and asked.json()["code"] == "consent_needed" and asked.json()["consent"] == CONSENT
+        switches: list[tuple[str, str]] = []
+
+        async def counted(session_id: str, env: str) -> None:
+            switches.append((session_id, env))
+
+        rig.service.switch_hooks.append(counted)
         made = await client.post("/api/panel/sessions", headers=panel(token), json={"title": "compare these prices", "consent": True})
         assert made.status_code == 200, made.text
         sid = made.json()["id"]
+        # Moved once, by the create: a second move announced the switch twice.
+        assert switches == [(sid, USER)]
         assert made.json()["group"].endswith("-u")
         assert (await rig.service.choices.get(sid))["env"] == USER
         again = await client.post("/api/panel/sessions", headers=panel(token), json={"title": "and these"})
