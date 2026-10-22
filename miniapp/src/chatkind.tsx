@@ -173,11 +173,22 @@ export function tabLabel(tab: KindTab): string {
  */
 export function KindTabs({ tab, onChange, counts, className = "" }: { tab: KindTab; onChange: (tab: KindTab) => void; counts?: Record<KindTab, number>; className?: string }) {
   const box = useRef<HTMLDivElement>(null);
-  const [pill, setPill] = useState<{ left: number; width: number } | null>(null);
+  const pill = useRef<HTMLSpanElement>(null);
+  // The underline is placed on the element itself, not through state. The tabs stretch with the
+  // sidebar, so dragging its edge resizes them every frame, and a state update per measurement made
+  // React commit once per pointer move for the whole drag.
   useLayoutEffect(() => {
     const place = () => {
       const on = box.current?.querySelector<HTMLElement>(`[data-kind-tab="${tab}"]`);
-      if (on) setPill({ left: on.offsetLeft, width: on.offsetWidth });
+      const line = pill.current;
+      if (!on || !line) return;
+      // The first placement must not slide in from the left edge.
+      const first = !line.dataset.placed;
+      if (first) line.style.transition = "none";
+      line.style.transform = `translateX(${on.offsetLeft}px)`;
+      line.style.width = `${on.offsetWidth}px`;
+      line.dataset.placed = "1";
+      if (first) { void line.offsetWidth; line.style.transition = ""; }
     };
     place();
     if (typeof ResizeObserver === "undefined" || !box.current) return;
@@ -195,7 +206,7 @@ export function KindTabs({ tab, onChange, counts, className = "" }: { tab: KindT
   };
   return (
     <div ref={box} className={`kind-tabs ${className}`} role="tablist" aria-label={t("kind.tabs.label")} onKeyDown={onKey}>
-      {pill && <span className="kind-tabs-pill" data-on={tab} aria-hidden style={{ transform: `translateX(${pill.left}px)`, width: pill.width }} />}
+      <span ref={pill} className="kind-tabs-pill" data-on={tab} aria-hidden />
       {KIND_TABS.map((k) => {
         const icon = k === "computer" || k === "chrome" ? kindIcon(k) : null;
         const n = counts?.[k];

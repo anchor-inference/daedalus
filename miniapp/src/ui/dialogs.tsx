@@ -18,6 +18,15 @@ import { t } from "../i18n";
     the portal's container, before the document's bubble phase. A listener there never heard the
     key at all; capture runs first. */
 const layers: symbol[] = [];
+
+/** Whether a sheet, confirmation or menu is open over the screen. A screen that focuses its own
+    field on mount asks this first: the start screen is a lazy chunk that can arrive after a dialog
+    opened, and its composer took the focus out from under the dialog, so the project name typed
+    into the new-project sheet went into the hidden composer and Create refused an empty name. */
+export function layerOpen(): boolean {
+  return layers.length > 0;
+}
+
 export function useLayer(onEscape: () => void) {
   const cb = useRef(onEscape);
   cb.current = onEscape;

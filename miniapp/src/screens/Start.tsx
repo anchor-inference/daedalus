@@ -7,7 +7,7 @@ import { Fragment, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useSt
 import { api, AsrStatus, Preset, Project, SessionList, SessionSummary, Settings } from "../api";
 import { fieldHeight } from "../composer";
 import { AttachmentCard, PlusSheet, useComposerFocus } from "../composerbox";
-import { Popover } from "../ui/dialogs";
+import { layerOpen, Popover } from "../ui/dialogs";
 import { effortBody, effortOf, presetEffort, type Effort } from "../starteffort";
 import { ModelChoice, ModelSelect } from "../modelselect";
 import { MicButton, VoiceBar, VoiceNoteFailed, useVoiceNote } from "../voicebar";
@@ -367,9 +367,10 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
   const [plusOpen, setPlusOpen] = useState(false);
 
   // A desktop lands here to type. A phone keeps the keyboard down until the field is touched:
-  // opening it over the list of chats hides the thing the reader came to find.
+  // opening it over the list of chats hides the thing the reader came to find. Nor does it take the
+  // focus from a dialog already open over this screen.
   useEffect(() => {
-    if (!phone) field.current?.focus();
+    if (!phone && !layerOpen()) field.current?.focus();
   }, [phone]);
   const fit = () => {
     const el = field.current;
