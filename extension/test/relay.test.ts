@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CHECK_TIMEOUT_MS, HEARTBEAT_TIMEOUT_MS, OWN_INPUT_MS, PAUSE_RENEW_MS, REATTACH_MS, cursorPoint } from "../src/relay.js";
+import { CHECK_TIMEOUT_MS, HEARTBEAT_TIMEOUT_MS, NAVIGATED_REATTACH_MS, OWN_INPUT_MS, PAUSE_RENEW_MS, REATTACH_MS, cursorPoint } from "../src/relay.js";
+import { Scope } from "../src/scope.js";
 import { PRIVATE_ADDRESS } from "../src/guard.js";
+import { installFakeChrome } from "./fake-chrome.js";
 import { flush, harness, shape } from "./harness.js";
 
 const golden = JSON.parse(readFileSync(new URL("./frames.json", import.meta.url), "utf8"));
@@ -591,17 +593,117 @@ describe("detach and reattach", () => {
     }
     expect(h.take()).toContainEqual(expect.objectContaining({ t: "tabs", op: "left", tab: expect.objectContaining({ id: tab }) }));
     expect(h.relay.status().tabs).toBe(0);
+    // The operator cancelled the debugging: the tab is theirs now, and stays open.
+    expect(h.fake.tabs.has(tab)).toBe(true);
+  });
+
+  it("closes a tab the agent opened once the reattach attempts run out for any other reason", async () => {
+    const h = await harness();
+    const tab = await h.withAgentTab();
+    h.fake.failAttach("Another debugger is attached");
+    h.fake.attached.delete(tab);
+    h.fake.events.debuggerDetach.emit({ tabId: tab }, "replaced_with_devtools");
+    await flush();
+    for (const delay of REATTACH_MS) {
+      vi.advanceTimersByTime(delay);
+      await flush();
+    }
+    const tabsFrames = h.take().filter((f) => f.t === "tabs");
+    expect(tabsFrames).toEqual([{ t: "tabs", op: "removed", tab: { id: tab } }]);
+    expect(h.fake.tabs.has(tab)).toBe(false);
+    expect(h.relay.status().tabs).toBe(0);
   });
 
   it("does not reattach to a tab that closed", async () => {
     const h = await harness();
     const tab = await h.withAgentTab();
+    h.take();
+    // Chrome ends the debugger session of a closing tab before it reports the tab removed.
+    h.fake.tabs.delete(tab);
     h.fake.attached.delete(tab);
     h.fake.events.debuggerDetach.emit({ tabId: tab }, "target_closed");
+    h.fake.events.tabsRemoved.emit(tab, { windowId: h.fake.operatorWindow, isWindowClosing: false });
     await flush();
     vi.advanceTimersByTime(REATTACH_MS[0]);
     await flush();
     expect(h.fake.attached.has(tab)).toBe(false);
+    expect(h.take()).toEqual([
+      { t: "event", session: `x${tab}`, method: "Inspector.detached", params: { reason: "target_closed" } },
+      { t: "tabs", op: "removed", tab: { id: tab } },
+    ]);
+  });
+
+  it("closes a tab the agent opened when it navigated somewhere the debugger cannot follow", async () => {
+    const h = await harness();
+    const tab = await h.withAgentTab();
+    h.take();
+    // A click opened a PDF in the tab: Chrome's viewer is another extension's page, the session ends
+    // with target_closed and the tab stays open.
+    h.fake.tabs.get(tab)!.url = "https://example.org/report.pdf";
+    h.fake.failAttach("Cannot access a chrome-extension:// URL of different extension");
+    h.fake.attached.delete(tab);
+    h.fake.events.debuggerDetach.emit({ tabId: tab }, "target_closed");
+    await flush();
+    vi.advanceTimersByTime(NAVIGATED_REATTACH_MS - 1);
+    await flush();
+    expect(h.fake.tabs.has(tab)).toBe(true);
+    vi.advanceTimersByTime(1);
+    await flush();
+    expect(h.fake.tabs.has(tab)).toBe(false);
+    // Reported once, as removed, and never as the operator closing the group with its last tab.
+    expect(h.take()).toEqual([
+      { t: "event", session: `x${tab}`, method: "Inspector.detached", params: { reason: "target_closed" } },
+      { t: "tabs", op: "removed", tab: { id: tab } },
+    ]);
+    expect(h.relay.status().tabs).toBe(0);
+    expect(h.relay.status().groups.map((g) => g.id)).toEqual(["g1"]);
+    // The group still works: its next tab gets a Chrome tab group of its own.
+    h.fake.failAttach(null);
+    const next = (await h.call("tab.create", { group: "g1" })).value.tab.id;
+    expect(h.fake.tabs.get(next)!.groupId).toBeGreaterThan(0);
+    expect(h.fake.attached.has(next)).toBe(true);
+  });
+
+  it("lets go of a tab the operator gave when it navigated somewhere the debugger cannot follow", async () => {
+    const h = await harness();
+    const agent = await h.withAgentTab();
+    const own = h.fake.addTab(h.fake.operatorWindow, "https://example.org/");
+    h.fake.setGroup(own.id, h.fake.tabs.get(agent)!.groupId);
+    await flush();
+    h.take();
+    h.fake.failAttach("Cannot access a chrome-extension:// URL of different extension");
+    h.fake.attached.delete(own.id);
+    h.fake.events.debuggerDetach.emit({ tabId: own.id }, "target_closed");
+    await flush();
+    vi.advanceTimersByTime(NAVIGATED_REATTACH_MS);
+    await flush();
+    expect(h.take().filter((f) => f.t === "tabs")).toEqual([{ t: "tabs", op: "left", tab: { id: own.id } }]);
+    expect(h.fake.tabs.has(own.id)).toBe(true);
+    expect(h.relay.status().tabs).toBe(1);
+  });
+
+  it("keeps a tab that navigated away and back to a page the debugger can attach to", async () => {
+    const h = await harness();
+    const tab = await h.withAgentTab();
+    h.take();
+    h.fake.attached.delete(tab);
+    h.fake.events.debuggerDetach.emit({ tabId: tab }, "target_closed");
+    await flush();
+    vi.advanceTimersByTime(NAVIGATED_REATTACH_MS);
+    await flush();
+    expect(h.fake.attached.has(tab)).toBe(true);
+    expect(h.take().filter((f) => f.t === "tabs")).toEqual([{ t: "tabs", op: "joined", tab: { id: tab, group: "g1", url: "about:blank" } }]);
+    expect(h.relay.status().tabs).toBe(1);
+  });
+});
+
+describe("the scope record", () => {
+  it("reads a remembered tab without the given flag as the operator's", async () => {
+    const fake = installFakeChrome();
+    await fake.chrome.storage.session.set({ scope: { groups: [], members: [{ tab: 7, group: "g1", grouped: true, attached: false, children: [] }] } });
+    const scope = new Scope();
+    await scope.load();
+    expect(scope.members.get(7)!.given).toBe(true);
   });
 });
 

@@ -252,15 +252,6 @@ func (p *Model) Act(ctx context.Context, t *browser.Tab, ap ActParams) (*ActResu
 
 	// What the action would do, for the host's policy.
 	if ref != "" {
-		raw, err := p.callIn(ctx, t, d, "evidence", ref, ap.Action, ap.Submit)
-		if err != nil {
-			return nil, err
-		}
-		if err := checkScript(raw); err != nil {
-			return nil, err
-		}
-		var ev sensitive.Evidence
-		_ = json.Unmarshal(raw, &ev)
 		kind := ap.Action
 		if ap.Action == "press" {
 			if c, err := parseKeys(ap.Keys); err == nil && c.key.Key == "Enter" && c.modBits == 0 {
@@ -269,6 +260,17 @@ func (p *Model) Act(ctx context.Context, t *browser.Tab, ap ActParams) (*ActResu
 				kind = "keys"
 			}
 		}
+		// The page is told the kind, not the action: only a plain Enter submits a form, and a Tab
+		// pressed in a field of one was reported as submitting it.
+		raw, err := p.callIn(ctx, t, d, "evidence", ref, kind, ap.Submit)
+		if err != nil {
+			return nil, err
+		}
+		if err := checkScript(raw); err != nil {
+			return nil, err
+		}
+		var ev sensitive.Evidence
+		_ = json.Unmarshal(raw, &ev)
 		s := sensitive.Classify(kind, ev, ap.Submit)
 		res.Sensitive = &s
 	} else {
@@ -310,6 +312,11 @@ func (p *Model) Act(ctx context.Context, t *browser.Tab, ap ActParams) (*ActResu
 	p.m.Publish("action", event)
 
 	err = p.dispatch(ctx, t, ap, d, ref, pr, res, id, g)
+	if _, gone := t.Detached(); gone && err != nil {
+		// The action took the tab to a page the extension cannot drive, and the input's last reply
+		// was lost with the debugger: what was done is reported, with the tab's state in effects.
+		err = nil
+	}
 	done := map[string]any{"action_id": id, "group_id": t.Group.ID, "tab_id": t.ID, "ok": err == nil}
 	if err != nil {
 		done["error"] = err.Error()
@@ -343,9 +350,15 @@ func (p *Model) Act(ctx context.Context, t *browser.Tab, ap ActParams) (*ActResu
 		res.Effects["logged"] = map[string]int{"errors": errs, "warnings": warns}
 	}
 	if dl := p.latestDownload(t.Group.ID, downloadsBefore); dl != nil {
-		res.Effects["download"] = map[string]any{"id": dl.ID, "name": dl.Name, "state": dl.State}
+		res.Effects["download"] = map[string]any{"id": dl.ID, "name": dl.Name, "state": dl.State, "size": dl.Size}
 	}
-	if ref != "" && res.Effects["navigated"] == nil && t.Dialog() == nil {
+	_, detached := t.Detached()
+	if detached {
+		res.Effects["detached"] = true
+	}
+	// A detached tab cannot be read: its outline after would be empty, and the difference would say
+	// the whole region went.
+	if ref != "" && res.Effects["navigated"] == nil && t.Dialog() == nil && !detached {
 		res.Diff = diff(before, p.region(ctx, t), 2000)
 	}
 	res.OK = true
@@ -1096,12 +1109,27 @@ func (p *Model) scrollToText(ctx context.Context, t *browser.Tab, text string, r
 func (p *Model) settle(ctx context.Context, t *browser.Tab, loaderBefore string) {
 	deadline := time.Now().Add(400 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		if t.Loader() != loaderBefore || t.Dialog() != nil {
+		if _, gone := t.Detached(); gone || t.Loader() != loaderBefore || t.Dialog() != nil {
 			break
 		}
 		select {
 		case <-t.Wake():
 		case <-time.After(time.Until(deadline)):
+		case <-ctx.Done():
+			return
+		}
+	}
+	// A response being kept as a file (a PDF the click led to) is waited for, so the file is this
+	// action's effect rather than a download that appears after it answered.
+	keepDeadline := time.Now().Add(30 * time.Second)
+	for {
+		wake := t.Wake()
+		if !t.Keeping() || !time.Now().Before(keepDeadline) {
+			break
+		}
+		select {
+		case <-wake:
+		case <-time.After(time.Until(keepDeadline)):
 		case <-ctx.Done():
 			return
 		}

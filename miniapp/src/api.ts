@@ -415,7 +415,7 @@ export type BrowserUserStatus = {
   consent: string;
 };
 
-export type BrowserUserSettings = { enabled: boolean; granted_sites: string[]; monitor: boolean; watch: boolean; bodies: boolean };
+export type BrowserUserSettings = { enabled: boolean; granted_sites: string[]; monitor: boolean; watch: boolean; bodies: boolean; read_only: boolean; close_tabs: boolean };
 
 /**
  * One row of a group's action log (`GET /api/browsers/{group}/actions`). `text` is what the agent

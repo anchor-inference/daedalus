@@ -77,6 +77,12 @@ class Element:
     """The operator's sign-in filled it: secret from then on, as the daemon marks it."""
     selector: str = ""
     """The CSS selector ``page.locate`` finds it by, as a recording keeps it."""
+    submits: bool = False
+    """Acting on it submits its form, as the daemon's evidence says."""
+    form_method: str = ""
+    """Its form's method, lower case, when it is in one."""
+    detaches: bool = False
+    """A click on it opens what the debugger cannot follow (a PDF viewer): the tab is dead after."""
 
     @property
     def secret(self) -> bool:
@@ -134,6 +140,7 @@ class Tab:
     log_seq: int = 0
     request_seq: int = 0
     dialog_seq: int = 0
+    detached: bool = False
 
     def log(self, entry: dict[str, Any]) -> None:
         self.log_seq += 1
@@ -148,7 +155,8 @@ class Tab:
             self.requests.append({"id": f"r{self.request_seq}", "seq": self.request_seq, "at": int(time.time() * 1000), **request})
 
     def view(self, active: bool) -> dict[str, Any]:
-        return {"id": self.id, "group_id": self.group_id, "url": self.page.url, "title": self.page.title, "favicon_url": "", "loading": False, "active": active, "opener": None, "created_at": self.created_at}
+        return {"id": self.id, "group_id": self.group_id, "url": self.page.url, "title": self.page.title, "favicon_url": "", "loading": False, "active": active, "opener": None, "created_at": self.created_at,
+                **({"detached": True} if self.detached else {})}
 
 
 @dataclass
@@ -232,6 +240,9 @@ class FakeBrowserd:
         self.wall: dict[str, Any] | None = None
         """The rules ``net.configure`` last set; ``None`` until the host sends them."""
         self.walled: dict[str, tuple[str, str]] = {}
+        self.documents: dict[str, tuple[str, bytes]] = {}
+        """Addresses that answer with a PDF in the operator's Chrome: a navigation there is kept as a
+        download and the tab stays where it was, as the daemon turns them."""
         """Host → (decision, reason) the network wall gives it: ``deny`` or ``ask``. Others pass."""
         self.grants: set[tuple[str, str, int]] = set()
         """(browser, host, port) the host opened with ``net.grant``."""
@@ -565,6 +576,8 @@ class FakeBrowserd:
             raise _Fail(1106, "the operator paused the agent in this browser", {"reason": group.control["reason"]})
 
     def _page_call(self, tab: Tab) -> None:
+        if tab.detached:
+            raise _Fail(1104, f"tab {tab.id} no longer answers: its debugger was detached", {"tab_id": tab.id, "reason": "detached"})
         if tab.dialog is not None:
             raise _Fail(1107, "a dialog is open", {"dialog": {"type": tab.dialog.get("type"), "message": tab.dialog.get("message")}})
 
@@ -702,6 +715,9 @@ class FakeBrowserd:
             if url.split(":", 1)[0] not in ("http", "https", "about"):
                 raise _Fail(1004, f"{url.split(':', 1)[0]}: URLs are not opened", {"reason": "scheme"})
             self._through_wall(group, url)
+            if url in self.documents:
+                download = self.add_download(group.id, *self.documents[url])
+                return {"url": tab.page.url, "title": tab.page.title, "download": {"id": download["id"], "name": download["name"], "size": download["size"], "mime": "application/pdf"}}
             tab.history.append(tab.page)
             tab.page = self._page_at(url)
             tab.loaded(tab.page)
@@ -1091,7 +1107,10 @@ class FakeBrowserd:
             kinds.append("cross_origin_post")
         # Every field of the form, as the daemon lists them, not only the secret ones.
         listed = [{"type": e.type or ("textarea" if e.tag == "textarea" else "text"), "name": e.name, "autocomplete": e.autocomplete} for e in tab.page.elements.values() if e.tag in ("input", "textarea", "select")]
-        return {"kinds": kinds, "evidence": {"name": element.name, "role": element.role, "words": words, "page_origin": page_origin, "fields": listed}}
+        evidence: dict[str, Any] = {"name": element.name, "role": element.role, "words": words, "page_origin": page_origin, "fields": listed, "submits": element.submits}
+        if element.form_method:
+            evidence["form_method"] = element.form_method
+        return {"kinds": kinds, "evidence": evidence}
 
     @staticmethod
     def _find(page: Page, query: str, *, regex: bool, limit: int) -> dict[str, Any]:
@@ -1183,6 +1202,9 @@ class FakeBrowserd:
                 effects["scrolled"] = {"by": 0 if tab.page.heading == "End" else 480, "at_end": tab.page.heading == "End", "pane": ref}
             effects["scroll"] = {"top": 800, "height": 4000, "view": 800, "above": 1.0, "below": 3.0}
         if action in ("click", "double_click") and element is not None:
+            if element.detaches:
+                tab.detached = True
+                effects["detached"] = True
             if element.opens_dialog is not None:
                 tab.dialog = dict(element.opens_dialog)
                 effects["dialog"] = {"type": tab.dialog.get("type"), "message": tab.dialog.get("message")}

@@ -1625,13 +1625,35 @@ connected, so a model that opened the wrong one can see it.
   host turns into the same question.
 - A purchase, a message sent, a deletion or a sign-in always asks: `[[browser.rules]]` cannot let
   them through in `user` (`daedalus.host.policy.CONSEQUENTIAL_KINDS`). Other kinds follow the rules.
+- Read-only (`[browser.user] read_only`, on by default): a click or Enter on a form's submit, or a
+  `type` with `submit`, whose form is posted (the daemon's evidence `submits` with `form_method`
+  `post`) is the kind `submit`, asked like a purchase and one of the consequential kinds. A form that
+  only searches (`get`) and every navigation stay free. A page's own script that posts with `fetch`
+  is not seen by this; the gate is the form, which is what a site's "file", "create" and "sign"
+  buttons submit when they are not scripts.
+- Tabs: an address already open in a live tab of the group is switched to, by `BrowserTabs(new)`
+  and by `BrowserOpen(url)` alike, instead of opening it twice; a new tab is opened blank and then
+  navigated, after the site question, so a question that waits leaves nothing in the operator's
+  window. The agent keeps at most three tabs there: past that its dead and blank tabs are closed to
+  make room, and otherwise it is refused with its tabs listed. Listings mark the new tab, a dead one
+  and a second tab on an address another already shows. When a turn ends with nothing waiting for
+  the operator and the control the agent's, its group is closed (`turn_end`), unless
+  `[browser.user] close_tabs` is off. The operator closing the group in Chrome is recorded as
+  `closed_in_chrome`, by the operator.
+- A tab that lost its debugger (a PDF viewer, a browser page) is refused as `detached` with what to
+  do: close it, fetch the document through BrowserNetwork or BrowserDownload, do not repeat what led
+  there. An action after which the tab stopped answering says so at once, and the same action on the
+  same site (by the element's name) is held back once for that conversation. A PDF a navigation of an
+  agent tab answers with never reaches the viewer: the daemon keeps it as a finished download and the
+  tab stays on its page.
 - Refused before the daemon is asked: `BrowserCookies` import and clear, `fresh=true`, and clearing
   or deleting the profile. `BrowserLogin` becomes a hand-over ("sign in in the agent's window").
 - `BrowserNetwork(body=true)` reads a body only when `[browser.user] bodies` is on, and then only
   from a granted site.
 - The injection monitor and watch mode are on (`[browser.user] monitor`, `watch`) whatever
   `[browser]` says for the agent's browser.
-- There is no cap and no idle close; only the recording's limits are sent to that daemon.
+- There is no browser cap and no idle close (the three tabs above are the host's own limit); only the
+  recording's limits are sent to that daemon.
 - Every result there starts with `[in the operator's own Chrome «<name>»]`; `BrowserOpen` says it in
   words.
 

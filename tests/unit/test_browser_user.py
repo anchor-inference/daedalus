@@ -18,8 +18,8 @@ import httpx
 import pytest
 from protocore.contracts.tools import ToolContext
 
-from daedalus.browser.agent import SensitiveAsk
-from daedalus.browser.model import USER, Owner, group_id
+from daedalus.browser.agent import SensitiveAsk, Step
+from daedalus.browser.model import USER, InvalidRequest, Owner, group_id
 from daedalus.browser.user import CONSENT, ConsentNeeded, SkipNeedsConfirm, site_granted, site_of
 from daedalus.config import BrowserConfig, BrowserRuleConfig, BrowserUserConfig, RuntimeConfig, Settings
 from daedalus.extensions import browser as browser_extension
@@ -30,6 +30,7 @@ from daedalus.host.session_runner import SessionManager
 from daedalus.stores.database import Database
 from daedalus.tools.browser import BROWSER_TOOLS
 from tests.support.fake_browserd import Element, FakeBrowserd
+from tests.unit.test_browser_service import wait_until
 
 CONNECTED = {"connected": True, "profile_id": "p1", "profile_name": "Work", "ext_version": "0.1.0", "chrome_version": "141.0.7390.54", "platform": "linux",
              "transport": "native", "since": "2026-10-20T10:00:00Z", "last_seen": "2026-10-20T10:00:05Z"}
@@ -277,7 +278,7 @@ async def test_sending_always_asks_in_the_operators_chrome_whatever_the_rules_al
 def test_rules_cannot_lift_a_consequential_kind_in_user_but_still_lift_others() -> None:
     rules = [BrowserRuleConfig(domain="shop.test", action="allow")]
     common = {"tool": "BrowserAct", "group": "g", "host": "shop.test", "page_origin": "https://shop.test", "action": "click", "name": "Buy", "text": "", "rules": rules}
-    for kind in ("purchase", "send", "destroy", "credentials"):
+    for kind in ("purchase", "send", "destroy", "credentials", "submit"):
         assert browser_sensitive(kinds=[kind], env="user", **common).action == ASK, kind
     assert browser_sensitive(kinds=["purchase"], **common).action == ALLOW, "the agent's own browser keeps the rule"
     assert browser_sensitive(kinds=["accept"], env="user", **common).action == ALLOW
@@ -638,3 +639,195 @@ async def test_a_chrome_conversation_is_refused_where_chrome_is_not_offered(rig:
         refused = await client.post("/api/sessions", json={"title": "Shop", "kind": "chrome"}, headers=headers)
         assert refused.status_code == 409 and "Your Chrome" in refused.json()["detail"]
         assert all(row["title"] != "Shop" for row in (await client.get("/api/sessions", headers=headers)).json()["sessions"])
+
+
+# -- the agent's tabs there -------------------------------------------------------------------------
+
+GRANTED = user_config(granted_sites=["example.com"])
+
+
+def documents(chrome: FakeBrowserd) -> None:
+    chrome.page("https://tax.example.com/documents", title="Documents", heading="Documents", elements={
+        "e1": Element("e1", "row", "Tax statement 2026", tag="tr", detaches=True),
+        "e2": Element("e2", "button", "Filter"),
+    })
+    chrome.page("https://tax.example.com/claim", title="Claim", elements={
+        "e3": Element("e3", "button", "File the claim", submits=True, form_method="post"),
+        "e4": Element("e4", "button", "Find", submits=True, form_method="get"),
+    })
+
+
+async def opened(rig: Rig, chrome: FakeBrowserd, url: str = "https://tax.example.com/documents") -> str:
+    documents(chrome)
+    sid = await rig.session()
+    await rig.switch(sid)
+    text, failed = await rig.call(sid, "BrowserOpen", url=url)
+    assert not failed, text
+    return sid
+
+
+def tabs_of(chrome: FakeBrowserd, sid: str) -> list[str]:
+    return [t.page.url for t in chrome.groups[group_id(Owner("session", sid), env=USER)].tabs]
+
+
+@pytest.mark.parametrize("runtime", [GRANTED])
+async def test_a_new_tab_on_an_open_address_switches_to_it_and_the_result_marks_the_new_one(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await opened(rig, chrome)
+    text, failed = await rig.call(sid, "BrowserTabs", action="new", url="https://tax.example.com/documents/")
+    assert not failed and "already shows" in text and "switched to it" in text, text
+    assert len(tabs_of(chrome, sid)) == 1
+    text, failed = await rig.call(sid, "BrowserTabs", action="new", url="https://mail.example.com/")
+    assert not failed and text.startswith("[in the operator's own Chrome «Work»]\nOpened tab t2 on https://mail.example.com/."), text
+    assert "https://mail.example.com/ (active; new)" in text
+    # Opened blank and then sent there, as one tab: no stray blank tab beside it.
+    assert tabs_of(chrome, sid) == ["https://tax.example.com/documents", "https://mail.example.com/"]
+    # BrowserOpen of an address a tab already shows brings that tab forward rather than navigating.
+    text, failed = await rig.call(sid, "BrowserOpen", url="https://tax.example.com/documents")
+    assert not failed and "Tab t1 already shows" in text, text
+    assert tabs_of(chrome, sid) == ["https://tax.example.com/documents", "https://mail.example.com/"]
+    assert chrome.groups[group_id(Owner("session", sid), env=USER)].active == "t1"
+
+
+@pytest.mark.parametrize("runtime", [GRANTED])
+async def test_a_site_still_waiting_for_the_operator_leaves_no_blank_tab(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await opened(rig, chrome)
+    text, failed = await rig.call(sid, "BrowserTabs", action="new", url="https://shop.example.co.uk/")
+    assert failed and "Approval key" in text
+    assert len(tabs_of(chrome, sid)) == 1, "nothing was opened before the yes"
+    (key, _), = rig.pending(sid).items()
+    await rig.manager.grant(sid, key, via="test")
+    text, failed = await rig.call(sid, "BrowserTabs", action="new", url="https://shop.example.co.uk/")
+    assert not failed, text
+    assert tabs_of(chrome, sid) == ["https://tax.example.com/documents", "https://shop.example.co.uk/"]
+
+
+@pytest.mark.parametrize("runtime", [GRANTED])
+async def test_three_tabs_are_the_most_kept_and_blank_ones_make_room_first(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await opened(rig, chrome)
+    await rig.call(sid, "BrowserTabs", action="new")
+    await rig.call(sid, "BrowserTabs", action="select", tab="t1")
+    text, failed = await rig.call(sid, "BrowserTabs", action="new", url="https://mail.example.com/")
+    assert not failed, text
+    assert len(tabs_of(chrome, sid)) == 3
+    text, failed = await rig.call(sid, "BrowserTabs", action="new", url="https://news.example.com/")
+    assert not failed and "Closed t2 first (dead or blank)" in text, text
+    assert tabs_of(chrome, sid) == ["https://tax.example.com/documents", "https://mail.example.com/", "https://news.example.com/"]
+    text, failed = await rig.call(sid, "BrowserTabs", action="new", url="https://docs.example.com/")
+    assert failed and "You already have 3 tabs" in text and "nothing was opened" in text, text
+    assert "https://news.example.com/" in text
+    assert len(tabs_of(chrome, sid)) == 3
+
+
+@pytest.mark.parametrize("runtime", [GRANTED])
+async def test_a_click_that_kills_its_tab_is_said_at_once_and_held_back_once_when_repeated(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await opened(rig, chrome)
+    await rig.call(sid, "BrowserSnapshot")
+    text, failed = await rig.call(sid, "BrowserAct", action="click", ref="e1", element="the tax statement row")
+    assert not failed and "Tab t1 stopped answering right after this" in text and "Do not repeat this action" in text, text
+    text, failed = await rig.call(sid, "BrowserText")
+    assert failed and "Tab t1 no longer answers" in text and "BrowserClose(tab='t1')" in text, text
+    listing, _ = await rig.call(sid, "BrowserTabs")
+    assert "(active; dead: close it)" in listing, listing
+    # The same row in a second tab is held back once, and goes through when the agent insists.
+    await rig.call(sid, "BrowserTabs", action="new", url="https://tax.example.com/documents")
+    text, failed = await rig.call(sid, "BrowserAct", action="click", ref="e1", element="the statement row again")
+    assert failed and "earlier left its tab dead" in text and "send it again" in text, text
+    assert not chrome.tab_of(group_id(Owner("session", sid), env=USER)).detached
+    text, failed = await rig.call(sid, "BrowserAct", action="click", ref="e1", element="the statement row again")
+    assert not failed and "stopped answering" in text
+    # A dead tab is the first to go when room is needed.
+    text, failed = await rig.call(sid, "BrowserTabs", action="new", url="https://mail.example.com/")
+    assert not failed, text
+
+
+@pytest.mark.parametrize("runtime", [GRANTED])
+async def test_an_address_that_is_a_pdf_arrives_as_a_download_and_the_tab_stays(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await opened(rig, chrome)
+    chrome.documents["https://tax.example.com/statement.pdf"] = ("statement.pdf", b"%PDF-1.7 statement")
+    text, failed = await rig.call(sid, "BrowserNavigate", url="https://tax.example.com/statement.pdf")
+    assert not failed and "saved as the download statement.pdf" in text and "Tab t1 stayed on https://tax.example.com/documents" in text, text
+    text, failed = await rig.call(sid, "BrowserDownload", name="statement.pdf")
+    assert not failed, text
+
+
+@pytest.mark.parametrize("runtime", [GRANTED])
+async def test_chromes_own_words_from_an_older_daemon_are_read_as_a_dead_tab_too(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await opened(rig, chrome)
+    chrome.fail["page.snapshot"] = (-32603, "reading the page: Runtime.evaluate: the debugger is not attached to this tab (detached) (-32000)", {})
+    text, failed = await rig.call(sid, "BrowserSnapshot")
+    assert failed and "Tab t1 no longer answers" in text, text
+    listing, _ = await rig.call(sid, "BrowserTabs")
+    assert "dead: close it" in listing
+    text, failed = await rig.call(sid, "BrowserClose", tab="t1")
+    assert not failed and "dead" not in text
+
+
+@pytest.mark.parametrize("runtime", [GRANTED])
+async def test_a_posted_form_waits_for_the_operator_while_read_only_and_a_search_does_not(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await opened(rig, chrome, "https://tax.example.com/claim")
+    await rig.call(sid, "BrowserSnapshot")
+    text, failed = await rig.call(sid, "BrowserAct", action="click", ref="e4", element="the Find button")
+    assert not failed, text
+    text, failed = await rig.call(sid, "BrowserAct", action="click", ref="e3", element="the File the claim button")
+    assert failed and "Approval key" in text and "submit a form" in text, text
+
+
+@pytest.mark.parametrize("runtime", [user_config(granted_sites=["example.com"], read_only=False)])
+async def test_with_read_only_off_a_posted_form_goes_through(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await opened(rig, chrome, "https://tax.example.com/claim")
+    await rig.call(sid, "BrowserSnapshot")
+    text, failed = await rig.call(sid, "BrowserAct", action="click", ref="e3", element="the File the claim button")
+    assert not failed, text
+
+
+@pytest.mark.parametrize("runtime", [GRANTED])
+async def test_the_tabs_close_when_the_turn_ends_unless_the_operator_holds_them(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await opened(rig, chrome)
+    gid = group_id(Owner("session", sid), env=USER)
+    chrome.set_control(gid, "paused", reason="the operator took it")
+    await wait_until(lambda: _control(rig, gid), "paused")
+    assert not await browser_extension.close_turn_tabs(rig.service, sid)
+    chrome.set_control(gid, "agent")
+    await wait_until(lambda: _control(rig, gid), "agent")
+    assert await browser_extension.close_turn_tabs(rig.service, sid)
+    row = await rig.service.get_row(gid)
+    assert row["status"] == "closed" and row["close_reason"] == "turn_end"
+    assert gid not in chrome.groups
+    text, failed = await rig.call(sid, "BrowserSnapshot")
+    assert failed and "BrowserOpen" in text
+
+
+@pytest.mark.parametrize("runtime", [user_config(granted_sites=["example.com"], close_tabs=False)])
+async def test_the_operator_may_keep_the_tabs_open_after_the_turn(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await opened(rig, chrome)
+    assert not await browser_extension.close_turn_tabs(rig.service, sid)
+    assert (await rig.service.get_row(group_id(Owner("session", sid), env=USER)))["status"] == "open"
+
+
+@pytest.mark.parametrize("runtime", [GRANTED])
+async def test_the_operator_closing_the_group_in_chrome_is_kept_as_theirs(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await opened(rig, chrome)
+    gid = group_id(Owner("session", sid), env=USER)
+    group = chrome.groups.pop(gid)
+    chrome.emit("group.closed", {"group_id": gid, "browser_id": group.browser_id, "profile": group.profile, "labels": group.labels, "reason": "closed_in_chrome"})
+    await wait_until(lambda: _status(rig, gid), "closed")
+    row = await rig.service.get_row(gid)
+    assert row["close_reason"] == "closed_in_chrome"
+    log = await rig.service.audit_log(gid)
+    assert any(e["action"] == "close" and e["actor"] == "operator" for e in log), log
+
+
+async def _control(rig: Rig, gid: str) -> str:
+    return str((await rig.service.get_row(gid))["control_owner"])
+
+
+async def _status(rig: Rig, gid: str) -> str:
+    return str((await rig.service.get_row(gid))["status"])
+
+
+def test_text_on_a_click_is_refused_rather_than_ignored() -> None:
+    with pytest.raises(InvalidRequest, match="text is read by type and scroll only"):
+        Step(action="click", element="the item", ref="e50", text="Смотреть").check()
+    Step(action="click", element="the item", ref="e50", text="  ").check()
+    Step(action="type", element="the box", ref="e1", text="").check()
+    Step(action="scroll", element="the page", text="Total").check()

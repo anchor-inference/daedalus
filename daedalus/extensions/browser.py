@@ -24,7 +24,7 @@ from protocore.contracts.types import Message, MessageRole, TextBlock
 from daedalus.browser import login
 from daedalus.browser.agent import SWITCH_ASK, BrowserAgent
 from daedalus.browser.cli import TOOL_SET, StaffBrowser
-from daedalus.browser.model import USER, BrowserError, Owner
+from daedalus.browser.model import USER, BrowserError, Owner, group_id
 from daedalus.browser.monitor import TIMEOUT_SECONDS, InjectionMonitor
 from daedalus.browser.notes import SiteNotes
 from daedalus.browser.owners import DatabaseOwners
@@ -219,6 +219,32 @@ async def run_finished(manager: Any, service: Browsers, herald: PanelHerald, ses
     waiting = sum(1 for sid in await service.choices.using_user() if waits(manager.live_state(sid)))
     kind = "needs_you" if status == "awaiting" or waits(state) else "done"
     await herald.event(session_id, kind, state.session.title, waiting=waiting)
+    if kind == "done":
+        await close_turn_tabs(service, session_id)
+
+
+async def close_turn_tabs(service: Browsers, session_id: str) -> bool:
+    """Close the agent's tabs in the operator's Chrome once its turn is over and it waits for nobody.
+
+    Its tabs sit in the operator's own window, and a session that ended its turn with five open,
+    three on the same page, left them to be closed by hand. Left open: a browser the operator holds
+    or the agent handed over (the control is not the agent's, or a hand-over is pending), since that
+    page is what they are looking at; and everything when the operator turned this off. Whether it
+    closed anything."""
+    if not service.config().user.close_tabs:
+        return False
+    try:
+        row = await service.get_row(group_id(Owner("session", session_id), env=USER))
+    except BrowserError:
+        return False
+    if row["status"] != "open" or row["control_owner"] != "agent" or row.get("needs_json"):
+        return False
+    try:
+        await service.close_group(row["id"], actor="system", reason="turn_end")
+    except BrowserError as exc:
+        logger.info("the agent's tabs of %s were left open at the end of its turn: %s", row["id"], exc.message)
+        return False
+    return True
 
 
 def _port_range(text: str) -> list[int] | None:

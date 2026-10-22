@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -33,6 +34,10 @@ type scripted struct {
 	frames []map[string]any
 	next   int
 	closed bool
+	// fixedWindow refuses window.bounds with bounds, as the extension does while the agent works in
+	// the operator's window; inner is then the page's size, which no resize changes.
+	fixedWindow bool
+	inner       []int
 }
 
 func (s *scripted) Send(p []byte) error {
@@ -82,7 +87,13 @@ func (s *scripted) answer(f map[string]any) {
 		case "Page.getFrameTree":
 			result(map[string]any{"frameTree": map[string]any{"frame": map[string]any{"id": "F" + session, "url": "about:blank"}}})
 		case "Runtime.evaluate":
-			result(map[string]any{"result": map[string]any{"value": []int{config.DefaultViewportW, config.DefaultViewportH}}})
+			s.mu.Lock()
+			inner := s.inner
+			s.mu.Unlock()
+			if inner == nil {
+				inner = []int{config.DefaultViewportW, config.DefaultViewportH}
+			}
+			result(map[string]any{"result": map[string]any{"value": inner}})
 		case "Page.getNavigationHistory":
 			result(map[string]any{"currentIndex": 0, "entries": []map[string]any{{"url": "about:blank", "title": ""}}})
 		default:
@@ -101,6 +112,13 @@ func (s *scripted) answer(f map[string]any) {
 			group, _ := args["group"].(string)
 			result(relay.TabCreated{Tab: relay.Tab{ID: n, Group: group, URL: "about:blank"}})
 		case relay.OpWindowBounds:
+			s.mu.Lock()
+			fixed := s.fixedWindow
+			s.mu.Unlock()
+			if args, _ := f["args"].(map[string]any); fixed && args["bounds"] != nil {
+				s.send(relay.Result{T: relay.TResult, ID: int64(id), Error: &relay.Error{Code: relay.ErrRefused, Message: "the agent works in the operator's window"}})
+				return
+			}
 			result(relay.WindowBounds{Bounds: relay.Bounds{Width: config.DefaultViewportW, Height: config.DefaultViewportH}})
 		default:
 			result(map[string]any{})
@@ -369,4 +387,185 @@ func TestAttachOperatorInput(t *testing.T) {
 		t.Fatal("input took control from a pause")
 	}
 	_ = tab
+}
+
+// sizings counts the window.bounds calls that asked for a size.
+func (s *scripted) sizings() int {
+	n := 0
+	for _, f := range s.seen(relay.TCall) {
+		if args, _ := f["args"].(map[string]any); f["op"] == relay.OpWindowBounds && args["bounds"] != nil {
+			n++
+		}
+	}
+	return n
+}
+
+// lockedLog is a log written from the daemon's goroutines and read by the test.
+type lockedLog struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (l *lockedLog) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.Write(p)
+}
+
+func (l *lockedLog) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.String()
+}
+
+// In the operator's own window the extension refuses to size it: the daemon asks once for the
+// group, measures the frame from what it read, and neither asks again for the next tabs nor warns.
+func TestAttachOperatorsWindowIsAskedOnce(t *testing.T) {
+	m, s, _ := attachManager(t)
+	logged := &lockedLog{}
+	m.log = slog.New(slog.NewTextHandler(logged, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	s.mu.Lock()
+	s.fixedWindow = true
+	// The operator's window holds a page of its own size, never the group's viewport.
+	s.inner = []int{1500, 900}
+	s.mu.Unlock()
+	g, _ := openAttached(t, m, "s-1")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for i := 0; i < 2; i++ {
+		if _, err := m.NewTab(ctx, g, "", true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := m.Resize(ctx, g.ID, Viewport{W: 1000, H: 700}); err != nil {
+		t.Fatal(err)
+	}
+	if n := s.sizings(); n != 1 {
+		t.Fatalf("the window was asked to be sized %d times", n)
+	}
+	g.Browser.mu.Lock()
+	known := g.Browser.frameKnown
+	g.Browser.mu.Unlock()
+	if !known {
+		t.Fatal("the frame was never taken as measured")
+	}
+	out := logged.String()
+	if strings.Contains(out, "level=WARN") || strings.Count(out, "operator's window") != 1 {
+		t.Fatalf("the log:\n%s", out)
+	}
+	// A group opened again asks afresh: the operator may have moved the agent to a window of its own.
+	s.mu.Lock()
+	s.fixedWindow = false
+	s.mu.Unlock()
+	if _, err := m.CloseGroup(ctx, g.ID); err != nil {
+		t.Fatal(err)
+	}
+	openAttached(t, m, "s-1")
+	if n := s.sizings(); n != 2 {
+		t.Fatalf("the reopened group's window was asked to be sized %d times in all", n)
+	}
+}
+
+// A tab whose debugger the extension lost is known as such: listed as detached, nothing waits on it,
+// and the tab the extension announces after attaching again is a fresh one.
+func TestAttachDetachedTab(t *testing.T) {
+	m, s, _ := attachManager(t)
+	g, tab := openAttached(t, m, "s-1")
+	if _, gone := tab.Detached(); gone || tab.View()["detached"] != nil {
+		t.Fatalf("a new tab is detached: %v", tab.View())
+	}
+	s.send(relay.Event{T: relay.TEvent, Session: tab.Session, Method: "Inspector.detached", Params: json.RawMessage(`{"reason":"canceled_by_user"}`)})
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, gone := tab.Detached(); gone {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the tab never knew it was detached")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if reason, _ := tab.Detached(); reason != "canceled_by_user" || tab.View()["detached"] != true {
+		t.Fatalf("detached %q, view %v", reason, tab.View())
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := tab.WaitLifecycle(ctx, "never", "load")
+	var we *wire.Error
+	if !errors.As(err, &we) || we.Code != CodeNoSuchTab || ctx.Err() != nil {
+		t.Fatalf("waiting on a detached tab: %v", err)
+	}
+	if data, _ := we.Data.(map[string]any); data["tab_id"] != tab.ID || data["reason"] != "detached" {
+		t.Fatalf("the error's data: %v", we.Data)
+	}
+	obs := &attachObserver{a: m.backend.(*attach), b: g.Browser}
+	obs.RelayTabs(relay.Tabs{T: relay.TTabs, Op: relay.TabsJoined, Tab: &relay.Tab{ID: 1, Group: "s-1"}})
+	tabs := g.Tabs()
+	if len(tabs) != 1 || tabs[0] == tab {
+		t.Fatalf("after the tab was attached again: %v", tabs)
+	}
+	if _, gone := tabs[0].Detached(); gone {
+		t.Fatal("the tab attached again is still detached")
+	}
+}
+
+// The operator's Chrome pauses every tab's document responses, the guard on or off, so a PDF never
+// reaches Chrome's viewer; SyncGuard keeps that pattern when the guard's changes.
+func TestAttachPausesDocumentResponses(t *testing.T) {
+	m, s, _ := attachManager(t)
+	_, tab := openAttached(t, m, "s-1")
+	var stages []string
+	for _, f := range s.seen(relay.TCDP) {
+		if f["method"] != "Fetch.enable" {
+			continue
+		}
+		params, _ := f["params"].(map[string]any)
+		patterns, _ := params["patterns"].([]any)
+		for _, p := range patterns {
+			pm, _ := p.(map[string]any)
+			stages = append(stages, fmt.Sprint(pm["resourceType"], "/", pm["requestStage"]))
+		}
+	}
+	if len(stages) != 1 || stages[0] != "Document/Response" {
+		t.Fatalf("Fetch.enable patterns %v", stages)
+	}
+	if st, _ := tab.Value(fetchKey{}).(fetchState); st != (fetchState{pdf: true}) {
+		t.Fatalf("the tab's fetch state %+v", st)
+	}
+	before := len(s.seen(relay.TCDP))
+	m.SyncGuard(context.Background())
+	for _, f := range s.seen(relay.TCDP)[before:] {
+		if f["method"] == "Fetch.disable" || f["method"] == "Fetch.enable" {
+			t.Fatalf("an unchanged guard sent %v", f["method"])
+		}
+	}
+}
+
+func TestPDFResponses(t *testing.T) {
+	for raw, want := range map[string]bool{
+		`{"requestId":"1","responseStatusCode":200}`:           true,
+		`{"requestId":"1","responseErrorReason":"Failed"}`:     true,
+		`{"requestId":"1","request":{"url":"https://a.test"}}`: false,
+	} {
+		if atResponse(json.RawMessage(raw)) != want {
+			t.Errorf("atResponse(%s) != %v", raw, want)
+		}
+	}
+	for ct, want := range map[string]bool{"application/pdf": true, "Application/PDF; charset=binary": true, "application/x-pdf": true,
+		"text/html": false, "": false} {
+		if isPDF(ct) != want {
+			t.Errorf("isPDF(%q) != %v", ct, want)
+		}
+	}
+	for _, c := range []struct{ disposition, url, want string }{
+		{`attachment; filename="Invoice 12.pdf"`, "https://a.test/x", "Invoice 12.pdf"},
+		{`inline; filename*=UTF-8''%D0%A1%D1%87%D1%91%D1%82.pdf`, "https://a.test/x", "Счёт.pdf"},
+		{"", "https://a.test/docs/Annual%20report.pdf?v=2", "Annual report.pdf"},
+		{"", "https://a.test/download", "download.pdf"},
+		{"", "https://a.test/", "document.pdf"},
+	} {
+		if got := pdfName(c.disposition, c.url); got != c.want {
+			t.Errorf("pdfName(%q, %q) = %q, want %q", c.disposition, c.url, got, c.want)
+		}
+	}
 }

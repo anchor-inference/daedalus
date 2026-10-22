@@ -30,6 +30,10 @@ type attach struct {
 	// setting are the tabs being prepared, by tab id, so a tab the extension announces while
 	// tab.create is still answering is prepared once.
 	setting map[int]chan *Tab
+	// fixedWindow are the groups whose window the extension refused to size: the agent works in the
+	// operator's own window (the extension's windowMode "current"). Asking again for every new tab
+	// and every measuring attempt filled the log with refusals and changed nothing.
+	fixedWindow map[string]bool
 }
 
 // ChromeHolder is the holder of human control the operator's own input in Chrome takes: a person at
@@ -176,6 +180,11 @@ func (a *attach) openGroup(ctx context.Context, g *Group) error {
 	if g.Profile == EphemeralProfile {
 		return ErrAttachRefused("a throwaway context")
 	}
+	// A group of the same id opened again asks afresh: the operator may have changed where the agent
+	// works since.
+	a.mu.Lock()
+	delete(a.fixedWindow, g.ID)
+	a.mu.Unlock()
 	s, err := a.sessionOf(g.Browser)
 	if err != nil {
 		return err
@@ -416,15 +425,35 @@ func (a *attach) windowSize(ctx context.Context, g *Group, target string) (int, 
 }
 
 func (a *attach) setWindowSize(ctx context.Context, g *Group, target string, w, h int) error {
+	a.mu.Lock()
+	fixed := a.fixedWindow[g.ID]
+	a.mu.Unlock()
+	if fixed {
+		return errWindowFixed
+	}
 	s, err := a.sessionOf(g.Browser)
 	if err != nil {
 		return err
 	}
-	if err := s.Call(ctx, relay.OpWindowBounds, relay.WindowBoundsArgs{Group: g.ID, Bounds: &relay.Size{Width: w, Height: h}}, nil); err != nil {
-		a.m.log.Warn("sizing the agent's window", "group", g.ID, "error", err.Error())
-		return relayErr(err)
+	err = s.Call(ctx, relay.OpWindowBounds, relay.WindowBoundsArgs{Group: g.ID, Bounds: &relay.Size{Width: w, Height: h}}, nil)
+	var re *relay.Error
+	switch {
+	case err == nil:
+		return nil
+	case errors.As(err, &re) && re.Code == relay.ErrRefused:
+		// Remembered for the group's life: the window is the operator's, and its size is whatever
+		// they gave it.
+		a.mu.Lock()
+		if a.fixedWindow == nil {
+			a.fixedWindow = map[string]bool{}
+		}
+		a.fixedWindow[g.ID] = true
+		a.mu.Unlock()
+		a.m.log.Info("the agent works in the operator's window; its size is left to them", "group", g.ID)
+		return errWindowFixed
 	}
-	return nil
+	a.m.log.Warn("sizing the agent's window", "group", g.ID, "error", err.Error())
+	return relayErr(err)
 }
 
 // cancelDownload has nothing to stop: a download in the operator's Chrome is theirs, in their

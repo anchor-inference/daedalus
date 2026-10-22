@@ -43,6 +43,7 @@ from daedalus.browser.model import (
     USER,
     BrowserError,
     BrowserGone,
+    Detached,
     EnvUnavailable,
     Forbidden,
     InvalidRequest,
@@ -52,6 +53,7 @@ from daedalus.browser.model import (
     OverCap,
     Owner,
     Unsupported,
+    detached,
     group_id,
     profile_id,
     rpc_failure,
@@ -950,6 +952,13 @@ class Browsers:
                 await self._mark_closed(row, "idle", status="closed")
                 raise BrowserGone(self._gone_text({**row, "close_reason": "idle"}), reason="idle") from None
             raise
+        except BrowserError as exc:
+            if not detached(exc) or isinstance(exc, Detached):
+                raise
+            # One kind for every way a tab that lost its debugger is refused (a typed answer, or
+            # Chrome's own words relayed under any code), so the agent is told one thing: close it.
+            tab = str(exc.details.get("tab_id") or (params or {}).get("tab_id") or "")
+            raise Detached(exc.message, **{**exc.details, "tab_id": tab, "group_id": group, "reason": "detached"}) from None
         await self.db.execute("UPDATE browser_groups SET last_activity_at = ? WHERE id = ?", (now_iso(), group))
         return result
 
@@ -972,6 +981,8 @@ class Browsers:
             "lost": "the browser service restarted",
             "shutdown": "the browser service stopped",
             "owner_gone": "its owner is gone",
+            "turn_end": "your tabs in the operator's Chrome are closed when your turn ends",
+            "closed_in_chrome": "the operator closed your tabs in their Chrome",
         }.get(str(reason), "the operator's Chrome disconnected from Daedalus" if str(reason).startswith("chrome disconnected") else "it was closed")
         return f"this browser is not open: {why}. Its profile and logins are kept; BrowserOpen starts it again"
 
@@ -1362,7 +1373,10 @@ class Browsers:
         if row is None:
             return
         if kind == "group.closed":
-            await self._mark_closed(row, "closed", status="closed")
+            # The daemon says why: the operator closing the agent's tab group in their Chrome is their
+            # verdict on the work there, and the action log must keep it rather than a bare "closed".
+            reason = str(data.get("reason") or "closed")[:80]
+            await self._mark_closed(row, reason, status="closed", by="operator" if reason == "closed_in_chrome" else "system")
         elif kind == "tab.updated":
             await self.db.execute("UPDATE browser_groups SET url = ?, title = ? WHERE id = ?", (str(data.get("url") or "")[:4000], str(data.get("title") or "")[:500], row["id"]))
         elif kind in ("tab.created", "tab.closed"):

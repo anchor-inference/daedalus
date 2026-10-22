@@ -23,7 +23,7 @@ import { toast as statusToast } from "../ui/dialogs";
 
 export const USER_STATUS = "/api/browser/user";
 
-export const DEFAULT_USER: BrowserUserSettings = { enabled: true, granted_sites: [], monitor: true, watch: true, bodies: false };
+export const DEFAULT_USER: BrowserUserSettings = { enabled: true, granted_sites: [], monitor: true, watch: true, bodies: false, read_only: true, close_tabs: true };
 
 /** Where the card stands: no daemon for it here, its daemon down, a Chrome connected, or waiting for one. */
 export type ChromeState = "none" | "down" | "connected" | "waiting";
@@ -252,6 +252,12 @@ function Defaults({ user, setUser }: { user: BrowserUserSettings; setUser: (patc
       </Row>
       <Row title={t("uc.bodies")} desc={t("uc.bodies.sub")} data-setting="browser.user.bodies">
         <Switch checked={user.bodies} onChange={(bodies) => setUser({ bodies })} label={t("uc.bodies")} />
+      </Row>
+      <Row title={t("uc.read_only")} desc={t("uc.read_only.sub")} data-setting="browser.user.read_only">
+        <Switch checked={user.read_only} onChange={(read_only) => setUser({ read_only })} label={t("uc.read_only")} />
+      </Row>
+      <Row title={t("uc.close_tabs")} desc={t("uc.close_tabs.sub")} data-setting="browser.user.close_tabs">
+        <Switch checked={user.close_tabs} onChange={(close_tabs) => setUser({ close_tabs })} label={t("uc.close_tabs")} />
       </Row>
       <label className="field" htmlFor="browser-user-sites">{t("uc.sites")}</label>
       <textarea id="browser-user-sites" data-setting="browser.user.granted_sites" className="field bs-list" rows={3} value={text} spellCheck={false} placeholder="example.com" onChange={(e) => setText(e.target.value)} onBlur={() => {

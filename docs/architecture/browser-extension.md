@@ -119,8 +119,12 @@ agent's. A tab is in scope when the extension holds it as a member, never becaus
 - **Focus emulation** is switched on at every attach, so a page in the unfocused window does not see
   itself blurred.
 - **Reattach.** A detach that is not the tab closing (the infobar's Cancel, the operator opening
-  DevTools on the tab) is followed by reattach attempts after 2, 5, 15, 30 and 60 s; when they run
-  out the tab is let go (`left`).
+  DevTools on the tab) is followed by reattach attempts after 2, 5, 15, 30 and 60 s. A detach that
+  says the target closed while the tab is still there means the tab went somewhere the debugger
+  cannot follow (Chrome's PDF viewer, a browser page): one attempt follows after a second. When the
+  attempts run out, a tab the agent opened (or a page its tab opened) is closed and reported
+  `removed`: a dead agent tab left in the operator's window is one nobody can remove but them. A tab
+  the operator gave, or one whose debugging they cancelled on the infobar, is let go (`left`).
 
 ## What the extension refuses by itself
 

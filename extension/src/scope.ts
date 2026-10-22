@@ -11,6 +11,10 @@ export type Member = {
   // been dragged out of a group it was never in.
   grouped: boolean;
   attached: boolean;
+  // Whether the operator put the tab in the agent's group (dragged it in, gave it from the side panel
+  // or the context menu) rather than the agent opening it. A tab the agent opened may be closed when
+  // it can no longer be driven; one the operator gave is theirs and is only ever let go.
+  given: boolean;
   // Flat child sessions seen attached inside this tab; a command may address only one of these.
   children: string[];
   opener?: number;
@@ -41,7 +45,11 @@ export class Scope {
   async load(): Promise<void> {
     const stored = (await chrome.storage.session.get(KEY))[KEY] as { groups?: Group[]; members?: Member[] } | undefined;
     this.groups = new Map((stored?.groups ?? []).map((group) => [group.id, group]));
-    this.members = new Map((stored?.members ?? []).map((member) => [member.tab, member]));
+    // A record without the flag reads as given: a tab that might be the operator's must never be
+    // closed on a guess, and letting go of one the agent opened costs only a stray tab.
+    this.members = new Map(
+      (stored?.members ?? []).map((member) => [member.tab, { ...member, given: (member as Partial<Member>).given ?? true }]),
+    );
   }
 
   async save(): Promise<void> {
@@ -76,8 +84,8 @@ export class Scope {
     return [...this.members.values()].filter((member) => member.group === groupId);
   }
 
-  add(tab: number, group: string, grouped: boolean, opener?: number): Member {
-    const member: Member = { tab, group, grouped, attached: false, children: [], ...(opener === undefined ? {} : { opener }) };
+  add(tab: number, group: string, grouped: boolean, given: boolean, opener?: number): Member {
+    const member: Member = { tab, group, grouped, given, attached: false, children: [], ...(opener === undefined ? {} : { opener }) };
     this.members.set(tab, member);
     return member;
   }

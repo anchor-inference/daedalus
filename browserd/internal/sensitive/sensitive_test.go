@@ -85,6 +85,32 @@ func TestEvidenceNamesTheWords(t *testing.T) {
 	}
 }
 
+// The host holds a POST form's submission for the operator by these two, so they are there for every
+// action on a form's element, the method lower-cased and "get" when the page gave none.
+func TestEvidenceSaysHowAFormIsSent(t *testing.T) {
+	for _, c := range []struct {
+		name       string
+		ev         Evidence
+		submits    bool
+		method     any
+		withMethod bool
+	}{
+		{"a post form's submit", Evidence{Name: "Save", Form: true, FormMethod: "POST", Submits: true}, true, "post", true},
+		{"a form without a method", Evidence{Name: "Search", Form: true, Submits: true}, true, "get", true},
+		{"a field of a form, not submitting", Evidence{Name: "Email", Form: true, FormMethod: "post"}, false, "post", true},
+		{"a button outside any form", Evidence{Name: "Open"}, false, nil, false},
+	} {
+		r := Classify("click", c.ev, false)
+		if r.Evidence["submits"] != c.submits {
+			t.Errorf("%s: submits %v", c.name, r.Evidence["submits"])
+		}
+		method, ok := r.Evidence["form_method"]
+		if ok != c.withMethod || method != c.method {
+			t.Errorf("%s: form_method %v (%v)", c.name, method, ok)
+		}
+	}
+}
+
 func TestSite(t *testing.T) {
 	for host, want := range map[string]string{
 		"shop.example.com":   "example.com",

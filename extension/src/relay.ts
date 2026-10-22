@@ -96,6 +96,10 @@ const SLOW_RECONNECT_MS: Partial<Record<ErrorCode, number>> = {
 // DevTools on the tab. The delays are long enough that a person who meant it can see it happen and
 // close the group instead, and the attempts end so that a tab the operator keeps taking back is let go.
 export const REATTACH_MS = [2_000, 5_000, 15_000, 30_000, 60_000];
+// A tab that is still open after a `target_closed` detach went somewhere the debugger cannot follow:
+// Chrome's PDF viewer (another extension's page) or a browser page. One attempt after this long tells
+// a page that is drivable again from one that is not, without leaving the agent waiting a minute.
+export const NAVIGATED_REATTACH_MS = 1_000;
 // Trusted input within this long after the daemon dispatched input into the tab is taken for the
 // daemon's own: `Input.dispatch*` events arrive in the page as trusted too.
 export const OWN_INPUT_MS = 1_000;
@@ -139,6 +143,9 @@ export class Relay {
   private flashTimer?: ReturnType<typeof setTimeout>;
   private reattachTimers = new Map<number, ReturnType<typeof setTimeout>>();
   private reattachAttempts = new Map<number, number>();
+  // The detach that started a tab's reattach schedule: when the attempts run out, a tab whose
+  // debugging the operator cancelled is theirs to keep, any other agent tab is closed.
+  private detachReasons = new Map<number, string>();
   private lastDispatch = new Map<number, number>();
   private lastInputReport = new Map<number, number>();
   private pauseTimer?: ReturnType<typeof setInterval>;
@@ -556,8 +563,44 @@ export class Relay {
     const member = this.scope.members.get(source.tabId);
     if (!member || !member.attached) return;
     this.markDetached(member, reason);
-    if (reason !== "target_closed") this.scheduleReattach(member.tab);
+    if (reason === "target_closed") void this.retryNavigated(member.tab);
+    else this.scheduleReattach(member.tab, reason);
     this.broadcast();
+  }
+
+  /**
+   * `target_closed` is also what Chrome says when the tab stays open but its page became one the
+   * debugger may not attach to, such as the PDF viewer after a click on a document. Treated as the
+   * tab closing, such a tab used to stay in scope detached for good: every call to it failed and
+   * nothing ever closed it. A tab that is really gone is left to `onTabRemoved`.
+   */
+  private async retryNavigated(tab: number): Promise<void> {
+    if (!(await chrome.tabs.get(tab).then(() => true, () => false))) return;
+    if (!this.scope.members.has(tab)) return;
+    // Counted with the reattach schedule's attempts, so a page that accepts the debugger only to
+    // drop it again at once cannot keep the tab bouncing between the two forever.
+    const attempts = this.reattachAttempts.get(tab) ?? 0;
+    if (attempts >= REATTACH_MS.length) {
+      await this.giveUp(tab, "target_closed");
+      return;
+    }
+    this.reattachAttempts.set(tab, attempts + 1);
+    this.detachReasons.set(tab, "target_closed");
+    clearTimeout(this.reattachTimers.get(tab));
+    this.reattachTimers.set(
+      tab,
+      setTimeout(async () => {
+        this.reattachTimers.delete(tab);
+        const member = this.scope.members.get(tab);
+        if (!member || member.attached) return;
+        if (await this.attach(member)) {
+          void this.report("joined", member);
+          this.broadcast();
+        } else {
+          await this.giveUp(tab, "target_closed");
+        }
+      }, NAVIGATED_REATTACH_MS),
+    );
   }
 
   /**
@@ -577,13 +620,13 @@ export class Relay {
     void this.scope.save();
   }
 
-  private scheduleReattach(tab: number): void {
+  private scheduleReattach(tab: number, reason?: string): void {
+    if (reason !== undefined) this.detachReasons.set(tab, reason);
     const attempts = this.reattachAttempts.get(tab) ?? 0;
     clearTimeout(this.reattachTimers.get(tab));
     if (attempts >= REATTACH_MS.length) {
       this.reattachTimers.delete(tab);
-      this.reattachAttempts.delete(tab);
-      void this.leave(tab, "left");
+      void this.giveUp(tab, this.detachReasons.get(tab));
       return;
     }
     this.reattachAttempts.set(tab, attempts + 1);
@@ -603,6 +646,35 @@ export class Relay {
         }
       }, REATTACH_MS[attempts]),
     );
+  }
+
+  /**
+   * The end for a tab that cannot be driven again. Let go, it stayed in the operator's window with
+   * no group to close and no daemon that would close it, and the operator had to close each one by
+   * hand; so a tab the agent opened is closed. A tab the operator gave, or one whose debugging the
+   * operator cancelled from the infobar, is theirs and is only let go.
+   */
+  private async giveUp(tab: number, reason: string | undefined): Promise<void> {
+    const member = this.scope.members.get(tab);
+    if (!member) return;
+    if (member.given || reason === "canceled_by_user") {
+      await this.leave(tab, "left");
+      return;
+    }
+    // Forgotten before it is closed, so that its removal is not taken for the operator closing it,
+    // and the daemon told here instead, since it still lists the tab.
+    await this.detach(member);
+    await this.border(tab, null);
+    this.scope.remove(tab);
+    // The last tab of the group's Chrome tab group takes the group with it, which would read as the
+    // operator closing the group. Forgetting the Chrome group keeps the agent's group open, and its
+    // next tab makes a new one.
+    const group = this.scope.groups.get(member.group);
+    if (group && !this.scope.tabsOf(group.id).some((other) => other.grouped)) group.chromeGroupId = undefined;
+    await this.scope.save();
+    this.send({ t: "tabs", op: "removed", tab: { id: tab } });
+    await chrome.tabs.remove(tab).catch(() => undefined);
+    await this.refreshScopeViews();
   }
 
   private async attach(member: Member): Promise<boolean> {
@@ -634,6 +706,7 @@ export class Relay {
     clearTimeout(this.reattachTimers.get(member.tab));
     this.reattachTimers.delete(member.tab);
     this.reattachAttempts.delete(member.tab);
+    this.detachReasons.delete(member.tab);
     if (!member.attached) return;
     this.markDetached(member, "left");
     try {
@@ -767,7 +840,7 @@ export class Relay {
     // the first page the agent opens is judged like every other; a URL given here would load before
     // anything could judge it.
     const tab = await chrome.tabs.create({ windowId, url: "about:blank", active: this.settings.windowMode === "own" });
-    const member = this.scope.add(tab.id!, group.id, false);
+    const member = this.scope.add(tab.id!, group.id, false, false);
     await this.groupTab(group, tab.id!);
     member.grouped = true;
     if (group.placeholderTab !== undefined) {
@@ -964,7 +1037,7 @@ export class Relay {
     if (!group) return;
     // A page the agent's tab opened (a popup, a link to a new tab) is the agent's too: the work it
     // was doing continues there, and leaving it out would strand the agent on the opener.
-    const member = this.scope.add(tab.id, group.id, false, opener.tab);
+    const member = this.scope.add(tab.id, group.id, false, false, opener.tab);
     try {
       if (group.chromeGroupId !== undefined && tab.windowId === (await chrome.tabs.get(opener.tab)).windowId) {
         await chrome.tabs.group({ tabIds: tab.id, groupId: group.chromeGroupId });
@@ -981,6 +1054,8 @@ export class Relay {
   async onTabRemoved(tabId: number): Promise<void> {
     clearTimeout(this.reattachTimers.get(tabId));
     this.reattachTimers.delete(tabId);
+    this.reattachAttempts.delete(tabId);
+    this.detachReasons.delete(tabId);
     this.lastDispatch.delete(tabId);
     this.lastInputReport.delete(tabId);
     for (const group of this.scope.groups.values()) if (group.placeholderTab === tabId) group.placeholderTab = undefined;
@@ -1021,7 +1096,7 @@ export class Relay {
   /** The operator dragged a tab into an agent group, or gave it through the context menu. */
   private async join(tab: chrome.tabs.Tab, group: Group): Promise<void> {
     if (tab.id === undefined || this.scope.members.has(tab.id)) return;
-    const member = this.scope.add(tab.id, group.id, true);
+    const member = this.scope.add(tab.id, group.id, true, true);
     await this.attach(member);
     await this.report("joined", member);
     await this.refreshScopeViews();

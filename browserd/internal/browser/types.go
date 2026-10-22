@@ -462,6 +462,86 @@ type Tab struct {
 	// next travel starts there rather than from wherever its own last action left it.
 	pointerX, pointerY float64
 	pointerKnown       bool
+
+	// In the operator's Chrome, the extension's debugger lets go of a tab that shows a page it cannot
+	// drive (Chrome's PDF viewer is another extension's page, a browser page is Chrome's), and says so
+	// with Inspector.detached. Every later command to the tab fails; without this the agent read
+	// "the debugger is not attached" on each call and never learnt why. A tab attached again is
+	// announced afresh and replaced by a new Tab, so this never clears.
+	detached     bool
+	detachReason string
+
+	// The responses being kept as files (pdf.go), and the last one kept, numbered, so a navigation
+	// or an action can tell whether it turned into a download.
+	keeping int
+	keptSeq int64
+	kept    *Kept
+}
+
+// Detached reports whether the tab lost its debugger, and the reason Chrome gave.
+func (t *Tab) Detached() (reason string, detached bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.detachReason, t.detached
+}
+
+func (t *Tab) markDetached(reason string) {
+	t.mu.Lock()
+	if t.detached {
+		t.mu.Unlock()
+		return
+	}
+	t.detached, t.detachReason = true, reason
+	t.broadcastLocked()
+	t.mu.Unlock()
+	t.publishUpdate()
+}
+
+// Keeping reports whether a response of the tab is being kept as a file right now: an action that
+// started it waits for it, so the file is the action's effect.
+func (t *Tab) Keeping() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.keeping > 0
+}
+
+func (t *Tab) beginKeeping() {
+	t.mu.Lock()
+	t.keeping++
+	t.broadcastLocked()
+	t.mu.Unlock()
+}
+
+func (t *Tab) endKeeping() {
+	t.mu.Lock()
+	t.keeping--
+	t.broadcastLocked()
+	t.mu.Unlock()
+}
+
+func (t *Tab) recordKept(k Kept) {
+	t.mu.Lock()
+	t.keptSeq++
+	t.kept = &k
+	t.broadcastLocked()
+	t.mu.Unlock()
+}
+
+// keptMark and keptSince tell whether a file was kept for the tab after the mark.
+func (t *Tab) keptMark() int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.keptSeq
+}
+
+func (t *Tab) keptSince(mark int64) *Kept {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.keptSeq == mark || t.kept == nil {
+		return nil
+	}
+	k := *t.kept
+	return &k
 }
 
 // Pointer is the mouse's last position on the page, and whether there has been one.
@@ -619,15 +699,19 @@ func (t *Tab) markClosed() {
 // View is the contract's Tab.
 func (t *Tab) View() map[string]any {
 	t.mu.Lock()
-	u, title, loading := t.url, t.title, t.loading
+	u, title, loading, detached := t.url, t.title, t.loading, t.detached
 	t.mu.Unlock()
 	active := t.Group.ActiveTab() == t
 	var opener any
 	if t.Opener != "" {
 		opener = t.Opener
 	}
-	return map[string]any{"id": t.ID, "group_id": t.Group.ID, "url": u, "title": title, "favicon_url": faviconURL(u),
+	v := map[string]any{"id": t.ID, "group_id": t.Group.ID, "url": u, "title": title, "favicon_url": faviconURL(u),
 		"loading": loading, "active": active, "opener": opener, "created_at": t.CreatedAt}
+	if detached {
+		v["detached"] = true
+	}
+	return v
 }
 
 // faviconURL is where a page's icon conventionally is. Reading the page's own <link rel=icon> would
@@ -659,6 +743,9 @@ func (t *Tab) publishUpdate() {
 	t.mu.Lock()
 	data := map[string]any{"group_id": t.Group.ID, "tab_id": t.ID, "url": t.url, "title": t.title,
 		"favicon_url": faviconURL(t.url), "loading": t.loading}
+	if t.detached {
+		data["detached"] = true
+	}
 	t.mu.Unlock()
 	t.Group.m.publishKeyed("tab.updated", t.ID, data)
 }
@@ -716,6 +803,17 @@ func (t *Tab) event(e cdp.Event) {
 		t.mu.Unlock()
 		t.Group.m.publish("dialog.opened", map[string]any{"group_id": t.Group.ID, "tab_id": t.ID, "type": d.Type,
 			"message": d.Message, "default_prompt": d.DefaultPrompt})
+	case "Inspector.detached":
+		// Only the extension sends it for a tab that stays open; a page of the daemon's own browser
+		// that loses its session is closing, and its target's end forgets it.
+		if !t.Group.Browser.attached {
+			return
+		}
+		var p struct {
+			Reason string `json:"reason"`
+		}
+		_ = json.Unmarshal(e.Params, &p)
+		t.markDetached(p.Reason)
 	case "Page.javascriptDialogClosed":
 		t.mu.Lock()
 		had := t.dialog != nil
@@ -735,13 +833,17 @@ func (t *Tab) WaitLifecycle(ctx context.Context, loader, name string) error {
 	for {
 		t.mu.Lock()
 		ok := t.life[name] && (loader == "" || t.loader == loader)
-		wake, closed, dialog := t.wake, t.closed, t.dialog
+		wake, closed, dialog, detached := t.wake, t.closed, t.dialog, t.detached
 		t.mu.Unlock()
 		if ok {
 			return nil
 		}
 		if closed {
 			return errNoSuchTab(t.ID)
+		}
+		if detached {
+			// No lifecycle event comes from a tab the debugger left.
+			return ErrDetached(t)
 		}
 		if dialog != nil {
 			// The page is stopped under a dialog: nothing will load until it is answered.

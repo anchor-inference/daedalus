@@ -232,7 +232,7 @@ async def test_tabs_waits_dialogs_downloads_and_close(rig: Rig) -> None:
     sid = await rig.session()
     await rig.call(sid, "BrowserOpen", url="https://shop.test/shoes")
     text, failed = await rig.call(sid, "BrowserTabs", action="new", url="https://shop.test/cart")
-    assert not failed and "https://shop.test/cart (active)" in text
+    assert not failed and "https://shop.test/cart (active; new)" in text
     text, _ = await rig.call(sid, "BrowserWait", until="text", value="Buy now")
     assert "reached text" in text
     text, failed = await rig.call(sid, "BrowserWait", until="sometime")

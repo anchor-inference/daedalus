@@ -248,7 +248,7 @@ func (d *Daemon) logs(ctx context.Context, c *server.Conn, params json.RawMessag
 	if err := decode(params, &p); err != nil {
 		return nil, err
 	}
-	t, err := d.gatedTab(ctx, p.TabID, p.Origin)
+	t, err := d.gatedAnyTab(ctx, p.TabID, p.Origin)
 	if err != nil {
 		return nil, err
 	}
@@ -273,7 +273,7 @@ func (d *Daemon) network(ctx context.Context, c *server.Conn, params json.RawMes
 	if len(p.Contains) > 500 || len(p.Host) > 253 || len(p.Method) > 20 || len(p.Types) > 16 {
 		return nil, wire.Errorf(wire.CodeInvalidParams, "the filter is too long")
 	}
-	t, err := d.gatedTab(ctx, p.TabID, p.Origin)
+	t, err := d.gatedAnyTab(ctx, p.TabID, p.Origin)
 	if err != nil {
 		return nil, err
 	}

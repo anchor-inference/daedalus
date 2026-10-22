@@ -190,7 +190,7 @@ func TestSecretsNeverLeaveThePage(t *testing.T) {
 	}
 	// Enter in a password field is allowed; it is the submit, and a credentials ask for the host.
 	dry := h.mustAct(tab, map[string]any{"action": "press", "ref": pw, "keys": "Enter", "element": "submit", "dry_run": true})
-	if !slices.Contains(dry.Sensitive.Kinds, "credentials") {
+	if !slices.Contains(dry.Sensitive.Kinds, "credentials") || dry.Sensitive.Evidence["submits"] != true || dry.Sensitive.Evidence["form_method"] != "post" {
 		t.Fatalf("Enter in a login form: %+v", dry.Sensitive)
 	}
 	dry = h.mustAct(tab, map[string]any{"action": "click", "ref": refOf(t, s, "button", "Sign in"), "element": "Sign in", "dry_run": true})
@@ -226,6 +226,43 @@ func TestSecretsNeverLeaveThePage(t *testing.T) {
 	s2 := h.snapshot(tab)
 	if strings.Contains(s2.Text, "SECRET") || !strings.Contains(s2.Text, `value="someone@example.com"`) {
 		t.Fatalf("after the screenshot:\n%s", s2.Text)
+	}
+}
+
+// The evidence of an action on a form's element says whether it submits the form and how, which is
+// what the host holds a POST's submission for: Enter in a field and a submit button submit, a key
+// other than Enter, Enter in a text area and a plain button do not, and a form that names no method is sent as a GET.
+func TestEvidenceSaysWhetherAFormIsSubmitted(t *testing.T) {
+	h := start(t, nil)
+	o := h.open("g1", "project-a", "/site/docs.html")
+	tab := o.Tab.ID
+	s := h.snapshot(tab)
+	search, note := refOf(t, s, "textbox", "Search"), refOf(t, s, "textbox", "Note")
+	for _, c := range []struct {
+		name    string
+		act     map[string]any
+		submits bool
+		method  string
+	}{
+		{"Enter in a field of a form without a method", map[string]any{"action": "press", "ref": search, "keys": "Enter"}, true, "get"},
+		{"Tab in it", map[string]any{"action": "press", "ref": search, "keys": "Tab"}, false, "get"},
+		{"typing with submit", map[string]any{"action": "type", "ref": search, "text": "x", "submit": true}, true, "get"},
+		{"typing without", map[string]any{"action": "type", "ref": search, "text": "x"}, false, "get"},
+		{"its button", map[string]any{"action": "click", "ref": refOf(t, s, "button", "Find")}, true, "get"},
+		{"Enter in a text area of a post form", map[string]any{"action": "press", "ref": note, "keys": "Enter"}, false, "post"},
+		{"a plain button of it", map[string]any{"action": "click", "ref": refOf(t, s, "button", "Preview")}, false, "post"},
+		{"a submit button that sends it as a get", map[string]any{"action": "click", "ref": refOf(t, s, "button", "Look up")}, true, "get"},
+		{"its own submit button", map[string]any{"action": "click", "ref": refOf(t, s, "button", "Save")}, true, "post"},
+	} {
+		c.act["element"], c.act["dry_run"] = c.name, true
+		r := h.mustAct(tab, c.act)
+		if ev := r.Sensitive.Evidence; ev["submits"] != c.submits || ev["form_method"] != c.method {
+			t.Errorf("%s: submits %v, form_method %v", c.name, ev["submits"], ev["form_method"])
+		}
+	}
+	r := h.mustAct(tab, map[string]any{"action": "click", "ref": refOf(t, s, "link", "The quarterly statement"), "element": "link", "dry_run": true})
+	if _, ok := r.Sensitive.Evidence["form_method"]; ok || r.Sensitive.Evidence["submits"] != false {
+		t.Errorf("a link outside any form: %v", r.Sensitive.Evidence)
 	}
 }
 

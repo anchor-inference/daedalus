@@ -181,6 +181,41 @@ func (p *Model) finish(dl *Download, state string) {
 	p.m.Publish("download.done", map[string]any{"group_id": dl.GroupID, "download": dl.snapshot()})
 }
 
+// KeepFile keeps data a tab's response carried as a finished download of the tab's group (the
+// manager hands it a PDF it kept out of Chrome's viewer, browser/pdf.go), announced as any download
+// is, so the agent finds it in download.list and an action's effects.
+func (p *Model) KeepFile(t *browser.Tab, name, url, mime string, data []byte) (browser.Kept, error) {
+	if p.lim.MaxDownloadBytes > 0 && int64(len(data)) > p.lim.MaxDownloadBytes {
+		return browser.Kept{}, wire.Errorf(wire.CodeLimit, "a download is at most %d bytes", p.lim.MaxDownloadBytes)
+	}
+	g := t.Group
+	dir := filepath.Join(p.stateDir, "downloads", "groups", g.ID)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return browser.Kept{}, err
+	}
+	dl := &Download{ID: newID("d"), GroupID: g.ID, TabID: t.ID, Name: safeName(name), URL: url, Mime: mime,
+		State: "in_progress", StartedAt: time.Now().UTC(), profile: g.Profile, browser: g.Browser}
+	path := filepath.Join(dir, dl.ID)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return browser.Kept{}, err
+	}
+	sum := sha256.Sum256(data)
+	now := time.Now().UTC()
+	// Registered whole: there is no progress to follow, and an in-progress entry with no Chrome
+	// download behind it would never finish.
+	p.mu.Lock()
+	dl.path, dl.SHA256, dl.Size = path, hex.EncodeToString(sum[:]), int64(len(data))
+	p.downloads[dl.ID] = dl
+	started := dl.snapshot()
+	dl.State, dl.FinishedAt = "completed", &now
+	done := dl.snapshot()
+	p.mu.Unlock()
+	p.m.Publish("download.started", map[string]any{"group_id": g.ID, "download": started})
+	p.evict(dl.profile)
+	p.m.Publish("download.done", map[string]any{"group_id": g.ID, "download": done})
+	return browser.Kept{ID: dl.ID, Name: dl.Name, Size: dl.Size, Mime: mime}, nil
+}
+
 // copyFile copies a finished download the daemon does not own into its keeping.
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
