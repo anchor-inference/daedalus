@@ -806,8 +806,10 @@ async def _project_instructions(ctx: DoctorContext) -> list[Check]:
     Codex member silently never sees the rules written last."""
     if ctx.db is None:
         return []
-    # Lazy: the other checks have no use for the adapter.
-    from daedalus.harness.codex import INSTRUCTIONS_LIMIT, instructions_size
+    from daedalus.harness.codex import (  # Lazy: the other checks have no use for the adapter
+        INSTRUCTIONS_LIMIT,
+        instructions_size,
+    )
 
     rows = await ctx.db.fetchall(
         "SELECT p.name, f.path FROM project_folders f JOIN projects p ON p.id = f.project_id WHERE f.env = ? ORDER BY p.name, f.position",
