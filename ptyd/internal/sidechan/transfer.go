@@ -408,9 +408,9 @@ func (t *Transfers) UnpackWrite(id string, data []byte) (int64, error) {
 	}
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	// Headers and padding cost a few blocks an entry beyond the files' bytes; a stream past that is
-	// not the one that was declared.
-	if limit := u.declared + int64(u.entries+2)*3*512 + 1<<20; u.streamed+int64(len(data)) > limit {
+	// Headers, a long name's extended header and a file's padding cost at most a few kilobytes an
+	// entry beyond the files' bytes; a stream past that is not the one that was declared.
+	if limit := u.declared + int64(u.entries+2)*16*512 + 1<<20; u.streamed+int64(len(data)) > limit {
 		return u.streamed, fmt.Errorf("%w: the stream is longer than the %d bytes it declared", ErrInvalid, u.declared)
 	}
 	u.digest.Write(data)
@@ -731,7 +731,9 @@ func (pk *pack) stop(reason error) {
 func (pk *pack) write(w io.Writer) error {
 	tw := tar.NewWriter(w)
 	for _, e := range pk.manifest {
-		hdr := &tar.Header{Name: e.rel, Mode: int64(e.perm), ModTime: e.mtime, Format: tar.FormatPAX}
+		// Whole seconds: a fraction would cost every entry an extended header, and the receiving side
+		// keeps seconds anyway.
+		hdr := &tar.Header{Name: e.rel, Mode: int64(e.perm), ModTime: e.mtime.Truncate(time.Second), Format: tar.FormatPAX}
 		switch e.kind {
 		case "dir":
 			hdr.Typeflag, hdr.Name = tar.TypeDir, e.rel+"/"
