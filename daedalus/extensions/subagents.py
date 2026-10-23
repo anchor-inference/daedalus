@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 from protocore.contracts.types import MessageRole, TextBlock
 
+from daedalus.config import REASONING_EFFORTS
 from daedalus.host.prompts import split_headline
 from daedalus.tools._common import idle_words
 
@@ -36,6 +37,29 @@ TASK_KEPT_CHARS = 400
 TITLE_CHARS = 160
 REMINDER_ANSWER_CHARS = 200
 NO_ANSWER = "(the subagent's run ended without a final reply; see its session)"
+
+
+EFFORTS = ("off", *REASONING_EFFORTS)
+"""What a leader may give a subagent: ``off`` turns thinking off, the rest are the session efforts."""
+
+
+def check_effort(effort: str | None) -> str | None:
+    """The effort a leader asked for, normalised; ``None`` keeps what the subagent would have had."""
+    if effort is None or not effort.strip():
+        return None
+    effort = effort.strip().lower()
+    if effort not in EFFORTS:
+        raise ValueError(f"unknown effort {effort!r}; choose one of: {', '.join(EFFORTS)}")
+    return effort
+
+
+async def set_effort(manager: Any, session_id: str, effort: str) -> None:
+    """Set a subagent's reasoning effort on top of its model, whichever way that model was chosen.
+    An effort without thinking means nothing to the model, so any effort turns thinking back on."""
+    if effort == "off":
+        await manager.set_model(session_id, thinking=False)
+    else:
+        await manager.set_model(session_id, thinking=True, reasoning_effort=effort)
 
 
 def unfinished_jobs(manager: Any, session_id: str) -> int:
@@ -200,6 +224,7 @@ class Subagents:
         deliverable: str | None = None,
         persona: str | None = None,
         tools_off: list[str] | None = None,
+        effort: str | None = None,
     ) -> dict[str, Any]:
         manager = self.app.manager
         assert manager is not None
@@ -221,6 +246,7 @@ class Subagents:
         active = [s for s in await self.children(leader_id) if s["running"]]
         if len(active) >= self.app.config.subagents.max_active:
             raise RuntimeError(f"{len(active)} subagents are already running for this session (limit {self.app.config.subagents.max_active}); wait for their reports")
+        effort = check_effort(effort)
         models = await self.models()
         if model is not None:
             model = model.strip()
@@ -269,7 +295,10 @@ class Subagents:
             await manager.set_model(cid, preset=model)
         else:
             overrides = await manager.live.load(leader_id)
-            if overrides.get("preset") or (overrides.get("provider") and overrides.get("model_name")):
+            # The effort the operator picked in the leader's composer is part of "the leader's model":
+            # it used to be carried only along with a model override, so a leader on the default model
+            # set to xhigh started helpers on the preset's effort.
+            if overrides.get("preset") or (overrides.get("provider") and overrides.get("model_name")) or overrides.get("thinking_enabled") is not None or overrides.get("reasoning_effort"):
                 await manager.live.set_model(
                     cid,
                     model_name=overrides.get("model_name"),
@@ -278,6 +307,8 @@ class Subagents:
                     thinking_enabled=overrides.get("thinking_enabled"),
                     reasoning_effort=overrides.get("reasoning_effort"),
                 )
+        if effort is not None:
+            await set_effort(manager, cid, effort)
         opening = (f"[persona: {persona}]\n{persona_text}\n\n" if persona_text else "")
         if idle:
             # No run at all: the session stands by with its brief until the leader sends it work.
@@ -295,7 +326,7 @@ class Subagents:
         if wait:
             self._waited.add(cid)
         run_id = await manager.submit(cid, TASK_HEADER.format(leader=leader_id) + opening + task + contract_text(expects, deliverable), as_answer=False, origin=f"subagent-task:{leader_id}")
-        result: dict[str, Any] = {"session_id": cid, "run_id": run_id, "name": label, "model": model or "(leader's model)", "answer": None, "kept": bool(keep)}
+        result: dict[str, Any] = {"session_id": cid, "run_id": run_id, "name": label, "model": model or "(leader's model)", "effort": effort, "answer": None, "kept": bool(keep)}
         if not wait:
             return result
         return await self._collect(cid, result, timeout_minutes)
@@ -354,13 +385,15 @@ class Subagents:
             self._waited.discard(cid)  # on a timeout the async report takes over
         return result
 
-    async def send(self, *, leader_id: str, name: str, text: str, wait: bool = False, timeout_minutes: int | None = None) -> dict[str, Any]:
-        """A message to one of the leader's subagents: a steer while it works, a new task once it has finished."""
+    async def send(self, *, leader_id: str, name: str, text: str, wait: bool = False, timeout_minutes: int | None = None, effort: str | None = None) -> dict[str, Any]:
+        """A message to one of the leader's subagents: a steer while it works, a new task once it has finished.
+        ``effort`` re-tunes the subagent for this and later runs; a running one picks it up at its next request."""
         manager = self.app.manager
         assert manager is not None
         text = text.strip()
         if not text:
             raise ValueError("the message is empty")
+        effort = check_effort(effort)
         match = await self._match(leader_id, name)
         cid = str(match["session_id"])
         state = await manager.get_state(cid)
@@ -368,6 +401,8 @@ class Subagents:
             raise ValueError(f"subagent {name!r} no longer exists")
         if state.pending is not None:
             raise RuntimeError(f"subagent {name!r} is waiting on a question; it cannot take a message now")
+        if effort is not None:
+            await set_effort(manager, cid, effort)
         if state.running:
             await manager.submit(cid, FOLLOW_UP_HEADER.format(leader=leader_id) + text, steer=True, as_answer=False, origin=f"subagent-task:{leader_id}")
             return {"session_id": cid, "name": match["name"], "delivered": "steer", "answer": None}

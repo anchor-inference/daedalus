@@ -9,6 +9,7 @@ from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
+from daedalus.config import REASONING_EFFORTS
 from daedalus.tools import search_hint, tool_group
 from daedalus.tools._common import clip, error, idle_words, ok, services_for
 
@@ -28,7 +29,9 @@ def _hook(context: ToolContext):  # type: ignore[no-untyped-def]
     description=(
         "Start a subagent: a helper session that does one task in THIS workspace and reports back. "
         "It runs on your model unless `model` names one of the presets listed in your environment "
-        "(use another model only when the operator asks for it or the task clearly suits it). "
+        "(use another model only when the operator asks for it or the task clearly suits it). `effort` sets how hard it "
+        "thinks — off, low, medium, high or xhigh — on top of whichever model it runs on; omit it to keep the leader's "
+        "(or the preset's) effort, raise it for a careful review or a hard problem, lower it for a quick lookup. "
         "wait=false (default) returns at once; the subagent's report arrives later as a message from "
         "`subagent:<name>` — even after you have finished your turn — so you may end your turn and "
         "continue when it comes. wait=true blocks until the report is in and returns it. Write the task "
@@ -60,12 +63,13 @@ async def sub_agent(
     deliverable: str | None = None,
     persona: str | None = None,
     tools_off: list[str] | None = None,
+    effort: str | None = None,
 ) -> ToolResult:
     hook = _hook(context)
     if hook is None:
         return error(context, "subagents are not available")
     try:
-        result = await hook("spawn", leader_id=context.session_id, task=task, model=model, name=name, wait=wait, timeout_minutes=timeout_minutes, keep=keep, expects=expects, deliverable=deliverable, persona=persona, tools_off=list(tools_off or []))
+        result = await hook("spawn", leader_id=context.session_id, task=task, model=model, name=name, wait=wait, timeout_minutes=timeout_minutes, keep=keep, expects=expects, deliverable=deliverable, persona=persona, tools_off=list(tools_off or []), effort=effort)
     except (ValueError, RuntimeError) as exc:
         return error(context, str(exc))
     return _report(context, result, started=True)
@@ -80,7 +84,8 @@ def _report(context: ToolContext, result: dict, *, started: bool) -> ToolResult:
         return ok(context, result["note"], session_id=result["session_id"])
     if result.get("delivered") == "steer":
         return ok(context, f"delivered to subagent {result['name']!r} while it works; it will act on it before its next step", session_id=result["session_id"])
-    what = f"subagent {result['name']!r} started on {result.get('model', 'its model')}" if started else f"subagent {result['name']!r} took the message and started a run"
+    effort = f" with {result['effort']} effort" if result.get("effort") else ""
+    what = f"subagent {result['name']!r} started on {result.get('model', 'its model')}{effort}" if started else f"subagent {result['name']!r} took the message and started a run"
     return ok(context, f"{what} (session {result['session_id']}); its report arrives as a message when it finishes", session_id=result["session_id"], run_id=result.get("run_id"))
 
 
@@ -95,15 +100,16 @@ def _report(context: ToolContext, result: dict, *, started: bool) -> ToolResult:
         "Send a message to one of your subagents by name. While it is still working the message is a steer "
         "it sees before its next step; once it has finished (and was started with keep=true, so it still "
         "exists with its context) the message starts a new run for it, whose report comes back like the "
-        "first one — as a message from subagent:<name>, or inline with wait=true."
+        "first one — as a message from subagent:<name>, or inline with wait=true. `effort` (off, low, medium, high, "
+        "xhigh) changes how hard it thinks from now on."
     ),
 )
-async def sub_agent_send(context: ToolContext, name: str, text: str, wait: bool = False, timeout_minutes: int | None = None) -> ToolResult:
+async def sub_agent_send(context: ToolContext, name: str, text: str, wait: bool = False, timeout_minutes: int | None = None, effort: str | None = None) -> ToolResult:
     hook = _hook(context)
     if hook is None:
         return error(context, "subagents are not available")
     try:
-        result = await hook("send", leader_id=context.session_id, name=name, text=text, wait=wait, timeout_minutes=timeout_minutes)
+        result = await hook("send", leader_id=context.session_id, name=name, text=text, wait=wait, timeout_minutes=timeout_minutes, effort=effort)
     except (ValueError, RuntimeError) as exc:
         return error(context, str(exc))
     return _report(context, result, started=False)
@@ -118,7 +124,7 @@ async def sub_agent_send(context: ToolContext, name: str, text: str, wait: bool 
     name="SubAgentList",
     description=(
         "List this session's subagents: whether each is running, waiting, idle or failed, whether it is kept, "
-        "and how long ago it was last active — plus the model presets SubAgent accepts."
+        "and how long ago it was last active — plus the model presets and efforts SubAgent accepts."
     ),
 )
 async def sub_agent_list(context: ToolContext) -> ToolResult:
@@ -128,7 +134,7 @@ async def sub_agent_list(context: ToolContext) -> ToolResult:
     views = await hook("views", leader_id=context.session_id)
     models = await hook("models")
     lines = [_list_line(v) for v in views] or ["(no subagents yet)"]
-    return ok(context, "\n".join(lines) + "\n\nmodels: " + ", ".join(models))
+    return ok(context, "\n".join(lines) + "\n\nmodels: " + ", ".join(models) + "\nefforts: " + ", ".join(("off", *REASONING_EFFORTS)))
 
 
 def _list_line(view: dict) -> str:  # type: ignore[type-arg]

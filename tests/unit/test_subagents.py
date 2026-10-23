@@ -96,6 +96,28 @@ async def test_subagent_model_choice_depth_and_limits(app: Any) -> None:
         await subs.spawn(leader_id=leader.session.id, task="   ")
 
 
+async def test_subagent_effort_is_set_on_top_of_its_model_and_can_change_later(app: Any) -> None:
+    manager: SessionManager = app.manager
+    subs = Subagents(app)
+    leader = await manager.create_session("lead")
+    _capture(manager)
+    with pytest.raises(ValueError, match="unknown effort"):
+        await subs.spawn(leader_id=leader.session.id, task="t", effort="ultra-max")
+    # The leader thinks on medium; the helper it starts for a hard review is asked for xhigh.
+    await manager.set_model(leader.session.id, thinking=True, reasoning_effort="medium")
+    result = await subs.spawn(leader_id=leader.session.id, task="review hard", name="critic", keep=True, effort="XHigh ")
+    assert result["effort"] == "xhigh"
+    controls = await manager.live.load(result["session_id"])
+    assert controls.get("reasoning_effort") == "xhigh" and controls.get("thinking_enabled") is True
+    assert (await manager.live.load(leader.session.id)).get("reasoning_effort") == "medium"
+    # A later message may turn thinking off for a quick follow-up.
+    await subs.send(leader_id=leader.session.id, name="critic", text="just list the files", effort="off")
+    assert (await manager.live.load(result["session_id"])).get("thinking_enabled") is False
+    # Without an effort the helper keeps what it inherited.
+    plain = await subs.spawn(leader_id=leader.session.id, task="t2")
+    assert (await manager.live.load(plain["session_id"])).get("reasoning_effort") == "medium"
+
+
 async def test_subagent_is_removed_after_reporting_unless_kept(app: Any) -> None:
 
     manager: SessionManager = app.manager
