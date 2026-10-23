@@ -1096,6 +1096,50 @@ export type ProjectDir = {
 
 export type FolderReach = "agents" | "terminals" | "none";
 
+/** A move of a folder between the container and the host, as /api/folder-moves follows it. */
+export type FolderMoveJob = {
+  id: string;
+  project_id: string;
+  folder_id: string;
+  direction: "to_host" | "to_container";
+  source: string;
+  destination: string;
+  remove_original: boolean;
+  /** preparing → copying → verifying → switching → cleaning → done; or failed, cancelled. */
+  state: "preparing" | "copying" | "verifying" | "switching" | "cleaning" | "done" | "failed" | "cancelled";
+  active: boolean;
+  total_bytes: number;
+  done_bytes: number;
+  total_files: number;
+  error: string;
+  /** What the move could not do and the operator may want to: a copy left behind, a worktree to repair. */
+  notes: string[];
+  skipped: { path: string; reason: string }[];
+  skipped_count: number;
+  original_removed: boolean;
+  started_at: number;
+  finished_at: number | null;
+};
+
+/** What a move of the folder would be, before it starts: GET /api/projects/{id}/folders/{id}/move. */
+export type FolderMovePlan = {
+  project_id: string;
+  folder_id: string;
+  /** Empty when the folder cannot move at all (`problem` "not_movable"). */
+  direction: "to_host" | "to_container" | "";
+  source: string;
+  env: "container" | "host";
+  /** The proposed place: `~/Daedalus/projects/<name>` on the host, or under the workspaces root. */
+  destination: string;
+  destination_editable: boolean;
+  host_home: string;
+  problem: "" | "not_movable" | "host_down" | "host_outdated" | "busy";
+  detail: string;
+  blockers: string[];
+  /** A move of this folder that is still running. */
+  job: FolderMoveJob | null;
+};
+
 /** Where a folder of this installation may live, from /api/project-environments. */
 export type ProjectEnvironments = {
   /** The environment the bot itself runs in: its agents work in folders of this one. */

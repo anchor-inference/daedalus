@@ -28,6 +28,7 @@ import { ProjectRoute } from "./project/ProjectRoute";
 import { RevealButton } from "./reveal";
 import { FolderBrowser, type FolderChoice } from "./project/FolderBrowser";
 import { openNewProject } from "./project/NewProject";
+import { MoveFolderButton, movable } from "./project/MoveFolder";
 import { openImport } from "./imports/ImportExplorer";
 
 const PICKED = "daedalus.project";
@@ -296,7 +297,7 @@ export function useEnvironments() {
 }
 
 /** One folder of a project: what it is, who can reach it, the read-only switch and the way to forget it. */
-function FolderRow({ project, folder, environments, write, canWrite }: { project: Project; folder: ProjectDir; environments?: ProjectEnvironments; write: WriteProject; canWrite: boolean }) {
+function FolderRow({ project, folder, environments, write, canWrite, toast }: { project: Project; folder: ProjectDir; environments?: ProjectEnvironments; write: WriteProject; canWrite: boolean; toast: (text: string) => void }) {
   const [busy, setBusy] = useState(false);
   const primary = folder.position === 0;
   const only = project.folders.length === 1;
@@ -334,6 +335,7 @@ function FolderRow({ project, folder, environments, write, canWrite }: { project
         <span>{t("folder.readonly")}</span>
       </label>
       <div className={`sub dir-reach ${reachIsProblem(key) ? "attn" : ""}`}>{t(key)}</div>
+      {canWrite && movable(folder, environments) && <div className="btnrow"><MoveFolderButton projectId={project.id} folder={folder} toast={toast} /></div>}
     </div>
   );
 }
@@ -483,7 +485,7 @@ export function ProjectSettingsSheet({ project: opened, onClose, onRemoved, toas
       )}
       <label className="field">{t("project.folders")}</label>
       <div className="dir-list">
-        {project.folders.map((folder) => <FolderRow key={folder.id} project={project} folder={folder} environments={environments} write={writes.write} canWrite={writes.ready} />)}
+        {project.folders.map((folder) => <FolderRow key={folder.id} project={project} folder={folder} environments={environments} write={writes.write} canWrite={writes.ready} toast={toast} />)}
       </div>
       {adding
         ? <AddFolder project={project} environments={environments} onDone={() => setAdding(false)} toast={toast} write={writes.write} canWrite={writes.ready} />

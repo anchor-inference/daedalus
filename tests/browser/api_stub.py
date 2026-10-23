@@ -34,6 +34,7 @@ from folder_stub import DEFAULT as FOLDERS
 from import_stub import DEFAULT as IMPORTS
 from import_stub import ImportStub
 from memory_stub import MemoryStub
+from move_stub import DEFAULT as MOVES
 from pages_stub import PagesStub
 
 # Outside services_port_range (8100-8119), the range this product hands to an agent's own preview
@@ -953,6 +954,12 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         # The new-project dialog's folder browser, over the invented trees; a check that drives it
         # installs a FolderStub of its own to change the host's state and read the writes back.
         answered = FOLDERS.answer("GET", path, query, None)
+        if answered is not None:
+            return answered[0], "application/json", json.dumps(answered[1])
+    if path.startswith("/api/folder-moves") or (path.startswith("/api/projects/") and path.endswith("/move")):
+        # Moving a folder between the container and the host; a check that drives it installs a
+        # MoveStub of its own with the folders it moves.
+        answered = MOVES.answer(method.upper(), path, body)
         if answered is not None:
             return answered[0], "application/json", json.dumps(answered[1])
     if path.startswith("/api/imports") or (path.startswith("/api/sessions/") and "/import/" in path):

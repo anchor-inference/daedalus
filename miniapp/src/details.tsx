@@ -18,6 +18,7 @@ import { plural, t } from "./i18n";
 import { SessionToolGroups } from "./toolgroupsview";
 import { HostMark } from "./runon";
 import { DiskUsage } from "./diskusage";
+import { MoveFolderButton } from "./project/MoveFolder";
 
 export type DetailsActions = {
   rename: (title: string) => void;
@@ -58,6 +59,7 @@ export type SessionDetailsProps = {
 export function SessionDetails({ ids, id, role = "session", detail, busy, schedules, provider, providerUsage, onOpen, toast, reload, on, focus }: SessionDetailsProps) {
   const container = useRef<HTMLDivElement>(null);
   const conductor = role !== "session";
+  const sessionFolder = detail.project?.folders?.find((folder) => folder.id === detail.folder_id) ?? detail.project?.folders?.[0] ?? null;
   const ctxPct = detail.context && detail.context.window > 0 ? Math.round((100 * detail.context.tokens) / detail.context.window) : null;
   useEffect(() => {
     if (!focus || focus === "session") return;
@@ -122,7 +124,13 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, schedu
             </Fact>
           )}
         </Facts>
-        {!conductor && <div className="btnrow"><button className="btn small" onClick={on.move}>{t("session.project.move")}</button></div>}
+        {!conductor && (
+          <div className="btnrow">
+            <button className="btn small" onClick={on.move}>{t("session.project.move")}</button>
+            {/* The folder the chat works in, carried between the container and the host as a whole. */}
+            {sessionFolder && <MoveFolderButton projectId={detail.project.id} folder={sessionFolder} toast={toast} />}
+          </div>
+        )}
       </Section>}
 
       {role !== "orchestrator" && <Section ids={ids} id="disk" icon="archive" label={t("disk.title")} closed>

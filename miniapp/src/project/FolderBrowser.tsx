@@ -110,11 +110,13 @@ export type FolderBrowserProps = {
   toast: (text: string) => void;
   /** Whether the desktop launcher's window shows the page: it can mount a container folder. */
   launcher?: boolean;
+  /** One side only, without the switch between them: a folder moved to the host is chosen there. */
+  only?: Env;
 };
 
-export function FolderBrowser({ environments, choice, onChoice, onOpenProject, toast, launcher = false }: FolderBrowserProps) {
-  const docker = !!environments?.docker;
-  const local: Env = environments?.local ?? "container";
+export function FolderBrowser({ environments, choice, onChoice, onOpenProject, toast, launcher = false, only }: FolderBrowserProps) {
+  const docker = !!environments?.docker && !only;
+  const local: Env = only ?? environments?.local ?? "container";
   const [env, setEnv] = useState<Env>(choice?.env ?? local);
   // A choice kept from a draft opens on that folder; otherwise where this browser was last left.
   const [path, setPath] = useState(() => choice?.path ?? remembered(choice?.env ?? local));

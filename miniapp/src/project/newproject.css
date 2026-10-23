@@ -161,3 +161,10 @@
   .fb-time { width: auto; }
   .fb-foot, .fb-warn { flex-wrap: wrap; }
 }
+
+/* The move of a folder between the container and the host: the destination with its browse button
+   on one line, and what the move left for the operator as a plain list. */
+.move-dest { display: flex; gap: var(--space-2); align-items: center; }
+.move-dest .field { flex: 1; min-width: 0; }
+.move-folder progress { width: 100%; }
+.move-notes { margin: 0; padding-left: 18px; }
