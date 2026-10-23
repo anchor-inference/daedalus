@@ -622,6 +622,11 @@ class CompactionFailed(SettingProblem):
         super().__init__(message, setting)
 
 
+class FolderMoving(RuntimeError):
+    """A run cannot start: the session's folder is being moved between the container and the host.
+    A ``RuntimeError``, so every caller that turns "this run cannot start" into a message says it."""
+
+
 class WorkspaceUnreachable(RuntimeError):
     """The session's working directory is not there (or not writable) and nothing here can make it.
 
@@ -802,6 +807,10 @@ class SessionManager:
         self.jobs: dict[str, dict[str, Any]] = {}
         """Each session's background jobs by id, shared with its tools; :mod:`daedalus.extensions.jobs`
         watches them and wakes the session when one ends."""
+        self.moving_folders: dict[str, Path] = {}
+        """The project folders being moved now (:mod:`daedalus.host.folder_move`), by folder id, with
+        where they are being copied to. No run starts in one, and the copy's directory is not an
+        orphan for the sweep while it is being filled."""
         self.tools = ToolRegistry()
         """Every tool but the main orchestrator's, MCP proxies included; a session sees the part its policy admits."""
         self.dispatcher_tools = ToolRegistry()
@@ -3103,6 +3112,7 @@ class SessionManager:
         sched = await self.db.fetchall("SELECT workspace FROM schedules")
         known_paths.update(Path(r["workspace"]).resolve() for r in sched)
         known_paths.add((self.settings.workspaces_dir / "heartbeat").resolve())
+        known_paths.update(target.resolve() for target in self.moving_folders.values())
         # A system project's folder lives under the workspaces root and is not a workspace nobody
         # refers to: the companion's agents work in it, and a sweep would take their files with it.
         for project in await self.projects.list():
@@ -3254,6 +3264,25 @@ class SessionManager:
         running contradicts its own screen, which says idle.
         """
         return {sid for sid, state in self._states.items() if state.running or state.pending is not None}
+
+    def sessions_at_work(self) -> set[str]:
+        """Sessions nothing may move the files of: :meth:`busy_sessions`, one whose next run is being
+        prepared, and one with a background job still running. Wider than a rewrite's test, because a
+        job or a run about to start writes the files whatever the history says."""
+        preparing = {sid for sid, state in self._states.items() if state.submit_lock.locked()}
+        jobs = {sid for sid, jobs in self.jobs.items() if any(getattr(job, "running", False) for job in jobs.values())}
+        return self.busy_sessions() | preparing | jobs
+
+    async def refresh_metadata(self, session_id: str) -> None:
+        """Read a loaded session's metadata again from its row, after something rewrote the row
+        directly (a folder move rewrites the worktree paths in it)."""
+        state = self._states.get(session_id)
+        if state is None:
+            return
+        session = await self.sessions.get(session_id, TENANT)
+        state.session.metadata.clear()  # the Session model is frozen; its dict is the thing that is kept
+        state.session.metadata.update(session.metadata)
+        state.metadata = dict(session.metadata)
 
     def store_occupants(self) -> dict[Path, set[str]]:
         """Which sessions this process holds open in each snapshot store, by the store's own directory.
@@ -3652,6 +3681,15 @@ class SessionManager:
                 raise RuntimeError("dependencies are being installed; wait for the application to restart")
             if self.recovering and not state.running:
                 raise RuntimeError("the bot is starting up and first continues the runs it left behind; try again in a moment")
+            if self.moving_folders and state.project is not None:
+                # A run started under a move would write into a copy that is about to be thrown away,
+                # or into a folder half-way to its new place.
+                try:
+                    moving = self.folder_of(state.session.id, state.metadata, state.project).id in self.moving_folders
+                except RuntimeError:
+                    moving = False
+                if moving:
+                    raise FolderMoving(f"the folder of {state.session.title} is being moved; the run can start once the move is over")
             if not state.workspace.is_dir():
                 # One of ours is remade here: a folder under the managed tree is the installation's
                 # to create, and a run refused because our own bookkeeping lost a directory is an

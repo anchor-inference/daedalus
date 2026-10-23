@@ -1363,6 +1363,86 @@ class ProjectStore:
             await self.list()
         await self.record(project_id, "system", "folder", f"removed the folder {folder.path}", {"folder_id": folder_id})
 
+    async def relocate_folder(self, project_id: str, folder_id: str, *, path: Path, env: str, is_git: bool | None = None) -> ProjectFolder:
+        """Point a folder at its files in their new place, once they have been copied there and checked
+        (:mod:`daedalus.host.folder_move`). One transaction, so nothing ever sees half a move.
+
+        Beside the folder's own row it rewrites what names the old place by its path: a session's
+        worktree (``worktree_cwd`` and ``worktrees`` in its metadata), a staff session's worktree and
+        launch directory, the directory of every terminal that is not running (so a restart opens in
+        the new place, in the new environment), and the environment of a staff member whose default
+        folder this is. The project's default environment follows when every folder is now in the new
+        one. Whatever is running there is the caller's to refuse beforehand. What is not rewritten:
+        the snapshots taken in the old place (a snapshot store belongs to a path, and the new place
+        starts its own) and a stopped service's directory.
+        """
+        target = normalise_root(str(path))
+        if env not in ENVIRONMENTS:
+            raise ProjectError(f"a folder lives in the container or on the host, not {env!r}")
+        async with self._write:
+            project = await self.get(project_id)
+            folder = project.folder(folder_id) if project is not None else None
+            if project is None or folder is None:
+                raise KeyError(folder_id)
+            old, old_env = folder.path, folder.env
+            if target == old and env == old_env:
+                return folder
+            await self._refuse_overlap(target, project_id, mode=_mode(project.settings))
+            git = (env == self.local_env and _detect_git(target)) if is_git is None else is_git
+
+            def moved(raw: Any) -> str | None:
+                text = str(raw or "")
+                if not text:
+                    return None
+                candidate = Path(os.path.normpath(text))
+                if candidate == old:
+                    return str(target)
+                if old in candidate.parents:
+                    return str(target / candidate.relative_to(old))
+                return None
+
+            async with self._db.transaction() as conn:
+                await conn.execute("UPDATE project_folders SET path = ?, env = ?, is_git = ? WHERE id = ?", (str(target), env, int(git), folder_id))
+                settings = project.settings
+                if settings.default_env != env and all(f.env == env for f in project.folders if f.id != folder_id):
+                    settings = replace(settings, default_env=env)
+                    await conn.execute("UPDATE projects SET settings = ? WHERE id = ?", (json.dumps(settings.dump()), project_id))
+                await conn.execute("UPDATE projects SET entity_revision = entity_revision + 1 WHERE id = ?", (project_id,))
+                cursor = await conn.execute("SELECT id, metadata FROM sessions WHERE project_id = ?", (project_id,))
+                for row in await cursor.fetchall():
+                    try:
+                        metadata = json.loads(row["metadata"] or "{}")
+                    except (TypeError, ValueError):
+                        continue
+                    if not isinstance(metadata, dict):
+                        continue
+                    changed = False
+                    if (new := moved(metadata.get("worktree_cwd"))) is not None:
+                        metadata["worktree_cwd"], changed = new, True
+                    worktrees = metadata.get("worktrees")
+                    if isinstance(worktrees, list):
+                        rewritten = [moved(item) or item for item in worktrees]
+                        if rewritten != worktrees:
+                            metadata["worktrees"], changed = rewritten, True
+                    if changed:
+                        await conn.execute("UPDATE sessions SET metadata = ? WHERE id = ?", (json.dumps(metadata), row["id"]))
+                cursor = await conn.execute("SELECT id, worktree_path, launch_cwd FROM staff_sessions WHERE worktree_path IS NOT NULL OR launch_cwd IS NOT NULL")
+                for row in await cursor.fetchall():
+                    worktree, launch = moved(row["worktree_path"]), moved(row["launch_cwd"])
+                    if worktree is not None or launch is not None:
+                        await conn.execute("UPDATE staff_sessions SET worktree_path = ?, launch_cwd = ? WHERE id = ?",
+                                           (worktree or row["worktree_path"], launch or row["launch_cwd"], row["id"]))
+                await conn.execute("UPDATE staff SET env = ? WHERE default_folder_id = ? AND env = ?", (env, folder_id, old_env))
+                cursor = await conn.execute("SELECT id, cwd FROM terminals WHERE env = ? AND status != 'running'", (old_env,))
+                for row in await cursor.fetchall():
+                    if (new := moved(row["cwd"])) is not None:
+                        await conn.execute("UPDATE terminals SET cwd = ?, env = ? WHERE id = ?", (new, env, row["id"]))
+            await self.list()
+            updated = (await self.get(project_id)).folder(folder_id)  # type: ignore[union-attr]
+        assert updated is not None
+        await self.record(project_id, "system", "folder", f"moved the folder {old} ({old_env}) to {target} ({env})", {"folder_id": folder_id})
+        return updated
+
     def _refuse_reserved(self, path: Path) -> None:
         """The folders that are the installation's, or are the whole of the operator's home.
 

@@ -283,6 +283,68 @@ class SideChannels:
         result: dict[str, Any] = await self._side_call(env, "fs.browse", params, what=f"browsing {path or '~'}")
         return result
 
+    # -- moving a folder whole ------------------------------------------------------------------
+
+    async def fs_unpack_begin(self, env: str, path: str, *, total_bytes: int, entries: int, actor: str = "system") -> dict[str, Any]:
+        """Take a new (or empty) folder inside the daemon's home to unpack a folder's tar stream into:
+        ``{transfer, path, created}``. The stream may hold at most ``total_bytes`` of files and
+        ``entries`` entries; see ``fs.unpack_*`` in the protocol. Audited, as every write is."""
+        params = {"path": path, "total_bytes": total_bytes, "entries": entries}
+        try:
+            result: dict[str, Any] = await self._side_call(env, "fs.unpack_begin", params, what=f"preparing {path}")
+        except TerminalError as exc:
+            await self.audit("", env, actor, "unpack", {**params, "error": exc.message})
+            raise
+        await self.audit("", env, actor, "unpack", {**params, "transfer": result.get("transfer"), "created": bool(result.get("created"))})
+        return result
+
+    async def fs_unpack_write(self, env: str, transfer: str, data: bytes) -> int:
+        """The next bytes of the stream (at most 512 KiB); how many it has taken so far."""
+        params = {"transfer": transfer, "data_b64": base64.b64encode(data).decode()}
+        result = await self._side_call(env, "fs.unpack_write", params, what="sending the folder", timeout=120.0)
+        return int(result.get("streamed") or 0)
+
+    async def fs_unpack_finish(self, env: str, transfer: str, *, actor: str = "system") -> dict[str, Any]:
+        """End the stream: ``{files, dirs, symlinks, bytes, sha256, path}`` of the folder as it is now
+        on disk, and of the stream as the daemon received it."""
+        try:
+            result: dict[str, Any] = await self._side_call(env, "fs.unpack_finish", {"transfer": transfer}, what="finishing the folder", timeout=600.0)
+        except TerminalError as exc:
+            await self.audit("", env, actor, "unpack_finish", {"transfer": transfer, "error": exc.message})
+            raise
+        await self.audit("", env, actor, "unpack_finish", {"transfer": transfer, "path": result.get("path"), "files": result.get("files"), "bytes": result.get("bytes")})
+        return result
+
+    async def fs_unpack_abort(self, env: str, transfer: str, *, actor: str = "system") -> None:
+        """End the transfer and have the daemon remove what it wrote."""
+        await self._side_call(env, "fs.unpack_abort", {"transfer": transfer}, what="abandoning the folder", timeout=600.0)
+        await self.audit("", env, actor, "unpack_abort", {"transfer": transfer})
+
+    async def fs_pack_begin(self, env: str, path: str, *, actor: str = "system") -> dict[str, Any]:
+        """Start the tar stream of a folder under the roots: ``{transfer, files, dirs, symlinks, bytes,
+        skipped, skipped_count}``, ``skipped`` naming what is left out and why."""
+        result: dict[str, Any] = await self._side_call(env, "fs.pack_begin", {"path": path}, what=f"reading {path}", timeout=600.0)
+        await self.audit("", env, actor, "pack", {"path": path, "transfer": result.get("transfer"), "files": result.get("files"), "bytes": result.get("bytes"), "skipped": result.get("skipped_count")})
+        return result
+
+    async def fs_pack_read(self, env: str, transfer: str, *, max_bytes: int = 640 << 10) -> tuple[bytes, bool, str]:
+        """The next bytes of a pack's stream, whether it has ended, and at the end its SHA-256."""
+        result = await self._side_call(env, "fs.pack_read", {"transfer": transfer, "max": max_bytes}, what="reading the folder", timeout=120.0)
+        return base64.b64decode(result.get("data_b64") or ""), bool(result.get("eof")), str(result.get("sha256") or "")
+
+    async def fs_pack_close(self, env: str, transfer: str) -> None:
+        """End a pack and leave its folder as it is."""
+        await self._side_call(env, "fs.pack_close", {"transfer": transfer}, what="closing the folder")
+
+    async def fs_pack_remove(self, env: str, transfer: str, *, actor: str = "system") -> None:
+        """Delete the folder a pack has sent whole and unchanged; the daemon refuses otherwise."""
+        try:
+            await self._side_call(env, "fs.pack_remove", {"transfer": transfer}, what="removing the moved folder", timeout=600.0)
+        except TerminalError as exc:
+            await self.audit("", env, actor, "pack_remove", {"transfer": transfer, "error": exc.message})
+            raise
+        await self.audit("", env, actor, "pack_remove", {"transfer": transfer})
+
     # -- other programs' sessions ---------------------------------------------------------------
 
     async def sessions_harnesses(self, env: str) -> dict[str, Any]:

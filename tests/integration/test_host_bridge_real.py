@@ -23,7 +23,9 @@ from typing import Any
 
 import pytest
 
-from daedalus.config import TerminalsConfig
+from daedalus.config import RuntimeConfig, Settings, TerminalsConfig
+from daedalus.host.folder_move import FolderMover
+from daedalus.host.session_runner import SessionManager
 from daedalus.host.worktrees import StaffWorktrees
 from daedalus.stores.database import Database
 from daedalus.stores.projects import ProjectFolder
@@ -208,3 +210,50 @@ async def test_the_daemon_stopped_and_started_as_its_unit_does(service: Terminal
 
 async def _available(service: Terminals) -> bool:
     return service.available("host")
+
+
+async def test_a_folder_moves_to_the_host_and_back(service: Terminals, base: Path, db: Database, settings: Settings, config: RuntimeConfig) -> None:
+    """A chat's folder carried out of the container into the host's home by the real daemon, and back
+    again with the host copy removed: the Python stream and the daemon's tar are one format."""
+    bridge = HostBridge(lambda: service)
+    assert bridge.transfer_problem() == ""
+    manager = SessionManager(settings, config, db=db)
+    await manager.start()
+    try:
+        mover = FolderMover(manager, lambda: bridge, workspaces_dir=settings.workspaces_dir)
+        project = await manager.projects.create("Weather station")
+        source = project.primary.path
+        (source / "src" / "deep").mkdir(parents=True)
+        (source / "src" / "main.py").write_text("print('hi')\n")
+        (source / "run.sh").write_text("#!/bin/sh\n")
+        (source / "run.sh").chmod(0o755)
+        (source / "src" / "deep" / ("long-name-" * 20)).write_bytes(os.urandom(3 << 20))
+        (source / "latest").symlink_to("src/main.py")
+        plan = await mover.plan(project.id, project.primary.id)
+        assert plan["problem"] == "" and plan["destination"] == str(base / "home" / "Daedalus" / "projects" / "weather-station")
+
+        async def finished(job_id: str) -> dict[str, Any]:
+            async with asyncio.timeout(60):
+                while mover.get(job_id).active:
+                    await asyncio.sleep(0.05)
+            return mover.get(job_id).view()
+
+        out = await finished((await mover.start(project.id, project.primary.id)).id)
+        assert out["state"] == "done", out
+        dest = Path(plan["destination"])
+        assert not source.exists() and (dest / "run.sh").stat().st_mode & 0o111
+        assert os.readlink(dest / "latest") == "src/main.py"
+        assert (dest / "src" / "deep" / ("long-name-" * 20)).stat().st_size == 3 << 20
+        moved = (await manager.projects.get(project.id)).primary
+        assert moved.env == "host" and moved.path == dest
+
+        # The roots follow the table on the next housekeeping; pushed now rather than waited for.
+        link = service.links["host"]
+        await service._push_roots("host", link.client, force=True)  # type: ignore[arg-type]
+        back = await finished((await mover.start(project.id, project.primary.id, remove_original=True)).id)
+        assert back["state"] == "done" and back["original_removed"], back
+        home = (await manager.projects.get(project.id)).primary
+        assert home.env == "container" and (home.path / "src" / "main.py").read_text() == "print('hi')\n"
+        assert not dest.exists()
+    finally:
+        await manager.close()

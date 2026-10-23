@@ -72,6 +72,13 @@ OUTDATED_SESSIONS = ("the host terminal daemon is older than this version and ca
                      "(bash deploy/host-terminal.sh install, which ends the open host terminals)")
 
 
+OUTDATED_TRANSFER = ("the host terminal daemon is older than this version and cannot move folders; update it "
+                     "(bash deploy/host-terminal.sh install, which ends the open host terminals)")
+
+TRANSFER_VERSION = 1
+"""The version of the daemon's folder moves (``capabilities.fs_transfer``) this host speaks."""
+
+
 class HostBridge:
     """The host environment through its terminal daemon. The service is looked up on each call,
     because the bridge is installed and removed while this process runs, and the terminals service
@@ -121,6 +128,61 @@ class HostBridge:
             return await self._side(lambda service: service.fs_browse(HOST, path, hidden=hidden, limit=limit))
         except _Outdated:
             raise HostDaemonOutdated(OUTDATED_BROWSE) from None
+
+    def daemon_info(self) -> dict[str, Any]:
+        """What the host daemon said of itself when it last connected (``daemon.info``): its home,
+        its system, its capabilities. Empty while it does not answer."""
+        service = self._terminals()
+        if service is None or not service.available(HOST):
+            return {}
+        link = service.links.get(HOST)
+        return dict(link.info) if link is not None else {}
+
+    def transfer_problem(self) -> str:
+        """Why a folder cannot be moved to or from the host now, or ``""`` when it can: the bridge not
+        answering, or a daemon older than the folder moves, which says how to update it."""
+        if not self.available():
+            return "the host terminal bridge is not available; start it (bash deploy/host-terminal.sh start) and try again"
+        capabilities = self.daemon_info().get("capabilities") or {}
+        try:
+            version = int(capabilities.get("fs_transfer") or 0)
+        except (TypeError, ValueError):
+            version = 0
+        return "" if version >= TRANSFER_VERSION else OUTDATED_TRANSFER
+
+    async def unpack_begin(self, path: str, *, total_bytes: int, entries: int, actor: str = "operator") -> dict[str, Any]:
+        """Take a new or empty folder inside the host's home to receive a folder (``fs.unpack_begin``)."""
+        return await self._transfer(lambda service: service.fs_unpack_begin(HOST, path, total_bytes=total_bytes, entries=entries, actor=actor))
+
+    async def unpack_write(self, transfer: str, data: bytes) -> int:
+        return await self._transfer(lambda service: service.fs_unpack_write(HOST, transfer, data))
+
+    async def unpack_finish(self, transfer: str, *, actor: str = "operator") -> dict[str, Any]:
+        return await self._transfer(lambda service: service.fs_unpack_finish(HOST, transfer, actor=actor))
+
+    async def unpack_abort(self, transfer: str, *, actor: str = "operator") -> None:
+        await self._transfer(lambda service: service.fs_unpack_abort(HOST, transfer, actor=actor))
+
+    async def pack_begin(self, path: str, *, actor: str = "operator") -> dict[str, Any]:
+        """Start sending a host folder under the roots (``fs.pack_begin``)."""
+        return await self._transfer(lambda service: service.fs_pack_begin(HOST, path, actor=actor))
+
+    async def pack_read(self, transfer: str, *, max_bytes: int = 640 << 10) -> tuple[bytes, bool, str]:
+        return await self._transfer(lambda service: service.fs_pack_read(HOST, transfer, max_bytes=max_bytes))
+
+    async def pack_close(self, transfer: str) -> None:
+        await self._transfer(lambda service: service.fs_pack_close(HOST, transfer))
+
+    async def pack_remove(self, transfer: str, *, actor: str = "operator") -> None:
+        await self._transfer(lambda service: service.fs_pack_remove(HOST, transfer, actor=actor))
+
+    async def _transfer(self, call: Callable[[Terminals], Awaitable[_T]]) -> _T:
+        """A folder-move call: a daemon without it is ``HostDaemonOutdated``; down, missing and refused
+        are as ``_side`` says."""
+        try:
+            return await self._side(call)
+        except _Outdated:
+            raise HostDaemonOutdated(OUTDATED_TRANSFER) from None
 
     async def sessions_harnesses(self) -> dict[str, Any]:
         """Which agent programs keep sessions on the machine (``sessions.harnesses``)."""

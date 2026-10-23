@@ -85,6 +85,7 @@ from daedalus.extensions import (
     api_explorations,
     api_files,
     api_folder_browser,
+    api_folder_move,
     api_goal_budget,
     api_harnesses,
     api_integrations,
@@ -1662,6 +1663,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_projects.register(api, app, auth)
     api_project_start.register(api, app, auth)
     api_folder_browser.register(api, app, auth)
+    # Moving a folder between the container and the host, as a background job.
+    api_folder_move.register(api, app, auth)
     api_session_import.register(api, app, auth)
     # A chat's prompt coach: the window the composer opens, and the prompt it saved.
     api_prompt_coach.register(api, app, auth)
