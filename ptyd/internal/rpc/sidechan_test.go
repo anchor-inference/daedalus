@@ -95,7 +95,7 @@ func startSideWith(t *testing.T, box *sandbox.Prober) (*fixture, *rpc.Side) {
 	sessionsEnv := &sessions.Env{Home: cfg.Home, Getenv: func(string) string { return "" }, GOOS: "linux", Refused: fsys.Refused, Now: time.Now}
 	side := &rpc.Side{Exec: sidechan.NewExec(nil, os.Environ(), cfg.Home, log), FS: fsys,
 		Dialer: sidechan.NewDialer(launches), Launches: launches, Listen: hln.Addr().String(), StateDir: cfg.StateDir,
-		Sessions: sessions.NewService(sessionsEnv, sessions.Parsers())}
+		Sessions: sessions.NewService(sessionsEnv, sessions.Parsers()), Transfers: sidechan.NewTransfers(fsys)}
 	ep, err := server.Prepare(cfg.RunDir, "unix", "ptyd")
 	if err != nil {
 		t.Fatal(err)
@@ -366,6 +366,84 @@ func TestAFileIsWrittenIntoAnInboxOverTheSocket(t *testing.T) {
 	}
 	if we := f.callErr("fs.write", map[string]any{"path": filepath.Join(f.dir, "home", ".agents", "inbox", "t", "a"), "offset": 0, "data_b64": []byte("x")}); we == nil || we.Code != wire.CodeForbidden {
 		t.Fatalf("outside the roots: %v", we)
+	}
+}
+
+// TestAFolderIsMovedOverTheSocket packs a project folder and unpacks its stream into a new folder
+// in the home, frame by frame, as the host does when it moves a folder; and a daemon says it can.
+func TestAFolderIsMovedOverTheSocket(t *testing.T) {
+	f, _ := startSide(t)
+	var info struct {
+		Capabilities struct {
+			FSTransfer int `json:"fs_transfer"`
+		} `json:"capabilities"`
+	}
+	f.call(t, "daemon.info", nil, &info)
+	if info.Capabilities.FSTransfer != 1 {
+		t.Fatalf("%+v", info)
+	}
+	project := filepath.Join(f.dir, "project")
+	if err := os.MkdirAll(filepath.Join(project, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "src", "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var roots map[string]any
+	f.call(t, "fs.set_roots", map[string]any{"roots": []string{project}}, &roots)
+	var packed struct {
+		Transfer string `json:"transfer"`
+		Files    int    `json:"files"`
+		Dirs     int    `json:"dirs"`
+		Bytes    int64  `json:"bytes"`
+	}
+	f.call(t, "fs.pack_begin", map[string]any{"path": project}, &packed)
+	if packed.Files != 1 || packed.Dirs != 1 {
+		t.Fatalf("%+v", packed)
+	}
+	dest := filepath.Join(f.dir, "home", "moved")
+	var began struct {
+		Transfer string `json:"transfer"`
+		Created  bool   `json:"created"`
+	}
+	f.call(t, "fs.unpack_begin", map[string]any{"path": dest, "total_bytes": packed.Bytes, "entries": packed.Files + packed.Dirs}, &began)
+	var sent string
+	for {
+		var chunk struct {
+			Data   []byte `json:"data_b64"`
+			EOF    bool   `json:"eof"`
+			SHA256 string `json:"sha256"`
+		}
+		f.call(t, "fs.pack_read", map[string]any{"transfer": packed.Transfer, "max": 4096}, &chunk)
+		if len(chunk.Data) > 0 {
+			f.call(t, "fs.unpack_write", map[string]any{"transfer": began.Transfer, "data_b64": chunk.Data}, nil)
+		}
+		if chunk.EOF {
+			sent = chunk.SHA256
+			break
+		}
+	}
+	var done struct {
+		Files  int    `json:"files"`
+		SHA256 string `json:"sha256"`
+	}
+	f.call(t, "fs.unpack_finish", map[string]any{"transfer": began.Transfer}, &done)
+	if done.Files != 1 || done.SHA256 != sent {
+		t.Fatalf("%+v, sent %s", done, sent)
+	}
+	if body, _ := os.ReadFile(filepath.Join(dest, "src", "main.go")); string(body) != "package main\n" {
+		t.Fatalf("%q", body)
+	}
+	f.call(t, "fs.pack_remove", map[string]any{"transfer": packed.Transfer}, nil)
+	if _, err := os.Stat(project); !os.IsNotExist(err) {
+		t.Fatalf("the sent folder is still there: %v", err)
+	}
+	// Outside the home nothing is unpacked.
+	if we := f.callErr("fs.unpack_begin", map[string]any{"path": filepath.Join(f.dir, "elsewhere"), "total_bytes": 1, "entries": 1}); we == nil || we.Code != wire.CodeForbidden {
+		t.Fatalf("outside the home: %v", we)
+	}
+	if we := f.callErr("fs.unpack_write", map[string]any{"transfer": "nope", "data_b64": []byte("x")}); we == nil || we.Code != wire.CodeNotFound {
+		t.Fatalf("an unknown transfer: %v", we)
 	}
 }
 

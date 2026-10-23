@@ -35,16 +35,18 @@ func startSide(cfg *config.Config, evlog *events.Log, environ []string, log *slo
 		return nil, nil, err
 	}
 	side := &rpc.Side{
-		Exec:     sidechan.NewExec(cfg.Side.ExecAllow, environ, cfg.Home, log),
-		FS:       fsys,
-		Dialer:   sidechan.NewDialer(launches),
-		Launches: launches,
-		Sessions: sessions.NewService(sessions.NewEnv(cfg.Home, fsys.Refused), sessions.Parsers()),
-		Listen:   ln.Addr().String(),
-		StateDir: cfg.StateDir,
+		Exec:      sidechan.NewExec(cfg.Side.ExecAllow, environ, cfg.Home, log),
+		FS:        fsys,
+		Dialer:    sidechan.NewDialer(launches),
+		Launches:  launches,
+		Sessions:  sessions.NewService(sessions.NewEnv(cfg.Home, fsys.Refused), sessions.Parsers()),
+		Transfers: sidechan.NewTransfers(fsys),
+		Listen:    ln.Addr().String(),
+		StateDir:  cfg.StateDir,
 	}
 	log.Info("hook listener", "listen", side.Listen)
 	return side, func() {
+		side.Transfers.Close()
 		launches.Close()
 		_ = hsrv.Close()
 	}, nil

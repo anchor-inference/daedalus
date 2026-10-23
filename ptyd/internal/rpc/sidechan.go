@@ -27,8 +27,10 @@ type Side struct {
 	Launches *hooks.Registry
 	// Sessions reads other agent programs' sessions for import; nil leaves sessions.* unregistered.
 	Sessions *sessions.Service
-	Listen   string // the hook listener's address
-	StateDir string
+	// Transfers moves whole folders (fs.unpack_*, fs.pack_*); nil leaves them unregistered.
+	Transfers *sidechan.Transfers
+	Listen    string // the hook listener's address
+	StateDir  string
 }
 
 func (d *Daemon) registerSide(srv *server.Server) {
@@ -50,6 +52,16 @@ func (d *Daemon) registerSide(srv *server.Server) {
 	srv.Handle("hooks.unregister_launch", d.unregisterLaunch)
 	srv.Handle("hooks.reply", d.hookReply)
 	srv.Handle("hooks.put_file", d.putFile)
+	if d.Side.Transfers != nil {
+		srv.Handle("fs.unpack_begin", d.fsUnpackBegin)
+		srv.Handle("fs.unpack_write", d.fsUnpackWrite)
+		srv.Handle("fs.unpack_finish", d.fsUnpackFinish)
+		srv.Handle("fs.unpack_abort", d.fsUnpackAbort)
+		srv.Handle("fs.pack_begin", d.fsPackBegin)
+		srv.Handle("fs.pack_read", d.fsPackRead)
+		srv.Handle("fs.pack_close", d.fsPackClose)
+		srv.Handle("fs.pack_remove", d.fsPackRemove)
+	}
 	if d.Side.Sessions != nil {
 		srv.Handle("sessions.harnesses", d.sessionsHarnesses)
 		srv.Handle("sessions.scan", d.sessionsScan)
@@ -70,7 +82,8 @@ func (d *Daemon) sideInfo() map[string]any {
 	if d.Side == nil {
 		return map[string]any{}
 	}
-	return map[string]any{"exec_allow": d.Side.Exec.Allowed(), "fs_roots": d.Side.FS.Roots(), "state_dir": d.Side.StateDir}
+	return map[string]any{"exec_allow": d.Side.Exec.Allowed(), "fs_roots": d.Side.FS.Roots(), "state_dir": d.Side.StateDir,
+		"fs_transfer": d.Side.Transfers != nil}
 }
 
 // sideError gives the side channels' errors their protocol codes.
@@ -294,6 +307,132 @@ func (d *Daemon) fsSetRoots(ctx context.Context, c *server.Conn, params json.Raw
 		refused = []sidechan.Refusal{}
 	}
 	return map[string]any{"roots": d.Side.FS.Roots(), "accepted": accepted, "refused": refused}, nil
+}
+
+// fsUnpackBegin starts moving a folder here: the one write outside an inbox, into a new or empty
+// folder inside the home directory (see sidechan.Transfers). Logged, as every write is.
+func (d *Daemon) fsUnpackBegin(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p struct {
+		Path       string `json:"path"`
+		TotalBytes int64  `json:"total_bytes"`
+		Entries    int    `json:"entries"`
+	}
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	r, err := d.Side.Transfers.UnpackBegin(p.Path, p.TotalBytes, p.Entries)
+	if err != nil {
+		d.logRefusal("fs.unpack_begin", p.Path, err)
+		return nil, sideError(err)
+	}
+	d.Log.Info("fs.unpack_begin", "path", r.Path, "transfer", r.Transfer, "created", r.Created, "total_bytes", p.TotalBytes, "entries", p.Entries)
+	return r, nil
+}
+
+func (d *Daemon) fsUnpackWrite(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p struct {
+		Transfer string `json:"transfer"`
+		Data     []byte `json:"data_b64"`
+	}
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	streamed, err := d.Side.Transfers.UnpackWrite(p.Transfer, p.Data)
+	if err != nil {
+		return nil, sideError(err)
+	}
+	return map[string]any{"streamed": streamed}, nil
+}
+
+func (d *Daemon) fsUnpackFinish(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p struct {
+		Transfer string `json:"transfer"`
+	}
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	r, err := d.Side.Transfers.UnpackFinish(p.Transfer)
+	if err != nil {
+		d.Log.Warn("fs.unpack_finish failed", "transfer", p.Transfer, "reason", err.Error())
+		return nil, sideError(err)
+	}
+	d.Log.Info("fs.unpack_finish", "path", r.Path, "transfer", p.Transfer, "files", r.Files, "bytes", r.Bytes)
+	return r, nil
+}
+
+func (d *Daemon) fsUnpackAbort(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p struct {
+		Transfer string `json:"transfer"`
+	}
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	if err := d.Side.Transfers.UnpackAbort(p.Transfer); err != nil {
+		return nil, sideError(err)
+	}
+	d.Log.Info("fs.unpack_abort", "transfer", p.Transfer)
+	return map[string]any{"aborted": true}, nil
+}
+
+func (d *Daemon) fsPackBegin(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p struct {
+		Path string `json:"path"`
+	}
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	r, err := d.Side.Transfers.PackBegin(p.Path)
+	if err != nil {
+		d.logRefusal("fs.pack_begin", p.Path, err)
+		return nil, sideError(err)
+	}
+	d.Log.Info("fs.pack_begin", "path", p.Path, "transfer", r.Transfer, "files", r.Files, "bytes", r.Bytes, "skipped", r.SkippedCount)
+	return r, nil
+}
+
+func (d *Daemon) fsPackRead(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p struct {
+		Transfer string `json:"transfer"`
+		Max      int    `json:"max"`
+	}
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	r, err := d.Side.Transfers.PackRead(p.Transfer, p.Max)
+	if err != nil {
+		return nil, sideError(err)
+	}
+	return r, nil
+}
+
+func (d *Daemon) fsPackClose(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p struct {
+		Transfer string `json:"transfer"`
+	}
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	if err := d.Side.Transfers.PackClose(p.Transfer); err != nil {
+		return nil, sideError(err)
+	}
+	return map[string]any{"closed": true}, nil
+}
+
+// fsPackRemove deletes a folder the pack has just sent whole and unchanged: the move's last step,
+// taken only after the host has verified the copy and switched to it.
+func (d *Daemon) fsPackRemove(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p struct {
+		Transfer string `json:"transfer"`
+	}
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	if err := d.Side.Transfers.PackRemove(p.Transfer); err != nil {
+		d.Log.Warn("fs.pack_remove refused", "transfer", p.Transfer, "reason", err.Error())
+		return nil, sideError(err)
+	}
+	d.Log.Info("fs.pack_remove", "transfer", p.Transfer)
+	return map[string]any{"removed": true}, nil
 }
 
 // sessionsHarnesses lists the agent programs whose sessions this machine holds (sessions.*: read

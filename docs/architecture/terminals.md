@@ -724,6 +724,37 @@ makes a folder with `fs.mkdir` and checks the chosen one with `fs.stat {as_root}
 to the rules a project folder is held to. A daemon older than the call answers "method not found",
 which the host turns into "update the host terminal daemon" instead of a broken picker.
 
+### Moving a folder whole
+
+A project folder (or a chat's) is carried between the agent's container and the operator's machine as
+one tar stream, cut into calls a frame long. The container side is the host process's own disk; the
+daemon on the machine is the other end. `daemon.info` names the version as
+`capabilities.fs_transfer` (`1`; absent or `0` on a daemon without these calls), so the host says
+"update the host terminal" before a move starts rather than halfway through one.
+
+| Method | Params → result |
+|---|---|
+| `fs.unpack_begin` | `{path, total_bytes, entries}` → `{transfer, path, created}`: takes a folder to unpack into. It must be absolute, strictly inside the home directory, held to the rules a project folder is (not denied, not the daemon's own, not holding the home), and missing (made, with its parents) or an empty plain folder |
+| `fs.unpack_write` | `{transfer, data_b64}` → `{streamed}`: the next ≤ 512 KiB of the stream |
+| `fs.unpack_finish` | `{transfer}` → `{files, dirs, symlinks, bytes, sha256, path}`: the folder counted on disk afterwards, and the SHA-256 of the stream as received |
+| `fs.unpack_abort` | `{transfer}` → `{aborted}`: removes what was written — the folder when the transfer made it, its contents when it was there and empty |
+| `fs.pack_begin` | `{path}` → `{transfer, files, dirs, symlinks, bytes, skipped[{path, reason}], skipped_count}`: the manifest of a folder under the roots |
+| `fs.pack_read` | `{transfer, max?}` → `{data_b64, eof, sha256?}`: the next bytes; at the end, the stream's SHA-256 |
+| `fs.pack_close` | `{transfer}` → `{closed}`: ends a pack; the folder is left as it is |
+| `fs.pack_remove` | `{transfer}` → `{removed}`: deletes the folder a pack has sent, and ends it |
+
+Every entry of an unpacked stream is a relative name without `..` (on Windows also without `\` or
+`:`); a symbolic link may only point inside the folder, and nothing is written through a link the
+stream made; directories, regular files (permission bits kept, at least owner read and write) and
+links are the only kinds. The regular files may not hold more than `total_bytes`, nor the stream
+more than `entries` entries. A pack leaves out, and names, what a read never opens — denied files,
+the daemon's own directories — and links that point out of the folder, sockets, devices and FIFOs.
+`fs.pack_remove` is refused unless the stream was read to its end, nothing was left out, the path
+still resolves to the folder that was sent, and the folder is still exactly the manifest (no entry
+added, removed, resized or touched). At most 4 transfers run at once, a folder is at most 64 GiB and
+two million entries, and a transfer nobody calls for 10 minutes is abandoned and cleaned up as an
+abort would.
+
 ### Sessions of other programs
 
 `sessions.*` reads the sessions other agent programs keep on the machine — Claude Code, Codex, Grok
@@ -982,7 +1013,9 @@ because the token in them is a shell.
   `browse(path)`, `stat_folder(path)` and `mkdir(path)` are the new-project folder picker's view of
   the host through `fs.browse`, `fs.stat {as_root}` and `fs.mkdir`, and a daemon without `fs.browse`
   is `HostDaemonOutdated`, an `OSError` that says to update it. Project
-  folders accept a host folder only while it answers.
+  folders accept a host folder only while it answers. `unpack_*` and `pack_*` move a folder whole
+  (`daedalus/host/folder_move.py`); a daemon whose `capabilities.fs_transfer` is missing is
+  `HostDaemonOutdated` before anything is copied.
 
 | Route | |
 |---|---|

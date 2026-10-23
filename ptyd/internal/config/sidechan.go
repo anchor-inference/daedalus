@@ -36,6 +36,18 @@ const (
 	MaxFSWrite     = 512 << 10
 	MaxFSWriteFile = 50 << 20
 
+	// MaxTransfers bounds the folder moves (fs.unpack_*, fs.pack_*) running at once, and
+	// TransferIdle how long one waits for its next call before it is abandoned and cleaned up: the
+	// host that started it may have restarted and forgotten it.
+	MaxTransfers = 4
+	TransferIdle = 10 * time.Minute
+
+	// MaxTransferBytes and MaxTransferEntries bound one folder moved whole: a project, not a disk.
+	// MaxTransferSkipped bounds the entries a pack names as left out; it counts all of them.
+	MaxTransferBytes   = 64 << 30
+	MaxTransferEntries = 2_000_000
+	MaxTransferSkipped = 200
+
 	// MaxFSList and DefaultFSList bound the entries of one fs.list.
 	MaxFSList     = 5000
 	DefaultFSList = 1000
