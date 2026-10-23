@@ -80,6 +80,20 @@ static void dk_request_ax(void) {
 	CFRelease(options);
 }
 
+// dk_stay_out_of_dock makes this process a background one before anything else touches AppKit.
+// deskd sits in Daedalus.app/Contents/MacOS, so the system takes the application's Info.plist for
+// its own: the first AppKit call (NSEvent, NSScreen, NSWorkspace below) checked it in as a second
+// copy of Daedalus, an ordinary application with a Dock icon. It never runs an event loop and so
+// never finishes launching, and that icon bounced for as long as the daemon ran. Prohibited is what
+// LSBackgroundOnly would say if the daemon had a bundle of its own: no Dock icon, no menu bar, never
+// activated. The grants are not affected: they follow the responsible process, the app.
+static void dk_stay_out_of_dock(void) {
+	@autoreleasepool {
+		[NSApplication sharedApplication];
+		[NSApp setActivationPolicy:NSApplicationActivationPolicyProhibited];
+	}
+}
+
 static double dk_double_click_interval(void) {
 	double interval = 0;
 	@autoreleasepool {
@@ -569,6 +583,7 @@ import (
 	"fmt"
 	"image"
 	"math"
+	"runtime"
 	"slices"
 	"strconv"
 	"sync"
@@ -595,6 +610,15 @@ type quartz struct {
 	held   heldButtons
 	mods   uint64
 	clicks clickCounter
+}
+
+// The activation policy is NSApplication's, which belongs to the main thread; init is the last point
+// where the main goroutine is certain to be on it, and locking it there keeps it there. It runs for
+// every subcommand: only the self-test's window needs to be an ordinary application, and it says so
+// itself when it opens one.
+func init() {
+	runtime.LockOSThread()
+	C.dk_stay_out_of_dock()
 }
 
 // Open opens the desktop of the logged-in user. It fails without a window server session (a process
