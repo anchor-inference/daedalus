@@ -88,3 +88,121 @@ test('a folder is opened, a file is shown in its folder, and nothing else is tou
     assert.equal(policy.revealAction(bad, stat), null, String(bad));
   }
 });
+
+test('closing keeps the application in the tray, and a Mac window leaves full screen before it hides', () => {
+  assert.equal(policy.closeAction({ platform: 'darwin', keep: false, fullScreen: true }), 'close');
+  assert.equal(policy.closeAction({ platform: 'darwin', keep: true, fullScreen: false, simpleFullScreen: false }), 'hide');
+  // Hidden as it was, a native full-screen window kept its Space: a black screen nothing closed.
+  assert.equal(policy.closeAction({ platform: 'darwin', keep: true, fullScreen: true, simpleFullScreen: false }), 'leave-full-screen');
+  assert.equal(policy.closeAction({ platform: 'darwin', keep: true, fullScreen: false, simpleFullScreen: true }), 'leave-simple-full-screen');
+  for (const platform of ['win32', 'linux']) {
+    assert.equal(policy.closeAction({ platform, keep: true, fullScreen: true }), 'hide', platform);
+    assert.equal(policy.closeAction({ platform, keep: false, fullScreen: true }), 'close', platform);
+  }
+});
+
+test('a full-screen window saves the bounds it had as an ordinary window', () => {
+  const normalBounds = { x: 0, y: 0, width: 1512, height: 982 };
+  const lastNormal = { bounds: { x: 100, y: 80, width: 1100, height: 760 }, maximized: true };
+  assert.deepEqual(policy.windowStateToSave({ fullScreen: true, normalBounds, maximized: false, lastNormal }), lastNormal);
+  assert.equal(policy.windowStateToSave({ fullScreen: true, normalBounds, maximized: false, lastNormal: null }), null);
+  assert.deepEqual(policy.windowStateToSave({ fullScreen: false, normalBounds, maximized: true, lastNormal }), { bounds: normalBounds, maximized: true });
+});
+
+function fakeWindow() {
+  const listeners = new Map();
+  return {
+    calls: [],
+    destroyed: false,
+    once(name, fn) {
+      listeners.set(name, fn);
+    },
+    removeListener(name, fn) {
+      if (listeners.get(name) === fn) listeners.delete(name);
+    },
+    emit(name) {
+      const fn = listeners.get(name);
+      listeners.delete(name);
+      if (fn) fn();
+    },
+    listening(name) {
+      return listeners.has(name);
+    },
+    setFullScreen(flag) {
+      this.calls.push(`full screen ${flag}`);
+    },
+    hide() {
+      this.calls.push('hide');
+    },
+    isDestroyed() {
+      return this.destroyed;
+    },
+  };
+}
+
+function fakeTimers() {
+  const timers = { pending: new Map(), next: 1 };
+  timers.set = (fn, ms) => {
+    const id = timers.next++;
+    timers.pending.set(id, { fn, ms });
+    return id;
+  };
+  timers.clear = (id) => timers.pending.delete(id);
+  timers.fire = () => {
+    for (const [id, { fn }] of [...timers.pending]) {
+      timers.pending.delete(id);
+      fn();
+    }
+  };
+  return timers;
+}
+
+test('the window hides once it has left full screen, not before', () => {
+  const window = fakeWindow();
+  const timers = fakeTimers();
+  let hidden = 0;
+  policy.leaveFullScreenThenHide(window, { onHidden: () => hidden++, setTimer: timers.set, clearTimer: timers.clear });
+  assert.deepEqual(window.calls, ['full screen false']);
+  window.emit('leave-full-screen');
+  assert.deepEqual(window.calls, ['full screen false', 'hide']);
+  assert.equal(hidden, 1);
+  assert.equal(timers.pending.size, 0);
+  timers.fire();
+  assert.equal(hidden, 1);
+});
+
+test('a transition that never ends still hides the window, once', () => {
+  const window = fakeWindow();
+  const timers = fakeTimers();
+  let hidden = 0;
+  policy.leaveFullScreenThenHide(window, { onHidden: () => hidden++, setTimer: timers.set, clearTimer: timers.clear });
+  assert.equal([...timers.pending.values()][0].ms, 2000);
+  timers.fire();
+  assert.deepEqual(window.calls, ['full screen false', 'hide']);
+  assert.equal(window.listening('leave-full-screen'), false);
+  window.emit('leave-full-screen');
+  assert.equal(hidden, 1);
+});
+
+test('a window shown again before it is out of full screen is not hidden', () => {
+  const window = fakeWindow();
+  const timers = fakeTimers();
+  let hidden = 0;
+  const cancel = policy.leaveFullScreenThenHide(window, { onHidden: () => hidden++, setTimer: timers.set, clearTimer: timers.clear });
+  cancel();
+  window.emit('leave-full-screen');
+  timers.fire();
+  assert.deepEqual(window.calls, ['full screen false']);
+  assert.equal(hidden, 0);
+});
+
+test('a window destroyed during the transition is left alone', () => {
+  const window = fakeWindow();
+  const timers = fakeTimers();
+  let hidden = 0;
+  policy.leaveFullScreenThenHide(window, { onHidden: () => hidden++, setTimer: timers.set, clearTimer: timers.clear });
+  window.destroyed = true;
+  window.emit('leave-full-screen');
+  assert.deepEqual(window.calls, ['full screen false']);
+  assert.equal(hidden, 0);
+});

@@ -2,7 +2,7 @@
 
 // The decisions the shell makes, kept apart from Electron so that they are tested on their own
 // (test/policy.test.js): which addresses stay in the window, what a line from the launcher means,
-// where a window may reopen, and when the Linux sandbox cannot work.
+// where a window may reopen, what closing it does, and when the Linux sandbox cannot work.
 
 const path = require('node:path');
 const { fileURLToPath } = require('node:url');
@@ -97,6 +97,59 @@ function restoreBounds(saved, workAreas) {
   return { bounds: { x: bounds.x, y: bounds.y, width, height }, maximized: Boolean(saved.maximized) };
 }
 
+// closeAction decides what closing the main window does: 'close' when it really closes, 'hide' when
+// the application stays in the tray, and on a Mac, when the window is in full screen, the full screen
+// it must leave first. Hiding a window that is in native full screen on macOS hides the window and
+// keeps its Space: the operator was left looking at a black full-screen Space that nothing would
+// close. So the window leaves full screen ('leave-full-screen', which is animated and ends with an
+// event) and is hidden after that. Simple full screen has no Space of its own and is left at once
+// ('leave-simple-full-screen'), so the window comes back as a window. Elsewhere a hidden full-screen
+// window leaves nothing behind and is hidden as it is.
+function closeAction({ platform, keep, fullScreen, simpleFullScreen }) {
+  if (!keep) return 'close';
+  if (platform !== 'darwin') return 'hide';
+  if (fullScreen) return 'leave-full-screen';
+  if (simpleFullScreen) return 'leave-simple-full-screen';
+  return 'hide';
+}
+
+// windowStateToSave is what window.json gets. In full screen the window's own idea of its normal
+// bounds cannot be trusted on a Mac — the window is the size of the screen, and a window that opened
+// at that size would cover the screen without being in full screen — so the last bounds seen while
+// the window was an ordinary window are kept instead, with whether it was maximized then. Without
+// any, nothing is saved and the file keeps what it had.
+function windowStateToSave({ fullScreen, normalBounds, maximized, lastNormal }) {
+  if (fullScreen) return lastNormal ? { bounds: { ...lastNormal.bounds }, maximized: Boolean(lastNormal.maximized) } : null;
+  return { bounds: { ...normalBounds }, maximized: Boolean(maximized) };
+}
+
+// leaveFullScreenThenHide takes a window out of native full screen and hides it once it is out,
+// and returns what calls that off. 'leave-full-screen' is the end of the animation; a window hidden
+// before it keeps its Space, which is the black screen closeAction exists to avoid. The timer is for
+// a transition that never reports its end (the system refused it, the Space went away under it): the
+// window is hidden anyway rather than left on screen after a close. onHidden runs only when the
+// window was hidden, never after the call is off or on a window already destroyed.
+function leaveFullScreenThenHide(window, { onHidden, timeoutMs = 2000, setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
+  let done = false;
+  let timer = null;
+  const stop = () => {
+    done = true;
+    clearTimer(timer);
+    window.removeListener('leave-full-screen', finish);
+  };
+  function finish() {
+    if (done) return;
+    stop();
+    if (window.isDestroyed()) return;
+    window.hide();
+    if (onHidden) onHidden();
+  }
+  timer = setTimer(finish, timeoutMs);
+  window.once('leave-full-screen', finish);
+  window.setFullScreen(false);
+  return stop;
+}
+
 // sandboxUnavailable says that Chromium's sandbox cannot start on this Linux machine: unprivileged
 // user namespaces are forbidden (Ubuntu 24.04 does it through AppArmor) and the setuid helper it
 // would fall back to is not there — an AppImage cannot carry one, and a folder unpacked by hand has
@@ -177,4 +230,4 @@ function strings(locale) {
   return String(locale || '').toLowerCase().startsWith('ru') ? dictionary.ru : dictionary.en;
 }
 
-module.exports = { isInternal, isOwnFile, isExternal, revealAction, linkFrom, parseEvent, restoreBounds, sandboxUnavailable, strings, dictionary };
+module.exports = { isInternal, isOwnFile, isExternal, revealAction, linkFrom, parseEvent, restoreBounds, closeAction, leaveFullScreenThenHide, windowStateToSave, sandboxUnavailable, strings, dictionary };

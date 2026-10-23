@@ -1,6 +1,7 @@
 package quartz
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -232,5 +233,29 @@ func TestCaptureRowsDropTheirPadding(t *testing.T) {
 	blank, _ := rgbaFromRows(2, 1, 8, make([]byte, 8))
 	if !allZero(blank) {
 		t.Error("a transparent picture does not count as empty")
+	}
+}
+
+// The daemon lives inside Daedalus.app and takes the application's Info.plist for its own, so without
+// a background activation policy set before any other AppKit call it showed in the Dock as a second
+// Daedalus that bounced for as long as it ran. The cgo file builds only on a Mac; this reads it, so
+// that the guard holds on every machine the tests run on.
+func TestTheDaemonStaysOutOfTheDock(t *testing.T) {
+	body, err := os.ReadFile("quartz_darwin.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(body)
+	if !strings.Contains(source, "[NSApp setActivationPolicy:NSApplicationActivationPolicyProhibited]") {
+		t.Fatal("dk_stay_out_of_dock no longer sets the prohibited activation policy")
+	}
+	start := strings.Index(source, "func init() {")
+	if start < 0 {
+		t.Fatal("the init that keeps the daemon out of the Dock is gone")
+	}
+	end := strings.Index(source[start:], "\n}\n")
+	initBody := source[start : start+end]
+	if !strings.Contains(initBody, "runtime.LockOSThread()") || !strings.Contains(initBody, "C.dk_stay_out_of_dock()") {
+		t.Fatalf("init must lock the main thread and leave the Dock before anything else runs:\n%s", initBody)
 	}
 }

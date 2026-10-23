@@ -63,6 +63,13 @@ let quitting = false;
 let upgrading = false;
 let pendingLink = policy.linkFrom(process.argv);
 let windowState = null;
+// The window's bounds the last time it was an ordinary window (neither full screen nor minimized),
+// and whether it was maximized then: what window.json gets while it is in full screen.
+let lastNormal = null;
+// A hide waiting for the window to finish leaving full screen; showing the window cancels it.
+let pendingHide = null;
+// The window was hidden out of full screen and goes back into it the next time it is shown.
+let restoreFullScreen = false;
 // The shell's own few words, in the system's language; read once the application is ready, which
 // is when Electron knows it.
 let strings = policy.strings('en');
@@ -386,21 +393,35 @@ function createWindow() {
     },
   });
   if (windowState.maximized) win.maximize();
+  restoreFullScreen = false;
+  rememberNormal();
   win.once('ready-to-show', () => win.show());
   guard(win.webContents);
   // The pairing link lands on the app by a redirect the launcher never sees: the address the window
   // ends up at is where Quick Chat's page is loaded from.
   win.webContents.on('did-navigate', (_event, url) => quickDesk?.noteAddress(url));
+  for (const name of ['resize', 'move', 'maximize', 'unmaximize']) win.on(name, rememberNormal);
   win.on('close', (event) => {
     saveWindowState();
-    if (quickDesk && quickDesk.keepOnClose(quitting || upgrading)) {
-      event.preventDefault();
-      win.hide();
+    const action = policy.closeAction({
+      platform: process.platform,
+      keep: Boolean(quickDesk && quickDesk.keepOnClose(quitting || upgrading)),
+      fullScreen: win.isFullScreen(),
+      simpleFullScreen: inSimpleFullScreen(win),
+    });
+    if (action === 'close') return;
+    event.preventDefault();
+    if (action === 'leave-full-screen') {
+      hideAfterFullScreen();
+      return;
     }
+    if (action === 'leave-simple-full-screen') win.setSimpleFullScreen(false);
+    win.hide();
   });
   // Quick Chat's window, hidden, still counts as a window, so the last one closing is not what ends
   // the application any more: the main one closing for real is.
   win.on('closed', () => {
+    cancelPendingHide();
     win = null;
     hideCompanion?.();
     if (!quitting && !upgrading) app.quit();
@@ -436,17 +457,61 @@ function openOutside(url) {
   if (policy.isExternal(url)) shell.openExternal(url);
 }
 
+// Simple full screen is a macOS mode; the method is documented for macOS alone, so it is not asked
+// elsewhere.
+function inSimpleFullScreen(window) {
+  return process.platform === 'darwin' && window.isSimpleFullScreen();
+}
+
+function rememberNormal() {
+  if (!win || win.isDestroyed() || win.isFullScreen() || inSimpleFullScreen(win) || win.isMinimized()) return;
+  lastNormal = { bounds: win.getNormalBounds(), maximized: win.isMaximized() };
+}
+
+// hideAfterFullScreen takes the window out of macOS full screen and hides it once it is out
+// (policy.leaveFullScreenThenHide has the why); the window goes back into full screen when it is
+// next shown.
+function hideAfterFullScreen() {
+  if (pendingHide) return;
+  pendingHide = policy.leaveFullScreenThenHide(win, {
+    onHidden: () => {
+      pendingHide = null;
+      restoreFullScreen = true;
+    },
+  });
+}
+
+function cancelPendingHide() {
+  if (!pendingHide) return;
+  pendingHide();
+  pendingHide = null;
+}
+
 function showWindow() {
+  // Shown again while it was still leaving full screen: the hide is off, and the window stays as
+  // the transition leaves it.
+  cancelPendingHide();
   if (!win || win.isDestroyed()) createWindow();
   if (win.isMinimized()) win.restore();
   if (!win.isVisible()) win.show();
+  // It was put away from full screen only to be hidden without its Space, so it goes back there.
+  if (restoreFullScreen) {
+    restoreFullScreen = false;
+    win.setFullScreen(true);
+  }
   win.focus();
 }
 
 function saveWindowState() {
   if (!win || win.isDestroyed()) return;
   try {
-    const state = { bounds: win.getNormalBounds(), maximized: win.isMaximized() };
+    const state = policy.windowStateToSave({
+      fullScreen: win.isFullScreen() || inSimpleFullScreen(win),
+      normalBounds: win.getNormalBounds(),
+      maximized: win.isMaximized(),
+      lastNormal,
+    });
+    if (!state) return;
     fs.mkdirSync(path.dirname(windowStateFile()), { recursive: true });
     fs.writeFileSync(windowStateFile(), JSON.stringify(state));
   } catch {}
