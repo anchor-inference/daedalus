@@ -23,6 +23,7 @@ from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
 
+import clients
 import httpx
 
 logger = logging.getLogger("keyproxy.subscriptions")
@@ -30,7 +31,6 @@ logger = logging.getLogger("keyproxy.subscriptions")
 CODEX_BASE = "https://chatgpt.com/backend-api"
 CODEX_TOKEN_URL = "https://auth.openai.com/oauth/token"
 CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
-CODEX_HEADERS = {"OpenAI-Beta": "responses=experimental", "originator": "codex_cli_rs"}
 GROK_BASE = "https://cli-chat-proxy.grok.com/v1"
 GROK_ISSUER = "https://auth.x.ai"
 REFRESH_SKEW_SECONDS = 300
@@ -67,24 +67,26 @@ def _jwt_claims(token: str) -> dict[str, Any]:
         return {}
 
 
-def _installed_grok_version() -> str:
+def codex_headers() -> dict[str, str]:
+    """The Codex CLI's identity, from its profile in clients.py.
+
+    Until 0.163 was compared this sent ``OpenAI-Beta: responses=experimental``, which the CLI no
+    longer sends, and no User-Agent at all, so every call went out as python-httpx: the CLI names
+    itself, its version and its platform in that header on every request.
+    """
+    current = clients.profile("codex")
+    return {"originator": current["originator"], "User-Agent": f"{current['originator']}/{current['version']} {current['platform']}"}
+
+
+def grok_version() -> str:
     """The grok CLI version the chat proxy expects on ``x-grok-client-version``.
 
     A constant here went stale at 0.2.101 while the CLI moved to 1.x, and this proxy has
-    already seen that host answer 426 "CLI version outdated" for a missing version. The
-    binary is mounted next to the login (``<grok home>/bin/grok`` → ``grok-<version>-…``),
-    so the version is read from that name. ``KEYPROXY_GROK_CLIENT_VERSION`` wins when set.
+    already seen that host answer 426 "CLI version outdated" for a missing version. The profile in
+    clients.py takes the newest of its built-in version, an update stored from the app and the
+    CLI mounted next to the login; ``KEYPROXY_GROK_CLIENT_VERSION`` wins when set.
     """
-    override = os.environ.get("KEYPROXY_GROK_CLIENT_VERSION", "").strip()
-    if override:
-        return override
-    auth = Path(os.environ.get("KEYPROXY_GROK_AUTH", os.path.expanduser("~/.grok/auth.json")))
-    try:
-        name = (auth.parent / "bin" / "grok").resolve().name
-    except OSError:
-        name = ""
-    found = re.search(r"(\d+\.\d+\.\d+)", name)
-    return found.group(1) if found else "1.0.40"
+    return clients.version("grok")
 
 
 def _grok_headers(version: str) -> dict[str, str]:
@@ -96,10 +98,6 @@ def _grok_headers(version: str) -> dict[str, str]:
         "X-XAI-Token-Auth": "xai-grok-cli",
         "x-authenticateresponse": "authenticate-response",
     }
-
-
-GROK_CLIENT_VERSION = _installed_grok_version()
-GROK_HEADERS = _grok_headers(GROK_CLIENT_VERSION)
 
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
@@ -159,7 +157,7 @@ class CodexAuth:
 
     async def headers(self, client: httpx.AsyncClient) -> dict[str, str]:
         access, account = await self.credentials(client)
-        out = {"authorization": f"Bearer {access}", **CODEX_HEADERS}
+        out = {"authorization": f"Bearer {access}", **codex_headers()}
         if account:
             out["chatgpt-account-id"] = account
         return out
@@ -217,7 +215,7 @@ class GrokAuth:
             response = await client.post(
                 self._token_endpoint,
                 data={"grant_type": "refresh_token", "client_id": str(entry.get("oidc_client_id") or ""), "refresh_token": str(entry.get("refresh_token") or "")},
-                headers={"accept": "application/json", "x-grok-client-version": GROK_CLIENT_VERSION, "x-grok-client-surface": "cli"},
+                headers={"accept": "application/json", "x-grok-client-version": grok_version(), "x-grok-client-surface": "cli"},
             )
             if response.status_code != 200:
                 raise SubscriptionError(f"grok token refresh failed: HTTP {response.status_code} {response.text[:160]}")
@@ -235,7 +233,7 @@ class GrokAuth:
             return str(entry["key"])
 
     async def headers(self, client: httpx.AsyncClient) -> dict[str, str]:
-        return {"authorization": f"Bearer {await self.token(client)}", **GROK_HEADERS}
+        return {"authorization": f"Bearer {await self.token(client)}", **_grok_headers(grok_version())}
 
 
 # -- Codex: chat completions ⇄ Responses ---------------------------------------------------------------
@@ -722,9 +720,11 @@ __all__ = [
     "GrokAuth",
     "SubscriptionError",
     "chat_to_responses",
+    "codex_headers",
     "codex_usage_view",
     "collect_completion",
     "grok_usage_view",
+    "grok_version",
     "KEEPALIVE",
     "REASONING_FORMAT",
     "reasoning_detail",

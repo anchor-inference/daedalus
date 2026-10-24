@@ -185,7 +185,7 @@ async def test_the_proxy_sends_the_session_header_and_retries_once_without_refus
         reply = await (await client.post("/codex/v1/chat/completions", json=body)).json()
     assert reply["choices"][0]["message"]["content"] == "OK"
     assert len(seen) == 2
-    assert all(r.headers["session_id"] == "sess-1234" for r in seen)
+    assert all(r.headers["session-id"] == r.headers["thread-id"] == "sess-1234" and "session_id" not in r.headers for r in seen)
     assert [i["type"] for i in json.loads(seen[0].content)["input"]] == ["message", "reasoning", "message", "message"]
     assert [i["type"] for i in json.loads(seen[1].content)["input"]] == ["message", "message", "message"]
 

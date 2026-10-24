@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
+import clients
 import httpx
 from subscriptions import (
     KEEPALIVE,
@@ -35,25 +36,20 @@ logger = logging.getLogger("keyproxy.claude")
 CLAUDE_API = "https://api.anthropic.com"
 CLAUDE_TOKEN_URL = "https://claude.ai/v1/oauth/token"
 CLAUDE_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-# The server refuses models to CLI versions it considers too old: a stale default here answers every request
-# with a 400 invalid_request_error (claude_code_version_too_old), not with a degraded reply. Raise it when that
-# refusal appears; the attribution stamp below follows the version on its own.
-CLAUDE_CLI_VERSION = os.environ.get("KEYPROXY_CLAUDE_CLI_VERSION", "2.1.296")
 CLAUDE_ENTRYPOINT = os.environ.get("KEYPROXY_CLAUDE_ENTRYPOINT", "sdk-cli")
+# The server refuses models to CLI versions it considers too old: a stale version answers every request
+# with a 400 invalid_request_error (claude_code_version_too_old), not with a degraded reply. The version,
+# the SDK and runtime it reports and its fixed betas are a profile in clients.py, read on every call, so
+# an update from the app holds from the next request; KEYPROXY_CLAUDE_CLI_VERSION still pins the version.
 # The CLI's attribution stamp: sha256(salt + three characters of the first user text + version)[:3].
 # A fixed "9d8" belonged to 2.1.270. KEYPROXY_CLAUDE_VERSION_HASH still pins one stamp for every call.
 _ATTRIBUTION_SALT = "59cf53e54c78"
 _ATTRIBUTION_INDEXES = (4, 7, 20)
-# The betas in the order the CLI assembles them for a subscriber's main loop: its fixed list first, then
-# effort when the request carries one, then the long cache TTL. The effort beta is per request, so it is
-# added by request_betas and not here; refresh and model listing never carry an effort.
-_BETAS_FIXED = (
-    "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,"
-    "context-management-2025-06-27,prompt-caching-scope-2026-01-05"
-)
+# The betas in the order the CLI assembles them for a subscriber's main loop: its fixed list first (the
+# profile's ``betas``), then effort when the request carries one, then the long cache TTL. The effort beta
+# is per request, so it is added by request_betas; refresh and model listing never carry an effort.
 _BETA_EFFORT = "effort-2025-11-24"
 _BETA_CACHE_TTL = "extended-cache-ttl-2025-04-11"
-CLAUDE_BETAS = f"{_BETAS_FIXED},{_BETA_CACHE_TTL}"
 CLAUDE_IDENTITY = "You are a Claude agent, built on Anthropic's Claude Agent SDK."
 CLAUDE_FALLBACK_MODELS = (
     "claude-haiku-4-5-20251001",
@@ -80,38 +76,53 @@ _KEEP_THINKING_EDIT = {"type": "clear_thinking_20251015", "keep": "all"}
 _UNCACHABLE_BLOCKS = frozenset({"thinking", "redacted_thinking"})
 
 
+def claude_betas() -> str:
+    """The betas a request without an effort carries: the profile's fixed list and the long cache TTL."""
+    return f"{clients.profile('claude')['betas']},{_BETA_CACHE_TTL}"
+
+
+def _user_agent(version: str) -> str:
+    return f"claude-cli/{version} (external, {CLAUDE_ENTRYPOINT})"
+
+
 def _cli_headers() -> dict[str, str]:
+    current = clients.profile("claude")
     return {
-        "User-Agent": f"claude-cli/{CLAUDE_CLI_VERSION} (external, {CLAUDE_ENTRYPOINT})",
+        "User-Agent": _user_agent(current["version"]),
         "x-app": "cli",
         "anthropic-version": "2023-06-01",
-        "anthropic-beta": CLAUDE_BETAS,
+        "anthropic-beta": f"{current['betas']},{_BETA_CACHE_TTL}",
         "anthropic-dangerous-direct-browser-access": "true",
         "X-Stainless-Lang": "js",
         "X-Stainless-OS": "Linux",
         "X-Stainless-Arch": "x64",
-        "X-Stainless-Package-Version": "0.128.0",
+        "X-Stainless-Package-Version": current["stainless_package_version"],
         "X-Stainless-Runtime": "node",
-        "X-Stainless-Runtime-Version": "v26.3.0",
+        "X-Stainless-Runtime-Version": current["stainless_runtime_version"],
+        # Sent by the CLI's SDK on every first attempt, and missing here until 2.1.310 was compared.
+        "X-Stainless-Retry-Count": "0",
+        "X-Stainless-Timeout": "600",
     }
 
 
-def attribution_hash(text: str) -> str:
+def attribution_hash(text: str, version: str | None = None) -> str:
     """The three hex characters Claude Code writes after ``cc_version``.
 
-    Taken from the CLI (2.1.278, unchanged through 2.1.296): the salt, the characters at indexes 4, 7 and 20 of the
+    Taken from the CLI (2.1.278, unchanged through 2.1.310): the salt, the characters at indexes 4, 7 and 20 of the
     first user text (``0`` when the text is shorter), then the CLI version. A missing
-    character is ``0``, not omitted, which is what makes a short prompt still stamp.
+    character is ``0``, not omitted, which is what makes a short prompt still stamp. The CLI reads the
+    first text block of the first user message that is not one of its own reminders.
     """
     pinned = os.environ.get("KEYPROXY_CLAUDE_VERSION_HASH", "").strip()
     if pinned:
         return pinned
     chars = "".join(text[i] if i < len(text) else "0" for i in _ATTRIBUTION_INDEXES)
-    return hashlib.sha256(f"{_ATTRIBUTION_SALT}{chars}{CLAUDE_CLI_VERSION}".encode()).hexdigest()[:3]
+    return hashlib.sha256(f"{_ATTRIBUTION_SALT}{chars}{version or clients.version('claude')}".encode()).hexdigest()[:3]
 
 
 def _billing_header(user_text: str) -> str:
-    return f"x-anthropic-billing-header: cc_version={CLAUDE_CLI_VERSION}.{attribution_hash(user_text)}; cc_entrypoint={CLAUDE_ENTRYPOINT};"
+    version = clients.version("claude")
+    return f"x-anthropic-billing-header: cc_version={version}.{attribution_hash(user_text, version)}; cc_entrypoint={CLAUDE_ENTRYPOINT};"
 
 
 def request_betas(payload: dict[str, Any]) -> str:
@@ -121,7 +132,8 @@ def request_betas(payload: dict[str, Any]) -> str:
     without an effort keeps the shorter list the CLI would send.
     """
     effort = isinstance(payload.get("output_config"), dict) and "effort" in payload["output_config"]
-    return f"{_BETAS_FIXED},{_BETA_EFFORT},{_BETA_CACHE_TTL}" if effort else CLAUDE_BETAS
+    fixed = clients.profile("claude")["betas"]
+    return f"{fixed},{_BETA_EFFORT},{_BETA_CACHE_TTL}" if effort else f"{fixed},{_BETA_CACHE_TTL}"
 
 
 class ClaudeAuth:
@@ -198,7 +210,7 @@ class ClaudeAuth:
         """Quota endpoints 429 when sent the full inference beta list; keep this to OAuth identity."""
         return {
             "authorization": f"Bearer {await self.token(client)}",
-            "User-Agent": f"claude-cli/{CLAUDE_CLI_VERSION} (external, {CLAUDE_ENTRYPOINT})",
+            "User-Agent": _user_agent(clients.version("claude")),
             "x-app": "cli",
             "anthropic-version": "2023-06-01",
             "anthropic-beta": "oauth-2025-04-20",
@@ -664,6 +676,7 @@ __all__ = [
     "ClaudeAuth",
     "attribution_hash",
     "chat_to_messages",
+    "claude_betas",
     "claude_header_windows",
     "claude_usage_view",
     "messages_events_to_chunks",

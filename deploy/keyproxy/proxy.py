@@ -22,6 +22,11 @@ can write one upstream's key with ``PUT /keys/<upstream>`` (and clear it with ``
 API token. The proxy writes the file and reads it again on every call, so a key saved in Settings
 signs the next request without a restart, and the agent's own configuration never holds it.
 
+The subscriptions are served as their vendors' CLIs would call them, and each CLI's identity is a
+profile in ``clients.py``: ``GET /clients`` says, for the bot alone, which version each one presents and
+the newest release (asked of the registries every few hours), and ``POST /clients/<name>/update`` and
+``/revert`` move it. The profile is stored in the keys file, so it holds from the next call.
+
 The budget is checked in two independent ways: the supervisor's flag file, and — when
 ``KEYPROXY_USD_PER_DAY`` is set — the proxy's own read of today's spend from the read-only
 database, which nothing in the agent container can unlink.
@@ -42,6 +47,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import clients
 import httpx
 from aiohttp import web
 from claude import (
@@ -503,6 +509,64 @@ async def handle_set_setting(request: web.Request) -> web.Response:
     return web.json_response(settings_view())
 
 
+def _write_client_setting(var: str, value: str) -> None:
+    write_env_value(KEYS_FILE, var, value)
+
+
+# The imitated clients' profiles live in the keys file too: the one file this process may write, read
+# again on every call, and kept across restarts in a container and in a native installation alike.
+clients.configure(read=settings, write=_write_client_setting, writable=lambda: bool(KEYS_FILE))
+
+
+def logged_in(name: str) -> bool | None:
+    """Whether the subscription a client profile signs for has a readable login; None for a client without one."""
+    auth = {"codex": CODEX_AUTH, "grok": GROK_AUTH, "claude": CLAUDE_AUTH}.get(clients.SPECS[name].upstream)
+    return credential_readable(auth) if auth is not None else None
+
+
+def clients_view() -> dict[str, Any]:
+    return {"writable": clients.writable(), "check_seconds": clients.CHECK_SECONDS, "clients": [clients.view(name, logged_in(name)) for name in clients.SPECS]}
+
+
+async def handle_clients(request: web.Request) -> web.Response:
+    """Each imitated client: the version in force, the newest release and what an update would move. For the bot alone."""
+    if not agent_call(request):
+        return web.json_response({"error": "this endpoint answers the agent only"}, status=403)
+    return web.json_response(clients_view())
+
+
+async def handle_clients_check(request: web.Request) -> web.Response:
+    """Ask the registries now rather than at the next due check, for the bot alone."""
+    if not agent_call(request):
+        return web.json_response({"error": "this endpoint answers the agent only"}, status=403)
+    await clients.check(request.app["client"], force=True)
+    return web.json_response(clients_view())
+
+
+async def handle_client_action(request: web.Request) -> web.Response:
+    """Update one client to the newest release (or to the body's ``version``), or revert its last update. For the bot alone."""
+    if not agent_call(request):
+        return web.json_response({"error": "this endpoint answers the agent only"}, status=403)
+    name, action = request.match_info["name"].lower(), request.match_info["action"]
+    try:
+        if action == "update":
+            try:
+                body = await request.json() if request.can_read_body else {}
+            except (ValueError, UnicodeDecodeError):
+                body = {}
+            target = str(body.get("version") or "").strip() if isinstance(body, dict) else ""
+            result = await clients.update(name, request.app["client"], target)
+        else:
+            result = await clients.revert(name)
+    except clients.ClientError as exc:
+        return web.json_response({"error": str(exc)}, status=exc.status)
+    except OSError as exc:
+        logger.warning("could not write the keys file: %s", type(exc).__name__)
+        return web.json_response({"error": f"the key proxy could not write its keys file ({type(exc).__name__})"}, status=500)
+    result["client"]["logged_in"] = logged_in(name)
+    return web.json_response(result)
+
+
 def auth_scheme(name: str) -> str:
     """How an upstream takes its key: ``bearer`` (``Authorization: Bearer <key>``) or the name of a header that carries the bare key."""
     scheme = settings().get(f"KEYPROXY_AUTH_{name.upper()}", "").strip() or DEFAULT_AUTH_SCHEMES.get(name, "")
@@ -816,11 +880,13 @@ async def handle_claude(request: web.Request, rest: str) -> web.StreamResponse:
         timing.report("refused")
         raw = raw_bytes.decode("utf-8", "replace")
         await response.aclose()
+        await clients.verify("claude", response.status_code, raw)
         try:
             payload_err = json.loads(raw)
         except ValueError:
             payload_err = {"error": {"message": raw[:400], "type": "upstream_error"}}
         return web.json_response(payload_err, status=response.status_code, headers=refusal_headers(response.headers))
+    await clients.verify("claude", response.status_code)
     if windows := claude_header_windows(response.headers):
         _claude_header_snapshot.update(windows=windows, at=time.monotonic())
     chunks = messages_events_to_chunks(_sse_lines(response, timing), model=model, names=names)
@@ -874,8 +940,9 @@ async def handle_codex(request: web.Request, rest: str) -> web.StreamResponse:
     sent = chat_to_responses(body)
     request_headers = {**headers, "accept": "text/event-stream", "content-type": "application/json"}
     if sent.get("prompt_cache_key"):
-        # The CLI names its conversation in this header as well as in the body's cache key.
-        request_headers["session_id"] = str(sent["prompt_cache_key"])
+        # The CLI names its conversation in these headers as well as in the body's cache key. It wrote
+        # ``session_id`` up to about 0.160; 0.163 writes ``session-id`` and ``thread-id``, both the thread.
+        request_headers["session-id"] = request_headers["thread-id"] = str(sent["prompt_cache_key"])
     replayed = any(item.get("type") == "reasoning" for item in sent["input"])
     while True:
         upstream = client.build_request("POST", CODEX_BASE + "/codex/responses", json=sent, headers=request_headers)
@@ -887,6 +954,7 @@ async def handle_codex(request: web.Request, rest: str) -> web.StreamResponse:
             return web.json_response({"error": {"message": f"upstream unreachable: {type(exc).__name__}", "type": "proxy_error"}}, status=502)
         timing.answered(response.status_code)
         if response.status_code < 400:
+            await clients.verify("codex", response.status_code)
             break
         raw_bytes = await response.aread()
         timing.received(len(raw_bytes))
@@ -899,6 +967,7 @@ async def handle_codex(request: web.Request, rest: str) -> web.StreamResponse:
             logger.warning("codex refused the replayed reasoning (%s); retrying without it", raw[:200])
             sent, replayed = without_reasoning(sent), False
             continue
+        await clients.verify("codex", response.status_code, raw)
         try:
             payload = json.loads(raw)
         except ValueError:
@@ -1119,6 +1188,10 @@ async def handle(request: web.Request) -> web.StreamResponse:
         timing.report(f"unreachable:{type(exc).__name__}")
         return web.json_response({"error": {"message": f"upstream unreachable: {type(exc).__name__}", "type": "proxy_error"}}, status=502)
     timing.answered(response.status_code)
+    if name == "grok" and request.method == "POST" and is_completion(rest):
+        # The body is streamed through untouched, so only the status is judged: 426 is how the chat
+        # proxy refuses a client version it no longer takes.
+        await clients.verify("grok", response.status_code)
     out = web.StreamResponse(status=response.status_code)
     for k, v in response.headers.items():
         if k.lower() not in DROP_RESPONSE_HEADERS:
@@ -1163,11 +1236,21 @@ def make_app() -> web.Application:
     app.router.add_get("/settings", handle_settings)
     app.router.add_put("/settings/{name}", handle_set_setting)
     app.router.add_get("/subscriptions/usage", handle_subscriptions_usage)
+    app.router.add_get("/clients", handle_clients)
+    app.router.add_post("/clients/check", handle_clients_check)
+    app.router.add_post(r"/clients/{name}/{action:update|revert}", handle_client_action)
     app.router.add_route("*", "/{upstream}/{rest:.*}", handle)
 
+    async def start_watch(app: web.Application) -> None:
+        app["client_watch"] = asyncio.create_task(clients.watch(lambda: app["client"]), name="client-releases")
+
     async def close(app: web.Application) -> None:
+        watch = app.get("client_watch")
+        if watch is not None:
+            watch.cancel()
         await app["client"].aclose()
 
+    app.on_startup.append(start_watch)
     app.on_cleanup.append(close)
     return app
 

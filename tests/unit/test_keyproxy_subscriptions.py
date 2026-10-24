@@ -28,6 +28,7 @@ def _load(name: str) -> Any:
 subs = _load("subscriptions")
 claude_mod = _load("claude")
 proxy = _load("proxy")
+clients_mod = sys.modules["clients"]
 
 
 def test_chat_body_becomes_a_responses_body() -> None:
@@ -103,18 +104,23 @@ async def test_codex_function_call_final_item_recovers_missing_arguments() -> No
     assert full["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"] == '{"path":"file"}'
 
 
-def test_grok_version_is_the_mounted_cli_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_grok_version_is_the_mounted_cli_name_when_it_is_newer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     home = tmp_path / "grok"
-    blob = home / "downloads" / "grok-1.2.3-linux-x86_64"
+    blob = home / "downloads" / "grok-9.2.3-linux-x86_64"
     blob.parent.mkdir(parents=True)
     blob.write_bytes(b"")
     (home / "bin").mkdir()
     (home / "bin" / "grok").symlink_to(blob)
     monkeypatch.setenv("KEYPROXY_GROK_AUTH", str(home / "auth.json"))
     monkeypatch.delenv("KEYPROXY_GROK_CLIENT_VERSION", raising=False)
-    assert subs._installed_grok_version() == "1.2.3"
+    assert subs.grok_version() == "9.2.3"
+    # An installed CLI older than the built-in version is not the one the chat proxy still takes.
+    blob.rename(home / "downloads" / "grok-0.1.0-linux-x86_64")
+    (home / "bin" / "grok").unlink()
+    (home / "bin" / "grok").symlink_to(home / "downloads" / "grok-0.1.0-linux-x86_64")
+    assert subs.grok_version() == clients_mod.SPECS["grok"].defaults["version"]
     monkeypatch.setenv("KEYPROXY_GROK_CLIENT_VERSION", "9.9.9")
-    assert subs._installed_grok_version() == "9.9.9"
+    assert subs.grok_version() == "9.9.9"
 
 
 def test_usage_views() -> None:
@@ -163,9 +169,12 @@ def test_claude_chat_body_becomes_messages() -> None:
     out, names = claude_mod.chat_to_messages(body)
     assert out["model"] == "claude-opus-5" and out["stream"] is True and out["thinking"]["type"] == "enabled" and out["thinking"]["budget_tokens"] >= 1024
     assert out["system"][0]["text"].startswith("x-anthropic-billing-header:") and "Claude Agent SDK" in out["system"][1]["text"]
-    assert "2.1.296" in out["system"][0]["text"] and claude_mod.attribution_hash("open x") in out["system"][0]["text"]
+    version = clients_mod.SPECS["claude"].defaults["version"]
+    assert f"cc_version={version}.{claude_mod.attribution_hash('open x')};" in out["system"][0]["text"]
     # Indexes 4, 7 and 20 of this sentence are o, o and a space. The digest is the CLI's stamp for 2.1.296.
-    assert claude_mod.attribution_hash("hello world, this is long enough") == "0e0"
+    assert claude_mod.attribution_hash("hello world, this is long enough", "2.1.296") == "0e0"
+    # The stamp Claude Code 2.1.309 itself wrote for this prompt, read off a request it sent to a loopback capture.
+    assert claude_mod.attribution_hash("hello there my friend how are you", "2.1.309") == "607"
     assert out["system"][2]["text"] == "You are Daedalus." and "cache_control" not in out["system"][2]
     assert out["system"][1]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
     assert "cache_control" not in out["system"][0]
@@ -344,6 +353,7 @@ async def test_proxy_routes_codex_and_grok(monkeypatch: pytest.MonkeyPatch, tmp_
         assert data["choices"][0]["message"]["content"] == "PONG" and data["usage"]["prompt_tokens"] == 5
         sent = [r for r in seen if str(r.url).endswith("/codex/responses")][0]
         assert sent.headers["authorization"] == "Bearer eyJ.e30.x" and sent.headers["chatgpt-account-id"] == "acct" and sent.headers["originator"] == "codex_cli_rs"
+        assert sent.headers["user-agent"] == f"codex_cli_rs/{clients_mod.version('codex')} (Ubuntu 24.4.0; x86_64) xterm-256color" and "openai-beta" not in sent.headers
         assert json.loads(sent.content)["store"] is False
         streamed = await client.post("/codex/v1/chat/completions", json={"model": "gpt-5.6-terra", "stream": True, "messages": [{"role": "user", "content": "hi"}]})
         text = await streamed.text()
@@ -353,7 +363,8 @@ async def test_proxy_routes_codex_and_grok(monkeypatch: pytest.MonkeyPatch, tmp_
         grok = await (await client.get("/grok/v1/models")).json()
         echoed = grok["echo"]
         assert echoed["authorization"] == "Bearer grok-token" and echoed["x-grok-client-identifier"] == "grok-shell" and echoed["x-xai-token-auth"] == "xai-grok-cli"
-        assert echoed["x-grok-client-version"] == subs.GROK_CLIENT_VERSION and subs.GROK_CLIENT_VERSION != "0.2.101"
+        assert echoed["x-grok-client-version"] == subs.grok_version() and subs.grok_version() != "0.2.101"
+        assert echoed["user-agent"] == f"grok-shell/{subs.grok_version()} (linux)"
         assert str([r for r in seen if "grok.com" in str(r.url)][0].url) == "https://cli-chat-proxy.grok.com/v1/models"
         await client.post("/grok/v1/chat/completions", json={"model": "grok-4.7", "messages": [{"role": "user", "content": "hi"}]})
         posted = [r for r in seen if str(r.url).endswith("/chat/completions")][0]
@@ -403,7 +414,9 @@ async def test_proxy_routes_claude(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
         assert payload["system"][2]["text"] == "Be terse."
         assert "cache_control" not in payload["tools"][-1] and payload["system"][1]["cache_control"]["type"] == "ephemeral"
         assert payload["messages"][0]["content"][-1]["cache_control"]["type"] == "ephemeral"
-        assert sent.headers["anthropic-beta"] == claude_mod.CLAUDE_BETAS and sent.headers["x-stainless-package-version"] == "0.128.0"
+        assert sent.headers["anthropic-beta"] == claude_mod.claude_betas() and sent.headers["x-stainless-package-version"] == "0.128.0"
+        assert "prompt-caching-scope" not in sent.headers["anthropic-beta"] and "per-turn-control-2026-07-01" in sent.headers["anthropic-beta"]
+        assert sent.headers["user-agent"] == f"claude-cli/{clients_mod.version('claude')} (external, sdk-cli)" and sent.headers["x-stainless-retry-count"] == "0"
         models = await (await client.get("/claude/v1/models")).json()
         assert "claude-opus-5" in {m["id"] for m in models["data"]}
         usage = await (await client.get("/subscriptions/usage")).json()
