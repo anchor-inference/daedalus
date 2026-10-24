@@ -126,6 +126,8 @@ class ClientSpec:
     installed: Callable[[], str] | None = None
     derive: Callable[[str], dict[str, str]] | None = None
     upstream: str = ""
+    labels: dict[str, str] = field(default_factory=dict)
+    """What the operator knows a field as: the header it fills. A field without one is shown by its key."""
 
     @property
     def variable(self) -> str:
@@ -160,6 +162,7 @@ SPECS: dict[str, ClientSpec] = {
             latest=lambda client: npm_latest(client, "@anthropic-ai/claude-code"),
             follows=("User-Agent", "cc_version attribution stamp"),
             upstream="claude",
+            labels={"stainless_package_version": "X-Stainless-Package-Version", "stainless_runtime_version": "X-Stainless-Runtime-Version", "betas": "anthropic-beta"},
         ),
         ClientSpec(
             name="codex",
@@ -174,6 +177,7 @@ SPECS: dict[str, ClientSpec] = {
             latest=lambda client: npm_latest(client, "@openai/codex"),
             follows=("User-Agent",),
             upstream="codex",
+            labels={"originator": "originator", "platform": "User-Agent platform"},
         ),
         ClientSpec(
             name="grok",
@@ -333,6 +337,7 @@ def view(name: str, logged_in: bool | None = None) -> dict[str, Any]:
         "check_error": state.get("error") or None,
         "stale": bool(latest) and newer(latest, str(current["version"])) and not pinned,
         "fields": {key: current[key] for key in spec.defaults},
+        "field_labels": {key: spec.labels.get(key, key) for key in spec.defaults},
         "follows": list(spec.follows),
         "kept_on_update": [key for key in spec.defaults if key != "version"] if spec.derive is None else [],
         "previous_version": (str(previous.get("version") or "") or None) if previous is not None else None,

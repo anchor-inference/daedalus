@@ -445,6 +445,34 @@ KEYPROXY_VIEW: dict[str, object] = {
 """What the key proxy holds, as /api/keyproxy answers it: keys only as set or not."""
 
 
+def keyproxy_client(name: str, label: str, version: str, latest: str, *, logged_in: bool = True, kept: tuple[str, ...] = (), labels: dict[str, str] | None = None, previous: str | None = None) -> dict[str, object]:
+    return {
+        "name": name, "label": label, "upstream": name, "logged_in": logged_in, "version": version, "source": "stored" if previous else "default",
+        "default_version": version, "installed_version": None, "pinned_by": None, "latest": latest, "checked_at": 1792800000, "check_error": None,
+        "stale": latest != version, "fields": {"version": version}, "field_labels": {"version": "version", **(labels or {})}, "follows": ["User-Agent"],
+        "kept_on_update": list(kept), "previous_version": previous, "updated_at": None, "pending": bool(previous), "verified_at": None, "reverted": None,
+    }
+
+
+CLAUDE_KEPT = ("stainless_package_version", "stainless_runtime_version", "betas")
+CLAUDE_LABELS = {"stainless_package_version": "X-Stainless-Package-Version", "stainless_runtime_version": "X-Stainless-Runtime-Version", "betas": "anthropic-beta"}
+KEYPROXY_CLIENTS: dict[str, object] = {
+    "reachable": True, "state": "ok", "writable": True, "check_seconds": 21600,
+    "clients": [
+        keyproxy_client("claude", "Claude Code", "2.1.296", "2.1.310", kept=CLAUDE_KEPT, labels=CLAUDE_LABELS),
+        keyproxy_client("codex", "Codex CLI", "0.164.0", "0.164.0", kept=("originator", "platform")),
+        keyproxy_client("grok", "Grok CLI", "1.0.70", "1.0.70", logged_in=False),
+    ],
+}
+"""The CLIs the key proxy imitates, as /api/keyproxy/clients answers it: Claude Code one release behind."""
+KEYPROXY_CLIENT_UPDATED: dict[str, object] = {
+    "client": keyproxy_client("claude", "Claude Code", "2.1.310", "2.1.310", kept=CLAUDE_KEPT, labels=CLAUDE_LABELS, previous="2.1.296"),
+    "changed": {"version": {"from": "2.1.296", "to": "2.1.310"}},
+    "kept": {"stainless_package_version": "0.128.0", "stainless_runtime_version": "v26.3.0", "betas": "claude-code-20250219"},
+}
+"""What ``POST /api/keyproxy/clients/claude/update`` answers: the version moved, three header values kept."""
+
+
 GATES: dict[str, object] = {
     "/api/terminals/envs": {"envs": [
         {"env": "container", "available": True, "sandbox": "ok", "containment": {"kind": "cgroup_v2", "available": True}},
@@ -465,6 +493,8 @@ GATES: dict[str, object] = {
     # Settings → Models → Providers and Settings → Tools → Search keys read what the key proxy holds.
     # check_keyproxy.py keeps a proxy of its own that stores what is written.
     "/api/keyproxy": KEYPROXY_VIEW,
+    # The key proxy card lists the imitated CLIs' versions; check_keyproxy_clients.py updates one.
+    "/api/keyproxy/clients": KEYPROXY_CLIENTS,
     # Where the rail, its More menu and the phone drawer put each destination: nothing configured, the
     # layout the app ships with. check_navigation.py answers it itself to move things about.
     "/api/navigation": {"rail": [], "more": [], "drawer": [], "hidden": [], "icons": {}},
@@ -616,6 +646,10 @@ SHARED_WRITES: dict[tuple[str, str], tuple[int, str, str]] = {
     ("POST", "/api/pet/react"): (200, "application/json", json.dumps({"line": "I'm here.", "emotion": "joy", "action": "wave", "prop": ""})),
     # The session cookie a custom page's frame needs; the stub's frames need none.
     ("POST", "/api/pages/_signin"): (200, "application/json", json.dumps({"ok": True})),
+    # The key proxy card's client versions: look again, update Claude Code, put it back.
+    ("POST", "/api/keyproxy/clients/check"): (200, "application/json", json.dumps(KEYPROXY_CLIENTS)),
+    ("POST", "/api/keyproxy/clients/claude/update"): (200, "application/json", json.dumps(KEYPROXY_CLIENT_UPDATED)),
+    ("POST", "/api/keyproxy/clients/claude/revert"): (200, "application/json", json.dumps({"client": keyproxy_client("claude", "Claude Code", "2.1.296", "2.1.310", kept=CLAUDE_KEPT, labels=CLAUDE_LABELS), "reverted": {"from": "2.1.310", "to": "2.1.296", "automatic": False}})),
 }
 
 

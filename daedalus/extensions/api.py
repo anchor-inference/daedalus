@@ -120,6 +120,7 @@ from daedalus.extensions import (
     api_workflows,
     api_workspace_archive,
     api_worktrees,
+    keyproxy_clients,
     launcher_updates,
 )
 from daedalus.extensions import commands as slash
@@ -427,6 +428,13 @@ class KeyproxySettingBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     value: str = Field(default="", max_length=4096)
+
+
+class KeyproxyClientUpdateBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: str = Field(default="", max_length=40, pattern=r"^[0-9.]*$")
+    """The release to move to; empty is the newest the key proxy knows of."""
 
 
 class AnswerBody(BaseModel):
@@ -6143,6 +6151,39 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if response.status_code in (400, 404, 409):
             raise HTTPException(response.status_code, reason or f"the key proxy refused {name}")
         raise HTTPException(502, reason or f"the key proxy answered {response.status_code}")
+
+    @api.get("/api/keyproxy/clients")
+    async def get_keyproxy_clients(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The CLIs the key proxy imitates: the version each presents, the newest release, and what an update keeps."""
+        return await keyproxy_clients.describe(app)
+
+    @api.post("/api/keyproxy/clients/check")
+    async def check_keyproxy_clients(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Have the key proxy ask the registries now rather than at its next six-hourly check."""
+        try:
+            return await keyproxy_clients.check_now(app)
+        except keyproxy_clients.ProxyUnavailable as exc:
+            raise HTTPException(exc.status, str(exc)) from None
+
+    @api.post("/api/keyproxy/clients/{name}/update")
+    async def update_keyproxy_client(name: str, body: KeyproxyClientUpdateBody | None = None, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Move one imitated client to the newest release; the proxy uses it from its next request."""
+        if not re.fullmatch(r"[a-z][a-z0-9_]*", name):
+            raise HTTPException(400, "a client is named in lower-case letters")
+        try:
+            return await keyproxy_clients.update(app, name, body.version if body is not None else "")
+        except keyproxy_clients.ProxyUnavailable as exc:
+            raise HTTPException(exc.status, str(exc)) from None
+
+    @api.post("/api/keyproxy/clients/{name}/revert")
+    async def revert_keyproxy_client(name: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Put back the profile from before the client's last update."""
+        if not re.fullmatch(r"[a-z][a-z0-9_]*", name):
+            raise HTTPException(400, "a client is named in lower-case letters")
+        try:
+            return await keyproxy_clients.revert(app, name)
+        except keyproxy_clients.ProxyUnavailable as exc:
+            raise HTTPException(exc.status, str(exc)) from None
 
     async def keyproxy_upstreams() -> list[str] | None:
         """The upstream names the proxy holds a credential for; None when it cannot be asked."""

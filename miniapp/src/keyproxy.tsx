@@ -8,6 +8,7 @@
 // learns whether one is set.
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
+import { relTimeLong } from "./format";
 import { t } from "./i18n";
 import { Icon } from "./icons";
 import { confirmAsync, errorText } from "./ui";
@@ -193,6 +194,129 @@ function AddUpstream({ write, taken, writable }: { write: (name: string, value: 
   );
 }
 
+/** One CLI the key proxy imitates for a subscription, as the proxy reports it. */
+export type KeyproxyClient = {
+  name: string;
+  label: string;
+  logged_in: boolean | null;
+  version: string;
+  source: "default" | "stored" | "installed" | "environment";
+  pinned_by: string | null;
+  latest: string | null;
+  checked_at: number | null;
+  check_error: string | null;
+  stale: boolean;
+  kept_on_update: string[];
+  field_labels?: Record<string, string>;
+  previous_version: string | null;
+  pending: boolean;
+  reverted: { from: string; to?: string; at: number; reason: string; automatic: boolean } | null;
+};
+export type KeyproxyClients = { reachable: boolean; state: "ok" | "none" | "unreachable" | "outdated"; writable?: boolean; clients: KeyproxyClient[] };
+type ClientResult = { client: KeyproxyClient; changed?: Record<string, { from: string; to: string }>; kept?: Record<string, string>; reverted?: { from: string; to?: string } };
+
+function keptLabels(client: KeyproxyClient, keys: string[]): string {
+  return keys.map((key) => client.field_labels?.[key] ?? key).join(", ");
+}
+
+/**
+ * The version each imitated CLI presents, the newest release the proxy found, and the buttons that
+ * move it. A vendor refuses a version it considers too old, so this is where a stale one is fixed:
+ * the proxy stores the new profile in its own file and uses it from the next request.
+ */
+function ClientRow({ client, writable, onDone, toast }: { client: KeyproxyClient; writable: boolean; onDone: (result: ClientResult) => void; toast: (text: string) => void }) {
+  const [busy, setBusy] = useState<"" | "update" | "revert">("");
+  const [said, setSaid] = useState("");
+  const act = async (action: "update" | "revert") => {
+    setBusy(action);
+    try {
+      const result = await api.post<ClientResult>(`/api/keyproxy/clients/${encodeURIComponent(client.name)}/${action}`, {});
+      const moved = result.changed?.version;
+      const kept = Object.keys(result.kept ?? {});
+      const text = action === "update"
+        ? [t("keyproxy.clients.updated", { label: client.label, from: moved?.from ?? client.version, to: result.client.version }), kept.length ? t("keyproxy.clients.kept", { fields: keptLabels(client, kept) }) : ""].filter(Boolean).join(" ")
+        : t("keyproxy.clients.reverted.done", { label: client.label, version: result.client.version });
+      setSaid(text);
+      toast(text);
+      onDone(result);
+    } catch (e) {
+      toast(errorText(e));
+    } finally {
+      setBusy("");
+    }
+  };
+  const source = client.source === "environment" ? t("keyproxy.clients.source.pinned", { name: client.pinned_by ?? "" }) : t(`keyproxy.clients.source.${client.source}`);
+  return (
+    <div className="mrow" data-client={client.name}>
+      <div className="mline noradio">
+        <div className="mmain">
+          <span className="mtitle">{client.label} <code>{client.version}</code></span>
+          <span className="sub">{source}{client.logged_in === false ? ` · ${t("keyproxy.login.off")}` : ""}</span>
+          <span className="sub">
+            {client.checked_at ? t("keyproxy.clients.checked", { when: relTimeLong(client.checked_at) }) : t("keyproxy.clients.unchecked")}
+            {client.check_error ? ` · ${t("keyproxy.clients.checkfailed", { error: client.check_error })}` : ""}
+            {client.stale && client.kept_on_update.length ? ` · ${t("keyproxy.clients.willkeep", { fields: keptLabels(client, client.kept_on_update) })}` : ""}
+            {client.reverted ? ` · ${t(client.reverted.automatic ? "keyproxy.clients.reverted.auto" : "keyproxy.clients.reverted.manual", { version: client.reverted.from, reason: client.reverted.reason })}` : ""}
+            {said && <span className="clients-said" data-said={client.name}> · {said}</span>}
+          </span>
+        </div>
+        <div className="mtags">
+          {client.pending && <span className="pill waiting">{t("keyproxy.clients.pending")}</span>}
+          {client.stale
+            ? <span className="pill waiting">{t("keyproxy.clients.out", { version: client.latest ?? "" })}</span>
+            : client.latest ? <span className="pill idle">{t("keyproxy.clients.current")}</span> : null}
+        </div>
+        <div className="mactions">
+          {client.stale && (
+            <button className="btn small primary" data-action="update" disabled={!writable || !!busy} onClick={() => void act("update")}>{t(busy === "update" ? "keyproxy.clients.updating" : "keyproxy.clients.update")}</button>
+          )}
+          {client.previous_version && (
+            <button className="btn small" data-action="revert" disabled={!writable || !!busy} title={t("keyproxy.clients.revert.to", { version: client.previous_version })} onClick={() => void act("revert")}>{t("keyproxy.clients.revert")}</button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The imitated clients' versions, inside the key proxy's card. Hidden where no endpoint goes through a proxy. */
+export function ClientVersions({ toast }: { toast: (text: string) => void }) {
+  const [data, setData] = useState<KeyproxyClients | null>(null);
+  const [checking, setChecking] = useState(false);
+  const load = useCallback(() => {
+    api.get<KeyproxyClients>("/api/keyproxy/clients").then(setData).catch(() => setData({ reachable: false, state: "unreachable", clients: [] }));
+  }, []);
+  useEffect(load, [load]);
+  if (!data || data.state === "none") return null;
+  const check = async () => {
+    setChecking(true);
+    try {
+      setData(await api.post<KeyproxyClients>("/api/keyproxy/clients/check", {}));
+    } catch (e) {
+      toast(errorText(e));
+    } finally {
+      setChecking(false);
+    }
+  };
+  const replace = (result: ClientResult) => setData((d) => d && { ...d, clients: (d.clients ?? []).map((c) => (c.name === result.client.name ? result.client : c)) });
+  return (
+    <div className="keyproxy-clients" data-setting="keyproxy.clients">
+      <div className="section-title">{t("keyproxy.clients.title")}</div>
+      <div className="sub">{t("keyproxy.clients.sub")}</div>
+      {!data.reachable
+        ? <div className="sub">{t(data.state === "outdated" ? "keyproxy.clients.outdated" : "keyproxy.unreachable")}</div>
+        : (
+          <>
+            <div className="mlist">{(data.clients ?? []).map((client) => <ClientRow key={client.name} client={client} writable={!!data.writable} onDone={replace} toast={toast} />)}</div>
+            <div className="btnrow">
+              <button className="btn small" data-action="check" disabled={checking} onClick={() => void check()}>{t(checking ? "keyproxy.clients.checking" : "keyproxy.clients.check")}</button>
+            </div>
+          </>
+        )}
+    </div>
+  );
+}
+
 function Unavailable({ data }: { data: KeyproxySettings | null }) {
   if (!data) return <div className="sub">{t("common.loading")}</div>;
   return <div className="sub">{t(data.state === "none" ? "keyproxy.none" : data.state === "refused" ? "keyproxy.refused" : "keyproxy.unreachable")}</div>;
@@ -228,6 +352,7 @@ export function KeyproxyCard({ toast, onChanged }: { toast: (text: string) => vo
               <span className="sub">{data.cli_logins.map((login) => `${login.upstream}: ${t(login.configured ? "keyproxy.login.on" : "keyproxy.login.off")}`).join(" · ")}</span>
             </Row>
           )}
+          <ClientVersions toast={toast} />
         </>
       )}
     </div>

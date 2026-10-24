@@ -848,6 +848,9 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
     if rel.startswith("/api/mcp/") and fulfil_shared(route):
         # Settings → MCP servers answers its writes with the list as it now stands, like the host.
         return None
+    if rel.startswith("/api/keyproxy/clients/") and fulfil_shared(route):
+        # The key proxy card's client versions: Check now, Update and Revert answer as api_stub has them.
+        return None
     if request.method == "POST" and rel == "/api/sessions":
         # New chat: the id of a chat the pictures already have, so the app lands on a drawn page.
         status, created = create_session(json.loads(request.post_data or "{}"), S6)
