@@ -282,6 +282,12 @@ class FakeBrowserd:
         """Tabs the operator gave that a ``tab.close`` or ``group.close`` let go of, still open in their Chrome."""
         self.selects: list[tuple[str, bool]] = []
         """(tab, quiet) of each ``tab.select``: quiet is the host's own switch, which leaves the operator's window alone."""
+        self.webgl: dict[str, str] = {}
+        """Profile → the WebGL mode its browser starts in (off when absent)."""
+        self.browser_webgl: dict[str, str] = {}
+        """Browser → the mode it was started in."""
+        self.gpu: tuple[bool, str] = (False, "no GPU render node (/dev/dri/renderD*) is visible here")
+        """Whether gpu mode can reach a GPU here, and why not, as ``daemon.info`` reports it."""
         self.legacy = False
         """A daemon older than the host: no ``page.find``, no point, no scroll to a text or sideways, and
         unknown parameters refused as the real daemon's strict decoding refuses them."""
@@ -668,7 +674,8 @@ class FakeBrowserd:
             return {}
         if method == "daemon.info":
             return {"version": "fake", "protocol": self.protocol, "instance": self.instance, "env": self.env, "os": "linux", "arch": "amd64", "pid": 1, "started_at": stamp(), "uptime_s": 1,
-                    "chromium": {"path": "/fake/chrome", "version": "151.0.0.0", "kind": "bundled"}, "capabilities": {"sandbox": "ok", "headed": False, "screencast": True},
+                    "chromium": {"path": "/fake/chrome", "version": "151.0.0.0", "kind": "bundled"},
+                    "capabilities": {"sandbox": "ok", "headed": False, "screencast": True, "webgl": {"modes": ["off", "software", *(["gpu"] if self.gpu[0] else [])], "gpu": self.gpu[0], "gpu_reason": self.gpu[1]}},
                     "limits": {"max_browsers": self.max_browsers, "max_tabs_per_group": 8}, "counts": {"browsers": len(self.browsers), "groups": len(self.groups), "tabs": sum(len(g.tabs) for g in self.groups.values()), "viewers": len(self.channels)},
                     "machine": self.machine}
         if method == "events.unsubscribe":
@@ -702,6 +709,8 @@ class FakeBrowserd:
             if not any(g.browser_id == group.browser_id for g in self.groups.values()) and group.browser_id in self.browsers:
                 self.crash(group.browser_id, "closed")
             return {"tabs": len(group.tabs)}
+        if method == "profile.webgl":
+            return self._webgl(params)
         if method == "profile.list":
             return {"profiles": [{"id": p, "size_bytes": 2 << 20, "last_used_at": stamp(), "running": any(b.profile == p for b in self.browsers.values())} for p in self.profiles]}
         if method in ("profile.clear", "profile.delete"):
@@ -1090,6 +1099,44 @@ class FakeBrowserd:
     def _scripts_on(self, profile: str, url: str) -> list[str]:
         return [n for n, s in self.scripts.get(profile, {}).items() if not s["matches"] or any(m in url for m in s["matches"])]
 
+    def _webgl(self, params: dict[str, Any]) -> dict[str, Any]:
+        """``profile.webgl`` as the daemon answers it: the mode kept for the profile, and a running
+        browser in another mode started again in this one, its groups kept under their ids with new
+        tabs on the same pages (browserd/internal/browser/webgl.go)."""
+        profile, mode = str(params.get("profile") or ""), str(params.get("mode") or "")
+        if profile == "ephemeral":
+            raise _Fail(1007, "a throwaway browser starts as it always does")
+        if mode and mode not in ("off", "software", "gpu"):
+            raise _Fail(-32602, "mode is off, software or gpu")
+        if mode == "gpu" and not self.gpu[0]:
+            raise _Fail(1007, f"gpu mode cannot reach a GPU here: {self.gpu[1]}", {"reason": "no_gpu"})
+        mode = mode or self.webgl.get(profile, "off")
+        self.webgl[profile] = mode
+        browser = next((b for b in self.browsers.values() if b.profile == profile), None)
+        result: dict[str, Any] = {"profile": profile, "mode": mode, "relaunched": False, "groups": [], "graphics": None}
+        if browser is not None and self.browser_webgl.get(browser.id, "off") != mode:
+            mine = [g for g in self.groups.values() if g.browser_id == browser.id]
+            del self.browsers[browser.id]
+            self.emit("browser.exited", {"browser_id": browser.id, "profile": profile, "code": 0, "crashed": False, "reason": "relaunch", "groups": [g.id for g in mine]})
+            self._next["browser"] += 1
+            browser = Browser(f"b{self._next['browser']:08x}", profile)
+            self.browsers[browser.id] = browser
+            self.emit("browser.started", {"browser_id": browser.id, "profile": profile, "pid": browser.pid, "chromium_version": "151.0.0.0"})
+            for group in mine:
+                urls = [t.page.url for t in group.tabs]
+                group.browser_id, group.tabs = browser.id, []
+                for url in urls:
+                    self._new_tab(group, url)
+                self.emit("group.opened", {"group_id": group.id, "browser_id": browser.id, "profile": profile, "labels": group.labels, "reason": "relaunch"})
+                result["groups"].append({"id": group.id, "tabs": [t.view(t.id == group.active) for t in group.tabs]})
+            result["relaunched"] = True
+        if browser is not None:
+            self.browser_webgl[browser.id] = mode
+            renderer = {"off": "ANGLE (Mesa, llvmpipe)", "software": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device))", "gpu": "ANGLE (NVIDIA, Vulkan 1.2 (NVK GK208B))"}[mode]
+            result["browser_id"] = browser.id
+            result["graphics"] = {"mode": mode, "webgl": "disabled_off" if mode == "off" else "enabled", "available": mode != "off", "renderer": renderer}
+        return result
+
     def _open(self, params: dict[str, Any]) -> dict[str, Any]:
         gid = str(params.get("group_id"))
         profile = str(params.get("profile"))
@@ -1109,6 +1156,7 @@ class FakeBrowserd:
             self._next["browser"] += 1
             browser = Browser(f"b{self._next['browser']:08x}", profile)
             self.browsers[browser.id] = browser
+            self.browser_webgl[browser.id] = self.webgl.get(profile, "off")
             self.profiles.setdefault(profile, {})
             self.emit("browser.started", {"browser_id": browser.id, "profile": profile, "pid": browser.pid, "chromium_version": "151.0.0.0"})
         group = Group(gid, browser.id, profile, dict(params.get("labels") or {}), dict(params.get("viewport") or {"w": 1280, "h": 800}))

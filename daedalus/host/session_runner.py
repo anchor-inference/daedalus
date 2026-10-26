@@ -6742,19 +6742,23 @@ class SessionManager:
             return False, head + prompts.STAFF_BROWSER_HINT
         return False, head + prompts.OPERATOR_APPROVAL_HINT
 
-    def ask_operator(self, session_id: str, *, key: str, tool: str, text: str, on_answer: str, card: dict[str, Any] | None = None) -> bool:
+    def ask_operator(
+        self, session_id: str, *, key: str, tool: str, text: str, on_answer: str, card: dict[str, Any] | None = None, extra: dict[str, Any] | None = None,
+    ) -> bool:
         """Put a request on the session that only the operator answers and the host carries out.
 
         It is announced like a policy question — the same card, the same Allow and Deny, from the app,
         Telegram or the staff request list — but always to the operator, a staff member's too, and
-        their answer runs ``answer_hooks[on_answer]`` instead of granting a call. ``False`` when the
-        session is not loaded and nothing was asked."""
+        their answer runs ``answer_hooks[on_answer]`` instead of granting a call. ``extra`` is kept in
+        the request the hook is handed, for what it needs to carry the answer out (the mode a browser
+        is to switch to); it never overrides the request's own fields. ``False`` when the session is
+        not loaded and nothing was asked."""
         state = self._states.get(session_id)
         if state is None:
             return False
         pending = dict(state.metadata.get("policy_pending") or {})
         fresh = key not in pending
-        pending[key] = {"tool": tool, "text": self.redactor.redact(text)[:800], "at": datetime.now(UTC).isoformat(), "on_answer": on_answer}
+        pending[key] = {**(extra or {}), "tool": tool, "text": self.redactor.redact(text)[:800], "at": datetime.now(UTC).isoformat(), "on_answer": on_answer}
         for meta in (state.metadata, state.session.metadata):
             meta["policy_pending"] = dict(list(pending.items())[-20:])
         self._spawn_background(self.sessions.update_metadata(session_id, state.session.metadata), f"operator-ask:{session_id}")

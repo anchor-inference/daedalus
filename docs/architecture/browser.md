@@ -117,14 +117,15 @@ unknown field is `-32602`. Errors use the JSON-RPC codes plus:
 
 | Method | Params → result |
 |---|---|
-| `daemon.info` | → `{version, protocol, instance, env, os, arch, pid, started_at, uptime_s, chromium{path, version, kind: "bundled" \| "system" \| "none" \| "relay", error?}, capabilities{sandbox, headed: true when `--mode headed`, screencast: true}, limits{…}, counts{browsers, groups, tabs, viewers}, machine, backend: "launch" \| "attach", relay: Relay \| null}`; `Relay` and the `relay.*` methods are in The operator's Chrome |
+| `daemon.info` | → `{version, protocol, instance, env, os, arch, pid, started_at, uptime_s, chromium{path, version, kind: "bundled" \| "system" \| "none" \| "relay", error?}, capabilities{sandbox, headed: true when `--mode headed`, screencast: true, webgl{modes, gpu, gpu_reason}}, limits{…}, counts{browsers, groups, tabs, viewers}, machine, backend: "launch" \| "attach", relay: Relay \| null}`; `Relay` and the `relay.*` methods are in The operator's Chrome |
 | `browser.open` | `{group_id, profile, labels?, viewport?{w, h}, url?}` → `{group: Group, tab: Tab, created}` |
 | `browser.list` | → `{browsers: [Browser]}` |
 | `browser.close` | `{browser_id}` → `{groups}`: ends the browser and forgets its groups |
 | `group.list` | `{browser_id?}` → `{groups: [Group]}` |
 | `group.close` | `{group_id}` → `{tabs}`: closes its tabs; an ephemeral group's context is disposed |
 | `group.resize` | `{group_id, viewport{w, h}}` → `{viewport{w, h}}`. Each side is 320–3840. Every page's window is sized the way `browser.open` sized it, and the group's viewport becomes that. The app calls it as the operator's picture changes size, so a tall pane is a tall page rather than a 1280×800 picture with an empty band under it. The agent's reads and actions are in that page's CSS pixels, so they follow |
-| `profile.list` | → `{profiles: [{id, size_bytes, last_used_at, running}]}` |
+| `profile.list` | → `{profiles: [{id, size_bytes, last_used_at, running, webgl}]}` |
+| `profile.webgl` | `{profile, mode?: off\|software\|gpu}` → `{profile, mode, relaunched, browser_id?, groups: [{id, tabs: [Tab], failed?: [url]}], graphics: {mode, webgl, available, renderer} \| null}`: the WebGL mode the profile's browser starts in (WebGL, under Which Chromium), changed when `mode` is given. A running browser in another mode is closed with the reason `relaunch` and started again in this one, each group reopened under its id with new tabs on the pages the old ones showed (`failed` names those that did not load); `1004` while the operator holds one of its groups, `1007` for the throwaway profile, for the operator's Chrome, and for `gpu` where no GPU is reachable (`gpu_reason`). `graphics` is the running browser's own `SystemInfo` report |
 | `profile.clear`, `profile.delete` | `{profile}` → `{}`; `1004` while its browser runs. Clear keeps the directory and removes cookies, storage and cache; delete removes it |
 | `cookies.set` | `{group_id, cookies: [CookieParam] ≤ 3000, origin?}` → `{set, rejected: [{name, domain, reason}]}`: `CookieParam` is the protocol's `Network.CookieParam` (`name, value, url? \| domain?, path?, secure?, httpOnly?, sameSite?, expires?`; no `expires` for a session cookie). Set through `Storage.setCookies` on the browser's session, in the group's context for a throwaway group, one at a time so one cookie the browser refuses is named rather than refusing the rest. They land in the profile's own cookie store on disk and outlive the browser, as a login made by hand does |
 | `cookies.list` | `{group_id, domain?}` → `{cookies: [{name, domain, path, expires, secure, http_only, same_site?}]}`: `expires` is 0 for a session cookie; `domain` keeps that site and its subdomains. Never a value: no method answers one |
@@ -825,6 +826,40 @@ as the operator's own browser would.
     named in `CHROME_DEVEL_SANDBOX` (a system Chrome's `chrome-sandbox`, or one installed for the
     purpose) or an AppArmor profile allows it. The reason says which.
 
+### WebGL
+
+A profile's browser starts in one of three WebGL modes, kept in the profile (`browserd/webgl.json`)
+and changed with `profile.webgl`; `daemon.info.capabilities.webgl` says which a browser here can
+start in.
+
+- **`off`** (the default) adds nothing to the command line. In the container that means no WebGL:
+  the GPU process finds only Mesa's llvmpipe on the virtual display, llvmpipe is on Chromium's GPU
+  blocklist, and since 137 Chromium no longer falls back to SwiftShader for WebGL unless told to
+  (measured on 151: `WebGL1 blocklisted`, `featureStatus.webgl` `disabled_off`). A headless browser
+  still reports `unavailable_software` and its pages do get WebGL through SwiftShader. Natively, on a
+  machine with a working GPU, Chromium's own choice already gives WebGL, and off leaves it alone.
+- **`software`**: `--use-angle=swiftshader --enable-unsafe-swiftshader`, ANGLE on the CPU renderer
+  every Chromium and Google Chrome ships, the same on every platform. WebGL 1 and 2.
+- **`gpu`**: `--ignore-gpu-blocklist`, and on Linux without a display of the machine's own (headless,
+  or on the daemon's Xvfb) `--use-angle=vulkan` as well: Xvfb has no DRI3, so OpenGL there is always
+  llvmpipe even with the GPU's render node passed in, and Vulkan on the render node is the one way to
+  the GPU. Offered only where a render node opens and a Vulkan driver for a GPU (not lavapipe) is
+  installed; in the container that is the `BROWSER_GPU_*` settings of the compose file.
+
+Measured on a 16-core server with a GeForce GT 710 (Kepler, nouveau, no NVIDIA driver), headed, a
+three.js scene of 20 and of 200 lit torus knots at 1280×720 (the machine was loaded by other work):
+
+| Mode | Renderer | 20 knots | 200 knots |
+|---|---|---|---|
+| off | none (blocklisted) | — | — |
+| software | SwiftShader (Subzero), Vulkan 1.3 | 22 fps | 2.4 fps |
+| llvmpipe through `--ignore-gpu-blocklist` (not offered) | Mesa llvmpipe, OpenGL 4.5 | 32 fps | 12 fps |
+| gpu | Mesa NVK on the GT 710, Vulkan 1.2 | 56 fps | 34 fps (38 headless) |
+
+The screencast and screenshots draw in every mode. Mesa's llvmpipe was faster than SwiftShader here
+but exists only where Mesa does and is reached only headed, so software mode stays on the renderer
+every build has.
+
 ## Limits
 
 | Name | Default | |
@@ -1077,7 +1112,7 @@ browser to make room.
 
 ### The agent's tools
 
-`BrowserOpen(url?, fresh?)`, `BrowserNavigate(url? | go: back|forward|reload, tab?)`,
+`BrowserOpen(url?, fresh?, webgl?: off|software|gpu)`, `BrowserNavigate(url? | go: back|forward|reload, tab?)`,
 `BrowserSnapshot(tab?, scope?, view?: page|viewport)`, `BrowserText(tab?, ref?, max_chars?, find?,
 regex?, query?, schema?)`, `BrowserLook(question, tab?, ref?, full_page?)`, `BrowserAct(action?,
 element?, ref?, text?, keys?, option?, submit?, to_ref?, direction?: up|down|left|right, paths?, x?,
@@ -1324,7 +1359,8 @@ the daemon's private figure under the cost profile `browser`, beside the termina
 `record_frames` (the default for a new group), `record_takeover`, `record_retention_days`,
 `record_max_mb`, `lan_allow`, `watch_mode` and `watch_domains`, `injection_monitor` and
 `injection_monitor_preset`, `extract_preset` (the model `BrowserText(query=…)` reads with) and
-`point_clicks` (off by default: whether the agent may act at a point of the viewport). The host gives the daemon its part with `limits.set` and `net.configure`
+`point_clicks` (off by default: whether the agent may act at a point of the viewport) and `webgl_allow`
+(`ask`, `software` or `gpu`: which WebGL the agent may turn on without asking). The host gives the daemon its part with `limits.set` and `net.configure`
 on every connection and within two seconds of a change.
 
 - **Watch mode.** With `watch_mode` on, on a host `watch_domains` names (`mail.example.com`, or
@@ -1341,6 +1377,15 @@ on every connection and within two seconds of a change.
   either way. Each judgement is a line of the action log (`monitor`).
 - **A page's own navigation the allowlist stopped** (`navigation.blocked`) is a line of the action log
   (`blocked`) and is told to the owning agent at the start of its next browser tool's result, once.
+
+- **WebGL.** `BrowserOpen(webgl=software|gpu, why)` asks the operator unless `webgl_allow` covers the
+  mode (each level covers the ones below it): the request goes on their card through
+  `ask_operator` with the answer hook `browser.webgl`, the same Allow and Deny as any approval and
+  never an orchestrator's to answer. Their yes calls `profile.webgl` for the owner's profile and wakes
+  the agent with the browser's own report; their no wakes it with the refusal; nothing changes while
+  it waits. `webgl=off` never asks. A browser closed with the reason `relaunch` leaves its group rows
+  open: the daemon reopens them under the same ids, and the host writes the new browser into them.
+  `gpu` where the daemon offers none is refused before anything is asked, with its reason.
 
 ### The network wall's rules and asks
 

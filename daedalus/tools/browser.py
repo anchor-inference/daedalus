@@ -215,8 +215,9 @@ def _caller(context: ToolContext) -> Caller | None:
             raise EnvUnavailable(str(exc)) from None
         return answer
 
-    async def ask_operator(key: str, text: str, card: dict[str, Any]) -> bool:
-        return bool(manager.ask_operator(context.session_id, key=key, tool="BrowserAskOperatorChrome", text=text, on_answer=SWITCH_ASK, card=card))
+    async def ask_operator(key: str, text: str, card: dict[str, Any], *, on_answer: str = SWITCH_ASK, extra: dict[str, Any] | None = None) -> bool:
+        tool = "BrowserAskOperatorChrome" if on_answer == SWITCH_ASK else "BrowserOpen"
+        return bool(manager.ask_operator(context.session_id, key=key, tool=tool, text=text, on_answer=on_answer, card=card, extra=extra))
 
     budget = max(4000, output_limit(context) - FRAME_CHARS - 600)
     return Caller(
@@ -236,8 +237,8 @@ async def _run(context: ToolContext, name: str, arguments: dict[str, Any]) -> To
 
 @tool_group("browser")
 @search_hint(
-    "launch start chromium chrome real browser watch live login profile incognito throwaway "
-    "браузер браузера запустить запусти открыть открой хром инкогнито профиль логины поднять подними"
+    "launch start chromium chrome real browser watch live login profile incognito throwaway webgl 3d gpu three.js canvas "
+    "браузер браузера запустить запусти открыть открой хром инкогнито профиль логины поднять подними вебгл видеокарта"
 )
 @tool(
     name="BrowserOpen",
@@ -246,11 +247,14 @@ async def _run(context: ToolContext, name: str, arguments: dict[str, Any]) -> To
         "your project's logins between sessions. url opens a page at once; fresh=true gives a throwaway browser whose "
         "cookies are wiped when it closes. Returns the tabs. Next: BrowserSnapshot to see the page. It opens the operator's "
         "own Chrome only when they switched this conversation there; when they ask for their browser and have not, call "
-        "BrowserAskOperatorChrome instead. " + NETWORK_ASK
+        "BrowserAskOperatorChrome instead. " + NETWORK_ASK + " Your browser has no WebGL unless turned on: webgl='software' "
+        "(drawn on the CPU, works everywhere) or 'gpu' (the machine's GPU, where one is passed in) asks the operator — say "
+        "in why what needs 3D — unless they allowed it already; on their yes the browser restarts in that mode with its "
+        "tabs. webgl='off' turns it off again without asking."
     ),
 )
-async def browser_open(context: ToolContext, url: str | None = None, fresh: bool = False, why: str | None = None) -> ToolResult:
-    return await _run(context, "BrowserOpen", {"url": url, "fresh": fresh, "why": why})
+async def browser_open(context: ToolContext, url: str | None = None, fresh: bool = False, why: str | None = None, webgl: str | None = None) -> ToolResult:
+    return await _run(context, "BrowserOpen", {"url": url, "fresh": fresh, "why": why, "webgl": webgl})
 
 
 @tool_group("browser")

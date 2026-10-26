@@ -33,7 +33,7 @@ from urllib.parse import urlsplit
 
 from daedalus import load as load_math
 from daedalus.browser import wire
-from daedalus.browser.agent import fenced, origin_of
+from daedalus.browser.agent import WEBGL_MODES, fenced, origin_of
 from daedalus.browser.model import (
     AGENT_ENVS,
     CONTROL_OWNERS,
@@ -99,6 +99,9 @@ LABEL = "browser service"
 UPDATE_BY_HAND = "docker compose -f deploy/compose.yaml --env-file .env up -d --build browser"
 """What the operator runs on the server when no rebuilder is there to recreate the browser service."""
 ACTING_SECONDS = 4.0
+RELAUNCH = "relaunch"
+"""The reason a daemon gives for a browser it closed only to start again in another WebGL mode: its
+groups come back under the same ids, so their rows stay open (:meth:`Browsers.webgl`)."""
 """How long after an action a group still counts as acting: the app's pulsing dot."""
 
 
@@ -584,6 +587,7 @@ class Browsers:
                     "version": str(info.get("version") or ""),
                     "chromium": {"version": str(chromium.get("version") or ""), "kind": str(chromium.get("kind") or ""), "error": str(chromium.get("error") or "")} if info else None,
                     "sandbox": str(capabilities.get("sandbox") or "") if info else "",
+                    "webgl": capabilities.get("webgl") if isinstance(capabilities.get("webgl"), dict) else None,
                     "limits": info.get("limits") or {},
                     "counts": info.get("counts") or {},
                     "image_version": image_version if env == "container" else "",
@@ -1163,6 +1167,39 @@ class Browsers:
             for r in rows
         ]
 
+    def webgl_offer(self, env: str) -> dict[str, Any]:
+        """What the daemon of ``env`` says of the WebGL modes: ``{modes, gpu, gpu_reason}``, empty
+        while it is not connected or is older than the modes."""
+        link = self.links.get(env)
+        info = link.info if link is not None and link.available else {}
+        offer = (info.get("capabilities") or {}).get("webgl")
+        return dict(offer) if isinstance(offer, dict) else {}
+
+    async def webgl(self, owner: Owner, mode: str | None = None, *, actor: str = "agent") -> dict[str, Any]:
+        """The WebGL mode of the owner's own profile and its running browser's report, or with
+        ``mode``, a change to it: a running browser in another mode is started again in this one by the
+        daemon, its groups kept under their ids, so their rows stay open and only learn the new
+        browser. Whether the change is allowed is the caller's to have settled — the operator's yes,
+        or their standing permission — never this method's."""
+        if mode is not None and mode not in WEBGL_MODES:
+            raise InvalidRequest(f"webgl is one of {', '.join(WEBGL_MODES)}")
+        env = await self.env_for(owner)
+        if env == USER:
+            raise Forbidden("the operator's own Chrome draws as they set it up; WebGL is chosen for the agent's own browser", reason="user_browser")
+        params: dict[str, Any] = {"profile": profile_id(owner, env=env)}
+        if mode is not None:
+            params["mode"] = mode
+        # A relaunch reopens every page of the profile's groups, each within the daemon's own 30 s.
+        result = await self._call(env, "profile.webgl", params, what="changing how the browser draws" if mode else "reading how the browser draws", timeout=120.0)
+        if result.get("relaunched"):
+            browser = str(result.get("browser_id") or "")
+            for group in result.get("groups") or []:
+                if isinstance(group, dict) and group.get("id"):
+                    await self.db.execute("UPDATE browser_groups SET browser_id = ?, tabs = ? WHERE id = ? AND env = ?", (browser, len(group.get("tabs") or []), str(group["id"]), env))
+        if mode is not None:
+            await self.audit(f"profile:{params['profile']}", env, actor, "webgl", {"mode": mode, "relaunched": bool(result.get("relaunched"))})
+        return {**result, "env": env}
+
     async def profile_action(self, env: str, profile: str, action: str, *, actor: str = "operator") -> None:
         """Clear a profile's cookies and storage, or delete it; the daemon refuses while it runs."""
         if action not in ("clear", "delete") or not valid_id(profile):
@@ -1643,6 +1680,10 @@ class Browsers:
         bid = str(data.get("browser_id") or "")
         reason = str(data.get("reason") or ("crashed" if data.get("crashed") else "closed"))
         await self.db.execute("UPDATE browsers SET status = 'exited', reason = ?, exited_at = ? WHERE env = ? AND id = ?", (reason, now_iso(), link.env, bid))
+        if reason == RELAUNCH:
+            # Started again in another WebGL mode, its groups reopened under the same ids: closing
+            # their rows here would have the agent's next call open a second group beside each.
+            return
         groups = [str(g) for g in data.get("groups") or []]
         rows = await self.db.fetchall("SELECT * FROM browser_groups WHERE env = ? AND status = 'open' AND (browser_id = ? OR id IN (SELECT value FROM json_each(?)))", (link.env, bid, json.dumps(groups)))
         for row in rows:

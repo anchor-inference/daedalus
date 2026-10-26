@@ -235,8 +235,16 @@ ENTRYPOINT ["python3", "/opt/launcher/supervisor.py"]
 # Widevine, the build a challenge expects to meet — so an operator who builds the image locally and
 # meets challenges the pinned build fails can have it, and name it to the service with
 # BROWSER_CHROMIUM=/opt/google/chrome/chrome in .env.
+#
+# The Vulkan drivers for a GPU are not in the image unless the build asks for them (BROWSER_GPU=1,
+# about 96 MB): only the browser's gpu WebGL mode uses them, and only with a GPU passed into the
+# service (the BROWSER_GPU_* lines in deploy/env.example). Xvfb has no DRI3, so OpenGL on the virtual
+# display is always Mesa's llvmpipe whatever device is passed in; Vulkan on the render node is the
+# browser's one way to the GPU there (measured with a GT 710 on nouveau: Mesa's NVK, WebGL 2, 34-38 fps
+# on a three.js scene llvmpipe drew at 12).
 FROM runtime AS browser
 ARG GOOGLE_CHROME=0
+ARG BROWSER_GPU=0
 ARG TARGETARCH
 
 ENV DAEDALUS_VENV_EXTRAS=speech,browser
@@ -260,6 +268,11 @@ RUN if [ "$GOOGLE_CHROME" = 1 ]; then \
         && apt-get install -y --no-install-recommends /tmp/google-chrome.deb \
         && rm -rf /tmp/google-chrome.deb /var/lib/apt/lists/* /etc/apt/sources.list.d/google-chrome.list /etc/cron.daily/google-chrome \
         && /opt/google/chrome/chrome --version; \
+    fi
+RUN if [ "$BROWSER_GPU" = 1 ]; then \
+        apt-get update \
+        && apt-get install -y --no-install-recommends mesa-vulkan-drivers \
+        && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man; \
     fi
 ENV CHROME_PATH=/usr/local/bin/chromium
 # The user the `browser` service runs browserd and Chromium as. Chromium's own sandbox gives every

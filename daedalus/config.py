@@ -2172,6 +2172,12 @@ class BrowserConfig(BaseModel):
     ref, for what the outline does not name (a canvas, a map). Off by default: a point is harder for
     the operator to read in the action log. The element found at the point is hit-tested and
     classified as a ref's would be, so a sensitive one is still asked about."""
+    webgl_allow: Literal["ask", "software", "gpu"] = "ask"
+    """Which WebGL the agent may turn on in its own browser without asking (``BrowserOpen(webgl=…)``):
+    ``ask`` asks the operator for either mode, ``software`` lets the CPU renderer through and asks
+    for the GPU, ``gpu`` lets both through. Turning it off never asks. Either mode widens what a page
+    can do in the browser's GPU process, which runs outside Chromium's sandbox in the container; the
+    GPU mode needs the GPU passed into the browser service (``BROWSER_GPU_*`` in the env file)."""
     user: BrowserUserConfig = Field(default_factory=BrowserUserConfig)
     """The operator's own Chrome (``[browser.user]``)."""
 

@@ -63,8 +63,10 @@ func (l *launch) start(ctx context.Context, profile string) (*Browser, error) {
 	}
 	cc := m.deps.Config.Chromium
 	screenW, screenH := cc.Screen()
+	b.WebGL = m.ProfileWebGL(profile)
 	proc, err := chrome.Start(chrome.Options{Path: found.Path, ProfileDir: dir, Proxy: proxy, Args: cc.Args, NoSandbox: cc.NoSandbox,
-		Env: env, Headed: cc.Headed(), ScreenW: screenW, ScreenH: screenH}, func(e cdp.Event) { m.onEvent(b, e) })
+		Env: env, Headed: cc.Headed(), ScreenW: screenW, ScreenH: screenH, WebGL: b.WebGL, Virtual: m.virtualDisplay()},
+		func(e cdp.Event) { m.onEvent(b, e) })
 	if err != nil {
 		m.closeWall(b)
 		return nil, errWith(wire.CodeUnsupported, map[string]any{"reason": err.Error()}, "Chromium did not start: %v", err)
@@ -124,7 +126,7 @@ func (l *launch) start(ctx context.Context, profile string) (*Browser, error) {
 	// How long the first answer took is logged so a slow start shows in the log before it ever runs
 	// out of budget.
 	m.log.Info("browser started", "browser", b.ID, "profile", profile, "pid", proc.Pid, "chromium", ver.Product,
-		"first_answer_ms", took.Milliseconds())
+		"webgl", b.WebGL, "first_answer_ms", took.Milliseconds())
 	return b, nil
 }
 
