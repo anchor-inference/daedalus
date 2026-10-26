@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
+	"time"
 
 	"github.com/ascorblack/daedalus/browserd/internal/cdp"
 )
@@ -49,11 +50,17 @@ func startPiped(opts Options, stderr io.Writer, handler func(cdp.Event)) (*exec.
 	return cmd, conn, nil
 }
 
-// killTree ends the browser's session: the browser and every helper it started.
+// killTree ends the browser's session: the browser and every helper it started, and returns once
+// they have died (see waitGroupGone), or after groupExitWait if one has not.
 func killTree(cmd *exec.Cmd) {
 	if cmd.Process == nil {
 		return
 	}
 	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	_ = cmd.Process.Kill()
+	waitGroupGone(cmd.Process.Pid, groupExitWait)
 }
+
+// groupExitWait bounds the wait for a killed browser's processes to die: they die in milliseconds,
+// and a stop must never hang on one the kernel is slow to take down.
+const groupExitWait = 5 * time.Second

@@ -2,6 +2,8 @@
 
 package chrome
 
+import "time"
+
 // PrivateBytes is not measured outside Linux; the caller falls back to the resident size.
 func PrivateBytes(pid int) int64 { return -1 }
 
@@ -17,3 +19,6 @@ type Cgroup struct {
 
 // OwnCgroup is false outside Linux.
 func OwnCgroup() (Cgroup, bool) { return Cgroup{}, false }
+
+// waitGroupGone has no process table to read outside Linux; the kill is taken as done.
+func waitGroupGone(pgid int, limit time.Duration) bool { return true }
