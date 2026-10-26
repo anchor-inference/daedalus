@@ -3050,6 +3050,43 @@ async def _memory_history_extra(conn: aiosqlite.Connection) -> None:
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _memory_history_extra))
 
+
+async def _memory_suggestion_kinds(conn: aiosqlite.Connection) -> None:
+    """Two more kinds of memory suggestion, from the background pass that learns from chats: a
+    ``revision`` (a change or removal of a bullet the operator wrote or edited, which the pass may
+    propose but never make, or one it was not sure of) and an ``addition`` (a new bullet held back
+    because it names something the operator never wrote — usually the agent's own choice of a port or
+    a library). ``detail`` carries what applying one needs: the entry, the chat and the seqs it rests
+    on, the action. The kind's CHECK cannot be altered in SQLite, so the table is rebuilt; the rows
+    keep their ids. Skipped when the table already allows the new kinds."""
+    row = await (await conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memory_suggestions'")).fetchone()
+    if row is None or "'revision'" in str(row[0]):
+        return
+    await conn.execute("""
+        CREATE TABLE memory_suggestions_rebuilt (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK (kind IN ('duplicate', 'contradiction', 'revision', 'addition')),
+            memory_ids TEXT NOT NULL,
+            fingerprint TEXT NOT NULL UNIQUE,
+            keep_id TEXT NOT NULL,
+            proposed_text TEXT NOT NULL,
+            score REAL NOT NULL DEFAULT 0,
+            reason TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'applied', 'dismissed', 'stale')),
+            created_at TEXT NOT NULL,
+            decided_at TEXT,
+            detail TEXT NOT NULL DEFAULT '{}'
+        )""")
+    columns = "id, tenant_id, kind, memory_ids, fingerprint, keep_id, proposed_text, score, reason, status, created_at, decided_at"
+    await conn.execute(f"INSERT INTO memory_suggestions_rebuilt({columns}) SELECT {columns} FROM memory_suggestions")
+    await conn.execute("DROP TABLE memory_suggestions")
+    await conn.execute("ALTER TABLE memory_suggestions_rebuilt RENAME TO memory_suggestions")
+    await conn.execute("CREATE INDEX IF NOT EXISTS memory_suggestions_open ON memory_suggestions(tenant_id, status)")
+
+
+MIGRATIONS.append(DataMigration("SELECT 1;", _memory_suggestion_kinds))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

@@ -1,17 +1,21 @@
-"""The background tidying of the agent's memory, and the curator the Memory screen works through."""
+"""The background work on the agent's memory — the tidying and the pass that learns from chats — and
+the curator the Memory screen works through."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from datetime import UTC, tzinfo
+from typing import TYPE_CHECKING, Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from protocore.contracts.memory import MemoryRecord
 
 from daedalus.extensions.notifications import Draft
 from daedalus.host.session_runner import NOT_OPERATOR_FACING, TENANT
 from daedalus.memory.curator import EMBEDDINGS_PER_PASS, MemoryCurator
+from daedalus.memory.synthesis import Synthesizer
 from daedalus.search.service import offload
 
 if TYPE_CHECKING:
@@ -30,6 +34,34 @@ def curator(app: Application) -> MemoryCurator:
     made = MemoryCurator(app.db, app.manager.memory, TENANT, lambda: app.config.memory)
     app.extensions["memory_curator"] = made
     return made
+
+
+def synthesizer(app: Application) -> Synthesizer:
+    """The application's learning pass, made on first use when the extension did not install one, so
+    the settings' status and "update now" answer either way."""
+    existing = app.extensions.get("memory_synthesis")
+    if isinstance(existing, Synthesizer):
+        return existing
+    made = _synthesizer(app)
+    app.extensions["memory_synthesis"] = made
+    return made
+
+
+def _synthesizer(app: Application, notify: Any = None) -> Synthesizer:
+    manager = app.manager
+    assert manager is not None
+
+    def zone() -> tzinfo:
+        name = manager.presence.locale()[1] if getattr(manager, "presence", None) is not None else ""
+        try:
+            return ZoneInfo(name) if name else UTC
+        except (ZoneInfoNotFoundError, ValueError):
+            return UTC
+
+    return Synthesizer(
+        app.db, curator(app), lambda: app.config, manager.providers,
+        running=manager.is_running, costs_nothing=manager.provider_costs_nothing, zone=zone, notify=notify,
+    )
 
 
 def embedder(app: Application):  # type: ignore[no-untyped-def]
@@ -67,12 +99,22 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
             kind="memory_suggestions", level="quiet", link="/app/memory?suggestions=1", dedupe_key="memory_suggestions", source="memory",
         ))
 
+    async def held(report: dict[str, Any]) -> None:
+        if app.notifications is None:
+            return
+        await app.notifications.post(Draft(
+            "system", f"Memory: {report['held']} note(s) from chats wait for your word", "The background pass held these back: a change to a note you wrote, or a note naming something you never said. Memory → Suggestions: apply or dismiss them.",
+            kind="memory_suggestions", level="quiet", link="/app/memory?suggestions=1", dedupe_key="memory_suggestions", source="memory",
+        ))
+
     made = MemoryCurator(app.db, app.manager.memory, TENANT, lambda: app.config.memory, embed=embedder(app), notify=notify)
     app.extensions["memory_curator"] = made
+    learning = _synthesizer(app, notify=held)
+    app.extensions["memory_synthesis"] = learning
     app.manager.delete_hooks.append(lambda session_id: session_deleted(app, session_id))
     if app.front is not None:
         app.front.memory_curator = made
-    return [asyncio.create_task(made.loop(), name="memory-consolidation")]
+    return [asyncio.create_task(made.loop(), name="memory-consolidation"), asyncio.create_task(learning.loop(), name="memory-synthesis")]
 
 
 async def session_deleted(app: Application, session_id: str) -> None:
@@ -89,4 +131,4 @@ async def session_deleted(app: Application, session_id: str) -> None:
         logger.info("memory: deleting %s removed %d record(s), kept %d backed elsewhere", session_id, found["removed"], found["kept"])
 
 
-__all__ = ["curator", "embedder", "install", "session_deleted"]
+__all__ = ["curator", "embedder", "install", "session_deleted", "synthesizer"]

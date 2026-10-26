@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { api, MEMORY_CATEGORIES, MemoryHistoryEntry, MemoryListing, MemoryRecord, MemorySuggestions } from "../api";
+import { api, MEMORY_CATEGORIES, MemoryHistoryEntry, MemoryListing, MemoryRecord, MemorySuggestion, MemorySuggestions } from "../api";
 import { MemoryEntryView, MemoryHome } from "../memory/MemoryEntries";
 import { navigate, pathFor, useRoute } from "../router";
 import { ChipRow, Segmented, Skeleton } from "../ui/index";
@@ -437,6 +437,14 @@ function RenameSheet({ topic, onClose, onDone, toast }: { topic: string; onClose
   );
 }
 
+/** Why the background pass left a proposal to the operator, in the page's language; a retirement gives the
+ *  model's own reason (it writes in the chat's language). */
+function learnedWhy(s: MemorySuggestion): string {
+  if (s.why === "locked") return t("memory.suggest.why.locked");
+  if (s.why === "ungrounded") return t("memory.suggest.why.ungrounded", { names: (s.tokens ?? []).join(", ") });
+  return s.reason;
+}
+
 function SuggestionsSheet({ projects, onClose, onChanged, toast }: { projects: Record<string, string>; onClose: () => void; onChanged: () => void; toast: (t: string) => void }) {
   const { data, error, loading, refresh } = useQuery<MemorySuggestions>("/api/memory/suggestions");
   const [busy, setBusy] = useState(false);
@@ -473,9 +481,14 @@ function SuggestionsSheet({ projects, onClose, onChanged, toast }: { projects: R
       {loading && !data && <Skeleton rows={3} />}
       {error && !data && <div className="empty">{error}</div>}
       {data && list.length === 0 && <div className="empty"><b>{t("memory.suggest.empty")}</b></div>}
-      {list.map((s) => (
-        <div key={s.id} className="card memory-suggestion" data-suggestion={s.id}>
-          <div className="section-title" style={{ marginTop: 0 }}>{t(`memory.suggest.${s.kind}`)}</div>
+      {list.map((s) => {
+        const learned = s.kind === "revision" || s.kind === "addition";
+        // The background pass's proposals name what they do: a change or removal of a bullet, or a held-back new one.
+        const kind = s.kind === "revision" ? `revision.${s.action === "retire" ? "retire" : "update"}` : s.kind;
+        const apply = s.kind === "revision" ? (s.action === "retire" ? "retire" : "revision") : s.kind;
+        return (
+        <div key={s.id} className="card memory-suggestion" data-suggestion={s.id} data-kind={s.kind}>
+          <div className="section-title" style={{ marginTop: 0 }}>{t(`memory.suggest.${kind}`)}</div>
           {s.memory_ids.map((id) => {
             const r = data?.records[id];
             return r ? (
@@ -485,13 +498,16 @@ function SuggestionsSheet({ projects, onClose, onChanged, toast }: { projects: R
               </div>
             ) : null;
           })}
-          <div className="sub"><b>{t("memory.suggest.keep")}</b> {s.text}</div>
+          {!learned && <div className="sub"><b>{t("memory.suggest.keep")}</b> {s.text}</div>}
+          {learned && s.action !== "retire" && <div className="memory-text memory-suggestion-proposed"><b>{t(s.kind === "addition" ? "memory.suggest.new" : "memory.suggest.proposed")}</b> {s.text}</div>}
+          {learned && <div className="sub">{s.kind === "addition" && s.entry_title ? t("memory.suggest.into", { entry: s.entry_title }) + " · " : ""}{learnedWhy(s)}</div>}
           <div className="row-actions">
-            <button className="btn small ghost" disabled={busy} onClick={() => void act(`/api/memory/suggestions/${s.id}/dismiss`)}>{t("memory.suggest.dismiss")}</button>
-            <button className="btn small primary" data-action="apply" disabled={busy} onClick={() => void act(`/api/memory/suggestions/${s.id}/apply`)}>{t(`memory.suggest.apply.${s.kind}`)}</button>
+            <button className="btn small ghost" disabled={busy} onClick={() => void act(`/api/memory/suggestions/${s.id}/dismiss`)}>{t(learned ? "memory.suggest.dismiss.learned" : "memory.suggest.dismiss")}</button>
+            <button className="btn small primary" data-action="apply" disabled={busy} onClick={() => void act(`/api/memory/suggestions/${s.id}/apply`)}>{t(`memory.suggest.apply.${apply}`)}</button>
           </div>
         </div>
-      ))}
+        );
+      })}
       <div className="sheet-foot">
         <button className="btn ghost" disabled={busy} onClick={() => void tidy()}>{t("memory.tidy")}</button>
         <span className="grow" />

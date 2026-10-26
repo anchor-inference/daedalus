@@ -295,8 +295,8 @@ async def test_the_status_reads_the_settings_the_background_pass_will_use(client
     assert status["paused"] and not status["generate"] and status["budget_usd"] == 1.25
     assert status["last_synthesis_at"] is None and status["learning"] == 0 and status["spent_today_usd"] == 0.0
     assert (await client.get("/api/memory/entries", headers=H)).json()["status"]["paused"]
-    # A preset that no longer exists is passed over for the classifier's, then the default model.
-    assert manager.config.memory.model_preset(manager.config.presets) == ""
+    # A preset that no longer exists is passed over, and the settings say so.
+    assert status["model"] != "nowhere" and "nowhere is no longer configured" in status["model_note"]
 
 
 # -- deleting a chat ---------------------------------------------------------------------------
@@ -330,6 +330,18 @@ async def test_deleting_a_chat_removes_what_only_it_taught_and_one_undo_restores
     found = await curator(app).forget_session(two.session.id, title="Shopping")
     assert found == {"removed": 1, "kept": 1, "history_id": found["history_id"]}
     assert elsewhere.id not in {r.id for r in manager.memory.records(TENANT)}
+
+
+async def test_deleting_a_chat_keeps_the_notes_saved_before_the_move_to_entries(app: Any, manager: SessionManager) -> None:
+    old_chat = await manager.create_session("Before entries")
+    entries = manager.memory_entries
+    moved = (await entries.remember(MemoryScope.global_, "", "Someone prefers short answers", kind="preference", metadata={}, origin="migration", session_id=old_chat.session.id)).record
+    learned = (await entries.remember(MemoryScope.global_, "", "Someone bakes on Sundays", kind="fact", metadata={}, origin="remember", session_id=old_chat.session.id)).record
+    manager.delete_hooks.append(lambda sid: session_deleted(app, sid))
+    assert await manager.delete_session(old_chat.session.id)
+    left = {r.id for r in manager.memory.records(TENANT)}
+    assert moved.id in left, "a note the move attributed to its chat is not that chat's to take"
+    assert learned.id not in left
 
 
 async def test_a_subagents_deletion_leaves_its_project_notes(app: Any, manager: SessionManager, tmp_path: Path) -> None:

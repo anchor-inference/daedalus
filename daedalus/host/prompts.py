@@ -1060,27 +1060,28 @@ def environment_section(
     workspace: Path,
     bot_repo: Path,
     core_repo: Path,
-    session_title: str,
     model: str,
     extra_notes: str = "",
     sandboxed: bool = False,
     github_org: str = "",
     ssh_hosts: Sequence[tuple[str, str]] = (),
     selfdev_mode: str = "off",
-    project: str = "",
+    in_project: bool = False,
 ) -> str:
+    # The session's and the project's names are not here: either can be renamed at any time, and a
+    # rename that changed these bytes cost the provider's cache of the whole history after them. They
+    # travel in the turn context instead (see ``titles_note``).
     lines = [
         "Environment:",
-        f"- Session: {session_title}",
         f"- Workspace (cwd for tools): {workspace}",
         f"- Files the operator sends arrive under {workspace / 'inbox'}",
         f"- Your host repository: {bot_repo}",
         f"- Your core repository: {core_repo}",
         f"- Current model: {model}",
     ]
-    if project:
+    if in_project:
         lines.append(
-            f"- This session belongs to the project {project}, whose folder is {workspace}. The folder is the "
+            f"- This session belongs to a project (the turn context names it), whose folder is {workspace}. The folder is the "
             "operator's own — their repository, their documents, their work — and it is the whole of your reach: "
             "everything you read, write, run and deliver is inside it, and a path that leads out of it is refused "
             "rather than followed. It is shared: other sessions of this project work in the same files, and files "
@@ -1135,6 +1136,46 @@ TURN_CONTEXT_RE = re.compile(r"\n*" + re.escape(TURN_CONTEXT_OPEN) + r"(?:(?!" +
 
 def without_turn_context(text: str) -> str:
     return TURN_CONTEXT_RE.sub("", text).rstrip()
+
+
+SESSION_TITLE_LINE = "- This session is titled: "
+PROJECT_TITLE_LINE = "- The project it belongs to: "
+"""The opening words of the two lines of :func:`titles_note`. The host finds what the model was last told
+by them, so they stay fixed."""
+
+
+def _one_line(name: str) -> str:
+    return " ".join(str(name or "").split())
+
+
+def titles_note(title: str, project: str) -> str:
+    """The session's and its project's names, as the turn context carries them, or ``""`` when there are none.
+
+    They were in the system prompt, where a rename (the session named from its first message, a
+    project renamed by the operator) changed bytes in the middle of the prefix every later request is
+    cached on. In the turn context they cost nothing to change; the host says them again only when
+    they differ from what the model was last told (:func:`told_titles`).
+    """
+    lines = [f"{SESSION_TITLE_LINE}{_one_line(title)}"] if _one_line(title) else []
+    if _one_line(project):
+        lines.append(f"{PROJECT_TITLE_LINE}{_one_line(project)}")
+    return "\n".join(lines)
+
+
+def told_titles(context: str) -> tuple[str, str] | None:
+    """The names one turn context told the model, or ``None`` when it told none.
+
+    A context that names the session but no project told that there is no project, which is how a
+    session moved out of one stops being told the old name."""
+    title = project = None
+    for line in context.splitlines():
+        if line.startswith(SESSION_TITLE_LINE):
+            title = line[len(SESSION_TITLE_LINE):].strip()
+        elif line.startswith(PROJECT_TITLE_LINE):
+            project = line[len(PROJECT_TITLE_LINE):].strip()
+    if title is None and project is None:
+        return None
+    return title or "", project or ""
 
 
 YAGNI_ON = "YAGNI mode is on"
@@ -1210,4 +1251,4 @@ def governance_section(path: Path) -> str:
     return ""
 
 
-__all__ = ["BOARD_HEADER", "BOARD_PARTS", "BOARD_PEERS", "BOARD_SERVICES", "BOARD_SUBAGENT", "BOARD_TASKS", "BOARD_TERMINALS", "BOARD_TWO_WAYS", "BOARD_WAKES", "CHAT_SEARCH", "COMPANION", "DEFAULT_RULES", "DISPATCHER", "DISPATCHER_COMPACTION", "HEADLINE_RE", "HISTORY_HEADER", "HISTORY_HEADLINE", "HISTORY_PARTS", "HISTORY_SEARCH", "LOOP", "MEMORY_BLOCK", "NOTIFY", "ORCHESTRATOR", "ORCHESTRATOR_COMPACTION", "PERSONA", "SCHEDULING", "SELF_DEVELOPMENT", "SELF_DEVELOPMENT_LOCAL", "SIDE_QUESTIONS", "YAGNI_OFF", "YAGNI_ON", "YAGNI_RULES", "group_instructions", "companion_sections", "dispatcher_sections", "environment_section", "governance_section", "language_section", "orchestrator_sections", "page_note", "rules_section", "self_development_section", "split_headline", "tool_sections", "turn_context", "without_turn_context", "yagni_note"]
+__all__ = ["BOARD_HEADER", "BOARD_PARTS", "BOARD_PEERS", "BOARD_SERVICES", "BOARD_SUBAGENT", "BOARD_TASKS", "BOARD_TERMINALS", "BOARD_TWO_WAYS", "BOARD_WAKES", "CHAT_SEARCH", "COMPANION", "DEFAULT_RULES", "DISPATCHER", "DISPATCHER_COMPACTION", "HEADLINE_RE", "HISTORY_HEADER", "HISTORY_HEADLINE", "HISTORY_PARTS", "HISTORY_SEARCH", "LOOP", "MEMORY_BLOCK", "NOTIFY", "ORCHESTRATOR", "ORCHESTRATOR_COMPACTION", "PERSONA", "PROJECT_TITLE_LINE", "SCHEDULING", "SELF_DEVELOPMENT", "SELF_DEVELOPMENT_LOCAL", "SESSION_TITLE_LINE", "SIDE_QUESTIONS", "YAGNI_OFF", "YAGNI_ON", "YAGNI_RULES", "group_instructions", "companion_sections", "dispatcher_sections", "environment_section", "governance_section", "language_section", "orchestrator_sections", "page_note", "rules_section", "self_development_section", "split_headline", "titles_note", "told_titles", "tool_sections", "turn_context", "without_turn_context", "yagni_note"]

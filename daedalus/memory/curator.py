@@ -77,7 +77,8 @@ class CuratorConflict(Exception):
     """The records changed since the history entry or suggestion was made; nothing was done."""
 
 
-def _tokens(text: str) -> set[str]:
+def words_of(text: str) -> set[str]:
+    """A text's words and values, lower case: what the duplicate comparisons measure overlap on."""
     return {t.lower() for t in _TOKEN.findall(text or "")}
 
 
@@ -107,6 +108,20 @@ def _fingerprint(kind: str, records: Sequence[MemoryRecord]) -> str:
     return hashlib.sha1(f"{kind}|{'|'.join(parts)}".encode()).hexdigest()
 
 
+LEARNED_KINDS = ("revision", "addition")
+"""Suggestions the background pass that learns from chats leaves (:mod:`daedalus.memory.synthesis`):
+a change to a bullet it may not or would not make itself, and a new bullet it held back."""
+
+
+def _learned_print(kind: str, records: Sequence[MemoryRecord], text: str, detail: dict[str, Any]) -> str:
+    """A learned suggestion's identity: the bullet it would change (as it reads now) or the entry it
+    would add to, and what it proposes — so the same proposal from a later pass is not offered twice,
+    and one whose bullet has since changed reads as stale."""
+    parts = sorted(f"{r.id}:{hashlib.sha1(r.text.encode()).hexdigest()[:12]}" for r in records)
+    target = str(detail.get("entry_key") or "") if kind == "addition" else str(detail.get("action") or "")
+    return hashlib.sha1(f"{kind}|{'|'.join(parts)}|{target}|{' '.join(text.lower().split())}".encode()).hexdigest()
+
+
 @dataclass(frozen=True)
 class Finding:
     kind: str
@@ -126,7 +141,7 @@ def _broadest_then_newest(records: Sequence[MemoryRecord]) -> MemoryRecord:
 def find(records: Sequence[MemoryRecord], vectors: dict[str, list[float]] | None = None) -> list[Finding]:
     """Every pair worth a word, best first, each record in at most one finding."""
     pool = sorted(records, key=lambda r: r.updated_at, reverse=True)[:MAX_RECORDS_COMPARED]
-    tokens = {r.id: _tokens(r.text) for r in pool}
+    tokens = {r.id: words_of(r.text) for r in pool}
     candidates: list[Finding] = []
     for i, a in enumerate(pool):
         ta = tokens[a.id]
@@ -206,6 +221,26 @@ class MemoryCurator:
                  json.dumps({k: v for k, v in (extra or {}).items() if v}, ensure_ascii=False, default=str)),
             )
             return int(cursor.lastrowid or 0)
+
+    async def journal(self, actor: str, action: str, summary: str, before: Sequence[MemoryRecord], after: Sequence[MemoryRecord], extra: dict[str, Any] | None = None) -> int:
+        """One history entry for a change made outside the curator's own methods (the background
+        pass's), under the same rules as :meth:`_journal`; the caller holds :attr:`lock`."""
+        return await self._journal(actor, action, summary, before, after, extra)
+
+    async def suggest(self, kind: str, records: Sequence[MemoryRecord], text: str, *, reason: str, detail: dict[str, Any]) -> bool:
+        """File a learned suggestion (``revision`` or ``addition``); ``False`` when the same one was
+        already filed, whatever became of it — a dismissed proposal is not offered again."""
+        if kind not in LEARNED_KINDS:
+            raise ValueError(f"unknown suggestion kind {kind!r}")
+        fingerprint = _learned_print(kind, records, text, detail)
+        async with self.db.transaction() as conn:
+            cursor = await conn.execute(
+                "INSERT OR IGNORE INTO memory_suggestions(tenant_id, kind, memory_ids, fingerprint, keep_id, proposed_text, score, reason, status, created_at, detail)"
+                " VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'open', ?, ?)",
+                (self.tenant, kind, json.dumps([r.id for r in records]), fingerprint, records[0].id if records else "", text,
+                 reason[:500], datetime.now(UTC).isoformat(), json.dumps(detail, ensure_ascii=False)),
+            )
+            return bool(cursor.rowcount)
 
     async def _merge(self, ids: Sequence[str], *, actor: str, action: str, keep_id: str | None = None, text: str | None = None, category: str | None = None, topics: Sequence[str] | None = None, summary: str = "") -> tuple[MemoryRecord, int]:
         unique = list(dict.fromkeys(ids))
@@ -346,7 +381,10 @@ class MemoryCurator:
         """What a deleted chat taught leaves with it.
 
         A record whose every source is this chat goes; one also taught by another chat, written by the
-        operator or imported stays, as does a locked one (the operator made it theirs). The chat's
+        operator or imported stays, as does a locked one (the operator made it theirs), and so does one
+        that came through the move to entries: those were saved before a chat could take its notes
+        with it, and attributing them to the chat they were saved in made deleting one busy chat take
+        out nearly half of memory at once. The chat's
         provenance rows go either way, so a record kept now because a second chat backs it goes when
         that chat is deleted too. The removed records are tombstoned with the reason
         ``session_deleted``, so a fork or a copy of the chat does not teach them again; the background
@@ -359,7 +397,7 @@ class MemoryCurator:
             taught = list(dict.fromkeys(r["record_id"] for r in rows))
             marks = ",".join("?" * len(taught))
             backed = {row["record_id"] for row in await self.db.fetchall(
-                f"SELECT DISTINCT record_id FROM memory_sources WHERE tenant_id = ? AND record_id IN ({marks}) AND session_id != ?",
+                f"SELECT DISTINCT record_id FROM memory_sources WHERE tenant_id = ? AND record_id IN ({marks}) AND (session_id != ? OR origin = 'migration')",
                 (self.tenant, *taught, session_id),
             )}
             live = [r for i in taught if (r := self.memory.get_record(self.tenant, i)) is not None]
@@ -565,6 +603,14 @@ class MemoryCurator:
             for record in before:
                 await self.memory.restore(record)
             await self.entries.restore_sources(extra.get("sources", []))
+            # Provenance a change added to records it left otherwise as they were (a chat that taught a
+            # note memory already had): undone, that chat no longer backs it, or deleting the chat later
+            # would keep a note only the undone change attributed to it.
+            for source in extra.get("added_sources", []):
+                await self.db.execute(
+                    "DELETE FROM memory_sources WHERE tenant_id = ? AND record_id = ? AND origin = ? AND session_id = ? AND from_seq = ?",
+                    (self.tenant, source["record_id"], source["origin"], source.get("session_id") or "", int(source.get("from_seq") or 0)),
+                )
             # An undone removal brings the notes back, and the tombstone that stopped them being learned
             # again would otherwise outlive the operator changing their mind.
             await self.entries.untombstone(r.text for r in before)
@@ -594,15 +640,32 @@ class MemoryCurator:
     async def suggestions(self) -> list[dict[str, Any]]:
         """The open suggestions whose records are still as they were; the others are closed on the way."""
         rows = await self.db.fetchall("SELECT * FROM memory_suggestions WHERE tenant_id = ? AND status = 'open' ORDER BY score DESC, id", (self.tenant,))
+        titles = {e.id: e.title for e in await self.entries.list()}
         out = []
         for row in rows:
             ids = json.loads(row["memory_ids"])
-            records = [self.memory.get_record(self.tenant, i) for i in ids]
-            if any(r is None for r in records) or _fingerprint(row["kind"], [r for r in records if r is not None]) != row["fingerprint"]:
+            if not await self._still_holds(row):
                 await self.db.execute("UPDATE memory_suggestions SET status = 'stale', decided_at = ? WHERE id = ?", (datetime.now(UTC).isoformat(), row["id"]))
                 continue
-            out.append({"id": row["id"], "kind": row["kind"], "memory_ids": ids, "keep_id": row["keep_id"], "text": row["proposed_text"], "score": row["score"], "reason": row["reason"], "created_at": row["created_at"]})
+            detail = _detail(row)
+            found = {"id": row["id"], "kind": row["kind"], "memory_ids": ids, "keep_id": row["keep_id"], "text": row["proposed_text"], "score": row["score"], "reason": row["reason"], "created_at": row["created_at"]}
+            if row["kind"] in LEARNED_KINDS:
+                found.update({"action": detail.get("action") or ("add" if row["kind"] == "addition" else "update"), "entry_id": detail.get("entry_id") or None,
+                              "entry_title": titles.get(str(detail.get("entry_id") or "")) or detail.get("entry_title"), "session_id": detail.get("session_id"),
+                              "why": detail.get("why") or "", "tokens": list(detail.get("tokens") or [])})
+            out.append(found)
         return out
+
+    async def _still_holds(self, row: Any) -> bool:
+        """Whether a suggestion still applies to memory as it is: its records exist and read as they did.
+        A held-back addition has no record; its entry is made again on apply when it is gone."""
+        records = [self.memory.get_record(self.tenant, i) for i in json.loads(row["memory_ids"])]
+        if any(r is None for r in records):
+            return False
+        live = [r for r in records if r is not None]
+        if row["kind"] in LEARNED_KINDS:
+            return _learned_print(row["kind"], live, row["proposed_text"], _detail(row)) == row["fingerprint"]
+        return _fingerprint(row["kind"], live) == row["fingerprint"]
 
     async def apply(self, suggestion_id: int, *, text: str | None = None) -> tuple[MemoryRecord, int]:
         row = await self.db.fetchone("SELECT * FROM memory_suggestions WHERE id = ? AND tenant_id = ?", (suggestion_id, self.tenant))
@@ -611,13 +674,63 @@ class MemoryCurator:
         if row["status"] != "open":
             raise CuratorConflict("this suggestion is no longer open")
         ids = json.loads(row["memory_ids"])
-        records = [self.memory.get_record(self.tenant, i) for i in ids]
-        if any(r is None for r in records) or _fingerprint(row["kind"], [r for r in records if r is not None]) != row["fingerprint"]:
+        if not await self._still_holds(row):
             raise CuratorConflict("the records changed since the suggestion was made")
+        if row["kind"] in LEARNED_KINDS:
+            record, history = await self._apply_learned(row, text=text)
+            await self.db.execute("UPDATE memory_suggestions SET status = 'applied', decided_at = ? WHERE id = ?", (datetime.now(UTC).isoformat(), suggestion_id))
+            return record, history
         async with self.lock:
             merged, history = await self._merge(ids, actor="operator", action="merge" if row["kind"] == "duplicate" else "replace", keep_id=row["keep_id"], text=text or row["proposed_text"], summary=row["reason"])
         await self.db.execute("UPDATE memory_suggestions SET status = 'applied', decided_at = ? WHERE id = ?", (datetime.now(UTC).isoformat(), suggestion_id))
         return merged, history
+
+    async def _apply_learned(self, row: Any, *, text: str | None) -> tuple[MemoryRecord, int]:
+        """The operator's yes to a learned suggestion. A revision changes or removes the bullet as the
+        operator's own edit (it stays locked: they approved the words); an addition files the held-back
+        bullet in its entry with the chat it came from as its source. Either is one undoable change."""
+        detail = _detail(row)
+        body = (text or row["proposed_text"]).strip()
+        if row["kind"] == "revision":
+            record = self._get(json.loads(row["memory_ids"])[0])
+            if detail.get("action") == "retire":
+                async with self.lock:
+                    history = await self._remove([record], actor="operator", action="delete", summary=row["reason"] or record.text[:120], tombstone="deleted")
+                assert history is not None
+                return record, history
+            changed, history = await self.edit(record.id, text=body)
+            if history is None:
+                raise CuratorConflict("the suggestion would not change the bullet")
+            return changed, history
+        entry = await self._learned_entry(detail)
+        async with self.lock:
+            was = {r.id: r for r in self.memory.records(self.tenant)}
+            scope, scope_key = self.entries.placement(entry)
+            seqs = [int(s) for s in detail.get("seqs") or [] if isinstance(s, int | str) and str(s).isdigit()]
+            result = await self.entries.remember(
+                scope, scope_key, body, kind=str(detail.get("kind") or "fact"), metadata={"source": "synthesis", "topics": list(detail.get("topics") or [])},
+                origin="synthesis", session_id=str(detail.get("session_id") or ""), entry=entry,
+                from_seq=min(seqs) if seqs else 0, to_seq=max(seqs) if seqs else 0,
+            )
+            prior = was.get(result.record.id)
+            history = await self._journal("operator", "add", body[:120], [prior] if prior else [], [result.record])
+            return result.record, history
+
+    async def _learned_entry(self, detail: dict[str, Any]) -> Entry:
+        """The entry a held-back addition goes to: the one it named, or the same page made again (the
+        pass makes no page for a bullet it only holds back, and removes one it left empty)."""
+        found = await self.entries.get(str(detail.get("entry_id") or ""))
+        if found is not None:
+            return found
+        section, slug = str(detail.get("section") or "topic"), str(detail.get("slug") or "")
+        if section == "area" and detail.get("project_id"):
+            try:
+                return await self.entries.ensure(Target("area", project_id=str(detail["project_id"])))
+            except ValueError:
+                pass  # the project is gone: a free area of the same name
+        if section not in ("topic", "area") or not slug:
+            raise CuratorConflict("the entry this was meant for is gone")
+        return await self.entries.ensure(Target(section, slug, str(detail.get("entry_title") or "") or slug))
 
     async def dismiss(self, suggestion_id: int) -> bool:
         await self.db.execute("UPDATE memory_suggestions SET status = 'dismissed', decided_at = ? WHERE id = ? AND tenant_id = ? AND status = 'open'", (datetime.now(UTC).isoformat(), suggestion_id, self.tenant))
@@ -683,4 +796,12 @@ class MemoryCurator:
             await asyncio.sleep(CHECK_EVERY_SECONDS)
 
 
-__all__ = ["CuratorConflict", "Finding", "MemoryCurator", "find"]
+def _detail(row: Any) -> dict[str, Any]:
+    try:
+        value = json.loads(row["detail"] or "{}") if "detail" in row.keys() else {}
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+__all__ = ["LEARNED_KINDS", "CuratorConflict", "Finding", "MemoryCurator", "find"]

@@ -513,6 +513,12 @@
       "synonyms": ["iterations", "steps", "max steps", "turn limit", "loop limit", "итерации", "шаги", "лимит шагов"]
     },
     {
+      "section": "limits", "anchor": "subagents.max_active", "config": "subagents.max_active",
+      "title": { "en": "Subagents at once", "ru": "Субагентов одновременно" },
+      "about": { "en": "How many subagents one session may run at the same time, from 1 to 32; the next SubAgent call uses the new value.", "ru": "Сколько субагентов одна сессия может держать запущенными одновременно, от 1 до 32; следующий вызов SubAgent берёт новое значение." },
+      "synonyms": ["subagents", "subagent limit", "parallel agents", "concurrency", "max active", "helpers", "субагенты", "лимит субагентов", "параллельные агенты"]
+    },
+    {
       "section": "limits", "anchor": "limits.usd_per_run", "config": "limits.usd_per_run",
       "title": { "en": "Spend cap per run", "ru": "Потолок трат за запуск" },
       "about": { "en": "The most one run may spend in USD; 0 means no cap.", "ru": "Сколько USD может потратить один запуск; 0 — без лимита." },
@@ -1007,7 +1013,7 @@
     {
       "section": "memory", "anchor": "memory.paused", "config": "memory.paused",
       "title": { "en": "Pause memory", "ru": "Пауза памяти" },
-      "about": { "en": "Keeps everything but hands nothing to the agent and learns nothing new; chats during the pause are never learned from.", "ru": "Всё сохраняется, но агенту ничего не передаётся и ничего нового не запоминается; чаты за время паузы не изучаются." },
+      "about": { "en": "Keeps everything but hands nothing to the agent, and neither the agent nor the background pass saves anything new; chats during the pause are never learned from. Your own notes still save.", "ru": "Всё сохраняется, но агенту ничего не передаётся, и ни агент, ни фоновый проход ничего нового не сохраняют; чаты за время паузы не изучаются. Ваши собственные заметки сохраняются." },
       "synonyms": ["pause", "stop remembering", "incognito", "пауза", "не запоминать"]
     },
     {
@@ -1019,8 +1025,14 @@
     {
       "section": "memory", "anchor": "memory.synthesis_usd_per_day", "config": "memory.synthesis_usd_per_day",
       "title": { "en": "Daily budget for learning", "ru": "Дневной бюджет на обучение" },
-      "about": { "en": "What the background memory pass may spend in a day; 0 turns it off.", "ru": "Сколько фоновый проход памяти может потратить за день; 0 — выключен." },
+      "about": { "en": "What memory's model calls may spend in a day; the background pass stops for the day when it is reached, a model that costs nothing carries on; 0 turns it off.", "ru": "Сколько вызовы модели памяти могут потратить за день; при достижении фоновый проход останавливается до завтра, бесплатная модель продолжает; 0 — выключен." },
       "synonyms": ["memory budget", "cost", "spend", "бюджет памяти", "расходы"]
+    },
+    {
+      "section": "memory", "anchor": "memory.learning", "config": null,
+      "title": { "en": "Learning from chats", "ru": "Обучение на чатах" },
+      "about": { "en": "When the background pass last read your chats, what it added, updated and held back, today's spend, and Update now to read every unread chat at once.", "ru": "Когда фоновый проход последний раз читал ваши чаты, что он добавил, обновил и отложил, сколько потрачено сегодня, и «Обновить сейчас», чтобы прочитать все непрочитанные чаты." },
+      "synonyms": ["update memory now", "learn now", "last pass", "synthesis", "обновить память", "последний проход", "обучение"]
     },
     {
       "section": "memory", "anchor": "memory.sensitive", "config": null,

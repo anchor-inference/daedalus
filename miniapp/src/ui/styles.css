@@ -2183,6 +2183,10 @@ a.memory-source:hover { color: var(--fg); }
 .memory-import-flags:empty { display: none; }
 .memory-file { cursor: pointer; }
 .memory-sensitive-sub { margin: 4px 0 2px; }
+.memory-learning-lines { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 2px; padding: 0; list-style: none; font-size: var(--fs-13); line-height: 1.45; color: var(--fg-2); overflow-wrap: anywhere; }
+.memory-learning-lines [data-tone="warn"] { color: var(--warn); }
+.memory-learning-lines [data-tone="busy"] { color: var(--accent); }
+.memory-suggestion-proposed { margin-top: var(--space-2); }
 .memory-saved-chip { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; min-height: var(--chip-h-dense); margin: 4px 0; padding: 0 10px; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--fg-2); font-size: var(--fs-12); text-decoration: none; }
 .memory-saved-chip:hover { color: var(--fg); }
 .memory-saved-chip svg { color: var(--accent); }
@@ -4606,6 +4610,12 @@ button.staff-row:hover { background: var(--surface-2); }
    orchestrator five tabs share the strip, and the words fit only without their icons. */
 .panel-tab .count.attn { background: var(--warn); color: var(--primary-ink); }
 .panel-tablist.many .panel-tab .ic { display: none; }
+/* A narrow panel drops the words (the container rule beside the panel's grid column), so there the
+   icons come back whatever the count: with both gone a strip of five tabs, a session's four and its
+   Subagents, drew as nothing but the Details tab's number, and no tab could be reached at all. */
+@container (max-width: 420px) {
+  .panel-tablist.many .panel-tab .ic { display: block; }
+}
 
 /* The chat's one line for the whole list: how many wait, and the way to them. */
 /* The same notice as the main chat's setup line — solid frame, icon, sentence, a small button at the

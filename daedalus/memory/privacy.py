@@ -38,6 +38,13 @@ REFUSAL = (
     "remembered, they can say it in an ordinary chat."
 )
 
+PAUSED_REFUSAL = (
+    "The operator has paused memory: it is kept but neither read nor added to until they resume it in "
+    "Settings → Memory. Nothing was {verb}. Carry on without it; do not keep the note in a file instead."
+)
+"""What Remember and Recall answer while memory is paused. Forget still works: removing a note is
+something the operator may want during a pause, and it uses nothing."""
+
 TURN_NOTE = (
     "This chat is private: nothing said here is kept in long-term memory, learned from or found by search "
     "from other chats, and the memory tools refuse here. Do not copy what is said here into memory notes "
@@ -101,9 +108,10 @@ class PrivateChatGuard(Tool):
     to remember. The tool stays advertised in a private chat (the session's tool list is part of its
     cached prefix and is the same for every chat), and the refusal tells the model why it stops."""
 
-    def __init__(self, inner: Tool, private: Callable[[str], bool]) -> None:
+    def __init__(self, inner: Tool, private: Callable[[str], bool], paused: Callable[[], bool] | None = None) -> None:
         self._inner = inner
         self._private = private
+        self._paused = paused
         self.output_trust = inner.output_trust
 
     def __getattr__(self, name: str) -> Any:
@@ -126,25 +134,28 @@ class PrivateChatGuard(Tool):
         return self._inner
 
     async def invoke(self, context: ToolContext, arguments: dict[str, Any]) -> ToolResult:
+        verb = {"Remember": "saved", "Recall": "read", "Forget": "forgotten"}.get(self._inner.name, "changed")
         if self._private(context.session_id):
-            verb = {"Remember": "saved", "Recall": "read", "Forget": "forgotten"}.get(self._inner.name, "changed")
-            return ToolResult(
-                tool_call_id=str(context.metadata.get("tool_call_id") or ""),
-                content=REFUSAL.format(verb=verb),
-                is_error=True,
-                metadata={"refused": "private_chat"},
-            )
+            return self._refuse(context, REFUSAL.format(verb=verb), "private_chat")
+        if self._paused is not None and self._inner.name != "Forget" and self._paused():
+            return self._refuse(context, PAUSED_REFUSAL.format(verb=verb), "memory_paused")
         return await self._inner.invoke(context, arguments)
 
+    @staticmethod
+    def _refuse(context: ToolContext, text: str, why: str) -> ToolResult:
+        return ToolResult(tool_call_id=str(context.metadata.get("tool_call_id") or ""), content=text, is_error=True, metadata={"refused": why})
 
-def guard_memory_tools(tools: list[Tool], private: Callable[[str], bool]) -> list[Tool]:
-    """The memory tools wrapped in :class:`PrivateChatGuard`, in the order given; other tools as they are."""
-    return [PrivateChatGuard(tool, private) if tool.name in MEMORY_TOOLS else tool for tool in tools]
+
+def guard_memory_tools(tools: list[Tool], private: Callable[[str], bool], paused: Callable[[], bool] | None = None) -> list[Tool]:
+    """The memory tools wrapped in :class:`PrivateChatGuard`, in the order given; other tools as they
+    are. ``paused`` is read on every call, so pausing memory in Settings takes effect at the next one."""
+    return [PrivateChatGuard(tool, private, paused) if tool.name in MEMORY_TOOLS else tool for tool in tools]
 
 
 __all__ = [
     "MEMORY_TOOLS",
     "PARENT_KEYS",
+    "PAUSED_REFUSAL",
     "PRIVATE_KEY",
     "REFUSAL",
     "TURN_NOTE",

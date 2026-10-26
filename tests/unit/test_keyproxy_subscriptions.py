@@ -167,7 +167,9 @@ def test_claude_chat_body_becomes_messages() -> None:
         "tools": [{"type": "function", "function": {"name": "Read", "description": "read", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}}],
     }
     out, names = claude_mod.chat_to_messages(body)
-    assert out["model"] == "claude-opus-5" and out["stream"] is True and out["thinking"]["type"] == "enabled" and out["thinking"]["budget_tokens"] >= 1024
+    # Claude Code asks this model for adaptive thinking: the effort sets how much it thinks, not a budget.
+    assert out["model"] == "claude-opus-5" and out["stream"] is True and out["thinking"] == {"type": "adaptive", "display": "omitted"}
+    assert out["max_tokens"] == 4096
     assert out["system"][0]["text"].startswith("x-anthropic-billing-header:") and "Claude Agent SDK" in out["system"][1]["text"]
     version = clients_mod.SPECS["claude"].defaults["version"]
     assert f"cc_version={version}.{claude_mod.attribution_hash('open x')};" in out["system"][0]["text"]
@@ -583,10 +585,12 @@ async def test_claude_silent_thinking_forwards_keepalive_comments() -> None:
     out = [c async for c in claude_mod.messages_events_to_chunks(_lines(events), model="m")]
     keepalives = [i for i, c in enumerate(out) if c == subs.KEEPALIVE]
     assert subs.KEEPALIVE.startswith(":") and subs.KEEPALIVE.endswith("\n\n")
-    assert keepalives[:6] == [0, 1, 2, 3, 4, 5]
+    assert keepalives[:5] == [0, 1, 2, 3, 4]
     data = [json.loads(c[6:]) for c in out if c.startswith("data: {")]
-    assert data[0]["choices"][0]["delta"]["tool_calls"][0]["function"]["name"] == "Read"
-    assert data[1]["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"] == "{}"
+    # The thinking block's stop carries the block itself, kept for the next request.
+    assert data[0]["choices"][0]["delta"]["reasoning_details"][0]["signature"] == "sig"
+    assert data[1]["choices"][0]["delta"]["tool_calls"][0]["function"]["name"] == "Read"
+    assert data[2]["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"] == "{}"
     assert data[-1]["choices"][0]["finish_reason"] == "tool_calls"
     full = await subs.collect_completion(claude_mod.messages_events_to_chunks(_lines(events), model="m"), model="m")
     call = full["choices"][0]["message"]["tool_calls"][0]

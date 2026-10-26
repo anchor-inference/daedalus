@@ -17,7 +17,7 @@ from fastapi import Depends, FastAPI, HTTPException, Response
 from protocore.contracts.memory import MemoryRecord, MemoryScope
 from pydantic import BaseModel, ConfigDict, Field
 
-from daedalus.extensions.memory import curator
+from daedalus.extensions.memory import curator, synthesizer
 from daedalus.host.session_runner import TENANT
 from daedalus.memory import edit, transfer
 from daedalus.memory.curator import CuratorConflict
@@ -328,8 +328,10 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         return {"entry": entry.view(count=len(records)), "records": [{**memory_view(r), "sources": sources.get(r.id, [])} for r in records]}
 
     async def status() -> dict[str, Any]:
-        """What the Memory screen's pill says: on, paused or not generating, when the background pass
-        last read a chat and how many it is reading, and today's spend on memory's model calls."""
+        """What the Memory screen's pill and settings say: on, paused or not generating, when the
+        background pass last read a chat and how many it is reading, today's spend on memory's model
+        calls, the model the pass runs on (and why, when it is not the chosen one) and what the last
+        pass did."""
         config = app.config.memory
         row = await app.db.fetchone("SELECT max(last_at) last_at, sum(CASE WHEN status = 'running' THEN 1 ELSE 0 END) running FROM memory_synthesis")
         midnight = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
@@ -339,7 +341,18 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             "synthesis_preset": config.synthesis_preset, "budget_usd": config.synthesis_usd_per_day,
             "spent_today_usd": float(spent["c"] or 0.0) if spent else 0.0,
             "last_synthesis_at": row["last_at"] if row else None, "learning": int(row["running"] or 0) if row else 0,
+            **await synthesizer(app).status(),
         }
+
+    @api.post("/api/memory/synthesis/run")
+    async def memory_synthesis_run(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Read every chat with something unread now, in the background ("update memory now").
+        Refused while memory is paused, not learning from chats, or has no budget at all."""
+        learning = synthesizer(app)
+        blocked = learning.blocked()
+        if blocked:
+            raise HTTPException(409, {"paused": "memory is paused", "off": "learning from chats is off", "no_budget": "the daily budget is 0"}.get(blocked, blocked))
+        return {"started": await learning.run_now()}
 
     @api.get("/api/memory/status")
     async def memory_status(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

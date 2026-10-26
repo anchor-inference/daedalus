@@ -27,6 +27,7 @@ from protocore.contracts.types import Message, MessageRole, TextBlock
 
 from daedalus.host.engine_factory import TENANT
 from daedalus.memory.entries import SUMMARY_MAX_CHARS, Entry, is_archived, is_locked
+from daedalus.memory.synthesis import choose_model
 from daedalus.security.untrusted import injection_signs
 
 if TYPE_CHECKING:
@@ -237,9 +238,9 @@ async def propose(entry: Entry, records: Sequence[MemoryRecord], instruction: st
 
 
 def model_ask(config: RuntimeConfig, providers: Any, *, purpose: str, max_tokens: int = 2000) -> Ask | None:
-    """A call on the memory model: Settings → Memory's synthesis preset, else the classifier's, else
-    the default model; ``None`` when no model is configured at all."""
-    chosen = config.memory.model_preset(config.presets) or (config.default_preset() or ("", None))[0]
+    """A call on memory's model, the one the background pass runs on (:func:`daedalus.memory.synthesis.choose_model`);
+    ``None`` when no model is configured at all."""
+    chosen = choose_model(config).preset
     if not chosen:
         return None
 

@@ -17,7 +17,6 @@ import re
 import sys
 import tempfile
 import tomllib
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -1038,12 +1037,6 @@ class HooksConfig(BaseModel):
 class MemoryConfig(BaseModel):
     """What the host does with memory beyond the Remember/Recall tools."""
 
-    extract_after_run: bool = False
-    """After a run of at least ``extract_min_messages`` messages, ask the model for the durable facts it learned
-    (decisions, preferences, identifiers, how-tos) and store them as memories. A paid call per run."""
-    extract_min_messages: int = Field(default=12, ge=2)
-    extract_preset: str = ""
-    """Preset id for the extraction call; empty = the session's own model."""
     classify_preset: str = ""
     """Preset id of the model that names a memory's category and topics when Remember was given
     none, and double-checks it for sensitive subjects; empty = word lists only, which cost nothing
@@ -1061,23 +1054,20 @@ class MemoryConfig(BaseModel):
     to an earlier conversation. Off, neither tool is offered; HistorySearch still searches the current chat."""
     generate: bool = True
     """Learn from the operator's chats in the background: the pass that files what was said into the
-    memory entries. Off, memory changes only when the agent is told to remember or the operator edits it."""
+    memory entries (:mod:`daedalus.memory.synthesis`). Off, memory changes only when the agent is told
+    to remember or the operator edits it; chats said meanwhile are read when it is turned back on."""
     synthesis_preset: str = ""
     """Preset id of the model the background pass and the Memory screen's "tell it what to change" use;
-    any configured preset. Empty = the classifier's preset, else the default model."""
+    any configured preset. Empty = the recommended cheap model when it is configured, else the
+    classifier's, the summariser's or a middle preset — the Memory settings say which one runs."""
     synthesis_usd_per_day: float = Field(default=0.5, ge=0)
-    """What the background pass may spend in a day; it stops for the day when this is reached. 0 = no pass."""
+    """What memory's model calls may spend in a day (UTC); the background pass stops for the day when
+    it is reached. A model that costs nothing (a subscription, a local one) is not stopped by it.
+    0 = no background pass at all."""
     paused: bool = False
-    """Memory kept but not used: nothing is handed to the agent and nothing new is learned. Chats held
-    during the pause are never learned from afterwards. The operator's own notes still save."""
-
-    def model_preset(self, presets: Mapping[str, Any]) -> str:
-        """The preset the memory model calls run on: the synthesis preset, the classifier's, or empty
-        for the default model; a named preset that no longer exists is passed over."""
-        for preset in (self.synthesis_preset, self.classify_preset):
-            if preset and preset in presets:
-                return preset
-        return ""
+    """Memory kept but not used: nothing is handed to the agent, the agent's Remember and Recall are
+    refused, and nothing is learned from chats. Chats said during the pause are marked read, so they are
+    never learned from afterwards. The operator's own notes (the Memory screen, ``/remember``) still save."""
 
 
 class CompactionConfig(BaseModel):
@@ -1664,8 +1654,10 @@ class EditBoardConfig(BaseModel):
 
 
 class SubagentsConfig(BaseModel):
-    max_active: int = Field(default=4, ge=1)
-    """Running subagents one leader may have at a time."""
+    max_active: int = Field(default=10, ge=1, le=32)
+    """Running subagents one leader may have at a time. Settings → Limits edits it, and the next
+    SubAgent call reads the new value. Four turned out too few for a leader fanning one task out, and
+    past about thirty-two the machine, not the cap, is what stops them."""
     wait_timeout_minutes: int = Field(default=30, ge=1)
     linger_remind_minutes: int = Field(default=30, ge=0)
     """How long a finished subagent sits idle before its leader is asked, once, whether it still needs
