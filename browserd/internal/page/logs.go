@@ -118,6 +118,11 @@ type LogsResult struct {
 // An `after` past the log's end (a daemon restarted under a host that kept its place) reads from
 // the start.
 func (p *Model) Logs(t *browser.Tab, after int64, level string, limit int) (*LogsResult, error) {
+	return readLog(p.consoleOf(t, false), t.URL(), after, level, limit)
+}
+
+// readLog is Logs over one console, a tab's or an extension worker's; c is nil before it took any.
+func readLog(c *consoleLog, url string, after int64, level string, limit int) (*LogsResult, error) {
 	if level == "" {
 		level = "info"
 	}
@@ -134,8 +139,7 @@ func (p *Model) Logs(t *browser.Tab, after int64, level string, limit int) (*Log
 	if after < 0 {
 		return nil, wire.Errorf(wire.CodeInvalidParams, "after is a sequence number, 0 or more")
 	}
-	out := &LogsResult{URL: t.URL(), Entries: []LogEntry{}}
-	c := p.consoleOf(t, false)
+	out := &LogsResult{URL: url, Entries: []LogEntry{}}
 	if c == nil {
 		return out, nil
 	}
@@ -185,6 +189,25 @@ func (p *Model) LogCounts(t *browser.Tab, mark LogMark) (errors, warnings int) {
 
 // logEvent keeps what the console, the page's uncaught errors and the browser's own log say.
 func (p *Model) logEvent(t *browser.Tab, e cdp.Event) {
+	if e.Method == "Page.javascriptDialogOpening" {
+		p.dialogLog(t, e)
+		return
+	}
+	entry, ok := logEntryOf(e)
+	if !ok {
+		return
+	}
+	c := p.consoleOf(t, true)
+	c.add(entry)
+	if e.Method != "Log.entryAdded" {
+		releaseConsole(c, func(ctx context.Context) error {
+			return t.Call(ctx, "Runtime.releaseObjectGroup", map[string]any{"objectGroup": "console"}, nil)
+		}, t.Closed)
+	}
+}
+
+// logEntryOf is the console entry an event of a page or a worker makes, if it makes one.
+func logEntryOf(e cdp.Event) (LogEntry, bool) {
 	switch e.Method {
 	case "Runtime.consoleAPICalled":
 		var r struct {
@@ -194,18 +217,16 @@ func (p *Model) logEvent(t *browser.Tab, e cdp.Event) {
 			StackTrace *stackTrace    `json:"stackTrace"`
 		}
 		if json.Unmarshal(e.Params, &r) != nil {
-			return
+			return LogEntry{}, false
 		}
 		if r.Type == "clear" || r.Type == "endGroup" || r.Type == "startGroupCollapsed" && len(r.Args) == 0 {
-			return
+			return LogEntry{}, false
 		}
 		entry := LogEntry{At: stamp(r.Timestamp), Level: consoleLevel(r.Type), Source: "console", Text: clipText(consoleText(r.Args), logTextMax)}
 		if f := r.StackTrace.first(); f != nil {
 			entry.URL, entry.Line = f.URL, f.LineNumber+1
 		}
-		c := p.consoleOf(t, true)
-		c.add(entry)
-		p.releaseConsole(t, c)
+		return entry, true
 	case "Runtime.exceptionThrown":
 		var r struct {
 			Timestamp float64 `json:"timestamp"`
@@ -218,7 +239,7 @@ func (p *Model) logEvent(t *browser.Tab, e cdp.Event) {
 			} `json:"exceptionDetails"`
 		}
 		if json.Unmarshal(e.Params, &r) != nil {
-			return
+			return LogEntry{}, false
 		}
 		d := r.Details
 		text := d.Text
@@ -237,9 +258,7 @@ func (p *Model) logEvent(t *browser.Tab, e cdp.Event) {
 		if f := d.StackTrace.first(); f != nil && entry.URL == "" {
 			entry.URL, entry.Line = f.URL, f.LineNumber+1
 		}
-		c := p.consoleOf(t, true)
-		c.add(entry)
-		p.releaseConsole(t, c)
+		return entry, true
 	case "Log.entryAdded":
 		var r struct {
 			Entry struct {
@@ -252,12 +271,12 @@ func (p *Model) logEvent(t *browser.Tab, e cdp.Event) {
 			} `json:"entry"`
 		}
 		if json.Unmarshal(e.Params, &r) != nil {
-			return
+			return LogEntry{}, false
 		}
 		l := r.Entry
 		if l.Source == "network" && strings.HasSuffix(strings.SplitN(l.URL, "?", 2)[0], "/favicon.ico") {
 			// The browser asks every site for its icon on its own; a site without one is not at fault.
-			return
+			return LogEntry{}, false
 		}
 		source := "browser"
 		if l.Source == "network" {
@@ -271,30 +290,34 @@ func (p *Model) logEvent(t *browser.Tab, e cdp.Event) {
 		if l.LineNumber > 0 {
 			entry.Line = l.LineNumber + 1
 		}
-		p.consoleOf(t, true).add(entry)
-	case "Page.javascriptDialogOpening":
-		// A dialog is told in the console too, whoever answers it: it is part of what the page did.
-		var r struct {
-			Type    string `json:"type"`
-			Message string `json:"message"`
-		}
-		if json.Unmarshal(e.Params, &r) != nil {
-			return
-		}
-		how := "waiting for an answer"
-		if t.Dialog() == nil {
-			how = "accepted by the browser"
-		}
-		p.consoleOf(t, true).add(LogEntry{At: time.Now().UnixMilli(), Level: "info", Source: "dialog",
-			Text: clipText(r.Type+" ("+how+"): "+r.Message, logTextMax)})
+		return entry, true
 	}
+	return LogEntry{}, false
+}
+
+// dialogLog tells a dialog in the console too, whoever answers it: it is part of what the page did.
+func (p *Model) dialogLog(t *browser.Tab, e cdp.Event) {
+	var r struct {
+		Type    string `json:"type"`
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(e.Params, &r) != nil {
+		return
+	}
+	how := "waiting for an answer"
+	if t.Dialog() == nil {
+		how = "accepted by the browser"
+	}
+	p.consoleOf(t, true).add(LogEntry{At: time.Now().UnixMilli(), Level: "info", Source: "dialog",
+		Text: clipText(r.Type+" ("+how+"): "+r.Message, logTextMax)})
 }
 
 // releaseConsole lets Chromium drop the objects it keeps for the console messages it sent: every
 // argument of a console call reaches the daemon as a handle in the "console" group, and a handle
 // keeps its object alive, so a page logging large objects would otherwise grow for as long as it
-// runs. At most once a second a tab: the daemon has taken what it keeps (the words) by then.
-func (p *Model) releaseConsole(t *browser.Tab, c *consoleLog) {
+// runs. At most once a second a page or worker: the daemon has taken what it keeps (the words) by
+// then. release is the call that lets them go, gone whether there is still anyone to call.
+func releaseConsole(c *consoleLog, release func(context.Context) error, gone func() bool) {
 	c.mu.Lock()
 	pending := c.release
 	c.release = true
@@ -306,12 +329,12 @@ func (p *Model) releaseConsole(t *browser.Tab, c *consoleLog) {
 		c.mu.Lock()
 		c.release = false
 		c.mu.Unlock()
-		if t.Closed() {
+		if gone() {
 			return
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = t.Call(ctx, "Runtime.releaseObjectGroup", map[string]any{"objectGroup": "console"}, nil)
+		_ = release(ctx)
 	})
 }
 

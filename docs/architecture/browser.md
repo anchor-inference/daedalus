@@ -513,6 +513,32 @@ them), so the page cannot tell it is on the way it could with older builds; a te
   the page's; the host frames them as untrusted. The console and the requests of a frame of another
   site, which runs in its own session, are not followed yet; a same-site frame's are the tab's.
 
+## The agent's own code: page scripts and extensions
+
+For testing a change to a site, or an extension the agent builds, before it ships anywhere. Each
+acts on the agent's own browser and its profile only: on the operator's Chrome every one is refused
+with `1004 {reason: "user_browser"}` (the relay would carry `Page` and `Runtime`, but the agent works
+read-only there), and a throwaway browser takes no extension (`1007`).
+
+| Method | Params → Result |
+|---|---|
+| `page.evaluate` | `{tab_id, expression ≤ 256 KiB, max_chars? ≤ 50000, timeout_ms? ≤ 60000, origin?}` → `{url, type, value, truncated?, exception?, logs: [LogEntry], scripts: [name]}`: run in the page's main world as the console runs it (`replMode`, a top-level await waits, a user gesture); an object is serialised in the page (elements as their tag and markup, cycles, maps, sets, errors, a node budget); `logs` is what the tab's console took meanwhile; a script past its time is stopped and said in `exception` |
+| `script.add` | `{group_id, tab_id?, name, js?, css?, matches?: [glob \| host], all_frames?, source?, origin?}` → `{scripts}`: kept in the profile (`browserd/scripts.json`), given to every tab of the browser with `Page.addScriptToEvaluateOnNewDocument` (and to frames of other sites when `all_frames`), and to every tab opened later before its first document; the code is compiled in `tab_id`'s page first, so a syntax error is `-32602` naming the line. The code runs inside an async function behind the address check, the styles as a constructed sheet (which a page's CSP does not refuse); an exception is logged under the script's name. At most 32 scripts, 256 KiB each |
+| `script.list` | `{group_id}` → `{scripts: [{name, matches, js_bytes, css_bytes, all_frames?, source?, added_at}]}` |
+| `script.remove` | `{group_id, name \| all, origin?}` → `{removed, scripts}`: documents already showing keep what it did until they load again |
+| `extension.install` | `{group_id, upload_id, source?, origin?}` → `{extension}`: the upload (`upload.put`) is a `.zip` (the folder holding `manifest.json` is the root) or a `.crx`; unpacked into the profile (`browserd/extensions/<name>`) and loaded with `Extensions.loadUnpacked`. The same `source` again replaces the files in the same folder and reloads it, keeping its id. Loaded again whenever the profile's browser starts |
+| `extension.list` | `{group_id}` → `{extensions: [{id, name, version, dir, source?, installed_at, enabled, error?}]}` |
+| `extension.uninstall` | `{group_id, id (an id, a name or a folder), origin?}` → `{extension}` |
+| `extension.logs` | `{group_id, id, after?, level?, limit?}` → `{extension, logs}` (`page.logs`'s shape): the console of the extension's service worker, which the daemon follows from its first line (an unpacked extension's id is known from its path before the load) |
+
+Chromium loads extensions over the debugging pipe once started with
+`--enable-unsafe-extension-debugging` (every browser is); measured on 151 (the pinned build), 155
+(Debian's) and 156, headed and new-headless. `--load-extension` was not used: it would mean a restart
+for every change, and branded Chrome stopped honouring it in 137. A worker the daemon follows is not
+stopped by Chromium for idling, which is the one way the agent's browser differs from a person's for
+an extension in test. Opening an extension's own pages (`chrome-extension://…/popup.html`) is still
+refused like every scheme but http and https.
+
 ## Sensitive actions
 
 The daemon classifies an action from the element and the page. `sensitive.kinds` is any of:
@@ -1050,10 +1076,15 @@ element?, ref?, text?, keys?, option?, submit?, to_ref?, direction?: up|down|lef
 y?, steps?, tab?)`, `BrowserTabs(action: list|new|select|close, tab?, url?)`, `BrowserWait(until:
 load|idle|text|gone|url, value?, timeout_s ≤ 60, tab?)`, `BrowserDialog(accept, text?, tab?)`,
 `BrowserHandoff(reason: login|captcha|two_factor|payment|confirm|other, what)`, `BrowserClose(tab? |
-all)`, `BrowserDownload(name, to?)`, `BrowserNote(note, host?)` or `BrowserNote(read)`, `BrowserLogs(tab?, level?, all?)`,
+all)`, `BrowserDownload(name, to?)`, `BrowserNote(note, host?)` or `BrowserNote(read)`, `BrowserLogs(tab?, level?, all?, extension?)`,
 `BrowserNetwork(tab?, type?, host?, contains?, method?, failed?, all?, id?, body?, max_chars?)`,
 `BrowserInspect(ref? | selector?, tab?, html? = true, max_chars?)`, `BrowserCookies(action:
-import|list|clear = import, path? | text?, domain?)`, `BrowserLogin(url_or_domain, reason, selectors?)`.
+import|list|clear = import, path? | text?, domain?)`, `BrowserLogin(url_or_domain, reason, selectors?)`,
+`BrowserEval(code, tab?, max_chars?, timeout_s?)`, `BrowserScripts(action: list|add|remove = list,
+name?, js? | js_path?, css? | css_path?, matches?, all_frames?)`, `BrowserExtensions(action:
+list|install|reload|remove = list, path?, extension?)`; `BrowserLogs(extension?)` reads an extension's
+worker. An extension folder is zipped by the host from the session's workspace (on the host for a
+session working there) and handed over with `upload.put`; a command-line member gives a `.zip`.
 
 - **Cookies.** `BrowserCookies` loads a cookie file the operator handed over into the caller's
   profile (`cookies.set`), starting its browser when none runs: a Netscape `cookies.txt` (with curl's

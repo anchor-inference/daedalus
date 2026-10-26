@@ -16,11 +16,13 @@ import base64
 import contextlib
 import copy
 import hashlib
+import io
 import json
 import re
 import secrets
 import struct
 import time
+import zipfile
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -258,6 +260,16 @@ class FakeBrowserd:
         """Group → its keyframes, each with its ``data``: one after every action while recording."""
         self.workflows: dict[str, dict[str, Any]] = {}
         """Group → its recording of a person's steps: the one on, or the last it made."""
+        self.evaluated: list[str] = []
+        self.eval_answers: dict[str, dict[str, Any]] = {}
+        """Expression → what ``page.evaluate`` answers for it (``type``, ``value``, ``exception``, ``logs``)."""
+        self.scripts: dict[str, dict[str, dict[str, Any]]] = {}
+        """Profile → its page scripts by name, as ``script.list`` lists them (with their js and css)."""
+        self.extensions: dict[str, dict[str, dict[str, Any]]] = {}
+        """Profile → its extensions by id."""
+        self.extension_files: dict[str, dict[str, bytes]] = {}
+        """Extension id → the files its last install unpacked."""
+        self.extension_logs: dict[str, list[dict[str, Any]]] = {}
         self.relay_status: dict[str, Any] = {"connected": False, "since": None, "last_seen": None}
         """The ``user`` daemon's ``relay.status``: what the test says the operator's Chrome is."""
         self.relays: list[ViewChannel] = []
@@ -904,6 +916,64 @@ class FakeBrowserd:
             return {"upload_id": upload_id, "size": len(upload["data"])}
         if method == "page.login":
             return await self._login(params)
+        if method in ("page.evaluate", "script.add", "script.remove", "extension.install", "extension.uninstall") and self.env == "user":
+            raise _Fail(1004, "refused in the operator's Chrome", {"reason": "user_browser"})
+        if method == "page.evaluate":
+            group, tab = self._tab(params)
+            await self._held_back(group, params)
+            self.evaluated.append(str(params.get("expression")))
+            answer = dict(self.eval_answers.get(str(params.get("expression")), {"type": "string", "value": tab.page.title}))
+            return {"url": tab.page.url, "logs": [], "scripts": self._scripts_on(group.profile, tab.page.url), **answer}
+        if method == "script.list":
+            group = self._group(str(params.get("group_id")))
+            return {"scripts": list(self.scripts.get(group.profile, {}).values())}
+        if method == "script.add":
+            group = self._group(str(params.get("group_id")))
+            if "let b = ;" in str(params.get("js") or ""):
+                raise _Fail(-32602, "the script does not parse (line 2 of its js): SyntaxError: Unexpected token ';'")
+            kept = self.scripts.setdefault(group.profile, {})
+            kept[str(params["name"])] = {"name": params["name"], "matches": params.get("matches") or [], "js_bytes": len(params.get("js") or ""), "css_bytes": len(params.get("css") or ""),
+                                         "source": params.get("source") or "", "js": params.get("js") or "", "css": params.get("css") or "", **({"all_frames": True} if params.get("all_frames") else {})}
+            return {"scripts": list(kept.values())}
+        if method == "script.remove":
+            group = self._group(str(params.get("group_id")))
+            kept = self.scripts.setdefault(group.profile, {})
+            names = list(kept) if params.get("all") else [str(params.get("name"))]
+            if any(n not in kept for n in names):
+                raise _Fail(1001, f"no page script {params.get('name')!r}")
+            for n in names:
+                del kept[n]
+            return {"removed": names, "scripts": list(kept.values())}
+        if method == "extension.list":
+            group = self._group(str(params.get("group_id")))
+            return {"extensions": list(self.extensions.get(group.profile, {}).values())}
+        if method == "extension.install":
+            group = self._group(str(params.get("group_id")))
+            upload = self.uploads[str(params.get("upload_id"))]
+            with zipfile.ZipFile(io.BytesIO(upload["data"])) as archive:
+                files = {n: archive.read(n) for n in archive.namelist()}
+            manifest = json.loads(files["manifest.json"])
+            kept = self.extensions.setdefault(group.profile, {})
+            ext_id = hashlib.sha256(str(params.get("source") or manifest["name"]).encode()).hexdigest()[:32].translate(str.maketrans("0123456789abcdef", "abcdefghijklmnop"))
+            kept[ext_id] = {"id": ext_id, "name": manifest["name"], "version": manifest["version"], "dir": manifest["name"].lower(), "source": params.get("source") or "", "enabled": True,
+                            "installed_at": stamp()}
+            self.extension_files[ext_id] = files
+            return {"extension": kept[ext_id]}
+        if method == "extension.uninstall":
+            group = self._group(str(params.get("group_id")))
+            kept = self.extensions.setdefault(group.profile, {})
+            found = next((e for e in kept.values() if params.get("id") in (e["id"], e["name"])), None)
+            if found is None:
+                raise _Fail(1001, f"no extension {params.get('id')!r} in this browser")
+            del kept[found["id"]]
+            return {"extension": found}
+        if method == "extension.logs":
+            group = self._group(str(params.get("group_id")))
+            found = next((e for e in self.extensions.get(group.profile, {}).values() if params.get("id") in (e["id"], e["name"])), None)
+            if found is None:
+                raise _Fail(1001, f"no extension {params.get('id')!r} in this browser")
+            entries = [e for e in self.extension_logs.get(found["id"], []) if e["seq"] > int(params.get("after") or 0)]
+            return {"extension": found, "logs": {"url": f"chrome-extension://{found['id']}/", "entries": entries, "last": entries[-1]["seq"] if entries else int(params.get("after") or 0), "more": 0, "dropped": False}}
         if method in ("cookies.set", "cookies.clear") and self.env == "user":
             raise _Fail(1004, "refused in the operator's Chrome", {"reason": "user_browser"})
         if method == "cookies.set":
@@ -1016,6 +1086,9 @@ class FakeBrowserd:
             return {"at": stamp(), "supported": True, "memory_basis": "cgroup", "machine": self.machine, "daemon": {"pid": 1, "rss_bytes": 20 << 20, "cpu_percent": 0.2},
                     "browsers": [{"id": b.id, "pid": b.pid, "processes": 6, "rss_bytes": 250 << 20, "cpu_percent": 5.0, "tabs": sum(len(g.tabs) for g in self.groups.values() if g.browser_id == b.id)} for b in self.browsers.values()]}
         raise _Fail(-32601, f"method not found: {method}")
+
+    def _scripts_on(self, profile: str, url: str) -> list[str]:
+        return [n for n, s in self.scripts.get(profile, {}).items() if not s["matches"] or any(m in url for m in s["matches"])]
 
     def _open(self, params: dict[str, Any]) -> dict[str, Any]:
         gid = str(params.get("group_id"))

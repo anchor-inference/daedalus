@@ -51,6 +51,8 @@ type Model struct {
 	byGUID    map[string]*Download
 	uploads   map[string]*upload
 	asked     map[string]string // tab -> the document a needs_you was raised for, so it is raised once
+	// The consoles of the agent's extensions' workers, by browser and extension (evaluate.go).
+	workerLogs map[string]*consoleLog
 
 	// AfterAction is told of every action that was done, once its page settled (the recording's
 	// keyframe). It must not block.

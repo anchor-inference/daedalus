@@ -12,14 +12,17 @@ agent is told, in the result itself, that the page cannot speak for the operator
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import contextlib
 import hashlib
+import io
 import itertools
 import json
 import logging
 import re
 import time
+import zipfile
 from collections import OrderedDict, deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -123,6 +126,20 @@ USER_TABS = 3
 session that opened five, three of them the same page, left the operator to close them by hand."""
 DEADLY_SECONDS = 120
 """How soon after an action a tab found dead is put down to that action."""
+SCRIPT_ACTIONS = ("list", "add", "remove")
+EXTENSION_ACTIONS = ("list", "install", "reload", "remove")
+EVAL_CHARS = 4_000
+"""Characters of a BrowserEval value shown unless the call asks for more (the daemon's own default)."""
+SCRIPT_MAX_BYTES = 256 << 10
+"""A page script's code and styles together, and one BrowserEval's code, as the daemon takes them."""
+EXTENSION_MAX_FILES = 2_000
+EXTENSION_MAX_BYTES = 50 << 20
+"""What an extension folder handed to the browser may hold: well past any real one, and bounded so a
+folder named by mistake (a home directory) is refused instead of read whole."""
+OWN_BROWSER_ONLY = (
+    "{what} is for your own browser only: in the operator's Chrome you work read-only, and code of yours in their "
+    "signed-in pages is what that rules out. Test in your own browser (the operator can switch this conversation back)."
+)
 LOG_LEVELS = ("error", "warning", "info", "debug")
 LOGS_SHOWN = 60
 """Console entries one BrowserLogs shows; the rest wait for the next call, as the daemon pages them."""
@@ -505,6 +522,11 @@ class Files(Protocol):
         """Put a download where the caller can open it; returns a sentence naming where."""
         ...
 
+    async def read_folder(self, path: str, *, max_files: int, max_bytes: int) -> tuple[str, dict[str, bytes]] | None:
+        """``(name, {relative path: bytes})`` of a folder the caller may read, or ``None`` when ``path`` is
+        not a folder (a file is read with :meth:`read`); raises ``Forbidden`` past the bounds."""
+        ...
+
 
 class AskOperator(Protocol):
     async def __call__(self, key: str, text: str, card: dict[str, Any]) -> bool:
@@ -771,6 +793,7 @@ class BrowserAgent:
         marks = [m for m, on in (
             ("active", tab.get("active")), ("new", new), ("the operator's own, given to you: closing it hands it back", given),
             ("dead: close it", dead), (f"the same address as {twin}", twin),
+            (f"your page scripts run here: {', '.join(str(x) for x in tab.get('scripts') or [])}", tab.get("scripts")),
         ) if on]
         return f"- {tab.get('id')} · {str(tab.get('title') or '(untitled)')[:120]} — {tab.get('url') or 'about:blank'}" + (f" ({'; '.join(marks)})" if marks else "")
 
@@ -1593,12 +1616,15 @@ class BrowserAgent:
             self.cursors.popitem(last=False)
         return self.cursors[key]
 
-    async def logs(self, caller: Caller, *, tab: str | None = None, level: str | None = None, all: bool = False) -> str:  # noqa: A002 — the tool's own argument name
+    async def logs(self, caller: Caller, *, tab: str | None = None, level: str | None = None, all: bool = False, extension: str | None = None) -> str:  # noqa: A002 — the tool's own argument name
         """The page's console since the caller's last look: what it logged, what it threw and did not
-        catch, and what the browser said about it (a resource that failed to load)."""
+        catch, and what the browser said about it (a resource that failed to load). With ``extension``,
+        the console of that extension's background worker instead."""
         if level is not None and level not in LOG_LEVELS:
             raise InvalidRequest(f"level is one of {', '.join(LOG_LEVELS)} (the least severe to show)")
         group = await self._group(caller)
+        if extension:
+            return await self._extension_logs(caller, group, extension, level=level, all=all)
         current = await self._tab(group, tab)
         after = 0 if all else self._cursor("logs", caller, group["id"], current["id"])
         params: dict[str, Any] = {"tab_id": current["id"], "after": after, "limit": LOGS_SHOWN, "origin": self._origin(caller)}
@@ -1793,6 +1819,238 @@ class BrowserAgent:
         name = str(result.get("ref") or ref or "")
         head = f"Tab {current['id']} — {url} · {name}" + (f" (the first of {int(result['matches'])} matching {selector!r})" if selector and int(result.get("matches") or 0) > 1 else "")
         return f"{head}\n{fenced(origin_of(url), text)}"
+
+    # -- the agent's own code in its browser: page scripts, extensions --------------------------
+
+    def _own_browser(self, group: dict[str, Any], what: str) -> None:
+        """Refuse code of the agent's in the operator's Chrome. The daemon refuses it there too; saying
+        so here names the reason in the agent's terms before anything is read or sent."""
+        if group.get("env") == USER_ENV:
+            raise Forbidden(OWN_BROWSER_ONLY.format(what=what))
+
+    async def _own_group(self, caller: Caller) -> dict[str, Any]:
+        """The caller's group in its own browser, opened when it has none: a script or an extension
+        belongs to the profile, which the browser writes."""
+        try:
+            return await self._group(caller)
+        except NotFound:
+            await self.service.open(caller.owner, actor=caller.actor)
+            return await self._group(caller)
+
+    async def evaluate(self, caller: Caller, *, code: str, tab: str | None = None, max_chars: int | None = None, timeout_s: float | None = None) -> str:
+        """Run the agent's JavaScript in the page now, in the page's own world, and say what it gave
+        back and what the console took meanwhile."""
+        if not code.strip():
+            raise InvalidRequest("code is the JavaScript to run, e.g. document.title or a block whose last statement is the answer")
+        if len(code.encode()) > SCRIPT_MAX_BYTES:
+            raise InvalidRequest(f"code is at most {SCRIPT_MAX_BYTES >> 10} KiB; a longer one belongs in a file and BrowserScripts")
+        group = await self._group(caller)
+        self._own_browser(group, "BrowserEval")
+        current = await self._tab(group, tab)
+        url = str(current.get("url") or "")
+        await self._watch(group, caller, url)
+        limit = max(200, min(max_chars or EVAL_CHARS, 50_000, caller.budget - 3000))
+        params: dict[str, Any] = {"tab_id": current["id"], "expression": code, "max_chars": limit, "origin": self._origin(caller)}
+        if timeout_s:
+            params["timeout_ms"] = int(max(0.1, min(float(timeout_s), 60.0)) * 1000)
+        try:
+            result = await self.service.call(group["id"], "page.evaluate", params, what="running your code in the page", timeout=(timeout_s or 10.0) + 20.0)
+        except Unsupported:
+            raise Unsupported("This browser service cannot run code in a page yet (it is older than the host); the operator updates it from the browser panel.") from None
+        url = str(result.get("url") or url)
+        await self._audit(group, caller, "inject", {"action": "eval", "element": host_of(url) or url[:200], "tab": current["id"], "url": url, "size": len(code), "error": str(result.get("exception") or "")[:200] or None})
+        logs = [e for e in result.get("logs") or [] if isinstance(e, dict)]
+        scripts = [str(x) for x in result.get("scripts") or []]
+        head = f"Tab {current['id']} — {url}"
+        if result.get("exception"):
+            body = f"Threw: {result['exception']}"
+            head += " · your code threw"
+        else:
+            body = str(result.get("value") or "")
+            head += f" · your code returned {result.get('type') or 'a value'}" + (f" (cut at {limit} characters; max_chars shows more)" if result.get("truncated") else "")
+        if logs:
+            body += "\n\nThe console while it ran:\n" + "\n".join(_log_line(e, url) for e in logs)
+        await self._screen(group, caller, url, body)
+        lines = [head, fenced(origin_of(url), body)]
+        if scripts:
+            lines.append(f"Your page scripts run on this page: {', '.join(scripts)}.")
+        return "\n".join(lines)
+
+    async def _code_from(self, caller: Caller, inline: str | None, path: str | None, what: str) -> tuple[str, str]:
+        """``(text, source)`` of a script's code or styles: given inline, or read from a file of the caller's."""
+        if inline and path:
+            raise InvalidRequest(f"give {what} inline or {what}_path, not both")
+        if path:
+            name, data = await caller.files.read(path)
+            if len(data) > SCRIPT_MAX_BYTES:
+                raise InvalidRequest(f"{name} is larger than the {SCRIPT_MAX_BYTES >> 10} KiB a page script takes")
+            try:
+                return data.decode("utf-8-sig"), path
+            except UnicodeDecodeError:
+                raise InvalidRequest(f"{name} is not UTF-8 text") from None
+        return inline or "", ""
+
+    @staticmethod
+    def _scripts_text(rows: list[dict[str, Any]], url: str) -> str:
+        if not rows:
+            return "Your browser has no page scripts."
+        lines = []
+        for r in rows:
+            parts = [f"js {_size(int(r.get('js_bytes') or 0))}" if r.get("js_bytes") else "", f"css {_size(int(r.get('css_bytes') or 0))}" if r.get("css_bytes") else ""]
+            where = ", ".join(str(m) for m in r.get("matches") or []) or "every page"
+            lines.append(f"- {r.get('name')} · on {where}" + (" (all frames)" if r.get("all_frames") else "") + f" · {', '.join(p for p in parts if p)}" + (f" · from {r['source']}" if r.get("source") else ""))
+        return f"Your page scripts ({len(rows)}), run at the start of every matching document in your browser:\n" + "\n".join(lines)
+
+    async def scripts(
+        self, caller: Caller, *, action: str = "list", name: str | None = None, js: str | None = None, js_path: str | None = None, css: str | None = None, css_path: str | None = None,
+        matches: list[str] | None = None, all_frames: bool = False,
+    ) -> str:
+        """The agent's page scripts: code and styles run at document start on matching pages of its
+        own browser, kept in its profile until removed."""
+        if action not in SCRIPT_ACTIONS:
+            raise InvalidRequest(f"action is one of {', '.join(SCRIPT_ACTIONS)}")
+        group = await (self._own_group(caller) if action == "add" else self._group(caller))
+        self._own_browser(group, "BrowserScripts")
+        origin = self._origin(caller)
+        current = await self._tab(group, None)
+        url = str(current.get("url") or "")
+        try:
+            if action == "list":
+                result = await self.service.call(group["id"], "script.list", {"group_id": group["id"]}, what="listing the page scripts")
+                return self._scripts_text([r for r in result.get("scripts") or [] if isinstance(r, dict)], url) + self._active_line(current)
+            if not name:
+                raise InvalidRequest(f"{action} needs name: the script's (1-64 of letters, digits, . _ -)" + (", or name='*' for all" if action == "remove" else ""))
+            if action == "remove":
+                params: dict[str, Any] = {"group_id": group["id"], "origin": origin, **({"all": True} if name == "*" else {"name": name})}
+                result = await self.service.call(group["id"], "script.remove", params, what="removing the page script")
+                removed = [str(x) for x in result.get("removed") or []]
+                await self._audit(group, caller, "inject", {"action": "unscript", "element": ", ".join(removed)[:200]})
+                rest = [r for r in result.get("scripts") or [] if isinstance(r, dict)]
+                return (f"Removed {', '.join(removed)}. Pages already open keep what it did until they load again (BrowserNavigate go='reload').\n"
+                        + self._scripts_text(rest, url))
+            code, js_source = await self._code_from(caller, js, js_path, "js")
+            style, css_source = await self._code_from(caller, css, css_path, "css")
+            if not code and not style:
+                raise InvalidRequest("add needs js or css (inline, or js_path / css_path naming a file in your workspace)")
+            if len(code.encode()) + len(style.encode()) > SCRIPT_MAX_BYTES:
+                raise InvalidRequest(f"a page script's js and css are at most {SCRIPT_MAX_BYTES >> 10} KiB together")
+            source = " + ".join(x for x in (js_source, css_source) if x) or "inline"
+            wanted = [m.strip() for m in (matches or []) if m and m.strip()]
+            params = {"group_id": group["id"], "tab_id": current["id"], "name": name, "js": code, "css": style, "matches": wanted, "all_frames": all_frames, "source": source[:1000], "origin": origin}
+            result = await self.service.call(group["id"], "script.add", params, what="adding the page script", timeout=60.0)
+        except Unsupported:
+            raise Unsupported("This browser service has no page scripts yet (it is older than the host); the operator updates it from the browser panel.") from None
+        await self._audit(group, caller, "inject", {"action": "script", "element": name, "matches": wanted[:10], "source": source[:200], "size": len(code) + len(style)})
+        rows = [r for r in result.get("scripts") or [] if isinstance(r, dict)]
+        return (
+            f"Page script {name} kept in your browser's profile: it runs at the start of every document on {', '.join(wanted) or 'every page'}, before the page's own scripts "
+            "(the document has no elements yet: wait for DOMContentLoaded to touch them), in every tab, until you remove it. Pages already open get it on their next load: "
+            "BrowserNavigate(go='reload') applies it here. An exception it throws is in BrowserLogs under its name.\n" + self._scripts_text(rows, url)
+        )
+
+    @staticmethod
+    def _active_line(tab: dict[str, Any]) -> str:
+        scripts = [str(x) for x in tab.get("scripts") or []]
+        return f"\nOn tab {tab.get('id')} ({tab.get('url') or 'about:blank'}) these run: {', '.join(scripts)}." if scripts else ""
+
+    async def _pack_extension(self, caller: Caller, path: str) -> tuple[str, bytes]:
+        """The extension at ``path`` as an archive for the browser: a folder zipped here, or a .zip or
+        .crx file as it is."""
+        folder = await caller.files.read_folder(path, max_files=EXTENSION_MAX_FILES, max_bytes=EXTENSION_MAX_BYTES)
+        if folder is None:
+            name, data = await caller.files.read(path)
+            if not name.lower().endswith((".zip", ".crx")):
+                raise InvalidRequest(f"{name} is neither a folder nor a .zip or .crx: path is the extension's folder (the one holding manifest.json), or an archive of it")
+            return name, data
+        name, files = folder
+        if "manifest.json" not in files:
+            nested = sorted(p for p in files if p.endswith("/manifest.json"))
+            hint = f" ({nested[0].rsplit('/', 1)[0]}/ holds one: name that folder)" if nested else ""
+            raise InvalidRequest(f"{path} has no manifest.json at its top{hint}: path is the extension's own folder")
+        return f"{name or 'extension'}.zip", await asyncio.to_thread(_zip_files, files)
+
+    async def extensions(self, caller: Caller, *, action: str = "list", path: str | None = None, extension: str | None = None) -> str:
+        """The agent's extensions in its own browser: installed from its workspace, reloaded after an
+        edit, removed, listed."""
+        if action not in EXTENSION_ACTIONS:
+            raise InvalidRequest(f"action is one of {', '.join(EXTENSION_ACTIONS)}")
+        group = await (self._own_group(caller) if action in ("install", "reload") else self._group(caller))
+        self._own_browser(group, "BrowserExtensions")
+        if group.get("fresh"):
+            raise InvalidRequest("a throwaway browser (fresh) takes no extensions: open your own browser (BrowserOpen without fresh) and install it there")
+        origin = self._origin(caller)
+        try:
+            listing = await self.service.call(group["id"], "extension.list", {"group_id": group["id"]}, what="listing the extensions")
+            rows = [r for r in listing.get("extensions") or [] if isinstance(r, dict)]
+            if action == "list":
+                return self._extensions_text(rows)
+            if action == "remove":
+                if not extension:
+                    raise InvalidRequest("remove needs extension: its name or id (BrowserExtensions lists them)")
+                result = await self.service.call(group["id"], "extension.uninstall", {"group_id": group["id"], "id": extension, "origin": origin}, what="removing the extension")
+                gone = result.get("extension") or {}
+                await self._audit(group, caller, "inject", {"action": "unextension", "element": str(gone.get("name") or extension)[:200]})
+                rest = [r for r in rows if r.get("id") != gone.get("id")]
+                return f"Removed the extension {gone.get('name') or extension} and its files from your browser's profile. Pages already open keep its content scripts until they load again.\n" + self._extensions_text(rest)
+            if action == "reload" and not path:
+                if not extension:
+                    raise InvalidRequest("reload needs extension (its name or id) or path (its folder)")
+                found = next((r for r in rows if extension in (r.get("id"), r.get("name"), r.get("dir"))), None)
+                if found is None:
+                    raise NotFound(f"no extension {extension!r} in your browser; BrowserExtensions lists them")
+                path = str(found.get("source") or "")
+                if not path:
+                    raise InvalidRequest(f"{found.get('name')} was installed without a source to read again: install it with path=")
+            if not path:
+                raise InvalidRequest("install needs path: the extension's folder in your workspace (holding manifest.json), or a .zip or .crx")
+            name, data = await self._pack_extension(caller, path)
+            upload = await self.service.upload(group["id"], safe_upload_name(name), data)
+            result = await self.service.call(group["id"], "extension.install", {"group_id": group["id"], "upload_id": upload, "source": path[:1000], "origin": origin}, what="installing the extension", timeout=90.0)
+        except Unsupported:
+            raise Unsupported("This browser service cannot install extensions yet (it is older than the host); the operator updates it from the browser panel.") from None
+        e = result.get("extension") or {}
+        again = any(r.get("id") == e.get("id") for r in rows)
+        await self._audit(group, caller, "inject", {"action": "extension", "element": f"{e.get('name')} {e.get('version')}"[:200], "source": path[:200], "size": len(data)})
+        verb = "Reloaded" if again else "Installed"
+        return (
+            f"{verb} {e.get('name')} {e.get('version')} (id {e.get('id')}) in your browser from {path}. It is kept in your browser's profile and loaded again whenever the "
+            "browser starts, until you remove it. Its content scripts reach pages loaded from now on: BrowserNavigate(go='reload') to see it on an open page. "
+            f"Its background worker's console: BrowserLogs(extension='{e.get('name')}'). After you edit its files, BrowserExtensions(action='reload', extension='{e.get('name')}')."
+        )
+
+    @staticmethod
+    def _extensions_text(rows: list[dict[str, Any]]) -> str:
+        if not rows:
+            return "Your browser has no extensions of yours."
+        lines = []
+        for r in rows:
+            state = "enabled" if r.get("enabled") else "not running" + (f": {r['error']}" if r.get("error") else "")
+            lines.append(f"- {r.get('name')} {r.get('version')} · id {r.get('id')} · {state}" + (f" · from {r['source']}" if r.get("source") else ""))
+        return f"Your extensions ({len(rows)}):\n" + "\n".join(lines)
+
+    async def _extension_logs(self, caller: Caller, group: dict[str, Any], extension: str, *, level: str | None, all: bool) -> str:  # noqa: A002 — the tool's own argument name
+        self._own_browser(group, "An extension's console")
+        key = f"ext:{extension}"
+        after = 0 if all else self._cursor("logs", caller, group["id"], key)
+        params: dict[str, Any] = {"group_id": group["id"], "id": extension, "after": after, "limit": LOGS_SHOWN}
+        if level:
+            params["level"] = level
+        try:
+            result = await self.service.call(group["id"], "extension.logs", params, what="reading the extension's console", timeout=20.0)
+        except Unsupported:
+            raise Unsupported("This browser service cannot read an extension's console yet (it is older than the host).") from None
+        e = result.get("extension") or {}
+        logs = result.get("logs") or {}
+        entries = [x for x in logs.get("entries") or [] if isinstance(x, dict)]
+        self._cursor("logs", caller, group["id"], key, int(logs.get("last") or 0))
+        since = "kept" if not after else "since your last look"
+        who = f"{e.get('name') or extension} (its background worker)"
+        if not entries:
+            return f"{who}: no console messages or errors {since}" + (f" at {level} or above" if level else "") + ". A content script logs into the page's console: BrowserLogs without extension."
+        base = f"chrome-extension://{e.get('id')}/"
+        body = "\n".join(_log_line(x, base) for x in entries)
+        tail = [f"{int(logs['more'])} more after these: call again."] if int(logs.get("more") or 0) else []
+        return "\n".join([f"{who} · {_count(len(entries), 'entry', 'entries')} {since}", fenced(f"extension {e.get('name') or extension}", body), *tail])
 
     async def _thumbnail(self, group: dict[str, Any], tab: dict[str, Any], ref: str, key: str) -> str:
         """A small picture of the element asked about, for the permission card; nothing when it cannot
@@ -2273,7 +2531,16 @@ class BrowserAgent:
                     return await self.read_procedure(caller, _str(a, "read") or ""), False
                 return await self.note(caller, note=_str(a, "note") or "", host=_str(a, "host")), False
             if tool == "BrowserLogs":
-                return await self.logs(caller, tab=_str(a, "tab"), level=_str(a, "level"), all=bool(a.get("all"))), False
+                return await self.logs(caller, tab=_str(a, "tab"), level=_str(a, "level"), all=bool(a.get("all")), extension=_str(a, "extension")), False
+            if tool == "BrowserEval":
+                return await self.evaluate(caller, code=str(a.get("code") or ""), tab=_str(a, "tab"), max_chars=_int(a, "max_chars"), timeout_s=_float(a, "timeout_s")), False
+            if tool == "BrowserScripts":
+                return await self.scripts(
+                    caller, action=_str(a, "action") or "list", name=_str(a, "name"), js=a.get("js") if isinstance(a.get("js"), str) else None, js_path=_str(a, "js_path"),
+                    css=a.get("css") if isinstance(a.get("css"), str) else None, css_path=_str(a, "css_path"), matches=_list(a, "matches"), all_frames=bool(a.get("all_frames")),
+                ), False
+            if tool == "BrowserExtensions":
+                return await self.extensions(caller, action=_str(a, "action") or "list", path=_str(a, "path"), extension=_str(a, "extension")), False
             if tool == "BrowserNetwork":
                 return await self.network(
                     caller, tab=_str(a, "tab"), id=_str(a, "id"), body=bool(a.get("body")), type=_str(a, "type"), host=_str(a, "host"), contains=_str(a, "contains"),
@@ -2359,6 +2626,33 @@ def _posts_form(step: Step, evidence: Any) -> bool:
         return False
     acts = step.action in ("click", "double_click", "press") or (step.action == "type" and step.submit)
     return acts and str(evidence.get("form_method") or "").lower() == "post"
+
+
+def _list(arguments: dict[str, Any], key: str) -> list[str] | None:
+    """A list of words: given as a list, or as one string of comma-separated ones."""
+    value = arguments.get(key)
+    if value is None or value == "":
+        return None
+    if isinstance(value, str):
+        return [v for v in (p.strip() for p in value.split(",")) if v]
+    if isinstance(value, list):
+        return [str(v) for v in value if str(v).strip()]
+    raise InvalidRequest(f"{key} is a list of strings")
+
+
+def _zip_files(files: dict[str, bytes]) -> bytes:
+    """A folder's files as a zip, in memory: the archive the browser daemon unpacks."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name in sorted(files):
+            archive.writestr(name, files[name])
+    return buffer.getvalue()
+
+
+def safe_upload_name(name: str) -> str:
+    """A plain file name for the daemon's upload area, which refuses a path."""
+    clean = re.sub(r"[^A-Za-z0-9._-]+", "-", name.replace("\\", "/").rsplit("/", 1)[-1]).strip("-.")
+    return clean[:100] or "extension.zip"
 
 
 def _float(arguments: dict[str, Any], key: str) -> float | None:

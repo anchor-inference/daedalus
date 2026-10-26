@@ -163,6 +163,8 @@ func (m *Manager) setupTab(g *Group, session string, info targetInfo, opener str
 			methods = append(methods, "Page.addScriptToEvaluateOnNewDocument")
 		}
 	}
+	// The agent's page scripts, before the page's first document as well.
+	scripts := m.sendScripts(ctx, b, session, false)
 	// Before the page runs, so its first navigation (a popup's) meets the guard too.
 	fetch := m.fetchWanted(b, info.given)
 	if fetch.on() {
@@ -176,6 +178,7 @@ func (m *Manager) setupTab(g *Group, session string, info targetInfo, opener str
 			m.log.Warn("page setup", "method", methods[i], "error", err.Error())
 		}
 	}
+	m.recordScripts(t, session, scripts)
 	m.measureFrame(ctx, g, session, info.TargetID, g.ViewportNow())
 	if !asked {
 		m.probeScreen(ctx, b, t)

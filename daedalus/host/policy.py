@@ -89,7 +89,7 @@ HOME_REASON = (
     "it is in the operator's home folder, outside every project and outside the installation; there is no "
     "container here, so a path the operator has not opened is one they are asked about"
 )
-PATH_ARGUMENTS = frozenset({"path", "paths", "file", "files", "filename", "dir", "directory", "cwd", "root", "source", "src", "destination", "dest", "target", "output"})
+PATH_ARGUMENTS = frozenset({"path", "paths", "js_path", "css_path", "file", "files", "filename", "dir", "directory", "cwd", "root", "source", "src", "destination", "dest", "target", "output"})
 """The names the file tools give a path. Reading every string of every argument instead would take a
 file's contents for a list of paths the moment one of them began with a slash."""
 WRITERS = {"cp", "mv", "install", "rsync", "ln"}

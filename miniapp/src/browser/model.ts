@@ -133,6 +133,12 @@ export function actionWords(row: Pick<BrowserActionRow, "kind" | "element" | "na
     case "cookies_import":
     case "cookies_clear":
       return { key: `browser.act.${row.kind}`, vars: { where: what } };
+    case "inject_eval":
+    case "inject_script":
+    case "inject_unscript":
+    case "inject_extension":
+    case "inject_unextension":
+      return { key: `browser.act.${row.kind}`, vars: { what } };
     case "login":
     case "login_declined":
       return { key: `browser.act.${row.kind}`, vars: { where: what } };

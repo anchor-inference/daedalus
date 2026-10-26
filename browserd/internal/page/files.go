@@ -485,6 +485,15 @@ func (p *Model) uploadPaths(group string, ids []string) ([]string, error) {
 	return out, nil
 }
 
+// UploadPath is where an upload of the group is on disk: the archive of an extension being installed.
+func (p *Model) UploadPath(group, id string) (string, error) {
+	paths, err := p.uploadPaths(group, []string{id})
+	if err != nil {
+		return "", err
+	}
+	return paths[0], nil
+}
+
 // GroupClosed removes a closed group's uploads and downloads: its files go with it.
 func (p *Model) GroupClosed(group string) {
 	p.mu.Lock()

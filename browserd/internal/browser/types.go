@@ -51,6 +51,15 @@ type Browser struct {
 	screenAsked bool
 	screenFix   bool
 	screenKnown chan struct{}
+
+	// profileDir is the profile the browser runs on, where its page scripts and extensions are kept;
+	// "" for the operator's Chrome, which keeps none of the daemon's.
+	profileDir string
+	scripts    []PageScript // guarded by mu
+	extWanted  map[string]bool
+	extErrors  map[string]string // why an extension did not load at start, by folder
+	// extMu orders the installs and removals of extensions, which rewrite their folders and index.
+	extMu sync.Mutex
 }
 
 type pageAttach struct {
@@ -480,6 +489,9 @@ type Tab struct {
 	keeping int
 	keptSeq int64
 	kept    *Kept
+
+	// The page scripts given to its documents (scripts.go).
+	scriptIDs scriptSessions
 }
 
 // Detached reports whether the tab lost its debugger, and the reason Chrome gave.
@@ -717,6 +729,11 @@ func (t *Tab) View() map[string]any {
 	}
 	if t.Given {
 		v["given"] = true
+	}
+	if scripts := t.Group.Browser.ScriptsOn(u); len(scripts) > 0 {
+		// Which of the agent's page scripts run on the page shown, so what it reads is never mistaken
+		// for the site's own.
+		v["scripts"] = scripts
 	}
 	return v
 }
