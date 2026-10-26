@@ -20,6 +20,8 @@ type Browser struct {
 	Ephemeral bool
 	StartedAt time.Time
 	Version   string
+	// WebGL is the mode the browser was started in (chrome.WebGLModes); the operator's Chrome has none.
+	WebGL string
 
 	proc        process
 	pid         int // the main process, 0 for the operator's Chrome
@@ -152,7 +154,7 @@ func (b *Browser) View() map[string]any {
 	default:
 	}
 	return map[string]any{"id": b.ID, "profile": b.Profile, "pid": b.pid, "status": status,
-		"started_at": b.StartedAt, "groups": groups, "tabs": tabs, "chromium_version": b.Version}
+		"started_at": b.StartedAt, "groups": groups, "tabs": tabs, "chromium_version": b.Version, "webgl": b.WebGL}
 }
 
 // The owners of a group's control.

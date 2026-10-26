@@ -22,7 +22,7 @@ from protocore.contracts.llm import LLMObservabilityContext, LLMRequest
 from protocore.contracts.types import Message, MessageRole, TextBlock
 
 from daedalus.browser import login
-from daedalus.browser.agent import SWITCH_ASK, BrowserAgent
+from daedalus.browser.agent import SWITCH_ASK, WEBGL_ASK, WEBGL_MODES, WEBGL_WORDS, BrowserAgent, webgl_line
 from daedalus.browser.cli import TOOL_SET, StaffBrowser
 from daedalus.browser.model import USER, BrowserError, Owner, group_id
 from daedalus.browser.monitor import TIMEOUT_SECONDS, InjectionMonitor
@@ -148,6 +148,36 @@ async def chrome_answered(app: Application, service: Browsers, session_id: str, 
             )
     else:
         text = "[browser] The operator declined to let you work in their Chrome. Use your own browser (BrowserOpen) for the task, or stop and tell them what it needs."
+    if service.wake is not None:
+        await service.wake(owner, text)
+
+
+async def webgl_answered(service: Browsers, session_id: str, request: dict[str, Any], allowed: bool) -> None:
+    """The operator answered the agent's ask for WebGL in its browser. A yes switches the profile's
+    browser to the mode — restarting it with its tabs when it runs — and either way the agent is
+    woken with the answer, since it ended its turn to wait for it. The owner is the one that asked,
+    project included, because the project decides which profile is switched."""
+    mode = str(request.get("webgl") or "")
+    owner = Owner("session", session_id, project_id=str(request.get("project_id") or "") or None, session_id=session_id, staff_id=str(request.get("staff_id") or "") or None)
+    if mode not in WEBGL_MODES:
+        logger.warning("a WebGL request of %s names no mode (%r); nothing was switched", session_id, mode)
+        return
+    words = WEBGL_WORDS[mode]
+    if allowed:
+        try:
+            result = await service.webgl(owner, mode, actor="operator")
+        except BrowserError as exc:
+            text = f"[browser] The operator allowed {words} in your browser, but it could not be switched: {exc.message}. Tell them."
+        else:
+            if result.get("relaunched"):
+                failed = [u for g in result.get("groups") or [] if isinstance(g, dict) for u in g.get("failed") or []]
+                again = f" These pages did not reopen: {', '.join(failed[:5])}." if failed else ""
+                head = f"[browser] The operator allowed {words} in your browser. It restarted in that mode with your tabs (their ids changed: BrowserTabs lists them).{again}"
+            else:
+                head = f"[browser] The operator allowed {words} in your browser. It starts in that mode when you open it (BrowserOpen)."
+            text = f"{head}\n{webgl_line(result)}"
+    else:
+        text = f"[browser] The operator declined {words} in your browser. Do the task without it, or stop and tell them what it needs."
     if service.wake is not None:
         await service.wake(owner, text)
 
@@ -365,6 +395,7 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     manager.delete_hooks.append(session_deleted)
     manager.project_delete_hooks.append(project_deleted)
     manager.answer_hooks[SWITCH_ASK] = lambda session_id, request, allowed: chrome_answered(app, service, session_id, allowed)
+    manager.answer_hooks[WEBGL_ASK] = lambda session_id, request, allowed: webgl_answered(service, session_id, request, allowed)
     manager.turn_line_hooks.append(lambda state: chrome_line(manager, service, state))
 
     async def switched(session_id: str, env: str) -> None:

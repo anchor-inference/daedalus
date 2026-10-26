@@ -256,6 +256,8 @@ services:
       target: browser
       args:
         GOOGLE_CHROME: ${BROWSER_GOOGLE_CHROME:-0}
+        # The Vulkan drivers the gpu WebGL mode needs (deploy/Dockerfile).
+        BROWSER_GPU: ${BROWSER_GPU:-0}
     image: daedalus:local-browser
     profiles: [browser]
     restart: unless-stopped
@@ -291,6 +293,18 @@ services:
     # long page. It counts against mem_limit, so this is room, not an allocation.
     shm_size: 1gb
     pids_limit: 2048
+    # The GPU, for the browser's gpu WebGL mode, which the agent may switch to only with the
+    # operator's yes. Off unless .env names it: by default the device is /dev/null, which every
+    # container has already, and the group is the browser's own. To pass a GPU in, set
+    # BROWSER_GPU_DEVICE=/dev/dri/renderD128 (the render node only: drawing needs no display
+    # controller), BROWSER_GPU_GROUP to the host's group of that node (`stat -c %g
+    # /dev/dri/renderD128`) and BROWSER_GPU=1, then rebuild the image and recreate this service, which
+    # ends every browser. It widens what a page can reach: the GPU process runs outside Chromium's
+    # sandbox here, and with the node it reaches the kernel's GPU driver.
+    devices:
+      - ${BROWSER_GPU_DEVICE:-/dev/null}:${BROWSER_GPU_DEVICE:-/dev/null}
+    group_add:
+      - "${BROWSER_GPU_GROUP:-1001}"
     healthcheck:
       test: ["CMD", "test", "-S", "/run/daedalus-browser/browserd.sock"]
       interval: 30s

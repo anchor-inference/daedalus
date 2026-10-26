@@ -78,6 +78,7 @@ func (d *Daemon) Register(s *server.Server) {
 		"profile.list":       d.profileList,
 		"profile.clear":      d.profileClear,
 		"profile.delete":     d.profileDelete,
+		"profile.webgl":      d.profileWebGL,
 		"tab.list":           d.tabList,
 		"tab.new":            d.tabNew,
 		"tab.select":         d.tabSelect,
@@ -147,8 +148,9 @@ func (d *Daemon) info(ctx context.Context, c *server.Conn, params json.RawMessag
 		"os": runtime.GOOS, "arch": runtime.GOARCH, "pid": os.Getpid(), "started_at": d.StartedAt,
 		"uptime_s": int64(time.Since(d.StartedAt).Seconds()), "chromium": chromium,
 		"backend": d.Manager.Backend().Name(), "relay": relayStatus,
-		"capabilities": map[string]any{"sandbox": d.Manager.Sandbox(), "headed": d.Config.Chromium.Headed(), "screencast": true},
-		"limits":       lim, "counts": counts, "machine": st.Machine,
+		"capabilities": map[string]any{"sandbox": d.Manager.Sandbox(), "headed": d.Config.Chromium.Headed(), "screencast": true,
+			"webgl": d.Manager.WebGLInfo()},
+		"limits": lim, "counts": counts, "machine": st.Machine,
 	}, nil
 }
 
@@ -285,6 +287,19 @@ func (d *Daemon) profileClear(ctx context.Context, c *server.Conn, params json.R
 
 func (d *Daemon) profileDelete(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
 	return d.profileChange(true)(ctx, c, params)
+}
+
+// profileWebGL reports the WebGL mode a profile's browser starts in, or, with a mode, changes it:
+// a running browser in another mode is started again in this one with its groups and pages.
+func (d *Daemon) profileWebGL(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p struct {
+		Profile string `json:"profile"`
+		Mode    string `json:"mode,omitempty"`
+	}
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	return d.Manager.SetWebGL(ctx, p.Profile, p.Mode)
 }
 
 // tabParams is what every method on one tab takes.

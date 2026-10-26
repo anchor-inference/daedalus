@@ -42,7 +42,7 @@ BROWSER = {
     "env": "auto", "running_cap": 2, "idle_close_minutes": 10, "agent_wait_seconds": 60, "control_wait_seconds": 20, "ticket_ttl_seconds": 30,
     "audit_retention_days": 90, "closed_retention_hours": 72, "local_sites": "ask", "lan_allow": [], "lan_sites": "ask", "rules": [], "record_frames": False, "record_takeover": False,
     "record_retention_days": 7, "record_max_mb": 500, "watch_mode": False, "watch_domains": ["mail.google.com"], "injection_monitor": False, "injection_monitor_preset": "",
-    "extract_preset": "", "point_clicks": False,
+    "extract_preset": "", "point_clicks": False, "webgl_allow": "ask",
 }
 
 
@@ -217,6 +217,18 @@ def desktop(browser, scenes, lang: str, problems: list[str]) -> None:  # type: i
     print(f"[{lang}] reading: point {saved.get('point_clicks')}, model {saved.get('extract_preset')!r}")
     if saved.get("point_clicks") is not True or saved.get("extract_preset") != "q":
         say(f"the reading card saved {saved.get('point_clicks')} and {saved.get('extract_preset')!r}")
+
+    # WebGL: asked about every time by default; a level allowed beforehand is saved, and the card
+    # says why the GPU mode is not offered here, in the daemon's words.
+    webgl = page.inner_text(".bs-webgl")
+    if "no GPU render node" not in webgl:
+        say(f"the WebGL card does not say why there is no GPU: {webgl!r}")
+    page.locator("#browser-webgl-allow").click()
+    page.locator(".dropdown-list [role=option][data-value='software']").click()
+    page.wait_for_timeout(900)
+    print(f"[{lang}] webgl: {host.settings['browser'].get('webgl_allow')!r}")
+    if host.settings["browser"].get("webgl_allow") != "software":
+        say(f"the WebGL permission was saved as {host.settings['browser'].get('webgl_allow')!r}")
 
     # Site notes: the waiting ones first, each to approve or discard; an approved one removed after asking.
     rows = page.locator(".bs-notes .bs-note")

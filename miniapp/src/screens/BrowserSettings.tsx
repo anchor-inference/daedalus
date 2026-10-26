@@ -2,7 +2,8 @@
 // sandbox holds, what runs now and what it costs, the profiles that keep its logins, how many may run
 // at once, how long an idle one lives, what is recorded, where the agent may act only while watched,
 // which local sites and addresses on the local network it may be let into, the injection monitor, the model that reads
-// a page for the agent and whether it may click at a point, and the site notes agents proposed.
+// a page for the agent and whether it may click at a point, which WebGL the agent may turn on in its
+// browser without asking, and the site notes agents proposed.
 //
 // Everything here is the host's `[browser]` section; the host hands the daemon its part at once, so a
 // cap typed here is the daemon's cap, not a number only the load bar believes. What cannot be undone —
@@ -41,6 +42,7 @@ export const DEFAULT_BROWSER: BrowserSettings = {
   injection_monitor_preset: "",
   extract_preset: "",
   point_clicks: false,
+  webgl_allow: "ask",
   user: DEFAULT_USER,
 };
 
@@ -110,6 +112,7 @@ export function BrowserSettingsTab({ s, save, toast, onDraft }: { s: Settings; s
       <Network b={b} set={set} />
       <Monitor b={b} set={set} presets={Object.keys(s.presets ?? {})} />
       <Reading b={b} set={set} presets={Object.keys(s.presets ?? {})} />
+      <Graphics b={b} set={set} envs={envs} />
       <SiteNotes toast={toast} />
     </div>
   );
@@ -409,6 +412,38 @@ function Reading({ b, set, presets }: { b: BrowserSettings; set: (patch: Partial
       <Row title={t("bs.agent.point")} desc={t("bs.agent.point.sub")} data-setting="browser.point_clicks">
         <Switch checked={b.point_clicks} onChange={(point_clicks) => set({ point_clicks })} label={t("bs.agent.point")} />
       </Row>
+    </div>
+  );
+}
+
+/** WebGL in the agent's browser: off until the agent asks and the operator says yes on the approval
+ *  card, or until a level is allowed here beforehand. Whether this installation can draw on a GPU is
+ *  the daemon's word, shown beside it, because the GPU mode needs the GPU passed into the service. */
+function Graphics({ b, set, envs }: { b: BrowserSettings; set: (patch: Partial<BrowserSettings>) => void; envs: BrowserEnv[] }) {
+  const reporting = envs.filter((e) => e.available && e.webgl);
+  return (
+    <div className="card bs-webgl">
+      <div className="section-title" style={{ marginTop: 0 }}>{t("bs.webgl.title")}</div>
+      <div className="sub">{t("bs.webgl.sub")}</div>
+      <Row title={t("bs.webgl.allow")} stack data-setting="browser.webgl_allow">
+        <Dropdown
+          id="browser-webgl-allow"
+          label={t("bs.webgl.allow")}
+          value={b.webgl_allow}
+          onChange={(webgl_allow) => set({ webgl_allow: webgl_allow as BrowserSettings["webgl_allow"] })}
+          options={[
+            { id: "ask", label: t("bs.webgl.allow.ask") },
+            { id: "software", label: t("bs.webgl.allow.software") },
+            { id: "gpu", label: t("bs.webgl.allow.gpu") },
+          ]}
+        />
+      </Row>
+      {reporting.map((e) => (
+        <div key={e.env} className="kv" data-env={e.env}>
+          <span>{t("bs.webgl.gpu")}{reporting.length > 1 ? ` · ${t(`bs.env.${e.env === "host" ? "host" : "container"}`)}` : ""}</span>
+          <b className={e.webgl?.gpu ? "" : "bs-warn"}>{e.webgl?.gpu ? t("bs.webgl.gpu.yes") : t("bs.webgl.gpu.no", { reason: e.webgl?.gpu_reason ?? "" })}</b>
+        </div>
+      ))}
     </div>
   );
 }

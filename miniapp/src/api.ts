@@ -483,6 +483,9 @@ export type BrowserEnv = {
   counts: Record<string, number>;
   image_version: string;
   update_available: boolean;
+  /** The WebGL modes a browser here can start in, and why the GPU one cannot when it cannot; null
+   *  from a daemon older than the modes. */
+  webgl?: { modes: string[]; gpu: boolean; gpu_reason: string } | null;
 };
 
 /** The recordings on disk per environment (`GET /api/browsers/recordings`). */
@@ -508,6 +511,8 @@ export type BrowserSettings = {
   injection_monitor_preset: string;
   extract_preset: string;
   point_clicks: boolean;
+  /** Which WebGL the agent may turn on in its browser without asking; turning it off never asks. */
+  webgl_allow: "ask" | "software" | "gpu";
   user?: BrowserUserSettings;
 };
 

@@ -529,15 +529,26 @@ class Files(Protocol):
 
 
 class AskOperator(Protocol):
-    async def __call__(self, key: str, text: str, card: dict[str, Any]) -> bool:
+    async def __call__(self, key: str, text: str, card: dict[str, Any], *, on_answer: str = ..., extra: dict[str, Any] | None = None) -> bool:
         """Put the request on the operator's card under ``key``, for the operator alone to answer; the
-        host switches the conversation on their yes. ``False`` when nothing could be asked."""
+        host carries out ``on_answer`` (by default :data:`SWITCH_ASK`) on their answer, with ``extra``
+        kept beside the request for it. ``False`` when nothing could be asked."""
         ...
 
 
 SWITCH_ASK = "browser.user.switch"
 """What the host carries out on the operator's answer to ``BrowserAskOperatorChrome``: their yes
 switches the conversation exactly as their switch in the panel does."""
+WEBGL_ASK = "browser.webgl"
+"""What the host carries out on the operator's answer to ``BrowserOpen(webgl=…)``: their yes switches
+the agent's browser to the mode it asked for, restarting it with its tabs."""
+WEBGL_MODES = ("off", "software", "gpu")
+"""How the agent's browser draws 3D: ``off`` as it always started (no WebGL in the container; a native
+browser's own choice), ``software`` on the CPU (SwiftShader), ``gpu`` on the machine's GPU."""
+WEBGL_ORDER = {"ask": 0, "software": 1, "gpu": 2}
+"""The operator's standing permission (``[browser] webgl_allow``) against the mode asked for: each
+level allows itself and every level below it, and ``off`` never needs one."""
+WEBGL_WORDS = {"software": "software WebGL (drawn on the CPU)", "gpu": "GPU WebGL (drawn on the machine's GPU)", "off": "no WebGL"}
 NOT_OFFERED = (
     "The operator's Chrome is not offered on this installation (Settings → Environments → Your Chrome). Nothing was "
     "asked and no browser was opened: tell the operator, or use your own browser (BrowserOpen) if they agree."
@@ -581,6 +592,25 @@ class Caller:
     @property
     def scope(self) -> str:
         return self.note_scope if self.note_scope is not None else (self.owner.project_id or "")
+
+
+def webgl_line(report: dict[str, Any]) -> str:
+    """One line on how the browser draws, from the daemon's ``profile.webgl``: the mode chosen and,
+    while the browser runs, its own word on whether a page gets WebGL and what renders it — the only
+    thing that tells a mode chosen from a mode that works."""
+    mode = str(report.get("mode") or "off")
+    graphics = report.get("graphics") if isinstance(report.get("graphics"), dict) else None
+    if graphics is None:
+        return f"WebGL: {mode} (the browser starts in this mode when it next opens)."
+    if graphics.get("error"):
+        return f"WebGL: {mode}; the browser did not say how it draws ({graphics['error']})."
+    renderer = str(graphics.get("renderer") or "unknown")
+    status = str(graphics.get("webgl") or "unknown")
+    if graphics.get("available"):
+        return f"WebGL: {mode} — pages get WebGL, drawn by {renderer}."
+    if mode == "off":
+        return f"WebGL: off — pages get no WebGL ({status}). BrowserOpen(webgl='software') asks the operator to turn it on."
+    return f"WebGL: {mode} was chosen, but the browser reports no WebGL ({status}, renderer {renderer}); tell the operator, or try webgl='software'."
 
 
 def explain(exc: BrowserError) -> str:
@@ -957,6 +987,65 @@ class BrowserAgent:
                 "If the operator asked for their own browser, call BrowserAskOperatorChrome instead of working here."
             )
         return f"{head} Tabs:\n{await self._tabs_text(group['id'])}\nNext: BrowserSnapshot to see the page and its refs, BrowserNavigate to go elsewhere."
+
+    async def open_webgl(self, caller: Caller, mode: str, *, url: str | None = None, fresh: bool = False, why: str | None = None) -> tuple[str, bool]:
+        """``BrowserOpen(webgl=mode)``: the browser in that WebGL mode, then opened as usual.
+
+        A mode above off waits for the operator unless their standing permission covers it: the
+        request goes on their card like any approval, the host switches on their yes and wakes the
+        agent either way, and nothing changes meanwhile. Back to off never asks, and asking for the
+        mode the browser already has only opens it. Switching restarts the profile's browser (the
+        daemon reopens its tabs), because how Chromium draws is fixed when it starts."""
+        if mode not in WEBGL_MODES:
+            raise InvalidRequest(f"webgl is one of {', '.join(WEBGL_MODES)}")
+        owner = caller.owner
+        if fresh:
+            raise InvalidRequest("WebGL is chosen for your own browser's profile; a throwaway browser (fresh=true) starts without it. Call BrowserOpen(webgl=…) without fresh")
+        if await self.service.env_for(owner) == USER_ENV:
+            raise Unsupported("this conversation works in the operator's own Chrome, which draws as they set it up; WebGL there is theirs, not something to switch")
+        state = await self.service.webgl(owner)
+        if state.get("mode") != mode:
+            if mode == "gpu":
+                offer = self.service.webgl_offer(str(state.get("env") or ""))
+                if not offer.get("gpu"):
+                    reason = str(offer.get("gpu_reason") or "this browser service reports no GPU it can reach")
+                    return (
+                        f"GPU WebGL is not available here: {reason}. Nothing changed and nothing was asked. webgl='software' draws WebGL on the CPU "
+                        "and works without a GPU (slower: fine for checking that a page or an extension renders, not for measuring frame rates); "
+                        "or tell the operator what passing the GPU in would take."
+                    ), True
+            if mode != "off" and WEBGL_ORDER.get(self.service.config().webgl_allow, 0) < WEBGL_ORDER[mode]:
+                return await self._ask_webgl(caller, mode, why=why)
+            await self.service.webgl(owner, mode, actor=caller.actor)
+        text = await self.open(caller, url=url, fresh=False, why=why)
+        report = await self.service.webgl(owner)
+        return f"{text}\n{webgl_line(report)}", False
+
+    async def _ask_webgl(self, caller: Caller, mode: str, *, why: str | None) -> tuple[str, bool]:
+        owner = caller.owner
+        if caller.ask_operator is None or owner.kind != "session" or not owner.session_id:
+            raise Unsupported(
+                f"{WEBGL_WORDS[mode]} in your browser waits for the operator's yes, and a command-line member cannot ask them: "
+                "Report what the task needs, or ask them to allow it in Settings → Environments → browser"
+            )
+        said = " ".join((why or "").split())[:300]
+        if not said:
+            raise InvalidRequest("why says in a sentence what you need WebGL for; the operator reads it on the card")
+        key = approval_key("BrowserOpen", {"owner": owner.id, "webgl": mode})
+        restart = "Its browser restarts in that mode, keeping its tabs."
+        risk = (
+            "Pages then run their shaders through a CPU renderer in the browser's GPU process."
+            if mode == "software"
+            else "Pages then reach the GPU and its kernel driver through the browser's GPU process."
+        )
+        text = f"The agent asks to turn on {WEBGL_WORDS[mode]} in its browser: {said}. {restart} {risk}"
+        extra = {"webgl": mode, "project_id": owner.project_id or "", "staff_id": owner.staff_id or ""}
+        if not await caller.ask_operator(key, text, {"webgl": {"mode": mode, "reason": said}}, on_answer=WEBGL_ASK, extra=extra):
+            raise EnvUnavailable("this session is not loaded; nothing was asked")
+        return (
+            f"Waiting for the operator: asked to turn on {WEBGL_WORDS[mode]} in your browser. Approval key: {key}. Only their yes changes it; "
+            "the browser then restarts in that mode with your tabs. End your turn now: a message brings their answer. Do not ask again."
+        ), True
 
     async def ask_operator_chrome(self, caller: Caller, *, reason: str) -> tuple[str, bool]:
         """Ask the operator to move this conversation into their Chrome. The agent never switches: the
@@ -2477,6 +2566,8 @@ class BrowserAgent:
         a = dict(arguments or {})
         try:
             if tool == "BrowserOpen":
+                if (webgl := _str(a, "webgl")) is not None:
+                    return await self.open_webgl(caller, webgl, url=_str(a, "url"), fresh=bool(a.get("fresh")), why=_str(a, "why"))
                 return await self.open(caller, url=_str(a, "url"), fresh=bool(a.get("fresh")), why=_str(a, "why")), False
             if tool == "BrowserAskOperatorChrome":
                 return await self.ask_operator_chrome(caller, reason=_str(a, "reason") or "")
@@ -2779,5 +2870,5 @@ def _size(n: int) -> str:
 
 __all__ = [
     "ACTIONS", "PAGE_CLOSE", "STEPS_MAX", "BrowserAgent", "Caller", "Files", "Gate", "LoopHints", "Look", "Rules", "SensitiveAsk", "Step", "chunks", "explain", "fenced", "host_of",
-    "merge_diffs", "origin_of", "page_open", "parse_extracted",
+    "merge_diffs", "origin_of", "page_open", "parse_extracted", "WEBGL_ASK", "WEBGL_MODES", "WEBGL_WORDS", "webgl_line",
 ]

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -81,6 +82,11 @@ type Options struct {
 	// ScreenW and ScreenH are the screen a headless browser reports; a headed one reports its
 	// display's. Zero leaves Chromium's own (800×600, smaller than any window the daemon makes).
 	ScreenW, ScreenH int
+	// WebGL is one of WebGLModes; empty is off.
+	WebGL string
+	// Virtual is true when the browser has no display of the machine's own: headless, or on the
+	// daemon's Xvfb. It decides how gpu mode reaches the GPU (GraphicsFlags).
+	Virtual bool
 }
 
 // Process is one running browser.
@@ -115,6 +121,7 @@ func Args(opts Options) []string {
 	if opts.NoSandbox {
 		a = append(a, "--no-sandbox")
 	}
+	a = append(a, GraphicsFlags(opts.WebGL, runtime.GOOS, opts.Virtual)...)
 	a = append(a, opts.Args...)
 	return append(a, "about:blank")
 }

@@ -785,6 +785,8 @@ type ProfileInfo struct {
 	SizeBytes  int64     `json:"size_bytes"`
 	LastUsedAt time.Time `json:"last_used_at"`
 	Running    bool      `json:"running"`
+	// WebGL is the mode the profile's browser starts in.
+	WebGL string `json:"webgl"`
 }
 
 // Profiles lists the persistent profiles on disk.
@@ -800,7 +802,7 @@ func (m *Manager) Profiles() []ProfileInfo {
 		if !e.IsDir() || !ValidID(e.Name()) {
 			continue
 		}
-		info := ProfileInfo{ID: e.Name()}
+		info := ProfileInfo{ID: e.Name(), WebGL: m.ProfileWebGL(e.Name())}
 		_ = filepath.WalkDir(filepath.Join(root, e.Name()), func(_ string, d os.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
 				return nil

@@ -209,6 +209,7 @@ class BrowserStub:
             "env": "container", "configured": True, "available": True, "reason": "", "detail": "", "version": "src-4f1c2a9e0b7d",
             "chromium": {"version": "Chrome/151.0.7922.34", "kind": "bundled", "error": ""}, "sandbox": "ok",
             "limits": {"max_browsers": 2}, "counts": {"browsers": 1}, "image_version": "", "update_available": False,
+            "webgl": {"modes": ["off", "software"], "gpu": False, "gpu_reason": "no GPU render node (/dev/dri/renderD*) is visible here"},
         }]
 
     # -- the groups -------------------------------------------------------------------------
