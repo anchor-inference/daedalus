@@ -723,7 +723,7 @@ export type SessionSummary = {
   /** The project this agent works in: the id it is grouped by and the name shown. */
   project_id: string;
   project: string;
-  metadata?: { subagent_of?: string; subagent_name?: string; loop?: LoopView; forked_from?: { session_id: string; seq: number }; [k: string]: unknown };
+  metadata?: { subagent_of?: string; subagent_name?: string; loop?: LoopView; forked_from?: { session_id: string; seq: number }; private?: boolean; [k: string]: unknown };
   /** How many of the session's terminals are running. */
   terminals?: number;
   /** The program the session was imported from, for its plate's corner mark. */
@@ -1005,6 +1005,8 @@ export type SessionDetail = {
   prompt_coach_of?: string | null;
   /** The chat this session answers a side question about (/btw), when it is one. */
   btw_of?: string | null;
+  /** A private chat: kept, but never remembered, learned from or found by search. Fixed when it was made. */
+  private?: boolean;
   /** The project this session is the orchestrator of (current or retired). */
   orchestrator_of?: string | null;
   /** The staff member this session is the work of. */

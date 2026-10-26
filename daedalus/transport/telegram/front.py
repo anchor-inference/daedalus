@@ -45,6 +45,7 @@ from daedalus.host.events import AppEvent, EventFilter
 from daedalus.host.prompts import DEFAULT_RULES, split_headline
 from daedalus.host.services import NO_CHAT_BOUND
 from daedalus.host.session_runner import Attachment, SessionManager, SessionState
+from daedalus.memory.privacy import PRIVATE_KEY, is_private
 from daedalus.security.operator_secrets import SecretError
 from daedalus.speech.service import LocalSpeech, recogniser_available, transcribe_recording
 from daedalus.stores.sqlite import DeliveryLedger
@@ -59,6 +60,7 @@ Each forum topic is one agent session in a project. Write in a topic to talk to 
 
 /bind — (in a supergroup with topics) make it the session hub
 /new &lt;title&gt; — new session (new topic)
+/private &lt;title&gt; — new private chat: kept, but never learned from or searched
 /stop — stop the current run · /detach — keep the agent on the site and close its topic
 /close — close this topic (asks whether to delete the agent)
 /sessions · /status — what exists, what is running
@@ -70,6 +72,7 @@ Every session lives in this chat, which is a window onto one of them at a time. 
 /sessions · /status — the sessions, numbered; what is running
 /use &lt;n|title&gt; — write to that session from now on
 /new &lt;title&gt; — new session, and write to it
+/private &lt;title&gt; — new private chat: kept, but never learned from or searched
 /stop — stop the current run · /close — put the current session away (asks whether to delete the agent)
 /bind — (in a supergroup with topics) give every session a topic of its own instead
 """
@@ -80,6 +83,7 @@ This chat is a window onto one session at a time. /new opens a topic in the boun
 /sessions · /status — the sessions, numbered; what is running
 /use &lt;n|title&gt; — write to that session from now on
 /new &lt;title&gt; — new session, in its own topic
+/private &lt;title&gt; — new private chat: kept, but never learned from or searched
 /stop — stop the current run · /close — put the current session away (asks whether to delete the agent)
 """
 
@@ -174,6 +178,10 @@ vanish, and a repeat rename then fails with TOPIC_NOT_MODIFIED); every prefix he
 CURRENT_SESSION_KEY = "telegram.current_session"
 """Which session the private chat is a window onto; in kv, so a restart resumes the same one."""
 SESSION_HEADER = "▸"
+PRIVATE_MARK = "🔒"
+"""Before a private chat's name wherever the chat names it: its topic, the header of its posts in the
+private chat, and /sessions. A private chat behaves like any other here, so the name is what says so."""
+PRIVATE_WORDS = "it is kept, but never learned from, searched from other chats or given memory"
 MAIN_HEADER = "🧭 Main"
 """What the main orchestrator's posts carry in the private chat, which it shares with the current session:
 the operator always sees which of the two is speaking, and a reply to one of these reaches it."""
@@ -695,7 +703,7 @@ class TelegramFront:
     async def rename_topic(self, binding: TopicBinding, title: str) -> None:
         """Rename a topic and remember the name; a refusal is logged, the binding stays as it was."""
         try:
-            await tg_call(self.bot.edit_forum_topic, binding.chat_id, binding.thread_id, name=title[:128], attempts=2, flood_chat=binding.chat_id)
+            await tg_call(self.bot.edit_forum_topic, binding.chat_id, binding.thread_id, name=self._marked(binding.session_id, title)[:128], attempts=2, flood_chat=binding.chat_id)
         except TelegramAPIError as exc:
             logger.warning("could not rename topic %s: %s", binding.thread_id, exc)
             return
@@ -807,7 +815,7 @@ class TelegramFront:
             if session_id == self._current_session:
                 return ""
             state = self.manager.live_state(session_id)
-            return f"{SESSION_HEADER} {state.session.title if state is not None else session_id}"
+            return f"{SESSION_HEADER} {self._marked(session_id, state.session.title) if state is not None else session_id}"
 
         return self.outbox_to(self.settings.owner_user_id, None, header=header, on_sent=self.remember_post(session_id))
 
@@ -830,7 +838,7 @@ class TelegramFront:
         if state is not None and is_dispatcher(state.metadata):
             return None  # General is the main orchestrator's; a topic of its own would split its one conversation
         try:
-            topic = await tg_call(self.bot.create_forum_topic, forum, title[:128], attempts=2, flood_chat=forum)
+            topic = await tg_call(self.bot.create_forum_topic, forum, self._marked(session_id, title)[:128], attempts=2, flood_chat=forum)
         except TelegramRetryAfter as exc:
             raise TelegramBusy(int(exc.retry_after), session_id) from exc
         except TelegramAPIError as exc:
@@ -910,7 +918,8 @@ class TelegramFront:
             await tg_call(
                 self.bot.send_message,
                 forum,
-                f"Session {state.session.id} — {title}\nproject directory: {state.workspace}",
+                f"Session {state.session.id} — {self._marked(state.session.id, title)}\nproject directory: {state.workspace}"
+                + (f"\nA private chat: {PRIVATE_WORDS}." if is_private(state) else ""),
                 message_thread_id=binding.thread_id,
                 flood_chat=forum,
             )
@@ -983,6 +992,7 @@ class TelegramFront:
         r = self.router
         r.message.register(self.cmd_start, Command("start", "help"))
         r.message.register(self.cmd_new, Command("new"))
+        r.message.register(self.cmd_private, Command("private"))
         r.message.register(self.cmd_use, Command("use"))
         r.message.register(self.cmd_main, Command("main"))
         r.message.register(self.cmd_stop, Command("stop"))
@@ -1062,23 +1072,36 @@ class TelegramFront:
         if not self._is_owner(message.from_user.id if message.from_user else None):
             return
         title = (command.args or "").strip() or datetime.now(UTC).strftime("session %m-%d %H:%M")
+        await self._start_session(message, title, None)
+
+    async def cmd_private(self, message: Message, command: CommandObject) -> None:
+        """``/new`` for a private chat: the same place, the same binding, and the flag set before its first turn."""
+        if not self._is_owner(message.from_user.id if message.from_user else None):
+            return
+        title = (command.args or "").strip() or datetime.now(UTC).strftime("private %m-%d %H:%M")
+        await self._start_session(message, title, {PRIVATE_KEY: True})
+
+    async def _start_session(self, message: Message, title: str, metadata: dict[str, Any] | None) -> None:
+        private = is_private(metadata)
+        made = "private chat" if private else "session"
+        tail = f" ({PRIVATE_WORDS})" if private else ""
         # A bound group is where a command-made session speaks, even while this chat is only a
         # window. Leaving it in the private chat is how a session the operator did not ask to
         # see there used to arrive as a message from the bot.
         if self.private_mode() and self.config.telegram.forum_chat_id:
             try:
-                state, _binding = await self.create_session_topic(title, chat_id=self.config.telegram.forum_chat_id, force_topic=True)
+                state, _binding = await self.create_session_topic(title, metadata=metadata, chat_id=self.config.telegram.forum_chat_id, force_topic=True)
             except (TelegramBusy, TelegramRefused) as exc:
                 if exc.session_id:
                     await self._keep_off_telegram(exc.session_id)
                 await message.answer(f"Telegram did not open a topic: {exc}")
                 return
-            await message.answer(f"Created topic '{title}' (session {state.session.id}).")
+            await message.answer(f"Created topic '{title}' ({made} {state.session.id}){tail}.")
             return
         if self.private_mode():
-            state, _ = await self.create_session_topic(title)
+            state, _ = await self.create_session_topic(title, metadata=metadata)
             await self.set_current_session(state.session.id)
-            await message.answer(f"New session '{title}' ({state.session.id}). You are writing to it; /sessions lists the others.")
+            await message.answer(f"New {made} '{title}' ({state.session.id}){tail}. You are writing to it; /sessions lists the others.")
             return
         if message.chat.type == "private" and not self.config.telegram.forum_chat_id:
             await message.answer(
@@ -1088,9 +1111,9 @@ class TelegramFront:
             )
             return
         forum = self.config.telegram.forum_chat_id if message.chat.type == "private" else message.chat.id
-        state, binding = await self.create_session_topic(title, chat_id=forum)
-        if message.chat.type == "private":
-            await message.answer(f"Created topic '{title}' (session {state.session.id}).")
+        state, binding = await self.create_session_topic(title, metadata=metadata, chat_id=forum)
+        if message.chat.type == "private" or private:
+            await message.answer(f"Created topic '{title}' ({made} {state.session.id}){tail}.")
 
     async def cmd_use(self, message: Message, command: CommandObject) -> None:
         """Point the private chat at another session: by its number in /sessions, its title, or its id."""
@@ -1194,8 +1217,14 @@ class TelegramFront:
 
     def _topic_name(self, session_id: str, title: str) -> str:
         prefix = TOPIC_STATUS_PREFIX.get(self._topic_status.get(session_id, "")) if self.config.telegram.topic_status_emoji else None
-        name = f"{prefix} {title}" if prefix else title
+        marked = self._marked(session_id, title)
+        name = f"{prefix} {marked}" if prefix else marked
         return name[:128]
+
+    def _marked(self, session_id: str, title: str) -> str:
+        """The name with :data:`PRIVATE_MARK` before it for a private chat; the stored title never carries it,
+        so the app and a rename see the operator's own words."""
+        return f"{PRIVATE_MARK} {title}" if is_private(self.manager.live_state(session_id)) else title
 
     def set_topic_status(self, session_id: str, status: str) -> None:
         """Show the session's state in its topic name (debounced: one rename per burst of changes)."""
@@ -1539,7 +1568,7 @@ class TelegramFront:
             return
         current = await self.current_session_id() if private else ""
         lines = [
-            f"{i}. {'▶' if s['status'] == 'running' else '❓' if s['status'] == 'waiting' else '·'} {s['title']} — {s['id']} ({s['status']})"
+            f"{i}. {'▶' if s['status'] == 'running' else '❓' if s['status'] == 'waiting' else '·'} {PRIVATE_MARK + ' ' if is_private(s['metadata']) else ''}{s['title']} — {s['id']} ({s['status']})"
             + ("  ← you are writing here" if s["id"] == current else "")
             for i, s in enumerate(sessions, 1)
         ]

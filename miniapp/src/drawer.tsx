@@ -20,6 +20,7 @@ import { useQuery } from "./store";
 import { useStreamUp } from "./events";
 import { LangPicker } from "./ui/components";
 import { KindMark, sessionKind } from "./chatkind";
+import { PrivateMark, isPrivate } from "./privatechat";
 import { BottomSheet, Drawer, IconButton, NewChatPill, SegmentedControl, SheetRow, closeDrawer, navigateFromDrawer, useDrawerOpen } from "./ui/phone";
 
 /** Where Chats lives: the agents screen with its list open, since /app/agents/<id> is a session. */
@@ -156,6 +157,7 @@ export function AppDrawer({ mode, nav: layout, waiting, selfdev, projects, onPro
                   <span className={`ph-dot ${s.status}`} aria-hidden />
                   <span className="ph-drow-t">{agentName(s)}</span>
                   <KindMark kind={sessionKind(s)} />
+                  <PrivateMark on={isPrivate(s)} />
                   <span className="ph-drow-tm">{relTime(s.last_message_at)}</span>
                 </button>
               ) : (
@@ -189,6 +191,7 @@ export function AppDrawer({ mode, nav: layout, waiting, selfdev, projects, onPro
                 <span className={`ph-dot ${s.status}`} aria-hidden />
                 <span className="ph-drow-t">{agentName(s)}</span>
                 <KindMark kind={sessionKind(s)} />
+                <PrivateMark on={isPrivate(s)} />
                 <span className="ph-drow-tm">{relTime(s.last_message_at)}</span>
               </button>
             ))}

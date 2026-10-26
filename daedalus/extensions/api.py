@@ -163,6 +163,7 @@ from daedalus.host.session_import import imported_view
 from daedalus.host.session_runner import TENANT, Attachment, HostUnreachable, clip_title
 from daedalus.host.setting_refs import LOCAL_SPEECH_MODEL, SPEECH_RECOGNITION, SettingProblem, SettingRef, setting_of
 from daedalus.host.transcript_view import full_tool_result, message_view
+from daedalus.memory import privacy
 from daedalus.model_capabilities import known_image_input
 from daedalus.processes import end_tree
 from daedalus.providers.context_window import catalog_window, table_window, window_from_entry
@@ -593,6 +594,9 @@ class NewSessionBody(BaseModel):
     kind: Literal["chat", "computer", "chrome"] = "chat"
     """What the conversation is for. ``chrome`` also moves it to the operator's Chrome: choosing a
     Chrome conversation is their yes, as pressing "new" in the side panel is."""
+    private: bool = False
+    """A private chat: kept, but never learned from, indexed, handed memory or found from another chat.
+    Only here, at creation: no route changes it later (:mod:`daedalus.memory.privacy` says why)."""
 
 
 class SessionKindBody(BaseModel):
@@ -2208,6 +2212,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         # A session opened here is not a Telegram session. Without this, private-chat mode
         # delivers the agent's replies into the operator's direct messages.
         metadata["telegram_detached"] = True
+        if body.private:
+            metadata[privacy.PRIVATE_KEY] = True
         title = body.title.strip()
         if body.autotitle:
             # The operator typed the message instead of a name. A clip stands in until the model
@@ -2479,6 +2485,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             "prompt_coach_of": state.metadata.get("prompt_coach_of"),
             # A side question likewise offers neither a coach nor a side question of its own.
             "btw_of": state.metadata.get("btw_of"),
+            # A private chat, for the mark in its header; fixed when the chat was made.
+            "private": privacy.is_private(state),
             # Where an imported session came from, for the banner and the "Origin" block of its details.
             "imported": imported_view(state.metadata),
             # What the session is to its project: its orchestrator (current or retired), or the session

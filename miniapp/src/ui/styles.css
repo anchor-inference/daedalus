@@ -5238,6 +5238,27 @@ body.resizing .kind-tabs-pill { transition: none; }
 .kind-mark { display: inline-grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 50%; }
 .kind-mark.kind-computer { color: var(--kind-computer); background: color-mix(in srgb, var(--kind-computer) 15%, transparent); }
 .kind-mark.kind-chrome { color: var(--kind-chrome); background: color-mix(in srgb, var(--kind-chrome) 15%, transparent); }
+/* Private chats (privatechat.tsx): one neutral mark, never a colour of its own. It is not a kind of
+   work but a promise about what is kept, so it reads as quiet grey wherever the chat is named, and the
+   new chat's composer draws its edge dashed while the choice stands, so it is seen before sending. */
+/* Inline-flex, not grid: in the sidebar's meta line every item after the first gets a "·" before it,
+   and a grid would stack that dot above the icon. */
+.private-mark { display: inline-flex; align-items: center; flex: none; color: var(--fg-3); }
+.private-badge { gap: 4px; padding: 1px 7px; color: var(--fg-2); flex: none; }
+.private-badge .ic { flex: none; }
+.private-chip { cursor: pointer; font: inherit; font-size: var(--fs-12); }
+.private-chip:hover { color: var(--fg); border-color: var(--fg-3); }
+.private-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.composer[data-private] .composer-box { border-style: dashed; border-color: var(--fg-3); }
+/* The phone's pill draws its edge as a shadow, not a border; an outline dashes it without moving the
+   44 px the idle composer is held to. */
+.composer[data-shape][data-private] .composer-box { box-shadow: none; outline: 1px dashed var(--fg-3); outline-offset: -1px; }
+/* The idle phone pill is one row shared with the field; the dashed edge and the placeholder say it there,
+   and the chip comes back with the toolbar once the field opens. */
+.composer[data-shape="idle"] .private-chip { display: none; }
+.private-item.on > .ic:first-child { color: var(--fg); }
+.ph-chat-top .private-badge { margin-right: 6px; }
+.ph-drow .private-mark { margin-left: 2px; }
 .sb-kind-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: var(--space-5) var(--space-3); text-align: center; }
 .sb-kind-empty div { font-size: var(--fs-12); line-height: 1.45; color: var(--fg-3); }
 .sb-kind-empty-icon { display: grid; place-items: center; width: 36px; height: 36px; margin-bottom: 4px; border-radius: 50%; }

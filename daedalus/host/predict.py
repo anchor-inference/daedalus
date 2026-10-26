@@ -177,7 +177,11 @@ class Predictor:
         manager = self.manager
         profile = await user_style.load(manager.db)
         learning: tuple[list[str], int] = ([], profile.through_seq)
-        if not self._learning.locked():
+        if manager.is_private(session_id):
+            # A private chat is handed nothing learned from the others, and the guess made in it does
+            # not carry the update either: the profile stays as the ordinary chats left it.
+            profile = user_style.Profile(through_seq=profile.through_seq)
+        elif not self._learning.locked():
             # One update at a time across sessions: two guesses learning the same messages at once
             # would each write a profile, and the second would overwrite the first's for nothing.
             learning = await user_style.pending(manager.db, profile.through_seq, manager.redactor.redact)
