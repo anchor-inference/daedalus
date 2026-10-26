@@ -1,0 +1,106 @@
+// The Memory screen's arithmetic, kept apart from the views so it is tested without a page: how the
+// entries are grouped, what a natural-language edit would do to an entry, how a date and the status
+// pill read.
+
+import type { MemoryEntry, MemoryOp, MemoryRecord, MemorySource, MemoryStatus } from "../api";
+import { absDate, relTimeLong } from "../format";
+import { t } from "../i18n";
+
+export type GroupId = "you" | "projects" | "topics" | "recent";
+export const GROUPS: GroupId[] = ["you", "projects", "topics", "recent"];
+
+/** The You pages and People first, in that order; within every other group the latest change first. */
+const YOU_ORDER = ["you/preferences", "you/profile", "topic/people"];
+
+function groupOf(entry: MemoryEntry): GroupId {
+  if (entry.section === "you" || (entry.section === "topic" && entry.slug === "people")) return "you";
+  if (entry.section === "area") return "projects";
+  if (entry.slug === "recent-work") return "recent";
+  return "topics";
+}
+
+/** The entries as the screen lists them: your preferences, profile and people; projects; topics;
+ *  recent work. A group with nothing in it is left out, so an empty memory shows no headings. */
+export function groupEntries(entries: MemoryEntry[]): { id: GroupId; entries: MemoryEntry[] }[] {
+  const out = new Map<GroupId, MemoryEntry[]>(GROUPS.map((g) => [g, []]));
+  for (const entry of entries) out.get(groupOf(entry))!.push(entry);
+  const rank = (e: MemoryEntry) => YOU_ORDER.indexOf(`${e.section}/${e.slug}`);
+  out.get("you")!.sort((a, b) => rank(a) - rank(b));
+  for (const id of ["projects", "topics", "recent"] as GroupId[]) out.get(id)!.sort((a, b) => b.updated_at.localeCompare(a.updated_at) || a.title.localeCompare(b.title));
+  return GROUPS.map((id) => ({ id, entries: out.get(id)! })).filter((g) => g.entries.length > 0);
+}
+
+/** Entries whose title, summary or aliases hold the query, case- and accent-blind enough for a filter box. */
+export function filterEntries(entries: MemoryEntry[], query: string): MemoryEntry[] {
+  const q = query.trim().toLocaleLowerCase();
+  if (!q) return entries;
+  return entries.filter((e) => [e.title, e.summary, e.project_name ?? "", ...e.aliases].some((field) => field.toLocaleLowerCase().includes(q)));
+}
+
+export type DiffRow = { kind: "same" | "changed" | "removed" | "added"; id: string | null; text: string; before?: string; op?: number };
+
+/** The entry after the chosen operations, as the preview draws it: every bullet with what happens to it
+ *  (the index of the operation acting on it, so a row can be unticked), then the added ones. The host
+ *  computes the same; it is drawn here so that unticking an operation redraws without a round trip. */
+export function diffRows(records: MemoryRecord[], ops: MemoryOp[], skipped: ReadonlySet<number> = new Set()): DiffRow[] {
+  const acting = new Map<string, number>();
+  ops.forEach((op, i) => op.id && !skipped.has(i) && acting.set(op.id, i));
+  const rows: DiffRow[] = records.map((r) => {
+    const i = acting.get(r.id);
+    if (i === undefined) return { kind: "same", id: r.id, text: r.text };
+    const op = ops[i];
+    return op.op === "remove" ? { kind: "removed", id: r.id, text: r.text, op: i } : { kind: "changed", id: r.id, text: op.text ?? r.text, before: r.text, op: i };
+  });
+  ops.forEach((op, i) => op.op === "add" && !skipped.has(i) && rows.push({ kind: "added", id: null, text: op.text ?? "", op: i }));
+  return rows;
+}
+
+/** How many of each change the chosen operations make: the preview's one-line summary. */
+export function diffCounts(rows: DiffRow[]): { added: number; removed: number; changed: number } {
+  return { added: rows.filter((r) => r.kind === "added").length, removed: rows.filter((r) => r.kind === "removed").length, changed: rows.filter((r) => r.kind === "changed").length };
+}
+
+/** The operations the operator kept ticked: what Apply sends. */
+export function chosenOps(ops: MemoryOp[], skipped: ReadonlySet<number>): MemoryOp[] {
+  return ops.filter((_, i) => !skipped.has(i));
+}
+
+function sameDay(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+/** "Updated today", "Updated yesterday", "Updated 14 Jul" — an entry's last change, as the list shows it. */
+export function updatedLabel(iso: string | null | undefined, now: number = Date.now()): string {
+  if (!iso) return "";
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "";
+  const today = new Date(now);
+  if (sameDay(at, today)) return t("memory.updated.today");
+  if (sameDay(at, new Date(now - 86400000))) return t("memory.updated.yesterday");
+  return t("memory.updated.on", { date: absDate(at) });
+}
+
+export type Pill = { tone: "on" | "paused" | "off" | "busy" | "budget"; text: string };
+
+/** The status pill: paused, not learning, today's budget used, learning now, or when memory last
+ *  changed by itself. Until the background pass runs for the first time it says so. */
+export function statusPill(status: MemoryStatus | undefined, now: number = Date.now()): Pill | null {
+  if (!status) return null;
+  if (status.paused) return { tone: "paused", text: t("memory.status.paused") };
+  if (!status.generate) return { tone: "off", text: t("memory.status.manual") };
+  if (status.budget_usd > 0 && status.spent_today_usd >= status.budget_usd) return { tone: "budget", text: t("memory.status.budget") };
+  if (status.learning > 0) return { tone: "busy", text: t("memory.status.learning", { n: status.learning }) };
+  if (status.last_synthesis_at) return { tone: "on", text: t("memory.status.updated", { when: relTimeLong(status.last_synthesis_at, now) }) };
+  return { tone: "on", text: t("memory.status.waiting") };
+}
+
+/** Where a bullet came from, in a few words: the chat by its title, or what taught it when no chat did. */
+export function sourceLabel(source: MemorySource): string {
+  if (source.session_id) return source.session_title || t("memory.source.gone");
+  return t(`memory.source.${["operator", "import", "migration", "synthesis", "remember"].includes(source.origin) ? source.origin : "other"}`);
+}
+
+/** The bullets shown in the entry (newest first) and the archived ones folded under "Older". */
+export function splitArchived<T extends MemoryRecord>(records: T[]): { live: T[]; older: T[] } {
+  return { live: records.filter((r) => !r.archived), older: records.filter((r) => r.archived) };
+}

@@ -17,20 +17,32 @@ merging across scopes changes who can recall the record.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
 import math
 import re
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from protocore.contracts.memory import MemoryRecord, MemoryScope
 
-from daedalus.memory.entries import MemoryEntries, entry_of
-from daedalus.memory.taxonomy import normalise_topics, record_topics
+from daedalus.memory.entries import (
+    ARCHIVED_KEY,
+    LOCKED_KEY,
+    Entry,
+    EntryConflict,
+    EntryNotEmpty,
+    MemoryEntries,
+    Target,
+    entry_of,
+    is_locked,
+)
+from daedalus.memory.taxonomy import classify, normalise_topics, record_topics, sensitive_subjects
+from daedalus.memory.transfer import target_of
 
 if TYPE_CHECKING:
     from daedalus.config import MemoryConfig
@@ -181,12 +193,17 @@ class MemoryCurator:
             raise KeyError(memory_id)
         return record
 
-    async def _journal(self, actor: str, action: str, summary: str, before: Sequence[MemoryRecord], after: Sequence[MemoryRecord]) -> int:
+    async def _journal(self, actor: str, action: str, summary: str, before: Sequence[MemoryRecord], after: Sequence[MemoryRecord], extra: dict[str, Any] | None = None) -> int:
+        """One history entry. ``extra`` carries what the change removed besides records — ``entries``
+        (rows it deleted), ``sources`` (provenance rows it dropped) — and ``made`` (entries it created),
+        so an undo restores all of it together; the tombstones of the records it removed are found by
+        their text."""
         async with self.db.transaction() as conn:
             cursor = await conn.execute(
-                "INSERT INTO memory_history(tenant_id, at, actor, action, summary, before_json, after_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO memory_history(tenant_id, at, actor, action, summary, before_json, after_json, extra_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (self.tenant, datetime.now(UTC).isoformat(), actor, action, summary[:500],
-                 json.dumps([_record_json(r) for r in before], ensure_ascii=False), json.dumps([_record_json(r) for r in after], ensure_ascii=False)),
+                 json.dumps([_record_json(r) for r in before], ensure_ascii=False), json.dumps([_record_json(r) for r in after], ensure_ascii=False),
+                 json.dumps({k: v for k, v in (extra or {}).items() if v}, ensure_ascii=False, default=str)),
             )
             return int(cursor.lastrowid or 0)
 
@@ -228,16 +245,275 @@ class MemoryCurator:
         async with self.lock:
             return await self._merge(ids, actor=actor, action="merge", keep_id=keep_id, text=text, category=category, topics=topics)
 
-    async def edit(self, memory_id: str, *, text: str | None = None, category: str | None = None, topics: Sequence[str] | None = None, actor: str = "operator") -> tuple[MemoryRecord, int | None]:
-        """Change a record's text, category or topics, with a history entry when anything changed."""
+    async def edit(self, memory_id: str, *, text: str | None = None, category: str | None = None, topics: Sequence[str] | None = None, actor: str = "operator", if_version: int | None = None) -> tuple[MemoryRecord, int | None]:
+        """Change a record's text, category or topics, with a history entry when anything changed.
+
+        ``if_version`` refuses the edit with :class:`CuratorConflict` when the record moved on since
+        it was read. A text the operator rewrote becomes theirs: it is locked, so the background pass
+        only ever suggests changes to it."""
         async with self.lock:
             before = self._get(memory_id)
+            if if_version is not None and before.version != if_version:
+                raise CuratorConflict(f"the record is at version {before.version}, not {if_version}")
             after = await self.memory.update(self.tenant, memory_id, text=text, kind=category, topics=list(topics) if topics is not None else None)
             if after.version == before.version:
                 return after, None
             what = [name for name, changed in (("text", after.text != before.text), ("category", after.kind != before.kind), ("topics", record_topics(after.metadata) != record_topics(before.metadata))) if changed]
+            if actor == "operator" and "text" in what and not is_locked(after):
+                after = after.model_copy(update={"metadata": {**after.metadata, LOCKED_KEY: True}})
+                await self.memory.restore(after)
             action = "recategorise" if what and "text" not in what else "edit"
-            return after, await self._journal(actor, action, ", ".join(what), [before], [after])
+            history = await self._journal(actor, action, ", ".join(what), [before], [after])
+            if entry_of(after):
+                await self.entries.touched(entry_of(after))
+            return after, history
+
+    async def mark(self, memory_id: str, *, locked: bool | None = None, archived: bool | None = None, actor: str = "operator") -> tuple[MemoryRecord, int | None]:
+        """Lock or unlock a bullet, archive it or bring it back; the version steps, so a stale edit of
+        it is refused, and the history can put it back."""
+        async with self.lock:
+            before = self._get(memory_id)
+            metadata = dict(before.metadata)
+            changes: list[str] = []
+            for key, value, on, off in ((LOCKED_KEY, locked, "lock", "unlock"), (ARCHIVED_KEY, archived, "archive", "unarchive")):
+                if value is None or bool(metadata.get(key)) == value:
+                    continue
+                if value:
+                    metadata[key] = True
+                else:
+                    metadata.pop(key, None)
+                changes.append(on if value else off)
+            if not changes:
+                return before, None
+            after = before.model_copy(update={"metadata": metadata, "version": before.version + 1, "updated_at": datetime.now(UTC)})
+            await self.memory.restore(after)
+            history = await self._journal(actor, changes[0], ", ".join(changes), [before], [after])
+            if entry_of(after):
+                await self.entries.touched(entry_of(after))
+            return after, history
+
+    async def _remove(self, records: Sequence[MemoryRecord], *, actor: str, action: str, summary: str, tombstone: str | None, extra: dict[str, Any] | None = None) -> int | None:
+        """Delete records with one history entry that puts them back, sources and all. The batch twin of
+        :meth:`MemoryEntries.forget`: each record is tombstoned with ``tombstone`` as the reason through
+        the same :meth:`MemoryEntries.tombstone`, so the background pass does not learn it again, and
+        the undo takes the tombstones away. The caller holds the lock."""
+        if not records:
+            return None
+        ids = [r.id for r in records]
+        sources = await self.entries.source_rows(record_ids=ids)
+        slugs = {e.id: e.slug for e in await self.entries.list()}
+        for record in records:
+            if tombstone:
+                await self.entries.tombstone(record.text, entry_slug=slugs.get(entry_of(record), ""), reason=tombstone)
+            await self.memory.delete(self.tenant, record.id)
+        await self.entries.drop_sources(record_ids=ids)
+        extra = dict(extra or {})
+        extra["sources"] = [*extra.get("sources", []), *sources]
+        history = await self._journal(actor, action, summary, records, [], extra)
+        for entry_id in {entry_of(r) for r in records} - {""}:
+            if await self.entries.get(entry_id) is not None:
+                await self.entries.touched(entry_id)
+        return history
+
+    async def remove(self, ids: Sequence[str], *, actor: str = "operator", reason: str = "deleted") -> tuple[int, int | None]:
+        """Forget records; the bullets are tombstoned so the background pass does not learn them again
+        from the same chats. Returns how many went and the history entry that brings them back."""
+        async with self.lock:
+            records = [r for i in dict.fromkeys(ids) if (r := self.memory.get_record(self.tenant, i)) is not None]
+            history = await self._remove(records, actor=actor, action="delete", summary=f"{len(records)} record(s)", tombstone=reason)
+            return len(records), history
+
+    async def remove_entry(self, entry_id: str, *, if_version: int, actor: str = "operator") -> tuple[int, int | None]:
+        """Delete an entry with its bullets, refused with :class:`EntryConflict` when it changed since
+        ``if_version``. The You pages stay (they are where the operator's own notes are filed) and only
+        lose their bullets. One history entry restores the page and every bullet."""
+        async with self.lock:
+            entry = await self.entries.get(entry_id)
+            if entry is None:
+                raise KeyError(entry_id)
+            if entry.version != if_version:
+                raise EntryConflict(f"the entry is at version {entry.version}, not {if_version}")
+            records = self.entries.records_of(entry_id)
+            rows = [] if entry.section == "you" else await self.entries.entry_rows([entry_id])
+            if rows:
+                await self.db.execute("DELETE FROM memory_entries WHERE tenant_id = ? AND id = ?", (self.tenant, entry_id))
+            history = await self._remove(records, actor=actor, action="delete_entry", summary=entry.title, tombstone="deleted", extra={"entries": rows})
+            if history is None and rows:
+                history = await self._journal(actor, "delete_entry", entry.title, [], [], {"entries": rows})
+            return len(records), history
+
+    async def forget_session(self, session_id: str, *, title: str = "") -> dict[str, Any]:
+        """What a deleted chat taught leaves with it.
+
+        A record whose every source is this chat goes; one also taught by another chat, written by the
+        operator or imported stays, as does a locked one (the operator made it theirs). The chat's
+        provenance rows go either way, so a record kept now because a second chat backs it goes when
+        that chat is deleted too. The removed records are tombstoned with the reason
+        ``session_deleted``, so a fork or a copy of the chat does not teach them again; the background
+        pass may weigh that reason below an operator's own delete. One history entry restores the
+        records, every row, and takes the tombstones away."""
+        async with self.lock:
+            rows = await self.entries.source_rows(session_id=session_id)
+            if not rows:
+                return {"removed": 0, "kept": 0, "history_id": None}
+            taught = list(dict.fromkeys(r["record_id"] for r in rows))
+            marks = ",".join("?" * len(taught))
+            backed = {row["record_id"] for row in await self.db.fetchall(
+                f"SELECT DISTINCT record_id FROM memory_sources WHERE tenant_id = ? AND record_id IN ({marks}) AND session_id != ?",
+                (self.tenant, *taught, session_id),
+            )}
+            live = [r for i in taught if (r := self.memory.get_record(self.tenant, i)) is not None]
+            going = [r for r in live if r.id not in backed and not is_locked(r)]
+            await self.entries.drop_sources(session_id=session_id)
+            await self.db.execute("DELETE FROM memory_synthesis WHERE session_id = ?", (session_id,))
+            # Every row the chat left goes into the history, read before they were dropped: the removed
+            # records' rows as much as the kept ones', or an undo brings records back with no source.
+            history = await self._remove(going, actor="operator", action="session_deleted", summary=title or session_id, tombstone="session_deleted", extra={"sources": rows})
+            if history is None:
+                history = await self._journal("operator", "session_deleted", title or session_id, [], [], {"sources": rows})
+            for entry_id in {entry_of(r) for r in live if r not in going} - {""}:
+                await self.entries.touched(entry_id)
+            return {"removed": len(going), "kept": len(live) - len(going), "history_id": history}
+
+    async def add(self, text: str, *, kind: str, topics: Sequence[str], entry: Entry | None = None, origin: str = "operator", actor: str = "operator", metadata: dict[str, Any] | None = None, action: str = "add", summary: str = "") -> tuple[Any, int]:
+        """The operator's own note, filed by the rule (or straight into ``entry``) through the one
+        door every record comes through, locked, with a history entry whose undo takes it away again
+        (and the entry it made, when it made one)."""
+        async with self.lock:
+            return await self._add(text, kind=kind, topics=topics, entry=entry, origin=origin, actor=actor, metadata=metadata, action=action, summary=summary)
+
+    async def quick(self, text: str, *, classifier: Callable[[str], Awaitable[str]] | None = None) -> tuple[Any, int, Entry | None]:
+        """Quick add, from the Memory screen's field and from Telegram's ``/remember``: the category and
+        topics inferred as Remember infers them, filed by the same rule into global memory, locked,
+        undoable. Returns the write's result, its history entry and the entry it landed in."""
+        found = await classify(text.strip(), vocabulary=self.memory.vocabulary(self.tenant), ask=classifier)
+        result, history = await self.add(text, kind=found.category, topics=found.topics)
+        return result, history, await self.entries.get(entry_of(result.record))
+
+    async def _add(self, text: str, *, kind: str, topics: Sequence[str], entry: Entry | None, origin: str, actor: str, metadata: dict[str, Any] | None, action: str, summary: str) -> tuple[Any, int]:
+        known = {e.id for e in await self.entries.list()}
+        scope, scope_key = self.entries.placement(entry) if entry is not None else (MemoryScope.global_, "")
+        meta = {"source": origin, "topics": list(topics), LOCKED_KEY: True, **(metadata or {})}
+        # A write that folds into a similar record changes that record: the history must hold it as it
+        # was, or the undo would delete a note the operator had before this one.
+        was = {r.id: r for r in self.memory.records(self.tenant)}
+        result = await self.entries.remember(scope, scope_key, text.strip(), kind=kind, metadata=meta, origin=origin, entry=entry)
+        prior = was.get(result.record.id)
+        made = [e.id for e in await self.entries.list() if e.id not in known]
+        history = await self._journal(actor, action, summary or text.strip()[:120], [prior] if prior else [], [result.record], {"made": made})
+        return result, history
+
+    async def rewrite(self, entry_id: str, ops: Sequence[Any], *, if_version: int, title: str | None = None, summary: str | None = None, instruction: str = "", kind: str = "fact", topics: Sequence[str] = ()) -> tuple[Entry, int | None]:
+        """Apply the operations of an instruction the operator approved (see :mod:`daedalus.memory.edit`)
+        to one entry, refused with :class:`EntryConflict` when the entry moved on since the preview.
+
+        Every change is the operator's, so changed and added bullets are locked; removed ones are
+        tombstoned. One history entry undoes the lot, the retitle aside (an entry's own fields are
+        not journalled; the screen edits them back directly)."""
+        async with self.lock:
+            entry = await self.entries.get(entry_id)
+            if entry is None:
+                raise KeyError(entry_id)
+            if entry.version != if_version:
+                raise EntryConflict(f"the entry is at version {entry.version}, not {if_version}")
+            if title is not None or summary is not None:
+                entry = await self.entries.update(entry_id, if_version=if_version, title=title, summary=summary, by_operator=True)
+            before: list[MemoryRecord] = []
+            after: list[MemoryRecord] = []
+            removed: list[MemoryRecord] = []
+            for op in ops:
+                if op.op == "add":
+                    continue
+                record = self._get(op.id)
+                if entry_of(record) != entry_id:
+                    raise KeyError(op.id)
+                if op.op == "remove":
+                    removed.append(record)
+                    continue
+                changed = await self.memory.update(self.tenant, record.id, text=op.text)
+                if changed.version != record.version:
+                    changed = changed.model_copy(update={"metadata": {**changed.metadata, LOCKED_KEY: True}})
+                    await self.memory.restore(changed)
+                    before.append(record)
+                    after.append(changed)
+            sources = await self.entries.source_rows(record_ids=[r.id for r in removed])
+            for record in removed:
+                await self.entries.tombstone(record.text, entry_slug=entry.slug, reason="deleted")
+                await self.memory.delete(self.tenant, record.id)
+            await self.entries.drop_sources(record_ids=[r.id for r in removed])
+            was = {r.id: r for r in self.memory.records(self.tenant)}
+            for op in ops:
+                if op.op != "add":
+                    continue
+                result = await self.entries.remember(
+                    *self.entries.placement(entry), op.text, kind=kind, metadata={"source": "operator", "topics": list(topics), LOCKED_KEY: True},
+                    origin="operator", entry=entry,
+                )
+                if (prior := was.get(result.record.id)) is not None and prior.id not in {b.id for b in before}:
+                    before.append(prior)
+                after = [r for r in after if r.id != result.record.id] + [result.record]
+            history = None
+            if before or after or removed:
+                history = await self._journal("operator", "instruct", instruction.strip()[:200] or entry.title, [*before, *removed], after, {"sources": sources})
+            await self.entries.touched(entry_id)
+            fresh = await self.entries.get(entry_id)
+            assert fresh is not None
+            return fresh, history
+
+    async def import_items(self, items: Sequence[Any], *, projects: Collection[str] = ()) -> tuple[list[MemoryRecord], int | None]:
+        """File approved import bullets (:class:`daedalus.memory.transfer.Item`, already scanned by the
+        caller) through the one door, origin ``import``, with one history entry that takes them all
+        away again, the entries they made included. An area bullet whose project exists here goes to
+        that project's area; any other area becomes a free one."""
+        async with self.lock:
+            known = {e.id for e in await self.entries.list()}
+            was = {r.id: r for r in self.memory.records(self.tenant)}
+            before: dict[str, MemoryRecord] = {}
+            after: dict[str, MemoryRecord] = {}
+            for item in items:
+                target = Target("area", project_id=item.project_id) if item.section == "area" and item.project_id in projects else target_of(item)
+                entry = await self.entries.ensure(target)
+                result = await self.entries.remember(
+                    *self.entries.placement(entry), item.text, kind=item.category or "fact",
+                    metadata={"source": "import", "topics": list(item.topics), **({"imported_date": item.date} if item.date else {})},
+                    origin="import", entry=entry,
+                )
+                if (prior := was.get(result.record.id)) is not None:
+                    before.setdefault(prior.id, prior)
+                after[result.record.id] = result.record
+            made = [e.id for e in await self.entries.list() if e.id not in known]
+            history = await self._journal("operator", "import", f"{len(after)} imported", list(before.values()), list(after.values()), {"made": made}) if after else None
+            return list(after.values()), history
+
+    def sensitive_records(self, subjects: Collection[str]) -> list[MemoryRecord]:
+        """The records touching any of ``subjects``, by the same check Remember refuses them with."""
+        wanted = set(subjects)
+        return [r for r in self.memory.records(self.tenant) if sensitive_subjects(r.text) & wanted]
+
+    async def purge_sensitive(self, subjects: Collection[str]) -> tuple[int, int | None]:
+        """Remove what memory holds on subjects the operator stopped allowing (claude.ai's rule: turning
+        a subject off removes the existing notes on it), the operator's own notes included, with one
+        history entry that brings them back. Not tombstoned: allowing the subject again may learn it anew."""
+        async with self.lock:
+            records = self.sensitive_records(subjects)
+            history = await self._remove(records, actor="operator", action="sensitive", summary=", ".join(sorted(subjects)), tombstone=None)
+            return len(records), history
+
+    async def reset(self) -> dict[str, int]:
+        """Delete every memory: records, entries, sources, tombstones, what the background pass read,
+        suggestions and the history itself (a history that keeps copies would keep the memory). Not
+        undoable; the screen asks for the word typed out first."""
+        async with self.lock:
+            records = self.memory.records(self.tenant)
+            for record in records:
+                await self.memory.delete(self.tenant, record.id)
+            counts = {"records": len(records)}
+            async with self.db.transaction() as conn:
+                for table in ("memory_entries", "memory_sources", "memory_tombstones", "memory_suggestions", "memory_history"):
+                    cursor = await conn.execute(f"DELETE FROM {table} WHERE tenant_id = ?", (self.tenant,))
+                    counts[table.removeprefix("memory_")] = cursor.rowcount
+                await conn.execute("DELETE FROM memory_synthesis")
+            return counts
 
     async def rename_topic(self, old: str, new: str, *, actor: str = "operator") -> int:
         """Rename a topic on every record carrying it (or fold it into an existing one). One history
@@ -280,16 +556,24 @@ class MemoryCurator:
             for record in before:
                 if self.memory.get_record(self.tenant, record.id) is not None and record.id not in {r.id for r in after}:
                     raise CuratorConflict(f"a record with the id {record.id} exists again")
-            for record in after:
-                if record.id not in {r.id for r in before}:
-                    await self.memory.delete(self.tenant, record.id)
+            extra = json.loads(row["extra_json"] or "{}") if "extra_json" in row.keys() else {}
+            await self.entries.revive(extra.get("entries", []))
+            dropped = [r.id for r in after if r.id not in {b.id for b in before}]
+            for memory_id in dropped:
+                await self.memory.delete(self.tenant, memory_id)
+            await self.entries.drop_sources(record_ids=dropped)
             for record in before:
                 await self.memory.restore(record)
-            # An undone forget brings the note back, and the tombstone that stopped it being learned
+            await self.entries.restore_sources(extra.get("sources", []))
+            # An undone removal brings the notes back, and the tombstone that stopped them being learned
             # again would otherwise outlive the operator changing their mind.
             await self.entries.untombstone(r.text for r in before)
-            for entry_id in {entry_of(r) for r in before} - {""}:
-                await self.entries.touched(entry_id)
+            for entry_id in extra.get("made", []):
+                with contextlib.suppress(EntryNotEmpty):
+                    await self.entries.delete(entry_id)
+            for entry_id in {entry_of(r) for r in (*before, *after)} - {""}:
+                if await self.entries.get(entry_id) is not None:
+                    await self.entries.touched(entry_id)
             await self.db.execute("UPDATE memory_history SET undone_at = ? WHERE id = ?", (datetime.now(UTC).isoformat(), history_id))
             return before
 

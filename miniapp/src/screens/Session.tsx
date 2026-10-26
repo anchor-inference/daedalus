@@ -26,6 +26,7 @@ import { drawnWidgets } from "../widget";
 import { useReveal } from "../reveal";
 import { withoutAttachedList } from "../keptfiles";
 import { FileGallery, InlineMedia, mediaCopyText, splitMediaAnswer } from "../media";
+import { SavedToMemory } from "../memory/savedchip";
 import { conversationMedia, galleryFor, toolSource, viewerSource, type HostSource } from "../mediaroute";
 import { Answer, Composer, ComposerHandle } from "../composerbox";
 import { Approval, QueuedMessage, pendingApproval, queuedAfter, questionsKey, readQueued } from "../composer";
@@ -2194,6 +2195,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
       {/* A page the agent showed is drawn as soon as the call returns, not when the turn ends: the
           point of showing it is that the operator can open it while the agent goes on. */}
       <PageCards pages={turnPages(turn.activity)} />
+      <SavedToMemory activity={turn.activity} />
       {turn.answer && !live && <MessageActions text={mediaCopyText(turn.answer, turn.media ?? [])} actions={answerActions(turn.answer, turn.answerSeq)} more={turnMenu} />}
       </div>
       {/* Outside the folded content: a loop's turn is folded by default, and this line is the one

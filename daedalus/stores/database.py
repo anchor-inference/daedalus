@@ -3037,6 +3037,19 @@ CREATE TABLE IF NOT EXISTS memory_tombstones (
 );
 """, _memory_entries))
 
+
+async def _memory_history_extra(conn: aiosqlite.Connection) -> None:
+    """What a memory change removed besides records: the entries it deleted, the source rows a deleted
+    chat took with it, the tombstones it wrote. Undo puts them back with the records, so undoing a
+    chat's deletion leaves the records exactly as attributed as before and undoing an entry's deletion
+    brings the page back rather than scattering its bullets. Checked first, like every added column."""
+    present = {row[1] for row in await (await conn.execute("PRAGMA table_info(memory_history)")).fetchall()}
+    if "extra_json" not in present:
+        await conn.execute("ALTER TABLE memory_history ADD COLUMN extra_json TEXT NOT NULL DEFAULT '{}'")
+
+
+MIGRATIONS.append(DataMigration("SELECT 1;", _memory_history_extra))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

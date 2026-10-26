@@ -993,6 +993,60 @@
       "synonyms": ["sensitive", "privacy", "health", "finances", "what it remembers", "чувствительное", "приватность", "здоровье", "финансы", "что запоминает"]
     },
     {
+      "section": "memory", "anchor": "memory.generate", "config": "memory.generate",
+      "title": { "en": "Generate memory from chats", "ru": "Создавать память из чатов" },
+      "about": { "en": "Learn from your chats in the background and file what lasts into the entries on the Memory screen.", "ru": "Учиться на чатах в фоне и раскладывать важное по разделам на экране памяти." },
+      "synonyms": ["learn from chats", "synthesis", "background memory", "автопамять", "учиться на чатах", "фоновая память"]
+    },
+    {
+      "section": "memory", "anchor": "memory.search_chats", "config": "memory.search_chats",
+      "title": { "en": "Search and reference chats", "ru": "Искать и упоминать чаты" },
+      "about": { "en": "Lets the agent search your other chats and list recent ones when you refer to an earlier conversation.", "ru": "Разрешает агенту искать по другим чатам и показывать недавние, когда вы ссылаетесь на прошлый разговор." },
+      "synonyms": ["chat search", "ChatSearch", "RecentChats", "earlier conversation", "поиск по чатам", "прошлый разговор"]
+    },
+    {
+      "section": "memory", "anchor": "memory.paused", "config": "memory.paused",
+      "title": { "en": "Pause memory", "ru": "Пауза памяти" },
+      "about": { "en": "Keeps everything but hands nothing to the agent and learns nothing new; chats during the pause are never learned from.", "ru": "Всё сохраняется, но агенту ничего не передаётся и ничего нового не запоминается; чаты за время паузы не изучаются." },
+      "synonyms": ["pause", "stop remembering", "incognito", "пауза", "не запоминать"]
+    },
+    {
+      "section": "memory", "anchor": "memory.synthesis_preset", "config": "memory.synthesis_preset",
+      "title": { "en": "Memory model", "ru": "Модель памяти" },
+      "about": { "en": "The model that learns from chats in the background and applies changes you ask for on an entry; any configured model.", "ru": "Модель, которая учится на чатах в фоне и вносит изменения, о которых вы просите в разделе; любая настроенная модель." },
+      "synonyms": ["synthesis model", "memory model", "модель памяти", "модель синтеза"]
+    },
+    {
+      "section": "memory", "anchor": "memory.synthesis_usd_per_day", "config": "memory.synthesis_usd_per_day",
+      "title": { "en": "Daily budget for learning", "ru": "Дневной бюджет на обучение" },
+      "about": { "en": "What the background memory pass may spend in a day; 0 turns it off.", "ru": "Сколько фоновый проход памяти может потратить за день; 0 — выключен." },
+      "synonyms": ["memory budget", "cost", "spend", "бюджет памяти", "расходы"]
+    },
+    {
+      "section": "memory", "anchor": "memory.sensitive", "config": null,
+      "title": { "en": "Include sensitive topics", "ru": "Включать чувствительные темы" },
+      "about": { "en": "The master switch over the sensitive subjects; off, nothing on them is kept, and turning a subject off offers to remove what memory holds on it.", "ru": "Главный переключатель чувствительных тем; если выключен, о них ничего не хранится, а выключение темы предлагает удалить то, что о ней уже известно." },
+      "synonyms": ["sensitive topics", "privacy", "чувствительные темы", "приватность"]
+    },
+    {
+      "section": "memory", "anchor": "memory.import", "config": null,
+      "title": { "en": "Import memory", "ru": "Импорт памяти" },
+      "about": { "en": "Bring over what another assistant remembers, by the prompt it is given, or restore a Daedalus export.", "ru": "Перенести то, что помнит другой ассистент, по готовому запросу, или восстановить экспорт Daedalus." },
+      "synonyms": ["import", "ChatGPT memory", "Claude memory", "импорт", "перенести память"]
+    },
+    {
+      "section": "memory", "anchor": "memory.export", "config": null,
+      "title": { "en": "Export memory", "ru": "Экспорт памяти" },
+      "about": { "en": "A zip of Markdown pages, one per entry, with memory.json for a lossless restore.", "ru": "Архив Markdown-страниц, по одной на раздел, и memory.json для точного восстановления." },
+      "synonyms": ["export", "backup", "download memory", "экспорт", "резервная копия"]
+    },
+    {
+      "section": "memory", "anchor": "memory.reset", "config": null,
+      "title": { "en": "Reset memory", "ru": "Сбросить память" },
+      "about": { "en": "Deletes every entry, note and their history, project memories included; asks for the word typed out.", "ru": "Удаляет все разделы, заметки и их историю, включая память проектов; просит ввести слово подтверждения." },
+      "synonyms": ["reset", "delete all memory", "wipe", "сбросить", "удалить всю память"]
+    },
+    {
       "section": "memory", "anchor": "memory.classify_preset", "config": "memory.classify_preset",
       "title": { "en": "Memory sorting model", "ru": "Модель сортировки памяти" },
       "about": { "en": "The cheap model that picks a note's category and topics when the agent leaves them out; empty sorts by word lists.", "ru": "Дешёвая модель, которая подбирает заметке категорию и темы, если агент их не указал; пусто — сортировка по спискам слов." },

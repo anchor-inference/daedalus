@@ -17,6 +17,7 @@ import re
 import sys
 import tempfile
 import tomllib
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -1058,6 +1059,25 @@ class MemoryConfig(BaseModel):
     search_chats: bool = True
     """Let the agent search and list the operator's other chats (ChatSearch, RecentChats) when they refer
     to an earlier conversation. Off, neither tool is offered; HistorySearch still searches the current chat."""
+    generate: bool = True
+    """Learn from the operator's chats in the background: the pass that files what was said into the
+    memory entries. Off, memory changes only when the agent is told to remember or the operator edits it."""
+    synthesis_preset: str = ""
+    """Preset id of the model the background pass and the Memory screen's "tell it what to change" use;
+    any configured preset. Empty = the classifier's preset, else the default model."""
+    synthesis_usd_per_day: float = Field(default=0.5, ge=0)
+    """What the background pass may spend in a day; it stops for the day when this is reached. 0 = no pass."""
+    paused: bool = False
+    """Memory kept but not used: nothing is handed to the agent and nothing new is learned. Chats held
+    during the pause are never learned from afterwards. The operator's own notes still save."""
+
+    def model_preset(self, presets: Mapping[str, Any]) -> str:
+        """The preset the memory model calls run on: the synthesis preset, the classifier's, or empty
+        for the default model; a named preset that no longer exists is passed over."""
+        for preset in (self.synthesis_preset, self.classify_preset):
+            if preset and preset in presets:
+                return preset
+        return ""
 
 
 class CompactionConfig(BaseModel):

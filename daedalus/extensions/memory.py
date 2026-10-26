@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from protocore.contracts.memory import MemoryRecord
 
 from daedalus.extensions.notifications import Draft
-from daedalus.host.session_runner import TENANT
+from daedalus.host.session_runner import NOT_OPERATOR_FACING, TENANT
 from daedalus.memory.curator import EMBEDDINGS_PER_PASS, MemoryCurator
 from daedalus.search.service import offload
 
@@ -69,7 +69,24 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
 
     made = MemoryCurator(app.db, app.manager.memory, TENANT, lambda: app.config.memory, embed=embedder(app), notify=notify)
     app.extensions["memory_curator"] = made
+    app.manager.delete_hooks.append(lambda session_id: session_deleted(app, session_id))
+    if app.front is not None:
+        app.front.memory_curator = made
     return [asyncio.create_task(made.loop(), name="memory-consolidation")]
 
 
-__all__ = ["curator", "embedder", "install"]
+async def session_deleted(app: Application, session_id: str) -> None:
+    """A chat the operator deletes takes what only it taught out of memory (see
+    :meth:`MemoryCurator.forget_session`). Only the operator's own conversations: a subagent, a staff
+    member or a side window is cleaned up by the host when its work is done, and the notes it left in
+    a project's memory are the team's, kept after the session that wrote them is gone."""
+    assert app.manager is not None
+    state = await app.manager.get_state(session_id)
+    if state is None or app.manager.is_staff(state) or any(state.metadata.get(key) for key in NOT_OPERATOR_FACING):
+        return
+    found = await curator(app).forget_session(session_id, title=state.session.title or "")
+    if found["removed"] or found["kept"]:
+        logger.info("memory: deleting %s removed %d record(s), kept %d backed elsewhere", session_id, found["removed"], found["kept"])
+
+
+__all__ = ["curator", "embedder", "install", "session_deleted"]

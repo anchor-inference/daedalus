@@ -3,24 +3,151 @@
 Records carry a category and topics; a merge keeps the broadest scope's record with the union of the
 topics, writes a history entry with the records as they were, and an undo puts them back; a suggestion
 applied merges its records the same way. ``writes`` lists every write a check may want to read back.
+
+Records are filed in entries as the host files them (a project's records in its area, a preference in
+your preferences, a note about a person in your profile, a topic in a page of its own, the rest in
+recent work) unless ``entries`` is given. The entry routes answer with versions and refuse a stale one
+with 409; a change in words is answered from ``proposals`` (instruction → operations), else with the
+instruction added as one bullet.
 """
 
 from __future__ import annotations
 
 import copy
+import io
+import json
+import zipfile
 from datetime import UTC, datetime
 from typing import Any
 
 CATEGORIES = ("person", "project", "preference", "fact", "procedure", "other")
 
 
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _slug(text: str) -> str:
+    return "-".join("".join(c if c.isalnum() else " " for c in text.lower()).split())
+
+
 class MemoryStub:
-    def __init__(self, records: list[dict[str, Any]] | None = None, projects: dict[str, str] | None = None, suggestions: list[dict[str, Any]] | None = None) -> None:
+    def __init__(
+        self,
+        records: list[dict[str, Any]] | None = None,
+        projects: dict[str, str] | None = None,
+        suggestions: list[dict[str, Any]] | None = None,
+        *,
+        entries: list[dict[str, Any]] | None = None,
+        summaries: dict[str, str] | None = None,
+        sources: dict[str, list[dict[str, Any]]] | None = None,
+        proposals: dict[str, dict[str, Any]] | None = None,
+        status: dict[str, Any] | None = None,
+    ) -> None:
         self.records: list[dict[str, Any]] = copy.deepcopy(records or [])
         self.projects = dict(projects or {})
         self.suggestions: list[dict[str, Any]] = copy.deepcopy(suggestions or [])
         self.history: list[dict[str, Any]] = []
         self.writes: list[tuple[str, str, Any]] = []
+        self.entries: list[dict[str, Any]] = copy.deepcopy(entries) if entries is not None else []
+        self.sources: dict[str, list[dict[str, Any]]] = copy.deepcopy(sources or {})
+        self.proposals = dict(proposals or {})
+        self.status = {"generate": True, "paused": False, "search_chats": True, "synthesis_preset": "", "budget_usd": 0.5, "spent_today_usd": 0.0, "last_synthesis_at": None, "learning": 0, **(status or {})}
+        self.imported: list[dict[str, Any]] = []
+        for record in self.records:
+            record.setdefault("locked", False)
+            record.setdefault("archived", False)
+            if not record.get("entry"):
+                record["entry"] = self._file(record)["id"]
+        for entry in self.entries:
+            if summaries and entry["slug"] in summaries:
+                entry["summary"] = summaries[entry["slug"]]
+
+    # -- entries -------------------------------------------------------------------------------
+
+    def _entry(self, entry_id: str) -> dict[str, Any] | None:
+        return next((e for e in self.entries if e["id"] == entry_id), None)
+
+    def _ensure(self, section: str, slug: str, title: str, project_id: str | None = None) -> dict[str, Any]:
+        found = next((e for e in self.entries if e["section"] == section and e["slug"] == slug), None)
+        if found is None:
+            found = {"id": f"ent-{section}-{slug}", "section": section, "slug": slug, "title": title, "summary": "", "project_id": project_id,
+                     "project_name": self.projects.get(project_id or ""), "aliases": [], "sensitive": [], "edited_by_operator": False, "version": 1,
+                     "created_at": _now(), "updated_at": _now()}
+            self.entries.append(found)
+        return found
+
+    def _file(self, record: dict[str, Any]) -> dict[str, Any]:
+        if record.get("scope") == "project" and record.get("scope_key"):
+            key = record["scope_key"]
+            return self._ensure("area", _slug(self.projects.get(key, key)), self.projects.get(key, key), key)
+        if record.get("category") == "preference":
+            return self._ensure("you", "preferences", "Preferences")
+        if record.get("category") == "person":
+            return self._ensure("you", "profile", "Profile")
+        if record.get("topics"):
+            topic = record["topics"][0]
+            return self._ensure("topic", _slug(topic), topic.replace("-", " ").capitalize())
+        return self._ensure("topic", "recent-work", "Recent work")
+
+    def _touch(self, entry_id: str | None) -> None:
+        entry = self._entry(entry_id or "")
+        if entry is not None:
+            entry["version"] += 1
+            entry["updated_at"] = _now()
+
+    def _count(self, entry_id: str) -> int:
+        return sum(1 for r in self.records if r.get("entry") == entry_id)
+
+    def _view(self, entry: dict[str, Any]) -> dict[str, Any]:
+        return {**copy.deepcopy(entry), "count": self._count(entry["id"])}
+
+    def _record_sources(self, record: dict[str, Any]) -> list[dict[str, Any]]:
+        return copy.deepcopy(self.sources.get(record["id"], [{"origin": "remember", "session_id": None, "session_title": None, "from_seq": None, "to_seq": None, "run_id": None, "quote": "", "at": record.get("created_at") or _now()}]))
+
+    def export_zip(self) -> bytes:
+        """What ``GET /api/memory/export.zip`` downloads: a page per entry and ``memory.json``."""
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("README.md", "# Daedalus memory export\n")
+            for entry in self.entries:
+                bullets = "".join(f"- {r['text']}\n" for r in self.records if r.get("entry") == entry["id"])
+                archive.writestr(f"{entry['section']}/{entry['slug']}.md", f"---\ntitle: \"{entry['title']}\"\nsection: {entry['section']}\n---\n\n{bullets}")
+            archive.writestr("memory.json", json.dumps({"format": "daedalus-memory", "version": 1, "entries": self.entries, "records": self.records}))
+        return buffer.getvalue()
+
+    def entry_listing(self) -> dict[str, Any]:
+        return {
+            "entries": [self._view(e) for e in self.entries],
+            "sections": {name: sum(1 for e in self.entries if e["section"] == name) for name in ("you", "topic", "area")},
+            "records": len(self.records), "unfiled": 0, "status": dict(self.status),
+        }
+
+    def entry_detail(self, entry_id: str) -> dict[str, Any] | None:
+        entry = self._entry(entry_id)
+        if entry is None:
+            return None
+        records = [r for r in self.records if r.get("entry") == entry_id]
+        return {"entry": self._view(entry), "records": [{**copy.deepcopy(r), "sources": self._record_sources(r)} for r in records]}
+
+    def _new_record(self, text: str, entry: dict[str, Any], category: str = "fact", origin: str = "operator") -> dict[str, Any]:
+        record = {"id": f"m{len(self.records) + 100 + len(self.history)}", "scope": "project" if entry.get("project_id") else "global", "scope_key": entry.get("project_id") or "",
+                  "category": category, "topics": [], "text": text, "salience": 0, "version": 1, "created_at": _now(), "updated_at": _now(), "last_accessed_at": None,
+                  "entry": entry["id"], "locked": origin == "operator", "archived": False}
+        self.records.insert(0, record)
+        self.sources[record["id"]] = [{"origin": origin, "session_id": None, "session_title": None, "from_seq": None, "to_seq": None, "run_id": None, "quote": "", "at": _now()}]
+        self._touch(entry["id"])
+        return record
+
+    def _snapshot(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [{"id": r["id"], "text": r["text"], "kind": r["category"], "topics": r["topics"]} for r in records]
+
+    def _journal_full(self, action: str, before: list[dict[str, Any]], after: list[dict[str, Any]], entries: list[dict[str, Any]] | None = None) -> int:
+        history = self._journal(action, self._snapshot(before), self._snapshot(after))
+        self.history[0]["_records"] = copy.deepcopy(before)
+        self.history[0]["_drop"] = [r["id"] for r in after if r["id"] not in {b["id"] for b in before}]
+        self.history[0]["_entries"] = copy.deepcopy(entries or [])
+        return history
 
     def _get(self, memory_id: str) -> dict[str, Any] | None:
         return next((r for r in self.records if r["id"] == memory_id), None)
@@ -60,14 +187,20 @@ class MemoryStub:
         self.history[0]["_records"] = before
         return keep, history
 
-    def answer(self, method: str, path: str, body: dict[str, Any] | None = None) -> tuple[int, Any] | None:
+    def answer(self, method: str, path: str, body: dict[str, Any] | None = None, query: str = "") -> tuple[int, Any] | None:
         """``(status, payload)`` for a memory route, ``None`` for any other path."""
+        if "?" in path:
+            path, query = path.split("?", 1)
         if not path.startswith("/api/memory"):
             return None
         body = body or {}
+        params = dict(part.split("=", 1) for part in query.split("&") if "=" in part)
         if method != "GET":
             self.writes.append((method, path, copy.deepcopy(body)))
         parts = path.strip("/").split("/")
+        entries = self._answer_entries(method, path, parts, body, params)
+        if entries is not None:
+            return entries
         if path == "/api/memory" and method == "GET":
             return 200, self.listing()
         if path == "/api/memory" and method == "POST":
@@ -77,9 +210,9 @@ class MemoryStub:
             self.records.insert(0, record)
             return 200, {"decision": "created", "record": record}
         if path == "/api/memory/delete" and method == "POST":
-            before = len(self.records)
+            gone = [r for r in self.records if r["id"] in body.get("ids", [])]
             self.records = [r for r in self.records if r["id"] not in body.get("ids", [])]
-            return 200, {"deleted": before - len(self.records)}
+            return 200, {"deleted": len(gone), "history_id": self._journal_full("delete", gone, []) if gone else None}
         if path == "/api/memory/merge" and method == "POST":
             record, history = self._merge(body.get("ids", []), body.get("text"), body.get("category"), body.get("topics"), body.get("keep_id"))
             return 200, {"record": record, "history_id": history}
@@ -116,15 +249,23 @@ class MemoryStub:
             if entry["undone_at"]:
                 return 409, {"detail": "this change was already undone"}
             restored = entry.get("_records", [])
-            ids = {r["id"] for r in restored}
+            ids = {r["id"] for r in restored} | set(entry.get("_drop", []))
             self.records = [r for r in self.records if r["id"] not in ids] + copy.deepcopy(restored)
+            for revived in entry.get("_entries", []):
+                if self._entry(revived["id"]) is None:
+                    self.entries.append(copy.deepcopy(revived))
             entry["undone_at"] = datetime.now(UTC).isoformat()
             return 200, {"restored": restored}
         if len(parts) == 3 and method == "PATCH":
             record = self._get(parts[2])
             if record is None:
                 return 404, {"detail": "no such memory"}
+            if body.get("version") is not None and body["version"] != record["version"]:
+                return 409, {"detail": f"the record is at version {record['version']}, not {body['version']}"}
             before = copy.deepcopy(record)
+            if body.get("text") is not None:
+                record["locked"] = True
+            self._touch(record.get("entry"))
             for field in ("text", "category", "topics"):
                 if body.get(field) is not None:
                     record[field] = body[field]
@@ -133,10 +274,149 @@ class MemoryStub:
             self.history[0]["_records"] = [before]
             return 200, {**record, "history_id": history}
         if len(parts) == 3 and method == "DELETE":
-            before = len(self.records)
+            gone = [r for r in self.records if r["id"] == parts[2]]
             self.records = [r for r in self.records if r["id"] != parts[2]]
-            return 200, {"deleted": before != len(self.records)}
+            for record in gone:
+                self._touch(record.get("entry"))
+            return 200, {"deleted": bool(gone), "history_id": self._journal_full("delete", gone, []) if gone else None}
         return 404, {"detail": "Not Found"}
+
+    def _answer_entries(self, method: str, path: str, parts: list[str], body: dict[str, Any], params: dict[str, str]) -> tuple[int, Any] | None:
+        """The entry routes, quick add, marks, status, export and import; ``None`` for the others."""
+        if path == "/api/memory/status" and method == "GET":
+            return 200, dict(self.status)
+        if path == "/api/memory/entries" and method == "GET":
+            return 200, self.entry_listing()
+        if path == "/api/memory/entries" and method == "POST":
+            slug = _slug(body.get("title", ""))
+            if any(e["section"] == body.get("section") and e["slug"] == slug for e in self.entries):
+                return 409, {"detail": "exists"}
+            return 200, {"entry": self._view(self._ensure(body.get("section", "topic"), slug, body.get("title", ""), None))}
+        if path == "/api/memory/quick" and method == "POST":
+            text = (body.get("text") or "").strip()
+            if not text:
+                return 422, {"detail": "nothing to remember"}
+            probe = {"scope": "global", "scope_key": "", "category": "preference" if text.lower().startswith(("i prefer", "i like", "я предпочитаю", "мне нравится")) else "fact", "topics": []}
+            entry = self._file(probe)
+            record = self._new_record(text, entry, probe["category"])
+            return 200, {"decision": "created", "record": copy.deepcopy(record), "entry": self._view(entry), "history_id": self._journal_full("add", [], [record])}
+        if path == "/api/memory/import/preview" and method == "POST":
+            raw = (body.get("text") or "").splitlines()
+            # As the host reads it: when the text has a code block, only what is inside blocks counts.
+            if any(line.strip().startswith("```") for line in raw):
+                inside, kept = False, []
+                for line in raw:
+                    if line.strip().startswith("```"):
+                        inside = not inside
+                    elif inside:
+                        kept.append(line)
+                raw = kept
+            lines = [line.strip().lstrip("-•* ").strip() for line in raw]
+            items = []
+            for n, line in enumerate(text for text in lines if len(text) > 2):
+                date = ""
+                if line.startswith("[") and "]" in line:
+                    date, line = line[1:line.index("]")], line[line.index("]") + 1:].lstrip(" -–:")
+                injection = ["an instruction to ignore earlier instructions"] if "ignore" in line.lower() and "instruction" in line.lower() else []
+                sensitive = ["health"] if any(w in line.lower() for w in ("diagnos", "asthma", "диагноз")) else []
+                preference = line.lower().startswith(("prefers", "i prefer", "предпочитает"))
+                items.append({"key": n, "text": line, "category": "preference" if preference else "fact", "topics": [], "section": "you" if preference else "topic",
+                              "slug": "preferences" if preference else "recent-work", "title": "Preferences" if preference else "Recent work", "project_id": None, "date": date or None,
+                              "sensitive": sensitive, "injection": injection, "duplicate": any(r["text"] == line for r in self.records), "forgotten": False,
+                              "checked": not (injection or sensitive)})
+            return 200, {"items": items, "count": len(items)}
+        if path == "/api/memory/import/apply" and method == "POST":
+            made = []
+            refused = 0
+            for item in body.get("items", []):
+                if "ignore" in item.get("text", "").lower() and "instruction" in item.get("text", "").lower():
+                    refused += 1
+                    continue
+                entry = self._ensure(item.get("section") or "topic", item.get("slug") or "recent-work", item.get("title") or "Recent work")
+                made.append(self._new_record(item["text"], entry, item.get("category") or "fact", "import"))
+            self.imported.extend(copy.deepcopy(body.get("items", [])))
+            return 200, {"imported": len(made), "refused": refused, "history_id": self._journal_full("import", [], made) if made else None}
+        if path == "/api/memory/sensitive" and method == "POST":
+            return 200, {"count": 0} if not body.get("apply") else {"removed": 0, "history_id": None}
+        if path == "/api/memory/reset" and method == "POST":
+            if (body.get("confirm") or "").strip().lower() not in ("reset", "сбросить"):
+                return 422, {"detail": "type the confirmation word to reset memory"}
+            count = len(self.records)
+            self.records, self.entries, self.history = [], [], []
+            return 200, {"deleted": {"records": count, "entries": 0, "sources": 0, "tombstones": 0, "suggestions": 0, "history": 0}}
+        if len(parts) == 4 and parts[3] == "mark" and method == "POST":
+            record = self._get(parts[2])
+            if record is None:
+                return 404, {"detail": "no such memory"}
+            before = copy.deepcopy(record)
+            changed = [k for k in ("locked", "archived") if body.get(k) is not None and bool(record.get(k)) != body[k]]
+            for k in changed:
+                record[k] = body[k]
+            if not changed:
+                return 200, {**copy.deepcopy(record), "history_id": None}
+            record["version"] += 1
+            self._touch(record.get("entry"))
+            return 200, {**copy.deepcopy(record), "history_id": self._journal_full(("" if body[changed[0]] else "un") + ("lock" if changed[0] == "locked" else "archive"), [before], [record])}
+        if len(parts) < 4 or parts[2] != "entries":
+            return None
+        entry = self._entry(parts[3])
+        if entry is None:
+            return 404, {"detail": "no such entry"}
+        if len(parts) == 4 and method == "GET":
+            return 200, self.entry_detail(entry["id"])
+        if len(parts) == 4 and method == "PATCH":
+            if body.get("version") != entry["version"]:
+                return 409, {"detail": f"the entry is at version {entry['version']}, not {body.get('version')}"}
+            for field in ("title", "summary", "aliases"):
+                if body.get(field) is not None:
+                    entry[field] = body[field]
+            entry["edited_by_operator"] = True
+            self._touch(entry["id"])
+            return 200, {"entry": self._view(entry)}
+        if len(parts) == 4 and method == "DELETE":
+            if str(entry["version"]) != params.get("version"):
+                return 409, {"detail": f"the entry is at version {entry['version']}"}
+            gone = [r for r in self.records if r.get("entry") == entry["id"]]
+            self.records = [r for r in self.records if r.get("entry") != entry["id"]]
+            removed = [] if entry["section"] == "you" else [copy.deepcopy(entry)]
+            if removed:
+                self.entries = [e for e in self.entries if e["id"] != entry["id"]]
+            else:
+                self._touch(entry["id"])
+            return 200, {"deleted": len(gone), "history_id": self._journal_full("delete_entry", gone, [], removed)}
+        if len(parts) == 5 and parts[4] == "bullets" and method == "POST":
+            record = self._new_record((body.get("text") or "").strip(), entry)
+            return 200, {"decision": "created", "record": copy.deepcopy(record), "history_id": self._journal_full("add", [], [record]), **self.entry_detail(entry["id"])}  # type: ignore[dict-item]
+        if len(parts) == 5 and parts[4] == "instruct" and method == "POST":
+            if body.get("version") != entry["version"]:
+                return 409, {"detail": f"the entry is at version {entry['version']}, not {body.get('version')}"}
+            records = [r for r in self.records if r.get("entry") == entry["id"]]
+            if not body.get("apply"):
+                scripted = self.proposals.get(body.get("instruction", ""))
+                proposal = copy.deepcopy(scripted) if scripted else {"ops": [{"op": "add", "id": None, "text": body.get("instruction", "")}], "title": None, "summary": None, "note": ""}
+                return 200, {"version": entry["version"], "dropped": 0, "flags": {}, "title": None, "summary": None, "note": "", **proposal}
+            before: list[dict[str, Any]] = []
+            after: list[dict[str, Any]] = []
+            for op in body.get("ops", []):
+                target = next((r for r in records if r["id"] == op.get("id")), None)
+                if op.get("op") == "add":
+                    after.append(self._new_record(op.get("text") or "", entry))
+                elif target is None:
+                    return 422, {"detail": "an operation does not fit this entry"}
+                elif op["op"] == "remove":
+                    before.append(copy.deepcopy(target))
+                    self.records = [r for r in self.records if r["id"] != target["id"]]
+                else:
+                    before.append(copy.deepcopy(target))
+                    target.update({"text": op.get("text") or target["text"], "version": target["version"] + 1, "locked": True})
+                    after.append(target)
+            if body.get("summary") is not None:
+                entry["summary"] = body["summary"]
+            if body.get("title") is not None:
+                entry["title"] = body["title"]
+            self._touch(entry["id"])
+            return 200, {"history_id": self._journal_full("instruct", before, after), **self.entry_detail(entry["id"])}  # type: ignore[dict-item]
+        return None
 
 
 __all__ = ["CATEGORIES", "MemoryStub"]

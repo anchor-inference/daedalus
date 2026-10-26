@@ -1,5 +1,5 @@
-"""The Memory screen by topic and by category, its merge, the tidying's suggestions, undo, and
-Settings → Memory's sensitive topics.
+"""The Memory screen's "All facts" segment by topic and by category, its merge, the tidying's
+suggestions, undo, and Settings → Memory's sensitive topics behind their master switch.
 
 What is checked, on a desktop window and on a phone, in both languages:
 
@@ -75,7 +75,7 @@ def open_page(browser, width: int, lang: str, memory: MemoryStub, path: str = "m
 
         page.route("**/api/settings", settings)
         page.route("**/api/settings/validate", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps({"valid": True, "stale": False, "problems": []})))
-    page.goto(f"{BASE}/{path}?token=t&lang={lang}")
+    page.goto(f"{BASE}/{path}{'&' if '?' in path else '?'}token=t&lang={lang}")
     return page
 
 
@@ -86,7 +86,8 @@ def groups(page: Page) -> list[tuple[str, list[str]]]:
 def check(browser, width: int, lang: str, problems: list[str]) -> None:  # type: ignore[no-untyped-def]
     where = f"{lang} {width}px"
     memory = MemoryStub(MEMORY_RECORDS, MEMORY_PROJECTS, MEMORY_SUGGESTIONS)
-    page = open_page(browser, width, lang, memory)
+    # The record grid is the Memory screen's "All facts" segment; the entries are its first view.
+    page = open_page(browser, width, lang, memory, "memory?view=facts")
     page.wait_for_selector(".memory-card", timeout=20000)
     views = page.locator(".memory-view [role=radio]")
     views.nth(1).click()
@@ -154,7 +155,10 @@ def check_settings(browser, width: int, lang: str, problems: list[str]) -> None:
     where = f"{lang} {width}px settings"
     saved: list[dict] = []
     page = open_page(browser, width, lang, MemoryStub(), "settings/memory", saved)
-    page.wait_for_selector('.memory-settings [data-subject="health"] [role=switch]', timeout=20000)
+    # The subjects wait behind the master switch while none is allowed.
+    page.wait_for_selector('[data-setting="memory.sensitive"] [role=switch]', timeout=20000)
+    page.locator('[data-setting="memory.sensitive"] [role=switch]').click()
+    page.wait_for_selector('.memory-settings [data-subject="health"] [role=switch]', timeout=5000)
     if page.locator(".memory-settings [data-subject]").count() != 5:
         problems.append(f"{where}: not five sensitive topics")
     page.locator('.memory-settings [data-subject="health"] [role=switch]').click()

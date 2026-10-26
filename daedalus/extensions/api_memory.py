@@ -4,19 +4,34 @@ undone from."""
 
 from __future__ import annotations
 
+import asyncio
+import base64
+import binascii
+import logging
 from collections import Counter
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Response
 from protocore.contracts.memory import MemoryRecord, MemoryScope
 from pydantic import BaseModel, ConfigDict, Field
 
 from daedalus.extensions.memory import curator
 from daedalus.host.session_runner import TENANT
+from daedalus.memory import edit, transfer
 from daedalus.memory.curator import CuratorConflict
-from daedalus.memory.entries import SECTIONS, UnknownProject, entry_of
+from daedalus.memory.entries import (
+    SECTIONS,
+    EntryConflict,
+    UnknownProject,
+    entry_of,
+    fingerprint,
+    is_archived,
+    is_locked,
+)
 from daedalus.memory.taxonomy import CATEGORIES, classify, normalise_category, record_topics
+from daedalus.security.untrusted import injection_signs
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -34,12 +49,120 @@ class MemoryBody(BaseModel):
     """The project's id for a project note."""
 
 
+logger = logging.getLogger(__name__)
+
+
 class MemoryPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     text: str | None = None
     category: str | None = None
     topics: list[str] | None = None
+    version: int | None = None
+    """The record's version the edit was made against; a newer one refuses it with 409."""
+
+
+class MarkBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    locked: bool | None = None
+    archived: bool | None = None
+
+
+class EntryBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    section: Literal["topic", "area"]
+    """The You pages exist already; new pages are topics or free areas (a project's area is made
+    with the project's first note)."""
+    title: str = Field(min_length=1, max_length=120)
+    summary: str = Field(default="", max_length=400)
+
+
+class EntryPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: int
+    title: str | None = Field(default=None, max_length=120)
+    summary: str | None = Field(default=None, max_length=400)
+    aliases: list[str] | None = Field(default=None, max_length=8)
+
+
+class BulletBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1, max_length=edit.BULLET_MAX_CHARS)
+    category: str = ""
+
+
+class QuickBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1, max_length=edit.BULLET_MAX_CHARS)
+
+
+class OpBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    op: Literal["add", "remove", "change"]
+    id: str | None = None
+    text: str | None = None
+
+
+class InstructBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    instruction: str = Field(default="", max_length=edit.INSTRUCTION_MAX_CHARS)
+    version: int
+    apply: bool = False
+    """False asks the model for a preview; true applies ``ops`` (the preview the operator approved)."""
+    ops: list[OpBody] = Field(default_factory=list, max_length=edit.MAX_OPS)
+    title: str | None = Field(default=None, max_length=120)
+    summary: str | None = Field(default=None, max_length=400)
+
+
+class ImportPreviewBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(default="", max_length=transfer.MAX_IMPORT_BYTES)
+    archive: str = Field(default="", max_length=transfer.MAX_IMPORT_BYTES * 2)
+    """A zip (a Daedalus export) as base64."""
+
+
+class ImportItemBody(BaseModel):
+    """One bullet to import. The preview's own items come back as they are, so what they carry beyond
+    these fields (what the scan said) is ignored: it is read again here, never trusted."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    text: str = Field(min_length=1, max_length=transfer.MAX_BULLET_CHARS)
+    category: str = ""
+    topics: list[str] = Field(default_factory=list, max_length=8)
+    section: str = ""
+    slug: str = ""
+    title: str = ""
+    project_id: str | None = None
+    date: str | None = None
+
+
+class ImportApplyBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[ImportItemBody] = Field(min_length=1, max_length=transfer.MAX_IMPORT_ITEMS)
+
+
+class SensitiveBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    subjects: list[str] = Field(min_length=1, max_length=8)
+    apply: bool = False
+    """False counts what would go; true removes it."""
+
+
+class ResetBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirm: str
 
 
 class MemoryIds(BaseModel):
@@ -82,6 +205,8 @@ def memory_view(record: MemoryRecord) -> dict[str, Any]:
         "updated_at": record.updated_at.isoformat() if record.updated_at else None,
         "last_accessed_at": record.last_accessed_at.isoformat() if record.last_accessed_at else None,
         "entry": entry_of(record) or None,
+        "locked": is_locked(record),
+        "archived": is_archived(record),
     }
 
 
@@ -181,44 +306,238 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             "sections": {name: sum(1 for e in every if e.section == name) for name in SECTIONS},
             "records": sum(counts.values()),
             "unfiled": sum(n for key, n in counts.items() if key not in known),
+            "status": await status(),
         }
 
     @api.get("/api/memory/entries/{entry_id}")
     async def memory_entry(entry_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """One entry with its records, newest first, and where each record was learned."""
-        entries = manager().memory_entries
-        entry = await entries.get(entry_id)
+        return await entry_detail(entry_id)
+
+    async def entry_or_404(entry_id: str) -> Any:
+        entry = await manager().memory_entries.get(entry_id)
         if entry is None:
             raise HTTPException(404, "no such entry")
+        return entry
+
+    async def entry_detail(entry_id: str) -> dict[str, Any]:
+        entries = manager().memory_entries
+        entry = await entry_or_404(entry_id)
         records = entries.records_of(entry_id)
         sources = await entries.sources(r.id for r in records)
         return {"entry": entry.view(count=len(records)), "records": [{**memory_view(r), "sources": sources.get(r.id, [])} for r in records]}
 
+    async def status() -> dict[str, Any]:
+        """What the Memory screen's pill says: on, paused or not generating, when the background pass
+        last read a chat and how many it is reading, and today's spend on memory's model calls."""
+        config = app.config.memory
+        row = await app.db.fetchone("SELECT max(last_at) last_at, sum(CASE WHEN status = 'running' THEN 1 ELSE 0 END) running FROM memory_synthesis")
+        midnight = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        spent = await app.db.fetchone("SELECT sum(cost_usd) c FROM usage_events WHERE purpose LIKE 'memory%' AND at >= ?", (midnight,))
+        return {
+            "generate": config.generate, "paused": config.paused, "search_chats": config.search_chats,
+            "synthesis_preset": config.synthesis_preset, "budget_usd": config.synthesis_usd_per_day,
+            "spent_today_usd": float(spent["c"] or 0.0) if spent else 0.0,
+            "last_synthesis_at": row["last_at"] if row else None, "learning": int(row["running"] or 0) if row else 0,
+        }
+
+    @api.get("/api/memory/status")
+    async def memory_status(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        return await status()
+
+    @api.post("/api/memory/entries")
+    async def memory_entry_create(body: EntryBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        try:
+            entry = await manager().memory_entries.create(body.section, body.title, body.title, summary=body.summary)
+        except ValueError as exc:
+            raise HTTPException(409 if "exists" in str(exc) else 422, str(exc)) from exc
+        return {"entry": entry.view(count=0)}
+
+    @api.patch("/api/memory/entries/{entry_id}")
+    async def memory_entry_update(entry_id: str, body: EntryPatch, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Rename an entry, rewrite its summary or aliases, refused with 409 when it changed since
+        ``version`` was read (a bullet added by the agent meanwhile steps it too)."""
+        try:
+            entry = await manager().memory_entries.update(entry_id, if_version=body.version, title=body.title, summary=body.summary, aliases=body.aliases, by_operator=True)
+        except KeyError as exc:
+            raise HTTPException(404, "no such entry") from exc
+        except EntryConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"entry": entry.view(count=len(manager().memory_entries.records_of(entry_id)))}
+
+    @api.delete("/api/memory/entries/{entry_id}")
+    async def memory_entry_delete(entry_id: str, version: int, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Delete an entry and its bullets as one change the history can undo; a You page only loses
+        its bullets."""
+        try:
+            removed, history = await curator(app).remove_entry(entry_id, if_version=version)
+        except KeyError as exc:
+            raise HTTPException(404, "no such entry") from exc
+        except EntryConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"deleted": removed, "history_id": history}
+
+    @api.post("/api/memory/entries/{entry_id}/bullets")
+    async def memory_entry_bullet(entry_id: str, body: BulletBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """A bullet the operator adds on the entry's own page: filed there, whatever the rule would say."""
+        entry = await entry_or_404(entry_id)
+        category = _category(body.category) or (await classify(body.text.strip(), vocabulary=manager().memory.vocabulary(TENANT), ask=None)).category
+        result, history = await curator(app).add(body.text, kind=category, topics=[], entry=entry)
+        return {"decision": result.decision.value, "record": memory_view(result.record), "history_id": history, **(await entry_detail(entry_id))}
+
+    @api.post("/api/memory/entries/{entry_id}/instruct")
+    async def memory_entry_instruct(entry_id: str, body: InstructBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Change an entry in the operator's words. Without ``apply`` a model proposes operations and
+        the answer is the diff to approve; with ``apply`` the approved operations are applied, refused
+        with 409 when the entry moved on since the preview."""
+        entries = manager().memory_entries
+        entry = await entry_or_404(entry_id)
+        records = entries.records_of(entry_id)
+        if entry.version != body.version:
+            raise HTTPException(409, f"the entry is at version {entry.version}, not {body.version}")
+        if not body.apply:
+            if not body.instruction.strip():
+                raise HTTPException(422, "say what to change")
+            ask = edit.model_ask(app.config, manager().providers, purpose="memory_edit")
+            if ask is None:
+                raise HTTPException(503, "no model is configured to edit memory with")
+            try:
+                proposal = await edit.propose(entry, records, body.instruction, ask)
+            except ValueError as exc:
+                raise HTTPException(502, str(exc)) from exc
+            except TimeoutError as exc:
+                raise HTTPException(504, "the model took too long to answer") from exc
+            except Exception as exc:  # noqa: BLE001 - a provider's failure is reported, not raised as a 500
+                logger.warning("memory edit preview failed", exc_info=True)
+                raise HTTPException(502, f"the model call failed: {exc}") from exc
+            return {
+                "version": entry.version, "ops": [op.view() for op in proposal.ops], "title": proposal.title, "summary": proposal.summary,
+                "note": proposal.note, "dropped": proposal.dropped, "flags": proposal.flags, "diff": edit.diff(records, proposal.ops),
+            }
+        try:
+            ops = edit.ops_from([op.model_dump() for op in body.ops], records)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        flagged = [op.text for op in ops if op.text and injection_signs(op.text)]
+        if flagged:
+            raise HTTPException(422, "a new bullet reads like an instruction to an AI agent; edit it by hand if it is really yours")
+        if not ops and body.title is None and body.summary is None:
+            raise HTTPException(422, "nothing to apply")
+        try:
+            fresh, history = await curator(app).rewrite(entry_id, ops, if_version=body.version, title=body.title, summary=body.summary, instruction=body.instruction)
+        except EntryConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(409, "a bullet changed or moved since the preview") from exc
+        return {"history_id": history, **(await entry_detail(fresh.id))}
+
+    @api.post("/api/memory/quick")
+    async def memory_quick(body: QuickBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Quick add: one line the operator typed, filed by the same rule as everything else (category
+        and topics inferred as Remember infers them) in global memory, locked, undoable."""
+        if not body.text.strip():
+            raise HTTPException(422, "nothing to remember")
+        result, history, entry = await curator(app).quick(body.text, classifier=manager().memory_classifier())
+        return {"decision": result.decision.value, "record": memory_view(result.record), "entry": entry.view() if entry else None, "history_id": history}
+
+    @api.get("/api/memory/export.zip")
+    async def memory_export(_: dict[str, Any] = Depends(auth)) -> Response:
+        entries = manager().memory_entries
+        listed = await entries.list()
+        records = manager().memory.records(TENANT)
+        by_entry: dict[str, list[MemoryRecord]] = {}
+        for record in records:
+            by_entry.setdefault(entry_of(record), []).append(record)
+        known = {e.id for e in listed}
+        sources = await entries.sources(r.id for r in records)
+        blob = await asyncio.to_thread(transfer.export_zip, listed, by_entry, sources, unfiled=[r for r in records if entry_of(r) not in known])
+        name = f"daedalus-memory-{datetime.now(UTC).strftime('%Y-%m-%d')}.zip"
+        return Response(blob, media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    async def scanned(items: list[transfer.Item]) -> list[transfer.Item]:
+        memory = manager().memory
+        existing = {fingerprint(r.text) for r in memory.records(TENANT)}
+        tombstones = {row["fingerprint"] for row in await app.db.fetchall("SELECT fingerprint FROM memory_tombstones WHERE tenant_id = ?", (TENANT,))}
+        topics = {e.slug for e in await manager().memory_entries.list(section="topic")}
+        return [transfer.scan(transfer.file_item(item, known_topics=topics), existing=existing, tombstones=tombstones) for item in items]
+
+    @api.post("/api/memory/import/preview")
+    async def memory_import_preview(body: ImportPreviewBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """What an import would add, each bullet filed and scanned; nothing is written."""
+        try:
+            if body.archive:
+                try:
+                    blob = base64.b64decode(body.archive, validate=True)
+                except (binascii.Error, ValueError) as exc:
+                    raise ValueError("the archive is not valid base64") from exc
+                items = await asyncio.to_thread(transfer.read_archive, blob)
+            else:
+                items = transfer.read_text(body.text)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        if len(items) > transfer.MAX_IMPORT_ITEMS:
+            raise HTTPException(413, f"{len(items)} notes; one import takes at most {transfer.MAX_IMPORT_ITEMS}")
+        found = await scanned(items)
+        return {"items": [item.view(n) for n, item in enumerate(found)], "count": len(found)}
+
+    @api.post("/api/memory/import/apply")
+    async def memory_import_apply(body: ImportApplyBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """File the bullets the operator ticked. Scanned again here, whatever the preview said: one that
+        addresses an AI agent is refused, because memory is handed to the agent in later chats."""
+        items = await scanned([transfer.Item(text=" ".join(i.text.split()), category=i.category, topics=i.topics, section=i.section, slug=i.slug, title=i.title, project_id=i.project_id or "", date=i.date or "") for i in body.items])
+        accepted = [i for i in items if not i.injection]
+        projects = {row["id"] for row in await app.db.fetchall("SELECT id FROM projects")}
+        records, history = await curator(app).import_items(accepted, projects=projects)
+        return {"imported": len(records), "refused": len(items) - len(accepted), "history_id": history}
+
+    @api.post("/api/memory/sensitive")
+    async def memory_sensitive(body: SensitiveBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Count, then remove, what memory holds on subjects the operator stops allowing."""
+        if not body.apply:
+            return {"count": len(curator(app).sensitive_records(body.subjects))}
+        removed, history = await curator(app).purge_sensitive(body.subjects)
+        return {"removed": removed, "history_id": history}
+
+    @api.post("/api/memory/reset")
+    async def memory_reset(body: ResetBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        if body.confirm.strip().lower() not in ("reset", "сбросить"):
+            raise HTTPException(422, "type the confirmation word to reset memory")
+        return {"deleted": await curator(app).reset()}
+
     @api.patch("/api/memory/{memory_id}")
     async def memory_edit(memory_id: str, body: MemoryPatch, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            record, history = await curator(app).edit(memory_id, text=body.text, category=_category(body.category), topics=body.topics)
+            record, history = await curator(app).edit(memory_id, text=body.text, category=_category(body.category), topics=body.topics, if_version=body.version)
+        except KeyError as exc:
+            raise HTTPException(404, "no such memory") from exc
+        except CuratorConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {**memory_view(record), "history_id": history}
+
+    @api.post("/api/memory/{memory_id}/mark")
+    async def memory_mark(memory_id: str, body: MarkBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Lock a bullet (the background pass may only suggest changes to it) or archive it (kept,
+        folded away, not handed to the agent), and back."""
+        try:
+            record, history = await curator(app).mark(memory_id, locked=body.locked, archived=body.archived)
         except KeyError as exc:
             raise HTTPException(404, "no such memory") from exc
         return {**memory_view(record), "history_id": history}
 
-    async def forget(memory_ids: list[str]) -> int:
-        memory = manager().memory
-        touched = {entry_of(r) for i in memory_ids if (r := memory.get_record(TENANT, i)) is not None} - {""}
-        deleted = 0
-        for memory_id in memory_ids:
-            deleted += int(await memory.delete(TENANT, memory_id))
-        for entry_id in touched:
-            await manager().memory_entries.touched(entry_id)
-        return deleted
+    async def forget(memory_ids: list[str]) -> tuple[int, int | None]:
+        """Forget records with one history entry; each is tombstoned, so the background pass does not
+        learn it again from the chats it came from."""
+        return await curator(app).remove(memory_ids)
 
     @api.delete("/api/memory/{memory_id}")
     async def memory_delete(memory_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        return {"deleted": bool(await forget([memory_id]))}
+        deleted, history = await forget([memory_id])
+        return {"deleted": bool(deleted), "history_id": history}
 
     @api.post("/api/memory/delete")
     async def memory_delete_many(body: MemoryIds, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        return {"deleted": await forget(body.ids)}
+        deleted, history = await forget(body.ids)
+        return {"deleted": deleted, "history_id": history}
 
     @api.post("/api/memory/merge")
     async def memory_merge(body: MergeBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

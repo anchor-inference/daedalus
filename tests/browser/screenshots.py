@@ -376,7 +376,39 @@ MEMORY_PROJECTS = {P1: "Bakery site", P3: "Support"}
 MEMORY_SUGGESTIONS = [
     {"id": 1, "kind": "duplicate", "memory_ids": ["m4", "m7"], "keep_id": "m7", "text": "Images are capped at 60 KB and 1600 px; the shop's phone is on 3G.", "score": 0.71, "reason": "nearly the same words", "created_at": ago(hours=1)},
 ]
-MEMORY = MemoryStub(MEMORY_RECORDS, MEMORY_PROJECTS, MEMORY_SUGGESTIONS)
+MEMORY_SUMMARIES = {
+    "preferences": "How answers should read and when the digest goes out",
+    "bakery-site": "The shop's site: who edits it and what its pages may weigh",
+    "support": "How refund questions are answered",
+    "deploy": "How changes reach the projects' servers",
+}
+
+
+def memory_source(session_id: str | None, title: str | None, origin: str = "remember", **at: float) -> dict[str, object]:
+    return {"origin": origin, "session_id": session_id, "session_title": title, "from_seq": 12 if session_id else None, "to_seq": None, "run_id": None, "quote": "", "at": ago(**(at or {"days": 2}))}
+
+
+MEMORY_SOURCES = {
+    "m1": [memory_source(None, None, "operator", days=6)],
+    "m6": [memory_source(S1, "Bakery site", days=7), memory_source(S2, "Weekly digest", days=3)],
+    "m3": [memory_source(S1, "Bakery site", days=3)],
+    "m4": [memory_source(S1, "Bakery site", days=2)],
+    "m7": [memory_source(S1, "Bakery site", hours=5)],
+}
+MEMORY_PROPOSALS = {
+    "The digest moved to Monday": {"ops": [{"op": "change", "id": "m6", "text": "The digest goes out on Monday at 09:00; eight items, newest first."}, {"op": "add", "id": None, "text": "The operator moved the digest to Monday in October."}], "title": None, "summary": None, "note": ""},
+    "Дайджест перенесли на понедельник": {"ops": [{"op": "change", "id": "m6", "text": "The digest goes out on Monday at 09:00; eight items, newest first."}, {"op": "add", "id": None, "text": "The operator moved the digest to Monday in October."}], "title": None, "summary": None, "note": ""},
+}
+
+
+def memory_stub() -> MemoryStub:
+    """A fresh copy of the memory the screenshots and the memory checks draw: what the agent remembered
+    by category and topic, filed in entries with summaries and sources, one suggestion the tidying was
+    unsure of, and a scripted change in words."""
+    return MemoryStub(MEMORY_RECORDS, MEMORY_PROJECTS, MEMORY_SUGGESTIONS, summaries=MEMORY_SUMMARIES, sources=MEMORY_SOURCES, proposals=MEMORY_PROPOSALS, status={"last_synthesis_at": ago(minutes=12)})
+
+
+MEMORY = memory_stub()
 """What the agent remembered, by category and topic, with one suggestion the tidying was unsure of."""
 
 BOARD = [
@@ -943,9 +975,11 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return respond(route, usage_data())
     if rel == "/api/balance":
         return respond(route, {"balances": {"deepseek": 4.62, "openrouter": 11.08}, "thresholds": [5, 2, 0.5]})
+    if rel == "/api/memory/export.zip":
+        return route.fulfill(status=200, content_type="application/zip", body=MEMORY.export_zip())
     if rel.startswith("/api/memory"):
         posted = json.loads(request.post_data or "{}") if request.method in ("POST", "PUT", "PATCH") and request.post_data else None
-        answered = MEMORY.answer(request.method, rel, posted)
+        answered = MEMORY.answer(request.method, rel, posted, urlsplit(url).query)
         if answered is not None:
             return respond(route, answered[1], status=answered[0])
     if rel == "/api/board":

@@ -974,8 +974,10 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         answered = COMPANION.answer(method, path, query, body if isinstance(body, dict) else None)
         if answered is not None:
             return answered[0], "application/json", json.dumps(answered[1])
+    if path == "/api/memory/export.zip":
+        return 200, "application/zip", MEMORY.export_zip()
     if path.startswith("/api/memory"):
-        answered = MEMORY.answer(method.upper(), path, body if isinstance(body, dict) else None)
+        answered = MEMORY.answer(method.upper(), path, body if isinstance(body, dict) else None, query)
         if answered is not None:
             return answered[0], "application/json", json.dumps(answered[1])
     if path in GATES:

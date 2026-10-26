@@ -44,12 +44,14 @@ from daedalus.host.config_validation import ConfigConflict, patched
 from daedalus.host.events import AppEvent, EventFilter
 from daedalus.host.prompts import DEFAULT_RULES, split_headline
 from daedalus.host.services import NO_CHAT_BOUND
-from daedalus.host.session_runner import Attachment, SessionManager, SessionState
+from daedalus.host.session_runner import TENANT, Attachment, SessionManager, SessionState
+from daedalus.memory.curator import MemoryCurator
 from daedalus.memory.privacy import PRIVATE_KEY, is_private
 from daedalus.security.operator_secrets import SecretError
 from daedalus.speech.service import LocalSpeech, recogniser_available, transcribe_recording
 from daedalus.stores.sqlite import DeliveryLedger
 from daedalus.transport.telegram.markdown import app_links, markdown_to_html, split_message, strip_tags
+from daedalus.transport.telegram.memorycmd import memory_view, remembered, saved_footer
 from daedalus.transport.telegram.render import Outbox, RunRenderer, RunView
 from daedalus.transport.telegram.voice import TranscriptionError, voice_note_text
 
@@ -106,6 +108,7 @@ HELP_TAIL = """/main — the main orchestrator: in a group it lives in General; 
 /approval manual|auto · /verbosity 0|1|2 — self-change approval, chat detail
 /rebuild · /rollback [n] · /panic — supervisor operations
 /prompt — show the editable working rules (edit them in the Mini App → Settings)
+/memory · /remember &lt;text&gt; — what memory holds; add a note to it
 /settings · /app — configuration, Mini App link
 """
 
@@ -498,6 +501,9 @@ class TelegramFront:
         """Listens for questions answered on another front, whose keyboards here must go."""
         self._current_session: str | None = None
         """The private chat's session, cached from kv; None until it is read the first time."""
+        self.memory_curator: MemoryCurator | None = None
+        """The application's curator, handed in when the memory extension starts, so ``/remember``
+        writes under the same lock and into the same history as the Memory screen."""
         self._force_reply_targets: dict[int, str] = {}
         """Message id of a "type your answer" prompt → the session that asked, so a reply in a
         chat shared by several sessions is attributed to the asker and not to the current one."""
@@ -993,6 +999,8 @@ class TelegramFront:
         r.message.register(self.cmd_start, Command("start", "help"))
         r.message.register(self.cmd_new, Command("new"))
         r.message.register(self.cmd_private, Command("private"))
+        r.message.register(self.cmd_memory, Command("memory"))
+        r.message.register(self.cmd_remember, Command("remember"))
         r.message.register(self.cmd_use, Command("use"))
         r.message.register(self.cmd_main, Command("main"))
         r.message.register(self.cmd_stop, Command("stop"))
@@ -1080,6 +1088,38 @@ class TelegramFront:
             return
         title = (command.args or "").strip() or datetime.now(UTC).strftime("private %m-%d %H:%M")
         await self._start_session(message, title, {PRIVATE_KEY: True})
+
+    def _curator(self) -> MemoryCurator:
+        if self.memory_curator is None:
+            self.memory_curator = MemoryCurator(self.manager.db, self.manager.memory, TENANT, lambda: self.config.memory)
+        return self.memory_curator
+
+    async def cmd_memory(self, message: Message) -> None:
+        """The short view of memory: its state, the You pages, the counts, and the app for the rest."""
+        if not self._is_owner(message.from_user.id if message.from_user else None):
+            return
+        entries = self.manager.memory_entries
+        listing = await entries.listing()
+        you = {e["id"]: [r.text for r in entries.records_of(e["id"]) if not r.metadata.get("archived")] for e in listing if e["section"] == "you"}
+        link = app_links("/app/memory", self.settings.miniapp_public_url)
+        status = {"paused": self.config.memory.paused, "generate": self.config.memory.generate}
+        await message.answer(memory_view(listing, you, status, link), parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+
+    async def cmd_remember(self, message: Message, command: CommandObject) -> None:
+        """Quick add from the chat: the same filing, lock and history as the Memory screen's field."""
+        if not self._is_owner(message.from_user.id if message.from_user else None):
+            return
+        text = (command.args or "").strip()
+        if not text:
+            await message.answer("usage: /remember <what to keep> — for example /remember my dog's name is Beans")
+            return
+        try:
+            result, _history, entry = await self._curator().quick(text, classifier=self.manager.memory_classifier())
+        except Exception as exc:  # noqa: BLE001 - the chat hears why rather than nothing
+            logger.warning("/remember failed", exc_info=True)
+            await message.answer(f"Not saved: {exc}")
+            return
+        await message.answer(remembered(result.decision.value, entry.title if entry else None))
 
     async def _start_session(self, message: Message, title: str, metadata: dict[str, Any] | None) -> None:
         private = is_private(metadata)
@@ -2568,7 +2608,18 @@ class TelegramFront:
             renderer.view.delivery_failed = not await self._deliver_inline_media(session_id, run_id, renderer.outbox) or renderer.view.delivery_failed
         if final:
             await self.ledger.settle(run_id, delivered=not renderer.view.delivery_failed, error="delivery failed" if renderer.view.delivery_failed else "")
+            await self._saved_note(run_id, renderer.outbox)
         self._renderers.pop(session_id, None)
+
+    async def _saved_note(self, run_id: str, outbox: Outbox) -> None:
+        """One quiet line under an answer whose turn saved something to memory, as the app's chip says
+        it: the agent is told not to announce its saves, so this is where the operator learns of them."""
+        try:
+            saved = await self.manager.memory_entries.saved_by_run(run_id)
+            if saved:
+                await outbox.send_text(saved_footer([e.title for e in saved]), markdown=False)
+        except Exception:  # noqa: BLE001 - a missing note is not worth a failed delivery
+            logger.warning("could not post the saved-to-memory note", exc_info=True)
 
     async def _deliver_inline_media(self, session_id: str, run_id: str, outbox: Outbox) -> bool:
         """Deliver the media whose placeholders the renderer removed from the text answer."""

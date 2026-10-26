@@ -1055,7 +1055,19 @@ export type SessionCheckpoints = {
 export const MEMORY_CATEGORIES = ["person", "project", "preference", "fact", "procedure", "other"] as const;
 export type MemoryCategory = (typeof MEMORY_CATEGORIES)[number];
 export const SENSITIVE_SUBJECTS = ["health", "finances", "intimate", "identity_documents", "precise_location"] as const;
-export type MemoryRecord = { id: string; scope: string; scope_key: string; category: string; topics: string[]; text: string; salience: number; version: number; created_at: string | null; updated_at: string | null; last_accessed_at: string | null; entry?: string | null };
+export type MemoryRecord = { id: string; scope: string; scope_key: string; category: string; topics: string[]; text: string; salience: number; version: number; created_at: string | null; updated_at: string | null; last_accessed_at: string | null; entry?: string | null; locked?: boolean; archived?: boolean };
+/** A titled page of memory (claude.ai's "You", "Topics", "Areas"): its records are its bullets. */
+export type MemoryEntry = { id: string; section: "you" | "topic" | "area"; slug: string; title: string; summary: string; project_id: string | null; project_name: string | null; aliases: string[]; sensitive: string[]; edited_by_operator: boolean; version: number; created_at: string; updated_at: string; count?: number };
+/** What the Memory screen's pill reads; the background pass fills ``last_synthesis_at`` and ``learning``. */
+export type MemoryStatus = { generate: boolean; paused: boolean; search_chats: boolean; synthesis_preset: string; budget_usd: number; spent_today_usd: number; last_synthesis_at: string | null; learning: number };
+export type MemoryEntryListing = { entries: MemoryEntry[]; sections: Record<string, number>; records: number; unfiled: number; status: MemoryStatus };
+/** Who taught a bullet: a chat (while it exists it has a title), the operator, an import, the migration. */
+export type MemorySource = { origin: "synthesis" | "remember" | "operator" | "import" | "migration" | string; session_id: string | null; session_title: string | null; from_seq: number | null; to_seq: number | null; run_id: string | null; quote: string; at: string };
+export type MemoryBullet = MemoryRecord & { sources: MemorySource[] };
+export type MemoryEntryDetail = { entry: MemoryEntry; records: MemoryBullet[] };
+export type MemoryOp = { op: "add" | "remove" | "change"; id: string | null; text: string | null };
+export type MemoryProposal = { version: number; ops: MemoryOp[]; title: string | null; summary: string | null; note: string; dropped: number; flags: Record<string, string[]> };
+export type MemoryImportItem = { key: number; text: string; category: string; topics: string[]; section: string; slug: string; title: string; project_id: string | null; date: string | null; sensitive: string[]; injection: string[]; duplicate: boolean; forgotten: boolean; checked: boolean };
 export type MemoryBucket = { scope: string; scope_key: string; title: string | null; count: number };
 export type MemoryListing = { records: MemoryRecord[]; buckets: MemoryBucket[]; projects: Record<string, string>; topics: { topic: string; count: number }[]; categories: Record<string, number>; suggestions: number };
 /** A finding of the background tidying it was not sure enough to apply. */
@@ -1690,7 +1702,7 @@ export type Settings = {
   balance: { enabled: boolean; poll_seconds: number; thresholds_usd: number[] };
   scheduler: { topic_mode: string; catch_up_missed: boolean };
   compaction: { auto_ratio: number; keep_recent_messages: number; max_words: number; chunk_tokens: number; min_messages: number; call_timeout_seconds: number; core_trigger_ratio: number; preset: string };
-  memory?: { extract_after_run: boolean; extract_min_messages: number; extract_preset: string; classify_preset: string; sensitive_allowed: string[]; consolidate: boolean; auto_merge: boolean };
+  memory?: { extract_after_run: boolean; extract_min_messages: number; extract_preset: string; classify_preset: string; sensitive_allowed: string[]; consolidate: boolean; auto_merge: boolean; search_chats?: boolean; generate?: boolean; synthesis_preset?: string; synthesis_usd_per_day?: number; paused?: boolean };
   terminals?: { running_cap: number };
   browser?: BrowserSettings;
   action_rules?: ActionRulesSettings;

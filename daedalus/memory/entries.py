@@ -53,6 +53,13 @@ SUMMARY_MAX_CHARS = 150
 ENTRY_KEY = "entry"
 """The record metadata key naming the record's entry."""
 
+LOCKED_KEY = "locked"
+"""Record metadata: the operator wrote or edited this bullet, so the background pass may suggest a
+change to it but never makes one."""
+
+ARCHIVED_KEY = "archived"
+"""Record metadata: kept, shown folded under the entry's older bullets, and not handed to the agent."""
+
 _OPERATOR_WORDS = re.compile(r"\b(?:operator|operator's|user|user's)\b|оператор\w*|пользовател\w*", re.IGNORECASE)
 _SLUG_JUNK = re.compile(r"[^\w]+", re.UNICODE)
 
@@ -114,6 +121,14 @@ def target_for(kind: str, scope: MemoryScope, scope_key: str, text: str, topics:
 
 def entry_of(record: MemoryRecord) -> str:
     return str((record.metadata or {}).get(ENTRY_KEY) or "")
+
+
+def is_locked(record: MemoryRecord) -> bool:
+    return bool((record.metadata or {}).get(LOCKED_KEY))
+
+
+def is_archived(record: MemoryRecord) -> bool:
+    return bool((record.metadata or {}).get(ARCHIVED_KEY))
 
 
 def new_entry_id() -> str:
@@ -260,6 +275,14 @@ class MemoryEntries:
             })
         return found
 
+    async def saved_by_run(self, run_id: str) -> list[Entry]:
+        """The entries a run's Remember calls filed something in, for the "saved to memory" note under
+        the answer; a record forgotten since does not count."""
+        rows = await self.db.fetchall("SELECT DISTINCT record_id FROM memory_sources WHERE tenant_id = ? AND run_id = ? AND origin = 'remember'", (self.tenant, run_id))
+        ids = list(dict.fromkeys(entry_of(r) for row in rows if (r := self.memory.get_record(self.tenant, row["record_id"])) is not None))
+        found = [e for e in [await self.get(i) for i in ids if i] if e is not None]
+        return found
+
     # -- writing ---------------------------------------------------------------------------------
 
     async def create(self, section: str, slug: str, title: str, *, summary: str = "", project_id: str | None = None, aliases: Sequence[str] = ()) -> Entry:
@@ -404,6 +427,61 @@ class MemoryEntries:
         await self.touched(entry_of(result.record) or entry.id)
         return result
 
+    @staticmethod
+    def placement(entry: Entry) -> tuple[MemoryScope, str]:
+        """The scope a bullet written straight into ``entry`` lives in: its project's, for the area of
+        a project, so the project's chats recall it; global for everything else, a free area included."""
+        if entry.section == "area" and entry.project_id:
+            return MemoryScope.project, entry.project_id
+        return MemoryScope.global_, ""
+
+    async def entry_rows(self, entry_ids: Iterable[str]) -> list[dict[str, Any]]:
+        """The entries' rows as they are stored, for a history entry that may have to put them back."""
+        ids = list(dict.fromkeys(entry_ids))
+        if not ids:
+            return []
+        marks = ",".join("?" * len(ids))
+        rows = await self.db.fetchall(f"SELECT * FROM memory_entries WHERE tenant_id = ? AND id IN ({marks})", (self.tenant, *ids))
+        return [dict(row) for row in rows]
+
+    async def revive(self, rows: Iterable[Mapping[str, Any]]) -> None:
+        """Put entry rows back as :meth:`entry_rows` read them; one whose section and slug were taken
+        meanwhile is skipped, and its records are filed again at the next start."""
+        for row in rows:
+            names = list(row.keys())
+            await self.db.execute(
+                f"INSERT OR IGNORE INTO memory_entries({', '.join(names)}) VALUES ({', '.join('?' * len(names))})",
+                tuple(row[n] for n in names),
+            )
+
+    async def source_rows(self, *, record_ids: Iterable[str] = (), session_id: str = "") -> list[dict[str, Any]]:
+        """Raw provenance rows: those of some records, or every row a chat left."""
+        if session_id:
+            rows = await self.db.fetchall("SELECT * FROM memory_sources WHERE tenant_id = ? AND session_id = ?", (self.tenant, session_id))
+        else:
+            ids = list(dict.fromkeys(record_ids))
+            if not ids:
+                return []
+            marks = ",".join("?" * len(ids))
+            rows = await self.db.fetchall(f"SELECT * FROM memory_sources WHERE tenant_id = ? AND record_id IN ({marks})", (self.tenant, *ids))
+        return [dict(row) for row in rows]
+
+    async def restore_sources(self, rows: Iterable[Mapping[str, Any]]) -> None:
+        for row in rows:
+            names = list(row.keys())
+            await self.db.execute(
+                f"INSERT OR IGNORE INTO memory_sources({', '.join(names)}) VALUES ({', '.join('?' * len(names))})",
+                tuple(row[n] for n in names),
+            )
+
+    async def drop_sources(self, *, session_id: str = "", record_ids: Iterable[str] = ()) -> None:
+        if session_id:
+            await self.db.execute("DELETE FROM memory_sources WHERE tenant_id = ? AND session_id = ?", (self.tenant, session_id))
+        ids = list(dict.fromkeys(record_ids))
+        if ids:
+            marks = ",".join("?" * len(ids))
+            await self.db.execute(f"DELETE FROM memory_sources WHERE tenant_id = ? AND record_id IN ({marks})", (self.tenant, *ids))
+
     async def file_unfiled(self) -> int:
         """File every record that has no entry, or names one that is gone; returns how many.
 
@@ -527,7 +605,9 @@ def area_slug(name: str, project_id: str, taken: Collection[str]) -> str:
 
 
 __all__ = [
+    "ARCHIVED_KEY",
     "ENTRY_KEY",
+    "LOCKED_KEY",
     "ORIGINS",
     "PEOPLE",
     "PREFERENCES",
@@ -545,6 +625,8 @@ __all__ = [
     "area_slug",
     "entry_of",
     "fingerprint",
+    "is_archived",
+    "is_locked",
     "migrated_scope",
     "slugify",
     "target_for",

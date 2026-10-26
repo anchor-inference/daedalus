@@ -284,7 +284,7 @@ Every session command also works from the app's composer with the same `/` palet
 | [docs/COMPANION.md](docs/COMPANION.md) | the companion: goals, its tools, the two models, hearing you, speaking back |
 | [docs/PAGES.md](docs/PAGES.md) | custom pages: your own screens inside the app, the kit, the bridge, the API |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | the repository's layout, and benchmark runs |
-| [docs/architecture/](docs/architecture/) | the browser, the terminals, conversation search |
+| [docs/architecture/](docs/architecture/) | the browser, the terminals, conversation search, memory |
 
 ## License
 

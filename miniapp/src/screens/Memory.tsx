@@ -1,11 +1,13 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, MEMORY_CATEGORIES, MemoryHistoryEntry, MemoryListing, MemoryRecord, MemorySuggestions } from "../api";
+import { MemoryEntryView, MemoryHome } from "../memory/MemoryEntries";
+import { navigate, pathFor, useRoute } from "../router";
 import { ChipRow, Segmented, Skeleton } from "../ui/index";
 import { Sheet, deleteWithUndo } from "../ui/dialogs";
 import { absTime, relTime } from "../format";
 import { Icon } from "../icons";
 import { PageHeader, screenTitle } from "../ui/index";
-import { hold, prime, release, useQuery } from "../store";
+import { hold, invalidate, prime, release, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
 import { plural, t } from "../i18n";
 
@@ -43,8 +45,40 @@ function storedView(): View {
   }
 }
 
-/** What the agent remembered — by category and topic — to read, correct, merge, add to and prune. */
+type Mode = "entries" | "facts";
+
+/** The Memory screen: the entries (claude.ai's list) or every fact (the record grid), and one entry
+ *  at /app/memory/<id>. ``?view=facts`` opens the grid, as does the tidying's notification link
+ *  (``?suggestions=1``), whose suggestions live there; ``?record=<id>`` (the chat's "Saved to memory"
+ *  chip) opens the entry that record is filed in. */
 export function MemoryScreen({ toast }: { toast: (t: string) => void }) {
+  const route = useRoute();
+  const [history, setHistory] = useState(false);
+  const record = route.query.get("record");
+  const mode: Mode = route.query.get("view") === "facts" || route.query.get("suggestions") === "1" ? "facts" : "entries";
+  const switcher = <Segmented label={t("memory.mode")} value={mode} onChange={(next: Mode) => navigate(pathFor("memory", null, next === "facts" ? { view: "facts" } : {}), { replace: true })} options={[{ id: "entries", label: t("memory.mode.entries") }, { id: "facts", label: t("memory.mode.facts") }]} />;
+  if (record) return <RecordRedirect id={record} />;
+  return (
+    <>
+      {route.detail ? <MemoryEntryView entryId={route.detail} onHistory={() => setHistory(true)} /> : mode === "facts" ? <MemoryFacts toast={toast} switcher={switcher} /> : <MemoryHome switcher={switcher} onHistory={() => setHistory(true)} />}
+      {history && mode === "entries" && <HistorySheet onClose={() => setHistory(false)} onChanged={() => invalidate("/api/memory")} toast={toast} />}
+    </>
+  );
+}
+
+/** The entry a record is filed in, looked up and opened in place of this address. */
+function RecordRedirect({ id }: { id: string }) {
+  const { data, error } = useQuery<MemoryListing>("/api/memory", { staleMs: 0 });
+  useEffect(() => {
+    if (!data) return;
+    const entry = data.records.find((r) => r.id === id)?.entry;
+    navigate(entry ? pathFor("memory", entry) : pathFor("memory"), { replace: true });
+  }, [data, id]);
+  return error ? <div className="empty">{error}</div> : <Skeleton rows={4} />;
+}
+
+/** What the agent remembered — by category and topic — to read, correct, merge, add to and prune. */
+function MemoryFacts({ toast, switcher }: { toast: (t: string) => void; switcher: ReactNode }) {
   const key = "/api/memory";
   const { data, error, loading, refresh } = useQuery<MemoryListing>(key, { staleMs: 10000 });
   const [bucket, setBucket] = useState<string>("all");
@@ -196,6 +230,7 @@ export function MemoryScreen({ toast }: { toast: (t: string) => void }) {
         }
       >
         {searching && <input className="field search" autoFocus placeholder={t("memory.search")} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { setQuery(""); setSearching(false); } }} aria-label={t("memory.search.label")} />}
+        <div className="memory-modebar">{switcher}</div>
         <div className="memory-view">
           <Segmented label={t("memory.view")} value={view} onChange={setView} options={VIEWS.map((v) => ({ id: v, label: t(`memory.view.${v}`) }))} />
         </div>

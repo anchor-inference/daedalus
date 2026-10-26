@@ -117,6 +117,11 @@ provider_retry_max_seconds = 600.0
 [memory]
 extract_after_run = false    # store durable facts after a completed run (a paid call)
 search_chats = true          # the agent may search and list your other chats (ChatSearch, RecentChats)
+generate = true              # learn from your chats in the background, filing what lasts into entries
+synthesis_preset = ""        # the memory model (background pass, "tell it what to change"); any preset,
+                             # empty = classify_preset, else the default model
+synthesis_usd_per_day = 0.5  # what the background pass may spend in a day; 0 = no pass
+paused = false               # keep memory but hand nothing to the agent and learn nothing new
 
 [navigation]                 # where the app puts each destination; Settings -> Navigation edits it
 rail = ["inbox", "terminals", "page:dosing"]  # the desktop rail, top to bottom
