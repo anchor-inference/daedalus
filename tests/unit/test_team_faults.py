@@ -157,6 +157,40 @@ async def test_a_cli_that_exits_mid_call_has_its_question_withdrawn_once(setting
             await s.team.answer(ask.short_id, text="the left one", by="orchestrator")
 
 
+async def test_a_cli_whose_exit_the_team_records_first_still_has_its_question_withdrawn(settings: Any, db: Database) -> None:
+    # The team's exit observer and the runtime hear the same terminal exit, and on a loaded machine
+    # the observer went first: it ended the row with no reason, the runtime then found no live
+    # session and let go without ending it, and the question stayed open for good. Here the runtime
+    # hears of the exit only once the observer has ended the row.
+    async with stand(settings, db, **claude()) as s:
+        trust(s)
+        ada = await started(s, f"askorch:{QUESTION};echo:done")
+        await the_open_question(s, ada.id)
+        row = await s.session_row(ada)
+        hears = s.runtime._on_terminal_event
+
+        async def after_the_observer(event: Any) -> None:
+            if event.type == "terminal.exited" and event.terminal_id == row.terminal_id:
+                async def recorded() -> bool:
+                    found = await s.manager.staff.session(row.id)
+                    return found is not None and bool(found.ended_at)
+
+                await eventually(recorded, "the observer ended the row")
+            await hears(event)
+
+        s.terminals._subscribers[s.terminals._subscribers.index(hears)] = after_the_observer
+        for pid in cli_pids(s):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        ask = await ended_once(s, ada.id)
+        assert ask.resolved_by == "system" and "session ended" in str(ask.resolution.get("closed")), ask.resolution
+        exited = await s.status_event(ada, "exited")
+        assert exited.payload.get("detail")
+        assert (await s.manager.staff.session(row.id)).end_reason  # type: ignore[union-attr]
+
+
 async def test_a_call_held_past_its_wait_is_answered_once_as_a_message(settings: Any, db: Database) -> None:
     # The hold ends before anyone answers: the CLI hears "pending", finishes its turn, and the answer
     # that comes later goes to it as a message.

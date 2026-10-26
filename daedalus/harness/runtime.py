@@ -973,9 +973,41 @@ class CliStaffRuntime:
                 return
             live = await self.lookup(session.staff_session_id)
             if live is None:
-                await self._finish(session, "", end=False)
+                # The team's own observer of the terminal's exit may end the row first, with no
+                # reason and nothing else: the two hear the same exit and either may go first. Let
+                # go as for a session ended elsewhere, and the open question stayed open for good,
+                # the card stayed taken and nobody heard the session had ended. Ending it here as
+                # the exit it was is what the observer leaves to this runtime.
+                ended = await self._observed_end(session.staff_session_id, session.term.id) if event.kind in (
+                    EventKind.PROCESS_EXITED, EventKind.SESSION_ENDED) else None
+                if ended is not None:
+                    await self._finish(session, await self._exit_reason(session, event), end=True, live=ended)
+                else:
+                    await self._finish(session, "", end=False)
                 return
             await self._apply_locked(session, live, event)
+
+    async def _observed_end(self, staff_session_id: str, terminal_id: str | None) -> LiveSession | None:
+        """The session the team's exit observer ended, before anyone said why, when that is how it
+        ended; ``None`` otherwise. Read only to finish its end, never to attach it."""
+        if not terminal_id:
+            return None
+        proof = await self.store.db.fetchone(
+            "SELECT 1 FROM runtime_exit_observations WHERE staff_session_id = ?"
+            " AND runtime_kind = 'cli' AND provider_session_ref = ? LIMIT 1",
+            (staff_session_id, f"terminal:{terminal_id}"),
+        )
+        if proof is None:
+            return None
+        from daedalus.stores.staff import StaffStore  # Lazy: only an observed end needs the historical projection.
+
+        staff = StaffStore(self.store.db)
+        prior = await staff.session(staff_session_id)
+        member = await staff.get(prior.staff_id) if prior is not None else None
+        if (prior is None or member is None or not prior.ended_at or prior.end_reason
+                or prior.terminal_id != terminal_id):
+            return None
+        return LiveSession(member, prior)
 
     async def _apply_locked(self, session: CliSession, live: LiveSession, event: StaffEvent) -> None:
         kind = event.kind
@@ -1945,22 +1977,9 @@ class CliStaffRuntime:
             if live is None:
                 await self._end_launch(launch, terminals, actor=f"agent:{actor}")
                 # The host's daemon observer can close ownership before this runtime reconnects.
-                # Read that exact historical session only to finish its exit reason, never attach it.
-                proof = await self.store.db.fetchone(
-                    "SELECT 1 FROM runtime_exit_observations WHERE staff_session_id = ?"
-                    " AND runtime_kind = 'cli' AND provider_session_ref = ? LIMIT 1",
-                    (launch.staff_session_id, f"terminal:{launch.terminal_id}"),
-                )
-                if proof is not None:
-                    from daedalus.stores.staff import StaffStore  # Lazy: recovery needs only historical projection.
-
-                    staff = StaffStore(self.store.db)
-                    prior = await staff.session(launch.staff_session_id)
-                    member = await staff.get(prior.staff_id) if prior is not None else None
-                    if (prior is not None and member is not None and prior.ended_at
-                            and not prior.end_reason and prior.terminal_id == launch.terminal_id):
-                        await self.ingress.ended(LiveSession(member, prior),
-                                                f"{self.adapter.capabilities.label} ended while the host was away")
+                ended = await self._observed_end(launch.staff_session_id, launch.terminal_id)
+                if ended is not None:
+                    await self.ingress.ended(ended, f"{self.adapter.capabilities.label} ended while the host was away")
                 continue
             if live.session.status == StaffState.SUSPENDED.value:
                 # The host went in the middle of a suspend: the row says what was meant, and the stop
