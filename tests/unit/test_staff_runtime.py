@@ -850,6 +850,64 @@ async def test_the_seventh_waits_for_a_slot_and_the_most_urgent_goes_first(setti
         await manager.close()
 
 
+async def test_a_slot_freed_during_a_sweep_still_goes_to_the_most_urgent(settings: Settings, db: Database, tmp_path: Path) -> None:
+    # A sweep defers the urgent launch while the project is full and leaves it out until the next
+    # wake, which comes from the bus after the status change that frees a slot. A loaded machine
+    # stretched that gap, and the sweep started the less urgent launch in the free slot. Here the
+    # slot is freed right after the urgent launch is deferred, with the bus's wake held back.
+    manager, team, runtime, project = await fake_team(settings, db, tmp_path)
+    try:
+        members = [await manager.staff.hire(project.id, name=f"Worker {n}", isolation="shared") for n in range(8)]
+        for n, member in enumerate(members[:6]):
+            await operator_assignment(team, member, await board_task(manager, project, f"Task {n}"))
+            live = await team.live_of(member)
+            assert live is not None
+            await team.ingress.status(live, "working")
+        late = await operator_assignment(team, members[6], await board_task(manager, project, "Later", priority=4),
+                                         wait_for_admission=False)
+        urgent_id = await board_task(manager, project, "Urgent", priority=1)
+        urgent = await operator_assignment(team, members[7], {"id": urgent_id}, wait_for_admission=False)
+
+        async def both_deferred() -> bool:
+            views = [await OutboxStore(manager.db).view(item["effect_id"]) for item in (late, urgent)]
+            return all(view["state"] == "pending" and view["wait_reason"] == "project" for view in views)
+
+        await until_await(both_deferred, "the two launches waited for a project slot")
+        dispatcher = team.app.extensions["effects"]
+        handler = dispatcher.handlers["task.launch"]
+        real_run, real_notify = handler.run, dispatcher.notify
+        urgent_deferred, slot_freed = asyncio.Event(), asyncio.Event()
+
+        async def run(claim: Any, check: Any) -> Any:
+            if claim.id == late["effect_id"] and urgent_deferred.is_set():
+                dispatcher.notify = real_notify
+            outcome = await real_run(claim, check)
+            if claim.id == urgent["effect_id"] and outcome.state == "deferred" and not urgent_deferred.is_set():
+                urgent_deferred.set()
+                await slot_freed.wait()
+            return outcome
+
+        handler.run = run
+        dispatcher.notify()
+        await until_await(lambda: asyncio.sleep(0, urgent_deferred.is_set()), "the urgent launch was deferred")
+        dispatcher.notify = lambda: None
+        freed = await team.live_of(members[0])
+        assert freed is not None
+        await team.ingress.report(freed, "done", "finished", call_id="first-worker-result")
+        await team.ingress.status(freed, "turn_done_unseen")
+        slot_freed.set()
+
+        async def urgent_started() -> bool:
+            return (await OutboxStore(manager.db).view(urgent["effect_id"]))["state"] == "completed"
+
+        await until_await(urgent_started, "the urgent launch won the slot freed during the sweep")
+        assert await status_of(manager, members[6]) == "off"
+        assert runtime.started[-1].task.id == urgent_id and len(runtime.started) == 7
+    finally:
+        await close_team(manager)
+        await manager.close()
+
+
 async def test_command_line_staff_wait_for_the_machine_and_daedalus_staff_do_not(settings: Settings, db: Database, tmp_path: Path) -> None:
     capacity = Capacity(running=20, cap=20)
     manager, team, runtime, project = await fake_team(settings, db, tmp_path, capacity=capacity)

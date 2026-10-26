@@ -115,6 +115,9 @@ class Entry:
     fallback_decision_id: str | None = None
     attempt_id: str | None = None
     role_class: Literal["coordinator", "reviewer", "worker"] = "worker"
+    ahead: str = ""
+    """A more urgent launch of the project that waits in the outbox for a project slot, not in this
+    queue: when a slot is free, this entry leaves it to that one."""
 
     def view(self, position: int) -> dict[str, Any]:
         return {
@@ -330,6 +333,9 @@ class LaunchQueue:
                 continue
             if active - int(reserved) >= concurrency:
                 self._wait(entry, "project", f"{active} of the project's {concurrency} staff slots are working")
+                continue
+            if entry.ahead and not reserved:
+                self._wait(entry, "behind", f"the more urgent «{entry.ahead}» takes the free slot first")
                 continue
             reuse = entry.principal is None and self._reuses is not None and await self._reuses(entry)
             if entry.terminal and not reuse:

@@ -28,7 +28,6 @@ import asyncio
 import hashlib
 import json
 import re
-import unicodedata
 import uuid
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -60,8 +59,6 @@ change to it but never makes one."""
 
 ARCHIVED_KEY = "archived"
 """Record metadata: kept, shown folded under the entry's older bullets, and not handed to the agent."""
-
-TOMBSTONE_REASONS: tuple[str, ...] = ("deleted", "forgotten", "session_deleted")
 
 _OPERATOR_WORDS = re.compile(r"\b(?:operator|operator's|user|user's)\b|оператор\w*|пользовател\w*", re.IGNORECASE)
 _SLUG_JUNK = re.compile(r"[^\w]+", re.UNICODE)
@@ -132,14 +129,6 @@ def is_locked(record: MemoryRecord) -> bool:
 
 def is_archived(record: MemoryRecord) -> bool:
     return bool((record.metadata or {}).get(ARCHIVED_KEY))
-
-
-def fingerprint(text: str) -> str:
-    """The tombstone key of a bullet's text: case, accents, punctuation and spacing do not make a
-    deleted note new again when the same chat says it a second time."""
-    folded = unicodedata.normalize("NFKD", (text or "").casefold())
-    words = re.findall(r"\w+", "".join(c for c in folded if not unicodedata.combining(c)))
-    return hashlib.sha256(" ".join(words).encode()).hexdigest()[:32]
 
 
 def new_entry_id() -> str:
@@ -422,20 +411,17 @@ class MemoryEntries:
         origin: str,
         session_id: str = "",
         run_id: str = "",
-        entry_id: str = "",
+        entry: Entry | None = None,
         **write: Any,
     ) -> MemoryWriteResult:
         """Write a record into memory filed in its entry, with a source row saying who taught it.
 
         The one door every new record comes through — the agent's Remember and the operator's own
-        note — so a record is never kept without an entry and a source. ``entry_id`` files it in that
-        entry instead of the one the rule picks (a bullet the operator added on the entry's own page);
-        the caller passes the scope :meth:`placement` gives for it. Keyword arguments past the named
-        ones go to the store's write (similarity threshold, per-scope cap)."""
-        chosen = await self.get(entry_id) if entry_id else None
-        if entry_id and chosen is None:
-            raise KeyError(entry_id)
-        entry = chosen or await self.target(kind, scope, scope_key, text, record_topics(metadata))
+        note — so a record is never kept without an entry and a source. ``entry`` files it in that
+        entry instead of the one :func:`target_for` picks (the caller has matched the scope to it).
+        Keyword arguments past the named ones go to the store's write (similarity threshold,
+        per-scope cap)."""
+        entry = entry or await self.target(kind, scope, scope_key, text, record_topics(metadata))
         result = await self.memory.write(self.tenant, scope, scope_key, text, kind=kind, metadata={**metadata, ENTRY_KEY: entry.id}, **write)
         await self.add_source(result.record.id, origin, session_id=session_id, run_id=run_id)
         await self.touched(entry_of(result.record) or entry.id)
@@ -496,32 +482,6 @@ class MemoryEntries:
             marks = ",".join("?" * len(ids))
             await self.db.execute(f"DELETE FROM memory_sources WHERE tenant_id = ? AND record_id IN ({marks})", (self.tenant, *ids))
 
-    async def tombstone(self, records: Iterable[MemoryRecord], reason: str) -> list[str]:
-        """Remember that these bullets were removed, so the background pass does not learn them again
-        from the same chats; returns the fingerprints that were new, which an undo takes away again."""
-        if reason not in TOMBSTONE_REASONS:
-            raise ValueError(f"unknown reason {reason!r}")
-        slugs = {e.id: e.slug for e in await self.list()}
-        written: list[str] = []
-        for record in records:
-            mark = fingerprint(record.text)
-            async with self.db.transaction() as conn:
-                cursor = await conn.execute(
-                    "INSERT OR IGNORE INTO memory_tombstones(tenant_id, fingerprint, entry_slug, reason, at) VALUES (?, ?, ?, ?, ?)",
-                    (self.tenant, mark, slugs.get(entry_of(record), ""), reason, now_text()),
-                )
-                if cursor.rowcount:
-                    written.append(mark)
-        return written
-
-    async def untombstone(self, fingerprints: Iterable[str]) -> None:
-        marks = list(dict.fromkeys(fingerprints))
-        if marks:
-            await self.db.execute(f"DELETE FROM memory_tombstones WHERE tenant_id = ? AND fingerprint IN ({','.join('?' * len(marks))})", (self.tenant, *marks))
-
-    async def tombstoned(self, text: str) -> bool:
-        return await self.db.fetchone("SELECT 1 FROM memory_tombstones WHERE tenant_id = ? AND fingerprint = ?", (self.tenant, fingerprint(text))) is not None
-
     async def file_unfiled(self) -> int:
         """File every record that has no entry, or names one that is gone; returns how many.
 
@@ -546,6 +506,59 @@ class MemoryEntries:
         for entry_id in touched:
             await self.touched(entry_id)
         return filed
+
+    async def forget(self, record_id: str, *, actor: str, reason: str = "forgotten") -> MemoryRecord | None:
+        """Remove a record as the agent's Forget or the operator's delete does: its entry steps, a
+        tombstone keeps the background pass from learning it again, and a history row lets the
+        operator undo it. ``None`` when there is no such record.
+
+        Forget used to be the core's bare delete: the entry kept its version, so an edit made against
+        it went through as if nothing had changed, and nothing remembered that the note was unwanted."""
+        record = self.memory.get_record(self.tenant, record_id)
+        if record is None or not await self.memory.delete(self.tenant, record_id):
+            return None
+        entry_id = entry_of(record)
+        entry = await self.get(entry_id) if entry_id else None
+        if entry is not None:
+            await self.touched(entry.id)
+        await self.tombstone(record.text, entry_slug=entry.slug if entry else "", reason=reason)
+        await self.db.execute(
+            "INSERT INTO memory_history(tenant_id, at, actor, action, summary, before_json, after_json) VALUES (?, ?, ?, ?, ?, ?, '[]')",
+            (self.tenant, now_text(), actor, "forget", record.text[:500], json.dumps([json.loads(record.model_dump_json())], ensure_ascii=False)),
+        )
+        return record
+
+    async def tombstone(self, text: str, *, entry_slug: str = "", reason: str = "deleted") -> None:
+        """Remember that a note was removed, by its :func:`fingerprint`, so it is never learned again."""
+        await self.db.execute(
+            "INSERT INTO memory_tombstones(tenant_id, fingerprint, entry_slug, reason, at) VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT(tenant_id, fingerprint) DO UPDATE SET entry_slug = excluded.entry_slug, reason = excluded.reason, at = excluded.at",
+            (self.tenant, fingerprint(text), entry_slug, reason, now_text()),
+        )
+
+    async def untombstone(self, texts: Iterable[str]) -> None:
+        """Drop the tombstones of notes put back (an undone forget): a note the operator wants is not unwanted."""
+        prints = list(dict.fromkeys(fingerprint(t) for t in texts))
+        if prints:
+            await self.db.execute(
+                f"DELETE FROM memory_tombstones WHERE tenant_id = ? AND fingerprint IN ({','.join('?' * len(prints))})", (self.tenant, *prints),
+            )
+
+    async def tombstoned(self, text: str) -> bool:
+        return await self.db.fetchone("SELECT 1 FROM memory_tombstones WHERE tenant_id = ? AND fingerprint = ?", (self.tenant, fingerprint(text))) is not None
+
+    async def named(self, name: str) -> list[Entry]:
+        """The entries ``name`` refers to: ``section/slug`` names one; a bare slug names every entry
+        with that slug (an area and a topic may share one), a project's area by its project id too."""
+        section, _, slug = name.strip().rpartition("/")
+        slug = slugify(slug)
+        if not slug:
+            return []
+        if section:
+            found = await self.by_slug(section.strip().lower(), slug)
+            return [found] if found is not None else []
+        listed = await self.list()
+        return [e for e in listed if e.slug == slug] or [e for e in listed if e.project_id and e.project_id == name.strip()]
 
     async def listing(self) -> list[dict[str, Any]]:
         """Every entry with its bullet count, in section order: what the Memory page lists and the
@@ -573,6 +586,16 @@ def migrated_scope(scope: str, scope_key: str, kind: str, *, session_project: Ma
     return MemoryScope.global_, ""
 
 
+_FINGERPRINT_JUNK = re.compile(r"[\W_]+", re.UNICODE)
+
+
+def fingerprint(text: str) -> str:
+    """A removed note's identity for the tombstones: its words, case and punctuation aside, so the
+    same note said again with a different full stop is still recognised."""
+    words = _FINGERPRINT_JUNK.sub(" ", (text or "").lower()).strip()
+    return hashlib.sha256(words.encode("utf-8")).hexdigest()[:32]
+
+
 def area_slug(name: str, project_id: str, taken: Collection[str]) -> str:
     """A project's area slug from its name, made unique with the project's id when the name is taken."""
     base = slugify(name) or "project"
@@ -592,7 +615,6 @@ __all__ = [
     "RECENT_WORK",
     "SECTIONS",
     "SUMMARY_MAX_CHARS",
-    "TOMBSTONE_REASONS",
     "Entry",
     "EntryConflict",
     "EntryNotEmpty",

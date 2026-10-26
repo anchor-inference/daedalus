@@ -1,10 +1,13 @@
 """Remember and Recall as this host offers them: with a category and topics on every record, and
 with the sensitive subjects the operator has not allowed refused at the door.
 
-They replace the core's two tools of the same names (Forget stays the core's). Where a note goes
-is the host's rule (:mod:`daedalus.memory.scope`): the chat's project, else the operator's global
-memory, never a per-chat silo; and every note is filed in an entry with a source row naming the
-chat and run that taught it (:mod:`daedalus.memory.entries`).
+They replace the core's three tools of the same names. Where a note goes is the host's rule
+(:mod:`daedalus.memory.scope`): the chat's project, else the operator's global memory, never a
+per-chat silo; and every note is filed in an entry with a source row naming the chat and run that
+taught it (:mod:`daedalus.memory.entries`). Recall also reads whole entries by name — the names the
+memory block in a chat's turn context lists (:mod:`daedalus.memory.render`) — and Remember files a
+note in a named one. Forget goes through the entries too, so the entry steps and a tombstone keeps
+the note from being learned again.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ from protocore.tools.memory import (
     RECALL_MAX_LIMIT,
     RECALL_QUERY_MAX_LENGTH,
     REMEMBER_TEXT_MAX_LENGTH,
+    ForgetInput,
     ForgetTool,
     RecallTool,
     RememberTool,
@@ -34,8 +38,8 @@ from protocore.tools.memory import (
 )
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from daedalus.memory.entries import MemoryEntries, UnknownProject
-from daedalus.memory.scope import WRITABLE_SCOPES, PlacementRefused, placement_from, resolve_write
+from daedalus.memory.entries import Entry, MemoryEntries, Target, UnknownProject, entry_of, slugify, topic_title
+from daedalus.memory.scope import WRITABLE_SCOPES, MemoryPlacement, PlacementRefused, placement_from, resolve_write
 from daedalus.memory.taxonomy import (
     CATEGORIES,
     SENSITIVE_LABELS,
@@ -95,6 +99,13 @@ class RememberInput(BaseModel):
         ),
     )
     scope_key: str | None = Field(default=None, description="With scope=project: the project's id, to file the note in another project's memory. Omit for this chat's project.")
+    entry: str | None = Field(
+        default=None, max_length=80,
+        description=(
+            "The memory entry to file the note in, by the name the memory block shows (preferences, profile, a topic, a "
+            "project's area). A new name makes a new topic. Omit to have the entry chosen from the category and scope."
+        ),
+    )
 
     @field_validator("category")
     @classmethod
@@ -119,6 +130,10 @@ class RecallInput(BaseModel):
     scope: Literal["global", "project"] | None = Field(default=None, description="Only global memory, or only a project's. Omit to search global memory and this chat's project together.")
     scope_key: str | None = Field(default=None, description="With scope=project: the project's id. Omit for this chat's project.")
     limit: int = Field(default=RECALL_DEFAULT_LIMIT, ge=1, le=RECALL_MAX_LIMIT, description=f"Max results (1-{RECALL_MAX_LIMIT}).")
+    entries: list[str] | None = Field(
+        default=None, max_length=10,
+        description="Read these memory entries in full, by the names the memory block shows (e.g. ['preferences', 'daedalus']); the other fields are then ignored.",
+    )
 
     @field_validator("category")
     @classmethod
@@ -181,8 +196,12 @@ class HostRememberTool(RememberTool):
         refused = sensitive - set(self._allowed())
         if refused:
             return sensitive_refusal(call_id, refused)
+        entry: Entry | None = None
         try:
-            scope, scope_key = resolve_write(placement_from(context.metadata), payload.scope, payload.scope_key)
+            if payload.entry:
+                entry, scope, scope_key = await self._named_entry(payload.entry, placement_from(context.metadata), payload.scope, payload.scope_key)
+            else:
+                scope, scope_key = resolve_write(placement_from(context.metadata), payload.scope, payload.scope_key)
         except PlacementRefused as exc:
             return _non_fatal_error(call_id, str(exc))
         try:
@@ -195,6 +214,7 @@ class HostRememberTool(RememberTool):
                 run_id=context.run_id,
                 similarity_threshold=_resolved_similarity_threshold(context),
                 max_records_per_scope=_resolved_max_records_per_scope(context),
+                entry=entry,
             )
         except UnknownProject:
             return _non_fatal_error(call_id, f"Not saved: there is no project with the id {scope_key!r}.")
@@ -210,15 +230,63 @@ class HostRememberTool(RememberTool):
         )
 
 
+    async def _named_entry(self, name: str, placement: MemoryPlacement, scope: str | None, scope_key: str | None) -> tuple[Entry, MemoryScope, str]:
+        """The entry ``name`` names and the scope a note in it lives in, or :class:`PlacementRefused`.
+
+        The entry decides the scope: a project's area holds that project's notes, everything else is
+        global memory. A scope given beside it must agree, and the placement still decides whether
+        this run may write there — naming an entry is no way round the rule that only the operator's
+        own conversations write global memory."""
+        found = await self._entries.named(name)
+        if len(found) > 1:
+            raise PlacementRefused(f"Not saved: {name!r} names several entries; say which with {', '.join(f'{e.section}/{e.slug}' for e in found)}.")
+        if found:
+            entry = found[0]
+        else:
+            section, _, slug = name.strip().rpartition("/")
+            if section and section.strip().lower() != "topic":
+                raise PlacementRefused(f"Not saved: there is no entry {name!r}; only a topic is made by naming it. Omit entry to have one chosen.")
+            if not placement.operator:
+                raise PlacementRefused("Not saved: only the operator's own conversations make new memory entries. Omit entry to save it in this project's memory.")
+            if not slugify(slug):
+                raise PlacementRefused("Not saved: an entry's name needs letters or digits.")
+            entry = await self._entries.ensure(Target("topic", slugify(slug), topic_title(slugify(slug))))
+        wanted = (MemoryScope.project.value, entry.project_id) if entry.section == "area" and entry.project_id else (MemoryScope.global_.value, None)
+        if scope is not None and scope != wanted[0]:
+            raise PlacementRefused(f"Not saved: the entry {entry.slug!r} holds {wanted[0]} memory, not {scope}; omit the scope.")
+        if scope_key and wanted[1] and scope_key.strip() != wanted[1]:
+            raise PlacementRefused(f"Not saved: the entry {entry.slug!r} belongs to another project than {scope_key!r}; omit scope_key.")
+        chosen, key = resolve_write(placement, wanted[0], wanted[1])
+        return entry, chosen, key
+
+
+def render_entry(entry: Entry, records: list[Any], screen: Callable[[str], str]) -> str:
+    """One entry in full, as Recall(entries=...) returns it: its name, summary and every note with its id."""
+    where = f"project {entry.project_name or entry.project_id}" if entry.project_id else entry.section
+    head = f"Entry {entry.section}/{entry.slug} — {entry.title} ({where}; version {entry.version}; {len(records)} note(s))"
+    if entry.summary:
+        head += f"\nSummary: {screen(entry.summary)}"
+    ordered = sorted(records, key=lambda r: (r.created_at.isoformat() if r.created_at else "", r.id))
+    lines = [f"- id={r.id} ({screen(r.kind)}{'; ' + ', '.join(screen(t) for t in record_topics(r.metadata)) if record_topics(r.metadata) else ''}) {screen(r.text)}" for r in ordered[-ENTRY_NOTES_MAX:]]
+    if len(ordered) > ENTRY_NOTES_MAX:
+        lines.insert(0, f"(the {len(ordered) - ENTRY_NOTES_MAX} oldest notes are left out; Recall with a query finds them)")
+    return "\n".join([head, *lines]) if lines else head + "\n(no notes yet)"
+
+
+ENTRY_NOTES_MAX = 100
+
+
 class HostRecallTool(RecallTool):
     description_: ClassVar[str] = (
         "Search your long-term memory and return the most relevant saved facts, ranked by keywords. Narrow by category "
-        "or topic when you know what kind of thing you are after; pass exact tokens (ids, names, paths) for precise recall."
+        "or topic when you know what kind of thing you are after; pass exact tokens (ids, names, paths) for precise recall. "
+        "Pass entries to read whole memory entries by name instead."
     )
 
-    def __init__(self, store: PersistentMemory, *, scanner: IMemoryContentScanner | None = None) -> None:
+    def __init__(self, store: PersistentMemory, *, entries: MemoryEntries, scanner: IMemoryContentScanner | None = None) -> None:
         super().__init__(store, scanner=scanner)
         self._memory = store
+        self._entries = entries
 
     @property
     def definition(self) -> ToolDefinition:
@@ -229,6 +297,8 @@ class HostRecallTool(RecallTool):
         call_id = _call_id(context)
         if _memory_disabled(context):
             return _memory_disabled_error(call_id)
+        if payload.entries:
+            return await self._read_entries(call_id, payload.entries)
         kinds = [payload.category] if payload.category else None
         topics = normalise_topics([payload.topic]) if payload.topic else None
         placement = placement_from(context.metadata)
@@ -256,6 +326,57 @@ class HostRecallTool(RecallTool):
             lines.append(f"[{index}] id={record.id} ({record.scope.value}/{self._safe_recall_kind(record.kind)}{'; ' + tags if tags else ''}) {self._safe_recall_text(record.text)}")
         return ToolResult(tool_call_id=call_id, content="\n".join(lines), metadata={"count": len(hits), "memory_ids": [h.record.id for h in hits]})
 
+    async def _read_entries(self, call_id: str, names: list[str]) -> ToolResult:
+        """The named entries in full. Reading is never narrowed by the placement: another project's
+        area is listed in the block so that its notes can be read when the operator asks about it."""
+        parts: list[str] = []
+        missing: list[str] = []
+        shown: list[str] = []
+        for name in dict.fromkeys(n for n in names if n.strip()):
+            found = await self._entries.named(name)
+            if not found:
+                missing.append(name)
+            for entry in found:
+                if entry.id in shown:
+                    continue
+                shown.append(entry.id)
+                parts.append(render_entry(entry, self._entries.records_of(entry.id), self._safe_recall_text))
+        if missing:
+            known = ", ".join(f"{e.section}/{e.slug}" for e in await self._entries.list())
+            parts.append(f"No entry named {', '.join(repr(m) for m in missing)}. Entries: {known or 'none yet'}.")
+        return ToolResult(tool_call_id=call_id, content="\n\n".join(parts), metadata={"entries": shown, "missing": missing})
+
+
+class HostForgetTool(ForgetTool):
+    """The core's Forget, through the entries: the entry steps, the note is tombstoned so the
+    background pass does not learn it again, and the operator can undo it from the Memory screen.
+
+    The placement applies as it does to Remember: a run that is not the operator's conversation may
+    forget its project's notes but not the operator's global memory."""
+
+    def __init__(self, store: PersistentMemory, *, entries: MemoryEntries) -> None:
+        super().__init__(store)
+        self._memory = store
+        self._entries = entries
+
+    async def invoke(self, context: ToolContext, arguments: dict[str, Any]) -> ToolResult:
+        payload = ForgetInput.model_validate(arguments)
+        call_id = _call_id(context)
+        if _memory_disabled(context):
+            return _memory_disabled_error(call_id)
+        record = self._memory.get_record(context.tenant_id, payload.memory_id)
+        if record is not None and record.scope is MemoryScope.global_ and not placement_from(context.metadata).operator:
+            return _non_fatal_error(call_id, "Not forgotten: only the operator's own conversations change global memory. Say in your answer which note is wrong instead.")
+        try:
+            removed = await self._entries.forget(payload.memory_id, actor="agent", reason="forgotten") if record is not None else None
+        except MemoryStoreUnavailableError as exc:
+            return _non_fatal_error(call_id, f"memory unavailable: {exc}")
+        return ToolResult(
+            tool_call_id=call_id,
+            content=f"forgot memory {payload.memory_id}" if removed is not None else f"memory {payload.memory_id} was already absent",
+            metadata={"removed": removed is not None, "memory_id": payload.memory_id, "entry": entry_of(removed) if removed is not None else None},
+        )
+
 
 def build_memory_tools(
     store: PersistentMemory,
@@ -264,13 +385,13 @@ def build_memory_tools(
     tenant_allowed: Callable[[], Iterable[str]],
     classifier: Callable[[], Asker | None],
     scanner: IMemoryContentScanner | None = None,
-) -> list[ForgetTool | HostRecallTool | HostRememberTool]:
+) -> list[HostForgetTool | HostRecallTool | HostRememberTool]:
     """Forget, Recall, Remember — the core's order, which its prompt-cache sort expects."""
     return [
-        ForgetTool(store),
-        HostRecallTool(store, scanner=scanner),
+        HostForgetTool(store, entries=entries),
+        HostRecallTool(store, entries=entries, scanner=scanner),
         HostRememberTool(store, entries=entries, tenant_allowed=tenant_allowed, classifier=classifier, scanner=scanner),
     ]
 
 
-__all__ = ["HostRecallTool", "HostRememberTool", "RecallInput", "RememberInput", "build_memory_tools", "sensitive_refusal"]
+__all__ = ["HostForgetTool", "HostRecallTool", "HostRememberTool", "RecallInput", "RememberInput", "build_memory_tools", "render_entry", "sensitive_refusal"]

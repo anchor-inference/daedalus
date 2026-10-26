@@ -818,9 +818,13 @@ class FolderMover:
         chunks: queue.Queue[Any] = queue.Queue(maxsize=QUEUE_CHUNKS)
         stop = threading.Event()
         entries = sent.files + sent.dirs + sent.symlinks
+        ended = threading.Event()
 
         def consume() -> Counts:
-            return extract_tar(_ChunkSource(chunks, stop), dest, total_bytes=sent.bytes, entries=entries, progress=job.progress)
+            try:
+                return extract_tar(_ChunkSource(chunks, stop), dest, total_bytes=sent.bytes, entries=entries, progress=job.progress)
+            finally:
+                ended.set()
 
         try:
             await asyncio.to_thread(dest.mkdir, parents=True)
@@ -831,13 +835,25 @@ class FolderMover:
         consumer = asyncio.get_running_loop().run_in_executor(None, consume)
         digest = hashlib.sha256()
         try:
+            # The unpacking thread may end before it is handed everything, and that is not by itself
+            # a failure. It stops at the archive's end marker, which it reaches without the closing
+            # None when the stream ends on a tar record, and the daemon sends the last bytes and the
+            # end in one reply. Feeding used to treat an ended thread as a stop and raise: under load
+            # the thread finished between those bytes and the closing None, and a whole, correct copy
+            # was thrown away as "failed: _Stopped". It also hid the error of a thread that failed,
+            # since nothing awaited it. Now an ended thread is awaited, which raises its error if it
+            # has one, and the rest of the stream is still read for the digest.
+            taking = True
             while True:
                 data, eof, sha = await bridge.pack_read(transfer, max_bytes=READ_CHUNK)
                 if data:
                     digest.update(data)
-                    await asyncio.to_thread(_feed, chunks, data, stop, consumer)
+                    if taking and not await asyncio.to_thread(_feed, chunks, data, stop, ended):
+                        taking = False
+                        await consumer
                 if eof:
-                    await asyncio.to_thread(_feed, chunks, None, stop, consumer)
+                    if taking:
+                        await asyncio.to_thread(_feed, chunks, None, stop, ended)
                     break
             job.state = "verifying"
             got = await consumer
@@ -906,15 +922,19 @@ class FolderMover:
             job.notes.append(f"git worktree repair did not finish ({detail[:200]}); run it in {job.destination}")
 
 
-def _feed(chunks: queue.Queue[Any], item: Any, stop: threading.Event, consumer: asyncio.Future[Any]) -> None:
-    """Hand a chunk to the unpacking thread, giving up when it has stopped (its error is raised when
-    it is awaited)."""
+def _feed(chunks: queue.Queue[Any], item: Any, stop: threading.Event, ended: threading.Event) -> bool:
+    """Hand a chunk to the unpacking thread: ``False`` when that thread has ended already, cleanly at
+    the archive's end or with an error that awaiting it raises. ``ended`` is an event the thread sets
+    itself, rather than the asyncio future around it, which is not safe to read from this thread and
+    learns of the end only a turn of the loop later."""
     while True:
-        if stop.is_set() or consumer.done():
+        if stop.is_set():
             raise _Stopped
+        if ended.is_set():
+            return False
         try:
             chunks.put(item, timeout=0.25)
-            return
+            return True
         except queue.Full:
             continue
 

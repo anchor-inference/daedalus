@@ -195,8 +195,9 @@ class MemoryCurator:
 
     async def _journal(self, actor: str, action: str, summary: str, before: Sequence[MemoryRecord], after: Sequence[MemoryRecord], extra: dict[str, Any] | None = None) -> int:
         """One history entry. ``extra`` carries what the change removed besides records — ``entries``
-        (rows it deleted), ``sources`` (provenance rows it dropped), ``tombstones`` (fingerprints it
-        wrote) — and ``made`` (entries it created), so an undo restores all of it together."""
+        (rows it deleted), ``sources`` (provenance rows it dropped) — and ``made`` (entries it created),
+        so an undo restores all of it together; the tombstones of the records it removed are found by
+        their text."""
         async with self.db.transaction() as conn:
             cursor = await conn.execute(
                 "INSERT INTO memory_history(tenant_id, at, actor, action, summary, before_json, after_json, extra_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -292,19 +293,22 @@ class MemoryCurator:
             return after, history
 
     async def _remove(self, records: Sequence[MemoryRecord], *, actor: str, action: str, summary: str, tombstone: str | None, extra: dict[str, Any] | None = None) -> int | None:
-        """Delete records with one history entry that puts them back, sources and all; ``tombstone``
-        is the reason written for each (``None`` writes none). The caller holds the lock."""
+        """Delete records with one history entry that puts them back, sources and all. The batch twin of
+        :meth:`MemoryEntries.forget`: each record is tombstoned with ``tombstone`` as the reason through
+        the same :meth:`MemoryEntries.tombstone`, so the background pass does not learn it again, and
+        the undo takes the tombstones away. The caller holds the lock."""
         if not records:
             return None
         ids = [r.id for r in records]
         sources = await self.entries.source_rows(record_ids=ids)
-        marks = await self.entries.tombstone(records, tombstone) if tombstone else []
+        slugs = {e.id: e.slug for e in await self.entries.list()}
         for record in records:
+            if tombstone:
+                await self.entries.tombstone(record.text, entry_slug=slugs.get(entry_of(record), ""), reason=tombstone)
             await self.memory.delete(self.tenant, record.id)
         await self.entries.drop_sources(record_ids=ids)
         extra = dict(extra or {})
         extra["sources"] = [*extra.get("sources", []), *sources]
-        extra["tombstones"] = marks
         history = await self._journal(actor, action, summary, records, [], extra)
         for entry_id in {entry_of(r) for r in records} - {""}:
             if await self.entries.get(entry_id) is not None:
@@ -344,8 +348,10 @@ class MemoryCurator:
         A record whose every source is this chat goes; one also taught by another chat, written by the
         operator or imported stays, as does a locked one (the operator made it theirs). The chat's
         provenance rows go either way, so a record kept now because a second chat backs it goes when
-        that chat is deleted too. One history entry restores the records and every row; nothing is
-        tombstoned, because the operator saying the same thing in a new chat is new evidence."""
+        that chat is deleted too. The removed records are tombstoned with the reason
+        ``session_deleted``, so a fork or a copy of the chat does not teach them again; the background
+        pass may weigh that reason below an operator's own delete. One history entry restores the
+        records, every row, and takes the tombstones away."""
         async with self.lock:
             rows = await self.entries.source_rows(session_id=session_id)
             if not rows:
@@ -362,7 +368,7 @@ class MemoryCurator:
             await self.db.execute("DELETE FROM memory_synthesis WHERE session_id = ?", (session_id,))
             # Every row the chat left goes into the history, read before they were dropped: the removed
             # records' rows as much as the kept ones', or an undo brings records back with no source.
-            history = await self._remove(going, actor="operator", action="session_deleted", summary=title or session_id, tombstone=None, extra={"sources": rows})
+            history = await self._remove(going, actor="operator", action="session_deleted", summary=title or session_id, tombstone="session_deleted", extra={"sources": rows})
             if history is None:
                 history = await self._journal("operator", "session_deleted", title or session_id, [], [], {"sources": rows})
             for entry_id in {entry_of(r) for r in live if r not in going} - {""}:
@@ -391,7 +397,7 @@ class MemoryCurator:
         # A write that folds into a similar record changes that record: the history must hold it as it
         # was, or the undo would delete a note the operator had before this one.
         was = {r.id: r for r in self.memory.records(self.tenant)}
-        result = await self.entries.remember(scope, scope_key, text.strip(), kind=kind, metadata=meta, origin=origin, entry_id=entry.id if entry else "")
+        result = await self.entries.remember(scope, scope_key, text.strip(), kind=kind, metadata=meta, origin=origin, entry=entry)
         prior = was.get(result.record.id)
         made = [e.id for e in await self.entries.list() if e.id not in known]
         history = await self._journal(actor, action, summary or text.strip()[:120], [prior] if prior else [], [result.record], {"made": made})
@@ -431,8 +437,8 @@ class MemoryCurator:
                     before.append(record)
                     after.append(changed)
             sources = await self.entries.source_rows(record_ids=[r.id for r in removed])
-            marks = await self.entries.tombstone(removed, "deleted") if removed else []
             for record in removed:
+                await self.entries.tombstone(record.text, entry_slug=entry.slug, reason="deleted")
                 await self.memory.delete(self.tenant, record.id)
             await self.entries.drop_sources(record_ids=[r.id for r in removed])
             was = {r.id: r for r in self.memory.records(self.tenant)}
@@ -441,14 +447,14 @@ class MemoryCurator:
                     continue
                 result = await self.entries.remember(
                     *self.entries.placement(entry), op.text, kind=kind, metadata={"source": "operator", "topics": list(topics), LOCKED_KEY: True},
-                    origin="operator", entry_id=entry_id,
+                    origin="operator", entry=entry,
                 )
                 if (prior := was.get(result.record.id)) is not None and prior.id not in {b.id for b in before}:
                     before.append(prior)
                 after = [r for r in after if r.id != result.record.id] + [result.record]
             history = None
             if before or after or removed:
-                history = await self._journal("operator", "instruct", instruction.strip()[:200] or entry.title, [*before, *removed], after, {"sources": sources, "tombstones": marks})
+                history = await self._journal("operator", "instruct", instruction.strip()[:200] or entry.title, [*before, *removed], after, {"sources": sources})
             await self.entries.touched(entry_id)
             fresh = await self.entries.get(entry_id)
             assert fresh is not None
@@ -470,7 +476,7 @@ class MemoryCurator:
                 result = await self.entries.remember(
                     *self.entries.placement(entry), item.text, kind=item.category or "fact",
                     metadata={"source": "import", "topics": list(item.topics), **({"imported_date": item.date} if item.date else {})},
-                    origin="import", entry_id=entry.id,
+                    origin="import", entry=entry,
                 )
                 if (prior := was.get(result.record.id)) is not None:
                     before.setdefault(prior.id, prior)
@@ -559,7 +565,9 @@ class MemoryCurator:
             for record in before:
                 await self.memory.restore(record)
             await self.entries.restore_sources(extra.get("sources", []))
-            await self.entries.untombstone(extra.get("tombstones", []))
+            # An undone removal brings the notes back, and the tombstone that stopped them being learned
+            # again would otherwise outlive the operator changing their mind.
+            await self.entries.untombstone(r.text for r in before)
             for entry_id in extra.get("made", []):
                 with contextlib.suppress(EntryNotEmpty):
                     await self.entries.delete(entry_id)

@@ -317,11 +317,14 @@ async def test_deleting_a_chat_removes_what_only_it_taught_and_one_undo_restores
     assert only.id not in left, "a bullet only the deleted chat taught goes"
     assert {shared.id, mine.id, elsewhere.id} <= left, "one another chat backs, or the operator locked, stays"
     assert {s["session_id"] for s in (await entries.sources([shared.id]))[shared.id]} == {two.session.id}
+    tombstone = await manager.db.fetchone("SELECT reason FROM memory_tombstones")
+    assert tombstone is not None and tombstone["reason"] == "session_deleted", "a fork or copy of the chat does not teach it again"
     history = (await client.get("/api/memory/history", headers=H)).json()["entries"][0]
     assert history["action"] == "session_deleted" and history["summary"] == "Kitchen plans"
     assert (await undo(client, history["id"])).status_code == 200
     assert only.id in {r.id for r in manager.memory.records(TENANT)}
     assert {s["session_id"] for s in (await entries.sources([only.id]))[only.id]} == {one.session.id}, "with its source"
+    assert not await entries.tombstoned("Someone wants a green kitchen")
     assert {s["session_id"] for s in (await entries.sources([shared.id]))[shared.id]} == {one.session.id, two.session.id}
     # Deleting the second chat now would leave the shared bullet backed by the first again.
     found = await curator(app).forget_session(two.session.id, title="Shopping")

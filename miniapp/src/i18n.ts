@@ -3503,6 +3503,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "memory.history.action.topic": { en: "Topic renamed", ru: "Тема переименована" },
   "memory.history.action.add": { en: "Added", ru: "Добавлена" },
   "memory.history.action.delete": { en: "Forgotten", ru: "Забыта" },
+  "memory.history.action.forget": { en: "Forgotten by the agent or you", ru: "Забыта агентом или вами" },
   "memory.history.action.delete_entry": { en: "Entry deleted", ru: "Раздел удалён" },
   "memory.history.action.session_deleted": { en: "Chat deleted, what only it taught removed", ru: "Чат удалён вместе с тем, что знал только он" },
   "memory.history.action.import": { en: "Imported", ru: "Импортировано" },
