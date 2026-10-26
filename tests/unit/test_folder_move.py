@@ -7,9 +7,11 @@ import hashlib
 import io
 import json
 import os
+import queue
 import shutil
 import stat
 import tarfile
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -23,7 +25,9 @@ from daedalus.host.folder_move import (
     FolderMover,
     MoveFailed,
     MoveRefused,
+    _feed,
     _Progress,
+    _Stopped,
     count_tree,
     extract_tar,
     scan_tree,
@@ -404,3 +408,27 @@ async def test_the_routes_plan_start_follow_and_refuse(settings: Settings, confi
         late = await client.post(f"/api/folder-moves/{started['id']}/cancel", headers=HEADERS)
         assert late.status_code == 409
         assert (await client.get("/api/folder-moves/nope", headers=HEADERS)).status_code == 404
+
+
+async def test_the_last_chunk_after_the_unpacker_finished_is_not_a_failure() -> None:
+    # A streamed tar ends at its first empty block, so the unpacker may return before the padding
+    # and the end marker are handed over; that race failed a small folder's move one time in three.
+    loop = asyncio.get_running_loop()
+    finished: asyncio.Future[Any] = loop.create_future()
+    finished.set_result("unpacked")
+    chunks: queue.Queue[Any] = queue.Queue(maxsize=1)
+    await asyncio.to_thread(_feed, chunks, b"padding", threading.Event(), finished)
+    await asyncio.to_thread(_feed, chunks, None, threading.Event(), finished)
+    assert chunks.empty()
+    broken: asyncio.Future[Any] = loop.create_future()
+    broken.set_exception(OSError("disk full"))
+    with pytest.raises(_Stopped):
+        await asyncio.to_thread(_feed, chunks, b"data", threading.Event(), broken)
+    broken.exception()  # retrieved, so the loop does not warn about it
+    with pytest.raises(_Stopped):
+        await asyncio.to_thread(_feed, chunks, b"data", _set(threading.Event()), loop.create_future())
+
+
+def _set(event: Any) -> Any:
+    event.set()
+    return event

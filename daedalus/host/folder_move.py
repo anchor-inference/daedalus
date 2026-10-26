@@ -908,9 +908,18 @@ class FolderMover:
 
 def _feed(chunks: queue.Queue[Any], item: Any, stop: threading.Event, consumer: asyncio.Future[Any]) -> None:
     """Hand a chunk to the unpacking thread, giving up when it has stopped (its error is raised when
-    it is awaited)."""
+    it is awaited).
+
+    An unpacker that finished cleanly is not a failure: a streamed tar ends at its first empty block,
+    so the unpacker returns before the padding after it and before the end marker arrive. Treating
+    that as stopped failed a small folder's move about one time in three, whenever the unpacker won
+    the race to the last chunk; what it unpacked is checked against what was sent when it is awaited."""
     while True:
-        if stop.is_set() or consumer.done():
+        if consumer.done():
+            if consumer.cancelled() or consumer.exception() is not None:
+                raise _Stopped
+            return
+        if stop.is_set():
             raise _Stopped
         try:
             chunks.put(item, timeout=0.25)
