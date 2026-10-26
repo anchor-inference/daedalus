@@ -227,9 +227,9 @@ class MemoryCurator:
         pass's), under the same rules as :meth:`_journal`; the caller holds :attr:`lock`."""
         return await self._journal(actor, action, summary, before, after, extra)
 
-    async def suggest(self, kind: str, records: Sequence[MemoryRecord], text: str, *, reason: str, detail: dict[str, Any]) -> bool:
-        """File a learned suggestion (``revision`` or ``addition``); ``False`` when the same one was
-        already filed, whatever became of it — a dismissed proposal is not offered again."""
+    async def suggest(self, kind: str, records: Sequence[MemoryRecord], text: str, *, reason: str, detail: dict[str, Any]) -> int | None:
+        """File a learned suggestion (``revision`` or ``addition``) and return its id; ``None`` when the
+        same one was already filed, whatever became of it — a dismissed proposal is not offered again."""
         if kind not in LEARNED_KINDS:
             raise ValueError(f"unknown suggestion kind {kind!r}")
         fingerprint = _learned_print(kind, records, text, detail)
@@ -240,7 +240,7 @@ class MemoryCurator:
                 (self.tenant, kind, json.dumps([r.id for r in records]), fingerprint, records[0].id if records else "", text,
                  reason[:500], datetime.now(UTC).isoformat(), json.dumps(detail, ensure_ascii=False)),
             )
-            return bool(cursor.rowcount)
+            return int(cursor.lastrowid) if cursor.rowcount and cursor.lastrowid else None
 
     async def _merge(self, ids: Sequence[str], *, actor: str, action: str, keep_id: str | None = None, text: str | None = None, category: str | None = None, topics: Sequence[str] | None = None, summary: str = "") -> tuple[MemoryRecord, int]:
         unique = list(dict.fromkeys(ids))
@@ -613,7 +613,8 @@ class MemoryCurator:
                 )
             # An undone removal brings the notes back, and the tombstone that stopped them being learned
             # again would otherwise outlive the operator changing their mind.
-            await self.entries.untombstone(r.text for r in before)
+            await self.entries.untombstone([*(r.text for r in before), *extra.get("tombstones", [])])
+            await self._undo_extras(extra)
             for entry_id in extra.get("made", []):
                 with contextlib.suppress(EntryNotEmpty):
                     await self.entries.delete(entry_id)
@@ -622,6 +623,31 @@ class MemoryCurator:
                     await self.entries.touched(entry_id)
             await self.db.execute("UPDATE memory_history SET undone_at = ? WHERE id = ?", (datetime.now(UTC).isoformat(), history_id))
             return before
+
+    async def _undo_extras(self, extra: dict[str, Any]) -> None:
+        """What a change did besides records, put back: the summaries a pass wrote (each only while the
+        entry still reads what the pass left — a summary rewritten since is someone's newer word), the
+        suggestions it filed (withdrawn, so an undone pass leaves nothing of itself to review), and the
+        suggestions a bulk decision closed (open again, to be decided anew)."""
+        for change in extra.get("summaries", []):
+            entry = await self.entries.get(str(change.get("entry_id") or ""))
+            if entry is None or entry.edited_by_operator or entry.summary != str(change.get("after") or ""):
+                continue
+            with contextlib.suppress(EntryConflict, KeyError):
+                await self.entries.update(entry.id, if_version=entry.version, summary=str(change.get("before") or ""))
+        now = datetime.now(UTC).isoformat()
+        withdrawn = [int(i) for i in extra.get("suggestions", [])]
+        if withdrawn:
+            await self.db.execute(
+                f"UPDATE memory_suggestions SET status = 'withdrawn', decided_at = ? WHERE tenant_id = ? AND status = 'open' AND id IN ({','.join('?' * len(withdrawn))})",
+                (now, self.tenant, *withdrawn),
+            )
+        decided = [int(i) for i in extra.get("decided", [])]
+        if decided:
+            await self.db.execute(
+                f"UPDATE memory_suggestions SET status = 'open', decided_at = NULL WHERE tenant_id = ? AND status IN ('applied', 'dismissed') AND id IN ({','.join('?' * len(decided))})",
+                (self.tenant, *decided),
+            )
 
     async def history(self, limit: int = 50) -> list[dict[str, Any]]:
         rows = await self.db.fetchall("SELECT * FROM memory_history WHERE tenant_id = ? ORDER BY id DESC LIMIT ?", (self.tenant, limit))
@@ -641,6 +667,10 @@ class MemoryCurator:
         """The open suggestions whose records are still as they were; the others are closed on the way."""
         rows = await self.db.fetchall("SELECT * FROM memory_suggestions WHERE tenant_id = ? AND status = 'open' ORDER BY score DESC, id", (self.tenant,))
         titles = {e.id: e.title for e in await self.entries.list()}
+        chats = {str(_detail(r).get("session_id") or "") for r in rows} - {""}
+        chat_titles = {row["id"]: row["title"] for row in await self.db.fetchall(
+            f"SELECT id, title FROM sessions WHERE id IN ({','.join('?' * len(chats))})", tuple(chats),
+        )} if chats else {}
         out = []
         for row in rows:
             ids = json.loads(row["memory_ids"])
@@ -652,7 +682,9 @@ class MemoryCurator:
             if row["kind"] in LEARNED_KINDS:
                 found.update({"action": detail.get("action") or ("add" if row["kind"] == "addition" else "update"), "entry_id": detail.get("entry_id") or None,
                               "entry_title": titles.get(str(detail.get("entry_id") or "")) or detail.get("entry_title"), "session_id": detail.get("session_id"),
-                              "why": detail.get("why") or "", "tokens": list(detail.get("tokens") or [])})
+                              "why": detail.get("why") or "", "tokens": list(detail.get("tokens") or []),
+                              "session_title": chat_titles.get(str(detail.get("session_id") or "")), "from_seq": _first_seq(detail),
+                              "quote": str(detail.get("quote") or ""), "pass": str(detail.get("pass") or ""), "pass_at": str(detail.get("pass_at") or row["created_at"])})
             out.append(found)
         return out
 
@@ -732,10 +764,116 @@ class MemoryCurator:
             raise CuratorConflict("the entry this was meant for is gone")
         return await self.entries.ensure(Target(section, slug, str(detail.get("entry_title") or "") or slug))
 
-    async def dismiss(self, suggestion_id: int) -> bool:
-        await self.db.execute("UPDATE memory_suggestions SET status = 'dismissed', decided_at = ? WHERE id = ? AND tenant_id = ? AND status = 'open'", (datetime.now(UTC).isoformat(), suggestion_id, self.tenant))
-        row = await self.db.fetchone("SELECT status FROM memory_suggestions WHERE id = ?", (suggestion_id,))
-        return bool(row and row["status"] == "dismissed")
+    async def dismiss(self, suggestion_id: int) -> tuple[bool, int | None]:
+        """Say no to one suggestion. A learned one goes the way of :meth:`decide` (its words tombstoned,
+        one history entry); the tidying's simply closes. Returns whether it was open and the history
+        entry, when one was written."""
+        row = await self.db.fetchone("SELECT kind FROM memory_suggestions WHERE id = ? AND tenant_id = ? AND status = 'open'", (suggestion_id, self.tenant))
+        if row is None:
+            return False, None
+        if row["kind"] in LEARNED_KINDS:
+            found = await self.decide([suggestion_id], "dismiss")
+            return found["dismissed"] > 0, found["history_id"]
+        await self.db.execute("UPDATE memory_suggestions SET status = 'dismissed', decided_at = ? WHERE id = ?", (datetime.now(UTC).isoformat(), suggestion_id))
+        return True, None
+
+    async def decide(self, ids: Sequence[int], action: str) -> dict[str, Any]:
+        """Accept or dismiss a group of the background pass's suggestions — an entry's, or one pass's —
+        as one change with one history entry, whose undo puts memory back and opens them again.
+
+        After a cold start the pass held dozens of notes; reviewing them one tap at a time was the
+        reason the review was left undone. A dismissed proposal's words are tombstoned (``dismissed``)
+        so no later pass, a re-read of the same chats included, proposes them again; a proposed
+        removal is not, since its words are a note that still stands. Accepted, each goes in as it
+        would alone (a change stays locked, a removal is tombstoned, an addition lands in its entry
+        with its chat as the source); one that went stale meanwhile is closed and skipped. Only learned
+        kinds are decided here — the tidying's merges each change the records they name and stay one
+        at a time."""
+        if action not in ("apply", "dismiss"):
+            raise ValueError(f"unknown decision {action!r}")
+        wanted = list(dict.fromkeys(int(i) for i in ids))
+        if not wanted:
+            return {"applied": 0, "dismissed": 0, "stale": 0, "history_id": None}
+        rows = await self.db.fetchall(
+            f"SELECT * FROM memory_suggestions WHERE tenant_id = ? AND status = 'open' AND kind IN ('revision', 'addition') AND id IN ({','.join('?' * len(wanted))}) ORDER BY id",
+            (self.tenant, *wanted),
+        )
+        now = datetime.now(UTC).isoformat()
+        async with self.lock:
+            slugs = {e.id: e.slug for e in await self.entries.list()}
+            if action == "dismiss":
+                written: list[str] = []
+                for row in rows:
+                    detail = _detail(row)
+                    if detail.get("action") == "retire" or await self.entries.tombstoned(row["proposed_text"]):
+                        continue
+                    await self.entries.tombstone(row["proposed_text"], entry_slug=slugs.get(str(detail.get("entry_id") or "")) or str(detail.get("slug") or ""), reason="dismissed")
+                    written.append(row["proposed_text"])
+                closed = [int(r["id"]) for r in rows]
+                await self._close(closed, "dismissed", now)
+                history = await self._journal("operator", "dismiss_suggestions", f"{len(closed)} suggestion(s)", [], [], {"decided": closed, "tombstones": written}) if closed else None
+                return {"applied": 0, "dismissed": len(closed), "stale": 0, "history_id": history}
+            known = set(slugs)
+            before: dict[str, MemoryRecord] = {}
+            after: dict[str, MemoryRecord] = {}
+            created: set[str] = set()
+            removed_sources: list[dict[str, Any]] = []
+            applied: list[int] = []
+            stale: list[int] = []
+            for row in rows:
+                if not await self._still_holds(row):
+                    stale.append(int(row["id"]))
+                    continue
+                detail = _detail(row)
+                body = row["proposed_text"].strip()
+                if row["kind"] == "revision":
+                    record = self._get(json.loads(row["memory_ids"])[0])
+                    before.setdefault(record.id, record)
+                    if detail.get("action") == "retire":
+                        removed_sources.extend(await self.entries.source_rows(record_ids=[record.id]))
+                        await self.entries.tombstone(record.text, entry_slug=slugs.get(entry_of(record), ""), reason="deleted")
+                        await self.memory.delete(self.tenant, record.id)
+                        await self.entries.drop_sources(record_ids=[record.id])
+                        after.pop(record.id, None)
+                    else:
+                        changed = await self.memory.update(self.tenant, record.id, text=body)
+                        changed = changed.model_copy(update={"metadata": {**changed.metadata, LOCKED_KEY: True}})
+                        await self.memory.restore(changed)
+                        after[changed.id] = changed
+                    if entry_of(record) and await self.entries.get(entry_of(record)) is not None:
+                        await self.entries.touched(entry_of(record))
+                else:
+                    entry = await self._learned_entry(detail)
+                    scope, scope_key = self.entries.placement(entry)
+                    prior_ids = {r.id: r for r in self.memory.records(self.tenant, scope=scope, scope_key=scope_key)}
+                    seqs = [int(s) for s in detail.get("seqs") or [] if isinstance(s, int | str) and str(s).isdigit()]
+                    result = await self.entries.remember(
+                        scope, scope_key, body, kind=str(detail.get("kind") or "fact"), metadata={"source": "synthesis", "topics": list(detail.get("topics") or [])},
+                        origin="synthesis", session_id=str(detail.get("session_id") or ""), entry=entry,
+                        from_seq=min(seqs) if seqs else 0, to_seq=max(seqs) if seqs else 0,
+                    )
+                    prior = prior_ids.get(result.record.id)
+                    if prior is not None and prior.id not in created:
+                        before.setdefault(prior.id, prior)
+                    elif prior is None:
+                        created.add(result.record.id)
+                    after[result.record.id] = result.record
+                applied.append(int(row["id"]))
+            await self._close(applied, "applied", now)
+            await self._close(stale, "stale", now)
+            made = [e.id for e in await self.entries.list() if e.id not in known]
+            history = await self._journal(
+                "operator", "accept_suggestions", f"{len(applied)} suggestion(s)", list(before.values()), list(after.values()),
+                {"decided": applied, "sources": removed_sources, "made": made},
+            ) if applied else None
+            return {"applied": len(applied), "dismissed": 0, "stale": len(stale), "history_id": history}
+
+    async def _close(self, ids: Sequence[int], status: str, at: str) -> None:
+        if ids:
+            await self.db.execute(
+                f"UPDATE memory_suggestions SET status = ?, decided_at = ? WHERE tenant_id = ? AND id IN ({','.join('?' * len(ids))})",
+                (status, at, self.tenant, *ids),
+            )
 
     def _state(self) -> str:
         """What the records are now, in one hash: the pass skips a memory that has not changed."""
@@ -794,6 +932,12 @@ class MemoryCurator:
             except Exception:  # noqa: BLE001 — a failed pass costs a log line; the next one tries again
                 logger.exception("memory consolidation failed")
             await asyncio.sleep(CHECK_EVERY_SECONDS)
+
+
+def _first_seq(detail: dict[str, Any]) -> int | None:
+    """The first transcript seq a learned suggestion rests on, for a link to where it was said."""
+    seqs = [int(s) for s in detail.get("seqs") or [] if isinstance(s, int | str) and str(s).isdigit()]
+    return min(seqs) if seqs and min(seqs) > 0 else None
 
 
 def _detail(row: Any) -> dict[str, Any]:

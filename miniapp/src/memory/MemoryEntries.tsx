@@ -14,6 +14,7 @@ import { confirmAsync, errorText } from "../ui";
 import { OverflowMenu, Sheet, toast } from "../ui/dialogs";
 import { PageHeader, Skeleton, go } from "../ui/index";
 import { chosenOps, diffCounts, diffRows, filterEntries, groupEntries, sourceLabel, splitArchived, statusPill, updatedLabel } from "./model";
+import { ReviewBanner, ReviewSheet } from "./review";
 import { ImportSheet, downloadExport } from "./transfer";
 import { type Undoable, undoToast } from "./undo";
 
@@ -82,7 +83,10 @@ function EntryRow({ entry, index }: { entry: MemoryEntry; index: number }) {
         </span>
         <span className="memory-entry-summary">{entry.summary || (entry.project_name && entry.section === "area" ? t("memory.entry.project", { name: entry.project_name }) : plural("memory.entry.facts", count))}</span>
       </span>
-      <span className="memory-entry-when">{updatedLabel(entry.updated_at)}</span>
+      <span className="memory-entry-end">
+        {(entry.suggestions ?? 0) > 0 && <span className="memory-badge" data-suggestions={entry.suggestions} title={plural("memory.review.badge", entry.suggestions ?? 0)} aria-label={plural("memory.review.badge", entry.suggestions ?? 0)}>{entry.suggestions}</span>}
+        <span className="memory-entry-when">{updatedLabel(entry.updated_at)}</span>
+      </span>
     </a>
   );
 }
@@ -93,6 +97,7 @@ export function MemoryHome({ switcher, onHistory }: { switcher: ReactNode; onHis
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
   const [busy, setBusy] = useState(false);
   const entries = useMemo(() => filterEntries(data?.entries ?? [], query), [data, query]);
   const groups = useMemo(() => groupEntries(entries), [entries]);
@@ -158,6 +163,7 @@ export function MemoryHome({ switcher, onHistory }: { switcher: ReactNode; onHis
             </div>
           </div>
         )}
+        <ReviewBanner count={data?.suggestions ?? 0} onOpen={() => setReviewing(true)} />
         {data && !empty && groups.length === 0 && <div className="empty"><b>{t("memory.nomatch")}</b></div>}
         {!empty && groups.map((group) => (
           <section key={group.id} className="memory-section" data-group={group.id}>
@@ -169,6 +175,7 @@ export function MemoryHome({ switcher, onHistory }: { switcher: ReactNode; onHis
       </div>
       <MemoryComposer placeholder={t("memory.quick.placeholder")} label={t("memory.quick.label")} busy={busy} onSend={quickAdd} />
       {importing && <ImportSheet onClose={() => setImporting(false)} onDone={() => { setImporting(false); refreshMemory(); refresh(); }} />}
+      {reviewing && <ReviewSheet onClose={() => setReviewing(false)} onChanged={refresh} />}
     </>
   );
 }
@@ -259,9 +266,12 @@ export function MemoryEntryView({ entryId, onHistory }: { entryId: string; onHis
   const [added, setAdded] = useState("");
   const [busy, setBusy] = useState(false);
   const [proposal, setProposal] = useState<{ instruction: string; proposal: MemoryProposal } | null>(null);
+  const [reviewing, setReviewing] = useState(false);
+  const listing = useQuery<MemoryEntryListing>(ENTRIES_KEY, { staleMs: 10000 });
+  const waiting = listing.data?.entries.find((e) => e.id === entryId)?.suggestions ?? 0;
   const entry = data?.entry;
   const { live, older } = useMemo(() => splitArchived(data?.records ?? []), [data]);
-  const changed = () => { refresh(); refreshMemory(); };
+  const changed = () => { refresh(); refreshMemory(); listing.refresh(); };
 
   async function patchEntry(patch: { title?: string; summary?: string }) {
     if (!entry) return;
@@ -350,6 +360,7 @@ export function MemoryEntryView({ entryId, onHistory }: { entryId: string; onHis
         {error && !data && <div className="empty"><b>{t("memory.entry.gone")}</b><div>{error}</div><a className="btn" href={pathFor("memory")} onClick={(e) => go(e, pathFor("memory"))}>{t("memory.entry.back")}</a></div>}
         {entry && (
           <>
+            <ReviewBanner count={waiting} onOpen={() => setReviewing(true)} />
             {entry.section === "area" && entry.project_id && entry.project_name && (
               <div className="memory-entry-project"><Icon name="folder" size={14} /> {t("memory.entry.project", { name: entry.project_name })}</div>
             )}
@@ -402,6 +413,7 @@ export function MemoryEntryView({ entryId, onHistory }: { entryId: string; onHis
         <div className="memory-composer-space" aria-hidden />
       </div>
       {entry && <MemoryComposer placeholder={t("memory.instruct.placeholder")} label={t("memory.instruct.label")} busy={busy} onSend={instruct} />}
+      {reviewing && <ReviewSheet entryId={entryId} onClose={() => setReviewing(false)} onChanged={changed} />}
       {entry && proposal && data && <DiffSheet entry={entry} records={data.records} instruction={proposal.instruction} proposal={proposal.proposal} onClose={() => setProposal(null)} onApplied={() => { setProposal(null); changed(); }} />}
     </>
   );

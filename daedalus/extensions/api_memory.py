@@ -191,6 +191,14 @@ class ApplyBody(BaseModel):
     text: str | None = None
 
 
+class DecideBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["apply", "dismiss"]
+    ids: list[int] = Field(min_length=1, max_length=500)
+    """The suggestions the operator saw in the group, so one filed since is not decided unseen."""
+
+
 def memory_view(record: MemoryRecord) -> dict[str, Any]:
     return {
         "id": record.id,
@@ -301,8 +309,16 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         found = await entries.list(section=section or None, project_id=project_id or None)
         every = found if not (section or project_id) else await entries.list()
         known = {e.id for e in every}
+        waiting = {str(row["entry_id"] or ""): int(row["n"]) for row in await app.db.fetchall(
+            "SELECT json_extract(detail, '$.entry_id') AS entry_id, count(*) AS n FROM memory_suggestions"
+            " WHERE tenant_id = ? AND status = 'open' AND kind IN ('revision', 'addition') GROUP BY 1",
+            (TENANT,),
+        )}
         return {
-            "entries": [e.view(count=counts.get(e.id, 0)) for e in found],
+            "entries": [{**e.view(count=counts.get(e.id, 0)), "suggestions": waiting.get(e.id, 0)} for e in found],
+            # What the background pass holds for the operator's word, by entry (the badge on each row)
+            # and in all (the review banner, which also counts notes meant for an entry not made yet).
+            "suggestions": sum(waiting.values()),
             "sections": {name: sum(1 for e in every if e.section == name) for name in SECTIONS},
             "records": sum(counts.values()),
             "unfiled": sum(n for key, n in counts.items() if key not in known),
@@ -353,6 +369,17 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         if blocked:
             raise HTTPException(409, {"paused": "memory is paused", "off": "learning from chats is off", "no_budget": "the daily budget is 0"}.get(blocked, blocked))
         return {"started": await learning.run_now()}
+
+    @api.post("/api/memory/synthesis/reread")
+    async def memory_synthesis_reread(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Read every chat again from its start, in the background: what an earlier pass dropped (at
+        an entry's cap, say) is learned now, and what memory holds already is not written twice.
+        Refused as "update now" is."""
+        learning = synthesizer(app)
+        blocked = learning.blocked()
+        if blocked:
+            raise HTTPException(409, {"paused": "memory is paused", "off": "learning from chats is off", "no_budget": "the daily budget is 0"}.get(blocked, blocked))
+        return {"started": await learning.reread()}
 
     @api.get("/api/memory/status")
     async def memory_status(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -588,7 +615,14 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
 
     @api.post("/api/memory/suggestions/{suggestion_id}/dismiss")
     async def memory_suggestion_dismiss(suggestion_id: int, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        return {"dismissed": await curator(app).dismiss(suggestion_id)}
+        dismissed, history = await curator(app).dismiss(suggestion_id)
+        return {"dismissed": dismissed, "history_id": history}
+
+    @api.post("/api/memory/suggestions/decide")
+    async def memory_suggestions_decide(body: DecideBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Accept or dismiss a group of the background pass's suggestions (an entry's, or one pass's)
+        as one change the history can undo."""
+        return await curator(app).decide(body.ids, body.action)
 
     @api.get("/api/memory/history")
     async def memory_history(limit: int = 50, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

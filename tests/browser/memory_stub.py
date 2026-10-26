@@ -55,6 +55,7 @@ class MemoryStub:
         self.status = {"generate": True, "paused": False, "search_chats": True, "synthesis_preset": "", "budget_usd": 0.5, "spent_today_usd": 0.0, "last_synthesis_at": None, "learning": 0,
                        "model": "cheap.model", "model_reason": "", "model_missing": "", "blocked": "", "running": False, "report": None, "failing_chats": 0, **(status or {})}
         self.learn_runs = 0
+        self.reread_runs = 0
         self.imported: list[dict[str, Any]] = []
         for record in self.records:
             record.setdefault("locked", False)
@@ -118,9 +119,15 @@ class MemoryStub:
             archive.writestr("memory.json", json.dumps({"format": "daedalus-memory", "version": 1, "entries": self.entries, "records": self.records}))
         return buffer.getvalue()
 
+    def _waiting(self) -> list[dict[str, Any]]:
+        """The background pass's suggestions still open: what the review shows and the badges count."""
+        return [s for s in self.suggestions if s.get("status", "open") == "open" and s["kind"] in ("revision", "addition")]
+
     def entry_listing(self) -> dict[str, Any]:
+        waiting = self._waiting()
         return {
-            "entries": [self._view(e) for e in self.entries],
+            "entries": [{**self._view(e), "suggestions": sum(1 for s in waiting if s.get("entry_id") == e["id"])} for e in self.entries],
+            "suggestions": len(waiting),
             "sections": {name: sum(1 for e in self.entries if e["section"] == name) for name in ("you", "topic", "area")},
             "records": len(self.records), "unfiled": 0, "status": dict(self.status),
         }
@@ -149,6 +156,12 @@ class MemoryStub:
         self.history[0]["_records"] = copy.deepcopy(before)
         self.history[0]["_drop"] = [r["id"] for r in after if r["id"] not in {b["id"] for b in before}]
         self.history[0]["_entries"] = copy.deepcopy(entries or [])
+        return history
+
+    def _decided(self, action: str, suggestions: list[dict[str, Any]], made: list[dict[str, Any]]) -> int:
+        history = self._journal_full(action, [], made)
+        self.history[0]["summary"] = f"{len(suggestions)} suggestion(s)"
+        self.history[0]["_reopen"] = [s["id"] for s in suggestions]
         return history
 
     def _get(self, memory_id: str) -> dict[str, Any] | None:
@@ -232,13 +245,26 @@ class MemoryStub:
             open_ = [s for s in self.suggestions if s.get("status", "open") == "open"]
             return 200, {"suggestions": [{k: v for k, v in s.items() if k != "status"} for s in open_],
                          "records": {i: r for s in open_ for i in s["memory_ids"] if (r := self._get(i)) is not None}}
+        if path == "/api/memory/suggestions/decide" and method == "POST":
+            # A group decided at once, as the host does: one history entry whose undo opens them again.
+            chosen = [s for s in self._waiting() if s["id"] in body.get("ids", [])]
+            made: list[dict[str, Any]] = []
+            for suggestion in chosen:
+                suggestion["status"] = "applied" if body.get("action") == "apply" else "dismissed"
+                if body.get("action") == "apply" and suggestion["kind"] == "addition":
+                    entry = self._entry(suggestion.get("entry_id") or "") or self._ensure("topic", _slug(suggestion.get("entry_title") or "new"), suggestion.get("entry_title") or "New")
+                    made.append(self._new_record(suggestion["text"], entry, origin="synthesis"))
+            history = self._decided("accept_suggestions" if body.get("action") == "apply" else "dismiss_suggestions", chosen, made) if chosen else None
+            applied = len(chosen) if body.get("action") == "apply" else 0
+            return 200, {"applied": applied, "dismissed": len(chosen) - applied, "stale": 0, "history_id": history}
         if len(parts) == 5 and parts[2] == "suggestions" and method == "POST":
             suggestion = next((s for s in self.suggestions if str(s["id"]) == parts[3]), None)
             if suggestion is None or suggestion.get("status", "open") != "open":
                 return 409, {"detail": "this suggestion is no longer open"}
             if parts[4] == "dismiss":
                 suggestion["status"] = "dismissed"
-                return 200, {"dismissed": True}
+                learned = suggestion["kind"] in ("revision", "addition")
+                return 200, {"dismissed": True, "history_id": self._decided("dismiss_suggestions", [suggestion], []) if learned else None}
             if suggestion["kind"] in ("revision", "addition"):
                 suggestion["status"] = "applied"
                 return 200, {"record": self._get(suggestion["memory_ids"][0]) if suggestion["memory_ids"] else None, "history_id": None}
@@ -256,6 +282,9 @@ class MemoryStub:
             restored = entry.get("_records", [])
             ids = {r["id"] for r in restored} | set(entry.get("_drop", []))
             self.records = [r for r in self.records if r["id"] not in ids] + copy.deepcopy(restored)
+            for suggestion in self.suggestions:
+                if suggestion["id"] in entry.get("_reopen", []):
+                    suggestion["status"] = "open"
             for revived in entry.get("_entries", []):
                 if self._entry(revived["id"]) is None:
                     self.entries.append(copy.deepcopy(revived))
@@ -290,10 +319,13 @@ class MemoryStub:
         """The entry routes, quick add, marks, status, export and import; ``None`` for the others."""
         if path == "/api/memory/status" and method == "GET":
             return 200, dict(self.status)
-        if path == "/api/memory/synthesis/run" and method == "POST":
-            # "Update now": the stub's pass finishes at once and leaves a report, as a real one would.
+        if path in ("/api/memory/synthesis/run", "/api/memory/synthesis/reread") and method == "POST":
+            # "Update now" and "read every chat again": the stub's pass finishes at once and leaves a
+            # report, as a real one would.
             if self.status.get("blocked"):
                 return 409, {"detail": "memory is paused"}
+            if path.endswith("reread"):
+                self.reread_runs += 1
             self.learn_runs += 1
             now = datetime.now(UTC).isoformat()
             self.status["last_synthesis_at"] = now

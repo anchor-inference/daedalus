@@ -2,9 +2,9 @@
 // entries are grouped, what a natural-language edit would do to an entry, how a date and the status
 // pill read.
 
-import type { MemoryEntry, MemoryOp, MemoryRecord, MemorySource, MemoryStatus } from "../api";
+import type { MemoryEntry, MemoryOp, MemoryRecord, MemorySource, MemoryStatus, MemorySuggestion } from "../api";
 import { absDate, relTimeLong } from "../format";
-import { t } from "../i18n";
+import { plural, t } from "../i18n";
 
 export type GroupId = "you" | "projects" | "topics" | "recent";
 export const GROUPS: GroupId[] = ["you", "projects", "topics", "recent"];
@@ -115,6 +115,7 @@ export function learningLines(status: MemoryStatus | undefined, now: number = Da
     out.push({ tone: "", text: t("settings.memory.learning.last", { when: relTimeLong(r.at, now), chats: r.chats }) });
     const dropped = Object.values(r.dropped ?? {}).reduce((a, b) => a + b, 0);
     out.push({ tone: "", text: t("settings.memory.learning.counts", { added: r.added, updated: r.updated, merged: r.merged, held: r.held, dropped }) });
+    if (r.archived) out.push({ tone: "", text: plural("settings.memory.learning.archived", r.archived) });
     if (r.stopped && r.stopped !== "paused" && r.stopped !== "off" && r.stopped !== "no_budget") out.push({ tone: "warn", text: t(`settings.memory.learning.stopped.${r.stopped === "budget" ? "budget" : "no_model"}`) });
   }
   out.push({ tone: "", text: t("settings.memory.learning.spent", { spent: money(status.spent_today_usd), budget: money(status.budget_usd) }) });
@@ -131,4 +132,38 @@ export function sourceLabel(source: MemorySource): string {
 /** The bullets shown in the entry (newest first) and the archived ones folded under "Older". */
 export function splitArchived<T extends MemoryRecord>(records: T[]): { live: T[]; older: T[] } {
   return { live: records.filter((r) => !r.archived), older: records.filter((r) => r.archived) };
+}
+
+export type ReviewBy = "entry" | "pass";
+export const REVIEW_BY: ReviewBy[] = ["entry", "pass"];
+
+/** One group of the review: an entry's suggestions or one pass's, with the ids "accept all" and
+ *  "dismiss all" act on. */
+export type SuggestionGroup = { key: string; title: string; at: string | null; sessionId: string | null; items: MemorySuggestion[]; bulk: number[] };
+
+/** Whether a suggestion is the background pass's own — the review's business. The tidying's merges each
+ *  change the records they name and stay in All facts, decided one at a time. */
+export const isLearned = (s: MemorySuggestion) => s.kind === "revision" || s.kind === "addition";
+
+/** The background pass's suggestions grouped by the entry they are for (the busiest first) or by the
+ *  pass that filed them (the latest first). After a cold start the pass held dozens; deciding them an
+ *  entry or a chat at a time is what makes the review doable. */
+export function groupSuggestions(list: MemorySuggestion[], by: ReviewBy): SuggestionGroup[] {
+  const groups = new Map<string, SuggestionGroup>();
+  for (const s of list.filter(isLearned)) {
+    const key = by === "entry" ? (s.entry_id ? `entry:${s.entry_id}` : `new:${s.entry_title ?? ""}`) : s.pass ? `pass:${s.pass}` : `chat:${s.session_id ?? ""}`;
+    const title = by === "entry" ? s.entry_title || t("memory.review.noentry") : s.session_title || t("memory.source.gone");
+    const group = groups.get(key) ?? { key, title, at: null, sessionId: by === "pass" ? s.session_id ?? null : null, items: [], bulk: [] };
+    group.items.push(s);
+    group.bulk.push(s.id);
+    const at = s.pass_at || s.created_at;
+    if (at && (!group.at || at > group.at)) group.at = at;
+    groups.set(key, group);
+  }
+  return [...groups.values()].sort((a, b) => (by === "entry" ? b.items.length - a.items.length : (b.at ?? "").localeCompare(a.at ?? "")) || a.title.localeCompare(b.title));
+}
+
+/** The background pass's suggestions, of one entry when the review is opened from that entry. */
+export function suggestionsFor(list: MemorySuggestion[], entryId: string | null | undefined): MemorySuggestion[] {
+  return list.filter((s) => isLearned(s) && (!entryId || s.entry_id === entryId));
 }

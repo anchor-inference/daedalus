@@ -10,14 +10,15 @@ compaction or a revert that takes the message carrying the block out of the work
 the next run carry the whole block again — the history was rewritten by then, so it costs no cache.
 
 What is rendered (:func:`render`): the operator's preferences in full, their profile, the current
-project's area in full, and every other topic and area as one line naming it, so the agent knows
-what it could read with ``Recall(entries=[...])``. The text is data, not instructions: the framing
+project's area in full, and every other topic and area as one line naming it with its summary, so
+the agent knows what it could read with ``Recall(entries=[...])``. Archived notes are left out: they
+stay searchable through Recall, which is where an entry's overflow goes. The text is data, not instructions: the framing
 says so, each note is flattened to one line, and the markers the host's own readers look for are
 defused, so a note cannot close the turn context early or pose as a summary. The order is stable
 (oldest note first, entries by name), so the same memory renders to the same bytes.
 
-The module is pure apart from :func:`render_for`, which reads the entries; the synthesis pass that
-fills summaries later changes nothing here — the block shows whatever entries exist.
+The module is pure apart from :func:`render_for`, which reads the entries; the summaries the
+synthesis pass writes for the entries it touched are what the listing lines carry.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 from protocore.contracts.memory import MemoryRecord
 
-from daedalus.memory.entries import Entry, entry_of
+from daedalus.memory.entries import Entry, entry_of, is_archived
 
 if TYPE_CHECKING:
     from daedalus.memory.entries import MemoryEntries
@@ -39,18 +40,29 @@ if TYPE_CHECKING:
 SNAPSHOT_KEY = "memory_snapshot"
 """The session metadata key holding what this chat was last told of memory."""
 
-HARD_CAP_CHARS = 8_000
-"""The block's ceiling, about two thousand tokens: paid once per chat, so it may be generous, but a
-memory that grew past it is listed rather than pasted."""
+HARD_CAP_CHARS = 10_000
+"""The block's ceiling, about two and a half thousand tokens: paid once per chat, so it may be
+generous, but a memory that grew past it is listed rather than pasted. Raised from 8 000 after the
+first live passes: twenty preferences in the operator's words and the profile already took about
+6 500 characters, so a project chat saw a handful of its area's notes and none of the other
+entries; at 10 000 it sees every entry's line and ten to fourteen of its area's notes."""
 WINDOW_SHARE = 0.01
 """Never more than this share of the session's window (a small local model's 32k window gets ~1.3k chars)."""
 CHARS_PER_TOKEN = 4
 DELTA_MAX_CHARS = 1_500
 """Past this a change is named, not written out: the agent reads the entries it needs."""
 BULLET_MAX_CHARS = 300
-PREFERENCES_MAX = 25
-PROFILE_MAX = 8
+LISTING_SUMMARY_CHARS = 100
+"""An entry's summary as its listing line carries it: enough to tell the agent what the entry is
+about and whether to read it, short enough that every entry fits beside the notes."""
+PREFERENCES_MAX = 20
+PROFILE_MAX = 12
 AREA_MAX = 20
+AREA_FLOOR = 8
+"""The current area's newest notes kept before the listing of other entries is cut. On the live
+memory the listing used to go first, whole: a chat in a busy project was told of no other area or
+topic at all, so it never thought to read one, and the summaries the background pass writes for
+those lines were never shown."""
 
 BLOCK_HEAD = "- Memory about the operator"
 DELTA_HEAD = "- Memory changed since this chat was last shown it"
@@ -116,6 +128,9 @@ class _Section:
     """How many lines survive trimming (the heading is dropped with the last line)."""
     trim_order: int = 0
     """Sections are cut highest first; preferences are cut last."""
+    floor: int | None = None
+    """Lines a first round of trimming leaves (``None``: that round passes the section by); the second
+    round cuts every section in :attr:`trim_order` down to nothing."""
     oldest_first: bool = False
     """Notes are trimmed from the oldest; a listing from its bottom."""
 
@@ -130,7 +145,7 @@ def _name(entry: Entry) -> str:
 
 
 def _listing_line(entry: Entry) -> str:
-    summary = clean(entry.summary, 150)
+    summary = clean(entry.summary, LISTING_SUMMARY_CHARS)
     return f"{_name(entry)} — {summary}" if summary else _name(entry)
 
 
@@ -144,10 +159,12 @@ def budget_for(window_tokens: int) -> int:
 def render(entries: Sequence[Entry], records: Mapping[str, Sequence[MemoryRecord]], *, project_id: str = "", budget: int = HARD_CAP_CHARS) -> Block:
     """The memory block for a chat in ``project_id`` (empty: a chat outside projects).
 
-    ``records`` maps an entry id to its notes. Entries with neither notes nor a summary are left
-    out. When the text would pass ``budget``, lines go from the bottom up: other areas, topics, the
-    current area's oldest notes, the profile's — and only then the oldest preferences, which are the
-    operator's own words and are kept whole whenever they alone fit the hard cap."""
+    ``records`` maps an entry id to its notes; archived ones are dropped here. Entries with neither
+    notes nor a summary are left out. When the text would pass ``budget``, lines go in this order: the
+    current area's oldest notes down to :data:`AREA_FLOOR`, other areas, topics, the rest of the current
+    area, the profile's oldest — and only then the oldest preferences, which are the operator's own
+    words and are kept whole whenever they alone fit the hard cap."""
+    records = {key: [r for r in value if not is_archived(r)] for key, value in records.items()}
     live = [e for e in entries if records.get(e.id) or e.summary.strip()]
     you = sorted((e for e in live if e.section == "you"), key=lambda e: ({"preferences": 0, "profile": 1}.get(e.slug, 2), e.slug))
     current = next((e for e in live if e.section == "area" and project_id and e.project_id == project_id), None)
@@ -164,7 +181,7 @@ def render(entries: Sequence[Entry], records: Mapping[str, Sequence[MemoryRecord
     if current is not None:
         notes = [Line(current.slug, clean(r.text)) for r in _ordered(records.get(current.id, ()))]
         summary = clean(current.summary, 150)
-        sections.append(_Section(f"Area {current.slug}, this chat's project" + (f" — {summary}" if summary else "") + ":", notes, AREA_MAX, trim_order=2, oldest_first=True))
+        sections.append(_Section(f"Area {current.slug}, this chat's project" + (f" — {summary}" if summary else "") + ":", notes, AREA_MAX, trim_order=2, oldest_first=True, floor=AREA_FLOOR))
     if topics:
         sections.append(_Section("Topics:", [Line("topics", _listing_line(e)) for e in topics], len(topics), trim_order=3))
     if areas:
@@ -195,11 +212,15 @@ def render(entries: Sequence[Entry], records: Mapping[str, Sequence[MemoryRecord
     limit = min(HARD_CAP_CHARS, max(budget, preferences + 400))
     dropped = 0
     text = text_of(0)
-    for section in sorted(sections, key=lambda s: -s.trim_order):
-        while len(text) > limit and section.keep > 0:
-            section.keep -= 1
-            dropped += 1
-            text = text_of(dropped)
+    for first_round in (True, False):
+        for section in sorted(sections, key=lambda s: -s.trim_order):
+            floor = section.floor if first_round else 0
+            if floor is None:
+                continue
+            while len(text) > limit and section.keep > floor:
+                section.keep -= 1
+                dropped += 1
+                text = text_of(dropped)
     shown = tuple(line for s in sections for line in shown_of(s))
     return Block(text, shown, known, names)
 

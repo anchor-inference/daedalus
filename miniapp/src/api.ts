@@ -1057,11 +1057,13 @@ export type MemoryCategory = (typeof MEMORY_CATEGORIES)[number];
 export const SENSITIVE_SUBJECTS = ["health", "finances", "intimate", "identity_documents", "precise_location"] as const;
 export type MemoryRecord = { id: string; scope: string; scope_key: string; category: string; topics: string[]; text: string; salience: number; version: number; created_at: string | null; updated_at: string | null; last_accessed_at: string | null; entry?: string | null; locked?: boolean; archived?: boolean };
 /** A titled page of memory (claude.ai's "You", "Topics", "Areas"): its records are its bullets. */
-export type MemoryEntry = { id: string; section: "you" | "topic" | "area"; slug: string; title: string; summary: string; project_id: string | null; project_name: string | null; aliases: string[]; sensitive: string[]; edited_by_operator: boolean; version: number; created_at: string; updated_at: string; count?: number };
+export type MemoryEntry = { id: string; section: "you" | "topic" | "area"; slug: string; title: string; summary: string; project_id: string | null; project_name: string | null; aliases: string[]; sensitive: string[]; edited_by_operator: boolean; version: number; created_at: string; updated_at: string; count?: number;
+  /** Learned suggestions waiting for the operator's word in this entry. */
+  suggestions?: number };
 /** What the last background pass over the chats did, as the settings show it. */
 export type MemorySynthesisReport = {
   at: string; trigger: "idle" | "nightly" | "manual" | string; model: string; chats: number; parts: number; calls: number; cost_usd: number; seconds?: number;
-  added: number; merged: number; updated: number; retired: number; new_entries: number; summaries: number; held: number;
+  added: number; merged: number; updated: number; retired: number; new_entries: number; summaries: number; held: number; archived?: number;
   dropped: Record<string, number>; stopped: "" | "budget" | "paused" | "off" | "no_budget" | "no_model" | string;
 };
 /** What the Memory screen's pill and Settings → Memory read; the background pass fills ``last_synthesis_at``, ``learning`` and ``report``. */
@@ -1070,7 +1072,7 @@ export type MemoryStatus = {
   model?: string; model_reason?: "" | "chosen_missing" | "fallback" | "substitute" | "none"; model_missing?: string;
   blocked?: "" | "paused" | "off" | "no_budget"; running?: boolean; report?: MemorySynthesisReport | null; failing_chats?: number;
 };
-export type MemoryEntryListing = { entries: MemoryEntry[]; sections: Record<string, number>; records: number; unfiled: number; status: MemoryStatus };
+export type MemoryEntryListing = { entries: MemoryEntry[]; sections: Record<string, number>; records: number; unfiled: number; status: MemoryStatus; suggestions?: number };
 /** Who taught a bullet: a chat (while it exists it has a title), the operator, an import, the migration. */
 export type MemorySource = { origin: "synthesis" | "remember" | "operator" | "import" | "migration" | string; session_id: string | null; session_title: string | null; from_seq: number | null; to_seq: number | null; run_id: string | null; quote: string; at: string };
 export type MemoryBullet = MemoryRecord & { sources: MemorySource[] };
@@ -1086,9 +1088,16 @@ export type MemoryListing = { records: MemoryRecord[]; buckets: MemoryBucket[]; 
 export type MemorySuggestion = {
   id: number; kind: "duplicate" | "contradiction" | "revision" | "addition"; memory_ids: string[]; keep_id: string; text: string; score: number; reason: string; created_at: string;
   action?: "add" | "update" | "retire"; entry_id?: string | null; entry_title?: string | null; session_id?: string | null;
-  /** Why the pass did not make it itself: the bullet is the operator's (``locked``) or names what they never wrote (``ungrounded``, with the names). */
-  why?: "" | "locked" | "ungrounded"; tokens?: string[];
+  /** Why the pass did not make it itself: the bullet is the operator's (``locked``), names what they never wrote
+   *  (``ungrounded``, with the names), or the entry is full of notes it may not archive (``full``). */
+  why?: "" | "locked" | "ungrounded" | "full"; tokens?: string[];
+  /** The chat it was learned in (its title while it exists), the first message it rests on, and what the operator said there. */
+  session_title?: string | null; from_seq?: number | null; quote?: string;
+  /** The pass that filed it and when, so one pass's suggestions are decided together. */
+  pass?: string; pass_at?: string;
 };
+/** What deciding a group of suggestions did, and the history entry whose undo takes it back. */
+export type MemoryDecision = { applied: number; dismissed: number; stale: number; history_id: number | null };
 export type MemorySuggestions = { suggestions: MemorySuggestion[]; records: Record<string, MemoryRecord> };
 export type MemoryHistoryRecord = { id: string; text: string; kind: string; topics: string[] };
 /** One change to memory, with the records as they were before it: what Undo puts back. */

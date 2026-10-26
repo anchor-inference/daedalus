@@ -3087,6 +3087,55 @@ async def _memory_suggestion_kinds(conn: aiosqlite.Connection) -> None:
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _memory_suggestion_kinds))
 
+
+async def _memory_dismissed(conn: aiosqlite.Connection) -> None:
+    """Two more states the review of learned suggestions needs. A tombstone's reason may be
+    ``dismissed``: the operator said no to a note the background pass held back, and no later pass,
+    a re-read of the same chats included, should propose those words again. A suggestion's status may
+    be ``withdrawn``: the pass that filed it was undone, so it no longer waits for a word. Neither CHECK
+    can be altered in SQLite, so both tables are rebuilt with their rows; each rebuild is skipped when
+    the table already allows the new value."""
+    row = await (await conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memory_tombstones'")).fetchone()
+    if row is not None and "'dismissed'" not in str(row[0]):
+        await conn.execute("""
+            CREATE TABLE memory_tombstones_rebuilt (
+                tenant_id TEXT NOT NULL,
+                fingerprint TEXT NOT NULL,
+                entry_slug TEXT NOT NULL DEFAULT '',
+                reason TEXT NOT NULL DEFAULT 'deleted' CHECK (reason IN ('deleted', 'forgotten', 'session_deleted', 'dismissed')),
+                at TEXT NOT NULL,
+                PRIMARY KEY (tenant_id, fingerprint)
+            )""")
+        await conn.execute("INSERT INTO memory_tombstones_rebuilt(tenant_id, fingerprint, entry_slug, reason, at) SELECT tenant_id, fingerprint, entry_slug, reason, at FROM memory_tombstones")
+        await conn.execute("DROP TABLE memory_tombstones")
+        await conn.execute("ALTER TABLE memory_tombstones_rebuilt RENAME TO memory_tombstones")
+    row = await (await conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memory_suggestions'")).fetchone()
+    if row is not None and "'withdrawn'" not in str(row[0]):
+        await conn.execute("""
+            CREATE TABLE memory_suggestions_rebuilt (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id TEXT NOT NULL,
+                kind TEXT NOT NULL CHECK (kind IN ('duplicate', 'contradiction', 'revision', 'addition')),
+                memory_ids TEXT NOT NULL,
+                fingerprint TEXT NOT NULL UNIQUE,
+                keep_id TEXT NOT NULL,
+                proposed_text TEXT NOT NULL,
+                score REAL NOT NULL DEFAULT 0,
+                reason TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'applied', 'dismissed', 'stale', 'withdrawn')),
+                created_at TEXT NOT NULL,
+                decided_at TEXT,
+                detail TEXT NOT NULL DEFAULT '{}'
+            )""")
+        columns = "id, tenant_id, kind, memory_ids, fingerprint, keep_id, proposed_text, score, reason, status, created_at, decided_at, detail"
+        await conn.execute(f"INSERT INTO memory_suggestions_rebuilt({columns}) SELECT {columns} FROM memory_suggestions")
+        await conn.execute("DROP TABLE memory_suggestions")
+        await conn.execute("ALTER TABLE memory_suggestions_rebuilt RENAME TO memory_suggestions")
+        await conn.execute("CREATE INDEX IF NOT EXISTS memory_suggestions_open ON memory_suggestions(tenant_id, status)")
+
+
+MIGRATIONS.append(DataMigration("SELECT 1;", _memory_dismissed))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""
