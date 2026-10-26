@@ -1041,6 +1041,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "media.seek": { en: "Position", ru: "Позиция" },
   "media.fullscreen": { en: "Full screen", ru: "На весь экран" },
   "media.panel": { en: "Open in the files panel", ru: "Открыть в панели файлов" },
+  "media.download": { en: "Download {name}", ru: "Скачать {name}" },
 
   // ── one word for a state, the same word everywhere ─────────────────────────────────────
   "status.idle": { en: "Idle", ru: "Без дела" },

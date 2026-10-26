@@ -77,6 +77,10 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
             headers["Content-Length"] = str(len(body))
             return route.fulfill(status=200, headers=headers, body=body)
         return route.fulfill(status=200, content_type="image/png", body=PNG)
+    if "/media/" in path and path.endswith("/download"):
+        # The save route answers as the host does: an attachment under the item's own name.
+        name = route.request.url.split("path=", 1)[1].split("&", 1)[0].split("%2F", 1)[-1]
+        return route.fulfill(status=200, headers={"Content-Type": "application/octet-stream", "Content-Disposition": f'attachment; filename="{name}"'}, body=PNG)
     if path.endswith("/api/media/access"):
         return route.fulfill(status=200, content_type="application/json", body='{"ok":true}')
     if "auth/me" in url:
@@ -133,6 +137,20 @@ def run() -> int:
             if geometry["centre"] > 2 or geometry["width"] > 2 or any(delta > 2 for delta in geometry["siblings"] + geometry["content"]) or geometry["scroll"] <= 0 or geometry["caption"] != "absolute":
                 problems.append(f"{name}: media does not fill the answer column or album is not swipeable and overlaid ({geometry})")
 
+            # A single clip is saved from under its player, as the host names it, and the press
+            # stays on the page: the link carries the token and the route answers as an attachment.
+            save = page.locator(".inline-media-player:not(.audio) .inline-media-player-foot a[download]")
+            href = save.get_attribute("href") if save.count() == 1 else None
+            print(f"{name}: clip save={href!r}")
+            if not href or f"/media/{VIDEO}/download?path=video-one%2Fwalkthrough.mp4" not in href or "token=t" not in href:
+                problems.append(f"{name}: the single clip has no download control at its save address ({href!r})")
+            else:
+                before = page.url
+                with page.expect_download(timeout=8000) as saving:
+                    save.click()
+                if saving.value.suggested_filename != "walkthrough.mp4" or page.url != before:
+                    problems.append(f"{name}: the clip saved as {saving.value.suggested_filename!r} or the page moved to {page.url}")
+
             # Near the tile's corner, clear of its actions in the other one: with the column at 288 px
             # a 1440 window's album tiles are small enough that the centre falls on those buttons.
             page.locator(".inline-media.album .inline-media-surface").first.click(position={"x": 12, "y": 12})
@@ -149,6 +167,8 @@ def run() -> int:
                 problems.append(f"{name}: viewer has a touch target below 44px ({controls})")
             if zoom != "200%":
                 problems.append(f"{name}: double click did not zoom the image ({zoom})")
+            if page.locator(".media-viewer .lightbox-save").get_attribute("download") != "one.png":
+                problems.append(f"{name}: the viewer offers no download of the picture under its own name")
             page.keyboard.press("ArrowRight")
             player = page.locator(".media-viewer-stage video")
             assert player.count() == 1

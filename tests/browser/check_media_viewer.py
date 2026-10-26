@@ -7,6 +7,9 @@ leaves the panel shut, the arrows page through the conversation's media in order
 the viewer, and the viewer's "Open in the files panel" still reaches the panel. A document the turn
 sent keeps opening in the panel. Desktop and phone; on the phone a swipe down closes the viewer.
 
+A picture in the files tab opened in the panel even while the panel was a narrow column; it now
+opens in the same viewer, with the download control, unless the panel covers the conversation.
+
     cd miniapp && npm run build
     mkdir -p /tmp/app-root && ln -s "$PWD/miniapp/dist" /tmp/app-root/app
     python3 tests/browser/serve_app.py 8701 /tmp/app-root &
@@ -110,8 +113,8 @@ def make_stub(clip: bytes | None, fetched: list[str]):  # type: ignore[no-untype
             body = json.dumps(DETAIL)
         elif path.endswith(f"/api/sessions/{SESSION}/checkpoints"):
             body = json.dumps({"checkpoints": [], "total": 0, "pruned": False, "pruned_before": None, "removed": 0, "note": "", "keep_days": 30, "keep_last": 50})
-        elif path.endswith(f"/api/sessions/{SESSION}/files"):
-            body = json.dumps({"path": "", "entries": []})
+        elif f"/api/sessions/{SESSION}/" in path and path.endswith("/files"):
+            body = json.dumps({"path": "", "kind": "dir", "entries": [{"name": "cover.png", "dir": False, "size": len(PNG), "mtime": 0}]})
         elif url.rstrip("/").endswith("/api/sessions"):
             body = json.dumps({"sessions": [], "projects": []})
         else:
@@ -171,6 +174,9 @@ def check(page: Page, name: str, clip: bytes | None, fetched: list[str]) -> list
         problems.append(f"{name}: the viewer did not start at the first of three media ({count!r}, {title!r})")
     if not any("/download?path=shots%2Ffirst.png" in url for url in fetched):
         problems.append(f"{name}: the viewer did not read the file where the panel does ({fetched})")
+    save = page.locator(".media-viewer .lightbox-save")
+    if save.count() != 1 or save.get_attribute("download") != "first.png" or "path=shots%2Ffirst.png" not in (save.get_attribute("href") or ""):
+        problems.append(f"{name}: the viewer has no download control for the step's picture")
 
     if name == "desktop":
         page.keyboard.press("ArrowRight")
@@ -252,6 +258,39 @@ def document_stays_in_panel(page: Page, name: str) -> list[str]:
     return []
 
 
+def files_tab(page: Page, name: str) -> list[str]:
+    """A picture in the files tab: the viewer beside a narrow panel, the panel once it covers the chat."""
+    problems: list[str] = []
+    page.goto(f"{BASE}/agents/{SESSION}?token=t&lang=en&panel=files")
+    row = page.locator('.explorer-tree [data-path="cover.png"]')
+    row.wait_for(timeout=10000)
+    row.click()
+    viewer = page.locator(".media-viewer.lightbox")
+    try:
+        viewer.wait_for(timeout=4000)
+    except Exception:
+        return [f"{name}: a picture in the files tab did not open the viewer beside a narrow panel"]
+    save = page.locator(".media-viewer .lightbox-save")
+    print(f"{name}: files tab viewer title={page.locator('.lightbox-title').inner_text()!r} save={save.get_attribute('href')!r}")
+    if save.get_attribute("download") != "cover.png":
+        problems.append(f"{name}: the viewer from the files tab has no download control")
+    if page.locator(".panel-crumbs").count():
+        problems.append(f"{name}: the files tab opened the picture in the panel as well as the viewer")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(300)
+    if name != "desktop":
+        return problems
+    page.locator(".panel").get_by_role("button", name="Expand over the conversation (Ctrl/⌘ ⇧ .)", exact=True).click()
+    page.wait_for_timeout(300)
+    row.click()
+    page.wait_for_timeout(600)
+    if viewer.count():
+        problems.append(f"{name}: with the panel covering the chat a picture still opened the viewer")
+    if not panel_open(page) or "cover.png" not in page.locator(".panel").inner_text():
+        problems.append(f"{name}: with the panel covering the chat a picture did not open in it")
+    return problems
+
+
 def run() -> int:
     problems: list[str] = []
     clip = make_clip()
@@ -270,6 +309,8 @@ def run() -> int:
                 page.goto(f"{BASE}/agents/{SESSION}?token=t&lang=en")
                 page.wait_for_selector(".chat-scroll .timeline .answer", timeout=15000)
                 found += document_stays_in_panel(page, name)
+            if not found:
+                found += files_tab(page, name)
             problems += found
             context.close()
         browser.close()

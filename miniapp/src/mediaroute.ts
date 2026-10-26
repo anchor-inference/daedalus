@@ -27,6 +27,17 @@ export function viewerSource(src: PreviewSource): HostSource | null {
   return viewerKind(src.path) ? { base: src.base, path: src.path } : null;
 }
 
+/**
+ * Where a press on a file goes from anywhere in a session — a step, a sent file, the files tab, a
+ * subagent's turn: the viewer's source, or null for the panel. A picture or a clip opens in the
+ * centred viewer while the panel is a column beside the chat, since a screenshot squeezed into a
+ * third of the window is not where anyone wants to look at it, and the files tab used to put it
+ * there. A panel covering the chat (``panelFull``) has the room, and the file stays in it.
+ */
+export function viewerTarget(src: PreviewSource, panelFull: boolean): HostSource | null {
+  return panelFull ? null : viewerSource(src);
+}
+
 export const sourceKey = (src: HostSource) => `${src.base}\n${src.path}`;
 
 /**

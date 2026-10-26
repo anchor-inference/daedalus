@@ -2813,9 +2813,14 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     async def media_download(session_id: str, presentation_id: str, path: str, _: dict[str, Any] = Depends(auth)) -> Response:
         """An attached item in the shape every file of the app is fetched in, ``{base}/download?path=…``:
         ``path`` is ``<item id>/<file name>``, so the panel's preview names the kind by the name (a
-        document, a spreadsheet) and a download link carries the token as any other does."""
+        document, a spreadsheet) and a download link carries the token as any other does.
+
+        A picture or a clip is answered as an attachment here too, unlike at ``/content``: this is
+        the address the save buttons point at, and a webview that ignores the link's ``download``
+        attribute navigated to an inline answer and replaced the whole app with the picture. The
+        preview reads the bytes with a fetch, which the disposition does not touch."""
         item_id = path.split("/", 1)[0]
-        return await media_content(session_id, presentation_id, item_id)
+        return await _media_file(session_id, presentation_id, item_id, save=True)
 
     @api.get("/api/sessions/{session_id}/media/{presentation_id}/{item_id}/content")
     async def media_content(
@@ -2824,6 +2829,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         item_id: str,
         _: dict[str, Any] = Depends(auth),
     ) -> Response:
+        return await _media_file(session_id, presentation_id, item_id, save=False)
+
+    async def _media_file(session_id: str, presentation_id: str, item_id: str, *, save: bool) -> Response:
         if await manager.get_state(session_id) is None:
             raise HTTPException(404, "no such session")
         item = await manager.media.item(session_id, presentation_id, item_id)
@@ -2844,7 +2852,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             filename=str(item["filename"]),
             # A picture or a clip is shown by the page's own element. Any other file is handed over
             # as a download: an attached HTML page or SVG opened inline would run on the app's origin.
-            content_disposition_type="attachment" if item["kind"] == "file" else "inline",
+            content_disposition_type="attachment" if save or item["kind"] == "file" else "inline",
             headers={"Cache-Control": "private, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff"},
         )
 
