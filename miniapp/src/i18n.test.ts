@@ -298,7 +298,7 @@ describe("the keys the code asks for", () => {
     // The section hints sit beside the section names, and a hint nobody wrote is a blank line.
     const hints = ["appearance", "models", "rules", "limits", "environments", "tools", "voice", "components", "chat", "notifications", "security", "heartbeat", "about"].map((s) => `settings.sec.${s}.hint`).filter((k) => !(k in DICT));
     // Every tool the timeline names has a verb while it runs and one after it.
-    const verbs = ["Exec", "Read", "Write", "Edit", "Find", "WebSearch", "WebFetch", "SendFile", "ImageView", "Skill", "Verify", "SubAgent", "SpawnAgent", "AskPeer", "HistorySearch", "ServiceStart", "ServiceStop"]
+    const verbs = ["Exec", "Read", "Write", "Edit", "Find", "WebSearch", "WebFetch", "SendFile", "ImageView", "Skill", "Verify", "SubAgent", "SpawnAgent", "AskPeer", "HistorySearch", "ChatSearch", "RecentChats", "ServiceStart", "ServiceStop"]
       .flatMap((name) => [`tool.${name}.on`, `tool.${name}.off`])
       .filter((k) => !(k in DICT));
     const isolation = listed("./team/team.ts", "ISOLATIONS").flatMap((i) => [`team.isolation.${i}.short`, `team.isolation.${i}.hint`]).filter((k) => !(k in DICT));

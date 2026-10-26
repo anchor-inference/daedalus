@@ -2720,6 +2720,10 @@ function describe(item: ToolItem, workspace?: string): { verb: string; family: s
       return { verb: verb("SavePrompt", r), family: "SavePrompt", detail: str("title"), icon: "wand" };
     case "HistorySearch":
       return { verb: verb("HistorySearch", r), family: "search", detail: str("query"), icon: "search" };
+    case "ChatSearch":
+      return { verb: verb("ChatSearch", r), family: "search", detail: [str("query"), str("project")].filter(Boolean).join(" · "), icon: "search" };
+    case "RecentChats":
+      return { verb: verb("RecentChats", r), family: "search", detail: [str("project"), str("after"), str("before")].filter(Boolean).join(" · "), icon: "search" };
     case "ToolSearch": {
       // A search that loaded a group says which, and how many tools came with it; the query is what
       // the model typed, and the group is what the reader wants to know it now has.

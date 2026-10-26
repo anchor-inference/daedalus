@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from daedalus.search.chats import Reach
 from daedalus.security.redact import redact
 from daedalus.stores.database import Database
 from daedalus.stores.sqlite import fts_query, snippet
@@ -132,10 +133,20 @@ class Index:
             (model, dimension, pack(vector, dimension), sid, title))
 
 
+def any_word(match: str) -> str:
+    """An FTS expression that every word of ``match`` satisfies alone, ranked by BM25 as before; a quoted
+    phrase stays one phrase."""
+    return match if match.startswith('"') and not match.endswith('*') else ' OR '.join(match.split())
+
+
 def search(path: Path, tenant: str, query: str, *, vector: list[float] | None = None,
            model: str = '', dimension: int = 0, project: str = '', limit: int = 30,
-           seconds: float = QUERY_SECONDS, max_vectors: int = MAX_VECTORS, session: str = '') -> dict[str, Any]:
-    """Dedicated read connection, SQL deadline, streaming vector pages and bounded candidate sets."""
+           seconds: float = QUERY_SECONDS, max_vectors: int = MAX_VECTORS, session: str = '',
+           reach: Reach | None = None, loose: bool = False) -> dict[str, Any]:
+    """Dedicated read connection, SQL deadline, streaming vector pages and bounded candidate sets.
+
+    ``reach`` narrows both halves and the disclosure check to what the agent's chat search may answer
+    from; ``loose`` lets a message match on any one word instead of all of them."""
     if not fts_query(query.strip()[:500]):
         return {'hits': [], 'partial': False}
     deadline = time.monotonic() + seconds
@@ -148,10 +159,14 @@ def search(path: Path, tenant: str, query: str, *, vector: list[float] | None = 
     hits: list[dict[str, Any]] = []
     partial = False
     scope = 's.tenant_id=?' + (' AND s.project_id=?' if project else '') + (' AND s.id=?' if session else '')
-    params = (tenant,) + ((project,) if project else ()) + ((session,) if session else ())
+    params: tuple[str, ...] = (tenant,) + ((project,) if project else ()) + ((session,) if session else ())
+    if reach is not None:
+        clause, extra = reach.where()
+        scope += f' AND {clause}'
+        params += extra
     query = query.strip()[:500]
     try:
-        match = fts_query(query)
+        match = any_word(fts_query(query)) if loose else fts_query(query)
         # Titles participate in the exact half too, including sessions without a transcript.
         literal = query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
         titles = conn.execute(f"SELECT s.id FROM sessions s WHERE {scope} AND s.title LIKE ? ESCAPE '\\' ORDER BY s.last_message_at DESC, s.id LIMIT ?", (*params, '%' + literal + '%', CANDIDATES))

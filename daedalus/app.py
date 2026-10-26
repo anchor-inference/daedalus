@@ -141,6 +141,9 @@ class Application:
         self.manager = SessionManager(self.settings, self.config, db=self.db, execution_store=self.executions)
         await self.manager.start()
         self.search.manager = self.manager
+        # The agent's ChatSearch asks the same service the app's search box does, so it ranks with
+        # whatever matches meaning here, or by words alone while nothing does.
+        self.manager.service_hooks["chat_search"] = self.search
         self.search.task = asyncio.create_task(self.search.run(), name="conversation-index")
         await self._log_llamacpp_startup()
         if self.settings.telegram_bot_token and not self.settings.owner_user_id:

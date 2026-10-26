@@ -90,3 +90,28 @@ Without a model, while warming, or after inference failure, exact search remains
 interface links to Components. Indexing progress and partial coverage are stated separately. A
 running backfill does not claim to have searched passages it has not yet embedded. Project scoping
 can narrow a search that reaches the scan limit.
+
+## The agent's chat search
+
+The agent reaches the same service through two tools. `ChatSearch(query, project, limit)` ranks the
+operator's other chats by topic, one hit per chat with its id, title, last activity, the seq of the
+best passage and a snippet; `RecentChats(n, before, after, project)` lists them by last activity with
+what was first asked and the headline the last reply ended with, from SQL alone. `HistoryExpand`
+reads either kind of hit back by seq; `HistorySearch` searches only the current chat. Both new tools
+are offered while `[memory] search_chats` is on.
+
+Inside a project both tools reach that project's chats; elsewhere they reach the chats outside
+projects (every plain chat's scratch project and the installation's own projects, taken together).
+Naming another project lists its matching chats with their headlines and without snippets, for when
+the operator asks about it. Never included: the asking chat, a chat marked private
+(`{"memory": "private"}` in its metadata), and every session that is not the operator talking — a
+subagent, a staff member, a schedule, a heartbeat or other unattended run, a prompt coach, a side
+question. Imported conversations are included. The rule is one predicate in
+`daedalus/search/chats.py` with an SQL twin applied inside both retrieval halves and the snippet
+read, and `HistoryExpand` refuses a private chat named by id.
+
+Every answer says which search answered: hybrid when the semantic half was ready, words only (with
+the reason) otherwise. The tools see only the service's `query` and its `semantic`, `reason` and
+`partial` fields; the embedding model behind it can change without touching them. When no chat holds
+every word of a multi-word query, the words half is asked again with any word allowed, and the answer
+says so.

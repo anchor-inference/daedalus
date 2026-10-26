@@ -418,7 +418,7 @@ export type FamilyCount = { family: string; n: number };
 
 /** Which family a tool belongs to for the folded summary: the search tools share one, everything else is itself. */
 export function familyOf(name: string): string {
-  if (name === "Find" || name === "Search" || name === "WebSearch" || name === "HistorySearch") return "search";
+  if (name === "Find" || name === "Search" || name === "WebSearch" || name === "HistorySearch" || name === "ChatSearch" || name === "RecentChats") return "search";
   // Calls imported from another program under their own names count with the native steps they amount to.
   if (name === "Task" || name === "Agent") return "SubAgent";
   if (name === "apply_patch") return "Edit";

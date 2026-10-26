@@ -63,6 +63,7 @@ from daedalus.computer import awareness as computer_awareness
 from daedalus.computer import wire as computer_wire
 from daedalus.config import (
     BTW_TOOLS,
+    CHAT_SEARCH_TOOLS,
     COMPANION_ONLY_TOOLS,
     COMPANION_TOOLS,
     DISPATCHER_TOOLS,
@@ -5826,6 +5827,8 @@ class SessionManager:
         blocked |= (known - set(ORCHESTRATOR_TOOLS)) if self.is_orchestrator(state) else (known & set(ORCHESTRATOR_ONLY_TOOLS))
         if not self.computer_offered(state):
             blocked |= known & capabilities.COMPUTER_TOOLS
+        if not self.config.memory.search_chats:
+            blocked |= known & set(CHAT_SEARCH_TOOLS)
         return blocked
 
     def _computer_agent(self) -> Any:

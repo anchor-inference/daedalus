@@ -1055,6 +1055,9 @@ class MemoryConfig(BaseModel):
     auto_merge: bool = True
     """Apply the tidying the comparison is sure of (each change can be undone from the Memory screen);
     off, every finding waits as a suggestion."""
+    search_chats: bool = True
+    """Let the agent search and list the operator's other chats (ChatSearch, RecentChats) when they refer
+    to an earlier conversation. Off, neither tool is offered; HistorySearch still searches the current chat."""
 
 
 class CompactionConfig(BaseModel):
@@ -1450,6 +1453,9 @@ class AutopilotConfig(BaseModel):
     no session is judged until tomorrow; ``0`` turns the judge off for paid models."""
 
 
+CHAT_SEARCH_TOOLS = ["ChatSearch", "RecentChats"]
+"""The tools that reach the operator's other chats; offered only while ``[memory] search_chats`` is on."""
+
 COMPANION_ONLY_TOOLS = ["Delegate", "Agents", "AgentResult", "StopAgent", "Projects", "GoalCreate", "GoalUpdate", "GoalList", "GoalReport"]
 """The tools that exist for the companion alone; every other session is blocked from them (it has SpawnAgent)."""
 
@@ -1459,6 +1465,9 @@ COMPANION_TOOLS = [
     "Remember",
     "Recall",
     "Forget",
+    "ChatSearch",
+    "RecentChats",
+    "HistoryExpand",
     "ScheduleCreate",
     "ScheduleList",
     "ScheduleDelete",
@@ -1468,7 +1477,8 @@ COMPANION_TOOLS = [
     "CalendarFindTime",
 ]
 """Everything the companion may call: hand work to an agent and follow it, own goals, keep its own notes and
-schedules, tell the operator something, read the calendar and answer a quick factual question itself. Nothing
+schedules, find and read back an earlier chat the operator refers to, tell the operator something, read the
+calendar and answer a quick factual question itself. Nothing
 that reads or writes a file, runs a command or drives a browser — that is what its agents are for. The
 schedule tools are scoped to the session that proposes them and every schedule waits for the operator's
 approval; the calendar is read, never written."""
@@ -1572,7 +1582,7 @@ Names that are not registered on this installation yet are simply absent from ev
 is here too: only the orchestrator hires, and an ordinary session would pay for its description on
 every turn."""
 
-ORCHESTRATOR_TOOLS = [*ORCHESTRATOR_ONLY_TOOLS, "Notify", "StaySilent", "HistorySearch", "HistoryExpand", "Recall", "SendFile", "AttachMedia"]
+ORCHESTRATOR_TOOLS = [*ORCHESTRATOR_ONLY_TOOLS, "Notify", "StaySilent", "HistorySearch", "HistoryExpand", "ChatSearch", "RecentChats", "Recall", "SendFile", "AttachMedia"]
 """Everything an orchestrator may call. It runs the team and never does the work itself: no shell, no
 file writes, no subagents. An allowlist rather than a list of refusals, so a tool added later is not
 an orchestrator's until someone decides it should be.
@@ -1583,7 +1593,7 @@ open. In an orchestrator they read inside the project's folders and its staff's 
 (:mod:`daedalus.host.deliverables`)."""
 
 
-DISPATCHER_TOOLS = ["Projects", "Delegate", "Progress", "Cancel", "CreateProject", "Answer", "Files", "Notify", "StaySilent", "HistorySearch", "HistoryExpand", "Recall"]
+DISPATCHER_TOOLS = ["Projects", "Delegate", "Progress", "Cancel", "CreateProject", "Answer", "Files", "Notify", "StaySilent", "HistorySearch", "HistoryExpand", "ChatSearch", "RecentChats", "Recall"]
 """Everything the main orchestrator may call. It routes the operator's words to projects and follows
 what it handed over; it never touches files, staff or a board itself, and it never blocks on a
 question (no AskUser: a main orchestrator paused on a question could not hear its projects report).
@@ -3149,6 +3159,7 @@ __all__ = [
     "AvatarConfig",
     "CompanionConfig",
     "TtsConfig",
+    "CHAT_SEARCH_TOOLS",
     "COMPANION_TOOLS",
     "COMPANION_ONLY_TOOLS",
     "STAFF_BLOCKED_TOOLS",
