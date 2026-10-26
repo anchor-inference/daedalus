@@ -9,6 +9,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
+from daedalus.search.chats import Reach
 from daedalus.search.store import Index, search
 from daedalus.speech.embedding_catalog import MODEL, get, resolve
 from daedalus.speech.models import Downloads
@@ -155,16 +156,22 @@ class ConversationSearch:
                 count = 0
             await asyncio.sleep(0.1 if count else 2)
 
-    async def query(self, query: str, *, project: str = '', limit: int = 30, session: str = '') -> dict[str, Any]:
+    async def query(self, query: str, *, project: str = '', limit: int = 30, session: str = '',
+                    reach: Reach | None = None, loose: bool = False) -> dict[str, Any]:
+        """Ranked conversations for ``query``: ``hits`` (session, seq, snippet, score), ``partial``, and how it
+        was answered — ``semantic`` true when meaning was matched beside the words, ``reason`` the state of
+        the semantic half (``ready``, ``off``, ``no_model``, ``warming``, ``busy``, ...). The words half
+        always runs, so a caller never needs to know which model, if any, stands behind the other."""
         if self.readers >= 2:
             raise SearchBusy("conversation search is busy; try again")
         self.readers += 1
         try:
-            return await self._query(query, project=project, limit=limit, session=session)
+            return await self._query(query, project=project, limit=limit, session=session, reach=reach, loose=loose)
         finally:
             self.readers -= 1
 
-    async def _query(self, query: str, *, project: str = '', limit: int = 30, session: str = '') -> dict[str, Any]:
+    async def _query(self, query: str, *, project: str = '', limit: int = 30, session: str = '',
+                     reach: Reach | None = None, loose: bool = False) -> dict[str, Any]:
         # No unbounded queue of ONNX calls when someone types quickly. The UI debounces and cancels;
         # concurrent callers get lexical results with the reason, rather than waiting behind work.
         reason = self.reason()
@@ -181,9 +188,10 @@ class ConversationSearch:
                         reason = 'error'
                         self.error = True
                 result = await offload(search, self.db.path, self.tenant, query, vector=vector,
-                                                 model=MODEL.space, dimension=MODEL.dimension, project=project, limit=limit, session=session)
+                                                 model=MODEL.space, dimension=MODEL.dimension, project=project, limit=limit, session=session,
+                                                 reach=reach, loose=loose)
                 return {**result, 'semantic': reason == 'ready' and vector is not None, 'reason': reason}
-        result = await offload(search, self.db.path, self.tenant, query, project=project, limit=limit, session=session)
+        result = await offload(search, self.db.path, self.tenant, query, project=project, limit=limit, session=session, reach=reach, loose=loose)
         return {**result, 'semantic': False, 'reason': reason}
 
     async def close(self) -> None:
