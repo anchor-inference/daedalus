@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -350,6 +351,75 @@ func TestAnAbandonedUnpackIsCleanedUp(t *testing.T) {
 	}
 	if _, err := tf.UnpackWrite(began.Transfer, []byte("x")); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("an abandoned unpack still takes writes: %v", err)
+	}
+}
+
+// TestAFinishedUnpackIsKeptUntilReleasedOrAborted: between the finish and the host's switch to the
+// copy, the host may still decide against it, and an abort is then its way to remove the folder; a
+// release leaves the folder for good. A kept one holds no slot, and is never removed on its own.
+func TestAFinishedUnpackIsKeptUntilReleasedOrAborted(t *testing.T) {
+	tr := newTree(t)
+	tf := NewTransfers(tr.fs)
+	stream := tarOf(t, tarEntry{name: "a.txt", body: "a"})
+	finished := func(name string) (string, string) {
+		t.Helper()
+		dest := filepath.Join(tr.home, name)
+		began, err := tf.UnpackBegin(dest, 100, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := feed(tf, began.Transfer, stream); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tf.UnpackFinish(began.Transfer); err != nil {
+			t.Fatal(err)
+		}
+		return dest, began.Transfer
+	}
+	kept, id := finished("kept")
+	if _, err := tf.UnpackWrite(id, []byte("x")); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a finished unpack takes writes: %v", err)
+	}
+	if err := tf.UnpackAbort(id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(kept); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("an aborted finished unpack kept its folder")
+	}
+
+	released, id := finished("released")
+	if err := tf.UnpackRelease(id); err != nil {
+		t.Fatal(err)
+	}
+	if err := tf.UnpackAbort(id); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a released unpack can still be aborted: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(released, "a.txt")); err != nil {
+		t.Fatal("a released unpack lost its folder")
+	}
+
+	// More finished copies than there are slots: none of them stops a new transfer.
+	tf.Idle = 100 * time.Millisecond
+	for i := 0; i < 5; i++ {
+		finished(fmt.Sprintf("slot-%d", i))
+	}
+	running, err := tf.UnpackBegin(filepath.Join(tr.home, "running"), 100, 10)
+	if err != nil {
+		t.Fatalf("finished copies took the slots: %v", err)
+	}
+	if err := tf.UnpackRelease(running.Transfer); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("a running unpack was released: %v", err)
+	}
+	time.Sleep(400 * time.Millisecond)
+	if _, err := os.Stat(filepath.Join(tr.home, "slot-0", "a.txt")); err != nil {
+		t.Fatal("a finished copy was removed when its idle time passed")
+	}
+	if err := tf.UnpackAbort(running.Transfer); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a running unpack outlived its idle time: %v", err)
+	}
+	tf.Close()
+	if _, err := os.Stat(filepath.Join(tr.home, "released", "a.txt")); err != nil {
+		t.Fatal("closing the transfers removed a released folder")
 	}
 }
 

@@ -180,12 +180,14 @@ func (d *Daemon) info(ctx context.Context, c *server.Conn, params json.RawMessag
 	}, nil
 }
 
-// transferVersion is the folder moves' version this daemon speaks; 0 when it has none.
+// transferVersion is the folder moves' version this daemon speaks; 0 when it has none. 2 adds
+// fs.unpack_release, an abort of a finished unpack, and transfers that end soon after the connection
+// driving them closes.
 func (d *Daemon) transferVersion() int {
 	if d.Side == nil || d.Side.Transfers == nil {
 		return 0
 	}
-	return 1
+	return 2
 }
 
 // integrations lists the shells whose integration the daemon has installed.

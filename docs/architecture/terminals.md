@@ -729,15 +729,17 @@ which the host turns into "update the host terminal daemon" instead of a broken 
 A project folder (or a chat's) is carried between the agent's container and the operator's machine as
 one tar stream, cut into calls a frame long. The container side is the host process's own disk; the
 daemon on the machine is the other end. `daemon.info` names the version as
-`capabilities.fs_transfer` (`1`; absent or `0` on a daemon without these calls), so the host says
-"update the host terminal" before a move starts rather than halfway through one.
+`capabilities.fs_transfer` (`2`; `1` on a daemon without `fs.unpack_release` and the connection
+watch below, absent or `0` on one without these calls), so the host says "update the host terminal"
+before a move starts rather than halfway through one.
 
 | Method | Params → result |
 |---|---|
 | `fs.unpack_begin` | `{path, total_bytes, entries}` → `{transfer, path, created}`: takes a folder to unpack into. It must be absolute, strictly inside the home directory, held to the rules a project folder is (not denied, not the daemon's own, not holding the home), and missing (made, with its parents) or an empty plain folder |
 | `fs.unpack_write` | `{transfer, data_b64}` → `{streamed}`: the next ≤ 512 KiB of the stream |
 | `fs.unpack_finish` | `{transfer}` → `{files, dirs, symlinks, bytes, sha256, path}`: the folder counted on disk afterwards, and the SHA-256 of the stream as received |
-| `fs.unpack_abort` | `{transfer}` → `{aborted}`: removes what was written — the folder when the transfer made it, its contents when it was there and empty |
+| `fs.unpack_abort` | `{transfer}` → `{aborted}`: removes what was written — the folder when the transfer made it, its contents when it was there and empty — of a running unpack, or of a finished one not yet released |
+| `fs.unpack_release` | `{transfer}` → `{released}`: lets a finished unpack go; its folder is in use, and no abort can remove it any more |
 | `fs.pack_begin` | `{path}` → `{transfer, files, dirs, symlinks, bytes, skipped[{path, reason}], skipped_count}`: the manifest of a folder under the roots |
 | `fs.pack_read` | `{transfer, max?}` → `{data_b64, eof, sha256?}`: the next bytes; at the end, the stream's SHA-256 |
 | `fs.pack_close` | `{transfer}` → `{closed}`: ends a pack; the folder is left as it is |
@@ -753,7 +755,13 @@ the daemon's own directories — and links that point out of the folder, sockets
 still resolves to the folder that was sent, and the folder is still exactly the manifest (no entry
 added, removed, resized or touched). At most 4 transfers run at once, a folder is at most 64 GiB and
 two million entries, and a transfer nobody calls for 10 minutes is abandoned and cleaned up as an
-abort would.
+abort would. A transfer also follows the connection its calls come over: when that connection closes
+and no other one calls about the transfer within 45 seconds, it is abandoned then — a host that
+restarts in the middle of a move finds its half-written copy gone rather than in the way of the move
+tried again, and one whose connection merely dropped carries on over the next. Any connection may
+abort a transfer by its id. A finished unpack is kept, holding no slot, until it is released, aborted
+or its idle time passes, and is never removed on its own: between the finish and the host's switch to
+the copy, an abort is the host's one way to remove a copy it decided against.
 
 ### Sessions of other programs
 

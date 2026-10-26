@@ -3,6 +3,7 @@
 package rpc_test
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -379,7 +380,7 @@ func TestAFolderIsMovedOverTheSocket(t *testing.T) {
 		} `json:"capabilities"`
 	}
 	f.call(t, "daemon.info", nil, &info)
-	if info.Capabilities.FSTransfer != 1 {
+	if info.Capabilities.FSTransfer != 2 {
 		t.Fatalf("%+v", info)
 	}
 	project := filepath.Join(f.dir, "project")
@@ -444,6 +445,84 @@ func TestAFolderIsMovedOverTheSocket(t *testing.T) {
 	}
 	if we := f.callErr("fs.unpack_write", map[string]any{"transfer": "nope", "data_b64": []byte("x")}); we == nil || we.Code != wire.CodeNotFound {
 		t.Fatalf("an unknown transfer: %v", we)
+	}
+}
+
+// TestATransferEndsSoonAfterItsConnectionCloses starts an unpack over a connection of its own and
+// closes it, as a host that restarts in the middle of a move does: the half-written folder is gone
+// within the grace, not after the idle time. A second unpack whose connection closes is taken up by
+// another connection within the grace and carries on; one whose connection is gone can still be
+// aborted by its id from any other.
+func TestATransferEndsSoonAfterItsConnectionCloses(t *testing.T) {
+	f, side := startSide(t)
+	side.Transfers.Grace = 300 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	begin := func(c *clienttest.Client, dest string) string {
+		t.Helper()
+		var began struct {
+			Transfer string `json:"transfer"`
+		}
+		if err := c.Call(ctx, "fs.unpack_begin", map[string]any{"path": dest, "total_bytes": 1 << 20, "entries": 10}, &began); err != nil {
+			t.Fatal(err)
+		}
+		if err := c.Call(ctx, "fs.unpack_write", map[string]any{"transfer": began.Transfer, "data_b64": []byte{}}, nil); err != nil {
+			t.Fatal(err)
+		}
+		return began.Transfer
+	}
+	gone := func(dest string) bool {
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if _, err := os.Stat(dest); os.IsNotExist(err) {
+				return true
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		return false
+	}
+
+	orphan := filepath.Join(f.dir, "home", "orphan")
+	first, err := clienttest.Dial(f.daemon.Config.RunDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	begin(first, orphan)
+	first.Close()
+	if !gone(orphan) {
+		t.Fatal("the unpack of a closed connection kept its folder past the grace")
+	}
+
+	adopted := filepath.Join(f.dir, "home", "adopted")
+	second, err := clienttest.Dial(f.daemon.Config.RunDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := begin(second, adopted)
+	second.Close()
+	<-second.Closed()
+	f.call(t, "fs.unpack_write", map[string]any{"transfer": id, "data_b64": []byte{}}, nil)
+	time.Sleep(3 * side.Transfers.Grace)
+	if _, err := os.Stat(adopted); err != nil {
+		t.Fatalf("an unpack taken up by another connection was abandoned: %v", err)
+	}
+	f.call(t, "fs.unpack_abort", map[string]any{"transfer": id}, nil)
+	if !gone(adopted) {
+		t.Fatal("an aborted unpack kept its folder")
+	}
+
+	side.Transfers.Grace = time.Minute
+	left := filepath.Join(f.dir, "home", "left")
+	third, err := clienttest.Dial(f.daemon.Config.RunDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id = begin(third, left)
+	third.Close()
+	<-third.Closed()
+	f.call(t, "fs.unpack_abort", map[string]any{"transfer": id}, nil)
+	if !gone(left) {
+		t.Fatal("an unpack whose connection went away could not be aborted from another")
 	}
 }
 

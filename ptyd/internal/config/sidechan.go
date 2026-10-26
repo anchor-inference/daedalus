@@ -42,6 +42,12 @@ const (
 	MaxTransfers = 4
 	TransferIdle = 10 * time.Minute
 
+	// TransferOrphanGrace is how long a transfer whose connection closed waits for another connection
+	// to take it up before it is abandoned as the idle time would abandon it. Long enough for a
+	// dropped connection to come back (the host redials within seconds), short enough that a host
+	// that restarted finds its half-written copy gone, not in the way of the move tried again.
+	TransferOrphanGrace = 45 * time.Second
+
 	// MaxTransferBytes and MaxTransferEntries bound one folder moved whole: a project, not a disk.
 	// MaxTransferSkipped bounds the entries a pack names as left out; it counts all of them.
 	MaxTransferBytes   = 64 << 30
