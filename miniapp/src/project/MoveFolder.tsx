@@ -6,14 +6,19 @@
 // container the destination is proposed (~/Daedalus/projects/<name>) and may be typed or chosen in the
 // host's folder browser; into the container it goes where a new container folder would. The move then
 // runs on the server; the dialog follows it and may be closed and opened again, which finds the move
-// still running. Natively there is no container and nothing here is offered.
+// still running — after a reload too, and the folder's row and the chat show it meanwhile
+// (`moves.tsx`). Before anything starts the plan lists what will not be carried — links out of the
+// folder, mostly a tool cache's — and says why, so it is read before the move, not after. A move a
+// restart interrupted is started again from here; the partial copy it left is removed first.
+// Natively there is no container and nothing here is offered.
 
 import { useEffect, useState } from "react";
 import { api, type FolderMoveJob, type FolderMovePlan, type ProjectDir, type ProjectEnvironments } from "../api";
 import { bytes } from "../format";
-import { t } from "../i18n";
+import { plural, t } from "../i18n";
 import { Icon } from "../icons";
 import { invalidate, useQuery } from "../store";
+import { MOVES_KEY, useFolderMove } from "./moves";
 import { errorText } from "../ui";
 import { Sheet } from "../ui/dialogs";
 import { FolderBrowser, type FolderChoice } from "./FolderBrowser";
@@ -30,8 +35,17 @@ export function movable(folder: Pick<ProjectDir, "env" | "managed">, environment
 const STATES: Record<FolderMoveJob["state"], string> = {
   preparing: "move.state.preparing", copying: "move.state.copying", verifying: "move.state.verifying",
   switching: "move.state.switching", cleaning: "move.state.cleaning", done: "move.state.done",
-  failed: "move.state.failed", cancelled: "move.state.cancelled",
+  failed: "move.state.failed", cancelled: "move.state.cancelled", interrupted: "move.state.interrupted",
 };
+
+/** The daemon's and the scan's reasons for leaving an entry out, in the reader's language. */
+const REASONS: Record<string, string> = {
+  "link outside the folder": "move.reason.link", "special file": "move.reason.special", denied: "move.reason.denied",
+};
+
+function reason(text: string): string {
+  return REASONS[text] ? t(REASONS[text]) : text;
+}
 
 const CANCELLABLE: FolderMoveJob["state"][] = ["preparing", "copying", "verifying"];
 
@@ -49,11 +63,12 @@ function joinPath(base: string, name: string): string {
 export function MoveFolderButton({ projectId, folder, toast }: { projectId: string; folder: ProjectDir; toast: (text: string) => void }) {
   const [open, setOpen] = useState(false);
   const environments = useQuery<ProjectEnvironments>("/api/project-environments", { staleMs: 60000 }).data;
+  const running = useFolderMove(folder.id);
   if (!movable(folder, environments)) return null;
   return (
     <>
       <button type="button" className="btn small" data-move-folder={folder.id} onClick={() => setOpen(true)}>
-        <Icon name="forward" size={13} />{t(folder.env === "container" ? "move.tohost" : "move.tocontainer")}
+        <Icon name="forward" size={13} />{running ? t("move.open") : t(folder.env === "container" ? "move.tohost" : "move.tocontainer")}
       </button>
       {open && <MoveFolderSheet projectId={projectId} folder={folder} onClose={() => setOpen(false)} toast={toast} />}
     </>
@@ -93,6 +108,7 @@ export function MoveFolderSheet({ projectId, folder, onClose, toast }: { project
         const next = await api.get<FolderMoveJob>(`/api/folder-moves/${encodeURIComponent(job.id)}`);
         setJob(next);
         if (!next.active) {
+          invalidate(MOVES_KEY);
           invalidate("/api/projects");
           invalidate("/api/sessions");
           if (next.state === "done") toast(t("move.done.toast", { path: next.destination }));
@@ -113,6 +129,7 @@ export function MoveFolderSheet({ projectId, folder, onClose, toast }: { project
     try {
       const body = plan.direction === "to_host" ? { destination: destination.trim() } : { remove_original: removeOriginal };
       setJob(await api.post<FolderMoveJob>(base, body));
+      invalidate(MOVES_KEY);
     } catch (error) { toast(errorText(error)); void loadPlan(); }
     finally { setBusy(false); }
   }
@@ -140,7 +157,7 @@ export function MoveFolderSheet({ projectId, folder, onClose, toast }: { project
             {job.active && <progress max={1} value={fraction} aria-label={t(STATES[job.state])} />}
             {job.total_bytes > 0 && <span className="sub">{bytes(job.done_bytes)} / {bytes(job.total_bytes)} · {t("move.files", { n: job.total_files })}</span>}
           </div>
-          {job.state === "failed" && <div className="np-error" role="alert"><Icon name="alert" size={14} />{job.error}</div>}
+          {(job.state === "failed" || job.state === "interrupted") && <div className="np-error" role="alert"><Icon name="alert" size={14} />{job.error}</div>}
           {job.state === "cancelled" && <div className="sub" role="status">{t("move.cancelled.body")}</div>}
           {job.state === "done" && (
             <div className="sub" role="status">
@@ -151,12 +168,12 @@ export function MoveFolderSheet({ projectId, folder, onClose, toast }: { project
           {!job.active && job.skipped.length > 0 && (
             <details className="sub">
               <summary>{t("move.skipped", { n: job.skipped_count })}</summary>
-              <ul className="mono">{job.skipped.map((item) => <li key={item.path}>{item.path} — {item.reason}</li>)}</ul>
+              <ul className="mono">{job.skipped.map((item) => <li key={item.path}>{item.path} — {reason(item.reason)}</li>)}</ul>
             </details>
           )}
           <div className="sheet-foot">
             {job.active && CANCELLABLE.includes(job.state) && <button type="button" className="btn ghost" onClick={() => void cancel()}>{t("move.cancel")}</button>}
-            {!job.active && job.state !== "done" && <button type="button" className="btn ghost" onClick={() => { setJob(null); void loadPlan(); }}>{t("move.again")}</button>}
+            {!job.active && job.state !== "done" && <button type="button" className="btn ghost" data-move-again onClick={() => { setJob(null); void loadPlan(); }}>{t(job.state === "interrupted" ? "move.restart" : "move.again")}</button>}
             <button type="button" className="btn primary" onClick={onClose}>{t(job.active ? "move.background" : "common.close")}</button>
           </div>
         </div>
@@ -166,6 +183,9 @@ export function MoveFolderSheet({ projectId, folder, onClose, toast }: { project
 
   const problem = plan?.problem ?? "";
   const ready = !!plan && !problem && (!toHost || !!destination.trim());
+  const skipped = plan?.skipped ?? [];
+  const skippedCount = plan?.skipped_count ?? 0;
+  const leftoverHere = !!plan?.leftover && destination.trim() === plan.leftover.destination;
   return (
     <Sheet title={title} onClose={onClose} size={browsing ? "wide" : "narrow"}>
       <div className="np move-folder" data-move-plan={plan ? plan.direction || "none" : "loading"}>
@@ -193,6 +213,7 @@ export function MoveFolderSheet({ projectId, folder, onClose, toast }: { project
               </button>
             </div>
             <span className="sub">{t("move.to.hint", { home: plan.host_home || "~" })}</span>
+            {leftoverHere && <span className="sub attn" data-move-leftover>{t("move.leftover", { path: plan.leftover!.destination })}</span>}
             {browsing && <FolderBrowser environments={environments} only="host" choice={choice} onChoice={pickFolder} toast={toast} />}
           </div>
         )}
@@ -208,6 +229,16 @@ export function MoveFolderSheet({ projectId, folder, onClose, toast }: { project
               <span className="sub">{t("move.remove.hint")}</span>
             </label>
           </>
+        )}
+        {plan?.counts && <div className="sub" data-move-counts>{bytes(plan.counts.bytes)} · {t("move.files", { n: plan.counts.files })}</div>}
+        {skippedCount > 0 && (
+          // Said before the move, with what it means for removing the original, because a list of
+          // paths alone reads as a fault to fix rather than what is meant to happen.
+          <details className="move-skipped sub" data-move-skipped={skippedCount}>
+            <summary>{plural("move.skip.title", skippedCount)}</summary>
+            <p>{t(toHost ? "move.skip.tohost" : "move.skip.tocontainer")}</p>
+            <ul className="mono">{skipped.map((item) => <li key={item.path}>{item.path} — {reason(item.reason)}</li>)}</ul>
+          </details>
         )}
         <div className="sheet-foot">
           <button type="button" className="btn ghost" onClick={onClose}>{t("common.cancel")}</button>

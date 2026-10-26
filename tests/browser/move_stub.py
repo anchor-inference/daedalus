@@ -3,8 +3,10 @@
 ``plans`` maps a folder id to what ``GET …/move`` answers; a folder it does not name answers as a
 folder that cannot move. A started move is followed by the app once a second; each read moves the
 invented job one step on (copying a third at a time, then checking, then done), so a check sees the
-bar grow and the move end without waiting on a clock. ``started`` and ``cancelled`` are what the app
-sent, for a check to read back.
+bar grow and the move end without waiting on a clock. ``held`` keeps every move a third of the way
+through, for a check that reloads the page in the middle of one; the list of running moves, which
+every folder row and the inbox read, moves the jobs on as the dialog's reads do. ``started`` and
+``cancelled`` are what the app sent, for a check to read back.
 """
 from __future__ import annotations
 
@@ -16,11 +18,14 @@ HOST_HOME = "/home/operator"
 TOTAL = 12 * 1024 * 1024
 
 
-def plan(folder_id: str, direction: str, source: str, destination: str, *, problem: str = "", detail: str = "") -> dict[str, Any]:
+def plan(folder_id: str, direction: str, source: str, destination: str, *, problem: str = "", detail: str = "",
+         skipped: list[dict[str, str]] | None = None) -> dict[str, Any]:
     return {"project_id": "p1", "folder_id": folder_id, "direction": direction, "source": source,
             "env": "container" if direction == "to_host" else "host", "destination": destination,
             "destination_editable": direction == "to_host", "host_home": HOST_HOME if direction == "to_host" else "",
-            "problem": problem, "detail": detail, "blockers": [], "job": None}
+            "problem": problem, "detail": detail, "blockers": [], "job": None, "leftover": None,
+            "counts": None if problem else {"files": 42, "dirs": 7, "symlinks": 1, "bytes": TOTAL},
+            "skipped": list(skipped or []), "skipped_count": len(skipped or [])}
 
 
 class MoveStub:
@@ -29,6 +34,7 @@ class MoveStub:
         self.jobs: dict[str, dict[str, Any]] = {}
         self.started: list[tuple[str, dict[str, Any]]] = []
         self.cancelled: list[str] = []
+        self.held = False
 
     def _plan(self, folder_id: str) -> dict[str, Any]:
         found = self.plans.get(folder_id)
@@ -38,6 +44,9 @@ class MoveStub:
 
     def _step(self, job: dict[str, Any]) -> None:
         if not job["active"]:
+            return
+        if self.held:
+            job["state"], job["done_bytes"] = "copying", TOTAL // 3
             return
         if job["state"] in ("preparing", "copying"):
             job["state"] = "copying"
@@ -49,12 +58,14 @@ class MoveStub:
             job["original_removed"] = job["direction"] == "to_host" or job["remove_original"]
             job["finished_at"] = 1_760_000_100.0
 
-    def answer(self, method: str, path: str, body: Any) -> tuple[int, Any] | None:
+    def answer(self, method: str, path: str, body: Any, query: str = "") -> tuple[int, Any] | None:
         parts = path.split("/")
         if len(parts) == 7 and parts[2] == "projects" and parts[4] == "folders" and parts[6] == "move":
             folder_id = parts[5]
             if method == "GET":
-                return 200, self._plan(folder_id)
+                found = self._plan(folder_id)
+                found["job"] = next((copy.deepcopy(job) for job in self.jobs.values() if job["folder_id"] == folder_id and job["active"]), None)
+                return 200, found
             if method == "POST":
                 found = self._plan(folder_id)
                 if found["problem"]:
@@ -65,11 +76,15 @@ class MoveStub:
                 job = {"id": job_id, "project_id": parts[3], "folder_id": folder_id, "direction": found["direction"], "source": found["source"],
                        "destination": sent.get("destination") or found["destination"], "remove_original": bool(sent.get("remove_original")),
                        "state": "preparing", "active": True, "total_bytes": TOTAL, "done_bytes": 0, "total_files": 42, "error": "",
-                       "notes": [], "skipped": [], "skipped_count": 0, "original_removed": False, "started_at": 1_760_000_000.0, "finished_at": None}
+                       "notes": [], "skipped": [], "skipped_count": 0, "original_removed": False, "started_at": 1_760_000_000.0, "finished_at": None,
+                       "leftover": ""}
                 self.jobs[job_id] = job
                 return 200, copy.deepcopy(job)
         if path == "/api/folder-moves" and method == "GET":
-            return 200, {"jobs": [copy.deepcopy(job) for job in self.jobs.values()]}
+            for job in self.jobs.values():
+                self._step(job)
+            active = "active=true" in query
+            return 200, {"jobs": [copy.deepcopy(job) for job in self.jobs.values() if job["active"] or not active]}
         if len(parts) >= 4 and parts[2] == "folder-moves":
             job = self.jobs.get(parts[3])
             if job is None:
@@ -87,10 +102,10 @@ class MoveStub:
 
     def fulfil(self, route) -> bool:  # type: ignore[no-untyped-def]
         request = route.request
-        path = request.url.split("?", 1)[0]
+        path, _, query = request.url.partition("?")
         path = path[path.index("/api/"):] if "/api/" in path else ""
         body = request.post_data_json if request.method == "POST" and request.post_data else None
-        answered = self.answer(request.method, path, body)
+        answered = self.answer(request.method, path, body, query)
         if answered is None:
             return False
         route.fulfill(status=answered[0], content_type="application/json", body=json.dumps(answered[1]))

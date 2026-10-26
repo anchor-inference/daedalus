@@ -11,6 +11,7 @@ import { navigate, pathFor } from "./router";
 import { useProjects } from "./projects";
 import { NeedsYou, NotificationList, NotificationRow, byDay, byProject, markAllSeen, openEntry, projectNames, useNotifications, useSummary } from "./notifications";
 import { plural, t } from "./i18n";
+import { MovesInProgress } from "./project/moves";
 
 type Chip = "all" | "needs" | "projects";
 const WIDTH = 400;
@@ -104,6 +105,7 @@ function BellPanel({ anchor, onClose, unseen, needs }: { anchor: HTMLElement | n
         <button className="chip select" aria-pressed={chip === "projects"} onClick={() => setChip("projects")}>{t("centre.projects")}</button>
       </div>
       <div className="bell-body">
+        <MovesInProgress projects={projects.data} onOpened={onClose} />
         {chip !== "projects" && <NeedsYou names={names} onOpened={onClose} empty={chip === "needs" ? <div className="bell-empty">{t("centre.needs.empty")}</div> : null} />}
         {chip !== "needs" && <NotificationList groups={groups} row={row} />}
         {chip !== "needs" && feed.data && groups.length === 0 && needs === 0 && <div className="bell-empty">{t("bell.empty")}</div>}
