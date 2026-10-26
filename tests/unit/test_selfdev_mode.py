@@ -171,7 +171,6 @@ async def test_the_prompt_never_names_a_tool_the_session_does_not_have(tmp_path:
                     workspace=tmp_path,
                     bot_repo=REPO_ROOT,
                     core_repo=REPO_ROOT.parent / "protocore-exp",
-                    session_title="t",
                     model="m",
                     github_org="an-org",
                     selfdev_mode=mode,
