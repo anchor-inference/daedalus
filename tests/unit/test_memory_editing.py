@@ -295,8 +295,8 @@ async def test_the_status_reads_the_settings_the_background_pass_will_use(client
     assert status["paused"] and not status["generate"] and status["budget_usd"] == 1.25
     assert status["last_synthesis_at"] is None and status["learning"] == 0 and status["spent_today_usd"] == 0.0
     assert (await client.get("/api/memory/entries", headers=H)).json()["status"]["paused"]
-    # A preset that no longer exists is passed over for the classifier's, then the default model.
-    assert manager.config.memory.model_preset(manager.config.presets) == ""
+    # A preset that no longer exists is passed over, and the settings say so.
+    assert status["model"] != "nowhere" and "nowhere is no longer configured" in status["model_note"]
 
 
 # -- deleting a chat ---------------------------------------------------------------------------

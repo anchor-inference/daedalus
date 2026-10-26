@@ -797,6 +797,12 @@ class OpenAICompatibleProvider(ILLMProvider):
                 body["tool_choice"] = extra["tool_choice"]
         effort = str(extra.get("reasoning_effort") or "medium")
         self._apply_thinking(body, thinking=thinking, effort=effort)
+        if extra.get("json_object") and self.endpoint.kind in DEEPSEEK_SHAPED:
+            # A caller that parses the answer as JSON itself asks for it here. DeepSeek-shaped endpoints
+            # otherwise scatter stray characters inside the object ('{"ops":#…') even on a trivial
+            # prompt; the others were never seen to, and how a proxied subscription route reads the
+            # field is unknown, so they are left as they answer best.
+            body["response_format"] = {"type": "json_object"}
         breakpoints = extra.get("cache_breakpoints")
         if breakpoints and self.endpoint.kind == "openrouter":
             apply_cache_control(body["messages"], breakpoints, index_map=wire_index)
@@ -1023,10 +1029,11 @@ class OpenAICompatibleProvider(ILLMProvider):
         normalized["cost_usd"] = cost
         if self._usage_sink is not None:
             obs = request.observability
-            if obs is not None and obs.call_category == "assist" and obs.call_purpose:
+            if obs is not None and obs.call_category in ("assist", "memory") and obs.call_purpose:
                 # A helper around the operator's messages (the next-message guess, the autopilot judge,
-                # meeting notes) is booked under its own name, so Usage shows what each one costs
-                # apart from the runs, and a helper's daily cap can be summed from the ledger.
+                # meeting notes) and memory's own calls (the background pass, the classifier, the edit
+                # in words) are booked under their own names, so Usage shows what each one costs apart
+                # from the runs, and a daily cap can be summed from the ledger.
                 purpose = obs.call_purpose
             elif purpose == "stream" and obs is not None and obs.call_category == "compaction":
                 # The host streams its summaries, and a 'stream' row is what the session's prompt size is

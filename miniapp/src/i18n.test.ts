@@ -206,8 +206,11 @@ describe("the keys the code asks for", () => {
       ["usage.purpose.", listed("./screens/Usage.tsx", "PURPOSES")],
       ["memory.cat.", ["person", "project", "preference", "fact", "procedure", "other"]],
       ["memory.view.", ["list", "topics", "categories"]],
-      ["memory.suggest.", ["duplicate", "contradiction"]],
-      ["memory.suggest.apply.", ["duplicate", "contradiction"]],
+      ["memory.suggest.", ["duplicate", "contradiction", "revision.update", "revision.retire", "addition"]],
+      ["memory.suggest.apply.", ["duplicate", "contradiction", "revision", "retire", "addition"]],
+      ["settings.memory.learning.blocked.", ["paused", "off", "no_budget"]],
+      ["settings.memory.learning.model.", ["chosen_missing", "fallback", "substitute", "none"]],
+      ["settings.memory.learning.stopped.", ["budget", "no_model"]],
       ["memory.history.action.", ["merge", "replace", "edit", "recategorise", "topic"]],
       ["settings.memory.subject.", ["health", "finances", "intimate", "identity_documents", "precise_location"]],
       ["svc.access.", ["local", "key", "public"]],
@@ -297,7 +300,7 @@ describe("the keys the code asks for", () => {
       // and the operations of a proposed edit by code.
       ["memory.group.", ["you", "projects", "topics", "recent"]],
       ["memory.source.", ["gone", "operator", "import", "migration", "synthesis", "remember", "other"]],
-      ["memory.history.action.", ["merge", "replace", "edit", "recategorise", "topic", "add", "delete", "forget", "delete_entry", "session_deleted", "import", "instruct", "lock", "unlock", "archive", "unarchive", "sensitive", "rescope"]],
+      ["memory.history.action.", ["merge", "replace", "edit", "recategorise", "topic", "add", "delete", "forget", "delete_entry", "session_deleted", "import", "instruct", "lock", "unlock", "archive", "unarchive", "sensitive", "rescope", "learn"]],
       ["memory.instruct.op.", ["add", "remove", "change"]],
     ];
     const missing = families.flatMap(([prefix, names]) => names.map((n) => prefix + n)).filter((key) => !(key in DICT));

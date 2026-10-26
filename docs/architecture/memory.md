@@ -88,19 +88,59 @@ opens the entry; in Telegram the answer gets one line saying the same.
 |---|---|---|
 | Generate memory from chats | `memory.generate` | The background pass learns from your chats |
 | Search and reference chats | `memory.search_chats` | `ChatSearch` and `RecentChats` are offered |
-| Pause memory | `memory.paused` | Keep everything, hand nothing to the agent, learn nothing new; chats held during the pause are never learned from later |
-| Memory model | `memory.synthesis_preset` | Any configured preset; empty = the categorising model's, else the default |
-| Daily budget for learning | `memory.synthesis_usd_per_day` | What the background pass may spend in a day |
+| Pause memory | `memory.paused` | Keep everything, hand nothing to the agent, refuse the agent's `Remember` and `Recall`, learn nothing new; chats held during the pause are never learned from later. Your own notes still save |
+| Memory model | `memory.synthesis_preset` | Any configured preset; empty = the recommended cheap model when configured, else the categorising model's, the summariser's or a middle preset — the page says which one runs |
+| Daily budget for learning | `memory.synthesis_usd_per_day` | What memory's model calls may spend in a day (UTC); a free model is not stopped by it; 0 = no background pass |
+| Learning from chats | — | When the last pass ran, what it added, updated, confirmed and held back, today's spend, chats it could not read; **Update now** reads every chat with something unread |
 | Include sensitive topics | `memory.sensitive_allowed` | Off, nothing on health, finances, intimate life, identity documents or precise location is kept; turning a subject off counts what memory holds on it and offers to remove it |
 | Reset memory | — | Deletes every entry, record, source, tombstone and the history; asks for the word typed out |
 
 Notes you add yourself are never refused for a sensitive subject: the setting guards what the agent
 keeps on its own.
 
-The background pass that learns from chats is its own piece of work and reads these keys when it
-lands; until then `generate`, the memory model and the budget are kept and shown, the status pill says
-memory learns from what you tell it, and memory changes when you or the agent write to it. The memory
-model already serves the change in words.
+Pausing stops what memory does on its own — the block handed to the agent, the agent's `Remember`
+and `Recall`, the background pass — and marks what is said meanwhile as read, so it is never learned
+later. What you do by hand is yours and still works: the quick add, a bullet added or edited on the
+Memory screen, `/remember` in Telegram, and the agent's `Forget` (removing a note uses nothing).
+
+## Learning from chats
+
+`daedalus/memory/synthesis.py` is the background pass. A chat is read when it has been quiet for ten
+minutes after at least two new messages of yours (or a long stretch of them), in a nightly sweep at
+03:30 your time, and when you press **Update now**. A chat is never read while one of its runs is in
+progress. The first start does not sweep the backlog by itself: the first nightly sweep is the next
+night, and **Update now** reads everything at once.
+
+Only your own conversations are read: not a private chat, a subagent's, a team member's, a schedule's,
+a heartbeat's, a prompt coach's or a side question's session, nor one another agent started. Imported
+sessions are read: they are your past chats held elsewhere. Inside a chat only your messages (not a
+schedule's turn, a loop's tick or a report) and the agent's final answer before each of them are read;
+tool calls and results never are.
+
+The model answers with operations — add a bullet, update or retire one it was shown, make a topic or
+an area, write an entry's summary. Code decides what happens to each:
+
+- words addressed to an AI agent are refused (imported chats are fenced as data besides);
+- immigration or residence status, a criminal record, an identity number, a password with its value
+  and anything already redacted are **never** kept, whatever the switches say;
+- a sensitive subject you did not allow is refused, by the word lists and the model's own label;
+- a bullet you removed (its tombstone) is not learned again;
+- a preference must quote your words exactly, or it is refused — the pass cannot invent "prefers short
+  answers" from how you behave;
+- a bullet naming an identifier you never wrote (usually the agent's own choice of a port, a default
+  or a library) is held as a suggestion, not written;
+- a change to a bullet you wrote or edited (locked) becomes a suggestion; the pass never makes it;
+- a fact memory already holds gains the chat as a second source instead of a second bullet;
+- at most 25 bullets per You or topic page, 40 per area, 60 entries.
+
+Everything one pass over one chat changed is one history entry, **Learned from “<chat>”**, whose undo
+takes it all back. A chat's watermark moves only after a part of it was applied, so a failed call reads
+the same messages again later. Each call is booked in Usage as `memory`; once today's memory spend
+reaches the budget, the pass waits for tomorrow (a model that costs nothing carries on).
+
+The model is the one you chose; with none chosen, `opencode.deepseek-v4.1-flash` when it is configured
+(the metered `deepseek.deepseek-v4-flash` is its fallback), chosen on a benchmark over real chats for
+valid answers at the first try, precision and cost.
 
 ## Export and import
 
@@ -138,7 +178,8 @@ because memory is handed to the agent in later chats. One history entry undoes t
 | `POST /api/memory/entries/{id}/instruct` | `apply: false` asks the memory model for a preview; `apply: true` applies the approved operations with `version` |
 | `POST /api/memory/quick` | the quick add |
 | `PATCH /api/memory/{id}`, `POST /api/memory/{id}/mark`, `DELETE /api/memory/{id}` | edit a bullet (with `version`), lock or archive it, forget it |
-| `GET /api/memory/status` | what the status pill reads |
+| `GET /api/memory/status` | what the status pill and the settings read: the model and why, the last pass's report |
+| `POST /api/memory/synthesis/run` | read every chat with something unread now (409 while paused, off or without budget) |
 | `GET /api/memory/export.zip` | the export |
 | `POST /api/memory/import/preview`, `POST /api/memory/import/apply` | the import, parsed and scanned, then filed |
 | `POST /api/memory/sensitive` | count, then remove, what memory holds on subjects no longer allowed |

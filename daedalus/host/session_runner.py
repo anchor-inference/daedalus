@@ -942,7 +942,7 @@ class SessionManager:
                 continue
             self.tools.register(tool)
         memory_tools = build_memory_tools(self.memory, entries=self.memory_entries, tenant_allowed=lambda: self.config.memory.sensitive_allowed, classifier=self.memory_classifier)
-        for tool in privacy.guard_memory_tools(list(memory_tools), self.is_private):
+        for tool in privacy.guard_memory_tools(list(memory_tools), self.is_private, lambda: self.config.memory.paused):
             self.tools.register(tool)
         for group, spec in TOOL_GROUPS.items():
             instructions = prompts.group_instructions(group, selfdev_mode=self.capabilities.selfdev.mode)
@@ -4979,6 +4979,10 @@ class SessionManager:
         schedule's turn, a loop's tick, a report waking it — waits: the block or its delta rides on
         the operator's next message, whose words the core keeps verbatim through a compaction, so the
         block is never handed to a summariser to paraphrase."""
+        if self.config.memory.paused:
+            # Paused memory is kept but not used. A block handed over before the pause stays where it is
+            # in the history (taking it out would rewrite the cached head); nothing new is added.
+            return False
         if privacy.is_private(state) or self.is_staff(state) or any(state.metadata.get(key) for key in NOT_OPERATOR_FACING):
             return False
         return state.run_origin == "operator"
@@ -5892,6 +5896,11 @@ class SessionManager:
         """Whether this session lives in a window over its chat — a prompt coach or a side question — and
         so reads where the chat works, writes nowhere and leaves the chat's directory to the chat."""
         return cls.is_prompt_coach(state) or cls.is_btw(state)
+
+    def is_running(self, session_id: str) -> bool:
+        """Whether a run of this session is in progress right now (a loaded session with a live task)."""
+        state = self._states.get(session_id)
+        return state is not None and state.running
 
     @staticmethod
     def is_staff(state: SessionState) -> bool:
