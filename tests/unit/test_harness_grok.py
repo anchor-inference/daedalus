@@ -6,6 +6,7 @@ fake Grok in a real terminal, with the permission relay in the loop.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from collections.abc import AsyncIterator
@@ -27,6 +28,7 @@ from tests.support.authorized_launch import operator_assignment
 from tests.support.fake_cli.fake_grok import front_matter
 from tests.support.fake_cli.tui import read_log
 from tests.unit.test_cli_staff_runtime import Stand, eventually, stand
+from tests.unit.test_harness_claude import post as post_hook
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="pseudo-terminals and process groups as on Linux")
 
@@ -277,6 +279,31 @@ async def test_a_message_for_now_interrupts_first_and_one_for_after_the_turn_wai
         texts = [e["text"] for e in log(s, "submitted")]
         assert texts.count("[orchestrator] echo:instead") == 1 and texts.count("[orchestrator] echo:after the turn") == 1
         assert not log(s, "queued")  # nothing was typed into the busy TUI
+
+
+async def test_a_tools_end_heard_after_its_turn_ended_starts_no_turn(settings: Settings, db: Database) -> None:
+    # An interrupt in the middle of a tool sends the tool's end and the cancellation as two hook
+    # posts, which arrive in either order. The tool's end coming last set the member working with
+    # no turn running, and a message for after the turn waited for an end that never came.
+    async with stand(settings, db, adapter=GrokAdapter()) as s:
+        ada = await started(s, "echo:ready")
+        done = await s.status_event(ada, "turn_done_unseen")
+        row = await s.session_row(ada)
+        launch = await HarnessStore(db).open_launch_for(row.id)
+        assert launch is not None
+        session = s.runtime.sessions[row.id]
+        before = session.last_signal
+        straggler = {"hookEventName": "post_tool_use", "hook_event_name": "PostToolUse", "sessionId": row.cli_session_id,
+                     "toolName": "run_terminal_cmd", "toolInput": {"command": "sleep 60"}, "toolUseId": "call-late"}
+        assert (await asyncio.to_thread(post_hook, s, launch.launch_id, "PostToolUse", straggler))[0] in (200, 204)
+
+        async def heard() -> bool:
+            return session.last_signal != before
+
+        await eventually(heard, "the straggler was taken")
+        assert [e.payload["status"] for e in await s.events("staff.status", staff_id=ada.id) if e.seq > done.seq] == []
+        later = await s.team.tell(ada, "echo:after the turn", when="after_turn", by="orchestrator")
+        await message(s, later["message_id"], "acknowledged")
 
 
 async def test_the_self_check_runs_one_session_through_the_agent_file(settings: Settings, db: Database) -> None:

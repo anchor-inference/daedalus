@@ -158,6 +158,13 @@ def _next(current: StaffState, event: StaffEvent, context: StateContext) -> Tran
         # orchestrator was woken to hear that idle members had "gone silent". A turn starts with a
         # prompt, a turn start or a tool, each of which says so.
         return _stay(current, context, signal=signal)
+    if kind is EventKind.TOOL_FINISHED and current in (StaffState.IDLE, StaffState.TURN_DONE_UNSEEN):
+        # The end of a tool belongs to a turn that is already under way: every CLI reports the tool's
+        # start first. Seen with the turn over, it is that turn's straggler. A turn interrupted in
+        # the middle of a tool sends the tool's end and the cancellation as two hook posts, which
+        # can arrive in either order; taken as work, the late tool end set the member working for
+        # good, and a message waiting for the turn to end never went.
+        return _stay(current, context, signal=signal)
     if kind in _ACTIVITY:
         if current in (StaffState.IDLE, StaffState.TURN_DONE_UNSEEN, StaffState.NO_SIGNAL):
             return _to(current, StaffState.WORKING, signal=signal)

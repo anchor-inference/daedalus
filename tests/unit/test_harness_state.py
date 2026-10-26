@@ -40,7 +40,8 @@ TABLE: list[tuple[str, EventKind, dict[str, str], StateContext, tuple[StaffState
     ("prompt acknowledged, a question open", EventKind.PROMPT_ACKNOWLEDGED, {}, QUESTION_OPEN, (W, W, W, W, Q, P, W, X, W, Su)),
     ("turn started", EventKind.TURN_STARTED, {}, NOTHING_OPEN, (W, W, W, W, Q, P, E, X, W, Su)),
     ("tool started", EventKind.TOOL_STARTED, {}, NOTHING_OPEN, (W, W, W, W, Q, P, E, X, W, Su)),
-    ("tool finished", EventKind.TOOL_FINISHED, {}, NOTHING_OPEN, (W, W, W, W, Q, P, E, X, W, Su)),
+    # A tool's end after the turn is over is that turn's straggler, not a new turn.
+    ("tool finished", EventKind.TOOL_FINISHED, {}, NOTHING_OPEN, (W, W, D, Id, Q, P, E, X, W, Su)),
     ("activity", EventKind.ACTIVITY, {}, NOTHING_OPEN, (S, W, D, Id, Q, P, E, X, W, Su)),
     ("permission requested", EventKind.PERMISSION_REQUESTED, {"summary": "npm install grammy"}, NOTHING_OPEN, (P, P, P, P, P, P, P, X, P, Su)),
     ("question asked", EventKind.QUESTION_ASKED, {"summary": "which colour?"}, NOTHING_OPEN, (Q, Q, Q, Q, Q, P, Q, X, Q, Su)),
