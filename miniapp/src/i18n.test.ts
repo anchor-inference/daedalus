@@ -293,6 +293,12 @@ describe("the keys the code asks for", () => {
       ["questions.perm.", ["allow", "always", "deny", "because"]],
       ["questions.field.", ["answer", "note", "reason"]],
       ["panel.tab.", ["questions"]],
+      // The Memory screen names its groups, where a bullet came from, every change its history holds
+      // and the operations of a proposed edit by code.
+      ["memory.group.", ["you", "projects", "topics", "recent"]],
+      ["memory.source.", ["gone", "operator", "import", "migration", "synthesis", "remember", "other"]],
+      ["memory.history.action.", ["merge", "replace", "edit", "recategorise", "topic", "add", "delete", "delete_entry", "session_deleted", "import", "instruct", "lock", "unlock", "archive", "unarchive", "sensitive", "rescope"]],
+      ["memory.instruct.op.", ["add", "remove", "change"]],
     ];
     const missing = families.flatMap(([prefix, names]) => names.map((n) => prefix + n)).filter((key) => !(key in DICT));
     // The section hints sit beside the section names, and a hint nobody wrote is a blank line.
