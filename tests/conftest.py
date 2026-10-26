@@ -194,3 +194,27 @@ def no_network() -> object:
     finally:
         socket.socket.connect = real_connect  # type: ignore[method-assign]
         socket.socket.connect_ex = real_connect_ex  # type: ignore[method-assign]
+
+
+@pytest.fixture(scope="session", autouse=True)
+def no_price_refresh() -> object:
+    """A session manager started by a test does not go to models.dev for prices.
+
+    The guard above refused the connection, but only after the name had been looked up: every test
+    whose manager lived past the first tick of the daily refresh resolved models.dev through the
+    machine's resolver, which the guard cannot see, and then logged "models.dev prices not
+    refreshed". The background refresh is the only caller; a test about prices patches
+    ``modelsdev.fetch_catalog`` and calls ``refresh_prices`` itself, which this leaves alone.
+    """
+    from daedalus.host.session_runner import SessionManager
+
+    real_refresh = SessionManager._refresh_prices_daily
+
+    async def refresh_nothing(self: SessionManager) -> None:
+        return None
+
+    SessionManager._refresh_prices_daily = refresh_nothing  # type: ignore[method-assign]
+    try:
+        yield None
+    finally:
+        SessionManager._refresh_prices_daily = real_refresh  # type: ignore[method-assign]
