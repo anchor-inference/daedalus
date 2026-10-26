@@ -27,7 +27,7 @@ from playwright.sync_api import Page, sync_playwright
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
 from memory_stub import MemoryStub  # noqa: E402
-from screenshots import MEMORY_RECORDS, MEMORY_SESSIONS, MEMORY_SUGGESTIONS, SETTINGS, UNHANDLED, stub  # noqa: E402
+from screenshots import MEMORY_PROJECTS, MEMORY_RECORDS, MEMORY_SUGGESTIONS, SETTINGS, UNHANDLED, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -85,7 +85,7 @@ def groups(page: Page) -> list[tuple[str, list[str]]]:
 
 def check(browser, width: int, lang: str, problems: list[str]) -> None:  # type: ignore[no-untyped-def]
     where = f"{lang} {width}px"
-    memory = MemoryStub(MEMORY_RECORDS, MEMORY_SESSIONS, MEMORY_SUGGESTIONS)
+    memory = MemoryStub(MEMORY_RECORDS, MEMORY_PROJECTS, MEMORY_SUGGESTIONS)
     page = open_page(browser, width, lang, memory)
     page.wait_for_selector(".memory-card", timeout=20000)
     views = page.locator(".memory-view [role=radio]")

@@ -171,7 +171,7 @@ async def test_every_project_keeps_its_folder_and_every_session_its_directory(tm
         "calendar_types", "calendar_groups", "calendar_event_history", "calendar_hooks", "action_reviews",
         "saved_logins", "companion_goals", "companion_activity",
         "two_factor", "two_factor_recovery", "widget_storage",
-        "memory_history", "memory_suggestions",
+        "memory_history", "memory_suggestions", "memory_entries", "memory_sources", "memory_synthesis", "memory_tombstones",
         "launch_routes", "project_environments", "user_style", "autopilot_decisions", "quota_samples", "edit_leases", "edit_notices",
         "explorations", "exploration_attempts",
     })

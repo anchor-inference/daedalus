@@ -1053,9 +1053,9 @@ export type SessionCheckpoints = {
 export const MEMORY_CATEGORIES = ["person", "project", "preference", "fact", "procedure", "other"] as const;
 export type MemoryCategory = (typeof MEMORY_CATEGORIES)[number];
 export const SENSITIVE_SUBJECTS = ["health", "finances", "intimate", "identity_documents", "precise_location"] as const;
-export type MemoryRecord = { id: string; scope: string; scope_key: string; category: string; topics: string[]; text: string; salience: number; version: number; created_at: string | null; updated_at: string | null; last_accessed_at: string | null };
+export type MemoryRecord = { id: string; scope: string; scope_key: string; category: string; topics: string[]; text: string; salience: number; version: number; created_at: string | null; updated_at: string | null; last_accessed_at: string | null; entry?: string | null };
 export type MemoryBucket = { scope: string; scope_key: string; title: string | null; count: number };
-export type MemoryListing = { records: MemoryRecord[]; buckets: MemoryBucket[]; sessions: Record<string, string>; topics: { topic: string; count: number }[]; categories: Record<string, number>; suggestions: number };
+export type MemoryListing = { records: MemoryRecord[]; buckets: MemoryBucket[]; projects: Record<string, string>; topics: { topic: string; count: number }[]; categories: Record<string, number>; suggestions: number };
 /** A finding of the background tidying it was not sure enough to apply. */
 export type MemorySuggestion = { id: number; kind: "duplicate" | "contradiction"; memory_ids: string[]; keep_id: string; text: string; score: number; reason: string; created_at: string };
 export type MemorySuggestions = { suggestions: MemorySuggestion[]; records: Record<string, MemoryRecord> };

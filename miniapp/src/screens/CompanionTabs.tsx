@@ -331,7 +331,7 @@ function Tools() {
 type MemoryRecord = { id: string; kind: string; text: string; created_at: string | null };
 
 function Memory({ sessionId, toast }: { sessionId: string; toast: (t: string) => void }) {
-  const { data, refresh } = useQuery<{ records: MemoryRecord[] }>(sessionId ? `/api/memory?scope=session&scope_key=${encodeURIComponent(sessionId)}` : null, { staleMs: 5000 });
+  const { data, refresh } = useQuery<{ records: MemoryRecord[] }>(sessionId ? "/api/memory?scope=global" : null, { staleMs: 5000 });
   const records = data?.records ?? [];
   async function forget(id: string) {
     try {

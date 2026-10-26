@@ -115,11 +115,11 @@ A conversation is an ordinary chat, a computer chat or a browser chat. Tabs over
 <td align="center"><sub>Two sessions side by side; each pane has its own files and settings</sub></td>
 </tr>
 <tr>
-<td><img src="screenshots/memory.png" alt="Memory: what the agent remembered, global and per session, editable" /></td>
+<td><img src="screenshots/memory.png" alt="Memory: what the agent remembered, global and per project, editable" /></td>
 <td><img src="screenshots/session-panel-preview.png" alt="The panel on its Preview tab: a Markdown file from the workspace, with the breadcrumb and the history buttons" /></td>
 </tr>
 <tr>
-<td align="center"><sub>Memory — what the agent remembered, global and per session; edit, add, forget in bulk</sub></td>
+<td align="center"><sub>Memory — what the agent remembered, global and per project; edit, add, forget in bulk</sub></td>
 <td align="center"><sub>The panel — files, previews and uploads beside the conversation</sub></td>
 </tr>
 <tr>

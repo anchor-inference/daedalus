@@ -126,6 +126,8 @@ from daedalus.host.transcript_view import TranscriptViewBuilder, message_view
 from daedalus.host.worktrees import append_exclude, exclude_lines
 from daedalus.mcp.manager import McpManager, McpStillStarting, blocked_for, mcp_tool_prefix
 from daedalus.mcp.oauth import mcp_callback_url
+from daedalus.memory import scope as memory_scope
+from daedalus.memory.entries import MemoryEntries
 from daedalus.memory.tools import build_memory_tools
 from daedalus.processes import end_tree
 from daedalus.providers.chain import build_chain
@@ -772,6 +774,8 @@ class SessionManager:
         and what its reports close."""
         self.checkpoint_retention = CheckpointRetention(db, workspaces_dir=settings.workspaces_dir, checkpoints_dir=settings.checkpoints_dir, busy=self.busy_sessions, occupants=self.store_occupants)
         self.memory = PersistentMemory(db)
+        self.memory_entries = MemoryEntries(db, self.memory, TENANT)
+        """The titled pages memory is read in; every new record comes through its ``remember``."""
         self.workspace_units = PersistentWorkspace(db)
         self.skills = DirectorySkillStore(settings.skills_dir)
         self.redactor = redact.shared()
@@ -906,6 +910,7 @@ class SessionManager:
     async def start(self, *, recovering: bool | None = None) -> None:
         """Open the stores; ``recovering`` (default: whether a previous process left runs behind) gates new runs until resume_unfinished()."""
         await self.memory.load()
+        await self.memory_entries.file_unfiled()
         await self.secrets.load()
         operator_secrets.install(self.secrets)
         await self.workspace_units.load()
@@ -933,7 +938,7 @@ class SessionManager:
             if not computer and tool.name in capabilities.COMPUTER_TOOLS:
                 continue
             self.tools.register(tool)
-        for tool in build_memory_tools(self.memory, tenant_allowed=lambda: self.config.memory.sensitive_allowed, classifier=self.memory_classifier):
+        for tool in build_memory_tools(self.memory, entries=self.memory_entries, tenant_allowed=lambda: self.config.memory.sensitive_allowed, classifier=self.memory_classifier):
             self.tools.register(tool)
         for group, spec in TOOL_GROUPS.items():
             instructions = prompts.group_instructions(group, selfdev_mode=self.capabilities.selfdev.mode)
@@ -4422,6 +4427,7 @@ class SessionManager:
             tool_rules_session=(str(pinned.get("cache_key") or "") or None) if pinned else None,
         )
         self._attach_hooks(engine, state)
+        self._stamp_memory(state, engine)
         if chain is not None:
             # The fit check reads the prompt size the engine last saw; before the first call it is zero and every rung fits.
             chain.bind_prompt_size(lambda: int(getattr(engine, "last_observed_prompt_tokens", 0) or 0))
@@ -4771,6 +4777,7 @@ class SessionManager:
         else:
             run_id = state.run_id or uuid.uuid4().hex[:12]
             engine = state.engine
+        self._stamp_memory(state, engine)
         admission = self.service_hooks.get("execution_run_admission")
         staff_session_id = state.metadata.get("staff_session_id")
         if staff_session_id and admission is not None:
@@ -5775,6 +5782,22 @@ class SessionManager:
     def is_staff(state: SessionState) -> bool:
         """Whether this session is a staff member's, working on a task of its project's team."""
         return bool(state.metadata.get("staff_session_id"))
+
+    def memory_placement(self, state: SessionState) -> memory_scope.MemoryPlacement:
+        """Where this run's memory lives (:mod:`daedalus.memory.scope`): the chat's project when it is
+        one of the operator's — not a lone chat's scratch project, not a system one — and whether
+        the run is the operator's own conversation, by the same test the fronts use to decide who an
+        answer is for. Read per run, since one session's runs change hands (the operator's turn, then
+        a schedule's)."""
+        project = state.project
+        project_id = project.id if project is not None and not project.settings.ephemeral and not project.settings.system else ""
+        operator = state.run_origin in OPERATOR_ORIGINS and not self.is_staff(state) and not any(state.metadata.get(key) for key in NOT_OPERATOR_FACING)
+        return memory_scope.MemoryPlacement(project_id=project_id, operator=operator)
+
+    def _stamp_memory(self, state: SessionState, engine: QueryEngine) -> None:
+        """Tell the run's memory tools where its memory lives. Without it Remember fell to the core's
+        default, a scope keyed by the session id, and no other chat ever recalled the note."""
+        memory_scope.stamp(engine.run_state.run_metadata, self.memory_placement(state))
 
     @staticmethod
     def is_orchestrator(state: SessionState) -> bool:

@@ -1,11 +1,12 @@
-"""The Memory screen's routes: the records with their categories and topics, edits, merges, the
-background tidying's suggestions, and the history every change can be undone from."""
+"""The Memory screen's routes: the records with their categories and topics, the entries they are
+filed in, edits, merges, the background tidying's suggestions, and the history every change can be
+undone from."""
 
 from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException
 from protocore.contracts.memory import MemoryRecord, MemoryScope
@@ -14,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from daedalus.extensions.memory import curator
 from daedalus.host.session_runner import TENANT
 from daedalus.memory.curator import CuratorConflict
+from daedalus.memory.entries import SECTIONS, UnknownProject, entry_of
 from daedalus.memory.taxonomy import CATEGORIES, classify, normalise_category, record_topics
 
 if TYPE_CHECKING:
@@ -27,8 +29,9 @@ class MemoryBody(BaseModel):
     category: str = ""
     """Empty: inferred as Remember infers it."""
     topics: list[str] | None = None
-    scope: str = "global"
+    scope: Literal["global", "project"] = "global"
     scope_key: str = ""
+    """The project's id for a project note."""
 
 
 class MemoryPatch(BaseModel):
@@ -78,6 +81,7 @@ def memory_view(record: MemoryRecord) -> dict[str, Any]:
         "created_at": record.created_at.isoformat() if record.created_at else None,
         "updated_at": record.updated_at.isoformat() if record.updated_at else None,
         "last_accessed_at": record.last_accessed_at.isoformat() if record.last_accessed_at else None,
+        "entry": entry_of(record) or None,
     }
 
 
@@ -96,30 +100,41 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             raise HTTPException(503, "the agent is still starting")
         return app.manager
 
+    async def project_names() -> dict[str, str]:
+        return {row["id"]: row["name"] for row in await app.db.fetchall("SELECT id, name FROM projects")}
+
     @api.get("/api/memory")
-    async def memory_list(scope: str = "", scope_key: str = "", _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        """Every memory record (or one scope's), the topics and categories in use, the session titles
-        the session-scoped records belong to, and how many suggestions wait."""
+    async def memory_list(scope: str = "", scope_key: str = "", source_session: str = "", _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Every memory record (or one scope's, or the ones a chat taught), the topics and categories
+        in use, the names of the projects the project records belong to, and how many suggestions wait."""
         try:
             wanted = MemoryScope(scope) if scope else None
         except ValueError as exc:
             raise HTTPException(422, f"unknown scope {scope!r}") from exc
         memory = manager().memory
         records = memory.records(TENANT, scope=wanted, scope_key=scope_key or None)
-        titles = {row["id"]: row["title"] for row in await app.db.fetchall("SELECT id, title FROM sessions")}
+        if source_session:
+            taught = {row["record_id"] for row in await app.db.fetchall("SELECT record_id FROM memory_sources WHERE tenant_id = ? AND session_id = ?", (TENANT, source_session))}
+            records = [r for r in records if r.id in taught]
+        names = await project_names()
         buckets: dict[str, dict[str, Any]] = {}
         everything = memory.records(TENANT)
         for rec in everything:
             key = f"{rec.scope.value}:{rec.scope_key}"
-            b = buckets.setdefault(key, {"scope": rec.scope.value, "scope_key": rec.scope_key, "title": titles.get(rec.scope_key) if rec.scope is MemoryScope.session else None, "count": 0})
+            b = buckets.setdefault(key, {"scope": rec.scope.value, "scope_key": rec.scope_key, "title": names.get(rec.scope_key) if rec.scope is MemoryScope.project else None, "count": 0})
             b["count"] += 1
         topics = memory.vocabulary(TENANT)
         categories = Counter(rec.kind for rec in everything)
         waiting = await app.db.fetchone("SELECT count(*) n FROM memory_suggestions WHERE tenant_id = ? AND status = 'open'", (TENANT,))
+        offered = {row["id"]: row["name"] for row in await app.db.fetchall(
+            "SELECT id, name FROM projects WHERE system = ''"
+            " AND NOT COALESCE(CASE WHEN json_valid(settings) THEN json_extract(settings, '$.ephemeral') END, 0) ORDER BY name COLLATE NOCASE"
+        )}
         return {
             "records": [memory_view(r) for r in records],
             "buckets": sorted(buckets.values(), key=lambda b: (b["scope"] != "global", -b["count"])),
-            "sessions": titles,
+            # The projects a note can be filed under, and the names of any a record still names.
+            "projects": {**offered, **{k: names[k] for k in {r.scope_key for r in everything if r.scope is MemoryScope.project} if k in names}},
             "topics": [{"topic": t, "count": n} for t, n in sorted(topics.items(), key=lambda kv: (-kv[1], kv[0]))],
             "categories": {c: categories.get(c, 0) for c in CATEGORIES},
             "suggestions": int(waiting["n"]) if waiting else 0,
@@ -128,13 +143,11 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     @api.post("/api/memory")
     async def memory_add(body: MemoryBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """The operator's own note. Never refused for a sensitive subject: the setting guards what the
-        agent keeps on its own, and the operator writing it here has decided."""
-        try:
-            scope = MemoryScope(body.scope)
-        except ValueError as exc:
-            raise HTTPException(422, f"unknown scope {body.scope!r}") from exc
-        if scope is not MemoryScope.global_ and not body.scope_key:
-            raise HTTPException(422, "scope_key is required for a non-global scope")
+        agent keeps on its own, and the operator writing it here has decided. Marked locked, so the
+        background pass may suggest a change to it but never makes one."""
+        scope = MemoryScope(body.scope)
+        if scope is MemoryScope.project and not body.scope_key:
+            raise HTTPException(422, "scope_key (the project's id) is required for a project note")
         memory = manager().memory
         category = _category(body.category)
         topics = body.topics
@@ -143,10 +156,43 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             category = category or found.category
             topics = topics if topics is not None else found.topics
         try:
-            result = await memory.write(TENANT, scope, body.scope_key, body.text.strip(), kind=category, metadata={"source": "operator", "topics": topics})
+            result = await manager().memory_entries.remember(
+                scope, body.scope_key if scope is MemoryScope.project else "", body.text.strip(),
+                kind=category, metadata={"source": "operator", "topics": topics, "locked": True}, origin="operator",
+            )
+        except UnknownProject as exc:
+            raise HTTPException(422, str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         return {"decision": result.decision.value, "record": memory_view(result.record)}
+
+    @api.get("/api/memory/entries")
+    async def memory_entries(section: str = "", project_id: str = "", _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The entries memory is read in, section by section, each with how many records it holds."""
+        if section and section not in SECTIONS:
+            raise HTTPException(422, f"unknown section {section!r}; one of {', '.join(SECTIONS)}")
+        entries = manager().memory_entries
+        counts = entries.counts()
+        found = await entries.list(section=section or None, project_id=project_id or None)
+        every = found if not (section or project_id) else await entries.list()
+        known = {e.id for e in every}
+        return {
+            "entries": [e.view(count=counts.get(e.id, 0)) for e in found],
+            "sections": {name: sum(1 for e in every if e.section == name) for name in SECTIONS},
+            "records": sum(counts.values()),
+            "unfiled": sum(n for key, n in counts.items() if key not in known),
+        }
+
+    @api.get("/api/memory/entries/{entry_id}")
+    async def memory_entry(entry_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """One entry with its records, newest first, and where each record was learned."""
+        entries = manager().memory_entries
+        entry = await entries.get(entry_id)
+        if entry is None:
+            raise HTTPException(404, "no such entry")
+        records = entries.records_of(entry_id)
+        sources = await entries.sources(r.id for r in records)
+        return {"entry": entry.view(count=len(records)), "records": [{**memory_view(r), "sources": sources.get(r.id, [])} for r in records]}
 
     @api.patch("/api/memory/{memory_id}")
     async def memory_edit(memory_id: str, body: MemoryPatch, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -156,16 +202,23 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             raise HTTPException(404, "no such memory") from exc
         return {**memory_view(record), "history_id": history}
 
+    async def forget(memory_ids: list[str]) -> int:
+        memory = manager().memory
+        touched = {entry_of(r) for i in memory_ids if (r := memory.get_record(TENANT, i)) is not None} - {""}
+        deleted = 0
+        for memory_id in memory_ids:
+            deleted += int(await memory.delete(TENANT, memory_id))
+        for entry_id in touched:
+            await manager().memory_entries.touched(entry_id)
+        return deleted
+
     @api.delete("/api/memory/{memory_id}")
     async def memory_delete(memory_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        return {"deleted": await manager().memory.delete(TENANT, memory_id)}
+        return {"deleted": bool(await forget([memory_id]))}
 
     @api.post("/api/memory/delete")
     async def memory_delete_many(body: MemoryIds, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        deleted = 0
-        for memory_id in body.ids:
-            deleted += int(await manager().memory.delete(TENANT, memory_id))
-        return {"deleted": deleted}
+        return {"deleted": await forget(body.ids)}
 
     @api.post("/api/memory/merge")
     async def memory_merge(body: MergeBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

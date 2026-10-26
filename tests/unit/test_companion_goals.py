@@ -220,19 +220,15 @@ async def test_the_turn_context_says_the_channel_and_the_goals(app: Any) -> None
 
 
 async def test_a_new_conversation_keeps_the_companions_notes(app: Any) -> None:
-    from protocore.contracts.memory import MemoryScope
-
-    from daedalus.host.engine_factory import TENANT
-
     manager: SessionManager = app.manager
     companion = Companion(app)
     _capture(manager)
     old = await companion.session_id()
-    await manager.memory.write(TENANT, MemoryScope.session, old, "the operator takes their coffee black", kind="fact")
+    # The companion belongs to no project of the operator's: what it remembers is global memory.
+    placement = manager.memory_placement(await manager.get_state(old))
+    assert placement.project_id == "" and placement.operator
     new = await companion.new_session()
-    assert new != old
-    assert [r.text for r in manager.memory.records(TENANT, scope=MemoryScope.session, scope_key=new)] == ["the operator takes their coffee black"]
-    assert not manager.memory.records(TENANT, scope=MemoryScope.session, scope_key=old)
+    assert new != old and manager.memory_placement(await manager.get_state(new)) == placement
 
 
 # -- what the host lets it do ---------------------------------------------------------------------

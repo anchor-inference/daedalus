@@ -17,6 +17,7 @@ from protocore.contracts.tools import ToolContext
 from daedalus.config import MemoryConfig, Settings
 from daedalus.memory import taxonomy
 from daedalus.memory.curator import MemoryCurator, find
+from daedalus.memory.entries import MemoryEntries
 from daedalus.memory.tools import build_memory_tools
 from daedalus.stores.database import MIGRATIONS, Database, DataMigration
 from daedalus.stores.persistent import PersistentMemory
@@ -29,7 +30,8 @@ def ctx(session: str = "s1") -> ToolContext:
 
 
 async def tools_for(memory: PersistentMemory, *, allowed: list[str] | None = None, ask: Any = None) -> dict[str, Any]:
-    return {tool.name: tool for tool in build_memory_tools(memory, tenant_allowed=lambda: allowed or [], classifier=lambda: ask)}
+    entries = MemoryEntries(memory._db, memory, T)
+    return {tool.name: tool for tool in build_memory_tools(memory, entries=entries, tenant_allowed=lambda: allowed or [], classifier=lambda: ask)}
 
 
 @pytest.fixture
@@ -135,7 +137,8 @@ async def test_recall_narrows_by_category_and_topic(memory: PersistentMemory) ->
     both = await tools["Recall"].invoke(ctx(), {"query": "deploys", "topic": "bakery", "category": "procedure"})
     assert both.metadata["count"] == 1 and "deploy script" in both.content and "/procedure; bakery, deploy)" in both.content
     assert (await tools["Recall"].invoke(ctx(), {"category": "preference"})).metadata["count"] == 0
-    assert (await tools["Recall"].invoke(ctx("another"), {"topic": "bakery"})).metadata["count"] == 0
+    # Another chat reads the same memory: a chat has no memory of its own.
+    assert (await tools["Recall"].invoke(ctx("another"), {"topic": "bakery"})).metadata["count"] == 2
 
 
 async def test_a_new_id_never_reuses_one_still_in_use(db: Database, memory: PersistentMemory) -> None:
@@ -198,9 +201,9 @@ async def test_a_newer_value_replaces_the_older_one(db: Database, memory: Persis
 
 
 async def test_what_is_not_sure_waits_as_a_suggestion(db: Database, memory: PersistentMemory) -> None:
-    # The same text in two scopes: merging would change who can recall it.
-    one = await _write(memory, "The bot commit is 5cedcdd.", scope=MemoryScope.session, key="s1")
-    two = await _write(memory, "The bot commit is 5cedcdd.", scope=MemoryScope.session, key="s2")
+    # The same text in two projects: merging would change who can recall it.
+    one = await _write(memory, "The bot commit is 5cedcdd.", scope=MemoryScope.project, key="p1")
+    two = await _write(memory, "The bot commit is 5cedcdd.", scope=MemoryScope.project, key="p2")
     # Alike, not the same.
     await _write(memory, "Images are capped at 60 KB and 1600 px for the shop", age_days=1)
     await _write(memory, "Images for the shop are capped at 60 KB, the phone is slow")
@@ -303,7 +306,7 @@ async def client(settings: Settings, db: Database) -> Any:
 H = {"X-Daedalus-Token": "tok"}
 
 
-async def test_the_memory_screen_routes(client: httpx.AsyncClient) -> None:
+async def test_the_memory_screen_routes(client: httpx.AsyncClient, db: Database) -> None:
     add = lambda text, **extra: client.post("/api/memory", json={"scope": "global", "text": text, **extra}, headers=H)  # noqa: E731
     a = (await add("The bakery site deploys with the deploy script.", topics=["bakery"])).json()["record"]
     assert a["category"] == "project" and a["topics"] == ["bakery"]
@@ -321,8 +324,9 @@ async def test_the_memory_screen_routes(client: httpx.AsyncClient) -> None:
     assert (await client.post(f"/api/memory/history/{history[0]['id']}/undo", headers=H)).status_code == 409
     assert len((await client.get("/api/memory", headers=H)).json()["records"]) == 2
     assert (await client.post("/api/memory/topics/rename", json={"topic": "bakery", "to": "shop"}, headers=H)).json() == {"changed": 2}
-    await add("The bot commit is 5cedcdd.", scope="session", scope_key="s1")
-    await add("The bot commit is 5cedcdd.", scope="session", scope_key="s2")
+    await db.execute("INSERT INTO projects(id, name, created_at) VALUES ('p-bot', 'Bot', ?)", (datetime.now(UTC).isoformat(),))
+    await add("The bot commit is 5cedcdd.")
+    await add("The bot commit is 5cedcdd.", scope="project", scope_key="p-bot")
     assert (await client.post("/api/memory/consolidate", headers=H)).json() == {"merged": 0, "suggested": 1}
     waiting = (await client.get("/api/memory/suggestions", headers=H)).json()
     assert len(waiting["suggestions"]) == 1 and set(waiting["records"]) == set(waiting["suggestions"][0]["memory_ids"])

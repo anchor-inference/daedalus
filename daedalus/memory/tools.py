@@ -1,17 +1,18 @@
 """Remember and Recall as this host offers them: with a category and topics on every record, and
 with the sensitive subjects the operator has not allowed refused at the door.
 
-They replace the core's two tools of the same names (Forget stays the core's). The scope rules —
-which scope a call files under, which keys it may address, what an unscoped recall fans out to —
-are the core's own helpers, imported rather than copied, so the two cannot drift apart.
+They replace the core's two tools of the same names (Forget stays the core's). Where a note goes
+is the host's rule (:mod:`daedalus.memory.scope`): the chat's project, else the operator's global
+memory, never a per-chat silo; and every note is filed in an entry with a source row naming the
+chat and run that taught it (:mod:`daedalus.memory.entries`).
 """
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Iterable
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
-from protocore.contracts.memory import IMemoryContentScanner, MemoryStoreUnavailableError
+from protocore.contracts.memory import IMemoryContentScanner, MemoryScope, MemoryStoreUnavailableError
 from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import ToolDefinition, ToolResult
 from protocore.tools.memory import (
@@ -22,20 +23,19 @@ from protocore.tools.memory import (
     ForgetTool,
     RecallTool,
     RememberTool,
-    _allowed_recall_scopes,
-    _ambient_scope_keys,
     _blocked_write_error,
     _call_id,
     _definition_from_model,
     _memory_disabled,
     _memory_disabled_error,
     _non_fatal_error,
-    _resolve_scope,
     _resolved_max_records_per_scope,
     _resolved_similarity_threshold,
 )
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from daedalus.memory.entries import MemoryEntries, UnknownProject
+from daedalus.memory.scope import WRITABLE_SCOPES, PlacementRefused, placement_from, resolve_write
 from daedalus.memory.taxonomy import (
     CATEGORIES,
     SENSITIVE_LABELS,
@@ -87,8 +87,14 @@ class RememberInput(BaseModel):
         default=None, max_length=5,
         description="One to three short lower-case tags naming what the note is about (e.g. 'deploy', 'billing-api'); reuse tags you have used before. Omit to have them inferred.",
     )
-    scope: str | None = Field(default=None, description="Optional scope override: global, user, project, session, agent or custom. Omit for the default.")
-    scope_key: str | None = Field(default=None, description="Optional key for the chosen scope. Omit to use the ambient key.")
+    scope: Literal["global", "project"] | None = Field(
+        default=None,
+        description=(
+            "Omit for the default: this chat's project when it belongs to one, otherwise the operator's global memory. "
+            "Pass global for something about the operator that holds everywhere (a preference, who they are) when you are inside a project."
+        ),
+    )
+    scope_key: str | None = Field(default=None, description="With scope=project: the project's id, to file the note in another project's memory. Omit for this chat's project.")
 
     @field_validator("category")
     @classmethod
@@ -110,8 +116,8 @@ class RecallInput(BaseModel):
     )
     category: str | None = Field(default=None, description="Only memories of this category: person, project, preference, fact, procedure or other.")
     topic: str | None = Field(default=None, max_length=64, description="Only memories carrying this topic tag.")
-    scope: str | None = Field(default=None, description="Optional single-scope filter (global, user, project, session, agent, custom).")
-    scope_key: str | None = Field(default=None, description="Optional key for the chosen scope.")
+    scope: Literal["global", "project"] | None = Field(default=None, description="Only global memory, or only a project's. Omit to search global memory and this chat's project together.")
+    scope_key: str | None = Field(default=None, description="With scope=project: the project's id. Omit for this chat's project.")
     limit: int = Field(default=RECALL_DEFAULT_LIMIT, ge=1, le=RECALL_MAX_LIMIT, description=f"Max results (1-{RECALL_MAX_LIMIT}).")
 
     @field_validator("category")
@@ -136,12 +142,14 @@ class HostRememberTool(RememberTool):
         self,
         store: PersistentMemory,
         *,
+        entries: MemoryEntries,
         tenant_allowed: Callable[[], Iterable[str]],
         classifier: Callable[[], Asker | None],
         scanner: IMemoryContentScanner | None = None,
     ) -> None:
         super().__init__(store, scanner=scanner)
         self._memory = store
+        self._entries = entries
         self._allowed = tenant_allowed
         self._classifier = classifier
 
@@ -173,15 +181,23 @@ class HostRememberTool(RememberTool):
         refused = sensitive - set(self._allowed())
         if refused:
             return sensitive_refusal(call_id, refused)
-        scope, scope_key = _resolve_scope(context, payload.scope, payload.scope_key)
         try:
-            result = await self._memory.write(
-                context.tenant_id, scope, scope_key, payload.text,
+            scope, scope_key = resolve_write(placement_from(context.metadata), payload.scope, payload.scope_key)
+        except PlacementRefused as exc:
+            return _non_fatal_error(call_id, str(exc))
+        try:
+            result = await self._entries.remember(
+                scope, scope_key, payload.text,
                 kind=category,
                 metadata={"topics": topics, "classified_by": source},
+                origin="remember",
+                session_id=context.session_id,
+                run_id=context.run_id,
                 similarity_threshold=_resolved_similarity_threshold(context),
                 max_records_per_scope=_resolved_max_records_per_scope(context),
             )
+        except UnknownProject:
+            return _non_fatal_error(call_id, f"Not saved: there is no project with the id {scope_key!r}.")
         except MemoryStoreUnavailableError as exc:
             return _non_fatal_error(call_id, f"memory unavailable: {exc}")
         record = result.record
@@ -190,7 +206,7 @@ class HostRememberTool(RememberTool):
             tool_call_id=call_id,
             content=f"{result.decision.value} memory {record.id} (scope={scope.value}; category={record.kind}; topics={', '.join(saved_topics) or '-'})",
             metadata={"memory_id": record.id, "decision": result.decision.value, "scope": scope.value, "scope_key": scope_key,
-                      "version": record.version, "category": record.kind, "topics": saved_topics},
+                      "version": record.version, "category": record.kind, "topics": saved_topics, "entry": record.metadata.get("entry")},
         )
 
 
@@ -215,17 +231,20 @@ class HostRecallTool(RecallTool):
             return _memory_disabled_error(call_id)
         kinds = [payload.category] if payload.category else None
         topics = normalise_topics([payload.topic]) if payload.topic else None
+        placement = placement_from(context.metadata)
+        if payload.scope == MemoryScope.global_.value:
+            scopes, keys = [MemoryScope.global_], {}
+        elif payload.scope == MemoryScope.project.value:
+            key = (payload.scope_key or "").strip() or placement.project_id
+            if not key:
+                return _non_fatal_error(call_id, "This chat belongs to no project; name the project's id in scope_key, or omit the scope.")
+            scopes, keys = [MemoryScope.project], {MemoryScope.project: key}
+        else:
+            # Global memory and this chat's project, nothing else: every other key is left out of
+            # the map, and the store skips a non-global scope it has no key for.
+            scopes, keys = list(WRITABLE_SCOPES), placement.scope_keys()
         try:
-            if payload.scope is not None:
-                scope, scope_key = _resolve_scope(context, payload.scope, payload.scope_key)
-                hits = await self._memory.search(context.tenant_id, payload.query, scopes=[scope], scope_keys={scope: scope_key}, kinds=kinds, topics=topics, limit=payload.limit)
-            else:
-                recall_scopes = _allowed_recall_scopes(context)
-                # An empty clipped list means no allowed scope resolves: the store would read [] as
-                # "every default scope", widening past the allow-list, so nothing is asked at all.
-                if recall_scopes is not None and not recall_scopes:
-                    return ToolResult(tool_call_id=call_id, content="No matching memories.", metadata={"count": 0})
-                hits = await self._memory.search(context.tenant_id, payload.query, scopes=recall_scopes, scope_keys=_ambient_scope_keys(context), kinds=kinds, topics=topics, limit=payload.limit)
+            hits = await self._memory.search(context.tenant_id, payload.query, scopes=scopes, scope_keys=keys, kinds=kinds, topics=topics, limit=payload.limit)
         except MemoryStoreUnavailableError as exc:
             return _non_fatal_error(call_id, f"memory unavailable: {exc}")
         if not hits:
@@ -241,6 +260,7 @@ class HostRecallTool(RecallTool):
 def build_memory_tools(
     store: PersistentMemory,
     *,
+    entries: MemoryEntries,
     tenant_allowed: Callable[[], Iterable[str]],
     classifier: Callable[[], Asker | None],
     scanner: IMemoryContentScanner | None = None,
@@ -249,7 +269,7 @@ def build_memory_tools(
     return [
         ForgetTool(store),
         HostRecallTool(store, scanner=scanner),
-        HostRememberTool(store, tenant_allowed=tenant_allowed, classifier=classifier, scanner=scanner),
+        HostRememberTool(store, entries=entries, tenant_allowed=tenant_allowed, classifier=classifier, scanner=scanner),
     ]
 
 

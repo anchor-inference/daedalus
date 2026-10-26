@@ -15,9 +15,9 @@ CATEGORIES = ("person", "project", "preference", "fact", "procedure", "other")
 
 
 class MemoryStub:
-    def __init__(self, records: list[dict[str, Any]] | None = None, sessions: dict[str, str] | None = None, suggestions: list[dict[str, Any]] | None = None) -> None:
+    def __init__(self, records: list[dict[str, Any]] | None = None, projects: dict[str, str] | None = None, suggestions: list[dict[str, Any]] | None = None) -> None:
         self.records: list[dict[str, Any]] = copy.deepcopy(records or [])
-        self.sessions = dict(sessions or {})
+        self.projects = dict(projects or {})
         self.suggestions: list[dict[str, Any]] = copy.deepcopy(suggestions or [])
         self.history: list[dict[str, Any]] = []
         self.writes: list[tuple[str, str, Any]] = []
@@ -32,12 +32,12 @@ class MemoryStub:
                 counts[topic] = counts.get(topic, 0) + 1
         buckets: dict[str, dict[str, Any]] = {}
         for r in self.records:
-            b = buckets.setdefault(f"{r['scope']}:{r['scope_key']}", {"scope": r["scope"], "scope_key": r["scope_key"], "title": self.sessions.get(r["scope_key"]) if r["scope"] == "session" else None, "count": 0})
+            b = buckets.setdefault(f"{r['scope']}:{r['scope_key']}", {"scope": r["scope"], "scope_key": r["scope_key"], "title": self.projects.get(r["scope_key"]) if r["scope"] == "project" else None, "count": 0})
             b["count"] += 1
         return {
             "records": copy.deepcopy(self.records),
             "buckets": sorted(buckets.values(), key=lambda b: (b["scope"] != "global", -b["count"])),
-            "sessions": self.sessions,
+            "projects": self.projects,
             "topics": [{"topic": t, "count": n} for t, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))],
             "categories": {c: sum(1 for r in self.records if r["category"] == c) for c in CATEGORIES},
             "suggestions": sum(1 for s in self.suggestions if s.get("status", "open") == "open"),
