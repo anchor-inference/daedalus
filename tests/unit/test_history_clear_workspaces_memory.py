@@ -116,7 +116,7 @@ async def test_memory_api_round_trip(client: httpx.AsyncClient) -> None:
     assert [m["id"] for m in listing["records"]] == [rid] and listing["buckets"][0] == {"scope": "global", "scope_key": "", "title": None, "count": 1}
     assert (await client.patch(f"/api/memory/{rid}", json={"text": "edited"}, headers=H)).json()["text"] == "edited"
     assert (await client.patch("/api/memory/mem-none", json={"text": "edited"}, headers=H)).status_code == 404
-    assert (await client.post("/api/memory/delete", json={"ids": [rid, "mem-none"]}, headers=H)).json() == {"deleted": 1}
+    assert (await client.post("/api/memory/delete", json={"ids": [rid, "mem-none"]}, headers=H)).json()["deleted"] == 1
     assert (await client.get("/api/memory", headers=H)).json()["records"] == []
 
 

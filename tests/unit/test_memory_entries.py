@@ -331,7 +331,7 @@ def test_the_migrations_scope_rule() -> None:
 
 
 async def test_the_migration_moves_the_per_chat_records(db: Database) -> None:
-    assert isinstance(MIGRATIONS[-1], DataMigration) and "memory_entries" in MIGRATIONS[-1].sql
+    assert any(isinstance(m, DataMigration) and m.step is _memory_entries and "memory_entries" in m.sql for m in MIGRATIONS)
     at = datetime.now(UTC).isoformat()
     await project(db, "p-bakery", "Bakery site")
     await db.execute("INSERT INTO projects(id, name, created_at, settings) VALUES ('lone', 'lone', ?, '{\"ephemeral\": true}')", (at,))
