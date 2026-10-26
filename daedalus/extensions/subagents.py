@@ -245,7 +245,12 @@ class Subagents:
             raise ValueError("a subagent cannot start subagents of its own; do this yourself or say in your report that it needs another agent")
         active = [s for s in await self.children(leader_id) if s["running"]]
         if len(active) >= self.app.config.subagents.max_active:
-            raise RuntimeError(f"{len(active)} subagents are already running for this session (limit {self.app.config.subagents.max_active}); wait for their reports")
+            # Where the limit lives, so the agent can tell the operator what to change instead of
+            # guessing: the operator once looked for it in Settings and could not find it.
+            raise RuntimeError(
+                f"{len(active)} subagents are already running for this session (limit {self.app.config.subagents.max_active}, "
+                "set in Settings → Limits → Subagents at once, config subagents.max_active); wait for their reports"
+            )
         effort = check_effort(effort)
         models = await self.models()
         if model is not None:

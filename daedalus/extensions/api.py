@@ -770,6 +770,8 @@ class SettingsBody(BaseModel):
     self_change: dict[str, Any] | None = None
     limits: dict[str, Any] | None = None
     """max_iterations, tool_timeout_seconds and usd_per_run; the daily cap is the supervisor's."""
+    subagents: dict[str, Any] | None = None
+    """How many subagents one session may run at once; SubAgent reads it on every start."""
     balance: dict[str, Any] | None = None
     scheduler: dict[str, Any] | None = None
     telegram: dict[str, Any] | None = None

@@ -174,10 +174,13 @@ function Tabs({ state, onTab, onClose, onExpand, badges, marks, inSheet, local, 
       <div ref={strip} className={`panel-tablist ${tabs.length > PANEL_TABS.length ? "many" : ""}`} role="tablist" aria-label={t("panel.label")} onKeyDown={onKey}>
         {tabs.map((tab) => {
           const n = badges?.[tab] ?? 0;
+          const label = t(`panel.tab.${tab}`);
+          // The name rides on the button itself: a narrow panel draws the tab as its icon alone, and
+          // with the word hidden the tab was announced, and hovered, as nothing but its count.
           return (
-            <button key={tab} role="tab" id={`${local.ids}-tab-${tab}`} aria-controls={`${local.ids}-body`} data-tab={tab} className={`panel-tab ${state.tab === tab ? "on" : ""}`} aria-selected={state.tab === tab} tabIndex={state.tab === tab ? 0 : -1} onClick={() => onTab(tab)}>
+            <button key={tab} role="tab" id={`${local.ids}-tab-${tab}`} aria-controls={`${local.ids}-body`} data-tab={tab} className={`panel-tab ${state.tab === tab ? "on" : ""}`} aria-selected={state.tab === tab} aria-label={label} title={label} tabIndex={state.tab === tab ? 0 : -1} onClick={() => onTab(tab)}>
               <Icon name={TAB_ICON[tab]} size={14} />
-              <span>{t(`panel.tab.${tab}`)}</span>
+              <span>{label}</span>
               {n > 0 && <span className={`count ${tab === "questions" ? "attn" : ""}`}>{n}</span>}
               {marks?.[tab] && <span className={`tab-mark ${marks[tab]}`} aria-hidden="true" />}
             </button>

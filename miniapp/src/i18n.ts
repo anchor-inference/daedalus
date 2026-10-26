@@ -4702,6 +4702,8 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "settings.limits.daily": { en: "daily cap: ${n} — set in the environment, enforced by the supervisor", ru: "потолок в день: ${n} — задан в окружении, следит супервизор" },
   "settings.limits.iterations": { en: "Max iterations per run", ru: "Максимум итераций за запуск" },
   "settings.limits.iterations.sub": { en: "0 = no cap.", ru: "0 — без лимита." },
+  "settings.limits.subagents": { en: "Subagents at once", ru: "Субагентов одновременно" },
+  "settings.limits.subagents.sub": { en: "How many subagents one session may run at the same time, 1 to 32. Applies to the next one started.", ru: "Сколько субагентов одна сессия может держать запущенными одновременно, от 1 до 32. Действует со следующего запуска." },
   "settings.limits.perrun": { en: "Spend cap per run", ru: "Потолок трат за запуск" },
   "settings.limits.perrun.sub": { en: "0 = no cap. A capped hosted call needs a known price and provider input ceiling before it starts.", ru: "0 — без лимита. Для запуска облачного вызова с лимитом нужны известный тариф и предел входных токенов у провайдера." },
   "settings.limits.total": { en: "Total spend cap", ru: "Общий потолок трат" },

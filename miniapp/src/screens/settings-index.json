@@ -513,6 +513,12 @@
       "synonyms": ["iterations", "steps", "max steps", "turn limit", "loop limit", "итерации", "шаги", "лимит шагов"]
     },
     {
+      "section": "limits", "anchor": "subagents.max_active", "config": "subagents.max_active",
+      "title": { "en": "Subagents at once", "ru": "Субагентов одновременно" },
+      "about": { "en": "How many subagents one session may run at the same time, from 1 to 32; the next SubAgent call uses the new value.", "ru": "Сколько субагентов одна сессия может держать запущенными одновременно, от 1 до 32; следующий вызов SubAgent берёт новое значение." },
+      "synonyms": ["subagents", "subagent limit", "parallel agents", "concurrency", "max active", "helpers", "субагенты", "лимит субагентов", "параллельные агенты"]
+    },
+    {
       "section": "limits", "anchor": "limits.usd_per_run", "config": "limits.usd_per_run",
       "title": { "en": "Spend cap per run", "ru": "Потолок трат за запуск" },
       "about": { "en": "The most one run may spend in USD; 0 means no cap.", "ru": "Сколько USD может потратить один запуск; 0 — без лимита." },
