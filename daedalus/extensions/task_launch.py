@@ -431,7 +431,38 @@ class TaskLaunchEffect:
                 async with self.app.db.transaction() as conn:
                     await withdraw_in(conn, claim.payload["attempt_id"])
             await self._report_wait(claim, before["error"] if before is not None else None, outcome.error)
+            if _wait_reason(outcome.error)[0] == "behind":
+                # Offered alone, a launch waits behind only the more urgent one it was given, which
+                # is still excluded from this sweep; a wake starts a new one, which claims it first.
+                self.app.extensions["effects"].notify()
         return outcome
+
+    async def _more_urgent_waiting(self, claim: Claim, project_id: str) -> str:
+        """The title of a launch of the same project that ranks before this one and was last held
+        back for a project slot, or "".
+
+        The dispatcher claims a project's launches most urgent first and leaves out, until the next
+        wake, the ones it deferred during its sweep. That wake comes from the bus, after the status
+        change that freed a slot has been committed. On a loaded machine the sweep went on in
+        between, found the slot free while the urgent launch was still left out, and started a less
+        urgent one in its place. A launch that ranks before this one and is still pending can only
+        be one the sweep left out, so this one gives it the slot.
+        """
+        rows = await self.app.db.fetchall(
+            "SELECT e.id,e.created_at,e.error,t.priority,t.title FROM effect_outbox e JOIN board_tasks t"
+            " ON t.id = json_extract(e.payload_json,'$.control.task_id')"
+            " WHERE e.kind = 'task.launch' AND t.project_id = ? AND (e.state = 'pending' OR e.id = ?)",
+            (project_id, claim.id),
+        )
+        mine = next((row for row in rows if row["id"] == claim.id), None)
+        if mine is None:
+            return ""
+        rank = (mine["priority"], mine["created_at"], mine["id"])
+        # Only a wait for a project slot: one that waits for its member, its dependencies or the
+        # host would not take the slot, and yielding to it would only start another sweep.
+        ahead = [row for row in rows if row["id"] != claim.id and (row["priority"], row["created_at"], row["id"]) < rank
+                 and _wait_reason(row["error"])[0] == "project"]
+        return min(ahead, key=lambda row: (row["priority"], row["created_at"], row["id"]))["title"] if ahead else ""
 
     async def _report_wait(self, claim: Claim, previous: str | None, current: str | None) -> None:
         """Say once on the card, and to whoever assigned it, that the start waits for a place or for
@@ -636,7 +667,8 @@ class TaskLaunchEffect:
                       resources=claim.payload.get("resources"),
                       fallback_decision_id=claim.payload.get("fallback_decision_id"),
                       attempt_id=claim.payload["attempt_id"],
-                      role_class="reviewer" if member.role.strip().lower() == "reviewer" else "worker")
+                      role_class="reviewer" if member.role.strip().lower() == "reviewer" else "worker",
+                      ahead=await self._more_urgent_waiting(claim, project.id))
         bound = launch_attempt.set(claim.payload["attempt_id"])
         try:
             admission = await team.queue.offer(entry)
