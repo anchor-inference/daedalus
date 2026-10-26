@@ -191,6 +191,12 @@ class ApplyBody(BaseModel):
     text: str | None = None
 
 
+class TidyBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dry_run: bool = True
+
+
 class DecideBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -380,6 +386,17 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         if blocked:
             raise HTTPException(409, {"paused": "memory is paused", "off": "learning from chats is off", "no_budget": "the daily budget is 0"}.get(blocked, blocked))
         return {"started": await learning.reread()}
+
+    @api.post("/api/memory/tidy")
+    async def memory_tidy(body: TidyBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """The one-off tidy-up: merge reworded notes, fold archived notes into their live twins, delete
+        legacy test notes, close duplicate held suggestions and bring back what the archive alone
+        holds. ``dry_run`` answers with what it would do (and the test notes it would delete); the
+        real run is one change the history can undo. Refused while a pass is reading chats."""
+        found = await synthesizer(app).tidy(dry_run=body.dry_run)
+        if found is None:
+            raise HTTPException(409, "a memory pass is reading chats; try again when it is done")
+        return found
 
     @api.get("/api/memory/status")
     async def memory_status(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

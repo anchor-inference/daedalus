@@ -5029,6 +5029,7 @@ class SessionManager:
             block = await memory_render.render_for(
                 self.memory_entries, project_id=self.memory_placement(state).project_id,
                 budget=memory_render.budget_for(await self.session_window(state)),
+                hint=await self._memory_hint(state), snapshot=snapshot,
             )
             history = await working()
             keys = {self.sessions.transcript_key(m) for m in history}
@@ -5044,6 +5045,23 @@ class SessionManager:
         except Exception:  # noqa: BLE001 — a turn starts without memory rather than not at all
             logger.exception("the memory block for session %s could not be rendered", state.session.id)
             return memory_render.Turn("", None)
+
+    async def _memory_hint(self, state: SessionState) -> str:
+        """What the chat is about, for choosing which notes of a big entry it is shown: its title and
+        the operator's first message, read from the transcript (which a compaction leaves whole)."""
+        row = await self.db.fetchone(
+            "SELECT message FROM transcript WHERE session_id = ? AND json_extract(message, '$.role') = 'user'"
+            " AND json_extract(message, '$.metadata.\"daedalus.origin\"') = 'operator' ORDER BY seq LIMIT 1",
+            (state.session.id,),
+        )
+        first = ""
+        if row is not None:
+            try:
+                blocks = json.loads(row["message"]).get("content_blocks") or []
+            except ValueError:
+                blocks = []
+            first = "".join(str(b.get("text") or "") for b in blocks if isinstance(b, dict) and b.get("kind") == "text")
+        return f"{state.session.title or ''}\n{prompts.without_host_notes(first)}"[:2000]
 
     async def _keep_memory_snapshot(self, state: SessionState, turn: memory_render.Turn, key: str) -> None:
         """Record what the opening message ``key`` told the model of memory, so the next run knows."""

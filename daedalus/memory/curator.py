@@ -39,6 +39,7 @@ from daedalus.memory.entries import (
     MemoryEntries,
     Target,
     entry_of,
+    is_archived,
     is_locked,
 )
 from daedalus.memory.taxonomy import classify, normalise_topics, record_topics, sensitive_subjects
@@ -139,7 +140,10 @@ def _broadest_then_newest(records: Sequence[MemoryRecord]) -> MemoryRecord:
 
 
 def find(records: Sequence[MemoryRecord], vectors: dict[str, list[float]] | None = None) -> list[Finding]:
-    """Every pair worth a word, best first, each record in at most one finding."""
+    """Every pair worth a word, best first, each record in at most one finding.
+
+    Two archived notes are never a pair: neither is shown or injected, and on the live memory 22 of the
+    57 pairs the pass was about to file were such, asking the operator to tidy what nobody reads."""
     pool = sorted(records, key=lambda r: r.updated_at, reverse=True)[:MAX_RECORDS_COMPARED]
     tokens = {r.id: words_of(r.text) for r in pool}
     candidates: list[Finding] = []
@@ -147,7 +151,7 @@ def find(records: Sequence[MemoryRecord], vectors: dict[str, list[float]] | None
         ta = tokens[a.id]
         for b in pool[i + 1:]:
             tb = tokens[b.id]
-            if not ta or not tb:
+            if not ta or not tb or (is_archived(a) and is_archived(b)):
                 continue
             same_bucket = a.scope is b.scope and a.scope_key == b.scope_key
             lexical = _jaccard(ta, tb)
@@ -642,6 +646,21 @@ class MemoryCurator:
                 f"UPDATE memory_suggestions SET status = 'withdrawn', decided_at = ? WHERE tenant_id = ? AND status = 'open' AND id IN ({','.join('?' * len(withdrawn))})",
                 (now, self.tenant, *withdrawn),
             )
+        # Held suggestions a change closed because it wrote what they proposed (a pass, the tidy-up):
+        # undone, they wait for the operator's word again.
+        closed = [int(i) for i in extra.get("closed", [])]
+        if closed:
+            await self.db.execute(
+                f"UPDATE memory_suggestions SET status = 'open', decided_at = NULL WHERE tenant_id = ? AND status = 'withdrawn' AND id IN ({','.join('?' * len(closed))})",
+                (self.tenant, *closed),
+            )
+        # A confirmation dates a source row anew; undone, the row keeps the date it had, so the note
+        # ranks for archiving as it did before.
+        for row in extra.get("refreshed", []):
+            await self.db.execute(
+                "UPDATE memory_sources SET at = ? WHERE tenant_id = ? AND record_id = ? AND origin = ? AND session_id = ? AND from_seq = ?",
+                (row["at"], self.tenant, row["record_id"], row["origin"], row.get("session_id") or "", int(row.get("from_seq") or 0)),
+            )
         decided = [int(i) for i in extra.get("decided", [])]
         if decided:
             await self.db.execute(
@@ -875,7 +894,7 @@ class MemoryCurator:
                 (status, at, self.tenant, *ids),
             )
 
-    def _state(self) -> str:
+    def state(self) -> str:
         """What the records are now, in one hash: the pass skips a memory that has not changed."""
         records = self.memory.records(self.tenant)
         return hashlib.sha1("|".join(sorted(f"{r.id}:{r.version}" for r in records)).encode()).hexdigest()
@@ -883,7 +902,7 @@ class MemoryCurator:
     async def consolidate(self, *, force: bool = False) -> dict[str, int]:
         """One pass: apply what is sure (when allowed), file the rest as suggestions."""
         config = self.config()
-        state = self._state()
+        state = self.state()
         if not force and await self.db.kv_get(f"memory_consolidated:{self.tenant}", "") == state:
             return {"merged": 0, "suggested": 0}
         records = self.memory.records(self.tenant)
@@ -894,11 +913,15 @@ class MemoryCurator:
             except Exception:  # noqa: BLE001 — without vectors the comparison is lexical, as it is when the index is off
                 logger.warning("memory embeddings failed; comparing words only", exc_info=True)
         findings = find(records, vectors)
-        known = {row["fingerprint"] for row in await self.db.fetchall("SELECT fingerprint FROM memory_suggestions WHERE tenant_id = ?", (self.tenant,))}
+        known = {row["fingerprint"]: (row["id"], row["status"]) for row in await self.db.fetchall("SELECT id, fingerprint, status FROM memory_suggestions WHERE tenant_id = ?", (self.tenant,))}
         merged = suggested = 0
         for finding in findings:
             fingerprint = _fingerprint(finding.kind, finding.records)
-            if fingerprint in known:
+            filed = known.get(fingerprint)
+            # A finding filed before is passed over, except one still open that has since become sure:
+            # the live memory kept three exact copies apart because their fingerprints were filed when
+            # the copies sat in different scopes, and a filed fingerprint was never looked at again.
+            if filed is not None and not (filed[1] == "open" and finding.sure and config.auto_merge):
                 continue
             if finding.sure and config.auto_merge:
                 async with self.lock:
@@ -906,6 +929,8 @@ class MemoryCurator:
                         await self._merge([r.id for r in finding.records], actor="auto", action="merge" if finding.kind == "duplicate" else "replace", keep_id=finding.keep.id, text=finding.text, summary=finding.reason)
                     except KeyError:
                         continue  # forgotten meanwhile: nothing left to merge
+                if filed is not None:
+                    await self._close([int(filed[0])], "applied", datetime.now(UTC).isoformat())
                 merged += 1
                 continue
             if suggested >= MAX_NEW_SUGGESTIONS:
@@ -917,7 +942,7 @@ class MemoryCurator:
                  round(finding.score, 4), finding.reason, datetime.now(UTC).isoformat()),
             )
             suggested += 1
-        await self.db.kv_set(f"memory_consolidated:{self.tenant}", self._state())
+        await self.db.kv_set(f"memory_consolidated:{self.tenant}", self.state())
         if merged or suggested:
             logger.info("memory consolidation: %d merged, %d suggested", merged, suggested)
         if suggested and self.notify is not None:

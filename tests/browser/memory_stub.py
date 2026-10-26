@@ -56,6 +56,8 @@ class MemoryStub:
                        "model": "cheap.model", "model_reason": "", "model_missing": "", "blocked": "", "running": False, "report": None, "failing_chats": 0, **(status or {})}
         self.learn_runs = 0
         self.reread_runs = 0
+        self.tidy_runs: list[bool] = []
+        """The ``dry_run`` flag of every tidy-up asked for, in order."""
         self.imported: list[dict[str, Any]] = []
         for record in self.records:
             record.setdefault("locked", False)
@@ -184,6 +186,32 @@ class MemoryStub:
             "categories": {c: sum(1 for r in self.records if r["category"] == c) for c in CATEGORIES},
             "suggestions": sum(1 for s in self.suggestions if s.get("status", "open") == "open"),
         }
+
+    def _tidy(self, dry_run: bool) -> dict[str, Any]:
+        """The tidy-up as the stub does it: a note saying what an earlier one of its entry says (case
+        aside) merges into it, and a planted test note ("the secret word is …") goes; the real run is
+        one history entry whose undo puts them back."""
+        self.tidy_runs.append(dry_run)
+        seen: dict[tuple[str, str], str] = {}
+        twins: list[dict[str, Any]] = []
+        probes: list[dict[str, Any]] = []
+        for record in self.records:
+            if record["text"].lower().startswith("the secret word is"):
+                probes.append(record)
+                continue
+            key = (str(record.get("entry")), " ".join(record["text"].lower().split()))
+            if key in seen:
+                twins.append(record)
+            else:
+                seen[key] = record["id"]
+        found = {"dry_run": dry_run, "merged": len(twins), "merge_groups": len(twins), "folded": 0, "probes": len(probes), "closed": 0, "restored": 0, "emptied_entries": 0,
+                 "probe_list": [{"id": r["id"], "entry": "", "text": r["text"]} for r in probes], "history_id": None}
+        if not dry_run and (twins or probes):
+            gone = {r["id"] for r in twins + probes}
+            before = [r for r in self.records if r["id"] in gone]
+            self.records = [r for r in self.records if r["id"] not in gone]
+            found["history_id"] = self._journal_full("tidy", before, [])
+        return found
 
     def _journal(self, action: str, before: list[dict[str, Any]], after: list[dict[str, Any]]) -> int:
         entry = {"id": len(self.history) + 1, "at": datetime.now(UTC).isoformat(), "actor": "operator", "action": action, "summary": "", "undone_at": None,
@@ -332,6 +360,8 @@ class MemoryStub:
             self.status["report"] = {"at": now, "trigger": "manual", "model": "cheap.model", "chats": 2, "parts": 2, "calls": 2, "cost_usd": 0.0, "added": 3, "merged": 1,
                                      "updated": 1, "retired": 0, "new_entries": 1, "summaries": 1, "held": 1, "dropped": {"sensitive": 1}, "stopped": ""}
             return 200, {"started": True}
+        if path == "/api/memory/tidy" and method == "POST":
+            return 200, self._tidy(bool(body.get("dry_run", True)))
         if path == "/api/memory/entries" and method == "GET":
             return 200, self.entry_listing()
         if path == "/api/memory/entries" and method == "POST":

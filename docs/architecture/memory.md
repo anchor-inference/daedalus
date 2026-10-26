@@ -100,6 +100,7 @@ opens the entry; in Telegram the answer gets one line saying the same.
 | Daily budget for learning | `memory.synthesis_usd_per_day` | What memory's model calls may spend in a day (UTC); a free model is not stopped by it; 0 = no background pass |
 | Learning from chats | — | When the last pass ran, what it added, updated, confirmed, archived and held back, today's spend, chats it could not read; **Update now** reads every chat with something unread |
 | Read every chat again | — | Every chat's watermark goes back to the start and the pass reads them all, to learn what an earlier pass dropped; what memory holds is confirmed rather than written twice, and tombstoned notes stay away |
+| Tidy memory now | — | A dry run first says what it would do: merge notes that say the same thing in other words, fold archived notes into their live twins, delete the notes early tests of memory left (listed by their words), close repeated held suggestions and bring back archived notes that now fit; your yes runs it as one change you can undo |
 | Include sensitive topics | `memory.sensitive_allowed` | Off, nothing on health, finances, intimate life, identity documents or precise location is kept; turning a subject off counts what memory holds on it and offers to remove it |
 | Reset memory | — | Deletes every entry, record, source, tombstone and the history; asks for the word typed out |
 
@@ -138,16 +139,35 @@ an area, write an entry's summary. Code decides what happens to each:
 - a bullet naming an identifier you never wrote (usually the agent's own choice of a port, a default
   or a library) is held as a suggestion, not written;
 - a change to a bullet you wrote or edited (locked) becomes a suggestion; the pass never makes it;
-- a fact memory already holds gains the chat as a second source instead of a second bullet;
-- an entry keeps at most 20 preferences, 12 profile notes, 20 notes per topic and 30 per area (60
-  entries in all). A new note past the cap archives the least valuable unlocked note — the one
-  confirmed longest ago, the fewest sources among equals; never a locked one or yours — and when every
-  note is locked, the new one is held for your word instead. Archived notes are not handed to the
-  agent but `Recall` still finds them.
+- a fact memory already holds — in other words, in the other language, archived, or waiting as a
+  held suggestion — gains the chat as one more source instead of a second bullet (see below); an
+  archived one comes back, a restatement with a changed value (said after every chat that taught the
+  note) or a detail more replaces its words, and a held one is not filed again;
+- an entry keeps at most 30 preferences, 12 profile notes, 20 notes per topic and 60 per area (60
+  entries in all), and one chat adds at most half an entry's cap. An entry at its cap is first
+  rewritten by one model call into fewer, denser notes — paraphrases merged with their sources, your
+  own and locked notes left as they are, task state archived — and only then does a new note archive
+  the least valuable unlocked note: the one the fewest chats confirmed, confirmed longest ago among
+  equals; never a locked one, yours, or one any chat of the current sweep wrote or said again. What
+  still does not fit is held for your word, with the reason that is true ("this chat already added its
+  share", or "the entry is full"). Archived notes are not handed to the agent but `Recall` still finds
+  them.
+
+Whether a new note repeats one memory has is decided in tiers (`daedalus/memory/similarity.py`): the
+same words, or so many word stems in common that no reader would call them two facts, decide alone;
+with the conversation index's embeddings model ready, a close cosine does; otherwise the closest few
+candidates by stems, character trigrams, a shared name, and on your own pages the notes in the other
+language, go to the memory model in one batched yes-or-no call within the daily budget. Without a
+model or past the budget a doubtful pair stays two notes. A confirmation dates the chat's source row
+anew, so a fact several chats state ranks above a one-chat paraphrase.
 
 After the operations, one small follow-up call writes a one-to-two-sentence summary for each topic and
 area the pass touched (unless the model already wrote one, or you wrote the summary yourself). The
-injected block lists every other entry by that summary.
+injected block lists every other entry by that summary. Of a big area the block shows what fits its
+budget, chosen rather than newest-first: notes the chat already holds, notes written since it was
+given the block, notes sharing words with the chat's title and first message, then the notes most
+chats confirmed, then the newest — so a project chat no longer sees only whichever chat the pass read
+last, and the same memory renders to the same bytes for the same chat.
 
 Everything one pass over one chat changed is one history entry, **Learned from “<chat>”**, whose undo
 takes it all back — the notes it archived and the summaries it wrote included — and withdraws the
@@ -198,6 +218,7 @@ because memory is handed to the agent in later chats. One history entry undoes t
 | `GET /api/memory/status` | what the status pill and the settings read: the model and why, the last pass's report |
 | `POST /api/memory/synthesis/run` | read every chat with something unread now (409 while paused, off or without budget) |
 | `POST /api/memory/synthesis/reread` | read every chat again from its start (409 as above) |
+| `POST /api/memory/tidy` | the one-off tidy-up: `dry_run: true` (the default) answers with the counts and the test notes it would delete; `dry_run: false` does it as one undoable change (409 while a pass is reading chats) |
 | `GET /api/memory/suggestions` | what waits: each with its entry, chat, quote and the pass that filed it |
 | `POST /api/memory/suggestions/decide` | `{action: apply \| dismiss, ids}`: a group decided as one undoable change |
 | `POST /api/memory/suggestions/{id}/apply`, `…/dismiss` | one decided; a dismissal answers with its history entry |

@@ -1041,6 +1041,12 @@
       "synonyms": ["re-read chats", "reread", "relearn", "recover notes", "перечитать чаты", "выучить заново"]
     },
     {
+      "section": "memory", "anchor": "memory.tidy_now", "config": null,
+      "title": { "en": "Tidy memory now", "ru": "Прибрать память сейчас" },
+      "about": { "en": "Merges notes that say the same thing in other words, folds archived notes into their live twins, deletes notes early tests left and brings back archived notes that fit; shows what it will do first and can be undone.", "ru": "Объединяет заметки, которые говорят одно и то же разными словами, сворачивает архивные заметки в живых двойников, удаляет заметки ранних тестов и возвращает архивные заметки, которые помещаются; сначала показывает, что сделает, и отменяется." },
+      "synonyms": ["deduplicate memory", "dedupe", "clean up memory", "merge duplicates", "убрать дубли", "почистить память", "объединить дубликаты"]
+    },
+    {
       "section": "memory", "anchor": "memory.sensitive", "config": null,
       "title": { "en": "Include sensitive topics", "ru": "Включать чувствительные темы" },
       "about": { "en": "The master switch over the sensitive subjects; off, nothing on them is kept, and turning a subject off offers to remove what memory holds on it.", "ru": "Главный переключатель чувствительных тем; если выключен, о них ничего не хранится, а выключение темы предлагает удалить то, что о ней уже известно." },

@@ -9,13 +9,20 @@ memory is unchanged, and when it has changed they carry only what changed (:func
 compaction or a revert that takes the message carrying the block out of the working history makes
 the next run carry the whole block again — the history was rewritten by then, so it costs no cache.
 
-What is rendered (:func:`render`): the operator's preferences in full, their profile, the current
-project's area in full, and every other topic and area as one line naming it with its summary, so
-the agent knows what it could read with ``Recall(entries=[...])``. Archived notes are left out: they
-stay searchable through Recall, which is where an entry's overflow goes. The text is data, not instructions: the framing
-says so, each note is flattened to one line, and the markers the host's own readers look for are
-defused, so a note cannot close the turn context early or pose as a summary. The order is stable
-(oldest note first, entries by name), so the same memory renders to the same bytes.
+What is rendered (:func:`render`): the operator's preferences, their profile, the current project's
+area, and every other topic and area as one line naming it with its summary, so the agent knows what
+it could read with ``Recall(entries=[...])``. Archived notes are left out: they stay searchable
+through Recall, which is where an entry's overflow goes. The text is data, not instructions: the
+framing says so, each note is flattened to one line, and the markers the host's own readers look for
+are defused, so a note cannot close the turn context early or pose as a summary.
+
+Which notes of an entry are shown when not all fit is chosen, not taken newest-first: notes a chat
+already holds stay (so a title the chat gained after its first run does not reshuffle the block),
+a note written since the block was pinned comes in, then notes sharing words with the chat's title
+and first message, then the notes most chats confirmed, then the newest. Taking the newest alone
+meant a project chat saw whichever chat the background pass had read last. The shown notes are
+written oldest first and entries by name, so the same memory, chat and snapshot render to the same
+bytes.
 
 The module is pure apart from :func:`render_for`, which reads the entries; the summaries the
 synthesis pass writes for the entries it touched are what the listing lines carry.
@@ -33,6 +40,7 @@ from typing import TYPE_CHECKING, Any
 from protocore.contracts.memory import MemoryRecord
 
 from daedalus.memory.entries import Entry, entry_of, is_archived
+from daedalus.memory.similarity import stems
 
 if TYPE_CHECKING:
     from daedalus.memory.entries import MemoryEntries
@@ -55,7 +63,11 @@ BULLET_MAX_CHARS = 300
 LISTING_SUMMARY_CHARS = 100
 """An entry's summary as its listing line carries it: enough to tell the agent what the entry is
 about and whether to read it, short enough that every entry fits beside the notes."""
-PREFERENCES_MAX = 20
+PREFERENCES_MAX = 30
+PREFERENCES_FLOOR = 20
+"""Preferences kept before anything but the current area's oldest notes is cut: the cap on preferences
+went from 20 to 30, and thirty of the operator's rules in full would leave a project chat almost none
+of its area within the same byte budget."""
 PROFILE_MAX = 12
 AREA_MAX = 20
 AREA_FLOOR = 8
@@ -133,11 +145,48 @@ class _Section:
     round cuts every section in :attr:`trim_order` down to nothing."""
     oldest_first: bool = False
     """Notes are trimmed from the oldest; a listing from its bottom."""
+    rank: list[int] = field(default_factory=list)
+    """For notes: the indices of :attr:`lines` best first; the shown ones are the first :attr:`keep`
+    of them, written in their own order."""
 
 
 def _ordered(records: Iterable[MemoryRecord]) -> list[MemoryRecord]:
     """Notes oldest first: a new note is appended and never reshuffles the rest."""
     return sorted(records, key=lambda r: (r.created_at.isoformat() if r.created_at else "", r.id))
+
+
+@dataclass(frozen=True)
+class Focus:
+    """What decides which notes of an entry a chat is shown when not all fit (see the module's note)."""
+
+    hint: str = ""
+    """The chat's title and first message."""
+    confirmations: Mapping[str, int] = field(default_factory=dict)
+    """How many chats confirmed each record."""
+    held: Collection[str] = frozenset()
+    """Hashes of the lines the chat holds already (its snapshot's)."""
+    pinned_at: str = ""
+    """When the chat's block was pinned: a note written after it comes in."""
+
+
+def _rank(records: Sequence[MemoryRecord], lines: Sequence[Line], focus: Focus) -> list[int]:
+    wanted = stems(focus.hint)
+
+    def key(index: int) -> tuple[int, int, int, str, str]:
+        record = lines_of[index]
+        created = record.created_at.isoformat() if record.created_at else ""
+        new = bool(focus.pinned_at) and created > focus.pinned_at
+        place = 0 if new else 1 if lines[index].hash in focus.held else 2
+        relevance = len(stems(record.text) & wanted) if wanted else 0
+        return (place, -relevance, -int(focus.confirmations.get(record.id, 0)), _negated(created), record.id)
+
+    lines_of = list(records)
+    return sorted(range(len(lines_of)), key=key)
+
+
+def _negated(text: str) -> str:
+    """A string that sorts in the opposite order, for "newest first" inside an ascending key."""
+    return "".join(chr(0x10FFFF - ord(c)) for c in text)
 
 
 def _name(entry: Entry) -> str:
@@ -156,14 +205,16 @@ def budget_for(window_tokens: int) -> int:
     return max(0, min(HARD_CAP_CHARS, int(window_tokens * WINDOW_SHARE * CHARS_PER_TOKEN)))
 
 
-def render(entries: Sequence[Entry], records: Mapping[str, Sequence[MemoryRecord]], *, project_id: str = "", budget: int = HARD_CAP_CHARS) -> Block:
+def render(entries: Sequence[Entry], records: Mapping[str, Sequence[MemoryRecord]], *, project_id: str = "", budget: int = HARD_CAP_CHARS, focus: Focus | None = None) -> Block:
     """The memory block for a chat in ``project_id`` (empty: a chat outside projects).
 
     ``records`` maps an entry id to its notes; archived ones are dropped here. Entries with neither
-    notes nor a summary are left out. When the text would pass ``budget``, lines go in this order: the
-    current area's oldest notes down to :data:`AREA_FLOOR`, other areas, topics, the rest of the current
-    area, the profile's oldest — and only then the oldest preferences, which are the operator's own
-    words and are kept whole whenever they alone fit the hard cap."""
+    notes nor a summary are left out. ``focus`` decides which notes of an entry are kept when not all
+    fit; without it the newest are. When the text would pass ``budget``, lines go in this order: the
+    current area's least wanted notes down to :data:`AREA_FLOOR`, the preferences down to
+    :data:`PREFERENCES_FLOOR`, other areas, topics, the rest of the current area, the profile — and only
+    then the rest of the preferences, which are the operator's own words."""
+    focus = focus or Focus()
     records = {key: [r for r in value if not is_archived(r)] for key, value in records.items()}
     live = [e for e in entries if records.get(e.id) or e.summary.strip()]
     you = sorted((e for e in live if e.section == "you"), key=lambda e: ({"preferences": 0, "profile": 1}.get(e.slug, 2), e.slug))
@@ -172,16 +223,19 @@ def render(entries: Sequence[Entry], records: Mapping[str, Sequence[MemoryRecord
     areas = sorted((e for e in live if e.section == "area" and e is not current), key=lambda e: e.slug)
     sections: list[_Section] = []
     for entry in you:
-        cap = PREFERENCES_MAX if entry.slug == "preferences" else PROFILE_MAX
-        notes = [Line(entry.slug, clean(r.text)) for r in _ordered(records.get(entry.id, ()))]
-        title = "Preferences, in their own words" if entry.slug == "preferences" else entry.title
+        preferences = entry.slug == "preferences"
+        cap = PREFERENCES_MAX if preferences else PROFILE_MAX
+        ordered = _ordered(records.get(entry.id, ()))
+        notes = [Line(entry.slug, clean(r.text)) for r in ordered]
+        title = "Preferences, in their own words" if preferences else entry.title
         summary = clean(entry.summary, 150)
         heading = f"{title}" + (f" — {summary}" if summary else "") + ":"
-        sections.append(_Section(heading, notes, cap, trim_order=0 if entry.slug == "preferences" else 1, oldest_first=True))
+        sections.append(_Section(heading, notes, cap, trim_order=0 if preferences else 1, floor=PREFERENCES_FLOOR if preferences else None, oldest_first=True, rank=_rank(ordered, notes, focus)))
     if current is not None:
-        notes = [Line(current.slug, clean(r.text)) for r in _ordered(records.get(current.id, ()))]
+        ordered = _ordered(records.get(current.id, ()))
+        notes = [Line(current.slug, clean(r.text)) for r in ordered]
         summary = clean(current.summary, 150)
-        sections.append(_Section(f"Area {current.slug}, this chat's project" + (f" — {summary}" if summary else "") + ":", notes, AREA_MAX, trim_order=2, oldest_first=True, floor=AREA_FLOOR))
+        sections.append(_Section(f"Area {current.slug}, this chat's project" + (f" — {summary}" if summary else "") + ":", notes, AREA_MAX, trim_order=2, oldest_first=True, floor=AREA_FLOOR, rank=_rank(ordered, notes, focus)))
     if topics:
         sections.append(_Section("Topics:", [Line("topics", _listing_line(e)) for e in topics], len(topics), trim_order=3))
     if areas:
@@ -194,6 +248,9 @@ def render(entries: Sequence[Entry], records: Mapping[str, Sequence[MemoryRecord
         return Block("", (), known, names)
 
     def shown_of(s: _Section) -> list[Line]:
+        if s.rank:
+            chosen = set(s.rank[: s.keep])
+            return [line for i, line in enumerate(s.lines) if i in chosen]
         return s.lines[len(s.lines) - s.keep:] if s.oldest_first else s.lines[: s.keep]
 
     def text_of(dropped: int) -> str:
@@ -208,7 +265,9 @@ def render(entries: Sequence[Entry], records: Mapping[str, Sequence[MemoryRecord
             body.append(f"  ({dropped} more not shown; Recall finds them.)")
         return f"{BLOCK_HEAD} ({FRAMING}):\n" + "\n".join(body)
 
-    preferences = sum(len(line.text) + 5 for s in sections if s.trim_order == 0 for line in shown_of(s))
+    # The preferences the block keeps whatever the budget are the floor's worth of the most wanted:
+    # the rest are cut like any other line when a small window's budget asks for it.
+    preferences = sum(len(s.lines[i].text) + 5 for s in sections if s.trim_order == 0 for i in (s.rank or range(len(s.lines)))[:PREFERENCES_FLOOR])
     limit = min(HARD_CAP_CHARS, max(budget, preferences + 400))
     dropped = 0
     text = text_of(0)
@@ -225,13 +284,20 @@ def render(entries: Sequence[Entry], records: Mapping[str, Sequence[MemoryRecord
     return Block(text, shown, known, names)
 
 
-async def render_for(entries: MemoryEntries, *, project_id: str = "", budget: int = HARD_CAP_CHARS) -> Block:
-    """The block rendered from what memory holds now."""
+async def render_for(entries: MemoryEntries, *, project_id: str = "", budget: int = HARD_CAP_CHARS, hint: str = "", snapshot: Snapshot | None = None) -> Block:
+    """The block rendered from what memory holds now, for a chat whose title and first message are
+    ``hint`` and which was last told ``snapshot``."""
     listed = await entries.list()
     grouped: dict[str, list[MemoryRecord]] = {}
     for record in entries.memory.records(entries.tenant):
         grouped.setdefault(entry_of(record), []).append(record)
-    return render(listed, grouped, project_id=project_id, budget=budget)
+    rows = await entries.db.fetchall(
+        "SELECT record_id, count(DISTINCT CASE WHEN session_id != '' THEN session_id END) + max(session_id = '') AS chats"
+        " FROM memory_sources WHERE tenant_id = ? GROUP BY record_id",
+        (entries.tenant,),
+    )
+    focus = Focus(hint, {str(r["record_id"]): int(r["chats"] or 0) for r in rows}, frozenset(snapshot.lines) if snapshot else frozenset(), snapshot.rendered_at if snapshot else "")
+    return render(listed, grouped, project_id=project_id, budget=budget, focus=focus)
 
 
 def told_lines(texts: Iterable[str]) -> dict[str, str]:
@@ -357,6 +423,7 @@ __all__ = [
     "HARD_CAP_CHARS",
     "SNAPSHOT_KEY",
     "Block",
+    "Focus",
     "Line",
     "Snapshot",
     "Turn",

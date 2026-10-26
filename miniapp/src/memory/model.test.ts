@@ -4,10 +4,10 @@
 // bullet came from, which Remember calls of a turn saved something, and how an import is grouped.
 
 import { beforeEach, describe, expect, it } from "vitest";
-import type { MemoryEntry, MemoryImportItem, MemoryOp, MemoryRecord, MemoryStatus, MemorySuggestion } from "../api";
+import type { MemoryEntry, MemoryImportItem, MemoryOp, MemoryRecord, MemoryStatus, MemorySuggestion, MemoryTidy } from "../api";
 import { setLang } from "../i18n";
 import type { Activity } from "../turns";
-import { chosenOps, diffCounts, diffRows, filterEntries, groupEntries, groupSuggestions, learningLines, sourceLabel, splitArchived, statusPill, suggestionsFor, updatedLabel } from "./model";
+import { chosenOps, diffCounts, diffRows, filterEntries, groupEntries, groupSuggestions, learningLines, sourceLabel, splitArchived, statusPill, suggestionsFor, tidyLines, updatedLabel } from "./model";
 import { savedMemories } from "./savedchip";
 import { byTarget, importable } from "./transfer";
 
@@ -192,5 +192,32 @@ describe("the review of held notes", () => {
   it("names the notes archived to make room in the last pass's counts", () => {
     const report = { at: new Date().toISOString(), trigger: "manual", model: "m", chats: 1, parts: 1, calls: 1, cost_usd: 0, added: 2, merged: 0, updated: 0, retired: 0, new_entries: 0, summaries: 1, held: 0, archived: 3, dropped: {}, stopped: "" };
     expect(learningLines(status({ report })).map((l) => l.text).join("\n")).toContain("3 older notes archived to make room in full entries");
+  });
+
+  it("names the notes a pass folded together and brought back from the archive", () => {
+    const report = { at: new Date().toISOString(), trigger: "manual", model: "m", chats: 1, parts: 1, calls: 1, cost_usd: 0, added: 0, merged: 4, updated: 0, retired: 0, new_entries: 0, summaries: 0, held: 0, consolidated: 5, revived: 1, dropped: {}, stopped: "" };
+    const text = learningLines(status({ report })).map((l) => l.text).join("\n");
+    expect(text).toContain("5 notes folded into others while making room in full entries");
+    expect(text).toContain("1 archived note brought back: a chat said it again");
+  });
+});
+
+describe("the tidy-up", () => {
+  const found = (over: Partial<MemoryTidy> = {}): MemoryTidy => ({ dry_run: true, merged: 0, merge_groups: 0, folded: 0, probes: 0, closed: 0, restored: 0, emptied_entries: 0, probe_list: [], history_id: null, ...over });
+
+  it("says nothing when there is nothing to do", () => {
+    expect(tidyLines(found())).toEqual([]);
+  });
+
+  it("lists each kind of change in both languages", () => {
+    const plan = found({ merged: 2, folded: 1, probes: 3, closed: 5, restored: 21 });
+    expect(tidyLines(plan)).toEqual([
+      "2 reworded notes merged into their twins", "1 archived note folded into a live one", "3 notes left by early tests deleted",
+      "5 repeated suggestions closed", "21 archived notes brought back",
+    ]);
+    setLang("ru");
+    expect(tidyLines(plan)[4]).toBe("21 архивная заметка возвращена");
+    expect(tidyLines(plan)[3]).toBe("5 повторяющихся предложений закрыты");
+    setLang("en");
   });
 });

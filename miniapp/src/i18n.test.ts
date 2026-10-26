@@ -300,7 +300,7 @@ describe("the keys the code asks for", () => {
       // and the operations of a proposed edit by code.
       ["memory.group.", ["you", "projects", "topics", "recent"]],
       ["memory.source.", ["gone", "operator", "import", "migration", "synthesis", "remember", "other"]],
-      ["memory.history.action.", ["merge", "replace", "edit", "recategorise", "topic", "add", "delete", "forget", "delete_entry", "session_deleted", "import", "instruct", "lock", "unlock", "archive", "unarchive", "sensitive", "rescope", "learn", "accept_suggestions", "dismiss_suggestions"]],
+      ["memory.history.action.", ["merge", "replace", "edit", "recategorise", "topic", "add", "delete", "forget", "delete_entry", "session_deleted", "import", "instruct", "lock", "unlock", "archive", "unarchive", "sensitive", "rescope", "learn", "accept_suggestions", "dismiss_suggestions", "tidy"]],
       ["memory.review.by.", ["entry", "pass"]],
       ["memory.instruct.op.", ["add", "remove", "change"]],
     ];
