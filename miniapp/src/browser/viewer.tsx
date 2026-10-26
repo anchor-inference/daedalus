@@ -17,7 +17,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { t } from "../i18n";
 import { Icon } from "../icons";
 import { InputDeduper } from "../terminal/dedupe";
-import { attachBox, clampZoom, dragToWheel, fit, NO_ZOOM, viewToPage, zoomed, type Rect, type Zoom } from "./geometry";
+import { attachBox, clampZoom, dragToWheel, fit, NO_ZOOM, viewOf, viewToPage, zoomed, type PictureQuality, type Rect, type Zoom } from "./geometry";
 import { copyFromPage, pasteText } from "./clipboard";
 import { clipboardChord, ESCAPE_TWICE_MS, isKeyPress, keyInput, modsOf, mouseButton, viewerChord, type ViewerChord } from "./keys";
 import type { LiveSnapshot, LiveView } from "./live";
@@ -43,6 +43,8 @@ export type ViewerProps = {
   /** The agent's name on its cursor. */
   agent: string;
   saving?: boolean;
+  /** The operator's choice between a fluid and a sharp picture. */
+  quality?: PictureQuality;
   onChord?: (chord: ViewerChord) => void;
   /** Two presses of Escape: the keyboard goes back to the app. */
   onRelease?: () => void;
@@ -53,7 +55,7 @@ export type ViewerProps = {
   children?: ReactNode;
 };
 
-export function BrowserViewer({ live, snap, tier, interactive, touch = false, compact = false, agent, saving = false, onChord, onRelease, stageRef, className, style, children }: ViewerProps) {
+export function BrowserViewer({ live, snap, tier, interactive, touch = false, compact = false, agent, saving = false, quality = "auto", onChord, onRelease, stageRef, className, style, children }: ViewerProps) {
   const box = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
@@ -81,14 +83,14 @@ export function BrowserViewer({ live, snap, tier, interactive, touch = false, co
   useEffect(() => {
     if (!live || tier !== "live" || size.w <= 0 || snap.state.kind !== "live") return;
     const timer = window.setTimeout(() => {
-      const want = attachBox(size.w, size.h, window.devicePixelRatio || 1, saving);
-      const key = `${want.max_w}x${want.max_h}`;
+      const want = viewOf(attachBox(size.w, size.h, window.devicePixelRatio || 1, saving, quality));
+      const key = `${want.max_w}x${want.max_h} q${want.quality} f${want.fps} ${want.adaptive}`;
       if (key === asked.current) return;
       asked.current = key;
-      live.view({ max_w: want.max_w, max_h: want.max_h, dpr: want.dpr, ...(want.quality ? { quality: want.quality } : {}) });
+      live.view(want);
     }, RESIZE_SETTLE_MS);
     return () => window.clearTimeout(timer);
-  }, [live, tier, size.w, size.h, saving, snap.state.kind]);
+  }, [live, tier, size.w, size.h, saving, quality, snap.state.kind]);
 
   const base = useMemo<Rect>(() => (meta ? fit(size.w, size.h, meta.w, meta.h) : { x: 0, y: 0, w: 0, h: 0 }), [meta, size.w, size.h]);
   const rect = useMemo(() => zoomed(base, size.w, size.h, zoom), [base, size.w, size.h, zoom]);

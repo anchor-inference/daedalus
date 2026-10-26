@@ -23,13 +23,13 @@ import { SkillEditor } from "./skilleditor";
 import { frameOfRow, ReplayStage } from "./replay";
 import type { LiveSnapshot, LiveView } from "./live";
 import { BrowserLoginCard } from "./login";
-import { actionWords, agentName, domainOf, driveState, isOpenGroup, mergeActions, needsOf, needWords, rowOfEvent, secure, viewGone, type DriveState } from "./model";
+import { actionWords, agentName, domainOf, driveState, isOpenGroup, mergeActions, needsOf, needWords, readPictureQuality, rowOfEvent, secure, storePictureQuality, viewGone, type DriveState } from "./model";
 import type { ActionEvent } from "./protocol";
 import { BrowserViewer, focusViewer } from "./viewer";
 import { PhoneBrowserList, PhoneDrive } from "./phone";
 import { copyFromPage, pasteFromClipboard } from "./clipboard";
 import { Favicon } from "./favicon";
-import { attachBox } from "./geometry";
+import { attachBox, PICTURE_QUALITIES, type PictureQuality } from "./geometry";
 import type { ViewerChord } from "./keys";
 import { SnapshotButton } from "../annotate/Annotate";
 import { liveSnapshot } from "../annotate/source";
@@ -144,6 +144,17 @@ function markFitted(group: string, fitted: boolean): void {
  * found off on a visit to a group this device had fitted), the page goes back to its own size; a size
  * the agent chose itself is never touched.
  */
+/** The live picture's quality, kept on this device: applied to the open view at once (a VIEW), and to
+ *  every view opened later. */
+function usePictureQuality(): [PictureQuality, (q: PictureQuality) => void] {
+  const [quality, setQuality] = useState<PictureQuality>(readPictureQuality);
+  const choose = useCallback((q: PictureQuality) => {
+    storePictureQuality(q);
+    setQuality(q);
+  }, []);
+  return [quality, choose];
+}
+
 function useFitChoice(group: string, enabled: boolean): [boolean, (on: boolean) => void] {
   const [fit, setFit] = useState(readFit);
   useEffect(() => {
@@ -213,10 +224,14 @@ function useFillPage(group: string, stage: { current: HTMLDivElement | null }, e
 export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = false, full = false, onList, switcher }: PanelProps) {
   const saving = useMemo(() => deviceSaving(phone), [phone]);
   const stage = useRef<HTMLDivElement | null>(null);
+  const [quality, setQuality] = usePictureQuality();
+  // Read when the view (re)connects, so a reconnect asks for the quality chosen since.
+  const qualityNow = useRef(quality);
+  qualityNow.current = quality;
   const live = useLiveView(group.id, "live", {
     box: () => {
       const el = stage.current;
-      return attachBox(el?.clientWidth || 800, el?.clientHeight || 500, window.devicePixelRatio || 1, saving);
+      return attachBox(el?.clientWidth || 800, el?.clientHeight || 500, window.devicePixelRatio || 1, saving, qualityNow.current);
     },
   });
   const snap = useLiveSnapshot(live);
@@ -331,6 +346,7 @@ export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = 
         interactive={drive === "you" && !phone}
         agent={agent}
         saving={saving}
+        quality={quality}
         onChord={onChord}
         stageRef={(el) => { stage.current = el; }}
         className="bp-viewer"
@@ -369,7 +385,7 @@ export function BrowserPanel({ group, groups = [group], onGroup, toast, phone = 
       {phone ? (
         <PhoneBar group={group} url={url} tabs={tabs.length} drive={drive} state={snap.state.kind} onList={onList} live={live} toast={toast} />
       ) : (
-        <Toolbar group={group} groups={groups} onGroup={onGroup} live={live} snap={snap} url={url} tabs={tabs} viewing={viewing?.id ?? null} drive={drive} control={control} toast={toast} full={full} fit={fit} onFit={setFit}
+        <Toolbar group={group} groups={groups} onGroup={onGroup} live={live} snap={snap} url={url} tabs={tabs} viewing={viewing?.id ?? null} drive={drive} control={control} toast={toast} full={full} fit={fit} onFit={setFit} quality={quality} onQuality={setQuality}
           recording={recording.recording.frames} frames={frames} onReplay={() => setReplay(frames.length - 1)} recordable={drive === "you" && !steps} />
       )}
       <div className="bp-main">
@@ -548,7 +564,7 @@ function pickCookies(group: string, domain: string, toast: (text: string) => voi
   input.click();
 }
 
-function Toolbar({ group, groups, onGroup, live, snap, url, tabs, viewing, drive, control, toast, full, recording, frames, onReplay, recordable, fit, onFit }: {
+function Toolbar({ group, groups, onGroup, live, snap, url, tabs, viewing, drive, control, toast, full, recording, frames, onReplay, recordable, fit, onFit, quality, onQuality }: {
   group: BrowserGroup;
   groups: BrowserGroup[];
   onGroup?: (id: string) => void;
@@ -569,6 +585,8 @@ function Toolbar({ group, groups, onGroup, live, snap, url, tabs, viewing, drive
   /** The page follows the panel's size (off: it keeps its own, scaled into the panel). */
   fit: boolean;
   onFit: (on: boolean) => void;
+  quality: PictureQuality;
+  onQuality: (q: PictureQuality) => void;
 }) {
   const driving = drive === "you";
   const record = async (on: boolean) => {
@@ -631,6 +649,13 @@ function Toolbar({ group, groups, onGroup, live, snap, url, tabs, viewing, drive
       {recordable && <RecordButton group={group.id} toast={toast} />}
       <SnapshotButton session={group.session_id} toast={toast} capture={() => liveSnapshot(live, url, (where) => t("annotate.page", { where }))} />
       <button type="button" className={`iconbtn small bp-fit ${fit ? "on" : ""}`} aria-pressed={fit} onClick={() => onFit(!fit)} aria-label={t("browser.fit")} title={t(fit ? "browser.fit.on" : "browser.fit.off")} data-fit={fit ? "on" : "off"}><Icon name="expand" size={16} /></button>
+      <OverflowMenu
+        className="bp-quality"
+        label={t("browser.quality", { quality: t(`browser.quality.${quality}`) })}
+        icon="image"
+        small
+        items={PICTURE_QUALITIES.map((q) => ({ label: t(`browser.quality.${q}`), hint: t(`browser.quality.${q}.hint`), checked: q === quality, onSelect: () => onQuality(q) }))}
+      />
       <ControlButton control={control} />
       <OverflowMenu label={t("browser.menu")} small items={items} />
     </div>

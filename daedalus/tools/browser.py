@@ -34,6 +34,7 @@ BROWSER_TOOLS = (
     "BrowserOpen", "BrowserNavigate", "BrowserSnapshot", "BrowserText", "BrowserLook", "BrowserAct",
     "BrowserTabs", "BrowserWait", "BrowserDialog", "BrowserHandoff", "BrowserClose", "BrowserDownload", "BrowserNote",
     "BrowserLogs", "BrowserNetwork", "BrowserInspect", "BrowserCookies", "BrowserLogin", "BrowserReplay", "BrowserAskOperatorChrome",
+    "BrowserEval", "BrowserScripts", "BrowserExtensions",
 )
 READ_ONLY_TOOLS = ("BrowserSnapshot", "BrowserText", "BrowserLook", "BrowserTabs", "BrowserWait", "BrowserLogs", "BrowserNetwork", "BrowserInspect")
 """The tools that only read the page or wait on it: a command-line agent's own permission rules may
@@ -88,6 +89,43 @@ class SessionFiles:
         if not target.is_file():
             raise NotFound(f"no such file: {target}")
         return target.name, await asyncio.to_thread(target.read_bytes)
+
+    async def read_folder(self, path: str, *, max_files: int, max_bytes: int) -> tuple[str, dict[str, bytes]] | None:
+        """The files of a folder of the session's (an extension it builds), or ``None`` when ``path`` is
+        not a folder. Read through the session's filesystem, so a session working on the host hands over
+        the folder there; the folders every project carries and an extension never needs (.git,
+        node_modules, .venv) are left out, as the file search leaves them."""
+        if parse_handle(path) is not None:
+            return None
+        try:
+            target = self.services.resolve(path)
+        except PermissionError as exc:
+            raise Forbidden(str(exc)) from None
+        fs = self.services.fs
+        if not await fs.is_dir(target):
+            return None
+        if self.services.is_protected(target):
+            raise Forbidden(f"{target} is protected and cannot be handed to the browser")
+        names = await fs.find(target, "*", max_files + 1)
+        if len(names) > max_files:
+            raise Forbidden(f"{target} holds more than {max_files} files: name the extension's own folder (the one with manifest.json), or its build output")
+        files: dict[str, bytes] = {}
+        total = 0
+        for rel in names:
+            entry = target / rel
+            if self.services.is_protected(entry):
+                continue
+            try:
+                data = await fs.read_bytes(entry, limit=max_bytes - total)
+            except FileNotFoundError:
+                continue
+            except ValueError:
+                raise Forbidden(f"{target} holds more than {max_bytes >> 20} MiB: name the extension's own folder, or its build output") from None
+            except OSError as exc:
+                raise Forbidden(f"could not read {entry}: {exc}") from None
+            total += len(data)
+            files[rel.replace(os.sep, "/")] = data
+        return target.name, files
 
     async def save(self, name: str, data: bytes, to: str | None) -> str:
         clean = safe_name(name) or "download"
@@ -492,11 +530,12 @@ async def browser_note(context: ToolContext, note: str | None = None, host: str 
         "catch (with where in the code), and what the browser said about it (a script or picture that failed to load, "
         "404s). For a site you build or one that misbehaves, where the page alone does not say what went wrong. "
         "level ('error', 'warning', 'info', 'debug') is the least severe to show; all=true reads everything the tab "
-        "keeps."
+        "keeps. extension='<name or id>' reads the console of an extension of yours (BrowserExtensions) instead: its "
+        "background service worker's logs and errors; its content scripts log into the page's console."
     ),
 )
-async def browser_logs(context: ToolContext, tab: str | None = None, level: str | None = None, all: bool = False) -> ToolResult:  # noqa: A002 — the tool's argument name
-    return await _run(context, "BrowserLogs", {"tab": tab, "level": level, "all": all or None})
+async def browser_logs(context: ToolContext, tab: str | None = None, level: str | None = None, all: bool = False, extension: str | None = None) -> ToolResult:  # noqa: A002 — the tool's argument name
+    return await _run(context, "BrowserLogs", {"tab": tab, "level": level, "all": all or None, "extension": extension})
 
 
 @tool_group("browser")
@@ -612,9 +651,87 @@ async def browser_replay(context: ToolContext, skill: str | None = None, params:
     return await _run(context, "BrowserReplay", {"skill": skill, "params": params, "from_step": from_step})
 
 
+@tool_group("browser")
+@search_hint(
+    "run javascript evaluate js in page console execute script devtools console change page test tweak dom style "
+    "выполнить джаваскрипт js в странице консоль выполни скрипт поменять страницу протестировать изменить стиль дом"
+)
+@tool(
+    name="BrowserEval",
+    description=(
+        "Run your own JavaScript in the page now, in the page's own world (as a developer's console runs it), and get "
+        "the result back: for testing and development — read a value, try a change to the page's look or behaviour "
+        "before building it. code is read as the console reads it: the last statement's value is the answer, a "
+        "top-level await waits. Elements, objects and errors come back as readable JSON (max_chars bounds it), with "
+        "what the console logged meanwhile; timeout_s (default 10, at most 60) stops a script that runs on. The change "
+        "lasts until the page loads again; to run code on every load use BrowserScripts. Your own browser only."
+    ),
+)
+async def browser_eval(context: ToolContext, code: str, tab: str | None = None, max_chars: int | None = None, timeout_s: float | None = None) -> ToolResult:
+    return await _run(context, "BrowserEval", {"code": code, "tab": tab, "max_chars": max_chars, "timeout_s": timeout_s})
+
+
+@tool_group("browser")
+@search_hint(
+    "userscript user script inject javascript css on page load document start tampermonkey greasemonkey override site "
+    "style test change site behaviour inject "
+    "юзерскрипт внедрить скрипт стили при загрузке страницы инжект подменить поведение сайта тампермонки изменить вид сайта"
+)
+@tool(
+    name="BrowserScripts",
+    description=(
+        "Page scripts: your own JavaScript and CSS run at the start of every matching page in your browser, before "
+        "the page's own scripts, as a userscript manager does — for testing a change to a site (its look, a function "
+        "replaced) while you develop it or an extension. action='add' keeps one by name (the same name replaces it): js "
+        "or js_path (a file in your workspace), css or css_path, matches (address globs like 'https://example.com/*' or "
+        "'*://localhost:*/*', or a bare host like 'example.com' for it and its subdomains; none = every page), "
+        "all_frames to run in frames too. It reaches every tab on its next load (BrowserNavigate go='reload') and stays "
+        "in your browser's profile until action='remove' (name, or '*' for all). action='list' (the default) shows "
+        "them and which run on the current page. Your own browser only."
+    ),
+)
+async def browser_scripts(
+    context: ToolContext,
+    action: str = "list",
+    name: str | None = None,
+    js: str | None = None,
+    js_path: str | None = None,
+    css: str | None = None,
+    css_path: str | None = None,
+    matches: list[str] | None = None,
+    all_frames: bool = False,
+) -> ToolResult:
+    return await _run(context, "BrowserScripts", {
+        "action": action, "name": name, "js": js, "js_path": js_path, "css": css, "css_path": css_path, "matches": matches, "all_frames": all_frames or None,
+    })
+
+
+@tool_group("browser")
+@search_hint(
+    "chrome extension install unpacked load extension manifest.json reload extension develop extension test addon "
+    "content script service worker crx "
+    "расширение хрома установить расширение загрузить распакованное перезагрузить расширение разработка расширения аддон плагин браузера"
+)
+@tool(
+    name="BrowserExtensions",
+    description=(
+        "Chrome extensions in your own browser, for developing and testing one: action='install' loads the extension "
+        "at path — its folder in your workspace (the one holding manifest.json, unpacked), or a .zip or .crx of it; "
+        "action='reload' after you edit its files (extension = its name or id, or path) reads them again; "
+        "action='remove' uninstalls it; action='list' (the default) shows id, name, version and whether it runs. "
+        "Installed extensions stay in your browser's profile and load whenever it starts. Content scripts reach pages "
+        "loaded after an install or reload (BrowserNavigate go='reload'); BrowserLogs(extension=…) shows its background "
+        "worker's console. Not in a throwaway browser, not in the operator's Chrome."
+    ),
+)
+async def browser_extensions(context: ToolContext, action: str = "list", path: str | None = None, extension: str | None = None) -> ToolResult:
+    return await _run(context, "BrowserExtensions", {"action": action, "path": path, "extension": extension})
+
+
 TOOLS = [
     browser_open, browser_navigate, browser_snapshot, browser_text, browser_look, browser_act, browser_tabs, browser_wait, browser_dialog, browser_handoff, browser_close,
     browser_download, browser_note, browser_logs, browser_network, browser_inspect, browser_cookies, browser_login, browser_replay, browser_ask_operator_chrome,
+    browser_eval, browser_scripts, browser_extensions,
 ]
 
 __all__ = ["BROWSER_TOOLS", "READ_ONLY_TOOLS", "TOOLS", "SessionFiles"]

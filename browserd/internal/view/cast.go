@@ -14,10 +14,14 @@ import (
 )
 
 // The sizes of the two tiers. A live frame is at most LiveMax; a thumbnail is ThumbMax at ThumbQuality,
-// at most once per ThumbEvery.
+// at most once per ThumbEvery. LiveMax was 1600×1000 once, which on a large window with the page fitted
+// to it scaled every frame down and the viewer up again: text went soft for no reason the operator
+// could change. A frame is never larger than the page's own pixels anyway; how many of them a client
+// takes is its own choice (its box, its quality preset).
 const (
-	LiveMaxW       = 1600
-	LiveMaxH       = 1000
+	LiveMaxW       = 4096
+	LiveMaxH       = 4096
+	MaxQuality     = 95 // what a client may ask: past it JPEG grows much faster than it sharpens
 	ThumbMaxW      = 320
 	ThumbMaxH      = 200
 	ThumbQuality   = 45
@@ -89,6 +93,10 @@ type cast struct {
 	lastAck                time.Time
 	ackTimer               *time.Timer
 
+	// fps is the pace Chromium is acknowledged at while a live client watches: the fastest any of them
+	// asked for, at most the daemon's cap.
+	fps int
+
 	// Starting and stopping are CDP calls made in order, one at a time, outside the lock.
 	ops chan struct{}
 }
@@ -102,9 +110,10 @@ func newCast(h *Hub, t *browser.Tab) *cast {
 // wanted is what the screencast should be for the clients now: the largest live client's box at the
 // best quality asked for, else a thumbnail, else nothing.
 func (c *cast) wantedLocked() (w, h, q int, live, some bool) {
+	c.fps = 0
 	for cl := range c.clients {
 		cl.mu.Lock()
-		tier, mw, mh, cq := cl.tier, cl.maxW, cl.maxH, cl.quality
+		tier, mw, mh, cq, fps := cl.tier, cl.maxW, cl.maxH, cl.quality, cl.fpsLocked()
 		cl.mu.Unlock()
 		if tier == "" {
 			continue
@@ -116,6 +125,7 @@ func (c *cast) wantedLocked() (w, h, q int, live, some bool) {
 		live = true
 		w, h = max(w, min(mw, LiveMaxW)), max(h, min(mh, LiveMaxH))
 		q = max(q, cq)
+		c.fps = max(c.fps, fps)
 	}
 	if some && !live {
 		return ThumbMaxW, ThumbMaxH, ThumbQuality, false, true
@@ -226,7 +236,11 @@ func (c *cast) scheduleAck(session int) {
 	// and a thumbnail every two seconds), not the two frames in flight this was written for.
 	interval := ThumbEvery
 	if c.liveNow {
-		interval = time.Second / time.Duration(c.hub.fps)
+		fps := c.fps
+		if fps <= 0 {
+			fps = c.hub.fps
+		}
+		interval = time.Second / time.Duration(fps)
 	}
 	now := time.Now()
 	at := c.lastAck.Add(interval)

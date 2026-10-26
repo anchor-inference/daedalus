@@ -94,6 +94,11 @@ class StaffFiles:
             raise Forbidden(str(exc)) from None
         return posixpath.basename(target), data
 
+    async def read_folder(self, path: str, *, max_files: int, max_bytes: int) -> tuple[str, dict[str, bytes]] | None:
+        """A member's folders are not handed over: the team's handoff reads one file at a time, so an
+        extension reaches the browser from a member's workspace as a .zip of its folder."""
+        return None
+
     async def save(self, name: str, data: bytes, to: str | None) -> str:
         project = await self.team.project(self.live.staff.project_id)
         try:

@@ -2,6 +2,7 @@
 // in words, when the corner preview shows and where it sits. Nothing here touches the page or the
 // network, so each rule is a test rather than a screenshot.
 
+import { PICTURE_QUALITIES, type PictureQuality } from "./geometry";
 import type { BrowserActionRow, BrowserGroup, BrowserStep } from "../api";
 import { t } from "../i18n";
 import type { ActionEvent, ViewControl } from "./protocol";
@@ -133,6 +134,12 @@ export function actionWords(row: Pick<BrowserActionRow, "kind" | "element" | "na
     case "cookies_import":
     case "cookies_clear":
       return { key: `browser.act.${row.kind}`, vars: { where: what } };
+    case "inject_eval":
+    case "inject_script":
+    case "inject_unscript":
+    case "inject_extension":
+    case "inject_unextension":
+      return { key: `browser.act.${row.kind}`, vars: { what } };
     case "login":
     case "login_declined":
       return { key: `browser.act.${row.kind}`, vars: { where: what } };
@@ -299,6 +306,22 @@ export function savingData(nav: { connection?: { saveData?: boolean; effectiveTy
   if (telegramPhone) return true;
   const c = nav?.connection;
   return !!c && (c.saveData === true || c.effectiveType === "2g" || c.effectiveType === "slow-2g" || c.effectiveType === "3g");
+}
+
+const QUALITY_KEY = "daedalus.browser.quality";
+
+/** The picture quality this device chose for the live view; auto until the operator picks one. */
+export function readPictureQuality(): PictureQuality {
+  const v = safeStorage()?.getItem(QUALITY_KEY) ?? "";
+  return (PICTURE_QUALITIES as readonly string[]).includes(v) ? (v as PictureQuality) : "auto";
+}
+
+export function storePictureQuality(q: PictureQuality): void {
+  try {
+    safeStorage()?.setItem(QUALITY_KEY, q);
+  } catch {
+    /* nothing to remember it in: the choice holds for this visit */
+  }
 }
 
 function safeStorage(): Storage | null {

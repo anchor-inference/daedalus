@@ -63,6 +63,9 @@ func fixture(t *testing.T) *httptest.Server {
 		})
 	}
 	page("/still", "Still", "<h1>Still</h1><p>"+strings.Repeat("Nothing moves on this page. ", 50)+"</p>")
+	// A page of text with one thing moving: what the quality presets are measured on (view_test.go).
+	page("/reading", "Reading", `<div style="position:fixed;left:0;top:0;width:60px;height:60px;background:#c33;animation:m 1s linear infinite alternate"></div>`+
+		`<style>@keyframes m{to{transform:translateX(1100px)}}</style><div style="padding:80px 40px;font:14px serif">`+strings.Repeat("<p>The quick brown fox jumps over the lazy dog; small print the operator wants to read. 0123456789</p>", 40)+`</div>`)
 	page("/anim", "Anim", `<div style="position:fixed;inset:0;background:conic-gradient(red,yellow,lime,aqua,blue,magenta,red);animation:s 2s linear infinite"></div><style>@keyframes s{to{transform:rotate(360deg)}}</style>`)
 	page("/button", "Button", `<button id="b" style="position:absolute;left:100px;top:100px;width:200px;height:60px" onclick="document.title='clicked '+event.isTrusted">Press</button>`)
 	// What a hand does on the way to a press, counted (human_test.go): the moves, the wheel, each key.

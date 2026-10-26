@@ -26,6 +26,10 @@ import (
 var Flags = []string{
 	// The only control channel: no debugging port is ever open.
 	"--remote-debugging-pipe",
+	// Lets that pipe load and remove unpacked extensions (Extensions.loadUnpacked), which is how the
+	// agent installs the extension it builds. Nothing a page can see: the switch opens a DevTools
+	// domain, and only to the pipe, which only the daemon holds.
+	"--enable-unsafe-extension-debugging",
 	// No welcome page and no question about the default browser, either of which would take the
 	// first tab or a strip of every window.
 	"--no-first-run",

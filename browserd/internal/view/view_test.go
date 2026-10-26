@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ascorblack/daedalus/browserd/internal/browser"
 	"github.com/ascorblack/daedalus/browserd/internal/wire"
 )
 
@@ -59,7 +60,7 @@ func pic(t *testing.T, n uint64, w, h int) *picture {
 func client(tier string, fps int) (*Client, *sink) {
 	s := &sink{}
 	h := &Hub{fps: fps}
-	return &Client{id: "c1", hub: h, conn: s, tier: tier, quality: 60, tab: nil, quit: make(chan struct{})}, s
+	return &Client{id: "c1", hub: h, conn: s, tier: tier, quality: 60, adaptive: true, tab: nil, quit: make(chan struct{})}, s
 }
 
 func TestNewestWinsAndOneFrameInFlight(t *testing.T) {
@@ -142,6 +143,83 @@ func TestDegradedClientGetsHalfSize(t *testing.T) {
 	last := got[len(got)-1]
 	if last.Meta.W != 320 || last.Meta.H != 200 {
 		t.Fatalf("a slow client's frame: %+v", last.Meta)
+	}
+}
+
+// slowAcks makes the client's link look slow for five frames: each acknowledged a second late.
+func slowAcks(t *testing.T, cl *Client, from int) {
+	for i := from; i < from+5; i++ {
+		cl.offer(pic(t, uint64(i), 640, 400))
+		cl.mu.Lock()
+		cl.sentAt = time.Now().Add(-time.Second)
+		cl.mu.Unlock()
+		cl.ack(cl.inFlight)
+	}
+}
+
+// TestADegradedPictureIsSharpenedOnceThePageIsStill holds the fix for a picture that stayed half size
+// at quality 40: a still page sends no more frames, so the last degraded one is sent again whole.
+func TestADegradedPictureIsSharpenedOnceThePageIsStill(t *testing.T) {
+	cl, s := client("live", 1000)
+	cl.tab = testTab()
+	cl.hub.casts = map[*browser.Tab]*cast{}
+	c := &cast{hub: cl.hub, tab: cl.tab, clients: map[*Client]bool{cl: true}}
+	cl.hub.casts[cl.tab] = c
+	slowAcks(t, cl, 1)
+	last := pic(t, 6, 640, 400)
+	c.newest = last
+	cl.offer(last)
+	got := s.got()
+	if got[len(got)-1].Meta.W != 320 {
+		t.Fatalf("not degraded: %+v", got[len(got)-1].Meta)
+	}
+	cl.ack(cl.inFlight)
+	time.Sleep(sharpenAfter + 200*time.Millisecond)
+	got = s.got()
+	whole := got[len(got)-1]
+	if whole.Meta.W != 640 || whole.Meta.H != 400 || whole.Meta.TS != 6 || whole.FrameNo != got[len(got)-2].FrameNo+1 {
+		t.Fatalf("the still page's picture was not sent whole: %+v", whole.Meta)
+	}
+	// A page still moving is not interrupted: a newer picture first, no sharpening of the old one.
+	cl.ack(cl.inFlight)
+	n := len(s.got())
+	cl.offer(pic(t, 7, 640, 400))
+	cl.ack(cl.inFlight)
+	cl.offer(pic(t, 8, 640, 400))
+	if len(s.got()) != n+2 {
+		t.Fatalf("frames while moving: %d after %d", len(s.got()), n)
+	}
+}
+
+func TestASharpClientIsNeverDegradedAndKeepsItsOwnPace(t *testing.T) {
+	cl, s := client("live", 1000)
+	cl.tab = testTab()
+	cl.adaptive = false
+	slowAcks(t, cl, 1)
+	cl.offer(pic(t, 6, 640, 400))
+	time.Sleep(20 * time.Millisecond)
+	got := s.got()
+	if last := got[len(got)-1]; last.Meta.W != 640 || last.Meta.TS != 6 {
+		t.Fatalf("a client that asked for no adaptation was degraded: %+v", last.Meta)
+	}
+	// Its own pace, below the daemon's cap.
+	cl.mu.Lock()
+	cl.fps = 5
+	cl.mu.Unlock()
+	cl.ack(cl.inFlight)
+	next := pic(t, 7, 640, 400) // made first: encoding it under the race detector takes a while
+	cl.mu.Lock()
+	cl.sentAt = time.Now()
+	cl.mu.Unlock()
+	n := len(s.got())
+	cl.offer(next)
+	time.Sleep(100 * time.Millisecond)
+	if len(s.got()) != n {
+		t.Fatal("a frame within the client's own pace of 5 a second")
+	}
+	time.Sleep(200 * time.Millisecond)
+	if len(s.got()) != n+1 {
+		t.Fatal("the paced frame did not follow")
 	}
 }
 

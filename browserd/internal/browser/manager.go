@@ -106,6 +106,9 @@ type Manager struct {
 	// The virtual display headed browsers draw on when the daemon has none; started with the first
 	// such browser, and again if it ever exits.
 	display *display.Display
+
+	// The sessions of the agent's extensions' workers, followed for their console (workers.go).
+	extWorkers map[string]*extWorker
 }
 
 type goneGroup struct {
@@ -660,6 +663,7 @@ func (m *Manager) watch(b *Browser) {
 	for _, g := range b.groupList() {
 		g.closeControl()
 	}
+	m.forgetWorkersOf(b)
 	b.removeTemp()
 	m.closeWall(b)
 	sort.Strings(groups)
@@ -861,6 +865,9 @@ func (m *Manager) onEvent(b *Browser, e cdp.Event) {
 		}
 		return
 	}
+	if m.workerEvent(e) {
+		return
+	}
 	m.mu.Lock()
 	t := m.bySession[e.Session]
 	tab := t != nil
@@ -951,20 +958,30 @@ func (m *Manager) attachFrame(b *Browser, t *Tab, parent string, raw json.RawMes
 	// A frame of another site is a document of its own, and the page's script does not reach it. The
 	// frame's session takes the script only with its Page domain on: without Page.enable the call
 	// succeeds and the frame's document never runs it (measured on 155).
-	if script := b.screenScript(ctx); script != "" {
+	script := b.screenScript(ctx)
+	if script != "" {
 		calls = append(calls, call{"Page.enable", nil},
 			call{"Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": script}})
 	}
-	calls = append(calls, call{"Runtime.runIfWaitingForDebugger", nil})
 	var replies []<-chan error
 	for _, call := range calls {
 		replies = append(replies, b.conn.Send(ctx, p.SessionID, call.method, call.params))
 	}
+	// The agent's page scripts that run in every frame, before the frame runs, as the page's get them.
+	var pending []pendingScript
+	if b.hasFrameScripts() {
+		if script == "" {
+			replies = append(replies, b.conn.Send(ctx, p.SessionID, "Page.enable", nil))
+		}
+		pending = m.sendScripts(ctx, b, p.SessionID, true)
+	}
+	replies = append(replies, b.conn.Send(ctx, p.SessionID, "Runtime.runIfWaitingForDebugger", nil))
 	for _, r := range replies {
 		if err := <-r; err != nil {
 			m.log.Debug("frame setup", "tab", t.ID, "error", err.Error())
 		}
 	}
+	m.recordScripts(t, p.SessionID, pending)
 }
 
 // detachFrame forgets a frame's session when Chromium lets it go (the frame navigated to another
@@ -980,6 +997,7 @@ func (m *Manager) detachFrame(t *Tab, raw json.RawMessage) {
 	delete(m.frameTabs, p.SessionID)
 	m.mu.Unlock()
 	t.dropFrame(p.SessionID)
+	t.dropScriptSession(p.SessionID)
 }
 
 type targetInfo struct {
@@ -1006,7 +1024,11 @@ func (m *Manager) browserEvent(b *Browser, e cdp.Event) {
 			return
 		}
 		if p.TargetInfo.Type != "page" {
-			// Workers and the like run as they are; the daemon follows pages only.
+			if m.workerAttached(b, e.Params) {
+				return
+			}
+			// Workers and the like run as they are; the daemon follows pages only, and the workers of
+			// the agent's own extensions.
 			go func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
@@ -1037,6 +1059,7 @@ func (m *Manager) browserEvent(b *Browser, e cdp.Event) {
 		if json.Unmarshal(e.Params, &p) != nil {
 			return
 		}
+		m.forgetWorker(p.SessionID, p.TargetID)
 		m.mu.Lock()
 		t := m.byTarget[p.TargetID]
 		if t == nil && p.SessionID != "" {

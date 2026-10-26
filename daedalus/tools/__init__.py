@@ -125,7 +125,9 @@ TOOL_GROUPS: dict[str, ToolGroupSpec] = {
         "recorded, replayed step by step (BrowserReplay), hand-over to the "
         "operator for a CAPTCHA or a payment, and a developer's view of a site "
         "you build or debug: its console errors (BrowserLogs), its requests and API responses (BrowserNetwork), why "
-        "an element is hidden (BrowserInspect). Not a Puppeteer or Playwright MCP server, not a headless browser in "
+        "an element is hidden (BrowserInspect), your own JavaScript run in the page (BrowserEval) or on every load of "
+        "a site as a userscript (BrowserScripts), and a Chrome extension you develop installed and reloaded "
+        "(BrowserExtensions). Not a Puppeteer or Playwright MCP server, not a headless browser in "
         "the shell; WebFetch for plain pages",
         "lazy",
     ),

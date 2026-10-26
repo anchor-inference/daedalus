@@ -55,6 +55,11 @@ type Attach struct {
 	MaxH    int     `json:"max_h"`
 	DPR     float64 `json:"dpr,omitempty"`
 	Quality int     `json:"quality,omitempty"`
+	// FPS is the most frames a second the client wants (at most the daemon's cap); 0 is the cap.
+	FPS int `json:"fps,omitempty"`
+	// Adaptive false keeps every frame at the asked quality and size however slow the link: the
+	// operator chose a sharp picture over a fluid one.
+	Adaptive *bool `json:"adaptive,omitempty"`
 }
 
 type View struct {
@@ -64,6 +69,9 @@ type View struct {
 	MaxH    int     `json:"max_h,omitempty"`
 	DPR     float64 `json:"dpr,omitempty"`
 	Quality int     `json:"quality,omitempty"`
+	FPS     int     `json:"fps,omitempty"`
+	// Adaptive is Attach's.
+	Adaptive *bool `json:"adaptive,omitempty"`
 	// Hidden says the client's page went out of view (true) or came back (false): a hidden client
 	// is sent no frames, its mailbox keeping the newest for when it is back.
 	Hidden *bool `json:"hidden,omitempty"`

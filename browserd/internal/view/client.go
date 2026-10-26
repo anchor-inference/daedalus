@@ -46,6 +46,16 @@ type Client struct {
 	degraded bool
 	hidden   bool
 	warnedAt time.Time
+
+	// fps is the client's own pace, 0 for the daemon's cap; adaptive false never degrades it.
+	fps      int
+	adaptive bool
+	// sharpen re-sends the newest picture whole once the page has gone still after a degraded frame:
+	// a page that stops changing stopped sending frames, and the last one stayed half size at
+	// quality 40 on screen for as long as the operator looked — the picture "compressed a hundred
+	// times" that a slow moment left behind.
+	sharpen      *time.Timer
+	degradedSent uint64
 }
 
 // ID is the client's id, which control.set names.
@@ -77,7 +87,7 @@ func (cl *Client) Frame(payload []byte) {
 			cl.event(map[string]any{"type": "error", "code": "bad_frame", "message": err.Error()})
 			return
 		}
-		cl.attach(wire.View{Tier: a.Tier, Tab: a.Tab, MaxW: a.MaxW, MaxH: a.MaxH, DPR: a.DPR, Quality: a.Quality}, true)
+		cl.attach(wire.View{Tier: a.Tier, Tab: a.Tab, MaxW: a.MaxW, MaxH: a.MaxH, DPR: a.DPR, Quality: a.Quality, FPS: a.FPS, Adaptive: a.Adaptive}, true)
 	case wire.TypeView:
 		v, err := wire.DecodeView(f)
 		if err != nil {
@@ -113,6 +123,9 @@ func (cl *Client) end(closeChannel bool) {
 	t := cl.tab
 	if cl.timer != nil {
 		cl.timer.Stop()
+	}
+	if cl.sharpen != nil {
+		cl.sharpen.Stop()
 	}
 	cl.mu.Unlock()
 	close(cl.quit)
@@ -162,8 +175,12 @@ func (cl *Client) attach(v wire.View, full bool) {
 			return
 		}
 	}
-	if v.Quality != 0 && (v.Quality < 30 || v.Quality > 90) {
-		cl.forceEvent(map[string]any{"type": "error", "code": "bad_frame", "message": "quality must be 30-90"})
+	if v.Quality != 0 && (v.Quality < 30 || v.Quality > MaxQuality) {
+		cl.forceEvent(map[string]any{"type": "error", "code": "bad_frame", "message": "quality must be 30-95"})
+		return
+	}
+	if v.FPS < 0 || v.FPS > 60 {
+		cl.forceEvent(map[string]any{"type": "error", "code": "bad_frame", "message": "fps must be 1-60"})
 		return
 	}
 	var tab *browser.Tab
@@ -202,6 +219,17 @@ func (cl *Client) attach(v wire.View, full bool) {
 		if cl.tier == "thumb" {
 			cl.quality = ThumbQuality
 		}
+	}
+	if full || v.FPS != 0 {
+		cl.fps = v.FPS
+	}
+	if v.Adaptive != nil {
+		cl.adaptive = *v.Adaptive
+	} else if full {
+		cl.adaptive = true
+	}
+	if !cl.adaptive {
+		cl.degraded, cl.slow, cl.fast = false, 0, 0
 	}
 	old := cl.tab
 	if tab == nil && (full || old == nil) {
@@ -330,7 +358,15 @@ func (cl *Client) gap() time.Duration {
 	if cl.tier == "thumb" {
 		return ThumbEvery
 	}
-	return time.Second / time.Duration(cl.hub.fps)
+	return time.Second / time.Duration(cl.fpsLocked())
+}
+
+// fpsLocked is the client's pace: its own, within the daemon's cap.
+func (cl *Client) fpsLocked() int {
+	if cl.fps > 0 && cl.fps < cl.hub.fps {
+		return cl.fps
+	}
+	return cl.hub.fps
 }
 
 func (cl *Client) trySend() {
@@ -367,6 +403,11 @@ func (cl *Client) trySend() {
 	cl.inFlight = n
 	cl.sentAt = time.Now()
 	tier, degraded, tabID := cl.tier, cl.degraded, cl.tab.ID
+	if degraded && tier == "live" {
+		cl.degradedSent = p.n
+	} else {
+		cl.degradedSent = 0
+	}
 	cl.mu.Unlock()
 	img, w, h := p.jpeg, p.meta.W, p.meta.H
 	switch {
@@ -396,7 +437,10 @@ func (cl *Client) ack(n uint32) {
 	}
 	rtt := time.Since(cl.sentAt)
 	cl.inFlight = 0
-	if cl.tier == "live" {
+	if cl.degradedSent != 0 {
+		cl.armSharpenLocked(cl.degradedSent)
+	}
+	if cl.tier == "live" && cl.adaptive {
 		switch {
 		case rtt > 400*time.Millisecond:
 			cl.slow++
@@ -472,4 +516,63 @@ func (cl *Client) run() {
 			return
 		}
 	}
+}
+
+// sharpenAfter is how long a page has to stay still after a degraded frame before that frame is
+// sent again whole: long enough that a page still moving sends its next frame first.
+const sharpenAfter = 700 * time.Millisecond
+
+// armSharpenLocked waits for the page to go still after the degraded picture n, then sends n whole.
+func (cl *Client) armSharpenLocked(n uint64) {
+	if cl.sharpen != nil {
+		cl.sharpen.Stop()
+	}
+	cl.sharpen = time.AfterFunc(sharpenAfter, func() { cl.sendWhole(n) })
+}
+
+// sendWhole sends picture n again at the client's own size and quality, if nothing newer came and
+// nothing is in flight; the frame carries a number of its own, as every frame does.
+func (cl *Client) sendWhole(n uint64) {
+	cl.mu.Lock()
+	cl.sharpen = nil
+	tab := cl.tab
+	if cl.ended || cl.hidden || cl.inFlight != 0 || cl.pending != nil || tab == nil || cl.lastPic != n {
+		cl.mu.Unlock()
+		return
+	}
+	cl.mu.Unlock()
+	cl.hub.mu.Lock()
+	c := cl.hub.casts[tab]
+	cl.hub.mu.Unlock()
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	p := c.newest
+	c.mu.Unlock()
+	if p == nil || p.n != n {
+		return
+	}
+	cl.mu.Lock()
+	if cl.inFlight != 0 || cl.lastPic != n || cl.ended || cl.tab != tab {
+		cl.mu.Unlock()
+		return
+	}
+	cl.frameNo++
+	if cl.frameNo == 0 {
+		cl.frameNo = 1
+	}
+	no := cl.frameNo
+	cl.inFlight = no
+	cl.sentAt = time.Now()
+	cl.degradedSent = 0
+	tabID := cl.tab.ID
+	cl.mu.Unlock()
+	meta := p.meta
+	meta.Tab, meta.Tier = tabID, "live"
+	b, err := wire.EncodeFrame(no, meta, p.jpeg)
+	if err != nil {
+		return
+	}
+	cl.send(b)
 }

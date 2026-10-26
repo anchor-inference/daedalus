@@ -909,3 +909,14 @@ def test_text_on_a_click_is_refused_rather_than_ignored() -> None:
     Step(action="click", element="the item", ref="e50", text="  ").check()
     Step(action="type", element="the box", ref="e1", text="").check()
     Step(action="scroll", element="the page", text="Total").check()
+
+
+async def test_the_agents_own_code_is_never_run_in_the_operators_chrome(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await rig.session()
+    await rig.switch(sid)
+    await rig.call(sid, "BrowserOpen")
+    for tool, arguments in (("BrowserEval", {"code": "document.cookie"}), ("BrowserScripts", {"action": "add", "name": "x", "js": "1"}),
+                            ("BrowserExtensions", {"action": "install", "path": "ext"}), ("BrowserLogs", {"extension": "x"})):
+        text, failed = await rig.call(sid, tool, **arguments)
+        assert failed and "read-only" in text, (tool, text)
+    assert not [m for m, _ in chrome.calls if m.startswith(("page.evaluate", "script.", "extension."))]

@@ -42,6 +42,8 @@ func (l *launch) start(ctx context.Context, profile string) (*Browser, error) {
 		dir = filepath.Join(m.deps.Config.StateDir, "ephemeral", b.ID)
 		b.tempDir = dir
 	}
+	b.profileDir = dir
+	b.loadScripts()
 	b.downloadDir = filepath.Join(m.deps.Config.StateDir, "downloads", b.ID)
 	if err := os.MkdirAll(b.downloadDir, 0o700); err != nil {
 		return nil, err
@@ -114,6 +116,10 @@ func (l *launch) start(ctx context.Context, profile string) (*Browser, error) {
 			b.removeTemp()
 			return nil, errWith(wire.CodeUnsupported, map[string]any{"reason": err.Error()}, "Chromium refused %s: %v", call.method, err)
 		}
+	}
+	if !b.Ephemeral {
+		// Before the first group's first page, so it opens with the extensions it had.
+		m.restoreExtensions(startCtx, b)
 	}
 	// How long the first answer took is logged so a slow start shows in the log before it ever runs
 	// out of budget.

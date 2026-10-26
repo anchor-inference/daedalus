@@ -70,11 +70,18 @@ describe("the pinch", () => {
 describe("the box a view asks for", () => {
   it("is the element in device pixels, capped at what the daemon sends", () => {
     expect(attachBox(700, 450, 2, false)).toEqual({ max_w: 1400, max_h: 900, dpr: 2 });
-    expect(attachBox(1400, 900, 2, false)).toEqual({ max_w: 1600, max_h: 1000, dpr: 2 });
+    expect(attachBox(1400, 900, 2, false)).toEqual({ max_w: 2560, max_h: 1600, dpr: 2 });
     expect(attachBox(10, 10, 1, false)).toEqual({ max_w: 64, max_h: 64, dpr: 1 });
   });
 
   it("is smaller and coarser when saving data", () => {
     expect(attachBox(390, 700, 3, true)).toEqual({ max_w: 640, max_h: 400, dpr: 3, quality: 45 });
+  });
+
+  it("follows the operator's preset, which data saving does not override", () => {
+    expect(attachBox(1400, 900, 2, false, "sharp")).toEqual({ max_w: 2800, max_h: 1800, dpr: 2, quality: 92, fps: 4, adaptive: false });
+    expect(attachBox(1400, 900, 2, true, "sharp")).toEqual({ max_w: 2800, max_h: 1800, dpr: 2, quality: 92, fps: 4, adaptive: false });
+    expect(attachBox(1400, 900, 2, false, "smooth")).toEqual({ max_w: 1280, max_h: 800, dpr: 2, quality: 50, fps: 15 });
+    expect(attachBox(1000, 600, 1, false, "balanced")).toEqual({ max_w: 1000, max_h: 600, dpr: 1, quality: 75, fps: 8 });
   });
 });

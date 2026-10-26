@@ -59,7 +59,7 @@ export type LiveOptions = {
   tier: Tier;
   tab?: string;
   readOnly?: boolean;
-  box: () => { max_w: number; max_h: number; dpr?: number; quality?: number };
+  box: () => { max_w: number; max_h: number; dpr?: number; quality?: number; fps?: number; adaptive?: boolean };
   deps?: ViewDeps;
 };
 

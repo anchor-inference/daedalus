@@ -11,7 +11,7 @@ import (
 
 func TestArgs(t *testing.T) {
 	a := Args(Options{ProfileDir: "/p", Proxy: "127.0.0.1:9", Args: []string{"--lang=ru"}})
-	for _, want := range []string{"--headless=new", "--remote-debugging-pipe", "--password-store=basic",
+	for _, want := range []string{"--headless=new", "--remote-debugging-pipe", "--enable-unsafe-extension-debugging", "--password-store=basic",
 		"--disable-field-trial-config", "--webrtc-ip-handling-policy=disable_non_proxied_udp", "--user-data-dir=/p",
 		"--proxy-server=http://127.0.0.1:9", "--proxy-bypass-list=<-loopback>", "--lang=ru",
 		// The rest of the wall: no name resolved by Chromium itself, the proxy's address excepted.

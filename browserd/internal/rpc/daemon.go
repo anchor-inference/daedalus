@@ -100,6 +100,7 @@ func (d *Daemon) Register(s *server.Server) {
 	d.registerWorkflow(s)
 	d.registerCookies(s)
 	d.registerRelay(s)
+	d.registerInject(s)
 }
 
 // decode reads params strictly: an unknown field is an error, so a misspelt parameter is never
