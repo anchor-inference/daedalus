@@ -115,15 +115,31 @@ _SENSITIVE_CUES: dict[str, re.Pattern[str]] = {
         r"(?<!tech )(?<!technical )\bdebts?\b",
         r"\b(зарплат\w*|доход\w*|банковск\w* (сч[её]т\w*|карт\w*)|номер карты|сч[её]т в банке|ипотек\w*|налогов\w* деклараци\w*)",
         r"(?<!технический )\b(долг|долга|долги|долгов)\b",
+        # How a bank account and a salary are said in Russian prose, which the phrases above missed on
+        # real chats: "a personal account at Kaspi", "an account in a Russian bank", "paid N in hand".
+        r"\b(личн\w*|рубл[её]в\w*|валютн\w*|расч[её]тн\w*|текущ\w*) сч[её]т\w*",
+        r"\bсч[её]т\w* (в|во) (банк\w*|рк|рф|[А-ЯЁ][\w-]*банк\w*)",
+        r"\bоткры\w* сч[её]т\w*",
+        r"\b(оклад\w*|на руки (получа\w*|выход\w*|остаётся|остается))",
+        r"\d\s*(тыс\w*|к|₽|руб\w*|₸|тенге)?\.?\s*на руки\b",
     ),
     "intimate": _any(
         r"\b(sex|sexual\w*|intimate|intimacy|erotic\w*|porn\w*|gay|lesbian|bisexual|libido|girlfriend|boyfriend)\b",
         r"\b(секс\w*|интим\w*|эроти\w*|порн\w*|любовни\w*)",
+        # Adult content as it is usually named rather than described: none of the words above occurred
+        # in the notes a model filed about it.
+        r"\b(nsfw|nud(e|es|ity)|naked|hentai|onlyfans|fetish\w*|xxx|rule ?34)\b|\b18\+\s*(content|videos?|контент\w*|видео)",
+        r"\badult[- ](content|sites?|videos?|material|art|games?|text)\b",
+        r"\b(хентай\w*|фетиш\w*|обнаж[её]нн\w*|откровенн\w* (фото|видео|контент|сцен)\w*)",
+        r"\bвзросл\w* (контент\w*|сайт\w*|видео|материал\w*|текст\w*|сцен\w*|арт\w*|игр\w*)",
     ),
     "identity_documents": _any(
         r"\b(passports?|ssn|social security( number)?|driver'?s licen[cs]e|national id|id card|residence permit)\b",
         r"\b\d{3}-\d{2}-\d{4}\b",
         r"\b(паспорт\w*|загранпаспорт\w*|снилс\w*|вид на жительство|водительск\w* (прав\w*|удостоверени\w*))",
+        # A residence permit by its Russian abbreviations and a residence registration: every model
+        # filed a permit into the profile when only "вид на жительство" was listed.
+        r"\b(рвп|внж|пмж|прописк\w*|разрешени\w* на (временное )?проживани\w*)\b",
     ),
     "precise_location": _any(
         r"-?\b\d{1,2}\.\d{4,}\s*,\s*-?\d{1,3}\.\d{4,}\b",

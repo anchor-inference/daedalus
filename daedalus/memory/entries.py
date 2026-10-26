@@ -412,6 +412,9 @@ class MemoryEntries:
         session_id: str = "",
         run_id: str = "",
         entry: Entry | None = None,
+        from_seq: int = 0,
+        to_seq: int = 0,
+        quote: str = "",
         **write: Any,
     ) -> MemoryWriteResult:
         """Write a record into memory filed in its entry, with a source row saying who taught it.
@@ -419,11 +422,12 @@ class MemoryEntries:
         The one door every new record comes through — the agent's Remember and the operator's own
         note — so a record is never kept without an entry and a source. ``entry`` files it in that
         entry instead of the one :func:`target_for` picks (the caller has matched the scope to it).
-        Keyword arguments past the named ones go to the store's write (similarity threshold,
-        per-scope cap)."""
+        ``from_seq``/``to_seq`` and ``quote`` are the evidence in the chat: the transcript range the
+        note rests on and, for a preference, the operator's own words. Keyword arguments past the
+        named ones go to the store's write (similarity threshold, per-scope cap)."""
         entry = entry or await self.target(kind, scope, scope_key, text, record_topics(metadata))
         result = await self.memory.write(self.tenant, scope, scope_key, text, kind=kind, metadata={**metadata, ENTRY_KEY: entry.id}, **write)
-        await self.add_source(result.record.id, origin, session_id=session_id, run_id=run_id)
+        await self.add_source(result.record.id, origin, session_id=session_id, run_id=run_id, from_seq=from_seq, to_seq=to_seq, quote=quote)
         await self.touched(entry_of(result.record) or entry.id)
         return result
 

@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { MemoryEntry, MemoryImportItem, MemoryOp, MemoryRecord, MemoryStatus } from "../api";
 import { setLang } from "../i18n";
 import type { Activity } from "../turns";
-import { chosenOps, diffCounts, diffRows, filterEntries, groupEntries, sourceLabel, splitArchived, statusPill, updatedLabel } from "./model";
+import { chosenOps, diffCounts, diffRows, filterEntries, groupEntries, learningLines, sourceLabel, splitArchived, statusPill, updatedLabel } from "./model";
 import { savedMemories } from "./savedchip";
 import { byTarget, importable } from "./transfer";
 
@@ -98,7 +98,29 @@ describe("dates and the status pill", () => {
     expect(statusPill(status({ budget_usd: 0, spent_today_usd: 3 }))?.tone).toBe("on");
     expect(statusPill(status({ learning: 2 }))).toEqual({ tone: "busy", text: "Learning from chats (2)…" });
     expect(statusPill(status({ last_synthesis_at: new Date(now - 12 * 60000).toISOString() }), now)?.text).toBe("Updated 12 minutes ago");
-    expect(statusPill(status())?.text).toBe("On · learns from what you tell it");
+    expect(statusPill(status())?.text).toBe("On · learns from your chats");
+  });
+});
+
+describe("learning from chats", () => {
+  const report = { at: "", trigger: "manual", model: "m", chats: 3, parts: 4, calls: 4, cost_usd: 0.01, added: 5, merged: 2, updated: 1, retired: 0, new_entries: 1, summaries: 0, held: 2, dropped: { sensitive: 1, no_quote: 2 }, stopped: "" };
+  it("names the model, what the last pass did and today's spend", () => {
+    const now = Date.parse("2026-10-26T12:00:00Z");
+    const lines = learningLines(status({ model: "cheap.model", spent_today_usd: 0.004, report: { ...report, at: new Date(now - 5 * 60000).toISOString() } }), now).map((l) => l.text);
+    expect(lines).toEqual([
+      "Runs on cheap.model",
+      "Last pass 5 minutes ago · chats read: 3",
+      "Added 5 · updated 1 · confirmed 2 · waiting for you 2 · refused 3",
+      "Spent today: $0.0040 of $0.50",
+    ]);
+  });
+  it("says why it does not run and when the model is a stand-in", () => {
+    const lines = learningLines(status({ blocked: "paused", model: "x", model_reason: "chosen_missing", model_missing: "gone", report: null }));
+    expect(lines[0]).toEqual({ tone: "warn", text: "Paused: nothing is learned until you resume memory." });
+    expect(lines.map((l) => l.text)).toContain("The chosen model gone is no longer configured; x runs instead.");
+    expect(lines.map((l) => l.text)).toContain("No pass has run yet.");
+    expect(learningLines(status({ model_reason: "none", report: { ...report, stopped: "budget" } })).map((l) => l.tone)).toContain("warn");
+    expect(learningLines(undefined)).toEqual([]);
   });
 });
 

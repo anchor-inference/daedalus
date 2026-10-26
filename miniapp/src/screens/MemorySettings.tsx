@@ -1,14 +1,15 @@
 // Settings → Memory: whether memory learns from chats, whether the agent may search them, the model
-// and the daily budget of the background pass, pause and reset; the sensitive subjects behind their
+// and the daily budget of the background pass, what its last pass did and "update now", pause and reset; the sensitive subjects behind their
 // master switch; the categorising model and the tidying; import and export. The list itself lives on
 // the Memory screen.
 
-import { useState } from "react";
-import { api, SENSITIVE_SUBJECTS, Settings } from "../api";
+import { useRef, useState } from "react";
+import { api, MemoryStatus, SENSITIVE_SUBJECTS, Settings } from "../api";
 import { plural, t } from "../i18n";
+import { learningLines } from "../memory/model";
 import { ImportSheet, downloadExport } from "../memory/transfer";
 import { NumRow, Row } from "../settingsrow";
-import { invalidate } from "../store";
+import { invalidate, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
 import { Sheet, toast } from "../ui/dialogs";
 import { Dropdown, Switch } from "../ui/index";
@@ -17,7 +18,7 @@ import { undoToast } from "../memory/undo";
 type MemorySection = NonNullable<Settings["memory"]>;
 
 const DEFAULTS: Required<MemorySection> = {
-  extract_after_run: false, extract_min_messages: 12, extract_preset: "", classify_preset: "", sensitive_allowed: [], consolidate: true, auto_merge: true,
+  classify_preset: "", sensitive_allowed: [], consolidate: true, auto_merge: true,
   search_chats: true, generate: true, synthesis_preset: "", synthesis_usd_per_day: 0.5, paused: false,
 };
 
@@ -82,6 +83,7 @@ export function MemorySettings({ s, save }: { s: Settings; save: (patch: Partial
         <NumRow id="memory-budget" setting="memory.synthesis_usd_per_day" title={t("settings.memory.budget")} desc={t("settings.memory.budget.sub")} unit="$"
           value={memory.synthesis_usd_per_day} min={0} step="0.05" onSave={(synthesis_usd_per_day) => put({ synthesis_usd_per_day })} />
       </div>
+      <LearningCard />
       <div className="card memory-settings" data-setting="memory.sensitive_allowed">
         <Row title={t("settings.memory.sensitive.master")} desc={t("settings.memory.sensitive.master.sub")} data-setting="memory.sensitive">
           <Switch checked={sensitiveOn} label={t("settings.memory.sensitive.master")} onChange={(on) => { setRevealed(on); if (!on) void disallow(memory.sensitive_allowed, []); }} />
@@ -132,6 +134,41 @@ export function MemorySettings({ s, save }: { s: Settings; save: (patch: Partial
       {importing && <ImportSheet onClose={() => setImporting(false)} onDone={() => { setImporting(false); invalidate("/api/memory"); }} />}
       {resetting && <ResetSheet onClose={() => setResetting(false)} />}
     </>
+  );
+}
+
+/** What the background pass did last and on which model, today's spend, and "update now". The status
+ *  is asked for again every few seconds while a pass is reading, so the counts arrive without a reload. */
+function LearningCard() {
+  // Polled while a pass reads, and for a while after "update now" (the pass may not have started yet).
+  const [watchUntil, setWatchUntil] = useState(0);
+  const wasRunning = useRef(false);
+  const { data, refresh } = useQuery<MemoryStatus>("/api/memory/status", { pollMs: wasRunning.current || Date.now() < watchUntil ? 4000 : 0 });
+  const [busy, setBusy] = useState(false);
+  const running = !!data && (!!data.running || data.learning > 0);
+  wasRunning.current = running;
+  async function learnNow() {
+    setBusy(true);
+    try {
+      const res = await api.post<{ started: boolean }>("/api/memory/synthesis/run", {});
+      toast(t(res.started ? "settings.memory.learning.started" : "settings.memory.learning.already"));
+      setWatchUntil(Date.now() + 30_000);
+      refresh();
+    } catch (e) {
+      toast(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="card memory-learning" data-setting="memory.learning">
+      <Row title={t("settings.memory.learning")} desc={t("settings.memory.learning.sub")}>
+        <button className="btn small" data-action="memory-learn-now" disabled={busy || running || !!data?.blocked} onClick={() => void learnNow()}>{t("settings.memory.learning.now")}</button>
+      </Row>
+      <ul className="memory-learning-lines">
+        {learningLines(data).map((line, i) => <li key={i} data-tone={line.tone || undefined}>{line.text}</li>)}
+      </ul>
+    </div>
   );
 }
 

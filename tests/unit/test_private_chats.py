@@ -160,17 +160,8 @@ async def test_a_private_chat_is_told_so_and_handed_no_project_facts(settings: S
 
 async def test_a_private_chat_leaves_no_learning_record(settings: Settings, db: Database) -> None:
     manager = await _manager(settings, db)
-    config = RuntimeConfig()
-    config.memory.extract_after_run = True
-    app = SimpleNamespace(settings=settings, config=config, db=db, manager=manager, front=None, extensions={})
+    app = SimpleNamespace(settings=settings, config=RuntimeConfig(), db=db, manager=manager, front=None, extensions={})
     learning = Learning(app)  # type: ignore[arg-type]
-    extracted: list[str] = []
-
-    async def extract(session_id: str, run_id: str) -> int:
-        extracted.append(session_id)
-        return 0
-
-    learning.extract_memories = extract  # type: ignore[method-assign]
     try:
         for title, metadata in (("secret", {"private": True}), ("plain", {})):
             state = await manager.create_session(title, metadata=metadata)
@@ -178,7 +169,6 @@ async def test_a_private_chat_leaves_no_learning_record(settings: Settings, db: 
             await learning.on_run_finished(state.session.id, f"run-{title}", "completed")
         rows = await db.fetchall("SELECT ask FROM learning_records")
         assert [r["ask"] for r in rows] == ["ask from plain"]
-        assert len(extracted) == 1 and not manager.is_private(extracted[0])
     finally:
         await manager.close()
 

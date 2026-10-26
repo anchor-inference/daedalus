@@ -1058,8 +1058,18 @@ export const SENSITIVE_SUBJECTS = ["health", "finances", "intimate", "identity_d
 export type MemoryRecord = { id: string; scope: string; scope_key: string; category: string; topics: string[]; text: string; salience: number; version: number; created_at: string | null; updated_at: string | null; last_accessed_at: string | null; entry?: string | null; locked?: boolean; archived?: boolean };
 /** A titled page of memory (claude.ai's "You", "Topics", "Areas"): its records are its bullets. */
 export type MemoryEntry = { id: string; section: "you" | "topic" | "area"; slug: string; title: string; summary: string; project_id: string | null; project_name: string | null; aliases: string[]; sensitive: string[]; edited_by_operator: boolean; version: number; created_at: string; updated_at: string; count?: number };
-/** What the Memory screen's pill reads; the background pass fills ``last_synthesis_at`` and ``learning``. */
-export type MemoryStatus = { generate: boolean; paused: boolean; search_chats: boolean; synthesis_preset: string; budget_usd: number; spent_today_usd: number; last_synthesis_at: string | null; learning: number };
+/** What the last background pass over the chats did, as the settings show it. */
+export type MemorySynthesisReport = {
+  at: string; trigger: "idle" | "nightly" | "manual" | string; model: string; chats: number; parts: number; calls: number; cost_usd: number; seconds?: number;
+  added: number; merged: number; updated: number; retired: number; new_entries: number; summaries: number; held: number;
+  dropped: Record<string, number>; stopped: "" | "budget" | "paused" | "off" | "no_budget" | "no_model" | string;
+};
+/** What the Memory screen's pill and Settings → Memory read; the background pass fills ``last_synthesis_at``, ``learning`` and ``report``. */
+export type MemoryStatus = {
+  generate: boolean; paused: boolean; search_chats: boolean; synthesis_preset: string; budget_usd: number; spent_today_usd: number; last_synthesis_at: string | null; learning: number;
+  model?: string; model_reason?: "" | "chosen_missing" | "fallback" | "substitute" | "none"; model_missing?: string;
+  blocked?: "" | "paused" | "off" | "no_budget"; running?: boolean; report?: MemorySynthesisReport | null; failing_chats?: number;
+};
 export type MemoryEntryListing = { entries: MemoryEntry[]; sections: Record<string, number>; records: number; unfiled: number; status: MemoryStatus };
 /** Who taught a bullet: a chat (while it exists it has a title), the operator, an import, the migration. */
 export type MemorySource = { origin: "synthesis" | "remember" | "operator" | "import" | "migration" | string; session_id: string | null; session_title: string | null; from_seq: number | null; to_seq: number | null; run_id: string | null; quote: string; at: string };
@@ -1071,7 +1081,14 @@ export type MemoryImportItem = { key: number; text: string; category: string; to
 export type MemoryBucket = { scope: string; scope_key: string; title: string | null; count: number };
 export type MemoryListing = { records: MemoryRecord[]; buckets: MemoryBucket[]; projects: Record<string, string>; topics: { topic: string; count: number }[]; categories: Record<string, number>; suggestions: number };
 /** A finding of the background tidying it was not sure enough to apply. */
-export type MemorySuggestion = { id: number; kind: "duplicate" | "contradiction"; memory_ids: string[]; keep_id: string; text: string; score: number; reason: string; created_at: string };
+/** A suggestion: the tidying's (``duplicate``, ``contradiction``) or the background pass's — a change to a bullet it may
+ *  not make (``revision``) or a new bullet it held back (``addition``), with the entry it is for. */
+export type MemorySuggestion = {
+  id: number; kind: "duplicate" | "contradiction" | "revision" | "addition"; memory_ids: string[]; keep_id: string; text: string; score: number; reason: string; created_at: string;
+  action?: "add" | "update" | "retire"; entry_id?: string | null; entry_title?: string | null; session_id?: string | null;
+  /** Why the pass did not make it itself: the bullet is the operator's (``locked``) or names what they never wrote (``ungrounded``, with the names). */
+  why?: "" | "locked" | "ungrounded"; tokens?: string[];
+};
 export type MemorySuggestions = { suggestions: MemorySuggestion[]; records: Record<string, MemoryRecord> };
 export type MemoryHistoryRecord = { id: string; text: string; kind: string; topics: string[] };
 /** One change to memory, with the records as they were before it: what Undo puts back. */
@@ -1703,7 +1720,7 @@ export type Settings = {
   balance: { enabled: boolean; poll_seconds: number; thresholds_usd: number[] };
   scheduler: { topic_mode: string; catch_up_missed: boolean };
   compaction: { auto_ratio: number; keep_recent_messages: number; max_words: number; chunk_tokens: number; min_messages: number; call_timeout_seconds: number; core_trigger_ratio: number; preset: string };
-  memory?: { extract_after_run: boolean; extract_min_messages: number; extract_preset: string; classify_preset: string; sensitive_allowed: string[]; consolidate: boolean; auto_merge: boolean; search_chats?: boolean; generate?: boolean; synthesis_preset?: string; synthesis_usd_per_day?: number; paused?: boolean };
+  memory?: { classify_preset: string; sensitive_allowed: string[]; consolidate: boolean; auto_merge: boolean; search_chats?: boolean; generate?: boolean; synthesis_preset?: string; synthesis_usd_per_day?: number; paused?: boolean };
   terminals?: { running_cap: number };
   browser?: BrowserSettings;
   action_rules?: ActionRulesSettings;

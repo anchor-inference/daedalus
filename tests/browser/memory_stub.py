@@ -52,7 +52,9 @@ class MemoryStub:
         self.entries: list[dict[str, Any]] = copy.deepcopy(entries) if entries is not None else []
         self.sources: dict[str, list[dict[str, Any]]] = copy.deepcopy(sources or {})
         self.proposals = dict(proposals or {})
-        self.status = {"generate": True, "paused": False, "search_chats": True, "synthesis_preset": "", "budget_usd": 0.5, "spent_today_usd": 0.0, "last_synthesis_at": None, "learning": 0, **(status or {})}
+        self.status = {"generate": True, "paused": False, "search_chats": True, "synthesis_preset": "", "budget_usd": 0.5, "spent_today_usd": 0.0, "last_synthesis_at": None, "learning": 0,
+                       "model": "cheap.model", "model_reason": "", "model_missing": "", "blocked": "", "running": False, "report": None, "failing_chats": 0, **(status or {})}
+        self.learn_runs = 0
         self.imported: list[dict[str, Any]] = []
         for record in self.records:
             record.setdefault("locked", False)
@@ -237,6 +239,9 @@ class MemoryStub:
             if parts[4] == "dismiss":
                 suggestion["status"] = "dismissed"
                 return 200, {"dismissed": True}
+            if suggestion["kind"] in ("revision", "addition"):
+                suggestion["status"] = "applied"
+                return 200, {"record": self._get(suggestion["memory_ids"][0]) if suggestion["memory_ids"] else None, "history_id": None}
             record, history = self._merge(suggestion["memory_ids"], body.get("text") or suggestion["text"], None, None, suggestion["keep_id"], "merge" if suggestion["kind"] == "duplicate" else "replace")
             suggestion["status"] = "applied"
             return 200, {"record": record, "history_id": history}
@@ -285,6 +290,16 @@ class MemoryStub:
         """The entry routes, quick add, marks, status, export and import; ``None`` for the others."""
         if path == "/api/memory/status" and method == "GET":
             return 200, dict(self.status)
+        if path == "/api/memory/synthesis/run" and method == "POST":
+            # "Update now": the stub's pass finishes at once and leaves a report, as a real one would.
+            if self.status.get("blocked"):
+                return 409, {"detail": "memory is paused"}
+            self.learn_runs += 1
+            now = datetime.now(UTC).isoformat()
+            self.status["last_synthesis_at"] = now
+            self.status["report"] = {"at": now, "trigger": "manual", "model": "cheap.model", "chats": 2, "parts": 2, "calls": 2, "cost_usd": 0.0, "added": 3, "merged": 1,
+                                     "updated": 1, "retired": 0, "new_entries": 1, "summaries": 1, "held": 1, "dropped": {"sensitive": 1}, "stopped": ""}
+            return 200, {"started": True}
         if path == "/api/memory/entries" and method == "GET":
             return 200, self.entry_listing()
         if path == "/api/memory/entries" and method == "POST":

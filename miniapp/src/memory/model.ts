@@ -94,6 +94,34 @@ export function statusPill(status: MemoryStatus | undefined, now: number = Date.
   return { tone: "on", text: t("memory.status.waiting") };
 }
 
+export type LearningLine = { tone: "" | "warn" | "busy"; text: string };
+
+/** Settings → Memory's account of the background pass: the model it runs on (and why, when it is not the
+ *  one chosen), what the last pass did, today's spend, why it is not running. Empty lines are left out. */
+export function learningLines(status: MemoryStatus | undefined, now: number = Date.now()): LearningLine[] {
+  if (!status) return [];
+  const out: LearningLine[] = [];
+  const money = (n: number) => `$${n.toFixed(n > 0 && n < 0.01 ? 4 : 2)}`;
+  if (status.blocked) out.push({ tone: "warn", text: t(`settings.memory.learning.blocked.${status.blocked}`) });
+  if (status.running || status.learning > 0) out.push({ tone: "busy", text: t("settings.memory.learning.running") });
+  if (status.model_reason === "none") out.push({ tone: "warn", text: t("settings.memory.learning.model.none") });
+  else if (status.model) {
+    out.push({ tone: "", text: t("settings.memory.learning.model", { model: status.model }) });
+    if (status.model_reason) out.push({ tone: "warn", text: t(`settings.memory.learning.model.${status.model_reason}`, { model: status.model, missing: status.model_missing ?? "" }) });
+  }
+  const r = status.report;
+  if (!r) out.push({ tone: "", text: t("settings.memory.learning.never") });
+  else {
+    out.push({ tone: "", text: t("settings.memory.learning.last", { when: relTimeLong(r.at, now), chats: r.chats }) });
+    const dropped = Object.values(r.dropped ?? {}).reduce((a, b) => a + b, 0);
+    out.push({ tone: "", text: t("settings.memory.learning.counts", { added: r.added, updated: r.updated, merged: r.merged, held: r.held, dropped }) });
+    if (r.stopped && r.stopped !== "paused" && r.stopped !== "off" && r.stopped !== "no_budget") out.push({ tone: "warn", text: t(`settings.memory.learning.stopped.${r.stopped === "budget" ? "budget" : "no_model"}`) });
+  }
+  out.push({ tone: "", text: t("settings.memory.learning.spent", { spent: money(status.spent_today_usd), budget: money(status.budget_usd) }) });
+  if (status.failing_chats) out.push({ tone: "warn", text: t("settings.memory.learning.failing", { n: status.failing_chats }) });
+  return out;
+}
+
 /** Where a bullet came from, in a few words: the chat by its title, or what taught it when no chat did. */
 export function sourceLabel(source: MemorySource): string {
   if (source.session_id) return source.session_title || t("memory.source.gone");
