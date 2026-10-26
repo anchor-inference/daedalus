@@ -20,7 +20,7 @@ def test_described_hosts_are_listed_and_wildcards_skipped(tmp_path: Path) -> Non
     )
     hosts = prompts.ssh_hosts(config)
     assert hosts == [("oracle", "A small cloud VM: 2 vCPU, 12 GB RAM, ports 22/80/443 open. Yours for hosting."), ("lab", "")]
-    section = prompts.environment_section(workspace=tmp_path, bot_repo=tmp_path, core_repo=tmp_path, session_title="t", model="m", ssh_hosts=hosts)
+    section = prompts.environment_section(workspace=tmp_path, bot_repo=tmp_path, core_repo=tmp_path, model="m", ssh_hosts=hosts)
     assert "`ssh oracle` — A small cloud VM" in section and "`ssh lab`" in section
     assert prompts.ssh_hosts(tmp_path / "missing") == []
 

@@ -396,13 +396,11 @@ async def test_the_folders_of_ours_are_put_back_when_the_manager_starts(settings
 
 def test_the_agent_is_told_where_the_project_is_and_that_it_stays_inside_it() -> None:
     root = Path("/work/bakery")
-    section = prompts.environment_section(
-        workspace=root, bot_repo=Path("/srv/daedalus"), core_repo=Path("/srv/core"), session_title="Menu", model="m", project="Bakery site"
-    )
-    assert "project Bakery site" in section and str(root) in section
+    section = prompts.environment_section(workspace=root, bot_repo=Path("/srv/daedalus"), core_repo=Path("/srv/core"), model="m", in_project=True)
+    assert "belongs to a project" in section and str(root) in section
     assert "refused" in section and "ask" in section
     # A session with no project says nothing about one.
-    plain = prompts.environment_section(workspace=root, bot_repo=Path("/srv/daedalus"), core_repo=Path("/srv/core"), session_title="Menu", model="m")
+    plain = prompts.environment_section(workspace=root, bot_repo=Path("/srv/daedalus"), core_repo=Path("/srv/core"), model="m")
     assert "project" not in plain.lower()
 
 

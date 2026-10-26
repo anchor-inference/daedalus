@@ -555,10 +555,11 @@ FORK_IDENTITY_KEY = "fork_identity"
 """What a fork's system prompt is written from, taken from its source when it was made.
 
 A fork made to try the source's work again elsewhere (an exploration's attempt in a worktree of its
-own) has a title, a working directory and a brief of its own, each of which the system prompt
-names. Written from those, its first request differed from the source's in the system prompt and the
-provider served none of the shared history from cache. Its prompt is written from the source's
-instead, and what differs is said in the fork's first message, after the shared prefix."""
+own) has a working directory and a brief of its own, each of which the system prompt names. Written
+from those, its first request differed from the source's in the system prompt and the provider served
+none of the shared history from cache. Its prompt is written from the source's instead, and what
+differs is said in the fork's first message, after the shared prefix. Its title needs no pinning: the
+system prompt names no title, and the fork's first turn context tells its own (``_titles_note``)."""
 
 FORK_COPIED_KEYS = ("discovered_tools", tool_groups.CARRIED_KEY)
 """The source's loaded tools, which decide the tool list the cached prefix starts with."""
@@ -566,7 +567,7 @@ FORK_COPIED_KEYS = ("discovered_tools", tool_groups.CARRIED_KEY)
 
 def fork_identity(metadata: dict[str, Any]) -> dict[str, Any] | None:
     pinned = metadata.get(FORK_IDENTITY_KEY)
-    if not isinstance(pinned, dict) or not all(isinstance(pinned.get(k), str) for k in ("title", "workspace", "notes")):
+    if not isinstance(pinned, dict) or not all(isinstance(pinned.get(k), str) for k in ("workspace", "notes")):
         return None
     return pinned
 
@@ -2947,7 +2948,7 @@ class SessionManager:
     async def pin_fork_identity(self, target_id: str, source_id: str) -> dict[str, Any]:
         """Have ``target``'s requests start with the bytes ``source``'s next request would start with.
 
-        Call after :meth:`fork_into`. The system prompt is written from the source's title, working
+        Call after :meth:`fork_into`. The system prompt is written from the source's working
         directory and notes, the source's loaded tools and stale-trimmed results are carried, and the
         run's requests are routed by the source's conversation, so a provider's prefix cache serves the
         fork the history it shares with the source. A fork of a fork keeps the first source's identity.
@@ -2959,7 +2960,7 @@ class SessionManager:
         pinned = fork_identity(source.metadata)
         if pinned is None:
             trimmed = sorted(source.engine.trimmed_tool_result_ids) if source.engine is not None else []
-            pinned = {"title": source.session.title, "workspace": str(self.work_dir(source)),
+            pinned = {"workspace": str(self.work_dir(source)),
                       "project": source.project.name if source.project is not None else "",
                       "notes": self.notes_for(source, window=int(source.context_window or 0)),
                       "trimmed": trimmed, "cache_key": source_id}
@@ -4171,6 +4172,35 @@ class SessionManager:
                 break
         return "" if told == wanted else prompts.yagni_note(wanted)
 
+    async def _titles_note(self, state: SessionState) -> str:
+        """The session's and its project's names when this turn has to tell them, or ``""``.
+
+        Told on a session's first turn, on the first turn after either name changed, and again once a
+        compaction, a clear or a revert took the turn that told them out of the working history: the
+        last telling still in that history is what the model knows, read back the way ``_yagni_note``
+        reads its own, so no record of it is kept that could fall out of step with the history. Only
+        the folder agent was ever told its names; the other roles' prompts never carried them.
+        """
+        if self.is_companion(state) or self.is_prompt_coach(state) or self.is_btw(state) or self.is_orchestrator(state) or self.is_dispatcher(state):
+            return ""
+        # Read from the store, not ``state.project``: a project renamed while the session was loaded
+        # leaves the state's copy with the old name.
+        project = await self.projects.for_session(state.session.id) if state.project is not None else None
+        note = prompts.titles_note(state.session.title, project.name if project is not None else "")
+        if not note:
+            return ""
+        history = state.engine.history if state.engine is not None else await self.sessions.list_messages(state.session.id, TENANT, limit=10_000)
+        for message in reversed(history):
+            if message.role is not MessageRole.user:
+                continue
+            text = "".join(b.text for b in message.content_blocks if isinstance(b, TextBlock))
+            if prompts.TURN_CONTEXT_OPEN not in text:
+                continue
+            told = prompts.told_titles(text[text.rfind(prompts.TURN_CONTEXT_OPEN):])
+            if told is not None:
+                return "" if prompts.told_titles(note) == told else note
+        return note
+
     def run_bounds(self, state: SessionState) -> RunBounds | None:
         """An orchestration role's own bounds on one turn, or ``None`` for every other session.
 
@@ -4398,9 +4428,8 @@ class SessionManager:
             max_iterations=bounds.max_iterations if bounds is not None else 0,
             run_id=run_id,
             session_id=state.session.id,
-            session_title=pinned["title"] if pinned else state.session.title,
             workspace=Path(pinned["workspace"]) if pinned else self.work_dir(state),
-            project=str(pinned.get("project") or "") if pinned else state.project.name if state.project is not None else "",
+            in_project=bool(pinned.get("project")) if pinned else state.project is not None,
             rungs=rungs,
             provider_chain=chain,
             model_name=rungs[0][1],
@@ -4874,6 +4903,8 @@ class SessionManager:
             if notes is not None:
                 break
         volatile = [notes if notes is not None else await self.workspace_notes(state)]
+        if titles := await self._titles_note(state):
+            volatile.append("\n" + titles)
         facts = await self._project_facts(state)
         if facts:
             volatile.append("\n" + facts)

@@ -188,7 +188,7 @@ def runtime_constants(config: RuntimeConfig, *, context_window: int, max_output_
 Role = Literal["agent", "companion", "coach", "btw", "orchestrator", "dispatcher"]
 
 
-def _agent_sections(deps: EngineDeps, config: RuntimeConfig, *, workspace: Path, session_title: str, model: str, extra_notes: str, project: str, advertised: Collection[str], admitted: Collection[str]) -> tuple[str, ...]:
+def _agent_sections(deps: EngineDeps, config: RuntimeConfig, *, workspace: Path, model: str, extra_notes: str, in_project: bool, advertised: Collection[str], admitted: Collection[str]) -> tuple[str, ...]:
     return (
         prompts.PERSONA,
         prompts.rules_section(config.prompt.rules),
@@ -199,14 +199,13 @@ def _agent_sections(deps: EngineDeps, config: RuntimeConfig, *, workspace: Path,
             workspace=workspace,
             bot_repo=deps.bot_repo,
             core_repo=deps.core_repo,
-            session_title=session_title,
             model=model,
             extra_notes=extra_notes,
             sandboxed=config.tools.exec.sandbox != "off",
             github_org=deps.github_org,
             ssh_hosts=prompts.ssh_hosts(deps.ssh_config) if deps.ssh_config else (),
             selfdev_mode=deps.selfdev_mode,
-            project=project,
+            in_project=in_project,
         ),
     )
 
@@ -240,7 +239,6 @@ def build_engine(
     config: RuntimeConfig,
     run_id: str,
     session_id: str,
-    session_title: str,
     workspace: Path,
     rungs: list[tuple[OpenAICompatibleProvider, str]],
     provider_chain: IProviderChain | None,
@@ -253,7 +251,7 @@ def build_engine(
     tool_visibility_policy: ToolVisibilityPolicy | None = None,
     max_iterations: int = 0,
     role: Role = "agent",
-    project: str = "",
+    in_project: bool = False,
     max_advertised_tools: int = 0,
     discovered_tools: Collection[str | Mapping[str, str]] = (),
     loaded_tool_groups: Collection[str] = (),
@@ -332,7 +330,7 @@ def build_engine(
         # sections that carry rules follow what the policy admits and the ones that only teach follow
         # the surface; ``prompts.tool_sections`` says which is which.
         sections = _agent_sections(
-            deps, config, workspace=workspace, session_title=session_title, model=model, extra_notes=extra_notes, project=project, advertised=advertised_tools(engine), admitted=admitted_tools(engine),
+            deps, config, workspace=workspace, model=model, extra_notes=extra_notes, in_project=in_project, advertised=advertised_tools(engine), admitted=admitted_tools(engine),
         )
         engine.config = replace(engine.config, system_prompt_sections=tuple(s for s in sections if s))
     deps.event_stream.bind_run(run_id, session_id)
