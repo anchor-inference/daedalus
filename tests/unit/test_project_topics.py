@@ -337,6 +337,15 @@ async def test_the_topic_follows_the_office(settings: Settings, db: Database, tm
         binding = await s.front.binding_for_session(first)
         assert binding is not None
 
+        # The topic is settled only once the project records it. The binding comes first and the
+        # setting a moment later, from the topics handler on the bus, and that write moves the
+        # project's revision. A replacement started in between read the revision before the write
+        # and its handoff checked it after, and refused with ControlConflict on a loaded machine.
+        async def recorded() -> bool:
+            return (await s.r.refreshed()).settings.orchestrator.telegram_topic_id == binding.thread_id
+
+        await until_await(recorded, "the project recorded its topic")
+
         await s.r.orch.replace(s.r.project.id, "a fresh start")
         second = await s.orchestrator()
 
