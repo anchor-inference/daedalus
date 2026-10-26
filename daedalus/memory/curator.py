@@ -285,6 +285,11 @@ class MemoryCurator:
                     await self.memory.delete(self.tenant, record.id)
             for record in before:
                 await self.memory.restore(record)
+            # An undone forget brings the note back, and the tombstone that stopped it being learned
+            # again would otherwise outlive the operator changing their mind.
+            await self.entries.untombstone(r.text for r in before)
+            for entry_id in {entry_of(r) for r in before} - {""}:
+                await self.entries.touched(entry_id)
             await self.db.execute("UPDATE memory_history SET undone_at = ? WHERE id = ?", (datetime.now(UTC).isoformat(), history_id))
             return before
 

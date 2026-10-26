@@ -128,6 +128,7 @@ from daedalus.host.worktrees import append_exclude, exclude_lines
 from daedalus.mcp.manager import McpManager, McpStillStarting, blocked_for, mcp_tool_prefix
 from daedalus.mcp.oauth import mcp_callback_url
 from daedalus.memory import privacy
+from daedalus.memory import render as memory_render
 from daedalus.memory import scope as memory_scope
 from daedalus.memory.entries import MemoryEntries
 from daedalus.memory.tools import build_memory_tools
@@ -2611,6 +2612,8 @@ class SessionManager:
         # A rewrite that did not shrink the history says nothing about the prompt getting smaller.
         state.observed_prompt_tokens = min(measured, scaled)
         await self.db.kv_set(f"context_measurement:{state.session.id}", {"floor": state.usage_floor_seq, "tokens": state.observed_prompt_tokens})
+        # Every rewrite of the history between runs comes through here: a compaction, a revert, a clear.
+        await self._memory_history_rewritten(state, after)
 
     async def _summarise_history(self, provider: Any, model: str, history: Sequence[Message], *, language: str, instructions: str, observability: LLMObservabilityContext, progress: Callable[..., Awaitable[None]] | None = None, window: int = 0) -> str:
         """One structured summary of ``history``, built on the summary it starts with.
@@ -4163,7 +4166,7 @@ class SessionManager:
         await self.sessions.update_metadata(session_id, state.session.metadata)
         return on
 
-    async def _yagni_note(self, state: SessionState) -> str:
+    async def _yagni_note(self, state: SessionState, history: Sequence[Message] | None = None) -> str:
         """The YAGNI note this turn has to carry, or ``""`` when the model already knows.
 
         The last note in the working history is what the model was told; none counts as off. A host
@@ -4171,7 +4174,8 @@ class SessionManager:
         mode is on, and a switch on and back off before any turn says nothing at all.
         """
         wanted = bool(state.metadata.get("yagni"))
-        history = state.engine.history if state.engine is not None else await self.sessions.list_messages(state.session.id, TENANT, limit=10_000)
+        if history is None:
+            history = await self._working_history(state)
         told = False
         for message in reversed(history):
             if message.role is not MessageRole.user:
@@ -4735,6 +4739,7 @@ class SessionManager:
         previous = state.compacting_keys if state.compacting_keys is not None else state.history_keys
         state.compacting_keys = None
         await self._label_summaries(state, engine.history, previous)
+        await self._memory_history_rewritten(state, engine.history)
 
     async def _start_run(
         self, state: SessionState, message: Message | None, *, continue_turn: bool = False
@@ -4891,6 +4896,19 @@ class SessionManager:
         facts = await self._project_facts(state)
         if facts:
             volatile.append("\n" + facts)
+        history: Sequence[Message] | None = None
+
+        async def working() -> Sequence[Message]:
+            # Read once for the notes that judge what the model was already told (YAGNI, memory):
+            # with no engine yet it is the whole stored history.
+            nonlocal history
+            if history is None:
+                history = await self._working_history(state)
+            return history
+
+        memory = await self._memory_turn(state, working)
+        if memory.text:
+            volatile.append("\n" + memory.text)
         if privacy.is_private(state):
             volatile.append("\n- " + privacy.TURN_NOTE)
         switched_off = await self._take_mcp_switched_off(state)
@@ -4899,7 +4917,7 @@ class SessionManager:
         loop_state = str(state.metadata.get("loop_state") or "").strip()
         if loop_state:
             volatile.append("\n" + loop_state)  # the loop's counter and next wake-up change every run
-        yagni = await self._yagni_note(state)
+        yagni = await self._yagni_note(state, await working())
         if yagni:
             volatile.append("\n- " + yagni)
         if waiting := self._running_jobs_note(state.session.id):
@@ -4939,7 +4957,89 @@ class SessionManager:
         if yagni:
             # The app draws the switch as a mark on the message instead of the note, which it never shows.
             update["metadata"] = {**update.get("metadata", message.metadata), "daedalus.yagni": "on" if yagni.startswith(prompts.YAGNI_ON) else "off"}
-        return message.model_copy(update=update)
+        opened = message.model_copy(update=update)
+        if memory.snapshot is not None:
+            await self._keep_memory_snapshot(state, memory, self.sessions.transcript_key(opened))
+        return opened
+
+    async def _working_history(self, state: SessionState) -> Sequence[Message]:
+        """The history the next run starts from: the engine's while one is kept, else the stored one."""
+        if state.engine is not None:
+            return state.engine.history
+        return await self.sessions.list_messages(state.session.id, TENANT, limit=10_000)
+
+    def memory_block_wanted(self, state: SessionState) -> bool:
+        """Whether this run's opening context may carry the memory block (:mod:`daedalus.memory.render`).
+
+        Only the operator's own turn in a conversation they read. A private chat is handed nothing
+        from other chats. A staff member, a subagent, a scheduled or unattended session, a heartbeat,
+        a prompt coach and a side question are not talking to the operator, and what their task needs
+        is in their brief. A harness session (a CLI agent a staff member runs in a terminal) never
+        comes through here at all. A run some other origin started in an operator's chat — a
+        schedule's turn, a loop's tick, a report waking it — waits: the block or its delta rides on
+        the operator's next message, whose words the core keeps verbatim through a compaction, so the
+        block is never handed to a summariser to paraphrase."""
+        if privacy.is_private(state) or self.is_staff(state) or any(state.metadata.get(key) for key in NOT_OPERATOR_FACING):
+            return False
+        return state.run_origin == "operator"
+
+    async def _memory_turn(self, state: SessionState, working: Callable[[], Awaitable[Sequence[Message]]]) -> memory_render.Turn:
+        """What this run's opening context carries of memory: the whole block the first time, a delta
+        when memory changed since, nothing while it has not — the earlier block is still in the history."""
+        if not self.memory_block_wanted(state):
+            return memory_render.Turn("", None)
+        try:
+            snapshot = memory_render.Snapshot.read(state.metadata)
+            block = await memory_render.render_for(
+                self.memory_entries, project_id=self.memory_placement(state).project_id,
+                budget=memory_render.budget_for(await self.session_window(state)),
+            )
+            history = await working()
+            keys = {self.sessions.transcript_key(m) for m in history}
+            quotes: dict[str, str] = {}
+            if snapshot is not None and snapshot.carriers and snapshot.digest != block.digest:
+                carriers = set(snapshot.carriers)
+                quotes = memory_render.told_lines(
+                    text[text.rfind(prompts.TURN_CONTEXT_OPEN):]
+                    for m in history if self.sessions.transcript_key(m) in carriers
+                    for text in ("".join(b.text for b in m.content_blocks if isinstance(b, TextBlock)),)
+                )
+            return memory_render.plan(snapshot, block, history_keys=keys, quotes=quotes)
+        except Exception:  # noqa: BLE001 — a turn starts without memory rather than not at all
+            logger.exception("the memory block for session %s could not be rendered", state.session.id)
+            return memory_render.Turn("", None)
+
+    async def _keep_memory_snapshot(self, state: SessionState, turn: memory_render.Turn, key: str) -> None:
+        """Record what the opening message ``key`` told the model of memory, so the next run knows."""
+        snapshot = turn.snapshot
+        assert snapshot is not None
+        if turn.text:
+            snapshot.carriers = [key] if turn.full else [*snapshot.carriers, key]
+        await self._write_memory_snapshot(state, snapshot)
+
+    async def _write_memory_snapshot(self, state: SessionState, snapshot: memory_render.Snapshot) -> None:
+        dumped = snapshot.dump()
+        for meta in (state.metadata, state.session.metadata):
+            if dumped == memory_render.Snapshot().dump():
+                meta.pop(memory_render.SNAPSHOT_KEY, None)
+            else:
+                meta[memory_render.SNAPSHOT_KEY] = dumped
+        try:
+            await self.sessions.update_metadata(state.session.id, state.session.metadata)
+        except Exception:  # noqa: BLE001 — at worst the next run carries the block or the delta again
+            logger.warning("could not keep the memory snapshot of session %s", state.session.id, exc_info=True)
+
+    async def _memory_history_rewritten(self, state: SessionState, history: Sequence[Message]) -> None:
+        """After a rewrite of the working history: when a message that carried the memory block or a
+        delta of it is gone (summarised, cut by a revert, cleared), the next run carries the whole
+        block again. The rewrite already changed the head of the conversation, so this costs no cache."""
+        snapshot = memory_render.Snapshot.read(state.metadata)
+        if snapshot is None or not snapshot.carriers or snapshot.reinject:
+            return
+        if set(snapshot.carriers) <= {self.sessions.transcript_key(m) for m in history}:
+            return
+        snapshot.reinject = True
+        await self._write_memory_snapshot(state, snapshot)
 
     async def _project_facts(self, state: SessionState) -> str:
         """The project's promoted facts for its coordinator and ordinary chats; ``""`` elsewhere.

@@ -25,6 +25,7 @@ the records back with their sources.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import uuid
@@ -387,14 +388,17 @@ class MemoryEntries:
         origin: str,
         session_id: str = "",
         run_id: str = "",
+        entry: Entry | None = None,
         **write: Any,
     ) -> MemoryWriteResult:
         """Write a record into memory filed in its entry, with a source row saying who taught it.
 
         The one door every new record comes through — the agent's Remember and the operator's own
-        note — so a record is never kept without an entry and a source. Keyword arguments past the
-        named ones go to the store's write (similarity threshold, per-scope cap)."""
-        entry = await self.target(kind, scope, scope_key, text, record_topics(metadata))
+        note — so a record is never kept without an entry and a source. ``entry`` files it in that
+        entry instead of the one :func:`target_for` picks (the caller has matched the scope to it).
+        Keyword arguments past the named ones go to the store's write (similarity threshold,
+        per-scope cap)."""
+        entry = entry or await self.target(kind, scope, scope_key, text, record_topics(metadata))
         result = await self.memory.write(self.tenant, scope, scope_key, text, kind=kind, metadata={**metadata, ENTRY_KEY: entry.id}, **write)
         await self.add_source(result.record.id, origin, session_id=session_id, run_id=run_id)
         await self.touched(entry_of(result.record) or entry.id)
@@ -425,6 +429,59 @@ class MemoryEntries:
             await self.touched(entry_id)
         return filed
 
+    async def forget(self, record_id: str, *, actor: str, reason: str = "forgotten") -> MemoryRecord | None:
+        """Remove a record as the agent's Forget or the operator's delete does: its entry steps, a
+        tombstone keeps the background pass from learning it again, and a history row lets the
+        operator undo it. ``None`` when there is no such record.
+
+        Forget used to be the core's bare delete: the entry kept its version, so an edit made against
+        it went through as if nothing had changed, and nothing remembered that the note was unwanted."""
+        record = self.memory.get_record(self.tenant, record_id)
+        if record is None or not await self.memory.delete(self.tenant, record_id):
+            return None
+        entry_id = entry_of(record)
+        entry = await self.get(entry_id) if entry_id else None
+        if entry is not None:
+            await self.touched(entry.id)
+        await self.tombstone(record.text, entry_slug=entry.slug if entry else "", reason=reason)
+        await self.db.execute(
+            "INSERT INTO memory_history(tenant_id, at, actor, action, summary, before_json, after_json) VALUES (?, ?, ?, ?, ?, ?, '[]')",
+            (self.tenant, now_text(), actor, "forget", record.text[:500], json.dumps([json.loads(record.model_dump_json())], ensure_ascii=False)),
+        )
+        return record
+
+    async def tombstone(self, text: str, *, entry_slug: str = "", reason: str = "deleted") -> None:
+        """Remember that a note was removed, by its :func:`fingerprint`, so it is never learned again."""
+        await self.db.execute(
+            "INSERT INTO memory_tombstones(tenant_id, fingerprint, entry_slug, reason, at) VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT(tenant_id, fingerprint) DO UPDATE SET entry_slug = excluded.entry_slug, reason = excluded.reason, at = excluded.at",
+            (self.tenant, fingerprint(text), entry_slug, reason, now_text()),
+        )
+
+    async def untombstone(self, texts: Iterable[str]) -> None:
+        """Drop the tombstones of notes put back (an undone forget): a note the operator wants is not unwanted."""
+        prints = list(dict.fromkeys(fingerprint(t) for t in texts))
+        if prints:
+            await self.db.execute(
+                f"DELETE FROM memory_tombstones WHERE tenant_id = ? AND fingerprint IN ({','.join('?' * len(prints))})", (self.tenant, *prints),
+            )
+
+    async def tombstoned(self, text: str) -> bool:
+        return await self.db.fetchone("SELECT 1 FROM memory_tombstones WHERE tenant_id = ? AND fingerprint = ?", (self.tenant, fingerprint(text))) is not None
+
+    async def named(self, name: str) -> list[Entry]:
+        """The entries ``name`` refers to: ``section/slug`` names one; a bare slug names every entry
+        with that slug (an area and a topic may share one), a project's area by its project id too."""
+        section, _, slug = name.strip().rpartition("/")
+        slug = slugify(slug)
+        if not slug:
+            return []
+        if section:
+            found = await self.by_slug(section.strip().lower(), slug)
+            return [found] if found is not None else []
+        listed = await self.list()
+        return [e for e in listed if e.slug == slug] or [e for e in listed if e.project_id and e.project_id == name.strip()]
+
     async def listing(self) -> list[dict[str, Any]]:
         """Every entry with its bullet count, in section order: what the Memory page lists and the
         seam the turn-context memory block will be rendered from."""
@@ -449,6 +506,16 @@ def migrated_scope(scope: str, scope_key: str, kind: str, *, session_project: Ma
         if project and kind not in ("preference", "person"):
             return MemoryScope.project, project
     return MemoryScope.global_, ""
+
+
+_FINGERPRINT_JUNK = re.compile(r"[\W_]+", re.UNICODE)
+
+
+def fingerprint(text: str) -> str:
+    """A removed note's identity for the tombstones: its words, case and punctuation aside, so the
+    same note said again with a different full stop is still recognised."""
+    words = _FINGERPRINT_JUNK.sub(" ", (text or "").lower()).strip()
+    return hashlib.sha256(words.encode("utf-8")).hexdigest()[:32]
 
 
 def area_slug(name: str, project_id: str, taken: Collection[str]) -> str:
@@ -477,6 +544,7 @@ __all__ = [
     "about_operator",
     "area_slug",
     "entry_of",
+    "fingerprint",
     "migrated_scope",
     "slugify",
     "target_for",
