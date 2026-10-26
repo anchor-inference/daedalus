@@ -104,7 +104,7 @@ Inside a project both tools reach that project's chats; elsewhere they reach the
 projects (every plain chat's scratch project and the installation's own projects, taken together).
 Naming another project lists its matching chats with their headlines and without snippets, for when
 the operator asks about it. Never included: the asking chat, a chat marked private
-(`{"memory": "private"}` in its metadata), and every session that is not the operator talking — a
+(`{"private": true}` in its metadata), and every session that is not the operator talking — a
 subagent, a staff member, a schedule, a heartbeat or other unattended run, a prompt coach, a side
 question. Imported conversations are included. The rule is one predicate in
 `daedalus/search/chats.py` with an SQL twin applied inside both retrieval halves and the snippet

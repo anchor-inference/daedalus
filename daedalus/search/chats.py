@@ -17,12 +17,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 from daedalus.host.prompts import without_host_notes
+from daedalus.memory.privacy import is_private, public_sessions_sql
 from daedalus.security.redact import redact
 
-PRIVATE_KEY = "memory"
-PRIVATE_VALUE = "private"
-"""Session metadata ``{"memory": "private"}``: the operator asked that this chat be neither learned from
-nor searched. Set before the chat's first message by the private-chat switch; read only here."""
 
 NOT_CONVERSATION_KEYS = ("subagent_of", "unattended", "heartbeat", "staff_id", "prompt_coach_of", "btw_of", "schedule_id")
 """Session metadata that marks a session which is not the operator's conversation. It covers every key of
@@ -32,8 +29,9 @@ Imported sessions are the operator's own conversations held elsewhere and are ke
 
 
 def private(metadata: Any) -> bool:
-    """Whether the operator made this chat private: nothing remembers it and no search returns it."""
-    return isinstance(metadata, dict) and metadata.get(PRIVATE_KEY) == PRIVATE_VALUE
+    """Whether the operator made this chat private: nothing remembers it and no search returns it.
+    The mark is :mod:`daedalus.memory.privacy`'s; two spellings of it once let a private chat into search."""
+    return is_private(metadata)
 
 
 def conversation(metadata: Any) -> bool:
@@ -54,7 +52,7 @@ def _unset(key: str) -> str:
 SEARCHABLE_SQL = (
     "(CASE WHEN json_valid(s.metadata) THEN "
     + " AND ".join(_unset(key) for key in NOT_CONVERSATION_KEYS)
-    + f" AND coalesce(json_extract(s.metadata, '$.{PRIVATE_KEY}'), '') != '{PRIVATE_VALUE}' ELSE 1 END)"
+    + f" AND {public_sessions_sql('s')} ELSE 1 END)"
 )
 """:func:`searchable` over the row ``s`` of ``sessions``. ``CASE`` rather than ``AND`` because only it
 promises that ``json_extract`` never sees text that is not JSON."""
@@ -197,8 +195,6 @@ __all__ = [
     "NOT_CONVERSATION_KEYS",
     "PLAIN_PROJECT_SQL",
     "PLAIN_SQL",
-    "PRIVATE_KEY",
-    "PRIVATE_VALUE",
     "SEARCHABLE_SQL",
     "Place",
     "Reach",

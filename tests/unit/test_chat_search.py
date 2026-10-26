@@ -64,7 +64,7 @@ async def world(db: Any, tmp_path: Path) -> Tools:
     await chat(db, "plain-2", "the asking chat mentions kombain itself", plain=True, at="2026-10-23T10:00:00+00:00")
     await chat(db, "voice-1", "kombain said out loud", system="voice", at="2026-10-19T10:00:00+00:00")
     await chat(db, "imported", "kombain from an imported conversation", plain=True, metadata={"imported": {"harness": "claude"}}, at="2026-10-18T10:00:00+00:00")
-    await chat(db, "secret", "kombain in a private chat", plain=True, metadata={"memory": "private"})
+    await chat(db, "secret", "kombain in a private chat", plain=True, metadata={"private": True})
     await chat(db, "helper", "kombain in a subagent", plain=True, metadata={"subagent_of": "plain-1", "unattended": True})
     await chat(db, "worker", "kombain in a staff session", plain=True, metadata={"staff_id": "st-1"})
     await chat(db, "cron", "kombain in a schedule", plain=True, metadata={"schedule_id": "sch-1", "unattended": True})
@@ -76,12 +76,12 @@ def test_the_rule_names_every_session_that_is_not_the_operator_talking() -> None
     # The session runner's own list of sessions nobody reads as a conversation is the floor.
     assert set(NOT_OPERATOR_FACING) <= set(chats.NOT_CONVERSATION_KEYS)
     assert chats.searchable({}) and chats.searchable({"imported": {"harness": "codex"}, "unattended": False})
-    assert not chats.searchable({"memory": "private"}) and chats.private({"memory": "private"})
+    assert not chats.searchable({"private": True}) and chats.private({"private": True})
     assert not chats.searchable({"subagent_of": "x"}) and not chats.searchable({"staff_id": "y"})
 
 
 async def test_the_sql_twin_agrees_with_the_predicate(db: Any) -> None:
-    cases = [{}, {"memory": "private"}, {"memory": "on"}, {"unattended": False}, {"unattended": True}, {"subagent_of": ""},
+    cases = [{}, {"private": True}, {"private": False}, {"unattended": False}, {"unattended": True}, {"subagent_of": ""},
              {"subagent_of": "s"}, {"heartbeat": True}, {"btw_of": "s"}, {"schedule_id": "x"}, {"imported": {"harness": "pi"}}]
     for index, metadata in enumerate(cases):
         await chat(db, f"s{index}", "text", plain=True, metadata=metadata)
@@ -154,7 +154,7 @@ async def test_the_answer_says_which_search_answered(db: Any, world: Tools, tmp_
 
 async def test_the_semantic_half_keeps_to_the_reach(db: Any) -> None:
     await chat(db, "open", "cycling along the water", plain=True)
-    await chat(db, "closed", "cycling along the water", plain=True, metadata={"memory": "private"})
+    await chat(db, "closed", "cycling along the water", plain=True, metadata={"private": True})
     index = Index(db)
     await index.prepare("test", 2)
     while (passage := await index.next()) is not None:
