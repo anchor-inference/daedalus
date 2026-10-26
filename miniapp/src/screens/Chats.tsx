@@ -12,6 +12,7 @@ import { relTime, shortModel, untilShort } from "../format";
 import { type Folder, type Row, agentName, arrange, dayGroup, kindOf, liveRow, splitPinned } from "../grouping";
 import { pinCommand } from "../pins";
 import { plural, t } from "../i18n";
+import { PrivateMark, isPrivate } from "../privatechat";
 import { Icon } from "../icons";
 import { agentsListingOf } from "../mode";
 import { ProjectSettingsSheet, useEnvironments, useProjects } from "../projects";
@@ -94,6 +95,7 @@ function RowMeta({ row, fork }: { row: Row; fork?: number }) {
   ].filter(Boolean).join(" · ");
   return (
     <>
+      <PrivateMark on={isPrivate(s)} size={11} />
       {live ? <span className={s.status}>{statusWord(s.status)}</span> : !s.metadata?.loop && <span>{s.status === "idle" && s.background_count ? plural("session.jobs.waiting", s.background_count) : statusWord(s.status)}</span>}
       {extra && (live || !s.metadata?.loop) && <span className="ph-sep" />}
       {extra && <span className="ph-ell">{extra}</span>}

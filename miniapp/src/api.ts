@@ -723,7 +723,7 @@ export type SessionSummary = {
   /** The project this agent works in: the id it is grouped by and the name shown. */
   project_id: string;
   project: string;
-  metadata?: { subagent_of?: string; subagent_name?: string; loop?: LoopView; forked_from?: { session_id: string; seq: number }; [k: string]: unknown };
+  metadata?: { subagent_of?: string; subagent_name?: string; loop?: LoopView; forked_from?: { session_id: string; seq: number }; private?: boolean; [k: string]: unknown };
   /** How many of the session's terminals are running. */
   terminals?: number;
   /** The program the session was imported from, for its plate's corner mark. */
@@ -1005,6 +1005,8 @@ export type SessionDetail = {
   prompt_coach_of?: string | null;
   /** The chat this session answers a side question about (/btw), when it is one. */
   btw_of?: string | null;
+  /** A private chat: kept, but never remembered, learned from or found by search. Fixed when it was made. */
+  private?: boolean;
   /** The project this session is the orchestrator of (current or retired). */
   orchestrator_of?: string | null;
   /** The staff member this session is the work of. */
@@ -1053,9 +1055,9 @@ export type SessionCheckpoints = {
 export const MEMORY_CATEGORIES = ["person", "project", "preference", "fact", "procedure", "other"] as const;
 export type MemoryCategory = (typeof MEMORY_CATEGORIES)[number];
 export const SENSITIVE_SUBJECTS = ["health", "finances", "intimate", "identity_documents", "precise_location"] as const;
-export type MemoryRecord = { id: string; scope: string; scope_key: string; category: string; topics: string[]; text: string; salience: number; version: number; created_at: string | null; updated_at: string | null; last_accessed_at: string | null };
+export type MemoryRecord = { id: string; scope: string; scope_key: string; category: string; topics: string[]; text: string; salience: number; version: number; created_at: string | null; updated_at: string | null; last_accessed_at: string | null; entry?: string | null };
 export type MemoryBucket = { scope: string; scope_key: string; title: string | null; count: number };
-export type MemoryListing = { records: MemoryRecord[]; buckets: MemoryBucket[]; sessions: Record<string, string>; topics: { topic: string; count: number }[]; categories: Record<string, number>; suggestions: number };
+export type MemoryListing = { records: MemoryRecord[]; buckets: MemoryBucket[]; projects: Record<string, string>; topics: { topic: string; count: number }[]; categories: Record<string, number>; suggestions: number };
 /** A finding of the background tidying it was not sure enough to apply. */
 export type MemorySuggestion = { id: number; kind: "duplicate" | "contradiction"; memory_ids: string[]; keep_id: string; text: string; score: number; reason: string; created_at: string };
 export type MemorySuggestions = { suggestions: MemorySuggestion[]; records: Record<string, MemoryRecord> };

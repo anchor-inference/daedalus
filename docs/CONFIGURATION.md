@@ -116,6 +116,7 @@ provider_retry_max_seconds = 600.0
 
 [memory]
 extract_after_run = false    # store durable facts after a completed run (a paid call)
+search_chats = true          # the agent may search and list your other chats (ChatSearch, RecentChats)
 
 [navigation]                 # where the app puts each destination; Settings -> Navigation edits it
 rail = ["inbox", "terminals", "page:dosing"]  # the desktop rail, top to bottom

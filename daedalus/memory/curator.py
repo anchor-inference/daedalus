@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 
 from protocore.contracts.memory import MemoryRecord, MemoryScope
 
+from daedalus.memory.entries import MemoryEntries, entry_of
 from daedalus.memory.taxonomy import normalise_topics, record_topics
 
 if TYPE_CHECKING:
@@ -169,6 +170,7 @@ class MemoryCurator:
         self.config = config
         self.embed = embed
         self.notify = notify
+        self.entries = MemoryEntries(db, memory, tenant)
         self.lock = asyncio.Lock()
         """One change at a time: a merge reads records, then writes and deletes, and the background
         pass must not merge a record the operator is merging by hand at the same moment."""
@@ -209,9 +211,14 @@ class MemoryCurator:
             "updated_at": datetime.now(UTC),
         })
         await self.memory.restore(merged)
+        # The kept record now says what the others said, so it was taught by their chats too; their
+        # own rows stay, and an undo that brings them back brings their sources with them.
+        await self.entries.copy_sources([r.id for r in records], keep.id)
         for record in records:
             if record.id != keep.id:
                 await self.memory.delete(self.tenant, record.id)
+        for entry_id in {entry_of(r) for r in records} - {""}:
+            await self.entries.touched(entry_id)
         history = await self._journal(actor, action, summary or f"{len(records)} records into one", records, [merged])
         return merged, history
 
@@ -278,6 +285,11 @@ class MemoryCurator:
                     await self.memory.delete(self.tenant, record.id)
             for record in before:
                 await self.memory.restore(record)
+            # An undone forget brings the note back, and the tombstone that stopped it being learned
+            # again would otherwise outlive the operator changing their mind.
+            await self.entries.untombstone(r.text for r in before)
+            for entry_id in {entry_of(r) for r in before} - {""}:
+                await self.entries.touched(entry_id)
             await self.db.execute("UPDATE memory_history SET undone_at = ? WHERE id = ?", (datetime.now(UTC).isoformat(), history_id))
             return before
 

@@ -20,6 +20,7 @@ from daedalus.extensions.notifications import format_entries
 from daedalus.host import standing
 from daedalus.host.config_validation import ConfigConflict, patched
 from daedalus.host.prompts import DEFAULT_RULES
+from daedalus.memory import privacy
 from daedalus.security import redact
 from daedalus.transport.telegram.front import SESSION_LIST_LIMIT, yagni_argument
 
@@ -53,6 +54,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("status", "", "what is running", scope="global"),
     CommandSpec("sessions", "", "every session", scope="global"),
     CommandSpec("new", "<title>", "a new session on the site", scope="global"),
+    CommandSpec("private", "<title>", "a new private chat on the site: kept, but never learned from, searched or given memory", scope="global"),
     CommandSpec("delete", "<id>", "delete a session; shared project files stay", scope="global", confirm=True),
     CommandSpec("cleanup", "[confirm]", "delete every session whose topic is closed", scope="global", confirm=True),
     CommandSpec("inbox", "[all|clear]", "the inbox", scope="global"),
@@ -255,6 +257,10 @@ async def run_command(app: Application, session_id: str, line: str) -> str:  # n
         # Pointing the private chat at it would deliver the answer somewhere the operator is not looking.
         created = await manager.create_session(title, metadata={"telegram_detached": True})
         return f"New session '{title}' ({created.session.id})."
+    if name == "private":
+        title = args.strip() or datetime.now(UTC).strftime("private %m-%d %H:%M")
+        created = await manager.create_session(title, metadata={"telegram_detached": True, privacy.PRIVATE_KEY: True})
+        return f"New private chat '{title}' ({created.session.id}): it is kept, but never learned from, searched or given memory."
     if name == "delete":
         target = args.strip()
         if not target:

@@ -868,6 +868,9 @@ def create_session(body: object, id_: str = "9a8b7c6d5e4f") -> tuple[int, dict]:
     kind = sent.get("kind") or "chat"
     if kind not in SESSION_KINDS:
         return 422, {"detail": f"unknown session kind: {kind}"}
+    if not isinstance(sent.get("private", False), bool):
+        # A private chat is asked for with a boolean, at creation only; anything else is the app's typo.
+        return 422, {"detail": "private is true or false"}
     CREATED_SESSIONS.append(dict(sent))
     return 200, {"id": id_, "kind": kind}
 

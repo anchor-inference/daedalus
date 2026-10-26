@@ -624,7 +624,7 @@ export function App() {
         {route.screen === "services" && <ServicesScreen onOpen={open} toast={showToast} />}
         {route.screen === "page" && route.detail && <PageHostScreen slug={route.detail} toast={showToast} />}
         {route.screen === "harnesses" && <HarnessesScreen toast={showToast} />}
-        {route.screen === "memory" && <MemoryScreen toast={showToast} onOpen={open} />}
+        {route.screen === "memory" && <MemoryScreen toast={showToast} />}
         {route.screen === "usage" && <UsageScreen onOpen={open} />}
         {route.screen === "health" && <HealthScreen toast={showToast} />}
         {route.screen === "settings" && <SettingsScreen toast={showToast} section={route.detail} />}

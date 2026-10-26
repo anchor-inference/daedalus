@@ -533,35 +533,14 @@ class Companion:
     async def new_session(self) -> str:
         """Start the conversation over: a fresh session, the old one left in place as a transcript.
 
-        The companion's notes come with it. They are written to its session's memory scope, and a new
-        conversation is a new session: without the move, starting over would also have been forgetting
-        everything the operator ever asked it to remember, which nobody asking for a clean transcript meant.
+        Its notes need no carrying: the companion belongs to no project of the operator's, so what it
+        remembers lives in the operator's global memory, which every conversation reads.
         """
-        old = self._id or str(await self.app.db.kv_get(SESSION_KEY) or "")
         await self.app.db.kv_set(SESSION_KEY, "")
         self._id = ""
         self._pending.clear()
         self._forget_agents()
-        new = await self.session_id()
-        if old and old != new:
-            await self._carry_memory(old, new)
-        return new
-
-    async def _carry_memory(self, old: str, new: str) -> None:
-        manager = self.app.manager
-        memory = getattr(manager, "memory", None)
-        if memory is None:
-            return
-        from protocore.contracts.memory import MemoryScope  # Lazy: only a new conversation needs it
-
-        from daedalus.host.engine_factory import TENANT  # Lazy: the engine factory imports half the host
-
-        for record in memory.records(TENANT, scope=MemoryScope.session, scope_key=old):
-            try:
-                await memory.write(TENANT, MemoryScope.session, new, record.text, kind=record.kind, metadata={"source": "companion", "moved_from": old})
-                await memory.delete(TENANT, record.id)
-            except Exception:  # noqa: BLE001 — a note that will not move stays with the old transcript
-                logger.exception("could not carry companion note %s to the new conversation", record.id)
+        return await self.session_id()
 
     def _forget_agents(self) -> None:
         """Drop everything held about the old conversation's agents, scheduled relays included."""

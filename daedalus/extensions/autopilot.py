@@ -264,7 +264,8 @@ class Autopilot:
             return "skipped:judged"  # this run was judged already (a callback delivered twice)
         used = await self.continuations_used(session_id)
         lines = await predict.conversation_lines(manager, session_id, tail=judge.TAIL_MESSAGES)
-        style = user_style.context_block((await user_style.load(manager.db)).summary)
+        # A private chat is handed nothing learned from the other chats, the judge's view of it included.
+        style = "" if manager.is_private(session_id) else user_style.context_block((await user_style.load(manager.db)).summary)
         try:
             answer = await asyncio.wait_for(
                 manager.small_model(

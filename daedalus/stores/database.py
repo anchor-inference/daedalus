@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+from collections import Counter
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
@@ -17,7 +18,26 @@ import aiosqlite
 
 from daedalus.config import native_mode
 from daedalus.host.checkpoints import SESSION_WORKSPACES_SQL, move_workspace_stores, session_workspace
-from daedalus.memory.taxonomy import CATEGORIES, corpus_vocabulary, guess_category, infer_topics, normalise_topics
+from daedalus.memory.entries import (
+    ENTRY_KEY,
+    PEOPLE,
+    RECENT_WORK,
+    area_slug,
+    migrated_scope,
+    new_entry_id,
+    now_text,
+    slugify,
+    target_for,
+    topic_title,
+)
+from daedalus.memory.taxonomy import (
+    CATEGORIES,
+    corpus_vocabulary,
+    guess_category,
+    infer_topics,
+    normalise_topics,
+    sensitive_subjects,
+)
 from daedalus.stores.attempt_fault_schema import MIGRATION as ATTEMPT_FAULT_MIGRATION
 from daedalus.stores.calendar_diagram_schema import migration as CALENDAR_DIAGRAM_MIGRATION
 from daedalus.stores.capacity_schema import MIGRATION as CAPACITY_MIGRATION
@@ -2828,6 +2848,194 @@ WHERE json_valid(metadata) AND (json_type(metadata, '$.mode') IS NOT NULL OR jso
 UPDATE session_messages SET message = json_remove(message, '$.metadata."daedalus.depth"')
 WHERE instr(message, 'daedalus.depth') > 0 AND json_valid(message) AND json_type(message, '$.metadata."daedalus.depth"') IS NOT NULL;
 """)
+
+
+async def _memory_entries(conn: aiosqlite.Connection) -> None:
+    """File every memory record in an entry, and move the per-chat records out of their chats.
+
+    Remember used to fall to the core's default, a scope keyed by the session id, and Recall read
+    only the current session's key: nearly every record the agent kept was readable in the one chat
+    that wrote it. Each such record now moves where the running host files a new one
+    (``entries.migrated_scope``: its chat's project, else global memory) and lands in the entry the
+    same rule as the host's picks (``entries.target_for``). The chat it came from is kept as a
+    source row, so deleting that chat later still finds what it taught.
+
+    A topic gets a page only when two or more of the moved records share it; the rest wait in recent
+    work. One history row holds every record as it was, so the move can be undone from the Memory
+    screen like any other change. A record that already lives in a writable scope and names an entry
+    that exists is left alone, which is what makes a second run change nothing."""
+    projects: dict[str, str] = {}
+    for row in await (await conn.execute("SELECT id, name, system, settings FROM projects")).fetchall():
+        try:
+            settings = json.loads(row["settings"] or "{}")
+        except (TypeError, ValueError):
+            settings = {}
+        ephemeral = isinstance(settings, dict) and bool(settings.get("ephemeral"))
+        if not row["system"] and not ephemeral:
+            projects[row["id"]] = row["name"]
+    session_project = {
+        row["id"]: row["project_id"] if row["project_id"] in projects else ""
+        for row in await (await conn.execute("SELECT id, project_id FROM sessions")).fetchall()
+    }
+    entries: dict[tuple[str, str, str], str] = {}
+    areas: dict[tuple[str, str], str] = {}
+    for row in await (await conn.execute("SELECT id, tenant_id, section, slug, project_id FROM memory_entries")).fetchall():
+        entries[(row["tenant_id"], row["section"], row["slug"])] = row["id"]
+        if row["project_id"]:
+            areas[(row["tenant_id"], row["project_id"])] = row["id"]
+    known_ids = set(entries.values())
+
+    pending: list[tuple[str, str, dict[str, Any], Any, str]] = []
+    for tenant_id, memory_id, raw in await (await conn.execute("SELECT tenant_id, id, record FROM memory_records")).fetchall():
+        try:
+            record = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(record, dict):
+            continue
+        metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+        scope, key = str(record.get("scope") or ""), str(record.get("scope_key") or "")
+        if scope in ("global", "project") and str(metadata.get(ENTRY_KEY) or "") in known_ids and (scope == "global" or key in projects):
+            continue
+        new_scope, new_key = migrated_scope(scope, key, str(record.get("kind") or ""), session_project=session_project, projects=projects)
+        pending.append((tenant_id, memory_id, record, new_scope, new_key))
+
+    shared: dict[tuple[str, str], int] = {}
+    for tenant_id, _, record, new_scope, _ in pending:
+        if new_scope.value == "global" and record.get("kind") not in ("preference", "person"):
+            for topic in normalise_topics((record.get("metadata") or {}).get("topics")):
+                shared[(tenant_id, slugify(topic))] = shared.get((tenant_id, slugify(topic)), 0) + 1
+
+    async def entry_for(tenant_id: str, section: str, slug: str, title: str, project_id: str | None) -> str:
+        if project_id and (tenant_id, project_id) in areas:
+            return areas[(tenant_id, project_id)]
+        if not project_id and (tenant_id, section, slug) in entries:
+            return entries[(tenant_id, section, slug)]
+        if project_id:
+            taken = {s for (t, sec, s) in entries if t == tenant_id and sec == "area"}
+            slug, title = area_slug(projects[project_id], project_id, taken), projects[project_id]
+        entry_id, at = new_entry_id(), now_text()
+        await conn.execute(
+            "INSERT INTO memory_entries(id, tenant_id, section, slug, title, project_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (entry_id, tenant_id, section, slug, title, project_id, at, at),
+        )
+        entries[(tenant_id, section, slug)] = entry_id
+        if project_id:
+            areas[(tenant_id, project_id)] = entry_id
+        return entry_id
+
+    targets = []
+    for tenant_id, _, record, new_scope, new_key in pending:
+        known = {slug for (t, slug), n in shared.items() if t == tenant_id and n >= 2}
+        known |= {slug for (t, section, slug) in entries if t == tenant_id and section == "topic"}
+        topics = normalise_topics((record.get("metadata") or {}).get("topics"))
+        targets.append(target_for(str(record.get("kind") or ""), new_scope, new_key, str(record.get("text") or ""), topics, known_topics=known))
+    # Two records sharing a topic need not both pick it first; a page that ends up holding one note
+    # is not a page, and that note waits in recent work with the rest.
+    picked = Counter((item[0], target.slug) for item, target in zip(pending, targets, strict=True) if target.section == "topic")
+    targets = [
+        RECENT_WORK if target.section == "topic" and target.slug not in (PEOPLE.slug, RECENT_WORK.slug) and picked[(item[0], target.slug)] < 2
+        and (item[0], "topic", target.slug) not in entries else target
+        for item, target in zip(pending, targets, strict=True)
+    ]
+
+    before: dict[str, list[dict[str, Any]]] = {}
+    after: dict[str, list[dict[str, Any]]] = {}
+    moved: dict[str, Counter[str]] = {}
+    for (tenant_id, memory_id, record, new_scope, new_key), target in zip(pending, targets, strict=True):
+        metadata = dict(record.get("metadata") if isinstance(record.get("metadata"), dict) else {})
+        entry_id = await entry_for(tenant_id, target.section, target.slug, target.title or topic_title(target.slug), target.project_id or None)
+        old_scope, old_key = str(record.get("scope") or ""), str(record.get("scope_key") or "")
+        changed = dict(record, scope=new_scope.value, scope_key=new_key, metadata={**metadata, ENTRY_KEY: entry_id})
+        if (old_scope, old_key) != (new_scope.value, new_key):
+            changed["version"] = int(record.get("version") or 1) + 1
+        await conn.execute("UPDATE memory_records SET record = ? WHERE tenant_id = ? AND id = ?", (json.dumps(changed, ensure_ascii=False), tenant_id, memory_id))
+        await conn.execute(
+            "INSERT OR IGNORE INTO memory_sources(record_id, tenant_id, origin, session_id, at) VALUES (?, ?, 'migration', ?, ?)",
+            (memory_id, tenant_id, old_key if old_scope == "session" else "", str(record.get("created_at") or now_text())),
+        )
+        before.setdefault(tenant_id, []).append(record)
+        after.setdefault(tenant_id, []).append(changed)
+        moved.setdefault(tenant_id, Counter())[f"{old_scope}->{new_scope.value}"] += 1
+    for tenant_id, records in before.items():
+        summary = ", ".join(f"{n} {move}" for move, n in sorted(moved[tenant_id].items()))
+        await conn.execute(
+            "INSERT INTO memory_history(tenant_id, at, actor, action, summary, before_json, after_json) VALUES (?, ?, 'migration', 'rescope', ?, ?, ?)",
+            (tenant_id, now_text(), f"filed {len(records)} records in entries ({summary})"[:500],
+             json.dumps(records, ensure_ascii=False), json.dumps(after[tenant_id], ensure_ascii=False)),
+        )
+        logger.info("memory: filed %d record(s) in entries (%s)", len(records), summary)
+    subjects: dict[str, set[str]] = {}
+    for records in after.values():
+        for record in records:
+            subjects.setdefault(record["metadata"][ENTRY_KEY], set()).update(sensitive_subjects(str(record.get("text") or "")))
+    for entry_id, found in subjects.items():
+        await conn.execute("UPDATE memory_entries SET sensitive = ? WHERE id = ?", (json.dumps(sorted(found)), entry_id))
+    # An entry is as fresh as its newest bullet, not as the migration that made it.
+    await conn.execute("""
+UPDATE memory_entries SET updated_at = COALESCE((
+    SELECT max(json_extract(r.record, '$.updated_at')) FROM memory_records r
+    WHERE r.tenant_id = memory_entries.tenant_id AND json_extract(r.record, '$.metadata.entry') = memory_entries.id
+), updated_at)
+WHERE version = 1""")
+
+
+# Memory entries: the titled pages memory is read in (see daedalus/memory/entries.py), the sources
+# each record was taught by, how far each chat has been read into memory, and what the operator
+# removed so it is never learned again. The last two are written by the background pass that comes
+# later; they are made here so one migration carries the whole model. A source row's session and
+# sequence numbers are empty rather than null: they are part of the key, and SQLite treats every
+# null as distinct, so a null key would let the same source in twice. The session has no foreign
+# key on purpose: deleting a chat reads its rows to find what it taught before the purge. One area
+# per project is the database's own rule, not the code's.
+MIGRATIONS.append(DataMigration("""
+CREATE TABLE IF NOT EXISTS memory_entries (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    section TEXT NOT NULL CHECK (section IN ('you', 'topic', 'area')),
+    slug TEXT NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+    aliases TEXT NOT NULL DEFAULT '[]',
+    sensitive TEXT NOT NULL DEFAULT '[]',
+    edited_by_operator INTEGER NOT NULL DEFAULT 0,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (tenant_id, section, slug)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS memory_entries_one_area ON memory_entries(tenant_id, project_id) WHERE section = 'area' AND project_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS memory_sources (
+    record_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    origin TEXT NOT NULL CHECK (origin IN ('synthesis', 'remember', 'operator', 'import', 'migration')),
+    session_id TEXT NOT NULL DEFAULT '',
+    from_seq INTEGER NOT NULL DEFAULT 0,
+    to_seq INTEGER NOT NULL DEFAULT 0,
+    run_id TEXT NOT NULL DEFAULT '',
+    quote TEXT NOT NULL DEFAULT '',
+    at TEXT NOT NULL,
+    PRIMARY KEY (record_id, origin, session_id, from_seq)
+);
+CREATE INDEX IF NOT EXISTS memory_sources_by_session ON memory_sources(session_id) WHERE session_id != '';
+CREATE TABLE IF NOT EXISTS memory_synthesis (
+    session_id TEXT PRIMARY KEY,
+    through_seq INTEGER NOT NULL DEFAULT 0,
+    last_at TEXT,
+    status TEXT NOT NULL DEFAULT 'idle',
+    error TEXT NOT NULL DEFAULT '',
+    cost_usd REAL NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS memory_tombstones (
+    tenant_id TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    entry_slug TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT 'deleted' CHECK (reason IN ('deleted', 'forgotten', 'session_deleted')),
+    at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, fingerprint)
+);
+""", _memory_entries))
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session

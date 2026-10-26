@@ -44,7 +44,7 @@ function storedView(): View {
 }
 
 /** What the agent remembered — by category and topic — to read, correct, merge, add to and prune. */
-export function MemoryScreen({ toast, onOpen }: { toast: (t: string) => void; onOpen: (id: string) => void }) {
+export function MemoryScreen({ toast }: { toast: (t: string) => void }) {
   const key = "/api/memory";
   const { data, error, loading, refresh } = useQuery<MemoryListing>(key, { staleMs: 10000 });
   const [bucket, setBucket] = useState<string>("all");
@@ -92,7 +92,7 @@ export function MemoryScreen({ toast, onOpen }: { toast: (t: string) => void; on
     if (view === "categories") return categories.map((c) => [c, records.filter((r) => r.category === c)] as [string, MemoryRecord[]]).filter(([, rs]) => rs.length > 0);
     return [["", records]];
   }, [view, records, categories]);
-  const bucketLabel = (scope: string, k: string) => (scope === "global" ? t("memory.scope.global") : scope === "session" ? data?.sessions[k] ?? t("memory.scope.deleted", { id: k }) : `${scope}: ${k}`);
+  const bucketLabel = (scope: string, k: string) => (scope === "global" ? t("memory.scope.global") : scope === "project" ? data?.projects[k] ?? t("memory.scope.deleted", { id: k }) : `${scope}: ${k}`);
 
   function toggle(id: string) {
     setSelected((s) => {
@@ -144,7 +144,7 @@ export function MemoryScreen({ toast, onOpen }: { toast: (t: string) => void; on
         <div className="erow-main">
           <div className="erow-meta">
             <span className={`chip cat-${r.category}`}>{categoryWord(r.category)}</span>
-            {r.scope === "global" ? <span>{t("memory.global")}</span> : r.scope === "session" ? (data?.sessions[r.scope_key] ? <button className="linkbtn" onClick={(e) => { e.stopPropagation(); onOpen(r.scope_key); }}>{data.sessions[r.scope_key]}</button> : <span>{t("memory.scope.deleted.short")}</span>) : <span>{r.scope}: {r.scope_key}</span>}
+            {r.scope === "global" ? <span>{t("memory.global")}</span> : r.scope === "project" ? <span>{data?.projects[r.scope_key] ?? t("memory.scope.deleted.short")}</span> : <span>{r.scope}: {r.scope_key}</span>}
             {r.created_at && <span className="sep">·</span>}
             {r.created_at && <span className="faint" title={absTime(r.created_at)}>{relTime(r.created_at)}</span>}
           </div>
@@ -179,7 +179,7 @@ export function MemoryScreen({ toast, onOpen }: { toast: (t: string) => void; on
     );
   }
 
-  const sessions = Object.entries(data?.sessions ?? {});
+  const projects = Object.entries(data?.projects ?? {});
   const chosen = all.filter((r) => selected.has(r.id));
   return (
     <>
@@ -251,22 +251,22 @@ export function MemoryScreen({ toast, onOpen }: { toast: (t: string) => void; on
           <button className="btn small danger" disabled={selected.size === 0} onClick={forgetMany}><Icon name="trash" size={14} /> {t("memory.forget")} {selected.size || ""}</button>
         </div>
       )}
-      {editing && <MemorySheet r={editing} sessions={sessions} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); refresh(); }} onForget={() => forget([editing.id])} toast={toast} />}
-      {adding && <MemorySheet sessions={sessions} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); refresh(); }} toast={toast} />}
+      {editing && <MemorySheet r={editing} projects={projects} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); refresh(); }} onForget={() => forget([editing.id])} toast={toast} />}
+      {adding && <MemorySheet projects={projects} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); refresh(); }} toast={toast} />}
       {merging && <MergeSheet records={merging} onClose={() => setMerging(null)} onDone={() => { setMerging(null); setSelecting(false); setSelected(new Set()); refresh(); }} toast={toast} />}
       {renaming && <RenameSheet topic={renaming} onClose={() => setRenaming(null)} onDone={(to) => { setRenaming(null); if (topic === renaming) setTopic(to || null); refresh(); }} toast={toast} />}
-      {tidying && <SuggestionsSheet sessions={data?.sessions ?? {}} onClose={() => setTidying(false)} onChanged={refresh} toast={toast} />}
+      {tidying && <SuggestionsSheet projects={data?.projects ?? {}} onClose={() => setTidying(false)} onChanged={refresh} toast={toast} />}
       {history && <HistorySheet onClose={() => setHistory(false)} onChanged={refresh} toast={toast} />}
     </>
   );
 }
 
-function MemorySheet({ r, sessions, onClose, onSaved, onForget, toast }: { r?: MemoryRecord; sessions: [string, string][]; onClose: () => void; onSaved: () => void; onForget?: () => void; toast: (t: string) => void }) {
+function MemorySheet({ r, projects, onClose, onSaved, onForget, toast }: { r?: MemoryRecord; projects: [string, string][]; onClose: () => void; onSaved: () => void; onForget?: () => void; toast: (t: string) => void }) {
   const [text, setText] = useState(r?.text ?? "");
   // A new note may leave its category and topics to the host, which infers them as Remember does.
   const [category, setCategory] = useState(r?.category ?? "");
   const [topics, setTopics] = useState((r?.topics ?? []).join(", "));
-  const [scope, setScope] = useState(r ? (r.scope === "global" ? "global" : `session:${r.scope_key}`) : "global");
+  const [scope, setScope] = useState(r ? (r.scope === "global" ? "global" : `project:${r.scope_key}`) : "global");
   const [busy, setBusy] = useState(false);
   async function save() {
     setBusy(true);
@@ -276,7 +276,7 @@ function MemorySheet({ r, sessions, onClose, onSaved, onForget, toast }: { r?: M
         toast(t("memory.updated"));
       } else {
         const typed = parseTopics(topics);
-        const res = await api.post<{ decision: string; record: MemoryRecord }>("/api/memory", { scope: scope === "global" ? "global" : "session", scope_key: scope === "global" ? "" : scope.slice(8), category, topics: typed.length ? typed : null, text: text.trim() });
+        const res = await api.post<{ decision: string; record: MemoryRecord }>("/api/memory", { scope: scope === "global" ? "global" : "project", scope_key: scope === "global" ? "" : scope.slice("project:".length), category, topics: typed.length ? typed : null, text: text.trim() });
         toast(res.decision.toLowerCase() === "created" ? t("memory.remembered") : t("memory.similar", { decision: res.decision.toLowerCase() }));
       }
       onSaved();
@@ -302,8 +302,8 @@ function MemorySheet({ r, sessions, onClose, onSaved, onForget, toast }: { r?: M
           <label className="field">{t("memory.scope")}</label>
           <select className="field" value={scope} disabled={!!r} title={r ? t("memory.scope.fixed") : undefined} onChange={(e) => setScope(e.target.value)}>
             <option value="global">{t("memory.scope.globaloption")}</option>
-            {sessions.map(([id, title]) => (
-              <option key={id} value={`session:${id}`}>{title}</option>
+            {projects.map(([id, name]) => (
+              <option key={id} value={`project:${id}`}>{name}</option>
             ))}
           </select>
         </div>
@@ -402,10 +402,10 @@ function RenameSheet({ topic, onClose, onDone, toast }: { topic: string; onClose
   );
 }
 
-function SuggestionsSheet({ sessions, onClose, onChanged, toast }: { sessions: Record<string, string>; onClose: () => void; onChanged: () => void; toast: (t: string) => void }) {
+function SuggestionsSheet({ projects, onClose, onChanged, toast }: { projects: Record<string, string>; onClose: () => void; onChanged: () => void; toast: (t: string) => void }) {
   const { data, error, loading, refresh } = useQuery<MemorySuggestions>("/api/memory/suggestions");
   const [busy, setBusy] = useState(false);
-  const where = (r: MemoryRecord) => (r.scope === "global" ? t("memory.global") : r.scope === "session" ? sessions[r.scope_key] ?? t("memory.scope.deleted.short") : `${r.scope}: ${r.scope_key}`);
+  const where = (r: MemoryRecord) => (r.scope === "global" ? t("memory.global") : r.scope === "project" ? projects[r.scope_key] ?? t("memory.scope.deleted.short") : `${r.scope}: ${r.scope_key}`);
   async function act(path: string, body?: object) {
     setBusy(true);
     try {

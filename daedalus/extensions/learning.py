@@ -69,6 +69,10 @@ class Learning:
         manager = self.app.manager
         if manager is None:
             return
+        if manager.is_private(session_id):
+            # Neither a record nor an extraction: a record keeps the ask and the headline, which the
+            # weekly digest quotes and the memory pass reads, and a private chat is never learned from.
+            return
         try:
             state = await manager.get_state(session_id)
             history = list(state.engine.history) if state is not None and state.engine is not None else []

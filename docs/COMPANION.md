@@ -20,7 +20,7 @@ seven tabs:
 - **Computer** — its agents' browsers, live, with **Take control** and **Give back**. The companion
   has no browser of its own.
 - **Tools** — what it may call itself, and what its agents may use.
-- **Memory** — the notes it keeps across conversations (`Remember`); forget one from here.
+- **Memory** — what it remembers across conversations (`Remember`): the global memory every chat outside a project shares; forget a note from here.
 
 The face and the name are yours to choose (the cog in the header): a shape, a colour, eyes and an
 accessory, drawn from four parameters wherever the companion is shown — the header, the Agents list,

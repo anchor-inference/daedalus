@@ -6,6 +6,7 @@ import { Chevron, Dot, Status, copyText, fmtInt, statusWord, timeAgo } from "../
 import { MenuItem, OverflowMenu, confirmDialog, Overlay } from "../ui/dialogs";
 import { absDate, clock, commandPreview, duration, plainPreview, shortDateTime } from "../format";
 import { HostMark } from "../runon";
+import { PrivateBadge, isPrivate } from "../privatechat";
 import { isProject } from "../grouping";
 import { readPrefs, type Prefs } from "../appearance";
 import { EVIDENCE_EVENT, EvidenceRequest, codeBlock, renderCached, renderMarkdown } from "../md";
@@ -1527,6 +1528,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           chip={phoneChip}
           onMenu={() => setPhoneSheet("menu")}
           shared={detail?.share && detail.share.mode !== "local" ? (detail.share.mode === "public" ? "public" : "key") : null}
+          secret={isPrivate(detail)}
         />
         {offline && <Banner strip tone="warn" icon="reload" className="ph-chat-strip">{t("session.phone.reconnecting")}</Banner>}
       </> : <div className={`chat-head ${busy || saving || compacting ? "live" : ""}`}>
@@ -1552,6 +1554,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             <span className="chat-title-line">
               <span className="chat-title truncate">{detail?.title ?? "…"}</span>
               <HostMark env={detail?.env} />
+              <PrivateBadge on={isPrivate(detail)} />
             </span>
           )}
           {detail?.subagent_of ? (
@@ -2720,6 +2723,10 @@ function describe(item: ToolItem, workspace?: string): { verb: string; family: s
       return { verb: verb("SavePrompt", r), family: "SavePrompt", detail: str("title"), icon: "wand" };
     case "HistorySearch":
       return { verb: verb("HistorySearch", r), family: "search", detail: str("query"), icon: "search" };
+    case "ChatSearch":
+      return { verb: verb("ChatSearch", r), family: "search", detail: [str("query"), str("project")].filter(Boolean).join(" · "), icon: "search" };
+    case "RecentChats":
+      return { verb: verb("RecentChats", r), family: "search", detail: [str("project"), str("after"), str("before")].filter(Boolean).join(" · "), icon: "search" };
     case "ToolSearch": {
       // A search that loaded a group says which, and how many tools came with it; the query is what
       // the model typed, and the group is what the reader wants to know it now has.
