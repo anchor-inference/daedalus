@@ -249,7 +249,7 @@ pictures and five were left out. Twice is far from both."""
 def _encode(image: object, *, prefer_png: bool, limit: int) -> tuple[bytes, str] | None:
     """The picture as PNG when it was not a photograph, fits, and is not much larger than its JPEG;
     else as the best JPEG that fits."""
-    from PIL import Image
+    from PIL import Image  # Lazy: only a picture that must be re-encoded needs the imaging library
 
     assert isinstance(image, Image.Image)
     flat = image
