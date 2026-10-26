@@ -70,10 +70,25 @@ CACHE_CONTROL = {"type": "ephemeral", "ttl": "1h"}
 CACHE_ANCHOR_STRIDE = 16
 """Messages between moves of the mid-history cache anchor; see ``_anchor_index``."""
 # Sent whenever thinking is on, as the CLI does. keep="all" clears nothing: it pins the server to keeping
-# every earlier thinking block rather than whatever its default for the model is, so the prefix never
-# changes under the cache. The proxy replays no thinking blocks today, which makes it a no-op here.
+# every earlier thinking block the request replays rather than whatever its default for the model is, so
+# the prefix never changes under the cache.
 _KEEP_THINKING_EDIT = {"type": "clear_thinking_20251015", "keep": "all"}
 _UNCACHABLE_BLOCKS = frozenset({"thinking", "redacted_thinking"})
+# The models Claude Code still asks for a fixed thinking budget; every other model gets adaptive thinking,
+# where the effort alone sets how much it thinks. Read off the CLI's own rule (2.1.309).
+_BUDGET_THINKING_MODELS = ("claude-opus-4-0", "claude-opus-4-1", "claude-opus-4-5", "claude-sonnet-4-0", "claude-sonnet-4-5", "claude-haiku-4-5")
+REASONING_FORMAT = "anthropic-claude-v1"
+"""The ``format`` of a ``reasoning_details`` entry holding one Claude ``thinking`` or ``redacted_thinking`` block.
+
+OpenRouter's name for Anthropic reasoning carried through a chat completion. The bot keeps the entries on
+the assistant message and sends them back unchanged, and only this module reads inside one: ``index`` is
+the block's position in the turn's content and ``text_offset`` how much of the turn's text came before it,
+which is what puts the block back exactly where the model wrote it (:func:`_assistant_content`)."""
+# What the server says when a replayed thinking block was signed over a different conversation prefix
+# (an account the preserved-thinking check is enforced on, after the history was edited), and the header
+# that names the first such block. Claude Code matches the same two phrases and reads the same header.
+_PREFIX_LOCK_PHRASES = ("not created in this conversation", "bound to a different conversation")
+PREFIX_MISMATCH_HEADER = "anthropic-thinking-prefix-mismatch"
 
 
 def claude_betas() -> str:
@@ -388,6 +403,126 @@ def _parse_args(raw: Any) -> Any:
     return {}
 
 
+def thinking_detail(block: dict[str, Any], index: int, text_offset: int) -> dict[str, Any] | None:
+    """One finished ``thinking`` or ``redacted_thinking`` block → the ``reasoning_details`` entry kept for it.
+
+    A thinking block goes back only with its signature: the server refuses an unsigned one, and Claude
+    Code keeps none either. Under the omitted display the text is empty and the signature is the whole
+    of the block; under the summarized one the summary text goes back as it came.
+    """
+    detail: dict[str, Any] = {"format": REASONING_FORMAT, "index": index, "text_offset": text_offset}
+    if block.get("type") == "redacted_thinking":
+        data = block.get("data")
+        return {"type": "reasoning.encrypted", **detail, "data": data} if isinstance(data, str) and data else None
+    signature = block.get("signature")
+    if block.get("type") != "thinking" or not isinstance(signature, str) or not signature:
+        return None
+    return {"type": "reasoning.text", **detail, "text": str(block.get("thinking") or ""), "signature": signature}
+
+
+def _replayed_blocks(message: dict[str, Any]) -> list[tuple[int, int, dict[str, Any]]]:
+    """The thinking blocks an assistant message's ``reasoning_details`` carry, as (index, text offset, block)."""
+    out: list[tuple[int, int, dict[str, Any]]] = []
+    for detail in message.get("reasoning_details") or []:
+        if not isinstance(detail, dict) or detail.get("format") != REASONING_FORMAT:
+            continue
+        if detail.get("type") == "reasoning.text" and isinstance(detail.get("signature"), str) and detail["signature"]:
+            block = {"type": "thinking", "thinking": str(detail.get("text") or ""), "signature": detail["signature"]}
+        elif detail.get("type") == "reasoning.encrypted" and isinstance(detail.get("data"), str) and detail["data"]:
+            block = {"type": "redacted_thinking", "data": detail["data"]}
+        else:
+            continue
+        out.append((int(detail.get("index") or 0), int(detail.get("text_offset") or 0), block))
+    out.sort(key=lambda entry: entry[0])
+    return out
+
+
+def _assistant_content(message: dict[str, Any], names: dict[str, str]) -> list[dict[str, Any]]:
+    """An assistant chat message → its Anthropic content, its thinking blocks back where the model wrote them.
+
+    Claude Code sends every earlier thinking and redacted_thinking block back verbatim, interleaved with
+    the turn's text and tool calls in their original order, on every request of a tool loop and across
+    user turns. A model handed its earlier turns without them re-derives its plan on every step, and a
+    block moved from its place no longer matches the prefix its signature was made over. A chat message
+    keeps the text as one string and the calls as a list, so each block's recorded position and text
+    offset say where it goes: the text the model wrote before it, then the calls before it, then the
+    block. Whatever text and calls remain follow the last block.
+    """
+    text = _text_of(message.get("content"))
+    calls: list[dict[str, Any]] = []
+    for call in message.get("tool_calls") or []:
+        fn = call.get("function") or {}
+        original = str(fn.get("name") or "")
+        wire = _wire_tool_name(original)
+        if original:
+            names[wire] = original
+        calls.append({"type": "tool_use", "id": str(call.get("id") or ""), "name": wire, "input": _parse_args(fn.get("arguments"))})
+    if not text and not calls:
+        return []
+    content: list[dict[str, Any]] = []
+    taken_text = taken_calls = 0
+    for index, offset, block in _replayed_blocks(message):
+        offset = min(max(offset, taken_text), len(text))
+        gap = index - len(content)
+        if offset > taken_text:
+            content.append({"type": "text", "text": text[taken_text:offset]})
+            taken_text = offset
+            gap -= 1
+        while gap > 0 and taken_calls < len(calls):
+            content.append(calls[taken_calls])
+            taken_calls += 1
+            gap -= 1
+        content.append(block)
+    if taken_text < len(text):
+        content.append({"type": "text", "text": text[taken_text:]})
+    content.extend(calls[taken_calls:])
+    return content
+
+
+def without_thinking(payload: dict[str, Any], first: tuple[int, int] | None = None) -> tuple[dict[str, Any], int]:
+    """The same ``/v1/messages`` body with replayed thinking blocks left out, and how many were.
+
+    ``first`` is the (message, content) position the server named as the first block bound to another
+    prefix: that block and every thinking block after it go, which is what the API's own ``drop_block``
+    does and what Claude Code strips before its one retry. Without a position every block goes.
+    """
+    removed = 0
+    messages: list[dict[str, Any]] = []
+    for at, message in enumerate(payload.get("messages") or []):
+        content = message.get("content")
+        if message.get("role") != "assistant" or not isinstance(content, list) or (first is not None and at < first[0]):
+            messages.append(message)
+            continue
+        kept = []
+        for position, block in enumerate(content):
+            later = first is None or at > first[0] or position >= first[1]
+            if later and isinstance(block, dict) and block.get("type") in _UNCACHABLE_BLOCKS:
+                removed += 1
+                continue
+            kept.append(block)
+        messages.append({**message, "content": kept})
+    return {**payload, "messages": messages}, removed
+
+
+def prefix_locked(status: int, text: str, headers: Any) -> tuple[bool, tuple[int, int] | None]:
+    """Whether a refusal is the server rejecting replayed thinking signed over another prefix, and where.
+
+    The position comes from the ``anthropic-thinking-prefix-mismatch`` header (``block=messages.N.content.M``)
+    when the server sends one.
+    """
+    lowered = text.lower()
+    if status != 400 or not any(phrase in lowered for phrase in _PREFIX_LOCK_PHRASES):
+        return False, None
+    named = str(headers.get(PREFIX_MISMATCH_HEADER) or "") if headers is not None else ""
+    for part in named.split(";"):
+        key, _, value = part.partition("=")
+        if key.strip() == "block":
+            pieces = value.strip().split(".")
+            if len(pieces) == 4 and pieces[0] == "messages" and pieces[2] == "content" and pieces[1].isdigit() and pieces[3].isdigit():
+                return True, (int(pieces[1]), int(pieces[3]))
+    return True, None
+
+
 def chat_to_messages(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
     """OpenAI chat-completions body → Anthropic ``/v1/messages`` plus wire-name → original-name."""
     instructions: list[str] = []
@@ -414,17 +549,7 @@ def chat_to_messages(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, st
             items.append({"role": "user", "content": _user_content(message.get("content"))})
         elif role == "assistant":
             flush_results()
-            content: list[dict[str, Any]] = []
-            text = _text_of(message.get("content"))
-            if text:
-                content.append({"type": "text", "text": text})
-            for call in message.get("tool_calls") or []:
-                fn = call.get("function") or {}
-                original = str(fn.get("name") or "")
-                wire = _wire_tool_name(original)
-                if original:
-                    names[wire] = original
-                content.append({"type": "tool_use", "id": str(call.get("id") or ""), "name": wire, "input": _parse_args(fn.get("arguments"))})
+            content = _assistant_content(message, names)
             if content:
                 items.append({"role": "assistant", "content": content})
         elif role == "tool":
@@ -436,7 +561,8 @@ def chat_to_messages(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, st
     model = str(body.get("model") or "")
     max_tokens = min(int(body.get("max_tokens") or 8192), MAX_OUTPUT)
     effort = str(body.get("reasoning_effort") or "")
-    if effort:
+    adaptive = not model.startswith(("claude-3-", *_BUDGET_THINKING_MODELS))
+    if effort and not adaptive:
         budget = max(1024, EFFORT_BUDGET.get(effort, 8192))
         if max_tokens <= budget:
             max_tokens = min(MAX_OUTPUT, budget + 1024)
@@ -473,11 +599,15 @@ def chat_to_messages(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, st
     elif isinstance(choice, str) and choice in ("auto", "none", "any", "required"):
         out["tool_choice"] = {"type": "any"} if choice == "required" else {"type": choice}
     if effort and not forced:
-        budget = max(1024, EFFORT_BUDGET.get(effort, 8192))
         # Omitted display keeps time-to-first-token low but makes the model think in silence for a
         # minute or more; messages_events_to_chunks forwards upstream liveness so the caller's idle
-        # watchdog does not read that silence as a dead stream.
-        out["thinking"] = {"type": "enabled", "budget_tokens": min(budget, max_tokens - 1), "display": "omitted"}
+        # watchdog does not read that silence as a dead stream. A fixed budget on a model the CLI
+        # gives adaptive thinking made every step think toward the budget instead of the effort.
+        if adaptive:
+            out["thinking"] = {"type": "adaptive", "display": "omitted"}
+        else:
+            budget = max(1024, EFFORT_BUDGET.get(effort, 8192))
+            out["thinking"] = {"type": "enabled", "budget_tokens": min(budget, max_tokens - 1), "display": "omitted"}
         out["context_management"] = {"edits": [dict(_KEEP_THINKING_EDIT)]}
         if any(model.startswith(prefix) for prefix in EFFORT_MODELS) and effort in EFFORT_BUDGET:
             out["output_config"] = {"effort": effort}
@@ -491,8 +621,12 @@ def _chunk(completion_id: str, model: str, delta: dict[str, Any], finish: str | 
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
-def _usage(input_tokens: int, output_tokens: int, cache_read: int = 0, cache_write: int = 0) -> dict[str, Any]:
-    """OpenAI-shaped usage. ``prompt_tokens`` is the whole prompt; Anthropic's ``input_tokens`` is sometimes only the uncached tail."""
+def _usage(input_tokens: int, output_tokens: int, cache_read: int = 0, cache_write: int = 0, thinking_tokens: int = 0) -> dict[str, Any]:
+    """OpenAI-shaped usage. ``prompt_tokens`` is the whole prompt; Anthropic's ``input_tokens`` is sometimes only the uncached tail.
+
+    ``thinking_tokens`` is the server's own count of the hidden thinking inside ``output_tokens``, which the
+    ``thinking-token-count`` beta the CLI sends asks for; it is what replaying that thinking later costs.
+    """
     cached = cache_read + cache_write
     prompt = input_tokens if input_tokens >= cached else input_tokens + cached
     return {
@@ -500,7 +634,7 @@ def _usage(input_tokens: int, output_tokens: int, cache_read: int = 0, cache_wri
         "completion_tokens": output_tokens,
         "total_tokens": prompt + output_tokens,
         "prompt_tokens_details": {"cached_tokens": cache_read},
-        "completion_tokens_details": {"reasoning_tokens": 0},
+        "completion_tokens_details": {"reasoning_tokens": thinking_tokens},
         "cache_creation_input_tokens": cache_write,
         "cache_read_input_tokens": cache_read,
     }
@@ -514,6 +648,9 @@ async def messages_events_to_chunks(lines: AsyncIterator[str], *, model: str, na
     while the model thinks silently. It follows real upstream events only, never a timer: a hung
     upstream stays silent and is still caught by the caller's idle watchdog.
 
+    Each finished thinking or redacted_thinking block becomes one ``reasoning_details`` entry
+    (:func:`thinking_detail`), which the caller keeps on the assistant turn and sends back.
+
     Only ``message_stop`` finishes the answer. A body that ends without it was cut in transit, and
     becomes a ``stream_truncated`` error with no ``[DONE]``; a ``tool_use`` block that never got its
     ``content_block_stop`` finishes the answer as ``length``, so the bot never runs the cut call.
@@ -522,10 +659,14 @@ async def messages_events_to_chunks(lines: AsyncIterator[str], *, model: str, na
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     calls: dict[int, int] = {}
     finish = "stop"
-    input_tokens = output_tokens = cache_read = cache_write = 0
+    input_tokens = output_tokens = cache_read = cache_write = thinking_tokens = 0
     failed: Any = None
     stopped = False
     open_calls: set[int] = set()
+    # Thinking blocks still streaming, by content index, and how much answer text came before each.
+    thinking: dict[int, dict[str, Any]] = {}
+    offsets: dict[int, int] = {}
+    text_chars = 0
     event_name = ""
     async for raw in lines:
         line = raw.strip()
@@ -552,7 +693,13 @@ async def messages_events_to_chunks(lines: AsyncIterator[str], *, model: str, na
         elif kind == "message_stop":
             stopped = True
         elif kind == "content_block_stop":
-            open_calls.discard(int(event.get("index") or 0))
+            index = int(event.get("index") or 0)
+            open_calls.discard(index)
+            block = thinking.pop(index, None)
+            detail = thinking_detail(block, index, offsets.pop(index, 0)) if block is not None else None
+            if detail is not None:
+                spoke = True
+                yield _chunk(completion_id, model, {"reasoning_details": [detail]})
         elif kind == "message_start":
             usage = (event.get("message") or {}).get("usage") or {}
             input_tokens = int(usage.get("input_tokens") or 0)
@@ -560,7 +707,11 @@ async def messages_events_to_chunks(lines: AsyncIterator[str], *, model: str, na
             cache_write = int(usage.get("cache_creation_input_tokens") or 0)
         elif kind == "content_block_start":
             block = event.get("content_block") or {}
-            if block.get("type") == "tool_use":
+            if block.get("type") in _UNCACHABLE_BLOCKS:
+                index = int(event.get("index") or 0)
+                thinking[index] = dict(block)
+                offsets[index] = text_chars
+            elif block.get("type") == "tool_use":
                 index = int(event.get("index") or len(calls))
                 calls[index] = index
                 open_calls.add(index)
@@ -573,10 +724,18 @@ async def messages_events_to_chunks(lines: AsyncIterator[str], *, model: str, na
             dtype = delta.get("type")
             if dtype == "text_delta" and delta.get("text"):
                 spoke = True
+                text_chars += len(delta["text"])
                 yield _chunk(completion_id, model, {"role": "assistant", "content": delta["text"]})
             elif dtype == "thinking_delta" and delta.get("thinking"):
                 spoke = True
+                open_block = thinking.get(int(event.get("index") or 0))
+                if open_block is not None:
+                    open_block["thinking"] = str(open_block.get("thinking") or "") + delta["thinking"]
                 yield _chunk(completion_id, model, {"reasoning_content": delta["thinking"]})
+            elif dtype == "signature_delta" and delta.get("signature"):
+                open_block = thinking.get(int(event.get("index") or 0))
+                if open_block is not None:
+                    open_block["signature"] = delta["signature"]
             elif dtype == "input_json_delta" and delta.get("partial_json"):
                 index = int(event.get("index") or (len(calls) - 1 if calls else 0))
                 spoke = True
@@ -587,6 +746,9 @@ async def messages_events_to_chunks(lines: AsyncIterator[str], *, model: str, na
                 output_tokens = int(usage.get("output_tokens") or 0)
             if usage.get("input_tokens") is not None:
                 input_tokens = int(usage.get("input_tokens") or input_tokens)
+            details = usage.get("output_tokens_details")
+            if isinstance(details, dict) and details.get("thinking_tokens") is not None:
+                thinking_tokens = int(details.get("thinking_tokens") or 0)
             reason = (event.get("delta") or {}).get("stop_reason")
             if reason in ("max_tokens", "model_context_window_exceeded"):
                 finish = "length"
@@ -606,7 +768,7 @@ async def messages_events_to_chunks(lines: AsyncIterator[str], *, model: str, na
         return
     if open_calls and finish != "length":
         finish = "length"
-    yield _chunk(completion_id, model, {}, finish=finish, usage=_usage(input_tokens, output_tokens, cache_read, cache_write))
+    yield _chunk(completion_id, model, {}, finish=finish, usage=_usage(input_tokens, output_tokens, cache_read, cache_write, thinking_tokens))
     yield "data: [DONE]\n\n"
 
 
@@ -673,6 +835,8 @@ def claude_usage_view(data: dict[str, Any], profile: dict[str, Any] | None = Non
 __all__ = [
     "CLAUDE_API",
     "CLAUDE_FALLBACK_MODELS",
+    "PREFIX_MISMATCH_HEADER",
+    "REASONING_FORMAT",
     "ClaudeAuth",
     "attribution_hash",
     "chat_to_messages",
@@ -680,5 +844,8 @@ __all__ = [
     "claude_header_windows",
     "claude_usage_view",
     "messages_events_to_chunks",
+    "prefix_locked",
     "request_betas",
+    "thinking_detail",
+    "without_thinking",
 ]

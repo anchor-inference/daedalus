@@ -58,7 +58,9 @@ from claude import (
     claude_header_windows,
     claude_usage_view,
     messages_events_to_chunks,
+    prefix_locked,
     request_betas,
+    without_thinking,
 )
 from subscriptions import (
     CODEX_BASE,
@@ -866,20 +868,36 @@ async def handle_claude(request: web.Request, rest: str) -> web.StreamResponse:
     stream = bool(body.get("stream", False))
     payload, names = chat_to_messages(body)
     headers["anthropic-beta"] = request_betas(payload)
-    upstream = client.build_request("POST", CLAUDE_API + "/v1/messages?beta=true", json=payload, headers={**headers, "accept": "text/event-stream", "content-type": "application/json"})
-    timing = UpstreamTiming("claude", "POST", "v1/messages", str(payload.get("model") or model))
-    try:
-        response = await client.send(upstream, stream=True)
-    except httpx.HTTPError as exc:
-        timing.report(f"unreachable:{type(exc).__name__}")
-        return web.json_response({"error": {"message": f"upstream unreachable: {type(exc).__name__}", "type": "proxy_error"}}, status=502)
-    timing.answered(response.status_code)
-    if response.status_code >= 400:
+    healed = False
+    while True:
+        upstream = client.build_request("POST", CLAUDE_API + "/v1/messages?beta=true", json=payload, headers={**headers, "accept": "text/event-stream", "content-type": "application/json"})
+        timing = UpstreamTiming("claude", "POST", "v1/messages", str(payload.get("model") or model))
+        try:
+            response = await client.send(upstream, stream=True)
+        except httpx.HTTPError as exc:
+            timing.report(f"unreachable:{type(exc).__name__}")
+            return web.json_response({"error": {"message": f"upstream unreachable: {type(exc).__name__}", "type": "proxy_error"}}, status=502)
+        timing.answered(response.status_code)
+        if response.status_code < 400:
+            break
         raw_bytes = await response.aread()
         timing.received(len(raw_bytes))
         timing.report("refused")
         raw = raw_bytes.decode("utf-8", "replace")
         await response.aclose()
+        locked, first = prefix_locked(response.status_code, raw, response.headers)
+        if locked and not healed:
+            # Thinking signed over a prefix the bot has since rewritten is refused before any output on an
+            # account the preserved-thinking check is enforced on. Claude Code answers this by dropping
+            # that block and every later one and asking once more; the model loses that reasoning, not
+            # the turn. Said aloud, since a history edited under replayed thinking should be rare.
+            payload, removed = without_thinking(payload, first)
+            if removed:
+                logger.warning("claude refused replayed thinking bound to another prefix (%s); retrying without %d block(s)", raw[:200], removed)
+                healed = True
+                continue
+        break
+    if response.status_code >= 400:
         await clients.verify("claude", response.status_code, raw)
         try:
             payload_err = json.loads(raw)
