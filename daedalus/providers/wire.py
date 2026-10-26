@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import logging
 import re
@@ -23,6 +24,7 @@ from protocore.contracts.types import (
 from protocore.providers.openai_compat import ReasoningReplay
 from protocore.providers.openai_compat.wire import TOOL_IMAGES_CARRIER_HEADER
 
+from daedalus.providers.image_fit import MAX_ENCODED_BYTES, encoded_size
 from daedalus.security.redact import redact
 
 logger = logging.getLogger(__name__)
@@ -82,40 +84,90 @@ def _image_refs_of(message: Message) -> list[tuple[str, str]]:
     return [(image.blob_ref, image.mime_type) for image in message_image_refs(message)]
 
 
+_ATTACHED_IMAGE_LINE = re.compile(r"^- (.+?) \((image/[\w.+-]+), \d+ bytes\)", re.MULTILINE)
+
+
+def _attached_image_paths(message: Message) -> dict[str, str]:
+    """The workspace path of each picture of a user message, by its blob reference.
+
+    The host lists every attached file in the message's own text (``- <path> (<type>, <n> bytes)``)
+    in the order it stored them, and gives the pictures among them blob references in the same
+    order; the two lists pair up only when they are as long as each other, and otherwise nothing is
+    claimed. A picture left out of a request is named by this path, which the agent can open with
+    ImageView, where a blob reference named nothing it could open."""
+    refs = [ref for ref, _mime in _image_refs_of(message)]
+    paths = [match.group(1) for match in _ATTACHED_IMAGE_LINE.finditer(_text_of(message))]
+    return dict(zip(refs, paths, strict=True)) if refs and len(paths) == len(refs) else {}
+
+
+def left_out_note(blob_ref: str, path: str | None) -> str:
+    """The line that stands where a picture left out of a request was. Built from the history alone,
+    so the same history gives the same line on every request and the prompt cache holds."""
+    if path:
+        return f"[picture left out of this request, which carries only the newest pictures that fit the provider's limits: {path} — ImageView opens it]"
+    return f"[picture left out of this request, which carries only the newest pictures that fit the provider's limits: blob {blob_ref}]"
+
+
+InlineFitter = Callable[[bytes, str], Awaitable[tuple[bytes, str]]]
+"""Fits a tool's inline picture to the request's provider, as the image loader fits a stored one."""
+
+
 async def images_left_out(
     messages: Sequence[Message],
     image_loader: Callable[[str], Awaitable[tuple[bytes, str]]],
+    *,
+    inline_fitter: InlineFitter | None = None,
 ) -> frozenset[str]:
-    """The pictures one request leaves out: all but the newest that fit :data:`MAX_REQUEST_IMAGES` and
-    :data:`MAX_REQUEST_IMAGE_BYTES`, the cut rounded up to :data:`IMAGE_WINDOW_STEP` but never past the
-    newest picture when that one fits on its own.
+    """The pictures of user turns one request leaves out: all but the newest that fit
+    :data:`MAX_REQUEST_IMAGES` and :data:`MAX_REQUEST_IMAGE_BYTES`, the cut rounded up to
+    :data:`IMAGE_WINDOW_STEP` but never past the newest picture when that one fits on its own, and any
+    picture that alone is past the provider's per-image bound however it was fitted.
 
-    Only the newest pictures are loaded to be measured, at most :data:`MAX_REQUEST_IMAGES` of them; pass
-    a loader that remembers what it loaded, so the pictures that are sent are not read twice.
+    The pictures tool results carry are counted first: which of them ride is the core's retention
+    policy's to decide, and what they take is not there for the user turns' pictures. Only the newest
+    pictures are loaded to be measured, at most :data:`MAX_REQUEST_IMAGES` of them; pass a loader that
+    remembers what it loaded, so the pictures that are sent are not read twice.
     """
     order: list[str] = []
+    tool_count = 0
+    tool_bytes = 0
     for message in messages:
         if message.role is MessageRole.user:
             for blob_ref, _mime in _image_refs_of(message):
                 if blob_ref not in order:
                     order.append(blob_ref)
-    cut = max(0, len(order) - MAX_REQUEST_IMAGES)
-    total = 0
+        elif message.role is MessageRole.tool:
+            for block in message.content_blocks:
+                if isinstance(block, ToolResultBlock):
+                    for image in block.images:
+                        loaded = await _tool_image_bytes(image, image_loader, inline_fitter)
+                        if loaded is not None and encoded_size(loaded[0]) <= MAX_ENCODED_BYTES:
+                            tool_count += 1
+                            tool_bytes += encoded_size(loaded[0])
+    room = max(0, MAX_REQUEST_IMAGES - tool_count)
+    cut = max(0, len(order) - room)
+    total = tool_bytes
+    oversize: set[str] = set()
     for index in range(len(order) - 1, cut - 1, -1):
         data, _mime = await image_loader(order[index])
-        total += 4 * ((len(data) + 2) // 3)  # its base64 length, which is what the request carries
+        size = encoded_size(data)  # its base64 length, which is what the request carries
+        if size > MAX_ENCODED_BYTES:
+            oversize.add(order[index])
+            continue
+        total += size
         if total > MAX_REQUEST_IMAGE_BYTES:
             cut = index + 1
             break
     if 0 < cut < len(order):
         cut = min(len(order) - 1, -(-cut // IMAGE_WINDOW_STEP) * IMAGE_WINDOW_STEP)
-    return frozenset(order[:cut])
+    return frozenset(order[:cut]) | frozenset(oversize)
 
 
 async def messages_to_wire(
     messages: Sequence[Message],
     *,
     image_loader: Any | None = None,
+    inline_fitter: InlineFitter | None = None,
     supports_images: bool = False,
     images_omitted: Container[str] = (),
     reasoning_replay: ReasoningReplay = ReasoningReplay.when_present,
@@ -126,7 +178,8 @@ async def messages_to_wire(
     ``image_loader`` is an async callable ``(blob_ref) -> (bytes, mime)``; when the
     endpoint cannot take images the block degrades to a text placeholder so the
     model still knows a file was attached. A picture named in ``images_omitted``
-    (see :func:`images_left_out`) degrades the same way, saying it was left out.
+    (see :func:`images_left_out`) degrades the same way, saying it was left out and where it is.
+    ``inline_fitter`` fits the inline pictures of tool results as the loader fits stored ones.
 
     ``reasoning_replay`` is the endpoint's policy for an assistant turn's reasoning text, in the
     core's terms: ``never`` sends none (a server that refuses a field it does not know),
@@ -145,7 +198,8 @@ async def messages_to_wire(
                 if isinstance(block, ToolResultBlock):
                     entry = {"role": "tool", "tool_call_id": block.tool_call_id, "content": block.content or ""}
                     if block.images:
-                        carried, notes = await _tool_image_parts(block, image_loader=image_loader, supports_images=supports_images)
+                        carried, notes = await _tool_image_parts(block, image_loader=image_loader, inline_fitter=inline_fitter,
+                                                                 supports_images=supports_images)
                         if notes:
                             entry["content"] = "\n".join([entry["content"], *notes])
                         if carried:
@@ -191,9 +245,10 @@ async def messages_to_wire(
         texts = [block.text for block in message.content_blocks if isinstance(block, TextBlock)]
         content: list[dict[str, Any]] = [{"type": "text", "text": t} for t in texts]
         has_image = False
+        paths = _attached_image_paths(message) if images_omitted else {}
         for blob_ref, mime_hint in _image_refs_of(message):
             if blob_ref in images_omitted:
-                content.append({"type": "text", "text": f"[image left out of this request, only the newest are sent: {blob_ref}]"})
+                content.append({"type": "text", "text": left_out_note(blob_ref, paths.get(blob_ref))})
             elif supports_images and image_loader is not None:
                 data, mime = await image_loader(blob_ref)
                 b64 = base64.b64encode(data).decode("ascii")
@@ -219,13 +274,14 @@ can only be placed once every message of the request is on the wire."""
 
 
 async def _tool_image_parts(
-    block: ToolResultBlock, *, image_loader: Any | None, supports_images: bool,
+    block: ToolResultBlock, *, image_loader: Any | None, inline_fitter: InlineFitter | None = None, supports_images: bool,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """The content parts for a result's images, and a line for each one that cannot be sent.
 
     A model that takes no images gets the lines in the result's own text and no extra turn. The size a
     tool gave goes beside its image: a model that points at coordinates in a screenshot needs the size
-    it was shown to turn them back into screen positions.
+    it was shown to turn them back into screen positions. When fitting the picture to the provider
+    changed that size, both are named, so a point read off the smaller picture can still be scaled.
     """
     parts: list[dict[str, Any]] = []
     notes: list[str] = []
@@ -234,20 +290,43 @@ async def _tool_image_parts(
         if not supports_images or (image.data is None and image_loader is None):
             notes.append(f"[image not sent, this model does not take images: {name}]")
             continue
-        loaded = await _tool_image_bytes(image, image_loader)
+        loaded = await _tool_image_bytes(image, image_loader, inline_fitter)
         if loaded is None:
             notes.append(f"[image not sent, it could not be loaded: {name}]")
             continue
         data, mime = loaded
+        if encoded_size(data) > MAX_ENCODED_BYTES:
+            notes.append(f"[image not sent, it is past the provider's limit for one picture and could not be made smaller: {name}]")
+            continue
         if image.width is not None and image.height is not None:
-            parts.append({"type": "text", "text": f"[image {number} of tool call {block.tool_call_id}: {image.width}x{image.height} pixels]"})
+            size = f"{image.width}x{image.height} pixels"
+            shown = _picture_size(data)
+            if shown is not None and shown != (image.width, image.height):
+                size += f", shown at {shown[0]}x{shown[1]} to fit the provider's limits"
+            parts.append({"type": "text", "text": f"[image {number} of tool call {block.tool_call_id}: {size}]"})
         parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"}})
     return parts, notes
 
 
-async def _tool_image_bytes(image: ToolResultImage, image_loader: Any | None) -> tuple[bytes, str] | None:
+def _picture_size(data: bytes) -> tuple[int, int] | None:
+    """The size a picture's header declares, read without decoding it; ``None`` when unreadable."""
+    from PIL import Image  # Lazy: only a tool picture with a stated size needs it
+
+    try:
+        with Image.open(io.BytesIO(data)) as probe:
+            return probe.size
+    except Exception:  # noqa: BLE001 — an unreadable header only costs the second size
+        return None
+
+
+async def _tool_image_bytes(image: ToolResultImage, image_loader: Any | None,
+                            inline_fitter: InlineFitter | None = None) -> tuple[bytes, str] | None:
     if image.data is not None:
+        if inline_fitter is not None:
+            return await inline_fitter(image.data, image.mime_type)
         return image.data, image.mime_type
+    if image_loader is None:
+        return None
     try:
         data, mime = await image_loader(image.blob_ref)
     except Exception as exc:  # noqa: BLE001 — one unreadable picture must not fail the whole request

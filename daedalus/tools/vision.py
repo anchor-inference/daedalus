@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import io
 import mimetypes
 from typing import Any
 
@@ -19,6 +21,7 @@ from protocore.contracts.types import (
 from protocore.tools.decorator import tool
 
 from daedalus.host.setting_refs import VISION_MODEL, VISION_OUTPUT, SettingRef
+from daedalus.providers.image_fit import sniffed_mime
 from daedalus.tools import search_hint
 from daedalus.tools._common import error, ok, refuse_protected, services_for
 
@@ -37,10 +40,12 @@ SUPPORTED = {"image/png", "image/jpeg", "image/webp", "image/gif"}
         "the image never enters your own context. Give the path and what you want to know "
         "(task): e.g. 'transcribe all text', 'describe the UI and any error messages', "
         "'what does this chart show, with numbers'. Use detail='full' for a long, exhaustive "
-        "description; the default is a focused answer to the task."
+        "description; the default is a focused answer to the task. A large picture is scaled down to "
+        "what the model keeps (1568 to 2576 pixels on the long side, by model); for small text or detail, "
+        "pass region=[x0, y0, x1, y1] in the file's own pixels to look at that part at full resolution."
     ),
 )
-async def image_view(context: ToolContext, path: str, task: str, detail: str = "focused") -> ToolResult:
+async def image_view(context: ToolContext, path: str, task: str, detail: str = "focused", region: list[int] | None = None) -> ToolResult:
     services = services_for(context)
     target = services.resolve(path)
     if refusal := refuse_protected(context, services, target, "read"):
@@ -61,11 +66,44 @@ async def image_view(context: ToolContext, path: str, task: str, detail: str = "
         data = await fs.read_bytes(target, limit=MAX_IMAGE_BYTES)
     except (OSError, ValueError) as exc:
         return error(context, str(exc))
+    if region is not None:
+        try:
+            data, mime = await asyncio.to_thread(crop, data, region)
+        except ValueError as exc:
+            return error(context, str(exc))
     try:
         text, model = await look(services.extra.get("vision"), services.extra.get("manager"), data, mime, task, detail=detail, session_id=context.session_id)
     except VisionUnavailable as exc:
         return error(context, str(exc))
     return ok(context, text, model=model, image=str(target))
+
+
+def crop(data: bytes, region: list[int]) -> tuple[bytes, str]:
+    """The part ``region`` (``[x0, y0, x1, y1]``, the picture's own pixels) of a picture, as PNG.
+
+    Every picture a model is shown is first scaled down to what its provider keeps, so a phone's
+    or a 4K monitor's screenshot loses the small type on it; the file itself stays at full
+    resolution, and a part cut out of it before it is scaled keeps its detail. A ``ValueError``
+    says what is wrong with the region."""
+    from PIL import Image  # Lazy: only a crop needs the imaging library
+
+    if len(region) != 4:
+        raise ValueError("region is [x0, y0, x1, y1]: four numbers, in the image's own pixels")
+    x0, y0, x1, y1 = (int(value) for value in region)
+    try:
+        with Image.open(io.BytesIO(data)) as picture:
+            width, height = picture.size
+            box = (max(0, min(x0, x1)), max(0, min(y0, y1)), min(width, max(x0, x1)), min(height, max(y0, y1)))
+            if box[2] <= box[0] or box[3] <= box[1]:
+                raise ValueError(f"region {region} is not inside the image, which is {width}x{height} pixels")
+            part = picture.crop(box)
+            if part.mode not in ("RGB", "RGBA", "L", "LA"):
+                part = part.convert("RGBA")
+            buffer = io.BytesIO()
+            part.save(buffer, format="PNG")
+    except (OSError, Image.DecompressionBombError) as exc:
+        raise ValueError(f"the image could not be read to crop it: {exc}") from exc
+    return buffer.getvalue(), "image/png"
 
 
 KEPT_IMAGE_TASK = (
@@ -175,27 +213,10 @@ IMAGE_TOKEN_FLOOR = 64
 """Fewer prompt tokens than the text alone plus this, and the picture cannot have been in the prompt."""
 
 
-_SIGNATURES = (
-    (b"\x89PNG\r\n\x1a\n", "image/png"),
-    (b"\xff\xd8\xff", "image/jpeg"),
-    (b"GIF87a", "image/gif"),
-    (b"GIF89a", "image/gif"),
-)
-
-
 def image_mime(data: bytes, claimed: str) -> str:
-    """The type the picture's own bytes declare, else the one its name claimed.
-
-    Anthropic checks the bytes against the declared type and refuses a mismatch with a 400: a JPEG
-    an image tool had saved as ``24.png`` failed on both vision models in turn, and the agent was told
-    no model could look at the picture.
-    """
-    for signature, mime in _SIGNATURES:
-        if data.startswith(signature):
-            return mime
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return "image/webp"
-    return claimed
+    """The type the picture's own bytes declare, else the one its name claimed (see
+    :func:`daedalus.providers.image_fit.sniffed_mime`)."""
+    return sniffed_mime(data, claimed)
 
 
 async def _ask(vision: Any, manager: Any, data: bytes, mime: str, task: str, *, detail: str, instruction: str) -> tuple[str, str]:

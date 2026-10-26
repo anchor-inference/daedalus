@@ -67,11 +67,11 @@ async def test_past_the_count_the_oldest_leave_in_steps() -> None:
 
 
 async def test_past_the_bytes_the_oldest_leave_too_and_only_the_newest_are_read() -> None:
-    loader = Loader(size=6 * 1024 * 1024)  # 8 MB each once encoded: three of them pass 20 MB
-    left_out = await images_left_out(_pictures(5), loader)
-    # Two fit; the step would leave out all five, but the newest that fits is always sent.
-    assert left_out == {f"blob-{i}" for i in range(4)}
-    assert loader.loaded == ["blob-4", "blob-3", "blob-2"]
+    loader = Loader(size=3_700_000)  # 4.9 MB each once encoded, under the per-image bound: five pass 20 MB
+    left_out = await images_left_out(_pictures(6), loader)
+    # Four fit; the step would leave out all six, but the newest that fits is always sent.
+    assert left_out == {f"blob-{i}" for i in range(5)}
+    assert loader.loaded == ["blob-5", "blob-4", "blob-3", "blob-2", "blob-1"]
     huge = Loader(size=MAX_REQUEST_IMAGE_BYTES)
     assert await images_left_out(_pictures(2), huge) == {"blob-0", "blob-1"}
     small = Loader(size=MAX_REQUEST_IMAGE_BYTES // 40)

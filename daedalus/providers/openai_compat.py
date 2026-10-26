@@ -49,9 +49,11 @@ from daedalus.providers.admission import InferenceAdmission
 from daedalus.providers.context_window import stated_window
 from daedalus.providers.dsml import DsmlGuard
 from daedalus.providers.failure_evidence import FailureEvidence, failure_evidence
+from daedalus.providers.image_fit import FittedImages, limits_for
 from daedalus.providers.llamacpp import tools_to_llamacpp_wire
 from daedalus.providers.pricing import ModelPricing, complete_usage
 from daedalus.providers.wire import (
+    InlineFitter,
     arguments_cut,
     images_left_out,
     messages_to_wire,
@@ -443,8 +445,12 @@ class OpenAICompatibleProvider(ILLMProvider):
         images_for: Callable[[str], bool] | None = None,
         admission: InferenceAdmission | None = None,
         context_refusal: Callable[[str, str, int], None] | None = None,
+        fitted_images: FittedImages | None = None,
     ) -> None:
         """``images_for(model)`` says whether that model takes image parts (a preset setting).
+
+        ``fitted_images`` fits every picture of a request to what its model's provider accepts and
+        keeps (see :mod:`daedalus.providers.image_fit`); without it pictures go out as stored.
 
         ``context_refusal(endpoint id, model, window)`` hears every refusal that states the model's real
         context window, so the window the presets run with can be corrected from it."""
@@ -456,6 +462,7 @@ class OpenAICompatibleProvider(ILLMProvider):
         )
         self._usage_sink = usage_sink
         self._image_loader = image_loader
+        self._fitted_images = fitted_images
         self._admission = admission
 
     # -- ILLMProvider -----------------------------------------------------------
@@ -761,12 +768,12 @@ class OpenAICompatibleProvider(ILLMProvider):
         wire_index: list[int] = []  # core message index -> index of its LAST wire entry (a tool message fans out into several)
         keep_reasoning = replays_reasoning(self.endpoint)
         images = self.accepts_images(model)
-        loader = _remembering(self._image_loader) if images and self._image_loader is not None else self._image_loader
-        omitted = await images_left_out(request.messages, loader) if images and loader is not None else frozenset()
+        loader, inline_fitter = self._picture_loaders(model) if images else (self._image_loader, None)
+        omitted = await images_left_out(request.messages, loader, inline_fitter=inline_fitter) if images and loader is not None else frozenset()
         thinking = bool(extra.get("enable_thinking", False))
         for message in request.messages:
-            entries = await messages_to_wire([message], image_loader=loader, supports_images=images, images_omitted=omitted,
-                                             reasoning_replay=self.endpoint.reasoning_replay, thinking=thinking)
+            entries = await messages_to_wire([message], image_loader=loader, inline_fitter=inline_fitter, supports_images=images,
+                                             images_omitted=omitted, reasoning_replay=self.endpoint.reasoning_replay, thinking=thinking)
             if keep_reasoning and entries and message.reasoning_items:
                 # An assistant message is one wire entry; its reasoning goes back on it, in order.
                 details = replayed_details(message, self.endpoint.id, model)
@@ -825,6 +832,30 @@ class OpenAICompatibleProvider(ILLMProvider):
 
     def accepts_images(self, model: str) -> bool:
         return self._image_loader is not None and bool(self._images_for(model))
+
+    def _picture_loaders(self, model: str) -> tuple[ImageLoader | None, InlineFitter | None]:
+        """The loaders one request reads its pictures through: stored ones by reference, each read
+        once and fitted to ``model``'s provider, and a tool's inline ones fitted the same way."""
+        base = self._image_loader
+        fitted = self._fitted_images
+        if base is None:
+            return None, None
+        if fitted is None:
+            return _remembering(base), None
+        limits = limits_for(model)
+
+        async def load(blob_ref: str) -> tuple[bytes, str]:
+            picture = await fitted.fit(blob_ref, lambda: base(blob_ref), limits)
+            return picture.data, picture.mime
+
+        async def inline(data: bytes, mime: str) -> tuple[bytes, str]:
+            async def stored() -> tuple[bytes, str]:
+                return data, mime
+
+            picture = await fitted.fit(None, stored, limits)
+            return picture.data, picture.mime
+
+        return _remembering(load), inline
 
     def _apply_thinking(self, body: dict[str, Any], *, thinking: bool, effort: str) -> None:
         kind = self.endpoint.kind

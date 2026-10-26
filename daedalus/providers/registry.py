@@ -16,6 +16,7 @@ from daedalus.config import ProviderConfig, RuntimeConfig, Settings, first_byte_
 from daedalus.host.setting_refs import provider_key
 from daedalus.providers.admission import InferenceAdmission
 from daedalus.providers.context_window import windows_from_catalog
+from daedalus.providers.image_fit import FittedImages
 from daedalus.providers.openai_compat import (
     ImageLoader,
     OpenAICompatibleProvider,
@@ -60,8 +61,10 @@ class ProviderRegistry:
         usage_sink: UsageSink | None = None,
         image_loader: ImageLoader | None = None,
         admission: InferenceAdmission | None = None,
+        fitted_images: FittedImages | None = None,
     ) -> None:
         self._settings = settings
+        self._fitted_images = fitted_images
         self._usage_sink = usage_sink
         self._image_loader = image_loader
         self._admission = admission
@@ -110,6 +113,7 @@ class ProviderRegistry:
                 images_for=lambda model, pid=provider_id: self._images_for(pid, model),
                 admission=self._admission,
                 context_refusal=self._context_refusal,
+                fitted_images=self._fitted_images,
             )
         self._config = config
         self._retired.extend(p for pid, p in self._providers.items() if pid not in fresh)

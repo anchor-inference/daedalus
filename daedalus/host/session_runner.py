@@ -136,6 +136,7 @@ from daedalus.processes import end_tree
 from daedalus.providers.chain import build_chain
 from daedalus.providers.free_catalog import approved_endpoint
 from daedalus.providers.free_catalog import catalog as free_catalog
+from daedalus.providers.image_fit import FittedImages
 from daedalus.providers.openai_compat import CACHE_ROUTING
 from daedalus.providers.registry import ProviderRegistry
 from daedalus.security import operator_secrets, redact
@@ -825,7 +826,7 @@ class SessionManager:
         """The main orchestrator's tools and the few shared ones it may call, and nothing else."""
         self.providers = ProviderRegistry(
             settings, config, usage_sink=self.usage, image_loader=self._load_image,
-            admission=HostInferenceAdmission(self),
+            admission=HostInferenceAdmission(self), fitted_images=FittedImages(settings.state_dir / "fitted-images"),
         )
         self.mcp = McpManager(config.mcp.servers, self.tools, token_dir=settings.state_dir / "mcp",
                               redirect_default=lambda: mcp_callback_url(settings.miniapp_public_url))
