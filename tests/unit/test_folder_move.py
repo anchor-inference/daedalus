@@ -10,6 +10,7 @@ import os
 import shutil
 import stat
 import tarfile
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -19,6 +20,7 @@ import pytest
 
 from daedalus.config import RuntimeConfig, Settings
 from daedalus.extensions.api import build_app
+from daedalus.host import folder_move
 from daedalus.host.folder_move import (
     FolderMover,
     MoveFailed,
@@ -356,6 +358,70 @@ async def test_a_copy_that_does_not_match_is_thrown_away(settings: Settings, man
     assert view["state"] == "failed" and "does not match" in view["error"]
     assert (project.primary.path / "a.txt").exists()
     assert (await manager.projects.get(project.id)).primary.env == "container"
+
+
+async def host_project(manager: SessionManager, home: Path, name: str) -> Any:
+    source = home / "work" / name
+    source.mkdir(parents=True)
+    (source / "index.html").write_text("<h1>hi</h1>")
+    return await manager.projects.create(name, [FolderSpec(str(source), env="host")])
+
+
+async def test_a_copy_unpacked_before_the_stream_says_it_ended_still_lands(settings: Settings, manager: SessionManager, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The unpacking thread stops at the archive's end marker and may be over before the end of the
+    # stream is fed to it. Feeding once took that for a stop and failed a whole copy with
+    # "_Stopped", but only when the thread won the race, so the move test failed under load alone.
+    # Here the end is held back until the thread is over, every time.
+    unpacked = threading.Event()
+    real_extract = folder_move.extract_tar
+
+    def extract_and_tell(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return real_extract(*args, **kwargs)
+        finally:
+            unpacked.set()
+
+    monkeypatch.setattr(folder_move, "extract_tar", extract_and_tell)
+
+    class EndAfterUnpacking(FakeBridge):
+        async def pack_read(self, transfer: str, *, max_bytes: int = 640 << 10) -> tuple[bytes, bool, str]:
+            item = self.packs[transfer]
+            if item["at"] < len(item["data"]):
+                item["at"] = len(item["data"])
+                return item["data"], False, ""
+            await asyncio.to_thread(unpacked.wait, 30)
+            await asyncio.sleep(0.05)  # the loop's turn in which it learns that the thread has ended
+            return b"", True, hashlib.sha256(item["data"]).hexdigest()
+
+    home = tmp_path / "hosthome"
+    project = await host_project(manager, home, "late-end")
+    bridge = EndAfterUnpacking(home)
+    mover = FolderMover(manager, lambda: bridge, workspaces_dir=settings.workspaces_dir)  # type: ignore[arg-type, return-value]
+    job = await mover.start(project.id, project.primary.id)
+    view = await wait_job(mover, job.id)
+    assert unpacked.is_set() and view["state"] == "done", view
+    assert (await manager.projects.get(project.id)).primary.env == "container"
+
+
+async def test_an_unpacking_error_is_what_the_move_says(settings: Settings, manager: SessionManager, tmp_path: Path) -> None:
+    # A link out of the folder first, then more than the queue between the threads holds: the
+    # unpacking thread fails at once and feeding finds it ended while the stream still comes. Its
+    # error is the move's, not an anonymous stop.
+    class LinkOut(FakeBridge):
+        async def pack_begin(self, path: str, *, actor: str = "operator") -> dict[str, Any]:
+            size = 8 << 20
+            self.packs["p0"] = {"path": Path(path), "data": hostile(("l", "link", "../../outside"), ("big", "file", "x" * size)), "at": 0}
+            return {"transfer": "p0", "files": 1, "dirs": 0, "symlinks": 1, "bytes": size, "skipped": [], "skipped_count": 0}
+
+    home = tmp_path / "hosthome"
+    project = await host_project(manager, home, "link-out")
+    bridge = LinkOut(home)
+    mover = FolderMover(manager, lambda: bridge, workspaces_dir=settings.workspaces_dir)  # type: ignore[arg-type, return-value]
+    job = await mover.start(project.id, project.primary.id)
+    view = await wait_job(mover, job.id)
+    assert view["state"] == "failed" and "points out of the folder" in view["error"], view
+    assert not Path(view["destination"]).exists()
+    assert (await manager.projects.get(project.id)).primary.env == "host"
 
 
 async def test_an_old_daemon_or_a_native_install_is_told_before_anything_starts(settings: Settings, manager: SessionManager, tmp_path: Path) -> None:
