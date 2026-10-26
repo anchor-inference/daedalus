@@ -11,6 +11,9 @@ What is checked, on a desktop window and on a phone, in both languages:
 - grouped by chat read, Dismiss all sends that pass's ids in one decision;
 - opened from an entry, the review shows that entry's notes only;
 - Settings → Memory: Read every chat again asks first and then starts the re-read;
+- Settings → Memory: Tidy memory now asks the host for a dry run, says what would change (the test
+  notes it would delete listed by their words), runs for real only on the operator's yes, and its
+  toast's Undo asks the history for the tidy-up back;
 - on a phone nothing leaves the screen sideways.
 
     APP_URL=http://127.0.0.1:8236/app python3 tests/browser/check_memory_review.py
@@ -34,8 +37,10 @@ BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 
 WORDS = {
-    "en": {"banner": "5 notes from your chats wait", "byPass": "By chat read", "undo": "Undo", "reread": "Read again"},
-    "ru": {"banner": "5 заметок из ваших чатов ждут", "byPass": "По прочитанным чатам", "undo": "Вернуть", "reread": "Перечитать"},
+    "en": {"banner": "5 notes from your chats wait", "byPass": "By chat read", "undo": "Undo", "reread": "Read again", "tidy": "Tidy",
+           "merged": "1 reworded note merged into its twin", "probes": "1 note left by early tests deleted"},
+    "ru": {"banner": "5 заметок из ваших чатов ждут", "byPass": "По прочитанным чатам", "undo": "Вернуть", "reread": "Перечитать", "tidy": "Прибрать",
+           "merged": "1 перефразированная заметка объединена с двойником", "probes": "1 заметка от ранних тестов удалена"},
 }
 AREA = "ent-area-bakery-site"
 PASS_A, PASS_B = "memory-a-0001", "memory-b-0002"
@@ -149,6 +154,40 @@ def check_reread(browser, width: int, lang: str, problems: list[str]) -> None:  
     page.context.close()
 
 
+def check_tidy(browser, width: int, lang: str, problems: list[str]) -> None:  # type: ignore[no-untyped-def]
+    where = f"{lang} {width}px tidy"
+    words = WORDS[lang]
+    memory = memory_stub()
+    twin = copy.deepcopy(next(r for r in memory.records if r["id"] == "m2"))
+    twin.update({"id": "m2-twin", "text": twin["text"].upper()})
+    probe = copy.deepcopy(twin)
+    probe.update({"id": "m-probe", "text": "The secret word is LANTERN."})
+    memory.records += [twin, probe]
+    count = len(memory.records)
+    page = open_page(browser, width, lang, memory, "settings/memory", [])
+    page.wait_for_selector('[data-setting="memory.tidy_now"] [data-action="memory-tidy-now"]', timeout=20000)
+    page.locator('[data-action="memory-tidy-now"]').click()
+    dialog = page.locator(".sheet-backdrop.confirm .dialog")
+    dialog.wait_for(timeout=5000)
+    said = dialog.inner_text()
+    if memory.tidy_runs != [True]:
+        problems.append(f"{where}: before the answer the tidy-up ran {memory.tidy_runs}")
+    for wanted in (words["merged"], words["probes"], "The secret word is LANTERN."):
+        if wanted not in said:
+            problems.append(f"{where}: the dry run's dialog does not say {wanted!r}: {said!r}")
+    if width < 600:
+        overflow(page, where, problems, ".sheet-backdrop.confirm *")
+    dialog.get_by_role("button", name=words["tidy"]).click()
+    page.wait_for_selector(".toast", timeout=8000)
+    if memory.tidy_runs != [True, False] or len(memory.records) != count - 2:
+        problems.append(f"{where}: after the yes the tidy-up ran {memory.tidy_runs} and memory holds {len(memory.records)} of {count}")
+    page.locator(".toast").get_by_role("button", name=words["undo"]).click()
+    page.wait_for_timeout(600)
+    if not any(path.endswith("/undo") for _, path, _ in memory.writes) or len(memory.records) != count:
+        problems.append(f"{where}: Undo left {len(memory.records)} of {count} notes")
+    page.context.close()
+
+
 def main() -> int:
     expect_app(BASE)
     problems: list[str] = []
@@ -158,6 +197,7 @@ def main() -> int:
             for width in (1280, 390):
                 check(browser, width, lang, problems)
                 check_reread(browser, width, lang, problems)
+                check_tidy(browser, width, lang, problems)
             print(f"memory review {lang}: {'ok' if not any(x.startswith(lang) for x in problems) else 'FAILED'}")
         browser.close()
     for problem in problems:

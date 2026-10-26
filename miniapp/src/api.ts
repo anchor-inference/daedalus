@@ -1064,7 +1064,14 @@ export type MemoryEntry = { id: string; section: "you" | "topic" | "area"; slug:
 export type MemorySynthesisReport = {
   at: string; trigger: "idle" | "nightly" | "manual" | string; model: string; chats: number; parts: number; calls: number; cost_usd: number; seconds?: number;
   added: number; merged: number; updated: number; retired: number; new_entries: number; summaries: number; held: number; archived?: number;
+  revived?: number; consolidated?: number;
   dropped: Record<string, number>; stopped: "" | "budget" | "paused" | "off" | "no_budget" | "no_model" | string;
+};
+/** What the tidy-up would do (a dry run) or did: the counts, and the test notes it deletes listed. */
+export type MemoryTidy = {
+  dry_run: boolean; merged: number; merge_groups: number; folded: number; probes: number; closed: number; restored: number; emptied_entries: number;
+  probe_list: { id: string; entry: string; text: string }[];
+  active_before?: number; archived_before?: number; held_before?: number; model?: string; model_unavailable?: string; cost_usd?: number; history_id: number | null;
 };
 /** What the Memory screen's pill and Settings → Memory read; the background pass fills ``last_synthesis_at``, ``learning`` and ``report``. */
 export type MemoryStatus = {
@@ -1090,7 +1097,7 @@ export type MemorySuggestion = {
   action?: "add" | "update" | "retire"; entry_id?: string | null; entry_title?: string | null; session_id?: string | null;
   /** Why the pass did not make it itself: the bullet is the operator's (``locked``), names what they never wrote
    *  (``ungrounded``, with the names), or the entry is full of notes it may not archive (``full``). */
-  why?: "" | "locked" | "ungrounded" | "full"; tokens?: string[];
+  why?: "" | "locked" | "ungrounded" | "full" | "chat_full"; tokens?: string[];
   /** The chat it was learned in (its title while it exists), the first message it rests on, and what the operator said there. */
   session_title?: string | null; from_seq?: number | null; quote?: string;
   /** The pass that filed it and when, so one pass's suggestions are decided together. */

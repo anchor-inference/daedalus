@@ -19,7 +19,7 @@ from protocore.contracts.types import Message, MessageRole, StopReason, TextBloc
 from daedalus.config import MemoryConfig, Settings
 from daedalus.extensions.memory import curator, synthesizer
 from daedalus.host.session_runner import TENANT, SessionManager
-from daedalus.memory import synthesis
+from daedalus.memory import similarity, synthesis
 from daedalus.memory.entries import LOCKED_KEY, entry_of
 from daedalus.memory.synthesis import never_store, parse_ops
 from daedalus.providers.openai_compat import OpenAICompatibleProvider, ProviderEndpoint
@@ -31,20 +31,32 @@ H = {"X-Daedalus-Token": "tok"}
 
 class FakeModel:
     """A provider whose every answer is the next scripted text (or exception), keeping what it was sent.
-    The follow-up call that writes entry summaries is answered from its own script (``summaries``) and
-    kept apart, so a test of the pass's operations counts only those calls."""
+    The follow-up calls — the entry summaries, the check whether a note repeats one memory has, the
+    consolidation of a full entry — are answered from their own scripts and kept apart, so a test of
+    the pass's operations counts only those calls."""
 
-    def __init__(self, *answers: Any, cost: float = 0.0, summaries: list[Any] | None = None) -> None:
+    def __init__(self, *answers: Any, cost: float = 0.0, summaries: list[Any] | None = None, judged: list[Any] | None = None, consolidated: list[Any] | None = None) -> None:
         self.answers = list(answers)
         self.summaries = list(summaries or [])
+        self.judged = list(judged or [])
+        self.consolidated = list(consolidated or [])
         self.requests: list[LLMRequest] = []
         self.summary_requests: list[LLMRequest] = []
+        self.judge_requests: list[LLMRequest] = []
+        self.consolidate_requests: list[LLMRequest] = []
         self.cost = cost
 
     async def complete_text(self, request: LLMRequest) -> LLMResponse:
-        if any(b.text == synthesis.SUMMARY_PROMPT for m in request.messages for b in m.content_blocks if isinstance(b, TextBlock)):
+        system = next((b.text for m in request.messages if m.role is MessageRole.system for b in m.content_blocks if isinstance(b, TextBlock)), "")
+        if system == synthesis.SUMMARY_PROMPT:
             self.summary_requests.append(request)
             answer = self.summaries.pop(0) if self.summaries else {"summaries": []}
+        elif system == similarity.JUDGE_PROMPT:
+            self.judge_requests.append(request)
+            answer = self.judged.pop(0) if self.judged else {"answers": []}
+        elif system == synthesis.CONSOLIDATE_PROMPT:
+            self.consolidate_requests.append(request)
+            answer = self.consolidated.pop(0) if self.consolidated else {"notes": [], "archive": []}
         else:
             self.requests.append(request)
             answer = self.answers.pop(0) if self.answers else {"ops": []}
@@ -81,8 +93,8 @@ async def client(app: Any) -> Any:
         yield c
 
 
-def fake(manager: SessionManager, *answers: Any, cost: float = 0.0, summaries: list[Any] | None = None) -> FakeModel:
-    model = FakeModel(*answers, cost=cost, summaries=summaries)
+def fake(manager: SessionManager, *answers: Any, cost: float = 0.0, summaries: list[Any] | None = None, judged: list[Any] | None = None, consolidated: list[Any] | None = None) -> FakeModel:
+    model = FakeModel(*answers, cost=cost, summaries=summaries, judged=judged, consolidated=consolidated)
     manager.providers.rungs_for = lambda config, preset_id=None: [(model, "fake-model")]  # type: ignore[method-assign]
     return model
 

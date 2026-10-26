@@ -4,9 +4,9 @@
 // the Memory screen.
 
 import { useRef, useState } from "react";
-import { api, MemoryStatus, SENSITIVE_SUBJECTS, Settings } from "../api";
+import { api, MemoryStatus, MemoryTidy, SENSITIVE_SUBJECTS, Settings } from "../api";
 import { plural, t } from "../i18n";
-import { learningLines } from "../memory/model";
+import { learningLines, tidyLines } from "../memory/model";
 import { ImportSheet, downloadExport } from "../memory/transfer";
 import { NumRow, Row } from "../settingsrow";
 import { invalidate, useQuery } from "../store";
@@ -119,6 +119,7 @@ export function MemorySettings({ s, save }: { s: Settings; save: (patch: Partial
         <Row title={t("settings.memory.automerge")} desc={t("settings.memory.automerge.sub")} data-setting="memory.auto_merge">
           <Switch checked={memory.auto_merge} disabled={!memory.consolidate} label={t("settings.memory.automerge")} onChange={(auto_merge) => put({ auto_merge })} />
         </Row>
+        <TidyNow />
       </div>
       <div className="card">
         <Row title={t("settings.memory.import")} desc={t("settings.memory.import.sub")} data-setting="memory.import">
@@ -175,6 +176,37 @@ function LearningCard() {
         {learningLines(data).map((line, i) => <li key={i} data-tone={line.tone || undefined}>{line.text}</li>)}
       </ul>
     </div>
+  );
+}
+
+/** "Tidy memory now": a dry run says what would change (and lists the test notes it would delete), the
+ *  operator confirms, and the real run is one change with Undo. */
+function TidyNow() {
+  const [busy, setBusy] = useState(false);
+  async function tidy() {
+    setBusy(true);
+    try {
+      const preview = await api.post<MemoryTidy>("/api/memory/tidy", { dry_run: true });
+      const lines = tidyLines(preview);
+      if (!lines.length) {
+        toast(t("settings.memory.tidynow.nothing"));
+        return;
+      }
+      const probes = preview.probe_list.length ? `\n\n${t("settings.memory.tidynow.probelist")}\n${preview.probe_list.map((p) => `• ${p.text}`).join("\n")}` : "";
+      if (!(await confirmAsync(t("settings.memory.tidynow.title"), { body: lines.join("\n") + probes, action: t("settings.memory.tidynow.action") }))) return;
+      const done = await api.post<MemoryTidy>("/api/memory/tidy", { dry_run: false });
+      undoToast(t("settings.memory.tidynow.done"), done.history_id, () => invalidate("/api/memory"));
+      invalidate("/api/memory");
+    } catch (e) {
+      toast(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Row title={t("settings.memory.tidynow")} desc={t("settings.memory.tidynow.sub")} data-setting="memory.tidy_now">
+      <button className="btn small ghost" data-action="memory-tidy-now" disabled={busy} onClick={() => void tidy()}>{t("settings.memory.tidynow.action")}</button>
+    </Row>
   );
 }
 

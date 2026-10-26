@@ -102,6 +102,9 @@ def test_a_note_cannot_end_the_turn_context_or_open_a_heading() -> None:
 
 
 def test_the_block_keeps_to_its_budget_and_trims_from_the_bottom_never_the_preferences() -> None:
+    # Thirty preferences (the cap was raised from twenty) are cut to the twenty most wanted before the
+    # listing of other entries goes, and those twenty are kept whatever the budget: in the operator's
+    # words thirty rules take most of the block, and a chat then hears of no other entry at all.
     entries, records = _world(preferences=render.PREFERENCES_MAX, area_notes=20)
     many_areas = [_entry(f"e-a{i}", "area", f"area-{i:02d}", project_id=f"p{i}", summary="x" * 140) for i in range(90)]
     for entry in many_areas:
@@ -109,11 +112,15 @@ def test_the_block_keeps_to_its_budget_and_trims_from_the_bottom_never_the_prefe
     full = render.render(entries + many_areas, records, project_id="p-dae")
     assert len(full.text) <= render.HARD_CAP_CHARS
     assert "more not shown" in full.text
-    assert all(f"answer style number {i}" in full.text for i in range(render.PREFERENCES_MAX))
+    newest = range(render.PREFERENCES_MAX - render.PREFERENCES_FLOOR, render.PREFERENCES_MAX)
+    assert all(f"answer style number {i}\n" in full.text + "\n" for i in newest)
+    assert "area-00" in full.text
+    whole = render.render(entries, {key: value for key, value in records.items() if key in {e.id for e in entries}}, project_id="p-dae")
+    assert all(f"answer style number {i}\n" in whole.text + "\n" for i in range(render.PREFERENCES_MAX))  # all thirty when they fit
     small = render.render(entries + many_areas, records, project_id="p-dae", budget=render.budget_for(32_000))
     assert render.budget_for(32_000) == 1_280
     assert len(small.text) < len(full.text)
-    assert all(f"answer style number {i}" in small.text for i in range(render.PREFERENCES_MAX))  # kept whole even past a small window's share
+    assert all(f"answer style number {i}\n" in small.text + "\n" for i in newest)  # kept whole even past a small window's share
     assert "area-89" not in small.text and "Daedalus fact 0" not in small.text
     assert render.budget_for(0) == render.HARD_CAP_CHARS and render.budget_for(10_000_000) == render.HARD_CAP_CHARS
     long = [_entry("e-pref", "you", "preferences")]

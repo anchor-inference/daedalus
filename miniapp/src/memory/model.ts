@@ -2,7 +2,7 @@
 // entries are grouped, what a natural-language edit would do to an entry, how a date and the status
 // pill read.
 
-import type { MemoryEntry, MemoryOp, MemoryRecord, MemorySource, MemoryStatus, MemorySuggestion } from "../api";
+import type { MemoryEntry, MemoryOp, MemoryRecord, MemorySource, MemoryStatus, MemorySuggestion, MemoryTidy } from "../api";
 import { absDate, relTimeLong } from "../format";
 import { plural, t } from "../i18n";
 
@@ -116,10 +116,23 @@ export function learningLines(status: MemoryStatus | undefined, now: number = Da
     const dropped = Object.values(r.dropped ?? {}).reduce((a, b) => a + b, 0);
     out.push({ tone: "", text: t("settings.memory.learning.counts", { added: r.added, updated: r.updated, merged: r.merged, held: r.held, dropped }) });
     if (r.archived) out.push({ tone: "", text: plural("settings.memory.learning.archived", r.archived) });
+    if (r.consolidated) out.push({ tone: "", text: plural("settings.memory.learning.consolidated", r.consolidated) });
+    if (r.revived) out.push({ tone: "", text: plural("settings.memory.learning.revived", r.revived) });
     if (r.stopped && r.stopped !== "paused" && r.stopped !== "off" && r.stopped !== "no_budget") out.push({ tone: "warn", text: t(`settings.memory.learning.stopped.${r.stopped === "budget" ? "budget" : "no_model"}`) });
   }
   out.push({ tone: "", text: t("settings.memory.learning.spent", { spent: money(status.spent_today_usd), budget: money(status.budget_usd) }) });
   if (status.failing_chats) out.push({ tone: "warn", text: t("settings.memory.learning.failing", { n: status.failing_chats }) });
+  return out;
+}
+
+/** What a tidy-up would do, one line per kind of change it makes; empty when there is nothing to do. */
+export function tidyLines(found: MemoryTidy): string[] {
+  const out: string[] = [];
+  if (found.merged) out.push(plural("settings.memory.tidynow.merged", found.merged));
+  if (found.folded) out.push(plural("settings.memory.tidynow.folded", found.folded));
+  if (found.probes) out.push(plural("settings.memory.tidynow.probes", found.probes));
+  if (found.closed) out.push(plural("settings.memory.tidynow.closed", found.closed));
+  if (found.restored) out.push(plural("settings.memory.tidynow.restored", found.restored));
   return out;
 }
 

@@ -27,6 +27,7 @@ export function learnedWhy(s: MemorySuggestion): string {
   if (s.why === "locked") return t("memory.suggest.why.locked");
   if (s.why === "ungrounded") return t("memory.suggest.why.ungrounded", { names: (s.tokens ?? []).join(", ") });
   if (s.why === "full") return t("memory.suggest.why.full");
+  if (s.why === "chat_full") return t("memory.suggest.why.chat_full");
   return s.reason;
 }
 

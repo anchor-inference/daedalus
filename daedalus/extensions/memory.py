@@ -61,6 +61,7 @@ def _synthesizer(app: Application, notify: Any = None) -> Synthesizer:
     return Synthesizer(
         app.db, curator(app), lambda: app.config, manager.providers,
         running=manager.is_running, costs_nothing=manager.provider_costs_nothing, zone=zone, notify=notify,
+        vectors=text_vectors(app),
     )
 
 
@@ -86,6 +87,36 @@ def embedder(app: Application):  # type: ignore[no-untyped-def]
         return {r.id: cache[(r.id, r.version)] for r in records if (r.id, r.version) in cache}
 
     return embed
+
+
+TEXTS_PER_CALL = 256
+"""Texts encoded for one comparison when the index's model is ready: a pass's adds and their pools
+fit, and a first tidy-up over the whole memory is told no rather than holding the encoder for long."""
+
+
+def text_vectors(app: Application):  # type: ignore[no-untyped-def]
+    """Vectors for plain texts (new notes, held suggestions, kept notes) from the conversation index's
+    model, for the comparison that finds a restatement; ``None`` when the index is off, not ready,
+    busy, or the request is larger than :data:`TEXTS_PER_CALL` uncached texts. The model behind the
+    index is replaceable, and the comparison takes whatever it returns."""
+    cache: dict[str, list[float]] = {}
+
+    async def vectors(texts: Sequence[str]) -> list[list[float]] | None:
+        search = getattr(app, "search", None)
+        if search is None or search.reason() != "ready" or search.encoder is None or search.busy():
+            return None
+        fresh = [t for t in dict.fromkeys(texts) if t not in cache]
+        if len(fresh) > TEXTS_PER_CALL:
+            return None
+        for text in fresh:
+            async with search.lock:
+                encoder = search.encoder
+                if encoder is None:
+                    return None
+                cache[text] = await offload(encoder.encode, text[:2000])
+        return [cache[t] for t in texts]
+
+    return vectors
 
 
 async def install(app: Application) -> list[asyncio.Task[None]]:
@@ -131,4 +162,4 @@ async def session_deleted(app: Application, session_id: str) -> None:
         logger.info("memory: deleting %s removed %d record(s), kept %d backed elsewhere", session_id, found["removed"], found["kept"])
 
 
-__all__ = ["curator", "embedder", "install", "session_deleted", "synthesizer"]
+__all__ = ["curator", "embedder", "install", "session_deleted", "synthesizer", "text_vectors"]
