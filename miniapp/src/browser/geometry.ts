@@ -101,15 +101,49 @@ export function dragToWheel(meta: FrameMeta, rect: Rect, dxClient: number, dyCli
   return { dx: round(-dxClient / perCss), dy: round(-dyClient / perCss) };
 }
 
+/** How the operator wants the live picture: chosen in the viewer's menu, kept on this device. */
+export type PictureQuality = "auto" | "smooth" | "balanced" | "sharp";
+export const PICTURE_QUALITIES: readonly PictureQuality[] = ["auto", "smooth", "balanced", "sharp"];
+
+/** What a live view asks the daemon for besides its box: JPEG quality, frames a second, adaptation. */
+export type AttachBox = { max_w: number; max_h: number; dpr: number; quality?: number; fps?: number; adaptive?: boolean };
+
 /**
- * The box a live view asks the daemon for: the element's size in device pixels, never above what the
- * daemon sends (1600×1000), and smaller under data saving. Rounded, since the daemon wants integers.
+ * Each preset trades frames for detail. Sharp is full resolution at JPEG 92, four frames a second, and
+ * never degraded on a slow link: the operator reading small text would rather wait for a picture than
+ * watch a blurred one move. Smooth caps the picture at 1280×800 and takes every frame the daemon gives.
+ * Auto is what the viewer did before there was a choice, with the box no longer cut at 1600×1000, which
+ * on a large window scaled every frame down and the viewer up again.
  */
-export function attachBox(cssW: number, cssH: number, dpr: number, saving: boolean): { max_w: number; max_h: number; dpr: number; quality?: number } {
-  const cap = saving ? 640 : 1600;
-  const capH = saving ? 400 : 1000;
+const PRESETS: Record<PictureQuality, { w: number; h: number; quality?: number; fps?: number; adaptive?: boolean }> = {
+  auto: { w: 2560, h: 1600 },
+  smooth: { w: 1280, h: 800, quality: 50, fps: 15 },
+  balanced: { w: 1920, h: 1200, quality: 75, fps: 8 },
+  sharp: { w: 4096, h: 4096, quality: 92, fps: 4, adaptive: false },
+};
+
+/**
+ * The same as a VIEW, every setting said: a VIEW leaves out what it does not change, so going back from
+ * Sharp to Auto has to name the daemon's defaults (quality 60, its own frame cap, adaptation on) or the
+ * sharp settings would stay.
+ */
+export function viewOf(b: AttachBox): Required<AttachBox> {
+  return { max_w: b.max_w, max_h: b.max_h, dpr: b.dpr, quality: b.quality ?? 60, fps: b.fps ?? 60, adaptive: b.adaptive ?? true };
+}
+
+/**
+ * The box a live view asks the daemon for: the element's size in device pixels within the preset's
+ * cap, and smaller and coarser under data saving when the choice is left to the device (auto).
+ * Rounded, since the daemon wants integers.
+ */
+export function attachBox(cssW: number, cssH: number, dpr: number, saving: boolean, preset: PictureQuality = "auto"): AttachBox {
+  const p = saving && preset === "auto" ? { w: 640, h: 400, quality: 45 } : PRESETS[preset] ?? PRESETS.auto;
   const ratio = Math.max(1, Math.min(dpr || 1, 3));
-  const w = Math.max(64, Math.min(cap, Math.round(cssW * ratio)));
-  const h = Math.max(64, Math.min(capH, Math.round(cssH * ratio)));
-  return saving ? { max_w: w, max_h: h, dpr: ratio, quality: 45 } : { max_w: w, max_h: h, dpr: ratio };
+  const w = Math.max(64, Math.min(p.w, Math.round(cssW * ratio)));
+  const h = Math.max(64, Math.min(p.h, Math.round(cssH * ratio)));
+  const out: AttachBox = { max_w: w, max_h: h, dpr: ratio };
+  if ("quality" in p && p.quality) out.quality = p.quality;
+  if ("fps" in p && p.fps) out.fps = p.fps;
+  if ("adaptive" in p && p.adaptive === false) out.adaptive = false;
+  return out;
 }

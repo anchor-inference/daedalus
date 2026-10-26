@@ -22,7 +22,7 @@ import { t } from "../i18n";
 import { Icon } from "../icons";
 import { resizeViewport, useLiveSnapshot, useLiveView } from "./data";
 import type { LiveSnapshot, LiveView } from "./live";
-import { agentName, domainOf, driveState, isOpenGroup, needsOf, needWords, pipGroup, viewGone } from "./model";
+import { agentName, domainOf, driveState, isOpenGroup, needsOf, needWords, pipGroup, readPictureQuality, viewGone } from "./model";
 import { tapKey } from "./keys";
 import { copyFromPage, pasteFromClipboard } from "./clipboard";
 import { BrowserViewer, focusViewer } from "./viewer";
@@ -133,7 +133,7 @@ export function PhoneDrive({ group, live, snap, agent, url, saving, onGiveBack }
           <Icon name="vdots" size={22} />
         </button>
       </div>
-      <BrowserViewer live={live} snap={snap} tier="live" interactive touch agent={agent} saving={saving} className="bp-drive-viewer" stageRef={(el) => { stage.current = el; }}>
+      <BrowserViewer live={live} snap={snap} tier="live" interactive touch agent={agent} saving={saving} quality={readPictureQuality()} className="bp-drive-viewer" stageRef={(el) => { stage.current = el; }}>
         {hint && !offline && <span className="bp-drive-hint" role="status">{t("browser.drive.hint")}</span>}
         {offline && (
           <div className="bp-drive-lost" role="status">

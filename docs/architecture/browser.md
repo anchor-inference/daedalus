@@ -637,9 +637,9 @@ so a frame sent down the wrong kind of channel is refused rather than misread.
 |---|---|---|
 | to the client | `0x21 FRAME` | `[u32 frame_no][u16 meta_len][meta JSON][JPEG bytes]` |
 | to the client | `0x22 EVENT` | a JSON object with a string `type` |
-| to the daemon | `0x30 ATTACH` | `{tier: "live" \| "thumb", tab?, max_w, max_h, dpr?, quality?}` |
+| to the daemon | `0x30 ATTACH` | `{tier: "live" \| "thumb", tab?, max_w, max_h, dpr?, quality?, fps?, adaptive?}` |
 | to the daemon | `0x31 ACK` | `[u32 frame_no]`, the frame the client has drawn |
-| to the daemon | `0x32 VIEW` | `{tier?, tab?, max_w?, max_h?, dpr?, quality?, hidden?}`: a resize, another tab, another tier; `hidden` says the client's page went out of sight (`true`) or came back (`false`) |
+| to the daemon | `0x32 VIEW` | `{tier?, tab?, max_w?, max_h?, dpr?, quality?, fps?, adaptive?, hidden?}`: a resize, another tab, another tier; `hidden` says the client's page went out of sight (`true`) or came back (`false`) |
 | to the daemon | `0x33 INPUT` | a JSON object with a string `t`, at most 4 KiB |
 
 - `frame_no` counts from 1 per channel and never repeats; a frame carries a whole JPEG, never a part.
@@ -648,8 +648,13 @@ so a frame sent down the wrong kind of channel is refused rather than misread.
   page's scroll and zoom as Chromium reported them for this frame, and `ts`, the capture time in
   milliseconds since the epoch. The app places the agent's cursor from these, never from its own
   guess.
-- `max_w` × `max_h` is the client's box in device pixels (CSS size × `dpr`), each 64–4096; the daemon
-  caps a live frame at 1600×1000. `quality` is 30–90 (default 60 live, 45 thumb).
+- `max_w` × `max_h` is the client's box in device pixels (CSS size × `dpr`), each 64–4096; a frame is
+  never larger than the page's own pixels. `quality` is 30–95 (default 60 live, 45 thumb). `fps` is
+  the most frames a second the client wants, within `fps_cap`; `adaptive: false` keeps its frames at
+  the asked size and quality however slow its link (Adaptive quality, below). A VIEW changes only what
+  it names, so a client going back to the defaults names them. The app's presets: Auto (its box up to
+  2560×1600, the defaults), Smooth (1280×800, quality 50, 15 a second), Balanced (1920×1200, 75, 8),
+  Sharp (its whole box, 92, 4, not adaptive), chosen in the viewer and kept on the device.
 - The golden frames are `browserd/internal/wire/testdata/frames.json` and
   `miniapp/src/browser/testdata/frames.json`, byte-identical (a host test checks it); each codec is
   tested against its copy. JSON in these frames is compact, with keys in the order this document
@@ -686,16 +691,19 @@ the tab has painted before, since the daemon keeps each watched tab's newest fra
   replaces whatever waits. A slow client (a phone on a train) gets fewer frames, never a backlog.
   Chromium's own acknowledgement is decoupled from the clients': the daemon acknowledges Chromium
   itself, paced to the frame rate below.
-- **`live`**: the screencast is asked for the largest live client's box (at most 1600×1000) at its
-  `quality`, and paced to at most `fps_cap` frames a second (15) by delaying Chromium's
-  acknowledgement. Unpaced, Chromium sends 50–60 frames a second while anything moves, at 1.2–1.5
+- **`live`**: the screencast is asked for the largest live client's box at the best `quality` any live
+  client asked for, and paced to the fastest live client's `fps`, at most `fps_cap` (15), by delaying
+  Chromium's acknowledgement; each client is then sent frames at its own pace. Unpaced, Chromium sends 50–60 frames a second while anything moves, at 1.2–1.5
   CPUs (measured).
 - **`thumb`**: at most one frame a second, at most 320×200 at quality 45, sent only when the page
   changed. With no live client on the tab the screencast itself runs at the thumbnail's size and pace;
   with one, the daemon downscales the newest live frame for its thumbnail clients.
 - **Adaptive quality.** The daemon measures each live client's time from frame to ACK. Above 400 ms for
   5 frames in a row, that client's frames are re-encoded at quality 40 and half size; below 120 ms for
-  20 frames they go back. Nothing in the protocol changes: `meta.w` and `meta.h` say what came.
+  20 frames they go back. Nothing in the protocol changes: `meta.w` and `meta.h` say what came. A page
+  that stops changing sends no more frames, so the last degraded one would stay on screen for as long
+  as the page is still: 700 ms after it, with nothing newer, it is sent again whole. A client with
+  `adaptive: false` is never degraded.
 - A client that sends no ACK for 60 s is sent `ping`s only; it is never disconnected for being slow.
 - **A hidden client** (VIEW `hidden: true`: the app's page is in the background) is sent no frames; its
   mailbox keeps the newest, which it gets as soon as it says it is back. Events still reach it. The
