@@ -19,6 +19,7 @@ import { SessionToolGroups } from "./toolgroupsview";
 import { HostMark } from "./runon";
 import { DiskUsage } from "./diskusage";
 import { MoveFolderButton } from "./project/MoveFolder";
+import { MoveLive, useFolderMove } from "./project/moves";
 
 export type DetailsActions = {
   rename: (title: string) => void;
@@ -60,6 +61,7 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, schedu
   const container = useRef<HTMLDivElement>(null);
   const conductor = role !== "session";
   const sessionFolder = detail.project?.folders?.find((folder) => folder.id === detail.folder_id) ?? detail.project?.folders?.[0] ?? null;
+  const folderMove = useFolderMove(sessionFolder?.id);
   const ctxPct = detail.context && detail.context.window > 0 ? Math.round((100 * detail.context.tokens) / detail.context.window) : null;
   useEffect(() => {
     if (!focus || focus === "session") return;
@@ -107,6 +109,7 @@ export function SessionDetails({ ids, id, role = "session", detail, busy, schedu
             </span>
           )}
         </div>
+        {folderMove && <MoveLive job={folderMove} />}
         <Facts>
           {detail.workspace_sessions && detail.workspace_sessions.length > 0 && (
             <Fact label={t("panel.shared")}>

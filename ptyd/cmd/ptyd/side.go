@@ -44,6 +44,10 @@ func startSide(cfg *config.Config, evlog *events.Log, environ []string, log *slo
 		Listen:    ln.Addr().String(),
 		StateDir:  cfg.StateDir,
 	}
+	// A transfer given up for want of calls is the trace a host that restarted mid-move leaves.
+	side.Transfers.Abandoned = func(id string, why error) {
+		log.Warn("folder transfer abandoned", "transfer", id, "reason", why.Error())
+	}
 	log.Info("hook listener", "listen", side.Listen)
 	return side, func() {
 		side.Transfers.Close()

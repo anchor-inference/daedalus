@@ -87,6 +87,7 @@ import { PromptCoach } from "../coach/PromptCoach";
 import { SideQuestion } from "../btw/SideQuestion";
 import { COMPOSE_EVENT, ComposeTarget, type ComposeRequest } from "../annotate/compose";
 import { noticeFromEvent, raiseFromError, raiseSettingNotice, SettingNoticeLines, settingRef } from "../settinglink";
+import { MoveLive, useFolderMove } from "../project/moves";
 
 /**
  * Markdown parsed once per text. `cacheKey` names a message that will never change again, so its
@@ -1500,6 +1501,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   ] : [];
   // An idle session with jobs still running has not finished: say what it waits for rather than look done.
   const jobsPending = !busy && !saving && !compacting && status !== "failed" ? detail?.background_count ?? 0 : 0;
+  // The folder the chat works in, while it is being carried between the container and the host.
+  const folderMove = useFolderMove(detail?.folder_id ?? detail?.project?.folders?.[0]?.id);
   const effortText = detail ? effortWord(detail.reasoning_effort, detail.thinking !== false) : "";
   const phoneSub = offline ? <StateSub tone="offline">{t("session.phone.reconnecting")}</StateSub>
     : compacting ? <StateSub tone="compacting">{t("session.compacting.bar")}</StateSub>
@@ -1573,6 +1576,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                 : status === "failed" ? <><span className="sep">·</span><span className="head-status failed" role="status"><b>{statusWord(status)}</b></span></>
                 : jobsPending > 0 ? <><span className="sep">·</span><button type="button" className="head-status jobs-pending" onClick={() => panel.open("jobs")}>{plural("session.jobs.waiting", jobsPending)}</button></> : null}
               {ahead && <><span className="sep">·</span><AheadStatus c={ahead} /></>}
+              {folderMove && <><span className="sep">·</span><MoveLive job={folderMove} compact /></>}
             </span>
           )}
         </div>

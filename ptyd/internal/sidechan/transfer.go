@@ -2,6 +2,7 @@ package sidechan
 
 import (
 	"archive/tar"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -39,24 +40,104 @@ import (
 //     left out, and the folder is still exactly what was sent.
 //
 // A transfer nobody has called for TransferIdle is abandoned and cleaned up as an abort would: the
-// host that started it may have restarted and forgotten it.
+// host that started it may have restarted and forgotten it. A transfer also follows the connection it
+// is driven over (Own): when that connection closes and no other one takes the transfer up within
+// TransferOrphanGrace, it is abandoned then. The idle time alone once kept a host's half-written copy
+// for ten minutes after the host restarted, and an operator who tried the move again at once was told
+// the folder was not empty — by the very copy that was waiting to be removed.
+//
+// A finished unpack is kept, not forgotten, until the host releases it (fs.unpack_release) or the idle
+// time passes: between the finish and the host's switch to the copy, the host may still decide the
+// copy is not wanted, and fs.unpack_abort is then the one way it has to remove a folder it made. A kept
+// one is never removed on its own — by then the host may be working in it — and holds no slot.
 type Transfers struct {
 	fs    *FS
 	mu    sync.Mutex
 	items map[string]transferItem
-	// Idle is how long a transfer may wait for its next call; tests shorten it.
-	Idle time.Duration
+	// Idle is how long a transfer may wait for its next call, and Grace how long one whose connection
+	// closed waits for another to take it up; tests shorten both.
+	Idle  time.Duration
+	Grace time.Duration
+	// Abandoned, when set, hears of a transfer given up for want of calls, for the daemon's log.
+	Abandoned func(id string, why error)
 }
 
 type transferItem interface {
 	stop(reason error)
 	touch()
+	adopt(conn context.Context)
+	holdsSlot() bool
 }
 
 // NewTransfers returns the transfers over a reader's rules.
 func NewTransfers(f *FS) *Transfers {
-	return &Transfers{fs: f, items: map[string]transferItem{}, Idle: config.TransferIdle}
+	return &Transfers{fs: f, items: map[string]transferItem{}, Idle: config.TransferIdle, Grace: config.TransferOrphanGrace}
 }
+
+// orphanWait is how long a transfer whose connection closed waits for another one.
+func (t *Transfers) orphanWait() time.Duration {
+	return min(t.Grace, t.Idle)
+}
+
+func (t *Transfers) abandoned(id string, why error) {
+	if t.Abandoned != nil {
+		t.Abandoned(id, why)
+	}
+}
+
+// Own ties a transfer to the connection a call about it came over. A call from another connection
+// than the last one takes the transfer up again, which is how a host whose connection dropped and came
+// back carries on; an id that names no transfer is ignored, since the call itself answers for it.
+func (t *Transfers) Own(id string, conn context.Context) {
+	if conn == nil {
+		return
+	}
+	t.mu.Lock()
+	item := t.items[id]
+	t.mu.Unlock()
+	if item != nil {
+		item.adopt(conn)
+	}
+}
+
+// owner follows the connection a transfer is driven over and calls orphaned when it closes, unless
+// another connection has taken the transfer up meanwhile.
+type owner struct {
+	mu    sync.Mutex
+	conn  context.Context
+	gen   int
+	ended chan struct{}
+	once  sync.Once
+}
+
+func (o *owner) init() { o.ended = make(chan struct{}) }
+
+func (o *owner) adopt(conn context.Context, orphaned func()) {
+	o.mu.Lock()
+	if o.conn == conn {
+		o.mu.Unlock()
+		return
+	}
+	o.conn = conn
+	o.gen++
+	gen := o.gen
+	o.mu.Unlock()
+	go func() {
+		select {
+		case <-conn.Done():
+			o.mu.Lock()
+			current := o.gen == gen
+			o.mu.Unlock()
+			if current {
+				orphaned()
+			}
+		case <-o.ended:
+		}
+	}()
+}
+
+// release ends the watch: the transfer is over.
+func (o *owner) release() { o.once.Do(func() { close(o.ended) }) }
 
 // Counts are what a tree holds, as fs.unpack_finish and fs.pack_begin report it: the folder itself
 // is not counted, a link is counted as a link, and Bytes is the regular files' sizes.
@@ -84,7 +165,13 @@ func newTransferID() string {
 func (t *Transfers) add(id string, item transferItem) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if len(t.items) >= config.MaxTransfers {
+	running := 0
+	for _, other := range t.items {
+		if other.holdsSlot() {
+			running++
+		}
+	}
+	if running >= config.MaxTransfers {
 		return fmt.Errorf("%w: %d folder transfers are running already", ErrBusy, config.MaxTransfers)
 	}
 	t.items[id] = item
@@ -101,10 +188,21 @@ func (t *Transfers) unpackOf(id string) (*unpack, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	u, ok := t.items[id].(*unpack)
-	if !ok {
+	if !ok || u.isFinished() {
 		return nil, fmt.Errorf("%w: no unpack %q is running (finished, aborted or abandoned)", ErrNotFound, id)
 	}
 	u.touch()
+	return u, nil
+}
+
+// anyUnpackOf finds an unpack running or finished and not yet released.
+func (t *Transfers) anyUnpackOf(id string) (*unpack, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	u, ok := t.items[id].(*unpack)
+	if !ok {
+		return nil, fmt.Errorf("%w: no unpack %q is running or kept (released, aborted or abandoned)", ErrNotFound, id)
+	}
 	return u, nil
 }
 
@@ -252,6 +350,10 @@ type unpack struct {
 	created  bool   // the transfer made the folder, so a cleanup removes it rather than empties it
 	declared int64
 	entries  int
+	owner    owner
+
+	stateMu  sync.Mutex
+	finished bool // the stream ended whole; the folder is kept until released, aborted or forgotten
 
 	mu       sync.Mutex // one write at a time, in order
 	pw       *io.PipeWriter
@@ -336,13 +438,14 @@ func (t *Transfers) UnpackBegin(p string, total int64, entries int) (UnpackStart
 	pr, pw := io.Pipe()
 	u := &unpack{t: t, id: newTransferID(), target: clean, real: real, created: created, declared: total, entries: entries,
 		pw: pw, digest: sha256.New(), done: make(chan struct{})}
+	u.owner.init()
 	if err := t.add(u.id, u); err != nil {
 		if created {
 			_ = os.Remove(clean)
 		}
 		return UnpackStarted{}, err
 	}
-	u.idle.start(t.Idle, func() { u.stop(fmt.Errorf("the transfer was abandoned: no call for %s", t.Idle)) })
+	u.idle.start(t.Idle, u.expire)
 	go func() {
 		u.err = u.extract(pr)
 		// A failed extraction closes the pipe with its error, so the next write returns it rather
@@ -362,14 +465,69 @@ func (u *unpack) errOr(fallback error) error {
 
 func (u *unpack) touch() { u.idle.reset(u.t.Idle) }
 
-// stop ends the transfer without finishing it and removes what it wrote.
+func (u *unpack) isFinished() bool {
+	u.stateMu.Lock()
+	defer u.stateMu.Unlock()
+	return u.finished
+}
+
+func (u *unpack) holdsSlot() bool { return !u.isFinished() }
+
+func (u *unpack) adopt(conn context.Context) {
+	u.owner.adopt(conn, func() {
+		// A finished copy waits for its release for the whole idle time whoever drives it: the host
+		// that comes back after a restart is the one that knows whether it switched to it.
+		if !u.isFinished() {
+			u.idle.reset(u.t.orphanWait())
+		}
+	})
+}
+
+// expire is the idle timer's end: a running unpack is abandoned and cleaned up, a finished one only
+// forgotten.
+func (u *unpack) expire() {
+	if u.isFinished() {
+		u.forget()
+		return
+	}
+	why := fmt.Errorf("the transfer was abandoned: no call came in time and the host that drove it is gone")
+	u.t.abandoned(u.id, why)
+	u.stop(why)
+}
+
+// stop ends the transfer without finishing it and removes what it wrote; a finished one is only
+// forgotten, as at the daemon's shutdown, since the host may be working in it by now.
 func (u *unpack) stop(reason error) {
+	if u.isFinished() {
+		u.forget()
+		return
+	}
 	u.stopOnce.Do(func() {
 		u.t.take(u.id)
 		u.idle.stop()
+		u.owner.release()
 		u.pw.CloseWithError(reason)
 		<-u.done
 		u.cleanup()
+	})
+}
+
+// discard removes a finished copy the host decided against.
+func (u *unpack) discard() {
+	u.stopOnce.Do(func() {
+		u.t.take(u.id)
+		u.idle.stop()
+		u.owner.release()
+		u.cleanup()
+	})
+}
+
+// forget lets a finished copy go and leaves it where it is.
+func (u *unpack) forget() {
+	u.stopOnce.Do(func() {
+		u.t.take(u.id)
+		u.idle.stop()
+		u.owner.release()
 	})
 }
 
@@ -441,23 +599,43 @@ func (t *Transfers) UnpackFinish(id string) (Unpacked, error) {
 		u.stop(u.err)
 		return Unpacked{}, u.err
 	}
-	t.take(u.id)
-	u.idle.stop()
 	counts, err := countTree(u.real)
 	if err != nil {
-		u.cleanup()
+		u.stop(err)
 		return Unpacked{}, err
 	}
+	u.stateMu.Lock()
+	u.finished = true
+	u.stateMu.Unlock()
+	u.touch()
 	return Unpacked{Counts: counts, SHA256: hex.EncodeToString(u.digest.Sum(nil)), Path: u.target}, nil
 }
 
-// UnpackAbort ends the transfer and removes what it wrote.
+// UnpackAbort ends the transfer and removes what it wrote: a running one's partial folder, or a
+// finished one the host has not released — the copy it decided against before switching to it.
 func (t *Transfers) UnpackAbort(id string) error {
-	u, err := t.unpackOf(id)
+	u, err := t.anyUnpackOf(id)
 	if err != nil {
 		return err
 	}
+	if u.isFinished() {
+		u.discard()
+		return nil
+	}
 	u.stop(errAborted)
+	return nil
+}
+
+// UnpackRelease lets a finished unpack go and leaves its folder as it is: the host works in it now.
+func (t *Transfers) UnpackRelease(id string) error {
+	u, err := t.anyUnpackOf(id)
+	if err != nil {
+		return err
+	}
+	if !u.isFinished() {
+		return fmt.Errorf("%w: the unpack %q has not finished; abort it instead", ErrInvalid, id)
+	}
+	u.forget()
 	return nil
 }
 
@@ -584,6 +762,7 @@ type pack struct {
 	manifest []packEntry
 	skipped  int
 	counts   Counts
+	owner    owner
 
 	mu       sync.Mutex
 	pr       *io.PipeReader
@@ -631,6 +810,7 @@ func (t *Transfers) PackBegin(p string) (PackStarted, error) {
 		return PackStarted{}, fmt.Errorf("%w: %s is not a folder", ErrInvalid, clean)
 	}
 	pk := &pack{t: t, id: newTransferID(), root: clean, real: real, digest: sha256.New(), done: make(chan struct{})}
+	pk.owner.init()
 	started := PackStarted{Skipped: []Skipped{}}
 	skip := func(rel, reason string) {
 		pk.skipped++
@@ -703,7 +883,11 @@ func (t *Transfers) PackBegin(p string) (PackStarted, error) {
 	if err := t.add(pk.id, pk); err != nil {
 		return PackStarted{}, err
 	}
-	pk.idle.start(t.Idle, func() { pk.stop(fmt.Errorf("the transfer was abandoned: no call for %s", t.Idle)) })
+	pk.idle.start(t.Idle, func() {
+		why := fmt.Errorf("the transfer was abandoned: no call came in time and the host that drove it is gone")
+		t.abandoned(pk.id, why)
+		pk.stop(why)
+	})
 	go func() {
 		err := pk.write(pw)
 		pw.CloseWithError(err)
@@ -716,10 +900,17 @@ func (t *Transfers) PackBegin(p string) (PackStarted, error) {
 
 func (pk *pack) touch() { pk.idle.reset(pk.t.Idle) }
 
+func (pk *pack) holdsSlot() bool { return true }
+
+func (pk *pack) adopt(conn context.Context) {
+	pk.owner.adopt(conn, func() { pk.idle.reset(pk.t.orphanWait()) })
+}
+
 func (pk *pack) stop(reason error) {
 	pk.stopOnce.Do(func() {
 		pk.t.take(pk.id)
 		pk.idle.stop()
+		pk.owner.release()
 		pk.pr.CloseWithError(reason)
 		<-pk.done
 	})

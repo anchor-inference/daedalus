@@ -20,6 +20,7 @@ import { SUMMARY_KEY } from "../events";
 import { useProjects } from "../projects";
 import { act, afterChange, byDay, byProject, categoryLabel, entryPath, listKey, markAllSeen, markSeen, noticeIcon, noticeLine, projectNames, resolutionLabel, toneClass, useNotifications, type ActResult } from "../notifications";
 import { PushNudge } from "../pushui";
+import { MovesInProgress } from "../project/moves";
 import { errorText } from "../ui";
 import { deleteWithUndo, toast as statusLine, type MenuItem } from "../ui/dialogs";
 import { ActionSheet, Banner, BottomSheet, Chip, ChipBar, EmptyState, IconButton, ListRow, RowSkeleton, SectionHeader, TopBar } from "../ui/phone";
@@ -254,7 +255,7 @@ export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; o
           <Chip on={filter === "projects"} onClick={() => setFilter("projects")}>{t("centre.projects")}</Chip>
         </ChipBar>
       )}
-      <div className={`ph-page-body ${data && !nothing ? "list" : ""}`}>{body}</div>
+      <div className={`ph-page-body ${data && !nothing ? "list" : ""}`}><MovesInProgress projects={projects.data} />{body}</div>
       {selected && (
         <div className="ph-selbar" role="toolbar" aria-label={plural("ph.inbox.selected", shown.size)}>
           <button type="button" disabled={!chosen.some((e) => !e.seen)} onClick={() => { setSeen(chosen.map((e) => e.id), true); setSelected(null); }}><Icon name="check" size={22} />{t("ph.inbox.markread")}</button>

@@ -29,6 +29,7 @@ import { RevealButton } from "./reveal";
 import { FolderBrowser, type FolderChoice } from "./project/FolderBrowser";
 import { openNewProject } from "./project/NewProject";
 import { MoveFolderButton, movable } from "./project/MoveFolder";
+import { MoveLive, useFolderMove } from "./project/moves";
 import { openImport } from "./imports/ImportExplorer";
 
 const PICKED = "daedalus.project";
@@ -302,6 +303,7 @@ function FolderRow({ project, folder, environments, write, canWrite, toast }: { 
   const primary = folder.position === 0;
   const only = project.folders.length === 1;
   const key = reachKey(folder, environments);
+  const moving = useFolderMove(folder.id);
   const base = `/api/projects/${encodeURIComponent(project.id)}/folders/${encodeURIComponent(folder.id)}`;
   async function lock(readonly: boolean) {
     if (!canWrite || busy) return;
@@ -335,6 +337,7 @@ function FolderRow({ project, folder, environments, write, canWrite, toast }: { 
         <span>{t("folder.readonly")}</span>
       </label>
       <div className={`sub dir-reach ${reachIsProblem(key) ? "attn" : ""}`}>{t(key)}</div>
+      {moving && <MoveLive job={moving} />}
       {canWrite && movable(folder, environments) && <div className="btnrow"><MoveFolderButton projectId={project.id} folder={folder} toast={toast} /></div>}
     </div>
   );

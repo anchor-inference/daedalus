@@ -15,6 +15,7 @@ import { errorText } from "../ui";
 import { plural, t } from "../i18n";
 import { PhoneInbox } from "./InboxPhone";
 import { NoticeLoginCard } from "../browser/login";
+import { MovesInProgress } from "../project/moves";
 
 type Filter = "all" | "unseen" | "problems" | "projects";
 
@@ -153,6 +154,7 @@ function DesktopInbox({ toast, onOpen }: { toast: (t: string) => void; onOpen: (
       <div className={`inbox-layout ${split ? "split" : ""}`}>
       <div className="screen narrow inbox-list">
         <PushNudge />
+        <MovesInProgress projects={projects.data} />
         <NeedsYou names={names} card />
         {pending.length > 0 && filter !== "problems" && (
           <section>

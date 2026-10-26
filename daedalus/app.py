@@ -331,6 +331,11 @@ class Application:
             # Stop observations before terminal clients and the database begin closing.
             await self.resource_monitor.close()
             await self._stop_api()
+            # Before the background tasks are cancelled, the terminal connections with them: a folder
+            # move still copying removes its partial copy through the host daemon, so a deploy that
+            # restarts this process leaves nothing on the operator's machine in the way of trying again.
+            if (mover := self.extensions.get("folder_mover")) is not None:
+                await mover.shutdown()
             for task in self.background:
                 task.cancel()
             await self.search.close()

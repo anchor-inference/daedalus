@@ -168,3 +168,18 @@
 .move-dest .field { flex: 1; min-width: 0; }
 .move-folder progress { width: 100%; }
 .move-notes { margin: 0; padding-left: 18px; }
+/* What the plan says will not be carried, and why; the list scrolls inside the sheet rather than
+   pushing the start button out of reach. */
+.move-skipped p { margin: var(--space-1) 0 0; }
+.move-skipped ul { margin: var(--space-1) 0 0; padding-left: 18px; max-height: 160px; overflow-y: auto; }
+/* A move running under a folder — in its row, in the chat's workspace card — is a line and a thin
+   bar in the flow of what it sits in, not a box of its own. */
+.move-live { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.move-live progress { width: 100%; height: 4px; }
+.head-status.moving { color: var(--accent); }
+/* The moves running now, at the top of the inbox: one row each, a row's height. */
+.moves-now { display: flex; flex-direction: column; padding: var(--space-1) 0; }
+.moves-now-head { padding: 0 var(--space-2); font-size: var(--fs-12); }
+.moves-now-row { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: var(--row-h); padding: 0 var(--space-2); background: none; border: 0; border-radius: var(--radius-sm); color: var(--fg); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; }
+.moves-now-row:hover { background: var(--surface-2); }
+.moves-now-row .sub { white-space: nowrap; }

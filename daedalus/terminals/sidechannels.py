@@ -316,9 +316,14 @@ class SideChannels:
         return result
 
     async def fs_unpack_abort(self, env: str, transfer: str, *, actor: str = "system") -> None:
-        """End the transfer and have the daemon remove what it wrote."""
+        """End the transfer and have the daemon remove what it wrote: a running one's partial folder,
+        or a finished one's folder that has not been released (a copy the move decided against)."""
         await self._side_call(env, "fs.unpack_abort", {"transfer": transfer}, what="abandoning the folder", timeout=600.0)
         await self.audit("", env, actor, "unpack_abort", {"transfer": transfer})
+
+    async def fs_unpack_release(self, env: str, transfer: str) -> None:
+        """Let a finished unpack go: the folder is in use now, and no abort may remove it any more."""
+        await self._side_call(env, "fs.unpack_release", {"transfer": transfer}, what="releasing the folder")
 
     async def fs_pack_begin(self, env: str, path: str, *, actor: str = "system") -> dict[str, Any]:
         """Start the tar stream of a folder under the roots: ``{transfer, files, dirs, symlinks, bytes,

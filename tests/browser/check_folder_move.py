@@ -6,6 +6,11 @@ choosing a folder in the host's browser keeps the folder's name under it, and th
 and ends saying the container copy was removed. The host folder comes back into the container with
 the host original kept unless the box is ticked, and the box's choice is what is sent. A daemon too
 old for moves says so and keeps the button off. A folder mounted from the host offers no move at all.
+
+And a move outlives its dialog: the plan names the link it will not carry before anything starts; once
+started and the dialog closed, the folder's row says how far it is; after a reload the row still says
+so and the inbox lists it under "in progress"; the button reopens the dialog on the running move, which
+then ends there.
 """
 from __future__ import annotations
 
@@ -38,9 +43,11 @@ PROJECT = {
 }
 WORDS = {
     "en": {"settings": "Settings for Bakery", "tohost": "Move to the host…", "tocontainer": "Move into the container…", "done": "Moved",
-           "removed": "was removed", "kept": "was kept as it is", "outdated": "Update the host terminal first:"},
+           "removed": "was removed", "kept": "was kept as it is", "outdated": "Update the host terminal first:",
+           "skipped": "1 entry will not be carried", "live": "Moving to the host… 33 %", "open": "Show the move", "now": "In progress"},
     "ru": {"settings": "Настройки: Bakery", "tohost": "Перенести на хост…", "tocontainer": "Перенести в контейнер…", "done": "Перенесено",
-           "removed": "удалена", "kept": "оставлена как есть", "outdated": "Сначала обновите терминал на хосте:"},
+           "removed": "удалена", "kept": "оставлена как есть", "outdated": "Сначала обновите терминал на хосте:",
+           "skipped": "1 запись не будет перенесена", "live": "Переносится на хост… 33 %", "open": "Показать перенос", "now": "Идёт сейчас"},
 }
 
 
@@ -57,6 +64,9 @@ def run() -> int:
                 page = context.new_page()
                 try:
                     scenario(page, lang, unhandled, f"{lang}-{width}")
+                    page.close()
+                    page = context.new_page()
+                    survives_reload(page, lang, unhandled, f"{lang}-{width}", mobile)
                     print(f"ok  {label}")
                 except Exception as exc:  # noqa: BLE001 — one failing layout must not hide the others
                     failures.append(f"{label}: {exc}")
@@ -68,15 +78,7 @@ def run() -> int:
     return unhandled.report()
 
 
-def scenario(page: Page, lang: str, unhandled: Unhandled, name: str) -> None:
-    words = WORDS[lang]
-    project = copy.deepcopy(PROJECT)
-    moves = MoveStub({
-        SITE["id"]: plan(SITE["id"], "to_host", SITE["path"], f"{HOST_HOME}/Daedalus/projects/bakery"),
-        CUTS["id"]: plan(CUTS["id"], "to_container", CUTS["path"], "/srv/workspaces/stream-cuts"),
-    })
-    folders = FolderStub(host="up")
-
+def install(page: Page, project: dict, moves: MoveStub, folders: FolderStub, unhandled: Unhandled) -> None:
     def answer(route, body: object, status: int = 200) -> None:  # type: ignore[no-untyped-def]
         route.fulfill(status=status, content_type="application/json", body=json.dumps(body))
 
@@ -97,10 +99,24 @@ def scenario(page: Page, lang: str, unhandled: Unhandled, name: str) -> None:
         answer(route, [])
 
     page.route("**/api/**", stub)
+
+
+def open_settings(page: Page, lang: str) -> None:
     page.goto(f"{BASE}/agents?token=t&lang={lang}")
     open_projects(page)
-    page.locator(f":is(.project-row, .projects-row) .iconbtn[aria-label='{words['settings']}']").click()
+    page.locator(f":is(.project-row, .projects-row) .iconbtn[aria-label='{WORDS[lang]['settings']}']").click()
     expect(page.locator(".dir-row")).to_have_count(3)
+
+
+def scenario(page: Page, lang: str, unhandled: Unhandled, name: str) -> None:
+    words = WORDS[lang]
+    project = copy.deepcopy(PROJECT)
+    moves = MoveStub({
+        SITE["id"]: plan(SITE["id"], "to_host", SITE["path"], f"{HOST_HOME}/Daedalus/projects/bakery"),
+        CUTS["id"]: plan(CUTS["id"], "to_container", CUTS["path"], "/srv/workspaces/stream-cuts"),
+    })
+    install(page, project, moves, FolderStub(host="up"), unhandled)
+    open_settings(page, lang)
     # A folder mounted from the host is on the host already: no move is offered for it.
     expect(page.locator(".dir-row[data-folder='f-mounted'] [data-move-folder]")).to_have_count(0)
 
@@ -141,6 +157,61 @@ def scenario(page: Page, lang: str, unhandled: Unhandled, name: str) -> None:
     page.locator(f"[data-move-folder='{SITE['id']}']").click()
     expect(page.locator("[data-move-problem='host_outdated']")).to_contain_text(words["outdated"])
     expect(sheet.locator(".sheet-foot .btn.primary")).to_be_disabled()
+
+
+
+def survives_reload(page: Page, lang: str, unhandled: Unhandled, name: str, mobile: bool) -> None:
+    words = WORDS[lang]
+    project = copy.deepcopy(PROJECT)
+    cache_link = [{"path": ".uv-cache/archive-v0/x/bin/python", "reason": "link outside the folder"}]
+    moves = MoveStub({SITE["id"]: plan(SITE["id"], "to_host", SITE["path"], f"{HOST_HOME}/Daedalus/projects/bakery", skipped=cache_link)})
+    moves.held = True
+    install(page, project, moves, FolderStub(host="up"), unhandled)
+    open_settings(page, lang)
+    row = page.locator(f".dir-row[data-folder='{SITE['id']}']")
+
+    # Before anything starts: what will not come along, and why.
+    row.locator("[data-move-folder]").click()
+    skipped = page.locator(".move-folder [data-move-skipped='1']")
+    expect(skipped).to_contain_text(words["skipped"])
+    skipped.locator("summary").click()
+    expect(skipped).to_contain_text(".uv-cache/archive-v0/x/bin/python")
+    if SHOTS:
+        page.screenshot(path=f"{SHOTS}/move-skipped-{name}.png")
+    page.locator(".move-folder .sheet-foot .btn.primary").click()
+    expect(page.locator(".move-folder progress")).to_be_visible()
+    page.locator(".move-folder .sheet-foot .btn.primary").click()  # continue in the background
+    expect(page.locator(".move-folder")).to_have_count(0)
+    expect(row.locator("[data-folder-move-live]")).to_contain_text(words["live"])
+
+    # A reload in the middle: the row still says so, and the inbox lists it.
+    page.reload()
+    if mobile:
+        page.goto(f"{BASE}/inbox?token=t&lang={lang}")
+        expect(page.locator(".moves-now-row")).to_contain_text("Bakery")
+        expect(page.locator(".moves-now")).to_contain_text(words["now"])
+    else:
+        page.locator(".bell").first.click()
+        expect(page.locator(".bell-pop .moves-now-row")).to_contain_text("Bakery")
+        expect(page.locator(".bell-pop .moves-now-row")).to_contain_text(words["live"])
+        if SHOTS:
+            page.screenshot(path=f"{SHOTS}/move-inbox-{name}.png")
+        page.keyboard.press("Escape")
+    open_settings(page, lang)
+    row = page.locator(f".dir-row[data-folder='{SITE['id']}']")
+    expect(row.locator("[data-folder-move-live]")).to_contain_text(words["live"])
+    if SHOTS:
+        page.screenshot(path=f"{SHOTS}/move-row-{name}.png")
+
+    # The button opens the dialog on the running move, which ends there.
+    expect(row.locator("[data-move-folder]")).to_contain_text(words["open"])
+    row.locator("[data-move-folder]").click()
+    expect(page.locator(".move-folder[data-move-state='copying']")).to_be_visible()
+    moves.held = False
+    expect(page.locator(".move-folder[data-move-state='done']")).to_be_visible(timeout=15000)
+    page.locator(".move-folder .sheet-foot .btn.primary").click()
+    expect(row.locator("[data-folder-move-live]")).to_have_count(0)
+    assert len(moves.started) == 1, moves.started
 
 
 if __name__ == "__main__":

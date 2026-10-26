@@ -1145,8 +1145,9 @@ export type FolderMoveJob = {
   source: string;
   destination: string;
   remove_original: boolean;
-  /** preparing → copying → verifying → switching → cleaning → done; or failed, cancelled. */
-  state: "preparing" | "copying" | "verifying" | "switching" | "cleaning" | "done" | "failed" | "cancelled";
+  /** preparing → copying → verifying → switching → cleaning → done; or failed, cancelled, or
+   *  interrupted (Daedalus restarted in the middle; the folder is where it was). */
+  state: "preparing" | "copying" | "verifying" | "switching" | "cleaning" | "done" | "failed" | "cancelled" | "interrupted";
   active: boolean;
   total_bytes: number;
   done_bytes: number;
@@ -1159,6 +1160,9 @@ export type FolderMoveJob = {
   original_removed: boolean;
   started_at: number;
   finished_at: number | null;
+  /** What the move left at its destination: "" nothing, "pending" a partial copy still to be removed
+   *  (before a move into the same place, or once the host terminal answers), "manual" one to delete by hand. */
+  leftover?: "" | "pending" | "manual";
 };
 
 /** What a move of the folder would be, before it starts: GET /api/projects/{id}/folders/{id}/move. */
@@ -1178,6 +1182,13 @@ export type FolderMovePlan = {
   blockers: string[];
   /** A move of this folder that is still running. */
   job: FolderMoveJob | null;
+  /** An earlier move of the folder to the host whose unfinished copy is at `destination` still; a
+   *  move into the same place removes it first. */
+  leftover?: { job_id: string; destination: string; state: string } | null;
+  /** What the move would carry, and what it would leave out and why, read before it starts. */
+  counts?: { files: number; dirs: number; symlinks: number; bytes: number } | null;
+  skipped?: { path: string; reason: string }[];
+  skipped_count?: number;
 };
 
 /** Where a folder of this installation may live, from /api/project-environments. */

@@ -57,6 +57,7 @@ func (d *Daemon) registerSide(srv *server.Server) {
 		srv.Handle("fs.unpack_write", d.fsUnpackWrite)
 		srv.Handle("fs.unpack_finish", d.fsUnpackFinish)
 		srv.Handle("fs.unpack_abort", d.fsUnpackAbort)
+		srv.Handle("fs.unpack_release", d.fsUnpackRelease)
 		srv.Handle("fs.pack_begin", d.fsPackBegin)
 		srv.Handle("fs.pack_read", d.fsPackRead)
 		srv.Handle("fs.pack_close", d.fsPackClose)
@@ -325,6 +326,7 @@ func (d *Daemon) fsUnpackBegin(ctx context.Context, c *server.Conn, params json.
 		d.logRefusal("fs.unpack_begin", p.Path, err)
 		return nil, sideError(err)
 	}
+	d.Side.Transfers.Own(r.Transfer, c.Context())
 	d.Log.Info("fs.unpack_begin", "path", r.Path, "transfer", r.Transfer, "created", r.Created, "total_bytes", p.TotalBytes, "entries", p.Entries)
 	return r, nil
 }
@@ -337,6 +339,7 @@ func (d *Daemon) fsUnpackWrite(ctx context.Context, c *server.Conn, params json.
 	if err := decode(params, &p); err != nil {
 		return nil, err
 	}
+	d.Side.Transfers.Own(p.Transfer, c.Context())
 	streamed, err := d.Side.Transfers.UnpackWrite(p.Transfer, p.Data)
 	if err != nil {
 		return nil, sideError(err)
@@ -351,6 +354,7 @@ func (d *Daemon) fsUnpackFinish(ctx context.Context, c *server.Conn, params json
 	if err := decode(params, &p); err != nil {
 		return nil, err
 	}
+	d.Side.Transfers.Own(p.Transfer, c.Context())
 	r, err := d.Side.Transfers.UnpackFinish(p.Transfer)
 	if err != nil {
 		d.Log.Warn("fs.unpack_finish failed", "transfer", p.Transfer, "reason", err.Error())
@@ -374,6 +378,21 @@ func (d *Daemon) fsUnpackAbort(ctx context.Context, c *server.Conn, params json.
 	return map[string]any{"aborted": true}, nil
 }
 
+// fsUnpackRelease lets a finished unpack go once the host works in the copy; until then the host
+// may still abort it, which removes the copy (see sidechan.Transfers).
+func (d *Daemon) fsUnpackRelease(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p struct {
+		Transfer string `json:"transfer"`
+	}
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	if err := d.Side.Transfers.UnpackRelease(p.Transfer); err != nil {
+		return nil, sideError(err)
+	}
+	return map[string]any{"released": true}, nil
+}
+
 func (d *Daemon) fsPackBegin(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
 	var p struct {
 		Path string `json:"path"`
@@ -386,6 +405,7 @@ func (d *Daemon) fsPackBegin(ctx context.Context, c *server.Conn, params json.Ra
 		d.logRefusal("fs.pack_begin", p.Path, err)
 		return nil, sideError(err)
 	}
+	d.Side.Transfers.Own(r.Transfer, c.Context())
 	d.Log.Info("fs.pack_begin", "path", p.Path, "transfer", r.Transfer, "files", r.Files, "bytes", r.Bytes, "skipped", r.SkippedCount)
 	return r, nil
 }
@@ -398,6 +418,7 @@ func (d *Daemon) fsPackRead(ctx context.Context, c *server.Conn, params json.Raw
 	if err := decode(params, &p); err != nil {
 		return nil, err
 	}
+	d.Side.Transfers.Own(p.Transfer, c.Context())
 	r, err := d.Side.Transfers.PackRead(p.Transfer, p.Max)
 	if err != nil {
 		return nil, sideError(err)

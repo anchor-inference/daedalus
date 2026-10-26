@@ -82,6 +82,8 @@ class FakeBridge:
         self.unpacks: dict[str, dict[str, Any]] = {}
         self.packs: dict[str, dict[str, Any]] = {}
         self.aborted: list[str] = []
+        self.released: list[str] = []
+        self.finished: dict[str, dict[str, Any]] = {}
         self.removed: list[str] = []
         self.gate: asyncio.Event | None = None
         self.corrupt = False
@@ -126,15 +128,23 @@ class FakeBridge:
 
     async def unpack_finish(self, transfer: str, *, actor: str = "operator") -> dict[str, Any]:
         item = self.unpacks.pop(transfer)
+        self.finished[transfer] = item
         counts = extract_tar(io.BytesIO(bytes(item["data"])), item["path"], total_bytes=item["total"], entries=item["entries"], progress=_Progress())
         digest = hashlib.sha256(bytes(item["data"]) + (b"x" if self.corrupt else b"")).hexdigest()
         return {**counts.view(), "sha256": digest, "path": str(item["path"])}
 
     async def unpack_abort(self, transfer: str, *, actor: str = "operator") -> None:
-        item = self.unpacks.pop(transfer)
+        # As the daemon does: a running unpack or a finished one not yet released; else not found.
+        item = self.unpacks.pop(transfer, None) or self.finished.pop(transfer, None)
+        if item is None:
+            raise FileNotFoundError(f"no unpack {transfer!r} is running")
         self.aborted.append(transfer)
         if item["created"]:
             shutil.rmtree(item["path"], ignore_errors=True)
+
+    async def unpack_release(self, transfer: str) -> None:
+        self.finished.pop(transfer, None)
+        self.released.append(transfer)
 
     async def pack_begin(self, path: str, *, actor: str = "operator") -> dict[str, Any]:
         data, scan = stream_of(Path(path))
@@ -470,3 +480,196 @@ async def test_the_routes_plan_start_follow_and_refuse(settings: Settings, confi
         late = await client.post(f"/api/folder-moves/{started['id']}/cancel", headers=HEADERS)
         assert late.status_code == 409
         assert (await client.get("/api/folder-moves/nope", headers=HEADERS)).status_code == 404
+
+
+# -- surviving a restart ----------------------------------------------------------------------------
+
+
+async def test_a_move_is_recorded_and_listed_again_by_the_next_process(settings: Settings, manager: SessionManager, db: Database, tmp_path: Path) -> None:
+    home = tmp_path / "hosthome"
+    home.mkdir()
+    bridge = FakeBridge(home)
+    told: list[str] = []
+
+    async def notify(job: Any) -> None:
+        told.append(job.state)
+
+    mover = FolderMover(manager, lambda: bridge, workspaces_dir=settings.workspaces_dir, notify=notify)  # type: ignore[arg-type, return-value]
+    project = await manager.projects.create("Kept")
+    (project.primary.path / "a.txt").write_text("a")
+    job = await mover.start(project.id, project.primary.id, destination=str(home / "kept"))
+    row = await db.fetchone("SELECT state FROM folder_moves WHERE id = ?", (job.id,))
+    assert row is not None and row["state"] in ("preparing", "copying", "verifying", "switching", "cleaning", "done")
+    view = await wait_job(mover, job.id)
+    assert view["state"] == "done" and told == ["done"]
+    assert bridge.released == [job.transfer], "a copy in use is released, so no abort can remove it any more"
+    later = FolderMover(manager, lambda: bridge, workspaces_dir=settings.workspaces_dir)  # type: ignore[arg-type, return-value]
+    assert await later.recover() == []
+    again = later.get(job.id).view()
+    assert again["state"] == "done" and again["destination"] == str(home / "kept") and again["done_bytes"] == again["total_bytes"]
+
+
+async def left_running(mover: FolderMover, project: Any, **fields: Any) -> Any:
+    """A move as the process that ran it left it when it was killed: its row, and no task."""
+    from daedalus.host.folder_move import MoveJob
+
+    job = MoveJob(id=fields.pop("id", "j1"), project_id=project.id, folder_id=project.primary.id, source=str(project.primary.path), remove_original=True, **fields)
+    await mover._save(job)
+    return job
+
+
+async def test_a_host_copy_left_by_a_killed_process_is_removed_once_the_daemon_answers(settings: Settings, manager: SessionManager, db: Database, tmp_path: Path) -> None:
+    home = tmp_path / "hosthome"
+    home.mkdir()
+    bridge = FakeBridge(home)
+    project = await manager.projects.create("Killed")
+    (project.primary.path / "a.txt").write_text("a")
+    began = await bridge.unpack_begin(str(home / "half"), total_bytes=10, entries=2)
+    (home / "half" / "partial").write_text("p")
+    told: list[str] = []
+
+    async def notify(job: Any) -> None:
+        told.append(job.state)
+
+    mover = FolderMover(manager, lambda: bridge, workspaces_dir=settings.workspaces_dir, notify=notify)  # type: ignore[arg-type, return-value]
+    await left_running(mover, project, direction="to_host", destination=str(home / "half"), state="copying", transfer=began["transfer"], leftover="pending")
+    interrupted = await mover.recover()
+    assert [job.id for job in interrupted] == ["j1"] and told == ["interrupted"]
+    view = mover.get("j1").view()
+    assert view["state"] == "interrupted" and view["leftover"] == "pending" and not view["active"]
+    plan = await mover.plan(project.id, project.primary.id)
+    assert plan["destination"] == str(home / "half") and plan["leftover"]["job_id"] == "j1"
+    await mover.clean_leftovers(wait=1, poll=0.01)
+    assert bridge.aborted == [began["transfer"]] and not (home / "half").exists()
+    row = await db.fetchone("SELECT state, leftover FROM folder_moves WHERE id = 'j1'")
+    assert (row["state"], row["leftover"]) == ("interrupted", "")
+    # The daemon had removed it already when its connection closed: nothing is left, nothing to do.
+    await left_running(mover, project, id="j2", direction="to_host", destination=str(home / "gone"), state="interrupted", transfer="u-gone", leftover="pending")
+    mover.jobs["j2"] = await _load(mover, "j2")
+    await mover.clean_leftovers(wait=1, poll=0.01)
+    assert mover.get("j2").leftover == ""
+    assert (await mover.plan(project.id, project.primary.id))["leftover"] is None
+
+
+async def _load(mover: FolderMover, job_id: str) -> Any:
+    from daedalus.host.folder_move import COLUMNS, MoveJob
+
+    row = await mover.db.fetchone(f"SELECT {COLUMNS} FROM folder_moves WHERE id = ?", (job_id,))
+    return MoveJob.of(row)
+
+
+async def test_a_container_copy_left_by_a_killed_process_is_removed_at_the_start(settings: Settings, manager: SessionManager, tmp_path: Path) -> None:
+    home = tmp_path / "hosthome"
+    project = await host_project(manager, home, "back")
+    dest = settings.workspaces_dir / "back"
+    (dest / "sub").mkdir(parents=True)
+    (dest / "sub" / "partial").write_text("p")
+    mover = FolderMover(manager, lambda: FakeBridge(home), workspaces_dir=settings.workspaces_dir)  # type: ignore[arg-type, return-value]
+    await left_running(mover, project, direction="to_container", destination=str(dest), state="copying", transfer="p9", leftover="pending")
+    await mover.recover()
+    assert mover.get("j1").state == "interrupted" and not dest.exists()
+    assert (await manager.projects.get(project.id)).primary.env == "host"
+
+
+async def test_a_move_whose_switch_committed_before_the_kill_is_completed(settings: Settings, manager: SessionManager, tmp_path: Path) -> None:
+    home = tmp_path / "hosthome"
+    dest = home / "switched"
+    dest.mkdir(parents=True)
+    project = await manager.projects.create("Switched")
+    source = project.primary.path
+    (source / "a.txt").write_text("a")
+    await manager.projects.relocate_folder(project.id, project.primary.id, path=dest, env="host", is_git=False)
+    mover = FolderMover(manager, lambda: FakeBridge(home), workspaces_dir=settings.workspaces_dir)  # type: ignore[arg-type, return-value]
+    from daedalus.host.folder_move import MoveJob
+
+    job = MoveJob(id="j1", project_id=project.id, folder_id=project.primary.id, direction="to_host", source=str(source), destination=str(dest),
+                  remove_original=True, state="switching", transfer="u1", leftover="pending", unpack_finished=True)
+    await mover._save(job)
+    assert await mover.recover() == []
+    view = mover.get("j1").view()
+    assert view["state"] == "done" and view["original_removed"] and view["leftover"] == "", view
+    assert not source.exists() and dest.exists()
+
+
+async def test_a_stop_interrupts_a_move_and_removes_its_partial_copy_at_once(settings: Settings, manager: SessionManager, db: Database, tmp_path: Path) -> None:
+    home = tmp_path / "hosthome"
+    home.mkdir()
+    bridge = FakeBridge(home)
+    bridge.gate = asyncio.Event()
+    mover = FolderMover(manager, lambda: bridge, workspaces_dir=settings.workspaces_dir)  # type: ignore[arg-type, return-value]
+    project = await manager.projects.create("Deploy")
+    (project.primary.path / "a.txt").write_text("a")
+    job = await mover.start(project.id, project.primary.id, destination=str(home / "deploy"))
+    for _ in range(200):
+        if mover.get(job.id).state == "copying" and bridge.unpacks:
+            break
+        await asyncio.sleep(0.01)
+    await mover.shutdown(timeout=5)
+    view = mover.get(job.id).view()
+    assert view["state"] == "interrupted" and view["leftover"] == "", view
+    assert bridge.aborted == [job.transfer] and not (home / "deploy").exists()
+    assert (project.primary.path / "a.txt").exists() and project.primary.id not in manager.moving_folders
+    row = await db.fetchone("SELECT state, leftover FROM folder_moves WHERE id = ?", (job.id,))
+    assert (row["state"], row["leftover"]) == ("interrupted", "")
+
+
+async def test_a_move_into_the_place_an_earlier_one_left_removes_that_copy_first(settings: Settings, manager: SessionManager, tmp_path: Path) -> None:
+    home = tmp_path / "hosthome"
+    home.mkdir()
+    bridge = FakeBridge(home)
+    project = await manager.projects.create("Again")
+    (project.primary.path / "a.txt").write_text("a")
+    began = await bridge.unpack_begin(str(home / "again"), total_bytes=10, entries=2)
+    (home / "again" / "partial").write_text("p")
+    mover = FolderMover(manager, lambda: bridge, workspaces_dir=settings.workspaces_dir)  # type: ignore[arg-type, return-value]
+    await left_running(mover, project, direction="to_host", destination=str(home / "again"), state="interrupted", transfer=began["transfer"], leftover="pending")
+    await mover.recover()
+    job = await mover.start(project.id, project.primary.id, destination=str(home / "again"))
+    assert bridge.aborted[0] == began["transfer"]
+    view = await wait_job(mover, job.id)
+    assert view["state"] == "done", view
+    assert (home / "again" / "a.txt").read_text() == "a" and not (home / "again" / "partial").exists()
+    # A folder of the operator's at the place, with no earlier move behind it, is never touched.
+    other = await manager.projects.create("Theirs")
+    (home / "theirs").mkdir()
+    (home / "theirs" / "mine.txt").write_text("mine")
+    job = await mover.start(other.id, other.primary.id, destination=str(home / "theirs"))
+    view = await wait_job(mover, job.id)
+    assert view["state"] == "failed" and "not empty" in view["error"]
+    assert (home / "theirs" / "mine.txt").read_text() == "mine"
+
+
+async def test_a_copy_refused_after_it_finished_is_removed_through_its_transfer(settings: Settings, manager: SessionManager, db: Database, tmp_path: Path) -> None:
+    home = tmp_path / "hosthome"
+    home.mkdir()
+    bridge = FakeBridge(home)
+    mover = FolderMover(manager, lambda: bridge, workspaces_dir=settings.workspaces_dir)  # type: ignore[arg-type, return-value]
+    project = await manager.projects.create("Late")
+    (project.primary.path / "a.txt").write_text("a")
+    real_check = bridge.check_folder
+
+    async def start_a_terminal_meanwhile(path: str, **kwargs: Any) -> FolderCheck:
+        await db.execute("INSERT INTO terminals(id, env, project_id, owner_kind, cwd, status, created_at) VALUES ('t9', 'container', ?, 'project', ?, 'running', '2026-10-27')",
+                         (project.id, str(project.primary.path)))
+        return await real_check(path, **kwargs)
+
+    bridge.check_folder = start_a_terminal_meanwhile  # type: ignore[method-assign]
+    job = await mover.start(project.id, project.primary.id, destination=str(home / "late"))
+    view = await wait_job(mover, job.id)
+    assert view["state"] == "failed" and "during the copy" in view["error"]
+    assert bridge.aborted == [job.transfer] and not (home / "late").exists() and view["leftover"] == ""
+
+
+async def test_the_plan_names_what_will_not_be_carried_before_the_move(settings: Settings, manager: SessionManager, tmp_path: Path) -> None:
+    home = tmp_path / "hosthome"
+    home.mkdir()
+    mover = FolderMover(manager, lambda: FakeBridge(home), workspaces_dir=settings.workspaces_dir)  # type: ignore[arg-type, return-value]
+    project = await manager.projects.create("Cache")
+    make_tree(project.primary.path)
+    plan = await mover.plan(project.id, project.primary.id)
+    assert {item["path"]: item["reason"] for item in plan["skipped"]} == {"escape": "link outside the folder", "pipe": "special file"}
+    assert plan["skipped_count"] == 2 and plan["counts"]["files"] == 3
+    back = await host_project(manager, home, "with-link")
+    (Path(back.primary.path) / "out").symlink_to("/etc/hostname")
+    plan = await mover.plan(back.id, back.primary.id)
+    assert plan["direction"] == "to_container" and [item["path"] for item in plan["skipped"]] == ["out"]

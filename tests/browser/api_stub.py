@@ -998,7 +998,7 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     if path.startswith("/api/folder-moves") or (path.startswith("/api/projects/") and path.endswith("/move")):
         # Moving a folder between the container and the host; a check that drives it installs a
         # MoveStub of its own with the folders it moves.
-        answered = MOVES.answer(method.upper(), path, body)
+        answered = MOVES.answer(method.upper(), path, body, query)
         if answered is not None:
             return answered[0], "application/json", json.dumps(answered[1])
     if path.startswith("/api/imports") or (path.startswith("/api/sessions/") and "/import/" in path):
