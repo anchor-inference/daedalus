@@ -1634,8 +1634,10 @@ class EditBoardConfig(BaseModel):
 
 
 class SubagentsConfig(BaseModel):
-    max_active: int = Field(default=4, ge=1)
-    """Running subagents one leader may have at a time."""
+    max_active: int = Field(default=10, ge=1, le=32)
+    """Running subagents one leader may have at a time. Settings → Limits edits it, and the next
+    SubAgent call reads the new value. Four turned out too few for a leader fanning one task out, and
+    past about thirty-two the machine, not the cap, is what stops them."""
     wait_timeout_minutes: int = Field(default=30, ge=1)
     linger_remind_minutes: int = Field(default=30, ge=0)
     """How long a finished subagent sits idle before its leader is asked, once, whether it still needs

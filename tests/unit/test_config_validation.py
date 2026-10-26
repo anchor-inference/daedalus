@@ -77,6 +77,21 @@ def test_the_terminal_cap_is_set_from_settings_with_no_upper_bound(tmp_path) -> 
         assert refused.status_code == 400 and app.config.terminals.running_cap == 500
 
 
+def test_the_subagent_limit_is_set_from_settings_within_its_bounds(tmp_path) -> None:
+    # The operator looked for this limit in Settings and could not find it; it is saved through the
+    # settings body like any section, and SubAgent reads the configuration on every start.
+    app = FakeApp(tmp_path, native=True)
+    with TestClient(build_app(app, "tok")) as client:
+        view = client.get("/api/settings", headers=HEAD).json()
+        assert view["subagents"]["max_active"] == 10
+        saved = client.put("/api/settings", headers=HEAD, json={"base_revision": view["revision"], "subagents": {"max_active": 16}})
+        assert saved.status_code == 200 and app.config.subagents.max_active == 16
+        assert app.config.subagents.wait_timeout_minutes == 30
+        for wrong in (0, 33):
+            refused = client.put("/api/settings", headers=HEAD, json={"base_revision": saved.json()["revision"], "subagents": {"max_active": wrong}})
+            assert refused.status_code == 400 and app.config.subagents.max_active == 16
+
+
 @pytest.mark.asyncio
 async def test_failed_manager_reload_restores_the_last_working_file(tmp_path) -> None:
     settings = settings_for(tmp_path, native=True)

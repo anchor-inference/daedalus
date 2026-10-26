@@ -4492,6 +4492,12 @@ button.staff-row:hover { background: var(--surface-2); }
    orchestrator five tabs share the strip, and the words fit only without their icons. */
 .panel-tab .count.attn { background: var(--warn); color: var(--primary-ink); }
 .panel-tablist.many .panel-tab .ic { display: none; }
+/* A narrow panel drops the words (the container rule beside the panel's grid column), so there the
+   icons come back whatever the count: with both gone a strip of five tabs, a session's four and its
+   Subagents, drew as nothing but the Details tab's number, and no tab could be reached at all. */
+@container (max-width: 420px) {
+  .panel-tablist.many .panel-tab .ic { display: block; }
+}
 
 /* The chat's one line for the whole list: how many wait, and the way to them. */
 /* The same notice as the main chat's setup line — solid frame, icon, sentence, a small button at the

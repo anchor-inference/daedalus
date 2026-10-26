@@ -1415,6 +1415,7 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
             {/* Only where the environment sets one: without it the line read "daily cap: $undefined". */}
             {typeof (s as any).usd_per_day === "number" && <div className="sub">{t("settings.limits.daily", { n: (s as any).usd_per_day })}</div>}
             <NumRow id="limits-iterations" setting="limits.max_iterations" title={t("settings.limits.iterations")} desc={t("settings.limits.iterations.sub")} value={s.limits.max_iterations} min={0} onSave={(v) => save({ limits: { ...s.limits, max_iterations: v } })} />
+            <NumRow id="limits-subagents" setting="subagents.max_active" title={t("settings.limits.subagents")} desc={t("settings.limits.subagents.sub")} value={s.subagents?.max_active ?? 10} min={1} max={32} step={1} onSave={(v) => save({ subagents: { ...s.subagents!, max_active: v } })} />
             <NumRow id="limits-perrun" setting="limits.usd_per_run" title={t("settings.limits.perrun")} desc={t("settings.limits.perrun.sub")} unit="USD" step="0.5" value={s.limits.usd_per_run} min={0} onSave={(v) => save({ limits: { ...s.limits, usd_per_run: v } })} />
             <TotalCaps s={s} save={save} />
             <div className="section-title">{t("settings.compaction")}</div>
