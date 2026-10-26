@@ -30,16 +30,24 @@ H = {"X-Daedalus-Token": "tok"}
 
 
 class FakeModel:
-    """A provider whose every answer is the next scripted text (or exception), keeping what it was sent."""
+    """A provider whose every answer is the next scripted text (or exception), keeping what it was sent.
+    The follow-up call that writes entry summaries is answered from its own script (``summaries``) and
+    kept apart, so a test of the pass's operations counts only those calls."""
 
-    def __init__(self, *answers: Any, cost: float = 0.0) -> None:
+    def __init__(self, *answers: Any, cost: float = 0.0, summaries: list[Any] | None = None) -> None:
         self.answers = list(answers)
+        self.summaries = list(summaries or [])
         self.requests: list[LLMRequest] = []
+        self.summary_requests: list[LLMRequest] = []
         self.cost = cost
 
     async def complete_text(self, request: LLMRequest) -> LLMResponse:
-        self.requests.append(request)
-        answer = self.answers.pop(0) if self.answers else {"ops": []}
+        if any(b.text == synthesis.SUMMARY_PROMPT for m in request.messages for b in m.content_blocks if isinstance(b, TextBlock)):
+            self.summary_requests.append(request)
+            answer = self.summaries.pop(0) if self.summaries else {"summaries": []}
+        else:
+            self.requests.append(request)
+            answer = self.answers.pop(0) if self.answers else {"ops": []}
         if isinstance(answer, BaseException):
             raise answer
         text = answer if isinstance(answer, str) else json.dumps(answer, ensure_ascii=False)
@@ -73,8 +81,8 @@ async def client(app: Any) -> Any:
         yield c
 
 
-def fake(manager: SessionManager, *answers: Any, cost: float = 0.0) -> FakeModel:
-    model = FakeModel(*answers, cost=cost)
+def fake(manager: SessionManager, *answers: Any, cost: float = 0.0, summaries: list[Any] | None = None) -> FakeModel:
+    model = FakeModel(*answers, cost=cost, summaries=summaries)
     manager.providers.rungs_for = lambda config, preset_id=None: [(model, "fake-model")]  # type: ignore[method-assign]
     return model
 
@@ -197,7 +205,8 @@ async def test_an_invalid_answer_gets_one_corrective_retry_and_then_applies(app:
     sid = await chat(manager, "c", [("operator", "I play the cello."), ("operator", "Every Sunday.")])
     model = fake(manager, 'Sure! {"ops": [{"op": "add"}]}', {"ops": [{"op": "add", "entry": "topic/music", "text": "Plays the cello on Sundays"}]})
     report = await sweep(app)
-    assert report["calls"] == 2 and report["added"] == 1
+    # Two calls for the operations, and the follow-up that summarises the entry the pass made.
+    assert report["calls"] == 3 and len(model.requests) == 2 and report["added"] == 1
     assert "not a valid operations object" in model.prompt(1)
     assert await watermark(db, sid) == (await last_seq(db, sid), "idle")
 
@@ -482,6 +491,172 @@ async def test_one_undo_takes_back_a_whole_pass(app: Any, manager: SessionManage
     assert {e.slug for e in await manager.memory_entries.list()} == before_entries
 
 
+# -- the caps, the summaries, the review of held suggestions, a re-read ------------------------------
+
+
+async def _seed(app: Any, manager: SessionManager, slug: str, notes: list[tuple[str, str, int]]) -> dict[str, str]:
+    """A topic holding ``notes`` as ``(text, origin, days since last confirmed)``; returns text → id.
+    An ``operator`` note is the operator's own but left unlocked, to show origin alone protects it."""
+    entries = manager.memory_entries
+    entry = await entries.ensure(synthesis.Target("topic", slug, slug.title()))
+    ids = {}
+    for text, origin, days in notes:
+        result = await entries.remember(*entries.placement(entry), text, kind="fact", metadata={"source": origin, "topics": []}, origin=origin, entry=entry, similarity_threshold=1.0)
+        at = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+        await manager.db.execute("UPDATE memory_sources SET at = ? WHERE record_id = ?", (at, result.record.id))
+        ids[text] = result.record.id
+    return ids
+
+
+async def test_a_note_past_its_entrys_cap_archives_the_least_valuable_one_and_undo_brings_it_back(app: Any, manager: SessionManager, db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(synthesis, "CAP_TOPIC", 4)
+    ids = await _seed(app, manager, "garden", [
+        ("Grows tomatoes", "synthesis", 30), ("Grows basil", "synthesis", 2), ("Waters at dawn", "operator", 90), ("Uses raised beds", "synthesis", 10),
+    ])
+    locked, _ = await curator(app).add("Never uses pesticides", kind="fact", topics=[], entry=await manager.memory_entries.by_slug("topic", "garden"))
+    await chat(manager, "c", [("operator", "I started growing peppers."), ("operator", "And I compost.")])
+    fake(manager, {"ops": [{"op": "add", "entry": "topic/garden", "text": "Grows peppers"}, {"op": "add", "entry": "topic/garden", "text": "Composts"}]})
+    report = await sweep(app)
+    # Five live notes in a topic capped at four: the first add makes room for itself and brings the
+    # entry under the cap (two go), the second one more. Never the locked one or the operator's own,
+    # and the oldest confirmed first.
+    assert report["added"] == 2 and report["archived"] == 3 and report["dropped"] == {}
+    archived = {r.text for r in manager.memory.records(TENANT) if r.metadata.get("archived")}
+    assert archived == {"Grows tomatoes", "Uses raised beds", "Grows basil"}
+    assert manager.memory.get_record(TENANT, locked.record.id) is not None and not manager.memory.get_record(TENANT, ids["Waters at dawn"]).metadata.get("archived")
+    await curator(app).undo(report["history_ids"][-1])
+    assert not any(r.metadata.get("archived") for r in manager.memory.records(TENANT))
+    assert sorted(await entry_texts(manager, "garden")) == sorted(["Grows tomatoes", "Grows basil", "Waters at dawn", "Uses raised beds", "Never uses pesticides"])
+
+
+async def test_an_entry_full_of_locked_notes_holds_the_new_one_as_a_suggestion(app: Any, client: httpx.AsyncClient, manager: SessionManager, db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(synthesis, "CAP_TOPIC", 2)
+    entry = await manager.memory_entries.ensure(synthesis.Target("topic", "garden", "Garden"))
+    for text in ("Grows tomatoes", "Grows basil"):
+        await curator(app).add(text, kind="fact", topics=[], entry=entry)
+    await chat(manager, "c", [("operator", "I started growing peppers."), ("operator", "ok")])
+    fake(manager, {"ops": [{"op": "add", "entry": "topic/garden", "text": "Grows peppers"}]})
+    report = await sweep(app)
+    assert report["added"] == 0 and report["held"] == 1 and report["archived"] == 0
+    held = (await client.get("/api/memory/suggestions", headers=H)).json()["suggestions"]
+    assert [(s["kind"], s["why"], s["text"]) for s in held] == [("addition", "full", "Grows peppers")]
+
+
+async def test_the_pass_summarises_the_entries_it_touched_and_its_undo_reverts_them_and_withdraws_its_suggestions(app: Any, client: httpx.AsyncClient, manager: SessionManager, db: Database) -> None:
+    entries = manager.memory_entries
+    garden = await entries.ensure(synthesis.Target("topic", "garden", "Garden"))
+    garden = await entries.update(garden.id, if_version=garden.version, summary="Vegetables")
+    await chat(manager, "c", [("operator", "I started growing peppers on the balcony."), ("operator", "The planner app is Sprout.")])
+    model = fake(manager, {"ops": [
+        {"op": "add", "entry": "topic/garden", "text": "Grows peppers on the balcony"},
+        {"op": "add", "entry": "topic/garden", "text": "Plans the beds in Sprout with SPROUT_TOKEN"},
+    ]}, summaries=[{"summaries": [{"entry": "topic/garden", "text": "A balcony vegetable garden"}, {"entry": "topic/elsewhere", "text": "Not asked"}]}])
+    report = await sweep(app)
+    assert report["added"] == 1 and report["held"] == 1 and report["summaries"] == 1
+    asked = "\n".join(b.text for m in model.summary_requests[0].messages for b in m.content_blocks if isinstance(b, TextBlock))
+    assert "entry: topic/garden — Garden" in asked and "current summary: Vegetables" in asked and "Grows peppers on the balcony" in asked
+    assert (await entries.get(garden.id)).summary == "A balcony vegetable garden"
+    held = (await client.get("/api/memory/suggestions", headers=H)).json()["suggestions"]
+    assert len(held) == 1 and held[0]["pass"].startswith("memory-") and held[0]["session_title"] == "c"
+    assert held[0]["quote"] and held[0]["from_seq"]
+    await curator(app).undo(report["history_ids"][-1])
+    assert (await entries.get(garden.id)).summary == "Vegetables"
+    assert (await client.get("/api/memory/suggestions", headers=H)).json()["suggestions"] == []
+    status = await db.fetchone("SELECT status FROM memory_suggestions WHERE id = ?", (held[0]["id"],))
+    assert status["status"] == "withdrawn"
+
+
+async def test_a_summary_the_operator_rewrote_after_the_pass_survives_its_undo(app: Any, manager: SessionManager, db: Database) -> None:
+    entries = manager.memory_entries
+    garden = await entries.ensure(synthesis.Target("topic", "garden", "Garden"))
+    await chat(manager, "c", [("operator", "I started growing peppers."), ("operator", "ok")])
+    fake(manager, {"ops": [{"op": "add", "entry": "topic/garden", "text": "Grows peppers"}]}, summaries=[{"summaries": [{"entry": "topic/garden", "text": "Peppers"}]}])
+    report = await sweep(app)
+    fresh = await entries.get(garden.id)
+    await entries.update(garden.id, if_version=fresh.version, summary="My garden", by_operator=True)
+    await curator(app).undo(report["history_ids"][-1])
+    assert (await entries.get(garden.id)).summary == "My garden"
+
+
+async def _held(app: Any, manager: SessionManager, client: httpx.AsyncClient) -> list[dict[str, Any]]:
+    await chat(manager, "c", [("operator", "Set up the planner server for Sprout."), ("operator", "Use the usual stack.")])
+    fake(manager, {"ops": [
+        {"op": "add", "entry": "area/sprout", "text": "Sprout server listens on 0.0.0.0:8102"},
+        {"op": "add", "entry": "area/sprout", "text": "Sprout reads SPROUT_TOKEN"},
+        {"op": "add", "entry": "topic/hosting", "text": "Hosting runs on node-7"},
+    ]})
+    report = await sweep(app)
+    assert report["held"] == 3
+    return (await client.get("/api/memory/suggestions", headers=H)).json()["suggestions"]
+
+
+async def test_accepting_a_group_is_one_change_whose_undo_opens_the_suggestions_again(app: Any, client: httpx.AsyncClient, manager: SessionManager, db: Database) -> None:
+    held = await _held(app, manager, client)
+    sprout = [s["id"] for s in held if s["entry_title"] and s["entry_title"].lower() == "sprout"]
+    assert len(sprout) == 2
+    done = await client.post("/api/memory/suggestions/decide", json={"action": "apply", "ids": sprout}, headers=H)
+    assert done.status_code == 200, done.text
+    assert done.json()["applied"] == 2 and done.json()["history_id"]
+    assert sorted(await entry_texts(manager, "sprout", "area")) == ["Sprout reads SPROUT_TOKEN", "Sprout server listens on 0.0.0.0:8102"]
+    assert len((await client.get("/api/memory/suggestions", headers=H)).json()["suggestions"]) == 1
+    listing = (await client.get("/api/memory/entries", headers=H)).json()
+    assert listing["suggestions"] == 1
+    assert (await client.post(f"/api/memory/history/{done.json()['history_id']}/undo", headers=H)).status_code == 200
+    assert await entry_texts(manager, "sprout", "area") == []
+    assert len((await client.get("/api/memory/suggestions", headers=H)).json()["suggestions"]) == 3
+
+
+async def test_dismissing_a_pass_tombstones_its_words_so_a_later_pass_does_not_propose_them_and_undo_lifts_that(app: Any, client: httpx.AsyncClient, manager: SessionManager, db: Database) -> None:
+    held = await _held(app, manager, client)
+    passes = {s["pass"] for s in held}
+    assert len(passes) == 1
+    done = (await client.post("/api/memory/suggestions/decide", json={"action": "dismiss", "ids": [s["id"] for s in held]}, headers=H)).json()
+    assert done["dismissed"] == 3 and done["history_id"]
+    reasons = [r["reason"] for r in await db.fetchall("SELECT reason FROM memory_tombstones")]
+    assert reasons == ["dismissed"] * 3
+    await chat(manager, "d", [("operator", "Again: the planner server for Sprout."), ("operator", "Same stack.")])
+    fake(manager, {"ops": [{"op": "add", "entry": "area/sprout", "text": "Sprout server listens on 0.0.0.0:8102."}]})
+    again = await sweep(app)
+    assert again["held"] == 0 and again["dropped"] == {"tombstoned": 1}
+    await curator(app).undo(done["history_id"])
+    assert await db.fetchall("SELECT reason FROM memory_tombstones") == []
+    assert len((await client.get("/api/memory/suggestions", headers=H)).json()["suggestions"]) == 3
+    # One dismissed alone goes the same way and can be undone from the toast.
+    one = (await client.post(f"/api/memory/suggestions/{held[0]['id']}/dismiss", headers=H)).json()
+    assert one["dismissed"] and one["history_id"]
+
+
+async def test_reading_every_chat_again_adds_no_duplicates(app: Any, client: httpx.AsyncClient, manager: SessionManager, db: Database) -> None:
+    sid = await chat(manager, "c", [("operator", "I play the cello every Sunday."), ("operator", "Set up the planner server for Sprout.")])
+    ops = {"ops": [
+        {"op": "add", "entry": "topic/music", "text": "Plays the cello every Sunday"},
+        {"op": "add", "entry": "area/sprout", "text": "Sprout server listens on 0.0.0.0:8102"},
+    ]}
+    fake(manager, ops)
+    first = await sweep(app)
+    assert first["added"] == 1 and first["held"] == 1
+    records = sorted((r.id, r.text) for r in manager.memory.records(TENANT))
+    sources = await db.fetchall("SELECT record_id, session_id, from_seq FROM memory_sources ORDER BY record_id")
+    suggestions = await db.fetchall("SELECT id FROM memory_suggestions")
+    # The model words the same facts a little differently the second time.
+    fake(manager, {"ops": [
+        {"op": "add", "entry": "topic/music", "text": "plays the cello every sunday."},
+        {"op": "add", "entry": "area/sprout", "text": "Sprout server listens on 0.0.0.0:8102"},
+    ]})
+    started = await client.post("/api/memory/synthesis/reread", headers=H)
+    assert started.status_code == 200 and started.json()["started"]
+    await synthesizer(app).task
+    status = (await client.get("/api/memory/status", headers=H)).json()
+    assert status["report"]["trigger"] == "reread" and status["report"]["chats"] == 1
+    assert status["report"]["added"] == 0 and status["report"]["merged"] == 1 and status["report"]["held"] == 0
+    assert sorted((r.id, r.text) for r in manager.memory.records(TENANT)) == records
+    assert await db.fetchall("SELECT record_id, session_id, from_seq FROM memory_sources ORDER BY record_id") == sources
+    assert await db.fetchall("SELECT id FROM memory_suggestions") == suggestions
+    assert (await watermark(db, sid))[0] == await last_seq(db, sid)
+    manager.config.memory = MemoryConfig(paused=True)
+    assert (await client.post("/api/memory/synthesis/reread", headers=H)).status_code == 409
+
+
 # -- the status the settings show ------------------------------------------------------------------
 
 
@@ -493,7 +668,8 @@ async def test_the_status_reports_the_last_pass_and_update_now_respects_pause(ap
     await synthesizer(app).task
     status = (await client.get("/api/memory/status", headers=H)).json()
     assert status["report"]["chats"] == 1 and status["report"]["added"] == 1 and status["report"]["trigger"] == "manual"
-    assert status["report"]["cost_usd"] == pytest.approx(0.002) and status["model"] and status["last_synthesis_at"]
+    # The operations call and the summary follow-up, at 0.002 each.
+    assert status["report"]["cost_usd"] == pytest.approx(0.004) and status["model"] and status["last_synthesis_at"]
     manager.config.memory = MemoryConfig(paused=True)
     assert (await client.post("/api/memory/synthesis/run", headers=H)).status_code == 409
 

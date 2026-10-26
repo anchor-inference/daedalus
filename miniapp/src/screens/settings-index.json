@@ -1035,6 +1035,12 @@
       "synonyms": ["update memory now", "learn now", "last pass", "synthesis", "обновить память", "последний проход", "обучение"]
     },
     {
+      "section": "memory", "anchor": "memory.reread", "config": null,
+      "title": { "en": "Read every chat again", "ru": "Перечитать все чаты" },
+      "about": { "en": "Reads all your chats from the start again, to learn what an earlier pass left out; what memory already holds is not written twice.", "ru": "Заново читает все ваши чаты с начала, чтобы выучить то, что прошлый проход пропустил; то, что уже есть в памяти, не записывается дважды." },
+      "synonyms": ["re-read chats", "reread", "relearn", "recover notes", "перечитать чаты", "выучить заново"]
+    },
+    {
       "section": "memory", "anchor": "memory.sensitive", "config": null,
       "title": { "en": "Include sensitive topics", "ru": "Включать чувствительные темы" },
       "about": { "en": "The master switch over the sensitive subjects; off, nothing on them is kept, and turning a subject off offers to remove what memory holds on it.", "ru": "Главный переключатель чувствительных тем; если выключен, о них ничего не хранится, а выключение темы предлагает удалить то, что о ней уже известно." },

@@ -102,24 +102,44 @@ def test_a_note_cannot_end_the_turn_context_or_open_a_heading() -> None:
 
 
 def test_the_block_keeps_to_its_budget_and_trims_from_the_bottom_never_the_preferences() -> None:
-    entries, records = _world(preferences=25, area_notes=20)
-    many_areas = [_entry(f"e-a{i}", "area", f"area-{i:02d}", project_id=f"p{i}", summary="x" * 140) for i in range(60)]
+    entries, records = _world(preferences=render.PREFERENCES_MAX, area_notes=20)
+    many_areas = [_entry(f"e-a{i}", "area", f"area-{i:02d}", project_id=f"p{i}", summary="x" * 140) for i in range(90)]
     for entry in many_areas:
         records[entry.id] = [_record(f"{entry.id}-1", entry.id, "note", 1, MemoryScope.project)]
     full = render.render(entries + many_areas, records, project_id="p-dae")
     assert len(full.text) <= render.HARD_CAP_CHARS
     assert "more not shown" in full.text
-    assert all(f"answer style number {i}" in full.text for i in range(25))
+    assert all(f"answer style number {i}" in full.text for i in range(render.PREFERENCES_MAX))
     small = render.render(entries + many_areas, records, project_id="p-dae", budget=render.budget_for(32_000))
     assert render.budget_for(32_000) == 1_280
     assert len(small.text) < len(full.text)
-    assert all(f"answer style number {i}" in small.text for i in range(25))  # kept whole even past a small window's share
-    assert "area-59" not in small.text and "Daedalus fact 0" not in small.text  # listing first, then the area's oldest
+    assert all(f"answer style number {i}" in small.text for i in range(render.PREFERENCES_MAX))  # kept whole even past a small window's share
+    assert "area-89" not in small.text and "Daedalus fact 0" not in small.text
     assert render.budget_for(0) == render.HARD_CAP_CHARS and render.budget_for(10_000_000) == render.HARD_CAP_CHARS
     long = [_entry("e-pref", "you", "preferences")]
     clipped = render.render(long, {"e-pref": [_record("p1", "e-pref", "y" * 5000, 1)]})
     note = clipped.text.splitlines()[-1]
     assert len(note) == len("  - ") + render.BULLET_MAX_CHARS and note.endswith("…")
+
+
+def test_the_current_area_keeps_its_newest_notes_before_the_listing_goes_and_archived_notes_are_left_out() -> None:
+    # On the live memory the listing used to be cut first and whole, so a chat in a busy project was
+    # told of no other entry: now the area gives up its oldest notes down to a floor first.
+    entries, records = _world(preferences=20, area_notes=20)
+    many_areas = [_entry(f"e-a{i}", "area", f"area-{i:02d}", project_id=f"p{i}", summary="y" * 90) for i in range(40)]
+    for entry in many_areas:
+        records[entry.id] = [_record(f"{entry.id}-1", entry.id, "note", 1, MemoryScope.project)]
+    budget = 3_000
+    block = render.render(entries + many_areas, records, project_id="p-dae", budget=budget)
+    assert len(block.text) <= budget
+    newest = [f"Daedalus fact {i}" for i in range(20 - render.AREA_FLOOR, 20)]
+    assert all(f"- {note}\n" in block.text + "\n" for note in newest)
+    assert "Daedalus fact 0\n" not in block.text + "\n"
+    assert "area-00" in block.text  # some of the listing survives beside the area's floor
+    archived = _record("d-old", "e-dae", "An archived Daedalus note", 0, MemoryScope.project)
+    archived = archived.model_copy(update={"metadata": {**archived.metadata, "archived": True}})
+    records["e-dae"].append(archived)
+    assert "An archived Daedalus note" not in render.render(entries, records, project_id="p-dae").text
 
 
 def test_a_delta_writes_what_changed_and_quotes_what_no_longer_holds() -> None:

@@ -147,10 +147,13 @@ function LearningCard() {
   const [busy, setBusy] = useState(false);
   const running = !!data && (!!data.running || data.learning > 0);
   wasRunning.current = running;
-  async function learnNow() {
+  async function learnNow(again = false) {
+    // Reading every chat again is for recovering what a pass dropped; it costs a pass over the whole
+    // backlog, so it asks first. What memory holds already is merged, not written twice.
+    if (again && !(await confirmAsync(t("settings.memory.learning.reread.title"), { body: t("settings.memory.learning.reread.body"), action: t("settings.memory.learning.reread.action") }))) return;
     setBusy(true);
     try {
-      const res = await api.post<{ started: boolean }>("/api/memory/synthesis/run", {});
+      const res = await api.post<{ started: boolean }>(again ? "/api/memory/synthesis/reread" : "/api/memory/synthesis/run", {});
       toast(t(res.started ? "settings.memory.learning.started" : "settings.memory.learning.already"));
       setWatchUntil(Date.now() + 30_000);
       refresh();
@@ -164,6 +167,9 @@ function LearningCard() {
     <div className="card memory-learning" data-setting="memory.learning">
       <Row title={t("settings.memory.learning")} desc={t("settings.memory.learning.sub")}>
         <button className="btn small" data-action="memory-learn-now" disabled={busy || running || !!data?.blocked} onClick={() => void learnNow()}>{t("settings.memory.learning.now")}</button>
+      </Row>
+      <Row title={t("settings.memory.learning.reread")} desc={t("settings.memory.learning.reread.sub")} data-setting="memory.reread">
+        <button className="btn small ghost" data-action="memory-reread" disabled={busy || running || !!data?.blocked} onClick={() => void learnNow(true)}>{t("settings.memory.learning.reread.action")}</button>
       </Row>
       <ul className="memory-learning-lines">
         {learningLines(data).map((line, i) => <li key={i} data-tone={line.tone || undefined}>{line.text}</li>)}

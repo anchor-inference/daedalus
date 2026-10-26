@@ -2108,6 +2108,23 @@ pre.diff .file { color: var(--fg); font-weight: 600; }
 .memory-entry-title { display: flex; align-items: center; gap: 6px; font-size: var(--fs-14); font-weight: 500; }
 .memory-entry-summary { overflow: hidden; color: var(--fg-2); font-size: var(--fs-13); line-height: var(--lh-ui); white-space: nowrap; text-overflow: ellipsis; min-height: calc(var(--fs-13) * 1.35); }
 .memory-entry-when { color: var(--fg-3); font-size: var(--fs-12); white-space: nowrap; }
+.memory-entry-end { display: inline-flex; align-items: center; gap: var(--space-2); }
+.memory-badge { display: inline-grid; place-items: center; min-width: var(--chip-h-dense); height: var(--chip-h-dense); padding: 0 6px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--info) 18%, var(--surface-2)); color: var(--fg); font-size: var(--fs-12); font-weight: 600; font-variant-numeric: tabular-nums; }
+/* The review of held notes: one section per entry or per chat read, its bulk buttons on the heading
+   line, each row the proposal, where it was said and the operator's words there. */
+.memory-review-by { margin: var(--space-2) 0; }
+.memory-review-group { margin-top: var(--space-4); }
+.memory-review-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding-bottom: var(--space-2); border-bottom: 1px solid var(--line); }
+.memory-review-title { min-width: 0; overflow: hidden; font-size: var(--fs-14); font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.memory-review-bulk { display: inline-flex; gap: var(--space-2); }
+.memory-review-list { margin: 0; padding: 0; list-style: none; }
+.memory-review-row { display: flex; flex-direction: column; gap: 4px; padding: var(--space-3) 0; border-bottom: 1px solid var(--line); min-width: 0; }
+.memory-review-kind { color: var(--fg-2); font-size: var(--fs-12); }
+.memory-review-row .memory-text { white-space: pre-wrap; word-break: break-word; line-height: 1.45; font-size: var(--fs-14); }
+.memory-review-before { color: var(--fg-3); text-decoration: line-through; }
+.memory-review-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: var(--fs-12); min-width: 0; }
+.memory-review-quote { margin: 0; padding: 2px 0 2px var(--space-3); border-left: 2px solid var(--line); color: var(--fg-2); font-size: var(--fs-13); line-height: 1.45; overflow-wrap: anywhere; }
+.memory-review-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
 .memory-sensitive { display: inline-flex; color: var(--warn); }
 .memory-empty { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-5); }
 .memory-empty-title { font-size: var(--fs-14); font-weight: 600; }
@@ -2195,6 +2212,8 @@ a.memory-source:hover { color: var(--fg); }
      makes Safari zoom the page when it takes focus. */
   .erow.memory-entry-row { min-height: var(--list-row-h); }
   .memory-entry-title, .memory-bullet-text, .memory-summary { font-size: var(--fs-15); }
+  .memory-review-row .memory-text { font-size: var(--fs-15); }
+  .memory-review-bulk { width: 100%; justify-content: flex-end; }
   .memory-composer { padding-inline: var(--gutter); }
   .memory-composer-pill { border-radius: var(--radius-composer); }
   .memory-composer textarea { font-size: var(--fs-16); }

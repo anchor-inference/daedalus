@@ -4,10 +4,10 @@
 // bullet came from, which Remember calls of a turn saved something, and how an import is grouped.
 
 import { beforeEach, describe, expect, it } from "vitest";
-import type { MemoryEntry, MemoryImportItem, MemoryOp, MemoryRecord, MemoryStatus } from "../api";
+import type { MemoryEntry, MemoryImportItem, MemoryOp, MemoryRecord, MemoryStatus, MemorySuggestion } from "../api";
 import { setLang } from "../i18n";
 import type { Activity } from "../turns";
-import { chosenOps, diffCounts, diffRows, filterEntries, groupEntries, learningLines, sourceLabel, splitArchived, statusPill, updatedLabel } from "./model";
+import { chosenOps, diffCounts, diffRows, filterEntries, groupEntries, groupSuggestions, learningLines, sourceLabel, splitArchived, statusPill, suggestionsFor, updatedLabel } from "./model";
 import { savedMemories } from "./savedchip";
 import { byTarget, importable } from "./transfer";
 
@@ -157,5 +157,40 @@ describe("the import preview", () => {
     const items = [item(0, "Profile"), item(1, "Recent work"), item(2, "Profile", { injection: ["an instruction to ignore earlier instructions"], checked: false })];
     expect(byTarget(items).map(([title, list]) => [title, list.map((i) => i.key)])).toEqual([["Profile", [0, 2]], ["Recent work", [1]]]);
     expect(items.map(importable)).toEqual([true, true, false]);
+  });
+});
+
+describe("the review of held notes", () => {
+  const held = (id: number, over: Partial<MemorySuggestion> = {}): MemorySuggestion => ({
+    id, kind: "addition", memory_ids: [], keep_id: "", text: `note ${id}`, score: 0, reason: "", created_at: "2026-10-20T10:00:00Z", action: "add",
+    entry_id: "e-a", entry_title: "Sprout", session_id: "s1", session_title: "Planner chat", pass: "memory-s1-aa", pass_at: "2026-10-20T10:00:00Z", ...over,
+  });
+  const list = [
+    held(1),
+    held(2, { entry_id: "e-b", entry_title: "Garden", pass: "memory-s2-bb", session_id: "s2", session_title: "Garden chat", pass_at: "2026-10-21T09:00:00Z" }),
+    held(3),
+    held(4, { kind: "revision", action: "update", memory_ids: ["r1"], entry_id: "e-b", entry_title: "Garden" }),
+    held(5, { kind: "duplicate", entry_id: null, entry_title: null, pass: undefined }),
+    held(6, { entry_id: "", entry_title: "Hosting", pass: "memory-s2-bb", session_id: "s2", session_title: null, pass_at: "2026-10-21T09:00:00Z" }),
+  ];
+
+  it("groups by entry, busiest first, with the ids accept all and dismiss all send; the tidying's merges stay out", () => {
+    const groups = groupSuggestions(list, "entry");
+    expect(groups.map((g) => [g.title, g.bulk])).toEqual([["Garden", [2, 4]], ["Sprout", [1, 3]], ["Hosting", [6]]]);
+  });
+
+  it("groups by the pass that filed them, the latest first, named by the chat or as gone", () => {
+    const groups = groupSuggestions(list, "pass");
+    expect(groups.map((g) => [g.title, g.bulk, g.sessionId])).toEqual([["Garden chat", [2, 6], "s2"], ["Planner chat", [1, 3, 4], "s1"]]);
+  });
+
+  it("narrows to one entry when opened from it", () => {
+    expect(suggestionsFor(list, "e-b").map((s) => s.id)).toEqual([2, 4]);
+    expect(suggestionsFor(list, null).map((s) => s.id)).toEqual([1, 2, 3, 4, 6]);
+  });
+
+  it("names the notes archived to make room in the last pass's counts", () => {
+    const report = { at: new Date().toISOString(), trigger: "manual", model: "m", chats: 1, parts: 1, calls: 1, cost_usd: 0, added: 2, merged: 0, updated: 0, retired: 0, new_entries: 0, summaries: 1, held: 0, archived: 3, dropped: {}, stopped: "" };
+    expect(learningLines(status({ report })).map((l) => l.text).join("\n")).toContain("3 older notes archived to make room in full entries");
   });
 });

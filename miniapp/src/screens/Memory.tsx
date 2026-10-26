@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, MEMORY_CATEGORIES, MemoryHistoryEntry, MemoryListing, MemoryRecord, MemorySuggestion, MemorySuggestions } from "../api";
 import { MemoryEntryView, MemoryHome } from "../memory/MemoryEntries";
+import { learnedWhy } from "../memory/review";
 import { navigate, pathFor, useRoute } from "../router";
 import { ChipRow, Segmented, Skeleton } from "../ui/index";
 import { Sheet, deleteWithUndo } from "../ui/dialogs";
@@ -437,14 +438,6 @@ function RenameSheet({ topic, onClose, onDone, toast }: { topic: string; onClose
   );
 }
 
-/** Why the background pass left a proposal to the operator, in the page's language; a retirement gives the
- *  model's own reason (it writes in the chat's language). */
-function learnedWhy(s: MemorySuggestion): string {
-  if (s.why === "locked") return t("memory.suggest.why.locked");
-  if (s.why === "ungrounded") return t("memory.suggest.why.ungrounded", { names: (s.tokens ?? []).join(", ") });
-  return s.reason;
-}
-
 function SuggestionsSheet({ projects, onClose, onChanged, toast }: { projects: Record<string, string>; onClose: () => void; onChanged: () => void; toast: (t: string) => void }) {
   const { data, error, loading, refresh } = useQuery<MemorySuggestions>("/api/memory/suggestions");
   const [busy, setBusy] = useState(false);
@@ -549,6 +542,7 @@ function HistorySheet({ onClose, onChanged, toast }: { onClose: () => void; onCh
             {e.undone_at ? <span className="faint">{t("memory.history.undone")}</span> : <button className="btn small" data-action="undo" disabled={busy === e.id} onClick={() => void undo(e.id)}><Icon name="undo" size={14} /> {t("memory.history.undo")}</button>}
           </div>
           {e.after.slice(0, 1).map((r) => <div key={r.id} className="memory-text">{r.text}</div>)}
+          {e.after.length === 0 && e.before.length === 0 && e.summary && <div className="memory-text faint">{e.summary}</div>}
           {e.before.length > 0 && (
             <details className="memory-history-before">
               <summary>{t("memory.history.before")}</summary>

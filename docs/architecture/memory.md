@@ -78,6 +78,13 @@ until you approve the diff; every change can be unticked first, and Apply is sen
 version. The bullets go to the model fenced as data, so a bullet that reads like an instruction is
 text to edit, never an order; a proposed bullet that reads like an instruction to an AI is refused.
 
+When the background pass held notes back for your word, a line above the entries says how many, and
+each entry's row carries a count badge. The line opens the **review**: the notes grouped by the entry
+they are for or by the chat read that filed them, each row with the chat it came from (linked to the
+message) and what you said there. A group is accepted or dismissed whole with one tap, as one change
+with Undo; a dismissed note's words are tombstoned (`dismissed`), so no later pass proposes them again.
+Opened from an entry, the review shows that entry's notes only.
+
 The record grid — by category, by topic, merges, the tidying's suggestions — stays as the **All facts**
 segment (`?view=facts`). A turn whose `Remember` saved something shows a **Saved to memory** chip that
 opens the entry; in Telegram the answer gets one line saying the same.
@@ -91,7 +98,8 @@ opens the entry; in Telegram the answer gets one line saying the same.
 | Pause memory | `memory.paused` | Keep everything, hand nothing to the agent, refuse the agent's `Remember` and `Recall`, learn nothing new; chats held during the pause are never learned from later. Your own notes still save |
 | Memory model | `memory.synthesis_preset` | Any configured preset; empty = the recommended cheap model when configured, else the categorising model's, the summariser's or a middle preset — the page says which one runs |
 | Daily budget for learning | `memory.synthesis_usd_per_day` | What memory's model calls may spend in a day (UTC); a free model is not stopped by it; 0 = no background pass |
-| Learning from chats | — | When the last pass ran, what it added, updated, confirmed and held back, today's spend, chats it could not read; **Update now** reads every chat with something unread |
+| Learning from chats | — | When the last pass ran, what it added, updated, confirmed, archived and held back, today's spend, chats it could not read; **Update now** reads every chat with something unread |
+| Read every chat again | — | Every chat's watermark goes back to the start and the pass reads them all, to learn what an earlier pass dropped; what memory holds is confirmed rather than written twice, and tombstoned notes stay away |
 | Include sensitive topics | `memory.sensitive_allowed` | Off, nothing on health, finances, intimate life, identity documents or precise location is kept; turning a subject off counts what memory holds on it and offers to remove it |
 | Reset memory | — | Deletes every entry, record, source, tombstone and the history; asks for the word typed out |
 
@@ -131,10 +139,19 @@ an area, write an entry's summary. Code decides what happens to each:
   or a library) is held as a suggestion, not written;
 - a change to a bullet you wrote or edited (locked) becomes a suggestion; the pass never makes it;
 - a fact memory already holds gains the chat as a second source instead of a second bullet;
-- at most 25 bullets per You or topic page, 40 per area, 60 entries.
+- an entry keeps at most 20 preferences, 12 profile notes, 20 notes per topic and 30 per area (60
+  entries in all). A new note past the cap archives the least valuable unlocked note — the one
+  confirmed longest ago, the fewest sources among equals; never a locked one or yours — and when every
+  note is locked, the new one is held for your word instead. Archived notes are not handed to the
+  agent but `Recall` still finds them.
+
+After the operations, one small follow-up call writes a one-to-two-sentence summary for each topic and
+area the pass touched (unless the model already wrote one, or you wrote the summary yourself). The
+injected block lists every other entry by that summary.
 
 Everything one pass over one chat changed is one history entry, **Learned from “<chat>”**, whose undo
-takes it all back. A chat's watermark moves only after a part of it was applied, so a failed call reads
+takes it all back — the notes it archived and the summaries it wrote included — and withdraws the
+suggestions it filed. A chat's watermark moves only after a part of it was applied, so a failed call reads
 the same messages again later. Each call is booked in Usage as `memory`; once today's memory spend
 reaches the budget, the pass waits for tomorrow (a model that costs nothing carries on).
 
@@ -180,6 +197,10 @@ because memory is handed to the agent in later chats. One history entry undoes t
 | `PATCH /api/memory/{id}`, `POST /api/memory/{id}/mark`, `DELETE /api/memory/{id}` | edit a bullet (with `version`), lock or archive it, forget it |
 | `GET /api/memory/status` | what the status pill and the settings read: the model and why, the last pass's report |
 | `POST /api/memory/synthesis/run` | read every chat with something unread now (409 while paused, off or without budget) |
+| `POST /api/memory/synthesis/reread` | read every chat again from its start (409 as above) |
+| `GET /api/memory/suggestions` | what waits: each with its entry, chat, quote and the pass that filed it |
+| `POST /api/memory/suggestions/decide` | `{action: apply \| dismiss, ids}`: a group decided as one undoable change |
+| `POST /api/memory/suggestions/{id}/apply`, `…/dismiss` | one decided; a dismissal answers with its history entry |
 | `GET /api/memory/export.zip` | the export |
 | `POST /api/memory/import/preview`, `POST /api/memory/import/apply` | the import, parsed and scanned, then filed |
 | `POST /api/memory/sensitive` | count, then remove, what memory holds on subjects no longer allowed |
