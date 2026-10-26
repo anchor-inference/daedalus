@@ -5,7 +5,7 @@ import asyncio
 import importlib.util
 import threading
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
@@ -135,6 +135,9 @@ class ConversationSearch:
                     passage = await self.index.next()
                     if passage is None:
                         break
+                    if await self.index.private(passage.seq):
+                        # Settled with no vector, so the row leaves the queue in one step.
+                        passage = replace(passage, block=-1, text='')
                     vector = await offload(self.encoder.encode, passage.text) if passage.text else None
                     await self.index.save(passage, vector, MODEL.space, MODEL.dimension)
                     done += 1

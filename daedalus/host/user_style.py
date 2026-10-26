@@ -26,6 +26,7 @@ from typing import Any
 
 from daedalus.host.engine_factory import TENANT
 from daedalus.host.prompts import without_host_notes
+from daedalus.memory.privacy import is_private
 
 MAX_CHARS = 2400
 """The profile's ceiling. A page a small model reads in one go; past it, a profile is a diary."""
@@ -141,7 +142,9 @@ async def pending(db: Any, through_seq: int, redact: Any = None) -> tuple[list[s
             metadata = json.loads(row["metadata"] or "{}")
         except ValueError:
             metadata = {}
-        if isinstance(metadata, dict) and any(metadata.get(key) for key in HIDDEN_KEYS):
+        if isinstance(metadata, dict) and (any(metadata.get(key) for key in HIDDEN_KEYS) or is_private(metadata)):
+            # Skipped, not left for later: the watermark moves past it, so a private chat's words are
+            # never read into the profile whatever happens to the chat afterwards.
             continue
         try:
             message = json.loads(row["message"])

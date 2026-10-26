@@ -126,6 +126,7 @@ from daedalus.host.transcript_view import TranscriptViewBuilder, message_view
 from daedalus.host.worktrees import append_exclude, exclude_lines
 from daedalus.mcp.manager import McpManager, McpStillStarting, blocked_for, mcp_tool_prefix
 from daedalus.mcp.oauth import mcp_callback_url
+from daedalus.memory import privacy
 from daedalus.memory import scope as memory_scope
 from daedalus.memory.entries import MemoryEntries
 from daedalus.memory.tools import build_memory_tools
@@ -938,7 +939,8 @@ class SessionManager:
             if not computer and tool.name in capabilities.COMPUTER_TOOLS:
                 continue
             self.tools.register(tool)
-        for tool in build_memory_tools(self.memory, entries=self.memory_entries, tenant_allowed=lambda: self.config.memory.sensitive_allowed, classifier=self.memory_classifier):
+        memory_tools = build_memory_tools(self.memory, entries=self.memory_entries, tenant_allowed=lambda: self.config.memory.sensitive_allowed, classifier=self.memory_classifier)
+        for tool in privacy.guard_memory_tools(list(memory_tools), self.is_private):
             self.tools.register(tool)
         for group, spec in TOOL_GROUPS.items():
             instructions = prompts.group_instructions(group, selfdev_mode=self.capabilities.selfdev.mode)
@@ -1582,6 +1584,10 @@ class SessionManager:
             folder = await self._make_host_chat_folder(sid)
             project = await self.projects.create(title, [FolderSpec(folder, env="host")], settings=ProjectSettings(ephemeral=True), project_id=sid)
         meta = dict(metadata or {})
+        if not privacy.is_private(meta) and any(privacy.is_private(self._states.get(parent)) for parent in privacy.parent_ids(meta)):
+            # A fork, a subagent, a side question or a coach of a private chat carries that chat's
+            # conversation, so it is private as well; otherwise the search would index the copy.
+            meta[privacy.PRIVATE_KEY] = True
         if folder_id:
             folder = project.folder(folder_id) if project is not None else None
             if folder is None:
@@ -4884,6 +4890,8 @@ class SessionManager:
         facts = await self._project_facts(state)
         if facts:
             volatile.append("\n" + facts)
+        if privacy.is_private(state):
+            volatile.append("\n- " + privacy.TURN_NOTE)
         switched_off = await self._take_mcp_switched_off(state)
         if switched_off:
             volatile.append("\n" + switched_off)
@@ -4909,7 +4917,7 @@ class SessionManager:
                 volatile.append("\n" + line)
         if self.is_btw(state):
             volatile.append("\n- " + prompts.BTW_TURN_NOTE)
-        if self.is_prompt_coach(state) and (style := user_style.context_block((await user_style.load(self.db)).summary)):
+        if self.is_prompt_coach(state) and not privacy.is_private(state) and (style := user_style.context_block((await user_style.load(self.db)).summary)):
             # A coach writes a prompt in the operator's voice, so it reads how they write. Here and not in
             # its role prompt: the profile changes as it learns, and the role prompt is the cached prefix.
             volatile.append("\n\n" + style)
@@ -4938,7 +4946,8 @@ class SessionManager:
         A staff member's session is left out: its launch packet already carries the facts chosen
         for its task, and a second, unselected copy would only crowd its context.
         """
-        if state.project is None or state.metadata.get("staff_id"):
+        if state.project is None or state.metadata.get("staff_id") or privacy.is_private(state):
+            # A private chat is handed nothing learned from other chats, the project's facts included.
             return ""
         try:
             return self.redactor.redact(await project_facts_note(self.db, state.project.id))
@@ -5761,6 +5770,11 @@ class SessionManager:
     def is_companion(state: SessionState) -> bool:
         """Whether this is the companion: the operator's standing personal agent, by text and by voice."""
         return bool(state.metadata.get("companion"))
+
+    def is_private(self, session_id: str) -> bool:
+        """Whether a loaded session is a private chat (:mod:`daedalus.memory.privacy`). A tool call always
+        comes from a loaded session, so the memory tools ask this without reading the row."""
+        return privacy.is_private(self._states.get(session_id))
 
     @staticmethod
     def is_prompt_coach(state: SessionState) -> bool:

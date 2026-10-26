@@ -6,6 +6,7 @@ import { Chevron, Dot, Status, copyText, fmtInt, statusWord, timeAgo } from "../
 import { MenuItem, OverflowMenu, confirmDialog, Overlay } from "../ui/dialogs";
 import { absDate, clock, commandPreview, duration, plainPreview, shortDateTime } from "../format";
 import { HostMark } from "../runon";
+import { PrivateBadge, isPrivate } from "../privatechat";
 import { isProject } from "../grouping";
 import { readPrefs, type Prefs } from "../appearance";
 import { EVIDENCE_EVENT, EvidenceRequest, codeBlock, renderCached, renderMarkdown } from "../md";
@@ -1527,6 +1528,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           chip={phoneChip}
           onMenu={() => setPhoneSheet("menu")}
           shared={detail?.share && detail.share.mode !== "local" ? (detail.share.mode === "public" ? "public" : "key") : null}
+          secret={isPrivate(detail)}
         />
         {offline && <Banner strip tone="warn" icon="reload" className="ph-chat-strip">{t("session.phone.reconnecting")}</Banner>}
       </> : <div className={`chat-head ${busy || saving || compacting ? "live" : ""}`}>
@@ -1552,6 +1554,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             <span className="chat-title-line">
               <span className="chat-title truncate">{detail?.title ?? "…"}</span>
               <HostMark env={detail?.env} />
+              <PrivateBadge on={isPrivate(detail)} />
             </span>
           )}
           {detail?.subagent_of ? (

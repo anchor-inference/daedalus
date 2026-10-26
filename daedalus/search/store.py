@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from daedalus.memory.privacy import public_sessions_sql
 from daedalus.security.redact import redact
 from daedalus.stores.database import Database
 from daedalus.stores.sqlite import fts_query, snippet
@@ -124,7 +125,12 @@ class Index:
     async def title(self, tenant: str) -> Any:
         return await self.db.fetchone(
             'SELECT s.id, substr(s.title,1,1000) title FROM sessions s LEFT JOIN search_titles v ON v.session_id=s.id'
-            ' WHERE s.tenant_id=? AND (v.session_id IS NULL OR v.title!=substr(s.title,1,1000)) ORDER BY s.last_message_at DESC LIMIT 1', (tenant,))
+            f' WHERE s.tenant_id=? AND {public_sessions_sql()} AND (v.session_id IS NULL OR v.title!=substr(s.title,1,1000)) ORDER BY s.last_message_at DESC LIMIT 1', (tenant,))
+
+    async def private(self, seq: int) -> bool:
+        """Whether a transcript row belongs to a private chat, whose words are never embedded."""
+        row = await self.db.fetchone(f'SELECT {public_sessions_sql()} public FROM transcript t JOIN sessions s ON s.id=t.session_id WHERE t.seq=?', (seq,))
+        return row is not None and not row['public']
 
     async def save_title(self, sid: str, title: str, vector: list[float], model: str, dimension: int) -> None:
         await self.db.execute(

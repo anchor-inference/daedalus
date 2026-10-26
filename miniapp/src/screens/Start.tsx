@@ -30,6 +30,7 @@ import { enterSends, errorText } from "../ui";
 import { t } from "../i18n";
 import { EnvPill } from "../envpill";
 import { HostMark, RunOn, RunOnRow, RunOnSelect, useRunOn } from "../runon";
+import { PrivateChip, PrivateMark, isPrivate, privateBody } from "../privatechat";
 import { projectReachable } from "../folders";
 import { ProjectsPage } from "./Projects";
 import { PhoneImportCard, StartImportCard } from "../imports/ImportedChat";
@@ -211,7 +212,7 @@ function DesktopLiveMeta({ s, where }: { s: SessionSummary; where: string }) {
   const parts: ReactNode[] = [];
   if (s.status === "waiting" || s.status === "running" || s.status === "failed") parts.push(<span key="state" className={`start-live-state ${s.status}`}>{statusWord(s.status)}</span>);
   else if (loop) parts.push(<span key="loop">{[loop.mode === "interval" ? t("loop.every", { t: fmtInterval(loop.interval_seconds) }) : t("loop.selfpaced"), loop.next_run_at ? t("ph.loop.next", { t: untilShort(loop.next_run_at) }) : ""].filter(Boolean).join(" · ")}</span>);
-  const mark = <HostMark key="host" env={s.env} />;
+  const mark = <Fragment key="marks"><HostMark env={s.env} /><PrivateMark on={isPrivate(s)} size={11} /></Fragment>;
   if (where) parts.push(<span key="where" className="start-live-where truncate">{where}</span>);
   if (s.model) parts.push(<span key="model" className="truncate">{shortModel(s.model, 28)}</span>);
   return <>{parts.map((part, i) => <Fragment key={i}>{i > 0 && <span className="sep">·</span>}{part}{i === 0 && mark}</Fragment>)}</>;
@@ -365,6 +366,8 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
   const photoInput = useRef<HTMLInputElement>(null);
   const plusButton = useRef<HTMLButtonElement>(null);
   const [plusOpen, setPlusOpen] = useState(false);
+  // Asked here, before the first message, because the host fixes it when the chat is made.
+  const [secret, setSecret] = useState(false);
 
   // A desktop lands here to type. A phone keeps the keyboard down until the field is touched:
   // opening it over the list of chats hides the thing the reader came to find. Nor does it take the
@@ -404,6 +407,7 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
         preset: chosen && "preset" in chosen ? chosen.preset : undefined,
         project_id: project || undefined,
         ...run.body,
+        ...privateBody(secret),
       });
       // The model and the effort in one change, before the message: the first turn is the one
       // that has to think the way the operator asked.
@@ -428,6 +432,7 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
       setDraft("");
       setFiles([]);
       setEffort(null);
+      setSecret(false);
     } catch (e) {
       toast(errorText(e));
     } finally {
@@ -485,7 +490,7 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
       ref={field}
       value={draft}
       rows={1}
-      placeholder={kind === "chat" ? t("session.composer.idle") : t(`kind.placeholder.${kind}`)}
+      placeholder={secret ? t("private.placeholder") : kind === "chat" ? t("session.composer.idle") : t(`kind.placeholder.${kind}`)}
       aria-label={t("session.composer.idle")}
       onChange={(event) => setDraft(event.target.value)}
       onPaste={(event) => {
@@ -510,12 +515,15 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
     <>
       <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); fileInput.current?.click(); }}><Icon name="attach" size={16} />{t("session.attach")}</button>
       {asr?.configured && <button type="button" role="menuitem" disabled={!note.supported || note.state.phase !== "idle"} onClick={() => { setPlusOpen(false); void note.start(); }}><Icon name="mic" size={16} />{t("session.mic")}</button>}
+      <button type="button" role="menuitemcheckbox" aria-checked={secret} data-private="" className={`private-item ${secret ? "on" : ""}`} title={t("private.menu.hint")} onClick={() => { setPlusOpen(false); setSecret(!secret); }}>
+        <Icon name="eyeoff" size={16} /><span className="grow">{t("private.menu")}</span>{secret && <Icon name="check" size={16} />}
+      </button>
     </>
   );
 
   if (!phone) {
     return (
-      <div className="start-composer composer" data-primary="send" onDragOver={(event) => { if (event.dataTransfer?.types.includes("Files")) event.preventDefault(); }} onDrop={(event) => { if (!event.dataTransfer?.files.length) return; event.preventDefault(); addFiles(event.dataTransfer.files); }}>
+      <div className="start-composer composer" data-primary="send" data-private={secret ? "" : undefined} onDragOver={(event) => { if (event.dataTransfer?.types.includes("Files")) event.preventDefault(); }} onDrop={(event) => { if (!event.dataTransfer?.files.length) return; event.preventDefault(); addFiles(event.dataTransfer.files); }}>
         <VoiceNoteFailed note={note} />
         <div className={`composer-box ${voiceBar ? "voicing" : ""}`}>
           {voiceBar && <VoiceBar note={note} />}
@@ -536,6 +544,7 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
                 composer has its mode there; the model and the circle keep the right. */}
             <KindSelect kind={kind} offers={offers} onChoose={onKind} sheet={false} />
             <RunOnSelect run={run} />
+            <PrivateChip on={secret} onClear={() => setSecret(false)} />
             <div className="composer-tools">
               <ModelSelect model={modelLabel} fallback={null} open={modelOpen} onOpenChange={setModelOpen} onChoose={choose} sheet={phone}
                 effort={shownEffort.thinking ? shownEffort.effort : undefined} thinking={shownEffort.thinking} onChooseEffort={chooseEffort} />
@@ -555,7 +564,7 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
   // empty; offline the draft waits here and Send waits with it.
   const shape = focused || !empty || progress !== null ? "open" : "idle";
   return (
-    <div className="start-composer composer" data-primary="send" data-shape={shape} data-typed={draft.trim() ? "" : undefined}
+    <div className="start-composer composer" data-primary="send" data-shape={shape} data-typed={draft.trim() ? "" : undefined} data-private={secret ? "" : undefined}
       onFocus={focus.onFocus}
       onBlur={focus.onBlur}>
       <VoiceNoteFailed note={note} />
@@ -574,6 +583,7 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
           <input ref={fileInput} type="file" multiple hidden onChange={(event) => { addFiles(event.target.files ?? []); event.target.value = ""; }} />
           <input ref={photoInput} type="file" accept="image/*" capture="environment" hidden onChange={(event) => { addFiles(event.target.files ?? []); event.target.value = ""; }} />
           <button ref={plusButton} type="button" className="iconbtn flat plus" aria-haspopup="dialog" aria-expanded={plusOpen} onClick={() => setPlusOpen(!plusOpen)} aria-label={t("composer.plus")} title={t("composer.plus")}><Icon name="plus" /></button>
+          <PrivateChip on={secret} onClear={() => setSecret(false)} />
           {offline && shape === "open" && <span className="grow ph-hint">{t("ph.offline.kept")}</span>}
           <div className="composer-tools">
             <ModelSelect model={modelLabel} fallback={null} open={modelOpen} onOpenChange={setModelOpen} onChoose={choose} sheet
@@ -588,7 +598,9 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
           onPhoto={() => photoInput.current?.click()}
           onFiles={() => fileInput.current?.click()}
           onRecord={asr?.configured && note.supported && note.state.phase === "idle" ? () => void note.start() : undefined}
-          extra={<><RunOnRow run={run} onDone={() => setPlusOpen(false)} /><SheetRow icon="settings" label={t("ph.plus.options")} hint={t("ph.plus.options.hint")} chevron onClick={() => { setPlusOpen(false); navigate(pathFor("agents", null, { new: "1" })); }} /></>} />
+          extra={<><RunOnRow run={run} onDone={() => setPlusOpen(false)} />
+            <SheetRow icon="eyeoff" label={t("private.menu")} hint={t("private.menu.hint")} checked={secret} data={{ private: "" }} onClick={() => { setSecret(!secret); setPlusOpen(false); }} />
+            <SheetRow icon="settings" label={t("ph.plus.options")} hint={t("ph.plus.options.hint")} chevron onClick={() => { setPlusOpen(false); navigate(pathFor("agents", null, { new: "1" })); }} /></>} />
       )}
     </div>
   );

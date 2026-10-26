@@ -44,6 +44,7 @@ import { plural, t } from "../i18n";
 import { useReveal } from "../reveal";
 import { pinCommand, setPinned } from "../pins";
 import { HostMark, RunEnv, useRunOn } from "../runon";
+import { PrivateMark, isPrivate, privateBody } from "../privatechat";
 import { KindTabs, byTab, kindIcon, sessionKind, tabCounts, useKindTab } from "../chatkind";
 
 type SearchList = SessionList & { semantic: boolean; reason: string; partial: boolean; indexing: boolean };
@@ -727,6 +728,7 @@ const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, proj
             <span className={`sb-m ${s.metadata?.loop?.status === "paused" ? "paused" : ""}`}>
               {state && <span className={`sb-word ${state}`}>{statusWord(state)}</span>}
               <HostMark env={s.env} />
+              <PrivateMark on={isPrivate(s)} size={11} />
               {s.terminals ? <span className="sb-terms num" title={plural("term.count", s.terminals)} aria-label={plural("term.count", s.terminals)}><Icon name="terminal" size={11} />{s.terminals}</span> : null}
               {tail && <span className="sb-ell">{tail}</span>}
             </span>
@@ -860,6 +862,7 @@ export function NewAgentSheet({ onClose, onCreated, toast, project: initial = ""
   const [folder, setFolder] = useState("");
   const [preset, setPreset] = useState("");
   const [advanced, setAdvanced] = useState(false);
+  const [secret, setSecret] = useState(false);
   const [busy, setBusy] = useState(false);
   const projects = useProjects();
   const run = useRunOn(project);
@@ -883,7 +886,7 @@ export function NewAgentSheet({ onClose, onCreated, toast, project: initial = ""
       const loop = loopOn && loopText.trim()
         ? { instruction: loopText.trim(), mode: loopMode, interval_minutes: loopMode === "interval" ? Math.max(1, Number(loopMinutes) || 10) : null, max_runs: loopMax.trim() ? Math.max(1, Number(loopMax) || 1) : null }
         : undefined;
-      const created = await api.post<{ id: string }>("/api/sessions", { title: title.trim(), prompt: prompt.trim() || undefined, tools_off: toolsOff, loop, project_id: project || undefined, folder_id: chosenFolder?.id, own_directory: ownDirectory, preset: preset || undefined, ...run.body });
+      const created = await api.post<{ id: string }>("/api/sessions", { title: title.trim(), prompt: prompt.trim() || undefined, tools_off: toolsOff, loop, project_id: project || undefined, folder_id: chosenFolder?.id, own_directory: ownDirectory, preset: preset || undefined, ...run.body, ...privateBody(secret) });
       // Read again now: a chat made without a first message starts no run, so no run event would
       // bring it into the column, and it stayed missing from its project until the next poll.
       invalidate("/api/sessions");
@@ -941,6 +944,7 @@ export function NewAgentSheet({ onClose, onCreated, toast, project: initial = ""
           <div className="sub">{run.hostReady ? t(`runon.${run.env}.hint`) : t("runon.host.down")}</div>
         </>
       )}
+      <label className="toggle-row" data-private=""><input type="checkbox" checked={secret} onChange={(e) => setSecret(e.target.checked)} /><span>{t("private.menu")}</span><span className="sub">{t("private.menu.hint")}. {t("private.newagent.hint")}</span></label>
       {chosen && <label className="toggle-row"><input type="checkbox" checked={ownDirectory} onChange={(e) => setOwnDirectory(e.target.checked)} /><span>{t("newagent.directory.own")}</span><span className="sub">{t("newagent.directory.own.hint")}</span></label>}
       <button type="button" className="disclosure" onClick={() => setAdvanced((v) => !v)} aria-expanded={advanced}>
         <span className={`chev ${advanced ? "down" : ""}`}>›</span> {t("newagent.advanced")}{loopOn ? t("newagent.advanced.loop") : ""}{toolsOff.length ? t("newagent.advanced.tools", { n: toolsOff.length }) : ""}
