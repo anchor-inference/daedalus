@@ -3136,6 +3136,40 @@ async def _memory_dismissed(conn: aiosqlite.Connection) -> None:
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _memory_dismissed))
 
+# The moves of project folders between the container and the host (daedalus.host.folder_move), so a
+# move outlives the process that runs it: a restart in the middle is noticed and its partial copy
+# removed, and the app still lists the move after a reload. ``transfer`` is the host daemon's id of
+# the move's stream, the one handle by which the daemon removes a folder it wrote; ``leftover`` says
+# whether such a copy may still be there ('pending'), is the operator's to delete ('manual'), or not.
+MIGRATIONS.append("""
+CREATE TABLE IF NOT EXISTS folder_moves (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    folder_id TEXT NOT NULL,
+    direction TEXT NOT NULL CHECK (direction IN ('to_host', 'to_container')),
+    source TEXT NOT NULL,
+    destination TEXT NOT NULL,
+    remove_original INTEGER NOT NULL DEFAULT 0,
+    state TEXT NOT NULL,
+    transfer TEXT NOT NULL DEFAULT '',
+    leftover TEXT NOT NULL DEFAULT '' CHECK (leftover IN ('', 'pending', 'manual')),
+    unpack_finished INTEGER NOT NULL DEFAULT 0,
+    total_bytes INTEGER NOT NULL DEFAULT 0,
+    done_bytes INTEGER NOT NULL DEFAULT 0,
+    total_files INTEGER NOT NULL DEFAULT 0,
+    error TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '[]',
+    skipped TEXT NOT NULL DEFAULT '[]',
+    skipped_count INTEGER NOT NULL DEFAULT 0,
+    original_removed INTEGER NOT NULL DEFAULT 0,
+    started_at REAL NOT NULL,
+    finished_at REAL,
+    updated_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS folder_moves_started ON folder_moves(started_at);
+CREATE INDEX IF NOT EXISTS folder_moves_open ON folder_moves(state, leftover);
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

@@ -13,7 +13,8 @@ from typing import TYPE_CHECKING, Any
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from daedalus.host.folder_move import FolderMover, MoveRefused, iter_jobs
+from daedalus.extensions.folder_moves import mover_of
+from daedalus.host.folder_move import MoveRefused, iter_jobs
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -27,21 +28,6 @@ class MoveBody(BaseModel):
     moved into the container always goes where a new container folder would."""
     remove_original: bool = False
     """Moving into the container: remove the host folder once the copy is verified and in use."""
-
-
-def mover_of(app: Application) -> FolderMover:
-    """The one mover of this process, made the first time a route needs it."""
-    mover = app.extensions.get("folder_mover")
-    if mover is None:
-        manager = app.manager
-        assert manager is not None
-
-        async def publish(event_type: str, payload: dict[str, Any]) -> None:
-            await manager.bus.publish(event_type, payload, project_id=payload.get("project_id"))
-
-        mover = FolderMover(manager, lambda: app.extensions.get("host_bridge"), workspaces_dir=app.settings.workspaces_dir, publish=publish)
-        app.extensions["folder_mover"] = mover
-    return mover
 
 
 def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:

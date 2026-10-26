@@ -257,3 +257,76 @@ async def test_a_folder_moves_to_the_host_and_back(service: Terminals, base: Pat
         assert not dest.exists()
     finally:
         await manager.close()
+
+
+class HeldBridge(HostBridge):
+    """The real bridge, with the stream held after its first chunk: a move caught in the middle."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.gate = asyncio.Event()
+        self.written = asyncio.Event()
+
+    async def unpack_write(self, transfer: str, data: bytes) -> int:
+        if self.written.is_set():
+            await self.gate.wait()
+        streamed = await super().unpack_write(transfer, data)
+        self.written.set()
+        return streamed
+
+
+async def test_a_move_cut_off_by_a_restart_leaves_nothing_on_the_host(service: Terminals, base: Path, db: Database, settings: Settings, config: RuntimeConfig) -> None:
+    """A stop removes the partial copy through the real daemon while it still answers; a process
+    killed instead leaves it to the next start, which aborts the transfer by its id over a new
+    connection; and a transfer nobody takes up again is removed by the daemon itself after its grace."""
+    manager = SessionManager(settings, config, db=db)
+    await manager.start()
+    try:
+        bridge = HeldBridge(lambda: service)
+        mover = FolderMover(manager, lambda: bridge, workspaces_dir=settings.workspaces_dir)
+        project = await manager.projects.create("Cut off")
+        (project.primary.path / "big.bin").write_bytes(os.urandom(4 << 20))
+        dest = base / "home" / "cut-off"
+
+        job = await mover.start(project.id, project.primary.id, destination=str(dest))
+        async with asyncio.timeout(30):
+            await bridge.written.wait()
+        assert dest.exists()
+        await mover.shutdown(timeout=15)
+        view = mover.get(job.id).view()
+        assert view["state"] == "interrupted" and view["leftover"] == "", view
+        assert not dest.exists(), "a stop left the partial copy on the host"
+
+        # Killed: the transfer outlives the connection that drove it, and the next process aborts it.
+        bridge.written.clear()
+        job = await mover.start(project.id, project.primary.id, destination=str(dest))
+        async with asyncio.timeout(30):
+            await bridge.written.wait()
+        # The process "dies" here: its connection goes, its task stays held and never cleans up, and
+        # the table says what the row said — copying, with its transfer.
+        await service.close()
+        later_service = Terminals(db, run_dirs={"container": None, "host": base / "run"}, config=lambda: TerminalsConfig(), owners=FreeOnly())
+        await later_service.start()
+        try:
+            assert await later_service.wait_available("host", timeout=15)
+            later_bridge = HostBridge(lambda: later_service)
+            later = FolderMover(manager, lambda: later_bridge, workspaces_dir=settings.workspaces_dir)
+            await later.recover()
+            assert later.get(job.id).state == "interrupted"
+            await later.clean_leftovers(wait=15, poll=0.1)
+            assert later.get(job.id).leftover == "" and not dest.exists()
+
+            # Nobody comes back for it: the daemon removes it itself once its grace has passed.
+            began = await later_bridge.unpack_begin(str(base / "home" / "orphan"), total_bytes=1 << 20, entries=10)
+            assert began["created"] and (base / "home" / "orphan").exists()
+        finally:
+            await later_service.close()
+        await _until(lambda: _gone(base / "home" / "orphan"), timeout=90)
+        bridge.gate.set()
+        await asyncio.gather(job.task, return_exceptions=True)  # type: ignore[arg-type]
+    finally:
+        await manager.close()
+
+
+async def _gone(path: Path) -> bool:
+    return not path.exists()

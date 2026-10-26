@@ -26,8 +26,24 @@ A move that fails or is cancelled before the switch leaves the original untouche
 partial copy (the daemon removes its half; a host that stops answering cleans up after its idle
 time). Once the switch has begun, the move is finished rather than cancelled.
 
-What a move does not carry, it says: links that point out of the folder, sockets and devices (and,
-from the host, files the daemon never reads, such as keys). Snapshots taken in the old place belong to
+A move outlives this process in the ``folder_moves`` table. A deliberate stop (a deploy) interrupts
+the moves still copying and removes their partial copies while the daemon still answers; a move that
+was finishing is let finish first. A start after a stop that could not do that (a crash, a kill)
+marks every move left running as interrupted, removes a container partial at once and a host partial
+through its transfer, by id, once the daemon answers — or finds, for a move that was switching, that
+the switch had committed and completes its last steps. An interrupted move is started again rather
+than resumed: the stream is one tar archive whose digest covers every byte, and carrying on from the
+middle would need both ends to rebuild the exact stream up to that byte — a scan of a folder the
+operator may have changed since, against a daemon that cleans the partial up within a minute of
+losing its connection. Starting again costs the copy, which is what a restart already cost.
+
+What a move does not carry, it says, and the plan says it before the move starts: links that point
+out of the folder, sockets and devices (and, from the host, files the daemon never reads, such as
+keys). A link out of the folder is not carried even as a link: its target is a path on the other
+side — a container's ``/usr/local/bin/python3.12`` under a tool cache's virtual environment, say —
+which on the operator's machine names nothing, or worse, something else, and an agent later
+writing through it would write wherever it points. Such links are almost always a cache's or an
+environment's, rebuilt by the tool that made them. Snapshots taken in the old place belong to
 that place's path and are not carried; the session's history from then on is snapshotted in the new
 one. Natively there is no container, and nothing here is offered.
 """
@@ -37,6 +53,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import json
 import logging
 import os
 import posixpath
@@ -47,7 +64,7 @@ import stat
 import tarfile
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Any, BinaryIO
@@ -79,7 +96,17 @@ place: ``~/Daedalus/projects/<name>``. The native app keeps the folders it makes
 where the operator never has to look; a folder moved to the machine is moved there to be worked on
 by hand, so it goes where it can be found, under one folder of its own that holds nothing else."""
 KEPT_JOBS = 20
+KEPT_ROWS = 200
+"""The moves the table remembers; older finished ones are pruned as new ones start."""
 GIT_TIMEOUT = 60.0
+SHUTDOWN_SECONDS = 10.0
+"""How long a stop waits for its moves: an abort of a partial copy is one call, and a move that was
+switching finishes in seconds; past this the start after the stop takes over. Short, because the
+supervisor gives the whole stop 25 seconds and the runs still have to be drained after it."""
+LEFTOVER_WAIT = 600.0
+LEFTOVER_POLL = 3.0
+"""After a start, how long the partial copies of interrupted moves are tried for while the host
+daemon does not answer yet, and how often."""
 
 
 class MoveRefused(ValueError):
@@ -418,6 +445,9 @@ def rebase(path: str, old: str, new: str) -> str | None:
 TO_HOST = "to_host"
 TO_CONTAINER = "to_container"
 CANCELLABLE = ("preparing", "copying", "verifying")
+ENDED = ("done", "failed", "cancelled", "interrupted")
+FINISHING = ("switching", "cleaning")
+INTERRUPTED = "Daedalus restarted during the move; the folder is where it was"
 
 
 @dataclass(slots=True)
@@ -430,7 +460,8 @@ class MoveJob:
     destination: str
     remove_original: bool
     state: str = "preparing"
-    """preparing → copying → verifying → switching → cleaning → done; or failed, cancelled."""
+    """preparing → copying → verifying → switching → cleaning → done; or failed, cancelled, or
+    interrupted (this process stopped in the middle)."""
     total_bytes: int = 0
     done_bytes: int = 0
     total_files: int = 0
@@ -441,38 +472,71 @@ class MoveJob:
     original_removed: bool = False
     started_at: float = field(default_factory=time.time)
     finished_at: float | None = None
+    transfer: str = ""
+    """The daemon's transfer of this move, kept after the move ends while a host copy it wrote may
+    still be there: by this id, and only by it, the daemon removes a folder it made."""
+    leftover: str = ""
+    """What the move left at its destination: "" nothing, "pending" a partial copy the daemon still
+    has to remove (tried again after a start, and before a move into the same place), "manual" a
+    copy the daemon no longer knows, for the operator to delete."""
+    unpack_finished: bool = False
+    interrupting: bool = False
+    switched: bool = False
     task: asyncio.Task[None] | None = None
     progress: _Progress = field(default_factory=_Progress)
 
     @property
     def active(self) -> bool:
-        return self.state not in ("done", "failed", "cancelled")
+        return self.state not in ENDED
 
     def view(self) -> dict[str, Any]:
-        done = self.total_bytes if self.state == "done" else min(self.progress.bytes, self.total_bytes)
+        done = self.total_bytes if self.state == "done" else min(max(self.progress.bytes, self.done_bytes), self.total_bytes)
         return {
             "id": self.id, "project_id": self.project_id, "folder_id": self.folder_id, "direction": self.direction,
             "source": self.source, "destination": self.destination, "remove_original": self.remove_original,
             "state": self.state, "active": self.active, "total_bytes": self.total_bytes, "done_bytes": done,
             "total_files": self.total_files, "error": self.error, "notes": list(self.notes), "skipped": list(self.skipped),
             "skipped_count": self.skipped_count, "original_removed": self.original_removed,
-            "started_at": self.started_at, "finished_at": self.finished_at,
+            "started_at": self.started_at, "finished_at": self.finished_at, "leftover": self.leftover,
         }
+
+    def row(self) -> tuple[Any, ...]:
+        return (self.id, self.project_id, self.folder_id, self.direction, self.source, self.destination, int(self.remove_original),
+                self.state, self.transfer, self.leftover, int(self.unpack_finished), self.total_bytes,
+                min(max(self.progress.bytes, self.done_bytes), self.total_bytes) if self.state != "done" else self.total_bytes,
+                self.total_files, self.error, json.dumps(self.notes, ensure_ascii=False), json.dumps(self.skipped, ensure_ascii=False),
+                self.skipped_count, int(self.original_removed), self.started_at, self.finished_at, time.time())
+
+    @classmethod
+    def of(cls, row: Any) -> MoveJob:
+        return cls(id=row["id"], project_id=row["project_id"], folder_id=row["folder_id"], direction=row["direction"], source=row["source"],
+                   destination=row["destination"], remove_original=bool(row["remove_original"]), state=row["state"], total_bytes=int(row["total_bytes"]),
+                   done_bytes=int(row["done_bytes"]), total_files=int(row["total_files"]), error=row["error"], notes=list(json.loads(row["notes"] or "[]")),
+                   skipped=list(json.loads(row["skipped"] or "[]")), skipped_count=int(row["skipped_count"]), original_removed=bool(row["original_removed"]),
+                   started_at=float(row["started_at"]), finished_at=row["finished_at"], transfer=row["transfer"], leftover=row["leftover"],
+                   unpack_finished=bool(row["unpack_finished"]))
+
+
+COLUMNS = ("id, project_id, folder_id, direction, source, destination, remove_original, state, transfer, leftover, unpack_finished,"
+           " total_bytes, done_bytes, total_files, error, notes, skipped, skipped_count, original_removed, started_at, finished_at, updated_at")
 
 
 class FolderMover:
     """The moves of project folders between the container and the host, one at a time per folder.
 
-    The jobs live in this process: a restart in the middle of one leaves the database pointing at the
-    original, which was never touched, and the partial copy is removed by the daemon (host side) after
-    its idle time, or is an unreferenced directory under the workspaces root (container side).
+    Each move is a row of ``folder_moves`` as well as a task of this process, so a restart in the
+    middle of one is noticed and cleaned up (:meth:`recover`, :meth:`clean_leftovers`), a deliberate
+    stop removes the partial copies itself (:meth:`shutdown`), and the app still lists the move after
+    a reload or a restart.
     """
 
-    def __init__(self, manager: SessionManager, bridge: Callable[[], HostBridge | None], *, workspaces_dir: Path, publish: Callable[[str, dict[str, Any]], Any] | None = None) -> None:
+    def __init__(self, manager: SessionManager, bridge: Callable[[], HostBridge | None], *, workspaces_dir: Path,
+                 publish: Callable[[str, dict[str, Any]], Any] | None = None, notify: Callable[[MoveJob], Awaitable[None]] | None = None) -> None:
         self.manager = manager
         self._bridge = bridge
         self.workspaces_dir = workspaces_dir
         self._publish = publish
+        self._notify = notify
         self.jobs: dict[str, MoveJob] = {}
 
     @property
@@ -485,6 +549,178 @@ class FolderMover:
 
     def bridge(self) -> HostBridge | None:
         return self._bridge()
+
+    # -- the record --------------------------------------------------------------------------------
+
+    async def _save(self, job: MoveJob) -> None:
+        """Write the move's row. A move never fails for its record: a database that cannot take the
+        row now costs the move its survival of a restart, not its copy."""
+        try:
+            await self.db.execute(f"INSERT OR REPLACE INTO folder_moves({COLUMNS}) VALUES ({', '.join('?' * len(COLUMNS.split(',')))})", job.row())
+        except Exception:  # noqa: BLE001 — see above
+            logger.warning("the record of folder move %s could not be written", job.id, exc_info=True)
+
+    async def _state(self, job: MoveJob, state: str) -> None:
+        # Set before anything is awaited: cancel() and shutdown() read the state to decide whether a
+        # move may still be stopped, and a move switching must not be.
+        job.state = state
+        await self._save(job)
+
+    async def _prune(self) -> None:
+        with contextlib.suppress(Exception):
+            await self.db.execute(
+                "DELETE FROM folder_moves WHERE id IN (SELECT id FROM folder_moves WHERE state IN ('done', 'failed', 'cancelled', 'interrupted')"
+                " AND leftover != 'pending' ORDER BY started_at DESC LIMIT -1 OFFSET ?)", (KEPT_ROWS,))
+
+    async def recover(self) -> list[MoveJob]:
+        """At a start: settle the moves the last process left running, and load the recent ones so the
+        app lists them. A move that was switching is looked up in the folder's row: committed, its
+        remaining steps are completed; not, it is interrupted like a move that was still copying. A
+        container partial is removed at once; a host partial is left to :meth:`clean_leftovers`, which
+        needs the daemon. Returns the moves interrupted now."""
+        try:
+            rows = await self.db.fetchall(f"SELECT {COLUMNS} FROM folder_moves WHERE state NOT IN ('done', 'failed', 'cancelled', 'interrupted') OR leftover = 'pending'"
+                                          " UNION SELECT * FROM (SELECT {COLUMNS} FROM folder_moves ORDER BY started_at DESC LIMIT ?)".replace("{COLUMNS}", COLUMNS), (KEPT_JOBS,))
+        except Exception:  # noqa: BLE001 — a start never fails for the record of moves
+            logger.warning("the folder moves could not be read", exc_info=True)
+            return []
+        interrupted: list[MoveJob] = []
+        for row in rows:
+            job = MoveJob.of(row)
+            self.jobs[job.id] = job
+            if not job.active:
+                continue
+            try:
+                if job.state in FINISHING and await self._switched(job):
+                    await self._complete_after_restart(job)
+                    continue
+                await self._interrupt(job)
+            except Exception:  # noqa: BLE001 — one move's record must not cost the start the others
+                logger.exception("folder move %s could not be settled after the start", job.id)
+                continue
+            interrupted.append(job)
+        return interrupted
+
+    async def _switched(self, job: MoveJob) -> bool:
+        """Whether the folder's row points at the move's destination: its switch committed."""
+        try:
+            _, folder = await self._folder(job.project_id, job.folder_id)
+        except KeyError:
+            return False
+        return str(folder.path) == job.destination and folder.env == ("host" if job.direction == TO_HOST else "container")
+
+    async def _interrupt(self, job: MoveJob) -> None:
+        job.state, job.error, job.finished_at = "interrupted", INTERRUPTED, time.time()
+        if job.direction == TO_CONTAINER and job.leftover == "pending":
+            await self._drop_container_copy(job)
+        elif job.direction == TO_HOST and job.transfer and job.leftover != "manual":
+            job.leftover = "pending"
+        await self._save(job)
+        await self._tell(job)
+
+    async def _drop_container_copy(self, job: MoveJob) -> None:
+        """Remove the partial copy a move into the container made: a folder directly under the
+        workspaces root that this move created (``leftover`` was set only once it had) and that no
+        project has taken since."""
+        dest = Path(job.destination)
+        if dest.parent != self.workspaces_dir or await self.projects.holders(dest):
+            job.leftover = ""
+            return
+        await asyncio.to_thread(shutil.rmtree, dest, True)
+        job.leftover = ""
+
+    async def _complete_after_restart(self, job: MoveJob) -> None:
+        """A move whose switch committed before the stop: the folder is in its new place, and the steps
+        that were left are each safe to repeat — the container original removed, the worktrees
+        repaired where this process can reach them."""
+        job.notes.append("Daedalus restarted while the move was finishing; its last steps were completed after the start")
+        if job.direction == TO_HOST:
+            source = Path(job.source)
+            if source.exists() and not await self.projects.holders(source):
+                if worktree_links(source):
+                    job.notes.append(f"the folder has git worktrees; run git worktree repair in {job.destination}")
+                await asyncio.to_thread(shutil.rmtree, source, True)
+                job.original_removed = not source.exists()
+            job.leftover = ""
+        else:
+            await self._repair_worktrees(job, await asyncio.to_thread(worktree_links, Path(job.destination)), env="container")
+            if job.remove_original and not job.original_removed:
+                job.notes.append(f"the folder on the host was kept: the restart ended the transfer that could remove it; delete {job.source} by hand if it is not wanted")
+            job.leftover = ""
+        job.state, job.finished_at = "done", time.time()
+        await self._save(job)
+        await self._tell(job)
+
+    def leftovers(self) -> list[MoveJob]:
+        """The ended moves whose host copy the daemon still has to remove."""
+        return [job for job in self.jobs.values() if not job.active and job.direction == TO_HOST and job.leftover == "pending" and job.transfer]
+
+    async def clean_leftovers(self, *, wait: float = LEFTOVER_WAIT, poll: float = LEFTOVER_POLL) -> None:
+        """Remove the host copies of interrupted and failed moves through their transfers, once the
+        daemon answers: after a start it may not yet, so this waits for it a while. A copy the daemon
+        no longer knows was removed by it already — when the connection that drove it closed, or when
+        its idle time passed — unless the copy had been finished, which it keeps and never removes."""
+        deadline = time.monotonic() + wait
+        while self.leftovers():
+            bridge = self.bridge()
+            if bridge is not None and bridge.available():
+                for job in self.leftovers():
+                    await self._remove_leftover(bridge, job)
+            if not self.leftovers() or time.monotonic() >= deadline:
+                return
+            await asyncio.sleep(poll)
+
+    async def _remove_leftover(self, bridge: HostBridge, job: MoveJob) -> None:
+        try:
+            await bridge.unpack_abort(job.transfer, actor="system")
+            job.leftover = ""
+            job.notes.append(f"the unfinished copy at {job.destination} on the host was removed")
+        except FileNotFoundError:
+            job.leftover = ""
+            if job.unpack_finished and await self._host_has(bridge, job.destination):
+                job.leftover = "manual"
+                job.notes.append(f"a complete copy was left at {job.destination} on the host; the folder stays where it was, so delete the copy by hand")
+        except (ConnectionError, HostDaemonOutdated):
+            return
+        except OSError as exc:
+            job.leftover = "manual"
+            job.notes.append(f"the unfinished copy at {job.destination} on the host could not be removed ({exc}); delete it by hand")
+        await self._save(job)
+
+    async def _host_has(self, bridge: HostBridge, path: str) -> bool:
+        try:
+            found = await bridge.stat_folder(path)
+        except FileNotFoundError:
+            return False
+        except Exception:  # noqa: BLE001 — unknown is "it may be there", which only asks the operator to look
+            return True
+        return bool(found.get("exists"))
+
+    async def shutdown(self, timeout: float = SHUTDOWN_SECONDS) -> None:
+        """Before this process stops: interrupt the moves still copying, which removes their partial
+        copies while the daemon still answers, and give the ones switching or cleaning up the time to
+        finish. What does not end in time is settled by the next start (:meth:`recover`)."""
+        running = [job for job in self.jobs.values() if job.active and job.task is not None and not job.task.done()]
+        if not running:
+            return
+        for job in running:
+            if job.state in CANCELLABLE:
+                job.interrupting = True
+                assert job.task is not None
+                job.task.cancel()
+        _, late = await asyncio.wait([job.task for job in running if job.task is not None], timeout=timeout)
+        if late:
+            logger.warning("%d folder moves did not end before the stop; the next start settles them", len(late))
+
+    async def _tell(self, job: MoveJob) -> None:
+        """The notification of a move that ended, other than one the operator cancelled."""
+        if self._notify is None or job.state == "cancelled":
+            return
+        try:
+            async with asyncio.timeout(5):
+                await self._notify(job)
+        except Exception:  # noqa: BLE001 — the move's card says the same; the notification is a courtesy
+            logger.warning("the notification of folder move %s failed", job.id, exc_info=True)
 
     # -- what may move ---------------------------------------------------------------------------
 
@@ -582,7 +818,8 @@ class FolderMover:
         direction, refusal = self._direction(folder)
         out: dict[str, Any] = {"project_id": project_id, "folder_id": folder_id, "direction": direction, "source": str(folder.path),
                                "env": folder.env, "destination": "", "destination_editable": direction == TO_HOST,
-                               "host_home": "", "problem": "", "detail": "", "blockers": [], "job": None}
+                               "host_home": "", "problem": "", "detail": "", "blockers": [], "job": None, "leftover": None,
+                               "counts": None, "skipped": [], "skipped_count": 0}
         running = self.running_move(folder_id)
         if running is not None:
             out["job"] = running.view()
@@ -597,14 +834,51 @@ class FolderMover:
         if direction == TO_HOST:
             flavour, home = self._host_paths()
             out["host_home"] = home
-            if home:
+            leftover = self._leftover_of(folder_id)
+            if leftover is not None:
+                # The place an interrupted move of this folder left its partial copy in: proposed
+                # again, since a move into it removes that copy first (see start).
+                out["destination"] = leftover.destination
+                out["leftover"] = {"job_id": leftover.id, "destination": leftover.destination, "state": leftover.state}
+            elif home:
                 out["destination"] = await self._free_host_path(str(flavour(home, *HOST_PROJECTS, name)), flavour)
         else:
             out["destination"] = str(self._free_container_path(name))
         out["blockers"] = await self.blockers(project, folder)
         if out["blockers"]:
             out["problem"], out["detail"] = "busy", "; ".join(out["blockers"])
+        elif out["job"] is None:
+            out.update(await self._preview(folder, direction))
         return out
+
+    async def _preview(self, folder: ProjectFolder, direction: str) -> dict[str, Any]:
+        """What the move would carry and what it would leave out, before it starts: the operator reads
+        that a tool cache's links will not come along before pressing anything, not on the card of a
+        move half done. Container to host this process scans the folder; host to container the daemon
+        does, by opening a pack and closing it unread."""
+        out: dict[str, Any] = {"counts": None, "skipped": [], "skipped_count": 0}
+        try:
+            if direction == TO_HOST:
+                scan = await asyncio.to_thread(scan_tree, folder.path)
+                out.update(counts=scan.counts.view(), skipped=scan.skipped, skipped_count=scan.skipped_count)
+            else:
+                bridge = self.bridge()
+                if bridge is None:
+                    return out
+                began = await bridge.pack_begin(str(folder.path), actor="system")
+                with contextlib.suppress(Exception):
+                    await bridge.pack_close(str(began.get("transfer") or ""))
+                out.update(counts=Counts.of(began).view(), skipped=list(began.get("skipped") or [])[:SKIPPED_SHOWN], skipped_count=int(began.get("skipped_count") or 0))
+        except MoveRefused as exc:
+            out.update(problem="not_movable", detail=str(exc))
+        except Exception as exc:  # noqa: BLE001 — the preview is a courtesy; the move itself reads the folder again
+            logger.info("the preview of moving %s failed: %s", folder.path, exc)
+        return out
+
+    def _leftover_of(self, folder_id: str) -> MoveJob | None:
+        """The latest ended move of the folder to the host whose partial copy is still to be removed."""
+        found = [job for job in self.jobs.values() if job.folder_id == folder_id and job in self.leftovers()]
+        return max(found, key=lambda job: job.started_at) if found else None
 
     # -- starting and stopping ---------------------------------------------------------------------
 
@@ -640,6 +914,8 @@ class FolderMover:
             await self.projects.check_folder(project_id, str(dest_path))
         except ProjectError as exc:
             raise MoveRefused(str(exc)) from None
+        if direction == TO_HOST:
+            await self._clear_way(folder_id, str(dest_path))
         # Held first and checked second, with nothing awaited between the hold and the check of the
         # sessions: a run that starts after this sees the hold, and one that started before is seen
         # at work here.
@@ -656,8 +932,25 @@ class FolderMover:
                       source=str(folder.path), destination=str(dest_path), remove_original=remove_original if direction == TO_CONTAINER else True)
         self.jobs[job.id] = job
         self._forget_old()
+        await self._save(job)
+        await self._prune()
         job.task = asyncio.create_task(self._run(job), name=f"folder-move:{job.id}")
+        await self._announce(job, "folder_move_started")
         return job
+
+    async def _clear_way(self, folder_id: str, destination: str) -> None:
+        """Before a move to the host: remove what an earlier move of the same folder left at the same
+        place. Only through that move's transfer, by its id, so the daemon removes only a folder that
+        transfer itself made (or emptied one it took empty) — never a folder of the operator's that
+        merely has the same name. A copy the daemon no longer knows is left, and the daemon's refusal
+        of a folder that is not empty then says so."""
+        bridge = self.bridge()
+        for job in list(self.leftovers()):
+            if job.folder_id != folder_id or posixpath.normpath(job.destination) != posixpath.normpath(destination) or bridge is None:
+                continue
+            await self._remove_leftover(bridge, job)
+            if job.leftover == "pending":
+                raise MoveRefused(f"the unfinished copy an earlier move left at {destination} could not be removed yet; try again in a minute or choose another place")
 
     def cancel(self, job_id: str) -> MoveJob:
         """Stop a move that has not begun its switch; one that has is finished instead."""
@@ -677,15 +970,17 @@ class FolderMover:
         return job
 
     def _forget_old(self) -> None:
-        finished = [job for job in self.jobs.values() if not job.active]
+        finished = [job for job in self.jobs.values() if not job.active and job.leftover != "pending"]
         for job in sorted(finished, key=lambda item: item.finished_at or 0)[:-KEPT_JOBS] if len(finished) > KEPT_JOBS else []:
             self.jobs.pop(job.id, None)
 
-    async def _announce(self, job: MoveJob) -> None:
+    async def _announce(self, job: MoveJob, change: str = "") -> None:
+        """Tell the app a move started or ended, so its lists and the folder rows read again."""
         if self._publish is None:
             return
+        change = change or ("folder_moved" if job.state == "done" else f"folder_move_{job.state}")
         with contextlib.suppress(Exception):
-            await self._publish("project.changed", {"change": "folder_moved" if job.state == "done" else f"folder_move_{job.state}", "actor": "operator", "project_id": job.project_id})
+            await self._publish("project.changed", {"change": change, "actor": "operator", "project_id": job.project_id, "job_id": job.id, "folder_id": job.folder_id})
 
     async def _run(self, job: MoveJob) -> None:
         try:
@@ -695,7 +990,10 @@ class FolderMover:
                 await self._to_container(job)
             job.state = "done"
         except asyncio.CancelledError:
-            job.state, job.error = "cancelled", "the move was cancelled; the folder is where it was"
+            if job.interrupting:
+                job.state, job.error = "interrupted", INTERRUPTED
+            else:
+                job.state, job.error = "cancelled", "the move was cancelled; the folder is where it was"
         except (MoveRefused, MoveFailed, HostDaemonOutdated, ProjectError, OSError) as exc:
             job.state, job.error = "failed", str(exc) or exc.__class__.__name__
             logger.warning("folder move %s of %s failed: %s", job.id, job.source, job.error)
@@ -705,20 +1003,29 @@ class FolderMover:
         finally:
             self.manager.moving_folders.pop(job.folder_id, None)
             job.finished_at = time.time()
+            await self._save(job)
             await self._announce(job)
+            await self._tell(job)
 
     async def _switch(self, job: MoveJob, env: str, *, is_git: bool | None) -> None:
-        """Check once more that nothing works in the folder, then point everything at the copy."""
-        job.state = "switching"
+        """Check once more that nothing works in the folder, then point everything at the copy. Past
+        the folder's row, nothing fails the move: the copy is in use, and taking it away again because
+        a session could not be reloaded would leave the database naming a folder that is gone."""
+        await self._state(job, "switching")
         project, folder = await self._folder(job.project_id, job.folder_id)
         found = await self.blockers(project, folder)
         if found:
             raise MoveRefused("something started working in the folder during the copy: " + "; ".join(found))
         await self.projects.relocate_folder(job.project_id, job.folder_id, path=Path(job.destination), env=env, is_git=is_git)
-        project = await self.projects.get(job.project_id)
-        for session in await self.projects.sessions_of(job.project_id):
-            await self.manager.refresh_metadata(session["id"])
-        await self.manager.reload_project(project, job.project_id)
+        job.switched = True
+        try:
+            project = await self.projects.get(job.project_id)
+            for session in await self.projects.sessions_of(job.project_id):
+                await self.manager.refresh_metadata(session["id"])
+            await self.manager.reload_project(project, job.project_id)
+        except Exception as exc:  # noqa: BLE001 — see above
+            logger.exception("after folder move %s the project could not be reloaded", job.id)
+            job.notes.append(f"the open chats of the project could not be reloaded ({exc}); reopen them")
 
     # -- container to host -----------------------------------------------------------------------
 
@@ -731,9 +1038,12 @@ class FolderMover:
         job.total_bytes, job.total_files = scan.counts.bytes, scan.counts.files
         job.skipped, job.skipped_count = scan.skipped, scan.skipped_count
         worktrees = await asyncio.to_thread(worktree_links, source)
-        job.state = "copying"
+        await self._state(job, "copying")
         began = await bridge.unpack_begin(job.destination, total_bytes=scan.counts.bytes, entries=len(scan.entries))
-        transfer = str(began.get("transfer") or "")
+        # Recorded before the first byte goes: a restart from here on finds the transfer that can
+        # remove what was written.
+        job.transfer, job.leftover = str(began.get("transfer") or ""), "pending"
+        await self._save(job)
         chunks: queue.Queue[Any] = queue.Queue(maxsize=QUEUE_CHUNKS)
         stop = threading.Event()
 
@@ -757,30 +1067,35 @@ class FolderMover:
                 if isinstance(item, BaseException):
                     raise item
                 digest.update(item)
-                await bridge.unpack_write(transfer, item)
-            job.state = "verifying"
-            arrived = await bridge.unpack_finish(transfer)
-            transfer = ""
+                await bridge.unpack_write(job.transfer, item)
+            await self._state(job, "verifying")
+            arrived = await bridge.unpack_finish(job.transfer)
+            job.unpack_finished = True
             got = Counts.of(arrived)
             if got != scan.counts or str(arrived.get("sha256") or "") != digest.hexdigest():
                 raise MoveFailed(f"the copy on the host does not match the folder: sent {scan.counts.view()}, found {got.view()}")
+            await producer
+            # Inside the guard: a move stopped while git is asked about the copy still removes it.
+            try:
+                check = await bridge.check_folder(job.destination)
+                is_git: bool | None = check.is_git
+            except Exception:  # noqa: BLE001 — git's answer is a convenience; the folder is there
+                is_git = None
         except BaseException:
             stop.set()
             await asyncio.gather(producer, return_exceptions=True)
-            await self._discard_host_copy(bridge, transfer, job)
+            await self._discard_host_copy(bridge, job)
             raise
-        await producer
-        try:
-            check = await bridge.check_folder(job.destination)
-            is_git: bool | None = check.is_git
-        except Exception:  # noqa: BLE001 — git's answer is a convenience; the folder is there
-            is_git = None
         try:
             await self._switch(job, "host", is_git=is_git)
         except BaseException:
-            await self._discard_host_copy(bridge, "", job, whole=True)
+            if not job.switched:
+                await self._discard_host_copy(bridge, job)
             raise
-        job.state = "cleaning"
+        job.leftover = ""
+        with contextlib.suppress(Exception):
+            await bridge.unpack_release(job.transfer)
+        await self._state(job, "cleaning")
         await self._repair_worktrees(job, worktrees, env="host")
         try:
             await asyncio.to_thread(shutil.rmtree, source)
@@ -790,17 +1105,24 @@ class FolderMover:
         if scan.skipped_count:
             job.notes.append(f"{scan.skipped_count} entries were not carried (links that point out of the folder, sockets, devices)")
 
-    async def _discard_host_copy(self, bridge: HostBridge, transfer: str, job: MoveJob, *, whole: bool = False) -> None:
-        """Remove the partial copy on the host: through its transfer while it is open, which the daemon
-        cleans up; a copy already finished is in no transfer any more and is left for the operator,
-        named in the notes, since this side has no other way to delete a host folder."""
-        if transfer:
-            try:
-                await asyncio.shield(bridge.unpack_abort(transfer))
-            except Exception as exc:  # noqa: BLE001 — the daemon removes it after its idle time anyway
-                job.notes.append(f"the partial copy on the host could not be removed now ({exc}); the host terminal removes it within ten minutes")
-        elif whole:
-            job.notes.append(f"a complete copy was left at {job.destination} on the host; the folder stays where it was, so delete the copy by hand")
+    async def _discard_host_copy(self, bridge: HostBridge, job: MoveJob) -> None:
+        """Remove the copy on the host through its transfer, which the daemon cleans up: a partial one,
+        or a finished one the move decided against before switching to it. A daemon that does not
+        answer now leaves the copy ``pending``, for the next start or the next move into the same
+        place; one older than the abort of a finished copy leaves it to the operator."""
+        if not job.transfer:
+            return
+        try:
+            await asyncio.shield(bridge.unpack_abort(job.transfer))
+            job.leftover = ""
+        except FileNotFoundError:
+            job.leftover = ""
+            if job.unpack_finished:
+                job.leftover = "manual"
+                job.notes.append(f"a complete copy was left at {job.destination} on the host; the folder stays where it was, so delete the copy by hand")
+        except Exception as exc:  # noqa: BLE001 — tried again after a start, and before a move into the same place
+            job.leftover = "pending"
+            job.notes.append(f"the partial copy on the host could not be removed now ({exc}); it is removed once the host terminal answers again")
 
     # -- host to container -----------------------------------------------------------------------
 
@@ -810,11 +1132,10 @@ class FolderMover:
             raise MoveRefused(self._host_problem())
         dest = Path(job.destination)
         began = await bridge.pack_begin(job.source)
-        transfer = str(began.get("transfer") or "")
+        transfer = job.transfer = str(began.get("transfer") or "")
         sent = Counts.of(began)
         job.total_bytes, job.total_files = sent.bytes, sent.files
         job.skipped, job.skipped_count = list(began.get("skipped") or []), int(began.get("skipped_count") or 0)
-        job.state = "copying"
         chunks: queue.Queue[Any] = queue.Queue(maxsize=QUEUE_CHUNKS)
         stop = threading.Event()
         entries = sent.files + sent.dirs + sent.symlinks
@@ -832,6 +1153,9 @@ class FolderMover:
             with contextlib.suppress(Exception):
                 await bridge.pack_close(transfer)
             raise MoveRefused(f"{dest} exists already; try again") from None
+        # This move made the folder, so a restart from here on may remove it (see recover).
+        job.leftover = "pending"
+        await self._state(job, "copying")
         consumer = asyncio.get_running_loop().run_in_executor(None, consume)
         digest = hashlib.sha256()
         try:
@@ -855,28 +1179,26 @@ class FolderMover:
                     if taking:
                         await asyncio.to_thread(_feed, chunks, None, stop, ended)
                     break
-            job.state = "verifying"
+            await self._state(job, "verifying")
             got = await consumer
             on_disk = await asyncio.to_thread(count_tree, dest)
             if got != sent or on_disk != sent or sha != digest.hexdigest():
                 raise MoveFailed(f"the copy in the container does not match the folder: sent {sent.view()}, found {on_disk.view()}")
+            await asyncio.to_thread(_own_like_siblings, dest, self.workspaces_dir)
+            worktrees = await asyncio.to_thread(worktree_links, dest)
+            await self._switch(job, "container", is_git=None)
         except BaseException:
             stop.set()
             await asyncio.gather(consumer, return_exceptions=True)
-            await asyncio.to_thread(shutil.rmtree, dest, True)
+            # Never once the folder's row names the copy: it is the folder now.
+            if not job.switched:
+                await asyncio.to_thread(shutil.rmtree, dest, True)
+                job.leftover = ""
             with contextlib.suppress(Exception):
                 await asyncio.shield(bridge.pack_close(transfer))
             raise
-        await asyncio.to_thread(_own_like_siblings, dest, self.workspaces_dir)
-        worktrees = await asyncio.to_thread(worktree_links, dest)
-        try:
-            await self._switch(job, "container", is_git=None)
-        except BaseException:
-            await asyncio.to_thread(shutil.rmtree, dest, True)
-            with contextlib.suppress(Exception):
-                await asyncio.shield(bridge.pack_close(transfer))
-            raise
-        job.state = "cleaning"
+        job.leftover = ""
+        await self._state(job, "cleaning")
         await self._repair_worktrees(job, worktrees, env="container")
         if job.remove_original and job.skipped_count:
             job.notes.append(f"the folder on the host was kept: {job.skipped_count} of its entries were not copied (files the host terminal never reads, links out of the folder, sockets)")

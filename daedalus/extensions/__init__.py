@@ -50,6 +50,7 @@ EXTENSIONS = (
     "daedalus.extensions.quota_sampler",
     "daedalus.extensions.companion",
     "daedalus.extensions.terminals",
+    "daedalus.extensions.folder_moves",
     "daedalus.extensions.harness",
     "daedalus.extensions.browser",
     "daedalus.extensions.project_environment",

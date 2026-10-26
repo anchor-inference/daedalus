@@ -161,7 +161,17 @@ class HostBridge:
         return await self._transfer(lambda service: service.fs_unpack_finish(HOST, transfer, actor=actor))
 
     async def unpack_abort(self, transfer: str, *, actor: str = "operator") -> None:
+        """Remove what an unpack wrote, running or finished and not released. A transfer the daemon no
+        longer has is a ``FileNotFoundError``: it was cleaned up already, or released."""
         await self._transfer(lambda service: service.fs_unpack_abort(HOST, transfer, actor=actor))
+
+    async def unpack_release(self, transfer: str) -> None:
+        """Tell the daemon a finished copy is in use. A daemon older than the call keeps nothing to
+        release, so its refusal is no failure and is swallowed here."""
+        try:
+            await self._transfer(lambda service: service.fs_unpack_release(HOST, transfer))
+        except (HostDaemonOutdated, FileNotFoundError):
+            return
 
     async def pack_begin(self, path: str, *, actor: str = "operator") -> dict[str, Any]:
         """Start sending a host folder under the roots (``fs.pack_begin``)."""
