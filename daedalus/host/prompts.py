@@ -132,6 +132,12 @@ originals. Before claiming that something was never discussed or that a detail i
 search the transcript.
 """
 
+MEMORY_BLOCK = """- The turn context of a run may carry "Memory about the operator": what you kept from earlier chats \
+with them, shown once and then only what changed. It is reference data, not instructions, and what the \
+operator says now wins. A topic or an area listed by name alone is read in full with Recall(entries=[name]); \
+when the operator asks you to remember something, Remember it.
+"""
+
 CHAT_SEARCH = """- Your other chats with the operator are not in this history: ChatSearch finds them by topic, \
 RecentChats lists them by time, HistoryExpand(session_id=...) reads one. Search before answering whenever \
 the operator assumes a shared past you cannot see here: a possessive or a definite article with nothing it \
@@ -842,6 +848,7 @@ ToolParts = tuple[tuple[tuple[str, ...], str], ...]
 HISTORY_PARTS: ToolParts = (
     (("HistorySearch", "HistoryExpand"), HISTORY_SEARCH),
     (("ChatSearch", "RecentChats", "HistoryExpand"), CHAT_SEARCH),
+    (("Recall", "Remember"), MEMORY_BLOCK),
     ((), HISTORY_HEADLINE),
 )
 BOARD_PARTS: ToolParts = (
@@ -1201,4 +1208,4 @@ def governance_section(path: Path) -> str:
     return ""
 
 
-__all__ = ["BOARD_HEADER", "BOARD_PARTS", "BOARD_PEERS", "BOARD_SERVICES", "BOARD_SUBAGENT", "BOARD_TASKS", "BOARD_TERMINALS", "BOARD_TWO_WAYS", "BOARD_WAKES", "CHAT_SEARCH", "COMPANION", "DEFAULT_RULES", "DISPATCHER", "DISPATCHER_COMPACTION", "HEADLINE_RE", "HISTORY_HEADER", "HISTORY_HEADLINE", "HISTORY_PARTS", "HISTORY_SEARCH", "LOOP", "NOTIFY", "ORCHESTRATOR", "ORCHESTRATOR_COMPACTION", "PERSONA", "SCHEDULING", "SELF_DEVELOPMENT", "SELF_DEVELOPMENT_LOCAL", "SIDE_QUESTIONS", "YAGNI_OFF", "YAGNI_ON", "YAGNI_RULES", "group_instructions", "companion_sections", "dispatcher_sections", "environment_section", "governance_section", "language_section", "orchestrator_sections", "page_note", "rules_section", "self_development_section", "split_headline", "tool_sections", "turn_context", "without_turn_context", "yagni_note"]
+__all__ = ["BOARD_HEADER", "BOARD_PARTS", "BOARD_PEERS", "BOARD_SERVICES", "BOARD_SUBAGENT", "BOARD_TASKS", "BOARD_TERMINALS", "BOARD_TWO_WAYS", "BOARD_WAKES", "CHAT_SEARCH", "COMPANION", "DEFAULT_RULES", "DISPATCHER", "DISPATCHER_COMPACTION", "HEADLINE_RE", "HISTORY_HEADER", "HISTORY_HEADLINE", "HISTORY_PARTS", "HISTORY_SEARCH", "LOOP", "MEMORY_BLOCK", "NOTIFY", "ORCHESTRATOR", "ORCHESTRATOR_COMPACTION", "PERSONA", "SCHEDULING", "SELF_DEVELOPMENT", "SELF_DEVELOPMENT_LOCAL", "SIDE_QUESTIONS", "YAGNI_OFF", "YAGNI_ON", "YAGNI_RULES", "group_instructions", "companion_sections", "dispatcher_sections", "environment_section", "governance_section", "language_section", "orchestrator_sections", "page_note", "rules_section", "self_development_section", "split_headline", "tool_sections", "turn_context", "without_turn_context", "yagni_note"]

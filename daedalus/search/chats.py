@@ -20,7 +20,6 @@ from daedalus.host.prompts import without_host_notes
 from daedalus.memory.privacy import is_private, public_sessions_sql
 from daedalus.security.redact import redact
 
-
 NOT_CONVERSATION_KEYS = ("subagent_of", "unattended", "heartbeat", "staff_id", "prompt_coach_of", "btw_of", "schedule_id")
 """Session metadata that marks a session which is not the operator's conversation. It covers every key of
 :data:`daedalus.host.session_runner.NOT_OPERATOR_FACING` (a guard test holds the two together; that module
