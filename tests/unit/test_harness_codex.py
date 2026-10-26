@@ -389,10 +389,11 @@ async def test_a_message_for_now_goes_into_the_running_turn_by_turn_steer_and_on
 async def test_after_a_host_restart_the_thread_is_taken_up_again(settings: Settings, db: Database) -> None:
     async with stand(settings, db, **codex()) as s:
         ada = await started(s, "echo:ready")
-        await s.status_event(ada, "turn_done_unseen")
+        first = await s.status_event(ada, "turn_done_unseen")
         told = await s.team.tell(ada, "echo:once only", by="operator")
         await message(s, told["message_id"], "acknowledged")
-        await s.status_event(ada, "turn_done_unseen")
+        # The told message's own turn has ended, not only the first one (see ``status_event``).
+        await s.status_event(ada, "turn_done_unseen", after=first)
         # The host went away after Codex took the message and before it heard so; another waits.
         await db.execute("UPDATE staff_messages SET state = 'submitted' WHERE id = ?", (told["message_id"],))
         pending = await s.manager.staff.add_message(ada.id, "echo:still to go", origin="operator", mode="after_turn", staff_session_id=(await s.session_row(ada)).id)

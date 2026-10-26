@@ -691,10 +691,15 @@ async def test_after_a_restart_a_submitted_message_found_in_the_transcript_is_no
     async with stand(settings, db, **claude()) as s:
         trust(s)
         ada = await started(s, "echo:ready")
-        await s.status_event(ada, "turn_done_unseen")
+        first = await s.status_event(ada, "turn_done_unseen")
         told = await s.team.tell(ada, "echo:once only", by="operator")
         await message(s, told["message_id"], "acknowledged")
-        await s.status_event(ada, "turn_done_unseen")
+        # The end of the told message's own turn, not the first turn's again. Restarted while that
+        # turn still ran, the new host either looked for the prompt before the CLI had written it to
+        # its transcript and failed the message as unknown, or never saw the turn end, because the
+        # old host had taken the Stop hook and was closed while applying it, so the message for
+        # after the turn waited for an end that had already gone by.
+        await s.status_event(ada, "turn_done_unseen", after=first)
         # The host went away after the CLI took the message and before it heard so.
         await db.execute("UPDATE staff_messages SET state = 'submitted' WHERE id = ?", (told["message_id"],))
         pending = await s.manager.staff.add_message(ada.id, "echo:still to go", origin="operator", mode="after_turn", staff_session_id=(await s.session_row(ada)).id)

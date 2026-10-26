@@ -305,11 +305,16 @@ class Stand:
     async def statuses(self, member: Staff) -> list[str]:
         return [e.payload["status"] for e in await self.events("staff.status", staff_id=member.id)]
 
-    async def status_event(self, member: Staff, status: str, *, timeout: float = 30.0) -> AppEvent:
+    async def status_event(self, member: Staff, status: str, *, after: AppEvent | None = None,
+                           timeout: float = 30.0) -> AppEvent:
+        """The member's first move to ``status``, or the first one after ``after``.
+
+        Without ``after`` an earlier turn's end answers at once: a test that waited this way for the
+        end of its second turn restarted the host while that turn still ran."""
         async with asyncio.timeout(timeout):
             while True:
                 for event in await self.events("staff.status", staff_id=member.id):
-                    if event.payload["status"] == status:
+                    if event.payload["status"] == status and (after is None or event.seq > after.seq):
                         return event
                 await asyncio.sleep(0.05)
 
