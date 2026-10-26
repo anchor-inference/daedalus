@@ -346,7 +346,10 @@ class MemoryCurator:
         """What a deleted chat taught leaves with it.
 
         A record whose every source is this chat goes; one also taught by another chat, written by the
-        operator or imported stays, as does a locked one (the operator made it theirs). The chat's
+        operator or imported stays, as does a locked one (the operator made it theirs), and so does one
+        that came through the move to entries: those were saved before a chat could take its notes
+        with it, and attributing them to the chat they were saved in made deleting one busy chat take
+        out nearly half of memory at once. The chat's
         provenance rows go either way, so a record kept now because a second chat backs it goes when
         that chat is deleted too. The removed records are tombstoned with the reason
         ``session_deleted``, so a fork or a copy of the chat does not teach them again; the background
@@ -359,7 +362,7 @@ class MemoryCurator:
             taught = list(dict.fromkeys(r["record_id"] for r in rows))
             marks = ",".join("?" * len(taught))
             backed = {row["record_id"] for row in await self.db.fetchall(
-                f"SELECT DISTINCT record_id FROM memory_sources WHERE tenant_id = ? AND record_id IN ({marks}) AND session_id != ?",
+                f"SELECT DISTINCT record_id FROM memory_sources WHERE tenant_id = ? AND record_id IN ({marks}) AND (session_id != ? OR origin = 'migration')",
                 (self.tenant, *taught, session_id),
             )}
             live = [r for i in taught if (r := self.memory.get_record(self.tenant, i)) is not None]

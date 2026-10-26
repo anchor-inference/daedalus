@@ -332,6 +332,18 @@ async def test_deleting_a_chat_removes_what_only_it_taught_and_one_undo_restores
     assert elsewhere.id not in {r.id for r in manager.memory.records(TENANT)}
 
 
+async def test_deleting_a_chat_keeps_the_notes_saved_before_the_move_to_entries(app: Any, manager: SessionManager) -> None:
+    old_chat = await manager.create_session("Before entries")
+    entries = manager.memory_entries
+    moved = (await entries.remember(MemoryScope.global_, "", "Someone prefers short answers", kind="preference", metadata={}, origin="migration", session_id=old_chat.session.id)).record
+    learned = (await entries.remember(MemoryScope.global_, "", "Someone bakes on Sundays", kind="fact", metadata={}, origin="remember", session_id=old_chat.session.id)).record
+    manager.delete_hooks.append(lambda sid: session_deleted(app, sid))
+    assert await manager.delete_session(old_chat.session.id)
+    left = {r.id for r in manager.memory.records(TENANT)}
+    assert moved.id in left, "a note the move attributed to its chat is not that chat's to take"
+    assert learned.id not in left
+
+
 async def test_a_subagents_deletion_leaves_its_project_notes(app: Any, manager: SessionManager, tmp_path: Path) -> None:
     root = tmp_path / "bakery"
     root.mkdir()
