@@ -290,7 +290,7 @@ class Downloads:
             if archive is not None:
                 archive.unlink(missing_ok=True)
             self._publish(Progress(id=model.id, state="installed", done_bytes=model.size_bytes, total_bytes=model.size_bytes))
-            logger.warning("local speech model %s installed (%d MB on disk)", model.id, disk >> 20)
+            logger.warning("local model %s installed (%d MB on disk)", model.id, disk >> 20)
             if self.installed is not None:
                 try:
                     self.installed(model.id)
@@ -300,8 +300,12 @@ class Downloads:
             self._publish(Progress(id=model.id, state="cancelled", total_bytes=model.size_bytes))
             raise
         except Exception as exc:  # noqa: BLE001 - every failure becomes one message for the operator
-            shutil.rmtree(self.directory(model.id), ignore_errors=True)
-            logger.warning("local speech model %s failed to install: %s", model.id, exc)
+            if not getattr(model, "files", ()):
+                # An archive unpacks in place and may leave half a tree. A model of single files is
+                # assembled in staging and renamed only once complete, so its directory holds either
+                # the last good install or files the operator seeded by hand: neither is ours to remove.
+                shutil.rmtree(self.directory(model.id), ignore_errors=True)
+            logger.warning("local model %s failed to install: %s", model.id, exc)
             self._publish(Progress(id=model.id, state="failed", total_bytes=model.size_bytes, error=str(exc)))
         finally:
             self._running.pop(model.id, None)
@@ -312,9 +316,17 @@ class Downloads:
         done = 0
         try:
             for entry in model.files:
-                target = await self._fetch(entry, client, entry.url, offset=done, total=model.size_bytes)
-                self._publish(Progress(id=model.id, state="verifying", done_bytes=done + entry.size_bytes, total_bytes=model.size_bytes))
-                await asyncio.to_thread(verify, target, entry)
+                target = await asyncio.to_thread(self._seeded, model, entry)
+                if target is None:
+                    target = await self._fetch(entry, client, entry.url, offset=done, total=model.size_bytes)
+                    self._publish(Progress(id=model.id, state="verifying", done_bytes=done + entry.size_bytes, total_bytes=model.size_bytes))
+                    try:
+                        await asyncio.to_thread(verify, target, entry)
+                    except DownloadError:
+                        # A part file of the full size that is not these bytes would otherwise be
+                        # "resumed" as complete and fail the same way on every later attempt.
+                        target.unlink(missing_ok=True)
+                        raise
                 await asyncio.to_thread(shutil.copyfile, target, staging / entry.archive)
                 done += entry.size_bytes
             if self.resolver:
@@ -327,6 +339,22 @@ class Downloads:
             return done
         finally:
             shutil.rmtree(staging, ignore_errors=True)
+
+    def _seeded(self, model: Any, entry: Any) -> Path | None:
+        """A copy of ``entry`` someone placed in the model's directory by hand, when it is exactly the pinned
+        file. Blocking; reads the whole file once.
+
+        This is how a machine that cannot reach the download host, or a model whose host is not settled
+        yet, gets installed: copy the file in, and the next start of the download takes it without a
+        byte of traffic. A copy with the wrong size or digest is left alone and the file is downloaded.
+        """
+        seed = self.directory(model.id) / entry.archive
+        if not entry.sha256 or not seed.is_file() or seed.stat().st_size != entry.size_bytes:
+            return None
+        if sha256_of(seed) != entry.sha256:
+            logger.warning("%s in %s is not the pinned file; downloading it instead", entry.archive, seed.parent)
+            return None
+        return seed
 
     async def _fetch(self, model: Any, client: httpx.AsyncClient | None, url: str, *, offset: int = 0, total: int = 0) -> Path:
         """The archive on disk, continuing a part file where one is already there."""
