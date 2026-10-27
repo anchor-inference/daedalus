@@ -195,6 +195,9 @@ async def chrome_line(manager: Any, service: Browsers, state: Any) -> str:
     name = name or "Chrome"
     if await service.choices.env(state.session.id) == USER:
         line = f"- Browser: the operator gave this conversation their own Chrome «{name}»; the browser tools work there" + ("." if connected else ", which is not connected now.")
+        # Said up front because an agent refused on the developer console told the operator nothing
+        # could be done, when its own browser opens the store: the limit is Chrome's, not the task's.
+        line += " Chrome keeps every extension off the Chrome Web Store and its developer console: for those, ask the operator to switch to «Agent's browser», which opens them."
         # Only while the conversation is in their Chrome: switched back to the agent's browser, "work in
         # their Chrome" would send the agent somewhere it cannot go.
         if state.metadata.get(PANEL_SESSION_KEY):

@@ -184,6 +184,25 @@ def detached(exc: BrowserError) -> bool:
     return "(detached)" in text or "debugger is not attached" in text
 
 
+class ChromeForbids(Forbidden):
+    """An address Chrome keeps every extension off (the Web Store, a browser page), asked for in the
+    operator's Chrome, which the agent drives only through the Daedalus extension. Chrome's rule and
+    not the host's: no setting, grant or retry lifts it, so the agent is told where it can open the page
+    instead of being left to conclude that nothing can be done."""
+
+    code = "chrome_forbids"
+
+
+def chrome_refused(exc: BrowserError) -> bool:
+    """Whether a navigation in the operator's Chrome failed because Chrome keeps extensions off the
+    address. Its DevTools answers ``Page.navigate`` with "Not allowed" (a stable Chrome on the Web
+    Store's developer console), or, in newer builds, drops the debugger with "Detached while handling
+    command"; either arrives in the daemon's words around Chrome's. A privileged scheme it refuses as
+    "… is not allowed", which the first test covers too."""
+    text = exc.message.lower()
+    return "not allowed" in text or "detached while handling command" in text
+
+
 class FieldForbidden(BrowserError):
     status, code = 403, "field_forbidden"
 
@@ -249,6 +268,7 @@ __all__ = [
     "Blocked",
     "BrowserError",
     "BrowserGone",
+    "ChromeForbids",
     "Conflict",
     "Detached",
     "DialogOpen",
@@ -267,6 +287,7 @@ __all__ = [
     "StaleRef",
     "TimedOut",
     "Unsupported",
+    "chrome_refused",
     "detached",
     "group_id",
     "profile_id",

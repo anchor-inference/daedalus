@@ -36,6 +36,7 @@ from daedalus.browser.model import (
     Blocked,
     BrowserError,
     BrowserGone,
+    ChromeForbids,
     Conflict,
     Detached,
     DialogOpen,
@@ -51,6 +52,7 @@ from daedalus.browser.model import (
     Paused,
     StaleRef,
     Unsupported,
+    chrome_refused,
     group_id,
 )
 from daedalus.browser.model import USER as USER_ENV
@@ -58,7 +60,7 @@ from daedalus.browser.monitor import InjectionMonitor
 from daedalus.browser.notes import ACTIVE, NOTE, PROCEDURE, SiteNotes
 from daedalus.browser.replay import RecordedSkills
 from daedalus.browser.replay import replay as run_replay
-from daedalus.browser.user import CONSENT, site_granted
+from daedalus.browser.user import CONSENT, chrome_forbids, site_granted
 from daedalus.browser.user import site_of as registrable_site
 from daedalus.host.policy import (
     ALLOW,
@@ -555,6 +557,46 @@ NOT_OFFERED = (
 )
 
 
+def chrome_forbids_text(url: str, kind: str, name: str) -> str:
+    """What the agent is told when its page is one Chrome keeps extensions off, in the operator's Chrome.
+
+    ``kind`` is :func:`chrome_forbids`'s answer, or ``refused`` when Chrome itself refused an address
+    the host did not know for one (an administrator's block, a store host added later). The
+    session this was written for read the bare "Page.navigate: Not allowed" three times, told the
+    operator that nothing could be done and to fill the developer console in by hand, while its own
+    browser could have opened the page: so the words name the cause as Chrome's, say what does work,
+    and forbid the conclusion."""
+    shown = url[:300]
+    if kind == "browser":
+        return (
+            f"{shown} is one of the browser's own pages: Chrome keeps every extension off them, and the browser tools open only http "
+            "and https addresses in either browser, so nothing was opened. Tell the operator what to open or change there; they do "
+            "it themselves in their Chrome."
+        )
+    if kind == "store":
+        cause = (
+            f"Chrome lets no extension open or control the Chrome Web Store ({shown}): chromewebstore.google.com and all of "
+            "chrome.google.com, the developer console included"
+        )
+    else:
+        cause = (
+            f"Chrome refused to let the extension open {shown}: it keeps extensions off some addresses, the Chrome Web Store "
+            "and any its administrator blocked among them"
+        )
+    return (
+        f"{cause}. You work in the operator's Chrome «{name}» only through the Daedalus extension, so the page cannot be opened "
+        "for you there. This "
+        "is Chrome's own rule, not a setting or a missing permission: a retry here, another tab or BrowserNavigate fails the "
+        "same way. It is not impossible — your own browser has no such limit and opens these pages. Ask the operator to "
+        "switch this conversation to «Agent's browser» in the browser panel's header (or to open the page in their Chrome "
+        "themselves, and tell them what to do there). Once switched: BrowserOpen(url=…) opens it; at Google's sign-in call "
+        "BrowserLogin(url_or_domain='accounts.google.com', reason=…) so they sign in through the app's private form, or "
+        "BrowserHandoff(reason='login', what=…) for them to sign in in the live view themselves. Should Google refuse that "
+        "sign-in (\"This browser or app may not be secure\"), the page is the operator's to do in their own Chrome: give them "
+        "the address and exactly what to fill in."
+    )
+
+
 Look = Callable[[bytes, str, str], Awaitable[str]]
 """``(image, mime, question) -> answer`` from the vision model, or ``None`` where there is none."""
 
@@ -645,7 +687,7 @@ def explain(exc: BrowserError) -> str:
         # opened the same page in a new tab, three times over: the words say what it is and what not to do.
         tab = str(exc.details.get("tab_id") or "")
         return (
-            f"Tab {tab or 'that tab'} no longer answers: it opened something the browser cannot drive (a PDF viewer, a browser page), "
+            f"Tab {tab or 'that tab'} no longer answers: it opened something the browser cannot drive (a PDF viewer, a browser page, the Chrome Web Store), "
             f"or the operator detached it. Close it with BrowserClose(tab='{tab or '…'}'); if it showed a document, get the file with "
             "BrowserNetwork (the request that loaded it) or BrowserDownload. Do not retry this tab, and do not repeat the action that led here."
         )
@@ -814,6 +856,13 @@ class BrowserAgent:
             raise NoSuchTab("the browser has no tab open", tab_id=wanted)
         raise NoSuchTab(f"no tab {wanted}", tab_id=wanted)
 
+    def _chrome_check(self, url: str | None) -> None:
+        """Refuse, before anything is asked or opened, an address Chrome keeps the extension off: a site
+        question the operator answers yes to, or a tab opened in their window, would only end in Chrome's
+        refusal. Called where the browser is the operator's Chrome."""
+        if url and (kind := chrome_forbids(url)):
+            raise ChromeForbids(chrome_forbids_text(url, kind, self._user_name()), reason="chrome_forbids", kind=kind, url=url[:2000])
+
     def _origin(self, caller: Caller) -> dict[str, Any]:
         return self.service.origin(actor="agent", launch_id=caller.launch_id)
 
@@ -953,6 +1002,8 @@ class BrowserAgent:
     async def open(self, caller: Caller, *, url: str | None = None, fresh: bool = False, why: str | None = None) -> str:
         # Opened blank and then sent to the address, so the address meets the network wall as any
         # navigation does: an ask becomes the operator's question, not a failed start.
+        if url and await self.service.env_for(caller.owner) == USER_ENV:
+            self._chrome_check(url)
         opened = await self.service.open(caller.owner, fresh=fresh, actor=caller.actor)
         group = opened["group"]
         found = ""
@@ -964,7 +1015,7 @@ class BrowserAgent:
         elif url:
             tab = opened.get("tab") or {}
             row = await self._group(caller)
-            await self._through_wall(caller, row, lambda: self.service.call(group["id"], "page.navigate", {"tab_id": tab.get("id"), "url": url, "origin": self._origin(caller), "timeout_ms": NAVIGATE_TIMEOUT_MS}, what="opening the page", timeout=NAVIGATE_TIMEOUT_MS / 1000 + 25), url=url, why=why or "")
+            await self._through_wall(caller, row, lambda: self.service.call(group["id"], "page.navigate", {"tab_id": tab.get("id"), "url": url, "origin": self._origin(caller), "timeout_ms": NAVIGATE_TIMEOUT_MS}, what="opening the page", timeout=NAVIGATE_TIMEOUT_MS / 1000 + 25), url=url, why=why or "", tab=str(tab.get("id") or ""))
         if url:
             await self._site_notes(caller, url)
         if found:
@@ -1091,7 +1142,7 @@ class BrowserAgent:
             if not url:
                 raise InvalidRequest("give a url, or go='back', 'forward' or 'reload'")
             await self._watch(group, caller, url)
-            result = await self._through_wall(caller, group, lambda: self.service.call(group["id"], "page.navigate", {"tab_id": current["id"], "url": url, "origin": origin, "timeout_ms": NAVIGATE_TIMEOUT_MS}, what="opening the page", timeout=NAVIGATE_TIMEOUT_MS / 1000 + 25), url=url, why=why or "")
+            result = await self._through_wall(caller, group, lambda: self.service.call(group["id"], "page.navigate", {"tab_id": current["id"], "url": url, "origin": origin, "timeout_ms": NAVIGATE_TIMEOUT_MS}, what="opening the page", timeout=NAVIGATE_TIMEOUT_MS / 1000 + 25), url=url, why=why or "", tab=str(current["id"]))
         await self._audit(group, caller, "navigate", {"tab": current["id"], "go": go or "", "url": str(result.get("url") or url or "")[:2000]})
         reached = str(result.get("url") or url or "")
         await self._site_notes(caller, reached)
@@ -1106,12 +1157,19 @@ class BrowserAgent:
             return f"{download} Tab {current['id']} stayed on {result.get('url') or current.get('url') or 'its page'}." + "".join(f"\n{line}" for line in said)
         return f"Tab {current['id']} is on {result.get('url') or url}{status}{failed}." + (f" Its title: {fenced(origin_of(str(result.get('url') or '')), title)}" if title else "") + "".join(f"\n{line}" for line in said) + "\nNext: BrowserSnapshot to see it."
 
-    async def _through_wall(self, caller: Caller, group: dict[str, Any], go: Callable[[], Awaitable[Any]], *, url: str = "", why: str = "") -> Any:
+    async def _through_wall(self, caller: Caller, group: dict[str, Any], go: Callable[[], Awaitable[Any]], *, url: str = "", why: str = "", tab: str = "") -> Any:
         """Run a call that loads an address; when the network wall asks rather than refuses (a host
         outside the allowlist, a port of this machine, an address on the LAN), ask the caller's gate —
         the operator, or a staff member's orchestrator for an address — and on a yes grant exactly that
         host and port and go once more. ``url`` and ``why`` are what the decider is shown: the address
-        as the agent wrote it and the agent's own reason."""
+        as the agent wrote it and the agent's own reason.
+
+        In the operator's Chrome an address Chrome keeps extensions off is refused before the site
+        question, and Chrome's own refusal of one the host did not know is told in the same words;
+        ``tab`` is the tab the call loads, marked dead when Chrome dropped its debugger on the way."""
+        user = group.get("env") == USER_ENV
+        if url and user:
+            self._chrome_check(url)
         if url:
             await self._site_ask(caller, group, url, why)
         try:
@@ -1137,6 +1195,16 @@ class BrowserAgent:
                 raise Forbidden(why) from None
             await self.service.grant(group["id"], host, port, by=caller.actor)
             return await go()
+        except BrowserError as exc:
+            if not user or not chrome_refused(exc):
+                raise
+            dropped = isinstance(exc, Detached) or "detached" in exc.message.lower()
+            if dropped:
+                self._mark_dead(str(group.get("id") or ""), tab)
+            said = chrome_forbids_text(url, chrome_forbids(url) or "refused", self._user_name())
+            if dropped and tab:
+                said += f" Tab {tab} lost its debugger on the way: close it with BrowserClose(tab='{tab}')."
+            raise ChromeForbids(said, reason="chrome_forbids", kind=chrome_forbids(url) or "refused", url=url[:2000], chrome=exc.message[:300]) from None
 
     async def snapshot(self, caller: Caller, *, tab: str | None = None, scope: str | None = None, view: str | None = None) -> str:
         if view not in (None, "page", "viewport"):
@@ -2188,6 +2256,8 @@ class BrowserAgent:
             )
         closed: list[str] = []
         if group.get("env") == USER_ENV:
+            # Before room is made: a tab closed to make room for a page Chrome will refuse is lost for nothing.
+            self._chrome_check(url)
             tabs, closed = await self._make_room(caller, group, tabs)
         if url:
             # Asked before the tab exists, so a site the operator has not answered about yet leaves

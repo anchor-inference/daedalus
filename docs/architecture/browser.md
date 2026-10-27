@@ -1733,6 +1733,17 @@ connected, so a model that opened the wrong one can see it.
   same site (by the element's name) is held back once for that conversation. A PDF a navigation of an
   agent tab answers with never reaches the viewer: the daemon keeps it as a finished download and the
   tab stays on its page.
+- Chrome keeps every extension, its debugger included, off the Chrome Web Store
+  (`chromewebstore.google.com` and the whole of `chrome.google.com`, the developer console with it,
+  and their subdomains) and off the browser's own pages (`chrome:`, another extension's pages,
+  `chrome-untrusted:`, `chrome-search:`, `devtools:`, `view-source:`). `BrowserOpen(url)`,
+  `BrowserNavigate` and `BrowserTabs(new)` refuse those before the site question or a tab
+  (`chrome_forbids`, `daedalus.browser.user`), and Chrome's own refusal of an address the host does
+  not know for one (`Page.navigate` answered "Not allowed", or the debugger dropped mid-command) is
+  told in the same words. For the store they say what works: the agent's own browser opens it, once
+  the operator switches the conversation to "Agent's browser", with `BrowserLogin` or
+  `BrowserHandoff` for Google's sign-in. The turn context and `BrowserOpen`'s description say the
+  limit up front.
 - Refused before the daemon is asked: `BrowserCookies` import and clear, `fresh=true`, and clearing
   or deleting the profile. `BrowserLogin` becomes a hand-over ("sign in in the agent's window").
 - `BrowserNetwork(body=true)` reads a body only when `[browser.user] bodies` is on, and then only
