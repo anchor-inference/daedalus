@@ -75,6 +75,38 @@ def site_granted(host: str, sites: list[str] | tuple[str, ...] | set[str]) -> bo
     return bool(host) and any(host == s or host.endswith("." + s) for s in sites if s)
 
 
+STORE_HOSTS = ("chrome.google.com", "chromewebstore.google.com")
+"""The Chrome Web Store, old and new. Chrome keeps every extension's debugger and scripts off these hosts
+and all their subdomains (``extension_urls::IsWebstoreDomain``, which ``IsScriptableURL`` checks for the
+debugger too): the whole of chrome.google.com, not only its /webstore pages, and the developer console
+with it. Its DevTools answers ``Page.navigate`` there with "Not allowed", or drops the debugger
+mid-command, so the operator's Chrome, which the agent reaches only through an extension, can never
+show the agent these pages. A browser of the daemon's own, driven over its pipe, opens them like any
+other site."""
+
+BROWSER_SCHEMES = frozenset({"chrome", "chrome-untrusted", "chrome-search", "chrome-extension", "devtools", "view-source"})
+"""The browser's own pages. Chrome keeps extensions off them (``chrome:`` and another extension's pages
+by name, the rest as schemes no extension may match), and the daemons' navigation guard opens only
+http and https in either browser, so no tool reaches them anywhere."""
+
+
+def chrome_forbids(url: str) -> str:
+    """Why an extension cannot open ``url`` in Chrome: ``store`` for the Web Store, ``browser`` for one
+    of the browser's own pages, ``""`` when nothing of Chrome's stands in the way. An address written
+    without a scheme is read as https, as a model often writes the store's."""
+    text = (url or "").strip()
+    parts = urlsplit(text)
+    scheme = parts.scheme.lower()
+    if scheme in BROWSER_SCHEMES:
+        return "browser"
+    if not scheme or ("." in scheme and not parts.netloc):
+        parts = urlsplit("https://" + text)
+        scheme = "https"
+    if scheme in ("http", "https") and site_granted(parts.hostname or "", STORE_HOSTS):
+        return "store"
+    return ""
+
+
 # -- per conversation ------------------------------------------------------------------------------
 
 
@@ -614,5 +646,5 @@ def not_connected(reason: str) -> EnvUnavailable:
 
 __all__ = [
     "AGENT", "CHOICES", "CLOSE_BUSY", "CLOSE_UNAUTHORIZED", "CONSENT", "Attempts", "ConsentNeeded", "Device", "Joiner", "Pairing", "PairingRefused",
-    "RelayDesk", "RelaySocket", "TooMany", "UserChoices", "normal_code", "not_connected", "site_granted", "site_of", "split",
+    "BROWSER_SCHEMES", "STORE_HOSTS", "RelayDesk", "RelaySocket", "TooMany", "UserChoices", "chrome_forbids", "normal_code", "not_connected", "site_granted", "site_of", "split",
 ]

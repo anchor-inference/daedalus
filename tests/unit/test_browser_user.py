@@ -20,7 +20,7 @@ from protocore.contracts.tools import ToolContext
 
 from daedalus.browser.agent import SensitiveAsk, Step, _address
 from daedalus.browser.model import USER, InvalidRequest, Owner, group_id
-from daedalus.browser.user import CONSENT, ConsentNeeded, SkipNeedsConfirm, site_granted, site_of
+from daedalus.browser.user import CONSENT, ConsentNeeded, SkipNeedsConfirm, chrome_forbids, site_granted, site_of
 from daedalus.config import BrowserConfig, BrowserRuleConfig, BrowserUserConfig, RuntimeConfig, Settings
 from daedalus.extensions import browser as browser_extension
 from daedalus.extensions.api import build_app
@@ -465,6 +465,7 @@ async def test_the_turn_line_says_where_the_conversation_is_and_stays_the_same_b
     await rig.switch(sid)
     third = (await rig.manager._with_turn_context(state, message)).content_blocks[0].text  # type: ignore[union-attr]
     assert "- Browser: the operator gave this conversation their own Chrome «Work»; the browser tools work there." in third
+    assert "Chrome Web Store" in third and "«Agent's browser»" in third
     # The static rules point at the ask, with both languages' words, and keep the conversation's state out.
     assert "BrowserAskOperatorChrome" in prompts.BROWSER and "в моём браузере" in prompts.BROWSER and "«Work»" not in prompts.BROWSER
     hint = rig.manager.tools.get("BrowserAskOperatorChrome").search_hint  # type: ignore[union-attr]
@@ -920,3 +921,80 @@ async def test_the_agents_own_code_is_never_run_in_the_operators_chrome(rig: Rig
         text, failed = await rig.call(sid, tool, **arguments)
         assert failed and "read-only" in text, (tool, text)
     assert not [m for m, _ in chrome.calls if m.startswith(("page.evaluate", "script.", "extension."))]
+
+
+# -- the pages Chrome keeps every extension off -------------------------------------------------------
+
+
+def test_the_store_and_the_browsers_own_pages_are_known_as_chromes_and_nothing_else_is() -> None:
+    # Chrome's rule is the whole of both store hosts and their subdomains (IsWebstoreDomain), so the
+    # developer console and chrome.google.com's other pages are in it; look-alikes are not.
+    for url in ("https://chromewebstore.google.com/", "https://chrome.google.com/webstore/devconsole/abc/def/edit", "https://chrome.google.com/",
+                "HTTPS://ChromeWebStore.Google.com/detail/x", "chromewebstore.google.com/detail/x", "chrome.google.com:443/webstore", "http://a.chromewebstore.google.com/"):
+        assert chrome_forbids(url) == "store", url
+    for url in ("chrome://settings", "chrome-extension://abcdefghijklmnopabcdefghijklmnop/popup.html", "chrome-untrusted://print/", "chrome-search://local-ntp/",
+                "devtools://devtools/bundled/inspector.html", "view-source:https://example.com/"):
+        assert chrome_forbids(url) == "browser", url
+    for url in ("https://google.com/", "https://developer.chrome.com/docs/webstore", "https://notchromewebstore.google.com/", "https://chrome.google.com.example.com/",
+                "https://example.com/?next=https://chromewebstore.google.com/", "about:blank", "", "localhost:8080/x"):
+        assert chrome_forbids(url) == "", url
+
+
+@pytest.mark.parametrize("runtime", [GRANTED])
+async def test_the_store_is_refused_before_anything_is_asked_or_opened_with_what_works_instead(rig: Rig, chrome: FakeBrowserd) -> None:
+    devconsole = "https://chrome.google.com/webstore/devconsole/abc/def/edit"
+    sid = await rig.session()
+    await rig.switch(sid)
+    text, failed = await rig.call(sid, "BrowserOpen", url=devconsole)
+    assert failed and "Chrome lets no extension open or control the Chrome Web Store" in text, text
+    # What works, by the tools' real names, and the conclusion the session reached ruled out.
+    assert "«Agent's browser»" in text and "BrowserOpen(url=" in text and "BrowserLogin(url_or_domain='accounts.google.com'" in text and "BrowserHandoff" in text
+    assert "It is not impossible" in text and "Not allowed" not in text
+    assert not chrome.groups, "the operator's window was not touched"
+    assert not rig.pending(sid), "no site question for a page Chrome will refuse anyway"
+    sid = await opened(rig, chrome)
+    for tool, arguments in (("BrowserNavigate", {"url": "https://chromewebstore.google.com/"}), ("BrowserTabs", {"action": "new", "url": "https://chromewebstore.google.com/detail/x"})):
+        text, failed = await rig.call(sid, tool, **arguments)
+        assert failed and "Chrome Web Store" in text and "«Agent's browser»" in text, (tool, text)
+    assert tabs_of(chrome, sid) == ["https://tax.example.com/documents"], "no tab opened, none moved"
+    assert not [m for m, p in chrome.calls if m == "page.navigate" and "google.com" in str(p.get("url"))]
+    assert not rig.pending(sid)
+
+
+@pytest.mark.parametrize("runtime", [GRANTED])
+async def test_a_browser_page_is_refused_as_one_neither_browser_opens(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await opened(rig, chrome)
+    text, failed = await rig.call(sid, "BrowserNavigate", url="chrome://extensions/")
+    assert failed and "one of the browser's own pages" in text and "they do it themselves" in text and "Agent's browser" not in text, text
+
+
+@pytest.mark.parametrize("runtime", [GRANTED])
+async def test_chromes_not_allowed_on_an_address_the_host_did_not_know_is_told_the_same_way(rig: Rig, chrome: FakeBrowserd) -> None:
+    # The operator's error, word for word: Chrome's refusal inside the daemon's words, for an address
+    # (here one an administrator blocked for extensions) that is not on the host's list.
+    sid = await opened(rig, chrome)
+    chrome.fail["page.navigate"] = (-32603, "opening the page: Page.navigate: Not allowed (-32000)", {})
+    text, failed = await rig.call(sid, "BrowserNavigate", url="https://intranet.example.com/")
+    assert failed and "Chrome refused to let the extension open https://intranet.example.com/" in text and "«Agent's browser»" in text, text
+    assert "lost its debugger" not in text
+    listing, _ = await rig.call(sid, "BrowserTabs")
+    assert "dead" not in listing, "a refused navigation leaves the tab where it was"
+    # A newer Chrome drops the debugger instead: the same words, and the tab is marked dead.
+    chrome.fail["page.navigate"] = (-32603, "opening the page: Page.navigate: Detached while handling command. (-32000)", {})
+    text, failed = await rig.call(sid, "BrowserNavigate", url="https://intranet.example.com/")
+    assert failed and "Chrome refused" in text and "Tab t1 lost its debugger on the way" in text, text
+    listing, _ = await rig.call(sid, "BrowserTabs")
+    assert "dead: close it" in listing, listing
+
+
+async def test_the_agents_own_browser_opens_the_store_as_any_site(rig: Rig, agents_browser: FakeBrowserd) -> None:
+    sid = await rig.session()
+    agents_browser.page("https://chromewebstore.google.com/", title="Chrome Web Store")
+    text, failed = await rig.call(sid, "BrowserOpen", url="https://chromewebstore.google.com/")
+    assert not failed and "lets no extension" not in text, text
+    assert agents_browser.tab_of(group_id(Owner("session", sid))).page.url == "https://chromewebstore.google.com/"
+
+
+async def test_the_open_tool_says_the_limit_up_front(rig: Rig) -> None:
+    description = rig.manager.tools.get("BrowserOpen").definition.description  # type: ignore[union-attr]
+    assert "Chrome Web Store" in description and "your own browser opens the store" in description
