@@ -177,6 +177,7 @@ from daedalus.speech import catalog as speech_catalog
 from daedalus.speech import models as speech_models
 from daedalus.speech import service as speech_service
 from daedalus.speech import tts_catalog
+from daedalus.speech.embedding_catalog import MODEL as SEARCH_MODEL
 from daedalus.speech.engine import CACHE as ENGINE_CACHE
 from daedalus.speech.engine import SAMPLE_RATE, SpeechError, clamp_rate
 from daedalus.speech.service import note_transcribers, recogniser_available, transcribe_recording
@@ -820,7 +821,7 @@ class SettingsValidationBody(BaseModel):
 
 
 class ConversationSearchBody(BaseModel):
-    mode: Literal["off", "local"] = "off"
+    mode: Literal["off", "local"] = "local"
     paused: bool = False
 
 
@@ -2049,20 +2050,20 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     @api.post("/api/conversation-search/model")
     async def search_download(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         service = await conversation_search()
-        service.downloads.start("multilingual-e5-small")
+        service.downloads.start(SEARCH_MODEL.id)
         return await service.status()
 
     @api.post("/api/conversation-search/model/cancel")
     async def search_cancel(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         service = await conversation_search()
-        service.downloads.cancel("multilingual-e5-small")
+        service.downloads.cancel(SEARCH_MODEL.id)
         return await service.status()
 
     @api.delete("/api/conversation-search/model")
     async def search_delete(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         service = await conversation_search()
         await service.configure("off", True)
-        await service.downloads.delete("multilingual-e5-small")
+        await service.downloads.delete(SEARCH_MODEL.id)
         return await service.status()
 
     @api.get("/api/sessions/search")

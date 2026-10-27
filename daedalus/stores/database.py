@@ -3170,6 +3170,38 @@ CREATE INDEX IF NOT EXISTS folder_moves_started ON folder_moves(started_at);
 CREATE INDEX IF NOT EXISTS folder_moves_open ON folder_moves(state, leftover);
 """)
 
+# Conversation search changes model (multilingual E5 small, 384 dimensions, float32) for ruBERT mini
+# FRIDA (312 dimensions), stored as signed bytes with a scale per vector. The old vectors cannot be
+# compared with the new model's, so both vector tables start empty and every message is queued again.
+# A passage carries the digest of its text, so a repeated passage reuses the vector already stored,
+# and an autoincrement id, never reused, by which a reader keeps an in-memory copy current by reading
+# only rows past the last id it saw. The search setting is cleared so that the new default, on,
+# applies: the operator turned the old model off, and asked for the new one on.
+MIGRATIONS.append("""
+DROP TABLE search_vectors;
+DROP TABLE search_titles;
+CREATE TABLE search_vectors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    seq INTEGER NOT NULL REFERENCES transcript(seq) ON DELETE CASCADE,
+    block INTEGER NOT NULL,
+    offset INTEGER NOT NULL,
+    digest BLOB NOT NULL,
+    scale REAL NOT NULL,
+    vector BLOB NOT NULL,
+    UNIQUE(seq, block, offset)
+);
+CREATE INDEX search_vectors_digest ON search_vectors(digest);
+CREATE TABLE search_titles (
+    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    scale REAL NOT NULL,
+    vector BLOB NOT NULL
+);
+DELETE FROM search_pending;
+INSERT INTO search_pending(seq) SELECT seq FROM transcript;
+DELETE FROM kv WHERE key IN ('search_space', 'conversation_search');
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

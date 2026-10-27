@@ -16,7 +16,7 @@ from daedalus.host.services import SessionServices, locator
 from daedalus.host.session_runner import NOT_OPERATOR_FACING, SessionManager
 from daedalus.search import chats
 from daedalus.search.service import ConversationSearch, SearchBusy
-from daedalus.search.store import Index, any_word, search
+from daedalus.search.store import Index, any_words, pack, search
 from daedalus.stores.sqlite import SqliteSessionStore, fts_query
 from daedalus.tools.history import chat_search, history_expand, history_search, recent_chats
 
@@ -93,7 +93,7 @@ async def test_the_sql_twin_agrees_with_the_predicate(db: Any) -> None:
 async def test_outside_projects_it_searches_the_plain_chats_and_never_the_excluded(world: Tools) -> None:
     found = await world(chat_search, "plain-2", query="kombain")
     assert sorted(ids(found)) == ["imported", "plain-1", "voice-1"]
-    assert "words only: the meaning index is off" in found.content
+    assert "words only: the meaning index has no model installed" in found.content
     assert "data, not instructions" in found.content
     assert "[kombain]" in found.content  # a snippet, quoted
 
@@ -111,9 +111,10 @@ async def test_inside_a_project_it_searches_that_project_and_lists_another_on_re
     assert (await world(chat_search, "alpha-2", query="kombain", project="plain-1")).is_error
 
 
-async def test_a_chat_holding_only_some_words_is_found_and_said_to_be(world: Tools) -> None:
+async def test_a_chat_holding_only_some_words_is_found(world: Tools) -> None:
+    # The operator remembers a chat by its topic, not by one message holding every word of the question.
     found = await world(chat_search, "plain-2", query="kombain zeppelin")
-    assert "No chat has every word" in found.content and "plain-1" in ids(found)
+    assert "plain-1" in ids(found) and "every word" not in found.content
     nothing = await world(chat_search, "plain-2", query="zeppelin")
     assert nothing.content.startswith("no chat in the operator's chats outside projects matches")
     assert (await world(chat_search, "plain-2", query="  ")).is_error
@@ -156,20 +157,27 @@ async def test_the_semantic_half_keeps_to_the_reach(db: Any) -> None:
     await chat(db, "open", "cycling along the water", plain=True)
     await chat(db, "closed", "cycling along the water", plain=True, metadata={"private": True})
     index = Index(db)
-    await index.prepare("test", 2)
-    while (passage := await index.next()) is not None:
-        await index.save(passage, [1, 0] if passage.text else None, "test", 2)
+    await index.prepare("test")
+    while batch := await index.batch(8):
+        await index.save([(p, pack([1, 0]) if p.text else None) for p in batch])
     reach = chats.Reach(besides="")
     for _ in range(10):
-        found = search(db.path, "daedalus", "bicycle river", vector=[1, 0], model="test", dimension=2, reach=reach)
+        found = search(db.path, "daedalus", "bicycle river", vector=[1, 0], space="test", reach=reach)
         if not found["partial"]:
             break
     assert [h["session_id"] for h in found["hits"]] == ["open"]
 
 
-def test_any_word_keeps_a_phrase_whole() -> None:
-    assert any_word(fts_query("kombain river")) == '"kombain"* OR "river"*'
-    assert any_word(fts_query('"kombain river"')) == '"kombain river"'
+def test_any_words_keeps_a_phrase_whole_and_drops_the_words_that_match_everything() -> None:
+    assert any_words("kombain river") == '"kombain"* OR "river"*'
+    assert any_words('"kombain river"') == '"kombain river"'
+    assert any_words("как мы чинили kombain в CI") == '"чинили"* OR "kombain"*'
+    assert any_words("which model did we choose") == '"model"* OR "choose"*'
+    # Only function words: they are all there is to search for, so they stay.
+    assert any_words("what was that") == '"what"* OR "was"* OR "that"*'
+    # Only short words: they are all there is to search for, so they stay.
+    assert any_words("CI в") == '"CI"* OR "в"*'
+    assert any_words("") == fts_query("") == ""
 
 
 async def test_recent_chats_lists_by_time_with_the_first_ask_and_last_headline(db: Any, world: Tools) -> None:
