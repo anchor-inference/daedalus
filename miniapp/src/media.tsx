@@ -29,6 +29,33 @@ function source(sessionId: string, presentationId: string, item: MediaItem): str
   return `/api/sessions/${encodeURIComponent(sessionId)}/media/${encodeURIComponent(presentationId)}/${encodeURIComponent(item.id)}/content`;
 }
 
+/** Where a press on "download" fetches an attached item, and the name it is saved under. */
+export type MediaSave = { href: string; filename: string; outside: boolean };
+
+/**
+ * The save address of an attached item: the presentation's ``/download`` route, which hands even a
+ * picture over as an attachment and carries the token a link needs, rather than the ``/content``
+ * address the element shows it from. The card used to save from ``/content``: that worked where the
+ * browser honours the link's ``download`` attribute, and where it did not, the app navigated away to
+ * the bare picture. A remote item is the link itself, ``outside`` this origin.
+ */
+export function mediaSave(sessionId: string, presentationId: string, item: MediaItem): MediaSave {
+  if (item.url) return { href: item.url, filename: item.filename, outside: true };
+  const src = attachedSource(sessionId, presentationId, item);
+  return { href: downloadHref(src.base, src.path), filename: item.filename, outside: false };
+}
+
+/**
+ * The download control. A same-origin link with ``download`` saves under the original name in a
+ * browser, on a phone and in the desktop window, whose shell answers a download with the system's
+ * save dialog. A link to another origin ignores the attribute and would replace the app, so it opens
+ * beside it instead: a new tab, or the system browser from the desktop window.
+ */
+export function SaveLink({ save, className }: { save: MediaSave; className?: string }) {
+  const label = t("media.download", { name: save.filename });
+  return <a className={className} href={save.href} download={save.filename} target={save.outside ? "_blank" : undefined} rel="noreferrer" aria-label={label} title={label}><Icon name="download" /></a>;
+}
+
 function clock(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
   const whole = Math.floor(seconds);
@@ -151,6 +178,7 @@ function VideoPlayer({ src }: { src: string }) {
 
 function MediaElement({ sessionId, presentation, item, onOpen }: { sessionId: string; presentation: MediaPresentation; item: MediaItem; onOpen: () => void }) {
   const src = source(sessionId, presentation.id, item);
+  const save = mediaSave(sessionId, presentation.id, item);
   if (item.kind === "image" || item.kind === "animation" || (item.kind === "video" && presentation.layout === "album")) {
     return <figure className="inline-media-image">
       <button type="button" className="inline-media-surface" onClick={onOpen} aria-label={t("media.open", { name: item.alt || item.filename })}>
@@ -158,17 +186,19 @@ function MediaElement({ sessionId, presentation, item, onOpen }: { sessionId: st
       </button>
       <div className="inline-media-actions">
         <button type="button" onClick={onOpen} aria-label={t("media.open", { name: item.alt || item.filename })}><Icon name="expand" /></button>
-        <a href={src} download={item.filename} aria-label={t("common.download")}><Icon name="download" /></a>
+        <SaveLink save={save} />
       </div>
       {item.caption && <figcaption>{item.caption}</figcaption>}
     </figure>;
   }
+  // The clip's save control sits under the player, beside its caption, and not in the player's bar:
+  // the bar hides while the clip plays, and a single clip had no way to be saved at all.
   if (item.kind === "video") return <figure className="inline-media-player">
     <VideoPlayer src={src} />
-    {item.caption && <figcaption>{item.caption}</figcaption>}
+    <div className="inline-media-player-foot"><figcaption>{item.caption || item.filename}</figcaption><SaveLink save={save} /></div>
   </figure>;
   return <figure className="inline-media-player audio">
-    <div className="inline-media-player-head"><span>{item.caption || item.filename}</span><a href={src} download={item.filename} aria-label={t("common.download")}><Icon name="download" /></a></div>
+    <div className="inline-media-player-head"><span>{item.caption || item.filename}</span><SaveLink save={save} /></div>
     <audio controls preload="metadata" src={src} />
   </figure>;
 }
@@ -179,7 +209,7 @@ function MediaElement({ sessionId, presentation, item, onOpen }: { sessionId: st
  * auth header, so it loads wherever the panel's copy does. ``onPanel`` keeps the files panel one
  * press away for the file the viewer took over from it.
  */
-export type ViewerItem = { key: string; kind: "image" | "video"; name: string; filename: string; url?: string; source?: HostSource; download: string; onPanel?: () => void };
+export type ViewerItem = { key: string; kind: "image" | "video"; name: string; filename: string; url?: string; source?: HostSource; download: string; outside?: boolean; onPanel?: () => void };
 
 /** A still from a session file: the same bytes, and the same shared fetch, as the panel's preview. */
 function SourceStill({ source, name, style }: { source: HostSource; name: string; style: CSSProperties }) {
@@ -278,7 +308,7 @@ export function MediaViewer({ items, start, onClose }: { items: ViewerItem[]; st
         {items.length > 1 && <span className="lightbox-count">{index + 1}/{items.length}</span>}
         {!video && zoom !== 1 && <button type="button" onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }} aria-label={t("preview.fit")}><span className="lightbox-zoom">{Math.round(zoom * 100)}%</span></button>}
         {toPanel && <button type="button" className="lightbox-panel" onClick={() => { onClose(); toPanel(); }} aria-label={t("media.panel")} title={t("media.panel")}><Icon name="panel" /></button>}
-        <a href={item.download} download={item.filename} target={item.source ? "_blank" : undefined} rel="noreferrer" aria-label={t("common.download")} title={t("common.download")}><Icon name="download" /></a>
+        <SaveLink save={{ href: item.download, filename: item.filename, outside: !!item.outside }} className="lightbox-save" />
         <button type="button" onClick={onClose} aria-label={t("common.close")}><Icon name="close" /></button>
       </div>
       {index > 0 && <button type="button" className="lightbox-edge previous" onClick={() => setIndex((value) => value - 1)} aria-label={t("media.previous")}><Icon name="back" /></button>}
@@ -306,8 +336,8 @@ export function FileGallery({ sources, start, onClose, onPanel }: { sources: Hos
 
 function presentationItems(sessionId: string, presentation: MediaPresentation): ViewerItem[] {
   return presentation.items.map((item) => {
-    const src = source(sessionId, presentation.id, item);
-    return { key: item.id, kind: item.kind === "video" ? "video" : "image", name: item.alt || item.filename, filename: item.filename, url: src, download: src };
+    const save = mediaSave(sessionId, presentation.id, item);
+    return { key: item.id, kind: item.kind === "video" ? "video" : "image", name: item.alt || item.filename, filename: item.filename, url: source(sessionId, presentation.id, item), download: save.href, outside: save.outside };
   });
 }
 

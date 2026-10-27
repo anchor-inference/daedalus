@@ -2,7 +2,7 @@
 // Pictures and clips in the conversation open in the centred viewer, paging through the rest of the
 // conversation's media; documents and cited lines still open in the files panel.
 import { describe, expect, it } from "vitest";
-import { conversationMedia, galleryFor, toolSource, viewerKind, viewerSource } from "./mediaroute";
+import { conversationMedia, galleryFor, toolSource, viewerKind, viewerSource, viewerTarget } from "./mediaroute";
 import type { ToolItem, Turn } from "./turns";
 
 const tool = (id: string, name: string, path: string, extra: Partial<ToolItem> = {}): ToolItem => ({ kind: "tool", id, name, args: { path }, running: false, ...extra });
@@ -19,6 +19,20 @@ describe("where a click in the conversation goes", () => {
     // A citation names lines: that is a source file opened at a place, never a picture.
     expect(viewerSource({ base: "/api/sessions/s", path: "shot.png", lines: "3" })).toBeNull();
     expect(viewerSource({ file: new File(["x"], "pasted.png") })).toBeNull();
+  });
+
+  it("keeps a picture in the panel only while the panel covers the chat", () => {
+    const shot = { base: "/api/sessions/s/folders/docs", path: "shots/a.png" };
+    const clip = { base: "/api/sessions/s", path: "out/demo.mp4" };
+    // A column beside the chat: the files tab's picture and clip open in the viewer.
+    expect(viewerTarget(shot, false)).toEqual(shot);
+    expect(viewerTarget(clip, false)).toEqual(clip);
+    // The panel on the whole width has the room: the file stays in it.
+    expect(viewerTarget(shot, true)).toBeNull();
+    expect(viewerTarget(clip, true)).toBeNull();
+    // A document and a cited place go to the panel at either width.
+    expect(viewerTarget({ base: "/api/sessions/s", path: "notes.md" }, false)).toBeNull();
+    expect(viewerTarget({ base: "/api/sessions/s", path: "a.png", lines: "4" }, false)).toBeNull();
   });
 
   it("finds a step's file in the workspace, an attached folder and a Windows workspace", () => {

@@ -27,7 +27,7 @@ import { useReveal } from "../reveal";
 import { withoutAttachedList } from "../keptfiles";
 import { FileGallery, InlineMedia, mediaCopyText, splitMediaAnswer } from "../media";
 import { SavedToMemory } from "../memory/savedchip";
-import { conversationMedia, galleryFor, toolSource, viewerSource, type HostSource } from "../mediaroute";
+import { conversationMedia, galleryFor, toolSource, viewerTarget, type HostSource } from "../mediaroute";
 import { Answer, Composer, ComposerHandle } from "../composerbox";
 import { Approval, QueuedMessage, pendingApproval, queuedAfter, questionsKey, readQueued } from "../composer";
 import { ModelChoice } from "../modelselect";
@@ -1327,9 +1327,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     }
   }
 
-  // A workspace file opens in the panel's Preview tab; a file waiting in the composer, which is
+  // A workspace file goes to the panel's Preview tab; a file waiting in the composer, which is
   // nowhere the panel can fetch it from, still opens in the dialog.
-  const openPreview = useCallback(
+  const showInPanel = useCallback(
     (src: PreviewSource) => {
       if ("file" in src) setPreview(src);
       else panel.openFile(src);
@@ -1337,21 +1337,35 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     [panel.openFile],
   );
 
-  // What the conversation opens: a picture or a clip in the centred viewer, paging through the
-  // conversation's other media, and everything else where openPreview sends it. The turns are read
-  // through a ref so the context, and with it every drawn turn, does not change with each new step.
+  // What the files tab, a subagent's turn or a job opens: a picture or a clip in the centred viewer
+  // while the panel is a column, alone, and everything else in the panel (viewerTarget). Whether the
+  // panel covers the chat is read through a ref so the callbacks keep their identity as it changes.
+  const panelFullNow = useRef(false);
+  panelFullNow.current = !phone && panel.state.expanded && panel.state.tab !== null;
+  const openPreview = useCallback(
+    (src: PreviewSource) => {
+      const media = viewerTarget(src, panelFullNow.current);
+      if (!media) return showInPanel(src);
+      setGallery({ items: [media], index: 0 });
+    },
+    [showInPanel],
+  );
+
+  // What the conversation opens: the same, with the conversation's other media a swipe away. The
+  // turns are read through a ref so the context, and with it every drawn turn, does not change with
+  // each new step.
   const turnsNow = useRef<Turn[]>([]);
   turnsNow.current = turns;
   const placesNow = useRef({ workspace: "", folders: NO_FOLDERS });
   placesNow.current = { workspace: detail?.workspace ?? "", folders: paneFolders };
   const openFromChat = useCallback(
     (src: PreviewSource) => {
-      const media = viewerSource(src);
-      if (!media) return openPreview(src);
+      const media = viewerTarget(src, panelFullNow.current);
+      if (!media) return showInPanel(src);
       const { workspace, folders } = placesNow.current;
       setGallery(galleryFor(conversationMedia(turnsNow.current, id, workspace, folders), media));
     },
-    [id, openPreview],
+    [id, showInPanel],
   );
 
   // Ctrl/⌘ . toggles the panel, with Shift it covers the chat. The pane the URL names owns the keys.
@@ -1877,7 +1891,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
 
       {preview && <FilePreview src={preview} onClose={() => setPreview(null)} />}
 
-      {gallery && <FileGallery sources={gallery.items} start={gallery.index} onClose={() => setGallery(null)} onPanel={openPreview} />}
+      {gallery && <FileGallery sources={gallery.items} start={gallery.index} onClose={() => setGallery(null)} onPanel={showInPanel} />}
 
       {receipt && <ReceiptDialog sessionId={id} receipt={receipt} onClose={() => setReceipt(null)} />}
 

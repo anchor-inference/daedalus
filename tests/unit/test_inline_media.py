@@ -177,6 +177,13 @@ async def test_content_api_authenticates_native_media_and_serves_ranges(settings
         assert response.content == PNG[:8]
         assert response.headers["content-range"] == f"bytes 0-7/{len(PNG)}"
         assert response.headers["x-content-type-options"] == "nosniff"
+        # The element's address shows the picture; the save button's address hands it over under its
+        # own name, so a webview that ignores the link's download attribute still saves it rather
+        # than navigating the app away to the bare picture.
+        assert (await client.get(path)).headers["content-disposition"].startswith("inline")
+        saved = await client.get(f"/api/sessions/{state.session.id}/media/{staged['id']}/download", params={"path": f"{item['id']}/{item['filename']}", "token": "media-token"})
+        assert saved.status_code == 200 and saved.content == PNG
+        assert saved.headers["content-disposition"] == f'attachment; filename="{item["filename"]}"'
     await manager.close()
 
 
