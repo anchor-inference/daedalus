@@ -194,8 +194,46 @@ export function clearSendIntent(sessionId: string, storage: StorageLike | null =
  *  a `follow_up` when the turn ends. */
 export type QueuedMessage = { id: string; kind: "steer" | "follow_up"; text: string; queued_at: string | null; files: string[] };
 
-/** What the stream says about the queue; the whole queue rides in every event. */
-export type QueueChange = { reason?: string; count?: number; queued?: unknown };
+/** What the stream says about the queue; the whole queue rides in every event. `withdrawn` names the
+ *  messages some device took back; `returned` carries whole the messages a stop handed back unsent. */
+export type QueueChange = { reason?: string; count?: number; queued?: unknown; withdrawn?: unknown; returned?: unknown };
+
+/** A message the host gave back instead of sending: a stop returned it, or the operator took it back to
+ *  edit. The words as typed, and the names of files, which cannot travel back into the field. */
+export type ReturnedMessage = { id: string; text: string; files: string[] };
+
+export function readReturned(raw: unknown): ReturnedMessage[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ReturnedMessage[] = [];
+  for (const it of raw) {
+    if (!it || typeof it !== "object") continue;
+    const r = it as Record<string, unknown>;
+    const id = typeof r.id === "string" ? r.id : "";
+    const files = Array.isArray(r.files) ? r.files.filter((name): name is string => typeof name === "string" && name !== "") : [];
+    if (id) out.push({ id, text: typeof r.text === "string" ? r.text : "", files });
+  }
+  return out;
+}
+
+/** The ids a change says will never reach the transcript: withdrawn on any device, or handed back by a
+ *  stop. The bubble a device drew while sending one of them waits for a transcript row that is never
+ *  coming, so it goes now — it once stayed on the screen as a message sent, after it was withdrawn. */
+export function settledIds(payload: QueueChange): string[] {
+  const withdrawn = Array.isArray(payload.withdrawn) ? payload.withdrawn.filter((id): id is string => typeof id === "string" && id !== "") : [];
+  return [...withdrawn, ...readReturned(payload.returned).map((m) => m.id)];
+}
+
+/** The words handed back as one draft, in the order they were written, a blank line between them. */
+export function returnedDraft(items: ReturnedMessage[]): string {
+  return items.map((m) => m.text.trim()).filter((text) => text !== "").join("\n\n");
+}
+
+/** The queue with a card for a message the host has just accepted into it. Drawn at once, so the words
+ *  are never shown as a sent bubble for the round trip it takes to read the queue again; the next read
+ *  or change event replaces the whole list with the host's own. */
+export function withQueued(queue: QueuedMessage[], message: QueuedMessage): QueuedMessage[] {
+  return queue.some((q) => q.id === message.id) ? queue : [...queue, message];
+}
 
 /** The queue after a `steer_changed` event: the payload's list, whatever the reason, or nothing. */
 export function queuedAfter(_current: QueuedMessage[], payload: QueueChange): QueuedMessage[] {

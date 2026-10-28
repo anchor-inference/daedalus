@@ -164,6 +164,7 @@ from daedalus.stores.purge import Purge
 from daedalus.stores.sqlite import (
     LENT_KEY,
     LiveControlStore,
+    ReceiptConflict,
     SqliteEventStream,
     SqliteRunStore,
     SqliteSessionStore,
@@ -510,7 +511,16 @@ class SessionState:
     follow_up_steered: set[str] = field(default_factory=set)
     """Follow-ups the operator turned into steers since that reload. The same stale reload would hand
     the item back to the engine's follow-up queue while the store already holds it as a steer, and the
-    message would then reach the model twice; and its leaving the follow-up queue is not consumption."""
+    message would then reach the model twice."""
+    placed: set[str] = field(default_factory=set)
+    """Ids the core said it put into the history (its ``queue_update``) since the last write-back. The
+    only evidence that a message was read: an item that merely left the engine's lists — a stop hands
+    them back — is not consumed, and the write-back keeps it."""
+    queue_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    """Serialises every move of a waiting message between the store and the running engine: the
+    round's reload and write-back, a withdrawal, a follow-up turned into a steer. Without it a
+    withdrawal could land between a reload's read and its hand-over, and the engine was given a
+    message the operator had just been told was withdrawn."""
 
     @property
     def running(self) -> bool:
@@ -3468,41 +3478,72 @@ class SessionManager:
         there is more. Three long pasted messages otherwise travel whole to every open stream on
         every later change of the queue.
         """
-        return _steer_cards(_waiting(await self.live.load(session_id)))
+        return _steer_cards(_waiting(await self.live.load_waiting(session_id)))
 
-    async def drop_queued_input(self, session_id: str, item_id: str) -> bool:
-        """Take one waiting message back before the run reads it; ``False`` when it is already gone.
+    async def waiting_message(self, session_id: str, item_id: str) -> dict[str, Any] | None:
+        """One waiting message whole, as the operator wrote it: what the field takes back when they
+        withdraw it to change it. The card carries only the first part of a long one."""
+        data = await self.live.load_waiting(session_id)
+        item = next((item for item in [*data["steer"], *data["follow_up"]] if str(item.get("id") or "") == item_id), None)
+        return _returned_message(item) if item is not None else None
 
-        The engine is asked first and the store second. A run between its reload and its next model
-        call holds the queues in memory and would write that copy back over any store-only removal —
-        emptying its list first is what actually stops the message, and the store write behind it
-        stops a reload from bringing the item round again.
+    async def drop_queued_input(self, session_id: str, item_id: str) -> str:
+        """Take one waiting message back before the run reads it.
+
+        Answers ``withdrawn`` (also when another device withdrew it first), ``delivered`` when the
+        model has it or is being handed it, and ``unknown`` for an id nothing waits under. Exactly one
+        of the first two is ever true of a message, and the store's receipt is what decides it.
+
+        Under the queue lock, so no reload hands the engine the row as it stood a moment before. The
+        engine is asked first: a run between its reload and its next model call holds the queues in
+        memory, and emptying its list is what actually stops the message. An item the run was handed
+        at its last reload and no longer holds has been placed, or is being placed this instant, and
+        is refused, because the store's receipt is only stamped a few awaits later and saying
+        "withdrawn" then was a promise the model had already broken.
         """
         state = self._states.get(session_id)
-        removed = False
-        engine = state.engine if state is not None else None
-        if engine is not None:
-            for attribute in ("_steer_queue", "_follow_up_queue"):
-                queue = list(getattr(engine, attribute, []) or [])
-                kept = [item for item in queue if str(item.get("id") or "") != item_id]
-                if len(kept) != len(queue):
-                    setattr(engine, attribute, kept)
-                    removed = True
-        receipt = await self.live.receipt(session_id, item_id)
-        if receipt is not None:
-            withdrawn = await self.live.withdraw(session_id, item_id)
-            if withdrawn is not None and withdrawn["status"] == "withdrawn":
-                removed = True
-        elif await self.live.remove(session_id, "steer", item_id) or await self.live.remove(session_id, "follow_up", item_id):
-            removed = True
-        if removed and state is not None:
-            # A reload that was already waiting on the database when this ran will be handed the row
-            # as it stood before the removal. Remembering the id here is what stops that answer from
-            # putting the withdrawn message back into the engine's queue, where it is authoritative.
-            state.queue_withdrawn.add(item_id)
-        if removed:
-            await self.steer_changed(session_id, reason="withdrawn")
-        return removed
+        lock = state.queue_lock if state is not None else asyncio.Lock()
+        async with lock:
+            engine = state.engine if state is not None and state.running else None
+            taken: list[tuple[str, int, dict[str, Any]]] = []
+            if state is not None and engine is not None:
+                for attribute in ("_steer_queue", "_follow_up_queue"):
+                    queue = list(getattr(engine, attribute, []) or [])
+                    index = next((i for i, item in enumerate(queue) if str(item.get("id") or "") == item_id), None)
+                    if index is not None:
+                        taken.append((attribute, index, queue.pop(index)))
+                        setattr(engine, attribute, queue)
+                handed = item_id in state.steer_seen or item_id in state.follow_up_seen
+                # A stop empties the engine's lists to hand them back, not to place them.
+                stopping = bool(getattr(engine, "stop_requested", False))
+                if item_id in state.placed or (not taken and handed and not stopping and item_id not in state.queue_withdrawn):
+                    return "delivered"
+            receipt = await self.live.receipt(session_id, item_id)
+            if receipt is not None:
+                after = await self.live.withdraw(session_id, item_id)
+                status = str(after["status"]) if after is not None else ""
+                outcome = "withdrawn" if status == "withdrawn" else "delivered" if status in ("consumed", "accepted") else "unknown"
+                fresh = receipt["status"] == "queued" and status == "withdrawn"
+            else:
+                outcome = "withdrawn" if await self.live.remove(session_id, item_id) else "unknown"
+                fresh = outcome == "withdrawn"
+            if outcome != "withdrawn":
+                if engine is not None:
+                    # The store says it is past taking back: the engine's copy goes back where it was,
+                    # because the store is the record and the engine only a copy.
+                    for attribute, index, item in reversed(taken):
+                        queue = list(getattr(engine, attribute, []) or [])
+                        queue.insert(index, item)
+                        setattr(engine, attribute, queue)
+                return outcome
+            if state is not None:
+                # A reload that was already waiting on the database when this ran will be handed the row
+                # as it stood before the removal. Remembering the id here is what stops that answer from
+                # putting the withdrawn message back into the engine's queue, where it is authoritative.
+                state.queue_withdrawn.add(item_id)
+        if fresh:
+            await self.steer_changed(session_id, reason="withdrawn", withdrawn=[item_id])
+        return "withdrawn"
 
     async def steer_queued(self, session_id: str, item_id: str) -> bool:
         """Turn a waiting follow-up into a steer of the run under way; ``False`` when it cannot be.
@@ -3517,40 +3558,49 @@ class SessionManager:
         if state is None or not state.running:
             # Nothing to steer: a follow-up left behind by a finished run opens the next one anyway.
             return False
-        engine = state.engine
-        taken: tuple[int, dict[str, Any]] | None = None
-        if engine is not None:
-            queue = list(getattr(engine, "_follow_up_queue", []) or [])
-            index = next((i for i, item in enumerate(queue) if str(item.get("id") or "") == item_id), None)
-            if index is not None:
-                taken = (index, queue.pop(index))
-                engine._follow_up_queue = queue  # type: ignore[attr-defined]
-            elif item_id in state.follow_up_seen:
-                return False
-        if not await self.live.promote(session_id, item_id):
-            if taken is not None and engine is not None:
-                # The store says it is gone (withdrawn, or consumed from another path): the engine's
-                # list goes back as it was, because the store is the record and the engine only a copy.
+        async with state.queue_lock:
+            engine = state.engine
+            taken: tuple[int, dict[str, Any]] | None = None
+            if engine is not None:
                 queue = list(getattr(engine, "_follow_up_queue", []) or [])
-                queue.insert(taken[0], taken[1])
-                engine._follow_up_queue = queue  # type: ignore[attr-defined]
-            return False
-        state.follow_up_steered.add(item_id)
+                index = next((i for i, item in enumerate(queue) if str(item.get("id") or "") == item_id), None)
+                if index is not None:
+                    taken = (index, queue.pop(index))
+                    engine._follow_up_queue = queue  # type: ignore[attr-defined]
+                elif item_id in state.follow_up_seen or item_id in state.placed:
+                    return False
+            if not await self.live.promote(session_id, item_id):
+                if taken is not None and engine is not None:
+                    # The store says it is gone (withdrawn, or consumed from another path): the engine's
+                    # list goes back as it was, because the store is the record and the engine only a copy.
+                    queue = list(getattr(engine, "_follow_up_queue", []) or [])
+                    queue.insert(taken[0], taken[1])
+                    engine._follow_up_queue = queue  # type: ignore[attr-defined]
+                return False
+            state.follow_up_steered.add(item_id)
         await self.steer_changed(session_id, reason="steered")
         return True
 
-    async def steer_changed(self, session_id: str, *, reason: str) -> None:
-        """Tell the session's listeners that what waits for the model is not what they last drew."""
+    async def steer_changed(
+        self, session_id: str, *, reason: str, withdrawn: Sequence[str] = (), returned: Sequence[dict[str, Any]] = (),
+    ) -> None:
+        """Tell the session's listeners that what waits for the model is not what they last drew.
+
+        ``withdrawn`` names the messages taken back, so every open device drops its own bubble of one
+        it sent, not only the device that pressed the button. ``returned`` carries whole the messages
+        a stop handed back, for the composer to take them in again.
+        """
         state = self._states.get(session_id)
-        waiting = _waiting(await self.live.load(session_id))
+        waiting = _waiting(await self.live.load_waiting(session_id))
+        payload: dict[str, Any] = {"session_id": session_id, "reason": reason, "count": len(waiting), "queued": _steer_cards(waiting)}
+        if withdrawn:
+            payload["withdrawn"] = list(withdrawn)
+        if returned:
+            payload["returned"] = list(returned)
         await self._notify_sinks(
             session_id,
-            HostEvent(
-                type=HostEventType.STEER_CHANGED,
-                run_id=(state.run_id if state is not None else "") or "",
-                # ``count`` is the whole queue; ``queued`` is the first cards' worth of it.
-                payload={"session_id": session_id, "reason": reason, "count": len(waiting), "queued": _steer_cards(waiting)},
-            ),
+            # ``count`` is the whole queue; ``queued`` is the first cards' worth of it.
+            HostEvent(type=HostEventType.STEER_CHANGED, run_id=(state.run_id if state is not None else "") or "", payload=payload),
         )
 
     async def setting_notice(
@@ -3787,7 +3837,9 @@ class SessionManager:
                     if client_message_id:
                         await self.live.consume(session_id, client_message_id, run_id=run_id, step_id="answer", message_seq=None)
                     return run_id
-                queued = {**new_queued_prompt("follow_up", body, attachments=_queued_attachments(attachments)).to_dict(), "origin": origin, "operator_words": None if operator_words is None else list(operator_words), "queued_at": datetime.now(UTC).isoformat(), **_queued_caption(text, attachments), **_queued_display(words)}
+                # Made before the item, so the item can name the row: a withdrawal deletes it by that key.
+                waiting_row = Message(role=MessageRole.user, content_blocks=[TextBlock(text=body)], metadata={"daedalus.delivery": "follow_up", "daedalus.origin": origin, **words, "daedalus.queued": True, **({"daedalus.client_message_id": client_message_id} if client_message_id else {}), **_image_refs_metadata(image_refs)})
+                queued = {**new_queued_prompt("follow_up", body, attachments=_queued_attachments(attachments)).to_dict(), "origin": origin, "operator_words": None if operator_words is None else list(operator_words), "queued_at": datetime.now(UTC).isoformat(), **_queued_caption(text, attachments), **_queued_display(words), "row": self.sessions.transcript_key(waiting_row)}
                 if client_message_id:
                     queued["id"] = client_message_id
                     receipt, created = await self.live.accept(
@@ -3802,9 +3854,7 @@ class SessionManager:
                         return str(receipt["run_id"] or state.run_id or "")
                 else:
                     await self.live.enqueue(session_id, "follow_up", queued)
-                await self.sessions.append_transcript(
-                    session_id, [Message(role=MessageRole.user, content_blocks=[TextBlock(text=body)], metadata={"daedalus.delivery": "follow_up", "daedalus.origin": origin, **words, "daedalus.queued": True, **({"daedalus.client_message_id": client_message_id} if client_message_id else {}), **_image_refs_metadata(image_refs)})]
-                )
+                await self.sessions.append_transcript(session_id, [waiting_row])
                 await self.steer_changed(session_id, reason="queued")
                 return state.run_id or ""
             provider_id: str | None = None
@@ -3850,7 +3900,11 @@ class SessionManager:
                 # survive every move the queue makes: a follow-up turned into a steer, a round that hands
                 # back what it did not place, the drain that opens the next run. Without them only the
                 # words reached the model, and a pasted screenshot arrived as a path it never looked at.
-                queued = {**new_queued_prompt(kind, placed, attachments=_queued_attachments(attachments)).to_dict(), "origin": origin, "operator_words": said, "queued_at": datetime.now(UTC).isoformat(), **_queued_caption(text, attachments), **_queued_display(words)}
+                # The core folds queued prompts into the model's history later (and compaction may
+                # rewrite them); the transcript keeps the operator's words as sent, in a hidden row the
+                # item names so that a withdrawal can delete it.
+                waiting_row = Message(role=MessageRole.user, content_blocks=[TextBlock(text=body)], metadata={"daedalus.delivery": kind, "daedalus.origin": origin, **words, "daedalus.queued": True, **({"daedalus.client_message_id": client_message_id} if client_message_id else {}), **_image_refs_metadata(image_refs)})
+                queued = {**new_queued_prompt(kind, placed, attachments=_queued_attachments(attachments)).to_dict(), "origin": origin, "operator_words": said, "queued_at": datetime.now(UTC).isoformat(), **_queued_caption(text, attachments), **_queued_display(words), "row": self.sessions.transcript_key(waiting_row)}
                 if client_message_id:
                     queued["id"] = client_message_id
                     receipt, created = await self.live.accept(
@@ -3865,11 +3919,7 @@ class SessionManager:
                         return str(receipt["run_id"] or state.run_id or "")
                 else:
                     await self.live.enqueue(session_id, kind, queued)  # type: ignore[arg-type]
-                # The core folds queued prompts into the model's history later (and compaction may
-                # rewrite them); the transcript keeps the operator's words as sent.
-                await self.sessions.append_transcript(
-                    session_id, [Message(role=MessageRole.user, content_blocks=[TextBlock(text=body)], metadata={"daedalus.delivery": kind, "daedalus.origin": origin, **words, "daedalus.queued": True, **({"daedalus.client_message_id": client_message_id} if client_message_id else {}), **_image_refs_metadata(image_refs)})]
-                )
+                await self.sessions.append_transcript(session_id, [waiting_row])
                 await self.steer_changed(session_id, reason="queued")
                 return state.run_id or ""
             # A new run starts. The one before it may still be tidying up behind the answer, and most
@@ -4478,40 +4528,32 @@ class SessionManager:
         session_id = state.session.id
 
         async def reload_live_control(eng: QueryEngine) -> None:
-            data = await self.live.load(session_id)
-            steer = [item for item in data["steer"] if str(item.get("id") or "") not in state.queue_withdrawn]
-            follow_up = [item for item in data["follow_up"] if str(item.get("id") or "") not in state.queue_withdrawn | state.follow_up_steered]
-            state.steer_seen = [str(item.get("id") or "") for item in steer]
-            state.follow_up_seen = [str(item.get("id") or "") for item in follow_up]
-            eng._steer_queue = steer  # type: ignore[attr-defined]
-            eng._follow_up_queue = follow_up  # type: ignore[attr-defined]
+            async with state.queue_lock:
+                data = await self.live.load_waiting(session_id)
+                steer = [item for item in data["steer"] if str(item.get("id") or "") not in state.queue_withdrawn]
+                follow_up = [item for item in data["follow_up"] if str(item.get("id") or "") not in state.queue_withdrawn | state.follow_up_steered]
+                state.steer_seen = [str(item.get("id") or "") for item in steer]
+                state.follow_up_seen = [str(item.get("id") or "") for item in follow_up]
+                eng._steer_queue = steer  # type: ignore[attr-defined]
+                eng._follow_up_queue = follow_up  # type: ignore[attr-defined]
 
         async def persist_live_control(eng: QueryEngine) -> None:
-            steer = list(getattr(eng, "_steer_queue", []) or [])
-            follow_up = list(getattr(eng, "_follow_up_queue", []) or [])
-            # A merge, not a write: a steer that arrived after this round's reload is in the store
-            # and not in the engine's list, and writing that list over the column would destroy it
-            # while the app was being told the model had read it.
-            gone = await self.live.replace_seen(
-                session_id, steer, follow_up, seen_steer=state.steer_seen, seen_follow_up=state.follow_up_seen,
-            )
-            # A follow-up turned into a steer leaves the follow-up queue without being read, so it
-            # is not consumed, unless this round was handed it as a steer and placed it. Excluding
-            # every turned item once left the card of a delivered steer standing above the composer.
-            handed_steers = set(state.steer_seen)
-            consumed = [
-                item_id for item_id in gone
-                if item_id not in state.queue_withdrawn
-                and (item_id not in state.follow_up_steered or item_id in handed_steers)
-            ]
-            state.steer_seen = [str(item.get("id") or "") for item in steer]
-            state.follow_up_seen = [str(item.get("id") or "") for item in follow_up]
-            state.queue_withdrawn.clear()
-            state.follow_up_steered.clear()
+            async with state.queue_lock:
+                steer = list(getattr(eng, "_steer_queue", []) or [])
+                follow_up = list(getattr(eng, "_follow_up_queue", []) or [])
+                # A merge, not a write: a steer that arrived after this round's reload is in the store
+                # and not in the engine's list, and writing that list over the column would destroy it
+                # while the app was being told the model had read it. Only what the core said it
+                # placed leaves the store; a stop empties the engine's lists without placing anything.
+                consumed = await self.live.replace_seen(session_id, steer, follow_up, placed=sorted(state.placed), run_id=state.run_id)
+                state.steer_seen = [str(item.get("id") or "") for item in steer]
+                state.follow_up_seen = [str(item.get("id") or "") for item in follow_up]
+                state.queue_withdrawn.clear()
+                state.follow_up_steered.clear()
+                state.placed.clear()
             if consumed:
                 # The round placed queued text into the history, so the cards the app draws above its
-                # composer are stale. Only what this round was handed and did not hand back counts,
-                # and a withdrawal announced itself when it happened and is not this.
+                # composer are stale. A withdrawal announced itself when it happened and is not this.
                 await self.steer_changed(session_id, reason="consumed")
 
         def start_persist(history: list[Message], fresh: list[Message] | None) -> None:
@@ -5229,6 +5271,13 @@ class SessionManager:
             # this made: they used to run for every status. They hand a finished answer on (a leader
             # collecting a subagent, a schedule learning its run ended), and this answer is not
             # finished; the resumed run announces itself when it really is.
+            if status == "cancelled":
+                # Before the run is announced as over, so the app has the words back by the time its
+                # composer opens.
+                try:
+                    await self._return_unsent(state)
+                except Exception:  # noqa: BLE001 — the messages stay queued and reach the next run instead
+                    logger.exception("could not hand back the unsent messages of session %s", state.session.id)
             if status != "interrupted":
                 await self._announce_settled(state, run_id, status, housekeeping=True)
                 if status == "awaiting":
@@ -5480,6 +5529,26 @@ class SessionManager:
         except RuntimeError as exc:
             logger.warning("session %s: overflow recovery did not start: %s", state.session.id, exc)
 
+    async def _return_unsent(self, state: SessionState) -> None:
+        """A stopped run hands the operator's waiting messages back instead of sending them anywhere.
+
+        Stop means the operator wants nothing more to happen, so opening the next turn with what they
+        had queued would defy it, and leaving it queued would have it steered into whatever run comes
+        next, ahead of the words that start it. So each one is withdrawn — its hidden row goes too —
+        and travels whole in the change event, for the composer to take back. What a system source
+        queued (a job's notice, a subagent's report) is the agent's to read, not the operator's to
+        resend, and stays for the next run. Until this, a stop deleted every message the run had been
+        handed while the app was told the model had read them.
+        """
+        def operators(item: dict[str, Any]) -> bool:
+            return str(item.get("origin") or "operator") == "operator"
+
+        # In the order they were written, whichever queue each ended up in: that is the order the
+        # operator reads them back in the field.
+        returned = sorted(await self.live.take(state.session.id, outcome="withdrawn", select=operators), key=lambda item: str(item.get("queued_at") or ""))
+        if returned:
+            await self.steer_changed(state.session.id, reason="returned", returned=[_returned_message(item) for item in returned])
+
     async def _drain_leftover_follow_ups(self, state: SessionState) -> None:
         """Input that arrived while the run was settling starts the next turn instead of rotting in the queue.
 
@@ -5495,11 +5564,11 @@ class SessionManager:
             await self._drain_locked(state)
 
     async def _drain_locked(self, state: SessionState) -> None:
-        queued = await self.live.load(state.session.id)
-        items = [item for item in queued["follow_up"] + queued["steer"] if str(item.get("text") or "").strip()]
+        # Taken in one transaction with their receipts: read-then-clear left a gap in which a
+        # withdrawal was answered "withdrawn" and the message opened the next turn all the same.
+        items = [item for item in await self.live.take(state.session.id, outcome="consumed") if str(item.get("text") or "").strip()]
         if not items:
             return
-        await self.live.save_queues(state.session.id, [], [])
         await self.steer_changed(state.session.id, reason="consumed")
         texts = [str(item["text"]).strip() for item in items]
         origins = {str(item.get("origin") or "operator") for item in items}
@@ -5651,6 +5720,10 @@ class SessionManager:
             if change is not None:
                 await self._dispatch_event(state, change)
             return
+        if event.type is EventType.QUEUE_UPDATE and event.payload.get("placed"):
+            # Before any await: from here a withdrawal of these ids is refused, because the model
+            # has them, and the write-back that follows takes them out of the store.
+            state.placed.update(str(item_id) for item_id in event.payload["placed"])
         if event.type is EventType.QUEUE_UPDATE and event.payload.get("placed") and state.engine is not None:
             # The core yields immediately after appending the received prompt. Submission time
             # belongs to the queue; this message's place in history is when the model received it.
@@ -5675,13 +5748,18 @@ class SessionManager:
                 for client_message_id in sorted(placed):
                     if await self.live.receipt(state.session.id, str(client_message_id)) is not None:
                         client_message_ids.append(str(client_message_id))
-                        await self.live.consume(
-                            state.session.id,
-                            str(client_message_id),
-                            run_id=event.run_id,
-                            step_id=str(event.payload.get("step_id") or "queue"),
-                            message_seq=None,
-                        )
+                        try:
+                            await self.live.consume(
+                                state.session.id,
+                                str(client_message_id),
+                                run_id=event.run_id,
+                                step_id=str(event.payload.get("step_id") or "queue"),
+                                message_seq=None,
+                            )
+                        except ReceiptConflict:
+                            # The model has the words whatever the receipt says; failing the run over the
+                            # bookkeeping would only lose the answer to them as well.
+                            logger.error("session %s: placed message %s has a withdrawn receipt", state.session.id, client_message_id)
                 if client_message_ids:
                     message.metadata["daedalus.client_message_ids"] = client_message_ids
         change = self._model_change(state, event)
@@ -7400,6 +7478,23 @@ def _queued_caption(text: str, attachments: Sequence[Attachment]) -> dict[str, A
     if not attachments:
         return {}
     return {"caption": "" if text in {"File attached.", "Files attached."} else text.strip()}
+
+
+def _returned_message(item: dict[str, Any]) -> dict[str, Any]:
+    """A message a stop handed back, as the composer takes it in: the words the operator typed — not
+    the text the model would have been given, which carries the host's notes and the files' paths —
+    and the names of the files, which cannot travel back into the field and are said instead."""
+    files = [str(entry.get("name") or "") for entry in item.get("attachments") or [] if isinstance(entry, dict) and entry.get("name")]
+    if "caption" in item:
+        words = str(item.get("caption") or "")
+    elif item.get("operator_words"):
+        words = "\n\n".join(str(part) for part in item["operator_words"])
+    else:
+        words = prompts.without_host_notes(str(item.get("text") or ""))
+    if (item.get("display") or {}).get("daedalus.reply_to") and words.startswith("[In reply to: «"):
+        # The quote is for the model; the field gets the operator's own words.
+        words = words.split("\n", 1)[1] if "\n" in words else ""
+    return {"id": str(item.get("id") or ""), "text": words.strip(), "files": files}
 
 
 def _queued_image_refs(items: Sequence[dict[str, Any]]) -> list[tuple[str, str]]:

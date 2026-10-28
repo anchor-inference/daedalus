@@ -19,8 +19,12 @@ import {
   readDraft,
   readDraftTarget,
   readQueued,
+  readReturned,
+  returnedDraft,
   sendIntent,
+  settledIds,
   queuedAfter,
+  withQueued,
   writeDraft,
   writeDraftTarget,
 } from "./composer";
@@ -200,6 +204,33 @@ describe("the queue", () => {
     expect(queuedAfter(before, { reason: "steered", queued: [{ id: "q_1", kind: "steer", text: "one" }] })[0].kind).toBe("steer");
     expect(queuedAfter(before, { reason: "consumed", count: 0, queued: [] })).toEqual([]);
     expect(queuedAfter(before, { reason: "cleared" })).toEqual([]);
+  });
+
+  it("names the messages that will never reach the transcript, so their sending bubbles can go", () => {
+    // A withdrawn message's bubble waited for a transcript row that never comes, and read as sent.
+    expect(settledIds({ reason: "withdrawn", withdrawn: ["c-1", 7, ""], queued: [] })).toEqual(["c-1"]);
+    expect(settledIds({ reason: "returned", returned: [{ id: "c-2", text: "first", files: [] }, { text: "no id" }] })).toEqual(["c-2"]);
+    expect(settledIds({ reason: "consumed", queued: [] })).toEqual([]);
+  });
+
+  it("takes back what a stop returned as one draft, in order, and keeps the names of its files", () => {
+    const back = readReturned([{ id: "a", text: "first thought" }, { id: "b", text: "  ", files: ["shot.png", 3] }, { id: "c", text: "second thought" }, null]);
+    expect(back).toEqual([
+      { id: "a", text: "first thought", files: [] },
+      { id: "b", text: "  ", files: ["shot.png"] },
+      { id: "c", text: "second thought", files: [] },
+    ]);
+    expect(returnedDraft(back)).toBe("first thought\n\nsecond thought");
+    expect(readReturned({ not: "a list" })).toEqual([]);
+  });
+
+  it("draws a card for a message the host has just queued, once, until the host's list replaces it", () => {
+    const card = { id: "c-3", kind: "follow_up" as const, text: "after this", queued_at: null, files: [] };
+    const once = withQueued([], card);
+    expect(once).toEqual([card]);
+    // The change event got there first: the host's card is kept, not doubled.
+    const hosts = [{ ...card, queued_at: "2026-10-28T10:00:00+00:00" }];
+    expect(withQueued(hosts, card)).toBe(hosts);
   });
 });
 

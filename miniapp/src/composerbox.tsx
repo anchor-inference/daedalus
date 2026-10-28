@@ -105,6 +105,8 @@ export type ComposerProps = {
   /** What the host holds for the running agent, drawn as cards above the field. */
   queued: QueuedMessage[];
   onWithdraw?: (message: QueuedMessage) => void;
+  /** Take a waiting message back into the field to change it: a withdrawal whose words come back. */
+  onEdit?: (message: QueuedMessage) => void;
   /** Hand a waiting follow-up to the run now, before its next model call. */
   onSteer?: (message: QueuedMessage) => void;
   questions?: Question[] | null;
@@ -549,6 +551,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               <span className="steer-hint sub">{t(s.kind === "follow_up" ? "composer.queued.hint" : "composer.steered.hint")}</span>
               {s.kind === "follow_up" && props.onSteer && status === "running" && (
                 <button type="button" className="btn small steer-now" onClick={() => props.onSteer!(s)} title={t("composer.steer.now.title")}>{t("composer.steer.now")}</button>
+              )}
+              {props.onEdit && (
+                <button type="button" className="iconbtn small steer-edit" onClick={() => props.onEdit!(s)} aria-label={t("composer.steer.edit")} title={t("composer.steer.edit.title")}>
+                  <Icon name="pen" size={13} />
+                </button>
               )}
               {props.onWithdraw && (
                 <button type="button" className="iconbtn small steer-x" onClick={() => props.onWithdraw!(s)} aria-label={t("composer.steer.withdraw")} title={t("composer.steer.withdraw")}>

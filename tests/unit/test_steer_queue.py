@@ -157,7 +157,8 @@ async def test_a_steer_is_listed_while_it_waits_and_can_be_taken_back(settings: 
         assert changes[-1]["queued"][0]["id"] == queued[0]["id"]
 
         dropped = await client.delete(f"/api/sessions/{sid}/steer/{queued[0]['id']}", headers=H)
-        assert dropped.status_code == 200 and dropped.json() == {"deleted": True}
+        assert dropped.status_code == 200
+        assert dropped.json() == {"deleted": True, "message": {"id": queued[0]["id"], "text": "also look at the log", "files": []}}
         assert (await client.get(f"/api/sessions/{sid}/steer", headers=H)).json() == []
         assert changes[-1]["reason"] == "withdrawn" and changes[-1]["count"] == 0
 
@@ -299,7 +300,7 @@ async def test_a_steer_the_run_has_read_is_gone_from_the_queue_and_cannot_be_wit
         assert all(m["run_id"] == state.run_id for m in visible if m["role"] == "assistant")
 
         late = await client.delete(f"/api/sessions/{sid}/steer/{item_id}", headers=H)
-        assert late.status_code == 409 and "already reached" in late.json()["detail"]
+        assert late.status_code == 409 and "no longer waiting" in late.json()["detail"]
     await manager.close()
 
 
@@ -328,7 +329,7 @@ async def test_the_id_the_app_holds_is_the_id_the_store_wrote(settings: Settings
     listed = await manager.queued_input(sid)
     stored = [item["id"] for item in (await manager.live.load(sid))[kind]]
     assert [item["id"] for item in listed] == stored and len(stored) == 2
-    assert await manager.drop_queued_input(sid, stored[0])
+    assert await manager.drop_queued_input(sid, stored[0]) == "withdrawn"
     assert [item["id"] for item in await manager.queued_input(sid)] == stored[1:]
     await manager.close()
 
@@ -358,6 +359,7 @@ async def test_a_steer_queued_after_the_round_read_the_queue_survives_the_round(
     await engine.reload_live_control(engine)
     assert [item["id"] for item in engine._steer_queue] == [waiting[0]["id"]]
     engine._steer_queue = []
+    state.placed.add(waiting[0]["id"])  # what the core's queue_update tells the host
     await engine.persist_live_control(engine)
     assert await manager.queued_input(sid) == []
     assert [c["reason"] for c in changes] == ["queued", "consumed"]
@@ -377,16 +379,16 @@ async def test_a_withdrawn_steer_is_not_brought_back_by_a_reload_that_raced_it(s
     item_id = (await manager.queued_input(sid))[0]["id"]
 
     # The row as a reload that started before the withdrawal would be handed it.
-    stale = await manager.live.load(sid)
-    assert await manager.drop_queued_input(sid, item_id)
+    stale = await manager.live.load_waiting(sid)
+    assert await manager.drop_queued_input(sid, item_id) == "withdrawn"
 
-    original = manager.live.load
+    original = manager.live.load_waiting
 
     async def stale_once(session_id: str) -> Any:
-        manager.live.load = original  # type: ignore[method-assign]
+        manager.live.load_waiting = original  # type: ignore[method-assign]
         return stale
 
-    manager.live.load = stale_once  # type: ignore[method-assign]
+    manager.live.load_waiting = stale_once  # type: ignore[method-assign]
     await engine.reload_live_control(engine)
     assert list(getattr(engine, "_steer_queue", [])) == []
 
@@ -508,6 +510,7 @@ async def test_a_steered_follow_up_the_round_places_takes_its_card_away(settings
     await engine.reload_live_control(engine)
     assert [item["id"] for item in engine._steer_queue] == [item_id]
     engine._steer_queue = []
+    state.placed.add(item_id)  # what the core's queue_update tells the host
     await engine.persist_live_control(engine)
     assert await manager.queued_input(sid) == []
     assert [c["reason"] for c in changes] == ["queued", "steered", "consumed"]
