@@ -1223,10 +1223,49 @@ def _queue_item_id(item: dict[str, Any]) -> str:
     return str(item.get("id") or "")
 
 
-def _merged_queue(kept: list[dict[str, Any]], stored: list[dict[str, Any]], seen: Sequence[str]) -> list[dict[str, Any]]:
-    """What a run hands back, followed by whatever the store gained while the run was holding it."""
-    known = {_queue_item_id(item) for item in kept} | set(seen)
-    return list(kept) + [item for item in stored if _queue_item_id(item) not in known]
+def _merged_queue(kept: list[dict[str, Any]], stored: list[dict[str, Any]], held: set[str], placed: set[str]) -> list[dict[str, Any]]:
+    """What a run hands back, followed by everything else the store still holds that the model did not read.
+
+    ``held`` is every id the run hands back in either queue, ``placed`` every id the core said it put
+    into the history. A stored item in neither stays where it is: it arrived after the run read the
+    row, or the run let go of it without placing it — a stop hands its queues back to the host, and
+    that used to delete the operator's waiting messages while telling the app the model had read them.
+    """
+    return list(kept) + [item for item in stored if _queue_item_id(item) not in held | placed]
+
+
+async def _not_waiting_in(conn: Any, session_id: str, ids: Sequence[str]) -> set[str]:
+    """The ids among ``ids`` whose receipt says the message no longer waits (withdrawn, or read).
+
+    The receipt is the one authority on whether a message may still reach the model: a queue column
+    or a run's in-memory copy can name an item a moment longer, and this is what each write consults
+    before letting such a copy back into the store.
+    """
+    wanted = [item_id for item_id in dict.fromkeys(ids) if item_id]
+    if not wanted:
+        return set()
+    marks = ",".join("?" for _ in wanted)
+    cursor = await conn.execute(
+        f"SELECT client_message_id FROM input_receipts WHERE session_id = ? AND status != 'queued' AND client_message_id IN ({marks})",
+        (session_id, *wanted),
+    )
+    rows = await cursor.fetchall()
+    await cursor.close()
+    return {str(row["client_message_id"]) for row in rows}
+
+
+async def _drop_waiting_row_in(conn: Any, session_id: str, item: dict[str, Any]) -> None:
+    """Delete the hidden transcript row ``submit`` wrote when ``item`` was queued.
+
+    A withdrawn message must leave nothing behind: the row is hidden in the chat, but the agent's
+    transcript search and the semantic index read every row, and a message the operator took back
+    was still there for the agent to find. The row's key travels in the item as ``row``.
+    """
+    key = str(item.get("row") or "")
+    if not key:
+        return
+    await conn.execute("DELETE FROM transcript_fts WHERE rowid IN (SELECT seq FROM transcript WHERE session_id = ? AND key = ?)", (session_id, key))
+    await conn.execute("DELETE FROM transcript WHERE session_id = ? AND key = ?", (session_id, key))
 
 
 class ReceiptConflict(ValueError):
@@ -1281,36 +1320,109 @@ class LiveControlStore:
         steer: list[dict[str, Any]],
         follow_up: list[dict[str, Any]],
         *,
-        seen_steer: Sequence[str],
-        seen_follow_up: Sequence[str],
+        placed: Sequence[str] = (),
+        run_id: str | None = None,
     ) -> list[str]:
         """Write back the queues a run is holding without losing what was enqueued while it ran.
 
-        ``steer`` and ``follow_up`` are what the run has left; ``seen_*`` are the ids it was handed
-        when it last read this row. An item in the store that is in neither list arrived after that
-        read: it is kept, appended behind the run's own remainder so the order stays the order the
-        operator queued things in. A blind write of the run's lists would drop it, and the operator
-        would be told it had been delivered.
+        ``steer`` and ``follow_up`` are what the run has left; ``placed`` the ids the core said it put
+        into the model's history since the last write. Only those leave the store. Everything else the
+        store holds stays, behind the run's own remainder, so the order is the order the operator
+        queued things in: an item that arrived after the run read the row, and one the run let go of
+        without placing it. A run's copy of an item whose receipt says it no longer waits is dropped
+        rather than written back, so a withdrawal the run's copy predates cannot be undone by it.
 
-        Returns the ids of either queue that are genuinely gone — handed to the run and not handed
-        back — so the caller can say ``consumed`` about those and only those.
+        The placed items' receipts become ``consumed`` in the same transaction, so a withdrawal can
+        never find one of them still ``queued`` once it has left the queue.
+
+        Returns the placed ids that were still in the store, so the caller says ``consumed`` about
+        those and only those.
         """
+        placed_ids = {item_id for item_id in placed if item_id}
         async with self._db.transaction() as conn:
             cursor = await conn.execute("SELECT steer_queue, follow_up_queue FROM live_control WHERE session_id = ?", (session_id,))
             row = await cursor.fetchone()
             await cursor.close()
             stored_steer = json.loads(row["steer_queue"] or "[]") if row else []
             stored_follow_up = json.loads(row["follow_up_queue"] or "[]") if row else []
-            merged_steer = _merged_queue(steer, stored_steer, seen_steer)
-            merged_follow_up = _merged_queue(follow_up, stored_follow_up, seen_follow_up)
+            finished = await _not_waiting_in(conn, session_id, [_queue_item_id(item) for item in [*steer, *follow_up]])
+            kept_steer = [item for item in steer if _queue_item_id(item) not in finished | placed_ids]
+            kept_follow_up = [item for item in follow_up if _queue_item_id(item) not in finished | placed_ids]
+            held = {_queue_item_id(item) for item in [*kept_steer, *kept_follow_up]}
+            merged_steer = _merged_queue(kept_steer, stored_steer, held, placed_ids)
+            merged_follow_up = _merged_queue(kept_follow_up, stored_follow_up, held, placed_ids)
             await conn.execute(
                 "INSERT INTO live_control(session_id, steer_queue, follow_up_queue, updated_at) VALUES (?, ?, ?, ?)"
                 " ON CONFLICT(session_id) DO UPDATE SET steer_queue = excluded.steer_queue,"
                 " follow_up_queue = excluded.follow_up_queue, updated_at = excluded.updated_at",
                 (session_id, json.dumps(merged_steer), json.dumps(merged_follow_up), _now()),
             )
-        kept = {_queue_item_id(item) for item in merged_steer} | {_queue_item_id(item) for item in merged_follow_up}
-        return [item_id for item_id in [*seen_steer, *seen_follow_up] if item_id not in kept]
+            for item_id in placed_ids:
+                await conn.execute(
+                    "UPDATE input_receipts SET status = 'consumed', run_id = coalesce(run_id, ?), step_id = coalesce(step_id, 'queue'), updated_at = ?"
+                    " WHERE session_id = ? AND client_message_id = ? AND status = 'queued'",
+                    (run_id, _now(), session_id, item_id),
+                )
+        before = {_queue_item_id(item) for item in [*stored_steer, *stored_follow_up]}
+        return [item_id for item_id in placed if item_id in before]
+
+    async def load_waiting(self, session_id: str) -> dict[str, list[dict[str, Any]]]:
+        """Both queues with only what may still reach the model: an item whose receipt is withdrawn or
+        read is left out even if a column still lists it. One transaction, so the row and the
+        receipts it is judged by are read at the same moment."""
+        async with self._db.transaction() as conn:
+            cursor = await conn.execute("SELECT steer_queue, follow_up_queue FROM live_control WHERE session_id = ?", (session_id,))
+            row = await cursor.fetchone()
+            await cursor.close()
+            steer = json.loads(row["steer_queue"] or "[]") if row else []
+            follow_up = json.loads(row["follow_up_queue"] or "[]") if row else []
+            finished = await _not_waiting_in(conn, session_id, [_queue_item_id(item) for item in [*steer, *follow_up]])
+        return {
+            "steer": [item for item in steer if _queue_item_id(item) not in finished],
+            "follow_up": [item for item in follow_up if _queue_item_id(item) not in finished],
+        }
+
+    async def take(self, session_id: str, *, outcome: str, select: Callable[[dict[str, Any]], bool] = lambda item: True) -> list[dict[str, Any]]:
+        """Take every waiting item ``select`` accepts out of both queues at once, follow-ups first.
+
+        ``outcome`` is what their receipts become: ``consumed`` for the drain that opens the next turn
+        with them, ``withdrawn`` for a stop that hands them back to the operator. One transaction with
+        the receipts, so a withdrawal and a drain racing for the same message have exactly one winner:
+        the drain never opens a turn with a message the operator was told is withdrawn, and a
+        withdrawal answered after the drain is refused. A withdrawn message's hidden transcript row
+        goes with it.
+        """
+        if outcome not in ("consumed", "withdrawn"):
+            raise ValueError(f"a taken item is consumed or withdrawn, not {outcome!r}")
+        now = _now()
+        async with self._db.transaction() as conn:
+            cursor = await conn.execute("SELECT steer_queue, follow_up_queue, queue_revision FROM live_control WHERE session_id = ?", (session_id,))
+            row = await cursor.fetchone()
+            await cursor.close()
+            if row is None:
+                return []
+            steer = json.loads(row["steer_queue"] or "[]")
+            follow_up = json.loads(row["follow_up_queue"] or "[]")
+            finished = await _not_waiting_in(conn, session_id, [_queue_item_id(item) for item in [*steer, *follow_up]])
+            taken = [item for item in [*follow_up, *steer] if _queue_item_id(item) not in finished and select(item)]
+            gone = {_queue_item_id(item) for item in taken} | finished
+            if not gone:
+                return []
+            revision = int(row["queue_revision"] or 0) + 1
+            await conn.execute(
+                "UPDATE live_control SET steer_queue = ?, follow_up_queue = ?, queue_revision = ?, updated_at = ? WHERE session_id = ?",
+                (json.dumps([item for item in steer if _queue_item_id(item) not in gone]),
+                 json.dumps([item for item in follow_up if _queue_item_id(item) not in gone]), revision, now, session_id),
+            )
+            for item in taken:
+                await conn.execute(
+                    f"UPDATE input_receipts SET status = '{outcome}', queue_revision = ?, updated_at = ?"
+                    " WHERE session_id = ? AND client_message_id = ? AND status = 'queued'",
+                    (revision, now, session_id, _queue_item_id(item)),
+                )
+                if outcome == "withdrawn":
+                    await _drop_waiting_row_in(conn, session_id, item)
+        return taken
 
     async def promote(self, session_id: str, item_id: str) -> bool:
         """Move one waiting follow-up to the back of the steer queue; ``False`` when it is not waiting.
@@ -1494,7 +1606,9 @@ class LiveControlStore:
                 raise KeyError(client_message_id)
             if row["status"] == "withdrawn":
                 raise ReceiptConflict("withdrawn input cannot be consumed")
-            if row["status"] != "consumed":
+            if row["status"] != "consumed" or not row["run_id"]:
+                # A drain takes its items as consumed before the run they open exists, so a consumed
+                # receipt with no run yet is stamped here rather than left naming nothing.
                 await conn.execute(
                     "UPDATE input_receipts SET status = 'consumed', run_id = ?, step_id = ?,"
                     " message_seq = ?, updated_at = ? WHERE session_id = ? AND client_message_id = ?",
@@ -1510,7 +1624,14 @@ class LiveControlStore:
         return self._receipt(settled)
 
     async def withdraw(self, session_id: str, client_message_id: str) -> dict[str, Any] | None:
-        """Withdraw queued input, or return its consumed receipt without lying about removal."""
+        """Withdraw waiting input; any other receipt comes back unchanged, without lying about removal.
+
+        A compare-and-set on the receipt: only ``queued`` becomes ``withdrawn``. A message that is
+        consumed was read by the model, and one that is ``accepted`` is opening a run right now; both
+        are past taking back. A second withdrawal of the same message finds it ``withdrawn`` and
+        changes nothing, so two devices pressing at once both see it gone. The hidden transcript row
+        written when it was queued goes in the same transaction.
+        """
         async with self._db.transaction() as conn:
             cursor = await conn.execute(
                 "SELECT * FROM input_receipts WHERE session_id = ? AND client_message_id = ?",
@@ -1518,7 +1639,7 @@ class LiveControlStore:
             )
             row = await cursor.fetchone()
             await cursor.close()
-            if row is None or row["status"] == "consumed":
+            if row is None or row["status"] != "queued":
                 return self._receipt(row) if row is not None else None
             cursor = await conn.execute(
                 "SELECT steer_queue, follow_up_queue, queue_revision FROM live_control WHERE session_id = ?",
@@ -1531,6 +1652,9 @@ class LiveControlStore:
                 for column in ("steer_queue", "follow_up_queue"):
                     current = json.loads(control[column] or "[]")
                     kept = [item for item in current if _queue_item_id(item) != client_message_id]
+                    for item in current:
+                        if _queue_item_id(item) == client_message_id:
+                            await _drop_waiting_row_in(conn, session_id, item)
                     if len(kept) != len(current):
                         revision += 1
                         await conn.execute(
@@ -1551,24 +1675,30 @@ class LiveControlStore:
         assert withdrawn is not None
         return self._receipt(withdrawn)
 
-    async def remove(self, session_id: str, kind: str, item_id: str) -> bool:
-        """Drop one queued item by its id; ``False`` when it is no longer there (consumed, or never was)."""
-        column = "steer_queue" if kind == "steer" else "follow_up_queue"
+    async def remove(self, session_id: str, item_id: str) -> bool:
+        """Drop one queued item that has no receipt by its id, from whichever queue holds it; ``False``
+        when it is no longer there (consumed, or never was). Its hidden transcript row goes with it."""
         async with self._db.transaction() as conn:
-            cursor = await conn.execute(f"SELECT {column} FROM live_control WHERE session_id = ?", (session_id,))
+            cursor = await conn.execute("SELECT steer_queue, follow_up_queue, queue_revision FROM live_control WHERE session_id = ?", (session_id,))
             row = await cursor.fetchone()
             await cursor.close()
             if row is None:
                 return False
-            current = json.loads(row[column] or "[]")
-            kept = [item for item in current if str(item.get("id") or "") != item_id]
-            if len(kept) == len(current):
-                return False
-            await conn.execute(
-                f"UPDATE live_control SET {column} = ?, updated_at = ? WHERE session_id = ?",
-                (json.dumps(kept), _now(), session_id),
-            )
-        return True
+            removed = False
+            for column in ("steer_queue", "follow_up_queue"):
+                current = json.loads(row[column] or "[]")
+                kept = [item for item in current if _queue_item_id(item) != item_id]
+                if len(kept) == len(current):
+                    continue
+                for item in current:
+                    if _queue_item_id(item) == item_id:
+                        await _drop_waiting_row_in(conn, session_id, item)
+                await conn.execute(
+                    f"UPDATE live_control SET {column} = ?, queue_revision = ?, updated_at = ? WHERE session_id = ?",
+                    (json.dumps(kept), int(row["queue_revision"] or 0) + 1, _now(), session_id),
+                )
+                removed = True
+        return removed
 
     async def set_model(
         self,

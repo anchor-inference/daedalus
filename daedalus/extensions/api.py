@@ -5542,13 +5542,22 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     @api.delete("/api/sessions/{session_id}/steer/{msg_id}")
     async def drop_steer(session_id: str, msg_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        """Take a waiting message back. 409 once the run has read it: by then it is in the history, not in a queue."""
+        """Take a waiting message back. 409 once the run has read it — by then it is in the history,
+        not in a queue — and for an id nothing waits under, which for a message sent without a receipt
+        is all a delivered one leaves behind. A message another device withdrew first answers as
+        withdrawn: that is the truth about it, whoever pressed first."""
         state = await manager.get_state(session_id)
         if state is None:
             raise HTTPException(404, "no such session")
-        if not await manager.drop_queued_input(session_id, msg_id):
+        # Read before the withdrawal, whose last act removes it: the words go back to the field when
+        # the operator took the message back to change it.
+        message = await manager.waiting_message(session_id, msg_id)
+        outcome = await manager.drop_queued_input(session_id, msg_id)
+        if outcome == "delivered":
             raise HTTPException(409, "that message has already reached the agent")
-        return {"deleted": True}
+        if outcome != "withdrawn":
+            raise HTTPException(409, "that message is no longer waiting")
+        return {"deleted": True, **({"message": message} if message is not None else {})}
 
     # -- usage / balance / status ---------------------------------------------------
 
