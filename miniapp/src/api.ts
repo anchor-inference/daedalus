@@ -945,7 +945,7 @@ export type MessageView = {
   text: string;
   thinking: string;
   tool_calls: { id: string; name: string; arguments: Record<string, unknown> }[];
-  tool_results: { id: string; content: string; is_error: boolean; length?: number | null; clipped?: boolean }[];
+  tool_results: { id: string; content: string; is_error: boolean; length?: number | null; clipped?: boolean; sources?: { url: string; title?: string; snippet?: string; image?: string }[] }[];
   created_at: string;
 };
 

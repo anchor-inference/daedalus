@@ -81,6 +81,8 @@ import { sentMessageReachedTranscript } from "../pending-message";
 import { Banner, IconButton } from "../ui/phone";
 import { SecretChip } from "../secrets";
 import { RawHtml } from "../rawhtml";
+import { SourcesButton, SourcesPanel, hydrateRich, useTurnSources } from "../sources";
+import { sourceCount, turnSources } from "../rich";
 import { RenameSheet, SearchSheet, SessionMenuSheet, SessionTopBar, StateSub, type SessionRow, type SessionTile } from "./SessionPhone";
 import { SubagentsTab, subagentIdFor } from "../subagents";
 import { PromptCoach } from "../coach/PromptCoach";
@@ -95,7 +97,7 @@ import { MoveLive, useFolderMove } from "../project/moves";
  */
 const Md = memo(function Md({ text, className, cacheKey }: { text: string; className?: string; cacheKey?: string }) {
   const html = useMemo(() => (cacheKey ? renderCached(cacheKey, text) : renderMarkdown(text)), [text, cacheKey]);
-  return <RawHtml className={className} html={html} />;
+  return <RawHtml className={className} html={html} onWritten={hydrateRich} />;
 });
 
 /** How much of the end of the conversation a run's event is answered with. */
@@ -202,7 +204,14 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // An ordinary session's side questions decide whether it has a Questions tab at all, so they are read
   // before the tabs are; the orchestrator's and the main chat's lists are read below, with their scope.
   const sideWaiting = useQuestions(panelContext === "session" && !bare ? { sessionId: id } : null).questions?.length ?? 0;
-  const panelTabs = tabsNow.current = tabsFor(panelContext, { browser: hasBrowser || panel.state.tab === "browser", preview: panel.state.stack.length > 0, subagents: (detail?.subagents?.length ?? 0) > 0 || panel.state.tab === "subagents", questions: sideWaiting > 0 || panel.state.tab === "questions" });
+  // The answer whose sources the panel shows; null shows the newest answer that has any, which is
+  // what an address naming the tab opens to after a reload.
+  const [sourcesOf, setSourcesOf] = useState<string | null>(null);
+  const openSources = useCallback((turnKey: string) => {
+    setSourcesOf(turnKey);
+    panel.open("sources");
+  }, [panel.open]);
+  const panelTabs = tabsNow.current = tabsFor(panelContext, { browser: hasBrowser || panel.state.tab === "browser", preview: panel.state.stack.length > 0, subagents: (detail?.subagents?.length ?? 0) > 0 || panel.state.tab === "subagents", questions: sideWaiting > 0 || panel.state.tab === "questions", sources: sourcesOf !== null || panel.state.tab === "sources" });
   const browserShown = pipGroup(browsers.groups);
   const runningSubagents = detail?.subagents?.filter((child) => child.running).length ?? 0;
   // Every way the conversation names a helper — its SubAgent step, its report, the reminder about the
@@ -1417,6 +1426,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       folders: paneFolders,
       preview: openFromChat,
       openJobs: () => panel.open("jobs"),
+      openSources,
       toast,
       link,
       asking: questionsKey(detail?.pending?.questions ?? null),
@@ -1426,8 +1436,14 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         return true;
       },
     }),
-    [id, detail?.workspace, paneFolders, openFromChat, panel.open, toast, link, detail?.pending?.questions],
+    [id, detail?.workspace, paneFolders, openFromChat, panel.open, openSources, toast, link, detail?.pending?.questions],
   );
+  const shownSources = useMemo(() => {
+    if (panel.state.tab !== "sources") return null;
+    const chosen = sourcesOf ? turns.find((turn) => turn.key === sourcesOf) : undefined;
+    const turn = chosen ?? [...turns].reverse().find((each) => each.answer && sourceCount(turnSources(each.answer, each.activity)) > 0);
+    return turn ? turnSources(turn.answer, turn.activity) : null;
+  }, [panel.state.tab, sourcesOf, turns]);
 
   // What the answer cited, clicked: a file opens at the lines it named, a Verify receipt opens as a
   // receipt, and any other run id is a background job — its log is a file in the workspace.
@@ -1822,6 +1838,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                 folders: <FoldersPage projectId={focus.projectId} compact toast={toast} />,
               } : {}),
               ...(questionScope ? { questions: <QuestionsPanel scope={questionScope} toast={toast} /> } : {}),
+              sources: <SourcesPanel key={sourcesOf ?? ""} sources={shownSources} />,
               browser: <BrowserTab groups={browsers.groups} toast={toast} phone={phone} sessionId={id ?? undefined} user={browsers.user} />,
               subagents: <SubagentsTab
                 leaderId={id}
@@ -2081,6 +2098,14 @@ function SystemNoteRow({ note, cacheKey, run }: { note: SystemNote; cacheKey?: s
   );
 }
 
+/** The "N sources" button under an answer that cited or read the web; it opens the Sources tab on this turn. */
+function TurnSources({ turn }: { turn: Turn }) {
+  const { openSources } = useContext(SessionContext);
+  const sources = useTurnSources(turn.answer, turn.activity);
+  if (!openSources) return null;
+  return <SourcesButton sources={sources} onOpen={() => openSources(turn.key)} />;
+}
+
 const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Turn; live: boolean; onTurnAction?: (kind: "revert" | "fork" | "retry", seq: number) => void }) {
   const { id: sessionId, workspace, folders, preview, toast, link, compose } = useContext(SessionContext);
   const focusChat = useFocusChat();
@@ -2206,6 +2231,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
         </div>
       ) : <Md className={`answer ${live ? "streaming" : ""}`} text={turn.answer} cacheKey={live ? undefined : `a${turn.key}`} />)}
       {turn.answer && !live && <KeptFiles text={turn.answer} onOpen={preview} />}
+      {turn.answer && !live && <TurnSources turn={turn} />}
       {/* Outside the folded steps: a change that waits for the operator's Apply must be seen without
           opening the turn's work, and it can be answered while the agent is still writing. */}
       {settingsChangeIds(turn.activity).map((id) => <SettingsChangeCard key={id} changeId={id} />)}
@@ -3105,7 +3131,7 @@ const NO_FOLDERS: SessionFolder[] = [];
  *  call that asked them reads as waiting and an older unanswered one does not. */
 /** `compose`: put text into the conversation's composer for the operator to send (a widget's ask);
  *  absent where the transcript has no composer of its own. */
-const SessionContext = createContext<{ id: string; workspace: string; folders: SessionFolder[]; preview: (src: PreviewSource) => void; openJobs: () => void; toast: (text: string) => void; link: string; asking: string; compose?: (text: string) => boolean }>({
+const SessionContext = createContext<{ id: string; workspace: string; folders: SessionFolder[]; preview: (src: PreviewSource) => void; openJobs: () => void; toast: (text: string) => void; link: string; asking: string; compose?: (text: string) => boolean; openSources?: (turnKey: string) => void }>({
   id: "",
   workspace: "",
   folders: NO_FOLDERS,

@@ -887,6 +887,13 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     path = path[path.index("/api/"):] if "/api/" in path else path
     if method.upper() == "GET" and path == EVENTS:
         return 200, "text/event-stream", event_stream_hello()
+    if method.upper() == "GET" and path == "/api/favicon":
+        # A site's icon, as the host's cache answers it: a small picture of the site's own colour, and
+        # nothing for a site whose name says it has none, so the letter that stands in is drawn too.
+        host = dict(pair.split("=", 1) for pair in query.split("&") if "=" in pair).get("host", "")
+        if not host or "nomark" in host:
+            return 404, "application/json", json.dumps({"detail": "no icon"})
+        return 200, "image/png", preview_png(f"favicon:{host}", 32, 32)
     parts = path.split("/")
     if path == "/api/sessions" and method.upper() == "POST":
         status, created = create_session(body)

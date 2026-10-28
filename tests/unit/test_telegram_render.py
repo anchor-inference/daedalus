@@ -163,3 +163,22 @@ async def test_the_final_answer_carries_no_raw_evidence_tags(tmp_path: Path) -> 
     await renderer.handle(_evt(EventType.MESSAGE_STOP, stop_reason="end_turn"))
     await renderer.finish("completed", workspace=tmp_path)
     assert [t for t, md in outbox.sent if md] == ["done: a/b.py:1-3"]
+
+
+def test_cards_and_citations_read_as_tidy_text_in_a_chat() -> None:
+    """The Mini App draws them as cards and chips; a chat gets the title as a link with its lines
+    under it, and the sites a sentence cites as links in brackets — no block markers, no key names."""
+    answer = (
+        "Pick:\n\n:::card\ntitle: 1. Pantum P2500NW\nurl: https://kaspi.kz/p/1\nimage: https://img.example/p.jpg\nbadge: My pick\n"
+        "meta: ≈ 45 000 ₸ · mono laser\n- 22 pages a minute\nlinks: [Kaspi](https://kaspi.kz/p/1) · [DNS](https://dns.example/p)\n"
+        "note: check delivery\n:::\n:::entity\ntitle: Anchor Inference\nurl: https://example.org\nmeta: AI systems · Astana\n:::\n\n"
+        "Order it.[^](https://kaspi.kz/p/1) [^DNS](https://www.dns-shop.kz/x) Quoted: `[^](https://a.example)`"
+    )
+    flat = flatten_evidence(answer)
+    assert ":::" not in flat and "image:" not in flat and "title:" not in flat
+    assert "**[1. Pantum P2500NW](https://kaspi.kz/p/1)** · _My pick_\n≈ 45 000 ₸ · mono laser\n- 22 pages a minute\n" in flat
+    assert "[Kaspi](https://kaspi.kz/p/1) · [DNS](https://dns.example/p)\n_check delivery_" in flat
+    assert "### [Anchor Inference](https://example.org)\nAI systems · Astana" in flat
+    assert "Order it. ([kaspi.kz](https://kaspi.kz/p/1), [DNS](https://www.dns-shop.kz/x))" in flat
+    assert "`[^](https://a.example)`" in flat
+    assert flatten_evidence("```\n:::card\ntitle: x\n:::\n```") == "```\n:::card\ntitle: x\n:::\n```"

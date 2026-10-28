@@ -1,9 +1,11 @@
 // Markdown → HTML for the chat: headings, paragraphs, lists (nested, ordered, tasks), tables,
 // fenced code with a language label and a copy button, quotes, dividers, inline marks, links,
-// <details>/<summary> passthrough, and the evidence tags an answer cites (<file …/>, <run …/>) as
-// clickable chips. Everything else is HTML-escaped first, so model output cannot inject markup.
+// <details>/<summary> passthrough, the evidence tags an answer cites (<file …/>, <run …/>) as
+// clickable chips, and the cards and web citations of a rich answer (see rich.ts). Everything else
+// is HTML-escaped first, so model output cannot inject markup.
 
 import { t } from "./i18n";
+import { CARD_CLOSE_RE, CARD_OPEN_RE, CITE_RUN_RE, type Card, type Citation, citationsIn, parseCard, siteOf, webUrl } from "./rich";
 
 function escape(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -66,6 +68,11 @@ function inline(s: string): string {
     codes.push(chip);
     return ` ${STASH}${codes.length - 1}${STASH} `;
   });
+  // Before the links: a citation is a link by its syntax, and read as one it would be a caret.
+  s = s.replace(CITE_RUN_RE, (run) => {
+    codes.push(citeChip(citationsIn(run)));
+    return ` ${STASH}${codes.length - 1}${STASH} `;
+  });
   s = escape(s);
   s = s.replace(/&lt;(\/?)(details|summary)&gt;/g, "<$1$2>");
   s = s.replace(/&lt;details open&gt;/g, "<details open>");
@@ -84,6 +91,44 @@ function inline(s: string): string {
   // A bare address in the text — "open /app/settings/voice#asr.transcriber" — is a link as well.
   s = s.replace(APP_BARE, (_, before: string, path: string) => `${before}<a href="${path}" data-app-link>${path}</a>`);
   return s.replace(/ \uE000(\d+)\uE000 /g, (_, i) => codes[Number(i)]);
+}
+
+/** The site's mark: its first letter until the favicon arrives (rich hydration fills it in). */
+function favicon(host: string, large = false): string {
+  const letter = escape((host.match(/[\p{L}\p{N}]/u)?.[0] ?? "·").toUpperCase());
+  return `<span class="fav${large ? " fav-lg" : ""}" data-host="${escape(host)}" aria-hidden="true">${letter}</span>`;
+}
+
+/** Citations side by side as one chip: the first site's mark and name, and how many more back the sentence. */
+function citeChip(cites: Citation[]): string {
+  const first = cites[0];
+  const host = siteOf(first.url);
+  const label = first.label || host;
+  const more = cites.length > 1 ? `<span class="cite-more">+${cites.length - 1}</span>` : "";
+  const urls = cites.map((c) => c.url).join(" ");
+  const title = cites.map((c) => c.label || siteOf(c.url)).join(", ");
+  return `<button type="button" class="cite" data-cite="${escape(urls)}" title="${escape(title)}" aria-label="${escape(t("rich.cite", { sites: title }))}">${favicon(host)}<span class="cite-label">${escape(label)}</span>${more}</button>`;
+}
+
+function cardHtml(card: Card): string {
+  const url = webUrl(card.url);
+  const image = webUrl(card.image);
+  const host = siteOf(url || image);
+  const link = (cls: string, inner: string) => url ? `<a class="${cls}" href="${escape(url)}" target="_blank" rel="noreferrer">${inner}</a>` : `<span class="${cls}">${inner}</span>`;
+  // A picture from a site the operator never chose to visit: no referrer tells that site where it
+  // was shown, it loads only when scrolled to, and a picture that fails is replaced by the site's
+  // mark (rich hydration listens for the error).
+  const media = image
+    ? link("rcard-media", `<img class="rcard-img" src="${escape(image)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-host="${escape(host)}"/>`)
+    : host ? link("rcard-media rcard-tile", favicon(host, true)) : "";
+  const title = card.title ? link("rcard-title", inline(card.title)) : "";
+  const badge = card.badge ? `<span class="rcard-badge">${inline(card.badge)}</span>` : "";
+  const head = title || badge ? `<div class="rcard-head">${title}${badge}</div>` : "";
+  const meta = card.meta ? `<div class="rcard-meta">${inline(card.meta)}</div>` : "";
+  const body = card.body ? `<div class="rcard-body">${renderMarkdown(card.body)}</div>` : "";
+  const links = card.links ? `<div class="rcard-links">${inline(card.links)}</div>` : "";
+  const note = card.note ? `<div class="rcard-note">${inline(card.note)}</div>` : "";
+  return `<div class="rcard rcard-${card.kind}${media ? "" : " no-media"}">${media}<div class="rcard-main">${head}${meta}${body}${links}${note}</div></div>`;
 }
 
 type ListItem = { text: string; children: string[]; task?: boolean; checked?: boolean };
@@ -183,6 +228,25 @@ export function renderMarkdown(text: string): string {
   };
   while (i < lines.length) {
     const line = lines[i];
+    if (CARD_OPEN_RE.test(line)) {
+      flush();
+      // Cards one after another are one list: a ranked set of choices reads as a set, with a rule
+      // between each two. An unclosed card runs to the end, which is what a card still streaming is.
+      const cards: string[] = [];
+      while (i < lines.length && CARD_OPEN_RE.test(lines[i])) {
+        const open = lines[i].match(CARD_OPEN_RE) as RegExpMatchArray;
+        const buf: string[] = [];
+        i++;
+        while (i < lines.length && !CARD_CLOSE_RE.test(lines[i])) buf.push(lines[i++]);
+        i++;
+        cards.push(cardHtml(parseCard(open[1], open[2], buf)));
+        let next = i;
+        while (next < lines.length && /^\s*$/.test(lines[next])) next++;
+        if (next < lines.length && CARD_OPEN_RE.test(lines[next])) i = next;
+      }
+      out.push(`<div class="rcards">${cards.join("")}</div>`);
+      continue;
+    }
     const fence = line.match(/^\s*```([\w+#.-]*)\s*$/);
     if (fence) {
       flush();

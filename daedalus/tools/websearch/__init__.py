@@ -12,6 +12,7 @@ proxy injects the credential, so nothing in this package ever sees one.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -47,6 +48,9 @@ class SearchHit:
     source: str = ""
     """The engine(s) or provider that returned it; for the operator, not the model."""
     score: float | None = None
+    image: str = ""
+    """A picture of the result when the provider gave one (a product photo, a video still), so an
+    answer can show it on a card; most hits have none, and then it costs the model nothing."""
 
 
 class SearchError(Exception):
@@ -138,7 +142,7 @@ def clean(text: object, limit: int = 600) -> str:
     return value if len(value) <= limit else value[: limit - 1].rstrip() + "…"
 
 
-def hit_from(item: dict[str, object], *, title: str, url: str, snippet: str, published: str = "", source: str = "", score: str = "") -> SearchHit | None:
+def hit_from(item: dict[str, object], *, title: str, url: str, snippet: str, published: str = "", source: str = "", score: str = "", image: str = "") -> SearchHit | None:
     """Build a hit from a provider's JSON object, naming the fields it uses; None without a URL."""
     link = str(item.get(url) or "").strip()
     if not link:
@@ -151,7 +155,20 @@ def hit_from(item: dict[str, object], *, title: str, url: str, snippet: str, pub
         published=clean(item.get(published), 40) if published else "",
         source=source,
         score=float(raw_score) if isinstance(raw_score, (int, float)) else None,
+        image=_picture(item, image),
     )
+
+
+def _picture(item: dict[str, object], fields: str) -> str:
+    """The first of the comma-separated ``fields`` that holds a web address; only https, since the
+    app shows it on a page served over https and an http picture would be blocked there anyway."""
+    for name in (f for f in fields.split(",") if f):
+        value = str(item.get(name) or "").strip()
+        if value.startswith("//"):
+            value = "https:" + value
+        if value.startswith("https://") and len(value) <= 500 and not any(c.isspace() for c in value):
+            return value
+    return ""
 
 
 def dedupe(hits: list[SearchHit], limit: int) -> list[SearchHit]:
@@ -203,8 +220,46 @@ def render(hits: list[SearchHit]) -> str:
     lines = []
     for hit in hits:
         head = f"- {hit.title}" + (f" ({hit.published})" if hit.published else "")
-        lines.append(f"{head}\n  {hit.url}\n  {hit.snippet}" if hit.snippet else f"{head}\n  {hit.url}")
+        lines.append("\n  ".join(part for part in (head, hit.url, hit.snippet, f"image: {hit.image}" if hit.image else "") if part))
     return "\n".join(lines)
+
+
+_HEAD_RE = re.compile(r"^- (.+?)(?: \((\d{4}-[^)]*)\))?$")
+_URL_LINE_RE = re.compile(r"^  (https?://\S+)$")
+SOURCE_SNIPPET_CHARS = 200
+SOURCE_LIMIT = 30
+
+
+def sources_of(text: str) -> list[dict[str, str]]:
+    """The hits back out of a result :func:`render` wrote, for the app's list of a turn's sources.
+
+    The listing carries only the first few hundred characters of a result, and a search is mostly
+    hits past that point; this is the compact form of all of them — address, title, a shortened
+    snippet, the picture — read from the text itself so that a result stored before this existed
+    is read the same way. Anything that is not a search result gives an empty list.
+    """
+    if "[search results" not in text[:400]:
+        return []
+    lines = text.splitlines()
+    out: list[dict[str, str]] = []
+    for index, line in enumerate(lines):
+        head = _HEAD_RE.match(line)
+        url = _URL_LINE_RE.match(lines[index + 1]) if head and index + 1 < len(lines) else None
+        if not head or not url:
+            continue
+        hit = {"url": url.group(1), "title": head.group(1).strip()}
+        for extra in lines[index + 2:]:
+            if not extra.startswith("  ") or extra.startswith("   "):
+                break
+            value = extra.strip()
+            if value.startswith("image: http"):
+                hit["image"] = value[len("image: "):]
+            elif "snippet" not in hit:
+                hit["snippet"] = clean(value, SOURCE_SNIPPET_CHARS)
+        out.append(hit)
+        if len(out) >= SOURCE_LIMIT:
+            break
+    return out
 
 
 def catalogue() -> list[dict[str, object]]:
@@ -233,6 +288,7 @@ __all__ = [
     "render",
     "search",
     "searxng_url",
+    "sources_of",
 ]
 
 del _backends
