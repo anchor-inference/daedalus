@@ -133,10 +133,24 @@ class Scheduler:
         )
 
     async def list(self) -> list[dict[str, Any]]:
+        """The live schedules, each with what the Schedules screen says about it besides its own row.
+
+        ``grant_expires_at`` is when the approval runs out, shown only while the operator reviews the
+        agent's schedules; ``last_session_id`` is the conversation the latest occurrence ran in, so
+        the last result links to that run; ``source_session_id`` is the conversation that asked for
+        it, which is the conversation it belongs to when it runs in a fresh one each time.
+        """
         rows = await self.app.db.fetchall(
-            "SELECT * FROM schedules WHERE deleted_at IS NULL AND id NOT IN"
+            "SELECT s.*,g.expires_at AS grant_expires_at,"
+            "(SELECT i.session_id FROM recurring_cycles c JOIN input_receipts i"
+            " ON i.client_message_id = 'schedule-cycle:' || c.id WHERE c.schedule_id = s.id"
+            " ORDER BY c.created_at DESC,c.id DESC LIMIT 1) AS last_session_id,"
+            "(SELECT p.source_session_id FROM schedule_proposals p WHERE p.accepted_schedule_id = s.id"
+            " AND p.status = 'accepted' ORDER BY p.updated_at DESC LIMIT 1) AS source_session_id"
+            " FROM schedules s LEFT JOIN actor_grants g ON g.id = s.grant_id AND g.revoked_at IS NULL"
+            " WHERE s.deleted_at IS NULL AND s.id NOT IN"
             " (SELECT legacy_schedule_id FROM schedule_proposals"
-            " WHERE legacy_schedule_id IS NOT NULL AND status != 'accepted') ORDER BY next_run_at"
+            " WHERE legacy_schedule_id IS NOT NULL AND status != 'accepted') ORDER BY s.next_run_at"
         )
         return [dict(r) for r in rows]
 

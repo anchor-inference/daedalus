@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { commandPreview, cronFor, describeCron, duration, middleTruncate, plainPreview, planName, relTime, tokens, untilShort, usd } from "./format";
+import { commandPreview, cronFor, describeCron, describeSchedule, duration, middleTruncate, plainPreview, planName, relTime, tokens, untilShort, usd } from "./format";
+import { setLang } from "./i18n";
 
 const NOW = Date.parse("2026-09-11T12:00:00Z");
 
@@ -67,8 +68,34 @@ describe("schedules", () => {
     expect(describeCron("0 2 * * 1", -300)).toBe("Sun at 21:00");
   });
   it("leaves the exotic lines alone", () => {
-    expect(describeCron("0 4 1 * *", 300)).toBe("0 4 1 * * (UTC)");
+    expect(describeCron("0 4 1-7 * *", 300)).toBe("0 4 1-7 * * (UTC)");
+    expect(describeCron("0 9-17/2 * * *", 300)).toBe("0 9-17/2 * * * (UTC)");
     expect(describeCron("nonsense")).toBe("nonsense");
+  });
+  // The shapes the agent writes, which the Schedules screen once showed as raw cron.
+  it("says the hourly, several-times-a-day and monthly shapes in words, in the reader's zone", () => {
+    expect(describeCron("5 * * * *", 300)).toBe("Every hour at :05");
+    expect(describeCron("10 2 * * *", 300)).toBe("Every day at 07:10");
+    expect(describeCron("50 5,11,17,23 * * *", 300)).toBe("Every day at 04:50, 10:50, 16:50, 22:50");
+    expect(describeCron("15 */3 * * *", 300)).toBe("Every 3 hours at :15");
+    expect(describeCron("0 4 1 * *", 300)).toBe("Every month on day 1 at 09:00");
+    // A zone half an hour off the hour moves the minute past it, and a shift back across the first
+    // of the month is left as cron rather than guessed.
+    expect(describeCron("5 * * * *", 330)).toBe("Every hour at :35");
+    expect(describeCron("0 22 1 * *", -300)).toBe("Every month on day 1 at 17:00");
+    expect(describeCron("0 2 1 * *", -300)).toBe("0 2 1 * * (UTC)");
+  });
+  it("says them in Russian too", () => {
+    setLang("ru");
+    try {
+      expect(describeCron("5 * * * *", 300)).toBe("Каждый час в :05");
+      expect(describeCron("10 2 * * *", 300)).toBe("Каждый день в 07:10");
+      expect(describeCron("15 */2 * * *", 300)).toBe("Каждые 2 часа в :15");
+      expect(describeCron("0 4 1 * *", 300)).toBe("Каждый месяц, 1-го числа в 09:00");
+      expect(describeSchedule({ cron: null, run_at: "2026-10-27T13:50:00Z" })).toMatch(/^Однократно /);
+    } finally {
+      setLang("en");
+    }
   });
   it("builds a UTC cron from a local time", () => {
     expect(cronFor("weekdays", 9, 0, [], 1, 300)).toBe("0 4 * * 1,2,3,4,5");

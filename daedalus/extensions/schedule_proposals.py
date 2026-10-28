@@ -82,6 +82,21 @@ STANDING_RECURRING_DAYS = 3650
 month and asks again; the standing choice is the operator having already said yes, so a recurring task
 the agent set must not quietly stop firing after thirty days."""
 
+HAND_APPROVAL_DAYS = 30
+"""How long the operator's own Accept of a recurring schedule lasts while ``scheduler.require_approval``
+is on: the operator asked to review the agent's schedules, so the review comes round again."""
+
+
+def approval_days(config: Any) -> int:
+    """How far ahead an Accept pressed in the app approves a recurring schedule.
+
+    With approval off the operator has already said yes to the agent's schedules, so a hand-pressed
+    Accept, a Resume or an edit gets the standing horizon too. A thirty-day grant in that mode only
+    meant a schedule that silently stopped a month later, with the app nagging about a renewal nobody
+    had asked for.
+    """
+    return HAND_APPROVAL_DAYS if config.scheduler.require_approval else STANDING_RECURRING_DAYS
+
 
 class ScheduleProposals:
     def __init__(self, app: Application) -> None:
@@ -326,7 +341,9 @@ class ScheduleProposals:
             revision = await self.db.fetchone("SELECT revision FROM domain_collection_revisions"
                                               " WHERE scope_kind=? AND scope_id=?", scope)
             collection_revision = int(revision["revision"]) if revision is not None else None
-        return {"schedule": schedule, "proposal": proposal, "collection_revision": collection_revision}
+        return {"schedule": schedule, "proposal": proposal, "collection_revision": collection_revision,
+                "require_approval": bool(self.app.config.scheduler.require_approval),
+                "approval_days": approval_days(self.app.config)}
 
     async def list(self, *, limit: int = 100, source_session_id: str | None = None) -> list[dict[str, Any]]:
         rows = await self.db.fetchall(

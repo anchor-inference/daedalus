@@ -37,7 +37,7 @@ const ALLOWED: Record<string, string[]> = {
     "ru, us",
     "ru, en",
   ],
-  "./screens/Schedules.tsx": ["0 4 * * 1-5"],
+  "./schedules/ScheduleForm.tsx": ["0 4 * * 1-5"],
   "./screens/AddModel.tsx": ["http://localhost:9000/v1"],
   "./modelselect.tsx": ["vllm/Qwen3.6"],
 };

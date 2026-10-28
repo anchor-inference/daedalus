@@ -536,8 +536,9 @@ GATES: dict[str, object] = {
     "/api/proposals": [],
     "/api/schedules": [],
     # The schedules the agent asks for that wait for the operator: none. The shell counts them on the
-    # Inbox entry, so every screen reads this.
-    "/api/recurring/proposals": {"entries": [], "collection_revisions": {"global:global": 1}},
+    # Inbox entry, so every screen reads this. Approval is off, the host's default, so an Accept lasts
+    # the standing horizon. A harness that needs real schedules uses schedule_stub.ScheduleStub.
+    "/api/recurring/proposals": {"entries": [], "collection_revisions": {"global:global": 1}, "require_approval": False, "approval_days": 3650},
     "/api/diagrams": [],
     # A project's requests: none waits, so a phone's project draws no banner.
     "/api/asks": {"asks": []},
@@ -2608,7 +2609,7 @@ class FocusStub:
         if path == "/api/recurring/overview" and method == "GET":
             return 200, {"global_collection_revision": 1}
         if path == "/api/recurring/proposals" and method == "GET":
-            return 200, {"entries": [], "collection_revisions": {"global:global": 1}}
+            return 200, {"entries": [], "collection_revisions": {"global:global": 1}, "require_approval": False, "approval_days": 3650}
         if path.startswith("/api/recurring/proposals/") and method == "POST":
             return 404, {"detail": "no such proposal"}
         if path == "/api/recurring/preview" and method == "POST":

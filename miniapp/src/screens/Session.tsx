@@ -22,6 +22,7 @@ import { KeptFiles, TurnFiles } from "../artifact";
 import { placeOf, turnFiles, turnPages } from "../turnfiles";
 import { PageCards } from "../pagecard";
 import { ScheduleCard, scheduleCardIds } from "../schedulecard";
+import { openSchedules } from "../schedules/host";
 import { WidgetFrames } from "../widgetframe";
 import { drawnWidgets } from "../widget";
 import { useReveal } from "../reveal";
@@ -1664,6 +1665,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                   ]
                 : []),
               ...(onSplit ? [{ label: t("session.split"), icon: "split" as IconName, onSelect: onSplit }] : []),
+              // This chat's schedules over the chat; the dialog's switch reaches everyone else's.
+              ...(id ? [{ label: t("session.schedules"), icon: "calendar" as IconName, onSelect: () => openSchedules({ sessionId: id, selected: null }) }] : []),
               "-",
               { label: t("session.share"), icon: "share", onSelect: () => setSharing(true) },
               { label: t("session.export"), icon: "download", onSelect: exportMarkdown },
@@ -2238,7 +2241,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
       {settingsChangeIds(turn.activity).map((id) => <SettingsChangeCard key={id} changeId={id} />)}
       {/* A schedule the agent set, or asks to set, is shown where it was made: a request nobody saw
           is a reminder that never rings, which is how proposals once sat unanswered for days. */}
-      {scheduleCardIds(turn.activity).map((id) => <ScheduleCard key={id} itemId={id} />)}
+      {scheduleCardIds(turn.activity).map((id) => <ScheduleCard key={id} itemId={id} sessionId={sessionId} />)}
       {files && <TurnFiles sessionId={sessionId} sent={files.sent} changed={files.changed} onOpen={preview} />}
       {/* A page the agent showed is drawn as soon as the call returns, not when the turn ends: the
           point of showing it is that the operator can open it while the agent goes on. */}
