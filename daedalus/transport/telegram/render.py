@@ -56,6 +56,92 @@ _ATTR_RE = re.compile(r"([a-z_]+)\s*=\s*\"([^\"]*)\"")
 _MEDIA_RE = re.compile(r"!\[[^\]\n]{0,500}\]\(daedalus-media:[0-9a-f-]{36}\)")
 
 
+_CARD_OPEN_RE = re.compile(r"^\s*:::\s*(card|entity)\b\s*(.*)$", re.IGNORECASE)
+_CARD_CLOSE_RE = re.compile(r"^\s*:::\s*$")
+_CARD_FIELD_RE = re.compile(r"^\s*(title|url|image|badge|meta|links|note)\s*:\s?(.*)$", re.IGNORECASE)
+_CITE_ONE = r"\[\^([^\]\n]{0,40})\]\((https?://[^)\s]+)\)"
+_CITE_RUN_RE = re.compile(rf"{_CITE_ONE}(?:[ \t]*{_CITE_ONE})*")
+_SITE_RE = re.compile(r"^https?://(?:www\d?\.|m\.)?([^/?#:]+)", re.IGNORECASE)
+
+
+def _site(url: str) -> str:
+    match = _SITE_RE.match(url)
+    return match.group(1).lower() if match else url
+
+
+def _card_text(kind: str, rest: str, lines: list[str]) -> list[str]:
+    """One card as the lines a chat reads: the title linked and the badge beside it, then the meta,
+    the body as written, the links and the note. The picture is left out: a chat message has no
+    place for it, and the link under the title leads to the page that shows it."""
+    fields = {"title": rest.strip()}
+    body: list[str] = []
+    fenced = False
+    for line in lines:
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        field = None if fenced else _CARD_FIELD_RE.match(line)
+        if field:
+            fields[field.group(1).lower()] = field.group(2).strip()
+        else:
+            body.append(line)
+    title, url = fields.get("title", ""), fields.get("url", "")
+    if not url.startswith(("https://", "http://")):
+        url = ""
+    head = f"[{title}]({url})" if title and url else title or (f"[{_site(url)}]({url})" if url else "")
+    if head:
+        head = f"**{head}**" if kind == "card" else f"### {head}"
+    if fields.get("badge"):
+        head = f"{head} · _{fields['badge']}_" if head else f"_{fields['badge']}_"
+    out = [part for part in (head, fields.get("meta", "")) if part]
+    text = "\n".join(body).strip()
+    if text:
+        out.append(text)
+    out += [part for part in (fields.get("links", ""), f"_{fields['note']}_" if fields.get("note") else "") if part]
+    return out
+
+
+def flatten_rich(text: str) -> str:
+    """A rich answer's cards and citations, as Markdown a chat renders.
+
+    The Mini App draws ``:::card`` and ``:::entity`` blocks as cards and ``[^](url)`` as a chip named
+    after the site. In Telegram the block markers and the key names would be noise, so a card becomes
+    its title as a link with its lines under it, and the citations beside a sentence become the sites
+    they name, each a link, in brackets.
+    """
+    if ":::" not in text and "[^" not in text:
+        return text
+    out: list[str] = []
+    lines = text.split("\n")
+    index = 0
+    fenced = False
+    while index < len(lines):
+        line = lines[index]
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        opened = None if fenced else _CARD_OPEN_RE.match(line)
+        if not opened:
+            out.append(line)
+            index += 1
+            continue
+        block: list[str] = []
+        index += 1
+        while index < len(lines) and not _CARD_CLOSE_RE.match(lines[index]):
+            block.append(lines[index])
+            index += 1
+        index += 1
+        out.extend(_card_text(opened.group(1).lower(), opened.group(2), block))
+        out.append("")
+
+    def cites(match: re.Match[str]) -> str:
+        links = [f"[{label.strip() or _site(url)}]({url})" for label, url in re.findall(_CITE_ONE, match.group(0))]
+        return f" ({', '.join(links)})"
+
+    # Citations are rewritten outside code only: a fence quoting the syntax keeps it as written.
+    joined = "\n".join(out)
+    pieces = re.split(r"(```.*?```|`[^`\n]*`)", joined, flags=re.DOTALL)
+    return "".join(piece if index % 2 else _CITE_RUN_RE.sub(cites, piece) for index, piece in enumerate(pieces))
+
+
 def flatten_evidence(text: str) -> str:
     """The evidence tags of an answer, as text a chat without click targets can read.
 
@@ -63,6 +149,7 @@ def flatten_evidence(text: str) -> str:
     into chips that open the file and the receipt. Telegram has nothing to open, and an unrendered
     tag is noise in the operator's chat — so a file becomes ``x.py:3-9`` and a run becomes its label
     with the id behind it. A tag that carries neither a path nor an id is dropped: it points nowhere.
+    A rich answer's cards and citations are flattened first (:func:`flatten_rich`).
     """
 
     def one(match: re.Match[str]) -> str:
@@ -78,7 +165,7 @@ def flatten_evidence(text: str) -> str:
             return label
         return f"{label} (run {run_id})" if label else f"run {run_id}"
 
-    return re.sub(r"\n{3,}", "\n\n", _MEDIA_RE.sub("", _EVIDENCE_RE.sub(one, text))).strip()
+    return re.sub(r"\n{3,}", "\n\n", _MEDIA_RE.sub("", _EVIDENCE_RE.sub(one, flatten_rich(text)))).strip()
 
 
 DEFAULT_EDIT_TIERS: tuple[tuple[float, float], ...] = ((60, 1), (300, 2), (900, 5), (0, 10))

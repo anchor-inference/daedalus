@@ -34,8 +34,9 @@ from daedalus.host import prompts
 from daedalus.host.prompts import split_headline
 from daedalus.host.run_outcome import OUTCOME_METADATA_KEY
 from daedalus.security import operator_secrets, redact
+from daedalus.tools.websearch import sources_of
 
-VIEW_VERSION = 12
+VIEW_VERSION = 13
 """Bumped whenever the shape below changes; stored views from an older version are recomputed. It
 covers this file only — what the redactor masks is covered by the key, by value and by shape, so a
 new secret format does not depend on anyone remembering this number."""
@@ -189,13 +190,18 @@ def _result_preview(block: ToolResultBlock) -> dict[str, Any]:
     if block.canonical_content and _SPLIT_POINTER_RE.search(content):
         # The model was shown a first page; the listing measures what the tool returned.
         content = block.canonical_content
-    return {
+    view: dict[str, Any] = {
         "id": block.tool_call_id,
         "content": redact.shared().redact_tool_data(content[:TOOL_RESULT_PREVIEW_CHARS]),
         "is_error": block.is_error,
         "length": len(content),
         "clipped": len(content) > TOOL_RESULT_PREVIEW_CHARS,
     }
+    # A search's hits are mostly past the preview; the answer's list of sources needs all of them,
+    # in the compact form rather than the whole text.
+    if not block.is_error and (sources := sources_of(content)):
+        view["sources"] = [{key: redact.shared().redact_tool_data(value) for key, value in hit.items()} for hit in sources]
+    return view
 
 
 async def full_tool_result(block: ToolResultBlock, blobs: IBlobStore, tenant_id: str) -> tuple[str, bool]:

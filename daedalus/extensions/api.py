@@ -83,6 +83,7 @@ from daedalus.extensions import (
     api_diagrams,
     api_disk,
     api_explorations,
+    api_favicon,
     api_files,
     api_folder_browser,
     api_folder_move,
@@ -1706,6 +1707,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_workspace_archive.register(api, app, auth)
     # How much disk each workspace takes, and the operator's clean-up of it.
     api_disk.register(api, app, auth)
+    # The site icons beside a rich answer's citations and sources, fetched once by the host and kept.
+    api_favicon.register(api, app, auth)
     api_plugins.register(api, app, auth)
     api_skill_quality.register(api, app, auth)
     api_integrations.register(api, app, auth)

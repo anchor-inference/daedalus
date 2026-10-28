@@ -1,7 +1,7 @@
 // Markup the app has already rendered to a string — markdown, a highlighted line, a code card —
 // put into the page without React redrawing it on every render.
 
-import { createElement, memo, useMemo } from "react";
+import { createElement, memo, useLayoutEffect, useMemo, useRef } from "react";
 
 /**
  * An element whose content is `html`, written into the page only when `html` changes.
@@ -16,7 +16,13 @@ import { createElement, memo, useMemo } from "react";
  * operator's selection in it. The object is now made once per string, so an unchanged string keeps
  * its nodes, and with them the scroll position and the selection.
  */
-export const RawHtml = memo(function RawHtml({ html, className, as = "div" }: { html: string; className?: string; as?: "div" | "span" }) {
+export const RawHtml = memo(function RawHtml({ html, className, as = "div", onWritten }: { html: string; className?: string; as?: "div" | "span"; onWritten?: (element: HTMLElement) => void }) {
   const inner = useMemo(() => ({ __html: html }), [html]);
-  return createElement(as, { className, dangerouslySetInnerHTML: inner });
+  // `onWritten` sees the nodes each time the string is written, for what markup cannot do alone: a
+  // rich answer's site marks are fetched with the credential and painted in afterwards.
+  const element = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    if (onWritten && element.current) onWritten(element.current);
+  }, [inner, onWritten]);
+  return createElement(as, { className, dangerouslySetInnerHTML: inner, ref: element });
 });

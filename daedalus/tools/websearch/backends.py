@@ -69,7 +69,7 @@ class SearxngBackend:
         hits = []
         for item in data.get("results") or []:
             engines = item.get("engines") or ([item["engine"]] if item.get("engine") else [])
-            hit = hit_from(item, title="title", url="url", snippet="content", published="publishedDate", source=",".join(engines), score="score")
+            hit = hit_from(item, title="title", url="url", snippet="content", published="publishedDate", source=",".join(engines), score="score", image="thumbnail,img_src")
             if hit is not None:
                 hits.append(hit)
         unresponsive = [f"{name} ({reason})" for name, reason in (pair for pair in data.get("unresponsive_engines") or [] if isinstance(pair, list) and len(pair) == 2)]
@@ -134,7 +134,7 @@ class SerperBackend:
         data = _check(response, self.id)
         hits = []
         for item in data.get("organic") or []:
-            hit = hit_from(item, title="title", url="link", snippet="snippet", published="date", source="google")
+            hit = hit_from(item, title="title", url="link", snippet="snippet", published="date", source="google", image="imageUrl")
             if hit is not None:
                 hits.append(hit)
         return hits
@@ -214,7 +214,7 @@ class ExaBackend:
         for item in data.get("results") or []:
             highlights = item.get("highlights")
             snippet = " ".join(str(h) for h in highlights) if isinstance(highlights, list) else str(item.get("text") or "")
-            hit = hit_from({**item, "snippet": snippet}, title="title", url="url", snippet="snippet", published="publishedDate", source="exa", score="score")
+            hit = hit_from({**item, "snippet": snippet}, title="title", url="url", snippet="snippet", published="publishedDate", source="exa", score="score", image="image")
             if hit is not None:
                 hits.append(hit)
         return hits

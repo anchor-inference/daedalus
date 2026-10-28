@@ -3,7 +3,7 @@
 // should reproduce (`?panel=preview&path=reports/menu.md`), the browser remembers the width and the
 // last open tab, and the component in panel.tsx is the only thing that turns either into pixels.
 
-export type PanelTab = "details" | "files" | "preview" | "jobs" | "subagents" | "board" | "brief" | "wakeups" | "folders" | "questions" | "browser";
+export type PanelTab = "details" | "files" | "preview" | "jobs" | "subagents" | "board" | "brief" | "wakeups" | "folders" | "questions" | "browser" | "sources";
 
 /** A session's own tabs: what the agent is, the files it works on, one of them open, its jobs. */
 export const PANEL_TABS: PanelTab[] = ["details", "files", "preview", "jobs"];
@@ -42,8 +42,9 @@ export type PanelContext = "session" | "orchestrator" | "member" | "main";
  * first, where the orchestrator's is: most sessions never leave one, and a tab that is nearly always
  * empty is one more thing on a phone's strip to read past.
  */
-export function tabsFor(context: PanelContext, opts: { browser?: boolean; preview?: boolean; subagents?: boolean; questions?: boolean } = {}): PanelTab[] {
-  const browser: PanelTab[] = opts.browser ? ["browser"] : [];
+export function tabsFor(context: PanelContext, opts: { browser?: boolean; preview?: boolean; subagents?: boolean; questions?: boolean; sources?: boolean } = {}): PanelTab[] {
+  // An answer's sources sit beside the browser: both are the web the turn read.
+  const browser: PanelTab[] = [...(opts.browser ? (["browser"] as PanelTab[]) : []), ...(opts.sources ? (["sources"] as PanelTab[]) : [])];
   const own: PanelTab[] = [...PANEL_TABS, ...(opts.subagents ? (["subagents"] as PanelTab[]) : [])];
   if (context === "orchestrator") return ["questions", "details", "files", ...(opts.preview ? (["preview"] as PanelTab[]) : []), ...browser, ...PROJECT_TABS];
   if (context === "member") return [...own, ...browser, ...PROJECT_TABS];
@@ -58,7 +59,7 @@ export function tabsFor(context: PanelContext, opts: { browser?: boolean; previe
  *  moment — the first click fetched the file and showed nothing, and only a second click, landing
  *  on an address that no longer changed, kept it open. */
 export function routeTabsFor(context: PanelContext): PanelTab[] {
-  return tabsFor(context, { browser: true, preview: true, subagents: true, questions: true });
+  return tabsFor(context, { browser: true, preview: true, subagents: true, questions: true, sources: true });
 }
 
 /** One file the Preview tab showed: where the bytes come from, and the lines an answer cited, if any. */
@@ -78,7 +79,7 @@ export type PanelState = {
 
 export const PANEL_CLOSED: PanelState = { tab: null, stack: [], at: -1, expanded: false, sub: null };
 
-export function isPanelTab(v: string | null | undefined, tabs: readonly PanelTab[] = [...PANEL_TABS, "subagents", ...PROJECT_TABS, "questions", "browser"]): v is PanelTab {
+export function isPanelTab(v: string | null | undefined, tabs: readonly PanelTab[] = [...PANEL_TABS, "subagents", ...PROJECT_TABS, "questions", "browser", "sources"]): v is PanelTab {
   return !!v && (tabs as readonly string[]).includes(v);
 }
 
