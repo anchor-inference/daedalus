@@ -3275,6 +3275,19 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "changes.diff.error": { en: "could not load the diff: {error}", ru: "не удалось загрузить различия: {error}" },
 
   // ── schedules ──────────────────────────────────────────────────────────────────────────
+  "schedcard.title": { en: "Schedule", ru: "Расписание" },
+  "schedcard.gone": { en: "This schedule is no longer kept.", ru: "Этого расписания больше нет." },
+  "schedcard.failed.load": { en: "Could not read the schedule: {error}", ru: "Не удалось прочитать расписание: {error}" },
+  "schedcard.status.set": { en: "Set", ru: "Поставлено" },
+  "schedcard.status.pending": { en: "Waiting for you", ru: "Ждёт вас" },
+  "schedcard.status.declined": { en: "Declined", ru: "Отклонено" },
+  "schedcard.status.removed": { en: "Removed", ru: "Удалено" },
+  "schedcard.status.paused": { en: "Paused", ru: "На паузе" },
+  "schedcard.next": { en: "Next run {at} · {rel}", ru: "Следующий запуск {at} · {rel}" },
+  "schedcard.open": { en: "Schedules", ru: "Расписания" },
+  "schedcard.accept": { en: "Accept", ru: "Принять" },
+  "schedcard.decline": { en: "Decline", ru: "Отклонить" },
+  "inbox.schedules": { en: "Schedules waiting for you", ru: "Расписания ждут вашего решения" },
   "sched.kind.agent": { en: "Agent task", ru: "Задача агенту" },
   "sched.kind.message": { en: "Reminder", ru: "Напоминание" },
   "sched.kind.lazy": { en: "Lazy note", ru: "Заметка на потом" },
@@ -5042,6 +5055,8 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "settings.chat.slowtool": { en: "Mark a tool call as slow after", ru: "Считать вызов инструмента медленным после" },
   "settings.chat.scheduled": { en: "Topics for scheduled runs", ru: "Темы для запусков по расписанию" },
   "settings.chat.scheduled.sub": { en: "One topic that every run of a task shares, or a new one for each run.", ru: "Одна тема на все запуски задания или новая на каждый запуск." },
+  "settings.chat.schedapproval": { en: "Agent's schedules wait for my approval", ru: "Расписания агента ждут моего подтверждения" },
+  "settings.chat.schedapproval.sub": { en: "Off: a schedule the agent creates is set at once and shown in the chat. On: it waits for Accept in its chat card or the Inbox.", ru: "Выключено: расписание, которое создаёт агент, ставится сразу и показывается в чате. Включено: ждёт кнопки «Принять» в карточке чата или во Входящих." },
   "settings.chat.pertask": { en: "one topic per task", ru: "одна тема на задачу" },
   "settings.chat.perrun": { en: "one topic per run", ru: "одна тема на запуск" },
 

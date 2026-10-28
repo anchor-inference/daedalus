@@ -1,4 +1,11 @@
-"""Persist agent schedule requests without giving them execution authority."""
+"""Persist agent schedule requests, and activate them under the operator's standing choice.
+
+Every schedule the agent asks for is first saved as a proposal: its files are pinned by digest and the
+request is hashed, whatever happens next. With ``scheduler.require_approval`` on, the proposal waits
+for the operator's Accept. With it off (the default) the host accepts it at once on the operator's
+behalf, through the very same acceptance, so the file checks, the grant and the receipts are those of
+an approval the operator pressed — only the press is replaced by the setting.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +13,7 @@ import hashlib
 import json
 import shutil
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -62,6 +69,18 @@ def _legacy_file_paths(request: dict[str, Any]) -> list[str]:
     if not isinstance(paths, list) or any(not isinstance(path, str) for path in paths):
         raise ControlDenied("the original attachment list cannot be reviewed")
     return paths
+
+
+STANDING_ISSUER = Principal("operator:standing-schedules", "operator")
+"""Who a schedule the agent set directly is recorded as approved by: the operator, through
+``scheduler.require_approval`` being off. A distinct identity rather than the operator's own, so a
+schedule the agent made is told apart from one the operator made or accepted by hand — which is what
+lets the agent remove its own and never the operator's."""
+
+STANDING_RECURRING_DAYS = 3650
+"""How long the standing approval of a recurring schedule lasts. The operator's own Accept grants a
+month and asks again; the standing choice is the operator having already said yes, so a recurring task
+the agent set must not quietly stop firing after thirty days."""
 
 
 class ScheduleProposals:
@@ -167,6 +186,147 @@ class ScheduleProposals:
             )
             return {"id": proposal_id, "proposal_revision": 1, "status": "pending",
                     "next_run_at": due, "kind": kind, "run_in": run_in, "request_digest": request_digest}
+
+    async def create_direct(self, **request: Any) -> dict[str, Any]:
+        """Save the proposal and accept it at once under the standing approval.
+
+        A replay of the same tool call finds its proposal already accepted and answers with the same
+        schedule. An acceptance that is refused retires the proposal: a pending one left behind by a
+        call that reported failure is exactly the forgotten request this path exists to avoid.
+
+        Going through the proposal is not ceremony. Its pinned digests are what every occurrence is
+        checked against when it fires (``verify_accepted_files``), so an attached file swapped in the
+        file store after the schedule was set is refused rather than fed to an unattended run.
+        """
+        proposal = await self.create(**request)
+        try:
+            return await self._accept_standing(proposal["id"])
+        except Exception:
+            await self.db.execute("UPDATE schedule_proposals SET status='withdrawn',"
+                                  "proposal_revision=proposal_revision+1,updated_at=?"
+                                  " WHERE id=? AND status='pending'", (now(), proposal["id"]))
+            raise
+
+    async def _accept_standing(self, proposal_id: str) -> dict[str, Any]:
+        for _ in range(3):
+            row = await self.db.fetchone("SELECT * FROM schedule_proposals WHERE id=?", (proposal_id,))
+            if row is None:
+                raise KeyError(proposal_id)
+            request = json.loads(row["request_json"])
+            done = {"proposal_id": proposal_id, "kind": request["kind"], "run_in": request["run_in"]}
+            if row["status"] == "accepted":
+                schedule = await self.db.fetchone("SELECT next_run_at FROM schedules WHERE id=?",
+                                                  (row["accepted_schedule_id"],))
+                return {**done, "id": row["accepted_schedule_id"], "status": "accepted",
+                        "next_run_at": schedule["next_run_at"] if schedule else request["next_run_at"]}
+            if row["status"] != "pending":
+                raise ControlDenied("this schedule request was withdrawn")
+            scope = (("project", row["source_project_id"]) if row["source_project_id"] else ("global", "global"))
+            revision = await self.db.fetchone("SELECT revision FROM domain_collection_revisions"
+                                              " WHERE scope_kind=? AND scope_id=?", scope)
+            if revision is None:
+                raise KeyError(scope[1])
+            # A one-shot needs its approval to outlive the occurrence, with a day to spare for a
+            # restart that delays the tick; a recurring one gets the standing horizon.
+            horizon = (timedelta(days=STANDING_RECURRING_DAYS) if request["cron"] else
+                       datetime.fromisoformat(request["next_run_at"]) - datetime.now(UTC) + timedelta(days=1))
+            try:
+                accepted = await self.accept(
+                    STANDING_ISSUER, proposal_id, request_digest=row["request_digest"],
+                    expected_proposal_revision=row["proposal_revision"],
+                    expires_at=(datetime.now(UTC) + horizon).isoformat(),
+                    expected_collection_revision=int(revision["revision"]),
+                    client_operation_id=f"standing:{proposal_id}",
+                )
+            except ControlConflict:
+                # Another command moved the collection between the read and the write; nothing
+                # was committed, so the same identity is tried again on the new revision.
+                continue
+            return {**done, "id": accepted["id"], "status": "accepted", "next_run_at": accepted["next_run_at"]}
+        raise ControlConflict("the schedules kept changing; try again")
+
+    async def remove_agent(self, *, source_session_id: str, source_run_id: str | None,
+                           source_command_id: str, schedule_id: str) -> dict[str, Any]:
+        """The session that set a schedule under the standing approval may remove it again.
+
+        Only that session and only that kind of schedule: one the operator created, or accepted by
+        hand, carries the operator's own identity and stays theirs to remove. The removal goes through
+        the operator's removal command, so it withdraws the grant and any queued delivery the same way.
+        """
+        if not source_session_id or not source_command_id or len(source_command_id) > 160:
+            raise ControlDenied("the host must identify this removal")
+        earlier = await self.db.fetchone(
+            "SELECT response_json FROM operation_receipts WHERE actor_id=? AND operation_kind='schedule.remove'"
+            " AND client_operation_id=?", (STANDING_ISSUER.actor_id, source_command_id))
+        if earlier is not None:
+            response = json.loads(earlier["response_json"])
+            if response.get("id") != schedule_id:
+                raise ControlConflict("the command identity was reused with different contents")
+            return response
+        if source_run_id:
+            run = await self.db.fetchone("SELECT session_id FROM runs WHERE id=?", (source_run_id,))
+            if run is None or run["session_id"] != source_session_id:
+                raise ControlDenied("the host run does not belong to this session")
+        recurring = self.app.extensions.get("recurring")
+        if recurring is None:
+            raise ControlDenied("durable scheduling is unavailable")
+        for _ in range(3):
+            schedule = await self.db.fetchone("SELECT * FROM schedules WHERE id=?", (schedule_id,))
+            if schedule is None or schedule["deleted_at"]:
+                raise KeyError(schedule_id)
+            origin = await self.db.fetchone("SELECT source_session_id FROM schedule_proposals"
+                                            " WHERE accepted_schedule_id=? AND status='accepted'"
+                                            " ORDER BY updated_at DESC,id DESC LIMIT 1", (schedule_id,))
+            if (schedule["actor_id"] != STANDING_ISSUER.actor_id or origin is None
+                    or origin["source_session_id"] != source_session_id):
+                raise ControlDenied("only a schedule this conversation set itself can be removed here;"
+                                    " the operator removes the others in Schedules")
+            scope = ("project", schedule["project_id"]) if schedule["project_id"] else ("global", "global")
+            revision = await self.db.fetchone("SELECT revision FROM domain_collection_revisions"
+                                              " WHERE scope_kind=? AND scope_id=?", scope)
+            if revision is None:
+                raise KeyError(scope[1])
+            try:
+                return await recurring.remove(
+                    STANDING_ISSUER, schedule_id, expected_collection_revision=int(revision["revision"]),
+                    expected_schedule_revision=int(schedule["schedule_revision"]),
+                    client_operation_id=source_command_id,
+                )
+            except ControlConflict:
+                continue
+        raise ControlConflict("the schedules kept changing; try again")
+
+    async def card(self, item_id: str) -> dict[str, Any]:
+        """What the chat card of a ScheduleCreate call shows: the schedule, its proposal, or both.
+
+        A proposal's card needs the revision of its collection to answer Accept or Decline with the
+        exact request the operator saw; an accepted one is shown as the schedule it became.
+        """
+        proposal: dict[str, Any] | None = None
+        schedule_id = item_id
+        if item_id.startswith("p"):
+            row = await self.db.fetchone("SELECT * FROM schedule_proposals WHERE id=?", (item_id,))
+            if row is None:
+                raise KeyError(item_id)
+            proposal = self._view(dict(row))
+            schedule_id = row["accepted_schedule_id"] or ""
+        found = await self.db.fetchone("SELECT * FROM schedules WHERE id=?", (schedule_id,)) if schedule_id else None
+        if proposal is None and found is None:
+            raise KeyError(item_id)
+        schedule = None
+        if found is not None:
+            schedule = {key: found[key] for key in ("id", "name", "cron", "run_at", "next_run_at", "kind",
+                                                    "run_in", "enabled", "authority_state")}
+            schedule["deleted"] = bool(found["deleted_at"])
+            schedule["set_by_agent"] = found["actor_id"] == STANDING_ISSUER.actor_id
+        collection_revision = None
+        if proposal is not None:
+            scope = (("project", proposal["source_project_id"]) if proposal["source_project_id"]
+                     else ("global", "global"))
+            revision = await self.db.fetchone("SELECT revision FROM domain_collection_revisions"
+                                              " WHERE scope_kind=? AND scope_id=?", scope)
+            collection_revision = int(revision["revision"]) if revision is not None else None
+        return {"schedule": schedule, "proposal": proposal, "collection_revision": collection_revision}
 
     async def list(self, *, limit: int = 100, source_session_id: str | None = None) -> list[dict[str, Any]]:
         rows = await self.db.fetchall(

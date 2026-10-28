@@ -1498,6 +1498,9 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
               <Row title={t("settings.chat.scheduled")} desc={t("settings.chat.scheduled.sub")} stack data-setting="scheduler.topic_mode">
                 <Segmented label={t("settings.chat.scheduled")} value={s.scheduler.topic_mode} onChange={(topic_mode) => save({ scheduler: { ...s.scheduler, topic_mode } })} options={["per_task", "per_run"].map((m) => ({ id: m, label: t(m === "per_task" ? "settings.chat.pertask" : "settings.chat.perrun") }))} />
               </Row>
+              <Row title={t("settings.chat.schedapproval")} desc={t("settings.chat.schedapproval.sub")} data-setting="scheduler.require_approval">
+                <Switch checked={!!s.scheduler.require_approval} onChange={(require_approval) => save({ scheduler: { ...s.scheduler, require_approval } })} label={t("settings.chat.schedapproval")} />
+              </Row>
             </div>
           </>
         );

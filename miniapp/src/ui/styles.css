@@ -523,6 +523,10 @@ button.more-item { border: 0; font-family: inherit; cursor: pointer; }
 .setchange-actions { display:inline-flex; gap:6px; margin-left:auto; }
 .setchange-note { font-size:var(--fs-12); color:var(--fg-2); }
 .setchange-note.error { color:var(--bad); }
+.schedcard.set { border-color:color-mix(in srgb, var(--ok) 35%, var(--line)); }
+.schedcard-facts { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px; min-width:0; font-size:var(--fs-13); color:var(--fg); }
+.schedcard-when { overflow-wrap:anywhere; min-width:0; }
+.schedcard-kind { color:var(--fg-2); font-size:var(--fs-12); }
 /* No hover on a touch screen: the actions are there from the start rather than never. */
 @media (hover: none) { .changed-file-actions { opacity:1; } }
 .reveal-btn { flex:none; background:transparent; color:var(--fg-2); }

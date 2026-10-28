@@ -262,6 +262,11 @@ async def test_operator_route_uses_exact_proposal_hash_and_receipt(proposals: Sc
         replay = await client.post(f"/api/recurring/proposals/{saved['id']}/accept", json=body)
         assert replay.json() == accepted.json()
         assert len(await db.fetchall("SELECT id FROM schedules")) == 1
+        # The chat card reads the proposal and the schedule it became through one route.
+        card = await client.get(f"/api/recurring/card/{saved['id']}")
+        assert card.status_code == 200
+        assert card.json()["proposal"]["status"] == "accepted" and card.json()["schedule"]["id"] == accepted.json()["id"]
+        assert (await client.get("/api/recurring/card/s000000000000000")).status_code == 404
 
 
 async def test_schedule_attachment_source_must_be_a_regular_file_in_project(proposals: ScheduleProposals,
@@ -406,3 +411,143 @@ async def test_repin_migration_cancels_only_pending_old_file_delivery(proposals:
     historical = await db.fetchone("SELECT action_state FROM recurring_cycles WHERE id=?", (cycle["id"],))
     assert effect["state"] == "cancelled" and historical["action_state"] == "needs_approval"
     assert (await db.fetchone("SELECT count(*) AS n FROM grant_events WHERE reason='attachment bytes require renewed review'"))["n"] == 1
+
+
+@pytest.fixture
+async def standing(settings, db: Database):  # type: ignore[no-untyped-def]
+    """The scheduler as the tools reach it, with the operator's approval setting in the config."""
+    manager = SessionManager(settings, RuntimeConfig(), db=db)
+    await manager.start()
+    await manager.create_session("origin", session_id="origin")
+    await manager.create_session("other", session_id="other")
+    app = SimpleNamespace(settings=settings, db=db, extensions={}, manager=manager, config=RuntimeConfig())
+    app.extensions["schedule_proposals"] = ScheduleProposals(app)
+    app.extensions["recurring"] = Recurring(app)
+    app.extensions["scheduler"] = Scheduler(app)
+    yield app
+    await manager.close()
+
+
+def tool_request(command: str, **overrides: object) -> dict[str, object]:
+    return {"name": "pills", "prompt": "take the pills", "cron": None, "run_at": later(),
+            "files": [], "model": None, "created_by_session": "origin", "source_run_id": None,
+            "source_command_id": command, "kind": "message", "run_in": "new", **overrides}
+
+
+async def test_agent_schedule_is_set_at_once_when_approval_is_off(standing) -> None:  # type: ignore[no-untyped-def]
+    from daedalus.extensions.schedule_proposals import STANDING_ISSUER
+
+    scheduler, db = standing.extensions["scheduler"], standing.db
+    request = tool_request("tool:direct", cron="0 6 * * *", run_at=None)
+    created = await scheduler.service("create", **dict(request))
+    assert created["status"] == "accepted" and created["id"].startswith("s") and created["next_run_at"]
+    row = await db.fetchone("SELECT * FROM schedules WHERE id=?", (created["id"],))
+    assert row["authority_state"] == "current" and row["enabled"] == 1 and row["actor_id"] == STANDING_ISSUER.actor_id
+    grant = await db.fetchone("SELECT expires_at FROM actor_grants WHERE id=?", (row["grant_id"],))
+    # A recurring schedule the agent set must not stop firing after the month an operator's Accept grants.
+    assert datetime.fromisoformat(grant["expires_at"]) > datetime.now(UTC) + timedelta(days=3000)
+    proposal = await db.fetchone("SELECT status,accepted_schedule_id FROM schedule_proposals WHERE id=?",
+                                 (created["proposal_id"],))
+    assert proposal["status"] == "accepted" and proposal["accepted_schedule_id"] == created["id"]
+    # A replayed tool call answers with the same schedule rather than setting a second one.
+    assert (await scheduler.service("create", **dict(request)))["id"] == created["id"]
+    assert len(await db.fetchall("SELECT id FROM schedules")) == 1
+    card = await standing.extensions["schedule_proposals"].card(created["id"])
+    assert card["schedule"]["set_by_agent"] and not card["schedule"]["deleted"] and card["proposal"] is None
+
+
+async def test_one_off_standing_approval_outlives_its_occurrence(standing) -> None:  # type: ignore[no-untyped-def]
+    due = later(60 * 24 * 90)
+    created = await standing.extensions["scheduler"].service("create", **tool_request("tool:far", run_at=due))
+    row = await standing.db.fetchone("SELECT g.expires_at FROM schedules s JOIN actor_grants g ON g.id=s.grant_id"
+                                     " WHERE s.id=?", (created["id"],))
+    assert datetime.fromisoformat(row["expires_at"]) > datetime.fromisoformat(due)
+
+
+async def test_agent_schedule_waits_for_the_operator_when_approval_is_on(standing) -> None:  # type: ignore[no-untyped-def]
+    standing.config.scheduler.require_approval = True
+    scheduler, db = standing.extensions["scheduler"], standing.db
+    created = await scheduler.service("create", **tool_request("tool:ask"))
+    assert created["status"] == "pending" and created["id"].startswith("p")
+    assert await db.fetchone("SELECT id FROM schedules") is None
+    card = await standing.extensions["schedule_proposals"].card(created["id"])
+    assert card["schedule"] is None and card["proposal"]["status"] == "pending"
+    assert card["collection_revision"] == await revision(db)
+    accepted = await standing.extensions["schedule_proposals"].accept(
+        Principal("operator:1", "operator"), created["id"], request_digest=card["proposal"]["request_digest"],
+        expected_proposal_revision=1, expires_at=later(120),
+        expected_collection_revision=card["collection_revision"], client_operation_id="accept:card",
+    )
+    after = await standing.extensions["schedule_proposals"].card(created["id"])
+    assert after["schedule"]["id"] == accepted["id"] and not after["schedule"]["set_by_agent"]
+    # With approval on the agent cannot remove what the operator accepted, nor anything else.
+    with pytest.raises(PermissionError):
+        await scheduler.service("remove", schedule_id=accepted["id"], source_session_id="origin",
+                                source_run_id=None, source_command_id="tool:remove-on")
+
+
+async def test_agent_removes_only_a_schedule_its_own_session_set(standing) -> None:  # type: ignore[no-untyped-def]
+    scheduler, proposals, db = standing.extensions["scheduler"], standing.extensions["schedule_proposals"], standing.db
+    mine = await scheduler.service("create", **tool_request("tool:mine"))
+    removal = dict(schedule_id=mine["id"], source_run_id=None, source_command_id="tool:remove")
+    with pytest.raises(ControlDenied):
+        await scheduler.service("remove", source_session_id="other", **removal)
+    removed = await scheduler.service("remove", source_session_id="origin", **removal)
+    assert removed["deleted"] is True
+    assert removed == await scheduler.service("remove", source_session_id="origin", **removal)
+    row = await db.fetchone("SELECT deleted_at,enabled,grant_id FROM schedules WHERE id=?", (mine["id"],))
+    assert row["deleted_at"] and row["enabled"] == 0
+    grant = await db.fetchone("SELECT revoked_at FROM actor_grants WHERE id=?", (row["grant_id"],))
+    assert grant["revoked_at"]
+    with pytest.raises(KeyError):
+        await scheduler.service("remove", source_session_id="origin", schedule_id=mine["id"],
+                                source_run_id=None, source_command_id="tool:remove-again")
+    # One the operator accepted by hand is theirs, even though this session proposed it.
+    standing.config.scheduler.require_approval = True
+    asked = await scheduler.service("create", **tool_request("tool:asked"))
+    standing.config.scheduler.require_approval = False
+    view = (await proposals.card(asked["id"]))["proposal"]
+    accepted = await proposals.accept(
+        Principal("operator:1", "operator"), asked["id"], request_digest=view["request_digest"],
+        expected_proposal_revision=1, expires_at=later(120),
+        expected_collection_revision=await revision(db), client_operation_id="accept:operator",
+    )
+    with pytest.raises(ControlDenied):
+        await scheduler.service("remove", source_session_id="origin", schedule_id=accepted["id"],
+                                source_run_id=None, source_command_id="tool:remove-operator")
+
+
+async def test_refused_direct_schedule_leaves_no_pending_proposal(standing) -> None:  # type: ignore[no-untyped-def]
+    # A wake needs the project's coordinator as its target; this session is not one.
+    with pytest.raises(ControlDenied):
+        await standing.extensions["scheduler"].service("create", **tool_request("tool:wake", kind="wake"))
+    assert await standing.db.fetchone("SELECT id FROM schedules") is None
+    row = await standing.db.fetchone("SELECT status FROM schedule_proposals")
+    assert row["status"] == "withdrawn"
+
+
+async def test_tool_answer_names_the_schedule_the_way_the_chat_card_reads_it(tmp_path: Path) -> None:
+    from daedalus.host.services import SessionServices, locator
+    from daedalus.tools.scheduling import schedule_create, schedule_delete
+
+    answers = {"create": {"id": "s0123456789abcde", "status": "accepted", "next_run_at": "2026-11-01T06:00:00+00:00",
+                          "kind": "message", "proposal_id": "p0123456789abcde"}}
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def schedule(op: str, **kwargs: object) -> object:
+        calls.append((op, kwargs))
+        return answers.get(op, {"id": kwargs.get("schedule_id"), "deleted": True})
+
+    locator.register(SessionServices(session_id="tooled", workspace_dir=tmp_path, schedule=schedule))
+    ctx = ToolContext(tenant_id="t", run_id="r", session_id="tooled", metadata={"tool_call_id": "call-1"})
+    try:
+        made = await schedule_create().invoke(ctx, {"name": "pills", "prompt": "take", "run_at": later()})
+        assert not made.is_error and made.content.splitlines()[0] == "Schedule: s0123456789abcde"
+        assert "is set" in made.content and "approval" not in made.content
+        answers["create"] = {"id": "p0123456789abcde", "status": "pending", "next_run_at": "soon", "kind": "message"}
+        asked = await schedule_create().invoke(ctx, {"name": "pills", "prompt": "take", "run_at": later()})
+        assert asked.content.splitlines()[0] == "Schedule proposal: p0123456789abcde"
+        removed = await schedule_delete().invoke(ctx, {"schedule_id": "s0123456789abcde"})
+        assert not removed.is_error and calls[-1][0] == "remove"
+    finally:
+        locator.unregister("tooled")

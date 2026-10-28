@@ -43,6 +43,7 @@ import { useNav } from "./usenav";
 import { currentId } from "./navconfig";
 import { SessionScreen, chunk, chunkVerdict, mayReload, retried, whenIdle } from "./chunks";
 import { useDeskBridge } from "./quick/deskbridge";
+import { usePendingSchedules } from "./schedulecard";
 
 /** A chunk that would not load: the build moved under an open page, or its download dropped. */
 function isChunkError(message: string): boolean {
@@ -290,7 +291,10 @@ export function App() {
   // this app does not recognise, must not take the whole shell down over a nav label.
   const selfdev: SelfDevMode = caps.data?.selfdev?.mode ?? "server";
   const proposals = useQuery<{ status: string }[]>(authed && selfdev !== "off" ? "/api/proposals" : null, { pollMs: 60000, staleMs: 30000 });
-  const counts: Counts = { inbox: notifications.unseen, changes: (proposals.data ?? []).filter((p) => p.status === "pending").length };
+  // A schedule the agent asks for counts on the Inbox like an unread entry: it waits for the operator
+  // there, and a request with no counter anywhere is one nobody answers.
+  const waitingSchedules = usePendingSchedules(!!authed);
+  const counts: Counts = { inbox: notifications.unseen + waitingSchedules.length, changes: (proposals.data ?? []).filter((p) => p.status === "pending").length };
   useShortcuts(openPalette, selfdev);
   const nav = useNav(selfdev, counts, !!authed);
   // Three more on a desktop: the menu, the sidebar and a new chat, each with a modifier so a text field never eats them.

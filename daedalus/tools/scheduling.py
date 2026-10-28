@@ -20,7 +20,8 @@ from daedalus.tools._common import error, local_copy, ok, services_for
 @tool(
     name="ScheduleCreate",
     description=(
-        "Propose a scheduled task for operator approval. Give either cron (5-field crontab expression, UTC) for a "
+        "Create a scheduled task. The result says whether it is set or waits for the operator's Accept, with its id "
+        "and next run. Give either cron (5-field crontab expression, UTC) for a "
         "recurring task, or run_at (ISO 8601 datetime, UTC) for a one-shot. The prompt is "
         "what the future agent session will be asked to do; files from the current "
         "workspace can be attached and are copied into the task's own persistent workspace. "
@@ -80,7 +81,16 @@ async def schedule_create(
     except (ValueError, PermissionError) as exc:
         return error(context, str(exc))
     where = " in this session" if created.get("run_in") == "self" else ""
-    return ok(context, f"schedule proposal {created['id']} '{name}' ({created.get('kind', kind)}{where}) awaits operator approval; proposed next at {created.get('next_run_at')}", proposal_id=created["id"])
+    what = f"'{name}' ({created.get('kind', kind)}{where})"
+    # The first line names the item the way the app's chat card reads it (schedulecard.tsx): the
+    # card is drawn from that id alone, so the wording of this line is a contract with the app.
+    if created.get("status") == "accepted":
+        return ok(context, f"Schedule: {created['id']}\n{what} is set; next run {created.get('next_run_at')} (UTC). "
+                  "The operator sees it in the chat and in Schedules; ScheduleDelete removes it.",
+                  schedule_id=created["id"], proposal_id=created.get("proposal_id"))
+    return ok(context, f"Schedule proposal: {created['id']}\n{what} waits for the operator's Accept; "
+              f"proposed next run {created.get('next_run_at')} (UTC). It does not run until accepted.",
+              proposal_id=created["id"])
 
 
 @tool_group("scheduling")
@@ -110,7 +120,9 @@ async def schedule_list(context: ToolContext) -> ToolResult:
     "delete scheduled job cancel cron reminder unschedule stop recurring "
     "удалить удали отменить отмени напоминалку напоминание расписание снять сними регулярное"
 )
-@tool(name="ScheduleDelete", description="Withdraw your own pending schedule proposal. An approved schedule must be removed by the operator in Schedules.")
+@tool(name="ScheduleDelete", description=(
+    "Remove a schedule this conversation set (its id from ScheduleCreate or ScheduleList), or withdraw its "
+    "pending proposal. A schedule the operator made or accepted is theirs to remove in Schedules."))
 async def schedule_delete(context: ToolContext, schedule_id: str) -> ToolResult:
     services = services_for(context)
     if services.schedule is None:
@@ -118,9 +130,18 @@ async def schedule_delete(context: ToolContext, schedule_id: str) -> ToolResult:
     call_id = context.metadata.get("tool_call_id")
     if not isinstance(call_id, str) or not call_id:
         return error(context, "the host did not identify this schedule command")
-    if not schedule_id.startswith("p"):
-        return error(context, "Open Schedules in the app to remove an approved action with a receipt")
     command_id = "schedule-tool:" + hashlib.sha256(f"{context.run_id}:{call_id}".encode()).hexdigest()
+    if not schedule_id.startswith("p"):
+        try:
+            await services.schedule(
+                "remove", schedule_id=schedule_id, source_session_id=context.session_id,
+                source_run_id=context.run_id, source_command_id=command_id,
+            )
+        except KeyError:
+            return error(context, f"no schedule {schedule_id}")
+        except (ValueError, PermissionError) as exc:
+            return error(context, str(exc))
+        return ok(context, f"schedule {schedule_id} removed", schedule_id=schedule_id)
     try:
         withdrawn = await services.schedule(
             "withdraw", proposal_id=schedule_id, source_session_id=context.session_id,

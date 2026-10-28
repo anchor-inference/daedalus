@@ -10,6 +10,7 @@ import { invalidate, useOffline, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
 import { t } from "../i18n";
 import { useSessionTitles } from "./Sessions";
+import { approvalExpiry } from "../schedulecard";
 
 type Group = "upcoming" | "paused" | "done";
 
@@ -222,11 +223,7 @@ function PendingProposals({ toast, onAccepted }: { toast: (text: string) => void
   const pending = useRef<Record<string, { fingerprint: string; id: string }>>({});
   const [approvalClock] = useState(() => Date.now());
   const entries = data?.entries.filter((item) => item.status === "pending") ?? [];
-  const expiresFor = (item: ScheduleProposal) => {
-    const due = Date.parse(item.next_run_at);
-    return new Date(Math.max(approvalClock + 30 * 86400000,
-      !item.cron && Number.isFinite(due) ? due + 86400000 : 0)).toISOString();
-  };
+  const expiresFor = (item: ScheduleProposal) => approvalExpiry(item, approvalClock);
   async function decide(item: ScheduleProposal, action: "accept" | "withdraw" | "review-files") {
     const scope = item.source_project_id ? `project:${item.source_project_id}` : "global:global";
     const revision = data?.collection_revisions[scope];

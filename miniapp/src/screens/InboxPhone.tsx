@@ -23,6 +23,7 @@ import { PushNudge } from "../pushui";
 import { MovesInProgress } from "../project/moves";
 import { errorText } from "../ui";
 import { deleteWithUndo, toast as statusLine, type MenuItem } from "../ui/dialogs";
+import { PendingSchedules, usePendingSchedules } from "../schedulecard";
 import { ActionSheet, Banner, BottomSheet, Chip, ChipBar, EmptyState, IconButton, ListRow, RowSkeleton, SectionHeader, TopBar } from "../ui/phone";
 
 type Filter = "all" | "unseen" | "problems" | "projects";
@@ -69,6 +70,8 @@ export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; o
   const kept = [...answered.values()].filter((a) => !needs.some((e) => e.id === a.entry.id));
   const entries = (data?.entries ?? []).filter((e) => !e.needs_you && !answered.has(e.id));
   const pending = filter === "problems" ? [] : (proposals.data ?? []).filter((p) => p.status === "pending");
+  const waitingSchedules = usePendingSchedules();
+  const schedules = filter === "problems" ? [] : waitingSchedules;
   const groups = filter === "projects" ? byProject(entries, names) : byDay(entries);
   const everything = [...needs, ...entries];
   const byId = useMemo(() => new Map([...(needsList.data?.entries ?? []), ...(data?.entries ?? []), ...[...answered.values()].map((a) => a.entry)].map((e) => [e.id, e])), [needsList.data, data, answered]);
@@ -181,7 +184,7 @@ export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; o
     );
   };
 
-  const nothing = data && entries.length === 0 && pending.length === 0 && needs.length === 0 && kept.length === 0;
+  const nothing = data && entries.length === 0 && pending.length === 0 && schedules.length === 0 && needs.length === 0 && kept.length === 0;
   let body: ReactNode;
   if (list.error && !data) {
     body = <EmptyState icon="alert" tone="bad" title={t("inbox.error")} body={list.error} action={<button type="button" className="ph-btn primary" onClick={() => list.refresh()}>{t("common.retry")}</button>} />;
@@ -221,6 +224,7 @@ export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; o
             </div>
           </section>
         )}
+        {selected === null && <PendingSchedules views={schedules} header={(n) => <SectionHeader count={n}>{t("inbox.schedules")}</SectionHeader>} />}
         {groups.map((group) => (
           <section key={group.key || "-"}>
             <SectionHeader count={group.key !== "today" && group.key !== "earlier" ? group.entries.length : undefined}>{group.label}</SectionHeader>

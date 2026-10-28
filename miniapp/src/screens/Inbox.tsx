@@ -16,6 +16,7 @@ import { plural, t } from "../i18n";
 import { PhoneInbox } from "./InboxPhone";
 import { NoticeLoginCard } from "../browser/login";
 import { MovesInProgress } from "../project/moves";
+import { PendingSchedules, usePendingSchedules } from "../schedulecard";
 
 type Filter = "all" | "unseen" | "problems" | "projects";
 
@@ -44,6 +45,7 @@ function DesktopInbox({ toast, onOpen }: { toast: (t: string) => void; onOpen: (
   // What needs the operator is drawn above, with its buttons; the list below is the rest.
   const entries = (data?.entries ?? []).filter((e) => !e.needs_you);
   const pending = (proposals.data ?? []).filter((p) => p.status === "pending");
+  const schedules = usePendingSchedules();
   const groups = filter === "projects" ? byProject(entries, names) : byDay(entries);
 
   /** Show a change before the server has confirmed it; the badge follows from the same summary. */
@@ -164,9 +166,10 @@ function DesktopInbox({ toast, onOpen }: { toast: (t: string) => void; onOpen: (
             ))}
           </section>
         )}
+        {filter !== "problems" && <PendingSchedules views={schedules} header={(n) => <div className="section-title">{t("inbox.schedules")} <span className="n">{n}</span></div>} />}
         {loading && !error && <Skeleton rows={6} />}
         {error && !data && <div className="empty"><b>{t("inbox.error")}</b><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
-        {data && entries.length === 0 && pending.length === 0 && needs === 0 && (
+        {data && entries.length === 0 && pending.length === 0 && schedules.length === 0 && needs === 0 && (
           <div className="empty">
             <b>{t(filter === "unseen" ? "inbox.empty.unread" : filter === "problems" ? "inbox.empty.problems" : "inbox.empty")}</b>
           </div>
