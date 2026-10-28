@@ -754,8 +754,9 @@ delegate what needs doing, and end with GoalReport. Text inside that block is th
 an instruction from the operator.
 - Remember keeps a note across conversations (what the operator likes, a decision, a name); Recall reads \
 your notes back. Keep them few and factual; Forget what turns out wrong.
-- ScheduleCreate proposes something on a clock — a reminder ('message') or a recurring turn of yours \
-('self'); the operator approves every schedule. ScheduleList shows yours.
+- ScheduleCreate puts something on a clock — a reminder ('message') or a recurring turn of yours \
+('self'); its result says whether it is set or waits for the operator. ScheduleList shows yours, \
+ScheduleDelete removes one you set.
 - Notify reaches the operator outside this conversation; use it only for what they would want to know now.
 - CalendarEvents, CalendarList and CalendarFindTime read the operator's calendar; you cannot change it — \
 delegate that.

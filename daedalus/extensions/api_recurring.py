@@ -119,6 +119,14 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         return {"entries": entries, "collection_revisions": {
             f"{row['scope_kind']}:{row['scope_id']}": row["revision"] for row in revisions}}
 
+    @api.get("/api/recurring/card/{item_id}")
+    async def schedule_card(item_id: str, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        Principal.operator(who)
+        try:
+            return await proposals().card(item_id)
+        except KeyError as exc:
+            raise refused(exc) from exc
+
     @api.post("/api/recurring/proposals/{proposal_id}/accept")
     async def accept_proposal(proposal_id: str, body: ProposalAcceptance,
                               who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

@@ -921,6 +921,12 @@
       "synonyms": ["scheduler", "scheduled tasks", "cron", "schedule topic", "расписание", "задания по расписанию", "крон"]
     },
     {
+      "section": "chat", "anchor": "scheduler.require_approval", "config": "scheduler.require_approval",
+      "title": { "en": "Agent's schedules wait for my approval", "ru": "Расписания агента ждут моего подтверждения" },
+      "about": { "en": "Off: a schedule the agent creates is set at once and shown in the chat. On: it waits for Accept in the chat card or the Inbox.", "ru": "Выключено: расписание, которое создаёт агент, ставится сразу и показывается в чате. Включено: ждёт кнопки «Принять» в карточке чата или во Входящих." },
+      "synonyms": ["schedule approval", "approve schedules", "schedule proposals", "ScheduleCreate", "подтверждение расписаний", "предложения расписаний", "одобрять расписания"]
+    },
+    {
       "section": "components", "anchor": "components.catalogue", "config": null,
       "title": { "en": "Components", "ru": "Компоненты" },
       "about": { "en": "The optional parts of the installation: what is installed, what each unlocks and how much a download takes.", "ru": "Необязательные части установки: что стоит, что каждая открывает и сколько займёт загрузка." },

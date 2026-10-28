@@ -21,6 +21,7 @@ import { looksLikeDiff } from "../diff";
 import { KeptFiles, TurnFiles } from "../artifact";
 import { placeOf, turnFiles, turnPages } from "../turnfiles";
 import { PageCards } from "../pagecard";
+import { ScheduleCard, scheduleCardIds } from "../schedulecard";
 import { WidgetFrames } from "../widgetframe";
 import { drawnWidgets } from "../widget";
 import { useReveal } from "../reveal";
@@ -2209,6 +2210,9 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
       {/* Outside the folded steps: a change that waits for the operator's Apply must be seen without
           opening the turn's work, and it can be answered while the agent is still writing. */}
       {settingsChangeIds(turn.activity).map((id) => <SettingsChangeCard key={id} changeId={id} />)}
+      {/* A schedule the agent set, or asks to set, is shown where it was made: a request nobody saw
+          is a reminder that never rings, which is how proposals once sat unanswered for days. */}
+      {scheduleCardIds(turn.activity).map((id) => <ScheduleCard key={id} itemId={id} />)}
       {files && <TurnFiles sessionId={sessionId} sent={files.sent} changed={files.changed} onOpen={preview} />}
       {/* A page the agent showed is drawn as soon as the call returns, not when the turn ends: the
           point of showing it is that the operator can open it while the agent goes on. */}

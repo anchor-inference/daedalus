@@ -124,7 +124,7 @@ class Scheduler:
         created_by_session: str, source_run_id: str | None, source_command_id: str,
         kind: str = "agent", target_session: str | None = None, run_in: str = "new",
     ) -> dict[str, Any]:
-        """Tool calls save inert proposals; the operator grants execution separately."""
+        """Save an inert proposal for the operator's Accept; ``service`` decides whether it is accepted at once."""
         return await self.app.extensions["schedule_proposals"].create(
             source_session_id=created_by_session, source_run_id=source_run_id,
             source_command_id=source_command_id, name=name, prompt=prompt, cron=cron,
@@ -141,8 +141,16 @@ class Scheduler:
         return [dict(r) for r in rows]
 
     async def service(self, op: str, **kwargs: Any) -> Any:
+        """The tools' door: create, list, and withdraw or remove.
+
+        Whether a create waits for the operator is read on every call rather than when the tool
+        was built, so flipping the setting takes effect on the agent's next ScheduleCreate.
+        """
         if op == "create":
-            return await self.create(**kwargs)
+            if self.app.config.scheduler.require_approval:
+                return {**await self.create(**kwargs), "status": "pending"}
+            return await self.app.extensions["schedule_proposals"].create_direct(
+                source_session_id=kwargs.pop("created_by_session"), **{**kwargs, "files": kwargs.get("files") or []})
         if op == "list":
             if kwargs.get("source_session_id"):
                 return [*await self.list(), *await self.app.extensions["schedule_proposals"].list(
@@ -150,6 +158,10 @@ class Scheduler:
             return await self.list()
         if op == "withdraw":
             return await self.app.extensions["schedule_proposals"].withdraw_agent(**kwargs)
+        if op == "remove":
+            if self.app.config.scheduler.require_approval:
+                raise PermissionError("schedules wait for the operator's approval here, so the operator removes them in Schedules")
+            return await self.app.extensions["schedule_proposals"].remove_agent(**kwargs)
         raise ValueError(op)
 
     # -- loop -----------------------------------------------------------------------

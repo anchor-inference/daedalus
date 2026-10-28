@@ -535,6 +535,9 @@ GATES: dict[str, object] = {
     "/api/asr": {"configured": False, "reason": "", "provider": "", "model": "", "max_seconds": 120, "autosend": False},
     "/api/proposals": [],
     "/api/schedules": [],
+    # The schedules the agent asks for that wait for the operator: none. The shell counts them on the
+    # Inbox entry, so every screen reads this.
+    "/api/recurring/proposals": {"entries": [], "collection_revisions": {"global:global": 1}},
     "/api/diagrams": [],
     # A project's requests: none waits, so a phone's project draws no banner.
     "/api/asks": {"asks": []},
@@ -955,6 +958,10 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         # Asking the sources again for a preset's window: the shared host finds what the settings
         # pictures already say, so the screen does not move under a check that presses it.
         return 200, "application/json", json.dumps({"window": 128000, "source": "default", "sources": {"provider": None, "catalog": None, "table": None, "error": None}})
+    if path.startswith("/api/recurring/card/"):
+        # The card under an agent's ScheduleCreate; the shared host keeps none, and a harness that
+        # draws one (check_schedule_card.py) answers it itself.
+        return 404, "application/json", json.dumps({"detail": "no such schedule or occurrence"})
     if path.startswith("/api/settings/changes/"):
         # The card under an agent's settings change; the shared host keeps none, and a harness that
         # draws one (check_settings_card.py) answers these itself.

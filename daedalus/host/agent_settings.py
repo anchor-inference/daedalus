@@ -59,6 +59,7 @@ NEVER: dict[str, str] = {
     "browser.rules": "the operator's rules for sensitive actions in the browser",
     "browser.record_frames": "whether the browser is recorded is the operator's to switch",
     "browser.record_takeover": "whether the browser is recorded is the operator's to switch",
+    "scheduler.require_approval": "whether the agent's own schedules wait for the operator's Accept; the agent must not loosen its own review",
     "telegram.mode": "where the operator's chat lives",
     "telegram.forum_chat_id": "where the operator's chat lives",
     "telegram.general_topic_id": "where the operator's chat lives",

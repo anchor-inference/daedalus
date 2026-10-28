@@ -1156,6 +1156,10 @@ class SchedulerConfig(BaseModel):
     """An unattended run (schedule, heartbeat) that asks a question waits this long, then continues on its own judgement."""
     lazy_ttl_hours: int = Field(default=24, ge=1)
     """A lazy reminder not yet seen by the operator after this long becomes an agent task."""
+    require_approval: bool = False
+    """Whether a schedule the agent creates waits for the operator's Accept. Off, ScheduleCreate sets
+    it at once and its card in the chat says so; on, the card and the Inbox carry Accept and Decline.
+    Off is the default because a proposal nobody was shown is a reminder that silently never rings."""
 
 
 NotifyCell = Literal["on", "off", "urgent"]

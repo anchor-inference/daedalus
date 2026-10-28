@@ -49,7 +49,7 @@ TOOLS = {
             ("GoalCreate", "Take on a goal: something you own over days rather than one task"),
             ("GoalReport", "Record what you found about a goal"),
             ("Remember", "Keep a note across conversations"),
-            ("ScheduleCreate", "Propose a scheduled task for operator approval"),
+            ("ScheduleCreate", "Create a scheduled task"),
             ("Notify", "Tell the operator something outside this chat"),
             ("CalendarEvents", "List calendar occurrences in a time range"),
         )
