@@ -158,11 +158,13 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
             return route.fulfill(status=200, content_type="application/json", body=json.dumps({"steered": True}))
         if rel.startswith(f"/api/sessions/{SESSION}/steer/"):
             sid = rel.rsplit("/", 1)[1]
-            before = len(HOST.queue)
+            gone = [q for q in HOST.queue if q["id"] == sid]
             HOST.queue = [q for q in HOST.queue if q["id"] != sid]
-            if len(HOST.queue) == before:
+            if not gone:
                 return route.fulfill(status=409, content_type="application/json", body=json.dumps({"detail": "that message has already reached the agent"}))
-            return route.fulfill(status=200, content_type="application/json", body=json.dumps({"deleted": True}))
+            # The host answers a withdrawal with the words whole, which the card's Edit puts back in the field.
+            message = {"id": sid, "text": gone[0]["text"], "files": gone[0].get("files", [])}
+            return route.fulfill(status=200, content_type="application/json", body=json.dumps({"deleted": True, "message": message}))
         if rel == f"/api/sessions/{SESSION}/policy/grant-similar":
             key = str((data or {}).get("key") or "")
             resolved = [key, *HOST.covered] if key == HOST.similar_key else []
@@ -407,6 +409,37 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     page.wait_for_timeout(100)
     if page.locator(".composer .steer").count():
         problems.append("the card stayed after its × was pressed")
+    # Queued, steered, withdrawn before the next step: the words never reached the agent, so nothing
+    # in the conversation may say they were sent. The bubble drawn while sending used to come back
+    # here, waiting for a transcript row a withdrawn message never gets.
+    page.wait_for_timeout(300)
+    if page.locator(".msg.user", has_text="also look at the log").count():
+        problems.append("a message withdrawn after Steer is still drawn in the conversation as sent")
+
+    # Edit takes a waiting message back into the field: the card goes, the words are the draft again,
+    # and nothing is left in the conversation.
+    field(page).fill("rename the column first")
+    before_edit = len(posts("/messages"))
+    page.keyboard.press("Enter")
+    reached(page, "/messages", before_edit, "queuing the message to edit", problems)
+    page.wait_for_selector(".composer .steer", timeout=5000)
+    edited_id = posts("/messages")[-1][2].get("client_message_id")
+    edit = page.locator(".composer .steer .steer-edit")
+    if edit.count() != 1:
+        problems.append("a waiting card offers no Edit")
+    else:
+        edit.click()
+        reached(page, f"/steer/{edited_id}", 0, "the card's Edit", problems, method="DELETE")
+        try:
+            page.wait_for_function("() => document.querySelector('.composer textarea')?.value === 'rename the column first'", timeout=3000)
+        except Exception:  # noqa: BLE001
+            problems.append(f"Edit did not put the words back in the field ({field(page).input_value()!r})")
+        if page.locator(".composer .steer").count():
+            problems.append("the card stayed after Edit")
+        page.wait_for_timeout(300)
+        if page.locator(".msg.user", has_text="rename the column first").count():
+            problems.append("a message taken back to edit is still drawn in the conversation as sent")
+        field(page).fill("")
 
     # A screenshot pasted from the Windows clipboard during a run, with no words: it waits as a card
     # of its own that names the file, and can still be steered.

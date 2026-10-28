@@ -31,7 +31,7 @@ import { FileGallery, InlineMedia, mediaCopyText, splitMediaAnswer } from "../me
 import { SavedToMemory } from "../memory/savedchip";
 import { conversationMedia, galleryFor, toolSource, viewerTarget, type HostSource } from "../mediaroute";
 import { Answer, Composer, ComposerHandle } from "../composerbox";
-import { Approval, QueuedMessage, pendingApproval, queuedAfter, questionsKey, readQueued } from "../composer";
+import { Approval, QueuedMessage, ReturnedMessage, pendingApproval, queuedAfter, questionsKey, readQueued, readReturned, returnedDraft, settledIds, withQueued } from "../composer";
 import { ModelChoice } from "../modelselect";
 import { effortWord } from "../effortselect";
 import { MoveSessionSheet } from "../projects";
@@ -636,19 +636,42 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     if (busy) void loadQueued();
     else setQueuedInput([]);
   }, [busy, loadQueued]);
-  const withdraw = useCallback(
-    async (message: QueuedMessage) => {
+  // Taking a waiting message back. The host's receipt decides: 200 is withdrawn, and then the card and
+  // the bubble this device drew while sending it both go — the bubble once stayed, waiting for a
+  // transcript row a withdrawn message never gets, and read as a message sent. 409 is the message
+  // having reached the agent first: its card goes with the re-read and its row arrives as delivered.
+  // `edit` brings the words back into the field, which is what changing a waiting message is.
+  const takeBack = useCallback(
+    async (message: QueuedMessage, edit: boolean) => {
       try {
-        await api.delete(`/api/sessions/${id}/steer/${encodeURIComponent(message.id)}`);
+        const r = await api.delete<{ message?: unknown }>(`/api/sessions/${id}/steer/${encodeURIComponent(message.id)}`);
         setQueuedInput((q) => q.filter((x) => x.id !== message.id));
-        toast(t("composer.steer.withdrawn"));
+        setSendingMessages((current) => current.filter((pending) => pending.id !== message.id));
+        if (edit) {
+          const back = readReturned([r?.message])[0] ?? { id: message.id, text: message.text, files: message.files };
+          composer.current?.insert(back.text);
+          toast(back.files.length ? t("composer.steer.edit.files", { names: back.files.join(", ") }) : t("composer.steer.withdrawn"));
+        } else toast(t("composer.steer.withdrawn"));
       } catch (e) {
-        // A 409 is the message having gone through after all; the list is re-read either way.
-        toast(e instanceof ApiError && e.status === 409 ? t("composer.steer.gone") : errorText(e));
+        const detail = e instanceof ApiError ? String(e.message || "") : "";
+        toast(e instanceof ApiError && e.status === 409 ? t(detail.includes("no longer waiting") ? "composer.steer.missing" : "composer.steer.gone") : errorText(e));
         void loadQueued();
       }
     },
     [id, toast, loadQueued],
+  );
+  const withdraw = useCallback((message: QueuedMessage) => takeBack(message, false), [takeBack]);
+  const editQueued = useCallback((message: QueuedMessage) => takeBack(message, true), [takeBack]);
+  // A stop handed the waiting messages back unsent: their words go into the field, after whatever the
+  // operator is writing, and the files are named, since they cannot come back by themselves.
+  const takeReturned = useCallback(
+    (items: ReturnedMessage[]) => {
+      const draft = returnedDraft(items);
+      if (draft) composer.current?.insert(draft, false);
+      const files = items.flatMap((m) => m.files);
+      toast(files.length ? t("composer.steer.returned.files", { names: files.join(", ") }) : t("composer.steer.returned"));
+    },
+    [toast],
   );
   // A follow-up the operator decides should not wait for the turn to end: the host moves it to the
   // steer queue, and the card stays, saying it is now read at the next step.
@@ -740,7 +763,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     // Whatever the last stream was in the middle of is over as far as this screen knows when it
     // drops, and a half-written turn kept across the gap would put the cursor back under an answer
     // that finished while the connection was down. The re-read brings back everything that is real.
-    const stop = followSession(id, { handle, onDrop: () => { live.reset(); load(true); } });
+    // The queue too: a change missed while the stream was down would leave a card for a message the
+    // run has read, or none for one that still waits.
+    const stop = followSession(id, { handle, onDrop: () => { live.reset(); load(true); if (busyRef.current) void loadQueued(); } });
     function handle(event: string, p: Record<string, any>) {
       const activeRun = live.get().runId;
       if (event === "run_settled" && p.run_id && activeRun && p.run_id !== activeRun) return;
@@ -803,12 +828,15 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       } else if (event === "steer_changed") {
         steerRoute.current = "ok";
         setQueuedInput((q) => queuedAfter(q, p));
+        const settled = settledIds(p);
+        if (settled.length) setSendingMessages((current) => current.filter((pending) => !settled.includes(pending.id)));
+        if (p.reason === "returned") takeReturned(readReturned(p.returned));
         if (p.reason === "consumed") refreshSoon("tail");
       } else if (event === "compaction_completed") refreshSoon("tail");
       else if (event === "state_changed" || event === "tool_call_pending") refreshSoon("state");
     }
     return stop;
-  }, [id, live, load, refresh, refreshSoon]);
+  }, [id, live, load, loadQueued, refresh, refreshSoon, takeReturned]);
 
   // The settled conversation, built once per message that lands. A turn whose messages did not
   // change comes back as the same object, so `memo` on the view holds and a streamed token
@@ -1204,6 +1232,11 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     // Only once the message is out: a send that fails puts the words back and keeps what they answer.
     if (reply) setReply(id, null);
     stick.current = true;
+    if (result.receipt?.status === "queued") {
+      // The card at once, so the words do not show as a sent bubble for the round trip of the re-read;
+      // the re-read, or the change event that may already be on its way, puts the host's list in its place.
+      setQueuedInput((q) => withQueued(q, { id: pendingId, kind: followUp ? "follow_up" : "steer", text: pendingText, queued_at: null, files: files.map((file) => file.name) }));
+    }
     if (followUp) void loadQueued();
     load();
     return result.receipt!.status === "queued" ? "queued" : "sent";
@@ -1804,6 +1837,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             asr={asr}
             queued={queuedInput}
             onWithdraw={withdraw}
+            onEdit={editQueued}
             onSteer={steerNow}
             questions={detail?.pending?.questions ?? null}
             answered={detail?.pending?.answered ?? null}
