@@ -55,10 +55,10 @@ def check(lang: str) -> None:
         assert len(accepted) == 1
         go(page, "/schedules/wk1", lang)
         action = "Approve this action" if lang == "en" else "Одобрить это действие"
-        current = "Current" if lang == "en" else "Действует"
+        current = "Active" if lang == "en" else "Активно"
         expect(page.get_by_role("button", name=action)).to_be_visible()
         page.get_by_role("button", name=action).click()
-        expect(page.get_by_text(current, exact=True)).to_be_visible()
+        expect(page.locator(".scheddetail .pill")).to_have_text(current)
 
         go(page, "/schedules", lang)
         new = "New schedule" if lang == "en" else "Новое расписание"

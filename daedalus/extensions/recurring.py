@@ -669,8 +669,15 @@ class Recurring:
         return response
 
     async def cycles(self, schedule_id: str, *, limit: int = 25) -> list[dict[str, Any]]:
+        """The occurrences, newest first, each with the conversation its run went into, if it started one.
+
+        The run is found through the input it consumed, keyed by the occurrence: the same proof the
+        delivery's own reconcile reads, so a link here never points at a session the run did not enter.
+        """
         rows = await self.db.fetchall(
-            "SELECT c.*,e.state AS effect_state,e.error AS effect_error FROM recurring_cycles c"
+            "SELECT c.*,e.state AS effect_state,e.error AS effect_error,"
+            "(SELECT i.session_id FROM input_receipts i WHERE i.client_message_id = 'schedule-cycle:' || c.id"
+            " ORDER BY i.rowid DESC LIMIT 1) AS session_id FROM recurring_cycles c"
             " LEFT JOIN effect_outbox e ON e.id=c.effect_id WHERE c.schedule_id = ?"
             " ORDER BY c.created_at DESC,c.id DESC LIMIT ?", (schedule_id, min(max(limit, 1), 100)),
         )

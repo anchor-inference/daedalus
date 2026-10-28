@@ -12,6 +12,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from daedalus.extensions.recurring import _contract
+from daedalus.extensions.schedule_proposals import approval_days
 from daedalus.stores.control import ControlConflict, ControlDenied, Principal
 
 if TYPE_CHECKING:
@@ -116,8 +117,13 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         entries = await proposals().list()
         revisions = await app.db.fetchall("SELECT scope_kind,scope_id,revision FROM domain_collection_revisions"
                                           " WHERE scope_kind='global' OR scope_kind='project'")
+        # The setting travels with the list every screen already reads, so the app's Accept, Resume
+        # and Save ask for the horizon the host itself would give, and say nothing about expiry when
+        # the operator has not asked to review.
         return {"entries": entries, "collection_revisions": {
-            f"{row['scope_kind']}:{row['scope_id']}": row["revision"] for row in revisions}}
+            f"{row['scope_kind']}:{row['scope_id']}": row["revision"] for row in revisions},
+            "require_approval": bool(app.config.scheduler.require_approval),
+            "approval_days": approval_days(app.config)}
 
     @api.get("/api/recurring/card/{item_id}")
     async def schedule_card(item_id: str, who: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

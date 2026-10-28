@@ -256,43 +256,82 @@ function dowLabel(days: number[]): { text: string; everyDay: boolean } {
   return { text: days.map(dow).join(", "), everyDay: false };
 }
 
+/** The hours a cron field names, "5,11,17" or "9-12", or null for anything with a step or a word. */
+function hourList(spec: string): number[] | null {
+  const out = new Set<number>();
+  for (const part of spec.split(",")) {
+    const m = /^(\d{1,2})(?:-(\d{1,2}))?$/.exec(part.trim());
+    if (!m) return null;
+    const a = Number(m[1]);
+    const b = m[2] === undefined ? a : Number(m[2]);
+    if (a > 23 || b > 23 || b < a) return null;
+    for (let i = a; i <= b; i++) out.add(i);
+  }
+  return [...out];
+}
+
+/** A UTC hour and minute moved into the reader's zone, with how many days the move crossed. */
+function shiftClock(hour: number, minute: number, offsetMinutes: number): { h: number; m: number; dayShift: number } {
+  let total = hour * 60 + minute + offsetMinutes;
+  let dayShift = 0;
+  while (total < 0) {
+    total += 1440;
+    dayShift -= 1;
+  }
+  while (total >= 1440) {
+    total -= 1440;
+    dayShift += 1;
+  }
+  return { h: Math.floor(total / 60), m: total % 60, dayShift };
+}
+
 /**
  * A cron line (UTC) as a sentence in the reader's zone: "Every day at 09:00", "Weekdays at 09:00",
- * "Mon, Wed, Fri at 14:30", "Every 2 hours", "Every 15 min". Anything else comes back as the
- * cron line itself with a "(UTC)" mark, so nothing is ever mistranslated.
+ * "Mon, Wed, Fri at 14:30", "Every hour at :05", "Every day at 04:50, 10:50, 16:50", "Every 15 min",
+ * "Every month on day 1 at 09:00". Anything else comes back as the cron line itself with a "(UTC)"
+ * mark, so nothing is ever mistranslated. The operator once read "10 2 * * *" on the Schedules screen
+ * and had to work out in their head that it meant seven in the morning; a shape the agent writes
+ * often gets a sentence here rather than leaving that sum to the reader.
  */
 export function describeCron(cron: string, offsetMinutes = zoneOffsetMinutes()): string {
   const p = parseCron(cron);
   if (!p) return cron;
-  const fixedMinute = /^\d+$/.test(p.minute);
-  const fixedHour = /^\d+$/.test(p.hour);
-  if (p.dom === "*" && p.month === "*") {
-    if (/^\*\/(\d+)$/.test(p.minute) && p.hour === "*" && p.dow === "*") return plural("fmt.cron.everyminutes", Number(/^\*\/(\d+)$/.exec(p.minute)![1]));
-    if (fixedMinute && /^\*\/(\d+)$/.test(p.hour) && p.dow === "*") {
-      const n = Number(/^\*\/(\d+)$/.exec(p.hour)![1]);
-      return n === 1 ? t("fmt.cron.everyhour") : plural("fmt.cron.everyhours", n);
-    }
-    if (fixedMinute && p.hour === "*" && p.dow === "*") return t("fmt.cron.everyhour");
-    if (fixedMinute && fixedHour) {
-      // Shift the UTC clock into the reader's zone; a shift across midnight moves the days too.
-      let total = Number(p.hour) * 60 + Number(p.minute) + offsetMinutes;
-      let dayShift = 0;
-      while (total < 0) {
-        total += 1440;
-        dayShift -= 1;
+  const fixedMinute = /^\d+$/.test(p.minute) && Number(p.minute) < 60;
+  // The minute past the hour moves with a zone whose offset is not whole hours (India, Nepal).
+  const localMinute = fixedMinute ? ((((Number(p.minute) + offsetMinutes) % 60) + 60) % 60) : 0;
+  const pastHour = `:${String(localMinute).padStart(2, "0")}`;
+  if (p.month === "*") {
+    if (p.dom === "*") {
+      if (/^\*\/(\d+)$/.test(p.minute) && p.hour === "*" && p.dow === "*") return plural("fmt.cron.everyminutes", Number(/^\*\/(\d+)$/.exec(p.minute)![1]));
+      if (fixedMinute && /^\*\/(\d+)$/.test(p.hour) && p.dow === "*") {
+        const n = Number(/^\*\/(\d+)$/.exec(p.hour)![1]);
+        if (n === 1) return t("fmt.cron.everyhour.at", { minute: pastHour });
+        return localMinute === 0 ? plural("fmt.cron.everyhours", n) : plural("fmt.cron.everyhours.at", n, { minute: pastHour });
       }
-      while (total >= 1440) {
-        total -= 1440;
-        dayShift += 1;
+      if (fixedMinute && p.hour === "*" && p.dow === "*") return t("fmt.cron.everyhour.at", { minute: pastHour });
+      const hours = fixedMinute ? hourList(p.hour) : null;
+      if (hours && hours.length === 1) {
+        const at = shiftClock(hours[0], Number(p.minute), offsetMinutes);
+        const clockText = fmtClock(at.h, at.m);
+        if (p.dow === "*") return t("fmt.cron.daily", { time: clockText });
+        const days = dowList(p.dow);
+        if (days) {
+          const shifted = days.map((d) => (((d + at.dayShift) % 7) + 7) % 7).sort();
+          const label = dowLabel(shifted);
+          return label.everyDay ? t("fmt.cron.daily", { time: clockText }) : t("fmt.cron.on", { days: label.text, time: clockText });
+        }
       }
-      const clockText = fmtClock(Math.floor(total / 60), total % 60);
-      if (p.dow === "*") return t("fmt.cron.daily", { time: clockText });
-      const days = dowList(p.dow);
-      if (days) {
-        const shifted = days.map((d) => (((d + dayShift) % 7) + 7) % 7).sort();
-        const label = dowLabel(shifted);
-        return label.everyDay ? t("fmt.cron.daily", { time: clockText }) : t("fmt.cron.on", { days: label.text, time: clockText });
+      // Several times a day: each moved into the reader's zone and read in the order the day has them.
+      if (hours && hours.length > 1 && hours.length <= 6 && p.dow === "*") {
+        const clocks = hours.map((h) => shiftClock(h, Number(p.minute), offsetMinutes)).sort((a, b) => a.h * 60 + a.m - (b.h * 60 + b.m));
+        return t("fmt.cron.daily", { time: clocks.map((c) => fmtClock(c.h, c.m)).join(", ") });
       }
+    } else if (/^\d{1,2}$/.test(p.dom) && p.dow === "*" && fixedMinute && /^\d{1,2}$/.test(p.hour)) {
+      // A day of the month, when the zone keeps it on the same date or moves it one day on within
+      // the month; a move back across the first would land on a day each month names differently.
+      const at = shiftClock(Number(p.hour), Number(p.minute), offsetMinutes);
+      const day = Number(p.dom) + at.dayShift;
+      if (day >= 1 && day <= 28) return t("fmt.cron.monthly", { day, time: fmtClock(at.h, at.m) });
     }
   }
   return t("fmt.cron.utc", { cron });

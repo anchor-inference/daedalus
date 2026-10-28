@@ -58,6 +58,7 @@ from api_stub import (  # noqa: E402
     session_tool_groups,
     worktree_route,
 )
+from schedule_stub import ScheduleStub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 # The app is bilingual, and so is this set: LANG_UI=ru opens every page with ?lang=ru and the words
@@ -482,11 +483,12 @@ def notify_frames(*entries: dict) -> str:
 
 PROPOSALS = [{"id": "p57", "repo": "daedalus", "branch": "bot/websearch-retry", "pr_number": 57, "pr_url": "https://github.com/example/daedalus/pull/57", "title": "WebSearch: retry a backend that timed out once before falling back", "summary": "A backend that answers 504 once is tried again after a second; only a second failure falls through to the next backend. Unit test added.", "status": "pending", "reason": None, "created_at": ago(minutes=20)}]
 
-SCHEDULES = [
-    {"id": "sch1", "name": "Weekly digest", "run_in": "self", "cron": "0 9 * * 5", "run_at": None, "prompt": "Collect the week's notes and send the digest.", "enabled": 1, "next_run_at": ahead(days=2, hours=8), "last_run_at": ago(days=5), "last_summary": "Eight items sent; two links fixed.", "kind": "agent", "target_session": S4, "created_by_session": S4, "active_session_id": None, "failure_count": 0, "last_error": None},
-    {"id": "sch2", "name": "Backup check", "run_in": "new", "cron": "30 3 * * *", "run_at": None, "prompt": "Verify last night's backup restored into a scratch directory; report sizes.", "enabled": 1, "next_run_at": ahead(hours=5), "last_run_at": ago(hours=19), "last_summary": "Restore ok: 2.1 GB, 12 340 files.", "kind": "agent", "target_session": None, "created_by_session": None, "active_session_id": None, "failure_count": 0, "last_error": None},
-    {"id": "sch3", "name": "Remind: renew the domain", "run_in": "new", "cron": None, "run_at": ahead(days=12), "prompt": "The bakery domain renews in 3 days.", "enabled": 1, "next_run_at": ahead(days=12), "last_run_at": None, "last_summary": None, "kind": "message", "target_session": None, "created_by_session": S1, "active_session_id": None, "failure_count": 0, "last_error": None},
-]
+# The Schedules screen's host: the realistic set of schedule_stub.py (long instructions, five cron
+# shapes, a failed run, a paused schedule, a finished one-off) in the picture's language. Its proposal
+# is left out here: every page counts waiting proposals on the Inbox entry, and the other pictures
+# must not change because the schedules screen has something to show.
+SCHEDULE_HOST = ScheduleStub(LANG, chat=S1, other=S4)
+SCHEDULE_HOST.proposals.clear()
 
 def usage_data() -> dict:
     daily = []
@@ -992,10 +994,10 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return respond(route, PROPOSALS)
     if rel == "/api/proposals/p57/diff":
         return respond(route, {"diff": "diff --git a/daedalus/search.py b/daedalus/search.py\n--- a/daedalus/search.py\n+++ b/daedalus/search.py\n@@ -41,2 +41,4 @@\n-    return await backend.search(query)\n+    try:\n+        return await backend.search(query)\n+    except TimeoutError:\n+        return await backend.search(query)\n"})
-    if rel == "/api/schedules":
-        return respond(route, SCHEDULES)
-    if rel == "/api/recurring/proposals":
-        return respond(route, {"entries": [], "collection_revisions": {"global:global": 1}})
+    if rel == "/api/schedules" or rel.startswith("/api/recurring/"):
+        answered = SCHEDULE_HOST.answer(route.request.method, rel, json.loads(route.request.post_data or "{}") if route.request.method in ("POST", "PATCH") else None)
+        if answered is not None:
+            return respond(route, answered[1], status=answered[0])
     if rel == "/api/projects":
         return respond(route, PROJECTS)
     if rel == "/api/settings":

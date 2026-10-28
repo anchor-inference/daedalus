@@ -109,4 +109,12 @@ describe("the schedule a turn created", () => {
     expect(approvalExpiry({ cron: "0 6 * * *", next_run_at: "2027-06-01T00:00:00Z" }, now)).toBe("2026-11-27T00:00:00.000Z");
     expect(approvalExpiry({ cron: null, next_run_at: "2027-06-01T00:00:00Z" }, now)).toBe("2027-06-02T00:00:00.000Z");
   });
+
+  it("approves a recurring schedule for as long as the host says when the operator does not review", () => {
+    const now = Date.parse("2026-10-28T00:00:00Z");
+    // With approval off the host names the standing ten years: an Accept by hand must not stop the
+    // schedule a month later. A one-off keeps its own rule whatever the horizon.
+    expect(approvalExpiry({ cron: "0 6 * * *", next_run_at: null }, now, 3650)).toBe(new Date(now + 3650 * 86400000).toISOString());
+    expect(approvalExpiry({ cron: null, next_run_at: "2026-11-01T00:00:00Z" }, now, 3650)).toBe("2026-11-27T00:00:00.000Z");
+  });
 });

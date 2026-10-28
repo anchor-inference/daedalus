@@ -1,6 +1,7 @@
 import { Component, Suspense, lazy, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useChromeChecks } from "./browser/yourchrome";
 import { openPathOf } from "./subagents";
+import { SchedulesDialogHost } from "./schedules/host";
 import { api, SessionList, telegram, TerminalList } from "./api";
 import { ConfirmHost, ToastHost, toast as showToast } from "./ui/dialogs";
 import { SessionPicker } from "./sessionpicker";
@@ -727,6 +728,7 @@ export function App() {
       <NotificationToasts />
       <PetHost needsReply={notifications.needs_you > 0} activity={route.screen} />
       <UpdateHost />
+      <SchedulesDialogHost onOpenSession={open} />
       <ToastHost />
       <ConfirmHost />
     </div>

@@ -36,7 +36,7 @@ async def proposals(settings, db: Database):  # type: ignore[no-untyped-def]
     manager = SessionManager(settings, RuntimeConfig(), db=db)
     await manager.start()
     await manager.create_session("origin", session_id="origin")
-    app = SimpleNamespace(settings=settings, db=db, extensions={}, manager=manager)
+    app = SimpleNamespace(settings=settings, db=db, extensions={}, manager=manager, config=RuntimeConfig())
     service = ScheduleProposals(app)
     app.extensions["schedule_proposals"] = service
     app.extensions["scheduler"] = Scheduler(app)
@@ -551,3 +551,46 @@ async def test_tool_answer_names_the_schedule_the_way_the_chat_card_reads_it(tmp
         assert not removed.is_error and calls[-1][0] == "remove"
     finally:
         locator.unregister("tooled")
+
+
+async def test_app_is_told_the_accept_horizon_and_the_schedules_screen_facts(standing) -> None:  # type: ignore[no-untyped-def]
+    from daedalus.extensions.schedule_proposals import HAND_APPROVAL_DAYS, STANDING_RECURRING_DAYS
+
+    scheduler, db = standing.extensions["scheduler"], standing.db
+    api = FastAPI()
+    api_recurring.register(api, standing, lambda: {"via": "token", "user_id": 1})
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="http://test") as client:
+        # With approval off a hand-pressed Accept approves as long as the standing choice does, so a
+        # schedule the operator accepts is not the one that stops after a month.
+        listed = (await client.get("/api/recurring/proposals")).json()
+        assert listed["require_approval"] is False and listed["approval_days"] == STANDING_RECURRING_DAYS
+        standing.config.scheduler.require_approval = True
+        listed = (await client.get("/api/recurring/proposals")).json()
+        assert listed["require_approval"] is True and listed["approval_days"] == HAND_APPROVAL_DAYS
+        standing.config.scheduler.require_approval = False
+
+        created = await scheduler.service("create", **tool_request("tool:facts", cron="5 * * * *", run_at=None,
+                                                                    kind="agent"))
+        card = (await client.get(f"/api/recurring/card/{created['id']}")).json()
+        assert card["approval_days"] == STANDING_RECURRING_DAYS and card["require_approval"] is False
+        row = next(item for item in await scheduler.list() if item["id"] == created["id"])
+        # The conversation that asked for it, the approval's end, and no run yet.
+        assert row["source_session_id"] == "origin" and row["last_session_id"] is None
+        assert datetime.fromisoformat(row["grant_expires_at"]) > datetime.now(UTC) + timedelta(days=3000)
+
+        # One occurrence ran into a fresh conversation: the history and the row link to it.
+        await standing.manager.create_session("run", session_id="ran-here")
+        stamp = datetime.now(UTC).isoformat()
+        await db.execute(
+            "INSERT INTO recurring_cycles(id,schedule_id,schedule_revision,due_at,local_wall,utc_offset_seconds,kind,"
+            "intent_digest,output_contract_json,receipt_id,action_state,created_at,updated_at)"
+            " VALUES ('cycle-1',?,1,?,?,0,'agent','d','{}','r','delivered',?,?)",
+            (created["id"], stamp, stamp, stamp, stamp))
+        await db.execute(
+            "INSERT INTO input_receipts(session_id,client_message_id,kind,content_digest,payload,status,"
+            "queue_revision,created_at,updated_at) VALUES ('ran-here','schedule-cycle:cycle-1','message','d',"
+            "'{\"origin\": \"schedule\"}','consumed',1,?,?)", (stamp, stamp))
+        history = (await client.get(f"/api/recurring/{created['id']}/cycles")).json()
+        assert [cycle["session_id"] for cycle in history["cycles"]] == ["ran-here"]
+        row = next(item for item in await scheduler.list() if item["id"] == created["id"])
+        assert row["last_session_id"] == "ran-here"
