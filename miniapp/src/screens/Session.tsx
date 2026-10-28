@@ -2225,7 +2225,6 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
           {closing === segment && <MessageActions text={segment.text} actions={answerActions(segment.text, segment.seq)} more={turnMenu} />}
         </Fragment>
       ))}
-      {turn.activity.map((item) => item.kind === "tool" && item.name === "AskUser" ? <AskUserRecord key={item.id} item={item} /> : null)}
       {turn.fallback && (turn.answer || live) && <FallbackChip fallback={turn.fallback} />}
       {turn.answer && (turn.media?.length ? (
         <div className={`answer answer-with-media ${live ? "streaming" : ""}`}>
@@ -2875,8 +2874,11 @@ function ActivityList({ items, compact, onRetry }: { items: Activity[]; compact:
       i++;
       continue;
     }
-    // The agent's questions are drawn as their record outside the folded steps (TurnView).
+    // A question is a step where it was asked, one row each: it used to be drawn after all of the
+    // turn's steps, so one asked first sat under the work it started, and two never group into
+    // "Asked you 2 times" because each carries its own answer.
     if (it.kind === "tool" && it.name === "AskUser") {
+      out.push(<AskUserRecord key={it.id} item={it} />);
       i++;
       continue;
     }
@@ -2997,15 +2999,14 @@ function subagentOfStep(item: ToolItem): { id?: string; name?: string } | null {
   return id || name ? { id, name } : null;
 }
 
-/** An AskUser call's record, drawn outside the turn's folded steps (TurnView): what the operator
- *  decided is read back without opening the work. The call the session still waits on draws nothing
- *  here — its card is above the composer. */
+/** An AskUser call's record among the turn's steps. The call the session still waits on is a step
+ *  that says so; the card that answers it is above the composer. */
 function AskUserRecord({ item }: { item: ToolItem }) {
-  const { asking } = useContext(SessionContext);
+  const { id: sessionId, asking } = useContext(SessionContext);
+  const [open, setOpen] = useDisclosed(`${sessionId}:tool:${item.id}`, false);
   const asked = Array.isArray(item.args.questions) ? (item.args.questions as Question[]) : [];
   const waiting = item.result === undefined && asking !== "" && asking === questionsKey(asked);
-  if (waiting) return null;
-  return <AskRecord item={item} />;
+  return <AskRecord item={item} waiting={waiting} open={open} onToggle={() => setOpen((o) => !o)} />;
 }
 
 function ToolRow({ item, nested }: { item: ToolItem; nested?: boolean }) {

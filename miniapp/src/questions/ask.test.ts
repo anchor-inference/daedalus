@@ -210,7 +210,16 @@ describe("the record in the transcript", () => {
 
   it("keeps a result it cannot read as it came", () => {
     const record = recordOf(args, 'User has answered your questions: "Which week?"="Last week"', false);
-    expect(record).toMatchObject({ state: "answered", rows: [], raw: 'User has answered your questions: "Which week?"="Last week"' });
+    expect(record).toMatchObject({ state: "answered", raw: 'User has answered your questions: "Which week?"="Last week"' });
+    // The questions are the call's own, so they are listed above the prose even when it is unreadable.
+    expect(record.rows.map((r) => [r.question, r.answer])).toEqual([["Which week?", ""], ["Which sections?", ""], ["Subject line?", ""]]);
     expect(recordOf({}, JSON.stringify({ answers: [] }), false).rows).toEqual([]);
+  });
+
+  it("never keeps the host's own answer as raw JSON when it arrived cut short", () => {
+    const whole = JSON.stringify({ answers: [{ question: "Which week?", selected: ["Last week"], custom: null }], source: "user" });
+    const record = recordOf(args, whole.slice(0, 40), false);
+    expect(record).toMatchObject({ state: "answered", raw: "", cut: true });
+    expect(record.rows.map((r) => r.question)).toEqual(["Which week?", "Which sections?", "Subject line?"]);
   });
 });

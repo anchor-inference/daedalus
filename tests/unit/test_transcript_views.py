@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 
 from protocore.contracts.types import Message, MessageRole, Session, TextBlock, ToolResultBlock
@@ -68,6 +69,20 @@ async def test_a_listed_tool_result_carries_a_preview_and_says_how_long_it_is(db
     assert len(view["tool_results"][0]["content"]) == TOOL_RESULT_PREVIEW_CHARS
     assert view["tool_results"][0]["length"] == len(body)
     assert TOOL_RESULT_PREVIEW_CHARS <= 1000  # a listing is a listing; the expand endpoint has the rest
+
+
+async def test_an_answered_question_is_listed_whole_so_the_app_can_read_it(db: Database) -> None:
+    store = await _store(db, "v-ask")
+    question = "Release 0.4.4 now? It carries the new characters and the fixed loader. " * 6
+    answer = json.dumps({"answers": [{"question": question, "selected": ["Yes, push it"], "custom": None}], "source": "user"}, ensure_ascii=False)
+    other = "{" + '"answers": "not the host shape"' + "}" + "y" * 900
+    await store.append_transcript("v-ask", [Message(role=MessageRole.tool, content_blocks=[ToolResultBlock(tool_call_id="ask1", content=answer), ToolResultBlock(tool_call_id="c2", content=other)])])
+    whole, clipped = (await store.list_transcript_views("v-ask", limit=10))[0]["tool_results"]
+    assert len(answer) > TOOL_RESULT_PREVIEW_CHARS
+    assert whole["content"] == answer and whole["clipped"] is False
+    assert json.loads(whole["content"])["answers"][0]["selected"] == ["Yes, push it"]
+    # Only the host's own reply is exempt: anything else shaped a little like it is still a preview.
+    assert len(clipped["content"]) == TOOL_RESULT_PREVIEW_CHARS and clipped["clipped"] is True
 
 
 def test_a_new_secret_shape_invalidates_the_stored_views_by_itself() -> None:

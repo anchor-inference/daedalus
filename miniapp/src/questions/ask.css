@@ -92,19 +92,28 @@
 .ask-back:hover { color: var(--fg); }
 .ask-go[aria-disabled="true"] { opacity: .45; cursor: default; }
 
-/* The record of an answered question in the transcript: one line per question. It is not a step
-   that opens, so its head is not drawn as one. */
-.ask-record { margin: 2px 0 6px; }
-.ask-record .act { cursor: default; }
-.ask-record .act:hover { background: none; }
-.ask-record .act .detail { font-family: inherit; color: var(--fg-3); }
-/* The questions' names in one column and the answers in the next, so six answers scan down a line. */
-.ask-record-rows { list-style: none; margin: 0 0 4px 24px; padding: 0; display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr); gap: 2px var(--space-3); min-width: 0; font-size: var(--fs-13); line-height: 1.45; }
-.ask-record-row { display: contents; }
-.ask-record-q { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-3); }
-.ask-record-a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
-.ask-record-a.none { color: var(--fg-3); font-style: italic; }
-.ask-record-note { margin: 0 0 4px 24px; color: var(--fg-3); font-size: var(--fs-13); line-height: 1.45; }
+/* An asked question among the turn's steps: one line, "Asked you  <question> → <answer>", that opens
+   to each question with what was chosen. The question gives way first, so the answer — the decision
+   the line exists to show — stays readable on a narrow column, up to most of the line. */
+.ask-record .act .detail.ask-record-line { display: flex; align-items: baseline; gap: 6px; font-family: inherit; font-size: inherit; color: var(--fg-3); white-space: nowrap; }
+.ask-record-line > span { overflow: hidden; text-overflow: ellipsis; }
+.ask-record-count { flex: none; }
+.ask-record-head-q { flex: 0 1 auto; min-width: 2em; }
+.ask-record-arrow { flex: none; color: var(--fg-3); }
+.ask-record-head-a { flex: 0 0 auto; max-width: 55%; color: var(--fg); }
+.ask-record-head-a.none, .ask-record-status { font-style: italic; }
+.ask-record-status { flex: 0 1 auto; min-width: 0; }
+.ask-record[data-state="waiting"] .ask-record-status { color: var(--accent); font-style: normal; }
+/* Opened: the questions whole, each with its answer under it, wrapping rather than cut. */
+.ask-record-body { margin: 2px 0 6px 24px; display: grid; gap: 6px; min-width: 0; font-size: var(--fs-13); line-height: 1.45; }
+.ask-record-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; min-width: 0; }
+.ask-record-row { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.ask-record-tag { color: var(--fg-3); font-size: var(--fs-12); }
+.ask-record-q { color: var(--fg-2); }
+.ask-record-a { color: var(--fg); font-weight: 500; }
+.ask-record-a.none { color: var(--fg-3); font-style: italic; font-weight: normal; }
+.ask-record-note { margin: 0; color: var(--fg-3); }
+.ask-record-raw { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 @media (max-width: 1023px) {
   /* The phone: full width, a thumb's targets, and the button that moves on kept in reach at the
@@ -139,6 +148,5 @@
   .ask.phone .ask-foot .btn { min-height: var(--tap); border-radius: var(--radius-pill); font-size: var(--fs-15); }
   .ask.phone .ask-go { padding: 0 20px; }
   .ask.phone .ask-back { min-width: var(--tap); justify-content: center; padding: 0; }
-  .ask-record-rows, .ask-record-note { font-size: var(--fs-14); }
-  .ask-record-q { max-width: 140px; }
+  .ask-record-body { font-size: var(--fs-14); }
 }

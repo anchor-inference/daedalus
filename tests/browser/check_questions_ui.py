@@ -6,7 +6,8 @@ are ``ASK_KINDS`` in api_stub.py): one choice with descriptions and a recommende
 choices, a yes/no pair, words only, options with previews, and a batch of six with its chips, its
 review and the hint that names what is missing. The keys (digits pick, Enter moves on), the Reply
 circle doing what the card's button does, a pick surviving the session being read again, the record
-an answered question leaves in the transcript, and the card at a phone's width are checked too.
+an answered question leaves among the turn's steps where it was asked, and the card at a phone's
+width are checked too.
 
     cd miniapp && npm run build
     mkdir -p /tmp/app-root && ln -s "$PWD/dist" /tmp/app-root/app
@@ -372,34 +373,63 @@ def batch(browser) -> list[str]:  # type: ignore[no-untyped-def]
     return problems
 
 
+def open_steps(page: Page) -> None:
+    """Unfold every turn's steps: a question is one of them, and a settled turn folds them away."""
+    heads = page.locator(".thinking-head[aria-expanded='false']")
+    while heads.count():
+        heads.first.click()
+        page.wait_for_timeout(50)
+
+
 def record(browser) -> list[str]:  # type: ignore[no-untyped-def]
     problems: list[str] = []
     record_messages()
     HOST.messages = [
         *HOST.messages,
-        message(6, "user", "Now the reminder for Friday."),
-        *ask_turn(7, "toolu_timeout", [ASK_KINDS["yesno"]["questions"][0]], [{"question": "", "selected": [], "custom": "No operator is available for this unattended run."}], source="timeout"),
-        message(9, "assistant", "I went ahead without sending."),
-        message(10, "user", "And the archive?"),
-        *ask_turn(11, "toolu_stopped", [ASK_KINDS["text"]["questions"][0]], None),
-        message(12, "assistant", "Stopped."),
+        message(20, "user", "Now the reminder for Friday."),
+        *ask_turn(21, "toolu_timeout", [ASK_KINDS["yesno"]["questions"][0]], [{"question": "", "selected": [], "custom": "No operator is available for this unattended run."}], source="timeout"),
+        message(23, "assistant", "I went ahead without sending."),
+        message(24, "user", "And the archive?"),
+        *ask_turn(25, "toolu_stopped", [ASK_KINDS["text"]["questions"][0]], None),
+        message(27, "assistant", "Stopped."),
     ]
     context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
-    page = open_page(context, wait=".ask-record")
+    page = open_page(context, wait=".thinking-head")
+    open_steps(page)
     records = page.locator(".ask-record")
     states = [records.nth(i).get_attribute("data-state") for i in range(records.count())]
     print("records:", states)
-    if states != ["answered", "expired", "unanswered"]:
-        problems.append(f"the three AskUser calls should read answered, expired, unanswered ({states})")
-    rows = page.locator(".ask-record[data-state='answered'] .ask-record-row")
+    if states != ["answered", "answered", "expired", "unanswered"]:
+        problems.append(f"the four AskUser calls should read answered, answered, expired, unanswered ({states})")
+    # Where each question was asked: between the commands of its turn, never pinned after them.
+    order = page.evaluate("""() => [...document.querySelector('.activity').children].filter((el) => el.classList.contains('act-wrap'))
+        .map((el) => el.classList.contains('ask-record') ? 'ask' : (el.querySelector('.verb') || {}).textContent || '')""")
+    print("first turn:", order)
+    if order != ["Ran command", "ask", "Ran command", "ask", "Ran command"]:
+        problems.append(f"the questions are not in the order they were asked among the steps ({order})")
+    outside = page.evaluate("() => [...document.querySelectorAll('.ask-record')].filter((el) => !el.closest('.activity')).length")
+    if outside:
+        problems.append(f"{outside} question records are drawn outside the turn's steps")
+    if '{"answers"' in page.locator(".chat, .screen").first.inner_text():
+        problems.append("an answered question is drawn as its JSON")
+    first = records.nth(0)
+    line = first.locator(".act").inner_text()
+    if "Week" not in line or "The one that just ended" not in line or "(Recommended)" in line or "6 questions" not in line:
+        problems.append(f"the folded line does not read as the first question and its answer ({line!r})")
+    first.locator(".act").click()
+    rows = first.locator(".ask-record-row")
     if rows.count() != 6:
-        problems.append(f"the answered record is not one line per question ({rows.count()})")
+        problems.append(f"the opened record is not one entry per question ({rows.count()})")
     else:
-        first, second = rows.nth(0).inner_text(), rows.nth(1).inner_text()
-        if "Week" not in first or "The one that just ended" not in first or "(Recommended)" in first or "Releases, Numbers" not in second:
-            problems.append(f"the record does not read as what was chosen ({first!r}, {second!r})")
-    if "Nobody answered" not in page.locator(".ask-record[data-state='expired']").inner_text():
+        one, two = rows.nth(0).inner_text(), rows.nth(1).inner_text()
+        if "Which week should this digest cover?" not in one or "The one that just ended" not in one or "Releases, Numbers" not in two:
+            problems.append(f"the opened record does not read as what was chosen ({one!r}, {two!r})")
+    expired = page.locator(".ask-record[data-state='expired']")
+    if "nobody answered in time" not in expired.locator(".act").inner_text():
         problems.append("the timed-out question does not say nobody answered")
+    expired.locator(".act").click()
+    if "Nobody answered" not in expired.inner_text():
+        problems.append("the opened timed-out question does not explain itself")
     if page.locator(".composer .ask").count():
         problems.append("the card stayed with nothing pending")
     context.close()
@@ -452,7 +482,13 @@ def shots(browser, out: Path, lang: str = "en") -> None:  # type: ignore[no-unty
             for kind in SHOT_KINDS:
                 if kind == "record":
                     record_messages()
-                    page = open_page(context, scheme, lang, wait=".chat, .screen")
+                    page = open_page(context, scheme, lang, wait=".thinking-head")
+                    open_steps(page)
+                    # The first question opened, so the picture shows its answers as well as its line.
+                    first = page.locator(".ask-record .act").first
+                    if first.count():
+                        first.click()
+                    page.mouse.move(1, 1)
                     page.wait_for_timeout(600)
                 else:
                     HOST.ask("batch" if kind == "batch-review" else kind)
@@ -481,12 +517,23 @@ def shots(browser, out: Path, lang: str = "en") -> None:  # type: ignore[no-unty
             context.close()
 
 
+def command(seq: int, call_id: str, line: str, output: str) -> list[dict]:
+    """A command the agent ran, and what it printed: the steps around a question."""
+    return [
+        message(seq, "assistant", "", tool_calls=[{"id": call_id, "name": "Exec", "arguments": {"command": line}}]),
+        message(seq + 1, "tool", "", tool_results=[{"id": call_id, "content": output, "is_error": False}]),
+    ]
+
+
 def record_messages() -> None:
+    """One turn that asks twice between its commands: the first question right after the first
+    command, the second later. Both once sat under the last command, in reverse of how they read."""
     questions = ASK_KINDS["batch"]["questions"]
     HOST.pending, HOST.status = None, "idle"
     HOST.messages = [
         *OPENING,
-        *ask_turn(3, "toolu_done", questions, [
+        *command(3, "toolu_items", "ls digest/items", "releases.md incidents.md numbers.md"),
+        *ask_turn(5, "toolu_done", questions, [
             {"question": questions[0]["question"], "selected": ["The one that just ended (Recommended)"], "custom": None},
             {"question": questions[1]["question"], "selected": ["Releases", "Numbers"], "custom": None},
             {"question": questions[2]["question"], "selected": ["Yes"], "custom": None},
@@ -494,7 +541,10 @@ def record_messages() -> None:
             {"question": questions[4]["question"], "selected": ["One column"], "custom": None},
             {"question": questions[5]["question"], "selected": [], "custom": "Plain, and thank the testers"},
         ]),
-        message(5, "assistant", "Done: the digest is drafted, one page, sections Releases and Numbers."),
+        *command(7, "toolu_draft", "make digest WEEK=41", "digest.html written"),
+        *ask_turn(9, "toolu_send", [ASK_KINDS["yesno"]["questions"][0]], [{"question": ASK_KINDS["yesno"]["questions"][0]["question"], "selected": ["Yes"], "custom": None}]),
+        *command(11, "toolu_mail", "mail-digest digest.html", "queued for 214 readers"),
+        message(13, "assistant", "Done: the digest is drafted, one page, sections Releases and Numbers."),
     ]
 
 
