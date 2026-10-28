@@ -174,8 +174,9 @@ export type RecordState = "answered" | "expired" | "unanswered";
 
 export type RecordRow = { header: string; question: string; answer: string };
 
-/** `by`: who answered, as the host's result names it (`orchestrator`, `operator`, `user`); empty when unknown. */
-export type AskRecord = { state: RecordState; rows: RecordRow[]; raw: string; by?: string };
+/** `by`: who answered, as the host's result names it (`orchestrator`, `operator`, `user`); empty when unknown.
+ *  `cut`: the host's answer arrived cut short, so what was chosen is not known here. */
+export type AskRecord = { state: RecordState; rows: RecordRow[]; raw: string; by?: string; cut?: boolean };
 
 function questionsOf(args: Record<string, unknown>): Question[] {
   const list = Array.isArray(args.questions) ? args.questions : [];
@@ -205,6 +206,10 @@ export function recordOf(args: Record<string, unknown>, result: string | undefin
     const by = typeof parsed.source === "string" ? parsed.source : "";
     return { state: "answered", rows: rows(parsed.answers as { question?: string; selected?: string[]; custom?: string | null }[]), raw: "", by };
   } catch {
-    return { state: "answered", rows: [], raw: result };
+    // The host's own answer cut short (a listing that clipped it) no longer parses. Its JSON used to
+    // be drawn as it was, half a question and an open bracket; the questions are known from the
+    // call, so they are listed and the answer is said to be missing rather than shown as code.
+    if (/^\s*\{\s*"answers"/.test(result)) return { state: "answered", rows: rows([]), raw: "", cut: true };
+    return { state: "answered", rows: rows([]), raw: result };
   }
 }

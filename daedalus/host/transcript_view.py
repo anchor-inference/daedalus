@@ -36,7 +36,7 @@ from daedalus.host.run_outcome import OUTCOME_METADATA_KEY
 from daedalus.security import operator_secrets, redact
 from daedalus.tools.websearch import sources_of
 
-VIEW_VERSION = 13
+VIEW_VERSION = 14
 """Bumped whenever the shape below changes; stored views from an older version are recomputed. It
 covers this file only — what the redactor masks is covered by the key, by value and by shape, so a
 new secret format does not depend on anyone remembering this number."""
@@ -49,6 +49,10 @@ session payload while they were ten times this long."""
 _SPLIT_POINTER_RE = re.compile(r"\n\[truncated \d+ chars(?:; full result at [^\]]*)?\]\Z")
 """The line the core ends a result with when it cut the text for the model and kept the whole value
 beside it (``canonical_content``)."""
+
+ANSWER_MAX_CHARS = 20_000
+"""Ceiling on an answered question the listing carries whole: a hundred questions of two hundred
+characters each. Past it the answer is clipped like any other result rather than bloat the listing."""
 
 _SUMMARY_WRAP_RE = re.compile(r"</?compacted-turn[^>]*>")
 _NUDGE_MARKERS = ("[internal control", "tool repeatedly failed with the same error", "has been disabled for the rest of this run", "The run has reached its budget")
@@ -171,6 +175,19 @@ def _readable_part(placeholder: str) -> str:
     return parsed[0].preview if parsed else ""
 
 
+def _is_answer(content: str) -> bool:
+    """Whether a result is the host's reply to an AskUser call (``{"answers": [...], "source": ...}``).
+
+    The block names no tool, so the reply is told by its shape, which only the host writes."""
+    if not content.startswith('{"answers"') or len(content) > ANSWER_MAX_CHARS:
+        return False
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError:
+        return False
+    return isinstance(parsed, dict) and isinstance(parsed.get("answers"), list) and "source" in parsed
+
+
 def _result_preview(block: ToolResultBlock) -> dict[str, Any]:
     """The listing's preview of one tool result; the full text (a skill body, a long command output) is one request away.
 
@@ -183,6 +200,9 @@ def _result_preview(block: ToolResultBlock) -> dict[str, Any]:
     button ever fetched: the original sits in the blob store, which only the endpoint reads. So the
     preview is the part written for a reader, and the length is left unknown rather than given as
     the placeholder's, which would claim the result was that short.
+
+    An answered question is carried whole. Cut at the preview's length, its JSON no longer parsed,
+    and the app drew the operator's own decision as a raw, half-finished ``{"answers": [...`` string.
     """
     content = block.content
     if is_compacted_placeholder(content):
@@ -197,6 +217,8 @@ def _result_preview(block: ToolResultBlock) -> dict[str, Any]:
         "length": len(content),
         "clipped": len(content) > TOOL_RESULT_PREVIEW_CHARS,
     }
+    if not block.is_error and _is_answer(content):
+        view["content"], view["clipped"] = redact.shared().redact_tool_data(content), False
     # A search's hits are mostly past the preview; the answer's list of sources needs all of them,
     # in the compact form rather than the whole text.
     if not block.is_error and (sources := sources_of(content)):
