@@ -1083,6 +1083,12 @@
   .msg.user { max-width: 85%; padding: 10px 16px; border-radius: var(--radius-xl) var(--radius-xl) 6px var(--radius-xl); font-size: var(--fs-15); line-height: 1.45; }
   .msg.user.clamped .msg-text { max-height: 6lh; overflow: hidden; }
   .msg.user.clamped.over .msg-text { -webkit-mask-image: linear-gradient(#000 calc(100% - 1.2lh), transparent); mask-image: linear-gradient(#000 calc(100% - 1.2lh), transparent); }
+  /* Three thumbnails to a row inside the bubble's 85 %, and a card a finger's height or more. */
+  .msg-attachments { max-width: 85%; }
+  .msg-thumb { width: 96px; border-radius: var(--radius-xl); }
+  .msg-file { width: 264px; border-radius: var(--radius-xl); font-size: var(--fs-15); }
+  .msg-file-name { font-size: var(--fs-15); }
+  .msg-file-kind { font-size: var(--fs-13); }
   .msg-more { position: relative; display: inline-flex; align-items: center; gap: 4px; min-height: 32px; margin-top: 2px; padding: 0; border: 0; background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-14); font-weight: 500; cursor: pointer; }
   .msg-more::after { content: ""; position: absolute; inset: -6px -8px; }
   .msg-actions { gap: 0; min-height: var(--tap); opacity: 1; }

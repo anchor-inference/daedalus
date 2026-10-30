@@ -47,6 +47,7 @@ from api_stub import (  # noqa: E402
     Unhandled,
     attached_media,
     attached_route,
+    attachment_route,
     create_session,
     expect_app,
     file_entries,
@@ -831,7 +832,7 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return respond(route, {"line": "I'm here.", "emotion": "joy", "action": "wave", "prop": ""})
     # A worktree's pane and an attached document answer before the shared file routes, which would
     # otherwise take a worktree's search for the workspace's.
-    served = worktree_route(rel, params) or attached_route(rel, params)
+    served = worktree_route(rel, params) or attached_route(rel, params) or attachment_route(rel, params)
     if served is not None:
         return respond(route, served[1], content_type=served[0])
     search = file_search(rel, params.get("q", [""])[0])
