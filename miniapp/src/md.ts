@@ -1,10 +1,13 @@
 // Markdown → HTML for the chat: headings, paragraphs, lists (nested, ordered, tasks), tables,
 // fenced code with a language label and a copy button, quotes, dividers, inline marks, links,
 // <details>/<summary> passthrough, the evidence tags an answer cites (<file …/>, <run …/>) as
-// clickable chips, and the cards and web citations of a rich answer (see rich.ts). Everything else
-// is HTML-escaped first, so model output cannot inject markup.
+// clickable chips, the cards and web citations of a rich answer (see rich.ts), its flows (flow.ts)
+// and its mermaid diagrams (diagrams.ts). Everything else is HTML-escaped first, so model output
+// cannot inject markup.
 
+import { FLOW_OPEN_RE, type Flow, type FlowNode, flowIcon, parseFlow } from "./flow";
 import { t } from "./i18n";
+import { iconSvg } from "./icons";
 import { CARD_CLOSE_RE, CARD_OPEN_RE, CITE_RUN_RE, type Card, type Citation, citationsIn, parseCard, siteOf, webUrl } from "./rich";
 
 function escape(s: string): string {
@@ -131,6 +134,30 @@ function cardHtml(card: Card): string {
   return `<div class="rcard rcard-${card.kind}${media ? "" : " no-media"}">${media}<div class="rcard-main">${head}${meta}${body}${links}${note}</div></div>`;
 }
 
+function flowNodeHtml(node: FlowNode): string {
+  const known = node.icon ? flowIcon(node.icon) : null;
+  const icon = known
+    ? `<span class="flow-icon${known.tone ? ` tone-${known.tone}` : ""}">${iconSvg(known.name, 20)}</span>`
+    : node.icon ? `<span class="flow-icon flow-emoji" aria-hidden="true">${escape(node.icon)}</span>` : "";
+  const title = node.title ? `<span class="flow-title">${inline(node.title)}</span>` : "";
+  const text = node.text ? `<span class="flow-text">${inline(node.text)}</span>` : "";
+  return `<div class="flow-node${node.mark ? " is-mark" : ""}">${icon}${title}${text}</div>`;
+}
+
+function flowHtml(flow: Flow): string {
+  const rows = flow.rows.map((row, index) => {
+    const cells = row.nodes.map((node, at) => (at ? `<span class="flow-link${row.links[at - 1] ? "" : " is-none"}" aria-hidden="true">${row.links[at - 1]}</span>` : "") + flowNodeHtml(node));
+    const before = index ? flow.steps[index - 1] : null;
+    const step = before ? `<div class="flow-step"><span class="flow-arrow" aria-hidden="true">${before.arrow}</span>${before.label ? `<span class="flow-step-label">${inline(before.label)}</span>` : ""}</div>` : "";
+    return `${step}<div class="flow-row" data-n="${row.nodes.length}">${cells.join("")}</div>`;
+  });
+  const known = flow.icon ? flowIcon(flow.icon) : null;
+  const icon = known ? iconSvg(known.name, 18) : flow.icon ? `<span class="flow-emoji" aria-hidden="true">${escape(flow.icon)}</span>` : "";
+  const head = flow.title || icon ? `<div class="flow-head">${icon}<span>${inline(flow.title)}</span></div>` : "";
+  const note = flow.note ? `<div class="flow-note">${inline(flow.note)}</div>` : "";
+  return `<figure class="flow">${head}<div class="flow-body">${rows.join("")}</div>${note}</figure>`;
+}
+
 type ListItem = { text: string; children: string[]; task?: boolean; checked?: boolean };
 
 function indentOf(line: string): number {
@@ -185,10 +212,19 @@ function keepFlags(html: string): string {
   return html.replace(/(^|[\s(])(--?[A-Za-z][\w-]*)/gm, '$1<span class="nobreak">$2</span>');
 }
 
-export function codeBlock(code: string, lang = ""): string {
+/** A closed ```mermaid fence: the code card it always was, marked for diagrams.ts to draw. The two
+ *  buttons show once the drawing is in (see the styles): back to the code, and the drawing large. */
+function mermaidBlock(code: string): string {
+  const source = escape(t("diagram.source"));
+  const open = escape(t("diagram.open"));
+  const buttons = `<button class="copy mermaid-toggle" data-mermaid-toggle="1" type="button" aria-label="${source}" title="${source}">${iconSvg("braces", 14)}</button><button class="copy mermaid-open" data-mermaid-open="1" type="button" aria-label="${open}" title="${open}">${iconSvg("expand", 14)}</button>`;
+  return codeBlock(code, "mermaid", buttons).replace('<div class="codecard">', '<div class="codecard mermaid-card" data-mermaid="pending">');
+}
+
+export function codeBlock(code: string, lang = "", buttons = ""): string {
   const label = lang || "text";
   const copy = escape(t("common.copy"));
-  return `<div class="codecard"><div class="codehead"><span>${escape(label)}</span><button class="copy" data-copy="1" type="button" aria-label="${copy}" title="${copy}"><span class="glyph-copy">${COPY_GLYPH}</span><span class="glyph-done">${DONE_GLYPH}</span></button></div><pre><code>${keepFlags(escape(code))}</code></pre></div>`;
+  return `<div class="codecard"><div class="codehead"><span>${escape(label)}</span>${buttons}<button class="copy" data-copy="1" type="button" aria-label="${copy}" title="${copy}"><span class="glyph-copy">${COPY_GLYPH}</span><span class="glyph-done">${DONE_GLYPH}</span></button></div><pre><code>${keepFlags(escape(code))}</code></pre></div>`;
 }
 
 const LIST_RE = /^\s*(?:[-*+]|\d+[.)])\s+/;
@@ -247,14 +283,36 @@ export function renderMarkdown(text: string): string {
       out.push(`<div class="rcards">${cards.join("")}</div>`);
       continue;
     }
+    const flowOpen = line.match(FLOW_OPEN_RE);
+    if (flowOpen) {
+      flush();
+      // An unclosed flow runs to the end, as a card does: that is a flow still streaming, and it is
+      // drawn row by row as the rows arrive.
+      const buf: string[] = [];
+      i++;
+      while (i < lines.length && !CARD_CLOSE_RE.test(lines[i])) buf.push(lines[i++]);
+      i++;
+      try {
+        const flow = parseFlow(flowOpen[1], buf);
+        if (flow.rows.length || flow.title || flow.note) out.push(flowHtml(flow));
+      } catch {
+        // The parser is written not to throw; should it ever, the reader still gets the words.
+        out.push(codeBlock([line, ...buf].join("\n")));
+      }
+      continue;
+    }
     const fence = line.match(/^\s*```([\w+#.-]*)\s*$/);
     if (fence) {
       flush();
       const buf: string[] = [];
       i++;
       while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) buf.push(lines[i++]);
+      // A diagram is drawn only once its fence has closed: half a mermaid source is a syntax error
+      // on every token, and the reader would watch an error flicker until the model finished.
+      const closed = i < lines.length;
       i++;
-      out.push(codeBlock(buf.join("\n"), fence[1]));
+      const code = buf.join("\n");
+      out.push(closed && fence[1].toLowerCase() === "mermaid" && code.trim() ? mermaidBlock(code) : codeBlock(code, fence[1]));
       continue;
     }
     if (/^\s*$/.test(line)) {

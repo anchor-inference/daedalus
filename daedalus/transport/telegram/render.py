@@ -59,6 +59,12 @@ _MEDIA_RE = re.compile(r"!\[[^\]\n]{0,500}\]\(daedalus-media:[0-9a-f-]{36}\)")
 _CARD_OPEN_RE = re.compile(r"^\s*:::\s*(card|entity)\b\s*(.*)$", re.IGNORECASE)
 _CARD_CLOSE_RE = re.compile(r"^\s*:::\s*$")
 _CARD_FIELD_RE = re.compile(r"^\s*(title|url|image|badge|meta|links|note)\s*:\s?(.*)$", re.IGNORECASE)
+_FLOW_OPEN_RE = re.compile(r"^\s*:::\s*flow\b\s*(.*)$", re.IGNORECASE)
+_FLOW_KEY_RE = re.compile(r"^\s*(title|note)\s*:\s?(.*)$", re.IGNORECASE)
+_FLOW_STEP_RE = re.compile(r"^\s*(↑↓|↓↑|⇅|⇵|↕|↓|↑|⬇️?|⬆️?|↧|↥)(?:\s+(.*?))?\s*$")
+_FLOW_STEP_ASCII = {"v": "↓", "^": "↑", "^v": "↕", "v^": "↕", "<->": "↕"}
+_FLOW_LINK_RE = re.compile(r"\s+(<->|↔|<-->|-->|->|→|<--|<-|←|\|)\s+")
+_FLOW_LINKS = {"<->": "↔", "<-->": "↔", "↔": "↔", "-->": "→", "->": "→", "→": "→", "<--": "←", "<-": "←", "←": "←", "|": "·"}
 _CITE_ONE = r"\[\^([^\]\n]{0,40})\]\((https?://[^)\s]+)\)"
 _CITE_RUN_RE = re.compile(rf"{_CITE_ONE}(?:[ \t]*{_CITE_ONE})*")
 _SITE_RE = re.compile(r"^https?://(?:www\d?\.|m\.)?([^/?#:]+)", re.IGNORECASE)
@@ -100,13 +106,50 @@ def _card_text(kind: str, rest: str, lines: list[str]) -> list[str]:
     return out
 
 
+def _flow_text(rest: str, lines: list[str]) -> list[str]:
+    """A flow as the lines a chat reads. The model writes it to read as a diagram already — an emoji,
+    a title and a subtitle on each row, an arrow line between rows — so what changes is little: the
+    header is bold, a row nobody joined to the one above gets the ``↓`` the app would draw, ASCII
+    arrows become the glyphs, the highlighted node's ``==`` marks become bold and the caption is
+    muted. The key names and the block markers go, as they do for a card."""
+    title, note = rest.strip(), ""
+    out: list[str] = []
+    pending = ""
+    for line in lines:
+        if not line.strip() or line.lstrip().startswith("```"):
+            continue
+        key = _FLOW_KEY_RE.match(line)
+        if key:
+            if key.group(1).lower() == "title":
+                title = key.group(2).strip()
+            else:
+                note = key.group(2).strip()
+            continue
+        step = _FLOW_STEP_RE.match(line)
+        ascii_step = _FLOW_STEP_ASCII.get(line.strip().lower())
+        if step or ascii_step:
+            pending = line.strip() if step else ascii_step or "↓"
+            continue
+        row = re.sub(r"^\s*(?:[-*+]|\d+[.)])\s+", "", line).strip()
+        row = _FLOW_LINK_RE.sub(lambda match: f" {_FLOW_LINKS[match.group(1)]} ", f" {row} ").strip()
+        row = re.sub(r"==(\S(?:.*?\S)?)==", r"**\1**", row)
+        if out:
+            out.append(pending or "↓")
+        out.append(row)
+        pending = ""
+    head = [f"**{title}**"] if title else []
+    return head + out + ([f"_{note}_"] if note else [])
+
+
 def flatten_rich(text: str) -> str:
     """A rich answer's cards and citations, as Markdown a chat renders.
 
-    The Mini App draws ``:::card`` and ``:::entity`` blocks as cards and ``[^](url)`` as a chip named
-    after the site. In Telegram the block markers and the key names would be noise, so a card becomes
-    its title as a link with its lines under it, and the citations beside a sentence become the sites
-    they name, each a link, in brackets.
+    The Mini App draws ``:::card`` and ``:::entity`` blocks as cards, ``:::flow`` as a panel of
+    nodes and arrows, and ``[^](url)`` as a chip named after the site. In Telegram the block markers
+    and the key names would be noise, so a card becomes its title as a link with its lines under it,
+    a flow its rows one per line with the arrows between them (:func:`_flow_text`), and the citations
+    beside a sentence become the sites they name, each a link, in brackets. A mermaid fence is left a
+    code block: a chat cannot draw it, and the source is what the reader can still use.
     """
     if ":::" not in text and "[^" not in text:
         return text
@@ -119,7 +162,8 @@ def flatten_rich(text: str) -> str:
         if line.lstrip().startswith("```"):
             fenced = not fenced
         opened = None if fenced else _CARD_OPEN_RE.match(line)
-        if not opened:
+        flow = None if fenced or opened else _FLOW_OPEN_RE.match(line)
+        if not opened and not flow:
             out.append(line)
             index += 1
             continue
@@ -129,7 +173,10 @@ def flatten_rich(text: str) -> str:
             block.append(lines[index])
             index += 1
         index += 1
-        out.extend(_card_text(opened.group(1).lower(), opened.group(2), block))
+        if flow:
+            out.extend(_flow_text(flow.group(1), block))
+        elif opened:
+            out.extend(_card_text(opened.group(1).lower(), opened.group(2), block))
         out.append("")
 
     def cites(match: re.Match[str]) -> str:
