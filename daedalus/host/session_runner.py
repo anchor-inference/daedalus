@@ -84,6 +84,7 @@ from daedalus.config import (
     on_demand_tool_groups_for,
 )
 from daedalus.host import (
+    attached_files,
     capabilities,
     launcher_bridge,
     prompt_coach,
@@ -317,6 +318,8 @@ class Attachment:
     stored_name: str | None = None
     image_ref: str | None = None
     """The blob an image was kept as, once ingested: what the model is shown alongside the words."""
+    shown: dict[str, Any] | None = None
+    """How the app draws the file once ingested (``attached_files``): the model reads the list in the text."""
 
 
 def _file_sha256(path: Path) -> str:
@@ -3826,6 +3829,10 @@ class SessionManager:
                 if target["provider_source_digest"] != self.providers.get(provider_id).endpoint.source_digest():
                     raise RuntimeError("the held provider connection changed; review the new configuration")
             body, image_refs = await self._ingest_attachments(state, text, attachments)
+            if shown := [item.shown for item in attachments if item.shown]:
+                # Rides with the words on every copy of the message, as the secrets do: the app drew
+                # nothing for a file before, and printed the list written for the model in the bubble.
+                words = {**words, attached_files.METADATA_KEY: shown}
             if state.pending is not None:
                 if as_answer:
                     # Free-text reply to a pending question counts as a custom answer.
@@ -4044,6 +4051,7 @@ class SessionManager:
                 continue
             attachment.stored_name = stored.name
             attachment.content_sha256 = stored.sha256
+            attachment.shown = attached_files.kept_entry(stored.id, stored.name, stored.mime, stored.size)
             lines.append(f"- {stored.line()}")
             if stored.mime.startswith("image/"):
                 meta = await self.blobs.put(TENANT, await self.files.read(stored), content_type=stored.mime)
@@ -4116,6 +4124,8 @@ class SessionManager:
                 shown = state.services.workspace_dir / "inbox" / target.name
                 await backend.put_bytes(str(shown), await asyncio.to_thread(target.read_bytes))
             size = target.stat().st_size
+            # The copy here is the one the app is served, whichever machine the tools read theirs on.
+            attachment.shown = attached_files.inbox_entry(name, target.name, attachment.mime_type, size)
             lines.append(f"- {shown} ({attachment.mime_type}, {size} bytes){await self._cookie_hint(target, attachment.mime_type, size)}")
             if attachment.mime_type.startswith("image/"):
                 meta = await self.blobs.put(TENANT, target.read_bytes(), content_type=attachment.mime_type)
@@ -7518,7 +7528,7 @@ def _image_refs_metadata(image_refs: Sequence[tuple[str, str]]) -> dict[str, Any
 # core places, or the one that opens the next turn, is written later from the queue item alone, so the item
 # has to carry it. It used to be dropped there: a message with a secret attached showed the host's note
 # about the secret as the operator's words and no chip.
-_DISPLAY_KEYS = ("daedalus.secrets", "daedalus.reply_to", "daedalus.autopilot")
+_DISPLAY_KEYS = ("daedalus.secrets", "daedalus.reply_to", "daedalus.autopilot", attached_files.METADATA_KEY)
 
 
 def _queued_display(words: dict[str, Any]) -> dict[str, Any]:
@@ -7528,17 +7538,21 @@ def _queued_display(words: dict[str, Any]) -> dict[str, Any]:
 
 def _merged_words(items: Sequence[dict[str, Any]]) -> dict[str, Any]:
     """The mark for one message made of several queued items, each with its own origin, and what the
-    app draws it with: every item's secrets, and the reply of the first item, the one whose quote
+    app draws it with: every item's secrets and files, and the reply of the first item, the one whose quote
     opens the joined text."""
     words: list[str] = []
     secrets: list[dict[str, Any]] = []
+    files: list[dict[str, Any]] = []
     for item in items:
         marked = operator_words_metadata(str(item.get("origin") or "operator"), str(item.get("text") or ""), item.get("operator_words"))
         words += marked[OPERATOR_WORDS_METADATA_KEY] or []
         secrets += [handed for handed in (item.get("display") or {}).get("daedalus.secrets") or [] if handed not in secrets]
+        files += [entry for entry in (item.get("display") or {}).get(attached_files.METADATA_KEY) or [] if isinstance(entry, dict)]
     merged: dict[str, Any] = {OPERATOR_WORDS_METADATA_KEY: words or False}
     if secrets:
         merged["daedalus.secrets"] = secrets
+    if files:
+        merged[attached_files.METADATA_KEY] = files
     reply = (items[0].get("display") or {}).get("daedalus.reply_to") if items else None
     if reply:
         merged["daedalus.reply_to"] = reply

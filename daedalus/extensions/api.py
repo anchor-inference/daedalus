@@ -145,7 +145,7 @@ from daedalus.extensions.review import ReviewRefused
 from daedalus.extensions.services import SHARE_COOKIE_PREFIX, SHARE_MODES, pid_alive
 from daedalus.harness import conditions as member_conditions
 from daedalus.harness.capabilities import CAPABILITIES
-from daedalus.host import capabilities, component_install, launcher_bridge
+from daedalus.host import attached_files, capabilities, component_install, launcher_bridge
 from daedalus.host import components as component_list
 from daedalus.host.config_validation import UNKNOWN_REFERENCE_PATHS, ConfigConflict, config_revision, validate_candidate
 from daedalus.host.deliverables import WORKTREE_PANE, parse_worktree_pane, secret_part, worktree_root
@@ -2773,6 +2773,38 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                         raise HTTPException(404, "the file is gone")
                     return FileResponse(target, media_type=mimetypes.guess_type(target.name)[0] or "application/octet-stream", filename=target.name, headers={"Access-Control-Allow-Origin": "https://web.telegram.org"})
         raise HTTPException(404, "no such call")
+
+    @api.get("/api/sessions/{session_id}/attachments/download")
+    async def attachment_file(session_id: str, path: str, _: dict[str, Any] = Depends(auth)) -> Response:
+        """A file the operator attached to a message of this session, by its name in the session's inbox.
+
+        Only that: ``path`` is a bare file name, and the file it names must lie directly in the inbox
+        once every link is followed. The inbox is in the session's workspace, which the agent writes,
+        so a link it left there pointing elsewhere is refused rather than followed. The copy read is
+        the one this process made when the message arrived; a session working on the host was handed
+        its own copy, which this does not need to reach.
+        """
+        state = await manager.get_state(session_id)
+        if state is None:
+            raise HTTPException(404, "no such session")
+        if not attached_files.inbox_name_ok(path):
+            raise HTTPException(400, "an attachment is named by its file name alone")
+        inbox = state.workspace / "inbox"
+        target = inbox / path
+        try:
+            inside = not target.is_symlink() and target.resolve().parent == inbox.resolve()
+        except OSError:
+            inside = False
+        if not inside:
+            raise HTTPException(403, "that is not an attachment of this session")
+        if not target.is_file():
+            raise HTTPException(404, "the file is gone")
+        return FileResponse(
+            target,
+            media_type=mimetypes.guess_type(target.name)[0] or "application/octet-stream",
+            filename=target.name,
+            headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=3600"},
+        )
 
     async def _sent_by_orchestrator(project: Any, raw: str, range_header: str) -> Response:
         """A file an orchestrator sent, read back from the project folder it lies in — a staff
