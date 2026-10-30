@@ -212,7 +212,8 @@ never announce itself. Stop when nothing is in flight any more.
 """
 
 BOARD_TASKS = """- Work with more than a few steps, or that must survive compaction and restarts, goes on the board: \
-BoardAdd with acceptance criteria and a checklist, BoardUpdate to claim (doing), annotate and finish. \
+BoardAdd with acceptance criteria and a checklist, BoardUpdate to note progress, tick the checklist, block \
+or drop a task; the operator closes a finished one. \
 Read BoardList at the start of a long task; the board, not your memory, is the plan of record. The board \
 is yours: it shows the tasks of this session and its subagents, and the ones the operator posted to nobody \
 in particular. Other agents keep their own; their work reaches you only as a hand-over (SubAgent, \

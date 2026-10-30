@@ -242,9 +242,60 @@ async def grant_review(app: Application, project_id: str, principal: Principal, 
                                               {"expires_at": expires_at}, effect)
 
 
+BOARD_STANDING_ISSUER = Principal("operator:standing-board", "operator")
+"""Who the operator's own chats are recorded as allowed to write their board by: the operator, standing.
+
+Nothing ever issued a chat a board grant. The approval screens issue grants to the coordinator only,
+so from the day board writes became receipted commands every BoardAdd and BoardUpdate from an
+ordinary chat was refused with "no current grant", while BoardList went on working. There is one
+operator, and a chat is that operator's own agent planning its own work; asking for an approval
+before it may write a to-do list is the stalled permission step the coordinator's standing grant was
+made to remove. A distinct identity rather than the operator's own, so the grant rows and the
+receipts still tell a chat's board write apart from one the operator made by hand."""
+
+BOARD_STANDING_OPERATIONS = ("board.task.create", "board.task.update")
+"""What a chat may do on its board: add a task, and annotate, tick, block or drop one. Assignment,
+launches, review and the operator's close stay with the coordinator and the operator."""
+
+_HELPER_LINKS = ("subagent_of", "btw_of", "prompt_coach_of")
+"""The metadata a helper session names its leader by; a helper is what its leader is."""
+
+
+async def _works_for_team(conn: Any, session_id: str) -> bool:
+    """Whether the session works for a project's team, and so must not take the chat's standing grant.
+
+    A staff member's subagent, a coordinator's helper, a retired coordinator and a worker whose session
+    has ended all look like a plain chat to the board (no live ``staff_sessions`` row, no
+    ``orchestrator_of``). Giving them the standing grant would let a worker plan the team's board
+    through a helper, so the whole chain of leaders is read, and any staff or coordinator link in it
+    keeps the refusal. A chain that cannot be followed to its end is refused the same way."""
+    seen: set[str] = set()
+    identity = session_id
+    while identity:
+        if identity in seen or len(seen) >= 32:
+            return True
+        seen.add(identity)
+        row = await one(conn, "SELECT metadata FROM sessions WHERE id = ?", (identity,))
+        if row is None:
+            return True
+        metadata = json.loads(row["metadata"] or "{}")
+        if (metadata.get("orchestrator_of") or metadata.get("orchestrator_retired_of")
+                or metadata.get("staff_id") or metadata.get("staff_session_id")
+                or await one(conn, "SELECT 1 FROM staff_sessions WHERE session_id = ? LIMIT 1", (identity,))):
+            return True
+        identity = next((str(metadata[key]) for key in _HELPER_LINKS if metadata.get(key)), "")
+    return False
+
+
 async def board_tool_authority(app: Application, session_id: str, operation: str,
                                task_id: str | None = None) -> tuple[Principal, Scope]:
-    """Derive the board from the host session, then require an explicit operation grant."""
+    """Derive the board from the host session, then find the grant that allows the operation.
+
+    The coordinator resolves its office (:func:`resolve_authority`). A staff worker needs the grant
+    its launch issued. The operator's own chat, and a helper of one, writes its board under the
+    standing grant of :data:`BOARD_STANDING_ISSUER`, issued here on first use; it covers only
+    :data:`BOARD_STANDING_OPERATIONS` and only the board the chat is in, its project's or the global
+    one. Every refusal names what the agent can do instead, because the model reads it."""
     session = await app.db.fetchone("SELECT project_id,metadata FROM sessions WHERE id = ?", (session_id,))
     if session is None:
         raise ControlDenied("the tool session is unknown")
@@ -278,7 +329,23 @@ async def board_tool_authority(app: Application, session_id: str, operation: str
             except ControlDenied:
                 continue
             return principal, scope
-    raise ControlDenied("the tool session has no current grant for this board operation")
+        if workers:
+            raise ControlDenied(f"a team member has no approval for {operation} on the project board; "
+                                "put what should change on the board in your Report and the coordinator plans it")
+        if await _works_for_team(conn, session_id):
+            raise ControlDenied(f"this session works for a project's team and has no approval for {operation}; "
+                                "the team's board is planned by its coordinator, so tell the session that "
+                                "started you what should change")
+        if operation not in BOARD_STANDING_OPERATIONS:
+            raise ControlDenied(f"{operation} belongs to a project's coordinator; an ordinary chat adds and "
+                                "updates tasks on its own board only")
+        expires = (datetime.now(UTC) + timedelta(days=STANDING_DAYS)).isoformat()
+        standing = await control.issue_grant_in(conn, BOARD_STANDING_ISSUER, Principal(actor_id, "agent"), scope,
+                                                operations=list(BOARD_STANDING_OPERATIONS), effects=[],
+                                                expires_at=expires)
+        principal = Principal(actor_id, "agent", standing["grant_id"], standing["generation"])
+        await control.authorize(conn, principal, scope, operation, task_id=task_id)
+        return principal, scope
 
 
 def install_authority(app: Application) -> None:

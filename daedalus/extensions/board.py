@@ -36,7 +36,7 @@ from daedalus.extensions.notifications import Draft
 from daedalus.extensions.orchestrator_domain import capture_contract_change, check_planning_capacity
 from daedalus.extensions.runtime_observations import settle_previous_host
 from daedalus.extensions.task_contract import Contracts
-from daedalus.stores.control import ControlStore, Entity, Principal, Scope
+from daedalus.stores.control import ControlConflict, ControlStore, Entity, Principal, Scope
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -771,6 +771,14 @@ class Board:
         raise ValueError(op)
 
 
+def _stale(exc: ControlConflict, argument: str) -> ControlConflict:
+    """A refused stale write that says the revision to retry with, so the agent need not guess it."""
+    if exc.current_revision is None:
+        return exc
+    return ControlConflict(f"{exc}: {argument} is now {exc.current_revision}; retry with it",
+                           current_revision=exc.current_revision)
+
+
 async def install(app: Application) -> list[asyncio.Task[None]]:
     board = Board(app)
     app.extensions["board"] = board
@@ -787,23 +795,52 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
                                            task_id=task_id)
         if not isinstance(principal, Principal) or not isinstance(scope, Scope):
             raise PermissionError("board authority did not return a host identity and scope")
+        control = ControlStore(app.db)
         if op == "revision":
-            return await ControlStore(app.db).revision(scope, Entity("collection", scope.id))
+            return await control.revision(scope, Entity("collection", scope.id))
+        # A chat writes its own board, not every task in the scope its grant names: the project's
+        # team cards and another chat's plan share that scope, and a chat finding them is the
+        # cross-talk the per-session board exists to prevent (see the module docstring).
+        own_board = principal.actor_id.startswith("session:")
         commands = BoardCommands(app.db, bus=app.manager.bus)
         if op == "add":
-            if expected_collection_revision is None:
-                raise ValueError("expected_collection_revision is required")
-            created = await commands.create(principal, scope, client_operation_id=client_operation_id,
-                                            expected_collection_revision=expected_collection_revision,
-                                            source_session_id=session_id, **kwargs)
+            if own_board:
+                for dependency in kwargs.get("depends_on") or []:
+                    try:
+                        await board.get(dependency, actor=session_id)
+                    except KeyError:
+                        raise ValueError(f"unknown dependency {dependency}; BoardList shows the tasks on your board") from None
+            if isinstance(expected_collection_revision, bool) or not isinstance(expected_collection_revision, int) or expected_collection_revision < 1:
+                current = await control.revision(scope, Entity("collection", scope.id))
+                raise ValueError(f"expected_collection_revision must be the board's current revision, now {current}; "
+                                 "BoardList shows it")
+            try:
+                created = await commands.create(principal, scope, client_operation_id=client_operation_id,
+                                                expected_collection_revision=expected_collection_revision,
+                                                source_session_id=session_id, **kwargs)
+            except ControlConflict as exc:
+                raise _stale(exc, "expected_collection_revision") from exc
             return await board.get(created["task_id"], actor=session_id)
         if op == "update":
-            if task_id is None or expected_entity_revision is None:
-                raise ValueError("task_id and expected_entity_revision are required")
+            if task_id is None:
+                raise ValueError("task_id is required")
+            if own_board:
+                await board.get(task_id, actor=session_id)
+                if kwargs.get("status") in ("doing", "review", "done"):
+                    # The refusal underneath names launch and result commands a chat does not have.
+                    raise ValueError("a task on a chat's board moves only to todo, blocked or dropped; record progress "
+                                     "with a note and checked criteria, and the operator closes it as done in the app")
+            if isinstance(expected_entity_revision, bool) or not isinstance(expected_entity_revision, int) or expected_entity_revision < 1:
+                current = await control.revision(scope, Entity("task", task_id))
+                raise ValueError(f"expected_entity_revision must be the task's current revision, now {current}; "
+                                 "BoardGet shows it")
             await settle_previous_host(app, task_id)
-            updated = await commands.update(principal, scope, task_id,
-                                            client_operation_id=client_operation_id,
-                                            expected_entity_revision=expected_entity_revision, **kwargs)
+            try:
+                updated = await commands.update(principal, scope, task_id,
+                                                client_operation_id=client_operation_id,
+                                                expected_entity_revision=expected_entity_revision, **kwargs)
+            except ControlConflict as exc:
+                raise _stale(exc, "expected_entity_revision") from exc
             return await board.get(updated["task_id"], actor=session_id)
         raise ValueError(op)
 
