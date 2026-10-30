@@ -903,6 +903,10 @@ export type OperatorSteps = {
   event_seq?: number;
 };
 
+/** A file an operator's message carried (daedalus/host/attached_files.py): `file` is its name in the
+ *  session's inbox, served at `/api/sessions/<id>/attachments`; `kept` is the id of one kept by handle. */
+export type MessageAttachment = { name: string; mime?: string; size?: number | null; file?: string; kept?: string };
+
 export type MessageView = {
   run_id?: string | null;
   role: "system" | "user" | "assistant" | "tool";
@@ -938,6 +942,8 @@ export type MessageView = {
   /** Set on a message that came from another program's session: which program, and the names its
    *  tool calls had there, by call id, for the calls the host renamed to native tools. */
   imported?: MessageImport | null;
+  /** The files the message carried, drawn as thumbnails and cards above it; the text still lists them for the model. */
+  attachments?: MessageAttachment[];
   /** The operator's secrets the message carried, by name and scope; a value never comes back. */
   secrets?: { name: string; scope: "session" | "project" }[] | null;
   /** A custom page's message (origin `page:<slug>`) that is the page's own report, not the operator's request. */

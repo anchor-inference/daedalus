@@ -38,12 +38,13 @@ def run() -> None:
             raw = request.post_data_buffer.decode("utf-8")
             def field(name: str) -> str:
                 return raw.split(f'name="{name}"', 1)[1].split("\r\n\r\n", 1)[1].split("\r\n", 1)[0]
-            sent.append({"text": field("text") + "\n\nAttached files:\n- sample.txt", "id": field("client_message_id"), "upload": "yes"})
+            sent.append({"text": field("text") + "\n\nAttached files:\n- /data/workspaces/s1/inbox/sample.txt (text/plain, 7 bytes)", "id": field("client_message_id"), "upload": "yes",
+                         "attachments": [{"name": "sample.txt", "mime": "text/plain", "size": 7, "file": "sample.txt"}]})
             return route.fulfill(status=200, content_type="application/json", body='{"run_id":"upload-run"}')
         if path == f"/api/sessions/{shots.S1}" and request.method == "GET":
             page = deepcopy(shots.detail(shots.S1))
             for index, item in enumerate(sent):
-                page["messages"].append({"role": "user", "seq": 999999 + index, "text": item["text"], "client_message_id": item["id"], "thinking": "", "tool_calls": [], "tool_results": [], "created_at": "2020-01-01T00:00:00Z" if item.get("upload") else datetime.now(UTC).isoformat()})
+                page["messages"].append({"role": "user", "seq": 999999 + index, "text": item["text"], "attachments": item.get("attachments", []), "client_message_id": item["id"], "thinking": "", "tool_calls": [], "tool_results": [], "created_at": "2020-01-01T00:00:00Z" if item.get("upload") else datetime.now(UTC).isoformat()})
             return route.fulfill(status=200, content_type="application/json", body=json.dumps(page))
         return shots.stub(route)
 
@@ -75,7 +76,10 @@ def run() -> None:
         page.locator(".composer [data-action=send]").click()
         expect(page.locator(".timeline .msg.user").filter(has_text=UPLOAD_WORDS)).to_have_count(1, timeout=8000)
         assert len(sent) == 2 and sent[1]["id"] != sent[0]["id"]
-        expect(page.locator(".timeline .msg.user").filter(has_text="Attached files")).to_have_count(1)
+        # The upload is one message: its words in the bubble, the file as a card above it, and the
+        # list written for the model nowhere on the page.
+        expect(page.locator(".timeline .msg-wrap").filter(has_text=UPLOAD_WORDS).locator(".msg-file", has_text="sample.txt")).to_have_count(1)
+        expect(page.locator(".timeline .msg.user").filter(has_text="Attached files")).to_have_count(0)
         page.set_viewport_size({"width": 390, "height": 844})
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
         if page.get_by_role("dialog", name="Project files panel").is_visible():

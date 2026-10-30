@@ -19,6 +19,7 @@ import { Explorer } from "../explorerpanel";
 import { DiffView } from "../previewparts";
 import { looksLikeDiff } from "../diff";
 import { KeptFiles, TurnFiles } from "../artifact";
+import { MessageAttachments } from "../attachcards";
 import { placeOf, turnFiles, turnPages } from "../turnfiles";
 import { PageCards } from "../pagecard";
 import { ScheduleCard, scheduleCardIds } from "../schedulecard";
@@ -2167,6 +2168,10 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
   const settled = !!seq && !!onTurnAction && !live;
   const inbound = turn.user?.origin?.startsWith("inbound:") ? turn.user.origin.slice(8) : "";
   const fromPage = turn.user?.origin?.startsWith("page:") ? turn.user.origin.slice(5) : "";
+  // The operator's words alone: the files are drawn above the bubble, so the list written for the model goes.
+  const words = turn.user ? withoutAttachedList(turn.user.text) : "";
+  // A message that was only files has no bubble, unless something else is said in one.
+  const bubble = !!turn.user && !!(words.trim() || inbound || fromPage || turn.user.autopilot || turn.user.yagni || turn.user.reply_to || turn.user.secrets?.length);
   const files = live ? null : turnFiles(turn.activity, workspace, folders);
   // Split, every text the agent wrote between its steps is a reply of its own and cuts the steps
   // into blocks around it; merged, the texts fold into one block of steps with the tool calls.
@@ -2210,20 +2215,20 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
       <div className="turn-content" hidden={folded && !live}>
       {turn.user && !turn.note && (
         <div className="msg-wrap">
-          <UserBubble>
+          <MessageAttachments sessionId={sessionId} items={turn.user.attachments} onOpen={preview} />
+          {bubble && <UserBubble>
             {inbound && <span className="msg-origin">{t("turn.origin.inbound", { source: inbound })}</span>}
             {fromPage && <span className="msg-origin" data-from-page={fromPage}>{t("turn.origin.page", { slug: fromPage })}</span>}
             {turn.user.autopilot && <span className="msg-origin msg-autopilot" data-autopilot={turn.user.autopilot.kind} title={autopilotTitle(turn.user.autopilot)}>{t(`turn.autopilot.${turn.user.autopilot.kind}`)}</span>}
             {turn.user.yagni && <span className="msg-origin msg-yagni" title={t("turn.yagni.title")}>{t(turn.user.yagni === "on" ? "turn.yagni.on" : "turn.yagni.off")}</span>}
             {turn.user.reply_to && <ReplyQuote reply={turn.user.reply_to} />}
-            <Md className="msg-text" text={withoutAttachedList(turn.user.text)} cacheKey={live ? undefined : `u${seq ?? turn.key}`} />
+            {words.trim() && <Md className="msg-text" text={words} cacheKey={live ? undefined : `u${seq ?? turn.key}`} />}
             {turn.user.secrets?.length ? <div className="msg-secrets">{turn.user.secrets.map((secret) => <SecretChip key={secret.name} name={secret.name} scope={secret.scope} />)}</div> : null}
-          </UserBubble>
-          <KeptFiles text={turn.user.text} onOpen={preview} />
+          </UserBubble>}
           {focusChat?.orchestrator && <MessageFate message={turn.user} sessionId={sessionId} projectId={focusChat.projectId} />}
           {/* Under the message, not beside it: a row beside the bubble is off-screen on a phone. */}
           <MessageActions
-            text={turn.user.text}
+            text={words || turn.user.text}
             actions={
               settled
                 ? ([

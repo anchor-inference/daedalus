@@ -654,6 +654,30 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 /* The message and its actions stack: a row of buttons beside the bubble is pushed off a phone screen. */
 .msg-wrap { display:flex; flex-direction:column; align-items:flex-end; gap:2px; min-width:0; }
 .msg-wrap .msg.user { margin-bottom:0; }
+/* The files the message carried, above its bubble and aligned with it: the pictures as one row of
+   square thumbnails, each other file as a card. Widths and a square ratio, not heights, so a card is
+   as tall as its two lines and the thumbnails stay square at every width. */
+.msg-attachments { display:flex; flex-direction:column; align-items:flex-end; gap:6px; max-width:min(86%, var(--chat-w)); min-width:0; margin-bottom:4px; }
+.msg-thumbs { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; }
+.msg-thumb { display:inline-flex; align-items:center; justify-content:center; width:112px; aspect-ratio:1; padding:0; border:1px solid var(--line); border-radius:var(--radius-lg); overflow:hidden; background:var(--surface-2); color:var(--fg-3); cursor:zoom-in; }
+.msg-thumb img { display:block; width:100%; height:100%; object-fit:cover; }
+.msg-thumb:hover img { filter:brightness(.92); }
+.msg-thumb:focus-visible, .msg-file:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.msg-file { display:flex; align-items:center; gap:10px; width:280px; max-width:100%; padding:8px 14px 8px 8px; border:1px solid var(--line); border-radius:var(--radius-lg); background:var(--surface-1); color:var(--fg); font:inherit; text-align:left; cursor:pointer; }
+.msg-file:hover { background:var(--surface-2); }
+.msg-file-icon { display:inline-flex; align-items:center; justify-content:center; width:36px; aspect-ratio:1; border-radius:var(--radius-md); background:var(--file-kind, var(--file-other)); color:var(--file-glyph); flex:none; }
+.msg-file[data-kind="pdf"] { --file-kind:var(--file-pdf); }
+.msg-file[data-kind="document"] { --file-kind:var(--file-document); }
+.msg-file[data-kind="sheet"] { --file-kind:var(--file-sheet); }
+.msg-file[data-kind="slides"] { --file-kind:var(--file-slides); }
+.msg-file[data-kind="archive"] { --file-kind:var(--file-archive); }
+.msg-file[data-kind="audio"] { --file-kind:var(--file-audio); }
+.msg-file[data-kind="video"] { --file-kind:var(--file-video); }
+.msg-file[data-kind="code"] { --file-kind:var(--file-code); }
+.msg-file[data-kind="text"] { --file-kind:var(--file-text); }
+.msg-file-text { display:flex; flex-direction:column; gap:1px; min-width:0; }
+.msg-file-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--fs-14); font-weight:600; }
+.msg-file-kind { font-size:var(--fs-12); color:var(--fg-2); }
 /* Under the message: copy, and what the turn allows. Always there on touch, on hover on a desk. */
 .msg-actions { display:flex; align-items:center; gap:2px; min-height:24px; opacity:.55; }
 .msg-actions .iconbtn.small { width:24px; height:24px; background:transparent; color:var(--fg-2); }

@@ -34,6 +34,11 @@
   /* A staff member's colour, one of eight the host hands out by name (daedalus/stores/staff.py). */
   --staff-blue: #7db4ff; --staff-green: #5fd68a; --staff-amber: #e8b44c; --staff-violet: #c792ea;
   --staff-rose: #f28bab; --staff-teal: #2dd4bf; --staff-orange: #f59e5b; --staff-slate: #9aa4b5;
+  /* An attached file's type square (attachcards.tsx): the colours the office suites taught everyone to
+     read a file by, deep enough to carry a white glyph in either theme, so they are not redefined. */
+  --file-pdf: #e5484d; --file-document: #2f6fe0; --file-sheet: #1e9e56; --file-slides: #e2711d;
+  --file-archive: #a87b2c; --file-audio: #9b4dca; --file-video: #d6409f; --file-code: #0e8f80;
+  --file-text: #5b667a; --file-other: #6f7280; --file-glyph: #ffffff;
 
   /* ── the scale everything is drawn on ────────────────────────────────────────────────────
      Type: the UI is 13/14, prose is 15 on a desktop and 16 on a phone; code is 12.5. A rule that

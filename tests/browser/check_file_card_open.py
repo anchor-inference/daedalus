@@ -38,7 +38,7 @@ def shown(page: Page, phone: bool) -> None:
 
 
 def press_once(page: Page, chat: str, downloads: list[str], phone: bool, where: str, problems: list[str]) -> None:
-    card = page.locator(f"{chat} .kept-files .artifact", has_text=SPEC_NAME).locator(".artifact-main")
+    card = page.locator(f"{chat} .msg-attachments .msg-file", has_text=SPEC_NAME)
     before = downloads.count(SPEC_ID)
     card.click()
     shown(page, phone)
@@ -79,7 +79,7 @@ def orchestrator(page: Page, lang: str, phone: bool, where: str, problems: list[
     page.wait_for_timeout(800)
     press_once(page, chat, downloads, phone, where, problems)
     if not phone:
-        page.locator(f"{chat} .kept-files .artifact", has_text=SPEC_NAME).locator(".artifact-main").click()
+        page.locator(f"{chat} .msg-attachments .msg-file", has_text=SPEC_NAME).click()
         shown(page, phone)
         tab = page.locator(".panel.shown .panel-tab[data-tab='preview']")
         if tab.count() != 1 or tab.get_attribute("aria-selected") != "true":

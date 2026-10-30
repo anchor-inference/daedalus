@@ -2238,6 +2238,61 @@ def attached_route(rel: str, params: dict[str, list[str]]) -> tuple[str, bytes] 
     return None
 
 
+def tiny_pdf(*lines: str) -> bytes:
+    """A one-page PDF that says ``lines``, written by hand so the harness needs no library for it."""
+    text = " ".join(f"({line.replace('(', '[').replace(')', ']')}) Tj 0 -18 Td" for line in lines)
+    stream = f"BT /F1 14 Tf 24 160 Td {text} ET".encode()
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>", b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 320 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    data = b"%PDF-1.4\n"
+    offsets = []
+    for number, body in enumerate(objects, 1):
+        offsets.append(len(data))
+        data += f"{number} 0 obj\n".encode() + body + b"\nendobj\n"
+    start = len(data)
+    data += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode() + b"".join(f"{n:010d} 00000 n \n".encode() for n in offsets)
+    return data + f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{start}\n%%EOF".encode()
+
+
+# Files an operator attached to a message, by their names in the session's inbox: what
+# ``/api/sessions/<id>/attachments/download?path=<name>`` serves (daedalus/host/attached_files.py).
+# A Windows clipboard paste is named by a GUID in braces, and a document's name has spaces and Cyrillic.
+INBOX_SHOT = "{2C33CD0A-830B-4C8A-B4EE-59B46E35D59E}.png"
+INBOX_PHOTO = "витрина (1).png"
+INBOX_PDF = "Отчёт тестировщика.pdf"
+INBOX_DOCX = "contract v2.docx"
+INBOX_TEXT = "The tester's report: the login form loses the password on a wrong code."
+INBOX_FILES: dict[str, tuple[str, bytes]] = {
+    INBOX_SHOT: ("image/png", preview_png("window-login", 480, 320)),
+    INBOX_PHOTO: ("image/png", preview_png("display-shop", 320, 480)),
+    INBOX_PDF: ("application/pdf", tiny_pdf(INBOX_TEXT)),
+    INBOX_DOCX: (DOCX_MIME, docx_bytes("Contract, second draft.", "Payment within ten days of the invoice.")),
+}
+
+
+def inbox_attachments(*names: str) -> list[dict]:
+    """The ``attachments`` of a message that carried these inbox files, as the host's view gives them."""
+    return [{"name": name, "mime": INBOX_FILES[name][0], "size": len(INBOX_FILES[name][1]), "file": name} for name in names]
+
+
+def inbox_list(*names: str, root: str = "/home/you/work/inbox") -> str:
+    """The list the host appends for the model, as a message written before the record carried it."""
+    return "Attached files:\n" + "\n".join(f"- {root}/{name} ({INBOX_FILES[name][0]}, {len(INBOX_FILES[name][1])} bytes)" for name in names)
+
+
+def attachment_route(rel: str, params: dict[str, list[str]]) -> tuple[str, bytes] | None:
+    """An attached file's bytes by its inbox name, for any session."""
+    parts = rel.split("/")
+    if len(parts) != 6 or parts[2] != "sessions" or parts[4:] != ["attachments", "download"]:
+        return None
+    found = INBOX_FILES.get((params.get("path") or [""])[0])
+    return found if found is not None else ("text/plain", b"")
+
+
 def question_view(ask: dict, project_name: str, *, asker: str = "", always: bool = False, rules: bool = False) -> dict:
     """One entry of GET /api/questions, as ``daedalus/extensions/questions.py`` draws a request.
     ``rules``: the member's CLI keeps standing rules (Claude Code), so an MCP tool's "Always" may

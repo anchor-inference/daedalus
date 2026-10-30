@@ -611,6 +611,13 @@ async def test_a_screenshot_sent_while_the_agent_works_waits_with_its_message_an
     assert digest in _images_the_model_saw(provider)
     texts = [b.text for m in provider.requests[-1].messages for b in m.content_blocks if isinstance(b, TextBlock)]
     assert any(PASTED in text for text in texts)
+    # The copy the chat shows is written from the queue item, not from the upload: the item has to
+    # carry the file for the app, or the bubble shows the model's list and no picture.
+    shown = [m for m in await manager.transcript_page(sid) if m["role"] == "user" and not m.get("internal") and "shot-1" in [m.get("client_message_id"), *(m.get("client_message_ids") or [])]]
+    assert [m["attachments"] for m in shown] == [[{"name": PASTED, "mime": "image/png", "size": len(PIXEL), "file": PASTED}]]
+    async with _client(settings, db, manager) as client:
+        served = await client.get(f"/api/sessions/{sid}/attachments/download", params={"path": PASTED}, headers=H)
+        assert served.status_code == 200 and served.content == PIXEL
     await manager.close()
 
 

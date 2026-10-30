@@ -4,6 +4,7 @@
 // anyone expects a screenshot to appear.
 
 import type { SessionFolder } from "./api";
+import { attachmentSource, splitAttachments } from "./attachments";
 import { folderBase } from "./folders";
 import { previewKind, sessionBase, type PreviewSource } from "./preview";
 import { placeOf, turnFiles, type ChangedFile } from "./turnfiles";
@@ -74,8 +75,9 @@ function stepMedia(activity: readonly Activity[], sessionId: string, workspace: 
 }
 
 /**
- * Every picture and clip of the conversation in reading order, each once: within a turn the images
- * its steps looked at, then the files it sent, then the files it changed — the order they are drawn.
+ * Every picture and clip of the conversation in reading order, each once: within a turn the pictures
+ * the operator attached, the images its steps looked at, then the files it sent, then the files it
+ * changed — the order they are drawn.
  */
 export function conversationMedia(turns: readonly Turn[], sessionId: string, workspace: string, folders: Folders): HostSource[] {
   const seen = new Set<string>();
@@ -87,6 +89,11 @@ export function conversationMedia(turns: readonly Turn[], sessionId: string, wor
     out.push(src);
   };
   for (const turn of turns) {
+    // The operator's own pictures open the turn, above their message.
+    for (const item of splitAttachments(turn.user?.attachments).images) {
+      const src = attachmentSource(sessionId, item);
+      if (viewerKind(src.path)) add(src);
+    }
     stepMedia(turn.activity, sessionId, workspace, folders).forEach(add);
     const { sent, changed } = turnFiles(turn.activity, workspace, folders);
     for (const file of sent) if (viewerKind(file.name)) add(sentSource(sessionId, file.callId, file.name));

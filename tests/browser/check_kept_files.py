@@ -3,7 +3,7 @@ chat, at 1440 px and on a 390 px phone, in both languages.
 
 What is checked is what the operator relies on. The operator's message shows their own words; the
 host's list of what they attached (a line of ``att:`` handles written for the model) is not printed
-in the bubble, and each file is a card under it instead. A card is also drawn under an event card
+in the bubble, and each file is a card above it instead. A card is also drawn under an event card
 that names a member's file and under an answer that names one. A card downloads the bytes from
 ``/api/files/<id>/download`` and opens the file in the preview, whatever machine it came from. Both
 chats offer to attach a file. Nothing scrolls sideways.
@@ -54,7 +54,8 @@ def messages(lang: str, *, seq: int, events_head: str) -> list[dict]:
     answer that passes it on: what the chats of the chain look like after a hand-over."""
     base = {"thinking": "", "tool_calls": [], "tool_results": []}
     return [
-        {**base, "role": "user", "seq": seq, "origin": "operator", "text": WORDS[lang]["ask"] + ATTACHED, "created_at": "2026-09-26T11:37:00Z"},
+        {**base, "role": "user", "seq": seq, "origin": "operator", "text": WORDS[lang]["ask"] + ATTACHED, "created_at": "2026-09-26T11:37:00Z",
+         "attachments": [{"name": SPEC_NAME, "mime": "text/markdown", "size": len(SPEC.encode()), "kept": SPEC_ID}]},
         {**base, "role": "assistant", "seq": seq + 1, "text": "langpt has it.", "created_at": "2026-09-26T11:37:20Z"},
         {**base, "role": "user", "seq": seq + 2, "origin": "events", "created_at": "2026-09-26T11:50:00Z",
          "text": f"{events_head}\n- 11:50 langpt reported done: \"estimated\" — files: att:{ESTIMATE_ID} estimate.md (20 B)"},
@@ -99,18 +100,19 @@ def check_chat(page: Page, chat: str, lang: str, where: str, downloads: list[str
     expect(bubble).to_be_visible()
     text = bubble.inner_text()
     assert "att:" not in text and "Attached files" not in text, f"{where}: the host's list is printed in the bubble: {text!r}"
-    # The operator's file is a card under their message; the member's under the event and the answer.
-    spec = page.locator(f"{chat} .kept-files .artifact", has_text=SPEC_NAME)
+    # The operator's file is a card above their message, as every attachment of theirs is; the
+    # member's is a card under the event and the answer.
+    spec = page.locator(f"{chat} .msg-attachments .msg-file", has_text=SPEC_NAME)
     expect(spec).to_have_count(1)
-    expect(spec.locator(".artifact-meta")).to_contain_text(words["from_you"])
+    expect(page.locator(f"{chat} .kept-files .artifact", has_text=SPEC_NAME)).to_have_count(0)
     estimate = page.locator(f"{chat} .kept-files .artifact", has_text="estimate.md")
     expect(estimate).to_have_count(2)
     expect(estimate.first.locator(".artifact-meta")).to_contain_text(words["from_staff"])
-    link = spec.locator("a.iconbtn")
+    link = estimate.first.locator("a.iconbtn")
     href = link.get_attribute("href") or ""
-    assert href.startswith(f"/api/files/{SPEC_ID}/download?path=") and "token=" in href, href
+    assert href.startswith(f"/api/files/{ESTIMATE_ID}/download?path=") and "token=" in href, href
     # The card opens the file in the preview: its bytes, read by handle.
-    spec.locator(".artifact-main").click()
+    spec.click()
     expect(page.get_by_text("Free users get three hints a day.").first).to_be_visible()
     assert SPEC_ID in downloads, f"{where}: the preview did not read the file by its handle"
     page.keyboard.press("Escape")
