@@ -74,15 +74,13 @@ async def test_pending_review_is_denied_after_its_office_or_grant_changes(db: Da
     assert (await db.fetchone("SELECT count(*) FROM operation_receipts WHERE operation_kind = 'review.verdict'"))[0] == 0
 
 
-async def test_generic_tool_session_needs_an_explicit_scoped_grant(db: Database) -> None:
+async def test_an_operator_chat_writes_its_board_under_an_explicit_grant_or_the_standing_one(db: Database) -> None:
     app, _ = await office(db)
     await db.execute("INSERT INTO sessions(id,tenant_id,project_id,metadata,created_at,last_message_at)"
                      " VALUES ('agent','tenant','project','{\"operator\":true}', '2026-01-01','2026-01-01')")
     await db.execute("INSERT INTO planning_budgets(project_id,max_depth,max_tasks,max_tokens) VALUES ('project',3,20,100000)")
     install_authority(app)
     hook = app.extensions["board_tool_authority"]
-    with pytest.raises(ControlDenied, match="no current grant"):
-        await hook("agent", "board.task.create")
     grant = await ControlStore(db).issue_grant(OPERATOR, Principal("session:agent", "agent"), Scope("project", "project"),
                                                operations=["board.task.create"], effects=[],
                                                expires_at=(datetime.now(UTC) + timedelta(hours=1)).isoformat())
@@ -91,11 +89,15 @@ async def test_generic_tool_session_needs_an_explicit_scoped_grant(db: Database)
     revision = await ControlStore(db).revision(scope, Entity("collection", scope.id))
     receipt = await BoardCommands(db).create(principal, scope, client_operation_id="from-tool",
                                              expected_collection_revision=revision, title="Authorized task")
-    with pytest.raises(ControlDenied):
-        await hook("agent", "board.task.update", receipt["task_id"])
+    # The explicit grant does not cover updates; the chat's standing grant does, and only board writes.
+    updater, _ = await hook("agent", "board.task.update", receipt["task_id"])
+    standing = await db.fetchone("SELECT issuer_id,operations_json FROM actor_grants WHERE id = ?", (updater.grant_id,))
+    assert standing["issuer_id"] == "operator:standing-board"
+    assert set(json.loads(standing["operations_json"])) == {"board.task.create", "board.task.update"}
     await ControlStore(db).revoke_grant(OPERATOR, grant["grant_id"], reason="approval withdrawn")
-    with pytest.raises(ControlDenied):
-        await hook("agent", "board.task.create")
+    assert (await hook("agent", "board.task.create"))[0].grant_id == updater.grant_id
+    with pytest.raises(ControlDenied, match="belongs to a project's coordinator"):
+        await hook("agent", "task.launch", receipt["task_id"])
 
 
 async def test_new_contract_and_stop_rights_require_fresh_explicit_approval(db: Database) -> None:
