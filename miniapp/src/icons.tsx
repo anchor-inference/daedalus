@@ -8,7 +8,8 @@ export type IconName =
   | "compose" | "grid" | "vdots" | "camera" | "region" | "offline" | "logo" | "sliders" | "apps" | "import" | "eyeoff"
   | "hand" | "ffwd"
   | "monitor"
-  | "utensils" | "cart" | "dumbbell" | "plane" | "home" | "list" | "heart" | "book" | "wand";
+  | "utensils" | "cart" | "dumbbell" | "plane" | "home" | "list" | "heart" | "book" | "wand"
+  | "chat" | "headset" | "database" | "mail" | "cloud" | "checkcircle";
 
 const PATHS: Record<IconName, string> = {
   // The approval modes of a conversation in the operator's Chrome: a raised hand asks, a fast-forward
@@ -24,6 +25,14 @@ const PATHS: Record<IconName, string> = {
   list: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
   heart: "M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7z",
   book: "M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5v14zM4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5",
+  // The nodes of a flow in an answer (see flow.ts), named by the emoji a model puts before a node:
+  // a conversation, a person on a headset, a store of records, a letter, a hosted service, a step done.
+  chat: "M7.9 20A9 9 0 1 0 4 16.1L2.5 21.5z",
+  headset: "M3 13a9 9 0 0 1 18 0M3 13h3v5H4a1 1 0 0 1-1-1zM21 13h-3v5h2a1 1 0 0 0 1-1zM21 17v1a4 4 0 0 1-4 4h-4",
+  database: "M12 3c4.4 0 8 1.3 8 3s-3.6 3-8 3-8-1.3-8-3 3.6-3 8-3zM4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6",
+  mail: "M3 5h18v14H3zM3 7l9 6 9-6",
+  cloud: "M17.5 19H9a7 7 0 1 1 6.7-9h1.8a4.5 4.5 0 1 1 0 9z",
+  checkcircle: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM8 12l3 3 5-6",
   back: "M15 18l-6-6 6-6",
   more: "M5 12h.01M12 12h.01M19 12h.01",
   plus: "M12 5v14M5 12h14",
@@ -142,6 +151,11 @@ export const ICON_NAMES = Object.keys(PATHS) as IconName[];
 
 export function isIconName(value: unknown): value is IconName {
   return typeof value === "string" && Object.prototype.hasOwnProperty.call(PATHS, value);
+}
+
+/** The same drawing as markup, for HTML the app writes as a string (an answer's rendered Markdown). */
+export function iconSvg(name: IconName, size = 18): string {
+  return `<svg class="ic ic-${name}" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${PATHS[name]}"/></svg>`;
 }
 
 /** `path` is a page's own glyph, a `d` string already checked by `iconPath` in navconfig.ts: drawn

@@ -36,9 +36,21 @@ function paint(mark: HTMLElement): void {
   });
 }
 
-/** Fill the site marks of markup just written into the page. Cheap when there are none. */
+// The diagram module is fetched with the first mermaid fence the reader meets, like the renderer it
+// loads in turn; once here it is called synchronously, which is what keeps a drawing in place while
+// the message around it streams (see diagrams.ts).
+let diagrams: typeof import("./diagrams") | null = null;
+
+/** Fill the site marks and draw the diagrams of markup just written into the page. Cheap when there are none. */
 export function hydrateRich(root: HTMLElement): void {
   root.querySelectorAll<HTMLElement>(".fav[data-host]").forEach(paint);
+  if (diagrams) diagrams.hydrateDiagrams(root);
+  else if (root.querySelector(".codecard[data-mermaid]")) {
+    void import("./diagrams").then((module) => {
+      diagrams = module;
+      if (root.isConnected) module.hydrateDiagrams(root);
+    });
+  }
 }
 
 // ── the citation popover ────────────────────────────────────────────────────────────────────

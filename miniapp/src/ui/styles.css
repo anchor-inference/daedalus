@@ -1618,6 +1618,61 @@ a.rcard-title:hover { text-decoration-color: currentColor; }
 .rcard-links a::after, .rcard-entity a.rcard-title::after { content: "↗"; margin-left: 2px; color: var(--fg-3); font-size: var(--fs-11); }
 .rcard-note { margin-top: 6px; color: var(--fg-3); font-size: var(--fs-12); }
 .rcard.no-media { padding-left: 0; }
+/* A flow in an answer (flow.ts): rows of centred nodes in one bordered panel, the arrows in the
+   muted ink, one node filled when the model marked it. A narrow column (a phone, the side panel)
+   stacks a row's nodes and turns its arrows down: three boxes squeezed into 390 px were three
+   columns of broken words, and the same flow read top to bottom says the same thing. */
+.flow { container: flow / inline-size; margin: 8px 0 14px; padding: 16px; border: 1px solid var(--line-strong); border-radius: var(--radius-lg); }
+.flow-head { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; color: var(--fg); font-size: var(--fs-14); font-weight: 600; line-height: var(--lh-ui); }
+.flow-head > .ic { flex: none; color: var(--fg-2); }
+.flow-body { display: flex; flex-direction: column; align-items: center; }
+.flow-row { display: flex; align-items: stretch; justify-content: center; gap: 6px; width: 100%; }
+.flow-node { flex: 0 1 230px; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 10px 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--bg); text-align: center; line-height: var(--lh-ui); overflow-wrap: anywhere; }
+.flow-row[data-n="1"] .flow-node { flex-basis: 320px; }
+.flow-node.is-mark { background: var(--surface-2); border-color: var(--line-strong); }
+.flow-icon { display: inline-flex; margin-bottom: 4px; color: var(--fg-2); }
+.flow-icon.tone-ok { color: var(--ok); }
+.flow-icon.tone-warn { color: var(--warn); }
+.flow-icon.tone-bad { color: var(--bad); }
+.flow-emoji { line-height: 1; }
+.answer .flow-icon.flow-emoji { font-size: var(--fs-18); }
+.flow-title { color: var(--fg); font-size: var(--fs-14); font-weight: 600; }
+.flow-text { color: var(--fg-2); font-size: var(--fs-13); }
+.flow-link { flex: none; align-self: center; color: var(--fg-3); font-size: var(--fs-14); line-height: 1; }
+.flow-link.is-none { width: 2px; }
+.flow-step { display: flex; flex-direction: column; align-items: center; padding: 4px 0; color: var(--fg-3); line-height: 1.2; }
+.flow-arrow { font-size: var(--fs-14); }
+.flow-step-label { font-size: var(--fs-12); }
+.flow-note { margin-top: 14px; color: var(--fg-3); font-size: var(--fs-12); text-align: center; }
+.flow code { font-size: var(--fs-12); }
+@container flow (max-width: 460px) {
+  .flow-row { flex-direction: column; align-items: center; gap: 4px; }
+  /* As specific as the one-node rule above: its 320 px basis, read down a column, made every lone
+     node on a phone 320 px tall. */
+  .flow-row .flow-node, .flow-row[data-n="1"] .flow-node { flex: none; width: min(100%, 320px); }
+  .flow-link { transform: rotate(90deg); }
+  .flow-link.is-none { width: auto; height: 2px; }
+}
+
+/* A mermaid diagram (diagrams.ts): drawn above its code in the same card, the code hidden until the
+   reader asks for it. Until the drawing is in, and when it cannot be drawn, the card is the plain
+   code block it always was. */
+.mermaid-card .codehead { justify-content: flex-start; gap: 2px; }
+.mermaid-card .codehead > span:first-child { flex: 1; }
+.mermaid-card:not([data-mermaid="done"]) .mermaid-toggle, .mermaid-card:not([data-mermaid="done"]) .mermaid-open { display: none; }
+.mermaid-card[data-mermaid="done"]:not([data-view="code"]) > pre { display: none; }
+.mermaid-card[data-view="code"] > .mermaid-view { display: none; }
+.mermaid-view { display: flex; justify-content: center; padding: 16px 12px; overflow-x: auto; }
+.mermaid-view svg { height: auto; max-width: 100%; }
+/* Mermaid's boxes have square corners; the app's blocks, the flow's nodes among them, are rounded. */
+.mermaid-view g.node rect, .diagram-zoom-body g.node rect { rx: 6px; ry: 6px; }
+.mermaid-note { padding: 6px 12px 8px; border-top: 1px solid var(--line); color: var(--fg-3); font-size: var(--fs-12); }
+.diagram-zoom { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: var(--bg); outline: none; }
+.diagram-zoom-top { display: flex; justify-content: flex-end; padding: max(8px, env(safe-area-inset-top)) 12px 0; }
+.diagram-zoom-top button { display: flex; align-items: center; justify-content: center; width: var(--ctl-h); height: var(--ctl-h); border: 0; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--fg); cursor: pointer; }
+.diagram-zoom-top button:hover { background: var(--surface-3); }
+.diagram-zoom-body { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 16px 16px max(16px, env(safe-area-inset-bottom)); }
+.diagram-zoom-body svg { width: 100%; height: 100%; }
 .fav { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 14px; aspect-ratio: 1; border-radius: 4px; background: var(--surface-3) center / cover no-repeat; color: var(--fg-2); font-size: var(--fs-11); font-weight: 600; line-height: 1; overflow: hidden; }
 .fav.has-mark { color: transparent; background-color: transparent; }
 .fav-lg { width: 40px; border-radius: var(--radius-sm); font-size: var(--fs-14); }

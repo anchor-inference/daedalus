@@ -182,3 +182,24 @@ def test_cards_and_citations_read_as_tidy_text_in_a_chat() -> None:
     assert "Order it. ([kaspi.kz](https://kaspi.kz/p/1), [DNS](https://www.dns-shop.kz/x))" in flat
     assert "`[^](https://a.example)`" in flat
     assert flatten_evidence("```\n:::card\ntitle: x\n:::\n```") == "```\n:::card\ntitle: x\n:::\n```"
+
+
+def test_a_flow_reads_as_rows_and_arrows_in_a_chat() -> None:
+    """The Mini App draws a flow as a panel of nodes; a chat gets the rows one per line with the arrows
+    between them, the header bold, the highlighted node bold and the caption muted."""
+    answer = (
+        "The plan:\n\n:::flow 💡 Pilot project\n💬 Customer — writes in the chat\n\n🤖 ==AI assistant== — answers\n"
+        "↓ when it cannot answer\n✅ Solved -> 🎧 Operator | 📊 Report\nv\nDone\nnote: Two weeks\n:::\nAfter."
+    )
+    flat = flatten_evidence(answer)
+    assert flat == (
+        "The plan:\n\n**💡 Pilot project**\n💬 Customer — writes in the chat\n↓\n🤖 **AI assistant** — answers\n"
+        "↓ when it cannot answer\n✅ Solved → 🎧 Operator · 📊 Report\n↓\nDone\n_Two weeks_\n\nAfter."
+    )
+
+
+def test_a_mermaid_fence_and_a_quoted_flow_stay_code_in_a_chat() -> None:
+    fence = "```mermaid\nflowchart TD\n  A --> B\n```"
+    assert flatten_evidence(fence) == fence
+    quoted = "```\n:::flow\nA -> B\n:::\n```"
+    assert flatten_evidence(quoted) == quoted

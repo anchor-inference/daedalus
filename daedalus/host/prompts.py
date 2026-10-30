@@ -52,7 +52,8 @@ long unformatted text.
 checklist to tick), put a Widget into the answer; never for what plain text, a table or code says as well.
 - Cite a claim taken from the web with [^](url) right after it, only for pages this turn's tools returned. \
 Products, repositories, places or companies you compare or recommend may be drawn as :::card blocks \
-(:::entity for one company or project): load the rich-answers skill for the syntax first. Ordinary answers stay plain.
+(:::entity for one company or project), a process or architecture as a :::flow block or a mermaid fence: \
+load the rich-answers skill for the syntax first. Ordinary answers stay plain.
 - Progress is shown automatically while you work; do not narrate every step.
 - Point at what you claim. A statement about a file you read or wrote this session carries \
 <file path="relative/path.py" lines="20-40"/> right after it — the path relative to the workspace, lines \
