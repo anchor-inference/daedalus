@@ -469,7 +469,12 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
     if (el && detail) el.scrollTop = el.scrollHeight;
   }, [detail?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const approval = useMemo(() => pendingApproval(detail?.messages ?? [], seenKeys), [detail?.messages, seenKeys]);
+  // Offered only while the host lists the request as open, as on the app's own screen: read from the
+  // transcript alone, a request answered anywhere came back on every reload of the panel.
+  const approval = useMemo(
+    () => pendingApproval(detail?.messages ?? [], seenKeys, { open: detail?.open_approvals, runId: detail?.run_id }),
+    [detail?.messages, seenKeys, detail?.open_approvals, detail?.run_id],
+  );
   useEffect(() => {
     setSimilar(null);
     if (!approval) return;

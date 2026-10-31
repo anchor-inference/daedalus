@@ -989,6 +989,8 @@ export type SessionDetail = {
   /** The question the session waits on. `answered`: a staff member's question someone else already
    *  settled while the session still shows it waiting — who, and with what. */
   pending: { questions: Question[]; answered?: PendingAnswered } | null;
+  /** The approval requests still waiting on the operator, by key: a refusal in the transcript is offered only while its key is here. */
+  open_approvals?: string[];
   model: string;
   provider?: string;
   /** Session override, else the preset: whether the next call thinks, and how hard. */

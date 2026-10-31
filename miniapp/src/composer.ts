@@ -276,22 +276,36 @@ export const CHROME_ASK_TOOL = "BrowserAskOperatorChrome";
 const APPROVAL_RE = /Approval key: ([0-9a-f]{12})/;
 
 type CallLike = { id: string; name: string; arguments: Record<string, unknown> };
-type MessageLike = { tool_calls: CallLike[]; tool_results: { id: string; content: string; is_error: boolean }[] };
+type MessageLike = { run_id?: string | null; tool_calls: CallLike[]; tool_results: { id: string; content: string; is_error: boolean }[] };
+
+/** What the host says about the session's requests: the keys still waiting on the operator, and the
+ *  newest run it knows of. */
+export type ApprovalState = { open: readonly string[] | null | undefined; runId?: string | null };
 
 /**
  * The most recent refusal still waiting on the operator: the last error result that names an
- * approval key, unless that key was already spent or dismissed. Read off the end of the history,
- * where the refusal that matters is.
+ * approval key, read off the end of the history, where the refusal that matters is.
+ *
+ * Offered only when the host still lists the key as open and the refusal belongs to the newest run.
+ * The transcript keeps every refusal for good and `seen` lives only as long as the screen, so read
+ * from those two alone a request answered days before — in this window, on another device, in
+ * Telegram — came back as an open card on every reload, and went away only when a new run pushed it
+ * out of the last messages. The host closes a request when the next run starts; checking the run
+ * here as well keeps a card from outliving it between that start and the next read.
  */
-export function pendingApproval(messages: readonly MessageLike[], seen: ReadonlySet<string>, lastMessages = 12): Approval | null {
+export function pendingApproval(messages: readonly MessageLike[], seen: ReadonlySet<string>, host: ApprovalState, lastMessages = 12): Approval | null {
+  if (!host.open?.length) return null;
+  const open = new Set(host.open);
   const calls = new Map<string, CallLike>();
   const tail = messages.slice(-lastMessages);
+  const newestRun = host.runId || [...messages].reverse().find((m) => m.run_id)?.run_id || "";
   for (const m of messages) for (const c of m.tool_calls) calls.set(c.id, c);
   for (let i = tail.length - 1; i >= 0; i--) {
+    if (newestRun && tail[i].run_id && tail[i].run_id !== newestRun) return null;
     for (const r of [...tail[i].tool_results].reverse()) {
       if (!r.is_error) continue;
       const key = APPROVAL_RE.exec(r.content)?.[1];
-      if (!key || seen.has(key)) continue;
+      if (!key || seen.has(key) || !open.has(key)) continue;
       const call = calls.get(r.id);
       const a = call?.arguments ?? {};
       if (call?.name === CHROME_ASK_TOOL) {

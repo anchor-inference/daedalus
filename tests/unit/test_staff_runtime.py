@@ -599,6 +599,29 @@ async def test_autonomy_decides_who_answers(settings: Settings, db: Database, tm
         await manager.close()
 
 
+async def test_a_members_request_closed_unanswered_is_withdrawn_not_refused(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """A Daedalus member's session closes an unanswered request when its next run starts; the team's
+    copy of it is withdrawn by the system, so the orchestrator never hears a refusal nobody gave."""
+    manager, team, _runtime, project = await fake_team(settings, db, tmp_path)
+    try:
+        ada = await manager.staff.hire(project.id, name="Ada", isolation="shared")
+        await operator_assignment(team, ada, await board_task(manager, project, "Menu"))
+        live = await team.live_of(ada)
+        assert live is not None
+        chat = await manager.create_session("Ada · menu", project_id=project.id, metadata={"staff_session_id": live.id})
+        sid = chat.session.id
+        now = datetime.now(UTC).isoformat()
+        await team.on_bus(AppEvent(1, now, "permission.pending", {"request_id": "abcdef012345", "request_ref": f"policy:{sid}:abcdef012345", "tool": "Exec", "text": "echo hi"}, session_id=sid))
+        row = await db.fetchone("SELECT id FROM asks WHERE staff_session_id = ? AND request_ref = 'abcdef012345'", (live.id,))
+        assert row is not None
+        await team.on_bus(AppEvent(2, now, "permission.resolved", {"request_id": "abcdef012345", "request_ref": f"policy:{sid}:abcdef012345", "decision": "expired", "via": "run"}, session_id=sid))
+        ask = await manager.asks.get(row["id"])
+        assert ask is not None and ask.resolved_by == "system" and "allow" not in ask.resolution
+    finally:
+        await close_team(manager)
+        await manager.close()
+
+
 async def test_a_one_off_goes_with_its_task(settings: Settings, db: Database, tmp_path: Path) -> None:
     manager, team, runtime, project = await fake_team(settings, db, tmp_path)
     try:

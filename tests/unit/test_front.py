@@ -328,3 +328,35 @@ async def test_leave_refused_carries_the_key_and_closes_the_request(front: Teleg
     await front.on_callback(query)
     assert calls == [(sid, "0123456789ab", "telegram")]
     assert "Left refused." in edited
+
+
+async def test_allow_under_a_closed_request_grants_nothing(front: TelegramFront) -> None:
+    """The buttons stay in the chat after the request is answered in the app or closed with its run;
+    pressing Allow there days later used to write a grant the agent was never told about."""
+    state = await front.manager.create_session("p")
+    sid = state.session.id
+    edited: list[str] = []
+
+    async def reply(*args: Any, **kwargs: Any) -> None:
+        edited.extend(str(a) for a in args)
+
+    def press(key: str) -> CallbackQuery:
+        query = CallbackQuery.model_validate(
+            {
+                "id": "cq",
+                "from": {"id": OWNER, "is_bot": False, "first_name": "A"},
+                "chat_instance": "x",
+                "data": f"pa:{sid}:{key}",
+                "message": {"message_id": 5, "date": 1, "chat": {"id": OWNER, "type": "private"}, "text": "refused"},
+            }
+        )
+        object.__setattr__(query, "answer", reply)
+        object.__setattr__(query.message, "edit_text", reply)
+        return query
+
+    await front.on_callback(press("0123456789ab"))
+    assert not state.metadata.get("policy_grants") and any("This request is closed" in text for text in edited)
+    # An open one is still granted from the same buttons.
+    state.metadata["policy_pending"] = {"abcdef012345": {"tool": "Exec", "text": "echo hi", "at": "2026-10-31T00:00:00+00:00"}}
+    await front.on_callback(press("abcdef012345"))
+    assert "abcdef012345" in state.metadata["policy_grants"] and "granted once" in edited

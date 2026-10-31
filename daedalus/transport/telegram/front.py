@@ -1486,6 +1486,15 @@ class TelegramFront:
             await query.answer("stale button")
             return
         _, session_id, key = data
+        # The buttons stay under the refusal in the chat after the request is answered elsewhere or
+        # closed with its run. Granting from one then wrote a grant the agent was never told about,
+        # which let its next call of the kind through unasked. Typed /allow <key> is still taken on trust.
+        state = await self.manager.get_state(session_id)
+        if state is None or key not in (state.metadata.get("policy_pending") or {}):
+            await query.answer("this request is closed")
+            if query.message is not None:
+                await query.message.edit_text("This request is closed: it was answered or its run is over. The agent asks again if it still needs it.", reply_markup=None)
+            return
         try:
             result = await self.manager.grant(session_id, key, via="telegram")
         except (KeyError, ValueError) as exc:

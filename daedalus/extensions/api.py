@@ -2469,6 +2469,10 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             # "leader:"), so the workspace list shows only the sessions that were attached to it.
             "workspace_sessions": [u for u in await manager.workspace_users(state.workspace) if u["id"] != session_id and u["id"] not in {c["session_id"] for c in subagents} and u["id"] != state.metadata.get("subagent_of")],
             "pending": await _pending_view(state),
+            # The approval requests still waiting on the operator, by key. The app finds a refusal in
+            # the transcript and offers it only when its key is here: read from the transcript alone,
+            # every refusal in the last turns came back as an open card on each reload, answered or not.
+            "open_approvals": list((state.metadata.get("policy_pending") or {}).keys()),
             "model": await session_model_label(state),
             "provider": await session_provider(state),
             **(await session_thinking(state)),

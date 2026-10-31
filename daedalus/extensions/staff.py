@@ -2205,7 +2205,11 @@ class Team:
                 row = await self.manager.db.fetchone(
                     "SELECT id FROM asks WHERE staff_session_id = ? AND request_ref = ? AND kind = 'permission' AND resolved_at IS NULL", (live.id, str(event.payload.get("request_id") or ""))
                 )
-                if row is not None and await self.manager.asks.resolve(row["id"], "operator", {"allow": event.payload.get("decision") == "allow", "via": event.payload.get("via"), "in_session": True}):
+                # A request the session closed unanswered (a later run, a restart) is withdrawn by the
+                # system, not refused by the operator: the orchestrator is not to hear a "no" nobody said.
+                expired = event.payload.get("decision") == "expired"
+                resolution = {"closed": "the request was left unanswered", "via": "withdrawn", "by": event.payload.get("via")} if expired else {"allow": event.payload.get("decision") == "allow", "via": event.payload.get("via"), "in_session": True}
+                if row is not None and await self.manager.asks.resolve(row["id"], "system" if expired else "operator", resolution):
                     await self._after_answer(live)
         elif event.type == "presence":
             for session_id in (event.payload.get("newly_attended") or {}).get("sessions") or ():

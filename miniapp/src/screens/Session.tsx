@@ -14,6 +14,7 @@ import { confirmAsync, errorText, fmtBytes, haptic } from "../ui";
 import { Icon, IconName } from "../icons";
 import { AuthImg, FilePreview, PreviewSource, canPreview, downloadHref, fileGlyph, previewKind, sessionBase } from "../preview";
 import { followSession } from "../sessionstream";
+import { useEvent } from "../events";
 import { Activity, LiveStore, Segment, SummaryItem, SystemNote, ToolItem, Turn, activitySummary, applyLive, buildTurns, createLiveStore, familyCounts, isOlderPage, liveAfter, liveBase, prepend, producedFiles, reconcile, splitActivity } from "../turns";
 import { Explorer } from "../explorerpanel";
 import { DiffView } from "../previewparts";
@@ -691,7 +692,21 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   );
 
   // A tool call the policy refused, waiting on the operator: the dock above the pill offers it once.
-  const approval = useMemo(() => pendingApproval(detail?.messages ?? [], seenKeys), [detail?.messages, seenKeys]);
+  const approval = useMemo(
+    () => pendingApproval(detail?.messages ?? [], seenKeys, { open: detail?.open_approvals, runId: detail?.run_id }),
+    [detail?.messages, seenKeys, detail?.open_approvals, detail?.run_id],
+  );
+  // A request answered somewhere else — another device, Telegram, the Chrome panel — or closed by the
+  // host leaves this screen at once: the session's own stream does not carry the answer, and an idle
+  // screen reads nothing on its own. A new request has the host's list of open keys read again too.
+  useEvent(["permission.pending", "permission.resolved"], (event) => {
+    if (event.session_id !== id) return;
+    if (event.type === "permission.resolved") {
+      const key = String(event.payload.request_id ?? "");
+      setDetail((prev) => (prev?.open_approvals?.includes(key) ? { ...prev, open_approvals: prev.open_approvals.filter((k) => k !== key) } : prev));
+    }
+    refreshSoon("state");
+  }, [id, refreshSoon]);
   const approve = useCallback(
     async (a: Approval) => {
       try {

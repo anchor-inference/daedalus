@@ -524,6 +524,10 @@ class SessionState:
     round's reload and write-back, a withdrawal, a follow-up turned into a steer. Without it a
     withdrawal could land between a reload's read and its hand-over, and the engine was given a
     message the operator had just been told was withdrawn."""
+    grant_resume: bool = False
+    """Set while the operator's grant starts the agent's next run. That run carries the answer to one
+    request and closes none of the others still open: closing them refused, with no word from the
+    operator, the second of two cards they were about to answer one after the other."""
 
     @property
     def running(self) -> bool:
@@ -4914,6 +4918,10 @@ class SessionManager:
             else:
                 await self.runs.create(run)
             state.run_id = run_id
+            # Before the engine starts, so a request this run raises is never caught by the sweep. A
+            # continued turn (an answer, a resume after a restart) is the same run and keeps them.
+            if not state.grant_resume:
+                await self._retire_open_requests(state, via="run")
             await self._publish(state, "run.started", {"run_id": run_id, "origin": state.run_origin, "title": state.session.title})
         else:
             await self.runs.update_status(run_id, TENANT, RunStatus.running)
@@ -6990,6 +6998,47 @@ class SessionManager:
             meta["policy_pending"] = {k: v for k, v in (meta.get("policy_pending") or {}).items() if k != key}
         return refused
 
+    async def _retire_open_requests(self, state: SessionState, *, via: str) -> list[str]:
+        """Close every request still open on the session, unanswered, and tell every front showing it.
+
+        A refusal outlives the run that asked: the agent is told to end its turn and the operator's
+        Allow starts the next one. It does not outlive the run after that, nor the process that
+        announced it. Nothing used to close an unanswered request at all: it stayed open through every
+        later run, its card and buttons with it, and an Allow pressed on it days later wrote a grant the
+        agent was never told about, which let its next call of that kind through unasked. The agent
+        that still wants the call makes it again and is asked again, as a new request."""
+        keys = list((state.metadata.get("policy_pending") or {}).keys())
+        if not keys:
+            return []
+        for meta in (state.metadata, state.session.metadata):
+            meta["policy_pending"] = {}
+        await self.sessions.update_metadata(state.session.id, state.session.metadata)
+        for key in keys:
+            await self._publish(state, "permission.resolved", {"request_id": key, "request_ref": f"policy:{state.session.id}:{key}", "decision": "expired", "via": via})
+        return keys
+
+    async def retire_requests_left_open(self) -> int:
+        """At start: close the requests the previous process left open, returning how many.
+
+        Called once the extensions listen, so the notifications and the team's request lists that
+        still offer one hear that it closed. The sessions are read from the store, not from memory:
+        none is loaded yet, and loading only those with something open keeps a start cheap."""
+        rows = await self.db.fetchall("SELECT id, metadata FROM sessions WHERE metadata LIKE '%policy_pending%'")
+        retired = 0
+        for row in rows:
+            try:
+                pending = json.loads(row["metadata"]).get("policy_pending")
+            except (TypeError, ValueError):
+                continue
+            if not pending:
+                continue
+            state = await self.get_state(str(row["id"]))
+            if state is not None:
+                retired += len(await self._retire_open_requests(state, via="restart"))
+        if retired:
+            logger.warning("closed %d approval request(s) the previous process left open", retired)
+        return retired
+
     async def grant(self, session_id: str, key: str, *, via: str) -> dict[str, Any]:
         """The operator lets one refused call through: the key from the refusal, valid once, for a limited time.
 
@@ -7034,10 +7083,18 @@ class SessionManager:
         if not lines:
             return
         text = ("The operator allowed what was refused; repeat the call now — it passes once:\n" + "\n".join(lines))
+        state = self._states.get(session_id)
+        if state is not None:
+            state.grant_resume = True
         try:
             await self.submit(session_id, text, steer=True, as_answer=False, origin="events")
         except Exception:  # noqa: BLE001 — the grant stands; only the nudge to use it failed
             logger.exception("could not tell session %s about a grant", session_id)
+        finally:
+            # Only the run this submit starts, if it starts one: a nudge steered into a run already
+            # going starts none, and the next run is an ordinary one.
+            if state is not None:
+                state.grant_resume = False
 
     def similar_of(self, session_id: str, key: str) -> dict[str, Any] | None:
         """What "Allow similar" would grant for an open request, for the app to say before it asks."""

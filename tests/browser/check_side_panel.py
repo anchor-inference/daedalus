@@ -114,7 +114,7 @@ class Door:
         ]
         self.consented = True
         self.details = {
-            "s1": {"id": "s1", "title": "Pay the electricity bill", "status": "idle", "messages": messages(refusal="0123456789ab"), "model": "Claude Opus", "workspace": "/w", "folders": [], "pending": None, "thinking": True, "reasoning_effort": "medium"},
+            "s1": {"id": "s1", "title": "Pay the electricity bill", "status": "idle", "messages": messages(refusal="0123456789ab"), "open_approvals": ["0123456789ab"], "model": "Claude Opus", "workspace": "/w", "folders": [], "pending": None, "thinking": True, "reasoning_effort": "medium"},
             "s2": {"id": "s2", "title": "Find flights to Lisbon", "status": "idle", "messages": messages()[:1], "model": "Claude Opus", "workspace": "/w", "folders": [], "pending": None, "thinking": True, "reasoning_effort": "medium"},
         }
         self.posts: list[tuple[str, object]] = []
@@ -157,6 +157,11 @@ class Door:
                 return route.fulfill(status=200, content_type="text/event-stream", body='event: hello\ndata: {"event_seq": 0}\n\n')
             if tail.startswith("policy/similar/"):
                 return self.json(route, {"similar": None})
+            if tail in ("policy/grant", "policy/refuse") and isinstance(body, dict):
+                # Answered, so no longer open: what the host's detail says from then on.
+                detail = self.details[sid]
+                detail["open_approvals"] = [k for k in detail.get("open_approvals", []) if k != body.get("key")]
+                return self.json(route, {"ok": True})
             if tail in ("messages", "upload"):
                 return self.json(route, {"run_id": "r1", "receipt": {"status": "consumed"}})
             if tail == "browser-approvals":
@@ -218,9 +223,15 @@ def run() -> int:
         page.keyboard.press("Enter")
         expect(card).to_have_count(0)
         assert door.posted("/api/panel/sessions/s1/policy/grant") == [{"key": "0123456789ab"}], door.posts
+        # The refusal stays in the transcript; a reload of the panel must not offer the answered request again.
+        page.reload()
+        expect(page.locator(".sp-title")).to_contain_text("Pay the electricity bill")
+        page.wait_for_timeout(400)
+        expect(page.locator(".sp-card")).to_have_count(0)
 
         # A second refusal comes in and is refused from the keyboard.
         door.details["s1"]["messages"] = messages(refusal="abcdefabcdef")
+        door.details["s1"]["open_approvals"] = ["abcdefabcdef"]
         page.evaluate("window.__shell.emit('event', {session: 's1', kind: 'needs_you', title: '', waiting: 1})")
         page.evaluate("window.__shell.emit('current', " + json.dumps(tab("s2", "Flights", "https://air.example/")) + ")")
         expect(page.locator(".sp-title")).to_contain_text("Find flights to Lisbon")

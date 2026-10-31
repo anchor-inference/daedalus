@@ -164,7 +164,7 @@ describe("the screen", { timeout: 20_000 }, () => {
     requests = [];
     listeners = new Map();
     listing = { sessions: [session("s1", { title: "Pay the bill" }), session("s2", { title: "Flights" })], consented: true, consent: "CONSENT", chrome: { connected: true, name: "Work" } };
-    detail = { id: "s1", title: "Pay the bill", status: "idle", messages: refusal("0123456789ab"), model: "m", workspace: "/w", folders: [], pending: null };
+    detail = { id: "s1", title: "Pay the bill", status: "idle", messages: refusal("0123456789ab"), open_approvals: ["0123456789ab"], model: "m", workspace: "/w", folders: [], pending: null };
     fakeShell.current = {
       hello: { lang: "en", token: "pnl_x", expires: "", current: { tab: { id: 7, url: "https://bank.example/", title: "Bank", readable: true }, owner: { group: "s-s1-u", session: "s1", title: "Pay the bill", paused: false } }, show: null, profile: "Work", connected: true, generation: 1 },
       request: async (op: string, args: Record<string, unknown> = {}) => {
@@ -216,6 +216,14 @@ describe("the screen", { timeout: 20_000 }, () => {
       await new Promise((r) => setTimeout(r, 200));
     });
     expect(posted).toContainEqual({ url: "/api/panel/sessions/s1/policy/grant", body: { key: "0123456789ab" } });
+  });
+
+  it("offers no card for a refusal the host no longer holds open", async () => {
+    detail = { ...detail, open_approvals: [] };
+    act(() => root.render(<SidePanel />));
+    await settle();
+    expect(host.querySelector(".sp-title")?.textContent).toContain("Pay the bill");
+    expect(host.querySelector(".sp-card")).toBeNull();
   });
 
   it("refuses with Esc", async () => {
