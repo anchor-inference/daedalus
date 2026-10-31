@@ -235,30 +235,53 @@ describe("the queue", () => {
 });
 
 describe("the approval dock", () => {
-  const refusal = (id: string, key: string) => ({ tool_calls: [], tool_results: [{ id, content: `refused by policy.\nApproval key: ${key}`, is_error: true }] });
-  const call = (id: string, name: string, args: Record<string, unknown>) => ({ tool_calls: [{ id, name, arguments: args }], tool_results: [] });
+  const refusal = (id: string, key: string, run_id?: string) => ({ run_id, tool_calls: [], tool_results: [{ id, content: `refused by policy.\nApproval key: ${key}`, is_error: true }] });
+  const call = (id: string, name: string, args: Record<string, unknown>, run_id?: string) => ({ run_id, tool_calls: [{ id, name, arguments: args }], tool_results: [] });
+  const open = (...keys: string[]) => ({ open: keys });
 
   it("names the refused call and its key", () => {
-    const a = pendingApproval([call("c1", "Exec", { command: "rm -rf build" }), refusal("c1", "0123456789ab")], new Set());
+    const a = pendingApproval([call("c1", "Exec", { command: "rm -rf build" }), refusal("c1", "0123456789ab")], new Set(), open("0123456789ab"));
     expect(a).toEqual({ key: "0123456789ab", callId: "c1", tool: "Exec", detail: "rm -rf build" });
   });
 
   it("makes the agent's ask for the operator's Chrome a switch naming that Chrome and the reason", () => {
     const asked = { tool_calls: [], tool_results: [{ id: "c1", content: "Waiting for the operator: asked to work in their Chrome «Work». Approval key: 0123456789ab.", is_error: true }] };
-    const a = pendingApproval([call("c1", "BrowserAskOperatorChrome", { reason: "read the page signed in as you" }), asked], new Set());
+    const a = pendingApproval([call("c1", "BrowserAskOperatorChrome", { reason: "read the page signed in as you" }), asked], new Set(), open("0123456789ab"));
     expect(a).toEqual({ key: "0123456789ab", callId: "c1", tool: "BrowserAskOperatorChrome", detail: "read the page signed in as you", chrome: { name: "Work", reason: "read the page signed in as you" } });
   });
 
   it("is silent once the key was spent or waved away, and for an ordinary error", () => {
     const history = [call("c1", "Exec", { command: "x" }), refusal("c1", "0123456789ab")];
-    expect(pendingApproval(history, new Set(["0123456789ab"]))).toBeNull();
-    expect(pendingApproval([call("c1", "Exec", { command: "x" }), { tool_calls: [], tool_results: [{ id: "c1", content: "exit 1", is_error: true }] }], new Set())).toBeNull();
+    expect(pendingApproval(history, new Set(["0123456789ab"]), open("0123456789ab"))).toBeNull();
+    expect(pendingApproval([call("c1", "Exec", { command: "x" }), { tool_calls: [], tool_results: [{ id: "c1", content: "exit 1", is_error: true }] }], new Set(), open("0123456789ab"))).toBeNull();
   });
 
   it("offers the newest refusal", () => {
     const history = [call("c1", "Exec", { command: "a" }), refusal("c1", "0123456789ab"), call("c2", "WebFetch", { url: "https://example.org" }), refusal("c2", "abcdef012345")];
-    expect(pendingApproval(history, new Set())?.key).toBe("abcdef012345");
-    expect(pendingApproval(history, new Set())?.detail).toBe("https://example.org");
+    const both = open("0123456789ab", "abcdef012345");
+    expect(pendingApproval(history, new Set(), both)?.key).toBe("abcdef012345");
+    expect(pendingApproval(history, new Set(), both)?.detail).toBe("https://example.org");
+  });
+
+  // The meal-plan chat: allowed, done by hand, and still offered on every reload days later.
+  it("offers nothing the host no longer lists as open, however the request was closed", () => {
+    const history = [call("c1", "BrowserAct", { action: "click" }), refusal("c1", "ed4293a63452")];
+    expect(pendingApproval(history, new Set(), open())).toBeNull();
+    expect(pendingApproval(history, new Set(), { open: undefined })).toBeNull();
+    expect(pendingApproval(history, new Set(), open("0123456789ab"))).toBeNull();
+    // A newer refusal that is closed does not hide an older one in the same run that is still open.
+    const two = [...history, call("c2", "Exec", { command: "b" }), refusal("c2", "abcdef012345")];
+    expect(pendingApproval(two, new Set(), open("ed4293a63452"))?.key).toBe("ed4293a63452");
+  });
+
+  it("offers nothing from a run older than the newest one", () => {
+    const history = [call("c1", "Exec", { command: "x" }, "r1"), refusal("c1", "0123456789ab", "r1"), { run_id: "r2", tool_calls: [], tool_results: [] }];
+    expect(pendingApproval(history, new Set(), open("0123456789ab"))).toBeNull();
+    // A run that has started but written nothing yet is the newest run too.
+    expect(pendingApproval(history.slice(0, 2), new Set(), { open: ["0123456789ab"], runId: "r2" })).toBeNull();
+    // The run that asked, idle now that the agent ended its turn to wait: still offered.
+    expect(pendingApproval(history.slice(0, 2), new Set(), { open: ["0123456789ab"], runId: "r1" })?.key).toBe("0123456789ab");
+    expect(pendingApproval(history.slice(0, 2), new Set(), { open: ["0123456789ab"], runId: null })?.key).toBe("0123456789ab");
   });
 });
 

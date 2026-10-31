@@ -151,6 +151,9 @@ class Application:
         if self.settings.telegram_bot_token:
             self.front = TelegramFront(self.settings, self.config, self.manager, save_config=self.save_config, speech=self.speech)
         await self._install_extensions()
+        # Before any run is resumed, so a request a resumed run raises is not closed with the old ones;
+        # after the extensions, so the notifications offering the old ones hear that they closed.
+        await self.manager.retire_requests_left_open()
         self.resource_monitor.start()
         # The voice the operator chose is built now rather than by the first answer they ask for.
         # It costs a second or two of a start that is already doing several, and it is the difference

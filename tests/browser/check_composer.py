@@ -33,6 +33,7 @@ from playwright.sync_api import Page, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, GATES, Unhandled, expect_app, folders, fulfil_shared, reveal_composer  # noqa: E402
+from event_feed import EventFeed  # noqa: E402
 
 UNHANDLED = Unhandled()
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -80,6 +81,9 @@ class Host:
         # The request "Allow similar" has a family for, and the other open ones that family answers.
         self.similar_key = ""
         self.covered: list[str] = []
+        # The keys of the requests the host still holds open; the app offers a refusal only while its
+        # key is here, as the real host's detail says.
+        self.open: list[str] = []
 
     def detail(self) -> dict:
         return {
@@ -89,10 +93,14 @@ class Host:
             "configured_model": CONFIGURED, "effective_model": STANDBY if self.fallback else CONFIGURED, "fallback": self.fallback,
             "thinking": self.thinking, "reasoning_effort": self.effort, "yagni": self.yagni, "brief": "",
             "tools_off": [], "loop": None, "services": [], "subagents": [], "usage": {}, "context": {"tokens": 42000, "window": 200000, "messages": 38, "summaries": 1, "operator_turns": 6},
-            "messages": self.messages,
+            "messages": self.messages, "open_approvals": list(self.open),
         }
 
+    def answered(self, *keys: str) -> None:
+        self.open = [k for k in self.open if k not in keys]
+
     def refuse(self, key: str) -> None:
+        self.open.append(key)
         self.messages = self.messages + [
             message(103, "assistant", "", tool_calls=[{"id": "c_rm", "name": "Exec", "arguments": {"command": "rm -rf build"}}]),
             message(104, "tool", "", tool_results=[{"id": "c_rm", "content": f"refused by policy: destructive command.\nApproval key: {key}", "is_error": True}]),
@@ -100,6 +108,7 @@ class Host:
 
     def ask_chrome(self, key: str) -> None:
         """The agent's ask to work in the operator's Chrome, waiting on their card."""
+        self.open.append(key)
         self.messages = self.messages + [
             message(103, "assistant", "", tool_calls=[{"id": "c_chrome", "name": "BrowserAskOperatorChrome", "arguments": {"reason": "open anchorinference signed in as you"}}]),
             message(104, "tool", "", tool_results=[{"id": "c_chrome", "content": f"Waiting for the operator: asked to work in their Chrome «Work». Approval key: {key}. End your turn now.", "is_error": True}]),
@@ -168,7 +177,11 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         if rel == f"/api/sessions/{SESSION}/policy/grant-similar":
             key = str((data or {}).get("key") or "")
             resolved = [key, *HOST.covered] if key == HOST.similar_key else []
+            HOST.answered(*resolved)
             return route.fulfill(status=200, content_type="application/json", body=json.dumps({"key": key, "similar": {"label": "rm*"}, "resolved": resolved, "approves": [], "standing": []}))
+        if rel in (f"/api/sessions/{SESSION}/policy/grant", f"/api/sessions/{SESSION}/policy/refuse"):
+            HOST.answered(str((data or {}).get("key") or ""))
+            return route.fulfill(status=200, content_type="application/json", body="{}")
         if rel == f"/api/sessions/{SESSION}/stop":
             HOST.status = "idle"
             return route.fulfill(status=200, content_type="application/json", body="{}")
@@ -505,6 +518,24 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
         problems.append(f"the approval did not spend the key ({granted})")
     if page.locator(".composer .dock.approval").count():
         problems.append("the dock stayed after the key was spent")
+    # The refusal is still in the transcript, and an answered request must not come back from it:
+    # this is what kept an approval allowed days before on the screen of every reload.
+    page.reload()
+    page.wait_for_selector(".composer .roundbtn.primary", timeout=15000)
+    page.wait_for_timeout(400)
+    if page.locator(".composer .dock.approval").count():
+        problems.append("a reload brought back the dock of a request already allowed")
+
+    # A refusal the host no longer holds open — answered on another device or in Telegram, or closed
+    # because a later run started — is not offered either.
+    HOST.messages = HOST.messages[:2]
+    HOST.refuse("0badc0ffee00")
+    HOST.answered("0badc0ffee00")
+    page.reload()
+    page.wait_for_selector(".composer .roundbtn.primary", timeout=15000)
+    page.wait_for_timeout(400)
+    if page.locator(".composer .dock.approval").count():
+        problems.append("the dock offers a refusal the host says is no longer open")
 
     # A request the host has no family for offers Allow once only.
     HOST.messages = HOST.messages[:2]
@@ -525,6 +556,7 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
         message(105, "assistant", "", tool_calls=[{"id": "c_rm2", "name": "Exec", "arguments": {"command": "rm -rf dist"}}]),
         message(106, "tool", "", tool_results=[{"id": "c_rm2", "content": "refused by policy: destructive command.\nApproval key: 0a1b2c3d4e5f", "is_error": True}]),
     ]
+    HOST.open.append("0a1b2c3d4e5f")
     page.reload()
     page.wait_for_selector(".composer .dock.approval [data-action='allow-similar']", timeout=15000)
     similar = page.locator(".composer .dock.approval [data-action='allow-similar']")
@@ -584,6 +616,8 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
         problems.append("the Chrome ask card stayed after the yes")
     # Its own context: the language the address names is remembered, and the steps after this one
     # read English words.
+    # The yes above closed the request, and a closed one is offered nowhere; the agent asks again.
+    HOST.open.append("c0ffee123456")
     ru_context = page.context.browser.new_context(viewport={"width": 1280, "height": 900})
     ru = open_page(ru_context, lang="ru")
     ru.wait_for_selector(".composer .dock.approval[data-kind='chrome']", timeout=15000)
@@ -1020,11 +1054,43 @@ def toggles(browser) -> list[str]:  # type: ignore[no-untyped-def]
     return problems
 
 
+def second_device(browser) -> list[str]:  # type: ignore[no-untyped-def]
+    """The dock goes away when the request is answered somewhere else, without a reload: the host's
+    ``permission.resolved`` reaches this window on the app's event stream."""
+    problems: list[str] = []
+    feed = EventFeed()
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
+    try:
+        HOST.status = "idle"
+        HOST.messages = HOST.messages[:2]
+        HOST.refuse("5ec0d0de1ce0")
+        page = context.new_page()
+        page.route("**/api/**", stub)
+        page.route("**/api/events**", feed.route)
+        page.goto(f"{BASE}/agents/{SESSION}?token=t&scheme=dark&lang=en")
+        page.wait_for_selector(".composer .dock.approval", timeout=15000)
+        deadline = time.monotonic() + 10
+        while not feed.connected() and time.monotonic() < deadline:
+            page.wait_for_timeout(50)
+        HOST.answered("5ec0d0de1ce0")
+        feed.send("permission.resolved", {"request_id": "5ec0d0de1ce0", "request_ref": f"policy:{SESSION}:5ec0d0de1ce0", "decision": "allow", "via": "telegram"}, session=SESSION)
+        try:
+            page.wait_for_selector(".composer .dock.approval", state="detached", timeout=5000)
+        except Exception:  # noqa: BLE001 — said as a problem, not raised
+            problems.append("the dock stayed after another device answered the request")
+    finally:
+        context.close()
+        feed.close()
+        HOST.messages = HOST.messages[:2]
+    return problems
+
+
 def run() -> int:
     problems: list[str] = []
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=CHROMIUM)
         problems += desktop(browser)
+        problems += second_device(browser)
         problems += phone(browser)
         problems += failure_bar(browser)
         problems += layout(browser)
