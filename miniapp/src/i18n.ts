@@ -5776,6 +5776,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "turn.family.other": { en: "{name} ×{n}", ru: "{name} ×{n}" },
   "turn.family.more": { en: "and {n} more|and {n} more", ru: "и ещё {n}|и ещё {n}|и ещё {n}" },
   "turn.failed": { en: "(failed)", ru: "(ошибка)" },
+  "turn.tool.image": { en: "Picture {n} the tool returned", ru: "Картинка {n} от инструмента" },
   "turn.receipt": { en: "receipt", ru: "отчёт" },
   "turn.open.file": { en: "Open {name} in the panel", ru: "Открыть {name} в панели" },
   "turn.note.loop": { en: "Loop run #{n}", ru: "Цикл, запуск #{n}" },

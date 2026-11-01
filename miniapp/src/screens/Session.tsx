@@ -31,7 +31,7 @@ import { useReveal } from "../reveal";
 import { withoutAttachedList } from "../keptfiles";
 import { FileGallery, InlineMedia, mediaCopyText, splitMediaAnswer } from "../media";
 import { SavedToMemory } from "../memory/savedchip";
-import { conversationMedia, galleryFor, toolSource, viewerTarget, type HostSource } from "../mediaroute";
+import { conversationMedia, galleryFor, toolImageSource, toolSource, viewerTarget, type HostSource } from "../mediaroute";
 import { Answer, Composer, ComposerHandle } from "../composerbox";
 import { Approval, QueuedMessage, ReturnedMessage, pendingApproval, queuedAfter, questionsKey, readQueued, readReturned, returnedDraft, settledIds, withQueued } from "../composer";
 import { ModelChoice } from "../modelselect";
@@ -3103,6 +3103,7 @@ function ToolRow({ item, nested }: { item: ToolItem; nested?: boolean }) {
         </span>
       </div>
       {item.name === "ImageView" && !item.running && <ToolAttachment item={item} />}
+      {!!item.images?.length && !item.running && <ToolImages item={item} />}
       {expanded && <ToolCard item={item} />}
     </div>
   );
@@ -3239,6 +3240,22 @@ function ToolAttachment({ item }: { item: ToolItem }) {
       <button type="button" className="file-chip" onClick={() => preview(src)} title={t(canPreview(name) ? "preview.open" : "preview.download")}>
         <span aria-hidden>{fileGlyph(name)}</span> {name}
       </button>
+    </div>
+  );
+}
+
+/** The pictures a tool returned with its result (an MCP server's screenshot), under the step the way
+ *  ImageView's picture is, each opening in the centred viewer. */
+function ToolImages({ item }: { item: ToolItem }) {
+  const { id, preview } = useContext(SessionContext);
+  if (!id) return null;
+  return (
+    <div className="tool-attachment tool-images" data-tool-images={item.images?.length ?? 0}>
+      {(item.images ?? []).map((image, index) => {
+        const src = toolImageSource(id, item.id, index, image.mime_type);
+        const name = image.uri || t("turn.tool.image", { n: index + 1 });
+        return <AuthImg key={index} src={src} alt={name} className="tool-image" onClick={() => preview(src)} />;
+      })}
     </div>
   );
 }

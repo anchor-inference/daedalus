@@ -29,6 +29,7 @@ from protocore.contracts.tools import Tool, ToolContext
 from protocore.contracts.types import ToolDefinition, ToolParameterSchema, ToolResult
 
 from daedalus.config import McpServerConfig
+from daedalus.mcp.content import McpAnswer, read_content
 from daedalus.mcp.oauth import MCPOAuthClient, NeedsAuthorization
 from daedalus.security import operator_secrets, redact
 from daedalus.security.untrusted import fenced
@@ -168,34 +169,26 @@ class McpToolProxy(Tool):
             # The operator's secrets first, then the server's own references: a «secret:…» is the operator's
             # value for whatever this session calls, a «ref:…» only ever goes back to the server that gave it.
             arguments, _used = store.substitute(arguments, context.session_id, used_by=f"MCP {self.server} ({self.name}) in {context.session_id}")
-        content, failed = await self.run(arguments, limit=_output_limit(context.session_id))
-        return ToolResult(tool_call_id=call_id, content=content, is_error=failed)
+        answer = await self.run(arguments, limit=_output_limit(context.session_id))
+        return ToolResult(tool_call_id=call_id, content=answer.text, is_error=answer.failed, images=answer.images)
 
-    async def run(self, arguments: dict[str, Any], *, limit: int) -> tuple[str, bool]:
-        """Call the remote tool and render its answer as a tool result's text, fenced as outside
-        content; ``(text, failed)``. What a session's call and a command-line member's call share."""
+    async def run(self, arguments: dict[str, Any], *, limit: int) -> McpAnswer:
+        """Call the remote tool and render its answer: the text fenced as outside content, the pictures
+        apart (:mod:`daedalus.mcp.content`). What a session's call and a command-line member's call share;
+        a member is handed the text alone, which still names every picture."""
         try:
             result = await self._connection.call(self._remote, self._connection.vault.resolve(arguments))
         except Exception as exc:  # noqa: BLE001
-            return f"MCP tool failed: {self._connection.describe(exc)}", True
-        parts: list[str] = []
-        for item in getattr(result, "content", []) or []:
-            text = getattr(item, "text", None)
-            if text is not None:
-                parts.append(text)
-            elif getattr(item, "type", "") == "image":
-                parts.append(f"[image {getattr(item, 'mimeType', '')} returned by the tool]")
-            else:
-                dump = getattr(item, "model_dump", None)
-                parts.append(json.dumps(dump() if dump else str(item), default=str)[:2000])
-        content = "\n".join(parts) or "(empty result)"
+            return McpAnswer(f"MCP tool failed: {self._connection.describe(exc)}", True)
+        content, images = read_content(getattr(result, "content", []))
+        content = content or "(empty result)"
         content, concealed = self._connection.vault.conceal(content)
         content = clip(content, limit, note="the MCP tool returned more")
         content = fenced(content, kind="tool output", origin=f"MCP server {self.server}", source="an outside server",
                          quoted_by="the tool")
         if concealed:
             content += "\n" + VAULT_NOTE
-        return content, bool(getattr(result, "is_error", None) or getattr(result, "isError", False))
+        return McpAnswer(content, bool(getattr(result, "is_error", None) or getattr(result, "isError", False)), images)
 
 
 def _output_limit(session_id: str) -> int:

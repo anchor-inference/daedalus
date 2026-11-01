@@ -1608,6 +1608,8 @@ button.secret-chip:hover { background: var(--card-2); }
 /* ── files the agent looked at or sent, right under the step ───────────────────────────── */
 .tool-attachment { margin: 2px 0 6px 28px; }
 .tool-image { display: block; max-width: min(100%, 420px); max-height: 260px; border-radius: var(--radius-md); border: 1px solid var(--line); background: var(--bg-2); }
+/* Several pictures of one call sit side by side and wrap, rather than a column of screenshots. */
+.tool-images { display: flex; flex-wrap: wrap; gap: 6px; }
 .img-loading { display: inline-block; width: 120px; height: 80px; border-radius: var(--radius-md); background: var(--card); animation: pulse 1.2s ease-in-out infinite; }
 .file-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 4px 10px; min-height: var(--ctl-h); color: var(--fg); font: inherit; font-size: var(--fs-13); cursor: pointer; max-width: 100%; }
 .file-chip:hover { background: var(--card-2); }

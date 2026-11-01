@@ -452,3 +452,18 @@ describe("splitActivity", () => {
     expect(splitActivity(turn.activity).map((s) => s.kind)).toEqual(["text", "work"]);
   });
 });
+
+describe("a tool's pictures", () => {
+  it("come from the listing and from the stream, without the stored reference", () => {
+    const listed = buildTurns([
+      user(1, "look at the page"),
+      call(2, "s1", "Mcp_Browser_screenshot"),
+      msg(3, { role: "tool", tool_results: [{ id: "s1", content: "shot", is_error: false, images: [{ mime_type: "image/png", uri: "file:///p.png" }] }] }),
+    ]);
+    const step = listed[0].activity.find((a) => a.kind === "tool");
+    expect(step && step.kind === "tool" ? step.images : null).toEqual([{ mime_type: "image/png", uri: "file:///p.png" }]);
+    let live = liveAfter(EMPTY_LIVE, "tool_use_start", { tool_call_id: "s2", tool_name: "Mcp_Browser_screenshot" });
+    live = liveAfter(live, "tool_result", { tool_call_id: "s2", content: "shot", images: [{ mime_type: "image/jpeg", blob_ref: "abc", width: 800, height: 600 }, { blob_ref: "no type" }] });
+    expect(live.tools[0].images).toEqual([{ mime_type: "image/jpeg", width: 800, height: 600 }]);
+  });
+});
