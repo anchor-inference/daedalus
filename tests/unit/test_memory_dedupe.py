@@ -8,6 +8,7 @@ note is invented, and no test reaches a network."""
 from __future__ import annotations
 
 import json
+import math
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -17,10 +18,12 @@ from protocore.contracts.memory import MemoryRecord, MemoryScope
 
 from daedalus.extensions.memory import curator, synthesizer
 from daedalus.host.session_runner import TENANT, SessionManager
+from daedalus.memory import curator as curator_module
 from daedalus.memory import render, similarity, synthesis, tidy
 from daedalus.memory.curator import find
 from daedalus.memory.entries import ARCHIVED_KEY, Entry, fingerprint
 from daedalus.memory.similarity import Judge, Note, overlap, surely_same
+from daedalus.speech import embedding_catalog
 from daedalus.stores.database import Database
 from tests.unit.test_memory_synthesis import (  # noqa: F401
     H,
@@ -94,6 +97,63 @@ async def test_embeddings_decide_when_a_model_is_ready_and_only_the_doubtful_go_
     found = await Judge(ask=ask, vectors=vectors).twins([("a again", [a, b]), ("near b", [b])])
     assert found[0] is not None and found[0].how == "cosine" and found[0].note is a
     assert found[1] is None and len(asked) == 1 and "near b" in asked[0]
+
+
+def _at(cosine: float) -> list[float]:
+    """A vector at exactly this cosine to ``[1, 0]``."""
+    return [cosine, math.sqrt(1 - cosine * cosine)]
+
+
+def test_the_cosine_thresholds_belong_to_the_model_the_search_service_loads() -> None:
+    # The thresholds were drawn for E5 once and outlived the switch to another model, whose scores
+    # spread twice as wide; a model change must fail here until someone measures again.
+    assert similarity.CALIBRATED_FOR == embedding_catalog.MODEL.id
+    # The background pass must never merge unasked what the judge would put to the model.
+    assert similarity.COSINE_MAYBE < similarity.COSINE_SURE <= curator_module.COSINE_SURE
+    # The nearest pair of distinct notes on the live memory scored 0.83: neither pass may merge it unasked.
+    assert similarity.COSINE_SURE > 0.83
+    assert curator_module.COSINE_MAYBE < curator_module.COSINE_SURE
+
+
+async def test_the_judge_decides_above_its_sure_line_asks_above_its_maybe_line_and_drops_the_rest() -> None:
+    # Scores as the live memory measured them: a reworded twin about 0.9, a restatement in other words
+    # about 0.7 (below the old 0.8 shortlist, which never let it reach the model), a neighbour in the
+    # same entry about 0.5.
+    base = "Renders video on the home machine"
+    table = {base: [1.0, 0.0], "same": _at(similarity.COSINE_SURE + 0.01), "close": _at(similarity.COSINE_SURE - 0.01),
+             "reworded": _at(0.7), "edge": _at(similarity.COSINE_MAYBE + 0.01), "neighbour": _at(similarity.COSINE_MAYBE - 0.01)}
+    asked: list[str] = []
+
+    async def vectors(texts: Any) -> list[list[float]]:
+        return [table[t] for t in texts]
+
+    async def ask(system: str, user: str) -> str:
+        asked.append(user)
+        return json.dumps({"answers": []})
+
+    note = Note("r:1", base, "active")
+    found = await Judge(ask=ask, vectors=vectors).twins([(t, [note]) for t in ("same", "close", "reworded", "edge", "neighbour")])
+    assert found[0] is not None and found[0].how == "cosine"
+    assert found[1:] == [None, None, None, None]
+    assert len(asked) == 1
+    put = asked[0]
+    assert "NEW: close" in put and "NEW: reworded" in put and "NEW: edge" in put
+    assert "NEW: neighbour" not in put and "NEW: same" not in put
+
+
+def test_the_background_pass_merges_above_its_sure_line_and_suggests_above_its_maybe_line() -> None:
+    # Sentences sharing no words, so the words alone find nothing and only the vectors speak.
+    a, b, c, d, e = (_record(i, t) for i, t in (("a", "Keeps bees behind the house"), ("b", "Owns three hives in the garden"),
+                                                    ("c", "Honey comes from his own apiary"), ("d", "Sells wax candles at the market"),
+                                                    ("e", "Smokes the hives before opening them")))
+    found = find([a, b], {"a": [1.0, 0.0], "b": _at(curator_module.COSINE_SURE + 0.01)})
+    assert len(found) == 1 and found[0].sure and found[0].reason == "nearly the same meaning"
+    found = find([a, c], {"a": [1.0, 0.0], "c": _at(curator_module.COSINE_SURE - 0.01)})
+    assert len(found) == 1 and not found[0].sure
+    found = find([a, d], {"a": [1.0, 0.0], "d": _at(curator_module.COSINE_MAYBE + 0.01)})
+    assert len(found) == 1 and not found[0].sure
+    # Below the line: two records about one subject, which the operator would only be asked to keep apart.
+    assert find([a, e], {"a": [1.0, 0.0], "e": _at(curator_module.COSINE_MAYBE - 0.01)}) == []
 
 
 def test_a_plain_name_the_operator_wrote_anywhere_in_the_chat_is_grounded() -> None:
