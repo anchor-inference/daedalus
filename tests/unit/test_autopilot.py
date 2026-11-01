@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from protocore.contracts.types import Message, MessageRole, TextBlock
+from protocore.contracts.types import Message, MessageRole, TextBlock, ToolResultBlock, ToolUseBlock
 
 from daedalus.config import Settings
 from daedalus.extensions import autopilot, questions, side_questions
@@ -249,3 +249,98 @@ async def test_a_restart_closes_what_it_caught_and_replays_nothing(pilot: Any) -
     rows = {r["id"]: r["state"] for r in await manager.db.fetchall("SELECT id, state FROM autopilot_decisions")}
     assert rows == {"d-judging": "abandoned", "d-unknown": "abandoned", "d-placed": "admitted"}
     assert await user_rows(manager, sid) == []
+
+
+# -- the fixed risk check ----------------------------------------------------------------------------
+
+
+async def risky_run(manager: SessionManager, sid: str, run_id: str, *calls: tuple[str, dict[str, Any]]) -> None:
+    """A finished run's rows as the session writes them: each call and its result, under the run's id."""
+    rows: list[Message] = []
+    for index, (name, arguments) in enumerate(calls):
+        call_id = f"{run_id}-{index}"
+        rows.append(Message(role=MessageRole.assistant, content_blocks=[ToolUseBlock(tool_call_id=call_id, name=name, arguments_json=json.dumps(arguments))],
+                            metadata={"daedalus.run_id": run_id}))
+        rows.append(Message(role=MessageRole.tool, content_blocks=[ToolResultBlock(tool_call_id=call_id, content="ok")], metadata={"daedalus.run_id": run_id}))
+    rows.append(Message(role=MessageRole.assistant, content_blocks=[TextBlock(text="done")], metadata={"daedalus.run_id": run_id}))
+    await manager.sessions.append_transcript(sid, rows)
+
+
+RESTART = ("Exec", {"command": "docker compose -f deploy/compose.yaml up -d"})
+OUTSIDE = ("Write", {"path": "/var/tmp/elsewhere.txt", "content": "x"})
+
+
+async def test_a_risky_turn_stops_without_asking_the_judge_and_continue_sends_one_turn(pilot: Any) -> None:
+    sid = await chat(pilot)
+    await pilot.manager.submit(sid, "deploy the fix")
+    await quiet(pilot)
+    judged = len(pilot.asked)
+    await risky_run(pilot.manager, sid, "r-risk", ("Write", {"path": "notes.md", "content": "x"}), RESTART)
+    assert await pilot.service.judge(sid, "r-risk") == "risk"
+    assert len(pilot.asked) == judged  # no model was asked whether the turn was fine
+    [waiting] = await questions.waiting(pilot.app, session_id=sid)
+    assert waiting["options"] == ["Continue", "Continue, allow this for the goal"] and waiting["asker"] == "autopilot"
+    assert "docker compose -f deploy/compose.yaml up -d" in waiting["text"] and "Files changed: 1 — notes.md" in waiting["text"]
+    note = pilot.app.notifications.posted[-1]
+    assert note.title.startswith("Autopilot stopped") and [a.id for a in note.actions] == ["opt:0", "opt:1", "open"]
+    row = await pilot.manager.db.fetchone("SELECT id FROM autopilot_decisions WHERE run_id = 'r-risk'")
+    decision = await pilot.service.decision(str(row["id"]))
+    assert decision is not None and [f["kind"] for f in decision["detail"]["risk"]["findings"]] == ["containers"]
+    # While the stop waits, nothing goes on by itself.
+    await risky_run(pilot.manager, sid, "r-while", ("Exec", {"command": "ls"}))
+    assert await pilot.service.judge(sid, "r-while") == "skipped:question"
+    # Continue: one turn, marked as the operator's choice, allowing nothing.
+    assert await pilot.service.choose(str(row["id"]), 0, via="telegram") == "Continue"
+    await quiet(pilot)
+    [sent] = [m for m in await user_rows(pilot.manager, sid) if (m.metadata.get("daedalus.autopilot") or {}).get("kind") == "choice"]
+    assert "Go on with the task" in sent.content_blocks[0].text and "allow" not in sent.metadata["daedalus.autopilot"]  # type: ignore[union-attr]
+    # So the same kind of action stops the goal again.
+    await risky_run(pilot.manager, sid, "r-again", RESTART)
+    assert await pilot.service.judge(sid, "r-again") == "risk"
+
+
+async def test_harmless_turns_go_to_the_judge(pilot: Any) -> None:
+    sid = await chat(pilot)
+    await pilot.manager.submit(sid, "fix the bug")
+    await quiet(pilot)
+    await risky_run(pilot.manager, sid, "r-plain", ("Write", {"path": "src/a.py", "content": "x"}), ("Exec", {"command": "pytest -q && docker ps"}),
+                    ("Exec", {"command": "git push origin feature"}))
+    assert await pilot.service.judge(sid, "r-plain") == "done"
+    assert await pilot.manager.asks.of_session(sid) == []
+
+
+async def test_allowing_a_kind_lasts_until_the_operator_writes_again(pilot: Any) -> None:
+    sid = await chat(pilot)
+    await pilot.manager.submit(sid, "deploy the fix")
+    await quiet(pilot)
+    await risky_run(pilot.manager, sid, "r-1", RESTART)
+    assert await pilot.service.judge(sid, "r-1") == "risk"
+    row = await pilot.manager.db.fetchone("SELECT id FROM autopilot_decisions WHERE run_id = 'r-1'")
+    [ask] = await questions.waiting(pilot.app, session_id=sid)
+    # Answered from the side panel this time: the chip of the second option.
+    done = await questions.answer(pilot.app, [{"ask_id": ask["id"], "selected": ["Continue, allow this for the goal"]}], project_id=None, via="app", session_id=sid)
+    assert done["results"][0]["delivered"] is True
+    await quiet(pilot)
+    [sent] = [m for m in await user_rows(pilot.manager, sid) if (m.metadata.get("daedalus.autopilot") or {}).get("decision") == row["id"]]
+    assert sent.metadata["daedalus.autopilot"]["allow"] == ["containers"]
+    # Containers are allowed for the rest of this goal; another kind still stops it.
+    await risky_run(pilot.manager, sid, "r-2", RESTART)
+    assert await pilot.service.judge(sid, "r-2") == "done"
+    await risky_run(pilot.manager, sid, "r-3", RESTART, OUTSIDE)
+    assert await pilot.service.judge(sid, "r-3") == "risk"
+    decision = await pilot.service.decision(str((await pilot.manager.db.fetchone("SELECT id FROM autopilot_decisions WHERE run_id = 'r-3'"))["id"]))
+    assert decision is not None and [f["kind"] for f in decision["detail"]["risk"]["findings"]] == ["write_outside"]
+    # A new message of the operator's is a new goal: what they allowed before no longer holds.
+    await pilot.manager.submit(sid, "now something else")
+    await quiet(pilot)
+    await risky_run(pilot.manager, sid, "r-4", RESTART)
+    assert await pilot.service.judge(sid, "r-4") == "risk"
+
+
+async def test_the_check_can_be_switched_off(pilot: Any) -> None:
+    pilot.manager.config.goal_risk.enabled = False
+    sid = await chat(pilot)
+    await pilot.manager.submit(sid, "deploy")
+    await quiet(pilot)
+    await risky_run(pilot.manager, sid, "r-off", RESTART)
+    assert await pilot.service.judge(sid, "r-off") == "done"

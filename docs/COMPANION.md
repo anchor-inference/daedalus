@@ -46,6 +46,13 @@ and optionally a cadence — `every 6h`, `30m`, `daily`, or a five-field cron in
 host gives the companion a turn to check the goal: it looks at the goal's agents, delegates what needs
 doing and ends with `GoalReport`. Checks are never more often than `goal_min_interval_minutes`.
 
+When an agent of an active goal finishes a turn that did something risky — the fixed check autopilot
+uses: an existing migration changed, containers or a service restarted, shared history rewritten, a
+tree deleted or a file written outside its folder, data dropped — the goal is paused and held. The
+Inbox asks you, with what the turn did: Resume, or Resume and allow those kinds for the rest of the
+goal. Until then the companion can neither steer that agent, nor delegate for the goal, nor change
+its status; setting the status yourself from the page counts as Resume.
+
 ## When nobody is listening
 
 An agent's result that arrives with no page open (or while the companion is paused) is held and
