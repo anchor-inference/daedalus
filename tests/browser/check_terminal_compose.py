@@ -71,7 +71,7 @@ def fleet() -> TerminalStub:
     return term
 
 
-def open_page(context, term: TerminalStub, feed: EventFeed, sent: list[tuple[str, dict]], lang: str) -> Page:  # type: ignore[no-untyped-def]
+def open_page(context, term: TerminalStub, feed: EventFeed, sent: list[tuple[str, dict]], lang: str, holding: list | None = None) -> Page:  # type: ignore[no-untyped-def]
     page = context.new_page()
     errors: list[str] = []
     page.on("pageerror", lambda e: errors.append(str(e)))
@@ -89,6 +89,10 @@ def open_page(context, term: TerminalStub, feed: EventFeed, sent: list[tuple[str
             return route.fulfill(status=200, content_type="application/json", body=json.dumps({"staff": {"id": parts[3]}, "session": None, "capabilities": {"harness": "claude", "label": "Claude Code", "steer": steer}}))
         if len(parts) == 5 and parts[2] == "staff" and parts[4] == "messages" and request.method == "POST":
             sent.append((parts[3], request.post_data_json))
+            if holding is not None and holding and holding[0] is True:
+                # The host slow to answer: the route is answered later by the check.
+                holding.append(route)
+                return None
             return route.fulfill(status=200, content_type="application/json", body=json.dumps({"state": "queued", "message_id": f"m{len(sent)}", "mode": "now", "degraded_to": ""}))
         if len(parts) == 5 and parts[2] == "staff" and parts[4] == "messages":
             return route.fulfill(status=200, content_type="application/json", body="[]")
@@ -121,9 +125,10 @@ def desktop(browser, lang: str, check: Check) -> None:  # type: ignore[no-untype
     term = fleet()
     feed = EventFeed()
     sent: list[tuple[str, dict]] = []
+    holding: list = [False]
     context = browser.new_context(viewport={"width": 1600, "height": 960}, color_scheme="dark")
     context.add_init_script(DEBUG)
-    page = open_page(context, term, feed, sent, lang)
+    page = open_page(context, term, feed, sent, lang, holding)
     for tid in (SHELL, IRA, NAYA):
         wait_live(page, tid)
     page.wait_for_timeout(400)
@@ -186,6 +191,25 @@ def desktop(browser, lang: str, check: Check) -> None:  # type: ignore[no-untype
         page.wait_for_timeout(100)
     check.that(len(sent) >= 2 and sent[1][1]["text"] == f"see the log\n\n{log}", f"{lang}: the paste went as {sent[1:2]}")
     expect(chip).to_have_count(0)
+    # A second message written while the first is still unanswered goes too, after it. The line once
+    # dropped that Enter silently, which on a loaded machine lost the paste message above now and then.
+    holding[0] = True
+    page.locator(field).type("first")
+    page.keyboard.press("Enter")
+    page.locator(field).type("second")
+    page.keyboard.press("Enter")
+    expect(page.locator(field)).to_have_value("")
+    page.wait_for_timeout(300)
+    check.that([b["text"] for _, b in sent[2:]] == ["first"], f"{lang}: with the first unanswered the line posted {[b['text'] for _, b in sent[2:]]}")
+    holding[0] = False
+    for route in holding[1:]:
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({"state": "queued", "message_id": "m-held", "mode": "now", "degraded_to": ""}))
+    del holding[1:]
+    deadline = time.monotonic() + 5
+    while len(sent) < 4 and time.monotonic() < deadline:
+        page.wait_for_timeout(100)
+    check.that([b["text"] for _, b in sent[2:]] == ["first", "second"], f"{lang}: the two quick messages went as {[b['text'] for _, b in sent[2:]]}")
+    del sent[2:]
     # A short one-line paste stays in the field.
     paste(page, field, "SPRING10")
     page.wait_for_timeout(100)

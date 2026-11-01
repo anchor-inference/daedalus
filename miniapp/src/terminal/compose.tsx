@@ -37,7 +37,6 @@ export function AgentCompose({ pane, toast }: { pane: PaneContext; toast: (text:
   const [quote, setQuote] = useState("");
   const [selection, setSelection] = useState("");
   const [pick, setPick] = useState(0);
-  const [busy, setBusy] = useState(false);
   const counter = useRef(0);
   const field = useRef<HTMLInputElement>(null);
 
@@ -63,31 +62,38 @@ export function AgentCompose({ pane, toast }: { pane: PaneContext; toast: (text:
     field.current?.focus();
   }
 
-  async function send() {
-    if (!message || busy || !staffId) return;
+  // The messages on their way, one after another. A message written while the one before it is still
+  // being posted waits its turn, so the member reads them in the order they were written. This line
+  // once refused a send while the previous one was on its way and said nothing: the Enter was lost,
+  // the words and chips stayed in the line, and on a loaded machine (the host slow to answer) the
+  // second of two quick messages was simply never sent.
+  const queue = useRef<Promise<void>>(Promise.resolve());
+
+  function send() {
+    if (!message || !staffId) return;
     if (offline) {
       toast(t("focus.staffDraftOffline"));
       return;
     }
-    // Cleared at once and put back on a failure: the line is for quick words, and a second message
-    // typed while the first is on its way must not be wiped by the first one's answer.
+    // Cleared at once and put back on a failure only into an empty line: the line is for quick
+    // words, and what was typed after this message must not be overwritten by its failure.
     const kept = { text, pastes, quote };
+    const body = { text: message, when: composerWhen(nowChoice(view?.capabilities), null) };
     setText("");
     setPastes([]);
     setQuote("");
-    setBusy(true);
-    try {
-      await api.post(`/api/staff/${enc(staffId)}/messages`, { text: message, when: composerWhen(nowChoice(view?.capabilities), null) });
-      toast(t("phone.told", { name }));
-      invalidate(`/api/staff/${enc(staffId)}/messages`);
-    } catch (e) {
-      setText((now) => now || kept.text);
-      setPastes((now) => (now.length ? now : kept.pastes));
-      setQuote((now) => now || kept.quote);
-      toast(errorText(e));
-    } finally {
-      setBusy(false);
-    }
+    queue.current = queue.current.then(async () => {
+      try {
+        await api.post(`/api/staff/${enc(staffId)}/messages`, body);
+        toast(t("phone.told", { name }));
+        invalidate(`/api/staff/${enc(staffId)}/messages`);
+      } catch (e) {
+        setText((now) => now || kept.text);
+        setPastes((now) => (now.length ? now : kept.pastes));
+        setQuote((now) => now || kept.quote);
+        toast(errorText(e));
+      }
+    });
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
@@ -104,7 +110,7 @@ export function AgentCompose({ pane, toast }: { pane: PaneContext; toast: (text:
     }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      void send();
+      send();
       return;
     }
     if (e.key === "Escape") {
@@ -182,7 +188,7 @@ export function AgentCompose({ pane, toast }: { pane: PaneContext; toast: (text:
           <span>{t("term.compose.reply")}</span>
         </button>
       )}
-      <button type="button" className="iconbtn small flat tp-compose-send" onClick={() => void send()} disabled={!message || busy || offline} aria-label={t("staff.send")} title={offline ? t("staff.compose.offline") : t("staff.send")}>
+      <button type="button" className="iconbtn small flat tp-compose-send" onClick={send} disabled={!message || offline} aria-label={t("staff.send")} title={offline ? t("staff.compose.offline") : t("staff.send")}>
         <Icon name="send" size={14} />
       </button>
     </div>
