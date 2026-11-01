@@ -298,3 +298,113 @@ async def test_editing_a_waiting_message_gives_its_whole_words_back_and_withdraw
         await _await_run(manager)
         assert not _model_saw(provider, "rename the column")
     await manager.close()
+
+
+def _given_back(manager: Any) -> list[tuple[str, list[dict[str, Any]], str]]:
+    """Every hand-back the fronts hear, as the Telegram front would."""
+    heard: list[tuple[str, list[dict[str, Any]], str]] = []
+
+    async def hook(session_id: str, messages: list[dict[str, Any]], cause: str) -> None:
+        heard.append((session_id, messages, cause))
+
+    manager.handback_hooks.append(hook)
+    return heard
+
+
+async def test_a_stop_gives_a_message_typed_in_telegram_back_to_the_topic_it_came_from(settings: Settings, db: Database) -> None:
+    """A Telegram message has no composer in the app to come back to; it used to reach only the open
+    app windows, and the operator who typed it in Telegram saw nothing at all."""
+    provider = ScriptedProvider([_held_tool(settings), {"text": "never reached"}])
+    manager = await _manager(settings, db, provider)
+    heard = _given_back(manager)
+    state = await manager.create_session("stopped from the phone")
+    sid = state.session.id
+    async with _client(settings, db, manager) as client:
+        await _start_in_tool(manager, sid)
+        await manager.submit(sid, "check the second server too", via="telegram", address={"chat_id": -100, "thread_id": 42})
+        await _send(client, sid, "typed in the app", "c-app")
+        done = asyncio.Event()
+
+        async def finished(session_id: str, run_id: str, status: str) -> None:
+            done.set()
+
+        manager.on_finished(finished)
+        assert (await client.post(f"/api/sessions/{sid}/stop", headers=H)).status_code == 200
+        (settings.state_dir / "release-the-tool").touch()
+        await asyncio.wait_for(done.wait(), timeout=30)
+
+    assert len(heard) == 1
+    session_id, messages, cause = heard[0]
+    assert (session_id, cause) == (sid, "stop")
+    assert [(m["text"], m["via"], m["address"]) for m in messages] == [
+        ("check the second server too", "telegram", {"chat_id": -100, "thread_id": 42}),
+        ("typed in the app", "app", {}),
+    ]
+    # Handed back, never queued again.
+    assert await manager.queued_input(sid) == []
+    assert not _model_saw(provider, "second server")
+    await manager.close()
+
+
+async def _waiting(manager: Any, sid: str) -> None:
+    """A message with a receipt and a job's notice waiting while the session is idle, as a drain that
+    could not start the next turn leaves them."""
+    item = {"id": "c-ghost", "kind": "follow_up", "text": "and rename the table", "attachments": [], "origin": "operator", "queued_at": "2026-11-02T10:00:00+00:00", "via": "telegram", "address": {"chat_id": 7, "thread_id": 0}}
+    await manager.live.accept(sid, "c-ghost", "input", {"text": "and rename the table"}, queue_item=item, queue_kind="follow_up")
+    await manager.live.enqueue(sid, "steer", {"id": "q-job", "kind": "steer", "text": "a job finished", "attachments": [], "origin": "job"})
+
+
+async def test_a_clear_withdraws_what_was_waiting_and_hands_the_operators_words_back(settings: Settings, db: Database) -> None:
+    """A clear emptied the queue columns and left the receipt ``queued`` for a message that no longer
+    existed anywhere, and the operator's words went without a word to them."""
+    provider = ScriptedProvider([{"text": "first answer"}])
+    manager = await _manager(settings, db, provider)
+    changes = _watch(manager)
+    heard = _given_back(manager)
+    state = await manager.create_session("cleared")
+    sid = state.session.id
+    await manager.submit(sid, "first request")
+    await _await_run(manager)
+    # The run's housekeeping drains the queue; what is queued after it stays queued.
+    assert state.housekeeping is not None
+    await state.housekeeping
+    await _waiting(manager, sid)
+
+    await manager.clear_history(sid)
+
+    assert (await manager.live.receipt(sid, "c-ghost"))["status"] == "withdrawn"
+    assert await manager.queued_input(sid) == []
+    returned = [change for change in changes if change["reason"] == "returned"]
+    assert [(change["cause"], [m["text"] for m in change["returned"]]) for change in returned] == [("clear", ["and rename the table"])]
+    # The job's notice was written to the conversation that was cleared: it goes, and is nobody's to resend.
+    assert [(cause, [(m["text"], m["via"], m["address"]) for m in messages]) for _, messages, cause in heard] == [("clear", [("and rename the table", "telegram", {"chat_id": 7, "thread_id": 0})])]
+    await manager.close()
+
+
+async def test_a_revert_withdraws_what_was_waiting_so_it_cannot_reach_the_rewound_conversation(settings: Settings, db: Database) -> None:
+    provider = ScriptedProvider([{"text": "first answer"}, {"text": "after the revert"}])
+    manager = await _manager(settings, db, provider)
+    changes = _watch(manager)
+    heard = _given_back(manager)
+    state = await manager.create_session("reverted")
+    sid = state.session.id
+    await manager.submit(sid, "first request")
+    await _await_run(manager)
+    # The run's housekeeping drains the queue; what is queued after it stays queued.
+    assert state.housekeeping is not None
+    await state.housekeeping
+    await _waiting(manager, sid)
+    seq = next(int(m.metadata["daedalus.seq"]) for m in await manager.sessions.list_transcript(sid) if m.text.startswith("first request"))
+
+    await manager.revert(sid, seq)
+
+    assert (await manager.live.receipt(sid, "c-ghost"))["status"] == "withdrawn"
+    assert await manager.queued_input(sid) == []
+    assert [change.get("cause") for change in changes if change["reason"] == "returned"] == ["revert"]
+    assert [cause for _, _, cause in heard] == ["revert"]
+    # The next turn starts clean: nothing from before the revert is drained into it.
+    await manager.submit(sid, "a new start")
+    await _await_run(manager)
+    assert not _model_saw(provider, "rename the table") and not _model_saw(provider, "a job finished")
+    assert await manager.drop_queued_input(sid, "c-ghost") == "withdrawn"
+    await manager.close()

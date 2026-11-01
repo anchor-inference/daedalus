@@ -21,6 +21,7 @@ import {
   readQueued,
   readReturned,
   returnedDraft,
+  returnedNoticeKey,
   sendIntent,
   settledIds,
   queuedAfter,
@@ -222,6 +223,16 @@ describe("the queue", () => {
     ]);
     expect(returnedDraft(back)).toBe("first thought\n\nsecond thought");
     expect(readReturned({ not: "a list" })).toEqual([]);
+  });
+
+  it("says what handed the words back: a revert or a clear is not a stop", () => {
+    expect(returnedNoticeKey("stop", false)).toBe("composer.steer.returned");
+    expect(returnedNoticeKey(undefined, true)).toBe("composer.steer.returned.files");
+    expect(returnedNoticeKey("revert", false)).toBe("composer.steer.returned.revert");
+    expect(returnedNoticeKey("clear", true)).toBe("composer.steer.returned.clear.files");
+    for (const cause of ["stop", "revert", "clear"]) {
+      for (const withFiles of [false, true]) expect(t(returnedNoticeKey(cause, withFiles), { names: "a.png" })).not.toMatch(/^\[/);
+    }
   });
 
   it("draws a card for a message the host has just queued, once, until the host's list replaces it", () => {

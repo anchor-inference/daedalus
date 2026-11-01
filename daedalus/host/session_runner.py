@@ -863,6 +863,12 @@ class SessionManager:
         self._finished: list[RunFinished] = []
         self.compaction_hooks: list[Callable[[str, dict[str, Any]], Awaitable[None]]] = []
         """Called after an automatic compaction with what changed, so the chat can say so in one line."""
+        self.handback_hooks: list[Callable[[str, list[dict[str, Any]], str], Awaitable[None]]] = []
+        """Each ``(session_id, messages, cause)`` hears the operator's waiting messages handed back
+        unsent, ``cause`` being ``stop``, ``revert`` or ``clear``. Every message is what the composer
+        takes in (``id``, ``text``, ``files``) plus the ``via`` it came through and that front's own
+        ``address``, so the front can give the words back where they were written: the app's change
+        event reaches only the open windows, and a message typed in Telegram was lost to its sender."""
         self._pending_restored: list[Callable[[str, PendingQuestion], Awaitable[None]]] = []
         self.service_hooks: dict[str, Any] = {}
         self.host_bridge: HostBridge | None = None
@@ -2894,9 +2900,10 @@ class SessionManager:
                 state.engine.compaction_state = CompactionState()
             state.history_keys = [self.sessions.transcript_key(m) for m in kept]
             _forget_persisted(state)
-            # Input queued during the undone turns and any run snapshot that could resume them are pre-revert by definition.
-            await self.live.save_queues(session_id, [], [])
-            await self.steer_changed(session_id, reason="cleared")
+            # Input queued during the undone turns belongs to them: delivered later, it would answer
+            # a conversation that no longer exists. Withdrawn and handed back rather than deleted, so
+            # its receipt says so and its words reach the operator again.
+            handed = await self._hand_back(state, "revert")
             state.last_error_kind = ""
             state.last_error_message = ""
             state.last_error_permanent = False
@@ -2906,7 +2913,8 @@ class SessionManager:
             await self._notify_sinks(session_id, HostEvent(HostEventType.HISTORY_CUT, state.run_id or "", result))
             if retry:
                 result["run_id"] = await self._start_run_locked(state, None)
-            return result
+        await self._give_back(session_id, handed, "revert")
+        return result
 
     async def clear_history(self, session_id: str) -> dict[str, Any]:
         """Start the session over with an empty working history: the workspace, the brief, the model, the
@@ -2937,8 +2945,7 @@ class SessionManager:
             state.history_keys = []
             await self.sessions.replace_messages(session_id, TENANT, [])
             _forget_persisted(state)
-            await self.live.save_queues(session_id, [], [])
-            await self.steer_changed(session_id, reason="cleared")
+            handed = await self._hand_back(state, "clear")
             for run in await self.db.fetchall("SELECT id FROM runs WHERE session_id = ?", (session_id,)):
                 await self.events.delete_snapshot(run["id"])
             marker = Message(
@@ -2947,7 +2954,8 @@ class SessionManager:
                 metadata={"daedalus.origin": "clear", "daedalus.clear": {"dropped": len(history)}},
             )
             await self.sessions.append_transcript(session_id, [marker])
-            return {"dropped": len(history)}
+        await self._give_back(session_id, handed, "clear")
+        return {"dropped": len(history)}
 
     async def fork(self, source_id: str, seq: int, *, title: str | None = None) -> dict[str, Any]:
         """Make a new session from the source's history before transcript ``seq``, or nothing at all.
@@ -3591,13 +3599,14 @@ class SessionManager:
         return True
 
     async def steer_changed(
-        self, session_id: str, *, reason: str, withdrawn: Sequence[str] = (), returned: Sequence[dict[str, Any]] = (),
+        self, session_id: str, *, reason: str, withdrawn: Sequence[str] = (), returned: Sequence[dict[str, Any]] = (), cause: str = "",
     ) -> None:
         """Tell the session's listeners that what waits for the model is not what they last drew.
 
         ``withdrawn`` names the messages taken back, so every open device drops its own bubble of one
         it sent, not only the device that pressed the button. ``returned`` carries whole the messages
-        a stop handed back, for the composer to take them in again.
+        a stop, a revert or a clear handed back — ``cause`` says which — for the composer to take
+        them in again.
         """
         state = self._states.get(session_id)
         waiting = _waiting(await self.live.load_waiting(session_id))
@@ -3606,6 +3615,8 @@ class SessionManager:
             payload["withdrawn"] = list(withdrawn)
         if returned:
             payload["returned"] = list(returned)
+        if cause:
+            payload["cause"] = cause
         await self._notify_sinks(
             session_id,
             # ``count`` is the whole queue; ``queued`` is the first cards' worth of it.
@@ -3702,6 +3713,7 @@ class SessionManager:
         origin: str = "operator",
         client_message_id: str | None = None,
         via: str = "app",
+        address: dict[str, Any] | None = None,
         operator_words: Sequence[str] | None = None,
         reply_to: dict[str, Any] | None = None,
         secrets: Sequence[str] = (),
@@ -3713,6 +3725,9 @@ class SessionManager:
         ``origin`` names who wrote the text (``operator``, or a system source such as
         ``reminder``); the transcript and the Mini App show it accordingly. ``via`` is the front it
         came through, which a free-text answer to a pending question reports as where it was answered.
+        ``address`` is that front's own note of where the words were written (Telegram's chat and
+        topic); a queued message keeps both, so if a stop, a revert or a clear hands it back unsent,
+        the front can put the words back in front of the operator where they typed them.
         While a run is active the text is a steer unless ``follow_up`` asks for it to wait for the end
         of the turn (or the session's ``queue_mode`` says so); ``steer`` wins over both.
         ``operator_words`` are the operator's passages a runtime note relays verbatim (an answer
@@ -3852,7 +3867,7 @@ class SessionManager:
                     return run_id
                 # Made before the item, so the item can name the row: a withdrawal deletes it by that key.
                 waiting_row = Message(role=MessageRole.user, content_blocks=[TextBlock(text=body)], metadata={"daedalus.delivery": "follow_up", "daedalus.origin": origin, **words, "daedalus.queued": True, **({"daedalus.client_message_id": client_message_id} if client_message_id else {}), **_image_refs_metadata(image_refs)})
-                queued = {**new_queued_prompt("follow_up", body, attachments=_queued_attachments(attachments)).to_dict(), "origin": origin, "operator_words": None if operator_words is None else list(operator_words), "queued_at": datetime.now(UTC).isoformat(), **_queued_caption(text, attachments), **_queued_display(words), "row": self.sessions.transcript_key(waiting_row)}
+                queued = {**new_queued_prompt("follow_up", body, attachments=_queued_attachments(attachments)).to_dict(), "origin": origin, "operator_words": None if operator_words is None else list(operator_words), "queued_at": datetime.now(UTC).isoformat(), **_queued_caption(text, attachments), **_queued_display(words), **_queued_source(via, address), "row": self.sessions.transcript_key(waiting_row)}
                 if client_message_id:
                     queued["id"] = client_message_id
                     receipt, created = await self.live.accept(
@@ -3917,7 +3932,7 @@ class SessionManager:
                 # rewrite them); the transcript keeps the operator's words as sent, in a hidden row the
                 # item names so that a withdrawal can delete it.
                 waiting_row = Message(role=MessageRole.user, content_blocks=[TextBlock(text=body)], metadata={"daedalus.delivery": kind, "daedalus.origin": origin, **words, "daedalus.queued": True, **({"daedalus.client_message_id": client_message_id} if client_message_id else {}), **_image_refs_metadata(image_refs)})
-                queued = {**new_queued_prompt(kind, placed, attachments=_queued_attachments(attachments)).to_dict(), "origin": origin, "operator_words": said, "queued_at": datetime.now(UTC).isoformat(), **_queued_caption(text, attachments), **_queued_display(words), "row": self.sessions.transcript_key(waiting_row)}
+                queued = {**new_queued_prompt(kind, placed, attachments=_queued_attachments(attachments)).to_dict(), "origin": origin, "operator_words": said, "queued_at": datetime.now(UTC).isoformat(), **_queued_caption(text, attachments), **_queued_display(words), **_queued_source(via, address), "row": self.sessions.transcript_key(waiting_row)}
                 if client_message_id:
                     queued["id"] = client_message_id
                     receipt, created = await self.live.accept(
@@ -5312,7 +5327,7 @@ class SessionManager:
                 # Before the run is announced as over, so the app has the words back by the time its
                 # composer opens.
                 try:
-                    await self._return_unsent(state)
+                    await self._give_back(state.session.id, await self._hand_back(state, "stop"), "stop")
                 except Exception:  # noqa: BLE001 — the messages stay queued and reach the next run instead
                     logger.exception("could not hand back the unsent messages of session %s", state.session.id)
             if status != "interrupted":
@@ -5566,25 +5581,51 @@ class SessionManager:
         except RuntimeError as exc:
             logger.warning("session %s: overflow recovery did not start: %s", state.session.id, exc)
 
-    async def _return_unsent(self, state: SessionState) -> None:
-        """A stopped run hands the operator's waiting messages back instead of sending them anywhere.
+    async def _hand_back(self, state: SessionState, cause: str) -> list[dict[str, Any]]:
+        """Withdraw what waits for the model and give the operator's own messages back unsent.
 
-        Stop means the operator wants nothing more to happen, so opening the next turn with what they
-        had queued would defy it, and leaving it queued would have it steered into whatever run comes
-        next, ahead of the words that start it. So each one is withdrawn — its hidden row goes too —
-        and travels whole in the change event, for the composer to take back. What a system source
-        queued (a job's notice, a subagent's report) is the agent's to read, not the operator's to
-        resend, and stays for the next run. Until this, a stop deleted every message the run had been
-        handed while the app was told the model had read them.
+        ``cause`` is ``stop``, ``revert`` or ``clear``. Stop means the operator wants nothing more to
+        happen, so opening the next turn with what they had queued would defy it, and leaving it
+        queued would have it steered into whatever run comes next, ahead of the words that start
+        it. What a system source queued (a job's notice, a subagent's report) is the agent's to
+        read, not the operator's to resend, and a stop leaves it for the next run. A revert or a
+        clear takes that too: everything waiting was written to the conversation that was undone.
+        Those two used to empty the queue columns without touching the receipts, so a receipt stayed
+        ``queued`` for a message that was gone, and the operator's words went with no word to them.
+
+        One transaction takes the items and turns their receipts ``withdrawn`` — the hidden rows go
+        too — so a withdrawal, a drain or a placement racing it has exactly one winner. The operator's
+        messages then travel whole in the change event, for the app's composer, and come back for
+        :meth:`_give_back` to hand to the front they were written in. Until this, a stop deleted
+        every message the run had been handed while the app was told the model had read them.
         """
         def operators(item: dict[str, Any]) -> bool:
             return str(item.get("origin") or "operator") == "operator"
 
+        select = operators if cause == "stop" else (lambda item: True)
+        taken = await self.live.take(state.session.id, outcome="withdrawn", select=select)
         # In the order they were written, whichever queue each ended up in: that is the order the
         # operator reads them back in the field.
-        returned = sorted(await self.live.take(state.session.id, outcome="withdrawn", select=operators), key=lambda item: str(item.get("queued_at") or ""))
+        returned = sorted((item for item in taken if operators(item)), key=lambda item: str(item.get("queued_at") or ""))
         if returned:
-            await self.steer_changed(state.session.id, reason="returned", returned=[_returned_message(item) for item in returned])
+            await self.steer_changed(state.session.id, reason="returned", returned=[_returned_message(item) for item in returned], cause=cause)
+        elif cause != "stop":
+            await self.steer_changed(state.session.id, reason="cleared")
+        return [{**_returned_message(item), "via": str(item.get("via") or ""), "address": dict(item.get("address") or {})} for item in returned]
+
+    async def _give_back(self, session_id: str, messages: list[dict[str, Any]], cause: str) -> None:
+        """Hand the messages :meth:`_hand_back` returned to the fronts they came through.
+
+        Called once the session's locks are released: a front talks to the network, and a revert or a
+        clear must not hold every other operation on the session while Telegram is slow.
+        """
+        if not messages:
+            return
+        for hook in self.handback_hooks:
+            try:
+                await hook(session_id, messages, cause)
+            except Exception:  # noqa: BLE001 — the app still has the words; one front failing must not stop the others
+                logger.exception("a front could not be given back the unsent messages of session %s", session_id)
 
     async def _drain_leftover_follow_ups(self, state: SessionState) -> None:
         """Input that arrived while the run was settling starts the next turn instead of rotting in the queue.
@@ -7570,8 +7611,13 @@ def _queued_caption(text: str, attachments: Sequence[Attachment]) -> dict[str, A
     return {"caption": "" if text in {"File attached.", "Files attached."} else text.strip()}
 
 
+def _queued_source(via: str, address: dict[str, Any] | None) -> dict[str, Any]:
+    """Where a queued message came from, kept in the item for the front that gives it back unsent."""
+    return {"via": via, **({"address": dict(address)} if address else {})}
+
+
 def _returned_message(item: dict[str, Any]) -> dict[str, Any]:
-    """A message a stop handed back, as the composer takes it in: the words the operator typed — not
+    """A message handed back unsent, as the composer takes it in: the words the operator typed — not
     the text the model would have been given, which carries the host's notes and the files' paths —
     and the names of the files, which cannot travel back into the field and are said instead."""
     files = [str(entry.get("name") or "") for entry in item.get("attachments") or [] if isinstance(entry, dict) and entry.get("name")]

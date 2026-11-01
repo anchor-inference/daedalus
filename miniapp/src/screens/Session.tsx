@@ -33,7 +33,7 @@ import { FileGallery, InlineMedia, mediaCopyText, splitMediaAnswer } from "../me
 import { SavedToMemory } from "../memory/savedchip";
 import { conversationMedia, galleryFor, toolImageSource, toolSource, viewerTarget, type HostSource } from "../mediaroute";
 import { Answer, Composer, ComposerHandle } from "../composerbox";
-import { Approval, QueuedMessage, ReturnedMessage, pendingApproval, queuedAfter, questionsKey, readQueued, readReturned, returnedDraft, settledIds, withQueued } from "../composer";
+import { Approval, QueuedMessage, ReturnedMessage, pendingApproval, queuedAfter, questionsKey, readQueued, readReturned, returnedDraft, returnedNoticeKey, settledIds, withQueued } from "../composer";
 import { ModelChoice } from "../modelselect";
 import { effortWord } from "../effortselect";
 import { MoveSessionSheet } from "../projects";
@@ -664,14 +664,15 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   );
   const withdraw = useCallback((message: QueuedMessage) => takeBack(message, false), [takeBack]);
   const editQueued = useCallback((message: QueuedMessage) => takeBack(message, true), [takeBack]);
-  // A stop handed the waiting messages back unsent: their words go into the field, after whatever the
-  // operator is writing, and the files are named, since they cannot come back by themselves.
+  // A stop, a revert or a clear handed the waiting messages back unsent: their words go into the
+  // field, after whatever the operator is writing, and the files are named, since they cannot come
+  // back by themselves.
   const takeReturned = useCallback(
-    (items: ReturnedMessage[]) => {
+    (items: ReturnedMessage[], cause: unknown) => {
       const draft = returnedDraft(items);
       if (draft) composer.current?.insert(draft, false);
       const files = items.flatMap((m) => m.files);
-      toast(files.length ? t("composer.steer.returned.files", { names: files.join(", ") }) : t("composer.steer.returned"));
+      toast(t(returnedNoticeKey(cause, files.length > 0), { names: files.join(", ") }));
     },
     [toast],
   );
@@ -846,7 +847,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         setQueuedInput((q) => queuedAfter(q, p));
         const settled = settledIds(p);
         if (settled.length) setSendingMessages((current) => current.filter((pending) => !settled.includes(pending.id)));
-        if (p.reason === "returned") takeReturned(readReturned(p.returned));
+        if (p.reason === "returned") takeReturned(readReturned(p.returned), p.cause);
         if (p.reason === "consumed") refreshSoon("tail");
       } else if (event === "compaction_completed") refreshSoon("tail");
       else if (event === "state_changed" || event === "tool_call_pending") refreshSoon("state");

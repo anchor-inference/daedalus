@@ -82,9 +82,11 @@ async def front(settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatc
     manager = SessionManager(settings, config, db=db)
     await manager.start()
     submitted: list[tuple[str, str, list[str]]] = []
+    addresses: list[dict[str, Any] | None] = []
 
-    async def fake_submit(session_id: str, text: str, attachments=(), *, steer: bool = False, via: str = "app") -> str:  # type: ignore[no-untyped-def]
+    async def fake_submit(session_id: str, text: str, attachments=(), *, steer: bool = False, via: str = "app", address: dict[str, Any] | None = None) -> str:  # type: ignore[no-untyped-def]
         submitted.append((session_id, text, [a.path.name for a in attachments]))
+        addresses.append(address)
         return "run"
 
     answered: list[tuple[str, list[dict[str, Any]]]] = []
@@ -102,6 +104,7 @@ async def front(settings: Settings, db: Database, monkeypatch: pytest.MonkeyPatc
     f = TelegramFront(settings, config, manager, save_config=save)
     f.bot = RecordingBot()  # type: ignore[assignment]
     f.submitted = submitted  # type: ignore[attr-defined]
+    f.addresses = addresses  # type: ignore[attr-defined]
     f.answered = answered  # type: ignore[attr-defined]
     yield f  # type: ignore[misc]
     # Everything the front still has in flight is stopped before the manager is closed. A test that
@@ -360,3 +363,41 @@ async def test_allow_under_a_closed_request_grants_nothing(front: TelegramFront)
     state.metadata["policy_pending"] = {"abcdef012345": {"tool": "Exec", "text": "echo hi", "at": "2026-10-31T00:00:00+00:00"}}
     await front.on_callback(press("abcdef012345"))
     assert "abcdef012345" in state.metadata["policy_grants"] and "granted once" in edited
+
+
+async def test_a_message_from_a_topic_is_submitted_with_where_it_was_written(front: TelegramFront) -> None:
+    """The address rides with the message, so a stop that hands it back unsent finds the topic."""
+    front.config.telegram.forum_chat_id = -100
+    state = await front.manager.create_session("research")
+    await front.bind_topic(-100, 10, state.session.id, state.session.title)
+    await front.on_message(_message("go", chat_type="supergroup", chat_id=-100, thread=10))
+    await grows_to(front.submitted, 1, "the message reached the manager")  # type: ignore[attr-defined]
+    assert front.addresses == [{"chat_id": -100, "thread_id": 10}]  # type: ignore[attr-defined]
+
+
+async def test_a_message_handed_back_unsent_goes_back_to_the_topic_it_was_typed_in(front: TelegramFront) -> None:
+    """Only the app's composer heard about a message a stop handed back; whoever typed it in Telegram
+    saw nothing. It comes back there, words in a block one tap copies, and is not queued again."""
+
+    class RichBot(RecordingBot):
+        async def send_rich_message(self, chat_id: int, message: Any, **kwargs: Any) -> SimpleNamespace:
+            self._id += 1
+            self.sent.append({"chat_id": chat_id, "html": message.html, "id": self._id, **kwargs})
+            return SimpleNamespace(message_id=self._id)
+
+    bot = RichBot()
+    front.bot = bot  # type: ignore[assignment]
+    state = await front.manager.create_session("stopped")
+    messages = [
+        {"id": "q1", "text": "check <both> servers", "files": ["shot.png"], "via": "telegram", "address": {"chat_id": -100, "thread_id": 42}},
+        {"id": "c-app", "text": "typed in the app", "files": [], "via": "app", "address": {}},
+        {"id": "q2", "text": "and the logs", "files": [], "via": "telegram", "address": {"chat_id": OWNER, "thread_id": 0}},
+    ]
+    await front.manager._give_back(state.session.id, messages, "clear")
+
+    assert [(m["chat_id"], m.get("message_thread_id")) for m in bot.sent] == [(-100, 42), (OWNER, None)]
+    first = bot.sent[0]["html"]
+    assert "Not sent" in first and "history was cleared" in first
+    assert "<pre>check &lt;both&gt; servers</pre>" in first and "<code>shot.png</code>" in first
+    assert "typed in the app" not in " ".join(m["html"] for m in bot.sent)
+    assert await front.manager.queued_input(state.session.id) == []

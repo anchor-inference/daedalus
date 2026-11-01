@@ -424,7 +424,7 @@ class ProjectTopics:
         binding = await self.front.binding_for_session(session_id)
         if binding is not None and binding.chat_id == message.chat.id and binding.thread_id == (message.message_thread_id or 0):
             return False  # inside the project's topic the binding already routes it, with the front's reactions
-        await self.manager.submit(session_id, text, via="telegram")
+        await self.manager.submit(session_id, text, via="telegram", address={"chat_id": message.chat.id, "thread_id": message.message_thread_id or 0})
         await message.reply(f"Sent to the orchestrator of {project.name}.")  # type: ignore[union-attr]
         return True
 
