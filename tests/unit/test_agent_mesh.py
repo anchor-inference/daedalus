@@ -8,6 +8,7 @@ orchestrator's wake-up.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -149,6 +150,9 @@ async def test_a_terminal_with_no_agent_in_it_is_refused(settings: Settings, db:
         # A command-line member whose CLI has gone from its terminal: the same refusal, by its name.
         cli = FakeStaffRuntime(kind="claude")
         cli.continuity = lambda live: "gone"  # type: ignore[attr-defined]
+        # Each fake runtime numbers its terminals from 1, so Ada's is term-1 as well: Cleo's terminal
+        # needs a name of its own, as every real terminal has, or the lookup by id finds either.
+        cli._ids = itertools.count(100)
         team.runtimes["claude"] = cli
         team._capacity = Capacity()
         cleo = await manager.staff.hire(project.id, name="Cleo", harness="claude", isolation="readonly")
