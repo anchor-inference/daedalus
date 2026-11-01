@@ -7,31 +7,39 @@
 // answer, never to the JSON the host and the model exchange.
 
 import type { ToolItem } from "../turns";
+import type { PreviewSource } from "../preview";
+import { MessageAttachments } from "../attachcards";
 import { Icon } from "../icons";
 import { Chevron } from "../ui/components";
 import { plural, t } from "../i18n";
 import { recordOf, type AskRecord as Record } from "./ask";
 
-/** What the folded line says after the verb: the question and its answer, or how it ended. */
-function headOf(record: Record, waiting: boolean): { question: string; answer: string; status: string } {
+/** What the folded line says after the verb: the question and its answer, or how it ended. A reply
+ *  that was only files is named by them, rather than said to be no answer at all. */
+function headOf(record: Record, waiting: boolean, files: readonly string[]): { question: string; answer: string; status: string } {
   const first = record.rows[0];
   const question = first ? first.header || first.question : "";
   if (waiting) return { question, answer: "", status: t("ask.record.waiting") };
   if (record.state === "expired") return { question, answer: "", status: t("ask.record.expired.short") };
   if (record.state === "unanswered") return { question, answer: "", status: t("ask.record.none") };
   if (record.cut || record.raw) return { question, answer: "", status: t("ask.record.answered") };
-  return { question, answer: first?.answer || t("ask.record.none"), status: "" };
+  return { question, answer: first?.answer || files.join(", ") || t("ask.record.none"), status: "" };
 }
 
 /**
  * `waiting`: the call the session still waits on. Its card is above the composer, where the operator
  * answers it; here it is only the step, so the turn's order stays whole while it waits.
+ *
+ * The files a reply carried are drawn under the line whether it is open or not, the way a message's
+ * sit above its bubble: they are the answer as much as its words are, and they used to be printed as
+ * the host's list for the model, paths and all.
  */
-export function AskRecord({ item, waiting = false, open, onToggle }: { item: ToolItem; waiting?: boolean; open: boolean; onToggle: () => void }) {
+export function AskRecord({ item, waiting = false, open, onToggle, sessionId, onOpen }: { item: ToolItem; waiting?: boolean; open: boolean; onToggle: () => void; sessionId?: string; onOpen?: (src: PreviewSource) => void }) {
   const record = recordOf(item.args, item.result, item.error);
   const state = waiting ? "waiting" : record.state;
   const n = record.rows.length;
-  const head = headOf(record, waiting);
+  const files = record.state === "answered" && !waiting ? item.attachments ?? [] : [];
+  const head = headOf(record, waiting, files.map((file) => file.name));
   // A member's question answered by the orchestrator says so: read back in the member's session, a
   // bare answer left the operator guessing whether it was their own.
   const byOrchestrator = record.state === "answered" && record.by === "orchestrator";
@@ -52,6 +60,11 @@ export function AskRecord({ item, waiting = false, open, onToggle }: { item: Too
           <Chevron open={open} />
         </span>
       </div>
+      {files.length > 0 && sessionId && onOpen && (
+        <div className="ask-record-files">
+          <MessageAttachments sessionId={sessionId} items={files} onOpen={onOpen} />
+        </div>
+      )}
       {open && (
         <div className="ask-record-body">
           {record.state === "expired" && !waiting && <p className="ask-record-note">{t("ask.record.expired")}</p>}

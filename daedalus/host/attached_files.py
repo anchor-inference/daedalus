@@ -61,9 +61,10 @@ def _base_name(path: str) -> str:
     return re.split(r"[\\/]", path.rstrip("/\\"))[-1]
 
 
-def _items(lines: list[str], start: int, pattern: re.Pattern[str]) -> list[re.Match[str]]:
-    """The list's items from ``start``, each line joined to the ones after it when it is incomplete on its
-    own: a text that went through a wrapping editor or a transport may have broken one item in two."""
+def _items(lines: list[str], start: int, pattern: re.Pattern[str]) -> tuple[list[re.Match[str]], int]:
+    """The list's items from ``start`` and the line after the last of them, each line joined to the ones
+    after it when it is incomplete on its own: a text that went through a wrapping editor or a transport
+    may have broken one item in two."""
     found: list[re.Match[str]] = []
     at = start
     while at < len(lines) and lines[at].startswith("- "):
@@ -79,7 +80,7 @@ def _items(lines: list[str], start: int, pattern: re.Pattern[str]) -> list[re.Ma
         else:
             found.append(match)
         at = end
-    return found
+    return found, at
 
 
 def parse(text: str) -> list[dict[str, Any]]:
@@ -89,14 +90,35 @@ def parse(text: str) -> list[dict[str, Any]]:
     for index in range(len(lines) - 1, -1, -1):
         if _PLAIN_HEADER.match(lines[index]):
             out = []
-            for match in _items(lines, index + 1, _PLAIN_LINE):
+            for match in _items(lines, index + 1, _PLAIN_LINE)[0]:
                 stored = _base_name(match["path"])
                 if inbox_name_ok(stored):
                     out.append(inbox_entry(stored, stored, match["mime"], int(match["size"])))
             return out
         if _KEPT_HEADER.match(lines[index]):
-            return [kept_entry(match["id"], match["name"], match["mime"], int(match["size"])) for match in _items(lines, index + 1, _KEPT_LINE)]
+            return [kept_entry(match["id"], match["name"], match["mime"], int(match["size"])) for match in _items(lines, index + 1, _KEPT_LINE)[0]]
     return []
+
+
+def without_lists(text: str) -> str:
+    """``text`` with every list the host appended taken out, header and items, and nothing else.
+
+    For a reader who must not see the paths and handles (a shared page), so it is stricter than
+    :func:`parse`: every list goes, not only the last, and every item line under a header goes with it,
+    a ``not kept`` note and a line of no recognisable shape alike. A list the operator quoted names
+    paths as surely as the host's own.
+    """
+    lines = text.split("\n")
+    kept: list[str] = []
+    at = 0
+    while at < len(lines):
+        pattern = _PLAIN_LINE if _PLAIN_HEADER.match(lines[at]) else _KEPT_LINE if _KEPT_HEADER.match(lines[at]) else None
+        if pattern is None:
+            kept.append(lines[at])
+            at += 1
+            continue
+        at = _items(lines, at + 1, pattern)[1]
+    return "\n".join(kept)
 
 
 def of(metadata: Any, text: str) -> list[dict[str, Any]]:
@@ -105,3 +127,11 @@ def of(metadata: Any, text: str) -> list[dict[str, Any]]:
     if isinstance(recorded, list):
         return [dict(entry) for entry in recorded if isinstance(entry, dict) and entry.get("name")]
     return parse(text) if "Attached files" in text else []
+
+
+def of_answer(metadata: Any, answers: Any) -> list[dict[str, Any]]:
+    """The files a reply to an AskUser question carried: the host's record on the tool result, else read
+    back from the list in the reply's own words. A reply typed into the composer with files attached is
+    one ``custom`` answer whose text ends in the list the model reads, as an ordinary message's does."""
+    words = [answer["custom"] for answer in answers if isinstance(answer, dict) and isinstance(answer.get("custom"), str)] if isinstance(answers, list) else []
+    return of(metadata, "\n\n".join(words))

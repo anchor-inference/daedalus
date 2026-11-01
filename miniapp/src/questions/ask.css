@@ -105,6 +105,11 @@
 .ask-record-status { flex: 0 1 auto; min-width: 0; }
 .ask-record[data-state="waiting"] .ask-record-status { color: var(--accent); font-style: normal; }
 /* Opened: the questions whole, each with its answer under it, wrapping rather than cut. */
+/* The reply's files sit under its line, at the body's indent; the strip leans left here, where a
+   message's leans right with its bubble. */
+.ask-record-files { margin: 2px 0 6px 24px; min-width: 0; }
+.ask-record-files .msg-attachments { align-items: flex-start; max-width: 100%; margin-bottom: 0; }
+.ask-record-files .msg-thumbs { justify-content: flex-start; }
 .ask-record-body { margin: 2px 0 6px 24px; display: grid; gap: 6px; min-width: 0; font-size: var(--fs-13); line-height: 1.45; }
 .ask-record-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; min-width: 0; }
 .ask-record-row { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }

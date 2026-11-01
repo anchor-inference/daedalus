@@ -3846,7 +3846,7 @@ class SessionManager:
                         receipt, created = await self.live.accept(session_id, client_message_id, "input", receipt_payload)
                         if not created and receipt["status"] != "accepted":
                             return str(receipt["run_id"] or state.run_id or "")
-                    run_id = await self.answer(session_id, [{"custom": body}], via=via)
+                    run_id = await self.answer(session_id, [{"custom": body}], via=via, attachments=shown)
                     if client_message_id:
                         await self.live.consume(session_id, client_message_id, run_id=run_id, step_id="answer", message_seq=None)
                     return run_id
@@ -4140,7 +4140,7 @@ class SessionManager:
         body = (text.strip() + "\n\n" if text.strip() else "") + "Attached files:\n" + "\n".join(lines)
         return body, image_refs
 
-    async def answer(self, session_id: str, answers: list[dict[str, Any]], *, via: str, source: str = "user", claimed: bool = False) -> str:
+    async def answer(self, session_id: str, answers: list[dict[str, Any]], *, via: str, source: str = "user", claimed: bool = False, attachments: Sequence[dict[str, Any]] = ()) -> str:
         """Resume a run paused on AskUser with the operator's answers.
 
         ``via`` says where it was answered (app, telegram, timeout, cli, …): the other fronts retire
@@ -4148,7 +4148,9 @@ class SessionManager:
         answered, as the model reads it in the tool result (``user``, or ``orchestrator`` for a staff
         member's question). Before anything changes, every answer claim is asked whether this answer
         is the first (``claimed`` says the caller already won that race itself); a question that has a
-        request row elsewhere is answered once, by whoever updates that row first.
+        request row elsewhere is answered once, by whoever updates that row first. ``attachments`` are
+        the files a free-text reply carried, as the app draws them (``attached_files``): the model reads
+        their list in the reply's words, and the record rides beside them on the result.
         """
         async with self.db.transaction() as conn:
             await assert_admission_open_in(conn)
@@ -4176,11 +4178,15 @@ class SessionManager:
                 }
             )
         result = json.dumps({"answers": shaped, "source": source}, ensure_ascii=False)
+        # The operator's reply to the model's question: the core's ledger quotes it whole. The files it
+        # carried are recorded on the block, which never reaches the wire, so the app draws them as it
+        # draws a message's: without the record a reply sent with a screenshot showed the list written
+        # for the model, paths and all, as the answer.
+        recorded = {attached_files.METADATA_KEY: [dict(entry) for entry in attachments]} if attachments else {}
         state.engine.history.append(
             Message(
                 role=MessageRole.tool,
-                # The operator's reply to the model's question: the core's ledger quotes it whole.
-                content_blocks=[ToolResultBlock(tool_call_id=pending.tool_call_id, content=result, metadata={OPERATOR_WORDS_METADATA_KEY: source in ("user", "operator")})],
+                content_blocks=[ToolResultBlock(tool_call_id=pending.tool_call_id, content=result, metadata={OPERATOR_WORDS_METADATA_KEY: source in ("user", "operator"), **recorded})],
             )
         )
         state.engine.clear_pending_approval(pending.tool_call_id)

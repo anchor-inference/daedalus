@@ -8,16 +8,18 @@ and Cyrillic in it.
 
 from __future__ import annotations
 
+import asyncio
+import json
 from typing import Any
 
-from protocore.contracts.types import Message, MessageRole, TextBlock
+from protocore.contracts.types import Message, MessageRole, TextBlock, ToolResultBlock
 
 from daedalus.config import Settings
 from daedalus.host import attached_files
 from daedalus.host.session_runner import Attachment
 from daedalus.host.transcript_view import message_view
 from daedalus.stores.database import Database
-from tests.unit.test_session_runner import ScriptedProvider
+from tests.unit.test_session_runner import ScriptedProvider, _wait_finished
 from tests.unit.test_steer_queue import PIXEL, H, _client, _manager
 
 GUID = "{2C33CD0A-830B-4C8A-B4EE-59B46E35D59E}.png"
@@ -115,4 +117,63 @@ async def test_a_sent_file_is_recorded_on_the_message_and_served_only_from_the_i
             assert answered.status_code == status, (bad, answered.status_code, answered.text)
         assert (await client.get(url, params={"path": GUID})).status_code == 401
         assert (await client.get("/api/sessions/nope/attachments/download", params={"path": GUID}, headers=H)).status_code == 404
+    await manager.close()
+
+
+def _reply(custom: str, metadata: dict[str, Any] | None = None) -> Message:
+    content = json.dumps({"answers": [{"question": "Which one?", "selected": [], "custom": custom}], "source": "user"}, ensure_ascii=False)
+    return Message(role=MessageRole.tool, content_blocks=[ToolResultBlock(tool_call_id="ask1", content=content, metadata=metadata or {})])
+
+
+def test_a_reply_to_a_question_carries_its_files_in_the_view() -> None:
+    words = "this one\n\nAttached files:\n- /w/inbox/shot-1a2b3c4d.png (image/png, 9 bytes)"
+    recorded = [attached_files.inbox_entry("shot.png", "shot-1a2b3c4d.png", "image/png", 9)]
+    (result,) = message_view(_reply(words, {attached_files.METADATA_KEY: recorded}))["tool_results"]
+    assert result["attachments"] == recorded
+    # A reply written before the record is read back from the list in its words.
+    (old,) = message_view(_reply(words))["tool_results"]
+    assert old["attachments"] == [{"name": "shot-1a2b3c4d.png", "mime": "image/png", "size": 9, "file": "shot-1a2b3c4d.png"}]
+    # The words the model read are left as they were, list and all.
+    assert json.loads(old["content"])["answers"][0]["custom"] == words
+    (plain,) = message_view(_reply("just words"))["tool_results"]
+    assert "attachments" not in plain
+
+
+def test_without_lists_takes_out_only_the_lists() -> None:
+    text = "a\nAttached files:\n- /x/inbox/one.png (image/png, 1 bytes)\nb\n- not an item of any list\n\nAttached files:\n- /w/inbox/two\n.png (image/png, 2 bytes)\n- odd line"
+    assert attached_files.without_lists(text) == "a\nb\n- not an item of any list\n"
+    assert attached_files.without_lists("nothing attached") == "nothing attached"
+
+
+async def test_a_reply_typed_with_files_is_recorded_on_the_answer(settings: Settings, db: Database, tmp_path: Any) -> None:
+    provider = ScriptedProvider([
+        {"tool": "AskUser", "args": {"questions": [{"question": "Which layout?", "options": [{"label": "A"}, {"label": "B"}]}]}},
+        {"text": "thanks"},
+    ])
+    manager = await _manager(settings, db, provider)
+    state = await manager.create_session("ask")
+    sid = state.session.id
+    waiter = asyncio.create_task(_wait_finished(manager))
+    await manager.submit(sid, "ask me")
+    assert (await waiter)[0][2] == "awaiting" and state.pending is not None
+    staged = tmp_path / "staged"
+    staged.mkdir()
+    (staged / "a").write_bytes(PIXEL)
+    (staged / "b").write_bytes(b"%PDF-1.4 tiny")
+    waiter = asyncio.create_task(_wait_finished(manager))
+    await manager.submit(sid, "like these", [
+        Attachment(path=staged / "a", name="layout", mime_type="image/png"),
+        Attachment(path=staged / "b", name="spec.pdf", mime_type="application/pdf"),
+    ])
+    assert (await waiter)[-1][2] == "completed"
+    # The model reads the reply exactly as before: the words, then the list of what came with them.
+    told = [m for m in provider.requests[-1].messages if m.role is MessageRole.tool][-1].content_blocks[0].content  # type: ignore[union-attr]
+    custom = json.loads(told)["answers"][0]["custom"]
+    assert custom.startswith("like these\n\nAttached files:\n- ") and f"inbox/layout (image/png, {len(PIXEL)} bytes)" in custom
+    results = [r for m in await manager.transcript_page(sid) for r in m["tool_results"]]
+    answered = next(r for r in results if r["content"].startswith('{"answers"'))
+    assert answered["attachments"] == [
+        {"name": "layout", "mime": "image/png", "size": len(PIXEL), "file": "layout"},
+        {"name": "spec.pdf", "mime": "application/pdf", "size": 13, "file": "spec.pdf"},
+    ]
     await manager.close()

@@ -7,7 +7,7 @@
 // the history is not rebuilt to show a word.
 
 import type { WebSource } from "./rich";
-import type { MediaPresentation, MessageView, ModelFallback, RunOutcome, ToolImage } from "./api";
+import type { MediaPresentation, MessageAttachment, MessageView, ModelFallback, RunOutcome, ToolImage } from "./api";
 
 /** A group of tools a run loaded, as `tool_group_loaded` said: which, how many, and how. */
 export type GroupLoad = { group: string; tools: number; via: string };
@@ -21,7 +21,7 @@ export type LiveTool = { id: string; name: string; args: string; result?: string
 export type LiveState = { runId?: string; text: string; thinking: string; tools: LiveTool[]; startedAt: number | null; lastActivityAt: number | null; ended: boolean; model: string; fallback: ModelFallback | null; groups?: GroupLoad[] };
 export const EMPTY_LIVE: LiveState = { text: "", thinking: "", tools: [], startedAt: null, lastActivityAt: null, ended: false, model: "", fallback: null };
 
-export type ToolItem = { kind: "tool"; id: string; name: string; args: Record<string, unknown>; result?: string; error?: boolean; running: boolean; length?: number; clipped?: boolean; /** How long the step took, when both ends of it are known. */ ms?: number; /** The groups a ToolSearch call loaded, while the run that made it streams. */ groups?: GroupLoad[]; /** The name the call had in the program it was imported from. */ orig?: string; /** The pages a web tool returned, as the host read them out of the result, which the listing carries only the start of. */ sources?: WebSource[]; /** The pictures the tool returned with its result, drawn as thumbnails under it. */ images?: ToolImage[] };
+export type ToolItem = { kind: "tool"; id: string; name: string; args: Record<string, unknown>; result?: string; error?: boolean; running: boolean; length?: number; clipped?: boolean; /** How long the step took, when both ends of it are known. */ ms?: number; /** The groups a ToolSearch call loaded, while the run that made it streams. */ groups?: GroupLoad[]; /** The name the call had in the program it was imported from. */ orig?: string; /** The pages a web tool returned, as the host read them out of the result, which the listing carries only the start of. */ sources?: WebSource[]; /** The pictures the tool returned with its result, drawn as thumbnails under it. */ images?: ToolImage[]; /** The files the operator's reply to an AskUser question carried. */ attachments?: MessageAttachment[] };
 export type NoteItem = { kind: "note"; text: string; seq?: number };
 export type ThinkItem = { kind: "thinking"; text: string };
 export type SummaryItem = { kind: "summary"; text: string; reason: string };
@@ -130,7 +130,7 @@ export function parseArgs(raw: string): Record<string, unknown> {
  * very same object, which is what keeps the view from reconciling the whole history.
  */
 export function buildTurns(messages: MessageView[], previous: readonly Turn[] = []): Turn[] {
-  const results = new Map<string, { content: string; is_error: boolean; length?: number | null; clipped?: boolean; sources?: WebSource[]; images?: ToolImage[]; at: number }>();
+  const results = new Map<string, { content: string; is_error: boolean; length?: number | null; clipped?: boolean; sources?: WebSource[]; images?: ToolImage[]; attachments?: MessageAttachment[]; at: number }>();
   for (const m of messages) for (const r of m.tool_results) results.set(r.id, { ...r, at: Date.parse(m.created_at) || 0 });
   const turns: Turn[] = [];
   const sigs: string[][] = [];
@@ -221,8 +221,9 @@ export function buildTurns(messages: MessageView[], previous: readonly Turn[] = 
       current.toolIds.push(c.id);
       const ms = r && at && r.at >= at ? r.at - at : undefined;
       const orig = m.imported?.tools?.[c.id];
-      current.activity.push({ kind: "tool", id: c.id, name: c.name, args: c.arguments, result: r?.content, error: r?.is_error, running, length: r?.length ?? undefined, clipped: r?.clipped, ms, ...(orig ? { orig } : {}), ...(r?.sources?.length ? { sources: r.sources } : {}), ...(r?.images?.length ? { images: r.images } : {}) });
-      mark(`t${c.id}:${r ? `${r.content.length}${r.is_error ? "!" : ""}${r.images?.length ?? ""}` : "-"}`);
+      current.activity.push({ kind: "tool", id: c.id, name: c.name, args: c.arguments, result: r?.content, error: r?.is_error, running, length: r?.length ?? undefined, clipped: r?.clipped, ms, ...(orig ? { orig } : {}), ...(r?.sources?.length ? { sources: r.sources } : {}), ...(r?.images?.length ? { images: r.images } : {}), ...(r?.attachments?.length ? { attachments: r.attachments } : {}) });
+      // The files count too: a view recomputed on the host can gain them while the reply's words stay the same.
+      mark(`t${c.id}:${r ? `${r.content.length}${r.is_error ? "!" : ""}${r.images?.length ?? ""}${r.attachments?.length ? `+${r.attachments.length}` : ""}` : "-"}`);
     }
   });
   const before = new Map<string, Turn>();

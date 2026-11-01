@@ -19,6 +19,7 @@ import secrets
 from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions.services import SHARE_MODES
+from daedalus.host import attached_files
 from daedalus.security import redact
 from daedalus.stores.media import MEDIA_TENANT
 
@@ -35,20 +36,6 @@ runaway answer becoming the whole document."""
 
 _LOOP_HEAD = re.compile(r"^\s*\[Loop iteration \d+")
 _CONTEXT = re.compile(r"<(?:turn_context|heartbeat)\b")
-_HANDLE_HEADER = re.compile(r"^Attached files \(kept by handle[^\n]*\):\s*$")
-_HANDLE_LINE = re.compile(r"^- (?:att:[0-9a-f]{12} .*|.+: not kept — .*)$")
-_PLAIN_HEADER = re.compile(r"^Attached files:\s*$")
-_PLAIN_LINE = re.compile(r"^- .+$")
-
-
-def _cut_block(lines: list[str], header: re.Pattern[str], item: re.Pattern[str]) -> list[str]:
-    at = next((i for i, line in enumerate(lines) if header.match(line)), -1)
-    if at < 0:
-        return lines
-    end = at + 1
-    while end < len(lines) and item.match(lines[end]):
-        end += 1
-    return lines[:at] + lines[end:]
 
 
 def visible_text(text: str) -> str:
@@ -57,9 +44,10 @@ def visible_text(text: str) -> str:
     The list names paths and handles. It is how the app finds the files; on a public page it
     would publish them, so it is removed before anything else looks at the text.
     """
-    lines = _cut_block(text.split("\n"), _HANDLE_HEADER, _HANDLE_LINE)
-    lines = _cut_block(lines, _PLAIN_HEADER, _PLAIN_LINE)
-    body = redact.redact("\n".join(lines)).strip()
+    # The host's own parser, so the page and the app agree on where a list ends. This module once kept
+    # its own copy of the patterns, which cut only the first list of each kind: the host's list, the
+    # last one, stayed on the page whenever the operator's words quoted another before it.
+    body = redact.redact(attached_files.without_lists(text)).strip()
     if len(body) > PUBLIC_TEXT_LIMIT:
         body = body[:PUBLIC_TEXT_LIMIT].rstrip() + "…"
     return body

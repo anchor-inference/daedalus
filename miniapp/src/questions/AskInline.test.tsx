@@ -130,6 +130,39 @@ describe("an asked question in the transcript", () => {
     expect(record.textContent).toContain("cut short");
   });
 
+  it("draws the files a typed reply carried as thumbnails and cards, and its words without the host's list", async () => {
+    // The reply's words end in the list written for the model; it used to be the answer shown, paths
+    // and all, with no card for any of the files.
+    const words = "Like these\n\nAttached files:\n- /home/someone/work/inbox/layout (image/png, 9 bytes)\n- /home/someone/work/inbox/spec.pdf (application/pdf, 13 bytes)";
+    const files = [{ name: "layout", mime: "image/png", size: 9, file: "layout" }, { name: "spec.pdf", mime: "application/pdf", size: 13, file: "spec.pdf" }];
+    const opened: unknown[] = [];
+    const replied = row(3, "tool", { tool_results: [{ id: "q1", content: answer([{ question: RELEASE.question, selected: [], custom: words }]), is_error: false, attachments: files }] });
+    const d = detail([row(1, "user", { text: "Ship it." }), call(2, "q1", "AskUser", { questions: [RELEASE] }), replied, row(4, "assistant", { text: "Done." })]);
+    await act(async () => root.render(<TranscriptView detail={d} live={createLiveStore()} onPreview={(src) => opened.push(src)} toast={() => undefined} />));
+    for (const head of [...host.querySelectorAll<HTMLButtonElement>(".thinking-head")]) {
+      if (head.getAttribute("aria-expanded") !== "true") await act(async () => head.click());
+    }
+    const record = host.querySelector(".ask-record")!;
+    expect(record.querySelector(".ask-record-head-a")!.textContent).toBe("Like these");
+    // Drawn while the record is folded: the files are the answer as much as the words are.
+    const strip = record.querySelector(".ask-record-files")!;
+    expect(strip.querySelectorAll(".msg-thumb")).toHaveLength(1);
+    expect([...strip.querySelectorAll(".msg-file-name")].map((n) => n.textContent)).toEqual(["spec.pdf"]);
+    await act(async () => (strip.querySelector(".msg-thumb") as HTMLElement).click());
+    expect(opened).toEqual([{ base: "/api/sessions/s1/attachments", path: "layout", mime: "image/png" }]);
+    await act(async () => (record.querySelector(".act") as HTMLElement).click());
+    expect(record.querySelector(".ask-record-a")!.textContent).toBe("Like these");
+    expect(record.textContent).not.toContain("Attached files");
+    expect(record.textContent).not.toContain("/home/someone");
+  });
+
+  it("names a reply of files alone by its files", async () => {
+    const words = "File attached.\n\nAttached files:\n- /w/inbox/shot.png (image/png, 9 bytes)";
+    const replied = row(3, "tool", { tool_results: [{ id: "q1", content: answer([{ question: RELEASE.question, selected: [], custom: words }]), is_error: false, attachments: [{ name: "shot.png", mime: "image/png", size: 9, file: "shot.png" }] }] });
+    await draw(detail([row(1, "user", { text: "Ship it." }), call(2, "q1", "AskUser", { questions: [RELEASE] }), replied, row(4, "assistant", { text: "Done." })]));
+    expect(host.querySelector(".ask-record-head-a")!.textContent).toBe("shot.png");
+  });
+
   it("reads in Russian", async () => {
     setLang("ru");
     await draw(detail(TURN));

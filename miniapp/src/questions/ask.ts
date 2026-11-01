@@ -9,6 +9,7 @@
 // several-of-these. The kinds below are what the card draws differently.
 
 import type { Question } from "../api";
+import { withoutAttachedList } from "../keptfiles";
 
 /** One answer as the host takes it (POST /api/sessions/{id}/answer). */
 export type Answer = { question: string; selected: string[]; custom: string | null };
@@ -188,14 +189,17 @@ function questionsOf(args: Record<string, unknown>): Question[] {
  * `{"answers": [{question, selected, custom}], "source"}`; anything else (a call imported from
  * another program, a clipped result) is kept as `raw` and shown as it came. An answer is matched to
  * its question by text, then by position: a reply typed into the composer answers the first
- * question only, and the rest then read as unanswered rather than shifting up.
+ * question only, and the rest then read as unanswered rather than shifting up. A reply typed with
+ * files attached ends in the host's list of them, written for the model; the answer shown is the
+ * words alone, and the files are drawn beside it from the result's own record.
  */
 export function recordOf(args: Record<string, unknown>, result: string | undefined, error: boolean | undefined): AskRecord {
   const questions = questionsOf(args);
   const rows = (answers: { question?: string; selected?: string[]; custom?: string | null }[]) =>
     questions.map((q, i) => {
       const a = answers.find((x) => x.question === q.question) ?? (answers[i] && !answers[i].question ? answers[i] : undefined);
-      return { header: q.header ?? "", question: q.question, answer: a ? answerLine(Array.isArray(a.selected) ? a.selected : [], a.custom) : "" };
+      const custom = typeof a?.custom === "string" ? withoutAttachedList(a.custom) : a?.custom;
+      return { header: q.header ?? "", question: q.question, answer: a ? answerLine(Array.isArray(a.selected) ? a.selected : [], custom) : "" };
     });
   if (result === undefined) return { state: "unanswered", rows: rows([]), raw: "" };
   if (error) return { state: "unanswered", rows: rows([]), raw: result };

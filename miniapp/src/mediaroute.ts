@@ -10,14 +10,22 @@ import { previewKind, sessionBase, type PreviewSource } from "./preview";
 import { placeOf, turnFiles, type ChangedFile } from "./turnfiles";
 import type { Activity, ToolItem, Turn } from "./turns";
 
-/** A file under a session API root, the only kind the viewer can fetch: a composer file is not one. */
-export type HostSource = { base: string; path: string };
+/** A file under a session API root, the only kind the viewer can fetch: a composer file is not one.
+ *  `mime` is the type the host recorded for it, when there is one (an operator's attachment). */
+export type HostSource = { base: string; path: string; mime?: string };
 
 type Folders = readonly Pick<SessionFolder, "id" | "path">[];
 
-/** What the viewer makes of a file name: a still, a clip, or nothing it shows. A PDF stays a document
- *  for the panel, which pages it; the viewer only zooms a single picture. */
-export function viewerKind(name: string): "image" | "video" | null {
+/** What the viewer makes of a file: a still, a clip, or nothing it shows. A PDF stays a document for
+ *  the panel, which pages it; the viewer only zooms a single picture.
+ *
+ *  A recorded type decides before the name does. A pasted picture can arrive named with no extension
+ *  at all; its thumbnail was drawn from the type, and a press on it then opened the panel, which had
+ *  only the name to go by and found nothing to show. */
+export function viewerKind(name: string, mime?: string): "image" | "video" | null {
+  const type = (mime ?? "").toLowerCase();
+  if (type.startsWith("image/")) return "image";
+  if (type.startsWith("video/")) return "video";
   const kind = previewKind(name);
   return kind === "image" || kind === "video" ? kind : null;
 }
@@ -25,7 +33,8 @@ export function viewerKind(name: string): "image" | "video" | null {
 /** The source as the viewer would take it, or null when it belongs to the panel. */
 export function viewerSource(src: PreviewSource): HostSource | null {
   if ("file" in src || src.lines) return null;
-  return viewerKind(src.path) ? { base: src.base, path: src.path } : null;
+  if (!viewerKind(src.path, src.mime)) return null;
+  return src.mime ? { base: src.base, path: src.path, mime: src.mime } : { base: src.base, path: src.path };
 }
 
 /**
@@ -75,7 +84,13 @@ export function changedSource(sessionId: string, file: ChangedFile): HostSource 
 function stepMedia(activity: readonly Activity[], sessionId: string, workspace: string, folders: Folders): HostSource[] {
   const found: HostSource[] = [];
   for (const a of activity) {
-    if (a.kind !== "tool" || a.running || a.name !== "ImageView") continue;
+    if (a.kind !== "tool" || a.running) continue;
+    // The pictures the operator sent with a reply to a question, where the reply is drawn.
+    for (const item of splitAttachments(a.attachments).images) {
+      const src = attachmentSource(sessionId, item);
+      if (viewerKind(src.path, src.mime)) found.push(src);
+    }
+    if (a.name !== "ImageView") continue;
     const src = toolSource(a, sessionId, workspace, folders);
     if (src && viewerKind(src.path)) found.push(src);
   }
@@ -84,8 +99,8 @@ function stepMedia(activity: readonly Activity[], sessionId: string, workspace: 
 
 /**
  * Every picture and clip of the conversation in reading order, each once: within a turn the pictures
- * the operator attached, the images its steps looked at, then the files it sent, then the files it
- * changed — the order they are drawn.
+ * the operator attached, the images its steps looked at and the pictures sent with a reply to its
+ * question, then the files it sent, then the files it changed — the order they are drawn.
  */
 export function conversationMedia(turns: readonly Turn[], sessionId: string, workspace: string, folders: Folders): HostSource[] {
   const seen = new Set<string>();
@@ -100,7 +115,7 @@ export function conversationMedia(turns: readonly Turn[], sessionId: string, wor
     // The operator's own pictures open the turn, above their message.
     for (const item of splitAttachments(turn.user?.attachments).images) {
       const src = attachmentSource(sessionId, item);
-      if (viewerKind(src.path)) add(src);
+      if (viewerKind(src.path, src.mime)) add(src);
     }
     stepMedia(turn.activity, sessionId, workspace, folders).forEach(add);
     const { sent, changed } = turnFiles(turn.activity, workspace, folders);
