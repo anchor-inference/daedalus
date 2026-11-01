@@ -27,6 +27,12 @@ import { FocusView, firstWait, splitTeam, staffTone, waitKey } from "./focus";
 import { budgetCompact, useGoalBudget } from "./ProjectBudget";
 import { operatorAttentionCount, type NextAction } from "./attention-model";
 import { RevealButton } from "../reveal";
+import { readLayout, writeLayout } from "../layout";
+
+/** Where the Project tools fold remembers being shut. It opens by default: the team and the
+ *  project's pages are what the column is for, and a fold the operator had to open on every visit
+ *  hid them behind a click. A collapse is kept, because the column is drawn anew per project. */
+const TOOLS_KEY = "focus.tools";
 
 export type ProjectSidebarProps = {
   projectId: string;
@@ -56,6 +62,7 @@ export function ProjectSidebar(p: ProjectSidebarProps) {
   const spent = chipText(usage);
   const remaining = budgetCompact(budget);
   const [hiring, setHiring] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(() => readLayout(TOOLS_KEY) !== "closed");
   const orchestrator = project?.settings.orchestrator;
   const orchestratorId = orchestrator?.enabled ? orchestrator.session_id : "";
   const orchestratorRow = orchestratorId ? sessions?.sessions.find((s) => s.id === orchestratorId) : undefined;
@@ -110,7 +117,7 @@ export function ProjectSidebar(p: ProjectSidebarProps) {
         <FocusRow icon="alert" label={t("focus.nav.attention")} href={projectPagePath(p.projectId, "attention")} current={here("attention")} meta={countKnown ? String(decisions) : "?"} metaTitle={countKnown ? undefined : t("focus.attention.countUnknown")} />
         <FocusRow icon="journal" label={t("focus.nav.journal")} href={projectPagePath(p.projectId, "journal")} current={here("journal")} />
 
-        <details className="focus-advanced">
+        <details className="focus-advanced" open={toolsOpen} onToggle={(e) => { const next = e.currentTarget.open; setToolsOpen(next); writeLayout(TOOLS_KEY, next ? "open" : "closed"); }}>
           <summary>{t("focus.nav.more")}</summary>
 
         <div className="focus-sec">

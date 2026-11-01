@@ -42,7 +42,7 @@ def run(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ignor
     bs = BrowserStub(scenes)
     bs.add("gs", scene="shop", owner_kind="staff", owner_id="st-ira", owner_label="Ira", project_id=pid, acting=True)
     context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
-    context.add_init_script("try { localStorage.setItem('daedalus.staff.view', 'terminal'); localStorage.removeItem('daedalus.staff.side'); } catch {}")
+    context.add_init_script("try { localStorage.removeItem('daedalus.staff.side'); } catch {}")
     page = open_page(context, focus, term, EventFeed(), "about:blank")
     bs.install(page)
     page.goto(f"{BASE}/project/{pid}/staff/st-ira?token=t&scheme=dark&lang={lang}")

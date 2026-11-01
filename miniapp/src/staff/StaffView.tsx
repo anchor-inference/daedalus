@@ -43,11 +43,10 @@ import { deviceSaving, useBrowsers } from "../browser/data";
 import { BrowserHeadButton } from "../browser/phone";
 import { BrowserPip } from "../browser/pip";
 import { StaffDetails } from "./StaffDetails";
-import { ASIDE_STEP, alwaysServer, askWords, attention, canAlways, channelWords, clampAside, composerWhen, defaultMode, keyboardBlocks, listRows, nowChoice, openRequests, outboxRows, readAsideWidth, rememberAsideWidth, ruleWords, turnFacts, type StaffViewMode } from "./model";
+import { ASIDE_STEP, alwaysServer, askWords, attention, canAlways, channelWords, clampAside, composerWhen, keyboardBlocks, listRows, nowChoice, openRequests, outboxRows, readAsideWidth, rememberAsideWidth, ruleWords, turnFacts, type StaffViewMode } from "./model";
 import { PaneHandle, pixelDrag } from "../layout";
 
 const enc = encodeURIComponent;
-const MODE_KEY = "daedalus.staff.view";
 const SIDE_KEY = "daedalus.staff.side";
 /** How many of the member's messages the Session tab lists, newest first. */
 const MESSAGES_N = 20;
@@ -101,7 +100,13 @@ export function StaffView({ projectId, staffId, wide, toast, onBack }: { project
   const session = view?.session ?? null;
   const caps = view?.capabilities ?? null;
   const terminalId = session?.terminal_id ?? member?.live?.terminal_id ?? null;
-  const [mode, setMode] = useState<StaffViewMode>(() => defaultMode(wide ? 1440 : 390, wide ? saved(MODE_KEY) : null, true));
+  // Opening a member lands on its terminal: the live TUI is what a command-line member is watched
+  // through. The Feed, once picked, holds for this visit only; remembered across visits, one look at
+  // the Feed left every later member opening on it, which is what the operator asked to stop. The
+  // view is keyed by the member, so the next member opens on its terminal again. Without a live
+  // terminal (off, not started yet) the Feed is shown and Terminal is disabled, and the terminal
+  // takes over by itself when one starts, unless the Feed was picked.
+  const [mode, setMode] = useState<StaffViewMode>("terminal");
   const [side, setSide] = useState(() => saved(SIDE_KEY) !== "closed");
   const [sheet, setSheet] = useState(false);
   const [tab, setTab] = useState<SideTab>("session");
@@ -172,7 +177,6 @@ export function StaffView({ projectId, staffId, wide, toast, onBack }: { project
       return;
     }
     setMode(next);
-    save(MODE_KEY, next);
   }
   function toggleSide() {
     if (!wide) return setSheet(true);

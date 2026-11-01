@@ -111,7 +111,8 @@ def desktop(page: Page, lang: str, width: int) -> None:
     expect(side.locator(".focus-project-meta")).to_contain_text(words["autonomy"])
     expect(side.locator(".focus-row.orchestrator")).to_have_class(re.compile(r"\bcurrent\b"))
     expect(side.locator(".focus-row", has_text="History" if lang == "en" else "История")).to_be_visible()
-    side.locator(".focus-advanced summary").click()
+    # Project tools open by default: the team and the project's pages without a click first.
+    expect(side.locator("details.focus-advanced")).to_have_attribute("open", "")
     rows = side.locator(".focus-staff:not(.compact)")
     expect(rows).to_have_count(5)
     expect(side.locator(".focus-staff.compact")).to_have_count(1)

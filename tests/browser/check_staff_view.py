@@ -300,9 +300,12 @@ def desktop(browser, lang: str, check: Check) -> None:  # type: ignore[no-untype
     expect(side.locator(".staff-notes")).to_be_visible()
 
     # OpenCode cannot take a message into a running turn: "now" is offered disabled, and says why.
-    page.locator(".focus-advanced summary").click()
+    # The Feed was picked for Ira in this visit; Naya, opened next, lands on her own terminal.
+    page.locator(".staff-mode button[data-mode='feed']").click()
     page.locator(".focus-staff", has_text="Naya").click()
     page.wait_for_url(f"**/project/{pid}/staff/st-naya**")
+    page.wait_for_selector(".staff-term .term-view[data-terminal-view='tm-naya']", timeout=10000)
+    check.that(page.locator(".staff-cli").get_attribute("data-mode") == "terminal", f"{lang}: Naya opened on {page.locator('.staff-cli').get_attribute('data-mode')}, not her terminal")
     now = page.locator(".staff-when button[data-when='now']")
     expect(now).to_be_disabled(timeout=5000)
     check.that(words["degrades"] in (now.get_attribute("title") or ""), f"{lang}: the disabled 'now' says {now.get_attribute('title')!r}")
@@ -367,6 +370,12 @@ def phone(browser, lang: str, check: Check) -> None:  # type: ignore[no-untyped-
     page.wait_for_selector(".term-phone-actions .ask-answers-row .btn", timeout=10000)
     above = [b.strip() for b in page.locator(".term-phone-actions .ask-answers-row .btn").all_inner_texts()]
     check.that(words["always"] in above, f"{lang} phone: the terminal's request offers {above}")
+    # A tap on a command-line member's row in the team lands on its terminal, not on the Feed.
+    page.goto(f"{BASE}/project/{pid}/team?token=t&lang={lang}")
+    row = page.locator(".ph-row-wrap[data-staff='st-ira'] .ph-row")
+    row.wait_for(timeout=10000)
+    row.locator(".ph-row-lead").tap()
+    page.wait_for_url("**/terminals/tm-ira**", timeout=10000)
     context.close()
     feed.close()
 
