@@ -22,8 +22,15 @@ type Recent = {
   reasoning_tokens: number;
   cost_usd: number | null;
   duration_ms: number;
+  /** The call's speed: empty for a call answered whole, or made before the host timed them. */
+  first_byte_ms?: number | null;
+  first_token_ms?: number | null;
+  output_tokens_per_second?: number | null;
   raw: Record<string, unknown>;
 };
+/** One provider and model's speed over the window, as `GET /api/usage/speed` gives it. */
+export type ModelSpeed = { provider_id: string; model: string; calls: number; rated: number; first_token_p50_ms: number | null; first_token_p90_ms: number | null; first_byte_p50_ms: number | null; tokens_per_second_p50: number | null; last_at: string };
+type SpeedData = { hours: number; models: ModelSpeed[] };
 type BySession = { session_id: string | null; title: string | null; calls: number; input_tokens: number; output_tokens: number; cost_usd: number | null; unmetered: number };
 type SubWindow = { name: string; used_percent: number; resets_at?: number | string | null };
 type Subscription = { provider: string; logged_in: boolean; plan?: string; limit_reached?: boolean; windows?: SubWindow[]; products?: { product: string; used_percent?: number }[]; error?: string };
@@ -41,7 +48,62 @@ function level(used: number): string {
 }
 
 function fmtMs(ms: number): string {
-  return ms < 1000 ? `${ms} ms` : t("fmt.dur.s", { n: (ms / 1000).toFixed(ms < 10000 ? 1 : 0) });
+  return ms < 1000 ? `${Math.round(ms)} ms` : t("fmt.dur.s", { n: (ms / 1000).toFixed(ms < 10000 ? 1 : 0) });
+}
+
+/** A rate as it reads at a glance: whole tokens past ten a second, one decimal below. */
+export function fmtRate(rate: number): string {
+  return rate >= 10 ? String(Math.round(rate)) : rate.toFixed(1);
+}
+
+const SPEED_WINDOWS = [24, 24 * 7, 24 * 30] as const;
+
+/** How fast each provider and model answered over a window of its own: a slow start shows over a day,
+ *  a provider's habit over a month, and neither is the spend window above. */
+function SpeedSection() {
+  const [hours, setHours] = useState<(typeof SPEED_WINDOWS)[number]>(24);
+  const { data, error } = useQuery<SpeedData>(`/api/usage/speed?hours=${hours}`, { staleMs: 30000, pollMs: 120000 });
+  const dash = "—";
+  return (
+    <>
+      <div className="section-title">{t("usage.speed")}</div>
+      <div className="chips" data-speed-windows>
+        {SPEED_WINDOWS.map((h) => (
+          <button key={h} className="chip select" aria-pressed={hours === h} onClick={() => setHours(h)}>{h < 48 ? t("usage.speed.hours", { n: h }) : t("usage.days", { n: h / 24 })}</button>
+        ))}
+      </div>
+      <div className="card tablecard" data-speed>
+        <table>
+          <thead>
+            <tr>
+              <th>{t("usage.col.model")}</th>
+              <th className="num">{t("usage.col.calls")}</th>
+              <th className="num">{t("usage.col.ttft")}</th>
+              <th className="num">{t("usage.col.ttft90")}</th>
+              <th className="num">{t("usage.col.tps")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {error && !data && <tr><td colSpan={5} className="sub usage-none">{t("usage.speed.error", { error })}</td></tr>}
+            {data && data.models.length === 0 && <tr><td colSpan={5} className="sub usage-none">{t("usage.speed.none")}</td></tr>}
+            {(data?.models ?? []).map((m) => (
+              <tr key={`${m.provider_id}/${m.model}`} data-speed-model={`${m.provider_id}/${m.model}`}>
+                <td className="modelc">
+                  <span className="sub">{m.provider_id}/</span>
+                  {m.model}
+                </td>
+                <td className="num callsc" data-label={t("usage.col.calls")}>{int(m.calls)}</td>
+                <td className="num ttftc" data-label={t("usage.col.ttft")} data-speed-ttft>{m.first_token_p50_ms === null ? dash : fmtMs(m.first_token_p50_ms)}</td>
+                <td className="num ttft90c" data-label={t("usage.col.ttft90")}>{m.first_token_p90_ms === null ? dash : fmtMs(m.first_token_p90_ms)}</td>
+                <td className="num tpsc" data-label={t("usage.col.tps")} data-speed-tps>{m.tokens_per_second_p50 === null ? dash : fmtRate(m.tokens_per_second_p50)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="sub speed-hint">{t("usage.speed.hint")}</div>
+      </div>
+    </>
+  );
 }
 
 /** One quota window: label · bar · what is left · when it resets, and under it the pace it is spent
@@ -207,6 +269,8 @@ export function UsageScreen({ onOpen }: { onOpen?: (id: string) => void }) {
               </>
             )}
 
+            <SpeedSection />
+
             <div className="section-title">{t("usage.byday")}</div>
             <div className="card tablecard">
               <table>
@@ -284,6 +348,9 @@ export function UsageScreen({ onOpen }: { onOpen?: (id: string) => void }) {
                       {usd(r.cost_usd)}
                       <br />
                       <span className="ms">{fmtMs(r.duration_ms)}</span>
+                      {/* The call's own speed beside its length, for the call that felt slow. */}
+                      {typeof r.first_token_ms === "number" && <><br /><span className="ms" data-call-ttft>{t("usage.call.ttft", { t: fmtMs(r.first_token_ms) })}</span></>}
+                      {typeof r.output_tokens_per_second === "number" && <><br /><span className="ms" data-call-tps>{t("usage.call.tps", { n: fmtRate(r.output_tokens_per_second) })}</span></>}
                     </div>
                   </div>
                   {open === i && <pre className="usage-raw">{JSON.stringify(r.raw, null, 2)}</pre>}

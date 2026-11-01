@@ -175,7 +175,9 @@ class ProjectMcpTools:
             if not allowed:
                 return ("The request was refused; do not try it another way." if allowed is False
                         else f"This needs approval ({decision.reason}); the question is open. Carry on with the rest of the task."), True
-        return await proxy.run(dict(arguments), limit=MCP_RESULT_LIMIT)
+        # A command-line member reads text only: the answer's pictures stay behind, and its text names each one.
+        answer = await proxy.run(dict(arguments), limit=MCP_RESULT_LIMIT)
+        return answer.text, answer.failed
 
 
 class ProjectEnvironments:
