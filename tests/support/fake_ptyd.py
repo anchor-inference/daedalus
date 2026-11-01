@@ -52,6 +52,8 @@ class FakeTerminal:
     pid: int = field(default_factory=lambda: 1000 + secrets.randbelow(30000))
     sandbox: dict[str, Any] | None = None
     """What ``terminal.create`` was asked to make writable, when it was sandboxed."""
+    busy: bool = False
+    """Whether a command is running under its shell, as the daemon reports it in a listing."""
 
     def info(self, preview_rows: int = 0) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -59,7 +61,7 @@ class FakeTerminal:
             "exit_code": self.exit_code, "exit_signal": self.exit_signal, "created_at": self.created_at, "exited_at": self.exited_at,
             "last_output_at": None, "last_input_at": None, "last_human_input_at": None, "cols": self.cols, "rows": self.rows,
             "size_owner": None, "clients": [], "last_detach_at": None, "keyboard": {"owner": "auto", "until": None},
-            "modes": {"alt_screen": False, "bracketed_paste": False, "mouse": False, "app_cursor": False}, "busy": False,
+            "modes": {"alt_screen": False, "bracketed_paste": False, "mouse": False, "app_cursor": False}, "busy": self.busy,
             "last_command": None, "labels": self.labels, "launch_id": "", "sandbox": self.sandbox is not None, "output_seq": len(self.output),
         }
         if preview_rows and self.preview is not None:

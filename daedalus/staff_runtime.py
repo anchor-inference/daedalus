@@ -217,6 +217,8 @@ class UsageSnapshot:
     at: str = ""
     """When the numbers were read: the end of the turn whose transcript they come from, or the moment
     of a live reading the CLI sent during a turn."""
+    cache_read_tokens: int = 0
+    """The part of ``input_tokens`` the provider served from its prompt cache, where the CLI says."""
 
     def over(self, older: UsageSnapshot | None) -> UsageSnapshot:
         """This reading laid over an older one: what this one does not say — a zero count, no cost,
@@ -235,6 +237,7 @@ class UsageSnapshot:
             windows=self.windows or older.windows,
             replies=self.replies or older.replies,
             at=self.at or older.at,
+            cache_read_tokens=self.cache_read_tokens or older.cache_read_tokens,
         )
 
     @classmethod
@@ -254,6 +257,7 @@ class UsageSnapshot:
                 windows=tuple((int(w.get("minutes") or 0), float(w.get("used_pct") or 0.0)) for w in view.get("windows") or [] if isinstance(w, Mapping)),
                 replies=int(view.get("replies") or 0),
                 at=str(view.get("at") or ""),
+                cache_read_tokens=int(view.get("cache_read_tokens") or 0),
             )
         except (TypeError, ValueError, AttributeError):
             return None
@@ -270,6 +274,7 @@ class UsageSnapshot:
             "windows": [{"minutes": minutes, "used_pct": used} for minutes, used in self.windows],
             "replies": self.replies,
             "at": self.at,
+            "cache_read_tokens": self.cache_read_tokens,
         }
 
 
