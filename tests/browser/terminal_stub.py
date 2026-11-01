@@ -121,6 +121,11 @@ class Term:
     row: int = 0
     # Who holds the keyboard, as the daemon arbitrates it: a person typing takes it for a while.
     keyboard: str = "auto"
+    # What the status line reads from the listing: the CLI working in it (api_stub.terminal_agent),
+    # the branch of its folder, and a shell's last finished command, as the host lists them.
+    agent: dict[str, Any] | None = None
+    git: dict[str, Any] | None = None
+    last_command: dict[str, Any] | None = None
 
     def view(self, preview: bool = False) -> dict[str, Any]:
         running = self.status == "running"
@@ -131,7 +136,8 @@ class Term:
             "exit_code": self.exit_code, "exit_signal": self.exit_signal, "created_at": self.created_at, "created_by": self.created_by,
             "exited_at": self.exited_at, "last_output_at": None, "last_input_at": self.last_input_at, "cols": self.cols, "rows": self.rows,
             "live": {"clients": self.clients, "busy": self.busy, "keyboard": {"owner": self.keyboard, "until": None}, "size_owner": self.size_owner, "alt_screen": False} if running else None,
-            "last_command": None, "preview": self.preview if preview else [], "activity": self.activity,
+            "last_command": self.last_command, "preview": self.preview if preview else [], "activity": self.activity,
+            "agent": self.agent if running else None, "git": self.git if running else None,
         }
 
 

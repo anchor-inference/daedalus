@@ -7,10 +7,12 @@ tested against a fake of this, and the manager is the one implementation the app
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+from daedalus.terminals.awareness import staff_agent
 from daedalus.terminals.model import Owner
 
 if TYPE_CHECKING:
@@ -30,8 +32,9 @@ class Owners(Protocol):
 
     async def sandbox_writable(self, env: str, owner: Owner, project_id: str | None, cwd: str) -> list[str]: ...
 
-    # Optional: ``activities(terminal_ids) -> {terminal_id: activity}``, what another part of the
-    # application says a terminal is doing. The service asks it when the owners have it.
+    # Optional: ``staffed(terminal_ids) -> {terminal_id: {"activity": …, "agent": …}}``, what the
+    # team says the staff member in a terminal is doing and which agent it is. The service asks it
+    # when the owners have it.
 
 
 ACTIVITY_LEVELS = {"permission": "warn", "question": "warn", "error": "bad", "no_signal": "idle", "turn_done_unseen": "ok", "idle": "idle"}
@@ -98,10 +101,14 @@ class ManagerOwners:
                 return str(folder.path)
         return None
 
-    async def activities(self, terminal_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
-        """What the staff members working in these terminals are doing, as the Terminals screen's
-        cards show it: the status (the app has words for it), what the member waits for in the host's
-        words, and — when it waits on someone — where it is answered.
+    async def staffed(self, terminal_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
+        """The staff members working in these terminals, two ways.
+
+        ``activity`` is what the member is doing as the Terminals screen's cards show it: the status
+        (the app has words for it), what the member waits for in the host's words, and — when it
+        waits on someone — where it is answered. ``agent`` is the status line's: the CLI, its model
+        and effort, its state, and the spend its transcript gave (``usage_json``, which the team
+        already keeps; nothing is read again here).
 
         Only the terminal a live session runs in gets one; a companion process (Codex's app-server)
         is plumbing, and a second "Answer" on it would be the same request twice.
@@ -111,8 +118,8 @@ class ManagerOwners:
             return {}
         marks = ",".join("?" * len(ids))
         rows = await self.db.fetchall(
-            "SELECT ss.terminal_id, ss.status, ss.waiting_for, ss.staff_id, s.project_id FROM staff_sessions ss JOIN staff s ON s.id = ss.staff_id "  # noqa: S608 — placeholders only
-            f"WHERE ss.ended_at IS NULL AND ss.terminal_id IN ({marks})",
+            "SELECT ss.terminal_id, ss.status, ss.waiting_for, ss.staff_id, ss.usage_json, s.project_id, s.harness, s.model, s.effort "  # noqa: S608 — placeholders only
+            f"FROM staff_sessions ss JOIN staff s ON s.id = ss.staff_id WHERE ss.ended_at IS NULL AND ss.terminal_id IN ({marks})",
             ids,
         )
         out: dict[str, dict[str, Any]] = {}
@@ -121,7 +128,13 @@ class ManagerOwners:
             activity: dict[str, Any] = {"status": status, "label": str(row["waiting_for"] or ""), "level": ACTIVITY_LEVELS.get(status, "ok")}
             if status in ("permission", "question"):
                 activity["action"] = {"kind": "answer", "label": "Answer", "path": f"/app/project/{row['project_id']}/staff/{row['staff_id']}"}
-            out[str(row["terminal_id"])] = activity
+            try:
+                usage = json.loads(row["usage_json"] or "{}")
+            except ValueError:
+                usage = {}
+            agent = staff_agent(harness=str(row["harness"]), model=str(row["model"] or ""), effort=str(row["effort"] or ""), status=status,
+                                waiting_for=str(row["waiting_for"] or ""), usage=usage if isinstance(usage, dict) else None)
+            out[str(row["terminal_id"])] = {"activity": activity, "agent": agent}
         return out
 
     async def sandbox_writable(self, env: str, owner: Owner, project_id: str | None, cwd: str) -> list[str]:

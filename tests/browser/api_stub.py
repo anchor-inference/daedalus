@@ -87,6 +87,22 @@ GIB = 1 << 30
 MIB = 1 << 20
 
 
+def terminal_agent(kind: str = "claude", *, model: str | None = "opus", effort: str | None = "high", state: str | None = "working", status: str | None = None,
+                   waiting_for: str | None = None, source: str = "staff", usage: dict[str, object] | None = None) -> dict[str, object]:
+    """A terminal row's ``agent`` as the host writes it: a staff member's CLI with its model, effort,
+    state and spend (``usage_json`` mapped), or a CLI a shell runs (``source="detected"``), known only
+    by its command line and so with no state and no spend."""
+    return {"kind": kind, "source": source, "model": model, "effort": effort, "state": state if source == "staff" else None,
+            "status": status or (state if source == "staff" else None), "waiting_for": waiting_for, "usage": usage if source == "staff" else None}
+
+
+def agent_usage(*, context: int = 11_000, window: int | None = 249_000, input_tokens: int = 40_000, cached: int = 30_800, output: int = 8_200,
+                cost: float | None = 1.23, source: str = "subscription") -> dict[str, object]:
+    """A staff session's spend as the listing carries it; ``window=None`` is a CLI that did not report one."""
+    return {"input_tokens": input_tokens, "output_tokens": output, "cache_read_tokens": cached, "context_tokens": context, "context_window": window,
+            "cost_usd": cost, "source": source, "windows": [], "at": "2026-09-24T09:50:00Z"}
+
+
 def terminal_load(*, running: int = 3, cap: int = 20, total: int = 62 * GIB, available: int = 38 * GIB, each: int = 700 * MIB, cpu: float = 14.0) -> dict[str, object]:
     """``GET /api/terminals/load`` for a 62 GB, 16-CPU machine: three sessions running, each about 700 MB."""
     daemon = 45 * MIB
@@ -1400,7 +1416,7 @@ def ask_turn(seq: int, call_id: str, questions: list[dict], answers: list[dict] 
     return rows
 
 
-__all__ = ["ASK_KINDS", "ask_turn", "CALENDAR", "CalendarStub", "ComputerStub", "MEMORY", "MemoryStub", "VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "IMPORTS", "ImportStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "SAMPLE_PAGE", "TOOL_GROUP_CATALOGUE", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tasks", "session_tool_groups", "terminal_load"]
+__all__ = ["ASK_KINDS", "ask_turn", "CALENDAR", "CalendarStub", "ComputerStub", "MEMORY", "MemoryStub", "VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "IMPORTS", "ImportStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "SAMPLE_PAGE", "TOOL_GROUP_CATALOGUE", "agent_usage", "terminal_agent", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tasks", "session_tool_groups", "terminal_load"]
 
 # What the harness manager reports for the container: Claude Code installed and signed in, Codex
 # installed but signed out, the rest absent. Enough for the hiring form to show one command-line agent
@@ -3037,6 +3053,8 @@ class FocusStub:
             "id": "tm-ira", "env": "container", "title": "claude · Ira", "owner": {"kind": "staff", "id": "st-ira", "label": "Ira"}, "project_id": pid, "profile": "harness:claude",
             "sandbox": False, "cwd": "/home/operator/work/bakery-site", "status": "running", "exit_code": None, "exit_signal": None, "created_at": "2026-09-24T09:00:00Z",
             "exited_at": None, "last_output_at": "2026-09-24T09:54:00Z", "last_input_at": None, "cols": 80, "rows": 24,
+            "agent": terminal_agent("claude", state="waiting", status="question", usage=agent_usage()),
+            "git": {"branch": "staff/ira", "detached": False, "dirty": True},
         })
         return ask
 

@@ -38,14 +38,18 @@
 /* ── the Workspace: bar, list, grid ─────────────────────────────────────────────────────── */
 .tp-ws { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); }
 .tp-top { flex: none; display: flex; align-items: center; gap: var(--space-2); height: var(--row-h); padding: 0 var(--space-2); border-bottom: 1px solid var(--line); background: var(--surface-1); min-width: 0; }
-.tp-top .grow { flex: 1; min-width: 0; }
-.tp-tabs { flex: 0 1 auto; display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+/* The tabs take the bar's free width and share it equally, up to 240 px each. */
+.tp-tabs { flex: 1 1 0; display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 /* A narrow bar keeps the titles and drops the hints first: the key and the state word are in the pane too. */
-.tp-top { container-type: inline-size; }
-@container (max-width: 1100px) { .tp-tab-key { display: none; } }
-@container (max-width: 860px) { .tp-tab-state, .tp-waiting span { display: none; } .tp-new span { display: none; } }
+.tp-top { container: tp-top / inline-size; }
+@container tp-top (max-width: 1100px) { .tp-tab-key { display: none; } }
+@container tp-top (max-width: 860px) { .tp-tab-state, .tp-waiting span { display: none; } .tp-new span { display: none; } }
 .tp-tabs::-webkit-scrollbar { display: none; }
-.tp-tab { flex: 0 1 auto; display: inline-flex; align-items: center; gap: 6px; height: var(--ctl-h-sm); max-width: 240px; min-width: 112px; padding: 0 8px; border: 0; border-radius: var(--radius-xs); background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-12); cursor: pointer; }
+/* Each tab is its own container and gives its width to the title before anything else. Four panes at
+ * 1440 px once kept the key and the state word in every tab and cut the titles to "np…" and "Ira · Cl…";
+ * now a tab short of its full width drops the key, then the state word, and keeps the dot, which says
+ * the state in colour (the tab's tooltip says it in words). */
+.tp-tab { container: tp-tab / inline-size; flex: 1 1 0; display: inline-flex; align-items: center; gap: 6px; height: var(--ctl-h-sm); max-width: 240px; min-width: 96px; padding: 0 8px; border: 0; border-radius: var(--radius-xs); background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-12); cursor: pointer; }
 .tp-tab:hover { background: var(--surface-2); color: var(--fg); }
 .tp-tab.on { background: var(--surface-2); color: var(--fg); box-shadow: inset 0 -2px 0 var(--accent); }
 .tp-tab.empty { color: var(--fg-3); }
@@ -56,6 +60,8 @@
 .tp-tab-state[data-state="done"] { color: var(--state-done); }
 .tp-tab-state[data-state="failed"] { color: var(--state-failed); }
 .tp-tab-key { padding: 0 4px; border: 1px solid var(--line); border-radius: var(--radius-xs); line-height: 16px; background: none; }
+@container tp-tab (max-width: 230px) { .tp-tab-key { display: none; } }
+@container tp-tab (max-width: 200px) { .tp-tab-state { display: none; } }
 .tp-waiting { flex: none; display: inline-flex; align-items: center; gap: 6px; height: var(--ctl-h-sm); padding: 0 10px; border: 1px solid color-mix(in srgb, var(--data-wait) 45%, transparent); border-radius: var(--radius-pill); background: color-mix(in srgb, var(--data-wait) 12%, transparent); color: var(--data-wait); font: inherit; font-size: var(--fs-12); cursor: pointer; }
 .tp-layouts { flex: none; display: inline-flex; gap: 1px; padding: 2px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); }
 .tp-layout { display: inline-flex; align-items: center; justify-content: center; width: calc(var(--ctl-h-sm) - 2px); height: calc(var(--ctl-h-sm) - 6px); border: 0; border-radius: var(--radius-xs); background: none; color: var(--fg-3); cursor: pointer; }
@@ -131,6 +137,51 @@ button.tp-attn:hover { background: color-mix(in srgb, var(--data-wait) 20%, tran
 .tp-pane-compose { flex: none; border-top: 1px solid var(--line); background: var(--surface-1); }
 /* The pane's last line: a status line of mono details, each kind of data in its own colour. */
 .tp-pane-foot { flex: none; display: flex; align-items: center; gap: var(--space-2); min-height: 24px; padding: 0 8px; border-top: 1px solid var(--line); background: var(--surface-1); font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-3); min-width: 0; }
+
+/* ── the status line (statusline.tsx) ───────────────────────────────────────────────────────
+ * paddock's line, at our density: 11 px mono, a 40 × 6 meter where paddock draws 56 × 8, and thin rules
+ * between segments. The line is its own container, so a pane and a card drop the same segments at
+ * the same widths, least useful first: cache and output, then the folder (the branch stays) and the
+ * effort, then the meter's numbers (the bar stays) and what a wait is for, then the cost. What is
+ * dropped is still in the line's tooltip. Between those steps only the long texts give way, the
+ * folder and a wait's reason first: a first cut let every segment shrink at once, and a 420 px pane
+ * read "op… high | …/worktrees/i… (staff/ira…", with no value whole. */
+.tsl { container-type: inline-size; flex: 1; min-width: 0; display: flex; align-items: center; height: 24px; overflow: hidden; white-space: nowrap; font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-3); }
+.tsl-seg { flex: none; display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.tsl-seg:not(:first-child)::before { content: ""; flex: none; width: 1px; height: 10px; margin: 0 4px; background: var(--line-strong); }
+.tsl-wait { color: var(--data-wait); }
+.tsl-wait-dot { flex: none; width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--state-waiting); box-shadow: var(--state-glow) var(--state-waiting); }
+.tsl-wait-why { flex: 0 8 auto; min-width: 3ch; max-width: 28ch; color: var(--fg-3); }
+.tsl-wait { flex: 0 8 auto; }
+.tsl-agent { flex: none; }
+.tsl-model { max-width: 18ch; color: var(--fg-2); }
+.tsl-effort { flex: none; color: var(--fg-3); }
+.tsl-where { flex: 0 4 auto; }
+.tsl-path { flex: 0 8 auto; min-width: 3ch; color: var(--data-path); }
+.tsl-branch { flex: 0 1 auto; min-width: 8ch; color: var(--data-branch); }
+.tsl-branch::before { content: "("; color: var(--fg-3); }
+.tsl-branch::after { content: ")"; color: var(--fg-3); }
+.tsl-dirty { font-weight: 700; color: var(--data-wait); }
+.tsl-ctx { color: var(--data-context); }
+.tsl-meter { flex: none; position: relative; width: 40px; height: 6px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--data-context) 18%, transparent); overflow: hidden; }
+.tsl-meter-fill { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: repeating-linear-gradient(135deg, var(--data-context) 0 3px, color-mix(in srgb, var(--data-context) 65%, transparent) 3px 6px); }
+.tsl-cache { color: var(--data-cache); }
+.tsl-out { color: var(--data-output); }
+.tsl-cost { color: var(--fg-2); }
+.tsl-cmd { flex: 0 4 auto; color: var(--fg-2); }
+.tsl-cmd-mark { flex: none; }
+.tsl-cmd[data-result="ok"] .tsl-cmd-mark { color: var(--ok); }
+.tsl-cmd[data-result="failed"] .tsl-cmd-mark, .tsl-cmd-code { color: var(--data-bad); }
+.tsl-cmd[data-result="running"] .tsl-cmd-mark { color: var(--state-working); }
+.tsl-cmd-text { min-width: 4ch; }
+.tsl-cmd-code { flex: none; }
+@container (max-width: 560px) { .tsl-cache, .tsl-out { display: none; } }
+/* The folder gives way only to something worth its room: a line of a folder and a branch keeps both. */
+@container (max-width: 480px) { .tsl:has(.tsl-agent, .tsl-cmd) .tsl-where:has(.tsl-branch) .tsl-path, .tsl-effort { display: none; } }
+@container (max-width: 400px) { .tsl-wait-why { display: none; } .tsl-meter + .tsl-ctx-text { display: none; } }
+@container (max-width: 300px) { .tsl-cost, .tsl-cmd-code { display: none; } }
+/* On a card the line sits between the preview and the card's foot, inside the card's own padding. */
+.tsl[data-variant="card"] { flex: none; height: 22px; padding: 0 12px; }
 
 .tp-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3); padding: var(--space-4); background: radial-gradient(60% 50% at 50% 40%, color-mix(in srgb, var(--accent) 7%, transparent), transparent); }
 .tp-empty-title { font-size: var(--fs-13); color: var(--fg-2); }

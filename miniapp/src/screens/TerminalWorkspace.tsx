@@ -21,7 +21,8 @@ import type { TerminalState } from "../terminal/instance";
 import { paneState } from "../terminal/status";
 import { instanceFor, setTerminalEnvs, terminals } from "../terminal/terminals";
 import { PhoneTerminal } from "../terminal/mobile";
-import { paneTitle, StateDot, TerminalWorkspace } from "../terminal/workspace";
+import { TerminalStatusLine } from "../terminal/statusline";
+import { paneTitle, StateDot, TerminalWorkspace, type WorkspaceSlots } from "../terminal/workspace";
 import { activeId, close, focus, fromAddress, loadWorkspace, place, replace, saveView, saveWorkspace, toAddress, type Workspace } from "../terminal/workspacestate";
 import { StaffPhoneTerminal } from "../project/phone";
 import { NewTerminalSheet } from "./Terminals";
@@ -44,6 +45,11 @@ export function TerminalWorkspaceScreen({ detail, query, toast, project, project
   useEffect(() => {
     if (list.data?.envs) setTerminalEnvs(list.data.envs);
   }, [list.data]);
+  // Each pane's status line: the agent, the folder and branch, the context, the spend.
+  const slots = useMemo<WorkspaceSlots>(() => {
+    const homes = new Map((list.data?.envs ?? []).map((e) => [e.env, e.home]));
+    return { footer: (pane) => <TerminalStatusLine row={pane.row} state={pane.state} home={pane.row ? homes.get(pane.row.env) : null} /> };
+  }, [list.data?.envs]);
 
   const address = useMemo(() => ({ detail, query }), [detail, query]);
   // A phone shows one pane at a time, so every one of the four places is a pane it can switch to: a
@@ -209,6 +215,7 @@ export function TerminalWorkspaceScreen({ detail, query, toast, project, project
         onNew={() => setCreating(true)}
         onOverview={overview}
         toast={toast}
+        slots={slots}
       />
       {sheet}
     </>
