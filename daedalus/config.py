@@ -1467,6 +1467,43 @@ class AutopilotConfig(BaseModel):
     no session is judged until tomorrow; ``0`` turns the judge off for paid models."""
 
 
+class MigrationListConfig(BaseModel):
+    """A file that holds its migrations as one list, where only appending is safe.
+
+    The region runs from the first line matching ``start`` to the line before the first one after
+    it matching ``end`` (to the end of the file when nothing does). A turn that changes anything
+    the region held when the goal began, rather than adding after it, rewrote a migration that a
+    database may already have applied."""
+
+    path: str
+    start: str
+    end: str = ""
+
+
+class GoalRiskConfig(BaseModel):
+    """The fixed check after each turn of work that goes on without the operator: autopilot's
+    continuations and the agents of the companion's goals. It reads the turn's tool calls, asks no
+    model, and stops the work after a turn that did something risky until the operator says go on.
+    :mod:`daedalus.host.turn_risk` has the rules."""
+
+    enabled: bool = True
+    migration_paths: list[str] = Field(default_factory=lambda: [
+        "*/alembic/versions/*.py", "*/migrations/versions/*.py", "*/migrations/[0-9]*.py", "*/migrations/*.sql",
+        "*/migrations/[0-9]*.js", "*/migrations/[0-9]*.ts", "*/db/migrate/*.rb", "*/db/migration/*.sql",
+        "*/db/changelog/*", "*/drizzle/[0-9]*.sql",
+    ])
+    """Path patterns of migration files, one file per migration (alembic, Django, Prisma, Rails,
+    Flyway, Liquibase, goose, Knex, Drizzle and their kin). ``*`` crosses folders, and a pattern
+    that does not start with ``/`` or ``*`` matches at the end of a path. Writing a new file here is
+    the ordinary work; changing one that was there when the goal began is what stops."""
+    migration_lists: list[MigrationListConfig] = Field(default_factory=lambda: [
+        MigrationListConfig(path="daedalus/stores/database.py", start=r"^MIGRATIONS: list", end=r"^CACHE_PAGES\b"),
+    ])
+    """Files that keep their migrations in one list. This installation's own database is one."""
+    shared_branches: list[str] = Field(default_factory=lambda: ["main", "master", "develop", "trunk", "release*"])
+    """Branch patterns where ``git reset --hard`` throws away work somebody else may have."""
+
+
 CHAT_SEARCH_TOOLS = ["ChatSearch", "RecentChats"]
 """The tools that reach the operator's other chats; offered only while ``[memory] search_chats`` is on."""
 
@@ -2368,6 +2405,7 @@ class RuntimeConfig(BaseModel):
     companion: CompanionConfig = Field(default_factory=CompanionConfig)
     assist: AssistConfig = Field(default_factory=AssistConfig)
     autopilot: AutopilotConfig = Field(default_factory=AutopilotConfig)
+    goal_risk: GoalRiskConfig = Field(default_factory=GoalRiskConfig)
     board: BoardConfig = Field(default_factory=BoardConfig)
     peers: PeersConfig = Field(default_factory=PeersConfig)
     edit_board: EditBoardConfig = Field(default_factory=EditBoardConfig)

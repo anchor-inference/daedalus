@@ -3322,7 +3322,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     @api.patch("/api/companion/goals/{goal_id}")
     async def companion_goal_edit(goal_id: str, body: CompanionGoalPatch, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            return await voice().goal_update(goal_id=goal_id, title=body.title, brief=body.brief, status=body.status, cadence=body.cadence)
+            return await voice().goal_update(goal_id=goal_id, title=body.title, brief=body.brief, status=body.status, cadence=body.cadence, by_operator=True)
         except KeyError as exc:
             raise HTTPException(404, "no such goal") from exc
         except ValueError as exc:

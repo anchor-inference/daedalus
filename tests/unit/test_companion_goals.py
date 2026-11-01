@@ -9,10 +9,12 @@ from typing import Any
 
 import httpx
 import pytest
+from protocore.contracts.types import Message, MessageRole, TextBlock, ToolResultBlock, ToolUseBlock
 
 from daedalus.config import COMPANION_TOOLS, RuntimeConfig, Settings
 from daedalus.extensions.api import build_app
 from daedalus.extensions.companion import GOAL_OPEN, PAUSED_KEY, Companion, report_block
+from daedalus.extensions.notifications import ActionConflict, ActionRequest
 from daedalus.host.session_runner import SessionManager, _own_schedules
 from daedalus.speech.service import LocalSpeech
 from daedalus.speech.tts_service import LocalTts
@@ -412,3 +414,67 @@ async def test_the_migration_carries_the_concierges_rows_to_the_companion(settin
             assert await db.kv_get("companion_session") == "sv" and await db.kv_get("voice_session") is None
         finally:
             await db.close()
+
+
+# -- the risk hold ----------------------------------------------------------------------------------
+
+
+class Notes(Inbox):
+    """The notification service as a held goal uses it: posts, its language and the resolvers registered."""
+
+    def language(self) -> str:
+        return "en"
+
+
+async def agent_run(manager: SessionManager, sid: str, run_id: str, *calls: tuple[str, dict[str, Any]]) -> None:
+    rows: list[Message] = []
+    for index, (name, arguments) in enumerate(calls):
+        rows.append(Message(role=MessageRole.assistant, content_blocks=[ToolUseBlock(tool_call_id=f"{run_id}-{index}", name=name, arguments_json=json.dumps(arguments))],
+                            metadata={"daedalus.run_id": run_id}))
+        rows.append(Message(role=MessageRole.tool, content_blocks=[ToolResultBlock(tool_call_id=f"{run_id}-{index}", content="ok")], metadata={"daedalus.run_id": run_id}))
+    rows.append(Message(role=MessageRole.assistant, content_blocks=[TextBlock(text="all done")], metadata={"daedalus.run_id": run_id}))
+    await manager.sessions.append_transcript(sid, rows)
+
+
+async def test_a_risky_agent_turn_holds_its_goal_until_the_operator_resumes_it(app: Any) -> None:
+    manager: SessionManager = app.manager
+    app.notifications = notes = Notes()
+    companion = Companion(app)
+    _capture(manager)
+    goal = await companion.goal_create(title="Ship the release")
+    agent = (await companion.delegate(title="Release", task="build and deploy", goal_id=goal["id"]))["session_id"]
+    # A harmless turn holds nothing.
+    await agent_run(manager, agent, "run-1", ("Exec", {"command": "pytest -q"}))
+    await companion.on_run_finished(agent, "run-1", "completed")
+    assert (await companion.goal_list())[0]["status"] == "active" and notes.posted == []
+    await agent_run(manager, agent, "run-2", ("Exec", {"command": "docker compose up -d"}))
+    await companion.on_run_finished(agent, "run-2", "completed")
+    assert (await companion.goal_list())[0]["status"] == "paused"
+    [note] = notes.posted
+    assert note.request_ref and note.request_ref.startswith(f"goalrisk:{goal['id']}:") and [a.id for a in note.actions] == ["resume", "allow", "open"]
+    assert "docker compose up -d" in note.body
+    # The companion is told, and can neither steer the agent on, nor hand the goal to another, nor lift the hold.
+    assert any("is now held" in line for line in companion.held)
+    with pytest.raises(ValueError, match="held"):
+        await companion.delegate(title="", task="go on", session_id=agent)
+    with pytest.raises(ValueError, match="held"):
+        await companion.delegate(title="More", task="another try", goal_id=goal["id"])
+    with pytest.raises(GoalError):
+        await companion.goal_update(goal_id=goal["id"], status="active")
+    # Resume and allow: the kinds that held it no longer do for the rest of the goal.
+    _, scope, token = note.request_ref.split(":")
+    request = ActionRequest(note.request_ref, "goalrisk", scope, token, "allow", None, "notification", {})  # type: ignore[arg-type]
+    assert (await companion.resolve_goal_risk(request)).resolution == "Resumed"
+    with pytest.raises(ActionConflict):
+        await companion.resolve_goal_risk(request)  # a second tap finds it answered
+    assert (await companion.goal_list())[0]["status"] == "active"
+    assert (await companion.goal_risk(goal["id"]))["allowed"] == ["containers"]
+    await agent_run(manager, agent, "run-3", ("Exec", {"command": "docker compose restart"}))
+    await companion.on_run_finished(agent, "run-3", "completed")
+    assert (await companion.goal_list())[0]["status"] == "active"
+    # Another kind still holds it, and the operator's own status change from the page lifts that hold.
+    await agent_run(manager, agent, "run-4", ("Write", {"path": "/var/tmp/elsewhere.txt", "content": "x"}))
+    await companion.on_run_finished(agent, "run-4", "completed")
+    assert (await companion.goal_list())[0]["status"] == "paused"
+    await companion.goal_update(goal_id=goal["id"], status="active", by_operator=True)
+    assert (await companion.goal_list())[0]["status"] == "active" and not (await companion.goal_risk(goal["id"]))["held"]
