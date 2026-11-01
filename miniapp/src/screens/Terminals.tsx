@@ -30,6 +30,7 @@ import { errorText } from "../ui";
 import { createTerminalConfirmed } from "../terminal/actions";
 import { EnvPill } from "../envpill";
 import { cardStatus, FILTERS, groupTerminals, headerCounts, matches, ownerLine, previewRows, runStyle, running, TerminalFilter } from "../terminal/preview";
+import { TerminalStatusLine } from "../terminal/statusline";
 
 /** How often the load bar asks again: the daemon measures at most every ten seconds anyway. */
 const LOAD_POLL_MS = 10000;
@@ -106,6 +107,7 @@ function DesktopTerminals({ toast, project, projects }: { toast: (text: string) 
   const shown = rows.filter((r) => matches(r, filter));
   const groups = groupTerminals(shown, projects);
   const names = useMemo(() => new Map(projects.map((p) => [p.id, p.name])), [projects]);
+  const homes = useMemo(() => new Map((list.data?.envs ?? []).map((e) => [e.env, e.home])), [list.data?.envs]);
 
   const refresh = useCallback(() => {
     invalidate("/api/terminals");
@@ -178,7 +180,7 @@ function DesktopTerminals({ toast, project, projects }: { toast: (text: string) 
             </div>
             <div className="term-cards">
               {group.rows.map((row) => (
-                <TerminalCard key={row.id} row={row} projectName={row.project_id ? names.get(row.project_id) ?? null : null} onRemove={() => void remove(row)} toast={toast} />
+                <TerminalCard key={row.id} row={row} projectName={row.project_id ? names.get(row.project_id) ?? null : null} home={homes.get(row.env) ?? null} onRemove={() => void remove(row)} toast={toast} />
               ))}
             </div>
           </section>
@@ -189,7 +191,7 @@ function DesktopTerminals({ toast, project, projects }: { toast: (text: string) 
   );
 }
 
-function TerminalCard({ row, projectName, onRemove, toast }: { row: TerminalRow; projectName: string | null; onRemove: () => void; toast: (text: string) => void }) {
+function TerminalCard({ row, projectName, home, onRemove, toast }: { row: TerminalRow; projectName: string | null; home: string | null; onRemove: () => void; toast: (text: string) => void }) {
   const status = cardStatus(row);
   const live = running(row);
   const open = () => navigate(terminalPath(row.id));
@@ -221,6 +223,8 @@ function TerminalCard({ row, projectName, onRemove, toast }: { row: TerminalRow;
             </div>
           ))}
         </pre>
+        {/* The pane's status line, shortened: the agent, the place, the meter, the cost. */}
+        {live && <TerminalStatusLine row={row} home={home} variant="card" />}
       </button>
       <div className="term-card-foot">
         <StateDot status={paneState(row)} className="term-card-dot" />

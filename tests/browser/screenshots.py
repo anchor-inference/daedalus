@@ -45,6 +45,7 @@ from api_stub import (  # noqa: E402
     MemoryStub,
     TeamStub,
     Unhandled,
+    agent_usage,
     attached_media,
     attached_route,
     attachment_route,
@@ -57,6 +58,7 @@ from api_stub import (  # noqa: E402
     notification_preferences,
     session_tasks,
     session_tool_groups,
+    terminal_agent,
     worktree_route,
 )
 from schedule_stub import ScheduleStub  # noqa: E402
@@ -1720,22 +1722,36 @@ def terminals_fleet():  # type: ignore[no-untyped-def]
     """The Terminals screen as the mock-up drew it: failing tests and a dev server in a conversation, two
     staff members (one on the host, waiting for permission), htop nobody watches, and a psql that ended.
     The rows are what the programs print, the same in both languages; the owners and the staff member's
-    status are the app's words, in the run's language."""
+    status are the app's words, in the run's language. Each running one carries what its status line
+    reads: the branch of its folder, a shell's last command, and a staff member's CLI with its model,
+    context, cache and spend (Naya's CLI reported no window, so her line has a count and no meter)."""
     from terminal_stub import TerminalStub, run
 
     term = TerminalStub(S1)
     term.add("m1tests00000", title="bash · bakery-site", owner_kind="session", owner_label=word("checkout"), project_id=P1, created_at=ago(minutes=2),
              preview=[[run(" ✗", 1), run(" promo code SPRING10")], [run("   Expected: "), run("1080", 2)], [run("   Received: "), run("1200", 1)],
                       [run(" Tests: "), run("1 failed", 1), run(", "), run("2 passed", 2)], [run("bakery-site", 2), run(" $ ")]])
+    term.terms["m1tests00000"].cwd = "/home/operator/work/bakery-site"
+    term.terms["m1tests00000"].git = {"branch": "checkout-promo", "detached": False, "dirty": True}
+    term.terms["m1tests00000"].last_command = {"command": "npm test -- checkout", "exit_code": 1, "at": ago(minutes=1)}
     term.add("m2devsrv0000", title="npm run dev", owner_kind="session", owner_label=word("checkout"), project_id=P1, created_at=ago(minutes=38),
              preview=[[run("14:02:11 ", 8), run("[vite]", 6), run(" hmr update /src/pages/checkout.tsx")], [run("14:02:19 ", 8), run("[vite]", 6), run(" hmr update /src/lib/cart.ts")],
                       [run("14:03:40 ", 8), run("[vite]", 6), run(" page reload")], [run("14:05:02 ", 8), run("[vite]", 6), run(" hmr update /src/lib/cart.ts")]])
+    term.terms["m2devsrv0000"].cwd = "/home/operator/work/bakery-site"
+    term.terms["m2devsrv0000"].git = {"branch": "checkout-promo", "detached": False, "dirty": True}
     term.add("m3claude0000", title="Ira · Claude Code", owner_kind="staff", owner_id="st-ira", owner_label="Ira", project_id=P1, created_at=ago(minutes=64),
              preview=[[run("⏺", 7), run(" Update(src/lib/cart.ts)")], [run("  ⎿ ", 8), run(" Updated with "), run("6 additions", 2)], [run("⏺", 7), run(" Bash(npm test -- checkout)")],
                       [run("  ⎿ ", 8), run(" ✓ 3 passed", 2)], [run("✻ Thinking…", 3), run(" (esc to interrupt)", 8)]])
+    term.terms["m3claude0000"].cwd = "/home/operator/work/bakery-site/.agents/worktrees/ira"
+    term.terms["m3claude0000"].agent = terminal_agent("claude", model="opus", effort="high", state="working", usage=agent_usage(context=61_000, window=200_000, input_tokens=412_000, cached=371_000, output=18_400, cost=2.84))
+    term.terms["m3claude0000"].git = {"branch": "staff/ira", "detached": False, "dirty": True}
     term.add("m4opencode00", title="Naya · OpenCode", env="host", owner_kind="staff", owner_id="st-naya", owner_label="Naya", project_id=P1, created_at=ago(minutes=12),
              activity={"label": word("permission"), "level": "warn", "action": {"label": word("answer"), "path": "/app/inbox"}},
              preview=[[run("△ Permission required", 3)], [run("  bash: "), run("npm install grammy", 7, b=True)], [run("  cwd ~/work/bakery-bot", 8)], [], [run(" Allow once ", inv=True), run("  Always  Reject")]])
+    term.terms["m4opencode00"].cwd = "/home/operator/work/bakery-bot"
+    term.terms["m4opencode00"].agent = terminal_agent("opencode", model="kimi-k2", effort=None, state="waiting", status="permission", waiting_for="bash: npm install grammy",
+                                                     usage=agent_usage(context=23_500, window=None, input_tokens=96_000, cached=52_000, output=4_100, cost=0.31, source="metered"))
+    term.terms["m4opencode00"].git = {"branch": "bot-commands", "detached": False, "dirty": False}
     term.add("m5htop000000", title="htop", env="host", owner_kind="free", owner_id="", cwd="~", clients=0, last_input_at=ago(hours=1), created_at=ago(hours=3),
              preview=[[run("  1", 6), run("["), run("|||||||", 2), run("        34%]", 8)], [run("  2", 6), run("["), run("||||", 2), run("           18%]", 8)],
                       [run("  Mem", 6), run("["), run("|||||||||", 2), run("||", 4), run("  9.1G/31G]", 8)], [run("  Load average: ", 8), run("3.12 2.80 2.41")]])

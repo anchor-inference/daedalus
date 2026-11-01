@@ -35,6 +35,7 @@ from daedalus import load as load_math
 from daedalus.harness.env import staff_inherited_env
 from daedalus.security import operator_secrets
 from daedalus.terminals import wire
+from daedalus.terminals.awareness import GIT_QUIET_ENV, STATUS_OUTPUT_MAX, BranchCache, detect_agent
 from daedalus.terminals.client import Channel, PtydClient, Unavailable
 from daedalus.terminals.endpoint import absolute_on, remember_hook_port, remember_state_dir
 from daedalus.terminals.model import (
@@ -43,6 +44,7 @@ from daedalus.terminals.model import (
     Conflict,
     EnvStatus,
     EnvUnavailable,
+    ExecResult,
     InvalidRequest,
     LiveTerminals,
     NoRebuilder,
@@ -253,6 +255,11 @@ class Terminals(SideChannels):
         self._subscribers: list[Subscriber] = []
         self._tasks: list[asyncio.Task[None]] = []
         self._closing = False
+        self.branches = BranchCache(self._read_branch)
+        self._running_agents: dict[str, tuple[str, dict[str, Any] | None]] = {}
+        """Per busy shell: the marker of the command it runs (the last finished one's time) and the
+        agent that command starts, so a command line is asked of the daemon once per command and not
+        once per listing."""
         self._init_side()
 
     # -- lifecycle --------------------------------------------------------------------------
@@ -277,6 +284,7 @@ class Terminals(SideChannels):
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
+        await self.branches.close()
         for link in self.links.values():
             if link.client is not None:
                 await link.client.close()
@@ -525,12 +533,53 @@ class Terminals(SideChannels):
         owners = [Owner(r["owner_kind"], r["owner_id"]) for r in rows if r["owner_kind"] in ("session", "staff", "project") and r["owner_id"]]
         labels = await self.owners.labels(owners) if owners else {}
         staffed = [r["id"] for r in rows if r["owner_kind"] == "staff" and r["status"] == "running"]
-        activities_of = getattr(self.owners, "activities", None)
-        activities = await activities_of(staffed) if staffed and activities_of is not None else {}
+        staff_of = getattr(self.owners, "staffed", None)
+        staff = await staff_of(staffed) if staffed and staff_of is not None else {}
         views = [self._view(r, live.get(r["id"]), labels, preview=bool(preview_rows)) for r in rows]
         for view in views:
-            view["activity"] = activities.get(view["id"])
+            member = staff.get(view["id"]) or {}
+            view["activity"] = member.get("activity")
+            view["agent"] = member.get("agent")
+            if view["status"] == "running":
+                view["git"] = self.branches.peek(view["env"], view["cwd"])
+        await self._detect_agents([v for v in views if v["agent"] is None], live)
         return views
+
+    async def _read_branch(self, env: str, argv: builtins.list[str], cwd: str, timeout: float) -> ExecResult:
+        return await self.exec_run(env, argv, cwd=cwd, env_vars=dict(GIT_QUIET_ENV), timeout=timeout, max_output=STATUS_OUTPUT_MAX, audit=False)
+
+    async def _detect_agents(self, views: builtins.list[TerminalView], live: dict[str, dict[str, Any]]) -> None:
+        """Name the agent a busy shell runs (``claude`` typed at its prompt), from the command line
+        its shell marked. Only a shell with its integration says what it runs; any other program is
+        its own title already. A shell that went quiet forgets what it ran."""
+        busy = {v["id"]: v for v in views if v["live"] and v["live"]["busy"] and v["shell_integration"]}
+        for gone in [k for k in self._running_agents if k not in busy]:
+            del self._running_agents[gone]
+        wanted: builtins.list[tuple[TerminalView, str]] = []
+        for terminal_id, view in busy.items():
+            last = (live.get(terminal_id) or {}).get("last_command")
+            marker = str(last.get("at") or "") if isinstance(last, dict) else ""
+            known = self._running_agents.get(terminal_id)
+            if known is not None and known[0] == marker:
+                view["agent"] = dict(known[1]) if known[1] is not None else None
+            else:
+                wanted.append((view, marker))
+        if not wanted:
+            return
+
+        async def running(view: TerminalView, marker: str) -> None:
+            try:
+                async with asyncio.timeout(2.0):
+                    result = await self._call(view["env"], "terminal.commands", {"id": view["id"], "last": 1, "with_output": False}, what="reading the running command", timeout=2.0)
+            except (TerminalError, TimeoutError):
+                return  # asked again on the next listing
+            records = [c for c in result.get("commands") or [] if isinstance(c, dict)]
+            open_command = records[-1] if records and records[-1].get("finished_at") is None else None
+            agent = detect_agent(str(open_command.get("command") or "")) if open_command else None
+            self._running_agents[view["id"]] = (marker, agent)
+            view["agent"] = dict(agent) if agent is not None else None
+
+        await asyncio.gather(*(running(view, marker) for view, marker in wanted))
 
     def _view(self, row: dict[str, Any], info: dict[str, Any] | None, labels: dict[Owner, str], *, preview: bool = False) -> TerminalView:
         owner_id = row["owner_id"]
@@ -558,6 +607,8 @@ class Terminals(SideChannels):
             "last_command": None,
             "shell_integration": bool(row["shell_integration"]),
             "activity": None,
+            "agent": None,
+            "git": None,
         }
         if info is not None:
             modes = info.get("modes") or {}

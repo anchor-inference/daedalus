@@ -179,11 +179,16 @@ class SideChannels:
         max_output: int | None = None,
         actor: str = "system",
         resources: dict[str, Any] | None = None,
+        audit: bool = True,
     ) -> ExecResult:
         """Run a program of the daemon's list in ``env`` (not in a terminal) and return its output.
 
         A program that fails is a result with its exit code, not an error; the errors are the ones
         of the call (not on the list, not found, the environment gone).
+
+        ``audit=False`` is for the host's own fixed, read-only probes that repeat on a timer (the
+        status line's ``git status``): one audit row every ten seconds per folder for as long as the
+        Terminals page is open would bury every row a person or an agent caused under the same line.
         """
         if not argv:
             raise InvalidRequest("a program needs an argv")
@@ -203,7 +208,8 @@ class SideChannels:
         try:
             result = await self._side_call(env, "exec.run", params, what=f"running {argv[0]}", timeout=timeout + 15)
         except TerminalError as exc:
-            await self.audit("", env, actor, "exec", {**detail, "error": exc.message})
+            if audit:
+                await self.audit("", env, actor, "exec", {**detail, "error": exc.message})
             raise
         out = ExecResult(
             exit_code=int(result.get("exit_code", -1)),
@@ -215,7 +221,8 @@ class SideChannels:
             duration_ms=int(result.get("duration_ms") or 0),
             path=str(result.get("path") or ""),
         )
-        await self.audit("", env, actor, "exec", {**detail, "exit_code": out.exit_code, "signal": out.signal, "timed_out": out.timed_out, "duration_ms": out.duration_ms})
+        if audit:
+            await self.audit("", env, actor, "exec", {**detail, "exit_code": out.exit_code, "signal": out.signal, "timed_out": out.timed_out, "duration_ms": out.duration_ms})
         return out
 
     # -- files ------------------------------------------------------------------------------

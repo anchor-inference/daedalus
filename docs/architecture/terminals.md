@@ -1054,6 +1054,24 @@ because the token in them is a shell.
 | `GET /api/terminals/envs/container/update/{job}` | `{state: pending\|completed\|failed, detail}` |
 | `WS /ws/terminals/{id}?ticket=` | the attachment, below |
 
+A view in the listing carries what the Terminals page's status line reads, beside `last_command`:
+
+- `agent`: the command-line agent working in it, or null. A staff member's terminal gets `{kind,
+  source: "staff", model, effort, state: working | waiting | done | idle | error, status, waiting_for,
+  usage}` from what the team already keeps (`staff`, `staff_sessions.status` and `usage_json`); `usage`
+  is `{input_tokens, output_tokens, cache_read_tokens, context_tokens, context_window, cost_usd, source,
+  windows, at}` with every count null where the CLI did not say it (`input_tokens` counts the cached
+  part; `context_window` is only the CLI's own). A busy shell whose marked command starts a known CLI
+  (`claude`, `codex`, `grok`, `opencode`, `pi`, `cursor-agent`, …) gets `{kind, source: "detected",
+  model, effort}` from the command line and no state or spend; the daemon is asked for the command
+  once per command, not once per listing.
+- `git`: `{branch, detached, dirty}` of the folder a running terminal is in, or null. Read by
+  `daedalus/terminals/awareness.py` with one `git --no-optional-locks status --porcelain=v2 --branch`
+  through `exec.run` in the terminal's environment, in the background, at most once per folder per
+  10 s and with a 2 s timeout; a listing serves the last answer and never waits for git. These reads
+  write no audit row (`exec_run(audit=False)`): they are the host's own fixed read, and one row per
+  folder every ten seconds would bury the rows a person or an agent caused.
+
 ### The WebSocket
 
 The browser reaches a terminal through the host (`daedalus/terminals/gateway.py`; the two routes are

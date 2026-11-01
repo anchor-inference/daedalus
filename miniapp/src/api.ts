@@ -584,6 +584,40 @@ export type TerminalView = {
   created_by?: string;
   /** Filled by other parts of the app (a staff member's status, a pending permission); null otherwise. */
   activity?: TerminalActivity | null;
+  /** The command-line agent working in it: a staff member's CLI, or one a shell is running. */
+  agent?: TerminalAgent | null;
+  /** The git branch of the folder it is in, read by the host at most every ten seconds; absent or
+   *  null when the folder is no repository, the read has not finished, or the terminal ended. */
+  git?: { branch: string; detached: boolean; dirty: boolean } | null;
+};
+
+/** What the status line says about the agent in a terminal. Every field but `kind` can be missing:
+ *  a CLI typed at a prompt (`source: "detected"`) is known only by its command line, and a staff
+ *  member's spend is there once its transcript gave one. */
+export type TerminalAgent = {
+  kind: string;
+  source: "staff" | "detected";
+  model?: string | null;
+  effort?: string | null;
+  /** A staff member's state; null for a detected agent, whose state nothing reads. */
+  state?: "working" | "waiting" | "done" | "idle" | "error" | null;
+  status?: string | null;
+  waiting_for?: string | null;
+  usage?: TerminalAgentUsage | null;
+};
+
+/** A staff session's spend so far. `input_tokens` counts the cached part too; the context meter needs
+ *  `context_window` from the CLI itself and is not drawn without it. */
+export type TerminalAgentUsage = {
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  cache_read_tokens?: number | null;
+  context_tokens?: number | null;
+  context_window?: number | null;
+  cost_usd?: number | null;
+  source?: "metered" | "subscription";
+  windows?: { minutes: number; used_pct: number }[];
+  at?: string | null;
 };
 
 /** What another part of the app says a terminal is doing: a line for its card and, when something

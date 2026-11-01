@@ -1243,6 +1243,7 @@ class CliStaffRuntime:
             context_window=int(said.get("context_window") or 0) or None,
             windows=windows,
             at=event.at,
+            cache_read_tokens=int(said.get("cache_read_tokens") or 0),
         )
         session.usage = reading.over(session.usage or UsageSnapshot.from_view(live.session.usage))
         try:
@@ -1834,6 +1835,7 @@ class CliStaffRuntime:
             windows=next((u.windows for u in reversed(spent) if u.windows), ()),
             replies=sum(1 for t in every if t.role == "assistant"),
             at=turns[-1].ended_at,
+            cache_read_tokens=sum(u.cache_read_tokens for u in spent),
         )
 
     # -- stopping --------------------------------------------------------------------------------
