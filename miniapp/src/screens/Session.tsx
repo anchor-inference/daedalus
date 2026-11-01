@@ -3056,11 +3056,11 @@ function subagentOfStep(item: ToolItem): { id?: string; name?: string } | null {
 /** An AskUser call's record among the turn's steps. The call the session still waits on is a step
  *  that says so; the card that answers it is above the composer. */
 function AskUserRecord({ item }: { item: ToolItem }) {
-  const { id: sessionId, asking } = useContext(SessionContext);
+  const { id: sessionId, asking, preview } = useContext(SessionContext);
   const [open, setOpen] = useDisclosed(`${sessionId}:tool:${item.id}`, false);
   const asked = Array.isArray(item.args.questions) ? (item.args.questions as Question[]) : [];
   const waiting = item.result === undefined && asking !== "" && asking === questionsKey(asked);
-  return <AskRecord item={item} waiting={waiting} open={open} onToggle={() => setOpen((o) => !o)} />;
+  return <AskRecord item={item} waiting={waiting} open={open} onToggle={() => setOpen((o) => !o)} sessionId={sessionId} onOpen={preview} />;
 }
 
 function ToolRow({ item, nested }: { item: ToolItem; nested?: boolean }) {

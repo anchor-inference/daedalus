@@ -1023,7 +1023,7 @@ export type MessageView = {
   text: string;
   thinking: string;
   tool_calls: { id: string; name: string; arguments: Record<string, unknown> }[];
-  tool_results: { id: string; content: string; is_error: boolean; length?: number | null; clipped?: boolean; sources?: { url: string; title?: string; snippet?: string; image?: string }[]; images?: ToolImage[] }[];
+  tool_results: { id: string; content: string; is_error: boolean; length?: number | null; clipped?: boolean; sources?: { url: string; title?: string; snippet?: string; image?: string }[]; images?: ToolImage[]; /** The files the operator's reply to a question carried, drawn with the answer. */ attachments?: MessageAttachment[] }[];
   created_at: string;
 };
 

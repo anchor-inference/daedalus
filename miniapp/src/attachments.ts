@@ -34,10 +34,12 @@ export function attachmentKind(item: Pick<MessageAttachment, "name" | "mime">): 
 }
 
 /** Where a file's bytes are served, in the shape the preview, the viewer and a download link take: a
- *  kept file by its id, an inbox file by its name there under the session's attachment route. */
-export function attachmentSource(sessionId: string, item: MessageAttachment): { base: string; path: string } {
-  if (item.kept) return { base: keptBase(item.kept), path: item.name };
-  return { base: `${sessionBase(sessionId)}/attachments`, path: item.file || item.name };
+ *  kept file by its id, an inbox file by its name there under the session's attachment route. The
+ *  type rides along, so a picture named without an extension still opens as a picture. */
+export function attachmentSource(sessionId: string, item: MessageAttachment): { base: string; path: string; mime?: string } {
+  const mime = item.mime ? { mime: item.mime } : {};
+  if (item.kept) return { base: keptBase(item.kept), path: item.name, ...mime };
+  return { base: `${sessionBase(sessionId)}/attachments`, path: item.file || item.name, ...mime };
 }
 
 /** The message's pictures first, in the order sent, then its other files: the row of thumbnails sits above the cards. */

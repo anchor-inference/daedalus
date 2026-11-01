@@ -10,7 +10,7 @@ import { MessageAttachments } from "./attachcards";
 import { attachmentKind, attachmentSource, splitAttachments } from "./attachments";
 import { setLang } from "./i18n";
 import { withoutAttachedList } from "./keptfiles";
-import { conversationMedia } from "./mediaroute";
+import { conversationMedia, viewerKind, viewerTarget } from "./mediaroute";
 import type { PreviewSource } from "./preview";
 import type { Turn } from "./turns";
 
@@ -36,8 +36,9 @@ describe("what kind of file an attachment is", () => {
   });
 
   it("is served from the session's attachments by inbox name, or by handle when kept", () => {
-    expect(attachmentSource("s1", ITEMS[0])).toEqual({ base: "/api/sessions/s1/attachments", path: GUID });
-    expect(attachmentSource("s1", ITEMS[3])).toEqual({ base: "/api/files/0123456789ab", path: "bundle.zip" });
+    expect(attachmentSource("s1", ITEMS[0])).toEqual({ base: "/api/sessions/s1/attachments", path: GUID, mime: "image/png" });
+    expect(attachmentSource("s1", ITEMS[3])).toEqual({ base: "/api/files/0123456789ab", path: "bundle.zip", mime: "application/zip" });
+    expect(attachmentSource("s1", { name: "x", file: "x" })).toEqual({ base: "/api/sessions/s1/attachments", path: "x" });
     const { images, files } = splitAttachments(ITEMS);
     expect(images.map((item) => item.name)).toEqual([GUID]);
     expect(files.map((item) => item.name)).toEqual(["Отчёт за квартал.pdf", "contract v2.docx", "bundle.zip"]);
@@ -111,8 +112,8 @@ describe("the attachments above a message", () => {
     await act(async () => thumbs[0].click());
     await act(async () => cards[0].click());
     expect(opened).toEqual([
-      { base: "/api/sessions/s1/attachments", path: GUID },
-      { base: "/api/sessions/s1/attachments", path: "Отчёт за квартал.pdf" },
+      { base: "/api/sessions/s1/attachments", path: GUID, mime: "image/png" },
+      { base: "/api/sessions/s1/attachments", path: "Отчёт за квартал.pdf", mime: "application/pdf" },
     ]);
     // A zip is nothing the app shows: it is downloaded, by handle.
     await act(async () => cards[2].click());
@@ -135,6 +136,26 @@ describe("the attachments above a message", () => {
 describe("the viewer's list", () => {
   it("opens the conversation with the operator's own pictures", () => {
     const turn = { key: "t", user: { role: "user", text: "", thinking: "", tool_calls: [], tool_results: [], created_at: "", attachments: ITEMS }, activity: [] } as unknown as Turn;
-    expect(conversationMedia([turn], "s1", "/work", [])).toEqual([{ base: "/api/sessions/s1/attachments", path: GUID }]);
+    expect(conversationMedia([turn], "s1", "/work", [])).toEqual([{ base: "/api/sessions/s1/attachments", path: GUID, mime: "image/png" }]);
+  });
+
+  it("takes a picture by its type when its name has no extension", () => {
+    // A pasted picture named "clipboard" got a thumbnail from its type, and a press on it opened the
+    // panel, because where it went was decided by the name alone.
+    const pasted: MessageAttachment = { name: "clipboard", mime: "image/png", size: 9, file: "clipboard" };
+    const src = attachmentSource("s1", pasted);
+    expect(viewerTarget(src, false)).toEqual({ base: "/api/sessions/s1/attachments", path: "clipboard", mime: "image/png" });
+    expect(viewerKind("clipboard", "video/webm")).toBe("video");
+    expect(viewerKind("clipboard")).toBeNull();
+    // A full panel keeps the file, whatever it is.
+    expect(viewerTarget(src, true)).toBeNull();
+    const turn = { key: "t", user: { role: "user", text: "", thinking: "", tool_calls: [], tool_results: [], created_at: "", attachments: [pasted] }, activity: [] } as unknown as Turn;
+    expect(conversationMedia([turn], "s1", "/work", [])).toEqual([src]);
+  });
+
+  it("pages through the pictures sent with a reply to a question, where the reply sits", () => {
+    const reply = { kind: "tool", id: "ask1", name: "AskUser", args: {}, result: "{}", running: false, attachments: [{ name: "layout", mime: "image/png", file: "layout" }, ITEMS[1]] };
+    const turn = { key: "t", user: { role: "user", text: "", thinking: "", tool_calls: [], tool_results: [], created_at: "", attachments: [ITEMS[0]] }, activity: [reply] } as unknown as Turn;
+    expect(conversationMedia([turn], "s1", "/work", []).map((src) => src.path)).toEqual([GUID, "layout"]);
   });
 });

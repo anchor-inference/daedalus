@@ -19,8 +19,9 @@ import { FileSkeleton } from "./feedback";
 import { createSharedFetch, type Joined } from "./sharedfetch";
 
 /** Where the bytes come from: a file under a session API root, or a File object from the composer.
- * `lines` ("20-40", or a single number) is what an answer cited: the file opens as source with that range marked. */
-export type PreviewSource = { base: string; path: string; lines?: string } | { file: File };
+ * `lines` ("20-40", or a single number) is what an answer cited: the file opens as source with that range marked.
+ * `mime` is the type the host recorded, when it knows one: it says what a file is where its name does not. */
+export type PreviewSource = { base: string; path: string; lines?: string; mime?: string } | { file: File };
 
 export const sessionBase = (sessionId: string) => `/api/sessions/${sessionId}`;
 

@@ -323,7 +323,7 @@ export function FileGallery({ sources, start, onClose, onPanel }: { sources: Hos
     const filename = src.path.split("/").pop() || src.path;
     return {
       key: sourceKey(src),
-      kind: viewerKind(filename) ?? "image",
+      kind: viewerKind(filename, src.mime) ?? "image",
       name: filename,
       filename,
       source: src,

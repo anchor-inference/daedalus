@@ -2309,8 +2309,11 @@ INBOX_PHOTO = "витрина (1).png"
 INBOX_PDF = "Отчёт тестировщика.pdf"
 INBOX_DOCX = "contract v2.docx"
 INBOX_TEXT = "The tester's report: the login form loses the password on a wrong code."
+# A picture named with no extension at all, as some clipboards hand one over: only its type says what it is.
+INBOX_PASTE = "clipboard-paste"
 INBOX_FILES: dict[str, tuple[str, bytes]] = {
     INBOX_SHOT: ("image/png", preview_png("window-login", 480, 320)),
+    INBOX_PASTE: ("image/png", preview_png("layout-sketch", 400, 300)),
     INBOX_PHOTO: ("image/png", preview_png("display-shop", 320, 480)),
     INBOX_PDF: ("application/pdf", tiny_pdf(INBOX_TEXT)),
     INBOX_DOCX: (DOCX_MIME, docx_bytes("Contract, second draft.", "Payment within ten days of the invoice.")),
