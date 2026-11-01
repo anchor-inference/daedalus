@@ -109,7 +109,9 @@ async def test_a_stored_layout_the_app_cannot_read_comes_back_as_a_usable_grid(d
 async def test_the_migration_runs_once_and_again_changes_nothing(db: Database) -> None:
     assert int((await db.fetchone("SELECT version FROM schema_version"))["version"]) == len(MIGRATIONS)
     await db.execute("INSERT INTO terminal_layouts(id, name, data_json, created_at, updated_at) VALUES ('k', 'Kept', '{}', 'a', 'a')")
-    await db.conn.executescript(MIGRATIONS[-1])
+    # Found by what it makes rather than by its place: migrations of other work land beside it.
+    layouts = next(m for m in MIGRATIONS if isinstance(m, str) and "CREATE TABLE IF NOT EXISTS terminal_layouts" in m)
+    await db.conn.executescript(layouts)
     assert (await db.fetchone("SELECT count(*) AS n FROM terminal_layouts"))["n"] == 1
 
 
