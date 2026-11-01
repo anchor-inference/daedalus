@@ -175,6 +175,12 @@ VOICE_PENDING_TTL_SECONDS = 2 * 3600
 VOICE_PENDING_MAX = 50
 SPEECH_MIME_TYPES = {"audio/ogg", "audio/opus", "audio/oga", "audio/wav", "audio/x-wav", "audio/webm"}
 RUN_REACTIONS = {"received": "👀", "steered": "✍", "completed": "🔥", "failed": "💔", "cancelled": "🫡", "awaiting": "🤔", "interrupted": "😴", "busy": "🤝"}
+HANDED_BACK_REASONS = {
+    "stop": "the run was stopped before the agent read it",
+    "revert": "the conversation was rewound past it",
+    "clear": "the history was cleared before the agent read it",
+}
+"""Why a waiting message came back unsent, by the cause the host names (see ``handback_hooks``)."""
 TOPIC_STATUS_PREFIX = {"running": "🟢", "awaiting": "🔴", "completed": "🏁", "failed": "💥", "cancelled": "⏹", "interrupted": "⏸", "compacting": "🗜"}
 """Telegram silently drops some emoji from the start of a topic name (✅ ❓ ✔️ ☑️ were measured to
 vanish, and a repeat rename then fails with TOPIC_NOT_MODIFIED); every prefix here was verified to survive."""
@@ -538,6 +544,7 @@ class TelegramFront:
         manager.on_finished(self._on_finished)
         manager.on_pending_restored(self._on_pending_restored)
         manager.compaction_hooks.append(self._on_auto_compaction)
+        manager.handback_hooks.append(self._on_handed_back)
         manager.service_hooks.update(
             {
                 "send_file": self._service_send_file,
@@ -2189,7 +2196,7 @@ class TelegramFront:
             text = "Files attached." if len(buffer.attachments) > 1 else "File attached."
         was_running = state.running and state.pending is None
         try:
-            await self.manager.submit(state.session.id, text, buffer.attachments, via="telegram")
+            await self.manager.submit(state.session.id, text, buffer.attachments, via="telegram", address={"chat_id": key[0], "thread_id": key[1]})
         except NoModelConfigured as exc:
             # Not a failure: the installation has not been finished yet. Say so, without a stack trace.
             outbox = await self.outbox_for_session(state.session.id)
@@ -2589,6 +2596,32 @@ class TelegramFront:
             )
         except Exception:  # noqa: BLE001
             logger.warning("compaction notice failed", exc_info=True)
+
+    async def _on_handed_back(self, session_id: str, messages: list[dict[str, Any]], cause: str) -> None:
+        """Give the operator back, in the chat or topic they wrote it in, a message that was never sent.
+
+        A stop, a revert or a clear withdraws what was waiting for the model; the app's composer takes
+        the words back, but a message typed here only ever reached the open app windows, and its
+        sender saw nothing. It goes back as a short message whose words are a block Telegram copies
+        with one tap; it is never queued again, since the operator chose to stop or to undo.
+        """
+        why = HANDED_BACK_REASONS.get(cause, HANDED_BACK_REASONS["stop"])
+        for message in messages:
+            address = message.get("address") or {}
+            chat_id = address.get("chat_id")
+            if message.get("via") != "telegram" or not isinstance(chat_id, int):
+                continue
+            words = str(message.get("text") or "")
+            files = [str(name) for name in message.get("files") or []]
+            parts = [f"<p>↩️ <b>Not sent</b>: {why}. Copy it to send again.</p>"]
+            if words:
+                parts.append(f"<pre>{html.escape(words)}</pre>")
+            if files:
+                parts.append("<p>Attach again: " + ", ".join(f"<code>{html.escape(name)}</code>" for name in files) + "</p>")
+            try:
+                await self.outbox_to(chat_id, int(address.get("thread_id") or 0) or None).send_html("".join(parts))
+            except Exception:  # noqa: BLE001 — the app's composer still has the words
+                logger.warning("could not give back an unsent message of session %s", session_id, exc_info=True)
 
     async def _on_finished(self, session_id: str, run_id: str, status: str) -> None:
         self.set_topic_status(session_id, status)

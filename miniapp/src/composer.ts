@@ -195,8 +195,9 @@ export function clearSendIntent(sessionId: string, storage: StorageLike | null =
 export type QueuedMessage = { id: string; kind: "steer" | "follow_up"; text: string; queued_at: string | null; files: string[] };
 
 /** What the stream says about the queue; the whole queue rides in every event. `withdrawn` names the
- *  messages some device took back; `returned` carries whole the messages a stop handed back unsent. */
-export type QueueChange = { reason?: string; count?: number; queued?: unknown; withdrawn?: unknown; returned?: unknown };
+ *  messages some device took back; `returned` carries whole the messages handed back unsent, and
+ *  `cause` says what handed them back: a stop, a revert or a clear. */
+export type QueueChange = { reason?: string; count?: number; queued?: unknown; withdrawn?: unknown; returned?: unknown; cause?: unknown };
 
 /** A message the host gave back instead of sending: a stop returned it, or the operator took it back to
  *  edit. The words as typed, and the names of files, which cannot travel back into the field. */
@@ -221,6 +222,14 @@ export function readReturned(raw: unknown): ReturnedMessage[] {
 export function settledIds(payload: QueueChange): string[] {
   const withdrawn = Array.isArray(payload.withdrawn) ? payload.withdrawn.filter((id): id is string => typeof id === "string" && id !== "") : [];
   return [...withdrawn, ...readReturned(payload.returned).map((m) => m.id)];
+}
+
+/** The toast that says why the words came back into the field. A revert or a clear hands back what was
+ *  waiting just as a stop does, and saying "the run was stopped" about either would be untrue; an
+ *  unknown cause reads as a stop, the one the host has always named. */
+export function returnedNoticeKey(cause: unknown, withFiles: boolean): string {
+  const base = cause === "revert" ? "composer.steer.returned.revert" : cause === "clear" ? "composer.steer.returned.clear" : "composer.steer.returned";
+  return withFiles ? `${base}.files` : base;
 }
 
 /** The words handed back as one draft, in the order they were written, a blank line between them. */
