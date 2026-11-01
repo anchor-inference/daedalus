@@ -186,6 +186,12 @@ class TerminalStub:
         # snapshot is still being parsed when the confirmation lands is left to xterm.js's timing,
         # which is why the exact order is pinned by `connection.test.ts` as well.
         self.snapshot_delay = 0.0
+        # The workspace's side panel: the named layouts kept on the host (``/api/terminals/layouts``),
+        # and per terminal the changed files of its folder and each file's diff. A terminal with no
+        # entry answers an unchanged repository; a check fills these to draw a busy one.
+        self.layouts: list[dict[str, Any]] = []
+        self.files: dict[str, dict[str, Any]] = {}
+        self.diffs: dict[tuple[str, str], str] = {}
 
     # -- the terminals ------------------------------------------------------------------------
 
@@ -462,6 +468,8 @@ class TerminalStub:
                     **({"cwd": body["cwd"]} if body.get("cwd") else {}),
                 )
                 return 201, {**term.view(), **({"sandbox_skipped": self.skipped} if boxed else {})}
+        if len(segments) >= 3 and segments[2] == "layouts":
+            return self.layout_answer(method, segments[3] if len(segments) > 3 else None, body or {})
         if len(segments) == 3 and segments[2] == "load" and method == "GET":
             return 200, {**self.load, "cap": self.cap, "running": self.running()}
         term = self.terms.get(segments[2]) if len(segments) >= 3 else None
@@ -485,6 +493,16 @@ class TerminalStub:
                 return 501, {"detail": "its commands are not recorded (it is not a shell started with its integration)"}
             last = max(1, min(500, int(query.get("last", ["20"])[0] or 20)))
             return 200, {"commands": self.command_records(term, last, query.get("output", ["0"])[0] in ("1", "true"))}
+        if action == "files" and method == "GET":
+            if len(segments) == 5 and segments[4] == "diff":
+                path = query.get("path", [""])[0]
+                if not path or path.startswith("/") or ".." in path.split("/"):
+                    return 400, {"detail": "a file of the repository, as a path relative to its top folder"}
+                listed = next((f for f in self.files.get(term.id, {}).get("files", []) if f["path"] == path), None)
+                diff = self.diffs.get((term.id, path), f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n@@ -1,2 +1,2 @@\n first\n-old\n+new\n")
+                return 200, {"source": "shell", "path": path, "diff": diff, "truncated": False, "untracked": bool(listed and listed["status"] == "?"), "reason": "", "detail": ""}
+            answer = {"source": "staff" if term.owner_kind == "staff" else "shell", "root": term.cwd, "branch": "main", "base": "HEAD", "files": [], "truncated": False, "reason": "", "detail": ""}
+            return 200, {**answer, **self.files.get(term.id, {})}
         if action == "keyboard" and method == "POST":
             self.hold_keyboard(term.id, str((body or {}).get("owner") or "auto"))
             return 200, {"owner": term.keyboard, "until": None}
@@ -501,6 +519,44 @@ class TerminalStub:
                 self.exit(term.id, 129)
             fresh = self.add(f"rst{self.counter:09d}"[:12], env=term.env, title=term.title, cwd=term.cwd, owner_id=term.owner_id, sandbox=boxed)
             return 200, {**fresh.view(), **({"sandbox_skipped": self.skipped} if boxed else {})}
+        return 404, {"detail": "no such route"}
+
+    def layout_answer(self, method: str, layout_id: str | None, body: dict[str, Any]) -> tuple[int, Any]:
+        """The named layouts as the host keeps them: a name saved again replaces that layout, a
+        rename onto another's name is refused, and what reopening a terminal takes is the stub's own
+        record of it."""
+        if layout_id is None and method == "GET":
+            return 200, {"layouts": sorted(self.layouts, key=lambda row: row["updated_at"], reverse=True)}
+        if layout_id is None and method == "POST":
+            name = " ".join(str(body.get("name") or "").split())
+            if not name:
+                return 400, {"detail": "a layout needs a name"}
+            given = body.get("workspace") or {}
+            panes = (list(given.get("panes") or []) + [None] * 4)[:4]
+            workspace = {"layout": given.get("layout", 1), "panes": panes, "col": given.get("col", 0.5), "row": given.get("row", 0.5), "active": given.get("active", 0)}
+            terminals = {tid: {"env": t.env, "cwd": t.cwd, "title": t.title, "project_id": t.project_id, "owner_kind": t.owner_kind, "owner_id": t.owner_id or None, "profile": "shell", "sandbox": t.sandbox}
+                         for tid in panes if tid and (t := self.terms.get(tid))}
+            self.counter += 1
+            stamp = f"2026-11-01T12:{self.counter:02d}:00Z"
+            found = next((row for row in self.layouts if row["name"] == name), None)
+            if found is not None:
+                found.update(workspace=workspace, terminals=terminals, updated_at=stamp)
+                return 201, found
+            row = {"id": f"lay{self.counter:05d}", "name": name, "workspace": workspace, "terminals": terminals, "created_at": stamp, "updated_at": stamp}
+            self.layouts.append(row)
+            return 201, row
+        found = next((row for row in self.layouts if row["id"] == layout_id), None)
+        if found is None:
+            return 404, {"detail": "no such layout"}
+        if method == "PATCH":
+            name = " ".join(str(body.get("name") or "").split())
+            if any(row["name"] == name and row is not found for row in self.layouts):
+                return 409, {"detail": f"a layout named {name!r} already exists"}
+            found["name"] = name
+            return 200, found
+        if method == "DELETE":
+            self.layouts.remove(found)
+            return 200, {"ok": True}
         return 404, {"detail": "no such route"}
 
     def install(self, page: Any) -> None:

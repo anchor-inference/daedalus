@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 import shutil
+import subprocess
 import tempfile
 from collections.abc import AsyncIterator, Iterable
 from pathlib import Path
@@ -20,7 +23,7 @@ from daedalus.host.session_runner import SessionManager
 from daedalus.stores.database import Database
 from daedalus.stores.projects import FolderSpec
 from daedalus.terminals import endpoint
-from daedalus.terminals.model import Owner
+from daedalus.terminals.model import ExecResult, Owner
 from daedalus.terminals.owners import ManagerOwners
 from daedalus.terminals.service import Terminals
 from tests.support.fake_ptyd import FakePtyd
@@ -291,3 +294,91 @@ async def test_the_doctor_reports_each_environment(terminal_settings: Settings, 
     assert by_name["terminals (container)"].ok
     host = by_name["terminals (host)"]
     assert not host.ok and host.severity == "info" and host.message.startswith("not installed") and "setup.sh" in host.fix_hint
+
+
+# ── the side panel: named layouts and a terminal's changed files ───────────────────────────
+
+
+async def test_the_layout_routes_save_list_rename_and_delete(client: httpx.AsyncClient) -> None:
+    # Before any terminal route: "layouts" must not be read as a terminal's id.
+    assert (await client.get("/api/terminals/layouts", headers=H)).json() == {"layouts": []}
+    made = await client.post("/api/terminals/layouts", json={"name": "Grid", "workspace": {"layout": 2, "panes": ["a1", "b2"], "col": 0.7}}, headers=H)
+    assert made.status_code == 201, made.text
+    layout = made.json()
+    assert layout["name"] == "Grid" and layout["workspace"]["panes"] == ["a1", "b2", None, None] and layout["workspace"]["col"] == 0.7
+    assert [row["id"] for row in (await client.get("/api/terminals/layouts", headers=H)).json()["layouts"]] == [layout["id"]]
+    other = (await client.post("/api/terminals/layouts", json={"name": "Other", "workspace": {}}, headers=H)).json()
+    assert (await client.patch(f"/api/terminals/layouts/{other['id']}", json={"name": "Grid"}, headers=H)).status_code == 409
+    renamed = await client.patch(f"/api/terminals/layouts/{layout['id']}", json={"name": "Review"}, headers=H)
+    assert renamed.status_code == 200 and renamed.json()["name"] == "Review"
+    assert (await client.delete(f"/api/terminals/layouts/{layout['id']}", headers=H)).json() == {"ok": True}
+    assert (await client.delete(f"/api/terminals/layouts/{layout['id']}", headers=H)).status_code == 404
+    assert (await client.post("/api/terminals/layouts", json={"name": "  ", "workspace": {}}, headers=H)).status_code == 400
+    assert (await client.get("/api/terminals/layouts")).status_code == 401
+
+
+def _git_in(repo: Path, *args: str) -> None:
+
+    identity = {"GIT_AUTHOR_NAME": "someone", "GIT_AUTHOR_EMAIL": "someone@example.invalid", "GIT_COMMITTER_NAME": "someone", "GIT_COMMITTER_EMAIL": "someone@example.invalid", "GIT_CONFIG_GLOBAL": os.devnull}
+    subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, env={**os.environ, **identity})
+
+
+def _local_exec(calls: list[tuple[str, list[str]]]) -> Any:
+    """The daemon's exec.run, run here: the fake daemon answers every git call alike."""
+
+    async def run(env: str, argv: list[str], *, max_output: int | None = None, **_: Any) -> ExecResult:
+        calls.append((env, argv))
+        process = await asyncio.create_subprocess_exec(*argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull})
+        out, err = await process.communicate()
+        limit = max_output or len(out)
+        return ExecResult(exit_code=process.returncode or 0, signal="", stdout=out[:limit].decode(), stderr=err.decode(), truncated=len(out) > limit, timed_out=False, duration_ms=1)
+
+    return run
+
+
+async def test_a_terminals_changed_files_and_one_diff_are_read_in_its_folder(client: httpx.AsyncClient, app: Any, manager: SessionManager, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    folder = tmp_path / "shop"
+    folder.mkdir()
+    _git_in(folder, "init", "-q", "-b", "main")
+    (folder / "app.py").write_text("one\n")
+    _git_in(folder, "add", ".")
+    _git_in(folder, "commit", "-qm", "start")
+    (folder / "app.py").write_text("one\ntwo\n")
+    project = await manager.projects.create("Shop", [FolderSpec(str(folder))])
+    view = (await client.post("/api/terminals", json={"env": "container", "owner_kind": "project", "owner_id": project.id}, headers=H)).json()
+    calls: list[tuple[str, list[str]]] = []
+    monkeypatch.setattr(app.extensions["terminals"], "exec_run", _local_exec(calls))
+
+    files = (await client.get(f"/api/terminals/{view['id']}/files", headers=H)).json()
+    assert files["source"] == "shell" and files["branch"] == "main" and files["root"] == str(folder)
+    assert files["files"] == [{"path": "app.py", "status": "M", "added": 1, "removed": 0}]
+    assert all(env == "container" for env, _ in calls), "the folder is read in the terminal's own environment"
+    diff = (await client.get(f"/api/terminals/{view['id']}/files/diff", params={"path": "app.py"}, headers=H)).json()
+    assert "+two" in diff["diff"] and diff["untracked"] is False
+    assert (await client.get(f"/api/terminals/{view['id']}/files/diff", params={"path": "../etc/passwd"}, headers=H)).status_code == 400
+    assert (await client.get("/api/terminals/nosuchterm/files", headers=H)).status_code == 404
+
+
+async def test_a_staff_terminals_files_are_its_worktrees_changes_since_the_sessions_base(client: httpx.AsyncClient, app: Any, manager: SessionManager, db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    folder = tmp_path / "work"
+    worktree = tmp_path / "member"
+    for repo in (folder, worktree):
+        repo.mkdir()
+        _git_in(repo, "init", "-q", "-b", "main")
+        (repo / "base.txt").write_text("base\n")
+        _git_in(repo, "add", ".")
+        _git_in(repo, "commit", "-qm", "start")
+    (worktree / "feature.py").write_text("x = 1\n")
+    _git_in(worktree, "add", ".")
+    _git_in(worktree, "commit", "-qm", "member's work")
+    project = await manager.projects.create("Work", [FolderSpec(str(folder))])
+    view = (await client.post("/api/terminals", json={"env": "container", "owner_kind": "project", "owner_id": project.id}, headers=H)).json()
+    await db.execute("PRAGMA foreign_keys=OFF")
+    try:
+        await db.execute("INSERT INTO staff_sessions(id, staff_id, kind, terminal_id, status_at, started_at, worktree_path, base_ref) VALUES ('ss1', 'st1', 'cli', ?, 'a', 'a', ?, 'HEAD~1')", (view["id"], str(worktree)))
+    finally:
+        await db.execute("PRAGMA foreign_keys=ON")
+    monkeypatch.setattr(app.extensions["terminals"], "exec_run", _local_exec([]))
+    files = (await client.get(f"/api/terminals/{view['id']}/files", headers=H)).json()
+    assert files["source"] == "staff" and files["root"] == str(worktree) and files["base"] == "HEAD~1"
+    assert [f["path"] for f in files["files"]] == ["feature.py"], "a committed file is still the member's work"

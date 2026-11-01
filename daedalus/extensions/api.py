@@ -117,6 +117,7 @@ from daedalus.extensions import (
     api_skill_quality,
     api_staff,
     api_staff_reports,
+    api_terminal_side,
     api_two_factor,
     api_update_drains,
     api_widgets,
@@ -4463,6 +4464,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             created_by="operator",
         )
         return await terminal_service().create(spec, confirm_over_cap=body.confirm)
+
+    # Before the routes of one terminal, which would take "layouts" for a terminal's id.
+    api_terminal_side.register(api, app, auth, terminal_service)
 
     @api.get("/api/terminals/{terminal_id}")
     async def terminals_get(terminal_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

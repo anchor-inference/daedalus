@@ -270,6 +270,44 @@ export const api = {
   renameTerminal: (id: string, title: string) => call<TerminalView>("PATCH", `/api/terminals/${encodeURIComponent(id)}`, { title }),
   /** Forgets an exited or lost terminal; refused (409) while it runs. */
   removeTerminal: (id: string) => call<unknown>("DELETE", `/api/terminals/${encodeURIComponent(id)}`),
+  /** One changed file's unified diff, as `GET /api/terminals/{id}/files` listed it. */
+  terminalFileDiff: (id: string, path: string) =>
+    call<TerminalFileDiff>("GET", `/api/terminals/${encodeURIComponent(id)}/files/diff?path=${encodeURIComponent(path)}`),
+  /** The Terminals workspace's named layouts, kept on the host; the one changed last first. */
+  terminalLayouts: () => call<{ layouts: TerminalLayout[] }>("GET", "/api/terminals/layouts"),
+  /** Saves the workspace under a name; a name already kept is replaced. */
+  saveTerminalLayout: (name: string, workspace: TerminalLayout["workspace"]) => call<TerminalLayout>("POST", "/api/terminals/layouts", { name, workspace }),
+  renameTerminalLayout: (id: string, name: string) => call<TerminalLayout>("PATCH", `/api/terminals/layouts/${encodeURIComponent(id)}`, { name }),
+  deleteTerminalLayout: (id: string) => call<unknown>("DELETE", `/api/terminals/layouts/${encodeURIComponent(id)}`),
+};
+
+/** `GET /api/terminals/{id}/files`: what changed in the terminal's folder. `source` is `staff` for a
+ *  staff member's terminal (its worktree, against the base its session started from) and `shell`
+ *  for any other (the folder its shell is in, against the last commit). `reason` says why nothing is
+ *  listed: `not_git`, `git_failed`, `no_folder`; `detail` is git's own sentence. */
+export type TerminalFiles = {
+  source: "staff" | "shell";
+  root: string;
+  branch: string;
+  base: string;
+  /** `status` is git's letter (A, M, D, T), or "?" for a file git does not track yet. */
+  files: { path: string; status: string; added: number | null; removed: number | null }[];
+  truncated: boolean;
+  reason: "" | "not_git" | "git_failed" | "no_folder";
+  detail: string;
+};
+
+export type TerminalFileDiff = { source: "staff" | "shell"; path: string; diff: string; truncated: boolean; untracked: boolean; reason: string; detail: string };
+
+/** A named layout of the Terminals workspace. `terminals` holds, for each terminal it names that the
+ *  host knew when it was saved, what reopening it takes once it has ended. */
+export type TerminalLayout = {
+  id: string;
+  name: string;
+  workspace: { layout: 1 | 2 | 4; panes: (string | null)[]; col: number; row: number; active: number };
+  terminals: Record<string, { env: TerminalEnvName; cwd: string; title: string; project_id: string | null; owner_kind: TerminalView["owner"]["kind"]; owner_id: string | null; profile: string; sandbox: boolean }>;
+  created_at: string;
+  updated_at: string;
 };
 
 /** One command a shell reported. Rows are absolute; a running command has no `end_row` yet. */
