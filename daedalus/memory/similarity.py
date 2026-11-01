@@ -18,9 +18,9 @@ The comparison here works in tiers, cheapest first:
   budget. Without a model or past the budget a candidate counts as a different fact: a duplicate costs
   a slot, a wrong merge loses a fact.
 
-The embeddings model is being replaced, so the cosine thresholds belong to whichever model is loaded
-and the judge takes the vectors as a plain callable; with none, the lexical shortlist and the model
-call do the work alone.
+The judge takes the vectors as a plain callable; with none, the lexical shortlist and the model call do
+the work alone. The cosine thresholds, though, belong to one model (:data:`CALIBRATED_FOR`): every
+model spreads its scores differently, and a line drawn for one is meaningless on the next.
 """
 
 from __future__ import annotations
@@ -55,8 +55,32 @@ SHORTLIST_SIZE = 4
 """Candidates per note put to the model."""
 OTHER_SCRIPT_SIZE = 6
 """Notes of the other script put to the model for a note on the operator's own pages."""
-COSINE_SURE = 0.92
-COSINE_MAYBE = 0.8
+CALIBRATED_FOR = "rubert-mini-frida"
+"""The embeddings model the cosine thresholds here and in :mod:`daedalus.memory.curator` were measured
+on. A test holds it equal to the model the search service loads, so replacing the model fails the
+suite until someone measures again. The first thresholds were drawn for multilingual E5 small and
+outlived the switch to this model; on its scores they kept a third of the restatements from the judge
+whenever the index was ready, and those were written again."""
+COSINE_SURE = 0.9
+"""The cosine at which a note is the same fact without asking the model. Measured on the live memory
+(129 pairs the tidy-up merged or folded, against 86,000 pairs of notes it kept apart): no pair of
+distinct notes scored above 0.83, and the ones near it were the same fact with a changed value or a
+shade of meaning ("almost never leaves home" against "never leaves home"), as were invented neighbours
+(a mother and a father living in one city 0.83, "always" and "never answer in Russian" 0.83). From 0.88
+up every merged pair read as the same fact; 0.9 decides a third of them without a call and keeps a
+margin over the nearest distinct pair. The cosine cannot read a negation: a real note with one "not"
+added or one "can" turned to "cannot" scores 0.89 to 1.0, median 0.99, so no line separates the two.
+The lexical tier above has the same blind spot for a one-word change. A note reversed in new words
+scores 0.57 to 0.83, below this line and inside the model's shortlist, which is where it belongs: a
+lower line to save calls would start merging those. E5 needed 0.92 because all of its scores sat
+between 0.75 and 0.95."""
+COSINE_MAYBE = 0.55
+"""The cosine from which a note is a candidate put to the model (the best :data:`SHORTLIST_SIZE` of
+them). With a model ready this list replaces the lexical one, so it decides what the judge ever sees.
+Measured as above: 91 % of the merged pairs had their twin among the top four at or above 0.55, the
+same share as at 0.5, at half the load (0.6 candidates per note with no twin, against 1.1); of the
+151 held suggestions the tidy-up closed as repeats, 95 % reach the model. The E5 value 0.8 let 62 %
+of the twins and 65 % of the repeats through."""
 BATCH_ITEMS = 16
 BATCH_CHARS = 18_000
 CANDIDATE_CHARS = 300

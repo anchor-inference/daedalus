@@ -63,8 +63,21 @@ memory does not hold the encoder away from the conversation index for minutes.""
 
 DUPLICATE_SURE = 0.85
 DUPLICATE_MAYBE = 0.6
-COSINE_SURE = 0.96
-COSINE_MAYBE = 0.9
+COSINE_SURE = 0.92
+"""The cosine at which two records in one scope are merged without asking (when ``memory.auto_merge``
+is on). One step stricter than the judge's own line (:data:`daedalus.memory.similarity.COSINE_SURE`,
+which explains the measurement and the model it belongs to): this pass compares every pair of the
+newest records across entries, about 86,000 pairs on the live memory against a judge's few per note,
+and it keeps the longer text without a model reading the two. On the memory as it was before the
+2026-10-27 tidy-up it would have merged 27 pairs at this line, every one of which read as the same
+fact; no pair of distinct records scores above 0.83. It must never be below the judge's line, or the
+pass would merge what the judge thinks worth asking about. E5 needed 0.96."""
+COSINE_MAYBE = 0.8
+"""The cosine from which a pair is offered as a suggestion. On the copy before the tidy-up, 42 pairs
+fell between this and the sure line and all but about five were the same fact or the same fact with a
+value changed; below 0.8 related records begin to outnumber the duplicates (two notes about one
+project, a rule and its exception), which is the operator's time spent saying "keep both". On memory
+as it is now the line finds two pairs, both worth a look. E5 needed 0.9."""
 CONTRADICTION_WORDS = 0.75
 """Share of the non-value words two records must have in common to be read as one statement with
 different values; below it two records with different numbers are simply about different things."""
