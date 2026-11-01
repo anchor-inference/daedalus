@@ -816,6 +816,10 @@ class ToolsConfig(BaseModel):
     exec: ExecToolsConfig = Field(default_factory=ExecToolsConfig)
     results: ResultToolsConfig = Field(default_factory=ResultToolsConfig)
     jobs: JobsToolsConfig = Field(default_factory=JobsToolsConfig)
+    nested_rules: bool = True
+    """Show the ``AGENTS.md`` (and ``CLAUDE.md``) of a folder below the workspace root at the head of the
+    first file tool result in a run that reaches into it (``daedalus.host.nested_rules``). Off, only the
+    root's files are read, at the start of each run."""
     groups: dict[str, ToolGroupConfig] = Field(default_factory=dict)
     """Only the groups the operator changed; the rest keep the default their declaration carries
     (``daedalus.tools.TOOL_GROUPS``), so a better default reaches every installation that never chose."""

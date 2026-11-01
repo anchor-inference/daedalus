@@ -376,6 +376,10 @@ class LocalFS:
     async def listdir(self, path: Path) -> list[str]:
         return sorted(os.listdir(path))
 
+    async def existing_files(self, paths: list[Path]) -> set[Path]:
+        """Which of ``paths`` are regular files, asked in one go."""
+        return await asyncio.to_thread(lambda: {path for path in paths if path.is_file()})
+
     async def find(self, root: Path, pattern: str, limit: int) -> list[str]:
         matches: list[str] = []
         for dirpath, dirnames, filenames in os.walk(root):
@@ -638,6 +642,15 @@ class ShellFS:
     async def listdir(self, path: Path) -> list[str]:
         outcome = await self._run(f"ls -1A {shlex.quote(str(path))}")
         return sorted(line for line in outcome.output.splitlines() if line)
+
+    async def existing_files(self, paths: list[Path]) -> set[Path]:
+        """Which of ``paths`` are regular files, in one command rather than a round trip each."""
+        if not paths:
+            return set()
+        quoted = " ".join(shlex.quote(str(path)) for path in paths)
+        outcome = await self._run(f"for f in {quoted}; do [ -f \"$f\" ] && printf '%s\\n' \"$f\"; done; true")
+        named = {str(path): path for path in paths}
+        return {named[line] for line in outcome.output.splitlines() if line in named}
 
     async def find(self, root: Path, pattern: str, limit: int) -> list[str]:
         prune = " -o ".join(f"-name {shlex.quote(d)}" for d in (".git", "node_modules", ".venv", "__pycache__"))
