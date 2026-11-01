@@ -14,6 +14,7 @@ import base64
 import fnmatch
 import os
 import re
+import secrets
 import shlex
 import stat
 from collections.abc import Callable, Iterable, Iterator
@@ -235,14 +236,95 @@ def read_window_local(path: Path, *, start: int, max_lines: int, max_chars: int,
     return TextWindow(lines=shown, start=start, more=more, size=size, total_lines=total, cut=cut)
 
 
-def write_untranslated(path: Path, content: str) -> None:
-    """Write ``content`` exactly, creating the parent folders.
+def _write_in_place(path: Path, data: bytes) -> None:
+    with open(path, "wb") as handle:
+        handle.write(data)
 
-    ``newline=""`` stops Python translating ``\\n``: on native Windows every LF file came back CRLF
-    after a single edit, the mirror of the read side losing CRLF on Linux.
+
+def write_atomically(path: Path, data: bytes) -> None:
+    """Replace the file at ``path`` with ``data`` so a failure part way leaves the old content whole.
+
+    Writing in place truncated the file first: a full disk or a process killed during an Edit of a
+    large file left it empty or cut, and the agent's next Read saw the damage as the file. The bytes
+    now go to a temporary file beside it, which is flushed to disk and renamed over the target; until
+    the rename the target is untouched, and on any failure the temporary file is removed.
+
+    The new file keeps the old one's mode and, where this process may set it, its owner and group.
+    Where it may not (a file of another user this one can still write), or the folder will not take
+    a new file, or the file has other hard links that a rename would part from it, it is written in
+    place as before: keeping who owns a file and which names share it matters more than atomicity.
+    A link is written through to its target, so the link stays a link. Anything else at the path (a
+    pipe, a device) is refused: writing to a pipe waits for a reader that may never come.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8", newline="")
+    target = Path(os.path.realpath(path)) if path.is_symlink() else path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        before: os.stat_result | None = os.stat(target)
+    except FileNotFoundError:
+        before = None
+    if before is not None and not stat.S_ISREG(before.st_mode):
+        raise NotRegularFile(f"{target} is {_kind(before.st_mode)}; only a regular file can be written")
+    if before is not None and before.st_nlink > 1:
+        _write_in_place(target, data)
+        return
+    temporary = target.parent / f".{target.name}.{secrets.token_hex(4)}.tmp"
+    try:
+        # Created with the mode a plain open would give a new file (0666 less the umask), then given
+        # the old file's mode and owner while still empty, so the content is never readable wider
+        # than the file it replaces.
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0), 0o666)
+    except OSError:
+        _write_in_place(target, data)
+        return
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            if before is not None:
+                if hasattr(os, "fchmod"):
+                    os.fchmod(handle.fileno(), stat.S_IMODE(before.st_mode))
+                else:
+                    os.chmod(temporary, stat.S_IMODE(before.st_mode))
+                if hasattr(os, "chown") and (before.st_uid, before.st_gid) != (os.geteuid(), os.getegid()):
+                    try:
+                        os.chown(temporary, before.st_uid, before.st_gid)
+                    except PermissionError:
+                        handle.close()
+                        temporary.unlink(missing_ok=True)
+                        _write_in_place(target, data)
+                        return
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, target)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+    _sync_folder(target.parent)
+
+
+def _sync_folder(folder: Path) -> None:
+    """Flush the folder's entry for the renamed file, so the rename itself survives a power cut. Best
+    effort: Windows cannot open a folder for this, and a failure here is not a failed write."""
+    if os.name != "posix":
+        return
+    try:
+        descriptor = os.open(folder, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
+
+
+def write_untranslated(path: Path, content: str) -> None:
+    """Write ``content`` exactly, creating the parent folders, replacing the file atomically.
+
+    Encoded as is, never through a text-mode file: that translated ``\\n`` on native Windows, and
+    every LF file came back CRLF after a single edit, the mirror of the read side losing CRLF on Linux.
+    """
+    write_atomically(path, content.encode("utf-8"))
 
 
 class LocalFS:
@@ -323,11 +405,40 @@ NOT_REGULAR_MARKER = "__DAEDALUS_NOT_REGULAR__"
 MISSING_MARKER = "__DAEDALUS_MISSING__"
 TOO_LARGE_MARKER = "__DAEDALUS_TOO_LARGE__"
 WINDOW_MARKER = "__DAEDALUS_WINDOW__"
+TEMP_MARKER = "__DAEDALUS_TEMP__"
+DIRECT_MARKER = "__DAEDALUS_DIRECT__"
 WRITE_CHUNK_CHARS = 60_000
 READ_CHUNK_BYTES = 384 * 1024
 """Bytes read per command by :meth:`ShellFS.read_bytes`: their base64 is 512 KiB, under the 640 KiB
 the host terminal daemon carries back in one reply."""
 """Base64 characters per command when writing through a shell: well under the kernel's 128 KiB per-argument cap."""
+
+
+def _prepare_write_script(path: Path, token: str) -> str:
+    """The shell that decides where :meth:`ShellFS._write_encoded` puts the bytes.
+
+    It prints a marker line, then the file the pieces go into, then the file that holds them at the
+    end: the temporary file and the target, or the target twice when it is written in place. ``stat``
+    is asked in GNU and busybox form (``-c``) and then in BSD form (``-f``), so a macOS host works too.
+    """
+    quoted = shlex.quote(str(path))
+    return (
+        f"t={quoted}; mkdir -p -- \"$(dirname -- \"$t\")\" || exit 1; "
+        "if [ -L \"$t\" ]; then r=$(readlink -f -- \"$t\" 2>/dev/null) && [ -n \"$r\" ] && t=$r; fi; "
+        f"if [ -e \"$t\" ] && [ ! -f \"$t\" ]; then echo {NOT_REGULAR_MARKER}; exit 4; fi; "
+        f"direct() {{ echo {DIRECT_MARKER}; echo \"$t\"; echo \"$t\"; exit 0; }}; "
+        "if [ -f \"$t\" ]; then links=$(stat -c %h -- \"$t\" 2>/dev/null || stat -f %l -- \"$t\" 2>/dev/null); "
+        "[ \"${links:-1}\" -gt 1 ] && direct; fi; "
+        f"p=\"$(dirname -- \"$t\")/.$(basename -- \"$t\").{token}.tmp\"; "
+        "( set -C; : > \"$p\" ) 2>/dev/null || direct; "
+        "if [ -f \"$t\" ]; then "
+        "mode=$(stat -c %a -- \"$t\" 2>/dev/null || stat -f %Lp -- \"$t\" 2>/dev/null); "
+        "owner=$(stat -c %u:%g -- \"$t\" 2>/dev/null || stat -f %u:%g -- \"$t\" 2>/dev/null); "
+        "[ -n \"$mode\" ] && chmod \"$mode\" \"$p\"; "
+        "if [ -n \"$owner\" ] && [ \"$owner\" != \"$(id -u):$(id -g)\" ]; then chown \"$owner\" \"$p\" 2>/dev/null || { rm -f -- \"$p\"; direct; }; fi; "
+        "fi; "
+        f"echo {TEMP_MARKER}; echo \"$p\"; echo \"$t\""
+    )
 
 
 class ShellFS:
@@ -466,19 +577,47 @@ class ShellFS:
 
         A heredoc would need a delimiter the content cannot contain and always ends its last line; base64
         has neither problem, and splitting the encoded text keeps every command under the kernel's
-        per-argument limit (128 KiB on Linux). The first piece replaces the file, the rest append.
+        per-argument limit (128 KiB on Linux). See :meth:`_write_encoded` for how the file is replaced.
         """
         await self._write_encoded(path, base64.b64encode(content.encode("utf-8")).decode("ascii"))
 
     async def _write_encoded(self, path: Path, encoded: str) -> None:
+        """Write the decoded bytes into a temporary file beside the target, a piece per command, then
+        rename it over the target.
+
+        The pieces used to go straight into the target, the first with ``>`` and the rest with ``>>``,
+        so a connection that dropped part way left the file cut, and a full disk left it empty. Now the
+        target is untouched until the last piece is in, and the temporary file is removed on failure.
+        The first command picks where the bytes go: the temporary file when it can be made and given the
+        old file's mode and owner, the target itself, as before, when it cannot or the file has other
+        hard links (the same reasons :func:`write_atomically` gives). A link is written through.
+        """
         pieces = [encoded[i : i + WRITE_CHUNK_CHARS] for i in range(0, len(encoded), WRITE_CHUNK_CHARS)] or [""]
-        target = shlex.quote(str(path))
-        for index, piece in enumerate(pieces):
-            lead = f"mkdir -p {shlex.quote(str(path.parent))} && " if index == 0 else ""
-            redirect = ">" if index == 0 else ">>"
-            outcome = await self._run(f"{lead}printf %s {shlex.quote(piece)} | base64 -d {redirect} {target}")
-            if outcome.exit_code != 0:
-                raise OSError(outcome.output.strip() or f"could not write {path}")
+        prepared = await self._run(_prepare_write_script(path, secrets.token_hex(4)))
+        lines = prepared.output.splitlines()
+        if prepared.exit_code == 4 and NOT_REGULAR_MARKER in prepared.output:
+            raise NotRegularFile(f"{path} is not a regular file; only a regular file can be written")
+        mode = next((i for i, line in enumerate(lines) if line in (TEMP_MARKER, DIRECT_MARKER)), None)
+        if prepared.exit_code != 0 or mode is None or mode + 2 >= len(lines):
+            raise OSError(prepared.output.strip()[-300:] or f"could not write {path}")
+        direct = lines[mode] == DIRECT_MARKER
+        destination, final = lines[mode + 1], lines[mode + 2]
+        quoted = shlex.quote(destination)
+        try:
+            for index, piece in enumerate(pieces):
+                redirect = ">" if index == 0 else ">>"
+                outcome = await self._run(f"printf %s {shlex.quote(piece)} | base64 -d {redirect} {quoted}")
+                if outcome.exit_code != 0:
+                    raise OSError(outcome.output.strip() or f"could not write {path}")
+            if not direct:
+                # ``sync`` of the one file where it takes a file (GNU, busybox); silenced where it does not.
+                outcome = await self._run(f"sync -- {quoted} 2>/dev/null; mv -f -- {quoted} {shlex.quote(final)}")
+                if outcome.exit_code != 0:
+                    raise OSError(outcome.output.strip() or f"could not write {path}")
+        except BaseException:
+            if not direct:
+                await asyncio.shield(self._run(f"rm -f -- {quoted}"))
+            raise
 
     async def exists(self, path: Path) -> bool:
         return (await self._run(f"test -e {shlex.quote(str(path))}")).exit_code == 0
