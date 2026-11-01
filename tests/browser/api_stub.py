@@ -604,6 +604,9 @@ GATES: dict[str, object] = {
         "terminals": [],
         "capacity": {"running": 0, "cap": 20, "queued": 0},
     },
+    # The Terminals workspace's named layouts, kept on the host: none yet. `TerminalStub` keeps its
+    # own, saved and restored, for the checks that drive the side panel.
+    "/api/terminals/layouts": {"layouts": []},
     # The Health screen: the doctor's list, and the integration card with one row of each kind.
     # check_health.py answers both itself, with failing rows; these are a quiet installation's.
     "/api/doctor": {"checks": [{"name": "default model", "ok": True, "message": "main = DeepSeek V4", "severity": "ok", "fix_hint": "", "fixable": False, "fixed": False}],

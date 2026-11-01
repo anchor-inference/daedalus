@@ -23,6 +23,8 @@ import { instanceFor, setTerminalEnvs, terminals } from "../terminal/terminals";
 import { PhoneTerminal } from "../terminal/mobile";
 import { TerminalStatusLine } from "../terminal/statusline";
 import { paneTitle, StateDot, TerminalWorkspace, type WorkspaceSlots } from "../terminal/workspace";
+import { TerminalSidePanel } from "../terminal/sidepanel";
+import { readSide, saveSide, type SidePrefs } from "../terminal/sidestate";
 import { activeId, close, focus, fromAddress, loadWorkspace, place, replace, saveView, saveWorkspace, toAddress, type Workspace } from "../terminal/workspacestate";
 import { StaffPhoneTerminal } from "../project/phone";
 import { NewTerminalSheet } from "./Terminals";
@@ -101,6 +103,11 @@ export function TerminalWorkspaceScreen({ detail, query, toast, project, project
     }
   }, [ws.panes, states, byId, list.data, update]);
 
+
+  // The side panel's open state, width and tab, remembered on this device. A desktop draws it; the
+  // phone shows one pane at a time and has nothing beside it.
+  const [side, setSide] = useState<SidePrefs>(() => readSide());
+  useEffect(() => saveSide(side), [side]);
 
   const [creating, setCreating] = useState(false);
   const lens = projects.find((p) => p.id === project) ?? null;
@@ -215,7 +222,13 @@ export function TerminalWorkspaceScreen({ detail, query, toast, project, project
         onNew={() => setCreating(true)}
         onOverview={overview}
         toast={toast}
-        slots={slots}
+        slots={{
+          ...slots,
+          panel: { open: side.open, onToggle: () => setSide((p) => ({ ...p, open: !p.open })) },
+          side: side.open ? (
+            <TerminalSidePanel ws={ws} update={update} rows={rows} states={states} prefs={side} onPrefs={setSide} onOpen={open} onFocusRequest={requestFocus} toast={toast} />
+          ) : undefined,
+        }}
       />
       {sheet}
     </>

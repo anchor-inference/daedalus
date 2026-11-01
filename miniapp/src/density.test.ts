@@ -41,6 +41,7 @@ import sidePanel from "./sidepanel/sidepanel.css?raw";
 import computer from "./computer.css?raw";
 import schedules from "./schedules/schedules.css?raw";
 import terminals from "./terminal/workspace.css?raw";
+import terminalSide from "./terminal/sidepanel.css?raw";
 // The browser's phone sheet, the session import, the agent's question card, the desktop's Quick
 // Chat, the widgets in an answer, the annotated snapshot, the Computer control's scope picker and the
 // Terminals page keep their looks beside their components; they answer to the same scale.
@@ -477,6 +478,23 @@ describe("rows and controls", () => {
     const declared = all.find((r) => r.selector === ":root" && !r.media)!.body;
     for (const kind of ["context", "cache", "wait", "output", "path", "branch", "bad"]) expect(declared).toMatch(new RegExp(`--data-${kind}: var\\(--`));
     expect(terminals).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+  });
+
+  it("give the Terminals side panel the workspace's rows and the same scale", () => {
+    // The panel sits beside four panes and lists files, commands and terminals: its tab bar is a row
+    // like the workspace's bar, every list row a dense row, its pills dense chips. It is read on its
+    // own here so the rules above hold for it too, and like the workspace it names no colour.
+    const side = rules(terminalSide);
+    expect(oversizeFonts(side)).toEqual([]);
+    expect(numericFonts(side)).toEqual([]);
+    expect(oversizeBoxes(side)).toEqual([]);
+    const sideDecl = (selector: string) => side.filter((r) => r.selector === selector).map((r) => r.body).join(";");
+    expect(sideDecl(".tside-head")).toContain("height: var(--row-h)");
+    expect(sideDecl(".tside-tab")).toContain("height: var(--ctl-h-sm)");
+    for (const row of [".tside-file", ".tside-act-row", ".tside-pane"]) expect(sideDecl(row)).toContain("height: var(--row-h-dense)");
+    expect(sideDecl(".tside-term-open")).toContain("height: var(--row-h)");
+    expect(sideDecl(".tside-pill")).toContain("height: var(--chip-h-dense)");
+    expect(terminalSide).not.toMatch(/#[0-9a-f]{3,8}\b/i);
   });
 
   it("give a phone's terminal and project the thumb's sizes from the tokens, and the visible height", () => {

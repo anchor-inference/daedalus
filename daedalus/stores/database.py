@@ -3221,6 +3221,23 @@ async def _usage_speed(conn: aiosqlite.Connection) -> None:
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _usage_speed))
 
+# The Terminals workspace's named layouts, kept on the host so that a layout saved on one device
+# restores on another. ``data_json`` is the workspace as the app stores it (the layout, the terminal
+# in each place, the splitters, the active place) plus, per terminal, what reopening an ended one
+# needs: its environment, folder, owner and program kind, read from ``terminals`` when it was saved.
+# No foreign key to ``terminals``: a layout outlives the terminals it names, and restoring one whose
+# terminal is gone is the case it exists for.
+MIGRATIONS.append("""
+CREATE TABLE IF NOT EXISTS terminal_layouts (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    data_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS terminal_layouts_by_name ON terminal_layouts(name);
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""
