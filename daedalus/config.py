@@ -1545,7 +1545,12 @@ not through a mode, so editing a mode cannot hand a staff member any of them."""
 STAFF_ONLY_TOOLS = ["Report", "AskOrchestrator"]
 """The tools that exist for staff alone; every other session is blocked from them."""
 
-SUBAGENT_BLOCKED_TOOLS = ["Notify", "SettingsChange", "AskUser", "SideQuestion", "DropSideQuestion", "AskPeer", "PeerList", "SubAgent", "SpawnAgent"]
+AGENT_MESH_TOOLS = ["ListAgents", "ReadAgent", "SendToAgent"]
+"""The tools that reach the other agents of a project. A project's staff and its orchestrator have
+them; every other session is blocked from them, having no team to talk to."""
+
+SUBAGENT_BLOCKED_TOOLS = ["Notify", "SettingsChange", "AskUser", "SideQuestion", "DropSideQuestion", "AskPeer", "PeerList", "SubAgent", "SpawnAgent",
+                          *AGENT_MESH_TOOLS]
 """What a subagent may not call, whoever its leader is. Its work reaches the operator through the
 agent that started it, which decides what is worth the operator's attention; a subagent that could
 notify on its own would put a dozen workers' progress on the operator's phone, and one that changed
@@ -1596,7 +1601,7 @@ Names that are not registered on this installation yet are simply absent from ev
 is here too: only the orchestrator hires, and an ordinary session would pay for its description on
 every turn."""
 
-ORCHESTRATOR_TOOLS = [*ORCHESTRATOR_ONLY_TOOLS, "Notify", "StaySilent", "HistorySearch", "HistoryExpand", "ChatSearch", "RecentChats", "Recall", "SendFile", "AttachMedia"]
+ORCHESTRATOR_TOOLS = [*ORCHESTRATOR_ONLY_TOOLS, *AGENT_MESH_TOOLS, "Notify", "StaySilent", "HistorySearch", "HistoryExpand", "ChatSearch", "RecentChats", "Recall", "SendFile", "AttachMedia"]
 """Everything an orchestrator may call. It runs the team and never does the work itself: no shell, no
 file writes, no subagents. An allowlist rather than a list of refusals, so a tool added later is not
 an orchestrator's until someone decides it should be.
@@ -3186,6 +3191,7 @@ __all__ = [
     "COMPANION_ONLY_TOOLS",
     "STAFF_BLOCKED_TOOLS",
     "STAFF_ONLY_TOOLS",
+    "AGENT_MESH_TOOLS",
     "SUBAGENT_BLOCKED_TOOLS",
     "SUBAGENT_ONLY_TOOLS",
     "compaction_ratio",

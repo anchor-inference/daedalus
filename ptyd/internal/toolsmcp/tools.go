@@ -14,6 +14,19 @@ import (
 const (
 	reportTool = "Report"
 	askTool    = "AskOrchestrator"
+	listTool   = "ListAgents"
+	readTool   = "ReadAgent"
+	sendTool   = "SendToAgent"
+)
+
+// The agent tools' limits, as the host keeps them too: a wait the host would cut shorter is cut here,
+// so the hold at the listener and the CLI's own timeout are both long enough for it.
+const (
+	defaultReplyWait = 300
+	maxReadLines     = 400
+	// replyMargin is what a waiting send's hold adds to the wait: the host answers when the wait ends,
+	// and its answer needs a moment to come back before the listener gives up on the post.
+	replyMargin = 15 * time.Second
 )
 
 // reportKinds are the states a report may name, as the host's staff service accepts them.
@@ -26,6 +39,13 @@ var reportKinds = []string{"checkpoint", "needs_input", "stuck", "done"}
 const (
 	reportRecorded = "recorded"
 	askExpired     = "Pending: nobody has answered yet. The answer will arrive as a message; carry on with what the brief allows meanwhile, or end your turn and wait for it. Do not ask the same question again."
+)
+
+// The agent tools' fallbacks are errors: nothing is known of a list or a read that did not come back,
+// and a message that may have gone must not be sent again blindly, which is worse than one missing.
+const (
+	agentsSilent = "the team did not answer in time; try again in a moment"
+	sendSilent   = "the team did not answer in time: the message may or may not have gone. Look with ReadAgent or ListAgents before sending it again"
 )
 
 // tool is one tool as tools/list describes it.
@@ -113,7 +133,51 @@ func toolList(askHold time.Duration) []tool {
 				"required": []string{"question"},
 			},
 		},
+		{
+			Name:        listTool,
+			Description: "The agents of your project: who is working, on what, and whether a message can reach each.",
+			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
+		},
+		{
+			Name:        readTool,
+			Description: "Read another agent of your project: its last reply (what 'last', the default) or its terminal (what 'screen'); lines: the last N lines.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"agent": map[string]any{"type": "string", "description": "Its name, as ListAgents shows it."},
+					"what":  map[string]any{"type": "string", "enum": []string{"last", "screen"}},
+					"lines": map[string]any{"type": "integer", "minimum": 1, "maximum": maxReadLines},
+				},
+				"required": []string{"agent"},
+			},
+		},
+		{
+			Name: sendTool,
+			Description: "Message another agent of your project by name. wait_for_reply returns its answer (up to timeout_seconds, at most " +
+				roughly(replyCap(askHold)) + "). Refused into a terminal with no agent, one waiting on a permission or question, and after 5 " +
+				"agent messages in a row. A reply to an agent waiting on you goes straight to it.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"agent":           map[string]any{"type": "string", "description": "Its name, as ListAgents shows it."},
+					"text":            map[string]any{"type": "string"},
+					"wait_for_reply":  map[string]any{"type": "boolean"},
+					"timeout_seconds": map[string]any{"type": "integer", "minimum": 1},
+				},
+				"required": []string{"agent", "text"},
+			},
+		},
 	}
+}
+
+// replyCap is the longest a send may wait for its reply: the question hold, which the launch gives
+// the CLI's own timeout room for, and never more than the host waits.
+func replyCap(askHold time.Duration) time.Duration {
+	limit := time.Duration(600) * time.Second
+	if askHold > 0 && askHold < limit {
+		return askHold
+	}
+	return limit
 }
 
 // roughly says a hold in the words a model reads: "5 minutes", "30 seconds".
@@ -166,7 +230,7 @@ func (teamSet) name() string { return ServerName }
 
 func (teamSet) instructions() string {
 	return "Report tells your project's orchestrator how your task stands; AskOrchestrator asks it " +
-		"something you cannot decide yourself."
+		"something you cannot decide yourself. ListAgents, ReadAgent and SendToAgent reach the other agents of your project."
 }
 
 func (t teamSet) list() []tool { return toolList(t.askHold) }
@@ -184,8 +248,22 @@ func (t teamSet) decode(name string, raw json.RawMessage) (request, error) {
 	}
 	req.source, req.withTool = ingressSource, true
 	req.hold = t.reportHold
-	if req.op == "ask" {
+	switch req.op {
+	case "ask":
 		req.hold = t.askHold
+	case "read_agent":
+		// A screen or a transcript read on the host takes longer than a report's acceptance.
+		req.hold = max(t.reportHold, 30*time.Second)
+	case "send_to_agent":
+		req.hold = max(t.reportHold, 30*time.Second)
+		if wait, _ := req.fields["wait_for_reply"].(bool); wait {
+			seconds := req.fields["timeout_s"].(int)
+			if limit := int(replyCap(t.askHold) / time.Second); seconds > limit {
+				seconds = limit
+			}
+			req.fields["timeout_s"] = seconds
+			req.hold = time.Duration(seconds)*time.Second + replyMargin
+		}
 	}
 	return req, nil
 }
@@ -245,6 +323,57 @@ func decode(name string, raw json.RawMessage) (request, error) {
 			fields["context"] = a.Context
 		}
 		return request{op: "ask", fields: fields, fallback: askExpired}, nil
+	case listTool:
+		var a struct{}
+		if err := strict(raw, &a); err != nil {
+			return request{}, err
+		}
+		return request{op: "list_agents", fields: map[string]any{}, fallback: agentsSilent, fallbackErr: true}, nil
+	case readTool:
+		var a struct {
+			Agent string `json:"agent"`
+			What  string `json:"what"`
+			Lines int    `json:"lines"`
+		}
+		if err := strict(raw, &a); err != nil {
+			return request{}, err
+		}
+		if strings.TrimSpace(a.Agent) == "" {
+			return request{}, errInvalid{"agent is empty: name one as ListAgents shows it"}
+		}
+		if a.What != "" && a.What != "last" && a.What != "screen" {
+			return request{}, errInvalid{"what must be 'last' or 'screen'"}
+		}
+		fields := map[string]any{"agent": a.Agent, "what": a.What}
+		if a.What == "" {
+			fields["what"] = "last"
+		}
+		if a.Lines > 0 {
+			fields["lines"] = min(a.Lines, maxReadLines)
+		}
+		return request{op: "read_agent", fields: fields, fallback: agentsSilent, fallbackErr: true}, nil
+	case sendTool:
+		var a struct {
+			Agent   string `json:"agent"`
+			Text    string `json:"text"`
+			Wait    bool   `json:"wait_for_reply"`
+			Timeout int    `json:"timeout_seconds"`
+		}
+		if err := strict(raw, &a); err != nil {
+			return request{}, err
+		}
+		if strings.TrimSpace(a.Agent) == "" {
+			return request{}, errInvalid{"agent is empty: name one as ListAgents shows it"}
+		}
+		if strings.TrimSpace(a.Text) == "" {
+			return request{}, errInvalid{"text is empty"}
+		}
+		timeout := a.Timeout
+		if timeout <= 0 {
+			timeout = defaultReplyWait
+		}
+		fields := map[string]any{"agent": a.Agent, "text": a.Text, "wait_for_reply": a.Wait, "timeout_s": timeout}
+		return request{op: "send_to_agent", fields: fields, fallback: sendSilent, fallbackErr: true}, nil
 	}
 	return request{}, errUnknownTool
 }
@@ -288,6 +417,12 @@ func shapeOf(field string) string {
 	}
 	if field == "operator_steps" {
 		return "an object with goal, steps and verified"
+	}
+	if field == "lines" || field == "timeout_seconds" {
+		return "a whole number"
+	}
+	if field == "wait_for_reply" {
+		return "true or false"
 	}
 	return "a string"
 }

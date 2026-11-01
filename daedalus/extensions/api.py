@@ -67,6 +67,7 @@ from daedalus.config import (
 from daedalus.doctor import DoctorContext, render_text, run_checks, summarize
 from daedalus.extensions import (
     api_action_rules,
+    api_agent_messages,
     api_attempt_diagnostics,
     api_autopilot,
     api_board,
@@ -1719,6 +1720,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_staff.register(api, app, auth)
     # The worker worktrees in a project's folders: the list to clean up from, and the safe removal.
     api_worktrees.register(api, app, auth)
+    # What the agents of a project said to each other, and their tools' direct route from a launch.
+    api_agent_messages.register(api, app, auth)
     # The files orchestration keeps by handle: the cards a chat draws, their bytes, the audit.
     api_files.register(api, app, auth)
     # The operator's custom pages: their list and management, their storage, and the pages at /pages/<slug>/.

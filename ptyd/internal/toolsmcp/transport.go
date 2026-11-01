@@ -21,7 +21,8 @@ import (
 // CLI's own hooks.
 const ingressSource = "team"
 
-// directTimeout bounds a call on the host's own team route, which answers at once and never holds.
+// directTimeout bounds a call on the host's own team route, which answers at once and holds only a
+// send that waits for its reply.
 const directTimeout = time.Minute
 
 // helloTimeout bounds the announcement that the CLI loaded the tools; it is never waited for by the
@@ -107,15 +108,16 @@ func (r ingress) hello(ctx context.Context, source string, fields map[string]any
 	_, _, _ = hooks.Post(ctx, r.url, r.token, source, b, 0)
 }
 
-// direct posts to the host's team route, `<base>/report` or `<base>/ask`.
+// direct posts to the host's team route, `<base>/<op>`: `report`, `ask`, or one of the agent tools'.
 type direct struct{ base, token string }
 
-func (r direct) call(ctx context.Context, req request, _ time.Duration) (string, bool) {
+func (r direct) call(ctx context.Context, req request, hold time.Duration) (string, bool) {
 	b, err := body(req, false)
 	if err != nil {
 		return err.Error(), true
 	}
-	ctx, cancel := context.WithTimeout(ctx, directTimeout)
+	// Only a send that waits for its reply is held there; its hold covers the wait.
+	ctx, cancel := context.WithTimeout(ctx, max(directTimeout, hold))
 	defer cancel()
 	hr, err := http.NewRequestWithContext(ctx, http.MethodPost, r.base+"/"+req.op, bytes.NewReader(b))
 	if err != nil {

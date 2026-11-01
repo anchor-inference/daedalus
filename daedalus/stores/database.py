@@ -3202,6 +3202,59 @@ INSERT INTO search_pending(seq) SELECT seq FROM transcript;
 DELETE FROM kv WHERE key IN ('search_space', 'conversation_search');
 """)
 
+# Agents of one project message each other (ListAgents, ReadAgent, SendToAgent). A message to a
+# member goes the way the orchestrator's do, as a staff message, so the delivery worker, its receipts
+# and its facts serve it unchanged; its origin is a third one, ``agent``, which the CHECK must take,
+# and SQLite cannot widen a CHECK in place. The table is rebuilt with its rowids, which order the
+# messages of one instant, under foreign keys switched off, so dropping the old table does not
+# cascade into the delivery facts that name its rows. ``agent_messages`` is the log of every such
+# message — refused ones too — with its sender, receiver, hop and the reply a waiting sender got.
+MIGRATIONS.append(("""
+CREATE TABLE staff_messages_rebuilt (
+    id TEXT PRIMARY KEY,
+    staff_id TEXT NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+    staff_session_id TEXT REFERENCES staff_sessions(id) ON DELETE SET NULL,
+    origin TEXT NOT NULL CHECK (origin IN ('orchestrator', 'operator', 'agent')),
+    text TEXT NOT NULL,
+    mode TEXT NOT NULL CHECK (mode IN ('now', 'after_turn', 'interrupt')),
+    state TEXT NOT NULL CHECK (state IN ('queued', 'written', 'submitted', 'acknowledged', 'failed')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    error TEXT NOT NULL DEFAULT ''
+);
+INSERT INTO staff_messages_rebuilt(rowid, id, staff_id, staff_session_id, origin, text, mode, state, attempts, created_at, updated_at, error)
+    SELECT rowid, id, staff_id, staff_session_id, origin, text, mode, state, attempts, created_at, updated_at, error FROM staff_messages;
+DROP TABLE staff_messages;
+ALTER TABLE staff_messages_rebuilt RENAME TO staff_messages;
+CREATE INDEX staff_messages_by_staff ON staff_messages(staff_id, created_at);
+CREATE TABLE IF NOT EXISTS agent_messages (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('message', 'reply')),
+    sender_kind TEXT NOT NULL CHECK (sender_kind IN ('staff', 'orchestrator')),
+    sender_staff_id TEXT REFERENCES staff(id) ON DELETE SET NULL,
+    sender_session TEXT NOT NULL DEFAULT '',
+    sender_name TEXT NOT NULL,
+    target_kind TEXT NOT NULL CHECK (target_kind IN ('staff', 'orchestrator', 'terminal', 'unknown')),
+    target_staff_id TEXT REFERENCES staff(id) ON DELETE SET NULL,
+    target_session TEXT NOT NULL DEFAULT '',
+    target_name TEXT NOT NULL,
+    hop INTEGER NOT NULL,
+    parent_id TEXT REFERENCES agent_messages(id) ON DELETE SET NULL,
+    text TEXT NOT NULL,
+    wait_s INTEGER NOT NULL DEFAULT 0,
+    state TEXT NOT NULL CHECK (state IN ('sent', 'refused', 'failed', 'answered', 'unanswered')),
+    detail TEXT NOT NULL DEFAULT '',
+    staff_message_id TEXT REFERENCES staff_messages(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS agent_messages_by_project ON agent_messages(project_id, created_at);
+CREATE INDEX IF NOT EXISTS agent_messages_by_sender ON agent_messages(sender_staff_id, created_at);
+CREATE INDEX IF NOT EXISTS agent_messages_by_target ON agent_messages(target_staff_id, created_at);
+""", True))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

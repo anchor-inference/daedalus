@@ -11,6 +11,7 @@ from protocore.contracts.tool_registry import policy_admits
 from protocore.contracts.tools import ToolContext
 
 from daedalus.config import (
+    AGENT_MESH_TOOLS,
     COMPANION_ONLY_TOOLS,
     ORCHESTRATOR_ONLY_TOOLS,
     PROMPT_COACH_ONLY_TOOLS,
@@ -110,8 +111,10 @@ async def test_a_working_session_is_blocked_only_from_other_roles_tools_and_what
     try:
         state = await manager.create_session("work")
         known = {t.name for t in manager.tools.list_all()}
-        # A working session is blocked from the concierge's, staff's, orchestrator's, subagents' and prompt coach's own tools and from nothing else.
-        others = set(COMPANION_ONLY_TOOLS) | set(STAFF_ONLY_TOOLS) | (known & set(ORCHESTRATOR_ONLY_TOOLS)) | set(SUBAGENT_ONLY_TOOLS) | set(PROMPT_COACH_ONLY_TOOLS)
+        # A working session is blocked from the concierge's, staff's, orchestrator's, subagents' and prompt coach's own tools, and from
+        # the tools that reach a project's agents, which only its staff and orchestrator have, and from nothing else.
+        others = (set(COMPANION_ONLY_TOOLS) | set(STAFF_ONLY_TOOLS) | (known & set(ORCHESTRATOR_ONLY_TOOLS)) | set(SUBAGENT_ONLY_TOOLS)
+                  | set(PROMPT_COACH_ONLY_TOOLS) | set(AGENT_MESH_TOOLS))
         assert manager.blocked_tools_for(state) == others
         await manager.set_tools_off(state.session.id, ["WebSearch"])
         assert manager.blocked_tools_for(state) == {"WebSearch"} | others

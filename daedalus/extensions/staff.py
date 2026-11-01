@@ -34,6 +34,7 @@ from protocore.runtime.events.envelope import TurnEvent
 from protocore.runtime.events.types import EventType
 
 from daedalus.extensions import staff_suspend
+from daedalus.extensions.agent_mesh import AgentMesh, Refused
 from daedalus.extensions.board import NOTES_MAX_CHARS
 from daedalus.extensions.launch_controls import launch_resources
 from daedalus.extensions.notifications import ActionConflict, ActionOutcome, ActionRefused, Draft
@@ -326,6 +327,8 @@ class Team:
         """Called with every member's report once it is published, before the call that made it
         returns: the orchestrators open the result as one to decide on, so a wake-up the report causes
         never finds it missing."""
+        self.mesh = AgentMesh(self)
+        """The project's agents talking to each other (ListAgents, ReadAgent, SendToAgent)."""
 
     # -- lookups -----------------------------------------------------------------------------------
 
@@ -1429,7 +1432,8 @@ class Team:
             await self.ingress.message_state(message.id, "acknowledged")
             return {"message_id": message.id, "state": "acknowledged", "error": "", "degraded_to": None,
                     "files": [d.path for d in delivered], "answered": answered}
-        outgoing = OutgoingMessage(message.id, message.text, when, "orchestrator" if by == "orchestrator" else "operator")  # type: ignore[arg-type]
+        origin = by if by in ("orchestrator", "agent") else "operator"
+        outgoing = OutgoingMessage(message.id, message.text, when, origin)  # type: ignore[arg-type]
         try:
             receipt = await self.runtime(member).send(live, outgoing)
         except Exception as exc:  # noqa: BLE001 — a failed delivery is recorded on the message, not raised past it
@@ -2441,6 +2445,7 @@ class Team:
         notifications = self.app.notifications
         if notifications is not None and hasattr(notifications, "register_resolver"):
             notifications.register_resolver("staff", self.resolve_action)
+        self.mesh.attach()
         return manager.bus.on(
             EventFilter(types=("permission.pending", "permission.resolved", "presence", "task.changed", "task.moved", "staff.status", "terminal.exited")),
             self.on_bus,
@@ -2673,6 +2678,13 @@ class Ingress:
         if detail:
             payload["detail"] = detail[:500]
         await self.team.publish("staff.channel", payload, member=live.staff, session_id=live.session_id)
+
+    async def agents(self, live: LiveSession, op: str, fields: dict[str, Any]) -> tuple[str, bool]:
+        try:
+            speaker = await self.team.mesh.speaker_of(live)
+        except (StaffError, Refused, KeyError) as exc:
+            return f"this session has no project to talk in: {exc}", True
+        return await self.team.mesh.call(speaker, op, fields)
 
     async def messages_of(self, live: LiveSession) -> list[Any]:
         messages = await self.manager.staff.messages(live.staff.id, limit=500)

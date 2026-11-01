@@ -1369,7 +1369,7 @@ export type JournalEntry = { id: number; at: string; author: "operator" | "orche
 export type BriefSection = { section: string; body: string; updated_at: string | null; updated_by: string | null };
 
 /** A message sent to a staff member, and how far it got. */
-export type StaffMessage = { id: string; staff_id: string; staff_session_id?: string | null; origin: "orchestrator" | "operator"; text: string; mode: MessageTiming; state: MessageState; attempts: number; created_at: string; updated_at: string; error: string; delivery?: StaffDelivery };
+export type StaffMessage = { id: string; staff_id: string; staff_session_id?: string | null; origin: "orchestrator" | "operator" | "agent"; text: string; mode: MessageTiming; state: MessageState; attempts: number; created_at: string; updated_at: string; error: string; delivery?: StaffDelivery };
 /** When a message to staff goes in: into the running turn, after it, or stopping it first. */
 export type MessageTiming = "now" | "after_turn" | "interrupt";
 export type MessageState = "queued" | "written" | "submitted" | "acknowledged" | "failed";

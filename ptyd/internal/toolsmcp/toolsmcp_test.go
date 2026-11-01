@@ -308,9 +308,12 @@ func TestInitializeListAndProtocol(t *testing.T) {
 	for _, raw := range tools {
 		tl := raw.(map[string]any)
 		schema := tl["inputSchema"].(map[string]any)
-		names[tl["name"].(string)] = schema["required"].([]any)
+		required, _ := schema["required"].([]any)
+		names[tl["name"].(string)] = required
 	}
-	if fmt.Sprint(names["Report"]) != "[kind note]" || fmt.Sprint(names["AskOrchestrator"]) != "[question]" || len(names) != 2 {
+	if fmt.Sprint(names["Report"]) != "[kind note]" || fmt.Sprint(names["AskOrchestrator"]) != "[question]" ||
+		fmt.Sprint(names["ListAgents"]) != "[]" || fmt.Sprint(names["ReadAgent"]) != "[agent]" ||
+		fmt.Sprint(names["SendToAgent"]) != "[agent text]" || len(names) != 5 {
 		t.Fatalf("%v", names)
 	}
 	if desc := tools[1].(map[string]any)["description"].(string); !strings.Contains(desc, "up to 5 minutes") {
@@ -426,6 +429,90 @@ func TestReportCarriesEvidenceAndAcknowledgements(t *testing.T) {
 	// Evidence of the wrong shape is refused with what it must be, before anything reaches the host.
 	c.call(2, "Report", map[string]any{"kind": "done", "note": "x", "evidence": "C1 passed"})
 	if text, isErr := c.result(2); !isErr || !strings.Contains(text, "evidence must be a list of objects with item, how and result") {
+		t.Fatalf("%q %v", text, isErr)
+	}
+}
+
+func TestTheAgentToolsPostTheirOperations(t *testing.T) {
+	f := listener(t)
+	c := serve(t, f.env("DAEDALUS_REPORT_HOLD_MS", "10000", "DAEDALUS_ASK_HOLD_MS", "120000"))
+	c.call(1, "ListAgents", map[string]any{})
+	ev := f.rec.hookN(t, 1)
+	if got := withoutCallID(t, ev["body"]); got != `{"tool":"list_agents"}` || ev["hold_ms"] != int64(10000) {
+		t.Fatalf("%s %v", got, ev["hold_ms"])
+	}
+	f.reply(t, ev, `{"text":"- Bob · Claude Code · working"}`)
+	if text, isErr := c.result(1); isErr || !strings.Contains(text, "Bob") {
+		t.Fatalf("%q %v", text, isErr)
+	}
+
+	// A read is held longer than a report: a screen or a transcript is read on the host.
+	c.call(2, "ReadAgent", map[string]any{"agent": "Bob", "what": "screen", "lines": 9000})
+	ev = f.rec.hookN(t, 2)
+	if got := withoutCallID(t, ev["body"]); got != `{"agent":"Bob","lines":400,"tool":"read_agent","what":"screen"}` || ev["hold_ms"] != int64(30000) {
+		t.Fatalf("%s %v", got, ev["hold_ms"])
+	}
+	f.reply(t, ev, `{"text":"Bob's screen"}`)
+	c.result(2)
+
+	// A send that waits is held for its wait, cut to the question hold, and a moment more for the answer.
+	c.call(3, "SendToAgent", map[string]any{"agent": "Bob", "text": "Which port?", "wait_for_reply": true, "timeout_seconds": 900})
+	ev = f.rec.hookN(t, 3)
+	if got := withoutCallID(t, ev["body"]); got != `{"agent":"Bob","text":"Which port?","timeout_s":120,"tool":"send_to_agent","wait_for_reply":true}` {
+		t.Fatalf("body %s", got)
+	}
+	if ev["hold_ms"] != int64(135000) {
+		t.Fatalf("hold %v", ev["hold_ms"])
+	}
+	f.reply(t, ev, `{"text":"Bob replied: 8080"}`)
+	if text, isErr := c.result(3); isErr || text != "Bob replied: 8080" {
+		t.Fatalf("%q %v", text, isErr)
+	}
+	// One that does not wait has the default wait recorded and the short hold.
+	c.call(4, "SendToAgent", map[string]any{"agent": "Bob", "text": "FYI: main is green"})
+	ev = f.rec.hookN(t, 4)
+	if got := withoutCallID(t, ev["body"]); got != `{"agent":"Bob","text":"FYI: main is green","timeout_s":300,"tool":"send_to_agent","wait_for_reply":false}` || ev["hold_ms"] != int64(30000) {
+		t.Fatalf("%s %v", got, ev["hold_ms"])
+	}
+	// A refusal comes back as an error the agent reads.
+	f.reply(t, ev, `{"text":"Bob is waiting on a permission","error":true}`)
+	if text, isErr := c.result(4); !isErr || !strings.Contains(text, "permission") {
+		t.Fatalf("%q %v", text, isErr)
+	}
+}
+
+func TestTheAgentToolsCheckTheirArguments(t *testing.T) {
+	f := listener(t)
+	c := serve(t, f.env())
+	for i, tc := range []struct {
+		tool string
+		args map[string]any
+		want string
+	}{
+		{"ReadAgent", map[string]any{}, "agent is empty"},
+		{"ReadAgent", map[string]any{"agent": "Bob", "what": "diff"}, "what must be 'last' or 'screen'"},
+		{"ReadAgent", map[string]any{"agent": "Bob", "lines": "ten"}, "lines must be a whole number"},
+		{"SendToAgent", map[string]any{"agent": "Bob"}, "text is empty"},
+		{"SendToAgent", map[string]any{"agent": "Bob", "text": "hi", "wait_for_reply": "yes"}, "wait_for_reply must be true or false"},
+	} {
+		c.call(i, tc.tool, tc.args)
+		if text, isErr := c.result(i); !isErr || !strings.Contains(text, tc.want) {
+			t.Fatalf("%s %v: %q %v", tc.tool, tc.args, text, isErr)
+		}
+	}
+	if n := len(f.rec.hooks()); n != 0 {
+		t.Fatalf("a wrong call reached the host: %d posts", n)
+	}
+}
+
+func TestASendWithASilentHostIsNotCalledSent(t *testing.T) {
+	// Nothing is known of a message whose post came back empty: the agent is told to look before it
+	// sends again, never that the message went.
+	f := listener(t)
+	c := serve(t, f.env())
+	c.call(1, "SendToAgent", map[string]any{"agent": "Bob", "text": "hi"})
+	f.reply(t, f.rec.hookN(t, 1), "")
+	if text, isErr := c.result(1); !isErr || text != sendSilent {
 		t.Fatalf("%q %v", text, isErr)
 	}
 }
@@ -549,7 +636,7 @@ func TestAnEndedLaunchIsSaidSo(t *testing.T) {
 func TestWithoutALaunchTheToolsStillList(t *testing.T) {
 	c := serve(t, map[string]string{})
 	c.request(1, "tools/list", nil)
-	if n := len(c.await(1)["result"].(map[string]any)["tools"].([]any)); n != 2 {
+	if n := len(c.await(1)["result"].(map[string]any)["tools"].([]any)); n != 5 {
 		t.Fatalf("%d tools", n)
 	}
 	c.call(2, "Report", map[string]any{"kind": "done", "note": "x"})

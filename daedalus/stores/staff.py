@@ -48,7 +48,8 @@ is idle or has failed occupies nothing until it is given work again."""
 WAITING_STATUSES = frozenset({"question", "permission"})
 SESSION_KINDS = ("daedalus", "cli")
 
-MESSAGE_ORIGINS = ("orchestrator", "operator")
+MESSAGE_ORIGINS = ("orchestrator", "operator", "agent")
+"""``agent`` is another agent of the project, through SendToAgent; its text carries who sent it."""
 MESSAGE_MODES = ("now", "after_turn", "interrupt")
 MESSAGE_STATES = ("queued", "written", "submitted", "acknowledged", "failed")
 _MESSAGE_RANK = {"queued": 0, "written": 1, "submitted": 2, "acknowledged": 3}
@@ -1084,7 +1085,7 @@ class StaffStore:
     async def add_message(self, staff_id: str, text: str, *, origin: str, mode: str,
                           staff_session_id: str | None = None, message_id: str | None = None) -> StaffMessage:
         if origin not in MESSAGE_ORIGINS:
-            raise StaffError(f"a message to staff comes from the orchestrator or the operator, not {origin!r}")
+            raise StaffError(f"a message to staff comes from the orchestrator, the operator or another agent, not {origin!r}")
         if mode not in MESSAGE_MODES:
             raise StaffError(f"a message goes in now, after the turn or with an interrupt ({', '.join(MESSAGE_MODES)}), not {mode!r}")
         body = _plain(text, "a message", TEXT_MAX, multiline=True)

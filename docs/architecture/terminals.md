@@ -875,11 +875,14 @@ per-launch MCP entry, `{"command": "$DAEDALUS_PTYD_BIN", "args": ["team-mcp"]}`,
 name `daedalus_team`. It answers `initialize` (echoing a revision it knows — 2024-11-05, 2025-03-26,
 2025-06-18, 2025-11-25 — and the newest for any other, logged on stderr), `ping`, `tools/list`,
 `tools/call` and `notifications/cancelled`; calls run concurrently (at most 16), and a cancelled
-call is not answered and releases its held post. Its two tools carry the names and arguments a
-Daedalus staff member has:
+call is not answered and releases its held post. Its tools carry the names and arguments a Daedalus
+staff member has:
 
 - `Report {kind: checkpoint|needs_input|stuck|done, note, artifacts?[], remember?}`
 - `AskOrchestrator {question, options?[], context?}`
+- `ListAgents {}`, `ReadAgent {agent, what?: last|screen, lines?}` and
+  `SendToAgent {agent, text, wait_for_reply?, timeout_seconds?}`: the other agents of the member's
+  project (below)
 
 Arguments are checked before anything is posted; a wrong one is a tool result marked as an error.
 The call is posted to the launch's hook listener as `team` with the body `{"tool": "report"|"ask",
@@ -899,9 +902,21 @@ On `initialize` and on `tools/list` the server also posts, unheld and without wa
 "hello", "stage": "initialize"|"tools/list", "client"?}`: the host's proof that the CLI loaded the
 team tools at all.
 
+The three agent tools post `{"tool": "list_agents"|"read_agent"|"send_to_agent", "call_id", …}`. A
+send carries `wait_for_reply` and `timeout_s` (default 300, cut to the question hold); it is held for
+that wait plus 15 s when it waits, and like a read for at least 30 s otherwise. Silence from the host
+is an error for all three: a message that may have gone must not be sent again blindly. The host's
+side (`daedalus/extensions/agent_mesh.py`) decides everything: reach is the project; a message is
+refused into a terminal with no agent in it, into a member waiting on a permission or a question, and
+after five agent messages in a row since the operator or the orchestrator last spoke to the sender; a
+message to a member that waits on the sender is handed to that waiting call as its reply; otherwise
+it goes as a staff message of origin `agent` through the delivery worker, under a header naming the
+sender and its hop. Every message is a row of `agent_messages` and an `agent.message` event, which
+wakes the orchestrator; `GET /api/projects/{id}/agent-messages[?staff=&before=&limit=]` reads the log.
+
 401 or 410 tells the worker its session is no longer connected to its team. When the launch
 environment names `DAEDALUS_TEAM_URL` and `DAEDALUS_TEAM_TOKEN`, the calls go instead to
-`<DAEDALUS_TEAM_URL>/report|ask` with `X-Daedalus-Team-Token`, the host's own team route; that
+`<DAEDALUS_TEAM_URL>/report|ask|list_agents|read_agent|send_to_agent` with `X-Daedalus-Team-Token`, the host's own team route; that
 reaches the host only where the CLI can reach its port, which a CLI in the `terminals` container
 cannot.
 
