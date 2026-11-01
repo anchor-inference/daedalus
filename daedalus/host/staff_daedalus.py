@@ -141,7 +141,8 @@ class DaedalusStaffRuntime:
 
     async def send(self, live: LiveSession, msg: OutgoingMessage) -> Receipt:
         session_id = self._session(live)
-        text = f"[message from the {msg.origin}]\n{msg.text}"
+        # Another agent's message carries its own header, which names the sender.
+        text = msg.text if msg.origin == "agent" else f"[message from the {msg.origin}]\n{msg.text}"
         if msg.mode == "interrupt":
             await self.interrupt(live)
             await self._settle(session_id)

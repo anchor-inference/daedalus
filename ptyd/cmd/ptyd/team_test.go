@@ -146,7 +146,7 @@ func TestTeamToolsAgainstARunningDaemon(t *testing.T) {
 	}
 	_, _ = stdin.Write([]byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}` + "\n"))
 	send(2, "tools/list", nil)
-	if tools := next()["result"].(map[string]any)["tools"].([]any); len(tools) != 2 {
+	if tools := next()["result"].(map[string]any)["tools"].([]any); len(tools) != 5 {
 		t.Fatalf("%v", tools)
 	}
 

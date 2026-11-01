@@ -84,6 +84,7 @@ WAKE_TYPES = (
     "staff.report",
     "staff.channel",
     "staff.message",
+    "agent.message",
     "ask.pending",
     "ask.answered",
     "permission.pending",
@@ -1192,6 +1193,11 @@ class Orchestrators:
             if message is None or _seconds_between(message.created_at, event.at) > FAILED_MESSAGE_NEWS_S:
                 return None
             return Wake(f"message:{message.id}", urgent=False)
+        if kind == "agent.message":
+            # Every message between members is the orchestrator's to know of, refused ones too: a
+            # chain stopped at the hop cap is a conversation it may have to take over. Never urgent:
+            # the members are talking, nobody waits on the orchestrator.
+            return Wake(f"agent-message:{p.get('message_id') or event.seq}", urgent=False)
         if kind in ("ask.pending", "permission.pending"):
             if not event.staff_id:
                 return None
@@ -1352,6 +1358,8 @@ class Orchestrators:
             why = _one_line(str(p.get("error") or "no reason was given"), 300)
             return (f"your message {p.get('message_id')} to {who(member)}{said} was not delivered: {why}. "
                     "It is not sent again by itself; Tell again if it still applies")
+        if kind == "agent.message":
+            return self._agent_message_line(p)
         if kind == "staff.channel":
             if p.get("team_tools") == "missing":
                 return f"{who(member)}'s team tools are not connected: {_one_line(str(p.get('detail') or ''), 200)}. They keep working, but will not Report or AskOrchestrator; Tell and ReadStaff still work"
@@ -1500,6 +1508,24 @@ class Orchestrators:
         if session is None or not session.task_id:
             return ""
         return " on " + await self._task_bit(session.task_id)
+
+    @staticmethod
+    def _agent_message_line(p: dict[str, Any]) -> str:
+        """A message between agents of the project, as one line of a wake-up."""
+        sender, receiver, ref = str(p.get("from") or "an agent"), str(p.get("to") or "an agent"), str(p.get("message_id") or "")
+        text = _one_line(str(p.get("text") or ""), 300)
+        why = _one_line(str(p.get("detail") or ""), 200)
+        if p.get("kind") == "reply":
+            if p.get("state") == "failed":
+                return f"{sender} did not answer {receiver}'s message {p.get('parent_id') or ''}: {why}"
+            came = " (the end of its turn)" if why else ""
+            return f"{sender} answered {receiver}'s message {p.get('parent_id') or ''}{came}: \"{text}\""
+        if p.get("state") == "refused":
+            return f"{sender}'s message to {receiver} was refused ({why}): \"{text}\""
+        if p.get("state") == "failed":
+            return f"{sender}'s message {ref} to {receiver} was not delivered ({why}): \"{text}\""
+        waits = f"; {sender} waits for the answer" if p.get("wait") else ""
+        return f"{sender} → {receiver}, agent message {ref} (hop {p.get('hop')}){waits}: \"{text}\""
 
     async def _headline(self, member: Staff | None) -> str:
         """The start of the member's last reply, so a finished turn can often be judged without reading it."""

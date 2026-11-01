@@ -403,7 +403,24 @@ class StaffMessage(TypedDict):
     actor: NotRequired[str]
 
 
-# ``from`` is a keyword, so these two are spelled in the functional form.
+# ``from`` is a keyword, so these are spelled in the functional form.
+AgentMessageEvent = TypedDict(
+    "AgentMessageEvent",
+    {
+        "message_id": str,
+        "kind": str,
+        "state": str,
+        "from": str,
+        "to": str,
+        "hop": int,
+        "text": str,
+        "wait": NotRequired[bool],
+        "parent_id": NotRequired[str],
+        "detail": NotRequired[str],
+    },
+)
+"""One agent of a project messaging another (SendToAgent): sent, refused, failed, or a reply."""
+
 TaskChange = TypedDict(
     "TaskChange",
     {
@@ -701,6 +718,7 @@ REGISTRY: dict[str, EventSpec] = {
     "staff.report": EventSpec(StaffReport),
     "staff.message": EventSpec(StaffMessage),
     "staff.channel": EventSpec(StaffChannel),
+    "agent.message": EventSpec(AgentMessageEvent),
     "task.created": EventSpec(TaskChange),
     "task.changed": EventSpec(TaskChange),
     "task.moved": EventSpec(TaskChange),

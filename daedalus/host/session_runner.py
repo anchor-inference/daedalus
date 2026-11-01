@@ -62,6 +62,7 @@ from daedalus.computer import agent as computer_agent
 from daedalus.computer import awareness as computer_awareness
 from daedalus.computer import wire as computer_wire
 from daedalus.config import (
+    AGENT_MESH_TOOLS,
     BTW_TOOLS,
     CHAT_SEARCH_TOOLS,
     COMPANION_ONLY_TOOLS,
@@ -6122,6 +6123,10 @@ class SessionManager:
         # than starting agents, schedules or loops; its two reporting tools are its alone. Beside the
         # companion rule and for the same reason: no mode edit can hand either side the other's tools.
         blocked |= (known & set(STAFF_BLOCKED_TOOLS)) if self.is_staff(state) else (known & set(STAFF_ONLY_TOOLS))
+        # The project's agents are reached by its staff and its orchestrator; any other session has no
+        # team, and the tools on its surface would only fail.
+        if not (self.is_staff(state) or self.is_orchestrator(state)):
+            blocked |= known & set(AGENT_MESH_TOOLS)
         # A subagent reaches the operator through its leader, never past it. Its descendants inherit
         # this through the parent chain below, and a staff member's subagents through both rules.
         if state.metadata.get("subagent_of"):

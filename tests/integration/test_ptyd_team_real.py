@@ -1,6 +1,7 @@
 """The daemon's bridge commands, the real ones, under the fake Claude Code: its team tools served by
-``ptyd team-mcp`` from a per-launch MCP entry, and its command hooks run as ``ptyd hook <event>``,
-including a permission answered through a held hook and a hook that outlives its launch.
+``ptyd team-mcp`` from a per-launch MCP entry, two agents talking to each other through them, and its
+command hooks run as ``ptyd hook <event>``, including a permission answered through a held hook and a
+hook that outlives its launch.
 
 The daemon around them is the test double (``LivePtyd``), which keeps the listener's contract; the
 commands are the built binary. Needs ``DAEDALUS_INTEGRATION=1 DAEDALUS_PTYD_BIN=<path to ptyd>``.
@@ -90,6 +91,72 @@ async def test_team_tools_through_the_real_team_mcp() -> None:
         assert "Report: commit first" in screen
         await rig.event("hook", where={"name": "Stop"})
         assert not logged(rig, "dialog_opened")
+
+
+async def team_post_of(rig: Rig, launch_id: str, tool: str) -> dict[str, Any]:
+    """The first team post of a tool from one launch, when two share the daemon."""
+    async with asyncio.timeout(30):
+        while True:
+            for event in rig.events:
+                data = event["data"] if event["type"] == "hook" else {}
+                if data.get("name") == "team" and data.get("launch_id") == launch_id and data["body"].get("tool") == tool:
+                    return event
+            await asyncio.sleep(0.05)
+
+
+def agent_call(tool: str, arguments: dict[str, Any]) -> str:
+    return f"mcp:daedalus_team:{tool}:{json.dumps(arguments)}"
+
+
+async def test_two_agents_talk_through_the_real_team_mcp() -> None:
+    """Ada asks Bob and waits; Bob's reply comes back as the answer to Ada's held call. The test plays
+    the host, which routes the reply to the waiting call; the two CLIs and their team servers are real
+    processes on the daemon's listener, each speaking for its own launch."""
+    async with Rig(ptyd_bin=Path(BINARY)) as rig:
+        trust(rig)
+        ada_launch = await rig.register(hold_max_ms=60_000)
+        bob_launch = await rig.register(hold_max_ms=60_000)
+
+        def mcp(launch: dict[str, Any]) -> str:
+            env = {"DAEDALUS_ASK_HOLD_MS": "30000"}
+            return json.dumps({"mcpServers": {"daedalus_team": {"command": launch["env"]["DAEDALUS_PTYD_BIN"], "args": ["team-mcp"], "env": env}}})
+
+        allow = [f"mcp__daedalus_team__{tool}" for tool in ("ListAgents", "ReadAgent", "SendToAgent")]
+        ask = agent_call("SendToAgent", {"agent": "Bob", "text": "Which port does your server listen on?", "wait_for_reply": True, "timeout_seconds": 20})
+        ada = await rig.spawn(["claude", "--session-id", SESSION, "--settings", command_hooks(allow=allow), "--mcp-config", mcp(ada_launch), "--", ask],
+                              launch_id=ada_launch["launch_id"])
+        asked = await team_post_of(rig, ada_launch["launch_id"], "send_to_agent")
+        asked["data"]["body"].pop("call_id")
+        assert asked["data"]["body"] == {"tool": "send_to_agent", "agent": "Bob", "text": "Which port does your server listen on?", "wait_for_reply": True, "timeout_s": 20}
+        # Held for the wait and a moment for the answer, not for a report's few seconds.
+        assert asked["data"]["reply_id"] and asked["data"]["hold_ms"] == 35_000
+
+        # The host types the message into Bob under its header; Bob answers with SendToAgent to Ada.
+        delivered = ("[message am-0123456789ab from Ada, another agent of your project, hop 1 of 5: a colleague's request] "
+                     "Which port does your server listen on? ; " + agent_call("SendToAgent", {"agent": "Ada", "text": "8080"}))
+        bob = await rig.spawn(["claude", "--session-id", "1c6d9b5f-4a8f-4e49-8b68-7a2a1c1f9b22", "--settings", command_hooks(allow=allow),
+                               "--mcp-config", mcp(bob_launch), "--", delivered], launch_id=bob_launch["launch_id"])
+        replied = await team_post_of(rig, bob_launch["launch_id"], "send_to_agent")
+        replied["data"]["body"].pop("call_id")
+        assert replied["data"]["body"] == {"tool": "send_to_agent", "agent": "Ada", "text": "8080", "wait_for_reply": False, "timeout_s": 300}
+        await rig.client.call("hooks.reply", {"reply_id": replied["data"]["reply_id"], "body": {"text": "Handed to Ada, who was waiting for your reply to am-0123456789ab."}})
+        await rig.client.call("hooks.reply", {"reply_id": asked["data"]["reply_id"], "body": {"text": "Bob replied to am-0123456789ab:\n\n8080"}})
+        await rig.screen_until(bob, "SendToAgent: Handed to Ada")
+        await rig.screen_until(ada, "SendToAgent: Bob replied to am-0123456789ab")
+        assert "8080" in await ada.screen()
+
+        # A refusal is the call's error, which the CLI shows as such.
+        refused = await rig.spawn(["claude", "--session-id", "2d7e0c6a-5b9f-4f5a-9c79-8b3b2d2a0c33", "--settings", command_hooks(allow=allow),
+                                   "--mcp-config", mcp(ada_launch), "--", agent_call("SendToAgent", {"agent": "t-shell", "text": "ls"})],
+                                  launch_id=ada_launch["launch_id"])
+        async with asyncio.timeout(30):
+            while True:
+                posts = [e for e in rig.events if e["type"] == "hook" and e["data"].get("name") == "team" and e["data"]["body"].get("agent") == "t-shell"]
+                if posts:
+                    break
+                await asyncio.sleep(0.05)
+        await rig.client.call("hooks.reply", {"reply_id": posts[0]["data"]["reply_id"], "body": {"text": "the terminal t-shell has no agent running in it", "error": True}})
+        await rig.screen_until(refused, "no agent running in it")
 
 
 async def test_command_hooks_through_the_real_hook_command() -> None:

@@ -25,7 +25,8 @@ from daedalus.stores.staff import Staff, StaffSession
 
 MessageMode = Literal["now", "after_turn", "interrupt"]
 """When a message goes in; see ``daedalus.harness.contract.SendMode``."""
-Origin = Literal["orchestrator", "operator"]
+Origin = Literal["orchestrator", "operator", "agent"]
+"""``agent`` is another agent of the project (SendToAgent): its text already names the sender."""
 ReceiptState = Literal["queued", "written", "submitted", "acknowledged", "failed"]
 PermissionLevel = Literal["ask", "edits", "all"]
 
@@ -344,6 +345,11 @@ class TeamIngress(Protocol):
 
     async def ask(self, live: LiveSession, question: str, options: list[str] | None = None, context: str = "") -> str:
         """A question for the orchestrator from the team server; returns the request's id at once."""
+
+    async def agents(self, live: LiveSession, op: str, fields: dict[str, Any]) -> tuple[str, bool]:
+        """A call of the tools that reach the other agents of the member's project (``list_agents``,
+        ``read_agent``, ``send_to_agent``), as ``(text, is_error)``. A send that waits for its reply
+        returns only when the reply came or the wait ended."""
 
     async def usage(self, live: LiveSession, snapshot: UsageSnapshot) -> None:
         """What the session has spent so far, after each turn."""

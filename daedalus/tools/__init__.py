@@ -194,6 +194,12 @@ TOOL_GROUPS: dict[str, ToolGroupSpec] = {
         "PageEmit, PageStorage). Not an HTML file sent in the chat, not a change to the app's own code",
         "lazy",
     ),
+    "team_agents": ToolGroupSpec(
+        "The other agents of your project, for a staff member or the orchestrator: who is working (ListAgents), what one "
+        "last said or shows (ReadAgent), a message to one with its answer if you wait (SendToAgent). Not Report or "
+        "AskOrchestrator, which reach the orchestrator",
+        "lazy",
+    ),
     "widgets": ToolGroupSpec(
         "An interactive element inside the answer when interaction genuinely helps: a calculator, a comparison with "
         "sliders, a small chart, a checklist (Widget). Not for text, tables or code, and not a screen of its own (pages)",

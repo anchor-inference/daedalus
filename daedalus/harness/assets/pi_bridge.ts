@@ -13,7 +13,8 @@
  * - it listens on `$DAEDALUS_DIAL_DIR/pi.sock`, where the terminal daemon lets the host dial, for one
  *   JSON object per line: `{"op": "send", "id", "text", "deliverAs"?}`, `{"op": "abort"}` and
  *   `{"op": "state"}`, each answered with one line;
- * - it gives the model the team's two tools, `Report` and `AskOrchestrator`, speaking the wire
+ * - it gives the model the team's tools — `Report` and `AskOrchestrator`, and `ListAgents`, `ReadAgent`
+ *   and `SendToAgent` for the other agents of the project — speaking the wire
  *   contract of the daemon's `team-mcp` (the other CLIs' route to the same tools): a post to
  *   `$DAEDALUS_HOOK_URL/team?wait_ms=<hold>` with a call id, the host's reply as the result;
  * - it gives the model the tools of each set named in `$DAEDALUS_TOOL_SETS` (the browser's), read
@@ -58,6 +59,15 @@ const EXPIRED =
   "Pending: nobody has answered yet. The answer will arrive as a message; carry on with what the brief allows " +
   "meanwhile, or end your turn and wait for it. Do not ask the same question again.";
 const GONE = "this session is no longer connected to its team; nobody received the call";
+const AGENTS_SILENT = "the team did not answer in time; try again in a moment";
+const SEND_SILENT =
+  "the team did not answer in time: the message may or may not have gone. Look with ReadAgent or ListAgents before sending it again";
+/** The agent tools' limits, as `team-mcp` keeps them: a read is held a little longer than a report, a
+ * send that waits for its reply for its wait (at most the question hold) and a moment for the answer. */
+const READ_HOLD_MS = Math.max(REPORT_HOLD_MS, 30_000);
+const REPLY_WAIT_S = 300;
+const REPLY_CAP_S = Math.max(1, Math.min(600, Math.floor(ASK_HOLD_MS / 1000)));
+const REPLY_MARGIN_MS = 15_000;
 
 let calls = 0;
 /** Call ids are `<launch>:<process>:<n>`, as `team-mcp` makes them, so the host drops a repeat. */
@@ -109,7 +119,11 @@ function replyText(raw: string): { text: string; error: boolean } {
   return { text: trimmed, error: false };
 }
 
-async function teamCall(tool: "report" | "ask", fields: Json, fallback: string, holdMs: number, signal?: AbortSignal): Promise<string> {
+type TeamOp = "report" | "ask" | "list_agents" | "read_agent" | "send_to_agent";
+
+/** `fallback` is what silence means: a report was heard, a question stays open. For the agent tools
+ * silence is an error (`silentIsError`): a message that may have gone must not be sent again blindly. */
+async function teamCall(tool: TeamOp, fields: Json, fallback: string, holdMs: number, signal?: AbortSignal, silentIsError = false): Promise<string> {
   calls += 1;
   const body = { tool, ...fields, call_id: `${CALL_PREFIX}:${calls}` };
   let result: { status: number; text: string };
@@ -123,6 +137,7 @@ async function teamCall(tool: "report" | "ask", fields: Json, fallback: string, 
   if (result.status >= 200 && result.status < 300) {
     const reply = replyText(result.text);
     if (reply.error) throw new Error(reply.text);
+    if (!reply.text && silentIsError) throw new Error(fallback);
     return reply.text || fallback;
   }
   if (result.status === 401 || result.status === 410) throw new Error(GONE);
@@ -325,6 +340,58 @@ export default function (pi: ExtensionAPI) {
       const fields: Json = { question: params.question, options: params.options ?? [] };
       if (params.context?.trim()) fields.context = params.context;
       return text(await teamCall("ask", fields, EXPIRED, ASK_HOLD_MS, signal));
+    },
+  });
+
+  pi.registerTool({
+    name: "ListAgents",
+    label: "List agents",
+    description: "The agents of your project: who is working, on what, and whether a message can reach each.",
+    promptSnippet: "List the other agents of your project",
+    parameters: Type.Object({}),
+    async execute(_id, _params, signal) {
+      return text(await teamCall("list_agents", {}, AGENTS_SILENT, REPORT_HOLD_MS, signal, true));
+    },
+  });
+
+  pi.registerTool({
+    name: "ReadAgent",
+    label: "Read an agent",
+    description:
+      "Read another agent of your project: its last reply (what 'last', the default) or its terminal (what 'screen'); lines: the last N lines.",
+    promptSnippet: "Read what another agent of your project last said or shows",
+    parameters: Type.Object({
+      agent: Type.String({ description: "Its name, as ListAgents shows it." }),
+      what: Type.Optional(StringEnum(["last", "screen"] as const)),
+      lines: Type.Optional(Type.Integer({ minimum: 1, maximum: 400 })),
+    }),
+    async execute(_id, params, signal) {
+      const fields: Json = { agent: params.agent, what: params.what ?? "last" };
+      if (params.lines) fields.lines = Math.min(params.lines, 400);
+      return text(await teamCall("read_agent", fields, AGENTS_SILENT, READ_HOLD_MS, signal, true));
+    },
+  });
+
+  pi.registerTool({
+    name: "SendToAgent",
+    label: "Send to an agent",
+    description:
+      `Message another agent of your project by name. wait_for_reply returns its answer (up to timeout_seconds, at most ${REPLY_CAP_S} s). ` +
+      "Refused into a terminal with no agent, one waiting on a permission or question, and after 5 agent messages in a row. " +
+      "A reply to an agent waiting on you goes straight to it.",
+    promptSnippet: "Message another agent of your project, optionally waiting for its answer",
+    parameters: Type.Object({
+      agent: Type.String({ description: "Its name, as ListAgents shows it." }),
+      text: Type.String(),
+      wait_for_reply: Type.Optional(Type.Boolean()),
+      timeout_seconds: Type.Optional(Type.Integer({ minimum: 1 })),
+    }),
+    async execute(_id, params, signal) {
+      const wait = params.wait_for_reply === true;
+      const seconds = Math.min(params.timeout_seconds && params.timeout_seconds > 0 ? params.timeout_seconds : REPLY_WAIT_S, REPLY_CAP_S);
+      const fields: Json = { agent: params.agent, text: params.text, wait_for_reply: wait, timeout_s: seconds };
+      const hold = wait ? seconds * 1000 + REPLY_MARGIN_MS : READ_HOLD_MS;
+      return text(await teamCall("send_to_agent", fields, SEND_SILENT, hold, signal, true));
     },
   });
 

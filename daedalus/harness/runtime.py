@@ -1474,6 +1474,10 @@ class CliStaffRuntime:
                 await session.term.reply(post.reply_id, {"text": "this session is no longer connected to its team", "error": True})
             return
         call_id = str(body.get("call_id") or "")
+        if tool in protocol.AGENT_OPS:
+            # A send may wait minutes for its reply: never in the way of the launch's next hook.
+            self._spawn(self._agents(session, live, post, tool, body, call_id), f"harness-agents-{session.staff_session_id}")
+            return
         seen = session.calls.get(call_id) if call_id else None
         if tool == "report":
             # Counted before the host has answered, as the turn's end may be applied meanwhile; a
@@ -1535,6 +1539,26 @@ class CliStaffRuntime:
             await self._apply(session, StaffEvent(EventKind.QUESTION_ASKED, post.at, {"summary": question, "text": text, "options": [str(o) for o in body.get("options") or []], "call_id": call_id}, native_id=ref, launch_id=session.launch.launch_id))
         elif post.reply_id:
             await session.term.reply(post.reply_id, {"text": f"the team has no tool {tool!r}", "error": True})
+
+    async def _agents(self, session: CliSession, live: LiveSession, post: HookPost, tool: str, body: dict[str, Any], call_id: str) -> None:
+        """``ListAgents``, ``ReadAgent`` and ``SendToAgent`` from the team bridge, answered on the held
+        post. The same call seen again while the first still runs — the CLI retried, the daemon
+        replayed it — waits for the first one's answer instead of sending its message a second time."""
+        seen = session.calls.get(call_id) if call_id else None
+        if seen is not None and seen[0] == "agents":
+            reply = await asyncio.shield(seen[1])
+        else:
+            answered: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
+            self._remember_call(session, call_id, ("agents", answered))
+            try:
+                text, failed = await self.ingress.agents(live, tool, {k: v for k, v in body.items() if k != "tool"})
+                reply = {"text": text, "error": failed}
+            except Exception as exc:  # noqa: BLE001 — a failure is the call's answer, not the runtime's end
+                logger.exception("an agents call of %s failed", session.staff_session_id)
+                reply = {"text": f"the call failed: {exc}", "error": True}
+            answered.set_result(reply)
+        if post.reply_id:
+            await session.term.reply(post.reply_id, reply)
 
     # -- Daedalus's other tools (the browser's) -------------------------------------------------------
 
@@ -1647,7 +1671,8 @@ class CliStaffRuntime:
         a timing this CLI cannot keep is named in ``degraded_to`` at once."""
         session = self._session(live)
         assert session.worker is not None
-        text = msg.text if msg.origin == "operator" else f"[orchestrator] {msg.text}"
+        # Another agent's message carries its own header, which names the sender.
+        text = msg.text if msg.origin in ("operator", "agent") else f"[orchestrator] {msg.text}"
         degraded = session.worker.degraded(msg.mode)
         session.worker.put(Pending(msg.id, text, msg.mode, msg.origin, degraded_to=degraded))
         return Receipt("queued", degraded_to=degraded or None)  # type: ignore[arg-type]
