@@ -43,7 +43,10 @@ class LayoutRename(BaseModel):
 
 
 def register(api: FastAPI, app: Any, auth: Callable[..., Any], service: Callable[[], Terminals]) -> None:
-    layouts = TerminalLayouts(app.db)
+    # Built per request, not here: several apps that build these routes carry no database at all
+    # (the component and voice tests' fakes), and they must still be able to build the API.
+    def layouts() -> TerminalLayouts:
+        return TerminalLayouts(app.db)
 
     def refused(exc: LayoutError) -> HTTPException:
         return HTTPException(exc.status, str(exc))
@@ -51,27 +54,27 @@ def register(api: FastAPI, app: Any, auth: Callable[..., Any], service: Callable
     @api.get("/api/terminals/layouts")
     async def terminal_layouts(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """Every saved layout, the one saved or changed last first."""
-        return {"layouts": await layouts.list()}
+        return {"layouts": await layouts().list()}
 
     @api.post("/api/terminals/layouts", status_code=201)
     async def terminal_layout_save(body: LayoutBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """Saves the workspace under a name; saving under a name already kept replaces that layout."""
         try:
-            return await layouts.save(body.name, body.workspace)
+            return await layouts().save(body.name, body.workspace)
         except LayoutError as exc:
             raise refused(exc) from None
 
     @api.patch("/api/terminals/layouts/{layout_id}")
     async def terminal_layout_rename(layout_id: str, body: LayoutRename, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            return await layouts.rename(layout_id, body.name)
+            return await layouts().rename(layout_id, body.name)
         except LayoutError as exc:
             raise refused(exc) from None
 
     @api.delete("/api/terminals/layouts/{layout_id}")
     async def terminal_layout_delete(layout_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            await layouts.delete(layout_id)
+            await layouts().delete(layout_id)
         except LayoutError as exc:
             raise refused(exc) from None
         return {"ok": True}
