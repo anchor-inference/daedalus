@@ -12,7 +12,15 @@ import httpx
 from mcp import types as mcp_types
 from PIL import Image
 from protocore.contracts.tools import ToolContext
-from protocore.contracts.types import Message, MessageRole, ToolDefinition, ToolParameterSchema, ToolResultBlock, ToolResultImage, ToolUseBlock
+from protocore.contracts.types import (
+    Message,
+    MessageRole,
+    ToolDefinition,
+    ToolParameterSchema,
+    ToolResultBlock,
+    ToolResultImage,
+    ToolUseBlock,
+)
 
 from daedalus.config import RuntimeConfig, Settings
 from daedalus.extensions.api import build_app
