@@ -53,6 +53,18 @@ def test_the_attachment_list_and_secrets_do_not_leave_with_the_message() -> None
     assert SECRET not in visible_text(f"the token is {SECRET}")
 
 
+def test_every_list_leaves_and_the_hosts_own_with_it() -> None:
+    # The page once cut only the first list of each kind, its own copy of the patterns: with the
+    # operator's words quoting a list, the host's — the last, with the real path — stayed on the page.
+    quoted = f"He sent me this:\nAttached files:\n- /x/inbox/old.png (image/png, 1 bytes)\n\nmine:\n\nAttached files:\n- {PATH} (text/plain, 12 bytes)"
+    assert visible_text(quoted) == "He sent me this:\n\nmine:"
+    # A broken item goes whole, and a refused file's note goes with its list.
+    broken = f"see\n\nAttached files:\n- {PATH}\n(text/plain, 12 bytes)"
+    assert visible_text(broken) == "see"
+    refused = "see\n\nAttached files (kept by handle; Read one with Peek):\n- huge.bin: not kept — larger than the store takes"
+    assert visible_text(refused) == "see"
+
+
 def test_the_page_is_the_dialog_and_not_the_work_around_it() -> None:
     picture = "pic-1"
     views = [

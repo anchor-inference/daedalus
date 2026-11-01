@@ -36,7 +36,7 @@ from daedalus.host.run_outcome import OUTCOME_METADATA_KEY
 from daedalus.security import operator_secrets, redact
 from daedalus.tools.websearch import sources_of
 
-VIEW_VERSION = 16
+VIEW_VERSION = 17
 """Bumped whenever the shape below changes; stored views from an older version are recomputed. It
 covers this file only — what the redactor masks is covered by the key, by value and by shape, so a
 new secret format does not depend on anyone remembering this number."""
@@ -179,17 +179,17 @@ def _readable_part(placeholder: str) -> str:
     return parsed[0].preview if parsed else ""
 
 
-def _is_answer(content: str) -> bool:
-    """Whether a result is the host's reply to an AskUser call (``{"answers": [...], "source": ...}``).
+def _answer_of(content: str) -> dict[str, Any] | None:
+    """The host's reply to an AskUser call (``{"answers": [...], "source": ...}``), or None for any other result.
 
     The block names no tool, so the reply is told by its shape, which only the host writes."""
     if not content.startswith('{"answers"') or len(content) > ANSWER_MAX_CHARS:
-        return False
+        return None
     try:
         parsed = json.loads(content)
     except json.JSONDecodeError:
-        return False
-    return isinstance(parsed, dict) and isinstance(parsed.get("answers"), list) and "source" in parsed
+        return None
+    return parsed if isinstance(parsed, dict) and isinstance(parsed.get("answers"), list) and "source" in parsed else None
 
 
 def _result_preview(block: ToolResultBlock) -> dict[str, Any]:
@@ -221,8 +221,12 @@ def _result_preview(block: ToolResultBlock) -> dict[str, Any]:
         "length": len(content),
         "clipped": len(content) > TOOL_RESULT_PREVIEW_CHARS,
     }
-    if not block.is_error and _is_answer(content):
+    if not block.is_error and (answered := _answer_of(content)) is not None:
         view["content"], view["clipped"] = redact.shared().redact_tool_data(content), False
+        # The files a reply carried, drawn with it as a message's are; the reply's words still hold
+        # the list the model read, which the app leaves out of the answer it shows.
+        if attached := attached_files.of_answer(block.metadata, answered["answers"]):
+            view["attachments"] = attached
     if block.images:
         view["images"] = tool_image_entries(block.images)
     # A search's hits are mostly past the preview; the answer's list of sources needs all of them,
