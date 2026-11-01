@@ -534,6 +534,12 @@ class AgentMesh:
         }
         if message.parent_id:
             payload["parent_id"] = message.parent_id
+        # The members by id as well as by name: the app lights the receiver's terminal and lists the
+        # message in both members' feeds, and a name is neither unique across projects nor stable.
+        if message.sender_staff_id:
+            payload["from_staff_id"] = message.sender_staff_id
+        if message.target_staff_id:
+            payload["to_staff_id"] = message.target_staff_id
         if detail:
             payload["detail"] = detail[:500]
         member = None

@@ -913,6 +913,9 @@ message to a member that waits on the sender is handed to that waiting call as i
 it goes as a staff message of origin `agent` through the delivery worker, under a header naming the
 sender and its hop. Every message is a row of `agent_messages` and an `agent.message` event, which
 wakes the orchestrator; `GET /api/projects/{id}/agent-messages[?staff=&before=&limit=]` reads the log.
+The event names both members by id as well (`from_staff_id`, `to_staff_id`, when they are members):
+the app lists the message in both members' Feeds, and lights the receiver's terminal tab and pane
+header in the `message` state for a moment.
 
 401 or 410 tells the worker its session is no longer connected to its team. When the launch
 environment names `DAEDALUS_TEAM_URL` and `DAEDALUS_TEAM_TOKEN`, the calls go instead to

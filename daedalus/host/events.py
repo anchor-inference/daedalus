@@ -417,6 +417,8 @@ AgentMessageEvent = TypedDict(
         "wait": NotRequired[bool],
         "parent_id": NotRequired[str],
         "detail": NotRequired[str],
+        "from_staff_id": NotRequired[str],
+        "to_staff_id": NotRequired[str],
     },
 )
 """One agent of a project messaging another (SendToAgent): sent, refused, failed, or a reply."""
