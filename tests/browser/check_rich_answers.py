@@ -20,7 +20,7 @@ from pathlib import Path
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import expect_app, preview_png  # noqa: E402
+from api_stub import expect_app  # noqa: E402
 from check_composer import BASE, CHROMIUM, HOST, SESSION, UNHANDLED, message, stub  # noqa: E402
 
 SHOTS = os.environ.get("SHOTS", "")
@@ -155,12 +155,15 @@ def conversation(lang: str) -> list[dict]:
     ]
 
 
+DIRECT: list[str] = []
+"""Card pictures the browser asked a site for itself: there must be none, the host brings them."""
+
+
 def outside(route) -> None:  # type: ignore[no-untyped-def]
-    """Pictures from other sites, answered here: nothing in a check reaches the network."""
-    url = route.request.url
-    if "broken" in url or "img.example" not in url:
-        return route.fulfill(status=404, body="")
-    return route.fulfill(status=200, content_type="image/png", body=preview_png(url, 160, 160))
+    """A request straight to another site: recorded as a fault and answered with nothing, so nothing in
+    a check reaches the network."""
+    DIRECT.append(route.request.url)
+    return route.fulfill(status=404, body="")
 
 
 def open_chat(page: Page, lang: str, scheme: str) -> None:
@@ -181,7 +184,8 @@ def check(page: Page, name: str, problems: list[str]) -> None:
     if page.locator(".rcard-entity").count() != 1:
         fail("the company card is missing")
     page.locator(".rcard-card").last.scroll_into_view_if_needed()
-    page.wait_for_function("() => [...document.querySelectorAll('img.rcard-img')].every(i => i.complete)")
+    # A picture has no src until the host has brought it, and an img with none counts as complete.
+    page.wait_for_function("() => document.querySelectorAll('img.rcard-img[src]').length >= 3 && [...document.querySelectorAll('img.rcard-img')].every(i => i.complete)")
     loaded = page.evaluate("() => [...document.querySelectorAll('img.rcard-img')].filter(i => i.naturalWidth > 0).length")
     if loaded != 3:
         fail(f"{loaded} card pictures drawn, not 3 (two printers and the logo)")
@@ -256,6 +260,8 @@ def run() -> int:
                         page.screenshot(path=f"{SHOTS}/{name}-sources.png")
                     context.close()
         browser.close()
+    if DIRECT:
+        problems.append(f"the browser fetched {len(DIRECT)} card picture(s) from the site itself, not through the host: {DIRECT[0]}")
     for line in problems:
         print("FAIL", line)
     print("rich answers:", "ok" if not problems else f"{len(problems)} problems")

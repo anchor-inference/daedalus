@@ -178,6 +178,10 @@ def runtime_constants(config: RuntimeConfig, *, context_window: int, max_output_
         # stored history keeps it whole — so a run of large reads stops
         # spending the window on pages nobody is looking at any more.
         tool_result_stale_trim_enabled=True,
+        # Nested AGENTS.md files are the host's to show, at the head of the file tool result that first
+        # reaches their folder (daedalus.host.nested_rules). The core's discovery adds them to the
+        # system prompt instead, which moves the cached prefix of every request on each new folder.
+        rules_discovery_enabled=False,
         tool_result_fresh_count=config.tools.results.fresh_count,
         tool_result_stale_max_chars=config.tools.results.stale_max_chars,
         tool_result_stale_trim_batch_chars=stale_trim_batch_chars(config, context_window),

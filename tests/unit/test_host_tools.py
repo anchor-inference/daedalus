@@ -62,6 +62,20 @@ async def test_a_large_file_reads_where_sigpipe_is_ignored(host_chat: Any) -> No
     assert await state.services.fs.read_bytes(state.services.resolve("chk1.png"), limit=len(PNG)) == PNG
 
 
+async def test_a_window_of_a_large_text_file_reads_where_sigpipe_is_ignored(host_chat: Any) -> None:
+    """Read cuts its window on the host with tail, head and cut; each stage cut off by the next must not
+    print "Broken pipe" into the lines, and the file is replaced, not rewritten, on a write."""
+    _, state, folder, host = host_chat
+    host.ignore_sigpipe = True
+    (folder / "app.log").write_text("".join(f"event {i}\n" for i in range(200_000)))
+    fs = state.services.fs
+    window = await fs.read_window(state.services.resolve("app.log"), start=10, max_lines=5, max_chars=4_000, line_chars=2_000)
+    assert window.lines == [f"event {i}" for i in range(10, 15)] and window.more and window.total_lines == 200_000
+    await fs.write_text(state.services.resolve("report.md"), "# report, again\n")
+    assert (folder / "report.md").read_text() == "# report, again\n"
+    assert not [p.name for p in folder.iterdir() if p.name.endswith(".tmp")]
+
+
 async def test_send_file_without_a_chat_reads_nothing_and_says_where_the_file_is(host_chat: Any) -> None:
     from daedalus.host.services import NO_CHAT_BOUND
     from daedalus.tools.chat import send_file

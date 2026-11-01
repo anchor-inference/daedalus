@@ -87,6 +87,7 @@ from daedalus.host import (
     attached_files,
     capabilities,
     launcher_bridge,
+    nested_rules,
     prompt_coach,
     prompts,
     standing,
@@ -4979,6 +4980,10 @@ class SessionManager:
         # The core allows a user message one content block, so the context joins the text rather
         # than following it; a message with no text (an image alone) goes as it is.
         at = next((i for i, block in enumerate(message.content_blocks) if isinstance(block, TextBlock)), None)
+        if state.services is not None:
+            # A new run shows each folder's rules again on first touch: the last run's copy may have been
+            # cut from an old result or folded into a summary since (see daedalus.host.nested_rules).
+            nested_rules.forget(state.services)
         if at is None:
             return message
         notes: str | None = None
