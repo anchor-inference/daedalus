@@ -42,11 +42,13 @@ export function connectionText(state: ConnectionState): string {
  * - `failed`: the agent reported an error, a shell's last command failed, or the program ended badly.
  * - `ended`: the program ended cleanly, or the terminal was lost.
  * - `idle`: none of the above.
+ * - `message`: never from here. A message from another agent just reached the agent in it, and for a
+ *   moment the tab and the pane say so (`withMessage`).
  *
  * The host's activity wins over what this page saw on the screen, because it knows about requests
  * the screen cannot show. The live state is optional: a list row of a terminal no pane shows has none.
  */
-export type PaneState = "working" | "waiting" | "done" | "failed" | "ended" | "idle";
+export type PaneState = "working" | "waiting" | "done" | "failed" | "ended" | "idle" | "message";
 
 export function paneState(row: Pick<TerminalView, "status" | "exit_code" | "exit_signal" | "activity" | "live"> | null | undefined, state?: TerminalState | null): PaneState {
   const exit = state?.exit;
@@ -68,4 +70,26 @@ export function paneState(row: Pick<TerminalView, "status" | "exit_code" | "exit
   if (state?.commands.last?.result === "failed") return "failed";
   if (state?.unseen || state?.bell) return "done";
   return "idle";
+}
+
+/** How long a tab and a pane header say "message" after another agent's message reached the agent in it. */
+export const MESSAGE_FLASH_MS = 2400;
+
+/**
+ * The state drawn while a message flash lasts. A request waiting on the operator stays "waiting": it
+ * is the one thing on the page that needs the operator, and a flash over it would hide it for the
+ * moment the operator looked.
+ */
+export function withMessage(status: PaneState, flashing: boolean): PaneState {
+  return flashing && status !== "waiting" ? "message" : status;
+}
+
+/**
+ * The terminals a message between agents lights: the running terminals of the member it reached. A
+ * refused or failed message reached nobody, and the orchestrator has no terminal.
+ */
+export function messageTargets(payload: Record<string, unknown> | null | undefined, rows: readonly Pick<TerminalView, "id" | "owner" | "status">[]): string[] {
+  const staffId = typeof payload?.to_staff_id === "string" ? payload.to_staff_id : "";
+  if (!staffId || payload?.state === "refused" || payload?.state === "failed") return [];
+  return rows.filter((r) => r.owner.kind === "staff" && r.owner.id === staffId && r.status === "running").map((r) => r.id);
 }

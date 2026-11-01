@@ -4,7 +4,7 @@ import { setLang } from "../i18n";
 import type { ConnectionState } from "./connection";
 import type { TerminalView } from "../api";
 import type { TerminalState } from "./instance";
-import { connectionText, paneState } from "./status";
+import { connectionText, messageTargets, paneState, withMessage } from "./status";
 
 const EVERY: ConnectionState[] = [
   { kind: "connecting" },
@@ -75,5 +75,30 @@ describe("paneState", () => {
 
   it("is idle for a row nobody knows anything about", () => {
     expect(paneState(null)).toBe("idle");
+  });
+});
+
+describe("a message from another agent", () => {
+  const rows = [
+    { id: "t-ira", owner: { kind: "staff" as const, id: "st-ira" }, status: "running" as const },
+    { id: "t-old", owner: { kind: "staff" as const, id: "st-ira" }, status: "exited" as const },
+    { id: "t-bob", owner: { kind: "staff" as const, id: "st-bob" }, status: "running" as const },
+    { id: "t-sh", owner: { kind: "free" as const, id: null }, status: "running" as const },
+  ];
+
+  it("lights the running terminals of the member it reached, and nothing for one that never went", () => {
+    expect(messageTargets({ to_staff_id: "st-ira", state: "sent" }, rows)).toEqual(["t-ira"]);
+    expect(messageTargets({ to_staff_id: "st-ira", state: "refused" }, rows)).toEqual([]);
+    expect(messageTargets({ to_staff_id: "st-ira", state: "failed" }, rows)).toEqual([]);
+    // The orchestrator, and a payload from before the host named the receiver by id.
+    expect(messageTargets({ to: "orchestrator", state: "sent" }, rows)).toEqual([]);
+    expect(messageTargets(null, rows)).toEqual([]);
+  });
+
+  it("says message for the moment it lasts, except over a request that waits on the operator", () => {
+    expect(withMessage("working", true)).toBe("message");
+    expect(withMessage("idle", true)).toBe("message");
+    expect(withMessage("waiting", true)).toBe("waiting");
+    expect(withMessage("working", false)).toBe("working");
   });
 });

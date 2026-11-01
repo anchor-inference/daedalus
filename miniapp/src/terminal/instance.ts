@@ -134,6 +134,7 @@ export class TerminalInstance {
   private disposables: IDisposable[] = [];
   private listeners = new Set<() => void>();
   private requestListeners = new Set<(request: TerminalRequest) => void>();
+  private selectionListeners = new Set<() => void>();
   private desired: Size | null = null;
   /** A size went out on the current socket (possibly before its `hello` arrived). */
   private sizedThisSocket = false;
@@ -197,6 +198,17 @@ export class TerminalInstance {
   onRequest(listener: (request: TerminalRequest) => void): () => void {
     this.requestListeners.add(listener);
     return () => this.requestListeners.delete(listener);
+  }
+
+  /** Told whenever the selection changes; the workspace's compose line offers to reply to it. */
+  onSelection(listener: () => void): () => void {
+    this.selectionListeners.add(listener);
+    return () => this.selectionListeners.delete(listener);
+  }
+
+  /** The selected text, "" when nothing is selected or the terminal has not opened yet. */
+  selectionText(): string {
+    return this.term?.getSelection() ?? "";
   }
 
   get search(): SearchAddon | null {
@@ -443,6 +455,7 @@ export class TerminalInstance {
     this.term?.dispose();
     this.host.remove();
     this.listeners.clear();
+    this.selectionListeners.clear();
     this.requestListeners.clear();
   }
 
@@ -527,6 +540,7 @@ export class TerminalInstance {
     );
     this.disposables.push(term.onBinary((data) => this.connection?.input(Uint8Array.from(data, (c) => c.charCodeAt(0) & 0xff))));
     this.disposables.push(term.onTitleChange((title) => this.patch({ title })));
+    this.disposables.push(term.onSelectionChange(() => { for (const listener of [...this.selectionListeners]) listener(); }));
     this.disposables.push(term.onBell(() => this.patch({ bell: !this.visible || this.stateValue.bell })));
     this.patch({ kit: "ready" });
     this.open();

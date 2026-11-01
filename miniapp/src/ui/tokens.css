@@ -47,6 +47,7 @@
   --state-waiting: var(--data-wait);
   --state-done: var(--ok);
   --state-failed: var(--bad);
+  --state-message: var(--info);  /* another agent's message just reached the agent in a terminal */
   --state-glow: 0 0 6px;  /* the soft halo a lit dot carries, in the dot's own colour */
   /* A staff member's colour, one of eight the host hands out by name (daedalus/stores/staff.py). */
   --staff-blue: #7db4ff; --staff-green: #5fd68a; --staff-amber: #e8b44c; --staff-violet: #c792ea;

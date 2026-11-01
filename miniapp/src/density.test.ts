@@ -42,6 +42,8 @@ import computer from "./computer.css?raw";
 import schedules from "./schedules/schedules.css?raw";
 import terminals from "./terminal/workspace.css?raw";
 import terminalSide from "./terminal/sidepanel.css?raw";
+import terminalCompose from "./terminal/compose.css?raw";
+import agentFeed from "./staff/agentfeed.css?raw";
 // The browser's phone sheet, the session import, the agent's question card, the desktop's Quick
 // Chat, the widgets in an answer, the annotated snapshot, the Computer control's scope picker and the
 // Terminals page keep their looks beside their components; they answer to the same scale.
@@ -495,6 +497,28 @@ describe("rows and controls", () => {
     expect(sideDecl(".tside-term-open")).toContain("height: var(--row-h)");
     expect(sideDecl(".tside-pill")).toContain("height: var(--chip-h-dense)");
     expect(terminalSide).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+  });
+
+  it("give a workspace pane's compose line a dense row, and the messages between agents the same scale", () => {
+    // The line sits under a terminal in a pane four of which may share the screen, so it is one dense
+    // row like the pane's header, its chips the side panel's dense chips, its hints small controls.
+    // The feed entries and the orchestrator's agent rows read at the Feed's and the event card's sizes.
+    // Neither sheet names a colour: the message colour is the theme's information token.
+    for (const sheet of [terminalCompose, agentFeed]) {
+      const own = rules(sheet);
+      expect(oversizeFonts(own)).toEqual([]);
+      expect(numericFonts(own)).toEqual([]);
+      expect(oversizeBoxes(own)).toEqual([]);
+      expect(sheet).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+    }
+    const composeDecl = (selector: string) => rules(terminalCompose).filter((r) => r.selector === selector).map((r) => r.body).join(";");
+    expect(composeDecl(".tp-compose")).toContain("height: var(--row-h-dense)");
+    expect(composeDecl(".tp-chip")).toContain("height: var(--chip-h-dense)");
+    expect(composeDecl(".tp-slash-row")).toContain("height: var(--ctl-h-sm)");
+    expect(rules(agentFeed).find((r) => r.selector === ".agent-line-head")!.body).toContain("min-height: var(--row-h-dense)");
+    // The message flash is a state colour like the others, an alias of a token every theme sets.
+    const declared = all.find((r) => r.selector === ":root" && !r.media)!.body;
+    expect(declared).toMatch(/--state-message: var\(--/);
   });
 
   it("give a phone's terminal and project the thumb's sizes from the tokens, and the visible height", () => {

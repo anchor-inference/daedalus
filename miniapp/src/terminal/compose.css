@@ -1,0 +1,21 @@
+/* The compose line under an agent's terminal in the workspace: a dense row, mono like the terminal it
+ * writes to, its chips the side panel's dense chips. Theme tokens only. */
+.tp-compose { position: relative; display: flex; align-items: center; gap: 6px; height: var(--row-h-dense); padding: 0 4px 0 8px; min-width: 0; }
+.tp-compose:focus-within { box-shadow: inset 2px 0 0 var(--accent); }
+.tp-compose[data-held] .tp-compose-field::placeholder { color: var(--data-wait); }
+.tp-compose-field { flex: 1; min-width: 80px; height: var(--ctl-h-sm); padding: 0; border: 0; background: none; color: var(--fg); font-family: var(--mono); font-size: var(--fs-12); outline: none; }
+.tp-compose-field::placeholder { color: var(--fg-3); }
+.tp-compose-reply { flex: none; gap: 4px; }
+.tp-compose-send { flex: none; }
+.tp-chip { flex: 0 1 auto; display: inline-flex; align-items: center; gap: 4px; min-width: 48px; max-width: 30%; height: var(--chip-h-dense); padding: 0 2px 0 8px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--surface-2); color: var(--fg-2); font-size: var(--fs-11); }
+.tp-chip.quote { border-color: color-mix(in srgb, var(--info) 45%, var(--line)); color: var(--fg); }
+.tp-chip.quote .ic { flex: none; color: var(--info); }
+.tp-chip-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.tp-chip-x { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--fg-3); cursor: pointer; }
+.tp-chip-x:hover { background: var(--surface-3); color: var(--fg); }
+/* The CLI's commands, over the terminal just above the line, never pushing it. */
+.tp-slash { position: absolute; left: 4px; bottom: calc(100% + 4px); z-index: 8; width: min(360px, calc(100% - 8px)); margin: 0; padding: 4px; list-style: none; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); box-shadow: var(--shadow-pop); }
+.tp-slash-row { display: flex; align-items: center; gap: 8px; height: var(--ctl-h-sm); padding: 0 8px; border-radius: var(--radius-xs); font-size: var(--fs-12); color: var(--fg-2); cursor: pointer; }
+.tp-slash-row.on, .tp-slash-row:hover { background: var(--surface-2); color: var(--fg); }
+.tp-slash-name { flex: none; font-family: var(--mono); color: var(--accent); }
+.tp-slash-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

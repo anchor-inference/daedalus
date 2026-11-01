@@ -36,6 +36,7 @@ import { TerminalView } from "../terminal/view";
 import type { TerminalState } from "../terminal/instance";
 import { errorText } from "../ui";
 import { FeedView, useTurns } from "./FeedView";
+import { useAgentMessages } from "./agentfeed";
 import { ConditionLine } from "./conditions";
 import { HealthLine } from "./health";
 import { BrowserTab } from "../browser/BrowserPanel";
@@ -150,6 +151,8 @@ export function StaffView({ projectId, staffId, wide, toast, onBack }: { project
   const live = !!session;
   const feed = useTurns(staffId, live);
   const turns = feed.turns;
+  // What the member said to the other agents of its project and they to it, among its turns.
+  const agents = useAgentMessages(projectId, staffId);
   // A phone shows the Feed; its terminal is the full-screen one with the row of keys, a tap away.
   const shown: StaffViewMode = wide && terminalId ? mode : "feed";
 
@@ -247,6 +250,8 @@ export function StaffView({ projectId, staffId, wide, toast, onBack }: { project
               name={member.name}
               live={live}
               feed={feed}
+              agents={agents}
+              staffId={staffId}
               tailKey={outbox.map((m) => `${m.id}:${m.state}`).join(",")}
               tail={outbox.length > 0 ? <FeedOutbox staffId={staffId} name={member.name} rows={outbox} toast={toast} /> : null}
             />
@@ -340,6 +345,8 @@ export function StaffView({ projectId, staffId, wide, toast, onBack }: { project
               name={member.name}
               live={live}
               feed={feed}
+              agents={agents}
+              staffId={staffId}
               tailKey={outbox.map((m) => `${m.id}:${m.state}`).join(",")}
               tail={outbox.length > 0 ? <FeedOutbox staffId={staffId} name={member.name} rows={outbox} toast={toast} /> : null}
             />

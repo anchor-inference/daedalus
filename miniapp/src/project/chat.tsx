@@ -14,6 +14,8 @@ import { keptBase } from "../keptfiles";
 import { downloadHref, type PreviewSource } from "../preview";
 import type { ToolItem } from "../turns";
 import { parseEvents } from "../turns";
+import { parseAgentLine } from "../staff/agentmessages";
+import { AgentEventLine } from "../staff/agentfeed";
 import { useFocusState } from "./data";
 import { isOrchestratorStep, stepDetail, stepKey } from "./focus";
 import { excerptOf, hasFate, lastAnswerSeq, messageFate, type FateLine } from "./goalmodel";
@@ -32,7 +34,8 @@ export function useFocusChat(): FocusChat | null {
  *  orchestrator's chat each line can be answered: a member's report is what a correction is most often
  *  about, and a correction read as being about the report beside it is how one went to the wrong member. */
 export function EventCard({ text, seq }: { text: string; seq?: number | null }) {
-  const reply = useFocusChat()?.reply;
+  const chat = useFocusChat();
+  const reply = chat?.reply;
   const batch = parseEvents(text);
   if (!batch) return null;
   return (
@@ -42,7 +45,11 @@ export function EventCard({ text, seq }: { text: string; seq?: number | null }) 
         <span>{plural("focus.events.head", batch.count, { time: batch.since })}</span>
       </div>
       <ul className="event-lines">
-        {batch.lines.map((line, i) => (
+        {batch.lines.map((line, i) => {
+          // A message between two agents of the project is a compact row that opens to the message.
+          const agent = parseAgentLine(line.text);
+          if (agent) return <AgentEventLine key={i} line={agent} time={line.time} projectId={chat?.projectId ?? null} reply={reply && seq ? () => reply({ seq, excerpt: excerptOf(`${line.time} ${line.text}`) }) : undefined} />;
+          return (
           <li key={i} className={`event-line ${line.tone} ${reply && seq ? "answerable" : ""}`}>
             <span className="event-time num">{line.time}</span>
             <span className="event-text">{line.text}</span>
@@ -52,7 +59,8 @@ export function EventCard({ text, seq }: { text: string; seq?: number | null }) 
               </button>
             ) : null}
           </li>
-        ))}
+          );
+        })}
         {batch.more > 0 && <li className="event-line info more">{t("focus.events.more", { n: batch.more })}</li>}
       </ul>
     </section>

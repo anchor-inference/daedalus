@@ -74,6 +74,7 @@ async def test_a_message_reaches_a_member_of_the_project_under_its_header_and_is
         assert row["text"] == "Which port does your server listen on?" and row["created_at"]
         [event] = await events(manager, "agent.message")
         assert event.payload["from"] == "Ada" and event.payload["to"] == "Bob" and event.payload["state"] == "sent" and event.project_id == project.id
+        assert (event.payload["from_staff_id"], event.payload["to_staff_id"]) == (ada.id, bob.id)
     finally:
         await close_team(manager)
         await manager.close()

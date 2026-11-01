@@ -910,6 +910,17 @@ def usage_speed(hours: int) -> dict:
     return {"hours": hours, "models": [{**m, "last_at": "2026-11-01T12:00:00+00:00"} for m in models]}
 
 
+def agent_message(id_: str, sender: tuple[str, str | None], target: tuple[str, str | None], text: str, *, at: str, kind: str = "message", hop: int = 1,
+                  state: str = "sent", wait_s: int = 0, detail: str = "", parent_id: str | None = None, delivery: str = "", project_id: str = "") -> dict:
+    """One row of ``GET /api/projects/<id>/agent-messages`` (``AgentMessage.view()``). ``sender`` and
+    ``target`` are ``(name, staff id)``; a staff id of None is the orchestrator."""
+    def party(name: str, staff_id: str | None) -> dict:
+        return {"kind": "staff" if staff_id else "orchestrator", "staff_id": staff_id, "session": f"ss-{(staff_id or 'orch')}", "name": name}
+
+    return {"id": id_, "project_id": project_id, "kind": kind, "sender": party(*sender), "target": party(*target), "hop": hop, "parent_id": parent_id, "text": text,
+            "wait_s": wait_s, "state": state, "detail": detail, "staff_message_id": f"m-{id_}" if state != "refused" else None, "delivery": delivery, "created_at": at, "updated_at": at}
+
+
 def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str, str | bytes] | None:
     """The answer every harness gives the same way: ``(status, content type, body)``, or ``None``.
 
@@ -987,6 +998,10 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     if method.upper() == "PUT" and path.startswith("/api/keyproxy/"):
         # A value written is answered with the proxy as it stood; check_keyproxy.py keeps what is written.
         return 200, "application/json", json.dumps(KEYPROXY_VIEW)
+    if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "agent-messages":
+        # What the agents of a project said to each other (api_agent_messages.py): nothing, here. A
+        # member's Feed reads it, and the orchestrator's agent rows once opened; FocusStub keeps a log.
+        return 200, "application/json", json.dumps({"messages": [], "more": False})
     if method.upper() == "PUT" and path.startswith("/api/projects/") and path.endswith("/pin"):
         # A pin answers with the time it holds, empty once unpinned; a harness that draws the block
         # keeps the pins itself (screenshots.PINS).
@@ -1419,7 +1434,7 @@ def ask_turn(seq: int, call_id: str, questions: list[dict], answers: list[dict] 
     return rows
 
 
-__all__ = ["ASK_KINDS", "ask_turn", "CALENDAR", "CalendarStub", "ComputerStub", "MEMORY", "MemoryStub", "VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "IMPORTS", "ImportStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "SAMPLE_PAGE", "TOOL_GROUP_CATALOGUE", "agent_usage", "terminal_agent", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tasks", "session_tool_groups", "terminal_load"]
+__all__ = ["ASK_KINDS", "agent_message", "ask_turn", "CALENDAR", "CalendarStub", "ComputerStub", "MEMORY", "MemoryStub", "VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "IMPORTS", "ImportStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "SAMPLE_PAGE", "TOOL_GROUP_CATALOGUE", "agent_usage", "terminal_agent", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "notification_preferences", "serve_shared_post", "session_tasks", "session_tool_groups", "terminal_load"]
 
 # What the harness manager reports for the container: Claude Code installed and signed in, Codex
 # installed but signed out, the rest absent. Enough for the hiring form to show one command-line agent
@@ -2514,6 +2529,10 @@ class FocusStub:
         """Whether a chat's search answers 429, as the host does while its search runs for someone else."""
         self.searched: list[tuple[str, str]] = []
         """Every search inside a chat: ``(session id, words)``."""
+        self.agent_messages: dict[str, list[dict]] = {}
+        """The log of messages between agents, by project, newest first, as ``GET
+        /api/projects/<id>/agent-messages`` lists it; ``agent_reads`` is every read, with its query."""
+        self.agent_reads: list[dict[str, str]] = []
 
     def project(self, pid: str) -> dict | None:
         return next((p for p in self.projects if p["id"] == pid), None)
@@ -2591,6 +2610,19 @@ class FocusStub:
             if refused:
                 ask["resolution"].update(outcome=f"approved, but the folder could not be added: {refused}", error=refused)
             return 200, {"state": "answered", "delivered": not refused, "error": refused, "ask": ask}
+        if path.startswith("/api/projects/") and path.endswith("/agent-messages") and method == "GET":
+            # The host's filter (agent_messages.py ``list``): a member's own, newest first, a page before an id.
+            pid = path.split("/")[3]
+            self.agent_reads.append(params)
+            rows = list(self.agent_messages.get(pid, []))
+            staff = unquote(params.get("staff", ""))
+            if staff:
+                rows = [m for m in rows if staff in (m["sender"]["staff_id"], m["target"]["staff_id"])]
+            if params.get("before"):
+                ids = [m["id"] for m in rows]
+                rows = rows[ids.index(params["before"]) + 1:] if params["before"] in ids else []
+            limit = int(params.get("limit", "50") or 50)
+            return 200, {"messages": rows[:limit], "more": len(rows) > limit}
         if path.startswith("/api/projects/") and path.endswith("/focus-state") and method == "GET":
             pid = path.split("/")[3]
             return 200, self.focus_states.get(pid) or empty_focus_state(pid)
