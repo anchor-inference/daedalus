@@ -243,7 +243,14 @@ yours), done (a notification), ask (a question in the session's list), or a choi
 forward — the same question with an option each, buttons on its notification and in Telegram. Only the
 labels leave the host; a tap sends that option's goal into that session, once, however many fronts
 answer it. Nothing is judged after a stopped or failed run, while a question waits, or once you wrote
-again. `GET /api/autopilot` is the day's spend against `autopilot.usd_per_day` and the day's verdicts.
+again. Before that call, a fixed check reads the run's own tool calls (no model): a run that changed a
+migration that existed when your message arrived, started, stopped or removed containers, restarted a
+service, force-pushed or hard-reset a shared branch, deleted a tree or wrote a file outside the
+session's folder, or dropped data is not judged. You get the same kind of question instead, with what
+broke which rule and what files and commands the turn ran, and two options: continue, or continue and
+allow those kinds for the rest of this goal, which ends with your next message. `[goal_risk]` holds the
+migration patterns, the shared branches and the switch.
+`GET /api/autopilot` is the day's spend against `autopilot.usd_per_day` and the day's verdicts.
 `GET /api/user-style` is the profile of how you write that the next-message guess learns from your own
 messages and that the guess, the prompt coach and autopilot read; `DELETE` forgets it.
 It sets its own alarms with `WakeMe` (in some minutes, at a moment, or on a cron at most every ten

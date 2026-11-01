@@ -53,6 +53,14 @@ export function toolSource(item: ToolItem, sessionId: string, workspace: string,
   return { base: folderBase(sessionBase(sessionId), place.folder, ""), path: place.rel };
 }
 
+const IMAGE_EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
+
+/** A picture a tool returned with its result, served by the call and its place among the call's
+ *  pictures (1-based). The name carries the type's extension so the viewer knows it for a still. */
+export function toolImageSource(sessionId: string, callId: string, index: number, mime: string): HostSource {
+  return { base: `${sessionBase(sessionId)}/tool-results/${encodeURIComponent(callId)}/images`, path: `image-${index + 1}.${IMAGE_EXT[mime] ?? "png"}` };
+}
+
 /** A sent file is served by the call that sent it, so a path outside every folder opens too. */
 export function sentSource(sessionId: string, callId: string, name: string): HostSource {
   return { base: `${sessionBase(sessionId)}/sent/${encodeURIComponent(callId)}`, path: name };

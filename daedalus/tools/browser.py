@@ -78,17 +78,17 @@ class SessionFiles:
         if self.services.is_protected(target):
             raise Forbidden(f"{target} is protected and cannot be uploaded by tools")
         fs = self.services.fs
-        if fs.remote:
-            # A session working on the host names a file there, which this process cannot open.
-            try:
-                return target.name, await fs.read_bytes(target, limit=FETCH_MAX_BYTES)
-            except FileNotFoundError:
-                raise NotFound(f"no such file: {target}") from None
-            except (OSError, ValueError) as exc:
-                raise Forbidden(str(exc)) from None
-        if not target.is_file():
+        # Through the session's filesystem either way: a session working on the host names a file
+        # there, which this process cannot open, and a local read is bounded and refuses a pipe or a
+        # device, where reading the path whole had no bound and waited on a pipe for good.
+        if not fs.remote and not target.is_file():
             raise NotFound(f"no such file: {target}")
-        return target.name, await asyncio.to_thread(target.read_bytes)
+        try:
+            return target.name, await fs.read_bytes(target, limit=FETCH_MAX_BYTES)
+        except FileNotFoundError:
+            raise NotFound(f"no such file: {target}") from None
+        except (OSError, ValueError) as exc:
+            raise Forbidden(str(exc)) from None
 
     async def read_folder(self, path: str, *, max_files: int, max_bytes: int) -> tuple[str, dict[str, bytes]] | None:
         """The files of a folder of the session's (an extension it builds), or ``None`` when ``path`` is

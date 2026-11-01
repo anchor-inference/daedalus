@@ -157,7 +157,30 @@ async def test_bytes_are_put_on_the_host_through_stdin_in_pieces(tmp_path: Path)
     data = bytes(range(256)) * 2100  # past one piece, and nothing a shell argument could carry
     await HostExecBackend(lambda: host, HOST_ROOT).put_bytes(f"{HOST_ROOT}/inbox/blob.bin", data)  # type: ignore[arg-type, return-value]
     assert (disk / "inbox" / "blob.bin").read_bytes() == data
-    assert len(host.calls) == 3 and all(len(stdin or b"") <= 256 * 1024 for _, _, stdin in host.calls)
+    assert len(host.calls) == 4 and all(len(stdin or b"") <= 256 * 1024 for _, _, stdin in host.calls)
+    assert "mv -f" in host.calls[-1][0][-1] and sorted(p.name for p in (disk / "inbox").iterdir()) == ["blob.bin"], "the pieces went to a temporary file renamed at the end"
+
+
+async def test_bytes_cut_off_part_way_leave_the_old_file_on_the_host(tmp_path: Path) -> None:
+    disk = host_disk(tmp_path)
+    (disk / "inbox").mkdir()
+    (disk / "inbox" / "blob.bin").write_bytes(b"the old attachment")
+    host = ShellHost(disk)
+    real = host.exec_run
+    sent: list[int] = []
+
+    async def drops_after_one_piece(env: str, argv: list[str], **kwargs: Any) -> ExecResult:
+        if kwargs.get("stdin") is not None:
+            sent.append(1)
+            if len(sent) == 2:
+                raise ConnectionError("the daemon went away")
+        return await real(env, argv, **kwargs)
+
+    host.exec_run = drops_after_one_piece  # type: ignore[method-assign]
+    with pytest.raises(ConnectionError):
+        await HostExecBackend(lambda: host, HOST_ROOT).put_bytes(f"{HOST_ROOT}/inbox/blob.bin", bytes(300 * 1024))  # type: ignore[arg-type, return-value]
+    assert (disk / "inbox" / "blob.bin").read_bytes() == b"the old attachment"
+    assert sorted(p.name for p in (disk / "inbox").iterdir()) == ["blob.bin"], "the temporary file is removed"
 
 
 # -- a session in a host folder -----------------------------------------------------------------------

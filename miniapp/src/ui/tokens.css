@@ -31,6 +31,23 @@
   --ansi-4: #7db4ff; --ansi-5: #c792ea; --ansi-6: #2dd4bf; --ansi-7: #c8c9ce;
   --ansi-8: #5c5d66; --ansi-9: #ff8a85; --ansi-10: #8be9a8; --ansi-11: #f5cf7a;
   --ansi-12: #a6ccff; --ansi-13: #ddb3f5; --ansi-14: #7ee8d9; --ansi-15: #ededef;
+  /* One colour per kind of data, wherever a terminal's details are drawn: a context meter is always
+     the same colour, a cache figure another, a path a third. Each is an alias of a semantic token that
+     every theme sets (appearance.ts writes them inline), so the kinds follow the active theme and a
+     theme never has to know about them. */
+  --data-context: var(--ansi-5);
+  --data-cache: var(--ok);
+  --data-wait: var(--warn);
+  --data-output: var(--warn);
+  --data-path: var(--info);
+  --data-branch: var(--accent);
+  --data-bad: var(--bad);
+  /* What a terminal is doing, as its dot draws it (terminal/status.ts paneState). */
+  --state-working: var(--accent);
+  --state-waiting: var(--data-wait);
+  --state-done: var(--ok);
+  --state-failed: var(--bad);
+  --state-glow: 0 0 6px;  /* the soft halo a lit dot carries, in the dot's own colour */
   /* A staff member's colour, one of eight the host hands out by name (daedalus/stores/staff.py). */
   --staff-blue: #7db4ff; --staff-green: #5fd68a; --staff-amber: #e8b44c; --staff-violet: #c792ea;
   --staff-rose: #f28bab; --staff-teal: #2dd4bf; --staff-orange: #f59e5b; --staff-slate: #9aa4b5;

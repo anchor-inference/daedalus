@@ -88,6 +88,7 @@ from daedalus.host import (
     attached_files,
     capabilities,
     launcher_bridge,
+    nested_rules,
     prompt_coach,
     prompts,
     standing,
@@ -4532,6 +4533,13 @@ class SessionManager:
             tool_group_loads=self.tool_group_loads_for(state) if not self.is_dispatcher(state) else None,
             tool_rules_session=(str(pinned.get("cache_key") or "") or None) if pinned else None,
         )
+        # The core keeps a new call clear of every id in the history it is handed, but a compaction
+        # folds old calls out of that history while the transcript still shows them and the app pairs
+        # their results by id. A model that numbers its ids from what it is shown (Kimi's
+        # ``functions.Write:0``) starts again from zero after a compaction, and its next call drew its
+        # result into a call far up the transcript.
+        rows = await self.db.fetchall("SELECT DISTINCT tool_call_id FROM tool_calls WHERE session_id = ?", (state.session.id,))
+        engine.reserve_tool_call_ids(str(row["tool_call_id"]) for row in rows)
         self._attach_hooks(engine, state)
         self._stamp_memory(state, engine)
         if chain is not None:
@@ -4973,6 +4981,10 @@ class SessionManager:
         # The core allows a user message one content block, so the context joins the text rather
         # than following it; a message with no text (an image alone) goes as it is.
         at = next((i for i, block in enumerate(message.content_blocks) if isinstance(block, TextBlock)), None)
+        if state.services is not None:
+            # A new run shows each folder's rules again on first touch: the last run's copy may have been
+            # cut from an old result or folded into a summary since (see daedalus.host.nested_rules).
+            nested_rules.forget(state.services)
         if at is None:
             return message
         notes: str | None = None

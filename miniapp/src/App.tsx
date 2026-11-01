@@ -69,7 +69,6 @@ const HealthScreen = lazy(retried(() => import("./screens/Settings"), (m) => ({ 
 const MemoryScreen = lazy(retried(() => import("./screens/Memory"), (m) => ({ default: m.MemoryScreen })));
 const TerminalsScreen = lazy(retried(() => import("./screens/Terminals"), (m) => ({ default: m.TerminalsScreen })));
 const BrowserFullScreen = lazy(retried(() => import("./screens/BrowserFull"), (m) => ({ default: m.BrowserFullScreen })));
-const TerminalFullScreen = lazy(retried(() => import("./screens/TerminalFull"), (m) => ({ default: m.TerminalFullScreen })));
 const HarnessesScreen = lazy(retried(() => import("./screens/Harnesses"), (m) => ({ default: m.HarnessesScreen })));
 const ServicesScreen = lazy(retried(() => import("./screens/Services"), (m) => ({ default: m.ServicesScreen })));
 const PageHostScreen = lazy(retried(() => import("./screens/PageHost"), (m) => ({ default: m.PageHostScreen })));
@@ -623,8 +622,7 @@ export function App() {
         {route.screen === "schedules" && <SchedulesScreen toast={showToast} onOpen={open} selected={route.detail} />}
         {route.screen === "calendar" && <CalendarScreen toast={showToast} query={route.query} />}
         {route.screen === "diagrams" && <DiagramsScreen toast={showToast} selected={route.detail} />}
-        {route.screen === "terminals" && !route.detail && <TerminalsScreen toast={showToast} project={project} projects={projectList} />}
-        {route.screen === "terminals" && route.detail && <TerminalFullScreen id={route.detail} beside={route.query.get("with")} toast={showToast} />}
+        {route.screen === "terminals" && <TerminalsScreen detail={route.detail} query={route.query} toast={showToast} project={project} projects={projectList} />}
         {route.screen === "browser" && route.detail && <BrowserFullScreen id={route.detail} toast={showToast} />}
         {route.screen === "services" && <ServicesScreen onOpen={open} toast={showToast} />}
         {route.screen === "page" && route.detail && <PageHostScreen slug={route.detail} toast={showToast} />}

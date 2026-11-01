@@ -1204,12 +1204,14 @@ class SqliteUsageSink(UsageSink):
         async with self._db.transaction() as conn:
             cursor = await conn.execute(
                 "INSERT INTO usage_events(at,provider_id,model,purpose,run_id,session_id,input_tokens,"
-                " output_tokens,cache_read_tokens,reasoning_tokens,cost_usd,duration_ms,raw,inference_reservation_id)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " output_tokens,cache_read_tokens,reasoning_tokens,cost_usd,duration_ms,raw,inference_reservation_id,"
+                " first_byte_ms,first_token_ms,output_tokens_per_second)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (_now(), record.provider_id, record.model, record.purpose, record.run_id, record.session_id,
                  int(n.get("input_tokens", 0)), int(n.get("output_tokens", 0)),
                  int(n.get("cache_read_tokens", 0)), int(n.get("reasoning_tokens", 0)),
-                 record.cost_usd, record.duration_ms, json.dumps(record.raw), record.inference_reservation_id),
+                 record.cost_usd, record.duration_ms, json.dumps(record.raw), record.inference_reservation_id,
+                 record.first_byte_ms, record.first_token_ms, record.output_tokens_per_second),
             )
             seq = cursor.lastrowid
             await cursor.close()

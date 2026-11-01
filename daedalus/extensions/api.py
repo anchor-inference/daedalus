@@ -76,6 +76,7 @@ from daedalus.extensions import (
     api_btw,
     api_calendar,
     api_capacity,
+    api_card_image,
     api_ci,
     api_comparisons,
     api_computer,
@@ -171,6 +172,7 @@ from daedalus.processes import end_tree
 from daedalus.providers.context_window import catalog_window, table_window, window_from_entry
 from daedalus.providers.free_catalog import approved_endpoint, probe_agent_cycle
 from daedalus.providers.free_catalog import catalog as free_catalog
+from daedalus.providers.image_fit import sniffed_mime
 from daedalus.providers.llamacpp import discover_llamacpp
 from daedalus.providers.openai_compat import UsageRecord
 from daedalus.search.service import ConversationSearch, SearchBusy
@@ -197,6 +199,7 @@ from daedalus.stores.harness import HarnessStore
 from daedalus.stores.inference_budget import InferenceBudget
 from daedalus.stores.media import MEDIA_TENANT
 from daedalus.stores.projects import Project, ProjectError
+from daedalus.stores.provider_speed import MAX_WINDOW_HOURS, provider_speed
 from daedalus.stores.quota import quota_forecast
 from daedalus.stores.sqlite import ReceiptConflict, message_text
 from daedalus.stores.staff import ACTIVE_STATUSES, HARNESSES, Staff, StaffBusy, StaffError
@@ -1710,6 +1713,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_disk.register(api, app, auth)
     # The site icons beside a rich answer's citations and sources, fetched once by the host and kept.
     api_favicon.register(api, app, auth)
+    # A card's picture in a rich answer, fetched by the host so the browser never calls an address the model wrote.
+    api_card_image.register(api, app, auth)
     api_plugins.register(api, app, auth)
     api_skill_quality.register(api, app, auth)
     api_integrations.register(api, app, auth)
@@ -2732,14 +2737,10 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         state = await manager.get_state(session_id)
         if state is None:
             raise HTTPException(404, "no such session")
-        messages = await manager.sessions.messages_for_call(session_id, call_id)
-        if state.engine is not None:
-            messages = [*messages, *reversed(state.engine.history)]
-        for message in messages:
-            for block in message.content_blocks:
-                if isinstance(block, ToolResultBlock) and block.tool_call_id == call_id:
-                    text, complete = await full_tool_result(block, manager.blobs, TENANT)
-                    return {"id": call_id, "content": redact.shared().redact_tool_data(text), "is_error": block.is_error, "length": len(text), "complete": complete}
+        block = await result_block(state, session_id, call_id)
+        if block is not None:
+            text, complete = await full_tool_result(block, manager.blobs, TENANT)
+            return {"id": call_id, "content": redact.shared().redact_tool_data(text), "is_error": block.is_error, "length": len(text), "complete": complete}
         streamed = await manager.events.session_tool_result(session_id, call_id)
         if streamed is not None:
             text, is_error = streamed
@@ -2747,6 +2748,46 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if state.running:
             return {"id": call_id, "content": None, "is_error": False, "length": None, "complete": False, "pending": True}
         raise HTTPException(404, "no such tool result")
+
+    async def result_block(state: Any, session_id: str, call_id: str) -> ToolResultBlock | None:
+        """The result block of one call: from the saved transcript, else from the run still going."""
+        messages = await manager.sessions.messages_for_call(session_id, call_id)
+        if state.engine is not None:
+            messages = [*messages, *reversed(state.engine.history)]
+        for message in messages:
+            for block in message.content_blocks:
+                if isinstance(block, ToolResultBlock) and block.tool_call_id == call_id:
+                    return block
+        return None
+
+    @api.get("/api/sessions/{session_id}/tool-results/{call_id}/images/download")
+    async def tool_result_image(session_id: str, call_id: str, path: str, _: dict[str, Any] = Depends(auth)) -> Response:
+        """One picture a tool returned with its result, by the call and its place (``image-<n>.<ext>``).
+
+        Shaped as a file download so the app's file viewer and thumbnails read it the way they read
+        any other file of the session. The picture is found through the session's own history, never
+        by a blob reference the app sends, so one session's screen cannot read another's pictures.
+        """
+        found = re.fullmatch(r"image-(\d{1,3})(?:\.[A-Za-z0-9]{1,5})?", path)
+        if found is None:
+            raise HTTPException(404, "no such picture")
+        state = await manager.get_state(session_id)
+        if state is None:
+            raise HTTPException(404, "no such session")
+        block = await result_block(state, session_id, call_id)
+        index = int(found.group(1)) - 1
+        if block is None or not 0 <= index < len(block.images):
+            raise HTTPException(404, "no such picture")
+        image = block.images[index]
+        if image.data is not None:
+            data = image.data
+        else:
+            try:
+                data = await manager.blobs.get(TENANT, str(image.blob_ref))
+            except Exception:  # noqa: BLE001 — a pruned blob is a picture that is gone, not a server fault
+                raise HTTPException(404, "the picture is no longer kept") from None
+        # A call's pictures never change, so the browser may keep them as long as it likes.
+        return Response(content=data, media_type=sniffed_mime(data, image.mime_type), headers={"Cache-Control": "private, max-age=86400"})
 
     @api.get("/api/sessions/{session_id}/sent/{call_id}/download")
     async def sent_file(request: Request, session_id: str, call_id: str, _: dict[str, Any] = Depends(auth)) -> Response:
@@ -3325,7 +3366,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     @api.patch("/api/companion/goals/{goal_id}")
     async def companion_goal_edit(goal_id: str, body: CompanionGoalPatch, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            return await voice().goal_update(goal_id=goal_id, title=body.title, brief=body.brief, status=body.status, cadence=body.cadence)
+            return await voice().goal_update(goal_id=goal_id, title=body.title, brief=body.brief, status=body.status, cadence=body.cadence, by_operator=True)
         except KeyError as exc:
             raise HTTPException(404, "no such goal") from exc
         except ValueError as exc:
@@ -5633,7 +5674,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         )
         recent = await app.db.fetchall(
             "SELECT u.at, u.provider_id, u.model, u.purpose, u.session_id, u.run_id, u.input_tokens, u.output_tokens,"
-            " u.cache_read_tokens, u.reasoning_tokens, u.cost_usd, u.duration_ms, u.raw, s.title session_title"
+            " u.cache_read_tokens, u.reasoning_tokens, u.cost_usd, u.duration_ms, u.first_byte_ms, u.first_token_ms,"
+            " u.output_tokens_per_second, u.raw, s.title session_title"
             " FROM usage_events u LEFT JOIN sessions s ON s.id = u.session_id ORDER BY u.seq DESC LIMIT 200"
         )
         by_session = await app.db.fetchall(
@@ -5650,6 +5692,18 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             # Read after the subscriptions, so the reading just taken is in its own forecast.
             "forecasts": [f.view() for f in await quota_forecast(app.db)],
         }
+
+    @api.get("/api/usage/speed")
+    async def usage_speed(hours: int = 24, provider_id: str | None = None, model: str | None = None,
+                          _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """How fast each provider and model answered over the last ``hours``: the median and p90 time to
+        the first token, the median time to the first byte, the median output rate over the generation.
+
+        Taken over streamed calls that produced a token, counting the attempt that answered; a call
+        answered whole or cancelled has no speed. ``provider_id`` and ``model`` narrow it to one model,
+        which is how a status line asks about the model a session runs on."""
+        rows = await provider_speed(app.db, hours=hours, provider_id=provider_id or None, model=model or None)
+        return {"hours": max(1, min(hours, MAX_WINDOW_HOURS)), "models": [row.view() for row in rows]}
 
     @api.get("/api/usage/provider/{provider_id}")
     async def usage_provider(provider_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

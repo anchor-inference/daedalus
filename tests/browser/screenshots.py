@@ -499,8 +499,8 @@ def usage_data() -> dict:
         daily.append({"day": day, "provider_id": "claude", "model": "claude-opus-5", "calls": 12 + (d * 5) % 11, "input_tokens": 500_000, "output_tokens": 21_000, "cache_read_tokens": 450_000, "reasoning_tokens": 0, "cost_usd": 0, "unmetered": 12 + (d * 5) % 11})
         daily.append({"day": day, "provider_id": "opencode", "model": "gpt-5.6-luna", "calls": 20 + (d * 3) % 9, "input_tokens": 300_000, "output_tokens": 15_000, "cache_read_tokens": 200_000, "reasoning_tokens": 4_000, "cost_usd": 0.0, "unmetered": 0})
     recent = [
-        {"at": ago(minutes=3), "provider_id": "claude", "model": "claude-opus-5", "purpose": "stream", "session_id": S1, "session_title": "Bakery site", "run_id": "r1", "input_tokens": 41_200, "output_tokens": 1_180, "cache_read_tokens": 39_000, "reasoning_tokens": 0, "cost_usd": 0, "duration_ms": 8_400, "raw": {}},
-        {"at": ago(minutes=4), "provider_id": "deepseek", "model": "deepseek-flash", "purpose": "stream", "session_id": S4, "session_title": "Weekly digest", "run_id": "r4", "input_tokens": 18_300, "output_tokens": 640, "cache_read_tokens": 16_000, "reasoning_tokens": 210, "cost_usd": 0.0061, "duration_ms": 3_100, "raw": {}},
+        {"at": ago(minutes=3), "provider_id": "claude", "model": "claude-opus-5", "purpose": "stream", "session_id": S1, "session_title": "Bakery site", "run_id": "r1", "input_tokens": 41_200, "output_tokens": 1_180, "cache_read_tokens": 39_000, "reasoning_tokens": 0, "cost_usd": 0, "duration_ms": 8_400, "first_byte_ms": 210, "first_token_ms": 2_100, "output_tokens_per_second": 56.3, "raw": {}},
+        {"at": ago(minutes=4), "provider_id": "deepseek", "model": "deepseek-flash", "purpose": "stream", "session_id": S4, "session_title": "Weekly digest", "run_id": "r4", "input_tokens": 18_300, "output_tokens": 640, "cache_read_tokens": 16_000, "reasoning_tokens": 210, "cost_usd": 0.0061, "duration_ms": 3_100, "first_byte_ms": 160, "first_token_ms": 540, "output_tokens_per_second": 91.0, "raw": {}},
         {"at": ago(minutes=12), "provider_id": "opencode", "model": "gpt-5.6-luna", "purpose": "stream", "session_id": S3, "session_title": "Support inbox", "run_id": "r3", "input_tokens": 22_800, "output_tokens": 2_010, "cache_read_tokens": 20_000, "reasoning_tokens": 800, "cost_usd": 0.0, "duration_ms": 12_900, "raw": {}},
         {"at": ago(minutes=40), "provider_id": "deepseek", "model": "deepseek-flash", "purpose": "structured", "session_id": S6, "session_title": "Expense tracker", "run_id": None, "input_tokens": 61_000, "output_tokens": 1_900, "cache_read_tokens": 0, "reasoning_tokens": 0, "cost_usd": 0.019, "duration_ms": 22_000, "raw": {}},
     ]
@@ -972,6 +972,8 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         if tail.startswith(("tool-results/", "widgets/")) and fulfil_shared(route):
             return None
         return respond(route, {})
+    if rel == "/api/usage/speed" and fulfil_shared(route):
+        return None
     if rel.startswith("/api/usage/provider/"):
         return respond(route, PROVIDER_USAGE)
     if rel == "/api/usage":
@@ -1742,6 +1744,16 @@ def terminals_fleet():  # type: ignore[no-untyped-def]
     return term
 
 
+# The Terminals pages are shot in the app theme THEME names (one of appearance.ts's ids), so one run
+# per theme shows that the page follows whichever theme the reader picked; empty keeps the default.
+THEME = os.environ.get("THEME", "")
+
+
+def themed(page: Page) -> None:
+    if THEME:
+        page.add_init_script(f"try {{ localStorage.setItem('daedalus.appearance', JSON.stringify({{follow: false, theme: {json.dumps(THEME)}}})); }} catch (e) {{}}")
+
+
 def terminals_shots(context, prefix: str = "") -> None:  # type: ignore[no-untyped-def]
     """The Terminals screen: cards by project with the load bar in the header (desktop), or its list (phone)."""
     from terminal_stub import load_answer
@@ -1751,11 +1763,47 @@ def terminals_shots(context, prefix: str = "") -> None:  # type: ignore[no-untyp
     page = context.new_page()
     page.route("**/api/**", stub)
     term.install(page)
-    page.goto(f"{BASE}/terminals?token=t&scheme=dark&lang={LANG}")
+    themed(page)
+    page.goto(f"{BASE}/terminals?view=overview&token=t&scheme=dark&lang={LANG}")
     page.wait_for_selector(".term-card .term-card-line, .ph-tcard .ph-tcard-term", timeout=15000)
     page.wait_for_timeout(700)
     page.screenshot(path=str(OUT / f"{prefix}terminals.png"))
     print(f"wrote {prefix}terminals")
+    page.close()
+
+
+WS_CLAUDE = (
+    f"{ESC}37m⏺{ESC}0m Update(src/lib/cart.ts)\r\n  {ESC}2m⎿{ESC}0m  Updated with {ESC}32m6 additions{ESC}0m\r\n"
+    f"{ESC}37m⏺{ESC}0m Bash(npm test -- checkout)\r\n  {ESC}2m⎿{ESC}0m  {ESC}32m✓ 3 passed{ESC}0m\r\n\r\n"
+    f"{ESC}33m✻ Thinking…{ESC}0m {ESC}2m(esc to interrupt){ESC}0m\r\n"
+)
+WS_OPENCODE = (
+    f"{ESC}33m△ Permission required{ESC}0m\r\n  bash: {ESC}1mnpm install grammy{ESC}0m\r\n  {ESC}2mcwd ~/work/bakery-bot{ESC}0m\r\n\r\n"
+    f"{ESC}7m Allow once {ESC}0m  Always  Reject\r\n"
+)
+
+
+def terminals_workspace_shots(context, prefix: str = "") -> None:  # type: ignore[no-untyped-def]
+    """The Workspace: four live panes in a 2 × 2 grid with mixed states — tests that failed, a dev
+    server, a staff member working and one waiting for permission (desktop); the same four as one pane
+    at a time with the switcher (phone)."""
+    term = terminals_fleet()
+    term.terms["m2devsrv0000"].busy = True
+    term.terms["m3claude0000"].activity = {"status": "working", "label": "", "level": "ok"}
+    dock_tests(term, "m1tests00000")
+    term.emit("m2devsrv0000", DOCK_DEV)
+    term.emit("m3claude0000", WS_CLAUDE)
+    term.emit("m4opencode00", WS_OPENCODE)
+    page = context.new_page()
+    page.route("**/api/**", stub)
+    term.install(page)
+    themed(page)
+    page.add_init_script("try { localStorage.setItem('daedalus.term.renderer', 'dom'); } catch (e) {}")
+    page.goto(f"{BASE}/terminals/m1tests00000?layout=4&panes=m1tests00000,m2devsrv0000,m3claude0000,m4opencode00&token=t&scheme=dark&lang={LANG}")
+    page.wait_for_selector(".term-view[data-state='live']", timeout=15000)
+    page.wait_for_timeout(1500)
+    page.screenshot(path=str(OUT / f"{prefix}terminals-workspace.png"))
+    print(f"wrote {prefix}terminals-workspace")
     page.close()
 
 
@@ -1766,9 +1814,11 @@ def run_terminals() -> int:
         browser = p.chromium.launch(executable_path=CHROMIUM)
         desk = browser.new_context(viewport=DESK, device_scale_factor=2, color_scheme="dark")
         terminals_shots(desk)
+        terminals_workspace_shots(desk)
         desk.close()
         phone = browser.new_context(viewport=PHONE, device_scale_factor=3, color_scheme="dark", is_mobile=True, has_touch=True)
         terminals_shots(phone, "phone-")
+        terminals_workspace_shots(phone, "phone-")
         page = phone.new_page()
         page.route("**/api/**", stub)
         shot(page, "phone-more", "agents", before=open_more)
@@ -2221,6 +2271,7 @@ def run() -> int:
         shot(page, "session-share", f"agents/{S1}", wait=".chat-scroll .timeline", before=open_share, settle=800)
         dock_shots(desk)
         terminals_shots(desk)
+        terminals_workspace_shots(desk)
         desk.add_init_script("try { localStorage.setItem('agents.groupBy', 'project'); } catch (e) {}")
         shot(page, "team", f"project/{P1}/team", wait=".staff-row")
         shot(page, "team-hire", f"project/{P1}/team", wait=".staff-row", before=open_hire, settle=700)
@@ -2275,6 +2326,7 @@ def run() -> int:
         shot(page, "phone-session-panel", f"agents/{S1}", wait=".chat-scroll .timeline", before=open_phone_panel, settle=600)
         dock_shots(phone, "phone-")
         terminals_shots(phone, "phone-")
+        terminals_workspace_shots(phone, "phone-")
         shot(page, "phone-voice", "companion")
         shot(page, "phone-memory", "memory")
         shot(page, "phone-health", "health", settle=900)

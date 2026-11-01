@@ -7,11 +7,11 @@
 // the history is not rebuilt to show a word.
 
 import type { WebSource } from "./rich";
-import type { MediaPresentation, MessageView, ModelFallback, RunOutcome } from "./api";
+import type { MediaPresentation, MessageView, ModelFallback, RunOutcome, ToolImage } from "./api";
 
 /** A group of tools a run loaded, as `tool_group_loaded` said: which, how many, and how. */
 export type GroupLoad = { group: string; tools: number; via: string };
-export type LiveTool = { id: string; name: string; args: string; result?: string; error?: boolean; startedAt?: number; endedAt?: number; groups?: GroupLoad[] };
+export type LiveTool = { id: string; name: string; args: string; result?: string; error?: boolean; startedAt?: number; endedAt?: number; groups?: GroupLoad[]; images?: ToolImage[] };
 /**
  * `ended` is the model's own full stop: the last `message_stop` of the run said `end_turn`, so the
  * answer on the screen is the whole answer. The text stays until the written copy takes its place,
@@ -21,7 +21,7 @@ export type LiveTool = { id: string; name: string; args: string; result?: string
 export type LiveState = { runId?: string; text: string; thinking: string; tools: LiveTool[]; startedAt: number | null; lastActivityAt: number | null; ended: boolean; model: string; fallback: ModelFallback | null; groups?: GroupLoad[] };
 export const EMPTY_LIVE: LiveState = { text: "", thinking: "", tools: [], startedAt: null, lastActivityAt: null, ended: false, model: "", fallback: null };
 
-export type ToolItem = { kind: "tool"; id: string; name: string; args: Record<string, unknown>; result?: string; error?: boolean; running: boolean; length?: number; clipped?: boolean; /** How long the step took, when both ends of it are known. */ ms?: number; /** The groups a ToolSearch call loaded, while the run that made it streams. */ groups?: GroupLoad[]; /** The name the call had in the program it was imported from. */ orig?: string; /** The pages a web tool returned, as the host read them out of the result, which the listing carries only the start of. */ sources?: WebSource[] };
+export type ToolItem = { kind: "tool"; id: string; name: string; args: Record<string, unknown>; result?: string; error?: boolean; running: boolean; length?: number; clipped?: boolean; /** How long the step took, when both ends of it are known. */ ms?: number; /** The groups a ToolSearch call loaded, while the run that made it streams. */ groups?: GroupLoad[]; /** The name the call had in the program it was imported from. */ orig?: string; /** The pages a web tool returned, as the host read them out of the result, which the listing carries only the start of. */ sources?: WebSource[]; /** The pictures the tool returned with its result, drawn as thumbnails under it. */ images?: ToolImage[] };
 export type NoteItem = { kind: "note"; text: string; seq?: number };
 export type ThinkItem = { kind: "thinking"; text: string };
 export type SummaryItem = { kind: "summary"; text: string; reason: string };
@@ -97,6 +97,24 @@ export function stripHeadline(text: string): string {
   return text;
 }
 
+/** The pictures a streamed result names, in the shape the listing gives them: the stream names each by
+ *  its stored reference too, which the screen has no use for, since a picture is fetched by its call. */
+export function streamedImages(raw: unknown): ToolImage[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ToolImage[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object" || typeof (entry as { mime_type?: unknown }).mime_type !== "string") continue;
+    const e = entry as { mime_type: string; width?: unknown; height?: unknown; metadata?: { uri?: unknown } };
+    out.push({
+      mime_type: e.mime_type,
+      ...(typeof e.width === "number" ? { width: e.width } : {}),
+      ...(typeof e.height === "number" ? { height: e.height } : {}),
+      ...(typeof e.metadata?.uri === "string" && e.metadata.uri ? { uri: e.metadata.uri } : {}),
+    });
+  }
+  return out;
+}
+
 export function parseArgs(raw: string): Record<string, unknown> {
   try {
     return JSON.parse(raw || "{}");
@@ -112,7 +130,7 @@ export function parseArgs(raw: string): Record<string, unknown> {
  * very same object, which is what keeps the view from reconciling the whole history.
  */
 export function buildTurns(messages: MessageView[], previous: readonly Turn[] = []): Turn[] {
-  const results = new Map<string, { content: string; is_error: boolean; length?: number | null; clipped?: boolean; sources?: WebSource[]; at: number }>();
+  const results = new Map<string, { content: string; is_error: boolean; length?: number | null; clipped?: boolean; sources?: WebSource[]; images?: ToolImage[]; at: number }>();
   for (const m of messages) for (const r of m.tool_results) results.set(r.id, { ...r, at: Date.parse(m.created_at) || 0 });
   const turns: Turn[] = [];
   const sigs: string[][] = [];
@@ -203,8 +221,8 @@ export function buildTurns(messages: MessageView[], previous: readonly Turn[] = 
       current.toolIds.push(c.id);
       const ms = r && at && r.at >= at ? r.at - at : undefined;
       const orig = m.imported?.tools?.[c.id];
-      current.activity.push({ kind: "tool", id: c.id, name: c.name, args: c.arguments, result: r?.content, error: r?.is_error, running, length: r?.length ?? undefined, clipped: r?.clipped, ms, ...(orig ? { orig } : {}), ...(r?.sources?.length ? { sources: r.sources } : {}) });
-      mark(`t${c.id}:${r ? `${r.content.length}${r.is_error ? "!" : ""}` : "-"}`);
+      current.activity.push({ kind: "tool", id: c.id, name: c.name, args: c.arguments, result: r?.content, error: r?.is_error, running, length: r?.length ?? undefined, clipped: r?.clipped, ms, ...(orig ? { orig } : {}), ...(r?.sources?.length ? { sources: r.sources } : {}), ...(r?.images?.length ? { images: r.images } : {}) });
+      mark(`t${c.id}:${r ? `${r.content.length}${r.is_error ? "!" : ""}${r.images?.length ?? ""}` : "-"}`);
     }
   });
   const before = new Map<string, Turn>();
@@ -236,7 +254,7 @@ export function applyLive(base: Turn | null, live: LiveState, now: number): Turn
       t.pendingTools--;
       // The stream carries the whole result, so what came over it is never cut short.
       const ms = lt.startedAt && lt.endedAt ? lt.endedAt - lt.startedAt : a.ms;
-      return { ...a, result: lt.result, error: lt.error, running: false, length: lt.result.length, clipped: false, ms, groups: lt.groups };
+      return { ...a, result: lt.result, error: lt.error, running: false, length: lt.result.length, clipped: false, ms, groups: lt.groups, ...(lt.images?.length ? { images: lt.images } : {}) };
     });
   }
   // Only what streamed after the last step the history already shows is new. A streamed step older
@@ -258,7 +276,7 @@ export function applyLive(base: Turn | null, live: LiveState, now: number): Turn
   for (const lt of fresh) {
     const running = lt.result === undefined;
     if (running) t.pendingTools++;
-    t.activity.push({ kind: "tool", id: lt.id, name: lt.name, args: parseArgs(lt.args), result: lt.result, error: lt.error, running, length: lt.result?.length, clipped: false, ms: lt.startedAt && lt.endedAt ? lt.endedAt - lt.startedAt : undefined, groups: lt.groups });
+    t.activity.push({ kind: "tool", id: lt.id, name: lt.name, args: parseArgs(lt.args), result: lt.result, error: lt.error, running, length: lt.result?.length, clipped: false, ms: lt.startedAt && lt.endedAt ? lt.endedAt - lt.startedAt : undefined, groups: lt.groups, ...(lt.images?.length ? { images: lt.images } : {}) });
   }
   // A search's loads are on its own step; the rest — a held-back tool called by its name — get a line.
   // The run's seed is not announced here: carried groups would repeat the line at every message.
@@ -612,7 +630,10 @@ export function liveAfter(state: LiveState, event: string, p: Record<string, any
     const tools = state.tools.map((t, i) => (i === at ? { ...t, groups: [...(t.groups ?? []).filter((g) => g.group !== load.group), load] } : t));
     return { ...state, tools, lastActivityAt: meaningful };
   }
-  if (event === "tool_result") return { ...state, tools: state.tools.map((t) => (t.id === p.tool_call_id ? { ...t, result: String(p.content ?? p.output ?? ""), error: !!p.is_error, endedAt: meaningful } : t)), lastActivityAt: meaningful };
+  if (event === "tool_result") {
+    const images = streamedImages(p.images);
+    return { ...state, tools: state.tools.map((t) => (t.id === p.tool_call_id ? { ...t, result: String(p.content ?? p.output ?? ""), error: !!p.is_error, endedAt: meaningful, ...(images.length ? { images } : {}) } : t)), lastActivityAt: meaningful };
+  }
   // A message that ended to make a tool call is not the end of the turn: the run goes on.
   if (event === "message_stop" && (p.stop_reason === "end_turn" || p.stop_reason === "max_tokens")) return { ...state, ended: true, lastActivityAt: meaningful };
   return state;

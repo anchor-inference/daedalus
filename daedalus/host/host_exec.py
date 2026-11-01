@@ -9,6 +9,7 @@ environment; it is the operator's machine, so nothing here adds a sandbox of its
 
 from __future__ import annotations
 
+import secrets
 import shlex
 from collections.abc import Callable
 from typing import TYPE_CHECKING
@@ -92,20 +93,34 @@ class HostExecBackend:
     async def put_bytes(self, path: str, data: bytes) -> None:
         """Write ``data`` to ``path`` on the host byte for byte: what the operator attached to a message.
 
-        Through stdin rather than the shell's arguments, in pieces under the daemon's cap, the first
-        replacing the file and the rest appending; an ``OSError`` when the host will not take it.
+        Through stdin rather than the shell's arguments, in pieces under the daemon's cap, into a
+        temporary file beside the target that is renamed over it once the last piece is in: written
+        straight into the target, a daemon that went away part way left a cut file under the real
+        name. An ``OSError`` when the host will not take it, with the temporary file removed.
         """
         bridge = self._bridge()
         if bridge is None:
             raise ConnectionError(BRIDGE_DOWN)
+        folder, _, name = path.rpartition("/")
         target = shlex.quote(path)
+        temporary = shlex.quote(f"{folder}/.{name}.{secrets.token_hex(4)}.tmp")
         pieces = [data[i : i + STDIN_CHUNK] for i in range(0, len(data), STDIN_CHUNK)] or [b""]
-        for index, piece in enumerate(pieces):
-            lead = f"mkdir -p -- {shlex.quote(path.rsplit('/', 1)[0] or '/')} && " if index == 0 else ""
-            redirect = ">" if index == 0 else ">>"
-            result = await bridge.exec_run(HOST, ["bash", "-c", f"{lead}cat {redirect} {target}"], cwd=self.root, timeout=120.0, stdin=piece)
+        try:
+            for index, piece in enumerate(pieces):
+                lead = f"mkdir -p -- {shlex.quote(folder or '/')} && " if index == 0 else ""
+                redirect = ">" if index == 0 else ">>"
+                result = await bridge.exec_run(HOST, ["bash", "-c", f"{lead}cat {redirect} {temporary}"], cwd=self.root, timeout=120.0, stdin=piece)
+                if result.exit_code != 0:
+                    raise OSError((result.stderr or result.stdout).strip() or f"could not write {path} on the host")
+            result = await bridge.exec_run(HOST, ["bash", "-c", f"mv -f -- {temporary} {target}"], cwd=self.root, timeout=120.0)
             if result.exit_code != 0:
                 raise OSError((result.stderr or result.stdout).strip() or f"could not write {path} on the host")
+        except BaseException:
+            try:
+                await bridge.exec_run(HOST, ["bash", "-c", f"rm -f -- {temporary}"], cwd=self.root, timeout=30.0)
+            except Exception:  # noqa: BLE001 — the write already failed; that error is the one to report
+                pass
+            raise
 
 
 __all__ = ["BRIDGE_DOWN", "DAEMON_MAX_TIMEOUT", "OLD_DAEMON", "PRELUDE", "HostExecBackend"]

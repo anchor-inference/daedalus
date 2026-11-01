@@ -40,6 +40,7 @@ import contextlib
 import logging
 import re
 import time
+import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -50,7 +51,9 @@ from protocore.contracts.types import MessageRole, TextBlock
 from protocore.runtime.events.types import EventType
 
 from daedalus.config import COMPANION_ONLY_TOOLS, COMPANION_TOOLS, ModelPresetConfig, RuntimeConfig, TtsConfig
-from daedalus.extensions.notifications import Draft
+from daedalus.extensions.notifications import Action, ActionConflict, ActionOutcome, ActionRefused, ActionRequest, Draft
+from daedalus.host import turn_risk
+from daedalus.host.notify_text import render
 from daedalus.host.prompts import split_headline, without_turn_context
 from daedalus.stores.companion import CompanionStore, Goal, GoalError, parse_cadence
 from daedalus.transport.telegram.voice import TranscriptionError, asr_configured, effective_asr
@@ -68,6 +71,12 @@ undid would be a goal check the operator had asked not to happen."""
 
 FLAG = "companion"
 """The session metadata flag that makes a session the companion."""
+GOAL_RISK_KEY = "companion.goal_risk."
+"""Per goal, in the key-value table: the hold the fixed risk check put on it, and the kinds of risky
+action the operator allowed for the rest of it. Kept beside the goal rather than in its row, since only
+the check and the operator's answer ever read it."""
+RISK_REF = "goalrisk"
+"""The notification request prefix of a held goal: ``goalrisk:<goal id>:<hold token>``."""
 PARENT = "companion_parent"
 """The session metadata mark on every agent the companion started: the companion session's id."""
 
@@ -801,6 +810,10 @@ class Companion:
         goal = await self.store.goal(goal_id) if goal_id else None
         if goal_id and goal is None:
             raise ValueError(f"no goal has the id {goal_id!r}; GoalList shows them")
+        if held := await self._held_goal(goal_id=goal_id, session_id=session_id):
+            # The stop is the operator's to lift: an agent steered on, or a new one handed the goal, would
+            # carry on past the very turn they were asked to look at.
+            raise ValueError(f"the goal {held.title!r} is held until the operator checks what its agent's last turn did; tell them, and wait")
         if session_id and (project_id or workspace != "shared"):
             raise ValueError("an agent that is already running works where it was started; leave workspace and project_id out when you steer one")
         if session_id:
@@ -1315,6 +1328,16 @@ class Companion:
             return
         answer = await self.last_answer(session_id) if status == "completed" else ""
         body = clip_report(answer) if answer else f"no final answer ({status}); its session has the detail"
+        try:
+            held = await self.check_goal_risk(state, run_id)
+        except Exception:  # noqa: BLE001 — a check that fails must not swallow the agent's report
+            logger.exception("the risk check of %s's run %s failed", session_id, run_id)
+            held = []
+        if held:
+            body += "\n\n" + "; ".join(f"The goal {quoted(g.title)} ({g.id}) is now held" for g in held) + (
+                ": this turn did something the operator checks before the work goes on. Do not steer this agent or "
+                "delegate for the goal until they resume it; tell them it waits for them."
+            )
         # Whatever it was about to say on the way is behind us now: the answer says more, and a progress
         # line spoken after "it finished" would tell the operator the job is still running.
         self._stop_relay(session_id)
@@ -1327,6 +1350,121 @@ class Companion:
             kind="final", title=state.session.title, session_id=session_id, body=answer or body,
         )
         await self.emit("agents", {"agents": await self.agents()})
+
+    # -- the risk hold on goals ---------------------------------------------------------
+
+    async def goal_risk(self, goal_id: str | None) -> dict[str, Any]:
+        if not goal_id or self.app.manager is None:
+            return {}
+        found = await self.app.manager.db.kv_get(GOAL_RISK_KEY + goal_id, {})
+        return found if isinstance(found, dict) else {}
+
+    async def _held_goal(self, *, goal_id: str | None, session_id: str | None) -> Goal | None:
+        """The held goal a delegation would carry on: the one it names, or one the steered agent works for."""
+        candidates = [g for g in await self.store.goals(statuses=("active", "paused")) if g.id == goal_id or (session_id and session_id in g.sessions)]
+        for goal in candidates:
+            if (await self.goal_risk(goal.id)).get("held"):
+                return goal
+        return None
+
+    async def check_goal_risk(self, state: Any, run_id: str) -> list[Goal]:
+        """Run the fixed check over an agent's finished run for each active goal it works for, and hold
+        every goal whose allowances the run went past. Returns the goals held."""
+        manager = self.app.manager
+        settings = self.app.config.goal_risk
+        if manager is None or not settings.enabled:
+            return []
+        session_id = state.session.id
+        goals = [g for g in await self.store.goals(statuses=("active",)) if session_id in g.sessions]
+        if not goals:
+            return []
+        calls = turn_risk.turn_calls(await turn_risk.run_messages(manager.db, session_id, run_id))
+        if not calls:
+            return []
+        held: list[Goal] = []
+        for goal in goals:
+            try:
+                started = datetime.fromisoformat(goal.created_at) if goal.created_at else None
+            except ValueError:
+                started = None
+            scope = turn_risk.Scope(work_dir=str(manager.work_dir(state)), started=started, config=settings)
+            risk = await self.goal_risk(goal.id)
+            findings = await turn_risk.check(calls, scope, allowed=risk.get("allowed") or [])
+            if findings:
+                await self._hold(goal, state, run_id, findings, turn_risk.digest(calls, scope), risk)
+                held.append(goal)
+        return held
+
+    async def _hold(self, goal: Goal, state: Any, run_id: str, findings: list[turn_risk.Finding], digest: turn_risk.Digest, risk: dict[str, Any]) -> None:
+        manager = self.app.manager
+        assert manager is not None
+        token = uuid.uuid4().hex[:12]
+        lang = self._lang()
+        text = turn_risk.stop_text(findings, digest, lang)
+        risk["held"] = {
+            "token": token, "session_id": state.session.id, "run_id": run_id, "at": datetime.now(UTC).isoformat(),
+            "kinds": list(dict.fromkeys(f.kind for f in findings)), "findings": [f.as_dict() for f in findings], "digest": digest.as_dict(),
+        }
+        await manager.db.kv_set(GOAL_RISK_KEY + goal.id, risk)
+        await self.store.update_goal(goal.id, status="paused")
+        await self.store.log("paused", goal.title, text, session_id=state.session.id, goal_id=goal.id)
+        await self.emit("goals", {})
+        notifications = getattr(self.app, "notifications", None)
+        if notifications is None:
+            return
+        await notifications.post(Draft(
+            "question", render("risk.goal.title", lang, name=self.config.name, title=goal.title), text, kind="companion", tone="warning",
+            session_id=state.session.id, link="/app/companion",
+            actions=(Action("resume", render("risk.goal.resume", lang), "primary", quick=True), Action("allow", render("risk.goal.allow", lang), quick=True),
+                     Action("open", render("open", lang), "ghost")),
+            request_ref=f"{RISK_REF}:{goal.id}:{token}", dedupe_key=f"{RISK_REF}:{goal.id}:{token}", source="companion",
+        ))
+
+    async def _clear_hold(self, goal_id: str, *, allow: bool) -> dict[str, Any] | None:
+        """Lift a goal's hold, adding its kinds to the goal's allowances when asked; the hold lifted, or ``None``."""
+        manager = self.app.manager
+        assert manager is not None
+        risk = await self.goal_risk(goal_id)
+        held = risk.get("held")
+        if not held:
+            return None
+        if allow:
+            risk["allowed"] = sorted({*(risk.get("allowed") or []), *(str(k) for k in held.get("kinds") or [] if str(k) in turn_risk.KINDS)})
+        risk["held"] = None
+        await manager.db.kv_set(GOAL_RISK_KEY + goal_id, risk)
+        return held
+
+    async def resume_goal(self, goal_id: str, token: str, *, allow: bool, via: str) -> Goal:
+        """The operator's answer to a hold: the goal is active again, and with ``allow`` the kinds that held
+        it no longer do for the rest of it. The companion is told, so it picks the goal up where it stopped."""
+        risk = await self.goal_risk(goal_id)
+        held = risk.get("held")
+        if not held or str(held.get("token")) != token:
+            raise ActionConflict(render("autopilot.taken", self._lang()))
+        await self._clear_hold(goal_id, allow=allow)
+        goal = await self.store.update_goal(goal_id, status="active")
+        await self.store.log("resumed", goal.title, ", ".join(held.get("kinds") or []) if allow else "", session_id=held.get("session_id"), goal_id=goal_id)
+        await self.emit("goals", {})
+        allowed = f" and allowed for the rest of the goal: {', '.join(held.get('kinds') or [])}" if allow else ""
+        await self.report(
+            f"The operator checked what the agent of the goal {quoted(goal.title)} ({goal.id}) did and resumed the goal{allowed} ({via}). Carry on with it.",
+            kind="progress",
+        )
+        return goal
+
+    async def resolve_goal_risk(self, request: ActionRequest) -> ActionOutcome:
+        """A held goal's notification button: ``resume`` or ``allow`` on ``goalrisk:<goal>:<token>``."""
+        if request.action not in ("resume", "allow"):
+            raise ActionRefused(f"this notification offers no {request.action!r}")
+        try:
+            await self.resume_goal(request.scope, request.target, allow=request.action == "allow", via=request.via)
+        except KeyError:
+            raise ActionRefused("this goal is gone") from None
+        return ActionOutcome(render("risk.goal.resumed", self._lang()))
+
+    def _lang(self) -> str:
+        notifications = getattr(self.app, "notifications", None)
+        return notifications.language() if notifications is not None else ""
 
     # -- speech ------------------------------------------------------------------------
 
@@ -1362,7 +1500,14 @@ class Companion:
         await self.emit("goals", {})
         return goal.as_dict()
 
-    async def goal_update(self, *, goal_id: str, title: str | None = None, brief: str | None = None, status: str | None = None, cadence: str | None = None) -> dict[str, Any]:
+    async def goal_update(self, *, goal_id: str, title: str | None = None, brief: str | None = None, status: str | None = None, cadence: str | None = None,
+                          by_operator: bool = False) -> dict[str, Any]:
+        """Change a goal. The companion may not take one off a risk hold; the operator setting its status
+        from the page is their answer to the hold, the same as Resume without an allowance."""
+        if status is not None and (await self.goal_risk(goal_id)).get("held"):
+            if not by_operator:
+                raise GoalError("this goal is held until the operator checks what its agent's last turn did; only they can change its status now")
+            await self._clear_hold(goal_id, allow=False)
         parsed = parse_cadence(cadence, min_minutes=self.config.goal_min_interval_minutes) if cadence is not None else None
         before = await self.store.goal(goal_id)
         goal = await self.store.update_goal(goal_id, title=title, brief=brief, status=status, cadence=parsed)
@@ -1510,6 +1655,8 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     app.manager.add_sink(companion.on_event)
     app.manager.on_finished(companion.on_run_finished)
     app.manager.turn_notes_hooks.append(companion.turn_notes)
+    if getattr(app, "notifications", None) is not None:
+        app.notifications.register_resolver(RISK_REF, companion.resolve_goal_risk)
     return [asyncio.create_task(companion.goal_loop(), name="companion-goals")]
 
 

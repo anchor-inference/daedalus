@@ -951,9 +951,13 @@ export type MessageView = {
   text: string;
   thinking: string;
   tool_calls: { id: string; name: string; arguments: Record<string, unknown> }[];
-  tool_results: { id: string; content: string; is_error: boolean; length?: number | null; clipped?: boolean; sources?: { url: string; title?: string; snippet?: string; image?: string }[] }[];
+  tool_results: { id: string; content: string; is_error: boolean; length?: number | null; clipped?: boolean; sources?: { url: string; title?: string; snippet?: string; image?: string }[]; images?: ToolImage[] }[];
   created_at: string;
 };
+
+/** A picture a tool returned with its result (an MCP server's screenshot): its type and size, never its
+ *  bytes, which are fetched by the call and the picture's place in it. `uri` names an embedded resource. */
+export type ToolImage = { mime_type: string; width?: number; height?: number; uri?: string };
 
 /** A compaction in flight. `background`: the summary written ahead of the trigger while the session goes on — never blocking. */
 export type Compacting = { reason: string; stage: "summarising" | "merging" | "writing"; messages: number; parts_done: number; parts_total: number; started_at: string; background?: boolean };

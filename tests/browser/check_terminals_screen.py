@@ -6,8 +6,8 @@ programs' colours; a host card is amber with a lock; the three new-terminal flow
 (and go to the new terminal); past the cap the operator is asked and the request goes again with
 ``confirm``; Remove on a finished card sends DELETE.
 
-The grid: four panes each send exactly one size when shown, and a grid left behind sends none however
-the window changes. Navigation: ``g t``, the menu, the palette, and the More sheet on a 390 px phone.
+The workspace: four panes each send exactly one size when shown, each pane's own header follows its
+terminal, and a workspace left behind sends no size however the window changes. Navigation: ``g t``, the menu, the palette, and the More sheet on a 390 px phone.
 
     cd miniapp && npm run build
     mkdir -p /tmp/app-root && ln -s "$PWD/dist" /tmp/app-root/app
@@ -174,12 +174,12 @@ def the_list(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-d
 
     # Open goes to the full-screen view of that terminal.
     page.locator("[data-terminal='k1tests00000'] .term-card-foot .btn").click()
-    page.wait_for_selector(".term-page .term-view[data-terminal-view='k1tests00000']", timeout=10000)
+    page.wait_for_selector(".tp-ws .term-view[data-terminal-view='k1tests00000']", timeout=10000)
     if not page.url.split("?")[0].endswith("/app/terminals/k1tests00000"):
         problems.append(f"Open went to {page.url}")
-    owner = page.locator(".term-page-owner")
+    owner = page.locator(".tp-pane[data-pane='k1tests00000'] .tp-pane-owner")
     if not owner.count() or owner.get_attribute("href") != f"/app/agents/{S1}":
-        problems.append("the full view's owner is not a link to the session")
+        problems.append("the pane's owner is not a link to the session")
     page.go_back()
     page.wait_for_selector(".term-card", timeout=10000)
 
@@ -236,7 +236,8 @@ def the_list(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-d
     # A machine that would not carry the cap: the bar turns to the bad token and says so, without refusing.
     term.cap = 20
     term.load = load_answer(used_gb=54)
-    page.goto(f"{BASE}/terminals?token=t&scheme=dark&lang=en")
+    # The Overview by name: a terminal opened above set up a pane, so a bare address opens the Workspace.
+    page.goto(f"{BASE}/terminals?view=overview&token=t&scheme=dark&lang=en")
     page.wait_for_selector(".pagehead .loadbar[data-level='bad']", timeout=15000)
     colour = page.eval_on_selector(".loadbar-now", "(e) => getComputedStyle(e).backgroundColor")
     bad = page.evaluate("() => { const d = document.createElement('i'); d.style.color = 'var(--bad)'; document.body.append(d); const c = getComputedStyle(d).color; d.remove(); return c; }")
@@ -262,7 +263,7 @@ def the_grid(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-d
     term.snapshot_delay = 0.3
     context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
     context.add_init_script(DEBUG)
-    page = open_page(context, term, f"terminals/{ids[0]}?with={','.join(ids[1:])}", ".term-grid")
+    page = open_page(context, term, f"terminals/{ids[0]}?with={','.join(ids[1:])}", ".tp-grid")
     for i in ids:
         wait_live(page, i)
     page.wait_for_timeout(800)
@@ -286,21 +287,23 @@ def the_grid(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-d
     for i in ids:
         if sizes[i] and grids[i] and (grids[i]["cols"], grids[i]["rows"]) != sizes[i][-1]:
             problems.append(f"pane {i} holds {grids[i]} but sent {sizes[i][-1]}")
-    boxes = page.eval_on_selector_all(".term-grid-pane", "(p) => p.map((e) => { const b = e.getBoundingClientRect(); return [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)]; })")
+    boxes = page.eval_on_selector_all(".tp-pane:not(.hidden)", "(p) => p.map((e) => { const b = e.getBoundingClientRect(); return [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)]; })")
     print("panes:", boxes)
     if len({(b[0], b[1]) for b in boxes}) != 4 or len({b[0] for b in boxes}) != 2 or len({b[1] for b in boxes}) != 2:
         problems.append(f"four panes are not a 2 × 2 grid: {boxes}")
 
-    # The header follows the pane touched last.
-    page.locator(".term-grid-pane[data-pane='k4htop000000']").click()
+    # Each pane has its own header; the one touched last is the active one.
+    page.locator(".tp-pane[data-pane='k4htop000000'] .term-screen").click()
     page.wait_for_timeout(200)
-    head = page.locator(".term-page-title").inner_text().strip()
-    if head != "htop" or not page.locator(".term-page-head .term-env.host").count():
-        problems.append(f"the header does not follow the touched pane: {head!r}")
+    head = page.locator(".tp-pane[data-pane='k4htop000000'] .tp-pane-title").inner_text().strip()
+    if head != "htop" or not page.locator(".tp-pane[data-pane='k4htop000000'] .tp-pane-head .term-env.host").count():
+        problems.append(f"the htop pane's header does not name it as a host terminal: {head!r}")
+    if not page.locator(".tp-pane.on[data-pane='k4htop000000']").count():
+        problems.append("the touched pane is not the active one")
 
     # Leave the grid: nothing it held may size anything any more, whatever the window does.
     count = len(term.resizes())
-    page.locator(".term-page-head button[aria-label='Back to the terminals']").click()
+    page.locator(".tp-top .tp-views [data-view='overview']").click()
     page.wait_for_selector(".term-card", timeout=10000)
     for w in (1200, 1000, 1300):
         page.set_viewport_size({"width": w, "height": 800})

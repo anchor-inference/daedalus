@@ -1608,6 +1608,8 @@ button.secret-chip:hover { background: var(--card-2); }
 /* ── files the agent looked at or sent, right under the step ───────────────────────────── */
 .tool-attachment { margin: 2px 0 6px 28px; }
 .tool-image { display: block; max-width: min(100%, 420px); max-height: 260px; border-radius: var(--radius-md); border: 1px solid var(--line); background: var(--bg-2); }
+/* Several pictures of one call sit side by side and wrap, rather than a column of screenshots. */
+.tool-images { display: flex; flex-wrap: wrap; gap: 6px; }
 .img-loading { display: inline-block; width: 120px; height: 80px; border-radius: var(--radius-md); background: var(--card); animation: pulse 1.2s ease-in-out infinite; }
 .file-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 4px 10px; min-height: var(--ctl-h); color: var(--fg); font: inherit; font-size: var(--fs-13); cursor: pointer; max-width: 100%; }
 .file-chip:hover { background: var(--card-2); }
@@ -2400,7 +2402,15 @@ a.memory-source:hover { color: var(--fg); }
   .usage .tablecard td.cachedc { grid-area: cached; }
   .usage .tablecard td[data-label] { color: var(--fg-2); font-size: var(--fs-12); }
   .usage .tablecard td[data-label]::before { content: attr(data-label) " "; color: var(--fg-3); }
+  /* The speed table has no day and no cost: the model on top, its four numbers under it in two
+     pairs, the two times side by side. Four in a row ran off the card's edge at phone width. */
+  .usage .tablecard[data-speed] tr { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "model model" "ttft ttft90" "tps calls"; }
+  .usage .tablecard[data-speed] td[data-label] { white-space: nowrap; }
+  .usage .tablecard td.ttftc { grid-area: ttft; }
+  .usage .tablecard td.ttft90c { grid-area: ttft90; }
+  .usage .tablecard td.tpsc { grid-area: tps; }
 }
+.speed-hint { padding: 6px 2px 2px; }
 .settings-stage { display: flex; flex-direction: column; min-height: 0; flex: 1; background: var(--bg); }
 .settings-index { display: flex; flex-direction: column; gap: 2px; }
 .settings-back { display: none; }
@@ -3863,11 +3873,6 @@ button.staff-row:hover { background: var(--surface-2); }
 .term-card-status { flex: 1; min-width: 0; font-size: var(--fs-12); }
 .term-card-status[data-level="warn"] { color: var(--warn); }
 .term-card-status[data-level="bad"] { color: var(--bad); }
-.term-card-dot { flex: none; width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--fg-3); }
-.term-card-dot[data-level="ok"] { background: var(--ok); }
-.term-card-dot[data-level="warn"] { background: var(--warn); }
-.term-card-dot[data-level="bad"] { background: var(--bad); }
-.term-card-dot[data-level="idle"] { background: transparent; box-shadow: inset 0 0 0 1px var(--fg-3); }
 .term-card-foot .btn.small { flex: none; }
 .term-group + .term-group { margin-top: var(--space-2); }
 
@@ -3887,28 +3892,6 @@ button.staff-row:hover { background: var(--surface-2); }
 
 .pagehead .loadbar { margin: 6px 0 2px; }
 
-.term-page { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--term-bg); }
-.term-page-head { flex: none; display: flex; align-items: center; gap: var(--space-2); height: var(--head-h); padding: 0 8px 0 6px; background: var(--surface-1); border-bottom: 1px solid var(--line); min-width: 0; }
-.term-page-title { min-width: 0; flex: 0 1 auto; font-family: var(--mono); font-size: var(--fs-13); font-weight: 600; }
-.term-page-head .term-env { margin-right: 0; flex: none; }
-.term-page-owner { min-width: 0; flex: 0 1 auto; font-size: var(--fs-12); color: var(--fg-2); }
-.term-page-owner:hover { color: var(--fg); text-decoration: underline; }
-.term-page-tools { flex: none; display: flex; align-items: center; gap: 2px; }
-.term-font { font-size: var(--fs-12); font-weight: 600; letter-spacing: -.02em; }
-.term-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 1px; background: var(--line-strong); }
-.term-grid[data-count="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.term-grid[data-count="3"], .term-grid[data-count="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); }
-.term-grid-pane { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--term-bg); }
-.term-grid-pane.on { box-shadow: inset 0 2px 0 var(--accent); }
-.term-grid-pane.on.host { box-shadow: inset 0 2px 0 var(--warn); }
-.term-grid-label { flex: none; display: flex; align-items: center; height: 22px; padding: 0 10px; font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-3); background: var(--surface-1); }
-.term-grid-pane.on .term-grid-label { color: var(--fg); }
-@media (max-width: 1023px) {
-  /* A phone has no room for two columns of terminals: the grid stacks, one pane per row. */
-  .term-grid[data-count="2"], .term-grid[data-count="3"], .term-grid[data-count="4"] { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-auto-rows: minmax(0, 1fr); }
-  .term-page-owner { display: none; }
-  .term-page-head .iconbtn.small { width: var(--ctl-h); height: var(--ctl-h); }
-}
 
 /* ── a project's focus mode ─────────────────────────────────────────────────────────────────
    The column keeps the sessions column's frame (.sidebar) and its row sizes; everything below is

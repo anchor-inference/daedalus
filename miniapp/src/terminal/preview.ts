@@ -147,13 +147,3 @@ export function ownerLine(row: TerminalView, projectName: string | null): string
   if (row.owner.kind === "project") return t("term.card.project", { name: label || projectName || t("term.card.unnamed") });
   return t("term.card.free", { path: row.cwd });
 }
-
-/** The grid of the full-screen view: the terminal the address names, then those beside it, at most four and none twice. */
-export function gridIds(first: string | null, beside: string | null): string[] {
-  const ids: string[] = [];
-  for (const id of [first, ...(beside ?? "").split(",")]) {
-    const clean = (id ?? "").trim();
-    if (clean && !ids.includes(clean) && ids.length < 4) ids.push(clean);
-  }
-  return ids;
-}
