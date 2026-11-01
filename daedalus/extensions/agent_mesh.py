@@ -155,12 +155,15 @@ def _int(value: Any, default: int, low: int, high: int) -> int:
     return max(low, min(high, number))
 
 
-def message_id_for(call_id: str) -> str:
+def message_id_for(session: str, call_id: str) -> str:
     """The log id a call's message gets: from the call's id when it has one, so the same call seen
-    twice — replayed after the host restarted — finds the row the first one wrote and sends nothing."""
+    twice — replayed after the host restarted — finds the row the first one wrote and sends nothing.
+    Scoped by the calling session: a tool call id is unique within one conversation only, and some
+    models number theirs (``functions.SendToAgent:0``) the same in every session, so two members'
+    first messages would otherwise share an id and the second be taken for a replay of the first."""
     if not call_id:
         return f"am-{uuid.uuid4().hex[:12]}"
-    return "am-" + hashlib.sha256(call_id.encode()).hexdigest()[:12]
+    return "am-" + hashlib.sha256(f"{session}\n{call_id}".encode()).hexdigest()[:12]
 
 
 class AgentMesh:
@@ -303,7 +306,7 @@ class AgentMesh:
             raise Refused("the message is empty")
         if len(body) > TEXT_MAX:
             raise Refused(f"the message is longer than {TEXT_MAX} characters; put it in a file in your folder and send its path")
-        message_id = message_id_for(call_id)
+        message_id = message_id_for(speaker.session, call_id)
         earlier = await self.log.get(message_id)
         if earlier is not None:
             return self._replayed(earlier)

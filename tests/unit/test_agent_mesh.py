@@ -270,6 +270,13 @@ async def test_a_replayed_call_sends_nothing_twice(settings: Settings, db: Datab
         again, failed = await send(team, ada_live, "Bob", "hello", call_id=call_id)
         assert not failed and "it is not sent twice" in again and len(runtime.sent) == sent
         assert len(await logged(manager, project)) == 1
+        # A model that numbers its calls the same in every conversation: Bob's first call has Ada's id,
+        # and is a message of its own, not a replay of hers.
+        bob_live = await team.live_of(await manager.staff.by_name(project.id, "Bob"))  # type: ignore[arg-type]
+        assert bob_live is not None
+        text, failed = await send(team, bob_live, "Ada", "hello back", call_id=call_id)
+        assert not failed and "Sent to Ada" in text and len(runtime.sent) == sent + 1
+        assert len(await logged(manager, project)) == 2
         del first
     finally:
         await close_team(manager)
