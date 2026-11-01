@@ -95,6 +95,29 @@ describe("a rich answer on the page", () => {
     expect(document.querySelector(".cite-pop")).toBeNull();
   });
 
+  it("brings a card's picture through the host and never from the address itself", async () => {
+    const asked = vi.fn(async (url: string) => (String(url).startsWith("/api/card-image")
+      ? new Response(new Blob(["x"], { type: "image/png" }), { status: 200, headers: { "content-type": "image/png" } })
+      : new Response("", { status: 404 })));
+    vi.stubGlobal("fetch", asked);
+    host.innerHTML = renderMarkdown(":::card\ntitle: X\nurl: https://kaspi.kz/p/1\nimage: https://img.example/p.png?token=abc\n:::");
+    hydrateRich(host);
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    const img = host.querySelector("img.rcard-img") as HTMLImageElement;
+    expect(img.getAttribute("src")).toBe("blob:mark");
+    const urls = asked.mock.calls.map(([url]) => String(url));
+    expect(urls).toContain(`/api/card-image?url=${encodeURIComponent("https://img.example/p.png?token=abc")}`);
+    expect(urls.some((url) => url.startsWith("https://img.example"))).toBe(false);
+  });
+
+  it("puts the site's mark where the host brings no picture", async () => {
+    host.innerHTML = renderMarkdown(":::card\ntitle: X\nurl: https://kaspi.kz/p/1\nimage: https://img.example/refused.jpg\n:::");
+    hydrateRich(host);
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(host.querySelector("img.rcard-img")).toBeNull();
+    expect(host.querySelector(".rcard-tile .fav-lg")?.getAttribute("data-host")).toBe("kaspi.kz");
+  });
+
   it("puts the site's mark where a card's picture failed", () => {
     host.innerHTML = renderMarkdown(":::card\ntitle: X\nurl: https://kaspi.kz/p/1\nimage: https://img.example/broken.jpg\n:::");
     const img = host.querySelector("img.rcard-img") as HTMLImageElement;

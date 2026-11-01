@@ -39,7 +39,7 @@ PAGE_MAX_BYTES = 256_000
 TIMEOUT_SECONDS = 5.0
 REDIRECTS = 3
 
-_HOST_RE = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}$")
+HOST_RE = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}$")
 _LINK_RE = re.compile(r"<link\b[^>]*>", re.IGNORECASE)
 _ATTR_RE = re.compile(r"""([a-zA-Z:_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""")
 _HEADERS = {"Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'"}
@@ -112,7 +112,7 @@ class FaviconStore:
         for _ in range(REDIRECTS + 1):
             parts = urlsplit(url)
             host = (parts.hostname or "").lower()
-            if parts.scheme != "https" or not _HOST_RE.match(host) or not await self._public(host):
+            if parts.scheme != "https" or not HOST_RE.match(host) or not await self._public(host):
                 return None
             async with client.stream("GET", url) as response:
                 if response.is_redirect and (location := response.headers.get("location")):
@@ -169,7 +169,7 @@ def valid_host(raw: str) -> str:
     """The host name asked for, lower-cased, or an empty string when it is not one: an IP address, a
     port, a path or a single label (``localhost``) is not a site on the web."""
     host = raw.strip().lower().rstrip(".")
-    if not _HOST_RE.match(host):
+    if not HOST_RE.match(host):
         return ""
     try:
         ipaddress.ip_address(host)
@@ -198,4 +198,4 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any], *, store:
     return icons
 
 
-__all__ = ["FaviconStore", "icon_link", "image_type", "register", "valid_host"]
+__all__ = ["HOST_RE", "FaviconStore", "icon_link", "image_type", "register", "resolve", "valid_host"]

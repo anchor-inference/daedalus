@@ -898,6 +898,15 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         if not host or "nomark" in host:
             return 404, "application/json", json.dumps({"detail": "no icon"})
         return 200, "image/png", preview_png(f"favicon:{host}", 32, 32)
+    if method.upper() == "GET" and path == "/api/card-image":
+        # A card's picture, as the host fetches it: the address the model wrote, refused when it is not
+        # on the public web over https or the site has no such picture, and never the browser's to call.
+        from urllib.parse import parse_qs
+
+        address = parse_qs(query).get("url", [""])[0]
+        if not address.startswith("https://") or "broken" in address:
+            return 404, "application/json", json.dumps({"detail": "no picture"})
+        return 200, "image/png", preview_png(address.split("?", 1)[0], 160, 160)
     parts = path.split("/")
     if path == "/api/sessions" and method.upper() == "POST":
         status, created = create_session(body)

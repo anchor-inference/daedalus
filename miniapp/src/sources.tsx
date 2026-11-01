@@ -1,6 +1,6 @@
-// What a rich answer needs once it is on the page: site marks fetched through the host, a card
-// picture that failed replaced by its site's mark, the popover of a citation chip, and the turn's
-// sources — the button under the answer and the panel it opens.
+// What a rich answer needs once it is on the page: site marks and card pictures fetched through the
+// host, a card picture that failed replaced by its site's mark, the popover of a citation chip, and
+// the turn's sources — the button under the answer and the panel it opens.
 
 import { memo, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
@@ -25,6 +25,54 @@ export function faviconUrl(host: string): Promise<string | null> {
   return asked;
 }
 
+// A card's picture, through the host for the same reason and the one more that matters: the address
+// is the model's, and fetched by the browser it was a way for an injected page to have the operator's
+// browser send a secret out. One request per address for the whole app.
+const pictures = new Map<string, Promise<string | null>>();
+
+export function cardImageUrl(address: string): Promise<string | null> {
+  const known = pictures.get(address);
+  if (known) return known;
+  const asked = fetch(`/api/card-image?url=${encodeURIComponent(address)}`, { headers: api.authHeaders() })
+    .then(async (response) => (response.ok && (response.headers.get("content-type") ?? "").startsWith("image/") ? URL.createObjectURL(await response.blob()) : null))
+    .catch(() => null);
+  pictures.set(address, asked);
+  return asked;
+}
+
+/** A card picture that will not come: the site's mark takes its place. */
+function toTile(img: HTMLImageElement): void {
+  const host = img.dataset.host ?? "";
+  const tile = document.createElement("span");
+  tile.className = "fav fav-lg";
+  tile.dataset.host = host;
+  tile.setAttribute("aria-hidden", "true");
+  tile.textContent = (host.match(/[\p{L}\p{N}]/u)?.[0] ?? "·").toUpperCase();
+  img.parentElement?.classList.add("rcard-tile");
+  img.replaceWith(tile);
+  if (host) paint(tile);
+}
+
+function load(img: HTMLImageElement): void {
+  const address = img.dataset.src;
+  if (!address) return;
+  void cardImageUrl(address).then((url) => {
+    if (!img.isConnected) return;
+    if (url) img.src = url;
+    else toTile(img);
+  });
+}
+
+// Asked for as soon as the card is drawn. An observer of the screen cannot stand in for the
+// browser's own lazy loading here: a card scrolled out of the conversation's column is clipped by
+// it and never counts as near the screen, so the pictures of earlier cards never came. The host
+// answers a picture it has seen from its disk, so a chat opened again costs it nothing.
+function watch(img: HTMLImageElement): void {
+  if (img.dataset.asked) return;
+  img.dataset.asked = "1";
+  load(img);
+}
+
 function paint(mark: HTMLElement): void {
   const host = mark.dataset.host;
   if (!host || mark.dataset.painted) return;
@@ -44,6 +92,7 @@ let diagrams: typeof import("./diagrams") | null = null;
 /** Fill the site marks and draw the diagrams of markup just written into the page. Cheap when there are none. */
 export function hydrateRich(root: HTMLElement): void {
   root.querySelectorAll<HTMLElement>(".fav[data-host]").forEach(paint);
+  root.querySelectorAll<HTMLImageElement>("img.rcard-img[data-src]").forEach(watch);
   if (diagrams) diagrams.hydrateDiagrams(root);
   else if (root.querySelector(".codecard[data-mermaid]")) {
     void import("./diagrams").then((module) => {
@@ -137,15 +186,7 @@ if (typeof document !== "undefined") {
   document.addEventListener("error", (e) => {
     const img = e.target as HTMLElement | null;
     if (!(img instanceof HTMLImageElement) || !img.classList.contains("rcard-img")) return;
-    const host = img.dataset.host ?? "";
-    const tile = document.createElement("span");
-    tile.className = "fav fav-lg";
-    tile.dataset.host = host;
-    tile.setAttribute("aria-hidden", "true");
-    tile.textContent = (host.match(/[\p{L}\p{N}]/u)?.[0] ?? "·").toUpperCase();
-    img.parentElement?.classList.add("rcard-tile");
-    img.replaceWith(tile);
-    if (host) paint(tile);
+    toTile(img);
   }, true);
 }
 

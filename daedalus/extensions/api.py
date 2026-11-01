@@ -75,6 +75,7 @@ from daedalus.extensions import (
     api_btw,
     api_calendar,
     api_capacity,
+    api_card_image,
     api_ci,
     api_comparisons,
     api_computer,
@@ -1709,6 +1710,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_disk.register(api, app, auth)
     # The site icons beside a rich answer's citations and sources, fetched once by the host and kept.
     api_favicon.register(api, app, auth)
+    # A card's picture in a rich answer, fetched by the host so the browser never calls an address the model wrote.
+    api_card_image.register(api, app, auth)
     api_plugins.register(api, app, auth)
     api_skill_quality.register(api, app, auth)
     api_integrations.register(api, app, auth)
