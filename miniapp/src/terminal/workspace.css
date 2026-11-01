@@ -16,6 +16,7 @@
 .tp-dot[data-state="done"] { background: var(--state-done); box-shadow: var(--state-glow) var(--state-done); }
 .tp-dot[data-state="failed"] { background: var(--state-failed); box-shadow: var(--state-glow) var(--state-failed); }
 .tp-dot[data-state="ended"] { background: var(--fg-3); box-shadow: none; opacity: .7; }
+.tp-dot[data-state="message"] { background: var(--state-message); box-shadow: var(--state-glow) var(--state-message); }
 .tp-dot.none { background: transparent; box-shadow: inset 0 0 0 1px var(--line-strong); animation: none; }
 @keyframes tp-pulse { 50% { opacity: .45; } }
 @media (prefers-reduced-motion: reduce) { .tp-dot[data-state="working"] { animation: none; } }
@@ -59,6 +60,15 @@
 .tp-tab-state[data-state="waiting"] { color: var(--state-waiting); }
 .tp-tab-state[data-state="done"] { color: var(--state-done); }
 .tp-tab-state[data-state="failed"] { color: var(--state-failed); }
+.tp-tab-state[data-state="message"] { color: var(--state-message); }
+/* A message from another agent lights the tab and the pane header for the moment the state lasts
+ * (MESSAGE_FLASH_MS): a tint that fades out, over a steady underline that holds while it is there. A
+ * reduced-motion reader gets the steady tint alone. */
+.tp-tab[data-state="message"] { box-shadow: inset 0 -2px 0 var(--state-message); animation: tp-message 2.4s var(--ease-out) 1; }
+.tp-pane[data-state="message"] .tp-pane-head { box-shadow: inset 0 -2px 0 var(--state-message); animation: tp-message 2.4s var(--ease-out) 1; }
+@keyframes tp-message { from { background-color: color-mix(in srgb, var(--state-message) 30%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .tp-tab[data-state="message"], .tp-pane[data-state="message"] .tp-pane-head { animation: none; background-color: color-mix(in srgb, var(--state-message) 14%, transparent); } }
+:root[data-motion="reduce"] .tp-tab[data-state="message"], :root[data-motion="reduce"] .tp-pane[data-state="message"] .tp-pane-head { animation: none; background-color: color-mix(in srgb, var(--state-message) 14%, transparent); }
 .tp-tab-key { padding: 0 4px; border: 1px solid var(--line); border-radius: var(--radius-xs); line-height: 16px; background: none; }
 @container tp-tab (max-width: 230px) { .tp-tab-key { display: none; } }
 @container tp-tab (max-width: 200px) { .tp-tab-state { display: none; } }

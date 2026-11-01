@@ -18,7 +18,10 @@ import { invalidate, useQuery } from "../store";
 import { errorText } from "../ui";
 import { endTerminal } from "../terminal/actions";
 import type { TerminalState } from "../terminal/instance";
-import { paneState } from "../terminal/status";
+import { MESSAGE_FLASH_MS, messageTargets, paneState, withMessage } from "../terminal/status";
+import { AgentCompose } from "../terminal/compose";
+import { showsCompose } from "../terminal/composeline";
+import { useEvent } from "../events";
 import { instanceFor, setTerminalEnvs, terminals } from "../terminal/terminals";
 import { PhoneTerminal } from "../terminal/mobile";
 import { TerminalStatusLine } from "../terminal/statusline";
@@ -47,11 +50,38 @@ export function TerminalWorkspaceScreen({ detail, query, toast, project, project
   useEffect(() => {
     if (list.data?.envs) setTerminalEnvs(list.data.envs);
   }, [list.data]);
-  // Each pane's status line: the agent, the folder and branch, the context, the spend.
+  // Each pane's status line: the agent, the folder and branch, the context, the spend; and over it,
+  // for a staff member's terminal, the line that writes to the member.
   const slots = useMemo<WorkspaceSlots>(() => {
     const homes = new Map((list.data?.envs ?? []).map((e) => [e.env, e.home]));
-    return { footer: (pane) => <TerminalStatusLine row={pane.row} state={pane.state} home={pane.row ? homes.get(pane.row.env) : null} /> };
-  }, [list.data?.envs]);
+    return {
+      footer: (pane) => <TerminalStatusLine row={pane.row} state={pane.state} home={pane.row ? homes.get(pane.row.env) : null} />,
+      compose: (pane) => (showsCompose(pane.row) ? <AgentCompose key={pane.id} pane={pane} toast={toast} /> : null),
+    };
+  }, [list.data?.envs, toast]);
+
+  // Another agent's message reached the member in a terminal: its tab and pane say "message" for a
+  // moment. One timer per terminal, so a second message restarts the moment rather than cutting it.
+  const [messaged, setMessaged] = useState<ReadonlySet<string>>(() => new Set());
+  const flashes = useRef(new Map<string, number>());
+  useEvent(["agent.message"], (event) => {
+    for (const tid of messageTargets(event.payload, rows)) {
+      const running = flashes.current.get(tid);
+      if (running !== undefined) window.clearTimeout(running);
+      setMessaged((all) => (all.has(tid) ? all : new Set([...all, tid])));
+      flashes.current.set(tid, window.setTimeout(() => {
+        flashes.current.delete(tid);
+        setMessaged((all) => {
+          const next = new Set(all);
+          next.delete(tid);
+          return next;
+        });
+      }, MESSAGE_FLASH_MS));
+    }
+  }, [rows]);
+  useEffect(() => () => {
+    for (const timer of flashes.current.values()) window.clearTimeout(timer);
+  }, []);
 
   const address = useMemo(() => ({ detail, query }), [detail, query]);
   // A phone shows one pane at a time, so every one of the four places is a pane it can switch to: a
@@ -178,7 +208,7 @@ export function TerminalWorkspaceScreen({ detail, query, toast, project, project
       <div className="tp-switch" role="tablist" aria-label={t("term.ws.panes")}>
         {filled.map(({ id, slot }) => (
           <button key={id} type="button" role="tab" aria-selected={id === shownId} className={`tp-switch-tab ${id === shownId ? "on" : ""}`} data-slot={slot} data-pane={id} onClick={() => { instanceFor(id)?.interact(); update((w) => focus(w, slot)); requestFocus(id); }}>
-            <StateDot status={paneState(byId.get(id), states[id])} />
+            <StateDot status={withMessage(paneState(byId.get(id), states[id]), messaged.has(id))} />
             <span className="truncate">{paneTitle(id, byId.get(id), states[id])}</span>
           </button>
         ))}
@@ -222,6 +252,7 @@ export function TerminalWorkspaceScreen({ detail, query, toast, project, project
         onNew={() => setCreating(true)}
         onOverview={overview}
         toast={toast}
+        messaged={messaged}
         slots={{
           ...slots,
           panel: { open: side.open, onToggle: () => setSide((p) => ({ ...p, open: !p.open })) },

@@ -23,7 +23,7 @@ import { fontSizeStep, type TerminalState } from "./instance";
 import { isMac } from "./keys";
 import { groupTerminals, headerCounts, ownerLine, ownerPath, running } from "./preview";
 import { useTerminalCommands } from "./rowmenu";
-import { paneState, type PaneState } from "./status";
+import { paneState, withMessage, type PaneState } from "./status";
 import { instanceFor } from "./terminals";
 import { copyLastOutput, TerminalView } from "./view";
 import { COLS_DEBOUNCE_MS } from "./fit";
@@ -76,6 +76,9 @@ export type TerminalWorkspaceProps = {
   onOverview: () => void;
   toast: (text: string) => void;
   slots?: WorkspaceSlots;
+  /** The terminals whose agent another agent's message has just reached: their tab and pane say
+   *  "message" for a moment (`MESSAGE_FLASH_MS`). The screen owns the timing. */
+  messaged?: ReadonlySet<string>;
 };
 
 const RAIL_KEY = "daedalus.term.rail";
@@ -155,7 +158,7 @@ function LayoutSwitch({ layout, onChange }: { layout: Layout; onChange: (layout:
 }
 
 export function TerminalWorkspace(props: TerminalWorkspaceProps) {
-  const { ws, update, rows, states, slots, onOpen } = props;
+  const { ws, update, rows, states, slots, onOpen, messaged } = props;
   const byId = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
   const grid = useRef<HTMLDivElement>(null);
   const [rail, setRail] = useState(readRail);
@@ -166,8 +169,8 @@ export function TerminalWorkspace(props: TerminalWorkspaceProps) {
     const id = ws.panes[slot] ?? null;
     const row = id ? byId.get(id) ?? null : null;
     const state = id ? states[id] : undefined;
-    return { slot, id, row, state, status: id ? paneState(row, state) : "idle", active: ws.active === slot };
-  }, [ws, byId, states]);
+    return { slot, id, row, state, status: id ? withMessage(paneState(row, state), !!messaged?.has(id)) : "idle", active: ws.active === slot };
+  }, [ws, byId, states, messaged]);
 
   const { onFocusRequest } = props;
   const choose = useCallback((slot: number, takeKeyboard = false) => {

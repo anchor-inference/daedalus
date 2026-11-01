@@ -1450,6 +1450,32 @@ export type StaffMessage = { id: string; staff_id: string; staff_session_id?: st
 export type MessageTiming = "now" | "after_turn" | "interrupt";
 export type MessageState = "queued" | "written" | "submitted" | "acknowledged" | "failed";
 
+/** One side of a message between agents of a project: a member, the orchestrator, or a terminal. */
+export type AgentParty = { kind: string; staff_id: string | null; session: string; name: string };
+/** What became of a message between agents: it went, was refused or failed; a waited-for one is then
+ *  answered or unanswered. */
+export type AgentMessageState = "sent" | "refused" | "failed" | "answered" | "unanswered";
+/** One SendToAgent, as `GET /api/projects/{id}/agent-messages` lists it. `kind` "reply" is an answer
+ *  handed to a sender that waited; `delivery` is the receipt of the staff message it went as. */
+export type AgentMessage = {
+  id: string;
+  project_id: string;
+  kind: "message" | "reply";
+  sender: AgentParty;
+  target: AgentParty;
+  hop: number;
+  parent_id: string | null;
+  text: string;
+  wait_s: number;
+  state: AgentMessageState;
+  detail: string;
+  staff_message_id: string | null;
+  delivery: MessageState | "";
+  created_at: string;
+  updated_at: string;
+};
+export type AgentMessagePage = { messages: AgentMessage[]; more: boolean };
+
 /** How a message reached a command-line member: pasted or by pointer, the Enters it took, when each state was reached. */
 export type StaffDelivery = { via: string; degraded_to: string; enters: number; written_at: string | null; submitted_at: string | null; acknowledged_at: string | null };
 

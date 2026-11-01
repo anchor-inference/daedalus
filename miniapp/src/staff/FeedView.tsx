@@ -4,7 +4,7 @@
 // being written, and merges what comes back by turn.
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { StaffTurn } from "../api";
+import type { AgentMessage, StaffTurn } from "../api";
 import { useEvent } from "../events";
 import { clock, tokens, usd } from "../format";
 import { plural, t } from "../i18n";
@@ -13,6 +13,10 @@ import { renderMarkdown } from "../md";
 import { RawHtml } from "../rawhtml";
 import { api } from "../api";
 import { mergeTurns, nextSince } from "./model";
+import { feedEntries, receivedBody, receivedId } from "./agentmessages";
+import { AgentFeedEntry } from "./agentfeed";
+
+const NO_AGENTS: AgentMessage[] = [];
 
 /** How often a working member's Feed asks again when the event stream says nothing. */
 const POLL_MS = 5000;
@@ -91,7 +95,10 @@ function TurnTools({ tools }: { tools: StaffTurn["tools"] }) {
 
 function FeedTurn({ turn, name }: { turn: StaffTurn; name: string }) {
   const html = useMemo(() => (turn.role === "assistant" && turn.text ? renderMarkdown(turn.text) : ""), [turn.role, turn.text]);
-  const who = turn.role === "orchestrator" ? t("staff.feed.orchestrator") : turn.role === "user" ? t("staff.feed.you") : turn.role === "system" ? t("staff.feed.system") : name;
+  // A message from another agent is a turn of the person at the keyboard to the CLI; one the log no
+  // longer lists (an older page of it) is still not the operator's, and its header is the host's.
+  const fromAgent = receivedId(turn) !== null;
+  const who = fromAgent ? t("staff.feed.agent") : turn.role === "orchestrator" ? t("staff.feed.orchestrator") : turn.role === "user" ? t("staff.feed.you") : turn.role === "system" ? t("staff.feed.system") : name;
   const spend = turn.usage ? [turn.usage.input_tokens + turn.usage.cache_read_tokens ? `${tokens(turn.usage.input_tokens + turn.usage.cache_read_tokens)}↑` : "", turn.usage.output_tokens ? `${tokens(turn.usage.output_tokens)}↓` : "", turn.usage.cost_usd ? usd(turn.usage.cost_usd) : ""].filter(Boolean).join(" ") : "";
   return (
     <article className={`feed-turn ${turn.role}`} data-turn={turn.index} data-role={turn.role}>
@@ -103,7 +110,7 @@ function FeedTurn({ turn, name }: { turn: StaffTurn; name: string }) {
       {turn.role === "assistant" ? (
         html ? <RawHtml className="answer feed-answer" html={html} /> : null
       ) : (
-        turn.text && <div className="feed-prompt">{turn.text}</div>
+        turn.text && <div className="feed-prompt">{fromAgent ? receivedBody(turn.text) : turn.text}</div>
       )}
       <TurnTools tools={turn.tools ?? []} />
     </article>
@@ -113,16 +120,20 @@ function FeedTurn({ turn, name }: { turn: StaffTurn; name: string }) {
 /**
  * The member's turns, newest at the bottom, kept in view as they arrive unless the reader scrolled up.
  * `tail` goes after the last turn (the messages still on their way); `tailKey` changes with it, so a
- * receipt that moves keeps the bottom in view as a new turn does.
+ * receipt that moves keeps the bottom in view as a new turn does. `agents` are the member's messages
+ * to and from other agents of its project (`staffId` says which side is the member's), drawn among
+ * the turns by time.
  */
-export function FeedView({ name, live, feed, tail, tailKey = "" }: { name: string; live: boolean; feed: { turns: StaffTurn[]; loaded: boolean; error: string }; tail?: ReactNode; tailKey?: string }) {
+export function FeedView({ name, live, feed, tail, tailKey = "", agents = NO_AGENTS, staffId = "" }: { name: string; live: boolean; feed: { turns: StaffTurn[]; loaded: boolean; error: string }; tail?: ReactNode; tailKey?: string; agents?: AgentMessage[]; staffId?: string }) {
   const { turns, loaded, error } = feed;
+  const entries = useMemo(() => feedEntries(turns, staffId ? agents : []), [turns, agents, staffId]);
+  const agentKey = agents.map((m) => `${m.id}:${m.state}`).join(",");
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   useEffect(() => {
     const el = scroller.current;
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
-  }, [turns, tailKey]);
+  }, [turns, tailKey, agentKey]);
   return (
     <div
       className="chat-scroll feed"
@@ -135,7 +146,9 @@ export function FeedView({ name, live, feed, tail, tailKey = "" }: { name: strin
       <div className="feed-turns">
         {!live && <div className="empty calm">{t("staff.feed.nolive")}</div>}
         {live && loaded && turns.length === 0 && <div className="empty calm">{error || t("staff.feed.empty")}</div>}
-        {turns.map((turn) => <FeedTurn key={turn.index} turn={turn} name={name} />)}
+        {entries.map((entry) => entry.kind === "agent" ? <AgentFeedEntry key={entry.message.id} message={entry.message} staffId={staffId} />
+          : entry.message ? <AgentFeedEntry key={entry.turn.index} message={entry.message} staffId={staffId} />
+          : <FeedTurn key={entry.turn.index} turn={entry.turn} name={name} />)}
         {tail}
       </div>
     </div>
