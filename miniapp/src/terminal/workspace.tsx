@@ -270,8 +270,10 @@ export function TerminalWorkspace(props: TerminalWorkspaceProps) {
           {tabs.map((slot) => {
             const pane = context(slot);
             const title = paneTitle(pane.id, pane.row, pane.state);
+            // A narrow tab shows its state as the dot alone; the tooltip keeps the word.
+            const tip = pane.id && pane.status !== "idle" ? t("term.ws.tab.tip", { title, state: t(`term.ws.state.${pane.status}`) }) : title;
             return (
-              <button key={slot} type="button" role="tab" aria-selected={pane.active} className={`tp-tab ${pane.active ? "on" : ""} ${pane.id ? "" : "empty"}`} data-slot={slot} data-state={pane.id ? pane.status : "empty"} onClick={() => choose(slot, true)} title={title}>
+              <button key={slot} type="button" role="tab" aria-selected={pane.active} className={`tp-tab ${pane.active ? "on" : ""} ${pane.id ? "" : "empty"}`} data-slot={slot} data-state={pane.id ? pane.status : "empty"} onClick={() => choose(slot, true)} title={tip}>
                 <StateDot status={pane.status} className={pane.id ? "" : "none"} />
                 <span className="tp-tab-title truncate">{title}</span>
                 {pane.id && pane.status !== "idle" && <span className="tp-tab-state" data-state={pane.status}>{t(`term.ws.state.${pane.status}`)}</span>}
@@ -280,7 +282,6 @@ export function TerminalWorkspace(props: TerminalWorkspaceProps) {
             );
           })}
         </div>
-        <div className="grow" />
         {waiting.length > 0 && (
           <button type="button" className="tp-waiting" onClick={() => onOpen(waiting[0].id)} title={waiting.map((r) => r.title).join(", ")}>
             <StateDot status="waiting" />
