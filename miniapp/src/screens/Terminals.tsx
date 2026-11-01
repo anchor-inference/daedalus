@@ -1,10 +1,14 @@
-import { useContextActions } from "../ui/context-menu";
-// The Terminals screen: every terminal on the machine as a card with the last rows of its screen, by
-// project, with the load bar in the header and a way to open a free one. The cards are read from the
-// host's listing (`?preview=6`), never from a connection: forty cards must not hold forty sockets.
-// Opening one goes to its full-screen view (`/app/terminals/<id>`), which does connect.
+// The Terminals screen. Its Overview is every terminal on the machine as a card with the last rows of
+// its screen, by project, with the load bar in the header and a way to open a free one. The cards are
+// read from the host's listing (`?preview=6`), never from a connection: forty cards must not hold
+// forty sockets. Its Workspace (TerminalWorkspace.tsx) is the terminals the operator set up, live, in
+// a grid; opening a card shows that terminal there (`/app/terminals/<id>`).
+//
+// Which of the two `/app/terminals` opens on is `openingView`'s rule: the Workspace when panes are
+// set up, unless the operator chose the Overview last.
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useContextActions } from "../ui/context-menu";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useEdgeFade } from "../edgefade";
 import { api, Project, SessionList, TerminalEnv, TerminalEnvName, TerminalList, TerminalLoad, TerminalView as TerminalRow } from "../api";
 import { Skeleton } from "../ui/index";
@@ -16,6 +20,11 @@ import { LoadBar } from "../loadbar";
 import { navigate, pathFor } from "../router";
 import { PageHeader, screenTitle, useMedia } from "../ui/index";
 import { PhoneTerminals } from "./TerminalsPhone";
+import { TerminalWorkspaceScreen } from "./TerminalWorkspace";
+import { StateDot, ViewSwitch } from "../terminal/workspace";
+import { paneState } from "../terminal/status";
+import { useTerminalCommands } from "../terminal/rowmenu";
+import { loadView, loadWorkspace, openingView, saveView } from "../terminal/workspacestate";
 import { invalidate, peek, useQuery } from "../store";
 import { errorText } from "../ui";
 import { createTerminalConfirmed } from "../terminal/actions";
@@ -55,13 +64,33 @@ export async function openFreeTerminal(env: TerminalEnvName, cwd: string | undef
   navigate(terminalPath(row.id));
 }
 
-export function TerminalsScreen(props: { toast: (text: string) => void; project: string; projects: Project[] }) {
-  // A phone draws the same listing from its own pieces (TerminalsPhone.tsx): a capacity line, cards, sheets.
+export function TerminalsScreen(props: { detail: string | null; query: URLSearchParams; toast: (text: string) => void; project: string; projects: Project[] }) {
+  const { detail, query, ...rest } = props;
+  // A phone draws the same listing from its own pieces (TerminalsPhone.tsx): a capacity line, cards,
+  // sheets; a terminal opened from it is the Workspace's one pane at a time.
   const phone = !useMedia("(min-width: 1024px)");
-  return phone ? <PhoneTerminals {...props} /> : <DesktopTerminals {...props} />;
+  const asked = query.get("view");
+  const marked = (window.history.state as { termView?: string } | null)?.termView;
+  const view = detail ? "workspace" : phone ? "overview" : asked === "overview" || asked === "workspace" ? asked : marked === "overview" ? "overview" : openingView(loadView(), loadWorkspace());
+  if (view === "workspace") return <TerminalWorkspaceScreen detail={detail} query={query} {...rest} />;
+  return phone ? <PhoneTerminals {...rest} /> : <DesktopTerminals {...rest} />;
 }
 
 function DesktopTerminals({ toast, project, projects }: { toast: (text: string) => void; project: string; projects: Project[] }) {
+  // The Overview marks its history entry: Back from a terminal opened here must come back to the
+  // cards, not to whatever `/app/terminals` would choose by then (the Workspace, once a pane is set
+  // up). In the entry's state rather than its address, so the address stays the one every link uses.
+  useEffect(() => {
+    try {
+      window.history.replaceState({ ...(window.history.state ?? {}), termView: "overview" }, "");
+    } catch {
+      /* the choice falls back to the remembered one */
+    }
+  }, []);
+  const toWorkspace = () => {
+    saveView("workspace");
+    navigate(pathFor("terminals", null, { view: "workspace" }));
+  };
   const [filter, setFilter] = useState<TerminalFilter>("all");
   const [creating, setCreating] = useState(false);
   // The host says how often a preview is worth refreshing; the environments come with the listing.
@@ -98,15 +127,18 @@ function DesktopTerminals({ toast, project, projects }: { toast: (text: string) 
   const lens = projects.find((p) => p.id === project) ?? null;
 
   return (
-    <>
+    <div className="tp tp-overview">
       <PageHeader
         title={screenTitle("terminals")}
         subtitle={subtitle}
         actions={
+          <>
+          <ViewSwitch view="overview" onChange={(v) => { if (v === "workspace") toWorkspace(); }} />
           <button className="btn primary small term-new-button" onClick={() => setCreating(true)} disabled={list.data ? !envs.some((e) => e.available) : false}>
             <Icon name="plus" size={16} />
             <span>{t("term.new")}</span>
           </button>
+          </>
         }
       >
         {load.data && <LoadBar load={load.data} compact />}
@@ -146,26 +178,30 @@ function DesktopTerminals({ toast, project, projects }: { toast: (text: string) 
             </div>
             <div className="term-cards">
               {group.rows.map((row) => (
-                <TerminalCard key={row.id} row={row} projectName={row.project_id ? names.get(row.project_id) ?? null : null} onRemove={() => void remove(row)} />
+                <TerminalCard key={row.id} row={row} projectName={row.project_id ? names.get(row.project_id) ?? null : null} onRemove={() => void remove(row)} toast={toast} />
               ))}
             </div>
           </section>
         ))}
       </div>
       {creating && <NewTerminalSheet envs={envs} lens={lens} projects={projects} toast={toast} onClose={() => setCreating(false)} />}
-    </>
+    </div>
   );
 }
 
-function TerminalCard({ row, projectName, onRemove }: { row: TerminalRow; projectName: string | null; onRemove: () => void }) {
+function TerminalCard({ row, projectName, onRemove, toast }: { row: TerminalRow; projectName: string | null; onRemove: () => void; toast: (text: string) => void }) {
   const status = cardStatus(row);
   const live = running(row);
   const open = () => navigate(terminalPath(row.id));
   const action = live && row.activity?.action;
   const card = useRef<HTMLElement>(null);
+  // Rename (and End) are the list row's own commands, with the same sheet and the same questions.
+  const commands = useTerminalCommands(row, toast);
+  const rename = commands.items[0];
   useContextActions(card, [
     { label:t("term.card.open"), icon:"terminal", onSelect:open },
     ...(action ? [{ label:action.kind === "answer" ? t("term.card.answer") : action.label, onSelect:() => navigate(action.path) }] : []),
+    ...(rename !== "-" ? [rename] : []),
     ...(!live ? [{ label:t("term.remove"), icon:"trash" as const, onSelect:onRemove }] : []),
   ]);
   return (
@@ -187,7 +223,7 @@ function TerminalCard({ row, projectName, onRemove }: { row: TerminalRow; projec
         </pre>
       </button>
       <div className="term-card-foot">
-        <span className="term-card-dot" data-level={status.level} aria-hidden="true" />
+        <StateDot status={paneState(row)} className="term-card-dot" />
         <span className="term-card-status sub truncate" data-level={status.level}>{status.text}</span>
         {!live ? (
           <button className="btn small ghost" onClick={onRemove}>{t("term.remove")}</button>
@@ -197,6 +233,7 @@ function TerminalCard({ row, projectName, onRemove }: { row: TerminalRow; projec
           <button className="btn small" onClick={open}>{t("term.card.open")}</button>
         )}
       </div>
+      {commands.layer}
     </article>
   );
 }
@@ -206,7 +243,7 @@ function TerminalCard({ row, projectName, onRemove }: { row: TerminalRow; projec
  * on the host at their home, or anywhere they choose. The host choice is marked amber and carries no
  * extra question — the operator decided that a marker is enough.
  */
-function NewTerminalSheet({ envs, lens, projects, toast, onClose }: { envs: TerminalEnv[]; lens: Project | null; projects: Project[]; toast: (text: string) => void; onClose: () => void }) {
+export function NewTerminalSheet({ envs, lens, projects, toast, onClose }: { envs: TerminalEnv[]; lens: Project | null; projects: Project[]; toast: (text: string) => void; onClose: () => void }) {
   const env = (name: TerminalEnvName) => envs.find((e) => e.env === name);
   const container = env("container");
   const host = env("host");

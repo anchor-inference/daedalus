@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TerminalView } from "../api";
 import { setLang } from "../i18n";
-import { cardStatus, gridIds, groupTerminals, headerCounts, matches, ownerLine, ownerPath, previewRows, runColor, runStyle, span } from "./preview";
+import { cardStatus, groupTerminals, headerCounts, matches, ownerLine, ownerPath, previewRows, runColor, runStyle, span } from "./preview";
 
 setLang("en");
 
@@ -126,13 +126,5 @@ describe("owners", () => {
     expect(paths(session)).toBe("/s/s1");
     expect(paths(staff)).toBe("/p/p1");
     expect(paths(row("f"))).toBeNull();
-  });
-});
-
-describe("the full-screen grid", () => {
-  it("holds the named terminal and up to three beside it, none twice", () => {
-    expect(gridIds("a", null)).toEqual(["a"]);
-    expect(gridIds("a", "b,c")).toEqual(["a", "b", "c"]);
-    expect(gridIds("a", "b,a,,c,d,e")).toEqual(["a", "b", "c", "d"]);
   });
 });

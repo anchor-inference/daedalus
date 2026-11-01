@@ -79,9 +79,11 @@ export type PhoneTerminalProps = {
   actions?: ReactNode;
   /** More items for the header's menu, after the terminal's own. */
   menu?: MenuItem[];
+  /** Under the header: the switcher between the workspace's panes, which a phone shows one at a time. */
+  switcher?: ReactNode;
 };
 
-export function PhoneTerminal({ id, row, onBack, onEnd, onRestart, onRemove, workspace, fileOpener, focusToken, onState, compose, actions, menu }: PhoneTerminalProps) {
+export function PhoneTerminal({ id, row, onBack, onEnd, onRestart, onRemove, workspace, fileOpener, focusToken, onState, compose, actions, menu, switcher }: PhoneTerminalProps) {
   const [state, setState] = useState<TerminalState | null>(null);
   const [selecting, setSelecting] = useState<string | null>(null);
   const [composeShown, setComposeShown] = useState(() => readFlag(COMPOSE_KEY, true));
@@ -261,6 +263,7 @@ export function PhoneTerminal({ id, row, onBack, onEnd, onRestart, onRemove, wor
         )}
         <OverflowMenu items={items} icon="vdots" label={t("term.phone.menu")} />
       </div>
+      {switcher}
       <div className="term-phone-screen" ref={stage}>
         <div className="term-phone-zoom" ref={zoom}>
           <TerminalView

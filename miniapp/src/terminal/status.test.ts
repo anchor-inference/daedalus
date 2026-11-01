@@ -2,7 +2,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { setLang } from "../i18n";
 import type { ConnectionState } from "./connection";
-import { connectionText } from "./status";
+import type { TerminalView } from "../api";
+import type { TerminalState } from "./instance";
+import { connectionText, paneState } from "./status";
 
 const EVERY: ConnectionState[] = [
   { kind: "connecting" },
@@ -35,5 +37,43 @@ describe("connectionText", () => {
     expect(connectionText({ kind: "exited", code: null, signal: "SIGKILL" })).toBe("Process ended · signal SIGKILL");
     setLang("ru");
     expect(connectionText({ kind: "proxy-blocked" })).toMatch(/обратным прокси/);
+  });
+});
+
+describe("paneState", () => {
+  const row = (fields: Partial<TerminalView> = {}) => ({ status: "running", exit_code: null, exit_signal: null, activity: null, live: null, ...fields }) as TerminalView;
+  const marks = (result: "running" | "ok" | "failed" | null) => ({ commands: { last: result ? { n: 1, command: "x", result, exitCode: null } : null, ended: false, prompts: 0, active: true }, unseen: false, bell: false, exit: null }) as unknown as TerminalState;
+
+  it("says waiting for a staff member's permission or question, and for anything with an Answer", () => {
+    expect(paneState(row({ activity: { status: "permission" } }))).toBe("waiting");
+    expect(paneState(row({ activity: { status: "question" } }))).toBe("waiting");
+    expect(paneState(row({ activity: { label: "waiting for permission", level: "warn", action: { label: "Answer", path: "/app/inbox" } } }))).toBe("waiting");
+  });
+
+  it("follows the agent's own status before the screen's", () => {
+    expect(paneState(row({ activity: { status: "working" } }), marks(null))).toBe("working");
+    expect(paneState(row({ activity: { status: "turn_done_unseen" } }))).toBe("done");
+    expect(paneState(row({ activity: { status: "error", level: "bad" } }))).toBe("failed");
+    expect(paneState(row({ activity: { status: "idle", level: "idle" } }), marks("running"))).toBe("idle");
+  });
+
+  it("reads a shell from its running command or its busy flag", () => {
+    expect(paneState(row(), marks("running"))).toBe("working");
+    expect(paneState(row({ live: { clients: 1, busy: true, keyboard: { owner: "auto", until: null }, size_owner: "you", alt_screen: false } }))).toBe("working");
+    expect(paneState(row(), marks("ok"))).toBe("idle");
+    expect(paneState(row(), marks("failed"))).toBe("failed");
+    expect(paneState(row(), { ...marks(null), unseen: true })).toBe("done");
+  });
+
+  it("tells a clean end from a failure, and a lost terminal from both", () => {
+    expect(paneState(row({ status: "exited", exit_code: 0 }))).toBe("ended");
+    expect(paneState(row({ status: "exited", exit_code: 2 }))).toBe("failed");
+    expect(paneState(row({ status: "exited", exit_signal: "SIGKILL" }))).toBe("failed");
+    expect(paneState(row({ status: "lost" }))).toBe("ended");
+    expect(paneState(row(), { ...marks(null), exit: { code: 1, signal: null } })).toBe("failed");
+  });
+
+  it("is idle for a row nobody knows anything about", () => {
+    expect(paneState(null)).toBe("idle");
   });
 });

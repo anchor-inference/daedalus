@@ -40,10 +40,11 @@ import petHost from "./pethost.tsx?raw";
 import sidePanel from "./sidepanel/sidepanel.css?raw";
 import computer from "./computer.css?raw";
 import schedules from "./schedules/schedules.css?raw";
+import terminals from "./terminal/workspace.css?raw";
 // The browser's phone sheet, the session import, the agent's question card, the desktop's Quick
-// Chat, the widgets in an answer, the annotated snapshot and the Computer control's scope picker keep
-// their looks beside their components; they answer to the same scale.
-const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop + "\n" + phone + "\n" + browserPhone + "\n" + newProject + "\n" + imports + "\n" + ask + "\n" + quick + "\n" + widget + "\n" + annotate + "\n" + computer + "\n" + schedules;
+// Chat, the widgets in an answer, the annotated snapshot, the Computer control's scope picker and the
+// Terminals page keep their looks beside their components; they answer to the same scale.
+const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop + "\n" + phone + "\n" + browserPhone + "\n" + newProject + "\n" + imports + "\n" + ask + "\n" + quick + "\n" + widget + "\n" + annotate + "\n" + computer + "\n" + schedules + "\n" + terminals;
 
 type Rule = { selector: string; media: string; body: string };
 
@@ -459,6 +460,23 @@ describe("rows and controls", () => {
     const wide = all.filter((r) => r.media.includes("min-width: 1024px")).map((r) => `${r.selector}{${r.body}}`).join("\n");
     expect(wide).not.toMatch(/\.term-dock[^{]*\{[^}]*--chat-w/);
     expect(decl(".term-dock")).not.toContain("--chat-w");
+  });
+
+  it("give the Terminals workspace a row for its bar, a dense row per pane header and a thin splitter", () => {
+    // paddock, which the workspace's arrangement comes from, draws a 40 px bar and 48 px pane headers
+    // over 15 px text. Here the bar is a row like any other, a pane header a dense row (four of them
+    // stack in a 2 × 2 grid, and every pixel they take is a terminal row lost), and the splitter a
+    // 5 px track that never grows into a gap.
+    expect(decl(".tp-top")).toContain("height: var(--row-h)");
+    expect(decl(".tp-pane-head")).toContain("height: var(--row-h-dense)");
+    expect(decl(".tp-row-open")).toContain("height: var(--row-h)");
+    expect(decl(".tp-tab")).toContain("height: var(--ctl-h-sm)");
+    expect(decl(".tp")).toContain("--tp-split: 5px");
+    // One colour per kind of data, and every one of them an alias of a token each theme sets: a
+    // hex here would stay put while the theme around it changed.
+    const declared = all.find((r) => r.selector === ":root" && !r.media)!.body;
+    for (const kind of ["context", "cache", "wait", "output", "path", "branch", "bad"]) expect(declared).toMatch(new RegExp(`--data-${kind}: var\\(--`));
+    expect(terminals).not.toMatch(/#[0-9a-f]{3,8}\b/i);
   });
 
   it("give a phone's terminal and project the thumb's sizes from the tokens, and the visible height", () => {
