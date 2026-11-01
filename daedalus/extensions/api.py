@@ -197,6 +197,7 @@ from daedalus.stores.harness import HarnessStore
 from daedalus.stores.inference_budget import InferenceBudget
 from daedalus.stores.media import MEDIA_TENANT
 from daedalus.stores.projects import Project, ProjectError
+from daedalus.stores.provider_speed import MAX_WINDOW_HOURS, provider_speed
 from daedalus.stores.quota import quota_forecast
 from daedalus.stores.sqlite import ReceiptConflict, message_text
 from daedalus.stores.staff import ACTIVE_STATUSES, HARNESSES, Staff, StaffBusy, StaffError
@@ -5667,7 +5668,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         )
         recent = await app.db.fetchall(
             "SELECT u.at, u.provider_id, u.model, u.purpose, u.session_id, u.run_id, u.input_tokens, u.output_tokens,"
-            " u.cache_read_tokens, u.reasoning_tokens, u.cost_usd, u.duration_ms, u.raw, s.title session_title"
+            " u.cache_read_tokens, u.reasoning_tokens, u.cost_usd, u.duration_ms, u.first_byte_ms, u.first_token_ms,"
+            " u.output_tokens_per_second, u.raw, s.title session_title"
             " FROM usage_events u LEFT JOIN sessions s ON s.id = u.session_id ORDER BY u.seq DESC LIMIT 200"
         )
         by_session = await app.db.fetchall(
@@ -5684,6 +5686,18 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             # Read after the subscriptions, so the reading just taken is in its own forecast.
             "forecasts": [f.view() for f in await quota_forecast(app.db)],
         }
+
+    @api.get("/api/usage/speed")
+    async def usage_speed(hours: int = 24, provider_id: str | None = None, model: str | None = None,
+                          _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """How fast each provider and model answered over the last ``hours``: the median and p90 time to
+        the first token, the median time to the first byte, the median output rate over the generation.
+
+        Taken over streamed calls that produced a token, counting the attempt that answered; a call
+        answered whole or cancelled has no speed. ``provider_id`` and ``model`` narrow it to one model,
+        which is how a status line asks about the model a session runs on."""
+        rows = await provider_speed(app.db, hours=hours, provider_id=provider_id or None, model=model or None)
+        return {"hours": max(1, min(hours, MAX_WINDOW_HOURS)), "models": [row.view() for row in rows]}
 
     @api.get("/api/usage/provider/{provider_id}")
     async def usage_provider(provider_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

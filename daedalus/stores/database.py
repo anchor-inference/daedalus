@@ -3202,6 +3202,25 @@ INSERT INTO search_pending(seq) SELECT seq FROM transcript;
 DELETE FROM kv WHERE key IN ('search_space', 'conversation_search');
 """)
 
+SPEED_COLUMNS = (("first_byte_ms", "INTEGER"), ("first_token_ms", "INTEGER"), ("output_tokens_per_second", "REAL"))
+
+
+async def _usage_speed(conn: aiosqlite.Connection) -> None:
+    """How fast a provider answered each call: the time to the first byte of the answering attempt, to
+    its first token (text, reasoning or a tool call), and the output rate over the generation that
+    followed. Empty on every call made before, on a call sent without streaming (it has no first
+    token to time), and on one too short for a rate to mean anything.
+
+    Each column is added only when it is missing: a test that winds the version back to an earlier
+    migration runs every later one again, and a bare ADD COLUMN fails the second time."""
+    present = {row[1] for row in await (await conn.execute("PRAGMA table_info(usage_events)")).fetchall()}
+    for name, kind in SPEED_COLUMNS:
+        if name not in present:
+            await conn.execute(f"ALTER TABLE usage_events ADD COLUMN {name} {kind}")
+
+
+MIGRATIONS.append(DataMigration("SELECT 1;", _usage_speed))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""
