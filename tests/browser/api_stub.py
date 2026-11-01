@@ -879,6 +879,18 @@ def create_session(body: object, id_: str = "9a8b7c6d5e4f") -> tuple[int, dict]:
     return 200, {"id": id_, "kind": kind}
 
 
+def usage_speed(hours: int) -> dict:
+    """The answer of ``GET /api/usage/speed``: a quick model, a subscription that starts slowly, and a
+    model with calls too short for a rate. A longer window holds more calls of the same models."""
+    scale = max(1, hours // 24)
+    models = [
+        {"provider_id": "deepseek", "model": "deepseek-flash", "calls": 140 * scale, "rated": 120 * scale, "first_token_p50_ms": 620, "first_token_p90_ms": 1_450, "first_byte_p50_ms": 180, "tokens_per_second_p50": 87.4},
+        {"provider_id": "claude", "model": "claude-opus-5", "calls": 38 * scale, "rated": 35 * scale, "first_token_p50_ms": 2_300, "first_token_p90_ms": 7_900, "first_byte_p50_ms": 240, "tokens_per_second_p50": 54.2},
+        {"provider_id": "opencode", "model": "gpt-5.6-luna", "calls": 4 * scale, "rated": 0, "first_token_p50_ms": 1_100, "first_token_p90_ms": 1_900, "first_byte_p50_ms": 310, "tokens_per_second_p50": None},
+    ]
+    return {"hours": hours, "models": [{**m, "last_at": "2026-11-01T12:00:00+00:00"} for m in models]}
+
+
 def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str, str | bytes] | None:
     """The answer every harness gives the same way: ``(status, content type, body)``, or ``None``.
 
@@ -1107,6 +1119,9 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
             return 200, "application/json", json.dumps({"name": parts[4] if len(parts) > 4 else "", "added": True, "probe": probe, "servers": servers})
         if method.upper() == "DELETE":
             return 200, "application/json", json.dumps({"removed": parts[4], "servers": servers[1:]})
+    if method.upper() == "GET" and path == "/api/usage/speed":
+        hours = int(dict(pair.split("=", 1) for pair in query.split("&") if "=" in pair).get("hours", "24") or 24)
+        return 200, "application/json", json.dumps(usage_speed(hours))
     if method.upper() == "GET" and len(parts) == 5 and parts[3] == "provider" and parts[2] == "usage":
         # The provider card in Details: a day with nothing spent, no subscription read.
         return 200, "application/json", json.dumps({"provider": parts[4], "today": {}, "subscription": None, "balance": None})

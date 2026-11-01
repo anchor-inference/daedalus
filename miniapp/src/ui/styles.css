@@ -2402,7 +2402,15 @@ a.memory-source:hover { color: var(--fg); }
   .usage .tablecard td.cachedc { grid-area: cached; }
   .usage .tablecard td[data-label] { color: var(--fg-2); font-size: var(--fs-12); }
   .usage .tablecard td[data-label]::before { content: attr(data-label) " "; color: var(--fg-3); }
+  /* The speed table has no day and no cost: the model on top, its four numbers under it in two
+     pairs, the two times side by side. Four in a row ran off the card's edge at phone width. */
+  .usage .tablecard[data-speed] tr { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "model model" "ttft ttft90" "tps calls"; }
+  .usage .tablecard[data-speed] td[data-label] { white-space: nowrap; }
+  .usage .tablecard td.ttftc { grid-area: ttft; }
+  .usage .tablecard td.ttft90c { grid-area: ttft90; }
+  .usage .tablecard td.tpsc { grid-area: tps; }
 }
+.speed-hint { padding: 6px 2px 2px; }
 .settings-stage { display: flex; flex-direction: column; min-height: 0; flex: 1; background: var(--bg); }
 .settings-index { display: flex; flex-direction: column; gap: 2px; }
 .settings-back { display: none; }
