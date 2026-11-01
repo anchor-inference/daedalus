@@ -82,15 +82,15 @@ const SAME_IN_BOTH = [
   "staff.changes.summary",
   // The key before a member's CLI and its version: the acronym is read as is in either language.
   "staff.details.cli",
+  // The kinds of a terminal's action that are a program's or a protocol's own name: git, MCP, shell.
+  "term.side.kind.git",
+  "term.side.kind.mcp",
+  "term.side.kind.shell",
   // The status line's units and marks, as a CLI's own status line prints them in either language.
   "term.status.cost.approx",
   "term.status.tok.k",
   "term.status.tok.m",
   "term.ws.tab.tip",
-  // The kinds of a terminal's action that are a program's or a protocol's own name: git, MCP, shell.
-  "term.side.kind.git",
-  "term.side.kind.mcp",
-  "term.side.kind.shell",
   "theme.claude",
   // A tool named by its own id and a count: the id is the same in both languages.
   "turn.family.other",
