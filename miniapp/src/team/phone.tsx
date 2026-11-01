@@ -34,6 +34,14 @@ export function memberPath(projectId: string, member: Staff): string | null {
   return null;
 }
 
+/** Where a tap on a member's row leads on a phone: a command-line member with a live terminal opens
+ *  on it, the full-screen one with the row of keys, where a message can be typed and its request
+ *  answered; the Feed stays in the row's menu. Any other member leads where `memberPath` says. */
+export function openPath(projectId: string, member: Staff): string | null {
+  if (member.harness !== "daedalus" && member.live?.terminal_id) return pathFor("terminals", member.live.terminal_id);
+  return memberPath(projectId, member);
+}
+
 /**
  * Dismissing a member on a phone. One with a live session cannot be dismissed until it is released,
  * so the question says so and offers the release itself instead of a Dismiss the host would refuse.
@@ -150,7 +158,7 @@ export function PhoneTeamList({ projectId, team, tasks, usage, toast, onEdit, on
           </>
         ) : undefined}
         trail={<span className="ph-member-tm">{wait ? t("ph.team.queued") : member.live?.started_at ? relTime(member.live.started_at) : ""}</span>}
-        onOpen={() => (path ? navigate(path) : onEdit(member))}
+        onOpen={() => { const to = openPath(projectId, member); if (to) navigate(to); else onEdit(member); }}
         actions={items}
         more={false}
         preview={{ title: <span className="ph-member-pv"><StaffAvatar name={member.name} color={member.color} /><span>{member.name}{member.role ? ` · ${member.role}` : ""}</span></span>, meta: [line.word, line.rest].filter(Boolean).join(" · ") }}

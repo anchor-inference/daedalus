@@ -208,13 +208,6 @@ export function answeredBy(detail: string): "operator" | "orchestrator" | "termi
 
 export type StaffViewMode = "feed" | "terminal";
 
-/** The Feed below a desktop's width, the terminal from it: a phone reads, a desktop watches the TUI. */
-export function defaultMode(width: number, saved: string | null, hasTerminal: boolean): StaffViewMode {
-  if (!hasTerminal) return "feed";
-  if (saved === "feed" || saved === "terminal") return saved;
-  return width >= 1024 ? "terminal" : "feed";
-}
-
 /**
  * Whether the keyboard banner shows: a person holds the terminal's keyboard, and a message from the
  * orchestrator waits for them to let go. The operator's own messages never wait for the keyboard.

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ChannelHealth, StaffMessage, StaffTurn } from "../api";
 import { setLang } from "../i18n";
 import { ASIDE_KEY, ASIDE_TERMINAL_MIN, ASIDE_W_MAX, ASIDE_W_MIN, alwaysServer, askWords, clampAside, mcpServer, readAsideWidth, rememberAsideWidth, ruleWords } from "./model";
-import { answeredBy, applyMessageEvent, attention, canAlways, channelWords, composerWhen, defaultMode, healthParts, keyboardBlocks, listRows, mergeTurns, nextSince, nowChoice, openRequests, outboxRows, stripRows, turnFacts } from "./model";
+import { answeredBy, applyMessageEvent, attention, canAlways, channelWords, composerWhen, healthParts, keyboardBlocks, listRows, mergeTurns, nextSince, nowChoice, openRequests, outboxRows, stripRows, turnFacts } from "./model";
 
 const msg = (id: string, state: StaffMessage["state"], created_at: string, origin: StaffMessage["origin"] = "orchestrator"): StaffMessage => ({
   id, staff_id: "st-ira", origin, text: id, mode: "after_turn", state, attempts: 1, created_at, updated_at: created_at, error: "",
@@ -123,13 +123,6 @@ describe("what the capabilities decide", () => {
 });
 
 describe("the rest of the view", () => {
-  it("opens on the terminal on a desktop and on the Feed on a phone, unless chosen otherwise", () => {
-    expect(defaultMode(1440, null, true)).toBe("terminal");
-    expect(defaultMode(390, null, true)).toBe("feed");
-    expect(defaultMode(1440, "feed", true)).toBe("feed");
-    expect(defaultMode(1440, "terminal", false)).toBe("feed");
-  });
-
   it("shows the keyboard banner only while a person holds it and the orchestrator's message waits", () => {
     const waiting = [msg("m1", "queued", "2026-09-25T10:00:00Z")];
     const mine = [msg("m1", "queued", "2026-09-25T10:00:00Z", "operator")];
