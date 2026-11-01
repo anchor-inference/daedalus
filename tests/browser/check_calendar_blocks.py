@@ -26,6 +26,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+from datetime import timedelta
 from pathlib import Path
 
 from playwright.sync_api import Locator, Page, expect, sync_playwright
@@ -33,7 +34,7 @@ from playwright.sync_api import Locator, Page, expect, sync_playwright
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import screenshots as shots  # noqa: E402
 from api_stub import expect_app  # noqa: E402
-from calendar_stub import ZONE, CalendarStub  # noqa: E402
+from calendar_stub import MENU, ZONE, CalendarStub  # noqa: E402
 
 BASE = shots.BASE
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -261,12 +262,34 @@ def scenario(browser, lang: str, phone: bool, scheme: str, errors: list[str]) ->
         page.locator(".cal-view-pick").click()
         page.get_by_role("menuitem", name="Месяц" if lang == "ru" else "Month", exact=True).click()
         expect(page.locator(".cal-month.compact")).to_be_visible()
-        assert page.locator(".cal-month.compact .cal-mark.typed").count() >= 7, f"{where}: the month draws no type dots"
+        # Every day of the week's plan carries its type's dot. This used to count seven dots in the
+        # month on screen, which held only while the whole plan, laid from today, fell inside the
+        # month's grid: in the last days of a month the plan runs on into the next one and the check
+        # failed every day of that week. The days are looked up by date instead, and the ones past
+        # the grid are looked for in the next month.
+        plan_days = [str(stub.today + timedelta(days=n)) for n in range(len(MENU))]
+        missing = [day for day in plan_days if page.locator(f".cal-month.compact .cal-month-cell[data-day='{day}']").count() == 0]
+        assert missing != plan_days, f"{where}: the month does not draw today"
+        undotted = [day for day in plan_days if day not in missing and page.locator(f".cal-month.compact .cal-month-cell[data-day='{day}'] .cal-mark.typed").count() == 0]
         widest = page.evaluate("Math.max(...[...document.querySelectorAll('.cal-month.compact .cal-month-marks')].map((m) => m.scrollWidth - m.parentElement.clientWidth))")
         assert widest <= 0, f"{where}: a day's dots run out of their cell by {widest}px"
         expect(page.locator(".cal-month-day .cal-totals-day")).to_be_visible()
         no_sideways(page, f"{where} month")
         shot(page, f"{tag}-month")
+        if missing:
+            # A phone has no Next button: a swipe to the left turns the month.
+            page.locator(".cal-main").evaluate(
+                """el => {
+                    const r = el.getBoundingClientRect();
+                    const y = r.top + r.height / 2;
+                    const touch = (cx) => new Touch({ identifier: 2, target: el, clientX: cx, clientY: y });
+                    el.dispatchEvent(new TouchEvent("touchstart", { bubbles: true, touches: [touch(r.right - 40)], changedTouches: [touch(r.right - 40)] }));
+                    el.dispatchEvent(new TouchEvent("touchend", { bubbles: true, touches: [], changedTouches: [touch(r.left + 40)] }));
+                }"""
+            )
+            expect(page.locator(f".cal-month.compact .cal-month-cell[data-day='{missing[-1]}']")).to_have_count(1)
+            undotted += [day for day in missing if page.locator(f".cal-month.compact .cal-month-cell[data-day='{day}'] .cal-mark.typed").count() == 0]
+        assert not undotted, f"{where}: the month draws no type dot on the plan's days {undotted}"
     context.close()
 
 

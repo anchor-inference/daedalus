@@ -172,8 +172,11 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
             if not gone:
                 return route.fulfill(status=409, content_type="application/json", body=json.dumps({"detail": "that message has already reached the agent"}))
             # The host answers a withdrawal with the words whole, which the card's Edit puts back in the field.
-            message = {"id": sid, "text": gone[0]["text"], "files": gone[0].get("files", [])}
-            return route.fulfill(status=200, content_type="application/json", body=json.dumps({"deleted": True, "message": message}))
+            # The name is not `message`: assigned anywhere in this handler, that name became local to all
+            # of it and the retry branch below called a dict that was never bound, so every retry and
+            # revert raised UnboundLocalError inside the route and the page was left waiting.
+            withdrawn = {"id": sid, "text": gone[0]["text"], "files": gone[0].get("files", [])}
+            return route.fulfill(status=200, content_type="application/json", body=json.dumps({"deleted": True, "message": withdrawn}))
         if rel == f"/api/sessions/{SESSION}/policy/grant-similar":
             key = str((data or {}).get("key") or "")
             resolved = [key, *HOST.covered] if key == HOST.similar_key else []

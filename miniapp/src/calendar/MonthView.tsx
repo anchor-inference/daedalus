@@ -69,7 +69,7 @@ export function MonthView(props: Props) {
             const colours = mine.filter((item, i) => mine.findIndex((other) => (other.typeColor ?? other.color) === (item.typeColor ?? item.color) && other.kind === item.kind && !!other.allDay === !!item.allDay) === i).slice(0, 4);
             return (
               <button key={day} type="button" role="gridcell" className={`cal-month-cell ${day.slice(0, 7) !== props.month ? "outside" : ""} ${day === today ? "today" : ""} ${day === props.selected ? "selected" : ""}`}
-                aria-selected={day === props.selected} aria-label={`${dayLabel(day, locale(), { weekday: "long", day: "numeric", month: "long" })}${mine.length ? `, ${t("cal.items.count", { n: mine.length })}` : ""}`}
+                aria-selected={day === props.selected} data-day={day} aria-label={`${dayLabel(day, locale(), { weekday: "long", day: "numeric", month: "long" })}${mine.length ? `, ${t("cal.items.count", { n: mine.length })}` : ""}`}
                 onClick={() => props.onPickDay(day)}>
                 <span className="cal-month-num">{Number(day.slice(8, 10))}</span>
                 <span className="cal-month-marks" aria-hidden="true">
