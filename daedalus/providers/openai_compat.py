@@ -426,6 +426,65 @@ class UsageRecord:
     run_id: str | None
     session_id: str | None
     inference_reservation_id: str | None = None
+    first_byte_ms: int | None = None
+    """From sending the attempt that answered to the first byte of its body (:class:`CallTiming`)."""
+    first_token_ms: int | None = None
+    """From sending the attempt that answered to its first token: text, reasoning or a tool call."""
+    output_tokens_per_second: float | None = None
+    """The output rate over the generation alone, from the first token to the last."""
+
+
+MIN_RATE_TOKENS = 16
+"""The fewest output tokens a call needs for its rate to be recorded. A short answer arrives in one or
+two network chunks, and its "rate" is the chunking, not the model: eight tokens in one frame 4 ms
+after the first read as two thousand tokens a second."""
+
+MIN_RATE_SECONDS = 0.25
+"""The shortest generation a rate is taken over, for the same reason: below it the clock measures the
+proxy's buffering, not the provider's generation."""
+
+
+@dataclass(slots=True)
+class CallTiming:
+    """When the attempt that answered was sent, and when its first byte and its tokens arrived.
+
+    Counted from the attempt, never from the first try: a request resent after a silent first-byte
+    window, or retried by the core, or handed to a fallback, is measured as the call that answered,
+    so a provider is not charged for the window another attempt spent. Monotonic seconds throughout.
+    """
+
+    began: float
+    first_byte: float | None = None
+    first_token: float | None = None
+    last_token: float | None = None
+    streamed_reasoning: bool = False
+
+    def token(self, *, reasoning: bool = False) -> None:
+        now = time.monotonic()
+        if self.first_token is None:
+            self.first_token = now
+        self.last_token = now
+        self.streamed_reasoning = self.streamed_reasoning or reasoning
+
+    def measures(self, normalized: dict[str, Any]) -> tuple[int | None, int | None, float | None]:
+        """``(first byte ms, first token ms, output tokens per second)``; ``None`` where not measured.
+
+        The rate is the output over the generation only, so a long think before the first token
+        does not read as a slow model. Reasoning a provider counted but never streamed (a hidden
+        think) is left out of the count: it was generated before the first token the clock saw,
+        and counting it over the visible stretch made such a model look several times faster."""
+        def ms(at: float | None) -> int | None:
+            return None if at is None else max(0, round((at - self.began) * 1000))
+
+        rate: float | None = None
+        if self.first_token is not None and self.last_token is not None:
+            output = int(normalized.get("output_tokens") or 0)
+            if not self.streamed_reasoning:
+                output -= int(normalized.get("reasoning_tokens") or 0)
+            generation = self.last_token - self.first_token
+            if output >= MIN_RATE_TOKENS and generation >= MIN_RATE_SECONDS:
+                rate = round(output / generation, 2)
+        return ms(self.first_byte), ms(self.first_token), rate
 
 
 class UsageSink(Protocol):
@@ -511,7 +570,7 @@ class OpenAICompatibleProvider(ILLMProvider):
                 # counts from the last delta, and two silent windows back to back would otherwise
                 # pass its baseline and be cut as a stalled stream half-way through the resend.
                 yield ProviderDelta(kind=ProviderDeltaKind.progress)
-            response, lines = opened
+            response, lines, timing = opened
             try:
                 if response.status_code >= 400:
                     raw = await response.aread()
@@ -548,6 +607,8 @@ class OpenAICompatibleProvider(ILLMProvider):
                     for choice in chunk.get("choices") or []:
                         delta = choice.get("delta") or {}
                         reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+                        if reasoning or delta.get("content") or delta.get("tool_calls"):
+                            timing.token(reasoning=bool(reasoning))
                         if reasoning:
                             yield ProviderDelta(kind=ProviderDeltaKind.thinking, content=reasoning)
                         if keep_reasoning and isinstance(delta.get("reasoning_details"), list):
@@ -593,14 +654,17 @@ class OpenAICompatibleProvider(ILLMProvider):
         for delta_out in self._close_tools(open_tools, resolved_finish):
             yield delta_out
         normalized = normalize_usage(usage_raw or {})
-        await self._record_usage(request, "stream", usage_raw or {}, normalized, started, reservation)
+        await self._record_usage(request, "stream", usage_raw or {}, normalized, started, reservation, timing=timing)
         yield ProviderDelta(kind=ProviderDeltaKind.usage, usage=normalized)
         kept = (reasoning_envelope(self.endpoint.id, request.model, details, normalized["reasoning_tokens"]),) if details else None
         yield ProviderDelta(kind=ProviderDeltaKind.finish, finish_reason=_map_finish(resolved_finish), reasoning_items=kept)
 
     async def _open_stream(self, request: LLMRequest, body: dict[str, Any],
-                           attempt: int) -> tuple[httpx.Response, AsyncIterator[str]] | None:
+                           attempt: int) -> tuple[httpx.Response, AsyncIterator[str], CallTiming] | None:
         """Send the request and wait for its first line back; ``None`` when nothing came in time.
+
+        The timing returned starts at this attempt's send and holds the arrival of that first line,
+        which is the call's first byte: a body is written in whole lines.
 
         The deadline covers the response headers and the first line of the body together, because an
         upstream that answers its headers at once and then says nothing is as stuck as one that never
@@ -629,8 +693,9 @@ class OpenAICompatibleProvider(ILLMProvider):
                 lines = response.aiter_lines()
                 if response.status_code >= 400:
                     deadline.reschedule(None)
-                    return response, lines
+                    return response, lines, CallTiming(began=began)
                 first = await anext(lines, None)
+                first_at = time.monotonic()
         except TimeoutError:
             if response is not None:
                 await response.aclose()
@@ -646,7 +711,7 @@ class OpenAICompatibleProvider(ILLMProvider):
             raise
         if attempt:
             logger.warning("%s: the resent %s request answered after %.1fs", self.endpoint.id, request.model, time.monotonic() - began)
-        return response, _after(first, lines)
+        return response, _after(first, lines), CallTiming(began=began, first_byte=first_at if first is not None else None)
 
     def _tool_call_chunk(
         self, open_tools: dict[int, dict[str, Any]], tc: dict[str, Any], started: float
@@ -1040,7 +1105,12 @@ class OpenAICompatibleProvider(ILLMProvider):
         normalized: dict[str, Any],
         started: float,
         reservation: str | None = None,
+        *,
+        timing: CallTiming | None = None,
     ) -> float | None:
+        """Price the call and book it. ``timing`` is a streamed call's clock; a call answered whole has
+        none, since its first byte is its whole answer and ``duration_ms`` already says how long that
+        took: counted as a first token, it would sit in the provider's medians as a minute-long start."""
         model = request.model
         cost: float | None = None
         if reservation is not None:
@@ -1075,6 +1145,7 @@ class OpenAICompatibleProvider(ILLMProvider):
                 # read from: a summary of a 30k-token part booked as one made the next check see a
                 # session of 30k tokens.
                 purpose = "compaction"
+            first_byte_ms, first_token_ms, rate = timing.measures(normalized) if timing is not None else (None, None, None)
             await self._usage_sink.record(
                 UsageRecord(
                     provider_id=self.endpoint.id,
@@ -1087,6 +1158,9 @@ class OpenAICompatibleProvider(ILLMProvider):
                     run_id=obs.run_id if obs else None,
                     session_id=obs.session_id if obs else None,
                     inference_reservation_id=reservation,
+                    first_byte_ms=first_byte_ms,
+                    first_token_ms=first_token_ms,
+                    output_tokens_per_second=rate,
                 )
             )
         return cost

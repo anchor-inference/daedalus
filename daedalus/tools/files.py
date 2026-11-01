@@ -15,20 +15,27 @@ from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
+from daedalus.host.filesystem import FileTooLarge, NotRegularFile
+from daedalus.host.nested_rules import rules_note
 from daedalus.host.services import PathOutsideProject
 from daedalus.processes import end_tree
 from daedalus.stores.control import ControlConflict, ControlDenied
 from daedalus.tools import search_hint
-from daedalus.tools._common import FRAME_CHARS, clip, error, ok, output_limit, refuse_protected, services_for
+from daedalus.tools._common import (
+    FRAME_CHARS,
+    clip,
+    error,
+    ok,
+    output_limit,
+    refuse_protected,
+    services_for,
+    tool_config,
+)
 from daedalus.tools.shell import shell_argv, shell_environment
 
 logger = logging.getLogger(__name__)
 
 _MAX_LINE_CHARS = 2000
-#: How far into a file to look for a NUL before calling it binary. A text file
-#: does not carry one; a compiled object, an archive or an image carries one
-#: early, and 8 KiB is past every plausible text header.
-_BINARY_SNIFF_CHARS = 8192
 
 
 _LINE_BREAK = re.compile(r"\r\n|\r|\n")
@@ -114,17 +121,18 @@ async def _as_spelled(fs: Any, target: Path) -> Path:
     return target
 
 
-def _line_allowance(text: str, lines: int, budget: int) -> int:
-    """How many lines of this file fit in one call's budget.
-
-    ``limit`` is the model's ask and it is often a round number chosen without
-    knowing the file — 400 lines of a minified bundle is megabytes. The ask is
-    honoured up to what the budget can actually carry, measured on this file's
-    own average line, so a call returns a window the model can read rather than
-    a clip in the middle of one.
-    """
-    average = max(1, len(text) // max(lines, 1)) + 8  # + the line-number column
-    return max(1, budget // min(average, _MAX_LINE_CHARS + 8))
+async def folder_rules(context: ToolContext, services: Any, target: Path, *, folder: bool = False) -> str:
+    """The rules files of the folders on the way to ``target`` that this run has not seen yet, for the
+    head of the result (see :mod:`daedalus.host.nested_rules`), or nothing."""
+    if not tool_config(context).nested_rules:
+        return ""
+    manager = services.extra.get("manager")
+    redactor = getattr(manager, "redactor", None)
+    try:
+        return await rules_note(services, target, folder=folder, redact=redactor.redact if redactor is not None else None)
+    except Exception:  # noqa: BLE001 — the tool did its work; rules that cannot be read must not turn it into an error
+        logger.warning("could not read the folder rules for %s", target, exc_info=True)
+        return ""
 
 
 @search_hint(
@@ -170,43 +178,52 @@ async def read_file(
     if await fs.is_dir(target):
         entries = await fs.listdir(target)
         return ok(context, f"{target} is a directory with {len(entries)} entries:\n" + "\n".join(entries[:500]))
-    size = await fs.size(target)
-    try:
-        text = await fs.read_text(target)
-    except UnicodeDecodeError:
-        return error(context, _binary_refusal(target, size))
-    if "\x00" in text[:_BINARY_SNIFF_CHARS]:
-        return error(context, _binary_refusal(target, size))
     budget = output_limit(context)
-    lines = split_lines(text)
     start = max(offset, 1) - 1
-    window = lines[start : start + max(1, min(max(limit, 1), _line_allowance(text, len(lines), budget)))]
-    numbered = "\n".join(
-        f"{start + i + 1:>6}\t{line[:_MAX_LINE_CHARS]}" for i, line in enumerate(window)
-    )
+    rules = await folder_rules(context, services, target)
+    room = max(budget - FRAME_CHARS - len(rules), FRAME_CHARS)
+    try:
+        # Streamed: only the window is decoded and held, so a multi-gigabyte log costs what the window
+        # costs, and a pipe or a device is refused before it is opened (see open_regular).
+        window = await fs.read_window(target, start=start, max_lines=max(1, limit), max_chars=room, line_chars=_MAX_LINE_CHARS)
+    except NotRegularFile as exc:
+        return error(context, f"{exc}. Read opens regular files only; use Exec if you mean to read from it, with a timeout.")
+    except UnicodeDecodeError:
+        return error(context, _binary_refusal(target, await fs.size(target)))
+    except FileNotFoundError:
+        return error(context, f"no such file: {target}")
+    except OSError as exc:
+        return error(context, f"could not read {target}: {exc}")
+    shown = window.lines
+    total = window.total_lines
+    if not shown and start > 0:
+        known = f"{total} lines" if total is not None else f"{window.size} bytes"
+        return ok(context, rules + f"[{target} has {known}; offset={offset} is past its end]", total_lines=total)
+    numbered = "\n".join(f"{start + i + 1:>6}\t{line}" for i, line in enumerate(shown))
+    end = start + len(shown)
+    whole = start == 0 and not window.more and not window.cut
     header = ""
-    # The budget is in characters, so the file is measured in characters too:
-    # `size` is bytes, and for a file that is mostly not Latin the two differ by
-    # a factor that would fire this header on a file comfortably under budget.
-    if len(text) > budget:
-        # The model asked for a file it cannot be shown whole. Say so before
-        # the lines, not after: a slice read as the whole file is how a wrong
-        # answer gets written confidently.
-        if len(lines) <= 1:
+    if not whole and (window.size > budget or window.cut):
+        # The model asked for a file it cannot be shown whole. Say so before the lines, not after: a
+        # slice read as the whole file is how a wrong answer gets written confidently.
+        if total == 1 and window.cut:
             header = (
-                f"[{target}: {len(text)} characters on a single line — one call shows at most "
+                f"[{target}: {window.size} bytes on a single line — one call shows at most "
                 f"{_MAX_LINE_CHARS} characters of it; use Exec with cut/sed, or Grep, for the rest]\n"
             )
         else:
-            header = (
-                f"[{target}: {len(text)} characters, {len(lines)} lines — showing lines "
-                f"{start + 1}-{start + len(window)} of them]\n"
-            )
+            lines_known = f"{total} lines" if total is not None else "too large to count its lines"
+            header = f"[{target}: {window.size} bytes, {lines_known} — showing lines {start + 1}-{end} of them]\n"
     footer = ""
-    if start + len(window) < len(lines):
-        footer = f"\n[{len(lines) - start - len(window)} more lines; continue with offset={start + len(window) + 1}]"
-    body = clip(numbered, max(budget - FRAME_CHARS, FRAME_CHARS))
-    return ok(context, header + body + footer, total_lines=len(lines))
+    if window.cut and not (total == 1 and header):
+        named = ", ".join(str(start + i + 1) for i in window.cut[:8]) + (" and more" if len(window.cut) > 8 else "")
+        which = f"line {named} ran past {_MAX_LINE_CHARS} characters and was" if len(window.cut) == 1 else f"lines {named} ran past {_MAX_LINE_CHARS} characters and were"
+        footer += f"\n[{which} cut to that; use Exec with cut/sed, or Grep, for the rest]"
+    if window.more:
+        remaining = f"{total - end} more lines" if total is not None else "more lines follow"
+        footer += f"\n[{remaining}; continue with offset={end + 1}]"
+    body = clip(numbered, room)
+    return ok(context, rules + header + body + footer, total_lines=total)
 
 
 def _binary_refusal(target: Path, size: int) -> str:
@@ -235,13 +252,13 @@ async def write_file(context: ToolContext, path: str, content: str) -> ToolResul
         # Overwriting a CRLF file keeps it CRLF; a new file is LF, as the model wrote it.
         if "\r" not in content and await fs.is_file(target):
             content = with_newline(content, dominant_newline(await fs.read_text(target)))
-    except (OSError, UnicodeDecodeError):
+    except (OSError, ValueError):  # unreadable, not text, or too large to load: written as sent
         pass
     try:
         await fs.write_text(target, content)
     except (OSError, ControlConflict, ControlDenied) as exc:
         return error(context, f"could not write {target}: {exc}")
-    return ok(context, f"wrote {len(content)} characters to {target}" + await diagnostics(services, target) + await board_note(context, services, target), path=str(target))
+    return ok(context, await folder_rules(context, services, target) + f"wrote {len(content)} characters to {target}" + await diagnostics(services, target) + await board_note(context, services, target), path=str(target))
 
 
 @search_hint(
@@ -269,7 +286,10 @@ async def edit_file(
     target = await _as_spelled(fs, target)
     if not await fs.is_file(target):
         return error(context, f"no such file: {target}")
-    text = await fs.read_text(target)
+    try:
+        text = await fs.read_text(target)
+    except (OSError, ValueError) as exc:
+        return error(context, _unreadable_for_edit(target, exc))
     try:
         updated, count, how = edit_keeping_newlines(text, old_string, new_string, replace_all=replace_all)
     except EditMiss as miss:
@@ -279,7 +299,16 @@ async def edit_file(
     except (OSError, ControlConflict, ControlDenied) as exc:
         return error(context, f"could not write {target}: {exc}")
     note = f" (matched {how})" if how != "exactly" else ""
-    return ok(context, f"edited {target}: {count} replacement(s){note}" + await diagnostics(services, target) + await board_note(context, services, target), path=str(target))
+    return ok(context, await folder_rules(context, services, target) + f"edited {target}: {count} replacement(s){note}" + await diagnostics(services, target) + await board_note(context, services, target), path=str(target))
+
+
+def _unreadable_for_edit(target: Path, exc: Exception) -> str:
+    """Why an edit could not load the file, with the way round it."""
+    if isinstance(exc, FileTooLarge):
+        return f"{exc}; an edit loads the whole file, so change a file this large with Exec (sed, a script) instead"
+    if isinstance(exc, UnicodeDecodeError):
+        return f"{target} is not UTF-8 text, so it cannot be edited as text; use Exec for it"
+    return f"could not read {target}: {exc}"
 
 
 class EditMiss(ValueError):
@@ -394,7 +423,10 @@ async def multi_edit(context: ToolContext, path: str, edits: list[dict[str, Any]
         return error(context, f"no such file: {target}")
     if not edits:
         return error(context, "edits is empty")
-    text = await fs.read_text(target)
+    try:
+        text = await fs.read_text(target)
+    except (OSError, ValueError) as exc:
+        return error(context, _unreadable_for_edit(target, exc))
     total = 0
     for index, edit in enumerate(edits, 1):
         old, new = str(edit.get("old_string", "")), str(edit.get("new_string", ""))
@@ -407,7 +439,7 @@ async def multi_edit(context: ToolContext, path: str, edits: list[dict[str, Any]
         await fs.write_text(target, text)
     except (OSError, ControlConflict, ControlDenied) as exc:
         return error(context, f"could not write {target}: {exc}")
-    return ok(context, f"edited {target}: {total} replacement(s) in {len(edits)} edits" + await diagnostics(services, target) + await board_note(context, services, target), path=str(target))
+    return ok(context, await folder_rules(context, services, target) + f"edited {target}: {total} replacement(s) in {len(edits)} edits" + await diagnostics(services, target) + await board_note(context, services, target), path=str(target))
 
 
 async def board_note(context: ToolContext, services: Any, target: Path) -> str:
@@ -492,7 +524,7 @@ async def find_files(
     if not await services.fs.is_dir(root):
         return error(context, f"not a directory: {root}")
     matches = await services.fs.find(root, pattern, limit)
-    return ok(context, "\n".join(matches) or "(no matches)", count=len(matches))
+    return ok(context, await folder_rules(context, services, root, folder=True) + ("\n".join(matches) or "(no matches)"), count=len(matches))
 
 
 @search_hint(
@@ -527,7 +559,8 @@ async def search_files(
     # ripgrep ends each match with LF; a matched line may itself hold a CR or U+2028.
     lines = [line for line in text.split("\n") if line][:limit]
     rel = [line.replace(str(root) + "/", "", 1) for line in lines]
-    return ok(context, clip("\n".join(rel), services.max_tool_output_chars), count=len(rel))
+    rules = await folder_rules(context, services, root, folder=await services.fs.is_dir(root))
+    return ok(context, rules + clip("\n".join(rel), services.max_tool_output_chars), count=len(rel))
 
 
 TOOLS = [read_file, write_file, edit_file, multi_edit, find_files, search_files]

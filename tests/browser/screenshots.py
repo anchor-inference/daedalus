@@ -501,8 +501,8 @@ def usage_data() -> dict:
         daily.append({"day": day, "provider_id": "claude", "model": "claude-opus-5", "calls": 12 + (d * 5) % 11, "input_tokens": 500_000, "output_tokens": 21_000, "cache_read_tokens": 450_000, "reasoning_tokens": 0, "cost_usd": 0, "unmetered": 12 + (d * 5) % 11})
         daily.append({"day": day, "provider_id": "opencode", "model": "gpt-5.6-luna", "calls": 20 + (d * 3) % 9, "input_tokens": 300_000, "output_tokens": 15_000, "cache_read_tokens": 200_000, "reasoning_tokens": 4_000, "cost_usd": 0.0, "unmetered": 0})
     recent = [
-        {"at": ago(minutes=3), "provider_id": "claude", "model": "claude-opus-5", "purpose": "stream", "session_id": S1, "session_title": "Bakery site", "run_id": "r1", "input_tokens": 41_200, "output_tokens": 1_180, "cache_read_tokens": 39_000, "reasoning_tokens": 0, "cost_usd": 0, "duration_ms": 8_400, "raw": {}},
-        {"at": ago(minutes=4), "provider_id": "deepseek", "model": "deepseek-flash", "purpose": "stream", "session_id": S4, "session_title": "Weekly digest", "run_id": "r4", "input_tokens": 18_300, "output_tokens": 640, "cache_read_tokens": 16_000, "reasoning_tokens": 210, "cost_usd": 0.0061, "duration_ms": 3_100, "raw": {}},
+        {"at": ago(minutes=3), "provider_id": "claude", "model": "claude-opus-5", "purpose": "stream", "session_id": S1, "session_title": "Bakery site", "run_id": "r1", "input_tokens": 41_200, "output_tokens": 1_180, "cache_read_tokens": 39_000, "reasoning_tokens": 0, "cost_usd": 0, "duration_ms": 8_400, "first_byte_ms": 210, "first_token_ms": 2_100, "output_tokens_per_second": 56.3, "raw": {}},
+        {"at": ago(minutes=4), "provider_id": "deepseek", "model": "deepseek-flash", "purpose": "stream", "session_id": S4, "session_title": "Weekly digest", "run_id": "r4", "input_tokens": 18_300, "output_tokens": 640, "cache_read_tokens": 16_000, "reasoning_tokens": 210, "cost_usd": 0.0061, "duration_ms": 3_100, "first_byte_ms": 160, "first_token_ms": 540, "output_tokens_per_second": 91.0, "raw": {}},
         {"at": ago(minutes=12), "provider_id": "opencode", "model": "gpt-5.6-luna", "purpose": "stream", "session_id": S3, "session_title": "Support inbox", "run_id": "r3", "input_tokens": 22_800, "output_tokens": 2_010, "cache_read_tokens": 20_000, "reasoning_tokens": 800, "cost_usd": 0.0, "duration_ms": 12_900, "raw": {}},
         {"at": ago(minutes=40), "provider_id": "deepseek", "model": "deepseek-flash", "purpose": "structured", "session_id": S6, "session_title": "Expense tracker", "run_id": None, "input_tokens": 61_000, "output_tokens": 1_900, "cache_read_tokens": 0, "reasoning_tokens": 0, "cost_usd": 0.019, "duration_ms": 22_000, "raw": {}},
     ]
@@ -974,6 +974,8 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         if tail.startswith(("tool-results/", "widgets/")) and fulfil_shared(route):
             return None
         return respond(route, {})
+    if rel == "/api/usage/speed" and fulfil_shared(route):
+        return None
     if rel.startswith("/api/usage/provider/"):
         return respond(route, PROVIDER_USAGE)
     if rel == "/api/usage":

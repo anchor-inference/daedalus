@@ -36,7 +36,7 @@ from daedalus.host.run_outcome import OUTCOME_METADATA_KEY
 from daedalus.security import operator_secrets, redact
 from daedalus.tools.websearch import sources_of
 
-VIEW_VERSION = 15
+VIEW_VERSION = 16
 """Bumped whenever the shape below changes; stored views from an older version are recomputed. It
 covers this file only — what the redactor masks is covered by the key, by value and by shape, so a
 new secret format does not depend on anyone remembering this number."""
@@ -223,11 +223,29 @@ def _result_preview(block: ToolResultBlock) -> dict[str, Any]:
     }
     if not block.is_error and _is_answer(content):
         view["content"], view["clipped"] = redact.shared().redact_tool_data(content), False
+    if block.images:
+        view["images"] = tool_image_entries(block.images)
     # A search's hits are mostly past the preview; the answer's list of sources needs all of them,
     # in the compact form rather than the whole text.
     if not block.is_error and (sources := sources_of(content)):
         view["sources"] = [{key: redact.shared().redact_tool_data(value) for key, value in hit.items()} for hit in sources]
     return view
+
+
+def tool_image_entries(images: Any) -> list[dict[str, Any]]:
+    """The pictures of a tool result as the app is told of them: type and size, never the bytes or the
+    blob reference. The app fetches each by the call and its position (``/tool-results/{id}/images``),
+    which the host resolves against the session's own history, so a reference is never a handle the
+    app could use to read a blob of another session."""
+    entries: list[dict[str, Any]] = []
+    for image in images or []:
+        entry = image.event_entry() if hasattr(image, "event_entry") else dict(image) if isinstance(image, dict) else {}
+        kept = {key: entry[key] for key in ("mime_type", "width", "height") if entry.get(key) is not None}
+        uri = (entry.get("metadata") or {}).get("uri") if isinstance(entry.get("metadata"), dict) else None
+        if isinstance(uri, str) and uri:
+            kept["uri"] = redact.shared().redact(uri)
+        entries.append(kept)
+    return entries
 
 
 async def full_tool_result(block: ToolResultBlock, blobs: IBlobStore, tenant_id: str) -> tuple[str, bool]:
@@ -275,4 +293,4 @@ class TranscriptViewBuilder:
         return message_view(message)
 
 
-__all__ = ["TOOL_RESULT_PREVIEW_CHARS", "VIEW_VERSION", "TranscriptViewBuilder", "full_tool_result", "message_view"]
+__all__ = ["TOOL_RESULT_PREVIEW_CHARS", "VIEW_VERSION", "TranscriptViewBuilder", "full_tool_result", "message_view", "tool_image_entries"]

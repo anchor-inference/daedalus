@@ -68,7 +68,7 @@ async def test_file_tools_and_exec_follow_the_backend(tmp_path: Path) -> None:
         assert not result.is_error and (remote / "a.txt").read_text() == "hello\nthere\n"
         backend.commands.clear()
         result = await read_file().invoke(ctx, {"path": "a.txt"})
-        assert "there" in result.content and any("cat " in c for c in backend.commands)
+        assert "there" in result.content and any("tail -n +1 " in c for c in backend.commands), "the read did not go through the backend"
         big = "x" * 70_000 + "\n" + "y" * 70_000 + "\nend"
         assert not (await write_file().invoke(ctx, {"path": "big.txt", "content": big})).is_error
         assert (remote / "big.txt").read_text() == big

@@ -11,6 +11,14 @@ of :mod:`daedalus.host.autopilot` at the end of every run that answered. Its ver
   and buttons in Telegram. The app and the chat get the labels; each option's next goal stays in the
   decision row, and a tap sends exactly that goal into exactly that session.
 
+Before the judge, a fixed check (:mod:`daedalus.host.turn_risk`) reads the run's own tool calls. A
+run that rewrote an applied migration, touched containers or services, rewrote shared history,
+deleted or wrote outside the session's folder, or dropped data is not judged at all: the operator
+gets the same kind of choice — go on, or go on and allow that kind of action for the rest of this
+goal — with a short account of what the turn changed. The goal is everything since the operator's
+last message; an allowance rides on the continuation it sent, so a new message of theirs ends it
+without anything to clear, and no model is asked whether a risky turn was fine.
+
 What it never does: judge a run that was stopped, failed or parked, a session that is not an
 ordinary chat (an orchestrator, the main orchestrator, the companion, staff, a subagent, a coach), a
 session waiting on the operator, or one where the operator wrote meanwhile. Every one of these is
@@ -41,7 +49,7 @@ from typing import TYPE_CHECKING, Any
 
 from daedalus.extensions.notifications import Action, ActionConflict, ActionOutcome, ActionRefused, ActionRequest, Draft
 from daedalus.host import autopilot as judge
-from daedalus.host import predict, user_style
+from daedalus.host import predict, turn_risk, user_style
 from daedalus.host.notify_text import render
 from daedalus.host.session_runner import NOT_OPERATOR_FACING
 
@@ -81,6 +89,11 @@ class Refused(ValueError):
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _allowances(option: dict[str, Any]) -> list[str]:
+    """The kinds of risky action an option of a risk stop allows for the rest of the goal; none for any other option."""
+    return [str(kind) for kind in option.get("allow") or [] if str(kind) in turn_risk.KINDS]
 
 
 class Autopilot:
@@ -227,9 +240,86 @@ class Autopilot:
         row = await self.manager.db.fetchone("SELECT coalesce(max(seq), 0) AS last FROM transcript WHERE session_id = ?", (session_id,))
         return int(row["last"]) if row is not None else 0
 
+    async def _goal_start(self, session_id: str) -> tuple[int, datetime | None]:
+        """The row and the moment of the operator's last message: where the goal autopilot works toward began."""
+        row = await self.manager.db.fetchone(
+            "SELECT seq, json_extract(message, '$.created_at') AS at FROM transcript WHERE session_id = ? "
+            "AND json_extract(message, '$.role') = 'user' AND json_extract(message, '$.metadata.\"daedalus.origin\"') = 'operator' "
+            "ORDER BY seq DESC LIMIT 1",
+            (session_id,),
+        )
+        if row is None:
+            return 0, None
+        try:
+            started = datetime.fromisoformat(str(row["at"])) if row["at"] else None
+        except ValueError:
+            started = None
+        return int(row["seq"]), started
+
+    async def allowed(self, session_id: str, since: int) -> set[str]:
+        """The kinds of risky action the operator allowed for this goal: every continuation they sent
+        since their last message names the kinds its button allowed."""
+        rows = await self.manager.db.fetchall(
+            "SELECT json_extract(message, '$.metadata.\"daedalus.autopilot\".allow') AS allow FROM transcript WHERE session_id = ? AND seq > ? "
+            "AND json_extract(message, '$.role') = 'user' AND json_extract(message, '$.metadata.\"daedalus.autopilot\".allow') IS NOT NULL",
+            (session_id, since),
+        )
+        kinds: set[str] = set()
+        for row in rows:
+            with suppress(ValueError, TypeError):
+                kinds.update(str(kind) for kind in json.loads(row["allow"]))
+        return kinds
+
+    async def risk(self, state: SessionState, run_id: str) -> tuple[list[turn_risk.Finding], turn_risk.Digest]:
+        """What the fixed check finds in this run's tool calls, past what this goal already allowed."""
+        settings = self.app.config.goal_risk
+        if not settings.enabled:
+            return [], turn_risk.Digest([], 0, 0)
+        session_id = state.session.id
+        since, started = await self._goal_start(session_id)
+        calls = turn_risk.turn_calls(await turn_risk.run_messages(self.manager.db, session_id, run_id, since=since))
+        scope = turn_risk.Scope(work_dir=str(self.manager.work_dir(state)), started=started, config=settings)
+        findings = await turn_risk.check(calls, scope, allowed=await self.allowed(session_id, since))
+        return findings, turn_risk.digest(calls, scope)
+
+    async def _open_decision(self, session_id: str, run_id: str) -> tuple[str, int] | None:
+        """Write the run's one decision row; ``None`` when the run was decided already (a callback delivered twice)."""
+        anchor = await self._last_seq(session_id)
+        decision_id = uuid.uuid4().hex[:16]
+        now = _now()
+        async with self.manager.db.transaction() as conn:
+            cursor = await conn.execute(
+                "INSERT INTO autopilot_decisions(id, session_id, run_id, anchor_seq, state, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, 'judging', ?, ?) ON CONFLICT(session_id, run_id) DO NOTHING",
+                (decision_id, session_id, run_id, anchor, now, now),
+            )
+            created = cursor.rowcount > 0
+            await cursor.close()
+        return (decision_id, anchor) if created else None
+
+    async def _stop_for_risk(self, state: SessionState, run_id: str, findings: list[turn_risk.Finding], digest: turn_risk.Digest) -> str:
+        """Ask the operator before the work goes on after a risky run: go on, or go on and allow its kinds."""
+        opened = await self._open_decision(state.session.id, run_id)
+        if opened is None:
+            return "skipped:judged"
+        decision_id, _anchor = opened
+        lang = self._lang()
+        kinds = list(dict.fromkeys(f.kind for f in findings))
+        text = turn_risk.stop_text(findings, digest, lang)
+        goal = render("risk.go_on", lang)
+        verdict = judge.Verdict("choice", reason=text, options=(
+            judge.Option(render("autopilot.continue", lang), goal), judge.Option(render("risk.allow", lang), goal),
+        ))
+        detail = verdict.detail()
+        detail["options"][1]["allow"] = kinds
+        detail["risk"] = {"findings": [f.as_dict() for f in findings], "digest": digest.as_dict()}
+        await self._ask(state, decision_id, verdict, title=render("risk.title", lang, title=state.session.title), detail=detail)
+        return "risk"
+
     async def judge(self, session_id: str, run_id: str) -> str:
         """Ask the judge about a finished run and deliver its verdict; returns what happened, for the log
-        and the tests: the verdict delivered, or ``skipped:<reason>``."""
+        and the tests: the verdict delivered, ``risk`` when the fixed check stopped the work before any
+        judge was asked, or ``skipped:<reason>``."""
         manager = self.manager
         state = await manager.get_state(session_id)
         if state is None:
@@ -241,6 +331,15 @@ class Autopilot:
         blocked = await self._blocked(state)
         if blocked:
             return f"skipped:{blocked}"
+        # Before the model and its allowance: a risky turn stops the work whether or not a judge could
+        # be asked, and the stop must not depend on what a model makes of the turn.
+        try:
+            findings, digest = await self.risk(state, run_id)
+        except Exception:  # noqa: BLE001 — an unchecked turn is not continued, and the operator's next message starts afresh
+            logger.exception("the risk check of %s's run %s failed", session_id, run_id)
+            return "skipped:unchecked"
+        if findings:
+            return await self._stop_for_risk(state, run_id, findings, digest)
         preset = predict.helper_preset(manager, self.config.preset)
         try:
             provider, model = manager.providers.rungs_for(manager.config, preset or None)[0]
@@ -249,19 +348,10 @@ class Autopilot:
         free = manager.provider_costs_nothing(provider.endpoint.id, model)
         if not free and (manager.budget_exceeded() or await predict.spent_today(manager.db, judge.PURPOSE) >= self.config.usd_per_day):
             return "skipped:cap"
-        anchor = await self._last_seq(session_id)
-        decision_id = uuid.uuid4().hex[:16]
-        now = _now()
-        async with manager.db.transaction() as conn:
-            cursor = await conn.execute(
-                "INSERT INTO autopilot_decisions(id, session_id, run_id, anchor_seq, state, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, 'judging', ?, ?) ON CONFLICT(session_id, run_id) DO NOTHING",
-                (decision_id, session_id, run_id, anchor, now, now),
-            )
-            created = cursor.rowcount > 0
-            await cursor.close()
-        if not created:
+        opened = await self._open_decision(session_id, run_id)
+        if opened is None:
             return "skipped:judged"  # this run was judged already (a callback delivered twice)
+        decision_id, anchor = opened
         used = await self.continuations_used(session_id)
         lines = await predict.conversation_lines(manager, session_id, tail=judge.TAIL_MESSAGES)
         # A private chat is handed nothing learned from the other chats, the judge's view of it included.
@@ -369,9 +459,11 @@ class Autopilot:
             link=f"/app/agents/{session_id}", dedupe_key=f"run:{session_id}", source=REF,
         ))
 
-    async def _ask(self, state: SessionState, decision_id: str, verdict: judge.Verdict) -> None:
+    async def _ask(self, state: SessionState, decision_id: str, verdict: judge.Verdict, *, title: str = "",
+                   detail: dict[str, Any] | None = None) -> None:
         """A question in the session's list; for a choice, with its labels as options, a notification
-        with a button each, and the same buttons in the session's Telegram topic."""
+        with a button each, and the same buttons in the session's Telegram topic. ``detail`` is what the
+        decision row keeps when it is more than the verdict (the risk stop's allowances)."""
         manager = self.manager
         session_id = state.session.id
         labels = [option.label for option in verdict.options]
@@ -380,11 +472,11 @@ class Autopilot:
             None, origin="session", kind="question", text=text, routed_to="operator",
             detail={"options": labels, "autopilot": decision_id}, session_id=session_id,
         )
-        await self._settle(decision_id, "asking", verdict=verdict.kind, detail=verdict.detail(), ask_id=ask.id)
+        await self._settle(decision_id, "asking", verdict=verdict.kind, detail=detail if detail is not None else verdict.detail(), ask_id=ask.id)
         with suppress(Exception):
             await manager.bus.publish("ask.side", {"change": "opened", "ask_ids": [ask.id]}, session_id=session_id)
         lang = self._lang()
-        title = render("autopilot.choice" if labels else "autopilot.ask", lang, title=state.session.title)
+        title = title or render("autopilot.choice" if labels else "autopilot.ask", lang, title=state.session.title)
         telegram = await self._telegram_buttons(state, decision_id, f"{title}\n\n{text}", labels)
         notifications = self.app.notifications
         if notifications is None:
@@ -421,7 +513,7 @@ class Autopilot:
     # -- admitting a turn, exactly once ---------------------------------------------------------
 
     async def _admit(self, decision_id: str, session_id: str, text: str, *, kind: str, via: str, label: str = "", question: str = "",
-                     origin: str = "autopilot") -> str:
+                     origin: str = "autopilot", allow: list[str] | None = None) -> str:
         """Send one turn for a decision; ``""`` when it went in (now or by an earlier call), or why not.
 
         The key is claimed in the decision row first, by the one caller whose update finds it empty;
@@ -444,6 +536,8 @@ class Autopilot:
                 mark["label"] = label
             if question:
                 mark["question"] = question
+            if allow:
+                mark["allow"] = list(allow)
             try:
                 await self.manager.submit(
                     session_id, text, as_answer=False, follow_up=True, origin=origin, client_message_id=key, via=via, autopilot=mark,
@@ -470,7 +564,8 @@ class Autopilot:
         if not await self.manager.asks.resolve(str(found["ask_id"]), "operator", {"selected": [label], "via": via}):
             raise ActionConflict(render("autopilot.taken", self._lang()))
         await self._announce(found, "answered")
-        outcome = await self._admit(decision_id, str(found["session_id"]), str(options[index].get("next_goal") or ""), kind="choice", via=via, label=label)
+        outcome = await self._admit(decision_id, str(found["session_id"]), str(options[index].get("next_goal") or ""), kind="choice", via=via, label=label,
+                                    allow=_allowances(options[index]))
         await self._close_elsewhere(found, render("autopilot.chosen", self._lang(), label=label), via=via)
         if outcome == "failed":
             raise Refused("the turn could not be sent; see the session")
@@ -492,7 +587,7 @@ class Autopilot:
         if chosen is not None:
             note = str(resolution.get("note") or "").strip()
             goal = str(chosen.get("next_goal") or "") + (f"\n\n{note}" if note else "")
-            outcome = await self._admit(decision_id, session_id, goal, kind="choice", via=via, label=str(chosen.get("label") or ""))
+            outcome = await self._admit(decision_id, session_id, goal, kind="choice", via=via, label=str(chosen.get("label") or ""), allow=_allowances(chosen))
             words = render("autopilot.chosen", self._lang(), label=str(chosen.get("label") or ""))
         else:
             words = str(resolution.get("text") or "").strip()

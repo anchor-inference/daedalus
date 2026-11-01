@@ -47,8 +47,9 @@ describe("a card", () => {
     expect(cards).toHaveLength(2);
     const first = cards[0];
     const img = first.querySelector("img.rcard-img") as HTMLImageElement;
-    expect(img.getAttribute("referrerpolicy")).toBe("no-referrer");
-    expect(img.getAttribute("loading")).toBe("lazy");
+    // The model's address is never the browser's to fetch: it waits for the host to bring the picture.
+    expect(img.hasAttribute("src")).toBe(false);
+    expect(img.dataset.src).toBe("https://images.example.com/p2500nw.jpg");
     expect(first.querySelector("a.rcard-title")?.getAttribute("href")).toBe("https://kaspi.kz/shop/p/pantum-p2500nw/");
     expect(first.querySelector(".rcard-title")?.textContent).toBe("1. Pantum P2500NW");
     expect(first.querySelector(".rcard-badge")?.textContent).toBe("My pick");

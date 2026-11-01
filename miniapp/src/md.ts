@@ -118,11 +118,12 @@ function cardHtml(card: Card): string {
   const image = webUrl(card.image);
   const host = siteOf(url || image);
   const link = (cls: string, inner: string) => url ? `<a class="${cls}" href="${escape(url)}" target="_blank" rel="noreferrer">${inner}</a>` : `<span class="${cls}">${inner}</span>`;
-  // A picture from a site the operator never chose to visit: no referrer tells that site where it
-  // was shown, it loads only when scrolled to, and a picture that fails is replaced by the site's
-  // mark (rich hydration listens for the error).
+  // The address is the model's, so the browser never fetches it: an injected page could have the
+  // model write a picture whose address carries a secret. The picture has no src here; rich
+  // hydration asks the host for it (/api/card-image, which drops the query string and checks the
+  // site), and a picture the host will not fetch becomes the site's mark.
   const media = image
-    ? link("rcard-media", `<img class="rcard-img" src="${escape(image)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-host="${escape(host)}"/>`)
+    ? link("rcard-media", `<img class="rcard-img" data-src="${escape(image)}" alt="" decoding="async" data-host="${escape(host)}"/>`)
     : host ? link("rcard-media rcard-tile", favicon(host, true)) : "";
   const title = card.title ? link("rcard-title", inline(card.title)) : "";
   const badge = card.badge ? `<span class="rcard-badge">${inline(card.badge)}</span>` : "";
