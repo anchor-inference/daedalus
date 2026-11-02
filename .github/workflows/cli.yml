@@ -1,0 +1,97 @@
+# daedalus-cli: tested on the three systems and built for six targets on every change to it or to the
+# parts of ptyd it imports (the side channels and what they need).
+#
+# The binaries are kept as the run's artifacts. Attaching them to a release on a cli-v* tag is not
+# done here yet.
+name: cli
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cli/**"
+      - "ptyd/sidechan/**"
+      - "ptyd/internal/procenv/**"
+      - "ptyd/internal/config/**"
+      - "ptyd/internal/ptyproc/**"
+      - "ptyd/proto/procstat/**"
+      - "ptyd/go.mod"
+      - "ptyd/go.sum"
+      - ".github/workflows/cli.yml"
+  pull_request:
+    paths:
+      - "cli/**"
+      - "ptyd/sidechan/**"
+      - "ptyd/internal/procenv/**"
+      - "ptyd/internal/config/**"
+      - "ptyd/internal/ptyproc/**"
+      - "ptyd/proto/procstat/**"
+      - "ptyd/go.mod"
+      - "ptyd/go.sum"
+      - ".github/workflows/cli.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+      - name: Format
+        if: runner.os == 'Linux'
+        run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      # The race detector needs cgo, which the Windows runner's toolchain is not set up for; there
+      # the tests run without it.
+      - name: Test with the race detector
+        if: runner.os != 'Windows'
+        run: go test -race ./...
+      - name: Test
+        if: runner.os == 'Windows'
+        run: go test ./...
+
+  build:
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+      - name: Build every target
+        working-directory: cli
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          version="0.1.0-dev+${GITHUB_SHA::12}"
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            os=${target%/*}
+            arch=${target#*/}
+            ext=""
+            [ "$os" = windows ] && ext=".exe"
+            GOOS=$os GOARCH=$arch go build -trimpath -ldflags "-s -w -X main.version=$version" \
+              -o "dist/daedalus-cli-$os-$arch$ext" ./cmd/daedalus-cli
+          done
+          (cd dist && sha256sum daedalus-cli-* > SHA256SUMS)
+          ./dist/daedalus-cli-linux-amd64 version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: daedalus-cli
+          path: cli/dist/
+          if-no-files-found: error

@@ -1,0 +1,30 @@
+ ✻ Transcript                                                                            1–14 of 14
+hh:mm:ss
+> run the suite
+
+✻ Thought for 1s
+  The suite is long; run it whole.
+
+hh:mm:ss
+● Bash(go test ./...)
+  ⎿  line 1
+     line 2
+     line 3
+     line 4
+     line 5
+     line 6
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ esc/q/ctrl+o to return · j/k ↑/↓ scroll · space/b page · g/G top/bottom · / search

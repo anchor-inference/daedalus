@@ -1,0 +1,30 @@
+
+
+
+
+
+
+
+╭──────────────────────────────────────────────────────────────╮
+│ ✻ Welcome to Daedalus!                                       │
+│                                                              │
+│ /help for help, /status for your current setup               │
+│                                                              │
+│ cwd: /work/project                                           │
+╰──────────────────────────────────────────────────────────────╯
+
+ Tips for getting started:
+
+ 1. Ask a question about this folder, or ask for a change
+ 2. Type @ to mention a file, ! to run a shell command, / for commands
+ 3. Shift+Tab cycles the local guard: ask, auto, plan
+
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ > /co                                                                                            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  /copy             Copy the last answer to the clipboard
+  /cost             Show the session's token use
+  /config           Settings: theme, editor mode, fullscreen, thinking
+  /compact [focus]  Summarise the conversation to free context
+  /context          Show how full the context window is
+  /resume           Resume a session

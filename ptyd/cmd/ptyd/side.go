@@ -7,9 +7,9 @@ import (
 	"github.com/ascorblack/daedalus/ptyd/internal/config"
 	"github.com/ascorblack/daedalus/ptyd/internal/hooks"
 	"github.com/ascorblack/daedalus/ptyd/internal/rpc"
-	"github.com/ascorblack/daedalus/ptyd/internal/sidechan"
-	"github.com/ascorblack/daedalus/ptyd/internal/sidechan/sessions"
 	"github.com/ascorblack/daedalus/ptyd/proto/events"
+	"github.com/ascorblack/daedalus/ptyd/sidechan"
+	"github.com/ascorblack/daedalus/ptyd/sidechan/sessions"
 )
 
 // startSide opens the side channels: the hook listener, the launch registry, the file reader, the

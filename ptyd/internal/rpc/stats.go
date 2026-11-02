@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/ascorblack/daedalus/ptyd/internal/config"
-	"github.com/ascorblack/daedalus/ptyd/internal/term"
+	"github.com/ascorblack/daedalus/ptyd/internal/procenv"
 	"github.com/ascorblack/daedalus/ptyd/proto/procstat"
 	"github.com/ascorblack/daedalus/ptyd/proto/server"
 )
@@ -21,7 +21,7 @@ func (d *Daemon) sample(ids map[string]bool, maxAge time.Duration) procstat.Samp
 		var terms []procstat.Term
 		for _, t := range d.Registry.List() {
 			if t.Running() {
-				terms = append(terms, procstat.Term{ID: t.ID, Pid: t.Pid, Tag: term.TagName + "=" + t.ID})
+				terms = append(terms, procstat.Term{ID: t.ID, Pid: t.Pid, Tag: procenv.TagName + "=" + t.ID})
 			}
 		}
 		s := d.sampler.Sample(terms, now)

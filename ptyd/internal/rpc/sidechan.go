@@ -12,11 +12,11 @@ import (
 
 	"github.com/ascorblack/daedalus/ptyd/internal/config"
 	"github.com/ascorblack/daedalus/ptyd/internal/hooks"
-	"github.com/ascorblack/daedalus/ptyd/internal/sidechan"
-	"github.com/ascorblack/daedalus/ptyd/internal/sidechan/sessions"
 	"github.com/ascorblack/daedalus/ptyd/internal/term"
 	"github.com/ascorblack/daedalus/ptyd/proto/server"
 	"github.com/ascorblack/daedalus/ptyd/proto/wire"
+	"github.com/ascorblack/daedalus/ptyd/sidechan"
+	"github.com/ascorblack/daedalus/ptyd/sidechan/sessions"
 )
 
 // Side is the daemon's side channels: what the harness adapters reach besides terminals.

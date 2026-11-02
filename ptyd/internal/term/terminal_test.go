@@ -18,6 +18,7 @@ import (
 	"github.com/ascorblack/daedalus/ptyd/internal/emulator"
 	"github.com/ascorblack/daedalus/ptyd/internal/emulator/fake"
 	"github.com/ascorblack/daedalus/ptyd/internal/logx"
+	"github.com/ascorblack/daedalus/ptyd/internal/procenv"
 	"github.com/ascorblack/daedalus/ptyd/proto/procstat/proctest"
 )
 
@@ -94,8 +95,8 @@ func newHarness(t *testing.T) *harness {
 
 func (h *harness) start(t *testing.T, id string, argv ...string) *Terminal {
 	t.Helper()
-	env := BuildEnv(os.Environ(), nil, map[string]string{"PS1": "$ ", "DAEDALUS_SI_NONCE": testNonce}, id)
-	path, ok := LookPath(argv[0], env, "/")
+	env := procenv.BuildEnv(os.Environ(), nil, map[string]string{"PS1": "$ ", "DAEDALUS_SI_NONCE": testNonce}, id)
+	path, ok := procenv.LookPath(argv[0], env, "/")
 	if !ok {
 		t.Skipf("%s is not installed", argv[0])
 	}
@@ -291,7 +292,7 @@ func TestEnvironmentOfTheProgram(t *testing.T) {
 	utf8 := false
 	for _, line := range strings.Split(s, "\n") {
 		for _, k := range []string{"LC_ALL=", "LC_CTYPE=", "LANG="} {
-			if strings.HasPrefix(line, k) && isUTF8Locale(line) {
+			if strings.HasPrefix(line, k) && procenv.IsUTF8Locale(line) {
 				utf8 = true
 			}
 		}

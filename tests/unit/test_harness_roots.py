@@ -18,7 +18,7 @@ import pytest
 from daedalus.extensions.harness import CATALOG_ROOTS, catalog_roots
 
 RECORDED = Path(__file__).resolve().parents[1] / "support" / "fake_cli" / "recorded"
-DAEMON_PROGRAMS = Path(__file__).resolve().parents[2] / "ptyd" / "internal" / "sidechan" / "allow.go"
+DAEMON_PROGRAMS = Path(__file__).resolve().parents[2] / "ptyd" / "sidechan" / "allow.go"
 
 
 def _recorded(cli: str, name: str, key: str) -> list[str]:

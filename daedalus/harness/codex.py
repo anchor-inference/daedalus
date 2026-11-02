@@ -193,7 +193,7 @@ anyone said. From its ``CONTEXTUAL_USER_FRAGMENT_MATCHERS`` (``core/src/context/
 and the fragments they match, plus the older names earlier rollouts carry.
 
 The terminal daemon's session import reads the same rollouts and keeps the same list
-(``codexNoise`` in ``ptyd/internal/sidechan/sessions/codex.go``); a test holds the two equal. The
+(``codexNoise`` in ``ptyd/sidechan/sessions/codex.go``); a test holds the two equal. The
 host's copy had fallen to six entries, and a member interrupted by the orchestrator showed a "user"
 turn ``<turn_aborted>…`` that nobody typed."""
 

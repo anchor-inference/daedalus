@@ -16,6 +16,7 @@ import (
 	"github.com/ascorblack/daedalus/ptyd/internal/answer"
 	"github.com/ascorblack/daedalus/ptyd/internal/emulator"
 	"github.com/ascorblack/daedalus/ptyd/internal/emulator/production"
+	"github.com/ascorblack/daedalus/ptyd/internal/procenv"
 	"github.com/ascorblack/daedalus/ptyd/internal/wire"
 )
 
@@ -32,8 +33,8 @@ func screenRegistry(t *testing.T) (*Registry, string) {
 
 func startIn(t *testing.T, reg *Registry, dir, id string, cols, rows int, script string) *Terminal {
 	t.Helper()
-	env := BuildEnv(os.Environ(), nil, map[string]string{"LC_ALL": "C.UTF-8"}, id)
-	sh, ok := LookPath("sh", env, "/")
+	env := procenv.BuildEnv(os.Environ(), nil, map[string]string{"LC_ALL": "C.UTF-8"}, id)
+	sh, ok := procenv.LookPath("sh", env, "/")
 	if !ok {
 		t.Skip("no sh")
 	}

@@ -1,0 +1,36 @@
+│                                                              │
+│ cwd: /work/project                                           │
+╰──────────────────────────────────────────────────────────────╯
+
+ Tips for getting started:
+
+ 1. Ask a question about this folder, or ask for a change
+ 2. Type @ to mention a file, ! to run a shell command, / for commands
+ 3. Shift+Tab cycles the local guard: ask, auto, plan
+
+> fix it
+
+● Update(internal/store/cursor.go)
+  ⎿  Running…
+
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Edit file  · asked by the local guard                                                            │
+│                                                                                                  │
+│ internal/store/cursor.go                                                                         │
+│   …                                                                                              │
+│ 2                                                                                                │
+│ 3   // Next is the cursor after the given event.                                                 │
+│ 4   func (c *Cursor) Next(after int) int {                                                       │
+│ 5 -     if after < 0 {                                                                           │
+│ 6 -         return 0                                                                             │
+│ 5 +     if after < 0 || after > c.head {                                                         │
+│ 6 +         return c.head                                                                        │
+│ 7       }                                                                                        │
+│ 8       return after + 1                                                                         │
+│ 9   }                                                                                            │
+│                                                                                                  │
+│ Do you want to make this edit to cursor.go?                                                      │
+│ ❯ 1. Yes                                                                                         │
+│   2. Yes, and don't ask again for edits in this folder                                           │
+│   3. No, and tell Daedalus what to do differently (esc)                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

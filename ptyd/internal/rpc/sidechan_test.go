@@ -24,13 +24,13 @@ import (
 	"github.com/ascorblack/daedalus/ptyd/internal/rpc"
 	"github.com/ascorblack/daedalus/ptyd/internal/sandbox"
 	"github.com/ascorblack/daedalus/ptyd/internal/shellint"
-	"github.com/ascorblack/daedalus/ptyd/internal/sidechan"
-	"github.com/ascorblack/daedalus/ptyd/internal/sidechan/sessions"
 	"github.com/ascorblack/daedalus/ptyd/internal/term"
 	"github.com/ascorblack/daedalus/ptyd/proto/events"
 	"github.com/ascorblack/daedalus/ptyd/proto/server"
 	"github.com/ascorblack/daedalus/ptyd/proto/server/clienttest"
 	"github.com/ascorblack/daedalus/ptyd/proto/wire"
+	"github.com/ascorblack/daedalus/ptyd/sidechan"
+	"github.com/ascorblack/daedalus/ptyd/sidechan/sessions"
 )
 
 // TestMain lets the test binary stand in for `ptyd hook-post`: a launch's terminals are given this

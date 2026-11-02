@@ -687,7 +687,7 @@ def test_the_host_and_the_terminal_daemon_skip_the_same_injected_fragments() -> 
 
     from daedalus.harness.codex import INJECTED
 
-    source = (Path(__file__).resolve().parents[2] / "ptyd" / "internal" / "sidechan" / "sessions" / "codex.go").read_text(encoding="utf-8")
+    source = (Path(__file__).resolve().parents[2] / "ptyd" / "sidechan" / "sessions" / "codex.go").read_text(encoding="utf-8")
     block = re.search(r"var codexNoise = \[\]string\{(.*?)\}\n", source, re.S)
     assert block is not None
     daemon = tuple(json.loads(f"[{block.group(1).strip().rstrip(',')}]"))
