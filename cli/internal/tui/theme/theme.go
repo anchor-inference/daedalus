@@ -133,9 +133,10 @@ var (
 	// scheme: every role is one of the basic ANSI colours, so it follows whatever the terminal maps
 	// them to, light or dark.
 	ansiPalette = Palette{
-		Accent:         lipgloss.Red,
-		AccentShimmer:  lipgloss.BrightRed,
-		Text:           lipgloss.BrightWhite,
+		Accent:        lipgloss.Red,
+		AccentShimmer: lipgloss.BrightRed,
+		// The terminal's own foreground: a fixed white would vanish on a light background.
+		Text:           nil,
 		Secondary:      lipgloss.BrightBlack,
 		Subtle:         lipgloss.BrightBlack,
 		Border:         lipgloss.White,

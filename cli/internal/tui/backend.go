@@ -380,6 +380,10 @@ type SessionUpdated struct{ Info SessionInfo }
 type HistoryReset struct{ History []Event }
 
 // UserMessage is a prompt in the conversation: typed here, in the app, or in Telegram.
+//
+// For a prompt sent from this terminal, ID is the Prompt.ClientID it was sent with: the interface
+// draws its own prompt the moment it is sent and uses the ID to recognise the echo instead of drawing
+// it twice. A steered prompt is drawn when this event arrives, at the point the agent read it.
 type UserMessage struct {
 	ID     string
 	Text   string
