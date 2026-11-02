@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -50,6 +51,39 @@ func TestOpenExecHasNoProgramList(t *testing.T) {
 	if _, err := e.Run(context.Background(), ExecRequest{Argv: []string{"no-such-program-here"}}); !errors.Is(err, ErrNotFound) {
 		t.Errorf("a missing program: %v", err)
 	}
+}
+
+// A caller that asked for the output as it comes gets all of it, while the result still carries it.
+func TestExecStreamsOutput(t *testing.T) {
+	e := NewOpenExec(os.Environ(), t.TempDir(), quietLog())
+	var seen lockedBuffer
+	res, err := e.Run(context.Background(), ExecRequest{Argv: []string{"sh", "-c", "echo one; echo two >&2"}, Output: &seen})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := seen.String(); !strings.Contains(got, "one") || !strings.Contains(got, "two") {
+		t.Errorf("streamed %q", got)
+	}
+	if strings.TrimSpace(res.Stdout) != "one" || strings.TrimSpace(res.Stderr) != "two" {
+		t.Errorf("result %+v", res)
+	}
+}
+
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // bash is on the list because a Daedalus agent working in a host folder runs every command and every

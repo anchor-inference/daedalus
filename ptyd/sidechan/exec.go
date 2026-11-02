@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -74,6 +75,10 @@ type ExecRequest struct {
 	Timeout   time.Duration
 	Stdin     []byte
 	MaxOutput int
+	// Output, when set, also receives the program's output as it is written, stdout and stderr
+	// alike, for a caller that shows a long command's progress. It is written from two goroutines
+	// and must not block: the program waits on it.
+	Output io.Writer
 }
 
 // ExecResult is what a program did. ExitCode is -1 when it ended by a signal, named in Signal.
@@ -151,6 +156,9 @@ func (e *Exec) Run(ctx context.Context, r ExecRequest) (ExecResult, error) {
 
 	stdout, stderr := &capped{max: r.MaxOutput}, &capped{max: r.MaxOutput}
 	cmd := &exec.Cmd{Path: path, Args: r.Argv, Dir: cwd, Env: env, Stdout: stdout, Stderr: stderr}
+	if r.Output != nil {
+		cmd.Stdout, cmd.Stderr = io.MultiWriter(stdout, r.Output), io.MultiWriter(stderr, r.Output)
+	}
 	if r.Stdin != nil {
 		cmd.Stdin = bytes.NewReader(r.Stdin)
 	}
