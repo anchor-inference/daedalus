@@ -46,8 +46,18 @@ func NewExec(extra []string, environ []string, home string, log *slog.Logger) *E
 	return &Exec{allow: allow, environ: environ, home: home, log: log, slots: make(chan struct{}, config.MaxExecConcurrent)}
 }
 
-// Allowed is the allowlist, sorted, for daemon.info.
+// NewOpenExec returns a runner without a program list, for daedalus-cli: there the operator's own
+// guard, on the machine the program runs on, decides what runs, and a list would only be a second
+// answer to the same question.
+func NewOpenExec(environ []string, home string, log *slog.Logger) *Exec {
+	return &Exec{environ: environ, home: home, log: log, slots: make(chan struct{}, config.MaxExecConcurrent)}
+}
+
+// Allowed is the allowlist, sorted, for daemon.info; nil for a runner without one.
 func (e *Exec) Allowed() []string {
+	if e.allow == nil {
+		return nil
+	}
 	out := make([]string, 0, len(e.allow))
 	for name := range e.allow {
 		out = append(out, name)
@@ -128,7 +138,7 @@ func (e *Exec) Run(ctx context.Context, r ExecRequest) (ExecResult, error) {
 	if !ok {
 		return ExecResult{}, fmt.Errorf("%w: %q is not an executable on PATH", ErrNotFound, r.Argv[0])
 	}
-	if !e.allow[ProgramName(path, runtime.GOOS)] {
+	if e.allow != nil && !e.allow[ProgramName(path, runtime.GOOS)] {
 		return ExecResult{}, fmt.Errorf("%w: %s is not among the programs exec.run may run", ErrForbidden, filepath.Base(path))
 	}
 

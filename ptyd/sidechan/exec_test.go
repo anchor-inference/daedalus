@@ -37,6 +37,21 @@ func TestExecRefusesWhatIsNotAllowed(t *testing.T) {
 	}
 }
 
+// An open runner, daedalus-cli's, runs a program no list names, and still refuses what is not there.
+func TestOpenExecHasNoProgramList(t *testing.T) {
+	e := NewOpenExec(os.Environ(), t.TempDir(), quietLog())
+	res, err := e.Run(context.Background(), ExecRequest{Argv: []string{"sh", "-c", "echo open"}})
+	if err != nil || strings.TrimSpace(res.Stdout) != "open" {
+		t.Fatalf("%+v, %v", res, err)
+	}
+	if e.Allowed() != nil {
+		t.Errorf("an open runner reported a list: %v", e.Allowed())
+	}
+	if _, err := e.Run(context.Background(), ExecRequest{Argv: []string{"no-such-program-here"}}); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a missing program: %v", err)
+	}
+}
+
 // bash is on the list because a Daedalus agent working in a host folder runs every command and every
 // file read through it; the daemon refusing it is an agent on the host that cannot do anything.
 func TestExecRunsBash(t *testing.T) {
