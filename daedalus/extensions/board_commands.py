@@ -4,15 +4,20 @@ from __future__ import annotations
 
 import json
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 import aiosqlite
 
 from daedalus.extensions.orchestrator_domain import (
+    CHAT_ACTOR_PREFIX,
     DomainConflict,
     capture_contract_change,
+    chat_finish_of,
     check_planning_capacity,
     close_by_operator,
+    finish_by_chat,
+    reopen_chat_finish,
 )
 from daedalus.extensions.task_contract import REQUIREMENT_KINDS, REQUIREMENTS_MAX, check_items
 from daedalus.host.events import AppEvent, EventBus
@@ -174,6 +179,58 @@ async def insert_task(
             "contract_revision": 1, "project_id": project_id}
 
 
+@dataclass(frozen=True, slots=True)
+class ChatTurn:
+    """A chat moving a task on its own board: the chat, the turn it acts in, and its board's reach.
+
+    Only the host builds one, for a ``session:`` principal whose task it has already found on that
+    chat's board; ``family`` is the chat with its subagents, the sessions whose tasks it may take.
+    """
+
+    session_id: str
+    run_id: str | None
+    family: tuple[str, ...]
+    wip_limit: int
+
+
+async def _chat_may_move(conn: aiosqlite.Connection, principal: Principal, chat: ChatTurn,
+                         row: aiosqlite.Row, status: str) -> None:
+    """Refuse a chat's doing or done move on anything but an unassigned card of its own board.
+
+    The grant behind a chat's write covers its whole project, where the team's cards and other
+    chats' plans live too; this is the line that keeps the light path to the chat's own work.
+    """
+    if principal.actor_id != CHAT_ACTOR_PREFIX + chat.session_id:
+        raise ControlDenied("a chat moves its own tasks only")
+    if row["origin_session_id"] not in chat.family:
+        raise ControlDenied("this task is not on your board; its own chat or the operator moves it")
+    if row["assignee_staff_id"] or row["current_attempt_id"]:
+        raise DomainConflict("a team member works this task; it moves through the team's launch and report")
+    if row["status"] in ("review", "done"):
+        raise DomainConflict(f"the task is already {row['status']}; the operator reopens it in the app")
+    if status == "doing" and row["status"] != "doing":
+        held = await _one(conn, f"SELECT count(*) AS n FROM board_tasks WHERE status = 'doing' AND id != ?"
+                          f" AND assignee_staff_id IS NULL AND session_id IN ({','.join('?' for _ in chat.family)})",
+                          (row["id"], *chat.family))
+        if held is not None and int(held["n"]) >= chat.wip_limit:
+            raise DomainConflict(f"work-in-progress limit reached ({chat.wip_limit} tasks in doing); "
+                                 "finish or hand back one first")
+
+
+async def _open_dependencies(conn: aiosqlite.Connection, dependencies: list[str]) -> list[str]:
+    """The dependencies still open, named for the agent: neither done nor dropped.
+
+    A dropped dependency counts as settled here, as it did on the chat's board before receipts: a
+    chat cannot edit dependencies, so treating a dropped one as open would hold its task for good.
+    """
+    named = []
+    for dependency in dependencies:
+        row = await _one(conn, "SELECT title, status FROM board_tasks WHERE id = ?", (dependency,))
+        if row is not None and row["status"] not in ("done", "dropped"):
+            named.append(f"{dependency} \"{row['title']}\" ({row['status']})")
+    return named
+
+
 class BoardCommands:
     """Public task mutations accept only host identities, never a `by` label."""
 
@@ -273,26 +330,41 @@ class BoardCommands:
                      assignee_staff_id: str | None = None,
                      folder_id: str | None = None, file_ids: list[str] | None = None,
                      requirements: list[dict[str, str]] | None = None,
-                     reassignment_reason: str | None = None) -> dict[str, Any]:
+                     reassignment_reason: str | None = None,
+                     chat: ChatTurn | None = None) -> dict[str, Any]:
+        """Edit a card. ``chat`` is set only for a chat moving a task on its own board, which may then
+        take it to ``doing`` (the chat's claim) and ``done`` (the chat's result, see
+        ``finish_by_chat``); every other caller keeps todo, blocked and dropped, and the operator may
+        take a card a chat finished back to ``todo``."""
         payload = {"title": title, "acceptance": acceptance, "checklist": checklist,
                    "depends_on": depends_on, "priority": priority, "brief": brief,
                    "note": note, "status": status, "check_ids": check_ids,
                    "uncheck_ids": uncheck_ids, "assignee_staff_id": assignee_staff_id,
                    "folder_id": folder_id, "file_ids": file_ids or [],
                    "requirements": requirements or [], "reassignment_reason": reassignment_reason}
+        if chat is not None:
+            # The turn stays out of the request: a call replayed after a restart runs in a new turn,
+            # and a different request under the same call id would be refused as reused.
+            payload["chat_session_id"] = chat.session_id
 
-        async def effect(conn: aiosqlite.Connection, _: Mutation) -> dict[str, Any]:
+        async def effect(conn: aiosqlite.Connection, mutation: Mutation) -> dict[str, Any]:
             row = await _one(conn, "SELECT * FROM board_tasks WHERE id = ?", (task_id,))
             if row is None or row["project_id"] != (scope.id if scope.kind == "project" else None):
                 raise ControlConflict("task is outside the command scope")
-            if status not in (None, "todo", "blocked", "dropped"):
+            chat_move = chat is not None and status in ("doing", "done")
+            if status not in (None, "todo", "blocked", "dropped") and not chat_move:
                 raise DomainConflict("work, review and completion require their dedicated result or launch command")
+            if chat is not None and chat_move:
+                assert status is not None
+                await _chat_may_move(conn, principal, chat, row, status)
+            reopening = (principal.origin_class == "operator" and status == "todo" and row["status"] == "done"
+                         and await chat_finish_of(conn, task_id) is not None)
             # A handed-in card may be dropped without a verdict: the matter was settled elsewhere, or
             # the work is no longer wanted. Refusing it sent coordinators through return-then-drop,
             # and return needs a verdict, so cards nobody would ever accept sat in review for good.
             dropping_handed_in = status == "dropped" and row["status"] == "review"
             if (status is not None and status != row["status"] and row["status"] in ("review", "done")
-                    and not dropping_handed_in):
+                    and not dropping_handed_in and not reopening):
                 raise DomainConflict("return the exact reviewed result before reopening")
             if dropping_handed_in:
                 await conn.execute("UPDATE open_loops SET closed_at = ?, closed_by = 'system', decision = 'dropped'"
@@ -392,6 +464,15 @@ class BoardCommands:
                         item["done"] = True
                     elif item["id"] in cleared:
                         item["done"] = False
+            if chat_move:
+                still_open = await _open_dependencies(conn, dependencies)
+                if still_open:
+                    raise DomainConflict(f"this task waits on {', '.join(still_open)}; finish those first. "
+                                         "Nothing was stored")
+                unticked = [f"{item['id']} ({str(item['text'])[:40]})" for item in checks if not item.get("done")]
+                if status == "done" and unticked:
+                    raise DomainConflict(f"the checklist is not complete: {', '.join(unticked)}. Check them in the "
+                                         "same call (check=[...]) or leave the task open. Nothing was stored")
             next_status = status or row["status"]
             if next_status in ("todo", "blocked") and depends_on is not None:
                 next_status = "todo" if ready else "blocked"
@@ -420,7 +501,21 @@ class BoardCommands:
                                        " kind,resolution_state,created_at)"
                                        " VALUES (?,?,?,'required','awaiting_result',?)",
                                        (uuid.uuid4().hex, task_id, dependency, now()))
-            return {"task_id": task_id, "status": next_status, "contract_revision": contract_revision}
+            response: dict[str, Any] = {"task_id": task_id, "status": next_status, "contract_revision": contract_revision}
+            if chat is not None and chat_move:
+                # The receipt names the chat and the turn it acted in: the claim on the way into
+                # doing (the board's stale watch reads it), the result on the way to done.
+                response |= {"session_id": chat.session_id, "run_id": chat.run_id}
+                if status == "doing":
+                    await conn.execute("UPDATE board_tasks SET session_id = ?, run_id = ?, heartbeat_at = ? WHERE id = ?",
+                                       (chat.session_id, chat.run_id, now(), task_id))
+                else:
+                    response |= await finish_by_chat(conn, task_id=task_id, session_id=chat.session_id, note=note,
+                                                     result_id=mutation.object_id, verdict_id=uuid.uuid4().hex)
+            if reopening:
+                response["status"] = await reopen_chat_finish(conn, task_id=task_id, reopen_id=mutation.object_id,
+                                                              actor_id=principal.actor_id, reason=note)
+            return response
 
         return await self._mutate(principal, scope, "board.task.update", client_operation_id,
                                   expected_entity_revision, Entity("task", task_id), payload, effect, "task.changed")
@@ -471,4 +566,4 @@ class BoardCommands:
                                   expected_entity_revision, Entity("task", task_id),
                                   {"reason": reason}, effect, "task.changed")
 
-__all__ = ["BoardCommands", "insert_task"]
+__all__ = ["BoardCommands", "ChatTurn", "insert_task"]

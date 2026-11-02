@@ -31,6 +31,7 @@ import { UncertainLaunches } from "./UncertainLaunches";
 import { TaskContext } from "./TaskContext";
 import { ManualResult } from "./ManualResult";
 import { ManualReopenRecovery } from "./ManualReopen";
+import { ChatFinish } from "./ChatFinish";
 import { IssueImport } from "./IssueImport";
 import { PhoneTaskPage } from "./TaskPage";
 import { AutoTextarea, BriefBlock, Prop, ToolPanel } from "./TaskDialogParts";
@@ -900,7 +901,7 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
   const handoffApplies = ["todo", "blocked", "doing"].includes(task.status) && !!task.project_id;
   const manualApplies = !task.branch && (task.status === "todo" || task.status === "blocked" || task.status === "review");
   const diagnosticsApply = !!task.current_attempt_id && task.status !== "done" && task.status !== "dropped";
-  const showResultTab = task.status === "review" || task.acceptance_state === "operator_approved" || !!resultReference || hasAcceptance(task);
+  const showResultTab = task.status === "review" || task.acceptance_state === "operator_approved" || !!resultReference || hasAcceptance(task) || !!task.finished_by;
   const toolLabels: Record<Tool, string> = {
     lifecycle: t("lifecycle.task.title"), comparison: t("pair.title"), handoff: t("handoff.title"), workflow: t("taskWorkflow.title"),
     context: t("taskContext.title"), manual: t("manual.title"), diagnostics: t("pboard.attempt.title"),
@@ -1000,6 +1001,7 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
   const requirementsPart = (task.requirements?.length ?? 0) > 0 && <RequirementsSection requirements={task.requirements!} />;
   const acceptancePart = hasAcceptance(task) && <AcceptanceSection task={task} />;
   const resultPart = <>
+    <ChatFinish task={task} onOpenSession={(id) => navigate(projectSessionPath(projectId, id))} onChanged={onDone} toast={toast} />
     {resultReference && <AcceptedResultDetail task={task} reference={resultReference} />}
     {!resultReference && (task.status === "review" || task.acceptance_state === "operator_approved") && <ResultFlow task={task} onAccepted={onDone} toast={toast} />}
     {task.status === "done" && task.acceptance_state === "operator_approved" && (

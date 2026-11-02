@@ -2131,6 +2131,10 @@ class BoardStub:
                     self._assign(row, payload["assignee_staff_id"] or None)
                 if "brief" in payload:
                     row["brief"] = {**row["brief"], **payload["brief"]}
+                # The operator reopening a card its own chat finished, as the host records it: the
+                # chat's result is returned and the card is open again.
+                if row.get("finished_by") and row["status"] == "done" and payload.get("status") == "todo":
+                    row.update(finished_by=None, acceptance_state="returned")
                 for key in ("title", "status", "priority", "depends_on"):
                     if key in payload:
                         row[key] = payload[key]

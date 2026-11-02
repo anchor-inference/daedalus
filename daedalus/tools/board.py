@@ -61,9 +61,10 @@ async def board_add(
 @tool(
     name="BoardUpdate",
     description=(
-        "Annotate a board task or move it to todo, blocked or dropped. Pass the exact entity revision "
-        "shown by BoardGet. Check or uncheck stable criterion IDs (C1, C2, …); unknown IDs are refused. "
-        "Execution, review and completion require their dedicated receipt commands."
+        "Annotate a task on your board or move it: doing when you start, done when its checklist and "
+        "dependencies are complete (the note is the result), or todo, blocked, dropped; a team's work moves "
+        "by launch and report. Pass the exact entity revision shown by BoardGet. Check or uncheck stable "
+        "criterion IDs (C1, C2, …); unknown IDs are refused."
     ),
 )
 async def board_update(

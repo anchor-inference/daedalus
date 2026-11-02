@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from daedalus.extensions.board_commands import BoardCommands
+from daedalus.extensions.board_commands import BoardCommands, ChatTurn
 from daedalus.extensions.notifications import Draft
 from daedalus.extensions.orchestrator_domain import capture_contract_change, check_planning_capacity
 from daedalus.extensions.runtime_observations import settle_previous_host
@@ -497,6 +497,24 @@ class Board:
         for task in tasks:
             task["needs_you"] = waiting.get(task["id"]) or ("review" if task.get("status") == "review" else None)
 
+    async def mark_chat_finishes(self, tasks: list[dict[str, Any]]) -> None:
+        """Set ``finished_by`` on each card a chat finished itself: the chat, its title, its note and when.
+
+        The operator's own Close and a team's accepted report say who decided in their own records; a
+        chat's finish is the one the operator did not see happen, so the card has to say it."""
+        results = {task["accepted_result_id"]: task for task in tasks
+                   if task.get("status") == "done" and task.get("accepted_result_id")}
+        if not results:
+            return
+        marks = ",".join("?" * len(results))
+        rows = await self.app.db.fetchall(
+            f"SELECT r.id, r.actor_id, r.original_text, r.created_at, s.title FROM result_receipts r"
+            f" LEFT JOIN sessions s ON s.id = substr(r.actor_id, 9)"
+            f" WHERE r.id IN ({marks}) AND r.actor_id LIKE 'session:%'", tuple(results))
+        for row in rows:
+            results[row["id"]]["finished_by"] = {"session_id": row["actor_id"][len("session:"):], "title": row["title"],
+                                                 "note": row["original_text"] or "", "at": row["created_at"]}
+
     async def project_board(self, project_id: str, *, include_done: bool = False) -> dict[str, Any]:
         """A project's board as the app draws it: the tasks with their assignees, "Needs you", and the counts."""
         tasks = await self.list(None, include_done=include_done, project_id=project_id)
@@ -526,6 +544,7 @@ class Board:
             }
         await self._contracts(tasks)
         await self._accepted_result_costs(tasks)
+        await self.mark_chat_finishes(tasks)
         await self._issue_links(project_id, tasks)
         needs = await self.needs_you(project_id)
         counts_rows = await self.app.db.fetchall("SELECT status, count(*) AS n FROM board_tasks WHERE project_id = ? AND removed_at IS NULL GROUP BY status", (project_id,))
@@ -824,12 +843,18 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
         if op == "update":
             if task_id is None:
                 raise ValueError("task_id is required")
+            chat = None
             if own_board:
                 await board.get(task_id, actor=session_id)
-                if kwargs.get("status") in ("doing", "review", "done"):
+                if kwargs.get("status") == "review":
                     # The refusal underneath names launch and result commands a chat does not have.
-                    raise ValueError("a task on a chat's board moves only to todo, blocked or dropped; record progress "
-                                     "with a note and checked criteria, and the operator closes it as done in the app")
+                    raise ValueError("a chat takes its own task to done itself, with its result in the note; "
+                                     "review is for a team's work")
+                if kwargs.get("status") in ("doing", "done"):
+                    state = app.manager.live_state(session_id)
+                    chat = ChatTurn(session_id=session_id, run_id=state.run_id if state is not None else None,
+                                    family=tuple(await board.family(session_id)),
+                                    wip_limit=app.config.board.wip_limit)
             if isinstance(expected_entity_revision, bool) or not isinstance(expected_entity_revision, int) or expected_entity_revision < 1:
                 current = await control.revision(scope, Entity("task", task_id))
                 raise ValueError(f"expected_entity_revision must be the task's current revision, now {current}; "
@@ -838,7 +863,7 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
             try:
                 updated = await commands.update(principal, scope, task_id,
                                                 client_operation_id=client_operation_id,
-                                                expected_entity_revision=expected_entity_revision, **kwargs)
+                                                expected_entity_revision=expected_entity_revision, chat=chat, **kwargs)
             except ControlConflict as exc:
                 raise _stale(exc, "expected_entity_revision") from exc
             return await board.get(updated["task_id"], actor=session_id)

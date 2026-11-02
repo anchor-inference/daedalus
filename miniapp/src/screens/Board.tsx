@@ -18,6 +18,7 @@ import { confirmAsync, errorText } from "../ui";
 import { plural, t, t as t2 } from "../i18n";
 import { useSessionTitles } from "./Sessions";
 import { closeItems } from "../board/operatorClose";
+import { ChatFinish, type ChatFinishInfo } from "../board/ChatFinish";
 import { byProject, filtered, storedGrouping, type Grouping, type NeedsReason } from "./boardview";
 
 type Status = "todo" | "doing" | "review" | "done" | "blocked" | "dropped";
@@ -43,6 +44,8 @@ type Task = {
   assignee?: { id: string; name: string; color: string } | null;
   /** Why the card waits on the operator: an open question or approval tied to it, or review. */
   needs_you?: NeedsReason | null;
+  /** The chat that finished the card itself, and its result note. */
+  finished_by?: ChatFinishInfo | null;
 };
 type BriefField = "objective" | "deliverable" | "boundaries" | "done_when";
 const BRIEF_FIELDS: BriefField[] = ["objective", "deliverable", "boundaries", "done_when"];
@@ -166,7 +169,7 @@ export function BoardScreen({ toast, onOpen, selected, project }: { toast: (t: s
   useEdgeFade(kanban, `${showDone}:${all.length}`);
   const sheets = <>
     {creating && <NewTaskSheet onClose={() => setCreating(false)} onCreated={() => { setCreating(false); reload(); }} toast={toast} />}
-    {open && <TaskSheet t={open} owner={open.session_id ? titles[open.session_id] : undefined} board={open.origin_session_id ? titles[open.origin_session_id] : undefined} onClose={() => navigate(pathFor("board"), { replace: true })} onMove={move} onCheck={check} ending={ending} onOpenSession={onOpen} toast={toast} />}
+    {open && <TaskSheet t={open} owner={open.session_id ? titles[open.session_id] : undefined} board={open.origin_session_id ? titles[open.origin_session_id] : undefined} onClose={() => navigate(pathFor("board"), { replace: true })} onMove={move} onCheck={check} ending={ending} onOpenSession={onOpen} onChanged={reload} toast={toast} />}
   </>;
   if (phone) return <PhoneBoardView tasks={tasks} error={error} loading={loading} refresh={refresh} showDone={showDone} setShowDone={setShowDone} project={project ?? null} grouping={phoneGrouping} setGrouping={setPhoneGrouping}
     titles={titles} offline={offline} onNew={() => setCreating(true)} onMove={move} ending={ending} onOpenSession={onOpen} toast={toast} sheets={sheets} />;
@@ -404,7 +407,7 @@ function TaskRow({ t, owner, onOpen, onDragStart, onDragEnd, dragging, canDrag }
   );
 }
 
-function TaskSheet({ t, owner, board, onClose, onMove, onCheck, ending, onOpenSession, toast }: { t: Task; owner?: string; board?: string; onClose: () => void; onMove: (t: Task, s: Status) => void; onCheck: (t: Task, i: number) => void; ending: (t: Task, blocked: boolean) => MenuItem[]; onOpenSession: (id: string) => void; toast: (t: string) => void }) {
+function TaskSheet({ t, owner, board, onClose, onMove, onCheck, ending, onOpenSession, onChanged, toast }: { t: Task; owner?: string; board?: string; onClose: () => void; onMove: (t: Task, s: Status) => void; onCheck: (t: Task, i: number) => void; ending: (t: Task, blocked: boolean) => MenuItem[]; onOpenSession: (id: string) => void; onChanged: () => void; toast: (t: string) => void }) {
   const offline = useOffline();
   const writeBlocked = offline || !Number.isInteger(t.entity_revision);
   const done = t.checklist.filter((c) => c.done).length;
@@ -490,6 +493,7 @@ function TaskSheet({ t, owner, board, onClose, onMove, onCheck, ending, onOpenSe
           <pre className="inbox-text">{t.notes}</pre>
         </section>
       )}
+      <ChatFinish task={t} onOpenSession={onOpenSession} onChanged={onChanged} toast={toast} />
       {NEXT[t.status].length > 0 && <section className="sheet-section">
         <div className="sheet-section-title">{t2("board.moveto")}</div>
         <div className="btnrow" style={{ marginTop: 0 }}>

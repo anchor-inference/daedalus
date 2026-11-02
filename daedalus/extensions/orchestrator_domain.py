@@ -26,6 +26,7 @@ from daedalus.stores.knowledge import enqueue_artifact_change
 from daedalus.stores.lifecycle import admit_child
 from daedalus.stores.outbox import OutboxStore
 from daedalus.stores.projects import keep_task_commitments_in
+from daedalus.stores.result_anchors import ResultAnchorRefused, add_result_turn_anchor
 from daedalus.stores.runtime_release import attempt_released_in
 
 RESULT_OUTCOMES = frozenset(("complete", "partial", "failed", "needs_input", "cancelled"))
@@ -990,6 +991,94 @@ async def close_by_operator(
     await reconcile_dependents(conn, task_id)
     return {"task_id": task_id, "status": status, "result_id": accepted_result,
             "verdict_id": verdict_id if accepted_result else None, "contract_revision": contract_revision}
+
+
+CHAT_ACTOR_PREFIX = "session:"
+"""The actor a chat's own board writes carry; a result under it was finished in that chat."""
+
+
+async def finish_by_chat(
+    conn: aiosqlite.Connection, *, task_id: str, session_id: str, note: str,
+    result_id: str, verdict_id: str,
+) -> dict[str, Any]:
+    """Finish a card from the chat that owns it, with a result that names the chat and its turn.
+
+    A team's card finishes through a launch, a report and someone else's verdict, because the worker
+    and the judge are different parties. A chat's card has no such second party short of the
+    operator, who reads the chat itself, so making the chat wait for the operator's Close left every
+    plan a chat kept stuck in "todo" until someone tidied it by hand. The receipt is light but
+    exact: the chat's session as the author, its latest message as the turn, the note as the
+    result, and the chat's own acceptance (``accepted``, never ``operator_approved``), so the
+    operator can tell it from their own word and reopen it. Cards that wait on this one see an
+    accepted result and move, exactly as after any other acceptance.
+    """
+    task = await _one(conn, "SELECT project_id, contract_revision, checklist FROM board_tasks WHERE id = ?", (task_id,))
+    if task is None:
+        raise KeyError(task_id)
+    actor_id = CHAT_ACTOR_PREFIX + session_id
+    contract_revision = int(task["contract_revision"])
+    body = note.strip()
+    raw = body.encode("utf-8")
+    at = _now()
+    await conn.execute(
+        "INSERT INTO result_receipts(id, task_id, contract_revision, attempt_id, outcome, original_text,"
+        " original_blob_ref, original_digest, original_size_bytes, checks_json, limitations_json,"
+        " actor_id, created_at) VALUES (?, ?, ?, NULL, 'complete', ?, NULL, ?, ?, '[]', '[]', ?, ?)",
+        (result_id, task_id, contract_revision, body, hashlib.sha256(raw).hexdigest(), len(raw), actor_id, at))
+    turn = await _one(conn, "SELECT MAX(seq) AS seq FROM session_messages WHERE session_id = ?", (session_id,))
+    turn_seq = int(turn["seq"]) if turn is not None and turn["seq"] is not None else None
+    if turn_seq is not None:
+        try:
+            await add_result_turn_anchor(conn, result_id, session_id, turn_seq)
+        except ResultAnchorRefused:
+            turn_seq = None  # a chat outside the card's project has no turn here to point at
+    await conn.execute(
+        "INSERT INTO review_verdicts(id, result_id, contract_revision, reviewer_actor_id, verification, accepted,"
+        " head, base, environment_digest, evidence_json, reason, self_review_waiver_receipt_id, created_at)"
+        " VALUES (?, ?, ?, ?, 'verified', 1, NULL, NULL, NULL, '[]', ?, NULL, ?)",
+        (verdict_id, result_id, contract_revision, actor_id, "finished by the chat that owns it", at))
+    await _finish_accepted(conn, task, task_id=task_id, result_id=result_id, verdict_id=verdict_id,
+                           contract_revision=contract_revision, attempt_id=None, acceptance_state="accepted")
+    return {"result_id": result_id, "verdict_id": verdict_id, "turn_seq": turn_seq}
+
+
+async def chat_finish_of(conn: aiosqlite.Connection, task_id: str) -> aiosqlite.Row | None:
+    """The accepted result a chat finished this card with, or ``None`` when someone else accepted it."""
+    return await _one(conn, "SELECT r.id, r.actor_id FROM board_tasks t JOIN result_receipts r"
+                      " ON r.id = t.accepted_result_id WHERE t.id = ? AND r.actor_id LIKE 'session:%'", (task_id,))
+
+
+async def reopen_chat_finish(
+    conn: aiosqlite.Connection, *, task_id: str, reopen_id: str, actor_id: str, reason: str,
+) -> str:
+    """Take a card a chat finished back to work on the operator's word; returns the status it lands in.
+
+    The chat's result and verdict stay as they were and a return records the operator's decision
+    against them, as a returned review does, so the history still says who finished it and who
+    reopened it. The criteria are cleared because the operator reopening the card is the statement
+    that they are not met.
+    """
+    finished = await chat_finish_of(conn, task_id)
+    if finished is None:
+        raise DomainConflict("only a card its own chat finished reopens this way")
+    task = await _one(conn, "SELECT contract_revision, checklist FROM board_tasks WHERE id = ?", (task_id,))
+    verdict = await _one(conn, "SELECT id FROM review_verdicts WHERE result_id = ? ORDER BY created_at DESC, rowid DESC"
+                         " LIMIT 1", (finished["id"],))
+    assert task is not None and verdict is not None
+    await conn.execute("INSERT INTO review_returns(id,task_id,result_id,verdict_id,contract_revision,actor_id,reason,created_at)"
+                       " VALUES (?,?,?,?,?,?,?,?)",
+                       (reopen_id, task_id, finished["id"], verdict["id"], task["contract_revision"], actor_id,
+                        " ".join(reason.split()) or "reopened by the operator", _now()))
+    checks = [{key: value for key, value in item.items() if key != "review_verdict_id"} | {"done": False}
+              for item in check_items(task["checklist"])]
+    await conn.execute("UPDATE board_tasks SET status = 'todo', acceptance_state = 'returned', accepted_result_id = NULL,"
+                       " accepted_contract_revision = NULL, checklist = ?, run_id = NULL, updated_at = ? WHERE id = ?",
+                       (_canonical(checks), _now(), task_id))
+    status = "todo" if (await dependency_readiness(conn, task_id))["ready"] else "blocked"
+    if status != "todo":
+        await conn.execute("UPDATE board_tasks SET status = ? WHERE id = ?", (status, task_id))
+    await reconcile_dependents(conn, task_id)
+    return status
 
 
 async def return_result(
