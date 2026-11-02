@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ascorblack/daedalus/deskd/internal/ax"
+	"github.com/ascorblack/daedalus/deskd/internal/ax/axfake"
 	"github.com/ascorblack/daedalus/deskd/internal/backend"
 	"github.com/ascorblack/daedalus/deskd/internal/geom"
 	"github.com/ascorblack/daedalus/deskd/internal/keys"
@@ -34,6 +36,40 @@ type Scene struct {
 type SceneWindow struct {
 	backend.Window
 	Color [3]uint8 `json:"color"`
+	// AX is the window's accessibility tree in the tool's shape, served by the fake tool
+	// (axfake) when the daemon runs it; a window without one exposes no tree.
+	AX *axfake.Node `json:"ax,omitempty"`
+}
+
+func str(s string) *string { return &s }
+
+// DefaultTrees are the accessibility trees of the default scene: a small form in the editor (with a
+// password field, whose value must never come out), a button in the terminal, and one in each of
+// the windows no call may reach, so a refusal is the daemon's and not an empty tree's.
+func DefaultTrees() map[string]*axfake.Node {
+	press := []string{"press"}
+	return map[string]*axfake.Node{
+		"10": {Role: "window", Name: str("notes.txt"), Children: []axfake.Node{
+			{Role: "textfield", Name: str("Title"), Value: str("notes"), AvailableActions: []string{"set_value", "focus"},
+				Bounds: &ax.ToolRect{X: 120, Y: 160, Width: 300, Height: 24}},
+			{Role: "textfield", Name: str("Password"), Value: str("hunter2"), States: []string{"secure"},
+				AvailableActions: []string{"set_value"}, Bounds: &ax.ToolRect{X: 120, Y: 200, Width: 300, Height: 24}},
+			{Role: "checkbox", Name: str("Wrap lines"), States: []string{"enabled"}, AvailableActions: []string{"toggle"},
+				Bounds: &ax.ToolRect{X: 120, Y: 240, Width: 120, Height: 20}},
+			{Role: "statictext", Name: str("Saved an hour ago")},
+			{Role: "button", Name: str("Save"), States: []string{"enabled"}, AvailableActions: press,
+				Bounds: &ax.ToolRect{X: 780, Y: 640, Width: 80, Height: 28}},
+		}},
+		"11": {Role: "window", Name: str("Daedalus"), Children: []axfake.Node{
+			{Role: "button", Name: str("Allow"), AvailableActions: press},
+		}},
+		"12": {Role: "window", Name: str("shell"), Children: []axfake.Node{
+			{Role: "button", Name: str("Clear"), AvailableActions: press},
+		}},
+		"13": {Role: "window", Name: str("Administrator: setup"), Children: []axfake.Node{
+			{Role: "button", Name: str("Install"), AvailableActions: press},
+		}},
+	}
 }
 
 // DefaultScene is a Retina laptop display with a 1080p display to its left, an editor and a terminal
@@ -60,7 +96,16 @@ func DefaultScene() Scene {
 				Color: [3]uint8{128, 128, 128}},
 		},
 		Focused: "10",
+	}.withTrees(DefaultTrees())
+}
+
+func (s Scene) withTrees(trees map[string]*axfake.Node) Scene {
+	for i := range s.Windows {
+		if t, ok := trees[s.Windows[i].ID]; ok {
+			s.Windows[i].AX = t
+		}
 	}
+	return s
 }
 
 // LoadScene reads a scene from a JSON file.
@@ -81,7 +126,7 @@ func LoadScene(path string) (Scene, error) {
 
 // Input is one recorded synthetic event.
 type Input struct {
-	Kind   string  `json:"kind"` // move, button, scroll, key, type
+	Kind   string  `json:"kind"` // move, button, scroll, key, type, ax
 	X      float64 `json:"x,omitempty"`
 	Y      float64 `json:"y,omitempty"`
 	Button string  `json:"button,omitempty"`
@@ -90,6 +135,9 @@ type Input struct {
 	DY     int     `json:"dy,omitempty"`
 	Key    string  `json:"key,omitempty"`
 	Text   string  `json:"text,omitempty"`
+	// Action and Ref are an element action's, recorded by the fake tool (kind "ax").
+	Action string `json:"action,omitempty"`
+	Ref    string `json:"ref,omitempty"`
 	// Window is the window under the pointer (a button or scroll) or with the keyboard (a key or
 	// text) when the event was sent: where it would have landed.
 	Window string `json:"window,omitempty"`
@@ -320,6 +368,45 @@ func (f *Fake) LastInput(ctx context.Context) (time.Time, bool) {
 }
 
 func (f *Fake) Close() error { return nil }
+
+// titleBar is how much taller than its accessibility frame the fake tool reports no window to be:
+// the fake's windows are the frame the operator sees, and the tool's frames are a title bar shorter,
+// as AT-SPI's are on X11, so the daemon's matching meets the overlap it meets there.
+const titleBar = 28
+
+// AXToolID is the fake tool's id of one of the fake's windows.
+func AXToolID(id string) string { return "w-fake-" + id }
+
+// AXScene is the desktop as the fake tool is to see it now: every window with a tree, where it is,
+// and the log the tool writes its actions to.
+func (f *Fake) AXScene(log string) axfake.Scene {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sc := axfake.Scene{Log: log}
+	for _, sw := range f.scene.Windows {
+		if sw.AX == nil || sw.Minimized {
+			continue
+		}
+		b := sw.Bounds
+		sc.Windows = append(sc.Windows, axfake.Window{ID: AXToolID(sw.ID), Title: sw.Title, App: sw.App.Name, PID: sw.App.PID,
+			Bounds: &ax.ToolRect{X: b.X, Y: b.Y + titleBar, Width: b.W, Height: b.H - titleBar}, Tree: *sw.AX})
+	}
+	return sc
+}
+
+// RecordAX keeps an element action the fake tool reported, among the inputs, under the window of
+// the fake it landed in.
+func (f *Fake) RecordAX(action, ref, text, toolWindow string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	in := Input{Kind: "ax", Action: action, Ref: ref, Text: text}
+	for _, sw := range f.scene.Windows {
+		if AXToolID(sw.ID) == toolWindow {
+			in.Window = sw.ID
+		}
+	}
+	f.inputs = append(f.inputs, in)
+}
 
 // Inputs returns the recorded events and forgets them.
 func (f *Fake) Inputs() []Input {

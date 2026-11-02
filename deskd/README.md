@@ -6,12 +6,15 @@ lease only the operator can grant, over an authenticated local socket. The frami
 event log are `ptyd`'s (`ptyd/proto`), which this module builds against. The daemon refuses input to
 Daedalus's own windows and outside the lease's scope, refuses the chords that close, lock or leave
 the session, ends the lease when the screen locks, pauses the moment the operator touches the
-machine, and keeps an audit of metadata only.
+machine, and keeps an audit of metadata only. Where the system's accessibility layer exposes a window's
+tree, the daemon also reads it and acts on its elements by reference, through agent-desktop run as
+its child, under the same lease and rules; without that tool everything else works as before.
 
 ```sh
 go build ./cmd/deskd
 ./deskd serve --run-dir /tmp/deskd-run --state-dir /tmp/deskd-state
 ./deskd serve --backend fake --run-dir /tmp/deskd-run --state-dir /tmp/deskd-state   # a desktop in memory
+./deskd serve --backend fake --ax-bin fake --run-dir /tmp/deskd-run --state-dir /tmp/deskd-state   # with a fake tree
 ./deskd selftest
 ```
 
@@ -28,7 +31,9 @@ The protocol, the coordinates, the roles and the rules are specified in
 | `internal/shot` | the downscale and the encoding of a capture |
 | `internal/backend` | what a system's desktop offers; `x11`, `win` and `quartz` are the systems, `fake` one in memory |
 | `internal/native` | the backend of the system the binary was built for |
-| `internal/desk` | the rules: the lease and its scope, screenshot ids, the operator's hand, the stop, the limits, the protected apps |
+| `internal/desk` | the rules: the lease and its scope, screenshot ids, element references, the operator's hand, the stop, the limits, the protected apps |
+| `internal/ax` | agent-desktop as a child: the version pin, the command lines (never its real-input mode), the environment and state root, the kill, the answers, the window matching |
+| `internal/ax/axfake` | a fake agent-desktop the tests and `--ax-bin fake` run as the child |
 | `internal/audit` | the metadata-only audit |
 | `internal/rpc` | the methods and the roles |
 | `internal/selftest` | `deskd selftest`: the daemon drives a window of its own and nothing else |

@@ -87,6 +87,10 @@ func (d *Daemon) Register(s *server.Server) {
 		"cursor":              only(d.cursor, RoleHost),
 		"apps.list":           only(d.apps, both...),
 		"apps.focus":          only(d.focus, RoleHost),
+		"ax.snapshot":         only(d.axSnapshot, RoleHost),
+		"ax.find":             only(d.axFind, RoleHost),
+		"ax.get":              only(d.axGet, RoleHost),
+		"ax.act":              only(d.axAct, RoleHost),
 		"lease.grant":         only(d.grant, RoleOperator),
 		"lease.revoke":        only(d.revoke, both...),
 		"lease.status":        only(d.status, both...),
@@ -131,6 +135,7 @@ func (d *Daemon) info(ctx context.Context, c *server.Conn, params json.RawMessag
 		"uptime_s": int64(time.Since(d.StartedAt).Seconds()),
 		"platform": info.Platform, "backend": info.Backend, "displays": info.Displays, "permissions": info.Permissions,
 		"secure": info.Secure, "lease": info.Lease, "human": info.Human, "limits": info.Limits,
+		"ax": d.Desk.AXStatus(),
 	}, nil
 }
 
@@ -158,6 +163,39 @@ func (d *Daemon) act(ctx context.Context, c *server.Conn, params json.RawMessage
 		return nil, desk.Undelivered(err)
 	}
 	return d.Desk.Act(ctx, p)
+}
+
+func (d *Daemon) axSnapshot(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p desk.AXSnapshotParams
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	return d.Desk.AXSnapshot(ctx, p)
+}
+
+func (d *Daemon) axFind(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p desk.AXFindParams
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	return d.Desk.AXFind(ctx, p)
+}
+
+func (d *Daemon) axGet(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p desk.AXGetParams
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	return d.Desk.AXGet(ctx, p)
+}
+
+// axAct is an element action; like act's, its parameter errors say that nothing was sent.
+func (d *Daemon) axAct(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+	var p desk.AXActParams
+	if err := decode(params, &p); err != nil {
+		return nil, desk.Undelivered(err)
+	}
+	return d.Desk.AXAct(ctx, p)
 }
 
 func (d *Daemon) cursor(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {

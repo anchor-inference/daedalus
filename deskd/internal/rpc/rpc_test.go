@@ -41,6 +41,12 @@ type harness struct {
 // Daedalus's own app on the protected list.
 func start(t *testing.T, cfg desk.Config) *harness {
 	t.Helper()
+	return startScene(t, cfg, fake.DefaultScene(), nil)
+}
+
+// startScene is start with a scene of the test's own, and setup called on the desk before it serves.
+func startScene(t *testing.T, cfg desk.Config, scene fake.Scene, setup func(d *desk.Desk, fk *fake.Fake, dir string)) *harness {
+	t.Helper()
 	dir, err := os.MkdirTemp("", "deskd")
 	if err != nil {
 		t.Fatal(err)
@@ -62,9 +68,12 @@ func start(t *testing.T, cfg desk.Config) *harness {
 		t.Fatal(err)
 	}
 	cfg.Protected = append(cfg.Protected, desk.Matcher{BundleID: "com.example.daedalus"})
-	fk := fake.New(fake.DefaultScene())
+	fk := fake.New(scene)
 	evlog := events.NewLog(1024)
 	d := desk.New(cfg, fk, evlog, al, log)
+	if setup != nil {
+		setup(d, fk, dir)
+	}
 	daemon := &rpc.Daemon{Desk: d, Events: evlog, Log: log, Instance: "test", StartedAt: time.Now(), Fake: fk}
 	srv := server.New(ep.Token, log, nil)
 	srv.AddToken(opToken, rpc.RoleOperator)

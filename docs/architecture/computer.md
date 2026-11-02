@@ -33,6 +33,7 @@ deskd version
 | `--operator-token-file` | where the operator's token is written; `<state-dir>/operator.token` by default. It may not be in the run directory |
 | `--audit-file` | the audit, JSON lines; `<state-dir>/audit.jsonl` by default, `off` for none |
 | `--log-file`, `--log-level` | the daemon's own JSON-lines log (stderr, `info`) |
+| `--ax-bin` | the accessibility tool, agent-desktop (see The accessibility tree): its path; `agent-desktop` (`agent-desktop.exe`) beside the daemon's own executable when not given and one is there; `off` for none; `fake` for the built-in fake (`--backend fake` only). No value stops the daemon from starting: one it cannot use leaves the tree unavailable |
 
 `SIGTERM` or `SIGINT` stops the daemon: whatever the agent holds down is released (as by `stop`),
 then the endpoint, the token, the operator's token and the socket are removed. On macOS the daemon
@@ -87,6 +88,7 @@ platform{os, session_type, units}}`. `protocol` is 1. The host refuses a protoco
 |---|---|---|
 | `info`, `lease.status`, `apps.list`, `events.subscribe`, `events.unsubscribe` | yes | yes |
 | `screenshot`, `act`, `cursor`, `apps.focus` | yes, within its lease | no |
+| `ax.snapshot`, `ax.find`, `ax.get`, `ax.act` | yes, within its lease | no |
 | `lease.grant`, `resume`, `permissions.request`, `preview` | no | yes |
 | `lease.revoke` | its own session's lease | any |
 | `stop` | yes | yes |
@@ -121,13 +123,16 @@ unknown field is `-32602`. Errors use the JSON-RPC codes, `ptyd`'s `1001 not_fou
 | 1206 | `rate` | `{limit: "per_second", retry_after_ms}` or `{limit: "lease_actions", max}` |
 | 1207 | `unreachable` | the system silently drops input to that window (Windows' UIPI in front of a program run as administrator); `{reason: "elevated", app?}` |
 | 1208 | `operator_only` | the method needs the operator's token; `{role}` |
-| 1209–1211 | — | held for the accessibility tree's refusals (no tree, a stale reference, an ambiguous target); not sent yet |
+| 1209 | `ax_unavailable` | no accessibility tree for this call; `{reason: "off" \| "missing" \| "version" \| "failed" \| "crashed" \| "unsupported" \| "no_window"}` (see The accessibility tree). Use screenshots and points instead |
+| 1210 | `stale_ref` | the element reference cannot be used; `{ref, reason: "unknown" \| "old" \| "window_gone" \| "changed" \| "expired" \| "not_found"}`. Take a new `ax.snapshot` |
+| 1211 | `ambiguous_target` | the reference, or the window, matches more than one live element or accessible window; `{ref?, window?, candidates?}`. Narrow it with `ax.find` or `root` |
 | 1212 | `blocked_key` | a chord that closes, locks or leaves the session, refused whatever the host asks; `{keys, reason: "ends" \| "leaves", why}` (see Blocked keys) |
+| 1213 | `ax_failed` | the accessibility tool ran the call and it failed: `{reason: "rejected" \| "contradicted" \| "timeout" \| "unresponsive" \| "internal", delivery, post_state?}`. `contradicted` is an action the element took whose result reads back otherwise |
 
 Every refusal happens before any input is sent, except the ones an action meets half way (a stop,
 the lease's end, a locked screen, the operator's hand): those cut the action short at its next event
-and release whatever it held down. Every refusal of `act` says which of the two it was in
-`data.delivery` (see Delivery).
+and release whatever it held down. Every refusal of `act` and `ax.act` says which of the two it was
+in `data.delivery` (see Delivery).
 
 ## Coordinates
 
@@ -198,7 +203,7 @@ Otherwise the action is refused with `1201` and the reason.
 
 | Method | Params → result |
 |---|---|
-| `info` | → `{version, protocol, instance, role, os, arch, pid, started_at, uptime_s, platform{os, session_type: "x11" \| "win32" \| "quartz" \| "fake", units}, backend, displays: [Display], permissions, secure, lease: LeaseStatus, human: Human, limits{…}}`. It never raises a system prompt |
+| `info` | → `{version, protocol, instance, role, os, arch, pid, started_at, uptime_s, platform{os, session_type: "x11" \| "win32" \| "quartz" \| "fake", units}, backend, displays: [Display], permissions, secure, lease: LeaseStatus, human: Human, limits{…}, ax: {available, reason?, version?}}`. It never raises a system prompt. `ax` says whether the accessibility tree is served; `reason` is the 1209 reason when it is not |
 | `screenshot` | `{session, display? \| window?, max_edge? (64–8192, default 1568), format?: "jpeg" \| "png" (jpeg), quality? (1–100, 80)}` → `{screenshot_id, format, data (base64), width, height, display, window?, region, units_per_pixel[2], pixels_per_unit, scale, units, cursor?[2]}`. With neither `display` nor `window` the target is the lease's window or display, else the primary display. `cursor` is the pointer in picture pixels when it is on the picture. A JPEG too large for a frame steps its quality down; a PNG too large is `1003` (ask for JPEG or a smaller `max_edge`) |
 | `act` | see Actions |
 | `preview` | `{display? \| window?, max_edge? (64 up; default 480, larger asks get 960)}` → `{image (base64 JPEG), width, height, display, window?}`: a thumbnail for the operator choosing what to grant. No lease is needed and no screenshot id is handed out, so nothing can be aimed with it; it is not audited. With neither, the primary display. A protected window is `1203`, a locked screen `1204`. On Windows a window is drawn by itself (`PrintWindow` with full content), so a half-covered window shows whole; elsewhere, or when that draws nothing, it is the screen region the window covers |
@@ -213,6 +218,7 @@ Otherwise the action is refused with `1201` and the reason.
 | `permissions.request` | `{which}` → `{which, state, permissions, hint}`: asks the system, which may show its prompt (macOS) |
 | `events.subscribe` | `{after_seq?}` → `{instance, from_seq, resync}`, as `ptyd`'s |
 | `events.unsubscribe` | → `{}` |
+| `ax.snapshot`, `ax.find`, `ax.get`, `ax.act` | see The accessibility tree |
 | `fake.simulate` | see The fake desktop |
 
 ## Actions
@@ -287,6 +293,189 @@ never for a wait longer than 2 s. Everything else goes to the model; on `unknown
 part of the action may have happened and to look before repeating it. A daemon that does not send
 `delivery` counts as `unknown`.
 
+## The accessibility tree
+
+Besides pixels and input events, the daemon reads the tree the system's accessibility layer keeps of
+a window (macOS's AX, Windows' UI Automation, Linux's AT-SPI) and acts on its elements by reference:
+a button is pressed through its own press action, a text field takes its value through its text
+interface. Nothing moves the pointer, takes the keyboard or brings the window forward, so an element
+of a granted window is reachable while the window is covered or in the background (the operator's
+decision; the border still shows what is granted). It is far more accurate than a point read off a
+picture, and its answers are text, not images. Apps that expose a poor tree (games, canvases, remote
+desktops, some Qt and Java programs) still need screenshots and points; the two work side by side
+under the same lease.
+
+The tree comes from **agent-desktop** (vercel-labs, Apache-2.0), a third-party command-line tool the
+desktop application ships pinned beside the daemon. The daemon runs it as a child, one call at a
+time, reads its JSON answer and passes on only what this section names. It is never the authority:
+every rule below is the daemon's and is checked before the tool runs.
+
+### Availability
+
+At start the daemon finds the binary (`--ax-bin`) and runs `agent-desktop version`. It runs only the
+release it was checked against, **1.0.2**, whose JSON envelope is 2.5: the tool changes its payloads
+between minor versions, so a newer one waits until the daemon has been checked against it, and the
+envelope must still be 2.x at 2.5 or later. The binary's bytes are not hashed by the daemon: the
+release's checksums and the operator's signature cover them before install, macOS signs the binary
+after the launcher is built, and a hash kept beside the binary stops no one who can replace both.
+`info.ax` says the outcome. Without a usable binary every
+`ax.*` call is refused with `1209` and its reason, and everything else works as before:
+
+| `reason` | Meaning |
+|---|---|
+| `off` | `--ax-bin off`, or no binary beside the daemon and none named |
+| `missing` | the named binary is not there or is not a file |
+| `version` | `version` answered with another version than 1.0.2, or an envelope older than 2.5 |
+| `failed` | `version` did not answer with JSON at all: the binary does not run here (for example a glibc older than 2.35 on Linux) |
+| `crashed` | this call's child exited without an answer; the next call tries again |
+| `unsupported` | the desktop is one the tree is not served on (the fake desktop without `--ax-bin fake`, or `--ax-bin fake` on a real one) |
+| `no_window` | this window exposes no accessibility tree, or none the daemon can match to it (see Windows) |
+
+A missing permission is `1205 {which: "accessibility"}`, as for input. On macOS the tool, a child of
+the daemon, is covered by Daedalus's own Accessibility grant.
+
+### Methods
+
+Only the host calls them, and only while its session holds the lease. `window` is the daemon's window
+id (Objects), never the tool's. `timeout_ms` is the tool's own deadline (500–30000; 3000 for a
+snapshot, 5000 otherwise); the child is killed 5 s after it.
+
+| Method | Params → result |
+|---|---|
+| `ax.snapshot` | `{session, window? \| root?, surface?: "window" \| "menu" \| "sheet" \| "popover" \| "alert", depth?: "full" \| "skeleton", interactive? (true), bounds? (false), timeout_ms?}` → `{snapshot_id, window, complete, ref_count, tree: Node}`. With neither `window` nor `root`, the lease's window (a window lease) or `-32602` (any other). `root` is a reference from an earlier snapshot: its subtree is read again, inside that snapshot, and replaces the references the last read of that root gave (`window` and `surface` may not be given with it). `interactive` keeps only elements one can act on and drops empty wrappers; `skeleton` stops at depth 3 and gives `children_count` where it cut. `complete: false` is a tree the deadline cut short; nodes whose children were cut carry `truncated` |
+| `ax.find` | `{session, window? \| root?, role?, name?, value?, text?, exact? (false), limit? (1–200, 50), timeout_ms?}`, at least one of `role`, `name`, `value`, `text` → `{snapshot_id, window, matches: [Match], roles_present?}`. `name` and `text` match loosely unless `exact`; `text` also matches an element whose subtree holds the text. A match without `ref` is text one can read but not act on. `roles_present` lists the roles in the searched tree when a `role` matched nothing |
+| `ax.get` | `{session, ref, property: "text" \| "value" \| "title" \| "bounds" \| "role" \| "states" \| "visible" \| "enabled" \| "checked" \| "focused" \| "expanded" \| "selected"}` → `{ref, property, value, live?, applicable?, secure?}`. The first six read the element (live where the system allows; `live` says so for `bounds`), the rest are booleans (`applicable: false`: the system could not tell, which is not `false`). A secure field's `text` and `value` are `null` with `secure: true` |
+| `ax.act` | `{session, ref, action, text?, direction?, amount?, timeout_ms?}` → `{action, ref, window, delivery, verified, post_state?, surfaces?, actions_left, duration_ms}` (see below) |
+
+**Node** `{ref?, role, name?, value?, description?, states?, actions?, secure?, bounds?,
+children_count?, truncated?, children?}`. Only elements one can act on have a `ref`. `states` are the
+tool's words (`focused`, `enabled`, `checked`, `expanded`, `selected`, `secure`, …); `actions` what
+the element offers. `bounds` `{x, y, w, h}` only when asked for, in desktop units as the system's
+accessibility layer reports them, for orientation only: a point for `act` still comes from a
+screenshot. **Match** `{ref?, role, name?, value?, states?, secure?, bounds?}`.
+
+**A secure field** (a password box: the state `secure`, or a role naming a password) never shows its
+value: the tool withholds it, and the daemon removes it again from trees, matches, `get` and
+`post_state`, and marks the element `secure: true`, so the host can treat any action on it as
+sensitive.
+
+**References** are `@<snapshot_id>:e<N>`, handed back exactly as given. The daemon keeps, per lease,
+every snapshot it took: which window it came from and every reference it handed out, with the
+element's role and whether it is secure. A reference is refused with `1210` when:
+
+- the daemon never handed it out under this lease (`unknown`): a reference from an earlier lease, from
+  another program's run of the tool, or made up;
+- its snapshot is older than `screenshot_ttl_s` (`old`), or not among the last 32 of the lease;
+- its window is gone (`window_gone`);
+- the tool can no longer find it in the live tree (`changed`), forgot the snapshot (`expired`) or
+  finds no element at all (`not_found`).
+
+Every new lease starts with none, and when a lease ends the tool's own state for it is deleted.
+
+### Element actions
+
+| `action` | Params | What happens |
+|---|---|---|
+| `click` | — | the element's own press or activate action |
+| `set_value` | `text` | the value written through the element's value interface: any script, whatever the keyboard layout. It may skip some of the program's callbacks; `type` does not |
+| `clear` | — | the element's value emptied |
+| `type` | `text` | the text inserted at the element's caret through its text interface, never as keystrokes. Windows has no such path: refused with `1007 {reason: "needs_pointer"}`, use `set_value` |
+| `select` | `text` (the option as shown) | an option of a list, combo box or menu button chosen |
+| `toggle`, `check`, `uncheck` | — | a check box or switch changed; `check` and `uncheck` do nothing to one already so |
+| `expand`, `collapse` | — | a tree item, disclosure or accordion opened or closed |
+| `scroll` | `direction?: "up" \| "down" \| "left" \| "right"` (down), `amount?` (1–50, 3) | a scroll area moved through its scroll interface. Linux has no such path (`1007 needs_pointer`): scroll with `act` |
+| `scroll_to` | — | the element brought into view inside its scroll area |
+| `focus` | — | the element given the keyboard focus inside its window, where the system allows it without input (macOS); elsewhere `1007 needs_pointer` |
+
+`text` is 1–`max_type_chars` characters. The result:
+
+- `delivery` is `delivered`, or `not_delivered` when the element was already as asked and nothing
+  was sent (`check` on a checked box). A refusal's `data.delivery` is `not_delivered` or `unknown`
+  as for `act` (Delivery); the host retries on the same terms.
+- `verified` is true when the tool read the element back and found what was asked.
+- `post_state` `{role, states?, value?}` is that read.
+- `surfaces` lists the kinds of overlay open after the action (`menu`, `sheet`, `alert`, `popover`):
+  the program is waiting on one, which `ax.snapshot {surface}` reads.
+
+An element action counts against the lease's actions and the rate like any other; the reads
+(`ax.snapshot`, `ax.find`, `ax.get`) are not counted, as screenshots are not.
+
+`1007 {reason: "needs_pointer" | "not_supported"}` is an element that offers no way to do this
+without real input; the host falls back to a screenshot and `act`. The tool's real-input mode is
+never used (below), so the daemon's own rules for physical input stay the only way pointer and keys
+reach the desktop.
+
+### The order of checks
+
+A call is judged in this order, and the tool is not run until every step passes:
+
+1. the parameters;
+2. the lease: active, not expired, held by this `session` (`1200`);
+3. the reference: handed out under this lease, recent, its window known (`1210`);
+4. for `ax.act`, the pause for the operator's hand (`1101`);
+5. the locked screen or secure desktop (`1204`), which also ends the lease;
+6. the window, read fresh: on screen (`1210 window_gone` for a reference, `1001` for a `window`),
+   not protected (`1203`), not elevated (`1207`), inside the lease's scope (`1202`). A covered or
+   background window passes; a protected one never does, whatever covers what;
+7. availability (`1209`), and the window mapped to the tool's (`1209 no_window`, `1211`);
+8. for `ax.act`, the rate and the lease's `max_actions` (`1206`).
+
+An `ax.act` holds the same input lock as `act`, so the two never interleave. A stop, the lease's end,
+a locked screen or the operator's hand during it kills the child at once, and the refusal says
+`delivery: "unknown"`, since the element may already have taken the action. A semantic action makes
+no input events, so the watch for the operator's hand never takes it for the operator's.
+
+**Blocked keys stay out of reach.** The tool's key command (`press`) is never run, and `type` and
+`set_value` write text through the element, not as keystrokes, so no chord of Blocked keys can reach
+the desktop through `ax.act`. A text with a line break is a line break in the field's value, not an
+Enter.
+
+### What the daemon lets the tool do
+
+The tool can also drive real input (its `--headed` mode: synthetic clicks and keys, focusing windows)
+and manage windows, the clipboard and apps. The daemon uses none of it:
+
+- it runs only `version`, `list-windows` (Linux, to match windows), `snapshot`, `find`, `get`, `is`
+  and the element actions of the table above
+  (`click`, `set-value`, `clear`, `type`, `select`, `toggle`, `check`, `uncheck`, `expand`, `collapse`,
+  `scroll`, `scroll-to`, `focus`), with arguments it builds itself; every value the host gave comes
+  after `--`, so a text such as `--headed` is text;
+- never `--headed`, `--force` or a pointer command, so where an element has no semantic path the tool
+  refuses rather than falls back to input;
+- the child's environment is the daemon's minus every `AGENT_DESKTOP_*` variable, plus
+  `AGENT_DESKTOP_HOME`, the tool's state root: `<state-dir>/ax/<lease id>`, mode 0700, in the state
+  directory the host never reads. Its reference maps hold the text of the screen, so it is deleted
+  when the lease ends and emptied at start;
+- the answer is read from stdout up to 8 MiB; a tree whose answer would pass 768 KiB is refused with
+  `1003` (ask for `depth: "skeleton"` or a `root`). Its text is never logged.
+
+On macOS the tool starts a helper process of its own (its command host), in a process group of its
+own, that keeps the system's element handles between calls for up to 15 idle minutes. Killing a
+call's process group does not reach it, so the daemon finds it by what it inherited from the call
+(the tool's internal host marker and the lease's state root, which only the daemon sets) and kills
+it when the lease ends, and every one left under the state directory when the daemon exits or
+starts. Another program's copy of the tool is never touched.
+
+### Windows
+
+The daemon names windows in the system's ids; the tool in its own. Each snapshot binds the two once,
+before the tool is asked for the tree, and the tool's answer must name the window it was asked for:
+
+| System | The tool's window id | How the daemon maps its own |
+|---|---|---|
+| Windows | `w-<HWND in decimal>` | directly: `0x<hex>` is the same handle |
+| macOS | `w-<window number>` | directly |
+| Linux (X11) | `w-<AT-SPI bus>-<object path>`, not the X11 window | the tool's windows of the same process (`_NET_WM_PID`) whose bounds overlap the X11 window's by at least 60 % (intersection over union; the X11 frame includes the title bar, the AT-SPI frame does not); the best one, and `1211` when the two best are within 0.02 of each other. A window without bounds in the tree cannot be matched: `1209 no_window` |
+| fake | `w-fake-<window id>` | as on Linux, so the tests exercise the hard case |
+
+A surface (`menu`, `sheet`, `popover`, `alert`) may be its own window: on Windows and macOS its id
+maps back directly and is judged like any window (step 6); on Linux it must be the window asked for,
+or the snapshot is refused with `1202`.
+
+*Not yet:* Wayland. AT-SPI works on any compositor, so the tree and the element actions could serve
+a Wayland session without the X11 server; the lease's border, the operator's hand and the window
+matching (no global window positions) need their own design first.
+
 ## Events
 
 An `event` notification carries `{seq, at, type, data}`, one counter for all, as `ptyd`'s. The
@@ -337,10 +526,13 @@ listen tap (it needs Input Monitoring).
 ## The audit
 
 `audit.jsonl` holds one JSON object per line, metadata only: `{at, role, event: act | refused |
-screenshot | focus | lease.granted | lease.ended | stop | resume | human.input, session, lease,
-action, code, reason, points (desktop units, rounded), button, count, keys, keys_hidden,
-text_length, screenshot, bytes, app, scope, ttl_ms}`. `app` is a bundle id, executable or window
-class, never a title. Typed text is its length only; a printable key is counted in `keys_hidden`,
+screenshot | focus | ax.snapshot | ax.find | ax.get | ax.act | lease.granted | lease.ended | stop |
+resume | human.input, session, lease, action, code, reason, points (desktop units, rounded), button,
+count, keys, keys_hidden, text_length, screenshot, ref, role_name, delivery, bytes, app, scope,
+ttl_ms}`. `app` is a bundle id, executable or window class, never a title. An accessibility call
+records its reference, the element's role (`role_name`: `button`, never its label) and the delivery,
+never a name, a value or any text of the tree; a refused one has `event: refused` and the method in
+`reason`. Typed text is its length only; a printable key is counted in `keys_hidden`,
 never named, since a model can type a password one key at a time. No pixels. The file is rotated at
 8 MiB into `audit.jsonl.1`.
 
@@ -382,15 +574,23 @@ window of an app the tests protect and an elevated program), a capture that pain
 colour, and input recorded instead of sent. The host's tests run against it with no display.
 
 ```json
-{"displays": [Display], "windows": [Window + {"color": [r, g, b]}], "focused": "<window id>"}
+{"displays": [Display], "windows": [Window + {"color": [r, g, b], "ax"?: AXNode}], "focused": "<window id>"}
 ```
+
+With `--ax-bin fake` the accessibility tree is served too, by a fake agent-desktop built into the
+daemon (`deskd axfake`, run as the child like the real one): a window's `ax` is its tree in the
+tool's own shape (`{role, name?, value?, states?, available_actions?, bounds?: {x, y, width,
+height}, children?}`), and an element with any `available_actions` gets a reference. The default
+scene gives the editor a small form (a text field, a password field, a check box, a Save button) and
+the terminal a button. An element action is recorded among the `inputs` as `{kind: "ax", action, ref,
+text?, window}` and changes nothing else.
 
 `fake.simulate {human_input?, dx?, dy?, secure?, permissions?, move_window?, displays?, focus?}` →
 `{inputs}` (operator only) changes the fake: the operator's hand (the pointer moves by `dx, dy` and
 the last input is now), a locked screen, withdrawn grants, a moved window, new displays, the
 keyboard on another window. `inputs` are the events recorded since the last call: `{kind: move |
-button | scroll | key | type, x, y, button, down, dx, dy, key, text, window}`, `window` being where
-the event landed.
+button | scroll | key | type | ax, x, y, button, down, dx, dy, key, text, action, ref, window}`,
+`window` being where the event landed.
 
 ## The selftest
 
@@ -419,17 +619,21 @@ its own. Touching the mouse during the run pauses it, and the report says so.
   Windows with Electron's `screenToDipRect`, since each display has its own scale) and draws the
   border inside a display and just outside a window. The shell's Stop reaches the daemon the same
   way. The grant picker's thumbnails are `preview`, served by the launcher as
-  `GET /api/computer/preview` with the JPEG's own bytes.
+  `GET /api/computer/preview` with the JPEG's own bytes. It always passes `--ax-bin`: the path
+  in `DAEDALUS_AGENT_DESKTOP`, else the `agent-desktop` file beside the launcher, else `off`.
 - **The host** connects with the run directory's token, reads `info` (protocol, platform, units,
   displays, limits), and acts only while `lease.status` says its session holds the lease. It keeps
   the screenshot id with every picture it gives the model and passes it back with every point. It
   converts the model's coordinate convention (relative 0–1000, smart-resized pixels) to the
   screenshot's pixels before calling `act`; the daemon takes screenshot pixels only. It repeats an
-  action by itself only as Delivery says.
+  action by itself only as Delivery says. It offers the accessibility tree only when `info.ax.available`
+  is true, passes references back exactly as `ax.snapshot` and `ax.find` gave them, fences the
+  tree's text as untrusted as it does the screen's, and treats `1209` on a window as "use
+  screenshots there".
 
 ## Not yet
 
-The accessibility tree and actions by reference (`ax.snapshot`, `element.at`), masking of secret
-fields and protected windows in screenshots, app tiers (view, click, full), the live view on channel
+The element under a point (`element.at`), the tree on Wayland, shell surfaces (task bar, tray, start
+menu) in the tree, masking of secret fields and protected windows in screenshots, app tiers (view, click, full), the live view on channel
 frames, Wayland through the portals, DXGI capture on Windows, ScreenCaptureKit on macOS, XShm on X11,
 and the direct detectors of the operator's input above.

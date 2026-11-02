@@ -157,6 +157,9 @@ func (d *Desk) Grant(ctx context.Context, p GrantParams) (Lease, error) {
 	}
 	d.lease = l
 	d.clearShotsLocked()
+	if old != nil {
+		d.retireAXLocked(old.ID)
+	}
 	d.paused = false
 	d.tokens, d.refilledAt = float64(d.cfg.ActionBurst), now
 	// The pointer's position now is the baseline: any move from here that the daemon did not make is
@@ -289,6 +292,7 @@ func (d *Desk) resumeLocked() {
 func (d *Desk) endLocked(reason string) {
 	if d.lease != nil {
 		d.ended = endedLease{id: d.lease.ID, session: d.lease.Session, reason: reason}
+		d.retireAXLocked(d.lease.ID)
 	}
 	d.lease = nil
 	d.paused = false
