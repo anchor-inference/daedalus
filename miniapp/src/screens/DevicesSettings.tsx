@@ -19,9 +19,11 @@ import { invalidate, useQuery } from "../store";
 import { errorText } from "../ui";
 import { copyText } from "../ui/components";
 
-/** How daedalus-cli is installed. Empty until the CLI's own guide publishes the command; the card then
- *  says where to find the guide instead of showing a command that does not exist yet. */
-export const INSTALL_COMMAND = "";
+/** How daedalus-cli is installed, as its guide (`cli/README.md`) says: built from a checkout by its
+ *  install script, which needs Go and puts `daedalus-cli` and `dae` in `~/.local/bin`. There is no
+ *  published binary yet; when there is, this becomes its download. Empty would make the card point at
+ *  the guide instead. */
+export const INSTALL_COMMAND = "git clone https://github.com/anchor-inference/daedalus && daedalus/cli/scripts/install.sh";
 
 /** The command that pairs a computer with this server, at the address this page was opened from. */
 export function loginCommand(origin = window.location.origin): string {
