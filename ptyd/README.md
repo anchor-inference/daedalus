@@ -27,7 +27,7 @@ The protocol, the run directory, the events and the guarantees about the output 
 |---|---|
 | `cmd/ptyd` | flags, signals, shutdown |
 | `internal/rpc` | the methods |
-| `internal/term` | one terminal (reader, emulator goroutine, input arbitration, keys, environment, the commands its shell reports), its attachments (flow control, size ownership, the keyboard), and the registry |
+| `internal/term` | one terminal (reader, emulator goroutine, input arbitration, keys, the commands its shell reports), its attachments (flow control, size ownership, the keyboard), and the registry |
 | `internal/scan` | the clamps and the marks, over the raw output |
 | `internal/shellint` | shell integration: the scripts for bash, zsh, fish and PowerShell, compiled in and written to `<state>/shell` at start, and the launch of an integrated shell |
 | `internal/ring` | the output ring, by absolute offset |
@@ -36,7 +36,8 @@ The protocol, the run directory, the events and the guarantees about the output 
 | `cmd/ptyd-replay` | plays a terminal recording through the emulator and writes its snapshots, for the cross-check against xterm.js |
 | `libghostty` | the pinned sources of the screen emulator, the patch carried against them, and the script that builds it |
 | `internal/ptyproc` | PTY start, resize, signals, ending a process tree; on Windows a pseudoconsole (ConPTY) and a job object |
-| `internal/sidechan` | `exec.run` and its program list, `fs.*` with its roots and deny list, `net.dial`; `sessions/` reads other agent programs' sessions (`sessions.*`), one file per program |
+| `internal/procenv` | the environment of every spawned process (what is stripped, the locale, the terminal tag) and the PATH lookup, shared by terminals and `exec.run` |
+| `sidechan` | `exec.run` and its program list, `fs.*` with its roots and deny list, `net.dial`; `sessions/` reads other agent programs' sessions (`sessions.*`), one file per program. Outside `internal/` because `daedalus-cli` (`../cli`) serves the same `exec.run` and `fs.*` on the operator's machine |
 | `internal/hooks` | launches (token, overlay files, dial directory, ports), the loopback hook listener with held replies, `hook-post` and `hook` |
 | `internal/toolsmcp` | `tools-mcp --set <name>` (and `team-mcp`, the `team` set): Daedalus's tools as an MCP server on stdio — the team's (`Report`, `AskOrchestrator`) compiled in, any other set read from the launch's `tools/<name>.json` — posting each call to the hook listener |
 | `internal/wire` | the terminal frames an attachment carries; `testdata/frames.json` is shared byte for byte with the app |

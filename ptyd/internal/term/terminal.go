@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -602,8 +601,3 @@ func incompleteTail(p []byte) int {
 
 // OutputHead is the output offset one past the last byte read.
 func (t *Terminal) OutputHead() int64 { return t.ring.Head() }
-
-func isExecutable(path string) bool {
-	st, err := os.Stat(path)
-	return err == nil && !st.IsDir() && st.Mode()&0o111 != 0
-}

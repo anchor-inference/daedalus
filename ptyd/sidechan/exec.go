@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/ascorblack/daedalus/ptyd/internal/config"
-	"github.com/ascorblack/daedalus/ptyd/internal/term"
+	"github.com/ascorblack/daedalus/ptyd/internal/procenv"
 )
 
 // Errors every side channel may answer with; the RPC layer gives each its code.
@@ -122,9 +122,9 @@ func (e *Exec) Run(ctx context.Context, r ExecRequest) (ExecResult, error) {
 	for k, v := range r.Env {
 		extra[k] = v
 	}
-	term.SetPWD(extra, cwd)
-	env := dropVar(term.BuildEnv(e.environ, nil, extra, ""), "DAEDALUS_TERMINAL_ID")
-	path, ok := term.LookPath(r.Argv[0], env, cwd)
+	procenv.SetPWD(extra, cwd)
+	env := dropVar(procenv.BuildEnv(e.environ, nil, extra, ""), "DAEDALUS_TERMINAL_ID")
+	path, ok := procenv.LookPath(r.Argv[0], env, cwd)
 	if !ok {
 		return ExecResult{}, fmt.Errorf("%w: %q is not an executable on PATH", ErrNotFound, r.Argv[0])
 	}

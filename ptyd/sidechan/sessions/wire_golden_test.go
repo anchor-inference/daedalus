@@ -13,7 +13,7 @@ import (
 
 // updateWire rewrites the wire samples instead of comparing with them:
 //
-//	go test ./internal/sidechan/sessions -run TestWireSamples -update-wire
+//	go test ./sidechan/sessions -run TestWireSamples -update-wire
 //
 // The samples are the exact JSON sessions.scan and sessions.read answer for a synthetic Claude Code
 // and Codex session. The host's tests (tests/unit/test_foreign_wire.py) read the same files and

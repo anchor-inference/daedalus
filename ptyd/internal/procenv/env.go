@@ -1,4 +1,7 @@
-package term
+// Package procenv is the environment every process the daemon spawns starts with, terminals and
+// exec.run alike, and the PATH lookup that finds its program. It sits apart from internal/term so the
+// side channels can be built without the screen emulator, which needs cgo.
+package procenv
 
 import (
 	"os"
@@ -71,7 +74,8 @@ func SelectInheritedEnv(inherited []string, names []string) []string {
 	return selected
 }
 
-func isUTF8Locale(v string) bool {
+// IsUTF8Locale reports whether a locale value names UTF-8, in either spelling.
+func IsUTF8Locale(v string) bool {
 	v = strings.ToLower(v)
 	return strings.Contains(v, "utf-8") || strings.Contains(v, "utf8")
 }
@@ -133,9 +137,9 @@ func BuildEnv(inherited []string, strip []string, extra map[string]string, termi
 			break
 		}
 	}
-	if !isUTF8Locale(effective) {
+	if !IsUTF8Locale(effective) {
 		for _, k := range []string{"LC_ALL", "LC_CTYPE"} {
-			if v, ok := env[envKey(k)]; ok && !isUTF8Locale(v) {
+			if v, ok := env[envKey(k)]; ok && !IsUTF8Locale(v) {
 				delete(env, envKey(k))
 			}
 		}
@@ -299,4 +303,9 @@ func windowsAbs(p string) bool {
 func isFile(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && !st.IsDir()
+}
+
+func isExecutable(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && !st.IsDir() && st.Mode()&0o111 != 0
 }

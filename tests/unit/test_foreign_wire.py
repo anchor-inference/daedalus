@@ -1,7 +1,7 @@
 """The shapes the host terminal daemon answers ``sessions.scan`` and ``sessions.read`` with, read by
 the host exactly as the daemon writes them.
 
-The samples are not written by hand: ``ptyd/internal/sidechan/sessions/wire_golden_test.go`` builds
+The samples are not written by hand: ``ptyd/sidechan/sessions/wire_golden_test.go`` builds
 a synthetic Claude Code and Codex session, runs the daemon's own parsers over them and writes what
 they answer. That test fails when the parsers' output stops matching the files, and this one fails
 when the host stops reading them, so a field renamed on one side cannot pass both. The two layers of
@@ -27,7 +27,7 @@ from daedalus.stores.database import Database
 from tests.unit.test_project_unification import HEADERS, _client
 from tests.unit.test_session_import import finished, host_of, import_config, manager  # noqa: F401 — the fixture
 
-SAMPLES = Path(__file__).resolve().parents[2] / "ptyd" / "internal" / "sidechan" / "sessions" / "testdata" / "wire"
+SAMPLES = Path(__file__).resolve().parents[2] / "ptyd" / "sidechan" / "sessions" / "testdata" / "wire"
 NATIVE = {"Exec", "Read", "Write", "Edit", "MultiEdit", "Find", "Search", "WebFetch", "WebSearch"}
 CWD = "/home/someone/proj"
 CLAUDE_ID = "c0ffee00-0000-4000-8000-000000000001"

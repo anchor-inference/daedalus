@@ -15,6 +15,7 @@ import (
 	"github.com/ascorblack/daedalus/ptyd/internal/answer"
 	"github.com/ascorblack/daedalus/ptyd/internal/config"
 	"github.com/ascorblack/daedalus/ptyd/internal/emulator/production"
+	"github.com/ascorblack/daedalus/ptyd/internal/procenv"
 	"github.com/ascorblack/daedalus/ptyd/internal/wire"
 )
 
@@ -72,8 +73,8 @@ func BenchmarkFanOut(b *testing.B) {
 	}, 4)
 	defer reg.Shutdown(100 * time.Millisecond)
 	const total = 100_000_000
-	env := BuildEnv(os.Environ(), nil, nil, "bench")
-	sh, _ := LookPath("sh", env, "/")
+	env := procenv.BuildEnv(os.Environ(), nil, nil, "bench")
+	sh, _ := procenv.LookPath("sh", env, "/")
 	b.SetBytes(total)
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
