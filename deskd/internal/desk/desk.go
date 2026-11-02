@@ -403,12 +403,18 @@ func (d *Desk) pollState(ctx context.Context) {
 }
 
 // Tick does one round of the watch and reports whether a lease is active. Tests call it directly.
+// A locked screen is looked for here as well as before each call, so a lease ends when the operator
+// locks the machine between two of the agent's calls, not only when the next call happens to come.
 func (d *Desk) Tick(ctx context.Context) bool {
 	d.expire()
 	d.mu.Lock()
 	active := d.lease != nil
 	d.mu.Unlock()
 	if active {
+		if sec, err := d.be.Secure(ctx); err == nil && sec.Locked {
+			d.endForSecure(sec)
+			return false
+		}
 		d.watchHuman(ctx)
 	}
 	return active

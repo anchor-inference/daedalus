@@ -564,21 +564,36 @@ func TestAnExpiredLeaseEndsAndAHostMayGiveItsOwnBack(t *testing.T) {
 	}
 }
 
-func TestALockedScreenAndAMissingPermissionAreSaidSo(t *testing.T) {
+func TestALockedScreenEndsTheLeaseAndAMissingPermissionIsSaidSo(t *testing.T) {
 	h := start(t, desk.Config{})
 	h.subscribe(h.op)
+	h.subscribe(h.host)
 	h.grant(map[string]any{"kind": "desktop"})
 	h.simulate(map[string]any{"secure": backend.Secure{Locked: true, Reason: "lock_screen"}})
-	if err := h.host.Call(h.ctx, "screenshot", map[string]any{"session": session}, nil); code(err) != desk.CodeSecure {
-		t.Fatalf("a locked screen: %v", err)
+	// The watch ends the lease within a tick, whether or not the agent calls.
+	e, err := h.host.WaitEvent("lease.ended", "", 3*time.Second)
+	if err != nil || !strings.Contains(string(e.Data), `"reason":"locked"`) || !strings.Contains(string(e.Data), `"secure":"lock_screen"`) {
+		t.Fatalf("lease.ended %s %v", e.Data, err)
 	}
-	if _, err := h.act(map[string]any{"action": "key", "keys": "enter"}); code(err) != desk.CodeSecure {
-		t.Fatalf("a key on a locked screen: %v", err)
+	if _, err := h.op.WaitEvent("stopped", "", time.Second); err != nil {
+		t.Fatal(err)
 	}
-	h.simulate(map[string]any{"secure": backend.Secure{}, "permissions": backend.Permissions{Screen: backend.Denied,
-		Accessibility: backend.Granted, InputMonitoring: backend.NotApplicable}})
-	err := h.host.Call(h.ctx, "screenshot", map[string]any{"session": session}, nil)
 	var we *wire.Error
+	if _, err := h.act(map[string]any{"action": "key", "keys": "enter"}); !errors.As(err, &we) || we.Code != desk.CodeNoLease ||
+		we.Data.(map[string]any)["reason"] != "locked" {
+		t.Fatalf("a key after the lock: %v", err)
+	}
+	if err := h.op.Call(h.ctx, "preview", map[string]any{}, nil); code(err) != desk.CodeSecure {
+		t.Fatalf("a preview of a locked screen: %v", err)
+	}
+	h.simulate(map[string]any{"secure": backend.Secure{}})
+	if err := h.host.Call(h.ctx, "screenshot", map[string]any{"session": session}, nil); code(err) != desk.CodeNoLease {
+		t.Fatalf("unlocking handed the desktop back: %v", err)
+	}
+	h.grant(map[string]any{"kind": "desktop"})
+	h.simulate(map[string]any{"permissions": backend.Permissions{Screen: backend.Denied,
+		Accessibility: backend.Granted, InputMonitoring: backend.NotApplicable}})
+	err = h.host.Call(h.ctx, "screenshot", map[string]any{"session": session}, nil)
 	if !errors.As(err, &we) || we.Code != desk.CodeNoPermission || we.Data.(map[string]any)["which"] != "screen" ||
 		!strings.Contains(we.Data.(map[string]any)["hint"].(string), "remove Daedalus from the list") {
 		t.Fatalf("no screen permission: %v %v", err, we)

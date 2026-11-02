@@ -112,19 +112,22 @@ unknown field is `-32602`. Errors use the JSON-RPC codes, `ptyd`'s `1001 not_fou
 | Code | Name | Meaning; `error.data` |
 |---|---|---|
 | 1101 | `human_driving` | the operator touched the mouse or keyboard during the lease; `{paused, since, last_input, resumes_at?}`. Actions are refused until the quiet period passes with no input (`resumes_at`) or the operator resumes |
-| 1200 | `no_lease` | `{reason: "none" \| "expired" \| "stopped" \| "revoked" \| "other_session"}` |
+| 1200 | `no_lease` | `{reason: "none" \| "expired" \| "stopped" \| "revoked" \| "superseded" \| "locked" \| "other_session"}` |
 | 1201 | `stale_screenshot` | the screenshot id cannot be used; `{screenshot_id, reason: "unknown" \| "other_lease" \| "old" \| "displays_changed" \| "window_moved" \| "window_gone"}`. Take a new screenshot |
 | 1202 | `out_of_scope` | the point, the window or the display is outside the lease's scope, or the point is off the screenshot; `{scope, point?, window?}` |
 | 1203 | `protected_target` | an app on the protected list (Daedalus itself); `{app, point?}` |
-| 1204 | `secure_desktop` | a locked screen, a secure desktop or a running screen saver; `{reason: "lock_screen" \| "secure_desktop" \| "screen_saver"}` |
+| 1204 | `secure_desktop` | a locked screen, a secure desktop or a running screen saver; `{reason: "lock_screen" \| "secure_desktop" \| "screen_saver", lease_ended}`. Finding one ends the lease (`locked`, see A locked screen); `lease_ended` says whether this call ended one |
 | 1205 | `no_permission` | the system has not granted what the call needs; `{which: "screen" \| "accessibility" \| "input_monitoring", hint}` |
 | 1206 | `rate` | `{limit: "per_second", retry_after_ms}` or `{limit: "lease_actions", max}` |
 | 1207 | `unreachable` | the system silently drops input to that window (Windows' UIPI in front of a program run as administrator); `{reason: "elevated", app?}` |
 | 1208 | `operator_only` | the method needs the operator's token; `{role}` |
+| 1209–1211 | — | held for the accessibility tree's refusals (no tree, a stale reference, an ambiguous target); not sent yet |
+| 1212 | `blocked_key` | a chord that closes, locks or leaves the session, refused whatever the host asks; `{keys, reason: "ends" \| "leaves", why}` (see Blocked keys) |
 
 Every refusal happens before any input is sent, except the ones an action meets half way (a stop,
-the lease's end, the operator's hand): those cut the action short at its next event and release
-whatever it held down.
+the lease's end, a locked screen, the operator's hand): those cut the action short at its next event
+and release whatever it held down. Every refusal of `act` says which of the two it was in
+`data.delivery` (see Delivery).
 
 ## Coordinates
 
@@ -214,8 +217,8 @@ Otherwise the action is refused with `1201` and the reason.
 
 ## Actions
 
-`act {session, action, …}` → `{action, points?: [[x, y]] (desktop units), target?: {window, app},
-cursor[2], duration_ms, actions_left}`.
+`act {session, action, …}` → `{action, delivery: "delivered", points?: [[x, y]] (desktop units),
+target?: {window, app}, cursor[2], duration_ms, actions_left}`.
 
 | Action | Params | What happens |
 |---|---|---|
@@ -237,14 +240,52 @@ An action is judged in this order, and nothing reaches the desktop until every s
 
 1. the parameters;
 2. the lease: active, not expired, held by this `session` (`1200`);
-3. the pause for the operator's hand (`1101`);
-4. the locked screen or secure desktop (`1204`);
-5. the screenshot id and the conversion of every point (`1201`, `1202`);
-6. where each point lands: the window under it, protected (`1203`), elevated (`1207`), outside the
+3. for `key`, every chord against the blocked keys (`1212`);
+4. the pause for the operator's hand (`1101`);
+5. the locked screen or secure desktop (`1204`), which also ends the lease;
+6. the screenshot id and the conversion of every point (`1201`, `1202`);
+7. where each point lands: the window under it, protected (`1203`), elevated (`1207`), outside the
    scope (`1202`);
-7. for `type`, `key` and a click with modifiers, the window with the keyboard, judged the same way;
-8. the rate (`actions_per_second`, `action_burst`) and the lease's `max_actions` (`1206`). `wait`
+8. for `type`, `key` and a click with modifiers, the window with the keyboard, judged the same way;
+9. the rate (`actions_per_second`, `action_burst`) and the lease's `max_actions` (`1206`). `wait`
    is not counted.
+
+### Blocked keys
+
+Some chords are refused whatever the host asks, because after them no screenshot can show the
+operator what was lost: the session is locked, logged out or switched away, the machine shuts down,
+or the app in front is gone. Others only take the keyboard away from the window in front; they are
+refused unless the lease covers the whole desktop, where a click could leave the window as well. A
+rule matches a chord with its key and at least its modifiers, in any order, so `shift+alt+f4` is
+still `alt+f4`; a sequence with one refused chord sends none of it. On macOS `super` is Command and
+`alt` is Option.
+
+| System | Refused under any lease (`reason: "ends"`) | Refused unless the lease is the desktop (`reason: "leaves"`) |
+|---|---|---|
+| Linux | `alt+f4`, `ctrl+alt+backspace`, `ctrl+alt+delete`, `ctrl+alt+f1`–`f12` (another virtual terminal), `super+l`, `ctrl+alt+l`, `ctrl+alt+shift+pageup` / `pagedown` (KDE's restart and shut down without asking) | `alt+tab`, `super+tab`, `super` alone, `super+d`, `alt+f1`, `alt+f2`, `ctrl+alt+t` |
+| Windows | `alt+f4`, `ctrl+alt+delete`, `ctrl+alt+end` (the same in a remote session), `super+l`, `ctrl+shift+escape`, `super+x` | `alt+tab`, `super+tab`, `alt+escape`, `super` alone, `super+d`, `super+m`, `super+r`, `super+e` |
+| macOS | `super+q`, `ctrl+super+q`, `super+shift+q`, `super+alt+escape`, `super+shift+backspace` | `super+tab`, `super+space`, `super+h`, `super+m`, `ctrl+up`, `ctrl+left`, `ctrl+right` |
+
+The fake desktop refuses every system's chords. The refusal's `why` says what the chord does, and the
+host passes it to the model with the advice to take another way. `type` cannot send a chord: its line
+breaks and tabs are plain Enter and Tab.
+
+### Delivery
+
+Every answer of `act` says whether its input may have reached the desktop, so the host knows when
+sending the action again is safe:
+
+| `delivery` | Meaning |
+|---|---|
+| `delivered` | the result: every event of the action was taken by the system. Physical input is never read back, so this says nothing of what the program under it did; the screenshot is the judge |
+| `not_delivered` | in a refusal's `data`: no event was sent, because the action was refused before its first or stopped before it (a `wait` cut short sent nothing) |
+| `unknown` | in a refusal's `data`: the action failed or was cut short after its first event, so part of it may have landed (half a typed text, a button that went down and was released by the stop) |
+
+The host sends an action again by itself only on `not_delivered`, and only for the per-second rate
+(`1206 {limit: "per_second"}`), after the `retry_after_ms` the daemon names, up to two times and
+never for a wait longer than 2 s. Everything else goes to the model; on `unknown` it is told that
+part of the action may have happened and to look before repeating it. A daemon that does not send
+`delivery` counts as `unknown`.
 
 ## Events
 
@@ -254,12 +295,25 @@ daemon keeps the last 4096, no more than 8 MiB. Both roles may subscribe.
 | Type | `data` |
 |---|---|
 | `lease.granted` | `{lease}` |
-| `lease.ended` | `{lease_id, session, reason: "revoked" \| "expired" \| "stopped" \| "superseded", by: "host" \| "operator" \| "daemon", actions}` |
-| `stopped` | `{by, lease_id}` |
+| `lease.ended` | `{lease_id, session, reason: "revoked" \| "expired" \| "stopped" \| "superseded" \| "locked", by: "host" \| "operator" \| "daemon", actions, secure?}`; `secure` is the 1204 reason when the lock ended it |
+| `stopped` | `{by, lease_id, reason?, secure?}`; a lease ended by a locked screen sends it too, `by: "daemon"`, `reason: "locked"` |
 | `human.input` | `{lease_id, how: "pointer" \| "input", human}` — the operator touched the machine; the agent is paused |
 | `human.resumed` | `{by: "operator" \| "quiet", lease_id?}` |
 | `permissions.changed` | `{permissions}` — read every second without a lease, every 2 s with one |
 | `displays.changed` | `{displays}` — every screenshot id is now stale |
+
+## A locked screen
+
+A locked screen, a secure desktop (Windows' UAC prompt and Ctrl+Alt+Del screen) or a running screen
+saver ends the lease the way `stop` does: the action in flight is cancelled at its next event,
+everything held is released, the lease ends with the reason `locked`, and `lease.ended` and `stopped`
+are published. Unlocking does not give the desktop back; the operator grants it again. The daemon
+looks ten times a second while a lease is active, and again before every screenshot, action, focus
+and preview, so the lease ends whether or not the agent is calling. The call that finds the lock is
+refused with `1204` (`lease_ended: true`); the calls after it with `1200 {reason: "locked"}`, which
+the host tells the model and the app shows beside the grant form. On X11 a screen locker shows as the
+screen saver, so a screen saver that only blanks the screen ends the lease as well: the operator has
+been away for its whole timeout, which is reason enough.
 
 ## The operator's hand
 
@@ -312,8 +366,8 @@ tells the shell when a grant arrives.
 | Input | XTest; a character missing from the layout is bound to a spare keycode for the moment it is typed | `SendInput` with absolute virtual-desktop moves; `KEYEVENTF_UNICODE` typing | `CGEventPost` from a private event source; Unicode typing in chunks of 20 UTF-16 units |
 | Displays | RandR monitors | `EnumDisplayMonitors`, per-monitor DPI | `CGGetActiveDisplayList`, backing scale |
 | Windows, focus | EWMH (`_NET_CLIENT_LIST_STACKING`, `_NET_ACTIVE_WINDOW`), the window tree without a window manager | `EnumWindows`, cloaked and tool windows skipped | `CGWindowListCopyWindowInfo`, `NSRunningApplication` |
-| Locked | screen saver active | input desktop not `Default`, the session's lock flag, a running screen saver | the session dictionary's lock and console keys |
-| Unreachable | — | a process at a higher integrity level | — |
+| Locked (ends the lease) | screen saver active | input desktop not `Default`, the session's lock flag, a running screen saver | the session dictionary's lock and console keys |
+| Unreachable | — | a process at a higher integrity level, read from the token's integrity level before input is sent; `SendInput`'s count is a second check only, since it can report success while UIPI drops the events | — |
 | Verified | by the tests and `deskd selftest` on Xvfb | compiled and vetted only | the pure helpers tested; the cgo parts not compiled here |
 
 **Wayland** sessions are refused with a reason (`deskd serve` exits; `info` is never reached): the
@@ -370,7 +424,8 @@ its own. Touching the mouse during the run pauses it, and the report says so.
   displays, limits), and acts only while `lease.status` says its session holds the lease. It keeps
   the screenshot id with every picture it gives the model and passes it back with every point. It
   converts the model's coordinate convention (relative 0–1000, smart-resized pixels) to the
-  screenshot's pixels before calling `act`; the daemon takes screenshot pixels only.
+  screenshot's pixels before calling `act`; the daemon takes screenshot pixels only. It repeats an
+  action by itself only as Delivery says.
 
 ## Not yet
 

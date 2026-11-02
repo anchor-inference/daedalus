@@ -283,7 +283,9 @@ func (d *Desk) resolveShot(ctx context.Context, id string, lease Lease) (*Shot, 
 	return s, nil
 }
 
-// checkSecure refuses on a locked screen or a secure desktop.
+// checkSecure refuses on a locked screen or a secure desktop, and ends the lease when it finds one.
+// Refusing each call alone left the grant alive behind the lock: the agent carried on the moment the
+// operator unlocked, though the operator had locked the machine to walk away from it.
 func (d *Desk) checkSecure(ctx context.Context) error {
 	sec, err := d.be.Secure(ctx)
 	if err != nil {
@@ -291,8 +293,9 @@ func (d *Desk) checkSecure(ctx context.Context) error {
 		return nil
 	}
 	if sec.Locked {
+		ended := d.endForSecure(sec)
 		return refuse(CodeSecure, fmt.Sprintf("the desktop is not one the agent may see or drive (%s)", sec.Reason),
-			map[string]any{"reason": sec.Reason})
+			map[string]any{"reason": sec.Reason, "lease_ended": ended})
 	}
 	return nil
 }

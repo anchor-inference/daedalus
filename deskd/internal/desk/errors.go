@@ -20,6 +20,9 @@ const (
 	CodeRate         = 1206 // too many actions: per second, or for the lease
 	CodeUnreachable  = 1207 // the system silently drops input to that window (an elevated program)
 	CodeOperatorOnly = 1208 // a method only the operator's token may call
+	// 1209–1211 are held for the accessibility tree's refusals (no tree, a stale reference, an
+	// ambiguous target), so the codes stay in the order the contract lists them.
+	CodeBlockedKey = 1212 // a chord that closes, locks or leaves the session, refused whatever the host asks
 )
 
 func refuse(code int, msg string, data any) *wire.Error {
