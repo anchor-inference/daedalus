@@ -23,7 +23,7 @@ describe("a ComputerUI step", () => {
   });
 
   it("tells an unconfirmed action and one that changed nothing apart", () => {
-    expect(uiStep({ action: "press", ref: "r" }, "Pressed r — sent, not confirmed.\nThe element now:", false).status).toBe("unverified");
+    expect(uiStep({ action: "press", ref: "r" }, "Pressed r — done, not confirmed.\nThe element now:", false).status).toBe("unverified");
     expect(uiStep({ action: "check", ref: "r" }, "Checked r — already so, nothing was sent.", false).status).toBe("already");
   });
 

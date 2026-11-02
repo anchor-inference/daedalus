@@ -10,9 +10,9 @@ and everything read off the screen is fenced as screen content.
 The point of the tree is the loop it allows. After a screenshot action the model is shown a whole new
 screenshot, some fifteen hundred tokens however small the change; after an element action it is shown
 that element read again (the daemon's ``post_state``), a line or a few. A screenshot comes with the
-answer only when the tree cannot say what happened: the daemon could not confirm the action, the
-element has no way to do it without real input, or the window has no usable tree (a canvas, a game, a
-remote desktop). The model goes on with ``Computer`` from that picture.
+answer only when the tree cannot say anything: the element has no way to do it without real input, or
+the window has no usable tree (a canvas, a game, a remote desktop). The model goes on with
+``Computer`` from that picture.
 
 A desktop that cannot read trees — a daemon older than them, or one shipped without its helper — is
 said to be so once per conversation, and later calls answer with one short line: the model is expected
@@ -75,8 +75,7 @@ ABSENT_AGAIN = "ComputerUI is not available on this desktop: use Computer."
 ABSENT_WHY = {
     "off": "the desktop service runs without its accessibility helper",
     "missing": "the desktop application was installed without its accessibility helper",
-    "checksum": "the accessibility helper failed its integrity check, so it is not run",
-    "version": "the accessibility helper is a version the desktop service does not accept",
+    "version": "the accessibility helper is a version the desktop service has not been checked against",
     "failed": "the accessibility helper does not run on this system",
     "unsupported": "this desktop does not serve it",
 }
@@ -92,6 +91,10 @@ CRASHED = "The accessibility helper stopped during that call; nothing is known t
 NEEDS_POINTER = (
     "This element offers no way to do that without real input. Use Computer on it instead: the attached screenshot "
     "is the screen now."
+)
+UNCONFIRMED = (
+    "The desktop could not confirm the effect. If it should show somewhere other than this element, read that part "
+    "again (tree or get) or take a screenshot with Computer before going on."
 )
 PARTIAL = "The tree was cut short by its deadline: if what you need is not here, read a part with tree and ref, or take a screenshot with Computer."
 PICK_WINDOW = "Name the window to read: window=<id> from ComputerApps list (the grant covers more than one window)."
@@ -150,7 +153,8 @@ def _line(node: dict[str, Any], depth: int) -> str:
         parts.append(f"= {SECURE_VALUE}")
     elif node.get("value") not in (None, ""):
         parts.append(f'= "{_clean(node.get("value"))}"')
-    shown = [s for s in _states(node) if s.lower() not in QUIET_STATES]
+    # "(hidden)" already says the field is secure; the state would say it twice.
+    shown = [s for s in _states(node) if s.lower() not in QUIET_STATES and s.lower() != "secure"]
     if shown:
         parts.append(f"({', '.join(_clean(s, 24) for s in shown)})")
     bounds = node.get("bounds")
@@ -447,6 +451,11 @@ class TreeTools:
         nodes = _walk(answer.get("tree"))
         window = _window_id(answer.get("window")) or self._window_of(caller, ref)
         self._remember(caller, nodes, window)
+        # The daemon hands the root of a re-read a reference of its own. The one asked about stays the
+        # daemon's too, so it is remembered as the same element: an action by it is still judged.
+        if nodes and str(nodes[0][0].get("ref") or "") != ref:
+            root = nodes[0][0]
+            self._session(caller).elements[ref] = Element(ref, str(root.get("role") or ""), str(root.get("name") or ""), _states(root), window)
         return nodes, window
 
     async def _get(self, caller: Caller, ref: str) -> Outcome:
@@ -527,7 +536,7 @@ class TreeTools:
         if delivery == refusals.NOT_DELIVERED:
             status = "already so, nothing was sent"
         elif verified is False:
-            status = "sent, not confirmed"
+            status = "done, not confirmed"
         elif verified:
             status = "done and confirmed"
         else:
@@ -563,10 +572,11 @@ class TreeTools:
         if isinstance(left, int):
             lines.append(f"{left} action{'s' if left != 1 else ''} left in this grant of control.")
         if verified is False and delivery != refusals.NOT_DELIVERED:
-            # The daemon could not see the change happen: the picture is what the model judges by now.
-            shot = await self.agent._after(caller)
-            lines.append("The desktop could not confirm the change, so a screenshot is attached: check it before going on.")
-            return Outcome(self.agent._with_shot(caller, "\n".join(lines), shot), image=shot, metadata={"ax": action, "delivery": delivery, "verified": False})
+            # No screenshot comes with it. The daemon calls an action verified only when its helper read
+            # the asked-for state back, and a press asks for no state, so nearly every press is
+            # unconfirmed; a picture after each would cost what the tree saves. The element read again
+            # is the evidence there is, and the model looks further only when the effect is elsewhere.
+            lines.append(UNCONFIRMED)
         return Outcome("\n".join(lines), metadata={"ax": action, "delivery": delivery, "verified": verified})
 
 

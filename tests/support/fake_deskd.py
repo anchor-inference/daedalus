@@ -13,7 +13,9 @@ The accessibility tree is the contract's ``ax.*``: a window's ``tree`` is a list
 ``role``, ``name``, ``value``, ``states``, ``secure`` and ``children``), and each read hands out
 ``@<snapshot>:e<N>`` references to the nodes one can act on (every node but a ``static`` one). A secure
 node's value is kept and never sent. A node may script what pressing it does: ``closes`` removes its
-window, ``unverified`` makes the action unconfirmed, ``needs_pointer`` refuses it with ``1007``.
+window, ``unverified`` makes the action unconfirmed (a press is unconfirmed unless ``verifies``, as the
+daemon confirms only a state read back), ``needs_pointer`` refuses it with ``1007``, and ``fails`` with
+``1213`` and that reason, ``delivery: unknown``.
 ``ax`` set to ``None`` is a daemon older than trees: every ``ax.*`` method is ``-32601`` and ``info``
 says nothing of them; ``{"available": False, "reason": …}`` refuses each with ``1209``.
 """
@@ -47,6 +49,9 @@ PARAMS: dict[str, set[str]] = {
     "ax.act": {"session", "ref", "action", "text", "direction", "amount", "timeout_ms"},
 }
 AX_ACTIONS = {"click", "set_value", "clear", "type", "select", "toggle", "check", "uncheck", "expand", "collapse", "scroll", "scroll_to", "focus"}
+AX_TEXT_ACTIONS = {"set_value", "type", "select"}
+AX_UNREAD_ACTIONS = {"click", "scroll", "scroll_to", "focus"}
+AX_PROPERTIES = {"text", "value", "title", "bounds", "role", "states", "visible", "enabled", "checked", "focused", "expanded", "selected"}
 """Each method's parameters; anything else is refused as the daemon's strict decoding refuses it."""
 
 
@@ -364,11 +369,23 @@ class FakeDeskd:
         if method == "ax.act":
             return self._ax_act(params, lease)
         if method == "ax.get":
-            _, node = self._ref(str(params.get("ref") or ""))
             prop = str(params.get("property") or "")
+            if prop not in AX_PROPERTIES:
+                raise _Fail(-32602, "property must be one of " + ", ".join(sorted(AX_PROPERTIES)))
+            _, node = self._ref(str(params.get("ref") or ""))
             if prop in ("text", "value") and node.get("secure"):
                 return {"ref": params["ref"], "property": prop, "value": None, "secure": True}
             return {"ref": params["ref"], "property": prop, "value": node.get(prop if prop != "text" else "value")}
+        if params.get("depth") not in (None, "full", "skeleton"):
+            raise _Fail(-32602, "depth must be full or skeleton")
+        if params.get("surface") not in (None, "window", "menu", "sheet", "popover", "alert"):
+            raise _Fail(-32602, "surface must be window, menu, sheet, popover or alert")
+        if method == "ax.find" and not any(params.get(k) for k in ("role", "name", "value", "text")):
+            raise _Fail(-32602, "give at least one of role, name, value, text")
+        if method == "ax.find" and params.get("limit") is not None and not 1 <= int(params["limit"]) <= 200:
+            raise _Fail(-32602, "limit must be 1–200")
+        if params.get("window") and params.get("root"):
+            raise _Fail(-32602, "give window or root, not both")
         self._serial += 1
         snapshot = f"s{self._serial}"
         counter = [0]
@@ -378,7 +395,9 @@ class FakeDeskd:
             window_id, root = self._ref(str(params["root"]))
             window = next(w for w in self.windows if w.id == window_id)
             nodes = [root]
-            keep_root = str(params["root"])
+            # As the daemon does, the root read again gets a reference of its own; the one asked
+            # about stays valid.
+            keep_root = ""
         else:
             window = self._ax_window(params, lease)
             if window.tree is None:
@@ -438,6 +457,8 @@ class FakeDeskd:
             return False
         if params.get("name") and not like(node.get("name"), params["name"]):
             return False
+        if params.get("value") and not like(node.get("value"), params["value"]):
+            return False
         return not (params.get("text") and not like(f"{node.get('name') or ''} {node.get('value') or ''}", params["text"]))
 
     def _view(self, node: dict[str, Any], window: str, snapshot: str, counter: list[int], bounds: bool, *, depth: int | None, keep: str = "", children: bool = True, level: int = 0) -> dict[str, Any]:
@@ -466,15 +487,35 @@ class FakeDeskd:
         return view
 
     def _ax_act(self, params: dict[str, Any], lease: dict[str, Any]) -> dict[str, Any]:
+        # In the daemon's order: the parameters, the reference, the action counted against the lease,
+        # then whatever the tool answers (1007 and 1213 come from the tool, after the count).
         action = str(params.get("action") or "")
         if action not in AX_ACTIONS:
-            raise _Fail(-32602, f"unknown action {action!r}")
-        window_id, node = self._ref(str(params.get("ref") or ""))
-        if action in ("set_value", "type", "select") and not params.get("text"):
+            raise _Fail(-32602, "action must be click, set_value, clear, type, select, toggle, check, uncheck, expand, collapse, scroll, scroll_to or focus")
+        if not params.get("ref"):
+            raise _Fail(-32602, "give ref")
+        text = str(params.get("text") or "")
+        if action in AX_TEXT_ACTIONS and not text:
             raise _Fail(-32602, f"{action} needs text")
-        if node.get("needs_pointer"):
-            raise _Fail(1007, "needs pointer", {"reason": "needs_pointer", "delivery": "not_delivered"})
+        if action in AX_TEXT_ACTIONS and len(text) > self.limits["max_type_chars"]:
+            raise _Fail(1003, f"text is at most {self.limits['max_type_chars']} characters a call")
+        if action not in AX_TEXT_ACTIONS and text:
+            raise _Fail(-32602, f"{action} takes no text")
+        if action != "scroll" and (params.get("direction") or params.get("amount")):
+            raise _Fail(-32602, "direction and amount are for scroll")
+        if params.get("timeout_ms") and not 500 <= int(params["timeout_ms"]) <= 30000:
+            raise _Fail(-32602, "timeout_ms must be 500–30000")
+        window_id, node = self._ref(str(params["ref"]))
+        if lease["actions"] >= lease["max_actions"]:
+            raise _Fail(1206, "rate", {"limit": "lease_actions", "max": lease["max_actions"], "delivery": "not_delivered"})
         lease["actions"] += 1
+        if node.get("needs_pointer"):
+            raise _Fail(1007, "that element offers no way to do this without real input: use a screenshot and act", {"reason": "needs_pointer", "delivery": "not_delivered"})
+        if node.get("fails"):
+            data: dict[str, Any] = {"reason": node["fails"], "delivery": "unknown"}
+            if node["fails"] == "contradicted":
+                data["post_state"] = {"role": node.get("role"), "states": list(node.get("states") or [])}
+            raise _Fail(1213, "the element action failed", data)
         self.ax_acts.append(dict(params))
         states = list(node.get("states") or [])
         delivery = "delivered"
@@ -498,8 +539,11 @@ class FakeDeskd:
             if action == "expand" and node.get("hidden_children"):
                 node["children"] = node.pop("hidden_children")
         node["states"] = states
+        # The daemon's verified is its helper's delivered_verified: a state read back as asked. A press
+        # asks for no state, so it is unverified unless the node says it reads back.
+        verified = delivery == "delivered" and not node.get("unverified") and (action not in AX_UNREAD_ACTIONS or bool(node.get("verifies")))
         out: dict[str, Any] = {"action": action, "ref": params["ref"], "window": window_id, "delivery": delivery,
-                               "verified": not node.get("unverified"), "actions_left": lease["max_actions"] - lease["actions"], "duration_ms": 1}
+                               "verified": verified, "actions_left": lease["max_actions"] - lease["actions"], "duration_ms": 1}
         if action == "click" and node.get("closes"):
             node["gone"] = True
             self.windows = [w for w in self.windows if w.id != window_id]

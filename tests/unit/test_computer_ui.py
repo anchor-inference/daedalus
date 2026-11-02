@@ -224,14 +224,29 @@ async def test_expanding_reads_the_new_children(desk: FakeDeskd, tools: ui.TreeT
     assert 'tree item "Folders" (expanded)' in outcome.text and 'tree item "Archive"' in outcome.text
 
 
-async def test_an_unconfirmed_action_brings_a_screenshot(desk: FakeDeskd, tools: ui.TreeTools) -> None:
-    desk.windows[0].tree.append({"role": "button", "name": "Refresh", "unverified": True})
+async def test_an_unconfirmed_press_answers_with_the_element_and_no_screenshot(desk: FakeDeskd, tools: ui.TreeTools) -> None:
+    # The daemon confirms only a state read back, so a press is nearly always unconfirmed; a picture
+    # after each would cost what the tree saves. The model is told where to look instead.
+    desk.windows[0].tree.append({"role": "button", "name": "Refresh"})
     desk.grant(SESSION)
     who = caller()
     named = await refs(tools, who)
     outcome = await tools.call(who, {"action": "press", "ref": named["Refresh"]})
-    assert not outcome.failed and outcome.image is not None
-    assert "sent, not confirmed" in outcome.text and "could not confirm" in outcome.text
+    assert not outcome.failed and outcome.image is None
+    assert "done, not confirmed" in outcome.text and ui.UNCONFIRMED in outcome.text
+    assert 'button "Refresh"' in outcome.text
+    assert "screenshot" not in desk.methods()
+
+
+async def test_a_contradicted_action_carries_no_retry_and_says_to_look(desk: FakeDeskd, tools: ui.TreeTools) -> None:
+    desk.windows[0].tree.append({"role": "switch", "name": "Wi-Fi", "fails": "contradicted"})
+    desk.grant(SESSION)
+    who = caller()
+    named = await refs(tools, who)
+    outcome = await tools.call(who, {"action": "toggle", "ref": named["Wi-Fi"]})
+    assert outcome.failed and "reads back otherwise" in outcome.text and "may already have happened" in outcome.text
+    assert len(ax_calls(desk, "ax.act")) == 1
+    assert desk.lease is not None and desk.lease["actions"] == 1  # counted, as the daemon counts it
 
 
 async def test_an_element_without_a_semantic_path_falls_back_to_a_screenshot(desk: FakeDeskd, tools: ui.TreeTools) -> None:
@@ -253,6 +268,19 @@ async def test_a_window_without_a_tree_brings_a_screenshot_instead(desk: FakeDes
     desk.windows[0].tree = []
     empty = await tools.call(caller(), {"action": "tree"})
     assert empty.image is not None and ui.NO_TREE in empty.text
+
+
+async def test_a_reference_the_host_never_saw_is_read_and_judged_before_acting(desk: FakeDeskd, tools: ui.TreeTools) -> None:
+    # A host restarted between the read and the action: the reference is the daemon's and still good,
+    # and the element is read again so that pressing it is judged like any other.
+    desk.grant(SESSION)
+    named = await refs(tools, caller())
+    fresh = ui.TreeTools(tools.agent)
+    gate = Asks(allow=False)
+    outcome = await fresh.call(caller(gate), {"action": "press", "ref": named["Send"]})
+    assert outcome.failed and [a.kinds for a in gate.asked] == [["send"]]
+    assert ax_calls(desk, "ax.snapshot")[-1] == {"session": SESSION, "root": named["Send"], "depth": "skeleton"}
+    assert ax_calls(desk, "ax.act") == []
 
 
 async def test_a_stale_reference_is_said_in_words(desk: FakeDeskd, tools: ui.TreeTools) -> None:
