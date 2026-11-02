@@ -76,6 +76,10 @@ func (r *Renderer) term(width int) (*glamour.TermRenderer, error) {
 		glamour.WithStyles(r.config),
 		glamour.WithWordWrap(width),
 		glamour.WithChromaFormatter(formatter),
+		// A newline inside a paragraph is kept as a break. A model writes a line break where it means
+		// one, a flattened card or flow is one row per line, and Telegram and the app both show the
+		// break; joining the lines into one paragraph ran a flow's rows and arrows together.
+		glamour.WithPreservedNewLines(),
 	)
 	if err != nil {
 		return nil, err

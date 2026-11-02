@@ -1,0 +1,30 @@
+
+
+
+
+
+
+
+╭──────────────────────────────────────────────────────────────╮
+│ ✻ Welcome to Daedalus!                                       │
+│                                                              │
+│ /help for help, /status for your current setup               │
+│                                                              │
+│ cwd: /work/project                                           │
+╰──────────────────────────────────────────────────────────────╯
+
+ Tips for getting started:
+
+ 1. Ask a question about this folder, or ask for a change
+ 2. Type @ to mention a file, ! to run a shell command, / for commands
+ 3. Shift+Tab cycles the local guard: ask, auto, plan
+
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ > Try "explain what this project does"                                                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ ! for shell mode                                double esc to rewind
+ / for commands                                  shift+tab to cycle guard
+ @ for file paths                                ctrl+o for transcript
+ \⏎ or shift+⏎ for newline                       ctrl+r to search history
+ ctrl+g to edit in $EDITOR                       ctrl+t to toggle todos
+ ctrl+v to paste an image                        pgup/pgdn to scroll · shift+drag to select
