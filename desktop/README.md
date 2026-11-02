@@ -937,6 +937,45 @@ whatever the agent held down.
 - **Linux** works on X11 sessions. On a Wayland session the launcher starts no daemon, and the app
   says computer use is unavailable there. `DAEDALUS_DESKD=/path/to/deskd` names a daemon built by
   hand. A build without one shows computer use unavailable with "this build carries no deskd".
+- **The accessibility tool.** For the tree tools (reading a window's elements and acting on them by
+  reference) the daemon runs [agent-desktop](https://github.com/vercel-labs/agent-desktop), a
+  program of vercel-labs' under the Apache License 2.0. Daedalus does not build it: each package
+  carries the release `desktop/agent-desktop.lock` pins, unmodified, beside `deskd` —
+  `agent-desktop` with `agent-desktop-linux-clipboard-owner` on Linux, `agent-desktop.exe` on
+  Windows, `Contents/MacOS/agent-desktop` with `agent-desktop-macos-helper` in the Mac bundle (both
+  architectures joined into one file, as for the daemons). The launcher hands its path to the
+  daemon (`--ax-bin`), or `--ax-bin off` when the package has none;
+  `DAEDALUS_AGENT_DESKTOP=/path/to/agent-desktop` names another, and `DAEDALUS_AGENT_DESKTOP=off`
+  leaves the tree out. Without it, or where it cannot run (Linux with a glibc older than 2.35),
+  computer use works as before with screenshots alone. No digest is passed with the path: the bytes
+  are checked by `SHA256SUMS` and the release signature before an install or an upgrade, and on macOS
+  by the bundle's signature, which rewrites the file after the release's digests are known.
+  - **How it gets into a release.** The workflow's `agent-desktop` job runs
+    `desktop/stage-agent-desktop.sh`, which downloads the five archives and refuses any whose
+    sha256 is not the lock's, whose build provenance (`gh attestation verify`, Sigstore) is not that
+    project's release workflow on a GitHub-hosted runner at the commit the lock pins, or which holds
+    anything but the expected files. Any refusal fails the build, so there is no package without
+    it. The binary is never run on the build machines. It is not code-signed by us on Windows, where
+    nothing of ours is; on macOS it is signed with the bundle, ad hoc or with the Developer ID,
+    exactly as `deskd` is; `SHA256SUMS` and the release signature cover the packages that carry it.
+  - **Its licence** is in `THIRD_PARTY_NOTICES.txt`: at the top of the installed folder on Windows and
+    Linux, in `Contents/Resources` on macOS. The text comes from
+    `desktop/third-party/agent-desktop.LICENSE`, a copy of the project's `LICENSE` at the pinned commit.
+  - **Moving to another release.** Change `version=` and `commit=` in `desktop/agent-desktop.lock`
+    and replace the five digests. The release's tag names the commit and GitHub lists each archive's
+    digest:
+
+    ```sh
+    v=1.0.3
+    gh api repos/vercel-labs/agent-desktop/git/ref/tags/v$v --jq .object   # type "commit": its sha is the commit
+    gh api repos/vercel-labs/agent-desktop/releases/tags/v$v --jq '.assets[] | select(.name | test("^agent-desktop-v")) | "\(.digest) \(.name)"'
+    ```
+
+    Then check that the licence did not change
+    (`gh api "repos/vercel-labs/agent-desktop/contents/LICENSE?ref=<commit>" --jq .content | base64 -d | diff - desktop/third-party/agent-desktop.LICENSE`),
+    and stage it once (`desktop/stage-agent-desktop.sh <empty folder>`): it proves the digests and the
+    provenance before CI does. Read the release's changelog for anything the daemon relies on — the
+    daemon accepts agent-desktop 1.x from 1.0.2 on and refuses another major version.
 - **Not yet proven:** the Windows and macOS daemons on real machines. The Windows build is compiled
   and vetted only, and the macOS build is compiled on the release runner and has not driven a real
   screen.
@@ -1047,8 +1086,10 @@ The application is built with electron-builder from `shell/` (`electron-builder.
 configuration: the installers, the archives, the icon, the protocol). `shell/build.sh linux` builds
 the `.deb`, the AppImage and the unpacked folder on a Linux machine; `shell/build.sh windows` builds
 the installer under Wine in a container. Both stage the launcher, browserd and the Mini App from this
-tree first and leave ptyd out (it needs Zig; host terminals are then unavailable). The macOS
-application needs a Mac. The release workflow builds all of it, ptyd included, and tests each
+tree first and leave ptyd out (it needs Zig; host terminals are then unavailable). They stage
+agent-desktop as the release does, which needs `gh` 2.49 or later for the provenance check;
+`DAEDALUS_AGENT_DESKTOP_ATTESTATION=skip` checks the digests alone, for a build that is only tried.
+The macOS application needs a Mac. The release workflow builds all of it, ptyd included, and tests each
 installer on its own system before anything is published.
 
 To try the application against a launcher you built, `DAEDALUS_ENGINE=/path/to/daedalus-desktop npm
@@ -1067,5 +1108,7 @@ docker run --rm -v "$PWD":/src -w /src -e GOFLAGS=-mod=mod -e GOCACHE=/tmp/gocac
 Releases are signed with the project's minisign key, on the operator's machine, after the workflow
 has built them into a draft: [SIGNING.md](SIGNING.md). There is no operating-system code signing —
 no Authenticode certificate for Windows and no Developer ID for macOS; the macOS application is
-signed ad-hoc, which is what lets Apple Silicon run it at all. [Get it](#get-it) says what each
-system asks on the first opening because of that.
+signed ad-hoc, which is what lets Apple Silicon run it at all. The same holds for agent-desktop
+inside it (see [Computer use](#computer-use)): signed with the bundle on macOS, unsigned on Windows
+like everything else there, and covered by `SHA256SUMS` and its signature with the rest of the
+package. [Get it](#get-it) says what each system asks on the first opening because of that.

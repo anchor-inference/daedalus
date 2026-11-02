@@ -1,10 +1,11 @@
 # The installers and the update archives of the desktop application, one configuration for the
-# three systems. The launcher (daedalus-desktop), its three daemons, the built Mini App and the Chrome
-# extension are not
+# three systems. The launcher (daedalus-desktop), its three daemons, agent-desktop (the program deskd
+# runs for the accessibility tree), the built Mini App and the Chrome extension are not
 # compiled here: the release workflow (and build.sh for a local build) puts them in stage/ first,
 # per system and architecture, and they are copied in beside the shell's own executable — where
 # the shell starts the launcher from, and where the launcher looks for its daemons. So is the seed
-# (desktop/seed.go): the release's code, runtime and packages, which make a first run local.
+# (desktop/seed.go): the release's code, runtime and packages, which make a first run local, and
+# stage/notices, the licences of what is carried and not ours (THIRD_PARTY_NOTICES.txt).
 appId: io.github.anchor-inference.daedalus
 productName: Daedalus
 copyright: Daedalus
@@ -50,6 +51,8 @@ win:
       to: browser-extension
     - from: stage/seed-win-${arch}
       to: seed
+    - from: stage/notices
+      to: .
   # No code signing: there is no certificate (SmartScreen warns once, README says how to pass it).
   # rcedit still runs, so the executable carries the icon and the version.
   signAndEditExecutable: true
@@ -104,9 +107,13 @@ mac:
     # Both Macs' parts of the seed, the same folder in both halves of the universal application.
     - from: stage/seed-mac
       to: seed
-  # The launcher and its daemons are one universal binary each already (lipo in the workflow), so
-  # the two halves of the application carry the same file and nothing is merged.
-  x64ArchFiles: "Contents/MacOS/{daedalus-desktop,ptyd,browserd,deskd}"
+    # In Resources, not beside the executables: codesign takes whatever is in Contents/MacOS for code.
+    - from: stage/notices
+      to: .
+  # The launcher, its daemons and agent-desktop with its helper are one universal binary each
+  # already (lipo in the workflow), so the two halves of the application carry the same file and
+  # nothing is merged.
+  x64ArchFiles: "Contents/MacOS/{daedalus-desktop,ptyd,browserd,deskd,agent-desktop,agent-desktop-macos-helper}"
 
 linux:
   icon: build/icon.png
@@ -136,6 +143,8 @@ linux:
       to: browser-extension
     - from: stage/seed-linux-${arch}
       to: seed
+    - from: stage/notices
+      to: .
 
 deb:
   artifactName: Daedalus-linux-${arch}.deb

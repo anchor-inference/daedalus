@@ -67,6 +67,36 @@ func deskdBinary(exe string, getenv func(string) string, exists func(string) boo
 	return ""
 }
 
+// agentDesktopBinary is the accessibility tool the daemon runs for the tree: agent-desktop, a program
+// of vercel-labs' that every package carries pinned by desktop/agent-desktop.lock, checked against its
+// digest and its build provenance when the release is built. DAEDALUS_AGENT_DESKTOP when it is set —
+// a path, or one of the daemon's own words (off, fake) — else the one packaged beside the launcher,
+// which is beside deskd too in every package, else "off". The launcher always says which, so the
+// daemon never picks up on its own whatever happens to lie beside a daemon built by hand; without
+// the tool it serves everything but the tree.
+//
+// No digest is passed with it, though the daemon takes one (--ax-sha256). The bytes are checked
+// where a check means something: by SHA256SUMS and the release signature before an install or an
+// upgrade, and on macOS by the bundle's own signature. A digest written beside the binary, in the
+// same folder anyone able to replace the binary can write, would prove nothing, and on macOS the
+// signing rewrites the file after the release's digests are known.
+func agentDesktopBinary(exe string, getenv func(string) string, exists func(string) bool) string {
+	if p := getenv("DAEDALUS_AGENT_DESKTOP"); p != "" {
+		return p
+	}
+	if exe == "" {
+		return "off"
+	}
+	name := "agent-desktop"
+	if runtime.GOOS == "windows" {
+		name = "agent-desktop.exe"
+	}
+	if p := filepath.Join(filepath.Dir(exe), name); exists(p) {
+		return p
+	}
+	return "off"
+}
+
 // deskdListen is where the daemon listens, by ptyd's rule: its socket, or loopback TCP on Windows
 // and where the socket's path would be too long.
 func deskdListen(runDir string) string {
@@ -81,11 +111,11 @@ func deskdListen(runDir string) string {
 func deskdLogPath(p Paths) string    { return filepath.Join(p.RuntimeLogs, "deskd.log") }
 func deskdOutputPath(p Paths) string { return filepath.Join(p.RuntimeLogs, "deskd-output.log") }
 
-// deskdArgv is the daemon's command line.
-func deskdArgv(binary string, p Paths) []string {
+// deskdArgv is the daemon's command line; axBinary is agentDesktopBinary's answer.
+func deskdArgv(binary, axBinary string, p Paths) []string {
 	run := deskdRunDir(p)
 	return []string{binary, "serve", "--run-dir", run, "--state-dir", deskdStateDir(p), "--config", deskdConfigPath(p),
-		"--listen", deskdListen(run), "--log-file", deskdLogPath(p)}
+		"--listen", deskdListen(run), "--log-file", deskdLogPath(p), "--ax-bin", axBinary}
 }
 
 // deskdMatcher names an app the daemon must never send input to nor let a lease scope to. The
@@ -242,7 +272,7 @@ func (n *Native) newDeskd() child {
 	// operator's, which is where DISPLAY and XAUTHORITY come from on Linux.
 	return &Process{
 		Name:    "desktop daemon",
-		Argv:    deskdArgv(binary, n.paths),
+		Argv:    deskdArgv(binary, agentDesktopBinary(exe, os.Getenv, exists), n.paths),
 		Dir:     n.paths.Local,
 		Env:     environWithout("VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT", "UV_PYTHON_INSTALL_DIR", "UV_CACHE_DIR", "UV_PYTHON", "PYTHONPATH"),
 		LogPath: deskdOutputPath(n.paths),
