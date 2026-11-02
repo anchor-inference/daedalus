@@ -291,10 +291,17 @@ async def test_a_launcher_that_lost_its_desktop_midway_is_503_not_a_crash(launch
     (1206, {"limit": "lease_actions"}, "cu.refusal.rate.actions"),
     (1206, {"retry_after_ms": 400}, "cu.refusal.rate"),
     (1101, None, "cu.refusal.human"),
+    (1200, {"reason": "locked"}, "cu.refusal.no_lease.locked"),
 ])
 def test_the_operators_words_pick_the_key_by_code_and_reason(code: int, data: Any, key: str) -> None:
     assert refusals.words(code, data) == {"key": key, "vars": {}}
     assert key in refusals.every_key()
+
+
+def test_a_refused_key_is_named_to_the_operator_by_what_it_would_have_done() -> None:
+    assert refusals.words(1212, {"keys": "alt+f4", "reason": "ends"}) == {"key": "cu.refusal.blocked.ends", "vars": {"keys": "alt+f4"}}
+    assert refusals.words(1212, {"keys": "alt+tab", "reason": "leaves"}) == {"key": "cu.refusal.blocked.leaves", "vars": {"keys": "alt+tab"}}
+    assert {"cu.refusal.blocked.ends", "cu.refusal.blocked.leaves"} <= refusals.every_key()
 
 
 def test_an_unknown_code_keeps_its_number_for_the_operator() -> None:

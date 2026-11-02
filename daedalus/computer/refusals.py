@@ -29,6 +29,11 @@ NO_PERMISSION = 1205
 RATE = 1206
 UNREACHABLE = 1207
 OPERATOR_ONLY = 1208
+BLOCKED_KEY = 1212
+
+NOT_DELIVERED = "not_delivered"
+"""An action's ``delivery`` when none of its input was sent: the only refusal the host may repeat by
+itself (``delivered`` and ``unknown`` are the other two; a daemon too old to say counts as unknown)."""
 
 _NO_LEASE_REASONS = {
     "none": "The operator has not given this conversation control of the computer.",
@@ -37,6 +42,7 @@ _NO_LEASE_REASONS = {
     "revoked": "Control of the computer was taken back.",
     "other_session": "Another conversation holds control of the computer right now.",
     "superseded": "The operator gave control of the computer to another conversation.",
+    "locked": "The screen was locked (or a secure system prompt came up), so control of the computer has ended.",
 }
 
 _STALE_REASONS = {
@@ -64,8 +70,17 @@ _PERMISSIONS = {
 def explain(code: int, message: str = "", data: Any = None) -> str:
     """One or two sentences for a refusal, ending with what to do next.
 
-    An unknown code keeps the daemon's own message, so a newer daemon's refusal is still readable."""
+    An unknown code keeps the daemon's own message, so a newer daemon's refusal is still readable. An
+    action cut short after some of its input went out (``delivery: unknown``) says so, because the
+    model's habit is to repeat a failed step, and half a typed text typed twice is not the same text."""
     detail = data if isinstance(data, dict) else {}
+    said = _explain(code, message, detail)
+    if detail.get("delivery") == "unknown":
+        said += " Part of the action may already have happened before it stopped: look at a new screenshot before repeating any of it."
+    return said
+
+
+def _explain(code: int, message: str, detail: dict[str, Any]) -> str:
     if code == HUMAN_DRIVING:
         return (
             "The operator is using the mouse or keyboard, so the agent is paused. Do not retry at once: "
@@ -90,6 +105,11 @@ def explain(code: int, message: str = "", data: Any = None) -> str:
         )
     if code == SECURE_DESKTOP:
         why = _SECURE_REASONS.get(str(detail.get("reason") or ""), "the screen is locked or a secure prompt is showing")
+        if detail.get("lease_ended"):
+            return (
+                f"The desktop cannot be used because {why}, so control of the computer has ended. Only the operator can "
+                "grant it again once the screen is back; do not try to get around it."
+            )
         return f"The desktop cannot be used because {why}. Wait for the operator; do not try to get around it."
     if code == NO_PERMISSION:
         which = _PERMISSIONS.get(str(detail.get("which") or ""), "a system permission")
@@ -110,6 +130,19 @@ def explain(code: int, message: str = "", data: Any = None) -> str:
         )
     if code == OPERATOR_ONLY:
         return "Only the operator can do that, from the app."
+    if code == BLOCKED_KEY:
+        keys = str(detail.get("keys") or "That key")
+        why = str(detail.get("why") or "").strip()
+        effect = f" ({why})" if why else ""
+        if str(detail.get("reason") or "") == "leaves":
+            return (
+                f"{keys} is not pressed under this grant{effect}: it would take the keyboard outside what the operator allowed. "
+                "Stay in the granted window, or ask the operator for control of the whole desktop."
+            )
+        return (
+            f"{keys} is never pressed for the agent{effect}: it closes, locks or leaves the session. "
+            "Do this step another way (a menu, a button), or ask the operator to do it."
+        )
     said = str(message or "").strip()
     if code == NOT_FOUND:
         return "That window or app is not on the screen any more" + (f" ({said})" if said else "") + ". List them again with ComputerApps."
@@ -155,6 +188,9 @@ def words(code: int, data: Any = None) -> dict[str, Any]:
         return {"key": f"cu.refusal.permission.{which if which in _PERMISSION_KEYS else 'other'}", "vars": {}}
     if code == RATE:
         return {"key": "cu.refusal.rate.actions" if str(detail.get("limit") or "") == "lease_actions" else "cu.refusal.rate", "vars": {}}
+    if code == BLOCKED_KEY:
+        kind = "leaves" if str(detail.get("reason") or "") == "leaves" else "ends"
+        return {"key": f"cu.refusal.blocked.{kind}", "vars": {"keys": str(detail.get("keys") or "")}}
     if code in _NAMES:
         return {"key": f"cu.refusal.{_NAMES[code]}", "vars": {}}
     return {"key": "cu.refusal.unknown", "vars": {"code": code}}
@@ -166,13 +202,15 @@ def every_key() -> set[str]:
     keys |= {f"cu.refusal.no_lease.{reason}" for reason in _NO_LEASE_KEYS}
     keys |= {f"cu.refusal.secure.{reason}" for reason in (*_SECURE_KEYS, "other")}
     keys |= {f"cu.refusal.permission.{which}" for which in (*_PERMISSION_KEYS, "other")}
-    keys |= {"cu.refusal.rate", "cu.refusal.rate.actions", "cu.refusal.unknown"}
+    keys |= {"cu.refusal.rate", "cu.refusal.rate.actions", "cu.refusal.unknown", "cu.refusal.blocked.ends", "cu.refusal.blocked.leaves"}
     return keys
 
 
 __all__ = [
+    "BLOCKED_KEY",
     "HUMAN_DRIVING",
     "LIMIT",
+    "NOT_DELIVERED",
     "NOT_FOUND",
     "NO_LEASE",
     "NO_PERMISSION",
