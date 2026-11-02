@@ -36,10 +36,10 @@ BASE = shots.BASE
 SHOTS = os.environ.get("SHOTS", "")
 WORDS = {
     "en": {"tabs": ["All", "Chats", "Computer", "Browser", "Remote"], "live": "Connected to your terminal now", "connected": "Connected",
-           "reconnecting": "Reconnecting…", "paused": "Turn paused · computer offline", "banner": "The turn is paused until studio-mac reconnects", "cancel": "Cancel turn",
+           "reconnecting": "Reconnecting…", "paused": "Turn paused · computer offline", "banner": "The turn is paused until studio-mac reconnects", "cancel": "Cancel turn", "composer": "Write a message; it goes to the agent when the turn goes on…",
            "guard": "asks before acting", "offline": "Offline"},
     "ru": {"tabs": ["Все", "Обычные", "Компьютер", "Браузер", "Удалённо"], "live": "Сейчас подключён к вашему терминалу", "connected": "Подключено",
-           "reconnecting": "Переподключается…", "paused": "Ход приостановлен · компьютер не в сети", "banner": "Ход приостановлен, пока studio-mac не переподключится", "cancel": "Отменить ход",
+           "reconnecting": "Переподключается…", "paused": "Ход приостановлен · компьютер не в сети", "banner": "Ход приостановлен, пока studio-mac не переподключится", "cancel": "Отменить ход", "composer": "Напишите сообщение; агент получит его, когда ход продолжится…",
            "guard": "спрашивает перед действием", "offline": "Не в сети"},
 }
 
@@ -74,12 +74,13 @@ def connection_frame(connected: bool) -> str:
 
 def set_state(state: str) -> None:
     """The computer's link as the host would report it next. Reconnecting is the app's own reading of
-    a link this window saw drop a moment ago; a paused turn is a running one, parked on the device."""
+    a link this window saw drop a moment ago; a paused turn's run ended parked on the device, and the
+    session reads ``waiting``, as the host says it, with no question pending."""
     REMOTE["connected"] = state == "connected"
     REMOTE["waiting"] = {"since": shots.ago(minutes=1), "calls": [{"tool_call_id": "call-7", "tool": "Exec"}]} if state == "paused" else None
     ROW["remote"] = {**REMOTE, "waiting": state == "paused"}
     ROW["controlling"] = ["remote"] if state == "connected" else []
-    ROW["status"] = "running" if state == "paused" else "idle"
+    ROW["status"] = "waiting" if state == "paused" else "idle"
     shots.stub.events = connection_frame(False) if state == "reconnecting" else ""  # type: ignore[attr-defined]
 
 
@@ -90,7 +91,7 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
     if rel == f"/api/sessions/{SR}" and request.method == "GET":
         detail = shots.detail(SR)
         detail.update({"kind": "remote", "controlling": ROW["controlling"], "remote": REMOTE,
-                       "status": "running" if REMOTE["waiting"] else "idle", "run_id": "r-remote" if REMOTE["waiting"] else None})
+                       "status": "waiting" if REMOTE["waiting"] else "idle", "run_id": None})
         return route.fulfill(status=200, content_type="application/json", body=json.dumps(detail))
     if rel == f"/api/sessions/{SR}/stop" and request.method == "POST":
         STOPS.append(SR)
@@ -179,6 +180,8 @@ def main() -> int:
                     check(words["banner"] in banner.inner_text(), f"{lang}: the banner says which computer the turn waits for ({banner.inner_text()!r})")
                     check(page.locator(".chat-head .livebar, .chat-head .live-bar").count() == 0, f"{lang}: a paused turn draws no working bar")
                     check(page.locator(".composer textarea").first.is_enabled(), f"{lang}: the composer stays open while the turn is paused")
+                    placeholder = page.locator(".composer textarea").first.get_attribute("placeholder") or ""
+                    check(placeholder == words["composer"], f"{lang}: the composer says a message waits for the turn, not to reply ({placeholder!r})")
                 shot(page, f"desktop-header-paused-{scheme}-{lang}")
                 if scheme == "dark":
                     del STOPS[:]

@@ -9111,6 +9111,7 @@ Object.assign(DICT, {
   "remote.paused.title": { en: "The turn is paused until {device} reconnects", ru: "Ход приостановлен, пока {device} не переподключится" },
   "remote.paused.since": { en: "Paused {t}.", ru: "Приостановлен {t}." },
   "remote.paused.sub": { en: "It goes on by itself when daedalus-cli reconnects. You can still read, answer and approve here.", ru: "Он продолжится сам, когда daedalus-cli переподключится. Читать, отвечать и одобрять можно и здесь." },
+  "remote.composer.paused": { en: "Write a message; it goes to the agent when the turn goes on…", ru: "Напишите сообщение; агент получит его, когда ход продолжится…" },
   "remote.paused.cancel": { en: "Cancel turn", ru: "Отменить ход" },
   "remote.cancel.title": { en: "Cancel the paused turn?", ru: "Отменить приостановленный ход?" },
   "remote.cancel.body": { en: "The step waiting for {device} is dropped and the turn ends. The conversation stays, and you can write again at once.", ru: "Шаг, который ждёт {device}, будет отброшен, и ход закончится. Разговор останется, писать можно сразу." },

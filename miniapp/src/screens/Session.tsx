@@ -1858,7 +1858,10 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             above={orchestrating ? <>{showGoalLine && <GoalStrip projectId={focus!.projectId} />}<ReplyChip sessionId={id} /></> : undefined}
             beside={browsers.user?.env === "user" ? <ApprovalChip key={id} sessionId={id} toast={toast} /> : undefined}
             sessionId={id}
-            status={status}
+            // A turn parked for its computer reads "waiting", the word a question uses, but nothing is
+            // asked: the composer would say "Reply to the agent…". A message written now is queued for
+            // the turn, so the field says that instead.
+            status={remotePaused && status === "waiting" ? "idle" : status}
             onSend={send}
             onStop={stop}
             commands={commands}
@@ -1881,7 +1884,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             place={{ project: detail?.project?.name, workspace: detail?.workspace_name || detail?.workspace, system: !!(detail?.project?.system || detail?.project?.settings.system) }}
             targetProject={detail?.project?.id}
             targetWorkspace={detail?.workspace}
-            idlePlaceholder={focusPlaceholder}
+            idlePlaceholder={remotePaused ? t("remote.composer.paused") : focusPlaceholder}
             context={detail?.context ?? null}
             onContext={hasDetails ? () => { setDetailsFocus("context"); panel.open("details"); } : undefined}
             asr={asr}

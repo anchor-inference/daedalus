@@ -477,8 +477,10 @@ A turn of a `remote` session whose device is not connected **pauses**; it does n
 1. A tool call that needs the device while its relay is down is held on the server, not sent and not
    failed. The turn waits on it. The session announces `remote.waiting {"waiting": true, "device_id",
    "since", "calls": [{"tool_call_id", "tool"}]}`, and its `remote.waiting` field in the session view
-   says the same. The app shows "Waiting for <device> to reconnect"; the session's status stays
-   `running`.
+   says the same. The app shows "The turn is paused until <device> reconnects". The run itself
+   has ended, parked (the core's `external_call` interrupt), so the session's status is `waiting`, the
+   word an unanswered question uses; `remote.waiting` says why, and no question is pending. A message
+   sent meanwhile is queued for the turn.
 2. A call that was already sent when the link dropped is handled by what the device reports on its
    next `device.hello`:
    - `known` says `done`: the server asks for the result again (`device.result {"id"}` → the stored
