@@ -57,7 +57,7 @@ func (m *Model) View() tea.View {
 	if m.inline() {
 		lines = m.liveLines(max(m.height-len(bottom)-1, 1))
 	} else {
-		lines = m.transcriptWindow(max(m.height-len(bottom), 1))
+		lines = m.highlight(m.transcriptWindow(max(m.height-len(bottom), 1)))
 	}
 	top := len(lines)
 	content := strings.Join(append(lines, bottom...), "\n")
@@ -471,7 +471,7 @@ func (m *Model) helpRows() []string {
 		{"@ for file paths", "ctrl+o for transcript"},
 		{"\\⏎ or shift+⏎ for newline", "ctrl+r to search history"},
 		{"ctrl+g to edit in $EDITOR", "ctrl+t to toggle todos"},
-		{"ctrl+v to paste an image", "pgup/pgdn to scroll · shift+drag to select"},
+		{"ctrl+v to paste an image", "pgup/pgdn to scroll · drag to copy"},
 	}
 	half := max(m.width/2-2, 20)
 	var out []string

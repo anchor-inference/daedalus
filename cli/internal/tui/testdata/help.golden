@@ -27,4 +27,4 @@
  @ for file paths                                ctrl+o for transcript
  \⏎ or shift+⏎ for newline                       ctrl+r to search history
  ctrl+g to edit in $EDITOR                       ctrl+t to toggle todos
- ctrl+v to paste an image                        pgup/pgdn to scroll · shift+drag to select
+ ctrl+v to paste an image                        pgup/pgdn to scroll · drag to copy

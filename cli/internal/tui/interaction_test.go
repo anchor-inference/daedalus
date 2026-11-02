@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+
+	tea "charm.land/bubbletea/v2"
 	"strings"
 	"testing"
 	"time"
@@ -403,4 +405,32 @@ func TestPromptFromTheAppIsLabelled(t *testing.T) {
 	h.apply(UserMessage{ID: "a1", Text: "typed on the phone", Origin: "app"})
 	h.contains("typed on the phone")
 	h.contains("from app")
+}
+
+func TestDragSelectsAndCopiesTranscriptText(t *testing.T) {
+	h := newHarness(t, 100, 30)
+	h.apply(Notice{Text: "copy this line please"})
+	lines := strings.Split(h.plain(), "\n")
+	row := -1
+	for i, line := range lines {
+		if strings.Contains(line, "copy this line please") {
+			row = i
+		}
+	}
+	if row < 0 {
+		t.Fatal("the notice is not on screen")
+	}
+	col := strings.Index(lines[row], "copy")
+	col = len([]rune(lines[row][:col]))
+	h.send(tea.MouseClickMsg{X: col, Y: row, Button: tea.MouseLeft})
+	h.send(tea.MouseMotionMsg{X: col + 13, Y: row, Button: tea.MouseLeft})
+	if !strings.Contains(h.frame(), "copy this line") {
+		t.Fatal("the selection hid the text")
+	}
+	text := selectedText(h.m.transcriptWindow(h.m.transcriptHeight()), h.m.sel, 100)
+	if text != "copy this line" {
+		t.Fatalf("selected %q", text)
+	}
+	h.send(tea.MouseReleaseMsg{X: col + 13, Y: row, Button: tea.MouseLeft})
+	h.contains("Copied 14 characters")
 }

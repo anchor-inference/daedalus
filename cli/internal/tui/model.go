@@ -133,6 +133,7 @@ type Model struct {
 
 	dialog dialog
 	pager  *pager
+	sel    *selection
 	search *reverseSearch
 	comp   *completion
 	help   bool
@@ -452,6 +453,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.scrollBy(-3)
 		}
 		return m, nil
+	case tea.MouseClickMsg:
+		return m, m.mouseClick(msg)
+	case tea.MouseMotionMsg:
+		return m, m.mouseMotion(msg)
+	case tea.MouseReleaseMsg:
+		return m, m.mouseRelease(msg)
 	case tea.KeyPressMsg:
 		return m, m.key(msg)
 	}
