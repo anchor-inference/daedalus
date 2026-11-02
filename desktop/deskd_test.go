@@ -44,6 +44,41 @@ func TestTheDesktopDaemonIsFoundWhereTheReleasePutsIt(t *testing.T) {
 	}
 }
 
+// DAEDALUS_AGENT_DESKTOP wins, a path or the daemon's own "off"; then agent-desktop beside the
+// launcher, which the packages put beside deskd as well; then "off", said out loud, so the daemon
+// does not go looking beside itself.
+func TestTheAccessibilityToolIsFoundWhereTheReleasePutsIt(t *testing.T) {
+	name := "agent-desktop"
+	if runtime.GOOS == "windows" {
+		name = "agent-desktop.exe"
+	}
+	exe := filepath.Join("apps", "Daedalus.app", "Contents", "MacOS", "daedalus-desktop")
+	beside := filepath.Join(filepath.Dir(exe), name)
+	env := func(value string) func(string) string {
+		return func(key string) string {
+			if key == "DAEDALUS_AGENT_DESKTOP" {
+				return value
+			}
+			return ""
+		}
+	}
+	has := func(p string) bool { return p == beside }
+	for _, value := range []string{"/built/agent-desktop", "off"} {
+		if got := agentDesktopBinary(exe, env(value), has); got != value {
+			t.Fatalf("the environment's %q: %q", value, got)
+		}
+	}
+	if got := agentDesktopBinary(exe, env(""), has); got != beside {
+		t.Fatalf("the packaged tool: %q", got)
+	}
+	if got := agentDesktopBinary(exe, env(""), func(string) bool { return false }); got != "off" {
+		t.Fatalf("no tool: %q", got)
+	}
+	if got := agentDesktopBinary("", env(""), has); got != "off" {
+		t.Fatalf("no executable: %q", got)
+	}
+}
+
 // The run directory, the state with the operator's token, and the configuration are all in the
 // sealed local state folder and none in the data folder an upgrade copies; the command line names
 // each of them, and the operator's token is not where the host is pointed.
@@ -62,8 +97,8 @@ func TestTheDesktopDaemonRunsFromTheSealedLocalState(t *testing.T) {
 	}
 	run := deskdRunDir(paths)
 	want := []string{"/opt/deskd", "serve", "--run-dir", run, "--state-dir", deskdStateDir(paths), "--config", deskdConfigPath(paths),
-		"--listen", deskdListen(run), "--log-file", filepath.Join(paths.RuntimeLogs, "deskd.log")}
-	if got := deskdArgv("/opt/deskd", paths); !slices.Equal(got, want) {
+		"--listen", deskdListen(run), "--log-file", filepath.Join(paths.RuntimeLogs, "deskd.log"), "--ax-bin", "/opt/agent-desktop"}
+	if got := deskdArgv("/opt/deskd", "/opt/agent-desktop", paths); !slices.Equal(got, want) {
 		t.Fatalf("argv %q, want %q", got, want)
 	}
 	if runtime.GOOS == "windows" && deskdListen(run) != "tcp:127.0.0.1:0" {

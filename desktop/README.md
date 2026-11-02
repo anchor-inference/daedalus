@@ -943,7 +943,13 @@ whatever the agent held down.
   carries the release `desktop/agent-desktop.lock` pins, unmodified, beside `deskd` —
   `agent-desktop` with `agent-desktop-linux-clipboard-owner` on Linux, `agent-desktop.exe` on
   Windows, `Contents/MacOS/agent-desktop` with `agent-desktop-macos-helper` in the Mac bundle (both
-  architectures joined into one file, as for the daemons).
+  architectures joined into one file, as for the daemons). The launcher hands its path to the
+  daemon (`--ax-bin`), or `--ax-bin off` when the package has none;
+  `DAEDALUS_AGENT_DESKTOP=/path/to/agent-desktop` names another, and `DAEDALUS_AGENT_DESKTOP=off`
+  leaves the tree out. Without it, or where it cannot run (Linux with a glibc older than 2.35),
+  computer use works as before with screenshots alone. No digest is passed with the path: the bytes
+  are checked by `SHA256SUMS` and the release signature before an install or an upgrade, and on macOS
+  by the bundle's signature, which rewrites the file after the release's digests are known.
   - **How it gets into a release.** The workflow's `agent-desktop` job runs
     `desktop/stage-agent-desktop.sh`, which downloads the five archives and refuses any whose
     sha256 is not the lock's, whose build provenance (`gh attestation verify`, Sigstore) is not that
