@@ -10,7 +10,7 @@ What is deliberately not gated: the Telegram Mini App (its ``tma`` header is Tel
 owner on every request, the same account whose bot chat already gives the agent's whole power with no
 code), the API token (a credential for scripts and the launcher, which whoever holds it could use to
 turn two-factor off anyway), and a pairing link the desktop launcher minted for its own window
-(``daedalus auth pair --window``: minting one takes running a command inside the installation).
+(``daedalus-server auth pair --window``: minting one takes running a command inside the installation).
 """
 
 from __future__ import annotations

@@ -14,6 +14,40 @@ dae resume                                 # pick any conversation to continue h
 dae status | dae sessions | dae doctor | dae logout
 ```
 
+## Installing
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/anchor-inference/daedalus/main/cli/scripts/install.sh | sh
+```
+
+```powershell
+irm https://raw.githubusercontent.com/anchor-inference/daedalus/main/cli/scripts/install.ps1 | iex
+```
+
+The client is released with the desktop application: every `desktop-vX.Y.Z` release on GitHub carries
+it, in six archives that hold the program and `LICENSE` at the top level:
+
+| Archive | Holds |
+|---|---|
+| `daedalus-cli-linux-amd64.tar.gz`, `daedalus-cli-linux-arm64.tar.gz` | `daedalus-cli` |
+| `daedalus-cli-darwin-amd64.tar.gz`, `daedalus-cli-darwin-arm64.tar.gz` | `daedalus-cli` |
+| `daedalus-cli-windows-amd64.zip`, `daedalus-cli-windows-arm64.zip` | `daedalus-cli.exe` |
+
+They are listed in the release's `SHA256SUMS`, which the project's release key signs together with
+the tag (`SHA256SUMS.sig`, [`desktop/SIGNING.md`](../desktop/SIGNING.md)). The install scripts take the
+newest release, refuse it unless that signature verifies (they need OpenSSL 3; Git for Windows ships
+one), check the archive against `SHA256SUMS`, and only then install:
+
+- `install.sh` (Linux, macOS) puts `daedalus-cli` into `~/.local/bin` (`PREFIX` moves it) and `dae` as a
+  link to it. `--tag desktop-vX.Y.Z` takes that release instead, `--from-source` builds the checkout
+  the script is in (needs Go), and a path installs a binary you already have.
+- `install.ps1` (Windows) puts `daedalus-cli.exe` and `dae.exe`, a hard link to it, into
+  `%LOCALAPPDATA%\Programs\daedalus-cli` and adds that folder to your PATH. `-Tag`, `-FromSource` and
+  `-Binary <file>` do the same as above; under `irm | iex`, `$env:DAEDALUS_CLI_TAG` picks the release.
+
+By hand: download the archive and `SHA256SUMS`, check it (`sha256sum -c --ignore-missing SHA256SUMS`),
+verify the signature as `desktop/SIGNING.md` shows, and unpack the program anywhere on your PATH.
+
 ## Local guards
 
 Shift+Tab cycles the guard the executor enforces on this machine. It is the operator's rule, applied
@@ -73,6 +107,15 @@ If the connection drops mid-turn, the turn pauses on the server and the client r
 run twice: the client keeps each call's result for fifteen minutes and tells the server, on
 reconnecting, which calls it holds and whether they finished.
 
+If the client itself dies — `kill -9`, the out-of-memory killer — the commands it started die with it
+and nothing keeps running unseen. Each command runs in a process group of its own; on Linux the kernel
+kills its leader the moment the client goes, and on Linux and macOS a small watchdog (the same program,
+started once per client, in a process group of its own) sees the client's end of a pipe close and
+hangs up each group still running, killing it two seconds later. On Windows each command's job object
+ends its tree when the client's handle to it closes. A command may still have finished, or done part
+of its work, before that, so the server reports such a call's outcome as unknown and the agent checks
+before trying again.
+
 ## Files and variables
 
 | | |
@@ -87,8 +130,9 @@ reconnecting, which calls it holds and whether they finished.
 
 ```sh
 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=0.1.0" -o daedalus-cli ./cmd/daedalus-cli
-scripts/install.sh                     # build and install daedalus-cli and dae into ~/.local/bin
-scripts/install.ps1 .\daedalus-cli.exe # Windows: install, with dae.exe as a hard link
+scripts/install.sh --from-source            # build and install daedalus-cli and dae into ~/.local/bin
+scripts/install.ps1 -Binary .\daedalus-cli.exe  # Windows: install, with dae.exe as a hard link
+scripts/package.sh 0.23.0 dist              # the six release archives and their SHA256SUMS
 ```
 
 The build is static and needs no cgo, for Linux, macOS and Windows on amd64 and arm64. The shell and file

@@ -118,7 +118,7 @@ Verify receipt that covers the bytes now in the branch, execution_path must name
 the change, and a large change must say what it replaces. Your commit messages are your own here — \
 nothing is published — and the summary is the one sentence the operator reads on the banner.
 - The restart checks your commit on a copy before anything moves: a change that cannot import, fails \
-`daedalus check` or breaks the smoke tests is never started, and one that starts and keeps dying is \
+`daedalus-server check` or breaks the smoke tests is never started, and one that starts and keeps dying is \
 put back automatically. Neither is a reason to skip your own checks; it is the operator who waits.
 - Never edit GOVERNANCE.md, the supervisor under /opt/launcher, or anything under the secrets \
 directory; those paths are protected.

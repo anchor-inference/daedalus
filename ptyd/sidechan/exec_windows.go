@@ -20,7 +20,11 @@ type procGroup struct {
 	job *ptyproc.Job
 }
 
-func newGroup(cmd *exec.Cmd) *procGroup { return &procGroup{cmd: cmd} }
+// newGroup ignores tied: the job is what ties the tree to the runner here, tied or not (Tie).
+func newGroup(cmd *exec.Cmd, _ bool) *procGroup { return &procGroup{cmd: cmd} }
+
+// parentDeathPerThread is false: there is no parent-death signal to keep a thread alive for.
+const parentDeathPerThread = false
 
 func (g *procGroup) started() {
 	job, err := ptyproc.NewJob()

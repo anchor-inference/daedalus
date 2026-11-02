@@ -1,11 +1,13 @@
-"""Command-line entry point.
+"""Command-line entry point: the ``daedalus-server`` console script, and ``python -m daedalus``,
+which is the same program and the form every deployment (the image, the supervisor, the desktop
+launcher) runs, so it works without the script on PATH.
 
-``daedalus serve``  — run the bot (Telegram + API + scheduler).
-``daedalus check``  — open the state, register tools and providers, exit.
-``daedalus doctor`` — check the deployment (config, state, git, providers); ``--fix`` applies safe repairs.
-``daedalus db checkpoints-prune`` — apply the workspace-snapshot retention bounds now.
-``daedalus auth pair`` — mint a one-time link that signs a browser in, for an installation without Telegram.
-``daedalus self restart`` — ask the supervisor to preflight the checkout and restart onto it if it passes.
+``daedalus-server serve``  — run the bot (Telegram + API + scheduler).
+``daedalus-server check``  — open the state, register tools and providers, exit.
+``daedalus-server doctor`` — check the deployment (config, state, git, providers); ``--fix`` applies safe repairs.
+``daedalus-server db checkpoints-prune`` — apply the workspace-snapshot retention bounds now.
+``daedalus-server auth pair`` — mint a one-time link that signs a browser in, for an installation without Telegram.
+``daedalus-server self restart`` — ask the supervisor to preflight the checkout and restart onto it if it passes.
 """
 
 from __future__ import annotations
@@ -245,7 +247,7 @@ async def cmd_components(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="daedalus")
+    parser = argparse.ArgumentParser(prog="daedalus-server")
     parser.add_argument("--state-dir", default=None)
     parser.add_argument("--workspaces-dir", default=None)
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -314,7 +316,7 @@ def _utf8_streams() -> None:
     """Make standard output and error UTF-8, replacing what cannot be written rather than raising.
 
     Outside UTF-8 mode a Windows pipe or log file takes the locale's code page — cp1252 on an English
-    machine — and the arrow in the no-model sentence ended `daedalus check` with a UnicodeEncodeError
+    machine — and the arrow in the no-model sentence ended `daedalus-server check` with a UnicodeEncodeError
     after it had already started its background work. The launcher runs every Python child in UTF-8
     mode; this is for the ones started some other way.
     """

@@ -14,11 +14,15 @@ import (
 type procGroup struct{ cmd *exec.Cmd }
 
 // newGroup starts the program as the leader of a new process group, so the whole group can be
-// ended together, and never with a controlling terminal of the daemon's.
-func newGroup(cmd *exec.Cmd) *procGroup {
+// ended together, and never with a controlling terminal of the daemon's. A tied program is also
+// killed by the kernel when its parent dies, where the system can do that (parentDeath).
+func newGroup(cmd *exec.Cmd, tied bool) *procGroup {
 	// The hangup that ends the group on a timeout must not be ignored by the program.
 	ptyproc.DefaultSignalsForChildren()
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if tied {
+		parentDeath(cmd.SysProcAttr)
+	}
 	return &procGroup{cmd: cmd}
 }
 

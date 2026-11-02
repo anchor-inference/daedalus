@@ -24,12 +24,18 @@ import (
 	"github.com/ascorblack/daedalus/cli/internal/device"
 	"github.com/ascorblack/daedalus/cli/internal/exec"
 	"github.com/ascorblack/daedalus/cli/internal/guard"
+	"github.com/ascorblack/daedalus/cli/internal/tether"
 )
 
 // version is set at build time with -ldflags "-X main.version=<v>".
 var version = "0.1.0-dev"
 
 func main() {
+	// The watchdog is this same program started again by tether.Start: it does nothing else, and
+	// must be told apart before anything reads the arguments or the configuration.
+	if tether.Child() {
+		os.Exit(tether.Watch(os.Stdin))
+	}
 	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
 
@@ -197,6 +203,14 @@ func (e *env) backend(ctx context.Context, interactive bool) (*app.Backend, *gua
 	executor, err := exec.New(e.log)
 	if err != nil {
 		return nil, nil, err
+	}
+	// Before any command can run: a client killed outright takes its commands with it. Without the
+	// watchdog (it could not start) Linux still kills each command's leader; say so in the log only,
+	// since the client works either way.
+	if t, err := tether.Start(); err != nil {
+		e.log.Warn("commands will not end with this client", "err", err)
+	} else if t != nil {
+		executor.Tie(t)
 	}
 	e.executor = executor
 	g := guard.New(e.guard, nil)

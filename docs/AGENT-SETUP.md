@@ -265,7 +265,7 @@ Two shapes; both keep every feature:
 | `off` | — | nothing: no tools, no `/api/proposals`, no Changes screen, no self-development text in the prompt |
 
 Set the mode explicitly to overrule the resolution — `mode = "off"` on an installation the operator
-does not want changing itself. `daedalus doctor` (and `GET /api/capabilities`) names the mode, the
+does not want changing itself. `daedalus-server doctor` (and `GET /api/capabilities`) names the mode, the
 reasons behind it, and anything a mode you chose yourself is missing. A change takes effect on the
 next restart.
 

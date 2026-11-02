@@ -6936,10 +6936,10 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     base = app.settings.miniapp_public_url or f"http://127.0.0.1:{app.settings.api_port}"
     # An installation with no other way in gets one at start: a link in a file only the operator can
     # read (never in the log, which is copied around and which the agent's own tools can read).
-    # A bot is a way in already; a fresh link is one `daedalus auth pair` away.
+    # A bot is a way in already; a fresh link is one `daedalus-server auth pair` away.
     if not app.settings.telegram_bot_token:
         await pairing.announce(app.db, app.settings.state_dir, base)
-        logger.warning("pairing link written to %s (opens once; `daedalus auth pair` makes another)", app.settings.state_dir / pairing.URL_FILE)
+        logger.warning("pairing link written to %s (opens once; `daedalus-server auth pair` makes another)", app.settings.state_dir / pairing.URL_FILE)
     else:
         # A link a previous start left behind is at best expired and at worst a way in nobody asked for.
         (app.settings.state_dir / pairing.URL_FILE).unlink(missing_ok=True)

@@ -251,7 +251,7 @@ async def test_the_capabilities_carry_the_restart_banner_and_the_restart_route(t
 
 
 def test_the_launcher_applies_a_change_through_the_supervisors_preflight(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    """``daedalus self restart`` is what the desktop launcher's Apply runs inside the container.
+    """``daedalus-server self restart`` is what the desktop launcher's Apply runs inside the container.
 
     The button used to stop the containers and start them again, which comes back on whatever the
     checkout holds with nothing having checked it; this is the op the preflight is on.

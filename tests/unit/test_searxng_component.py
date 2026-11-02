@@ -463,7 +463,7 @@ async def test_the_installer_installs_searxng_itself_and_tells_the_application(t
 
 
 def test_the_launcher_can_install_searxng_from_a_terminal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    """``daedalus components install searxng`` is how the setup wizard's choice is carried out natively."""
+    """``daedalus-server components install searxng`` is how the setup wizard's choice is carried out natively."""
     from daedalus.__main__ import main
 
     monkeypatch.setenv("STATE_DIR", str(tmp_path / "state"))
