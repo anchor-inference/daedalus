@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, api, type CliDevice, type PairRequest, type RemoteBinding } from "./api";
 import { setLang } from "./i18n";
 import { PairSheet, RECONNECT_GRACE_MS, RemoteHead, RemotePaused, findRequest, normCode, noteConnection, osLabel, remoteOf, remoteRowWords, remoteState, shortFolder, showCode, timeLeft } from "./remote";
-import { DevicesPanel, loginCommand, tokenAge } from "./screens/DevicesSettings";
+import { DevicesPanel, INSTALL_COMMAND, INSTALL_COMMAND_WINDOWS, installCommand, loginCommand, tokenAge } from "./screens/DevicesSettings";
 import { prime } from "./store";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -87,6 +87,13 @@ describe("a pairing code", () => {
     expect(tokenAge("2026-11-02T08:00:00Z", NOW)).toBe("issued today");
     expect(tokenAge("2026-10-30T08:00:00Z", NOW)).toBe("3 days old");
     expect(loginCommand("http://127.0.0.1:8765")).toBe("daedalus-cli login http://127.0.0.1:8765");
+    // The released binary, not a checkout and Go: PowerShell on Windows, the shell script elsewhere.
+    expect(installCommand("Win32")).toBe(INSTALL_COMMAND_WINDOWS);
+    expect(installCommand("Windows")).toBe(INSTALL_COMMAND_WINDOWS);
+    expect(installCommand("Linux x86_64")).toBe(INSTALL_COMMAND);
+    expect(installCommand("MacIntel")).toBe(INSTALL_COMMAND);
+    expect(installCommand("darwin")).toBe(INSTALL_COMMAND);
+    expect(INSTALL_COMMAND).toContain("cli/scripts/install.sh | sh");
   });
 });
 

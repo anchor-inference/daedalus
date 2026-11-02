@@ -20,6 +20,17 @@
 # seed each one carries (desktop/seed.go): the code at the release's commit, the pinned runtime and
 # uv's packages for its lock, so that a first run downloads none of it.
 #
+# The release carries the terminal client too, built and tested by cli.yml (called here, on a tag
+# only) with the tag's version — six archives, flat, holding the program and LICENSE:
+#
+#   daedalus-cli-linux-amd64.tar.gz    daedalus-cli-linux-arm64.tar.gz
+#   daedalus-cli-darwin-amd64.tar.gz   daedalus-cli-darwin-arm64.tar.gz
+#   daedalus-cli-windows-amd64.zip     daedalus-cli-windows-arm64.zip
+#
+# They go into the same SHA256SUMS and so under the same signature, which is what
+# cli/scripts/install.sh and install.ps1 check before they install one. A launcher looks for its own
+# archive's line in SHA256SUMS and ignores the rest, so the extra lines change nothing for it.
+#
 # The launcher is plain Go and cross-compiled for every system from one Linux runner. ptyd is Go with
 # a C library (the screen emulator, built with the pinned Zig): Linux and Windows cross-compiled on
 # the Linux runner, the Mac on the Mac runner. browserd is plain Go. deskd, the desktop daemon, is
@@ -708,9 +719,17 @@ jobs:
           path: out
           retention-days: 3
 
+  # The terminal client, on a tag only: its own workflow tests it on the three systems and packs the
+  # six archives, versioned by the tag, as the artifact daedalus-cli.
+  cli:
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    uses: ./.github/workflows/cli.yml
+    with:
+      tag: ${{ github.ref_name }}
+
   # On a tag: every installer and archive, their checksums, the notes, into a draft release.
   release:
-    needs: [app-windows, app-linux, app-macos, platforms]
+    needs: [app-windows, app-linux, app-macos, platforms, cli]
     if: startsWith(github.ref, 'refs/tags/desktop-v')
     runs-on: ubuntu-latest
     steps:
@@ -720,6 +739,20 @@ jobs:
           pattern: app-*
           merge-multiple: true
           path: dist/files
+      - uses: actions/download-artifact@v4
+        with:
+          name: daedalus-cli
+          path: dist/cli
+
+      - name: The terminal client's archives
+        run: |
+          # Checked against the SHA256SUMS they were packed with, then only the six archives join the
+          # release: the release's own SHA256SUMS, written next, covers them, and a second checksum
+          # file among the assets would be one more name for the installers to confuse.
+          (cd dist/cli && sha256sum -c SHA256SUMS)
+          cp dist/cli/daedalus-cli-*.tar.gz dist/cli/daedalus-cli-*.zip dist/files/
+          ls dist/files/daedalus-cli-*
+          test "$(find dist/files -name 'daedalus-cli-*' | wc -l)" -eq 6
 
       - name: Checksums
         run: |
@@ -764,6 +797,24 @@ jobs:
           place, started and checked, and if it does not come up the data and the previous version are put
           back. The .deb and the AppImage are updated by installing the new release's file the same way.
 
+          ### The terminal client
+
+          \`daedalus-cli\` (also installed as \`dae\`) talks to your Daedalus server from a terminal and runs the
+          conversation's tools on that computer, in the folder you start it in. The \`daedalus-cli-<os>-<arch>\`
+          archives hold it for Linux and macOS (\`.tar.gz\`) and Windows (\`.zip\`), on x86-64 (\`amd64\`) and
+          ARM64 (\`arm64\`). The install scripts pick the right one, check it against the signed \`SHA256SUMS\`
+          and put \`daedalus-cli\` and \`dae\` on your PATH:
+
+          \`\`\`sh
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/cli/scripts/install.sh | sh
+          \`\`\`
+
+          \`\`\`powershell
+          irm https://raw.githubusercontent.com/${{ github.repository }}/main/cli/scripts/install.ps1 | iex
+          \`\`\`
+
+          Then \`daedalus-cli login https://<your server>\` pairs it; Settings → Devices in the app shows the same.
+
           ### The archives
 
           \`daedalus-desktop-windows-amd64.zip\`, \`Daedalus-macOS.zip\` and \`daedalus-desktop-linux-*.tar.gz\`
@@ -778,7 +829,7 @@ jobs:
           irm https://raw.githubusercontent.com/${{ github.repository }}/main/desktop/install.ps1 | iex
           \`\`\`
 
-          \`SHA256SUMS\` covers every file here, installers and archives alike, and \`SHA256SUMS.sig\` signs it
+          \`SHA256SUMS\` covers every file here, installers, archives and the terminal client alike, and \`SHA256SUMS.sig\` signs it
           together with this release's tag, by the project's release key — minisign key id
           \`A18524FA935353DF\`, key line \`RWTfU1OT+iSFoaxGzNfGzkwHdVs2o8WmnCzBUo/LBUw2L4ssGN4xYx/2\`, whose
           SHA-256 (what the installers print as its fingerprint) is

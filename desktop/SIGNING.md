@@ -2,7 +2,9 @@
 
 **Status: in force.** Every launcher release is signed with the project's release key, and the
 launcher (`signing.go`, `trustedReleaseKeys`), `install.sh` (`release_keys`) and `install.ps1`
-(`$ReleaseKeys`) refuse a release that is not — before anything from it is unpacked or run. The key:
+(`$ReleaseKeys`) refuse a release that is not — before anything from it is unpacked or run. So do the
+terminal client's installers, `cli/scripts/install.sh` and `install.ps1`, which carry the same key and
+install the `daedalus-cli-*` archives the same release attaches. The key:
 
 ```
 minisign key id   A18524FA935353DF   (the bytes df535393fa2485a1 in the record)
@@ -61,7 +63,8 @@ preview — is signed before it is published, like every release after it.
 
 1. **Tag.** Pushing `desktop-vX.Y.Z` runs the workflow (`desktop.yml`): it builds the installers
    (`Daedalus-Setup-x64.exe`, `Daedalus-macOS.dmg`, the `.deb` and AppImage files), the archives the
-   launcher's `upgrade` installs from, and `SHA256SUMS` over all of them into a **draft** release,
+   launcher's `upgrade` installs from, the terminal client's six `daedalus-cli-<os>-<arch>` archives
+   (built by `cli.yml`, which `desktop.yml` calls), and `SHA256SUMS` over all of them into a **draft** release,
    and signs nothing. It refuses to touch a release that is already published: new files under a
    signature over the old `SHA256SUMS` would be refused everywhere, and replacing both is a new
    release.
@@ -171,7 +174,9 @@ sign.
 ## Rotation and loss
 
 - `trustedReleaseKeys` is a list: a new key ships in a release signed by the old one, and the old one
-  is dropped a release later.
+  is dropped a release later. The four installers (`desktop/` and `cli/scripts/`, `install.sh` and
+  `install.ps1`) change with it; `tests/unit/test_cli_install_script.py` holds the client's two to the
+  desktop's.
 - There is one key today and no spare. A lost key means shipping a new key the old way cannot vouch
   for: every installation takes that release by hand, through the installer, after checking the new
   fingerprint out of band. A spare kept offline from the start is what would avoid that.

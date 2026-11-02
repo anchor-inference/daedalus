@@ -9144,7 +9144,6 @@ Object.assign(DICT, {
   "settings.sec.devices.hint": { en: "computers paired with daedalus-cli, pairing a new one", ru: "компьютеры с daedalus-cli, подключение нового" },
   "devices.pair.title": { en: "Pair a computer", ru: "Подключить компьютер" },
   "devices.install": { en: "Install daedalus-cli on the computer.", ru: "Установите daedalus-cli на компьютер." },
-  "devices.install.soon": { en: "The install command will be in the daedalus-cli guide.", ru: "Команда установки будет в руководстве daedalus-cli." },
   "devices.login": { en: "In a terminal there, run:", ru: "В терминале на нём выполните:" },
   "devices.approve": { en: "Approve the request that appears here, once the codes match.", ru: "Одобрите запрос, который появится здесь, сверив коды." },
   "devices.code.label": { en: "Enter the code from your terminal", ru: "Введите код из терминала" },

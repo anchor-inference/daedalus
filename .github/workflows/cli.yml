@@ -1,8 +1,10 @@
 # daedalus-cli: tested on the three systems and built for six targets on every change to it or to the
 # parts of ptyd it imports (the side channels and what they need).
 #
-# The binaries are kept as the run's artifacts. Attaching them to a release on a cli-v* tag is not
-# done here yet.
+# The six archives cli/scripts/package.sh makes (daedalus-cli-<os>-<arch>.tar.gz for Linux and macOS,
+# .zip for Windows) are kept as the run's artifact, daedalus-cli. The client has no release of its
+# own: desktop.yml calls this workflow on a desktop-v* tag with the tag as the version, and attaches
+# the same archives to that draft release, inside its SHA256SUMS and so under its signature.
 name: cli
 
 on:
@@ -30,6 +32,12 @@ on:
       - "ptyd/go.sum"
       - ".github/workflows/cli.yml"
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      tag:
+        description: "The desktop-vX.Y.Z tag being released; the client takes its version."
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -73,23 +81,27 @@ jobs:
         with:
           go-version-file: cli/go.mod
           cache-dependency-path: cli/go.sum
-      - name: Build every target
+      - name: Build and pack every target
         working-directory: cli
         env:
-          CGO_ENABLED: "0"
+          TAG: ${{ inputs.tag }}
         run: |
-          version="0.1.0-dev+${GITHUB_SHA::12}"
-          mkdir -p dist
-          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
-            os=${target%/*}
-            arch=${target#*/}
-            ext=""
-            [ "$os" = windows ] && ext=".exe"
-            GOOS=$os GOARCH=$arch go build -trimpath -ldflags "-s -w -X main.version=$version" \
-              -o "dist/daedalus-cli-$os-$arch$ext" ./cmd/daedalus-cli
-          done
-          (cd dist && sha256sum daedalus-cli-* > SHA256SUMS)
-          ./dist/daedalus-cli-linux-amd64 version
+          if [ -n "$TAG" ]; then
+            version="${TAG#desktop-v}"
+          else
+            version="0.1.0-dev+${GITHUB_SHA::12}"
+          fi
+          echo "VERSION=$version" >>"$GITHUB_ENV"
+          scripts/package.sh "$version" dist
+      - name: The Linux build runs and names its version
+        working-directory: cli
+        run: |
+          mkdir -p "$RUNNER_TEMP/unpacked"
+          tar -xzf dist/daedalus-cli-linux-amd64.tar.gz -C "$RUNNER_TEMP/unpacked"
+          test "$(tar -tzf dist/daedalus-cli-linux-amd64.tar.gz | LC_ALL=C sort | tr '\n' ' ')" = "LICENSE daedalus-cli "
+          test "$(unzip -Z1 dist/daedalus-cli-windows-amd64.zip | LC_ALL=C sort | tr '\n' ' ')" = "LICENSE daedalus-cli.exe "
+          "$RUNNER_TEMP/unpacked/daedalus-cli" version | tee "$RUNNER_TEMP/said"
+          test "$(cat "$RUNNER_TEMP/said")" = "daedalus-cli $VERSION"
       - uses: actions/upload-artifact@v4
         with:
           name: daedalus-cli
