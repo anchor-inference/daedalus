@@ -83,10 +83,12 @@ OUTPUT_FLUSH_SECONDS = 0.1
 
 OFFLINE = "the operator's terminal is not connected, so nothing can run on their machine now; start daedalus-cli there"
 NO_TURN = "nothing runs on the operator's machine outside a turn of its conversation"
+# Not "the restart ended it": a client that was killed outright leaves its command running on its own,
+# which the smoke run against the real client showed (the command finished after the client was gone).
 LOST_OUTCOME = (
     "The operator's terminal disconnected while running this and came back without knowing it (daedalus-cli was "
-    "restarted, which ended what it was running). It was not run again and its outcome is unknown: check the state "
-    "on their machine before you try it again."
+    "restarted). It was not run again and its outcome is unknown: it may have stopped with the old client or may "
+    "still be running or have finished on its own. Check the state on their machine before you try it again."
 )
 
 REFUSALS = {
