@@ -130,6 +130,11 @@
 .fb-host { display: inline-flex; align-items: center; gap: 3px; height: 16px; padding: 0 5px 0 4px; border-radius: 4px; background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); font-size: var(--fs-11); font-weight: 600; flex: none; }
 .fb-warn { flex: none; display: flex; align-items: center; gap: var(--space-2); padding: 8px 12px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--fg); font-size: var(--fs-12); }
 .fb-warn > svg { color: var(--warn); flex: none; }
+/* A folder other projects use already: a question, not a fault, so it wears the accent rather than the
+   warning colour, and its two answers wrap under the sentence on a narrow screen. */
+.fb-warn.fb-shared { flex-wrap: wrap; background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.fb-warn.fb-shared > svg { color: var(--accent); }
+.fb-warn.fb-shared > .grow { flex: 1 1 240px; min-width: 0; }
 .fb-warn .grow { flex: 1; min-width: 0; }
 
 @media (min-width: 1024px) {

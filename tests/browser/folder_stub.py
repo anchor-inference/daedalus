@@ -23,8 +23,10 @@ HOST_HOME = "/home/operator"
 
 def _folder(age_days: float, *, git: bool = False, writable: bool = True, project: tuple[str, str] | None = None,
             kind: str = "folder", chat: str = "") -> dict[str, Any]:
+    owner = {"id": project[0], "name": project[1]} if project else None
+    # ``projects`` is every ordinary project that has the folder: a folder may belong to several.
     entry: dict[str, Any] = {"mtime": NOW - age_days * DAY, "writable": writable, "readable": True, "is_git": git, "link": False,
-                             "kind": kind, "project": {"id": project[0], "name": project[1]} if project else None}
+                             "kind": kind, "project": owner, "projects": [owner] if owner and kind == "folder" else []}
     if chat:
         entry["chat_title"] = chat
     return entry
@@ -139,7 +141,7 @@ class FolderStub:
                        {"name": "srv", "path": "/srv", "kind": "volume"}])
         recent = ([{"name": "smart-home", "path": f"{HOST_HOME}/projects/smart-home"}] if env == "host"
                   else [{"name": "esp32-door", "path": "/srv/projects/esp32-door"}])
-        here = {"kind": "folder", "project": None}
+        here = {"kind": "folder", "project": None, "projects": []}
         return 200, {"env": env, "path": path, "parent": parent, "home": home, "writable": True, "is_git": path.endswith("esp32-door"),
                      "crumbs": crumbs(path, home, anchor), "entries": entries, "truncated": False, "roots": roots,
                      "recent": recent, "favourites": self._favourites(), "here": here}
@@ -156,7 +158,7 @@ class FolderStub:
         return 200, {"env": env, "path": path, "exists": exists, "is_dir": exists, "writable": True if exists else None,
                      "is_git": bool(meta and meta.get("is_git")), "mount": env == "container" and not exists and not self.native,
                      "on_host": path in self.trees["host"] if env == "container" else None,
-                     "kind": (meta or {}).get("kind", "folder"), "project": (meta or {}).get("project")}
+                     "kind": (meta or {}).get("kind", "folder"), "project": (meta or {}).get("project"), "projects": (meta or {}).get("projects", [])}
 
     def answer(self, method: str, path: str, query: str, body: Any) -> tuple[int, dict[str, Any]] | None:
         params = {key: values[0] for key, values in parse_qs(query).items()}

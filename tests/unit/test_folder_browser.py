@@ -97,6 +97,31 @@ async def test_the_host_side_lists_names_owners_and_makes_folders(settings: Sett
         assert missing.status_code == 404 and missing.json()["detail"]["code"] == "missing"
 
 
+async def test_a_folder_of_several_projects_names_them_all(settings: Settings, config: RuntimeConfig, db: Database, manager: SessionManager) -> None:
+    """Two projects may share one folder, and the operator is asked before a third joins them; the
+    listing and the check name every project that has it, the first-made first. Keyed by path to one
+    project, the listing named whichever came last by name, and the app refused the folder outright."""
+    manager.host_bridge = FakeBridge()  # type: ignore[assignment]
+    home = "/home/operator/projects/smart-home"
+    first = await manager.projects.create("Zebra", [FolderSpec(home, env="host")])
+    second = await manager.projects.create("Alpha", [FolderSpec(home, env="host")])
+    third = (await manager.projects.create("Third", [FolderSpec(home, env="host")])).id
+    shared = settings.workspaces_dir / "shared"
+    shared.mkdir(parents=True)
+    async with await _client(settings, config, db, manager) as client:
+        # The route the app's "Use the same folder" ends in: a second project on a folder one has.
+        for name in ("Shop", "Shop notes"):
+            made = await client.post("/api/projects", headers=HEADERS, json={"name": name, "folders": [{"path": str(shared)}]})
+            assert made.status_code == 200, made.text
+        listing = (await client.get("/api/folders", headers=HEADERS, params={"env": "host", "path": "/home/operator/projects"})).json()
+        row = next(r for r in listing["entries"] if r["name"] == "smart-home")
+        assert row["kind"] == "folder" and row["project"] == {"id": first.id, "name": "Zebra"}
+        assert [p["id"] for p in row["projects"]] == [first.id, second.id, third]
+        checked = (await client.get("/api/folders/check", headers=HEADERS, params={"env": "host", "path": home})).json()
+        assert [p["name"] for p in checked["projects"]] == ["Zebra", "Alpha", "Third"]
+    assert sorted(p.name for p in await manager.projects.list() if any(str(f.path) == str(shared) for f in p.folders)) == ["Shop", "Shop notes"]
+
+
 @pytest.mark.parametrize(("failure", "status", "code"), [
     (ConnectionError("the host terminal bridge is not available"), 503, "host_down"),
     (HostDaemonOutdated("the host terminal daemon is older than this version and cannot browse folders"), 501, "host_outdated"),

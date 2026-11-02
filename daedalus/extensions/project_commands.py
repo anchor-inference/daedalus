@@ -237,6 +237,7 @@ class ProjectCommands:
                     raise ProjectError(f"that folder contains the project {row['name']} ({other})")
                 if other in target.parents:
                     raise ProjectError(f"that folder is inside the project {row['name']} ({other})")
+            await self.projects._refuse_namesakes(target, project_id, conn)
             position = await one(conn, "SELECT count(*) AS n FROM project_folders WHERE project_id = ?", (project_id,))
             folder_id = f"f-{mutation.object_id[:12]}"
             is_git = folder_env == self.projects.local_env and (target / ".git").exists()

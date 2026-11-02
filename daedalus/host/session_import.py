@@ -275,6 +275,23 @@ class ReadResult:
     done: bool = True
 
 
+def _best_holder(holders: list[tuple[Project, ProjectFolder]], prefer: str | None) -> tuple[Project, ProjectFolder] | None:
+    """Of the projects that have one folder, the one a session joins: the one asked for, else an
+    ordinary project before a chat's scratch one before the installation's, the oldest first."""
+    if not holders:
+        return None
+    for held in holders:
+        if prefer and held[0].id == prefer:
+            return held
+
+    def rank(held: tuple[Project, ProjectFolder]) -> tuple[int, str, str]:
+        project = held[0]
+        installation = bool(project.settings.system or project.setup_by == "dispatcher")
+        return (2 if installation else 1 if project.settings.ephemeral else 0, project.created_at.isoformat(), project.id)
+
+    return min(holders, key=rank)
+
+
 class SessionImporter:
     """Reads, converts and writes imported sessions; one per manager, held by the API extension."""
 
@@ -359,14 +376,20 @@ class SessionImporter:
 
     # -- where it goes --------------------------------------------------------------------------
 
-    async def destination(self, cwd: str, *, make_project: bool = False, check: bool = True, projects: list[Project] | None = None) -> Destination:
+    async def destination(self, cwd: str, *, make_project: bool = False, check: bool = True, projects: list[Project] | None = None,
+                          prefer: str | None = None) -> Destination:
         """The project a session in ``cwd`` joins, or the one an import would make (see the module).
         ``check`` asks the machine whether the folder is there; a listing of many sessions passes the
-        projects it read once and does not ask."""
+        projects it read once and does not ask.
+
+        A folder may belong to several projects. ``prefer`` is the project the operator asked for,
+        taken when it is one of them; otherwise an ordinary project wins over a chat's scratch one and
+        over the installation's, and the oldest wins among equals. Taking the first in the list once
+        joined whichever came first by name and refused the operator's pick of the other one."""
         cwd = normalise_cwd(cwd)
         if not cwd:
             return Destination("refused", cwd, code="missing", problem="the session does not say which folder it worked in")
-        exact: tuple[Project, ProjectFolder] | None = None
+        exact: list[tuple[Project, ProjectFolder]] = []
         around: list[tuple[int, Project, ProjectFolder]] = []
         inner: Project | None = None
         container_same: Project | None = None
@@ -379,7 +402,7 @@ class SessionImporter:
                 path = normalise_cwd(str(folder.path))
                 if folder.env == "host":
                     if _key(path) == _key(cwd):
-                        exact = exact or (project, folder)
+                        exact.append((project, folder))
                     elif _inside(cwd, path):
                         around.append((len(path), project, folder))
                     elif _inside(path, cwd):
@@ -394,7 +417,10 @@ class SessionImporter:
         exists: bool | None = None
         if check:
             exists = await self._exists(cwd)
-        chosen = exact or (max(around, key=lambda row: row[0])[1:] if around else None)
+        if not exact and around:
+            deepest = max(row[0] for row in around)
+            exact = [(project, folder) for length, project, folder in around if length == deepest]
+        chosen = _best_holder(exact, prefer)
         if chosen is not None:
             project, folder = chosen
             if project.settings.system or project.setup_by == "dispatcher":
@@ -552,7 +578,7 @@ class SessionImporter:
         masked = read.masked + conversion.masked
         await self._progress(job, masked=masked, messages=len(conversion.entries))
         cwd = normalise_cwd(request.cwd or str(header.get("cwd") or ""))
-        destination = await self.destination(cwd, make_project=request.make_project)
+        destination = await self.destination(cwd, make_project=request.make_project, prefer=request.project_id)
         if destination.kind == "refused":
             raise ImportRefused(destination.code, destination.problem, destination=destination.view())
         if request.project_id and (destination.project is None or destination.project.id != request.project_id):

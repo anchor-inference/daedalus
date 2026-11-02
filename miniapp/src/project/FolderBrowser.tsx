@@ -31,7 +31,11 @@ export type FolderEntry = {
   is_git: boolean;
   link?: boolean;
   kind: "folder" | "chat" | "service";
+  /** The first owner: the chat whose scratch folder it is, the installation's project, or the first
+   *  of the projects that have it. */
   project: FolderOwner | null;
+  /** Every ordinary project that has exactly this folder: a folder may belong to several. */
+  projects?: FolderOwner[];
   chat_title?: string;
 };
 
@@ -50,20 +54,27 @@ export type Listing = {
   roots: Place[];
   recent: Place[];
   favourites: Place[];
-  here: Pick<FolderEntry, "kind" | "project" | "chat_title">;
+  here: Pick<FolderEntry, "kind" | "project" | "projects" | "chat_title">;
 };
 
 type Failure = { code: string; message: string; configured?: boolean; start?: string; install?: string; mount?: boolean; on_host?: boolean | null };
 
 /** What the dialog is told about the chosen folder. `problem` is empty when the folder can be a new
- *  project's as it is; otherwise it names why not, and the dialog keeps its Create button off. */
+ *  project's as it is; otherwise it names why not, and the dialog keeps its Create button off.
+ *  `project` is a question rather than a refusal: other projects have this folder already, and the
+ *  operator answers it with "Use the same folder", which clears it and sets `shared`. `mine` is the
+ *  folder the project being edited has already. */
 export type FolderChoice = {
   env: Env;
   path: string;
   isGit: boolean;
   writable: boolean | null;
   project: FolderOwner | null;
-  problem: "" | "project" | "chat" | "service" | "unreadable" | "missing" | "hostdown";
+  /** The projects that have this folder already, when it is shared or about to be. */
+  projects?: FolderOwner[];
+  /** The operator chose to share the folder with `projects`. */
+  shared?: boolean;
+  problem: "" | "project" | "mine" | "chat" | "service" | "unreadable" | "missing" | "hostdown";
   /** A container folder that is not mounted yet, accepted so the launcher mounts it on the next start. */
   unmounted?: boolean;
   /** Typed while nothing could check it: an outdated host daemon. */
@@ -94,10 +105,16 @@ function failureOf(error: unknown): Failure {
   return { code: "refused", message: errorText(error) };
 }
 
-function choiceOf(env: Env, path: string, entry: Pick<FolderEntry, "kind" | "project" | "is_git" | "writable"> & { readable?: boolean }): FolderChoice {
+function choiceOf(env: Env, path: string, entry: Pick<FolderEntry, "kind" | "project" | "projects" | "is_git" | "writable"> & { readable?: boolean }, current?: string): FolderChoice {
+  // A folder other projects have is asked about, not refused: one folder in several projects is a
+  // deliberate choice the server allows (each project's staff work in worktrees of their own), and
+  // refusing it here left the operator with no way to make a second project on a repository.
+  const owners = entry.projects ?? (entry.project ? [entry.project] : []);
+  const others = owners.filter((owner) => owner.id !== current);
   const problem: FolderChoice["problem"] = entry.kind === "chat" ? "chat" : entry.kind === "service" ? "service"
-    : entry.project ? "project" : entry.readable === false ? "unreadable" : "";
-  return { env, path, isGit: entry.is_git, writable: entry.writable, project: entry.project, problem };
+    : current && owners.some((owner) => owner.id === current) ? "mine"
+    : others.length ? "project" : entry.readable === false ? "unreadable" : "";
+  return { env, path, isGit: entry.is_git, writable: entry.writable, project: others[0] ?? entry.project, projects: others, problem };
 }
 
 const ROOT_ICON: Record<string, IconName> = { home: "user", workspaces: "logo", data: "archive", volume: "folder" };
@@ -112,9 +129,11 @@ export type FolderBrowserProps = {
   launcher?: boolean;
   /** One side only, without the switch between them: a folder moved to the host is chosen there. */
   only?: Env;
+  /** The project a folder is being added to, whose own folders are said to be its already. */
+  current?: string;
 };
 
-export function FolderBrowser({ environments, choice, onChoice, onOpenProject, toast, launcher = false, only }: FolderBrowserProps) {
+export function FolderBrowser({ environments, choice, onChoice, onOpenProject, toast, launcher = false, only, current: currentProject }: FolderBrowserProps) {
   const docker = !!environments?.docker && !only;
   const local: Env = only ?? environments?.local ?? "container";
   const [env, setEnv] = useState<Env>(choice?.env ?? local);
@@ -164,7 +183,7 @@ export function FolderBrowser({ environments, choice, onChoice, onOpenProject, t
   useEffect(() => {
     if (!listing || failure) return;
     if (choice && choice.env === env && listing.entries.some((entry) => entry.path === choice.path)) return;
-    onChoice(choiceOf(env, listing.path, { ...listing.here, is_git: listing.is_git, writable: listing.writable }));
+    onChoice(choiceOf(env, listing.path, { ...listing.here, is_git: listing.is_git, writable: listing.writable }, currentProject));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listing]);
 
@@ -237,7 +256,7 @@ export function FolderBrowser({ environments, choice, onChoice, onOpenProject, t
   const places = listing ?? lastPlaces.get(env) ?? null;
 
   function pick(entry: FolderEntry) {
-    onChoice(choiceOf(env, entry.path, entry));
+    onChoice(choiceOf(env, entry.path, entry, currentProject));
   }
 
   function rowKeys(event: KeyboardEvent<HTMLButtonElement>, entry: FolderEntry) {
@@ -253,7 +272,7 @@ export function FolderBrowser({ environments, choice, onChoice, onOpenProject, t
 
   const row = (entry: FolderEntry, sub = false) => {
     const selected = choice?.env === env && choice.path === entry.path;
-    const blocked = entry.kind !== "folder" || !!entry.project;
+    const blocked = entry.kind !== "folder";
     const label = entry.kind === "chat" ? t("fb.chat.row", { title: entry.chat_title ?? entry.name }) : entry.name;
     return (
       <button key={entry.path} type="button" role="option" aria-selected={selected} data-path={entry.path}
@@ -264,7 +283,7 @@ export function FolderBrowser({ environments, choice, onChoice, onOpenProject, t
         <span className="fb-name">{label}{entry.kind === "chat" && <span className="fb-hash">{entry.name}</span>}</span>
         {entry.is_git && <span className="fb-badge">{t("comp.name.git")}</span>}
         {entry.kind === "service" && <span className="fb-badge">{t("fb.service.badge")}</span>}
-        {entry.project && entry.kind === "folder" && <span className="fb-badge acc">{t("fb.project.badge", { name: entry.project.name })}</span>}
+        {entry.project && entry.kind === "folder" && <span className="fb-badge acc">{ownersText(entry.projects ?? [entry.project], "fb.project.badge", "fb.project.badge.more")}</span>}
         {entry.writable === false && entry.kind === "folder" && <span className="fb-badge warn">{t("fb.readonly")}</span>}
         <span className="fb-time">{entry.mtime ? relTime(entry.mtime * 1000) : ""}</span>
       </button>
@@ -430,14 +449,17 @@ function ChoiceLine({ choice, env, failure, launcher, environments, onOpenProjec
     return <div className="fb-foot sub">{t("fb.choose")}</div>;
   }
   if (choice.problem === "project" && choice.project) {
+    const owners = choice.projects?.length ? choice.projects : [choice.project];
     return (
-      <div className="fb-foot bad" role="alert">
-        <Icon name="alert" size={14} />
-        <span className="grow">{t("fb.taken", { name: choice.project.name })}</span>
-        {onOpenProject && <button type="button" className="btn small" onClick={() => onOpenProject(choice.project!.id)}>{t("fb.taken.open")}</button>}
+      <div className="fb-warn fb-shared" role="status" data-shared-with={owners.map((owner) => owner.id).join(" ")}>
+        <Icon name="folder" size={15} />
+        <span className="grow">{ownersText(owners, "fb.shared.ask", "fb.shared.ask.more")} {t("fb.shared.why")}</span>
+        <button type="button" className="btn small" data-action="share" onClick={() => onAccept({ ...choice, problem: "", shared: true, projects: owners })}>{t("fb.shared.use")}</button>
+        {onOpenProject && <button type="button" className="btn small" data-action="open-project" onClick={() => onOpenProject(owners[0].id)}>{t("fb.taken.open")}</button>}
       </div>
     );
   }
+  if (choice.problem === "mine") return <div className="fb-foot" role="status"><Icon name="check" size={14} />{t("fb.mine")}</div>;
   if (choice.problem === "chat") return <div className="fb-foot" role="status">{t("fb.chat.hint")}</div>;
   if (choice.problem === "service") return <div className="fb-foot" role="status">{t("fb.service.hint")}</div>;
   if (choice.problem === "unreadable") return <div className="fb-foot bad" role="alert"><Icon name="alert" size={14} />{t("fb.unreadable")}</div>;
@@ -459,6 +481,7 @@ function ChoiceLine({ choice, env, failure, launcher, environments, onOpenProjec
     <div className="fb-foot" role="status" data-chosen={choice.path}>
       <span className="fb-label">{t("fb.chosen")}</span>
       <span className="mono truncate">{choice.path}</span>
+      {choice.shared && !!choice.projects?.length && <span className="fb-badge acc" data-shared>{ownersText(choice.projects, "fb.shared.with", "fb.shared.with.more")}</span>}
       <span className="grow" />
       {choice.unmounted ? <span className="sub">{t(launcher ? "fb.mount.after" : "fb.mount.after.compose")}</span>
         : choice.unchecked ? <span className="sub">{t("fb.unchecked")}</span>
@@ -470,4 +493,10 @@ function ChoiceLine({ choice, env, failure, launcher, environments, onOpenProjec
             </span>}
     </div>
   );
+}
+
+/** The projects that have a folder, in a sentence: the first by name and how many more. */
+function ownersText(owners: FolderOwner[], one: string, more: string): string {
+  const [first, ...rest] = owners;
+  return rest.length ? t(more, { name: first?.name ?? "", n: rest.length }) : t(one, { name: first?.name ?? "" });
 }

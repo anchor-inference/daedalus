@@ -80,9 +80,10 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             raise HTTPException(404, "no such project")
         return project
 
-    async def owner_of(project_id: str, path: Path) -> StaffSession | None:
-        """The live staff session working in ``path``, if any: an open session row names its worktree."""
-        for session in (await manager.staff.live_sessions(project_id)).values():
+    async def owner_of(path: Path) -> StaffSession | None:
+        """The live staff session working in ``path``, if any: an open session row names its worktree.
+        Any project's, since the folder may be shared with another project."""
+        for session in (await manager.staff.live_sessions_anywhere()).values():
             if _same(session.worktree_path, path):
                 return session
         return None
@@ -99,8 +100,12 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             # An active member wins the slug over a dismissed one who had it before.
             if member.archived_at is None or staff_slug(member.name) not in by_slug:
                 by_slug[staff_slug(member.name)] = member
-        live = await manager.staff.live_sessions(project_id)
+        live = await manager.staff.live_sessions_anywhere()
         names = {m.id: m.name for m in members}
+        for staff_id in set(live) - set(names):
+            # A member of another project on a folder this one shares: named, so the row says who.
+            other = await manager.staff.get(staff_id)
+            names[staff_id] = other.name if other is not None else ""
         trees = worktrees()
 
         async def one_folder(folder: ProjectFolder) -> tuple[list[dict[str, Any]], dict[str, str] | None]:
@@ -153,7 +158,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         if folder is None:
             raise HTTPException(404, "no such folder in this project")
         path = Path(body.path)
-        owner = await owner_of(project_id, path)
+        owner = await owner_of(path)
         if owner is not None:
             member = await manager.staff.get(owner.staff_id)
             raise HTTPException(409, f"{member.name if member else 'a worker'} is working in this worktree; release it first")

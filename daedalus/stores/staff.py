@@ -568,6 +568,13 @@ class StaffStore:
         )
         return {r["staff_id"]: _session(r) for r in rows}
 
+    async def live_sessions_anywhere(self) -> dict[str, StaffSession]:
+        """``{staff_id: live session}`` for every member of every project. A folder may belong to
+        several projects, so a worktree in it may be another project's member's: asking only the
+        project in view let one project remove a worktree another's member was working in."""
+        rows = await self._db.fetchall("SELECT * FROM staff_sessions WHERE ended_at IS NULL")
+        return {r["staff_id"]: _session(r) for r in rows}
+
     async def team_counts(self) -> dict[str, dict[str, int]]:
         """``{project_id: {staff, working}}`` for every project with a team, in two queries.
 
@@ -742,6 +749,22 @@ class StaffStore:
                 clash = next((n for n in taken if staff_slug(n) == slug and n.lower() != label.lower()), None)
                 if clash is not None:
                     raise StaffError(f"{label} would share the worktree and branch name {slug!r} with {clash}; choose another name")
+                # A folder may belong to several projects, and a member's worktree is named by the slug
+                # alone (<folder>/.agents/worktrees/<slug>): a namesake in another project on the same
+                # folder would be handed this member's worktree, switched to its own branch under it.
+                cursor = await conn.execute(
+                    "SELECT DISTINCT m.name, p.name AS project FROM staff m JOIN projects p ON p.id = m.project_id"
+                    " WHERE m.archived_at IS NULL AND m.project_id != ? AND m.project_id IN"
+                    " (SELECT other.project_id FROM project_folders other JOIN project_folders mine ON mine.path = other.path"
+                    "  WHERE mine.project_id = ?)",
+                    (project_id, project_id),
+                )
+                beside = [(r["name"], r["project"]) for r in await cursor.fetchall()]
+                await cursor.close()
+                namesake = next(((n, p) for n, p in beside if staff_slug(n) == slug), None)
+                if namesake is not None:
+                    raise StaffError(f"{label} would share the worktree {slug!r} with {namesake[0]} of the project {namesake[1]}, "
+                                     "which works in the same folder; choose another name")
                 await conn.execute(
                     "INSERT INTO staff(id, project_id, name, color, role, harness, agent, model, effort, permission_mode, env, default_folder_id, isolation, instructions, notes, one_off, created_by, created_at) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
