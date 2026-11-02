@@ -18,6 +18,14 @@ ptyd/libghostty/patches/*.patch -whitespace
 # where git turns line ends into CRLF by default, would change both, so nothing here is converted.
 ptyd/** -text
 
+# Pins and the scripts that read them keep LF in every checkout. git on a Windows runner converts
+# text to CRLF by default, which handed the lock's parsers "1.0.2\r" for a version and would give bash
+# a script whose every line ends in a stray carriage return. The licence travels in the packages as
+# upstream wrote it.
+*.sh text eol=lf
+desktop/*.lock text eol=lf
+desktop/third-party/** text eol=lf
+
 # Signed fixtures are bytes, not text: a Windows checkout turning their line ends into CRLF changed
 # the message a signature covers, and the signature no longer verified.
 desktop/testdata/** -text

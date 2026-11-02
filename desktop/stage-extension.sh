@@ -19,8 +19,9 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 out="${1:?usage: stage-extension.sh <out-dir>}"
 lock="$root/desktop/extension.lock"
 
-version="$(sed -n 's/^version=//p' "$lock")"
-want="$(sed -n 's/^sha256=//p' "$lock")"
+# Trimmed of carriage returns and blanks: the Windows runner's checkout may give the lock CRLF.
+version="$(tr -d '\r' <"$lock" | sed -n 's/^[[:space:]]*version=//p' | tr -d '[:space:]')"
+want="$(tr -d '\r' <"$lock" | sed -n 's/^[[:space:]]*sha256=//p' | tr -d '[:space:]')"
 if [ -z "$version" ] || [ "${#want}" -ne 64 ]; then
   echo "$lock needs a version= and a sha256= line" >&2
   exit 1

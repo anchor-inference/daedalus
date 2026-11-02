@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -353,6 +354,49 @@ func TestAWaylandSessionIsToldApartAsTheDaemonTellsIt(t *testing.T) {
 	}
 }
 
+// parseAgentDesktopLock reads the lock's key=value lines as the staging script does. Each line is
+// trimmed of its carriage return and surrounding blanks first: a Windows checkout once gave the test
+// "1.0.2\r" for the version, and the lock is the same file whatever line ends the checkout chose.
+func parseAgentDesktopLock(body string) (map[string]string, error) {
+	fields := map[string]string{}
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			return nil, fmt.Errorf("a line that is not key=value: %q", line)
+		}
+		fields[strings.TrimSpace(key)] = strings.TrimSpace(value)
+	}
+	return fields, nil
+}
+
+// The lock reads the same with CRLF line ends, which a Windows checkout gives it when git converts
+// text, as with LF.
+func TestTheAccessibilityToolLockReadsTheSameWithCRLF(t *testing.T) {
+	body, err := os.ReadFile("agent-desktop.lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lf := strings.ReplaceAll(string(body), "\r\n", "\n")
+	want, err := parseAgentDesktopLock(lf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := parseAgentDesktopLock(strings.ReplaceAll(lf, "\n", "\r\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("with CRLF the lock reads %q, with LF %q", got, want)
+	}
+	if !regexp.MustCompile(`^1\.\d+\.\d+$`).MatchString(got["version"]) {
+		t.Fatalf("with CRLF the version reads %q", got["version"])
+	}
+}
+
 // The lock names one archive for each platform a package is built for, each with a full digest, and
 // the release it pins by version and by commit: the staging script trusts it, and a platform left
 // out would ship a package whose tree tools are silently missing. The Mac bundle declares the tool
@@ -363,16 +407,9 @@ func TestTheAccessibilityToolIsPinnedForEveryPackagedPlatform(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fields := map[string]string{}
-	for _, line := range strings.Split(string(body), "\n") {
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			t.Fatalf("a line that is not key=value: %q", line)
-		}
-		fields[key] = value
+	fields, err := parseAgentDesktopLock(string(body))
+	if err != nil {
+		t.Fatal(err)
 	}
 	if !regexp.MustCompile(`^1\.\d+\.\d+$`).MatchString(fields["version"]) {
 		t.Fatalf("version %q: deskd accepts agent-desktop 1.x", fields["version"])
