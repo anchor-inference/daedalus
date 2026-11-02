@@ -16,6 +16,7 @@ import { AuthImg, FilePreview, PreviewSource, canPreview, downloadHref, fileGlyp
 import { followSession } from "../sessionstream";
 import { useEvent } from "../events";
 import { Activity, LiveStore, Segment, SummaryItem, SystemNote, ToolItem, Turn, activitySummary, applyLive, buildTurns, createLiveStore, familyCounts, isOlderPage, liveAfter, liveBase, prepend, producedFiles, reconcile, splitActivity } from "../turns";
+import { uiStep } from "../computerstep";
 import { Explorer } from "../explorerpanel";
 import { DiffView } from "../previewparts";
 import { looksLikeDiff } from "../diff";
@@ -2861,6 +2862,12 @@ function describe(item: ToolItem, workspace?: string): { verb: string; family: s
       const patch = str("input") || str("patch") || str("raw");
       const files = [...patch.matchAll(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/gm)].map((m) => base(m[1].trim()));
       return { verb: verb("Edit", r), family: "Edit", detail: files.join(", ").slice(0, 60), icon: "pen" };
+    }
+    case "ComputerUI": {
+      // The element and the outcome, read out of the host's answer: "Pressed · button “Send” · confirmed".
+      const step = uiStep(a, item.result, item.error);
+      const outcome = step.status ? t(`tool.ComputerUI.status.${step.status}`) : step.found !== null ? t("tool.ComputerUI.found", { n: step.found }) : "";
+      return { verb: t(`tool.ComputerUI.${step.action}.${r ? "on" : "off"}`), family: "ComputerUI", detail: [step.target, outcome].filter(Boolean).join(" · "), icon: "monitor" };
     }
     case "HistoryExpand":
       return { verb: t("tool.HistoryExpand"), family: "HistoryExpand", detail: t("tool.HistoryExpand.range", { from: str("from_seq"), to: str("to_seq") }), icon: "file" };

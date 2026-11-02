@@ -29,7 +29,14 @@ NO_PERMISSION = 1205
 RATE = 1206
 UNREACHABLE = 1207
 OPERATOR_ONLY = 1208
+AX_UNAVAILABLE = 1209
+STALE_REF = 1210
+AMBIGUOUS_TARGET = 1211
 BLOCKED_KEY = 1212
+AX_FAILED = 1213
+METHOD_NOT_FOUND = -32601
+"""JSON-RPC's own code for a method the daemon does not serve: a daemon older than the accessibility
+tree answers every ``ax.*`` call with it."""
 
 NOT_DELIVERED = "not_delivered"
 """An action's ``delivery`` when none of its input was sent: the only refusal the host may repeat by
@@ -52,6 +59,14 @@ _STALE_REASONS = {
     "displays_changed": "the displays changed since it was taken",
     "window_moved": "the window moved or changed size since it was taken",
     "window_gone": "the window it showed has closed",
+}
+
+_AX_FAILED_REASONS = {
+    "rejected": "the app refused that element action",
+    "contradicted": "the element took the action but reads back otherwise",
+    "timeout": "the element action did not finish in time",
+    "unresponsive": "the app did not answer the accessibility request",
+    "internal": "the accessibility helper failed",
 }
 
 _SECURE_REASONS = {
@@ -130,6 +145,26 @@ def _explain(code: int, message: str, detail: dict[str, Any]) -> str:
         )
     if code == OPERATOR_ONLY:
         return "Only the operator can do that, from the app."
+    if code == AX_UNAVAILABLE:
+        return "The accessibility tree cannot be read on this desktop now. Use Computer: take a screenshot and act by points."
+    if code == STALE_REF:
+        return (
+            "That element reference is no longer valid: the window changed since it was read, or the reference came from "
+            "another window or an earlier grant. Read the window again (ComputerUI tree or find) and use the new reference."
+        )
+    if code == AMBIGUOUS_TARGET and detail.get("window") and not detail.get("ref"):
+        return (
+            "The accessibility tree cannot tell that window apart from another of the same app, so it was not read. "
+            "Use Computer with screenshots for it."
+        )
+    if code == AMBIGUOUS_TARGET:
+        return (
+            "That reference now matches more than one element, so nothing was done rather than acting on a lookalike. "
+            "Read the window again (ComputerUI tree or find) and use the new reference."
+        )
+    if code == AX_FAILED:
+        why = _AX_FAILED_REASONS.get(str(detail.get("reason") or ""), "the element action failed")
+        return f"{why[:1].upper() + why[1:]}. Read the element again (ComputerUI get) before trying anything else, or use Computer."
     if code == BLOCKED_KEY:
         keys = str(detail.get("keys") or "That key")
         why = str(detail.get("why") or "").strip()
@@ -168,6 +203,10 @@ _NAMES = {
     NOT_FOUND: "not_found",
     LIMIT: "limit",
     UNSUPPORTED: "unsupported",
+    AX_UNAVAILABLE: "ax_unavailable",
+    STALE_REF: "stale_ref",
+    AMBIGUOUS_TARGET: "ambiguous",
+    AX_FAILED: "ax_failed",
 }
 
 
@@ -207,9 +246,13 @@ def every_key() -> set[str]:
 
 
 __all__ = [
+    "AMBIGUOUS_TARGET",
+    "AX_FAILED",
+    "AX_UNAVAILABLE",
     "BLOCKED_KEY",
     "HUMAN_DRIVING",
     "LIMIT",
+    "METHOD_NOT_FOUND",
     "NOT_DELIVERED",
     "NOT_FOUND",
     "NO_LEASE",
@@ -219,6 +262,7 @@ __all__ = [
     "PROTECTED_TARGET",
     "RATE",
     "SECURE_DESKTOP",
+    "STALE_REF",
     "STALE_SCREENSHOT",
     "UNREACHABLE",
     "UNSUPPORTED",

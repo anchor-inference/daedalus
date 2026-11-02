@@ -389,8 +389,9 @@ class ComputerAgent:
                 _point(arguments.get("coordinate"))
             _modifiers(arguments.get("text"))
 
-    async def _leased(self, caller: Caller) -> None:
-        """Refuse unless deskd says this session holds the lease now; nothing else is sent before."""
+    async def _leased(self, caller: Caller) -> dict[str, Any]:
+        """Refuse unless deskd says this session holds the lease now; nothing else is sent before.
+        Returns the lease held."""
         status = await self.client.call("lease.status", {})
         lease = (status or {}).get("lease") or {}
         held = lease.get("lease") or {}
@@ -400,6 +401,7 @@ class ComputerAgent:
         if str(held.get("session") or "") != caller.session_id:
             self.shots.pop(caller.session_id, None)
             raise Refused(refusals.explain(refusals.NO_LEASE, "", {"reason": "other_session"}))
+        return held
 
     async def _carry_out(self, caller: Caller, action: str, arguments: dict[str, Any]) -> Outcome:
         session = caller.session_id
@@ -476,12 +478,13 @@ class ComputerAgent:
             lines.append(front.strip())
         return Outcome(self._with_shot(caller, "\n".join(lines), shot), image=shot)
 
-    async def _act(self, params: dict[str, Any], timeout: float) -> Any:
-        """``act``, sent again after the daemon's wait while it is refused for the per-second rate with
-        nothing delivered. Anything else, and a daemon too old to say ``delivery``, is raised as is."""
+    async def _act(self, params: dict[str, Any], timeout: float, method: str = "act") -> Any:
+        """``act`` (or ``ax.act``), sent again after the daemon's wait while it is refused for the
+        per-second rate with nothing delivered. Anything else, and a daemon too old to say ``delivery``,
+        is raised as is."""
         for attempt in range(RATE_RETRIES + 1):
             try:
-                return await self.client.call("act", params, timeout=timeout)
+                return await self.client.call(method, params, timeout=timeout)
             except DeskError as exc:
                 wait = _rate_wait(exc)
                 if wait is None or attempt == RATE_RETRIES:

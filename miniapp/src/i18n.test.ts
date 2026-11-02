@@ -233,6 +233,9 @@ describe("the keys the code asks for", () => {
       ["theme.", listed("./appearance.ts", "THEME_IDS")],
       ["tool.group.", ["Exec", "Read", "Write", "Edit", "search", "WebFetch", "SendFile", "other"]],
       ["tool.board.", ["get", "list"]],
+      // A ComputerUI step names its action and its outcome from the lists the step's reader knows.
+      ["tool.ComputerUI.", listed("./computerstep.ts", "UI_ACTIONS").flatMap((a) => [`${a}.on`, `${a}.off`])],
+      ["tool.ComputerUI.status.", listed("./computerstep.ts", "UI_STATUSES")],
       // Both speech pickers build a language name from a catalog's own code, and the recognition
       // one reaches far past the ten languages the synthesis catalog speaks. A code with no row
       // here is a bare `[lang.of.xx]` in a filter someone is choosing from.

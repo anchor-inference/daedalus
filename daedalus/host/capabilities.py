@@ -116,7 +116,7 @@ class Computer:
         return {"configured": self.configured, "native": self.native}
 
 
-COMPUTER_TOOLS: frozenset[str] = frozenset({"Computer", "ComputerApps"})
+COMPUTER_TOOLS: frozenset[str] = frozenset({"Computer", "ComputerApps", "ComputerUI"})
 """The computer tools; an installation that cannot offer computer use registers none of them."""
 
 

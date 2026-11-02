@@ -10,6 +10,11 @@ say, a false alarm costs the operator a tap and a purchase nobody asked about co
 Keys are judged by what they do where they land: Enter (and Ctrl/Cmd+Enter) sends in a mail or
 messaging app, Shift+Delete and Cmd+Backspace delete for good in those and in a file manager, and
 typed text with a line break presses Enter.
+
+An action through the accessibility tree (``ComputerUI``) names its element, so the same lists are read
+off the element's own name, as the browser reads them (:func:`element_kinds`). There a password field
+or other secure text is always the operator's, and a press named for signing in is asked about too: an
+account entered from the operator's desktop is theirs to enter.
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ PURCHASE = "purchase"
 SEND = "send"
 DESTROY = "destroy"
 ACCEPT = "accept"
+CREDENTIALS = "credentials"
 
 WORDS: dict[str, tuple[str, ...]] = {
     PURCHASE: (
@@ -179,7 +185,77 @@ def typed_kinds(text: str, app: dict[str, object]) -> list[str]:
     return [SEND] if ("\n" in text or "\r" in text) and app_kind(app) in ("mail", "messaging") else []
 
 
+SIGN_IN = (
+    "sign in", "sign on", "log in", "login", "log on", "sign into", "log into", "unlock",
+    "войти", "войдите", "вход", "авторизоваться", "авторизуйтесь", "авторизация", "разблокировать",
+)
+"""A press that hands over credentials. Read only off an element's own name, never a window's title: a
+window titled "Sign in" holds the fields as well as the button, and every keystroke there asking would
+teach the operator to approve without reading."""
+
+CONFIRMATIONS = (
+    "ok", "okay", "yes", "continue", "confirm", "proceed", "next", "done", "apply", "finish",
+    "ок", "да", "продолжить", "подтвердить", "далее", "готово", "применить", "завершить",
+)
+"""Names that say nothing of their own consequence. A button named only "OK" takes its meaning from the
+dialog around it, so for these the window's title is read as well — the browser reads a checkout's
+heading for a button named "Continue" for the same reason."""
+
+SECURE_ROLES = ("password", "password text", "password field", "secure text", "secure text field", "securetextfield", "passwordtext", "passwordbox", "password edit")
+SECURE_STATES = ("protected", "secure", "password")
+"""How the three platforms' trees mark a field whose characters are hidden: AT-SPI's ``password text``
+role, macOS's ``AXSecureTextField``, UI Automation's ``IsPassword`` (which the daemon reports as a
+state). Matched without case, spaces, underscores or an ``AX`` prefix."""
+
+# Whole words, without the Russian endings the other lists allow: "войти" cut to its stem would
+# match "война", and every button of a war film's player would ask.
+_SIGN_IN = re.compile(r"(?:^|[\W_])(" + "|".join(r"\s+".join(re.escape(p) for p in w.split()) for w in SIGN_IN) + r")(?:$|[\W_])", re.IGNORECASE)
+_CONFIRMATION = re.compile(r"^\s*(" + "|".join(re.escape(w) for w in CONFIRMATIONS) + r")\s*[.!…]*\s*$", re.IGNORECASE)
+
+
+def _plain(word: str) -> str:
+    # macOS writes its roles as AXSecureTextField: the prefix goes only where a capital follows it,
+    # so a role or state that merely starts with the letters (an axis) keeps them.
+    text = re.sub(r"^AX(?=[A-Z])", "", str(word or "").strip())
+    return re.sub(r"[\s_\-]+", " ", text.lower()).strip()
+
+
+def is_secure(role: str, states: Iterable[str] = ()) -> bool:
+    """Whether the element hides what is typed into it: a password field or other secure text."""
+    plain_role = _plain(role)
+    squashed = plain_role.replace(" ", "")
+    if plain_role in SECURE_ROLES or squashed in {r.replace(" ", "") for r in SECURE_ROLES}:
+        return True
+    return any(_plain(state) in SECURE_STATES for state in states or ())
+
+
+PRESSES = ("press", "toggle", "select", "expand")
+"""The element actions that can set something off: a press, a switch, a choice, a menu opened. A value
+set into a field sends nothing by itself, as typed text without a line break sends nothing."""
+
+
+def element_kinds(action: str, role: str, name: str, states: Iterable[str] = (), *, option: str = "", window_title: str = "") -> list[str]:
+    """The kinds an action on an accessibility element has, sorted.
+
+    Any action on secure text but bringing it into view is ``credentials``. A press-like action is read
+    by the element's name (and, for ``select``, the option chosen) with the window's lists plus the
+    sign-in words; a name that is only a confirmation borrows the window's title."""
+    kinds: set[str] = set()
+    if action != "scroll_to" and is_secure(role, states):
+        kinds.add(CREDENTIALS)
+    if action not in PRESSES:
+        return sorted(kinds)
+    label = " ".join(part for part in (name, option) if part)
+    kinds.update(label_kinds(label))
+    if _SIGN_IN.search(label.lower()):
+        kinds.add(CREDENTIALS)
+    if _CONFIRMATION.match(name or "") and window_title:
+        kinds.update(label_kinds(window_title))
+    return sorted(kinds)
+
+
 WORDS_FOR = {
+    CREDENTIALS: "enter or submit sign-in credentials",
     PURCHASE: "buy or pay",
     SEND: "send or publish something",
     DESTROY: "delete or cancel something",
@@ -189,6 +265,7 @@ WORDS_FOR = {
 
 __all__ = [
     "ACCEPT",
+    "CREDENTIALS",
     "DESTROY",
     "FILE_MANAGERS",
     "MAIL_APPS",
@@ -199,6 +276,8 @@ __all__ = [
     "WORDS_FOR",
     "app_kind",
     "chords",
+    "element_kinds",
+    "is_secure",
     "key_kinds",
     "label_kinds",
     "typed_kinds",
