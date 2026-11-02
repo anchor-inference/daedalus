@@ -70,6 +70,9 @@ const maxWritePiece = 512 << 10
 // maxWriteFile bounds a file written through fs.write, as ptyd bounds its own.
 const maxWriteFile = 50 << 20
 
+// FSMethods are the native file calls this executor serves, as device.hello advertises them.
+var FSMethods = []string{"stat", "list", "read", "write", "mkdir", "find", "search"}
+
 // Executor runs calls for the sessions bound to this machine.
 type Executor struct {
 	exec *sidechan.Exec
@@ -254,6 +257,28 @@ func (e *Executor) Handle(ctx context.Context, r Request) (any, error) {
 			return nil, err
 		}
 		return e.write(root, p.Path, p.Offset, p.Data, p.Final)
+	case "fs.find":
+		var p struct {
+			Path    string `json:"path"`
+			Pattern string `json:"pattern"`
+			Limit   int    `json:"limit"`
+		}
+		if err := decode(r.Params, &p); err != nil {
+			return nil, err
+		}
+		return e.find(ctx, root, p.Path, p.Pattern, p.Limit)
+	case "fs.search":
+		var p struct {
+			Path            string `json:"path"`
+			Pattern         string `json:"pattern"`
+			Glob            string `json:"glob"`
+			CaseInsensitive bool   `json:"case_insensitive"`
+			Limit           int    `json:"limit"`
+		}
+		if err := decode(r.Params, &p); err != nil {
+			return nil, err
+		}
+		return e.search(ctx, root, p.Path, p.Pattern, p.Glob, p.CaseInsensitive, p.Limit)
 	case "fs.mkdir":
 		var p struct {
 			Path string `json:"path"`

@@ -322,10 +322,14 @@ func (l *Link) session(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	// The watchdog: no message and no ping for the silence window is a dead link, which a TCP
-	// connection that stopped delivering would otherwise hide forever.
+	// connection that stopped delivering would otherwise hide forever. Halfway through a silence the
+	// client pings the server itself, so a quiet link to a server that does not ping (the contract says
+	// it pings every 20 s; a proxy may eat that) is proved alive by the pong rather than torn down.
 	go func() {
-		timer := time.NewTimer(l.opt.Silence)
+		half := l.opt.Silence / 2
+		timer := time.NewTimer(half)
 		defer timer.Stop()
+		probing := false
 		for {
 			select {
 			case <-connCtx.Done():
@@ -337,11 +341,23 @@ func (l *Link) session(ctx context.Context) (bool, error) {
 					default:
 					}
 				}
-				timer.Reset(l.opt.Silence)
+				probing = false
+				timer.Reset(half)
 			case <-timer.C:
-				l.log.Warn("device link silent", "for", l.opt.Silence)
-				_ = conn.CloseNow()
-				return
+				if probing {
+					l.log.Warn("device link silent", "for", l.opt.Silence)
+					_ = conn.CloseNow()
+					return
+				}
+				probing = true
+				timer.Reset(half)
+				go func() {
+					pingCtx, cancel := context.WithTimeout(connCtx, half)
+					defer cancel()
+					if conn.Ping(pingCtx) == nil {
+						touch()
+					}
+				}()
 			}
 		}
 	}()
@@ -431,7 +447,7 @@ func (l *Link) hello() map[string]any {
 		"arch":           runtime.GOARCH,
 		"shell":          shell,
 		"home":           home,
-		"capabilities":   map[string]any{"exec": true, "fs": []string{"stat", "list", "read", "write", "mkdir"}, "pty": false},
+		"capabilities":   map[string]any{"exec": true, "fs": exec.FSMethods, "pty": false},
 		"sessions":       nonNil(l.opt.Sessions()),
 		"known":          l.known(),
 	}
@@ -571,7 +587,9 @@ func (l *Link) run(ctx context.Context, id, method string, params json.RawMessag
 		}
 	}
 	req := exec.Request{Method: method, Params: params, Session: action.Session}
-	if method == "exec.run" {
+	// Only a command run as one streams its output: a file read the server does through the shell
+	// (intent read) would otherwise cross the link twice.
+	if method == "exec.run" && intentOf(params) == "exec" {
 		out := newOutputStream(l, id)
 		defer out.close()
 		req.Output = out

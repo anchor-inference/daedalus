@@ -309,3 +309,37 @@ func TestCancelEndsTheCommandAndOutputStreams(t *testing.T) {
 		t.Fatal("the command outlived its cancel")
 	}
 }
+
+// A quiet link to a server that never pings stays up on the client's own pings.
+func TestAQuietLinkStaysUp(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("rig is POSIX")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	srv := fakeserver.New()
+	defer srv.Close()
+	srv.AddToken("dcl_test", "dev-1")
+	ex, err := exec.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	connects := 0
+	link := device.New(device.Options{Server: srv.URL, Token: "dcl_test", ClientVersion: "test", Executor: ex, Silence: 400 * time.Millisecond,
+		MinBackoff: 20 * time.Millisecond, OnStatus: func(s device.Status) {
+			if s.State == device.Connected {
+				mu.Lock()
+				connects++
+				mu.Unlock()
+			}
+		}})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = link.Run(ctx)
+	mu.Lock()
+	defer mu.Unlock()
+	if connects != 1 {
+		t.Errorf("the link connected %d times in 2 s of silence", connects)
+	}
+}

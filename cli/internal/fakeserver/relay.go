@@ -181,7 +181,8 @@ func (s *Server) Call(ctx context.Context, id, method string, params map[string]
 	ch := make(chan rpcResponse, 4)
 	s.mu.Lock()
 	s.calls[id] = ch
-	resultID := id + "#result"
+	// The server's own form of a device.result request's id.
+	resultID := id + "/result"
 	s.calls[resultID] = ch
 	s.mu.Unlock()
 	defer func() {
@@ -209,7 +210,7 @@ func (s *Server) Call(ctx context.Context, id, method string, params map[string]
 			case "":
 				return nil, nil, "unknown"
 			case "done":
-				ask, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": resultID, "method": "device.result", "params": map[string]any{"id": id}})
+				ask, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": resultID, "method": "device.result", "params": map[string]any{"id": id, "_meta": params["_meta"]}})
 				_ = conn.Write(ctx, websocket.MessageText, ask)
 			}
 		} else {

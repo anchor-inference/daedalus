@@ -174,3 +174,99 @@ func TestExecRunsInTheFolder(t *testing.T) {
 		t.Errorf("mkdir: %v %v", made, err)
 	}
 }
+
+func TestFindAndSearch(t *testing.T) {
+	e, root := newExecutor(t)
+	files := map[string]string{
+		"main.go":               "package main\nfunc main() {}\n",
+		"pkg/util/util.go":      "package util\n// TODO: tidy\nfunc Tidy() {}\n",
+		"pkg/util/util_test.go": "package util\n",
+		"README.md":             "todo: write\n",
+		"node_modules/x/a.go":   "package x // TODO\n",
+		".hidden/h.go":          "package h // TODO\n",
+		"bin.dat":               "TODO\x00\x01",
+		".ssh/id_ed25519":       "TODO secret\n",
+	}
+	for name, body := range files {
+		p := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res, err := call(t, e, "fs.find", map[string]any{"path": root, "pattern": "*.go", "limit": 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, p := range res["paths"].([]any) {
+		got = append(got, filepath.ToSlash(p.(string)))
+	}
+	want := []string{".hidden/h.go", "main.go", "pkg/util/util.go", "pkg/util/util_test.go"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("find *.go: %v, want %v", got, want)
+	}
+	// A pattern on the relative path, where `*` crosses folders as Python's fnmatch does.
+	res, _ = call(t, e, "fs.find", map[string]any{"path": root, "pattern": "pkg/*_test.go"})
+	if len(res["paths"].([]any)) != 1 {
+		t.Errorf("find pkg/*_test.go: %v", res["paths"])
+	}
+	res, _ = call(t, e, "fs.find", map[string]any{"path": root, "pattern": "*.go", "limit": 2})
+	if len(res["paths"].([]any)) != 2 || res["truncated"] != true {
+		t.Errorf("a limited find: %v", res)
+	}
+
+	res, err = call(t, e, "fs.search", map[string]any{"path": root, "pattern": "TODO", "case_insensitive": true, "limit": 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	for _, l := range res["lines"].([]any) {
+		lines = append(lines, l.(string))
+	}
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, filepath.Join(root, "pkg", "util", "util.go")+":2:// TODO: tidy") || !strings.Contains(joined, "README.md:1:todo: write") {
+		t.Errorf("search: %q", joined)
+	}
+	for _, skipped := range []string{"node_modules", ".hidden", "bin.dat", "id_ed25519"} {
+		if strings.Contains(joined, skipped) {
+			t.Errorf("search reached %s: %q", skipped, joined)
+		}
+	}
+	res, _ = call(t, e, "fs.search", map[string]any{"path": root, "pattern": "TODO", "glob": "*.md"})
+	if n := len(res["lines"].([]any)); n != 0 {
+		t.Errorf("case-sensitive TODO in *.md found %d lines", n)
+	}
+	if _, err := call(t, e, "fs.search", map[string]any{"path": root, "pattern": "("}); err == nil || err.Code != CodeInvalidParams {
+		t.Errorf("a broken pattern: %v", err)
+	}
+	if _, err := call(t, e, "fs.find", map[string]any{"path": filepath.Dir(root), "pattern": "*"}); err == nil || reasonOf(err) != ReasonOutsideRoot {
+		t.Errorf("find outside the folder: %v", err)
+	}
+}
+
+func TestFnmatchIsPythons(t *testing.T) {
+	cases := []struct {
+		pattern, name string
+		match         bool
+	}{
+		{"*.go", "a/b/c.go", true},
+		{"a?c", "abc", true},
+		{"[!a]bc", "xbc", true},
+		{"[!a]bc", "abc", false},
+		{"[ab]*", "b.txt", true},
+		{"a.b", "aXb", false},
+		{"[", "[", true},
+	}
+	for _, c := range cases {
+		re, err := fnmatch(c.pattern)
+		if err != nil {
+			t.Fatalf("%q: %v", c.pattern, err)
+		}
+		if re.MatchString(c.name) != c.match {
+			t.Errorf("fnmatch(%q, %q) = %v", c.name, c.pattern, !c.match)
+		}
+	}
+}

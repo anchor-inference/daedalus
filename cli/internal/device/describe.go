@@ -70,3 +70,12 @@ func Script(argv []string) string {
 	}
 	return strings.Join(argv, " ")
 }
+
+// intentOf is the server's _meta.intent of a request.
+func intentOf(params json.RawMessage) string {
+	var p struct {
+		Meta meta `json:"_meta"`
+	}
+	_ = json.Unmarshal(params, &p)
+	return p.Meta.Intent
+}
