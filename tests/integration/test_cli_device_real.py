@@ -25,7 +25,7 @@ from daedalus.host import call_scope
 from daedalus.remote.hands import DeviceExecBackend
 from daedalus.stores.database import Database
 from tests.support.waiting import until
-from tests.unit.test_remote_relay import DEVICE, TOKEN, Rig, _tool_results, rig, root  # noqa: F401 — root is the fixture
+from tests.unit.test_remote_relay import DEVICE, TOKEN, Rig, _tool_results, rig
 from tests.unit.test_session_runner import ScriptedProvider
 
 BINARY = os.environ.get("DAEDALUS_CLI_DEVICE_TEST_BIN", "")
@@ -34,6 +34,13 @@ pytestmark = [
     pytest.mark.skipif(os.environ.get("DAEDALUS_INTEGRATION") != "1", reason="set DAEDALUS_INTEGRATION=1 to run"),
     pytest.mark.skipif(not BINARY or not Path(BINARY).is_file(), reason="set DAEDALUS_CLI_DEVICE_TEST_BIN to the built cli/internal/device test binary"),
 ]
+
+
+@pytest.fixture
+def root(tmp_path: Path) -> Path:
+    folder = tmp_path / "project"
+    folder.mkdir()
+    return folder.resolve()
 
 
 class GoClient:
