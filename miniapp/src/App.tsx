@@ -31,6 +31,7 @@ import { insideTerminal } from "./terminal/keys";
 import { startEvents } from "./events";
 import { useSummary } from "./notifications";
 import { NotificationToasts } from "./toasts";
+import { PairingHost } from "./remote";
 import { PetHost } from "./pethost";
 import { UpdateHost } from "./updatedialog";
 import { listenForOpen, syncPush } from "./push";
@@ -724,6 +725,7 @@ export function App() {
       {!wide && <AppDrawer mode={mode} nav={nav} waiting={waiting} selfdev={selfdev} projects={agentProjects} onProjects={() => setSwitching(true)} />}
       {picking && sessionId && <SessionPicker title={t("app.beside.title")} exclude={sessionId} onPick={(id) => { navigate(sessionPath(sessionId, id)); setPicking(false); }} onClose={() => setPicking(false)} />}
       <NotificationToasts />
+      <PairingHost />
       <PetHost needsReply={notifications.needs_you > 0} activity={route.screen} />
       <UpdateHost />
       <SchedulesDialogHost onOpenSession={open} />

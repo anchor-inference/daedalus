@@ -26,6 +26,7 @@ import { ActionSheet, Banner, Chip, ChipBar, EmptyState, IconButton, ListRow, Ne
 import { NewAgentSheet, useSessionCommands } from "./Sessions";
 import { asChatCommand } from "../chatproject";
 import { KindTabs, byTab, kindIcon, kindPlate, tabCounts, useKindTab } from "../chatkind";
+import { remoteRowWords } from "../remote";
 
 type View = "all" | "attention" | "working" | "loops" | "archive";
 type SearchList = SessionList & { semantic: boolean; reason: string; partial: boolean; indexing: boolean };
@@ -85,6 +86,7 @@ function RowMeta({ row, fork }: { row: Row; fork?: number }) {
   const onHost = useEnvironments().data?.docker && s.env === "host";
   const live = s.status === "waiting" || s.status === "running" || s.status === "failed";
   const extra = [
+    remoteRowWords(s),
     s.metadata?.loop ? loopLine(s) : "",
     fork ? t("agents.fork.at", { n: fork }) : "",
     s.model ? shortModel(s.model, 28) : "",
