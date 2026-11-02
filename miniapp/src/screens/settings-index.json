@@ -37,6 +37,12 @@
       "synonyms": ["login", "sign in", "secrets", "2FA", "two-factor", "вход", "секреты", "пароль", "двухфакторная"]
     },
     {
+      "id": "devices", "group": "you", "icon": "laptop",
+      "title": { "en": "Devices", "ru": "Устройства" },
+      "about": { "en": "The computers paired with daedalus-cli, the terminal client: pairing a new one by its code, renaming and revoking.", "ru": "Компьютеры, подключённые через daedalus-cli, терминальный клиент: подключение нового по коду, переименование и отзыв." },
+      "synonyms": ["daedalus-cli", "CLI", "terminal", "pairing", "pair", "laptop", "remote", "терминал", "подключение", "ноутбук", "удалённо", "сопряжение"]
+    },
+    {
       "id": "models", "group": "work", "icon": "model",
       "title": { "en": "Models & providers", "ru": "Модели и клиенты" },
       "about": { "en": "The models sessions use, the default and the fallbacks, the image model, and the provider endpoints with their keys.", "ru": "Модели сессий, модель по умолчанию и запасные, модель для картинок, клиенты провайдеров и их ключи." },
@@ -104,6 +110,18 @@
     }
   ],
   "fields": [
+    {
+      "section": "devices", "anchor": "devices.pair", "config": null,
+      "title": { "en": "Pair a computer", "ru": "Подключить компьютер" },
+      "about": { "en": "How to install daedalus-cli and sign it in to this server, and a field for the code a terminal prints when its request did not appear.", "ru": "Как установить daedalus-cli и войти им на этот сервер, и поле для кода, который печатает терминал, если запрос не появился." },
+      "synonyms": ["pairing code", "device code", "login", "install CLI", "код подключения", "код из терминала", "установить CLI"]
+    },
+    {
+      "section": "devices", "anchor": "devices.list", "config": null,
+      "title": { "en": "Paired computers", "ru": "Подключённые компьютеры" },
+      "about": { "en": "Each paired computer with its system, when it was last seen, whether it is connected, its chats and its token's age; rename or revoke it here.", "ru": "Каждый подключённый компьютер: система, когда был в сети, подключён ли сейчас, его чаты и возраст токена; здесь же переименование и отзыв." },
+      "synonyms": ["revoke device", "rename device", "token", "отозвать устройство", "переименовать", "токен"]
+    },
     {
       "section": "appearance", "anchor": "language", "config": null,
       "title": { "en": "Language / Язык", "ru": "Язык / Language" },

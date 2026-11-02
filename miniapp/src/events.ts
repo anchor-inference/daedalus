@@ -423,6 +423,9 @@ export function wireCache(to: { on: typeof onEvent; prime: typeof prime; invalid
       to.invalidate("/api/notifications?");
     }),
     to.on(["run.", "session.", "ask.", "permission."], sessionsSoon),
+    // A remote chat's row names its computer and says when a turn waits for it: a computer renamed,
+    // dropping or coming back, and a turn parking on it, change rows the run events do not.
+    to.on(["remote.waiting", "device.connection", "device.changed"], sessionsSoon),
     // A session made or deleted changes the projects' own lists (their chats and counts) as well.
     to.on(["session.created", "session.deleted"], () => to.invalidate("/api/projects")),
     // A pin made on another screen moves a row into or out of the pinned block. Only the pin: the

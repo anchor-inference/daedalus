@@ -7,7 +7,7 @@ export type IconName =
   | "download" | "share" | "split" | "key" | "link" | "unlink" | "down" | "copy" | "paste" | "columns" | "eye" | "mic" | "fork" | "undo" | "phone" | "expand" | "external" | "reload" | "forward" | "panel" | "chevron" | "bolt" | "volume" | "mute" | "lock" | "bell" | "shield" | "conductor" | "journal" | "alert" | "compass" | "user" | "ask" | "archive" | "braces" | "sidebar" | "reply" | "flag" | "menu" | "pin" | "pushpin"
   | "compose" | "grid" | "vdots" | "camera" | "region" | "offline" | "logo" | "sliders" | "apps" | "import" | "eyeoff"
   | "hand" | "ffwd"
-  | "monitor"
+  | "monitor" | "laptop"
   | "utensils" | "cart" | "dumbbell" | "plane" | "home" | "list" | "heart" | "book" | "wand"
   | "chat" | "headset" | "database" | "mail" | "cloud" | "checkcircle";
 
@@ -100,6 +100,9 @@ const PATHS: Record<IconName, string> = {
   eye: "M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
   mic: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM6 11a6 6 0 0 0 12 0M12 17v4M9 21h6",
   monitor: "M3 4h18v12H3zM8 20h8M12 16v4",
+  // A remote chat and a paired device: a laptop whose screen holds a prompt, apart from the monitor on
+  // its stand (the Computer control) and the bare window of a terminal in the dock.
+  laptop: "M5 5h14v10H5zM2 19h20M8.5 8.5l2 1.75-2 1.75M12.5 12h3",
   phone: "M8 3h8a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM11 18h2",
   expand: "M15 4h5v5M20 4l-6 6M9 20H4v-5M4 20l6-6",
   external: "M14 4h6v6M20 4l-9 9M18 13v6H5V6h6",

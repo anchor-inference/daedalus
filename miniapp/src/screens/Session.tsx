@@ -50,6 +50,7 @@ import { turnFor, withOlder } from "../anchor";
 import { ChatSearch } from "../chatsearch";
 import { ComputerBanner, ComputerButton, ComputerSheet, useComputer } from "../computer";
 import { takeComputerSheet } from "../chatkind";
+import { RemoteHead, RemotePaused, remoteOf, remotePlace, useRemoteState } from "../remote";
 import { useMedia } from "../ui/index";
 import { SCROLL_KEYS, Windowed, keepOpened, openedLine, stillAtEnd, type OpenedLine, type WindowedHandle } from "../virtual";
 import { DICT, plural, t } from "../i18n";
@@ -709,6 +710,15 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     }
     refreshSoon("state");
   }, [id, refreshSoon]);
+  // A remote chat's computer connecting, dropping, being renamed or holding the turn changes the
+  // header and the paused banner; the host says so on the global stream, and the session's own
+  // stream does not. The device's events name the device, not the session.
+  const remoteDevice = useRef("");
+  remoteDevice.current = detail?.kind === "remote" ? detail.remote?.device_id ?? "" : "";
+  useEvent(["session.controlling", "remote.waiting", "remote.guard", "device.connection", "device.changed"], (event) => {
+    const device = String(event.payload?.device_id ?? "");
+    if (event.session_id === id || (device && device === remoteDevice.current)) refreshSoon("state");
+  }, [id, refreshSoon]);
   const approve = useCallback(
     async (a: Approval) => {
       try {
@@ -1281,6 +1291,18 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     }
   }
 
+  // A turn paused for a remote chat's computer ends the way any run is stopped; the question names the
+  // computer, because the run is not working but waiting, and "Stop run" would describe something else.
+  async function cancelPaused(device: string) {
+    if (!(await confirmDialog({ title: t("remote.cancel.title"), body: t("remote.cancel.body", { device }), action: t("remote.paused.cancel"), danger: true, cancel: t("remote.cancel.keep") }))) return;
+    try {
+      await api.post(`/api/sessions/${id}/stop`);
+      toast(t("remote.cancelled"));
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
+
   async function rename(title: string) {
     setEditingTitle(null);
     if (!title.trim() || title.trim() === detail?.title) return;
@@ -1587,13 +1609,20 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // The folder the chat works in, while it is being carried between the container and the host.
   const folderMove = useFolderMove(detail?.folder_id ?? detail?.project?.folders?.[0]?.id);
   const effortText = detail ? effortWord(detail.reasoning_effort, detail.thinking !== false) : "";
+  // A remote chat names its computer and folder, and says when the computer is not there; a turn held
+  // for it is a pause, not work, so the live bar steps aside for the banner that says what to do.
+  const remote = remoteOf(detail);
+  const remoteNow = useRemoteState(remote);
+  const remotePaused = remoteNow === "paused";
   const phoneSub = offline ? <StateSub tone="offline">{t("session.phone.reconnecting")}</StateSub>
+    : remote && remoteNow && remoteNow !== "connected" ? <StateSub tone={remotePaused ? "waiting" : "offline"}>{t(`remote.state.${remoteNow}`)}</StateSub>
     : compacting ? <StateSub tone="compacting">{t("session.compacting.bar")}</StateSub>
     : busy ? <LiveSub status={status} base={tail} live={live} />
     : saving ? <StateSub tone="saving">{t("session.livebar.saving")}</StateSub>
     : status === "failed" ? <StateSub tone="failed">{statusWord("failed")}</StateSub>
     : jobsPending > 0 ? <StateSub tone="running">{plural("session.jobs.waiting", jobsPending)}</StateSub>
     : ahead ? <span>{t("session.compacting.ahead", { what: compactionStage(ahead) })}</span>
+    : remote ? <span className="ph-chat-remote">{remotePlace(remote)}</span>
     : detail ? <span className={detail.fallback ? "ph-chat-fallback" : undefined}>{shortModel(detail.fallback?.to ?? detail.model, 28)}{effortText ? ` · ${effortText}` : ""}</span>
     : null;
   const phoneChip = phone && browserShown
@@ -1618,6 +1647,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           secret={isPrivate(detail)}
         />
         {offline && <Banner strip tone="warn" icon="reload" className="ph-chat-strip">{t("session.phone.reconnecting")}</Banner>}
+        {remote && <RemotePaused b={remote} onCancel={() => cancelPaused(remote.device_name)} />}
       </> : <div className={`chat-head ${busy || saving || compacting ? "live" : ""}`}>
         {(pane || phone) && (
           <button className="iconbtn" onClick={onBack} aria-label={t(pane === "right" ? "session.closepane" : "shell.back")} title={t(pane === "right" ? "session.closepane" : "shell.back")}>
@@ -1655,7 +1685,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               {isProject(detail.project) && detail.project.name !== detail.title && <><span className="truncate chat-sub-project">{detail.project.name}</span><span className="sep">·</span></>}
               <span className="truncate chat-sub-model">{shortModel(detail.fallback?.to ?? detail.model, 28)}{effortText && <span className="chat-sub-effort"> {effortText}</span>}</span>
               {detail.imported && <><span className="sep">·</span><span className="truncate chat-sub-from">{t("imp.head.from", { name: harnessMeta(detail.imported.harness, detail.imported.harness_name).name })}</span></>}
-              {compacting ? null : busy || saving ? <><span className="sep">·</span><LiveBar status={status} saving={saving} base={tail} live={live} workspace={detail.workspace} onJump={jumpToBottom} /></>
+              {remote && remoteNow && <><span className="sep">·</span><RemoteHead b={remote} state={remoteNow} /></>}
+              {compacting ? null : (busy || saving) && !remotePaused ? <><span className="sep">·</span><LiveBar status={status} saving={saving} base={tail} live={live} workspace={detail.workspace} onJump={jumpToBottom} /></>
                 : status === "failed" ? <><span className="sep">·</span><span className="head-status failed" role="status"><b>{statusWord(status)}</b></span></>
                 : jobsPending > 0 ? <><span className="sep">·</span><button type="button" className="head-status jobs-pending" onClick={() => panel.open("jobs")}>{plural("session.jobs.waiting", jobsPending)}</button></> : null}
               {ahead && <><span className="sep">·</span><AheadStatus c={ahead} /></>}
@@ -1732,6 +1763,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         {(busy || saving || compacting) && <HeadProgress status={status} compacting={compacting} />}
       </div>}
       {staffId && <StaffHeader projectId={focus!.projectId} staffId={staffId} toast={toast} />}
+      {!bare && !(phone && !pane) && remote && <RemotePaused b={remote} onCancel={() => cancelPaused(remote.device_name)} />}
       {banner}
 
       <div ref={body} className={`chat-body ${panel.state.tab && !phone ? "with-panel" : ""} ${panel.state.expanded && !phone ? "panel-full" : ""}`} style={{ ["--panel-w" as string]: `${panelPct}%` }}>

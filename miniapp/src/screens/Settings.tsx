@@ -25,6 +25,7 @@ import { describeIntegration, type IntegrationRow } from "../integrationHealth";
 import { Dropdown, LangPicker, MultiDropdown, Segmented, Switch } from "../ui/index";
 import { NumInput, NumRow, Row, TextBlock } from "../settingsrow";
 import { DesktopPanel } from "./DesktopSettings";
+import { DevicesPanel } from "./DevicesSettings";
 import { AppearancePanel } from "./Appearance";
 import { NavigationSettings } from "./NavigationSettings";
 import { MemorySettings } from "./MemorySettings";
@@ -1009,7 +1010,7 @@ function SecurityTab({ toast }: { toast: (t: string) => void }) {
   );
 }
 
-type Section = "appearance" | "desktop" | "navigation" | "models" | "rules" | "limits" | "memory" | "environments" | "tools" | "voice" | "components" | "dependencies" | "chat" | "notifications" | "security" | "heartbeat" | "about";
+type Section = "appearance" | "desktop" | "devices" | "navigation" | "models" | "rules" | "limits" | "memory" | "environments" | "tools" | "voice" | "components" | "dependencies" | "chat" | "notifications" | "security" | "heartbeat" | "about";
 /** The sections, grouped the way the page lists them. Their ids, groups and icons are read from the
  *  settings index beside this file — the same table the agent's documentation search answers from —
  *  so a section renamed there is renamed in the links the agent gives out as well. The words on the
@@ -1229,6 +1230,7 @@ export function SettingsScreen({ toast, section }: { toast: (t: string) => void;
   const body = (sec: Section) => {
     if (sec === "appearance") return <AppearancePanel />;
     if (sec === "desktop") return <DesktopPanel />;
+    if (sec === "devices") return <DevicesPanel toast={toast} />;
     if (!s) return <div className="empty">{t("common.loading")}</div>;
     const kinds = s.provider_kinds ?? DEFAULT_KINDS;
     const providerIds = Object.keys(s.providers ?? {});

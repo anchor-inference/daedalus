@@ -808,11 +808,68 @@ export type SessionSummary = {
   /** An ordinary chat, one about the operator's computer, or one in their Chrome (chatkind.tsx);
    *  absent from a host older than the column, which is the same as "chat". What the chat was started
    *  as: fixed at creation, never changed by what it later does. */
-  kind?: "chat" | "computer" | "chrome";
+  kind?: "chat" | "computer" | "chrome" | "remote";
   /** What the chat controls right now: a live tab group in the operator's Chrome, a live lease on their
-   *  computer. Derived by the host and cleared once control is released or the chat goes idle, so a
-   *  chat that drove the browser once is not a browser chat forever (chatkind.tsx). */
-  controlling?: ("chrome" | "computer")[];
+   *  computer, a daedalus-cli connected to it from a terminal. Derived by the host and cleared once
+   *  control is released or the chat goes idle, so a chat that drove the browser once is not a browser
+   *  chat forever (chatkind.tsx). */
+  controlling?: ("chrome" | "computer" | "remote")[];
+  /** The terminal a remote chat is bound to (remote.tsx); absent for every other chat. */
+  remote?: RemoteBinding | null;
+};
+
+/**
+ * Where a remote chat's hands are (docs/architecture/cli.md, "What a session shows about its device"):
+ * the device that runs daedalus-cli and the folder it was started in, whether its link is up now, the
+ * terminal's own guard, and the turn parked on a tool call while the device is away. The session's
+ * view carries `waiting` as the parked calls; a row of the list carries it as a plain yes or no.
+ */
+export type RemoteBinding = {
+  device_id: string;
+  device_name: string;
+  cwd: string;
+  connected: boolean;
+  guard?: "ask" | "auto" | "plan" | null;
+  waiting?: RemoteWaiting | boolean | null;
+};
+
+export type RemoteWaiting = { since: string; calls: { tool_call_id: string; tool: string }[] };
+
+/** A computer paired with daedalus-cli, as `GET /api/cli/devices` lists it. */
+export type CliDevice = {
+  id: string;
+  name: string;
+  hostname: string;
+  os: string;
+  arch: string;
+  client_version: string;
+  /** When it was paired, which is when its token was issued. */
+  paired_at: string;
+  approved_via: "app" | "telegram";
+  last_seen_at: string | null;
+  last_address: string;
+  /** When the token lapses unless it is used before then. */
+  expires_at: string;
+  revoked_at: string | null;
+  /** Whether its link to the server is up now. */
+  connected: boolean;
+  /** How many conversations are bound to it. */
+  sessions: number;
+};
+
+/** A daedalus-cli asking to be paired, as `GET /api/cli/pairs` lists it. */
+export type PairRequest = {
+  id: string;
+  user_code: string;
+  name: string;
+  hostname: string;
+  os: string;
+  arch: string;
+  client_version: string;
+  address: string;
+  created_at: string;
+  expires_at: string;
+  state: "pending" | "approved" | "denied" | "delivered" | "expired";
 };
 
 export type TaskView = {
@@ -1059,6 +1116,10 @@ export type SessionDetail = {
   workspace_own?: boolean;
   /** Where its commands and file tools run: "host" for one working on the host from the container. */
   env?: "container" | "host";
+  /** What it was started as (chatkind.tsx); a remote chat carries its terminal in `remote`. */
+  kind?: SessionSummary["kind"];
+  controlling?: SessionSummary["controlling"];
+  remote?: RemoteBinding | null;
   workspace_sessions?: { id: string; title: string }[];
   /** The project this session belongs to. */
   project: ProjectRef;
