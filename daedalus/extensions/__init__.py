@@ -74,6 +74,7 @@ EXTENSIONS = (
     "daedalus.extensions.prompt_coach",
     "daedalus.extensions.btw",
     "daedalus.extensions.autopilot",
+    "daedalus.extensions.remote_relay",
     "daedalus.extensions.api",
 )
 

@@ -442,7 +442,8 @@ class Scheduler:
         if manager is None:
             return
         timeout = timedelta(minutes=self.app.config.scheduler.question_timeout_minutes)
-        rows = await self.app.db.fetchall("SELECT session_id, created_at FROM pending_questions")
+        # A turn waiting for its terminal asked nothing, and it waits for the terminal however long that takes.
+        rows = await self.app.db.fetchall("SELECT session_id, created_at FROM pending_questions WHERE kind != 'external_call'")
         for row in rows:
             if now - datetime.fromisoformat(row["created_at"]) < timeout:
                 continue

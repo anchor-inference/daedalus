@@ -18,6 +18,7 @@ from typing import Any, Literal
 from protocore.contracts.tools import Tool, ToolContext
 from protocore.contracts.types import ToolResult
 
+from daedalus.host import call_scope
 from daedalus.security import redact
 
 _ARG_ERROR = re.compile(r"unexpected keyword argument '(?P<extra>\w+)'|missing \d+ required (?:positional|keyword-only) arguments?: (?P<missing>.+)$")
@@ -47,6 +48,9 @@ def _guarded(tool: Tool) -> Tool:
     original = tool.invoke
 
     async def invoke(context: ToolContext, arguments: dict[str, Any]) -> ToolResult:
+        # The call this invocation serves, for a backend that runs its commands on another machine
+        # (``daedalus.host.call_scope``): opened here because every tool passes through here.
+        scope = call_scope.CURRENT.set(call_scope.CallScope(context.session_id, str(context.metadata.get("tool_call_id") or ""), tool.name))
         try:
             return _concealed(await original(context, arguments))
         except TypeError as exc:
@@ -56,6 +60,8 @@ def _guarded(tool: Tool) -> Tool:
             if explained is None:
                 raise
             return ToolResult(tool_call_id=str(context.metadata.get("tool_call_id") or ""), content=explained, is_error=True)
+        finally:
+            call_scope.CURRENT.reset(scope)
 
     tool.invoke = invoke  # type: ignore[method-assign]
     return tool

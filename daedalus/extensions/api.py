@@ -109,6 +109,7 @@ from daedalus.extensions import (
     api_provider_holds,
     api_recurring,
     api_remote,
+    api_remote_relay,
     api_resource_profiles,
     api_reveal,
     api_runtime,
@@ -157,7 +158,8 @@ from daedalus.host.deliverables import WORKTREE_PANE, parse_worktree_pane, secre
 from daedalus.host.deliverables import locate as locate_deliverable
 from daedalus.host.dependencies import DependencyPlanner
 from daedalus.host.events import EventFilter, event_stream, streamed_types
-from daedalus.host.host_exec import BRIDGE_DOWN, HostExecBackend
+from daedalus.host.filesystem import foreign_paths, machine_of
+from daedalus.host.host_exec import BRIDGE_DOWN
 from daedalus.host.policy import sealed_root
 from daedalus.host.predict import Predictor
 from daedalus.host.presence import MAX_ID_LENGTH, MAX_PROJECTS, MAX_SESSIONS, MAX_TERMINALS, PresenceReport
@@ -179,6 +181,7 @@ from daedalus.providers.image_fit import sniffed_mime
 from daedalus.providers.llamacpp import discover_llamacpp
 from daedalus.providers.openai_compat import UsageRecord
 from daedalus.remote import door as remote_door
+from daedalus.remote.turns import EXTERNAL_CALL
 from daedalus.search.service import ConversationSearch, SearchBusy
 from daedalus.security import redact
 from daedalus.speech import catalog as speech_catalog
@@ -258,6 +261,8 @@ VOICE_AUDIO_MAX = 25 << 20
 """One spoken utterance, not a recording session: anything larger is a mistake, not speech."""
 VOICE_NOTE_MAX = 50 << 20
 """A composer voice note. The site sends 16 kHz WAV, so this is over twenty minutes of talking."""
+SENT_FROM_MACHINE_MAX = 50 << 20
+"""The largest file a remote conversation sent that is read back whole from the operator's machine."""
 KEPT_RECORDINGS = ".voice-notes"
 """Where, under a session's inbox, a voice note waits until its words are in the composer."""
 KEPT_NAME = re.compile(r"[0-9a-f]{12}\.[a-z0-9]{1,5}")
@@ -1763,6 +1768,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_browsers.register(api, app, auth)
     # The operator's own Chrome: its card, a conversation's switch, and a server's pairing and relay.
     api_browser_user.register(api, app, auth)
+    api_remote_relay.register(api, app, auth)
     # The operator's own desktop, natively: the Computer control's state, its grant, Stop and Resume.
     api_computer.register(api, app, auth)
 
@@ -2448,7 +2454,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         """The question the session waits on, and, when it is a staff member's question someone
         already answered, who and with what: the member's card stayed open with its options while
         answering it only returned "already answered by the orchestrator"."""
-        if state.pending is None:
+        if state.pending is None or state.pending.kind == EXTERNAL_CALL:
+            # A turn waiting for its terminal is no question: the session's ``remote.waiting`` says it.
             return None
         view = dict(state.pending.payload)
         team = app.extensions.get("staff")
@@ -2866,9 +2873,13 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                         raise HTTPException(404, "the call named no file")
                     if state.project is not None and manager.is_orchestrator(state):
                         return await _sent_by_orchestrator(state.project, raw.strip(), request.headers.get("range", ""))
-                    if state.services is not None and isinstance(state.services.exec_backend, HostExecBackend):
+                    backend = state.services.exec_backend if state.services is not None else None
+                    if machine_of(backend) == "host":
                         # The call ran on the host and named a file there, which this process cannot open.
                         return await _sent_from_host(state, raw.strip(), request.headers.get("range", ""))
+                    if foreign_paths(backend):
+                        # The call ran on the operator's terminal: the file is read back through it.
+                        return await _sent_from_machine(state, raw.strip())
                     candidate = Path(raw).expanduser()
                     target = candidate if candidate.is_absolute() else state.workspace / candidate
                     # The path is read back out of the transcript, so it is checked again rather than
@@ -2943,6 +2954,31 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             if target == root or target.startswith(root.rstrip("/") + "/"):
                 return await _host_pane(root).download(posixpath.relpath(target, root), range_header)
         raise HTTPException(403, "that file is outside this project")
+
+    async def _sent_from_machine(state: Any, raw: str) -> Response:
+        """A file a remote conversation sent, read back from the operator's machine through its
+        terminal, whole and bounded: inside the folder the conversation is bound to, as its tools
+        were. A terminal that is away answers 503; the file is still there when it is back."""
+        services = state.services
+
+        def slashed(path: str) -> str:
+            # A Windows terminal spells its paths with backslashes; compared here in one spelling.
+            return posixpath.normpath(path.replace("\\", "/"))
+
+        work = str(services.workspace_dir)
+        target = raw if raw.startswith("/") or (len(raw) > 2 and raw[1] == ":") else f"{work}/{raw}"
+        if slashed(target) != slashed(work) and not slashed(target).startswith(slashed(work).rstrip("/") + "/"):
+            raise HTTPException(403, "that file is outside this conversation's folder")
+        try:
+            data = await services.fs.read_bytes(Path(target), limit=SENT_FROM_MACHINE_MAX)
+        except FileNotFoundError:
+            raise HTTPException(404, "the file is gone") from None
+        except ValueError as exc:
+            raise HTTPException(413, str(exc)) from None
+        except OSError as exc:
+            raise HTTPException(503, str(exc)) from None
+        name = posixpath.basename(slashed(target)) or "file"
+        return Response(data, media_type=mimetypes.guess_type(name)[0] or "application/octet-stream", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
     @api.post("/api/media/access")
     async def media_access(request: Request, _: dict[str, Any] = Depends(auth)) -> JSONResponse:
@@ -5561,7 +5597,10 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         services = state.services
         on_host = False
         if not folder_id:
-            if services is not None and isinstance(services.exec_backend, HostExecBackend):
+            backend = services.exec_backend if services is not None else None
+            if foreign_paths(backend) and machine_of(backend) != "host":
+                raise HTTPException(409, "this conversation's files are on the operator's machine, where its terminal works; the pane does not reach them yet")
+            if services is not None and machine_of(backend) == "host":
                 root = services.workspace_dir
                 on_host = True
             else:

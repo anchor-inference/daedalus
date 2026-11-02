@@ -6,6 +6,26 @@ from dataclasses import dataclass, field
 from typing import Any
 
 ENVS = ("container", "host")
+"""The environments that have a terminal daemon of their own here. A session's tools may also work on a
+device, an operator's terminal client (:func:`device_env`), which has no terminal daemon this service
+reaches yet: its environment is named, and a terminal asked for there is refused by that name."""
+DEVICE_PREFIX = "device:"
+
+
+def device_env(device_id: str) -> str:
+    """The environment of a session whose tools run on a paired terminal client."""
+    return DEVICE_PREFIX + device_id
+
+
+def is_device_env(env: str) -> bool:
+    return env.startswith(DEVICE_PREFIX) and len(env) > len(DEVICE_PREFIX)
+
+
+def unknown_env(env: str) -> str:
+    """Why a terminal cannot be opened in ``env``."""
+    if is_device_env(env):
+        return "a terminal on the operator's own machine through daedalus-cli is not available yet; the conversation's tools run there all the same"
+    return f"an environment is one of {', '.join(ENVS)}, not {env!r}"
 OWNER_KINDS = ("session", "staff", "project", "free")
 STATUSES = ("running", "exited", "lost")
 
@@ -291,6 +311,7 @@ class NoRebuilder(TerminalError):
 
 
 __all__ = [
+    "DEVICE_PREFIX",
     "ENVS",
     "OWNER_KINDS",
     "STATUSES",
@@ -318,4 +339,7 @@ __all__ = [
     "TimedOut",
     "Unsupported",
     "WriteReceipt",
+    "device_env",
+    "is_device_env",
+    "unknown_env",
 ]

@@ -290,7 +290,7 @@ async def test_a_run_cannot_start_while_the_history_is_being_rewritten(settings:
     state = await manager.create_session("locked")
     started: list[str] = []
 
-    async def fake_start(st: Any, message: Any, *, continue_turn: bool = False) -> str:
+    async def fake_start(st: Any, message: Any, *, continue_turn: bool = False, redispatch: bool = False) -> str:
         started.append("run")
         return "run-id"
 

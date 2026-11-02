@@ -3461,6 +3461,34 @@ CREATE UNIQUE INDEX IF NOT EXISTS cli_device_sessions_one_home ON cli_device_ses
 CREATE INDEX IF NOT EXISTS cli_device_sessions_by_session ON cli_device_sessions(session_id);
 """)
 
+# What the server sent, or meant to send, to an operator's terminal (``daedalus.remote.journal``): one
+# row per request of a remote conversation's tool call, written before the request leaves. It is the
+# audit of what the agent ran on the operator's computer, and the delivery record a call parked by a
+# disconnect is handed over again from, possibly by another process after a restart: ``response`` is
+# kept only while the tool call is open. No foreign key to ``sessions``: the audit outlives a deleted
+# conversation, and is pruned by age instead.
+MIGRATIONS.append("""
+CREATE TABLE IF NOT EXISTS remote_calls (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    tool_call_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    device_id TEXT NOT NULL,
+    tool TEXT NOT NULL DEFAULT '',
+    method TEXT NOT NULL,
+    intent TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL,
+    delivery TEXT NOT NULL,
+    outcome TEXT NOT NULL DEFAULT '',
+    response TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS remote_calls_by_session ON remote_calls(session_id, created_at);
+CREATE INDEX IF NOT EXISTS remote_calls_by_device ON remote_calls(device_id, state);
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

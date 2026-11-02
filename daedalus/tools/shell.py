@@ -22,6 +22,7 @@ from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
+from daedalus.host.filesystem import machine_of
 from daedalus.processes import end_tree, read_until_exit
 from daedalus.security import operator_secrets
 from daedalus.tools import search_hint
@@ -683,7 +684,8 @@ class RemoteJob:
 
     @property
     def where(self) -> str:
-        return "host"
+        """The machine it runs on, as the backend names it (``host``, ``device:<id>``)."""
+        return machine_of(self.backend) or "host"
 
     async def refresh(self) -> None:
         """Ask the other machine whether the job still runs; a finished one keeps its exit code.
