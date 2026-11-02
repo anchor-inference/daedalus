@@ -41,22 +41,29 @@ NO_IMAGES = (
 TITLE_CHARS = 80
 
 
-async def held_lease(client: DeskClient, session_id: str) -> dict[str, Any] | None:
-    """The lease this session holds now, with ``remaining_ms`` beside it, or ``None``.
+async def lease_holder(client: DeskClient) -> dict[str, Any] | None:
+    """The lease held now, whichever session holds it, with ``remaining_ms`` beside it, or ``None``.
 
-    A daemon that cannot be reached holds nothing for anyone; it is not an error at the start of a turn."""
+    A daemon that cannot be reached holds nothing for anyone; it is not an error at the start of a turn
+    or in a listing."""
     try:
         status = await client.call("lease.status", {})
     except (DeskError, DeskUnavailable) as exc:
-        logger.debug("no lease read for the turn context: %s", exc)
+        logger.debug("no lease read: %s", exc)
         return None
     lease = (status or {}).get("lease") if isinstance(status, dict) else None
     if not isinstance(lease, dict) or not lease.get("active"):
         return None
     held = lease.get("lease") if isinstance(lease.get("lease"), dict) else {}
-    if str(held.get("session") or "") != session_id:
+    if not held.get("session"):
         return None
     return {**held, "remaining_ms": lease.get("remaining_ms")}
+
+
+async def held_lease(client: DeskClient, session_id: str) -> dict[str, Any] | None:
+    """The lease this session holds now, with ``remaining_ms`` beside it, or ``None``."""
+    held = await lease_holder(client)
+    return held if held is not None and str(held.get("session") or "") == session_id else None
 
 
 def _title(text: Any) -> str:
@@ -170,6 +177,7 @@ __all__ = [
     "grant_steer",
     "granted_line",
     "held_lease",
+    "lease_holder",
     "scope_words",
     "until_words",
 ]

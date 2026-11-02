@@ -1026,7 +1026,7 @@ The calls:
 | `group.close` | `{group}` → `{}`: closes the agent's tabs of the group, its tab group and window; the tabs the operator gave are let go and stay open |
 | `notify` | `{text}` → `{}`: the toast and badge flash of `relay.notify` |
 | `panel.grant` | `{base, token, expires}` → `{}`: the side panel's credential, from the host through `relay.call`. The extension keeps it in `chrome.storage.session` and gives it to the panel's frame alone. A paired Chrome frames the server it was paired with, whatever `base` says; natively `base` must be a loopback address or the grant is refused |
-| `panel.event` | `{session, kind: "needs_you" \| "done", title, waiting, tab?}` → `{}`: a conversation in this Chrome waits for the operator or finished its turn; a notification (unless the operator is looking at that window's panel) whose click opens the panel on it, and the badge counts `waiting` |
+| `panel.event` | `{session, kind: "needs_you" \| "done", title, waiting, tab?}` → `{}`: a conversation of this Chrome waits for the operator or finished its turn; a notification (unless the operator is looking at that window's panel) whose click opens the panel on it, and the badge counts `waiting`. The host sends it as one channel of its notifications (`daedalus.browser.panel.ChromeChannel`): only for this Chrome's conversations — the ones made for it, and any other while it controls it now — only when the notification router decides the entry sounds at all, and then instead of the push and the desktop notification, never beside them |
 
 `Tab` is `{id, group?, opener?, url?, title?}`: `id` is Chrome's tab id, `opener` a tab id of the
 agent's.

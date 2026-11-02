@@ -36,7 +36,7 @@ import { ProjectsPage } from "./Projects";
 import { PhoneImportCard, StartImportCard } from "../imports/ImportedChat";
 import { Sheet } from "../ui/dialogs";
 import { ProjectPickList } from "../projectpick";
-import { type ChatKind, type KindOffers, KindSelect, kindIcon, requestComputerSheet, sessionKind, useKindOffers, useNewChatKind } from "../chatkind";
+import { type ChatKind, type KindOffers, KindSelect, kindIcon, kindPlate, requestComputerSheet, useKindOffers, useNewChatKind } from "../chatkind";
 import { USER_STATUS } from "../browser/yourchrome";
 import { confirmAsync } from "../ui";
 
@@ -190,10 +190,11 @@ function LiveNow({ listing, project, onOpen }: { listing: SessionList | null; pr
       {shown.map((s) => {
         const folder = folders.get(s.project_id);
         const where = folder && isProject(folder) && folder.name !== agentName(s) ? folder.name : "";
+        const plate = kindPlate(s);
         return (
           <div key={s.id} data-session={s.id} className={`start-live-row ${s.status}`} role="link" tabIndex={0} onClick={() => onOpen(s.id)}
             onKeyDown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(s.id); } }}>
-            <span className={`start-live-plate kind-${sessionKind(s)}`} title={sessionKind(s) === "chat" ? undefined : t(`kind.mark.${sessionKind(s)}`)}><Icon name={s.metadata?.loop ? "loop" : kindIcon(sessionKind(s)) ?? "bots"} size={15} />{s.status !== "idle" && <Dot status={s.status} />}</span>
+            <span className={`start-live-plate ${plate.className}`} title={plate.title}><Icon name={s.metadata?.loop ? "loop" : kindIcon(plate.kind) ?? "bots"} size={15} />{s.status !== "idle" && <Dot status={s.status} />}</span>
             <span className="start-live-main">
               <span className="start-live-title truncate">{agentName(s)}</span>
               <span className="start-live-meta"><DesktopLiveMeta s={s} where={where} /></span>
@@ -288,7 +289,7 @@ function PhoneHome({ onOpen, toast, project, projects, model }: { onOpen: (id: s
             <div className={`ph-list ph-live ${offline ? "stale" : ""}`}>
               {shown.map((s) => (
                 <ListRow key={s.id} data={{ session: s.id }} title={agentName(s)} onOpen={() => onOpen(s.id)}
-                  lead={<span className={`ph-sicon kind-${sessionKind(s)}`} title={sessionKind(s) === "chat" ? undefined : t(`kind.mark.${sessionKind(s)}`)}><Icon name={s.metadata?.loop ? "loop" : kindIcon(sessionKind(s)) ?? "bots"} size={18} />{s.status !== "idle" && <span className={`ph-st ${s.status}`} />}</span>}
+                  lead={<span className={`ph-sicon ${kindPlate(s).className}`} title={kindPlate(s).title}><Icon name={s.metadata?.loop ? "loop" : kindIcon(kindPlate(s).kind) ?? "bots"} size={18} />{s.status !== "idle" && <span className={`ph-st ${s.status}`} />}</span>}
                   meta={<LiveMeta s={s} />}
                   trail={relTime(s.last_message_at)} />
               ))}

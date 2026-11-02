@@ -130,15 +130,17 @@ def _team() -> TeamStub:
     return TeamStub({**bakery, "folders": listed}, staff=staff, presets=[{"id": "strong", "label": "Claude Opus 5"}, {"id": "fast", "label": "DeepSeek Flash"}], personas=["builder", "reviewer", "tester"])
 
 
-def session(id_: str, title: str, model: str, *, status: str = "idle", last: str, own: bool = False, meta: dict | None = None, project: str, kind: str = "chat") -> dict:
+def session(id_: str, title: str, model: str, *, status: str = "idle", last: str, own: bool = False, meta: dict | None = None, project: str, kind: str = "chat", controlling: tuple[str, ...] = ()) -> dict:
     row = next(p for p in PROJECTS if p["id"] == project)
     root = row["folders"][0]["path"]
     path = f"{root}/.agents/{id_}" if own else root
-    return {"id": id_, "title": title, "status": status, "created_at": ago(days=3), "last_message_at": last, "run_id": "run1" if status == "running" else None, "model": model, "workspace": path.rsplit("/", 1)[-1], "workspace_path": path, "workspace_own": own, "metadata": meta or {}, "project_id": project, "project": row["name"], "kind": kind}
+    return {"id": id_, "title": title, "status": status, "created_at": ago(days=3), "last_message_at": last, "run_id": "run1" if status == "running" else None, "model": model, "workspace": path.rsplit("/", 1)[-1], "workspace_path": path, "workspace_own": own, "metadata": meta or {}, "project_id": project, "project": row["name"], "kind": kind, "controlling": list(controlling)}
 
 
 SESSIONS = [
-    session(S1, "Bakery site", "Claude Opus 5", status="running", last=ago(seconds=40), project=P1),
+    # An ordinary chat that is checking the shop in the operator's Chrome right now: listed under Browser
+    # and marked hollow only while it holds the browser, its kind staying "chat".
+    session(S1, "Bakery site", "Claude Opus 5", status="running", last=ago(seconds=40), project=P1, controlling=("chrome",)),
     # The kinds mixed as an operator's list has them: a chat that sorted photos on the operator's own
     # computer, and one that gathers the digest in their Chrome; the rest are ordinary chats.
     session(S2, "Bakery site: photos", "Local Qwen3.8", last=ago(minutes=12), project=P1, kind="computer"),

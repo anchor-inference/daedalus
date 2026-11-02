@@ -24,6 +24,8 @@ from protocore.contracts.types import Message, MessageRole, TextBlock
 from daedalus.browser import login
 from daedalus.browser.agent import SWITCH_ASK, WEBGL_ASK, WEBGL_MODES, WEBGL_WORDS, BrowserAgent, webgl_line
 from daedalus.browser.cli import TOOL_SET, StaffBrowser
+from daedalus.browser.control import EVENTS as CONTROL_EVENTS
+from daedalus.browser.control import ChromeControl
 from daedalus.browser.model import USER, BrowserError, Owner, group_id
 from daedalus.browser.monitor import TIMEOUT_SECONDS, InjectionMonitor
 from daedalus.browser.notes import SiteNotes
@@ -33,8 +35,10 @@ from daedalus.browser.panel import (
     NATIVE_DEVICE,
     PANEL_LINE,
     PANEL_SESSION_KEY,
+    ChromeChannel,
     PanelGrants,
     PanelHerald,
+    waits_for_operator,
 )
 from daedalus.browser.replay import RecordedSkills
 from daedalus.browser.service import Browsers
@@ -43,6 +47,7 @@ from daedalus.browser.workflows import DRAFT_TIMEOUT_SECONDS, Workflows
 from daedalus.config import keyproxy_base
 from daedalus.extensions.notifications import Draft
 from daedalus.host.engine_factory import TENANT
+from daedalus.host.events import EventFilter
 from daedalus.terminals.update import DaemonUpdate
 
 EXTRACT_TIMEOUT_SECONDS = 60.0
@@ -236,24 +241,17 @@ async def relay_changed(herald: PanelHerald, kind: str) -> None:
         await herald.grant()
 
 
-async def run_finished(manager: Any, service: Browsers, herald: PanelHerald, session_id: str, status: str) -> None:
-    """A turn of a conversation in the operator's Chrome ended: the side panel's notification says
-    whether it waits for them (a question, or an action they must approve) or is done, and the badge
-    how many such conversations wait."""
+async def turn_ended(manager: Any, service: Browsers, session_id: str, status: str) -> None:
+    """A turn of a conversation in the operator's Chrome ended: its tabs close unless it waits for the
+    operator (a question, or an action they must approve). What the operator hears of the end is the
+    app's notification, which reaches the extension as one of its channels (``ChromeChannel``); this
+    hook used to tell the extension itself as well, and every end sounded twice."""
     if await service.choices.env(session_id) != USER:
         return
     state = manager.live_state(session_id)
-    if state is None:
+    if state is None or status == "awaiting" or waits_for_operator(state):
         return
-
-    def waits(found: Any) -> bool:
-        return found is not None and (found.pending is not None or bool(found.metadata.get("policy_pending")))
-
-    waiting = sum(1 for sid in await service.choices.using_user() if waits(manager.live_state(sid)))
-    kind = "needs_you" if status == "awaiting" or waits(state) else "done"
-    await herald.event(session_id, kind, state.session.title, waiting=waiting)
-    if kind == "done":
-        await close_turn_tabs(service, session_id)
+    await close_turn_tabs(service, session_id)
 
 
 async def close_turn_tabs(service: Browsers, session_id: str) -> bool:
@@ -376,7 +374,15 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
         herald = PanelHerald(grants, call=service.call_extension, device=lambda: panel_device(service, desk), base=lambda: panel_base(settings))
         app.extensions["browser_panel_herald"] = herald
         service.relay_hooks.append(lambda kind, data: relay_changed(herald, kind))
-        manager.on_finished(lambda session_id, run_id, status: run_finished(manager, service, herald, session_id, status))
+        notifications = getattr(app, "notifications", None)
+        if notifications is not None:
+            notifications.register_channel(ChromeChannel(herald, manager=manager, using=service.choices.using_user, offered=service.user_offered))
+    manager.on_finished(lambda session_id, run_id, status: turn_ended(manager, service, session_id, status))
+    control: ChromeControl | None = None
+    if settings.browser_user_dir is not None:
+        control = ChromeControl(service, manager)
+        app.extensions["browser_control"] = control
+        service.relay_hooks.append(lambda kind, data: control.refresh())
     manager.service_hooks["browser"] = agent
 
     async def session_deleted(session_id: str) -> None:
@@ -401,16 +407,14 @@ async def install(app: Application) -> list[asyncio.Task[None]]:
     manager.answer_hooks[WEBGL_ASK] = lambda session_id, request, allowed: webgl_answered(service, session_id, request, allowed)
     manager.turn_line_hooks.append(lambda state: chrome_line(manager, service, state))
 
-    async def switched(session_id: str, env: str) -> None:
-        # The mark sticks: moved back to the agent's browser, the conversation stays a Chrome one,
-        # and a computer conversation moved to their Chrome stays a computer one.
-        if env == USER:
-            await manager.set_session_kind(session_id, "chrome", only_from="chat")
-
-    service.switch_hooks.append(switched)
     tasks = await service.start()
     if herald is not None:
         tasks.append(asyncio.create_task(herald.keep_fresh(), name="browser-panel-grants"))
+    if control is not None:
+        # A switch to the operator's Chrome no longer makes a chat a Chrome one: it shows the mark only
+        # while it controls their Chrome, which these two keep current.
+        tasks.append(manager.bus.on(EventFilter(types=CONTROL_EVENTS), control.on_event, name="browser-control"))
+        tasks.append(asyncio.create_task(control.watch(), name="browser-control-idle"))
     if service.daemon_update is not None:
         # In the background: it runs a program, and nothing about the start waits for its answer.
         tasks.append(asyncio.create_task(service.daemon_update.probe(), name="browser-image-version"))  # type: ignore[arg-type]

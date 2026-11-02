@@ -58,7 +58,10 @@ const (
 	Menu      = "menu"
 )
 
-var named = map[string]string{
+// The function keys are added by withFunctionKeys as the table is built, not in an init function: the
+// blocked chords (blocked.go) are parsed while the package's variables are set up, which is before any
+// init function runs, and "alt+f4" must already parse then.
+var named = withFunctionKeys(map[string]string{
 	"enter": Enter, "return": Enter, "kpenter": Enter, "numpadenter": Enter, "ret": Enter,
 	"tab": Tab, "escape": Escape, "esc": Escape,
 	"backspace": Backspace, "bksp": Backspace, "back": Backspace,
@@ -77,13 +80,14 @@ var named = map[string]string{
 	"plus": "+", "minus": "-", "equal": "=", "comma": ",", "period": ".", "slash": "/", "backslash": "\\",
 	"semicolon": ";", "apostrophe": "'", "quote": "'", "grave": "`", "backquote": "`",
 	"bracketleft": "[", "bracketright": "]",
-}
+})
 
-func init() {
+func withFunctionKeys(m map[string]string) map[string]string {
 	for i := 1; i <= 24; i++ {
 		f := fmt.Sprintf("f%d", i)
-		named[f] = f
+		m[f] = f
 	}
+	return m
 }
 
 // Key is one key: a named one (Name) or the key that types a character (Rune).

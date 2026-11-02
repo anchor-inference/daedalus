@@ -151,6 +151,10 @@ class Draft:
     dedupe_key: str | None = None
     source: str = "system"
     handled: frozenset[str] = field(default_factory=frozenset)
+    controlling: frozenset[str] = field(default_factory=frozenset)
+    """What the session controlled when this happened (``chrome``, ``computer``), for a draft posted
+    after the control ended: a run's end is posted once its tabs in the operator's Chrome are closed,
+    and still belongs to the Chrome it was working in."""
 
 
 @dataclass(frozen=True)
@@ -218,6 +222,16 @@ class Channel(Protocol):
 
     async def deliver(self, view: NotificationView, *, more: int) -> Any:
         """Send it; return a JSON-able outcome for ``delivered`` (``{"sent": 2}``)."""
+        ...
+
+
+class ScopedChannel(Channel, Protocol):
+    """A way out for some conversations only: the operator's Chrome, for the conversations it follows
+    (``daedalus.browser.panel.ChromeChannel``). Where it covers an entry it carries the sound instead
+    of the push and the desktop, which on the same computer would be the same sound twice."""
+
+    async def covers(self, session_id: str, held: frozenset[str]) -> bool:
+        """Whether this conversation's entries go this way; ``held`` is the draft's ``controlling``."""
         ...
 
 
@@ -422,6 +436,7 @@ class NotificationService:
         quick_allowed = prefs.quick_actions and policy.quick_actions
         actions = json.dumps([replace(a, quick=a.quick and quick_allowed).as_dict() for a in draft.actions], ensure_ascii=False)
         presence = self._snapshot()
+        chrome = await self._in_chrome(draft.session_id, draft.controlling)
         now_moment = datetime.now(UTC)
         now = now_moment.isoformat()
         merged = False
@@ -439,7 +454,7 @@ class NotificationService:
             rose = existing is not None and LEVELS.index(level) > LEVELS.index(existing["level"])
             candidate = Candidate(
                 category=draft.category, level=level, actionable=draft.request_ref is not None, session_id=draft.session_id,
-                terminal_id=draft.terminal_id, project_id=draft.project_id, staff_id=staff_id, handled=draft.handled,
+                terminal_id=draft.terminal_id, project_id=draft.project_id, staff_id=staff_id, handled=draft.handled, chrome=chrome,
                 # Silent only while the last occurrence is still unseen: that is a burst. Once the operator
                 # has looked, the next one is news again (another answer in the same session, the service
                 # down once more), and it sounds like the first did.
@@ -507,6 +522,17 @@ class NotificationService:
         )
         return facts, policy, staff_id
 
+    async def _in_chrome(self, session_id: str | None, held: frozenset[str] = frozenset()) -> bool:
+        """Whether the conversation is one the operator follows in their Chrome, connected now."""
+        channel = cast("ScopedChannel | None", self._channels.get("chrome"))
+        if channel is None or not session_id:
+            return False
+        try:
+            return channel.available() and await channel.covers(session_id, held)
+        except Exception:  # noqa: BLE001 — undecided, it goes the usual way rather than nowhere
+            logger.warning("could not tell whether session %s is followed in Chrome", session_id, exc_info=True)
+            return False
+
     def _snapshot(self) -> PresenceSnapshot:
         return self.presence.snapshot() if self.presence is not None else PresenceSnapshot(present=False)
 
@@ -536,6 +562,13 @@ class NotificationService:
             except Exception as exc:  # noqa: BLE001 — the record stands whether or not a device took it
                 logger.warning("notification %s could not be pushed", row_id, exc_info=True)
                 outcomes["push"] = f"failed: {type(exc).__name__}"
+        chrome = self._channels.get("chrome")
+        if decision.chrome and chrome is not None:
+            try:
+                outcomes["chrome"] = await chrome.deliver(view, more=decision.more)
+            except Exception as exc:  # noqa: BLE001 — as the push: the record stands either way
+                logger.warning("notification %s could not be shown in Chrome", row_id, exc_info=True)
+                outcomes["chrome"] = f"failed: {type(exc).__name__}"
         delivered = {**view["delivered"], **outcomes}
         delivered.pop("held", None)
         await self.db.execute("UPDATE notifications SET delivered_json = ? WHERE id = ?", (json.dumps(delivered, ensure_ascii=False), row_id))
@@ -657,6 +690,7 @@ class NotificationService:
         candidate = Candidate(
             category=view["category"], level=view["level"], actionable=view["request_ref"] is not None,
             session_id=view["session_id"], terminal_id=view["terminal_id"], project_id=view["project_id"], staff_id=view["staff_id"],
+            chrome=await self._in_chrome(view["session_id"]),
         )
         decision = decide(candidate, prefs, self._snapshot(), facts, self._available(), datetime.now(UTC), limiter=self._limiter)
         if decision.seen_now:
@@ -953,6 +987,7 @@ class NotificationRouter:
             await self.service.resolve_session(sid, "expired", via="run", prefixes=("ask",))
         status = p.get("status")
         title = str(p.get("title") or sid or "")
+        held = frozenset(str(c) for c in p.get("controlling") or ())
         # A run that tells news (the main orchestrator relaying a project's report) is worth a line however
         # short it was: the threshold exists for runs the operator started and waited on.
         if status == "completed" and p.get("operator_facing") and (p.get("news") or float(p.get("duration_s") or 0) >= self.service.preferences().finished_min_seconds):
@@ -960,6 +995,7 @@ class NotificationRouter:
                 "run_finished", render("run.finished", self._lang(), title=title), str(p.get("summary") or ""), kind="run_finished",
                 tone="ok", session_id=sid, project_id=event.project_id, run_id=str(p.get("run_id") or "") or None,
                 link=str(p.get("link") or "") or self._session_link(sid), dedupe_key=f"run:{sid}", source="run", handled=self._telegram_handled(p),
+                controlling=held,
             ))
         elif status == "failed" and p.get("origin") not in SELF_REPORTING_ORIGINS and not await self._reports_itself(sid):
             body = str(p.get("error") or "").strip() or render("run.failed.body", self._lang())
@@ -967,6 +1003,7 @@ class NotificationRouter:
                 "run_failed", render("run.failed", self._lang(), title=title), body, kind="run_failed", tone="error",
                 session_id=sid, project_id=event.project_id, run_id=str(p.get("run_id") or "") or None,
                 link=self._session_link(sid), dedupe_key=f"fail:{sid}", source="run", handled=self._telegram_handled(p),
+                controlling=held,
             ))
 
     async def _presence(self, event: AppEvent) -> None:

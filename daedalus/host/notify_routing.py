@@ -18,12 +18,17 @@ The rules, in the order they apply:
 5. A muted project says nothing below urgent.
 6. A window in front of the operator makes push and the desktop redundant.
 7. Quiet hours hold back push, the desktop and Telegram below urgent.
+7a. A conversation the operator follows in their Chrome sounds there instead: what would have been
+   pushed or raised on the desktop is shown by the extension, once, and the two are skipped. The
+   extension used to announce every turn's end by itself, beside the app's own push or desktop
+   notification of the same end, so each one was heard twice. The rules below hold for it as they
+   hold for the two it replaces.
 8. Telegram: what the front or the producer already delivered is ``handled``; with no bot there is
    no Telegram at all; an orchestrated project's items are its orchestrator's to post, and the
    router never posts into a project's topic; a session detached from Telegram (a site session)
    stays off it at every level; a session otherwise gets its topic, and a notice with no session and
    no project goes to General.
-9. What went to Telegram is not pushed or raised on the desktop as well.
+9. What went to Telegram is not pushed, raised on the desktop or shown in Chrome as well.
 10. A repeat of an entry the operator has not seen yet makes no second sound unless its level rose.
 11. A staff member's request in an orchestrated project is held for the orchestrator first.
 12. Rate limits: per session, and one ceiling for everything.
@@ -60,6 +65,8 @@ class Candidate:
     project_id: str | None = None
     staff_id: str | None = None
     handled: frozenset[str] = frozenset()
+    chrome: bool = False
+    """The conversation is one the operator follows in their Chrome, and that Chrome is connected."""
     merged: bool = False
     """It repeats an entry with the same dedupe key that the operator has not seen yet."""
     level_rose: bool = False
@@ -94,6 +101,7 @@ class Decision:
     toast: bool = False
     push: bool = False
     desktop: bool = False
+    chrome: bool = False
     telegram: TelegramRoute = "off"
     hold_until: datetime | None = None
     more: int = 0
@@ -254,6 +262,16 @@ def decide(
         push = desktop = False
         telegram_block = telegram_block or "skipped: quiet hours"
 
+    chrome = c.chrome and (push or desktop)
+    if chrome:
+        for name, wanted in (("push", push), ("desktop", desktop)):
+            if wanted:
+                reasons[name] = "skipped: shown in Chrome"
+        push = desktop = False
+        reasons["chrome"] = ""
+    elif c.chrome:
+        reasons["chrome"] = reasons.get("desktop") or reasons.get("push") or "skipped: off"
+
     if desktop and not presence.desktop:
         desktop, reasons["desktop"] = False, "skipped: no launcher"
     if push and not channels.push:
@@ -277,16 +295,16 @@ def decide(
         route, reasons["telegram"] = "general", "general"
 
     if preferences.telegram_covers_push and route in REACHES_TELEGRAM:
-        for name, wanted in (("push", push), ("desktop", desktop)):
+        for name, wanted in (("push", push), ("desktop", desktop), ("chrome", chrome)):
             if wanted:
                 reasons[name] = "skipped: sent to Telegram"
-        push = desktop = False
+        push = desktop = chrome = False
 
     if c.merged and not c.level_rose:
-        for name, wanted in (("push", push), ("desktop", desktop)):
+        for name, wanted in (("push", push), ("desktop", desktop), ("chrome", chrome)):
             if wanted:
                 reasons[name] = "skipped: repeat"
-        push = desktop = False
+        push = desktop = chrome = False
         if route in SENDS_TO_TELEGRAM:
             route, reasons["telegram"] = "off", "skipped: repeat"
 
@@ -295,18 +313,18 @@ def decide(
         hold_until = now + timedelta(seconds=hold_seconds)
 
     more = 0
-    if (push or desktop) and limiter is not None and hold_until is None:
+    if (push or desktop or chrome) and limiter is not None and hold_until is None:
         allowed, more = limiter.take(c.session_id or c.terminal_id or c.project_id or "", now)
         if not allowed:
-            for name, wanted in (("push", push), ("desktop", desktop)):
+            for name, wanted in (("push", push), ("desktop", desktop), ("chrome", chrome)):
                 if wanted:
                     reasons[name] = "skipped: rate limit"
-            push = desktop = False
+            push = desktop = chrome = False
 
-    for name, wanted in (("push", push), ("desktop", desktop)):
+    for name, wanted in (("push", push), ("desktop", desktop), ("chrome", chrome)):
         if wanted:
             reasons[name] = "sent"
-    return Decision(record=True, seen_now=seen_now, toast=toast, push=push, desktop=desktop, telegram=route, hold_until=hold_until, more=more, reasons=reasons)
+    return Decision(record=True, seen_now=seen_now, toast=toast, push=push, desktop=desktop, chrome=chrome, telegram=route, hold_until=hold_until, more=more, reasons=reasons)
 
 
 __all__ = [

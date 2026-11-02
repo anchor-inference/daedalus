@@ -155,7 +155,7 @@ func (d *Daemon) preview(ctx context.Context, c *server.Conn, params json.RawMes
 func (d *Daemon) act(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
 	var p desk.ActParams
 	if err := decode(params, &p); err != nil {
-		return nil, err
+		return nil, desk.Undelivered(err)
 	}
 	return d.Desk.Act(ctx, p)
 }

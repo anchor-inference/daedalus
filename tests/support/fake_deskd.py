@@ -322,7 +322,7 @@ class FakeDeskd:
         else:
             x, y = self.cursor
             target_window = next((w for w in self.windows if w.bounds["x"] <= x < w.bounds["x"] + w.bounds["w"] and w.bounds["y"] <= y < w.bounds["y"] + w.bounds["h"]), None)
-        out: dict[str, Any] = {"action": action, "cursor": list(self.cursor), "duration_ms": 1, "actions_left": lease["max_actions"] - lease["actions"]}
+        out: dict[str, Any] = {"action": action, "delivery": "delivered", "cursor": list(self.cursor), "duration_ms": 1, "actions_left": lease["max_actions"] - lease["actions"]}
         if points:
             out["points"] = [list(p) for p in points]
         if target_window is not None and action != "wait":

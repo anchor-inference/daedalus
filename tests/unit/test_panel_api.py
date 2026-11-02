@@ -4,7 +4,9 @@ browser session), the one door that accepts it, and who may frame its page.
 
 The door's matrix is the contract: a panel token reads and writes the conversations in the operator's
 Chrome and nothing else — every other route answers 401 to it, and a conversation outside the set
-answers 404 as if it did not exist."""
+answers 404 as if it did not exist. The list is narrower than the door: this Chrome's own
+conversations, the ones made for it and any other while it is controlling it now; and what the
+extension is told of them is the app's notification, through one channel, not a second notifier."""
 
 from __future__ import annotations
 
@@ -23,13 +25,15 @@ import pytest
 from starlette.applications import Starlette
 from starlette.routing import Mount
 
-from daedalus.browser.model import USER
+from daedalus.browser.control import ChromeControl
+from daedalus.browser.model import USER, Owner, group_id
 from daedalus.browser.panel import (
     EXTENSION_ID,
     IDLE,
     NATIVE_DEVICE,
     PANEL_LINE,
     PANEL_SESSION_KEY,
+    ChromeChannel,
     PanelGrants,
     PanelHerald,
 )
@@ -38,6 +42,9 @@ from daedalus.config import BrowserConfig, BrowserUserConfig, RuntimeConfig, Set
 from daedalus.extensions import api_panel
 from daedalus.extensions import browser as browser_extension
 from daedalus.extensions.api import SpaFiles, build_app, frame_policy
+from daedalus.extensions.notifications import Draft, NotificationService
+from daedalus.host.control_marks import IDLE_AFTER
+from daedalus.host.events import EventFilter
 from daedalus.host.session_runner import SessionManager
 from daedalus.stores.database import Database
 from tests.support.fake_browserd import FakeBrowserd
@@ -186,12 +193,18 @@ class Rig:
     def grants(self) -> PanelGrants:
         return self.app.extensions["browser_panel"]  # type: ignore[no-any-return]
 
-    async def session(self, *, chrome: bool) -> str:
-        state = await self.manager.create_session("chat")
+    async def session(self, *, chrome: bool, kind: str | None = None) -> str:
+        """A conversation; with ``chrome`` given the operator's Chrome, and by default made for it (a
+        Chrome chat). ``kind="chat"`` with ``chrome`` is an ordinary chat moved there later."""
+        state = await self.manager.create_session("chat", kind=kind or ("chrome" if chrome else "chat"))
         await self.manager.get_state(state.session.id)
         if chrome:
             await self.service.choices.switch(state.session.id, USER, consent=True)
         return state.session.id
+
+    @property
+    def channel(self) -> ChromeChannel:
+        return ChromeChannel(self.app.extensions["browser_panel_herald"], manager=self.manager, using=self.service.choices.using_user, offered=self.service.user_offered)
 
 
 @pytest.fixture
@@ -260,8 +273,17 @@ async def test_the_door_matrix(rig: Rig, chrome: FakeBrowserd) -> None:
             answer = await client.request(method, path.format(mine=mine), headers=panel(token), json={})
             assert answer.status_code == 401, (method, path, answer.status_code)
         # The conversations in this Chrome, and only those.
+        borrowed = await rig.session(chrome=True, kind="chat")
         listing = (await client.get("/api/panel/sessions", headers=panel(token))).json()
         assert [s["id"] for s in listing["sessions"]] == [mine]
+        # An ordinary chat given this Chrome is listed only while it controls it; its door stays open,
+        # so a panel showing it does not lose it mid-reply when the control lapses.
+        assert (await client.get(f"/api/panel/sessions/{borrowed}", headers=panel(token))).status_code == 200
+        await rig.manager.control_marks.update("chrome", {borrowed})
+        listing = (await client.get("/api/panel/sessions", headers=panel(token))).json()
+        assert sorted(s["id"] for s in listing["sessions"]) == sorted([mine, borrowed])
+        await rig.manager.control_marks.update("chrome", set())
+        listing = (await client.get("/api/panel/sessions", headers=panel(token))).json()
         assert listing["sessions"][0]["group"].endswith("-u") and listing["consent"] == CONSENT and listing["consented"] is False
         assert listing["chrome"] == {"connected": True, "name": "Work"}
         page = await client.get(f"/api/panel/sessions/{mine}", headers=panel(token))
@@ -288,17 +310,16 @@ async def test_a_new_conversation_is_born_in_chrome_after_one_consent_and_takes_
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=build_app(rig.app, "tok")), base_url="http://test") as client:  # type: ignore[arg-type]
         asked = await client.post("/api/panel/sessions", headers=panel(token), json={"title": "compare these prices"})
         assert asked.status_code == 409 and asked.json()["code"] == "consent_needed" and asked.json()["consent"] == CONSENT
-        switches: list[tuple[str, str]] = []
-
-        async def counted(session_id: str, env: str) -> None:
-            switches.append((session_id, env))
-
-        rig.service.switch_hooks.append(counted)
+        switches = rig.manager.bus.subscribe(EventFilter(types=("browser.user",)), name="test")
         made = await client.post("/api/panel/sessions", headers=panel(token), json={"title": "compare these prices", "consent": True})
         assert made.status_code == 200, made.text
         sid = made.json()["id"]
         # Moved once, by the create: a second move announced the switch twice.
-        assert switches == [(sid, USER)]
+        moved = [await asyncio.wait_for(anext(switches), 2)]
+        with pytest.raises(TimeoutError):
+            moved.append(await asyncio.wait_for(anext(switches), 0.2))
+        assert [(e.session_id, e.payload["kind"], e.payload["reason"]) for e in moved] == [(sid, "switched", USER)]
+        assert (await rig.manager.get_state(sid)).kind == "chrome"  # type: ignore[union-attr]
         assert made.json()["group"].endswith("-u")
         assert (await rig.service.choices.get(sid))["env"] == USER
         again = await client.post("/api/panel/sessions", headers=panel(token), json={"title": "and these"})
@@ -347,18 +368,139 @@ async def test_a_client_cannot_set_the_doors_mark_itself(rig: Rig) -> None:
     assert seen == [None]
 
 
-async def test_a_turn_that_ends_in_chrome_tells_the_panel_whether_it_waits(rig: Rig, chrome: FakeBrowserd) -> None:
+async def test_this_chromes_conversations_are_those_made_for_it_and_those_controlling_it_now(rig: Rig, chrome: FakeBrowserd) -> None:
+    made = await rig.session(chrome=True)
+    borrowed = await rig.session(chrome=True, kind="chat")
+    elsewhere = await rig.session(chrome=False)
+    channel = rig.channel
+    assert channel.available()
+    assert await channel.covers(made) and not await channel.covers(borrowed) and not await channel.covers(elsewhere)
+    await rig.manager.control_marks.update("chrome", {borrowed, elsewhere})
+    # Controlling the operator's Chrome counts only for a conversation given that Chrome.
+    assert await channel.covers(borrowed) and not await channel.covers(elsewhere)
+    await rig.manager.control_marks.update("chrome", set())
+    assert not await channel.covers(borrowed)
+    # A turn's end posted after its tabs closed still belongs to the Chrome it was working in.
+    assert await channel.covers(borrowed, frozenset({"chrome"}))
+    # A Chrome chat moved back to the agent's own browser is no longer this Chrome's.
+    await rig.service.choices.switch(made, "agent", consent=True)
+    assert not await channel.covers(made)
+
+
+async def test_the_channel_tells_the_panel_whether_it_waits_and_counts_only_this_chromes(rig: Rig, chrome: FakeBrowserd) -> None:
     mine = await rig.session(chrome=True)
-    other = await rig.session(chrome=False)
-    herald = rig.app.extensions["browser_panel_herald"]
-    await browser_extension.run_finished(rig.manager, rig.service, herald, other, "completed")
-    assert chrome.extension_calls == []
-    await browser_extension.run_finished(rig.manager, rig.service, herald, mine, "completed")
+    borrowed = await rig.session(chrome=True, kind="chat")
+    channel = rig.channel
+    view = {"session_id": mine, "category": "run_finished", "needs_you": False, "title": "Finished: chat"}
+    assert await channel.deliver(view, more=0) == "sent"  # type: ignore[arg-type]
     assert chrome.extension_calls[-1] == {"op": "panel.event", "args": {"session": mine, "kind": "done", "title": "chat", "waiting": 0}}
-    state = rig.manager.live_state(mine)
-    state.metadata["policy_pending"] = {"k": {"tool": "BrowserNavigate"}}
-    await browser_extension.run_finished(rig.manager, rig.service, herald, mine, "completed")
+    # A conversation waiting for an approval counts on the badge; an ordinary one waiting does not.
+    rig.manager.live_state(mine).metadata["policy_pending"] = {"k": {"tool": "BrowserNavigate"}}  # type: ignore[union-attr]
+    rig.manager.live_state(borrowed).metadata["policy_pending"] = {"k": {"tool": "BrowserNavigate"}}  # type: ignore[union-attr]
+    await channel.deliver({**view, "category": "permission", "needs_you": True}, more=0)  # type: ignore[arg-type]
     assert chrome.extension_calls[-1]["args"] | {"session": ""} == {"session": "", "kind": "needs_you", "title": "chat", "waiting": 1}
+
+
+class Pushes:
+    name = "push"
+
+    def __init__(self) -> None:
+        self.sent: list[str] = []
+
+    def available(self) -> bool:
+        return True
+
+    async def deliver(self, view: Any, *, more: int) -> Any:
+        self.sent.append(str(view["session_id"]))
+        return {"sent": 1}
+
+
+async def test_a_turn_end_sounds_once_in_chrome_for_its_conversations_and_by_push_for_others(rig: Rig, chrome: FakeBrowserd) -> None:
+    mine = await rig.session(chrome=True)
+    borrowed = await rig.session(chrome=True, kind="chat")
+    service = NotificationService(rig.manager.db, rig.manager.bus)
+    pushes = Pushes()
+    service.register_channel(pushes)
+    service.register_channel(rig.channel)
+    before = len(chrome.extension_calls)
+    made = await service.post(Draft("run_finished", "Finished", session_id=mine, dedupe_key=f"run:{mine}"))
+    assert made is not None and made["delivered"]["chrome"] == "sent" and made["delivered"]["push"] == "skipped: shown in Chrome"
+    assert pushes.sent == [] and len(chrome.extension_calls) == before + 1
+    # An ordinary chat that once worked in Chrome is announced by the app alone: no second sound.
+    plain = await service.post(Draft("run_finished", "Finished", session_id=borrowed, dedupe_key=f"run:{borrowed}"))
+    assert plain is not None and "chrome" not in plain["delivered"] and pushes.sent == [borrowed]
+    assert len(chrome.extension_calls) == before + 1
+    # While it controls the Chrome (or did when its turn ended), it is announced there instead.
+    held = await service.post(Draft("run_finished", "Finished", session_id=borrowed, dedupe_key=f"again:{borrowed}", controlling=frozenset({"chrome"})))
+    assert held is not None and held["delivered"]["chrome"] == "sent" and pushes.sent == [borrowed]
+
+
+async def test_the_turn_end_closes_the_tabs_of_a_turn_that_waits_for_nobody(rig: Rig, chrome: FakeBrowserd) -> None:
+    mine = await rig.session(chrome=True)
+    owner = Owner("session", mine, session_id=mine)
+    await rig.service.open(owner, actor="operator")
+    group = group_id(owner, env=USER)
+    rig.manager.live_state(mine).metadata["policy_pending"] = {"k": {"tool": "BrowserNavigate"}}  # type: ignore[union-attr]
+    await browser_extension.turn_ended(rig.manager, rig.service, mine, "completed")
+    assert (await rig.service.get_row(group))["status"] == "open"
+    rig.manager.live_state(mine).metadata.pop("policy_pending")  # type: ignore[union-attr]
+    before = len(chrome.extension_calls)
+    await browser_extension.turn_ended(rig.manager, rig.service, mine, "completed")
+    assert (await rig.service.get_row(group))["status"] == "closed"
+    # The end itself is told by the app's notification, not by this hook.
+    assert len(chrome.extension_calls) == before
+
+
+class Clock2:
+    def __init__(self, at: datetime) -> None:
+        self.at = at
+
+    def __call__(self) -> datetime:
+        return self.at
+
+
+async def test_a_chat_controls_the_operators_chrome_while_its_tab_group_is_open_and_used(rig: Rig, chrome: FakeBrowserd) -> None:
+    borrowed = await rig.session(chrome=True, kind="chat")
+    made = await rig.session(chrome=True)
+    clock = Clock2(datetime.now(UTC))
+    control = ChromeControl(rig.service, rig.manager, now=clock)
+    await control.refresh()
+    assert rig.manager.control_marks.of(borrowed) == []
+    owner = Owner("session", borrowed, session_id=borrowed)
+    await rig.service.open(owner, actor="agent")
+    await control.refresh()
+    rows = {row["id"]: (row["kind"], row["controlling"]) for row in await rig.manager.list_sessions()}
+    assert rows[borrowed] == ("chat", ["chrome"]) and rows[made] == ("chrome", [])
+    # Idle: the group still open, unused for the idle time, and no run going.
+    clock.at += IDLE_AFTER + timedelta(seconds=1)
+    await control.refresh()
+    assert rig.manager.control_marks.of(borrowed) == []
+    # A hand-over waits for the operator in their Chrome, however long ago it was used.
+    await rig.service.db.execute("UPDATE browser_groups SET needs_json = '{}' WHERE id = ?", (group_id(owner, env=USER),))
+    await control.refresh()
+    assert rig.manager.control_marks.of(borrowed) == ["chrome"]
+    await rig.service.db.execute("UPDATE browser_groups SET needs_json = NULL WHERE id = ?", (group_id(owner, env=USER),))
+    clock.at = datetime.now(UTC)
+    await control.refresh()
+    assert rig.manager.control_marks.of(borrowed) == ["chrome"]
+    # Released: the group closed, the mark goes, and the chat was a chat all along.
+    await rig.service.close_group(group_id(owner, env=USER), actor="operator")
+    await control.refresh()
+    rows = {row["id"]: (row["kind"], row["controlling"]) for row in await rig.manager.list_sessions()}
+    assert rows[borrowed] == ("chat", []) and rows[made] == ("chrome", [])
+
+
+async def test_the_installed_watcher_follows_the_groups_by_their_events(rig: Rig, chrome: FakeBrowserd) -> None:
+    borrowed = await rig.session(chrome=True, kind="chat")
+    owner = Owner("session", borrowed, session_id=borrowed)
+    await rig.service.open(owner, actor="agent")
+    async with asyncio.timeout(5):
+        while rig.manager.control_marks.of(borrowed) != ["chrome"]:
+            await asyncio.sleep(0.02)
+    await rig.service.close_group(group_id(owner, env=USER), actor="operator")
+    async with asyncio.timeout(5):
+        while rig.manager.control_marks.of(borrowed):
+            await asyncio.sleep(0.02)
 
 
 async def test_a_conversation_held_from_the_panel_is_told_to_work_in_the_browser_and_others_are_not(rig: Rig, chrome: FakeBrowserd) -> None:

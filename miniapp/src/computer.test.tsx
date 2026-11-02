@@ -242,6 +242,20 @@ describe("the control", () => {
     expect(linux.textContent).toContain("Wayland is not supported yet");
   });
 
+  it("says a grant ended by a locked screen, and only while nobody holds the computer", async () => {
+    await show(state({ lease: { active: false, last_ended: "locked" } }), <ComputerSheet sessionId={SESSION} toast={() => undefined} onClose={() => undefined} />);
+    expect(sheet()!.querySelector("[data-ended=locked]")?.textContent).toBe("The last grant ended when the screen locked or a secure system prompt came up.");
+    await show(state({ lease: { active: false, last_ended: "stopped" } }), <ComputerSheet sessionId={SESSION} toast={() => undefined} onClose={() => undefined} />);
+    expect(sheet()!.querySelector("[data-ended]")).toBeNull();
+  });
+
+  it("names the refused key in the reader's language", () => {
+    setLang("ru");
+    const words = new ApiError(409, "x", { error: { code: 1212, message: "", data: null, explanation: "", words: { key: "cu.refusal.blocked.ends", vars: { keys: "alt+f4" } } } });
+    expect(refusalText(words)).toBe("Агент попросил alt+f4: это сочетание закрывает, блокирует или покидает сеанс. Такие клавиши для него не нажимаются никогда.");
+    setLang("en");
+  });
+
   it("shows a refusal in its words, never its code", async () => {
     refuse["/api/computer/grant"] = { detail: "That is one of Daedalus's own windows.", error: { code: 1203, message: "protected", data: { app: "com.example.daedalus" }, explanation: "That is one of Daedalus's own windows (or another protected app)." } };
     await show(state(), <ComputerSheet sessionId={SESSION} toast={() => undefined} onClose={() => undefined} />);

@@ -599,16 +599,11 @@ class NewSessionBody(BaseModel):
     """Where a chat that names no project runs: ``host`` puts its scratch folder on the host and runs
     every command there through the host terminal daemon. Only a Docker installation offers it."""
     kind: Literal["chat", "computer", "chrome"] = "chat"
-    """What the conversation is for. ``chrome`` also moves it to the operator's Chrome: choosing a
-    Chrome conversation is their yes, as pressing "new" in the side panel is."""
+    """What the conversation is made for, fixed from here on. ``chrome`` also moves it to the operator's
+    Chrome: choosing a Chrome conversation is their yes, as pressing "new" in the side panel is."""
     private: bool = False
     """A private chat: kept, but never learned from, indexed, handed memory or found from another chat.
     Only here, at creation: no route changes it later (:mod:`daedalus.memory.privacy` says why)."""
-
-
-class SessionKindBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    kind: Literal["chat", "computer", "chrome"]
 
 
 class MoveSessionBody(BaseModel):
@@ -2280,7 +2275,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if body.own_directory:
             create_args["own_directory"] = True
         try:
-            state = await manager.create_session(title, **create_args)
+            state = await manager.create_session(title, kind=body.kind, **create_args)
         except HostUnreachable as exc:
             # The daemon went away between the check above and the session.
             raise HTTPException(409, str(exc)) from exc
@@ -2293,9 +2288,10 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 await manager.set_model(state.session.id, preset=body.preset)
             except ValueError as exc:
                 raise HTTPException(400, str(exc)) from exc
-        if body.kind != "chat":
-            # Before the first message, so its turn already carries what the kind tells the agent.
-            await into_kind(state.session.id, body.kind)
+        if body.kind == "chrome":
+            # Moved before the first message, so its turn already works in the operator's Chrome, and
+            # by the operator's own switch: the same path, event and consent record either way.
+            await chrome_offered().switch_conversation(state.session.id, BROWSER_USER, consent=True)
         if body.prompt:
             await manager.submit(state.session.id, body.prompt)
         if body.loop is not None:
@@ -2315,23 +2311,6 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if found is None or not found.user_offered():  # type: ignore[attr-defined]
             raise HTTPException(409, "this installation does not offer your Chrome (Settings → Environments → Your Chrome)")
         return found
-
-    async def into_kind(session_id: str, kind: str) -> None:
-        """Make the conversation that kind; a Chrome one is moved to the operator's Chrome as their own
-        switch moves it, which is the same path, event and record whichever way they chose it."""
-        if kind == "chrome":
-            await chrome_offered().switch_conversation(session_id, BROWSER_USER, consent=True)
-        await manager.set_session_kind(session_id, kind)
-
-    @api.post("/api/sessions/{session_id}/kind")
-    async def change_session_kind(session_id: str, body: SessionKindBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        """Change what the conversation is for. Back to ``chat`` leaves its browser where it is; the
-        operator moves it with the chat's own switch."""
-        state = await manager.get_state(session_id)
-        if state is None:
-            raise HTTPException(404, "no such session")
-        await into_kind(session_id, body.kind)
-        return {"id": session_id, "kind": state.kind}
 
     async def session_model_label(state: Any) -> str:
         overrides = await manager.live.load(state.session.id)

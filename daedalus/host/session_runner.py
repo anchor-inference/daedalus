@@ -16,7 +16,7 @@ import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import ExitStack, suppress
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -101,6 +101,7 @@ from daedalus.host.btw import BTW_KEY, btw_of, btws_of
 from daedalus.host.checkpoint_retention import CheckpointRetention, RetentionBounds, RetentionReport
 from daedalus.host.checkpoints import CheckpointError, Checkpoints, scan_workspace, store_dir
 from daedalus.host.containment import Walls, walls_for, worktree_writable_paths
+from daedalus.host.control_marks import ControlMarks
 from daedalus.host.deliverables import locate as locate_deliverable
 from daedalus.host.deliverables import secret_part
 from daedalus.host.engine_factory import TENANT, EngineDeps, PolicyAdapter, build_engine
@@ -166,6 +167,7 @@ from daedalus.stores.provider_holds import (
 from daedalus.stores.purge import Purge
 from daedalus.stores.sqlite import (
     LENT_KEY,
+    SESSION_KINDS,
     LiveControlStore,
     ReceiptConflict,
     SqliteEventStream,
@@ -374,8 +376,8 @@ class SessionState:
     extra_notes: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
     kind: str = "chat"
-    """What the conversation is for (``sessions.kind``): ``chat``, ``computer`` or ``chrome``. Read when
-    the state loads and changed only through :meth:`SessionManager.set_session_kind`, which writes both."""
+    """What the conversation was made for (``sessions.kind``): ``chat``, ``computer`` or ``chrome``. Given
+    at creation and never changed; what it controls now is ``SessionManager.control_marks``."""
     run_origin: str = "operator"
     """Who started the current run (``operator``, ``schedule``, ``reminder``, ``subagent:…``): StaySilent and the reply routing read it."""
     last_error_kind: str = ""
@@ -875,6 +877,9 @@ class SessionManager:
         """The host through its terminal daemon, set when the terminals are installed: what a session
         working in a host folder runs its commands and file tools through."""
         self.delete_hooks: list[Callable[[str], Awaitable[None]]] = []
+        self.control_marks = ControlMarks(self._announce_controls)
+        """What each session controls right now (the operator's Chrome, their computer), kept apart from
+        what it was made for; the browser service and the computer's watcher recompute it."""
         """Called with the session id before a session is removed (extensions release what they hold for it)."""
         self.project_delete_hooks: list[Callable[[str], Awaitable[None]]] = []
         """Called with the project id before a project is forgotten, for what an extension holds for the
@@ -1124,6 +1129,8 @@ class SessionManager:
             payload["summary"] = summary[:SUMMARY_CHARS]
         if state.last_error_message:
             payload["error"] = state.last_error_message[:300]
+        if controls := self.control_marks.of(state.session.id):
+            payload["controlling"] = controls
         return payload
 
     def _ask_payload(self, state: SessionState, pending: PendingQuestion) -> dict[str, Any]:
@@ -1592,12 +1599,21 @@ class SessionManager:
         folder_id: str | None = None,
         on_host: bool = False,
         directory: str | None = None,
+        kind: str = "chat",
     ) -> SessionState:
         """Make a session. ``on_host`` starts a chat that names no project on the host from the
         container: its scratch project's one folder is on the host, so every command and file tool
         of it runs there through the terminal daemon, as in any host folder. ``directory`` is another
         session's own directory in the folder, shared rather than made: a prompt coach reads where its
-        chat works."""
+        chat works.
+
+        ``kind`` is what the conversation was made for, and it is given here and nowhere else: a chat
+        that later borrows the operator's Chrome or their computer stays a chat, and only shows the
+        control while it holds it (:mod:`daedalus.host.control_marks`). A Chrome conversation starts
+        its runs with the browser's tools loaded, since it is told to work there and should not have
+        to search for them first."""
+        if kind not in SESSION_KINDS:
+            raise ValueError(f"a session's kind is one of {', '.join(SESSION_KINDS)}, not {kind!r}")
         sid = session_id or uuid.uuid4().hex[:12]
         project = await self.projects.get(project_id) if project_id else None
         if project_id and project is None:
@@ -1654,10 +1670,13 @@ class SessionManager:
                 await self._make_host_directory(self.folder_workspace(sid, meta, project), host_folder)
         workspace = self.workspace_of(sid, meta, project)
         _ensure_inbox(workspace, self.inbox_folder(sid, meta, project))
+        if kind == "chrome":
+            carried = [str(g) for g in (meta.get(tool_groups.CARRIED_KEY) or ()) if isinstance(g, str)]
+            meta[tool_groups.CARRIED_KEY] = list(dict.fromkeys([*carried, "browser"]))
         session = Session(id=sid, tenant_id=TENANT, title=title, metadata=dict(meta))
-        await self.sessions.create(session, project_id=project.id)
+        await self.sessions.create(session, project_id=project.id, kind=kind)
         project = await self._settle_project(project)
-        state = SessionState(session=session, workspace=workspace, metadata=dict(meta), project=project)
+        state = SessionState(session=session, workspace=workspace, metadata=dict(meta), project=project, kind=kind)
         self._states[sid] = state
         self.register_services(state)
         created: dict[str, Any] = {"title": title}
@@ -1879,32 +1898,27 @@ class SessionManager:
                     "metadata": session.metadata,
                     "project_id": projects.get(session.id),
                     "kind": kinds.get(session.id, "chat"),
+                    "controlling": self.control_marks.of(session.id),
                 }
             )
         return out
 
-    async def set_session_kind(self, session_id: str, kind: str, *, only_from: str | None = None) -> bool:
-        """Change what a conversation is for; with ``only_from``, only from that kind (a mark that sticks
-        leaves the operator's own choice alone). ``True`` when it changed, and then the fronts hear of it.
+    async def _announce_controls(self, session_id: str, controls: list[str]) -> None:
+        """Tell the fronts what a session controls now: the sidebar moves it into or out of the Browser
+        and Computer tabs on this rather than on its next poll."""
+        state = self._states.get(session_id)
+        if state is not None:
+            await self._publish(state, "session.controlling", {"controlling": controls})
+        else:
+            await self.bus.publish("session.controlling", {"controlling": controls}, session_id=session_id)
 
-        A conversation that becomes a Chrome conversation starts its runs with the browser's tools
-        loaded, as one the side panel started does: the agent is told to work in the operator's Chrome
-        and should not have to search for the tools first."""
-        state = await self.get_state(session_id)
-        if state is None:
-            raise KeyError(session_id)
-        changed = await self.sessions.set_kind(session_id, kind, only_from=only_from)
-        if not changed:
-            return False
-        state.kind = kind
-        if kind == "chrome":
-            carried = [str(g) for g in (state.metadata.get(tool_groups.CARRIED_KEY) or ()) if isinstance(g, str)]
-            if "browser" not in carried:
-                for meta in (state.metadata, state.session.metadata):
-                    meta[tool_groups.CARRIED_KEY] = list(dict.fromkeys([*carried, "browser"]))
-                await self.sessions.update_metadata(session_id, state.session.metadata)
-        await self._publish(state, "session.kind", {"kind": kind})
-        return True
+    def run_since(self, session_id: str) -> datetime | None:
+        """When the session's current run started, on the wall clock: one going, or one parked on the
+        operator's answer. ``None`` when it has none, which is what makes a held control idle."""
+        state = self._states.get(session_id)
+        if state is None or not (state.running or state.pending is not None) or not state.run_active_since:
+            return None
+        return datetime.now(UTC) - timedelta(seconds=max(0.0, time.monotonic() - state.run_active_since))
 
     async def session_catalog(self) -> list[dict[str, Any]]:
         """Return the cheap session read model without opening any transcript.
@@ -2016,6 +2030,7 @@ class SessionManager:
                 await hook(session_id)
             except Exception:  # noqa: BLE001
                 logger.exception("delete hook failed for %s", session_id)
+        self.control_marks.forget(session_id)
         if state is None:
             return False
         if state.running and state.engine is not None:
@@ -6195,6 +6210,14 @@ class SessionManager:
         run_dir = self.settings.computer_host_dir
         return computer_agent.agent_for(run_dir) if run_dir is not None else None
 
+    async def computer_holder(self) -> dict[str, Any] | None:
+        """The live lease on the operator's computer, whichever session holds it, or ``None``: none is
+        held, or no desktop daemon is there to hold one."""
+        if not self.capabilities.computer.configured or not computer_wire.endpoint_live(self.settings.computer_host_dir):
+            return None
+        agent = self._computer_agent()
+        return await computer_awareness.lease_holder(agent.client) if agent is not None else None
+
     async def _computer_lease(self, state: SessionState) -> tuple[Any, dict[str, Any] | None]:
         """The desktop agent and the lease this session holds now (``None`` when it holds none)."""
         if not self.capabilities.computer.configured or not computer_wire.endpoint_live(self.settings.computer_host_dir):
@@ -6229,13 +6252,13 @@ class SessionManager:
     async def computer_granted(self, session_id: str) -> None:
         """The operator granted this conversation control of their computer through the app.
 
-        The mark sticks: a plain chat becomes a computer conversation. The tools are queued for the
+        The conversation keeps its kind: a plain chat given the computer is a chat controlling it, and
+        shows that only while it does (the computer's watcher marks it). The tools are queued for the
         next run, and a run already going is steered with the news, the way an allowed call is: its
         turn context was written before the grant and says nothing of it."""
         state = await self.get_state(session_id)
         if state is None:
             return
-        await self.set_session_kind(session_id, "computer", only_from="chat")
         await self.load_tool_group_now(session_id, "computer")
         if not state.running:
             return

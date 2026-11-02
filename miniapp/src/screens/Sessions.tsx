@@ -45,7 +45,7 @@ import { useReveal } from "../reveal";
 import { pinCommand, setPinned } from "../pins";
 import { HostMark, RunEnv, useRunOn } from "../runon";
 import { PrivateMark, isPrivate, privateBody } from "../privatechat";
-import { KindTabs, byTab, kindIcon, sessionKind, tabCounts, useKindTab } from "../chatkind";
+import { KindTabs, byTab, kindIcon, kindPlate, tabCounts, useKindTab } from "../chatkind";
 
 type SearchList = SessionList & { semantic: boolean; reason: string; partial: boolean; indexing: boolean };
 type View = "all" | "attention" | "working" | "loops" | "archive";
@@ -654,10 +654,13 @@ const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, proj
   const imported = importedHarness(s);
   // A computer or Chrome chat says so on its plate, where a loop says it is a loop: the mark that lets
   // the mixed list of the All tab, or a search, be read without opening the chat.
-  const kind = sessionKind(s);
+  // An ordinary chat holding the operator's Chrome or computer now borrows that mark, hollow, until
+  // it lets go (chatkind.tsx).
+  const plate = kindPlate(s);
+  const kind = plate.kind;
   const icon: IconName = s.archived ? "archive" : s.metadata?.loop ? "loop" : kindIcon(kind) ?? (fork || s.metadata?.forked_from ? "fork" : system ? "mic" : "bots");
-  const kindClass = kind === "chat" ? "" : ` kind-${kind}`;
-  const kindTitle = kind === "chat" ? undefined : t(`kind.mark.${kind}`);
+  const kindClass = plate.className ? ` ${plate.className}` : "";
+  const kindTitle = plate.title;
   const open = () => onOpen(s.id);
   const beside = () => {
     const route = parse();

@@ -5,8 +5,11 @@ The extension's side panel frames the host's app at ``/app/panel`` and signs in 
 generic authentication never accepts it, so every other route stays the operator's alone. What it
 does open is listed here and nowhere else:
 
-- the conversations that use the operator's Chrome — listed, read, streamed, written to, stopped,
-  answered, their model, effort and mode set, their pending actions allowed or refused;
+- the conversations given the operator's Chrome — read, streamed, written to, stopped, answered, their
+  model, effort and mode set, their pending actions allowed or refused. The list shows fewer: only
+  this Chrome's own conversations (``daedalus.browser.panel.follows_in_chrome``), the ones made for it
+  and any other while it controls it. The door stays wider than the list so that a conversation open
+  in the panel does not answer 404 mid-reply the moment its control lapses;
 - a new conversation, born in the operator's Chrome (the operator pressed "new" in the panel, which
   is their consent, asked once like the first switch);
 - opening such a conversation's browser on the tab the operator just gave it;
@@ -31,7 +34,7 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field
 
 from daedalus.browser.model import USER, Owner, group_id
-from daedalus.browser.panel import mark_panel_session
+from daedalus.browser.panel import follows_in_chrome, mark_panel_session, waits_for_operator
 from daedalus.browser.user import CONSENT, ConsentNeeded
 
 if TYPE_CHECKING:
@@ -207,13 +210,11 @@ def register(api: FastAPI, app: Application, *, new_body: type[BaseModel]) -> No
 
     new_session = endpoint("POST", "/api/sessions")
 
-    def waits(session_id: str) -> bool:
-        state = manager.live_state(session_id)
-        return state is not None and (state.pending is not None or bool(state.metadata.get("policy_pending")))
-
     @api.get("/api/panel/sessions")
     async def panel_sessions(who: dict[str, Any] = Depends(panel)) -> dict[str, Any]:
-        """The conversations that use the operator's Chrome, newest first, with their tab group."""
+        """This Chrome's conversations, newest first, with their tab group: of those given the
+        operator's Chrome, the ones made for it and any other while it controls it now. Every
+        conversation ever given their Chrome used to be listed, for good, the main chat among them."""
         found = service()
         ids = await found.choices.using_user() if found is not None and found.user_offered() else []
         rows = await manager.list_sessions(limit=200, ids=ids) if ids else []
@@ -226,11 +227,11 @@ def register(api: FastAPI, app: Application, *, new_body: type[BaseModel]) -> No
                     "title": row["title"],
                     "status": row["status"],
                     "last_message_at": row["last_message_at"],
-                    "needs_you": row["status"] in ("waiting", "failed") or waits(row["id"]),
+                    "needs_you": row["status"] in ("waiting", "failed") or waits_for_operator(manager.live_state(row["id"])),
                     "group": group_id(Owner("session", row["id"], session_id=row["id"]), env=USER),
                 }
                 for row in rows
-                if not row["metadata"].get("archived")
+                if not row["metadata"].get("archived") and follows_in_chrome(row["kind"], row["controlling"])
             ],
             "consented": bool(await app.db.kv_get(CONSENTED_KEY, False)),
             "consent": CONSENT,
