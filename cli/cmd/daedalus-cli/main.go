@@ -336,6 +336,14 @@ func cmdMain(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 
 	e, err := setup(g, true)
+	if errors.Is(err, app.ErrNotPaired) && !print && isTerminal(stdin) && isTerminalWriter(stdout) {
+		// A first start on a machine that knows its server but has no token pairs right here, with
+		// the QR code in the terminal, and then opens the conversation.
+		if code := cmdLogin(loginArgs(g), stdout, stderr); code != 0 {
+			return code
+		}
+		e, err = setup(g, true)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", name(), err)
 		if errors.Is(err, app.ErrNotPaired) {
@@ -367,6 +375,18 @@ func cmdMain(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return app.ExitCodeFor(err)
 	}
 	return 0
+}
+
+// loginArgs carries the conversation's server and profile flags over to login.
+func loginArgs(g globals) []string {
+	var args []string
+	if g.profile != "" {
+		args = append(args, "--profile", g.profile)
+	}
+	if g.server != "" {
+		args = append(args, g.server)
+	}
+	return args
 }
 
 func isTerminalWriter(w io.Writer) bool {
