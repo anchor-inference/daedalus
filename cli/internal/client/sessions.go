@@ -221,9 +221,8 @@ func (c *Client) SetModel(ctx context.Context, id string, body map[string]any) e
 
 // Compact summarises the history.
 func (c *Client) Compact(ctx context.Context, id, instructions string) error {
-	// The contract names the field focus; the server has called it instructions. Both are sent,
-	// and the server reads the one it knows.
-	return c.Do(ctx, http.MethodPost, sessionPath(id, "/compact"), nil, map[string]string{"focus": instructions, "instructions": instructions}, nil)
+	// instructions is the one field the server reads, and what the app sends too.
+	return c.Do(ctx, http.MethodPost, sessionPath(id, "/compact"), nil, map[string]string{"instructions": instructions}, nil)
 }
 
 // Command is one server slash command.
