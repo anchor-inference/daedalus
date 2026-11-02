@@ -254,8 +254,9 @@ made to remove. A distinct identity rather than the operator's own, so the grant
 receipts still tell a chat's board write apart from one the operator made by hand."""
 
 BOARD_STANDING_OPERATIONS = ("board.task.create", "board.task.update")
-"""What a chat may do on its board: add a task, and annotate, tick, block or drop one. Assignment,
-launches, review and the operator's close stay with the coordinator and the operator."""
+"""What a chat may do on its board: add a task, annotate, tick, block or drop one, and take its own to
+doing and done on the light receipts of ``BoardCommands.update``. Assignment, launches, review and the
+operator's close stay with the coordinator and the operator."""
 
 _HELPER_LINKS = ("subagent_of", "btw_of", "prompt_coach_of")
 """The metadata a helper session names its leader by; a helper is what its leader is."""

@@ -4857,6 +4857,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         an empty title. ``needs_you`` says why a card waits on the operator, for the screen's filter."""
         tasks = await _board().list(None, include_done=bool(include_done), project_id=project or None)
         await _board().mark_needs_you(tasks)
+        await _board().mark_chat_finishes(tasks)
         projects = {r["id"]: r["name"] for r in await manager.db.fetchall("SELECT id, name FROM projects")}
         staff = {r["id"]: {"id": r["id"], "name": r["name"], "color": r["color"]} for r in await manager.db.fetchall("SELECT id, name, color FROM staff")}
         for task in tasks:
