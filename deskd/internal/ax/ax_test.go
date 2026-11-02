@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -17,12 +18,22 @@ import (
 	"github.com/ascorblack/daedalus/deskd/internal/geom"
 )
 
-// childEnvName makes the test binary act as the fake tool when the package runs it as its child.
-const childEnvName = "DESKD_AX_TEST_CHILD"
+// childEnvName makes the test binary act as the fake tool when the package runs it as its child;
+// standInEnvName makes it a stand-in for the tool's lingering helper, which says it is running and
+// then waits to be killed.
+const (
+	childEnvName   = "DESKD_AX_TEST_CHILD"
+	standInEnvName = "DESKD_AX_TEST_STAND_IN"
+)
 
 func TestMain(m *testing.M) {
 	if os.Getenv(childEnvName) == "1" {
 		os.Exit(axfake.Main(os.Args[1:], os.Stdout))
+	}
+	if os.Getenv(standInEnvName) == "1" {
+		fmt.Println("ready")
+		time.Sleep(time.Minute)
+		os.Exit(0)
 	}
 	os.Exit(m.Run())
 }

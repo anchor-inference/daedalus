@@ -11,6 +11,10 @@ import (
 // the lease that started it, holding handles to the windows of a grant that has ended. The daemon
 // finds it by what it inherited from the call: the tool's internal host marker and the lease's state
 // root, which only the daemon sets, so no other program's copy of the tool is ever touched.
+//
+// A process still inside its exec shows an empty environment and cannot be recognised. That never
+// hides a real helper: the search runs holding the tool's lock, so no call is starting one, and the
+// call that started one waited until the helper answered on its socket, long past its exec.
 
 const helperMarker = "AGENT_DESKTOP_INTERNAL_COMMAND_HOST=1"
 

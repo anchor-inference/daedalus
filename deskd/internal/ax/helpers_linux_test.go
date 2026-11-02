@@ -3,6 +3,7 @@
 package ax_test
 
 import (
+	"bufio"
 	"context"
 	"os"
 	"os/exec"
@@ -28,14 +29,33 @@ func TestTheToolsLingeringHelperGoesWithItsLease(t *testing.T) {
 	// tool's internal marker and the state root they inherited. The third is another program's copy
 	// of the tool, which must be left alone.
 	root := filepath.Join(cfg.StateDir, "l1")
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Each stand-in is this test binary, and the search starts only once every one has said it is
+	// running. Until the kernel has finished an exec, the new process's /proc/<pid>/environ reads
+	// empty, though Start has already returned: Start waits only for the exec's point of no return,
+	// and the environment is laid out after it. That takes some 50 µs with the binary in the page
+	// cache and milliseconds when it is not, as on a fresh CI machine running sleep for the first
+	// time, where the search read three empty environments, matched nothing, and the test waited
+	// out its 2 s for a kill that was never sent.
 	start := func(env ...string) *exec.Cmd {
-		cmd := exec.Command("sleep", "60")
-		cmd.Env = append(os.Environ(), env...)
+		cmd := exec.Command(self)
+		cmd.Env = append(os.Environ(), append([]string{standInEnvName + "=1"}, env...)...)
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		out, err := cmd.StdoutPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
 		if err := cmd.Start(); err != nil {
-			t.Skip("no sleep to stand in for the helper")
+			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = cmd.Process.Kill(); _, _ = cmd.Process.Wait() })
+		line, err := bufio.NewReader(out).ReadString('\n')
+		if err != nil || line != "ready\n" {
+			t.Fatalf("the stand-in did not start: %q %v", line, err)
+		}
 		return cmd
 	}
 	ours := start("AGENT_DESKTOP_INTERNAL_COMMAND_HOST=1", "AGENT_DESKTOP_HOME="+root)
