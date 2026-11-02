@@ -181,7 +181,7 @@ function DeviceRow({ device: d, toast }: { device: CliDevice; toast: (text: stri
     d.connected ? "" : d.last_seen_at ? t("devices.seen", { t: relTimeLong(d.last_seen_at) }) : t("devices.never"),
     plural("devices.sessions", d.sessions),
     // The token is issued at pairing; the server does not say when a client rotated it since.
-    t("devices.token", { age: tokenAge(d.paired_at) }),
+    t("devices.token", { age: tokenAge(d.token_issued_at ?? d.paired_at) }),
   ].filter(Boolean).join(" · ");
   const about = [
     t(d.approved_via === "telegram" ? "devices.paired.telegram" : "devices.paired", { date: absDate(d.paired_at) }),

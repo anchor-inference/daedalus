@@ -43,10 +43,9 @@ export type RemoteState = "connected" | "reconnecting" | "offline" | "paused";
  *  lid, not a hiccup. */
 export const RECONNECT_GRACE_MS = 45_000;
 
-// When each device's link was last seen to drop, by this window. The server says only whether a link
-// is up; the moment it went down arrives once, as `device.connection`, and is kept here so the header
-// can tell a client that is retrying from one that is gone. A window opened after the drop never saw
-// it, and says offline, which is what such a device most likely is.
+// When each device's link was last seen to drop, by this window, from `device.connection`. The server
+// also says when in the binding's `disconnected_at`, which is what a window opened after the drop goes
+// by; the event is kept too, because it arrives before the next read of the session.
 const droppedAt = new Map<string, number>();
 const linkListeners = new Set<() => void>();
 
@@ -60,7 +59,8 @@ export function noteConnection(deviceId: string, connected: boolean, now = Date.
 export function remoteState(b: RemoteBinding, now = Date.now()): RemoteState {
   if (b.waiting) return "paused";
   if (b.connected) return "connected";
-  const dropped = droppedAt.get(b.device_id);
+  const told = b.disconnected_at ? Date.parse(b.disconnected_at) : NaN;
+  const dropped = droppedAt.get(b.device_id) ?? (Number.isFinite(told) ? told : undefined);
   return dropped !== undefined && now - dropped < RECONNECT_GRACE_MS ? "reconnecting" : "offline";
 }
 

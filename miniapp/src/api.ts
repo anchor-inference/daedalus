@@ -829,6 +829,9 @@ export type RemoteBinding = {
   device_name: string;
   cwd: string;
   connected: boolean;
+  /** When the session stopped being carried by a link of its device, while none carries it; null
+   *  while one does, and after a server restart for a device that has not come back. */
+  disconnected_at?: string | null;
   guard?: "ask" | "auto" | "plan" | null;
   waiting?: RemoteWaiting | boolean | null;
 };
@@ -843,8 +846,10 @@ export type CliDevice = {
   os: string;
   arch: string;
   client_version: string;
-  /** When it was paired, which is when its token was issued. */
+  /** When it was paired. */
   paired_at: string;
+  /** When its current token was issued: at pairing, and again at each rotation. */
+  token_issued_at?: string;
   approved_via: "app" | "telegram";
   last_seen_at: string | null;
   last_address: string;

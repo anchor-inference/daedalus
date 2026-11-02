@@ -46,6 +46,13 @@ describe("what a remote chat's header says", () => {
     expect(remoteState(down, NOW + 3000)).toBe("offline");
   });
 
+  it("tells reconnecting from offline by the server's moment in a window that did not see the drop", () => {
+    const down = { ...BOUND, device_id: "d3", connected: false, disconnected_at: new Date(NOW - 5000).toISOString() };
+    expect(remoteState(down, NOW)).toBe("reconnecting");
+    expect(remoteState(down, NOW + RECONNECT_GRACE_MS)).toBe("offline");
+    expect(remoteState({ ...down, disconnected_at: null }, NOW)).toBe("offline");
+  });
+
   it("names the system as people do", () => {
     expect(osLabel("darwin", "arm64")).toBe("macOS · ARM");
     expect(osLabel("linux", "amd64")).toBe("Linux · x86-64");
@@ -156,8 +163,9 @@ describe("the remote parts on screen", () => {
   });
 
   it("asks in the row before revoking a device, and revokes only on the second press", async () => {
+    // Paired a month ago, token rotated just now: the age is the token's, not the pairing's.
     const device: CliDevice = { id: "d1", name: "laptop-graceful-unicorn", hostname: "laptop", os: "linux", arch: "amd64", client_version: "0.1.0", paired_at: "2026-10-01T00:00:00Z",
-      approved_via: "app", last_seen_at: null, last_address: "127.0.0.1", expires_at: "2027-01-01T00:00:00Z", revoked_at: null, connected: true, sessions: 2 };
+      token_issued_at: new Date().toISOString(), approved_via: "app", last_seen_at: null, last_address: "127.0.0.1", expires_at: "2027-01-01T00:00:00Z", revoked_at: null, connected: true, sessions: 2 };
     prime("/api/cli/devices", { devices: [device] });
     vi.spyOn(api, "get").mockResolvedValue({ devices: [device] });
     const remove = vi.spyOn(api, "delete").mockResolvedValue({ revoked: true });
@@ -165,6 +173,7 @@ describe("the remote parts on screen", () => {
     const row = host.querySelector("[data-device=d1]")!;
     expect(row.textContent).toContain("Connected");
     expect(row.textContent).toContain("2 chats");
+    expect(row.innerHTML).toContain("issued today");
     act(() => row.querySelector<HTMLButtonElement>("[data-action=revoke]")!.click());
     expect(remove).not.toHaveBeenCalled();
     expect(row.textContent).toContain("Revoke laptop-graceful-unicorn?");
