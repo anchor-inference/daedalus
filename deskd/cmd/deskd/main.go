@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"github.com/ascorblack/daedalus/deskd/internal/audit"
+	"github.com/ascorblack/daedalus/deskd/internal/ax"
+	"github.com/ascorblack/daedalus/deskd/internal/ax/axfake"
 	"github.com/ascorblack/daedalus/deskd/internal/backend"
 	"github.com/ascorblack/daedalus/deskd/internal/backend/fake"
 	"github.com/ascorblack/daedalus/deskd/internal/desk"
@@ -37,6 +39,7 @@ const usage = `usage:
   deskd serve --run-dir <dir> --state-dir <dir> [flags]
   deskd selftest [--keep-display]
   deskd version
+  deskd axfake <command>               a fake agent-desktop, which --ax-bin fake runs (tests only)
 
 serve flags:
   --listen unix|tcp:127.0.0.1:<port>   where to listen (default unix: <run-dir>/deskd.sock)
@@ -46,6 +49,7 @@ serve flags:
   --operator-token-file <file>         where the operator's token is written (default <state-dir>/operator.token)
   --audit-file <file>                  the metadata audit (default <state-dir>/audit.jsonl; "off" keeps none)
   --log-file <file>, --log-level <lv>  the daemon's own log (default stderr, info)
+  --ax-bin <path>|off|fake             agent-desktop, for the accessibility tree (default: beside deskd)
 
 selftest opens a window of its own and drives nothing else; on Linux without a display it starts a
 virtual one (Xvfb). It prints a report and exits 0 when every check passed.
@@ -70,6 +74,9 @@ func main() {
 			fmt.Fprintln(os.Stderr, "deskd:", err)
 			os.Exit(1)
 		}
+	case "axfake":
+		// The fake accessibility tool, run by the daemon itself as its child under --ax-bin fake.
+		os.Exit(axfake.Main(os.Args[2:], os.Stdout))
 	case "selftest":
 		fs := flag.NewFlagSet("selftest", flag.ContinueOnError)
 		verbose := fs.Bool("verbose", false, "log the daemon's own lines too")
@@ -88,6 +95,7 @@ func main() {
 type options struct {
 	runDir, stateDir, listen, backendName, scene, configFile string
 	operatorTokenFile, auditFile, logFile, logLevel          string
+	axBin                                                    string
 }
 
 func defaultListen() string {
@@ -112,6 +120,7 @@ func parse(args []string) (options, error) {
 	fs.StringVar(&o.auditFile, "audit-file", "", "")
 	fs.StringVar(&o.logFile, "log-file", "", "")
 	fs.StringVar(&o.logLevel, "log-level", "info", "")
+	fs.StringVar(&o.axBin, "ax-bin", "", "")
 	if err := fs.Parse(args); err != nil {
 		return o, err
 	}
@@ -178,6 +187,81 @@ func newLog(path, level string) (*slog.Logger, io.Closer, error) {
 		w, c = f, f
 	}
 	return slog.New(slog.NewJSONHandler(w, &slog.HandlerOptions{Level: lv})), c, nil
+}
+
+// openAX finds and checks agent-desktop. Every failure leaves the tree unavailable and the rest of
+// the daemon as it was; the reason is in info.ax. No value of --ax-bin stops the daemon from
+// starting: the launcher passes it whatever it found, and a desktop without a tree is still one.
+func openAX(ctx context.Context, o options, fk *fake.Fake) *ax.Tool {
+	stateDir := filepath.Join(o.stateDir, "ax")
+	switch {
+	case o.axBin == "off":
+		return ax.Off(ax.ReasonOff)
+	case o.axBin == "fake" && o.backendName != "fake":
+		return ax.Off(ax.ReasonUnsupported)
+	case o.axBin == "fake":
+		self, err := os.Executable()
+		if err != nil {
+			return ax.Off(ax.ReasonMissing)
+		}
+		scene := filepath.Join(stateDir+"-fake", "scene.json")
+		actions := filepath.Join(stateDir+"-fake", "actions.jsonl")
+		if err := os.MkdirAll(filepath.Dir(scene), 0o700); err != nil {
+			return ax.Off(ax.ReasonFailed)
+		}
+		// The fake tool reads the fake desktop as it is at each call (a window moved by
+		// fake.simulate moves for it too), and its actions are handed back as the fake's inputs.
+		var seen int64
+		return ax.Open(ctx, ax.Config{Path: self, Prefix: []string{"axfake"}, StateDir: stateDir,
+			Env: []string{axfake.SceneEnv + "=" + scene},
+			Before: func() error {
+				b, err := json.Marshal(fk.AXScene(actions))
+				if err != nil {
+					return err
+				}
+				return os.WriteFile(scene, b, 0o600)
+			},
+			After: func() { seen = collectFakeActions(fk, actions, seen) }})
+	case o.backendName == "fake":
+		// The fake desktop has no real windows for a real tool to read.
+		return ax.Off(ax.ReasonUnsupported)
+	}
+	path := o.axBin
+	if path == "" {
+		self, err := os.Executable()
+		if err != nil {
+			return ax.Off(ax.ReasonOff)
+		}
+		path = filepath.Join(filepath.Dir(self), ax.BinaryName())
+		if _, err := os.Stat(path); err != nil {
+			return ax.Off(ax.ReasonOff)
+		}
+	}
+	return ax.Open(ctx, ax.Config{Path: path, StateDir: stateDir})
+}
+
+// collectFakeActions hands the fake tool's element actions after offset to the fake desktop, and
+// returns the new offset.
+func collectFakeActions(fk *fake.Fake, path string, offset int64) int64 {
+	f, err := os.Open(path)
+	if err != nil {
+		return offset
+	}
+	defer f.Close()
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return offset
+	}
+	b, err := io.ReadAll(f)
+	if err != nil {
+		return offset
+	}
+	for _, line := range bytes.Split(b, []byte("\n")) {
+		var l axfake.LogLine
+		if json.Unmarshal(line, &l) == nil && l.Action != "" {
+			fk.RecordAX(l.Action, l.Ref, l.Text, l.Window)
+		}
+	}
+	return offset + int64(len(b))
 }
 
 func serve(args []string) error {
@@ -248,6 +332,9 @@ func serve(args []string) error {
 	evlog := events.NewLog(eventRingSize)
 	evlog.SetMaxBytes(eventRingBytes)
 	d := desk.New(cfg, be, evlog, auditLog, log)
+	axTool := openAX(ctx, o, fk)
+	d.SetAX(axTool)
+	log.Info("accessibility tree", "status", d.AXStatus())
 	daemon := &rpc.Daemon{Desk: d, Events: evlog, Log: log, Instance: hex.EncodeToString(instance),
 		StartedAt: time.Now().UTC(), Fake: fk}
 	srv := server.New(ep.Token, log, nil)
@@ -273,6 +360,8 @@ func serve(args []string) error {
 	}
 	// Whatever the agent holds down comes up before the daemon goes.
 	d.Stop("daemon")
+	// The tool's helpers and its reference maps, which hold the screen's text, go with the daemon.
+	axTool.Close()
 	close(stop)
 	ep.Release()
 	_ = ep.Listener.Close()

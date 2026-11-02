@@ -33,8 +33,7 @@ deskd version
 | `--operator-token-file` | where the operator's token is written; `<state-dir>/operator.token` by default. It may not be in the run directory |
 | `--audit-file` | the audit, JSON lines; `<state-dir>/audit.jsonl` by default, `off` for none |
 | `--log-file`, `--log-level` | the daemon's own JSON-lines log (stderr, `info`) |
-| `--ax-bin` | the accessibility tool, agent-desktop (see The accessibility tree): its path; `agent-desktop` (`agent-desktop.exe`) beside the daemon's own executable when not given and one is there; `off` for none; `fake` for the built-in fake (`--backend fake` only) |
-| `--ax-sha256` | the SHA-256 of that binary, 64 hex characters. A binary that does not hash to it is not run. Without it the binary is used unchecked, which only a development build should do |
+| `--ax-bin` | the accessibility tool, agent-desktop (see The accessibility tree): its path; `agent-desktop` (`agent-desktop.exe`) beside the daemon's own executable when not given and one is there; `off` for none; `fake` for the built-in fake (`--backend fake` only). No value stops the daemon from starting: one it cannot use leaves the tree unavailable |
 
 `SIGTERM` or `SIGINT` stops the daemon: whatever the agent holds down is released (as by `stop`),
 then the endpoint, the token, the operator's token and the socket are removed. On macOS the daemon
@@ -124,7 +123,7 @@ unknown field is `-32602`. Errors use the JSON-RPC codes, `ptyd`'s `1001 not_fou
 | 1206 | `rate` | `{limit: "per_second", retry_after_ms}` or `{limit: "lease_actions", max}` |
 | 1207 | `unreachable` | the system silently drops input to that window (Windows' UIPI in front of a program run as administrator); `{reason: "elevated", app?}` |
 | 1208 | `operator_only` | the method needs the operator's token; `{role}` |
-| 1209 | `ax_unavailable` | no accessibility tree for this call; `{reason: "off" \| "missing" \| "checksum" \| "version" \| "failed" \| "crashed" \| "unsupported" \| "no_window"}` (see The accessibility tree). Use screenshots and points instead |
+| 1209 | `ax_unavailable` | no accessibility tree for this call; `{reason: "off" \| "missing" \| "version" \| "failed" \| "crashed" \| "unsupported" \| "no_window"}` (see The accessibility tree). Use screenshots and points instead |
 | 1210 | `stale_ref` | the element reference cannot be used; `{ref, reason: "unknown" \| "old" \| "window_gone" \| "changed" \| "expired" \| "not_found"}`. Take a new `ax.snapshot` |
 | 1211 | `ambiguous_target` | the reference, or the window, matches more than one live element or accessible window; `{ref?, window?, candidates?}`. Narrow it with `ax.find` or `root` |
 | 1212 | `blocked_key` | a chord that closes, locks or leaves the session, refused whatever the host asks; `{keys, reason: "ends" \| "leaves", why}` (see Blocked keys) |
@@ -313,20 +312,23 @@ every rule below is the daemon's and is checked before the tool runs.
 
 ### Availability
 
-At start the daemon finds the binary (`--ax-bin`), checks its SHA-256 against `--ax-sha256` when one
-is given, and runs `agent-desktop version`. It accepts agent-desktop 1.x at 1.0.2 or later whose
-JSON envelope is 2.x at 2.5 or later. `info.ax` says the outcome. Without a usable binary every
+At start the daemon finds the binary (`--ax-bin`) and runs `agent-desktop version`. It runs only the
+release it was checked against, **1.0.2**, whose JSON envelope is 2.5: the tool changes its payloads
+between minor versions, so a newer one waits until the daemon has been checked against it, and the
+envelope must still be 2.x at 2.5 or later. The binary's bytes are not hashed by the daemon: the
+release's checksums and the operator's signature cover them before install, macOS signs the binary
+after the launcher is built, and a hash kept beside the binary stops no one who can replace both.
+`info.ax` says the outcome. Without a usable binary every
 `ax.*` call is refused with `1209` and its reason, and everything else works as before:
 
 | `reason` | Meaning |
 |---|---|
 | `off` | `--ax-bin off`, or no binary beside the daemon and none named |
 | `missing` | the named binary is not there or is not a file |
-| `checksum` | the binary does not hash to `--ax-sha256` |
-| `version` | `version` answered with a version outside the range above |
+| `version` | `version` answered with another version than 1.0.2, or an envelope older than 2.5 |
 | `failed` | `version` did not answer with JSON at all: the binary does not run here (for example a glibc older than 2.35 on Linux) |
 | `crashed` | this call's child exited without an answer; the next call tries again |
-| `unsupported` | the desktop is one the tree is not served on (the fake desktop without `--ax-bin fake`) |
+| `unsupported` | the desktop is one the tree is not served on (the fake desktop without `--ax-bin fake`, or `--ax-bin fake` on a real one) |
 | `no_window` | this window exposes no accessibility tree, or none the daemon can match to it (see Windows) |
 
 A missing permission is `1205 {which: "accessibility"}`, as for input. On macOS the tool, a child of
@@ -433,7 +435,8 @@ Enter.
 The tool can also drive real input (its `--headed` mode: synthetic clicks and keys, focusing windows)
 and manage windows, the clipboard and apps. The daemon uses none of it:
 
-- it runs only `version`, `snapshot`, `find`, `get`, `is` and the element actions of the table above
+- it runs only `version`, `list-windows` (Linux, to match windows), `snapshot`, `find`, `get`, `is`
+  and the element actions of the table above
   (`click`, `set-value`, `clear`, `type`, `select`, `toggle`, `check`, `uncheck`, `expand`, `collapse`,
   `scroll`, `scroll-to`, `focus`), with arguments it builds itself; every value the host gave comes
   after `--`, so a text such as `--headed` is text;
@@ -446,9 +449,12 @@ and manage windows, the clipboard and apps. The daemon uses none of it:
 - the answer is read from stdout up to 8 MiB; a tree whose answer would pass 768 KiB is refused with
   `1003` (ask for `depth: "skeleton"` or a `root`). Its text is never logged.
 
-On macOS the tool starts a helper process of its own that keeps the system's element handles
-between calls and exits after 15 idle minutes, so it may outlive a lease by that much. It is keyed
-to the state root, so the next lease, with a root of its own, never talks to it.
+On macOS the tool starts a helper process of its own (its command host), in a process group of its
+own, that keeps the system's element handles between calls for up to 15 idle minutes. Killing a
+call's process group does not reach it, so the daemon finds it by what it inherited from the call
+(the tool's internal host marker and the lease's state root, which only the daemon sets) and kills
+it when the lease ends, and every one left under the state directory when the daemon exits or
+starts. Another program's copy of the tool is never touched.
 
 ### Windows
 
@@ -613,9 +619,8 @@ its own. Touching the mouse during the run pauses it, and the report says so.
   Windows with Electron's `screenToDipRect`, since each display has its own scale) and draws the
   border inside a display and just outside a window. The shell's Stop reaches the daemon the same
   way. The grant picker's thumbnails are `preview`, served by the launcher as
-  `GET /api/computer/preview` with the JPEG's own bytes. It passes the bundled agent-desktop as
-  `--ax-bin <path> --ax-sha256 <hex>`, the hash taken of the very binary it ships when the release
-  is built; with no binary for the platform it passes `--ax-bin off`.
+  `GET /api/computer/preview` with the JPEG's own bytes. It always passes `--ax-bin`: the path
+  in `DAEDALUS_AGENT_DESKTOP`, else the `agent-desktop` file beside the launcher, else `off`.
 - **The host** connects with the run directory's token, reads `info` (protocol, platform, units,
   displays, limits), and acts only while `lease.status` says its session holds the lease. It keeps
   the screenshot id with every picture it gives the model and passes it back with every point. It
