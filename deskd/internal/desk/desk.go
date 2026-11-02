@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/ascorblack/daedalus/deskd/internal/audit"
+	"github.com/ascorblack/daedalus/deskd/internal/ax"
 	"github.com/ascorblack/daedalus/deskd/internal/backend"
 	"github.com/ascorblack/daedalus/deskd/internal/geom"
 	"github.com/ascorblack/daedalus/ptyd/proto/events"
@@ -228,6 +229,15 @@ type Desk struct {
 	// What the daemon is holding down, released by stop and by any action that fails half way.
 	heldButtons map[backend.Button]bool
 	heldKeys    []heldKey
+
+	// The accessibility tree: the tool, the snapshots of the current lease and the windows matched
+	// to the tool's, and the children in flight, killed when the lease ends.
+	ax        *ax.Tool
+	axSnaps   map[string]*axSnapshot
+	axOrder   []string
+	axWindows map[string]axBinding
+	axCancels map[uint64]context.CancelFunc
+	axSerial  uint64
 }
 
 // New returns the rules over be.
@@ -237,7 +247,8 @@ func New(cfg Config, be backend.Backend, evlog *events.Log, auditLog *audit.Log,
 	cfg = cfg.withDefaults()
 	return &Desk{cfg: cfg, be: be, events: evlog, audit: auditLog, log: log, now: time.Now,
 		shots: map[string]*Shot{}, shotPrefix: hex.EncodeToString(prefix), tokens: float64(cfg.ActionBurst),
-		heldButtons: map[backend.Button]bool{}}
+		heldButtons: map[backend.Button]bool{}, ax: ax.Off(ax.ReasonOff), axSnaps: map[string]*axSnapshot{},
+		axWindows: map[string]axBinding{}, axCancels: map[uint64]context.CancelFunc{}}
 }
 
 // Backend is the desktop the rules apply to.

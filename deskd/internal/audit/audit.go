@@ -20,7 +20,7 @@ const DefaultMaxBytes = 8 << 20
 type Record struct {
 	At      time.Time `json:"at"`
 	Role    string    `json:"role"`
-	Event   string    `json:"event"` // act, screenshot, lease.granted, lease.ended, stop, resume, human.input, refused, focus
+	Event   string    `json:"event"` // act, screenshot, ax.*, lease.granted, lease.ended, stop, resume, human.input, refused, focus
 	Session string    `json:"session,omitempty"`
 	Lease   string    `json:"lease,omitempty"`
 	Action  string    `json:"action,omitempty"`
@@ -37,7 +37,12 @@ type Record struct {
 	KeysHidden int      `json:"keys_hidden,omitempty"`
 	TextLength int      `json:"text_length,omitempty"`
 	Screenshot string   `json:"screenshot,omitempty"`
-	Bytes      int      `json:"bytes,omitempty"`
+	// Ref is an accessibility element's reference, RoleName its role ("button"), never its label;
+	// Delivery whether an element action may have reached it.
+	Ref      string `json:"ref,omitempty"`
+	RoleName string `json:"role_name,omitempty"`
+	Delivery string `json:"delivery,omitempty"`
+	Bytes    int    `json:"bytes,omitempty"`
 	// App is the identity of the app under the point or with the keyboard: its bundle id, executable
 	// or window class, never a title.
 	App   string `json:"app,omitempty"`

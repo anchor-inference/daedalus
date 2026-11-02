@@ -2,10 +2,11 @@
 #
 # What is built, for each system, is the application (desktop/shell, Electron: the window, the
 # menu entry, the icon) with the launcher beside it (desktop/, Go: the setup, the runtime, the
-# update manager), the launcher's three daemons, the built Mini App and the Chrome extension's release
-# that desktop/extension.lock pins (built in its own repository, daedalus-chrome-extension) — and from
-# that one build both the installer an operator runs and the archive the launcher's own `upgrade`
-# installs from:
+# update manager), the launcher's three daemons, the built Mini App, the Chrome extension's release
+# that desktop/extension.lock pins (built in its own repository, daedalus-chrome-extension) and the
+# agent-desktop release that desktop/agent-desktop.lock pins (vercel-labs/agent-desktop, the program
+# deskd runs for the accessibility tree) — and from that one build both the installer an operator
+# runs and the archive the launcher's own `upgrade` installs from:
 #
 #   Windows  Daedalus-Setup-x64.exe (one window, per user, no administrator), and
 #            daedalus-desktop-windows-amd64.zip, the same files unpacked;
@@ -23,7 +24,9 @@
 # a C library (the screen emulator, built with the pinned Zig): Linux and Windows cross-compiled on
 # the Linux runner, the Mac on the Mac runner. browserd is plain Go. deskd, the desktop daemon, is
 # plain Go on Linux and Windows and needs cgo on the Mac (CoreGraphics and the accessibility API), so
-# it is built like ptyd: Linux and Windows on the Linux runner, both Macs on the Mac runner. The
+# it is built like ptyd: Linux and Windows on the Linux runner, both Macs on the Mac runner.
+# agent-desktop is not built here at all: its released archives are downloaded, held to the lock's
+# digests and to their build provenance, and unpacked once on the Linux runner. The
 # application is packaged on each system's own runner — rcedit, NSIS, hdiutil and codesign want their
 # own systems — and its installer is installed, started and removed there before anything is
 # published.
@@ -267,6 +270,34 @@ jobs:
           path: deskd-dist
           retention-days: 3
 
+  # agent-desktop, the accessibility backend deskd runs: its release archives for every system, as
+  # desktop/agent-desktop.lock pins them. The script refuses an archive whose sha256 is not the lock's,
+  # whose build provenance does not verify as the project's release workflow at the pinned commit
+  # (gh attestation verify, Sigstore), or which holds anything but the expected files — and a refusal
+  # fails this job, so no package is built without it. It is a program of someone else's that will
+  # run with Daedalus's Accessibility grant, so it is never executed here: checked, unpacked and
+  # passed on, with a SHA256SUMS of the unpacked files that each packaging job checks again. Its own
+  # permissions are read-only: nothing it runs needs to write to this repository.
+  agent-desktop:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download, verify and unpack
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh --version
+          desktop/stage-agent-desktop.sh agent-desktop-dist
+          cat agent-desktop-dist/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-desktop
+          path: agent-desktop-dist
+          retention-days: 3
+
   # The launcher, for every system, from here: no C in it.
   engine:
     needs: [test]
@@ -356,7 +387,7 @@ jobs:
   # operator would, silently: installed, started until the window shows the launcher's page,
   # closed with nothing left running, and uninstalled twice — keeping the data, then deleting it.
   app-windows:
-    needs: [engine, ptyd, browserd, deskd, miniapp, seed]
+    needs: [engine, ptyd, browserd, deskd, agent-desktop, miniapp, seed]
     runs-on: windows-latest
     defaults:
       run:
@@ -372,6 +403,8 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { name: deskd-Linux, path: dl/deskd }
       - uses: actions/download-artifact@v4
+        with: { name: agent-desktop, path: dl/agent-desktop }
+      - uses: actions/download-artifact@v4
         with: { name: miniapp-dist, path: desktop/shell/stage/miniapp-dist }
       # The extension release desktop/extension.lock pins, refused on a wrong digest.
       - run: desktop/stage-extension.sh desktop/shell/stage/browser-extension
@@ -384,7 +417,12 @@ jobs:
         working-directory: desktop/shell
         run: |
           if [ "$IS_RELEASE" = true ]; then version="${GITHUB_REF_NAME#desktop-v}"; else version=0.0.0; fi
-          mkdir -p stage/win-x64 stage/seed-win-x64
+          # agent-desktop as the agent-desktop job checked it, and its licence for the notices. Not
+          # code-signed, like every other executable here: there is no Authenticode certificate.
+          (cd ../../dl/agent-desktop && sha256sum -c --quiet SHA256SUMS)
+          mkdir -p stage/win-x64 stage/seed-win-x64 stage/notices
+          cp ../../dl/agent-desktop/windows-amd64/agent-desktop.exe stage/win-x64/agent-desktop.exe
+          cp ../../dl/agent-desktop/THIRD_PARTY_NOTICES.txt stage/notices/
           cp -R ../../dl/seed/manifest.json ../../dl/seed/code ../../dl/seed/windows-amd64 stage/seed-win-x64/
           cp ../../dl/engine/daedalus-desktop-windows-amd64.exe stage/win-x64/daedalus-desktop.exe
           cp ../../dl/ptyd/ptyd-windows-amd64.exe stage/win-x64/ptyd.exe
@@ -393,6 +431,8 @@ jobs:
           cp ../../docs/brand/avatar-bot.png build/icon.png
           npm ci --no-audit --no-fund
           npx electron-builder --win nsis dir --x64 -c.extraMetadata.version="$version" --publish never
+          test -f dist/win-unpacked/agent-desktop.exe
+          test -f dist/win-unpacked/THIRD_PARTY_NOTICES.txt
           # The archive the launcher's upgrade installs from: the unpacked application, its items at the
           # top level, names with forward slashes.
           (cd dist/win-unpacked && 7z a -tzip -bd ../daedalus-desktop-windows-amd64.zip . >/dev/null)
@@ -424,7 +464,7 @@ jobs:
   # x86-64 .deb is then installed on this runner, started under a virtual display until its window
   # shows the launcher's page, closed, and removed — the user's data staying.
   app-linux:
-    needs: [engine, ptyd, browserd, deskd, miniapp, seed]
+    needs: [engine, ptyd, browserd, deskd, agent-desktop, miniapp, seed]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -436,6 +476,8 @@ jobs:
         with: { name: browserd, path: dl/browserd }
       - uses: actions/download-artifact@v4
         with: { name: deskd-Linux, path: dl/deskd }
+      - uses: actions/download-artifact@v4
+        with: { name: agent-desktop, path: dl/agent-desktop }
       - uses: actions/download-artifact@v4
         with: { name: miniapp-dist, path: desktop/shell/stage/miniapp-dist }
       # The extension release desktop/extension.lock pins, refused on a wrong digest.
@@ -449,6 +491,9 @@ jobs:
         working-directory: desktop/shell
         run: |
           if [ "$IS_RELEASE" = true ]; then version="${GITHUB_REF_NAME#desktop-v}"; else version=0.0.0; fi
+          (cd ../../dl/agent-desktop && sha256sum -c --quiet SHA256SUMS)
+          mkdir -p stage/notices
+          cp ../../dl/agent-desktop/THIRD_PARTY_NOTICES.txt stage/notices/
           for pair in amd64:x64 arm64:arm64; do
             goarch=${pair%:*} arch=${pair#*:}
             mkdir -p "stage/linux-$arch" "stage/seed-linux-$arch"
@@ -457,8 +502,12 @@ jobs:
             cp "../../dl/ptyd/ptyd-linux-$goarch" "stage/linux-$arch/ptyd"
             cp "../../dl/browserd/browserd-linux-$goarch" "stage/linux-$arch/browserd"
             cp "../../dl/deskd/deskd-linux-$goarch" "stage/linux-$arch/deskd"
-            # An artifact does not keep the execute bit; the packages and the archives must.
-            chmod +x "stage/linux-$arch"/*
+            # agent-desktop and the clipboard helper it starts from beside itself.
+            cp "../../dl/agent-desktop/linux-$goarch"/* "stage/linux-$arch/"
+            # An artifact does not keep the execute bit; the packages and the archives must. 0755
+            # exactly, not +x on whatever the umask left: agent-desktop refuses a helper that a group
+            # may write.
+            chmod 0755 "stage/linux-$arch"/*
           done
           cp ../../docs/brand/avatar-bot.png build/icon.png
           npm ci --no-audit --no-fund
@@ -482,6 +531,10 @@ jobs:
           test -f squashfs-root/miniapp-dist/index.html
           test -f squashfs-root/seed/manifest.json
           test -f squashfs-root/seed/linux-amd64/wheels.tar.gz
+          test -x squashfs-root/agent-desktop
+          test -x squashfs-root/agent-desktop-linux-clipboard-owner
+          test -z "$(find squashfs-root/agent-desktop squashfs-root/agent-desktop-linux-clipboard-owner -perm /022)"
+          test -f squashfs-root/THIRD_PARTY_NOTICES.txt
       - name: Install, start, close, remove
         timeout-minutes: 30
         run: |
@@ -513,7 +566,7 @@ jobs:
   # open it the first time), in a .dmg to drag into Applications and in the zip the launcher's upgrade
   # installs from. The .dmg is then mounted and its application checked and started.
   app-macos:
-    needs: [engine, ptyd, browserd, deskd, miniapp, seed]
+    needs: [engine, ptyd, browserd, deskd, agent-desktop, miniapp, seed]
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -525,6 +578,8 @@ jobs:
         with: { name: browserd, path: dl/browserd }
       - uses: actions/download-artifact@v4
         with: { name: deskd-macOS, path: dl/deskd }
+      - uses: actions/download-artifact@v4
+        with: { name: agent-desktop, path: dl/agent-desktop }
       - uses: actions/download-artifact@v4
         with: { name: miniapp-dist, path: desktop/shell/stage/miniapp-dist }
       # The extension release desktop/extension.lock pins, refused on a wrong digest.
@@ -551,7 +606,19 @@ jobs:
           lipo -create ../../dl/ptyd/ptyd-darwin-amd64 ../../dl/ptyd/ptyd-darwin-arm64 -output stage/mac-universal/ptyd
           lipo -create ../../dl/browserd/browserd-darwin-amd64 ../../dl/browserd/browserd-darwin-arm64 -output stage/mac-universal/browserd
           lipo -create ../../dl/deskd/deskd-darwin-amd64 ../../dl/deskd/deskd-darwin-arm64 -output stage/mac-universal/deskd
-          chmod +x stage/mac-universal/*
+          # agent-desktop and its helper the same way, from the files the agent-desktop job checked.
+          # It looks for the helper beside itself, so both go to Contents/MacOS, where the signing
+          # below treats them exactly as it treats deskd.
+          (cd ../../dl/agent-desktop && shasum -a 256 -c SHA256SUMS)
+          for name in agent-desktop agent-desktop-macos-helper; do
+            lipo -create "../../dl/agent-desktop/darwin-amd64/$name" "../../dl/agent-desktop/darwin-arm64/$name" -output "stage/mac-universal/$name"
+          done
+          # 0755 exactly: agent-desktop refuses a helper that a group or other users may write.
+          chmod 0755 stage/mac-universal/*
+          # Its licence goes to Contents/Resources: a file that is not code has no place in
+          # Contents/MacOS, where codesign would take it for code.
+          mkdir -p stage/notices
+          cp ../../dl/agent-desktop/THIRD_PARTY_NOTICES.txt stage/notices/
           cp -R stage/mac-universal stage/mac-x64
           cp -R stage/mac-universal stage/mac-arm64
           # Both Macs' seeds, the same folder in both halves of the universal application.
@@ -602,6 +669,15 @@ jobs:
           lipo -archs "$mount/Daedalus.app/Contents/MacOS/Daedalus"
           lipo -archs "$mount/Daedalus.app/Contents/MacOS/daedalus-desktop"
           "$mount/Daedalus.app/Contents/MacOS/daedalus-desktop" --version
+          # agent-desktop is signed as deskd is (ad hoc, or the Developer ID when there is one): both
+          # architectures, a signature that verifies, and what kind it is, for the log.
+          for name in deskd agent-desktop agent-desktop-macos-helper; do
+            bin="$mount/Daedalus.app/Contents/MacOS/$name"
+            lipo -archs "$bin"
+            codesign --verify --strict "$bin"
+            codesign -dv "$bin" 2>&1 | grep -E '^(Identifier|Signature|TeamIdentifier|Runtime)' || true
+          done
+          test -f "$mount/Daedalus.app/Contents/Resources/THIRD_PARTY_NOTICES.txt"
           test -f "$mount/Daedalus.app/Contents/Resources/miniapp-dist/index.html"
           test -f "$mount/Daedalus.app/Contents/Resources/seed/manifest.json"
           test -f "$mount/Daedalus.app/Contents/Resources/seed/darwin-arm64/wheels.tar.gz"
