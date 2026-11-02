@@ -271,3 +271,44 @@ func TestSessionsAndContinue(t *testing.T) {
 		t.Errorf("-c started a new session: %d sessions", n)
 	}
 }
+
+// The operator's rule end to end: both connections drop in the middle of a turn, the client comes
+// back on its own, the turn finishes, and the command it was running ran exactly once.
+func TestHeadlessSurvivesADropMidTurn(t *testing.T) {
+	h := newHarness(t, "dcl_good")
+	h.srv.Turn = func(t *fakeserver.Turn) {
+		res, rpcErr, outcome := t.Exec("echo ran >> ran.log; sleep 1; echo finished")
+		if rpcErr != nil || outcome != "ok" {
+			t.Fail("the call ended " + outcome)
+			return
+		}
+		t.Say("it " + strings.TrimSpace(res["stdout"].(string)))
+	}
+	marker := filepath.Join(h.root, "ran.log")
+	go func() {
+		for i := 0; i < 500; i++ {
+			if b, _ := os.ReadFile(marker); len(b) > 0 {
+				h.srv.DropStreams()
+				h.srv.DropRelay()
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+	code, out, errOut := h.run(t, "-p", "run it", "--output-format", "stream-json")
+	if code != 0 {
+		t.Fatalf("exit %d: %s\n%s", code, errOut, out)
+	}
+	if !strings.Contains(out, `"result":"it finished"`) {
+		t.Errorf("no final answer in %s", out)
+	}
+	if !strings.Contains(out, `"state":"reconnecting"`) {
+		t.Errorf("the drop was not reported: %s", out)
+	}
+	if b, _ := os.ReadFile(marker); string(b) != "ran\n" {
+		t.Errorf("the command ran %d times", strings.Count(string(b), "ran"))
+	}
+	if n := len(h.srv.Hellos()); n < 2 {
+		t.Errorf("the device did not reconnect: %d hellos", n)
+	}
+}
