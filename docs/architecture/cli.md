@@ -488,7 +488,11 @@ A turn of a `remote` session whose device is not connected **pauses**; it does n
    - `known` says `running`: the server waits for its result as if nothing had happened;
    - the device does not know it (the client was restarted, which ended its processes): the call is
      **not run again**. Its result for the agent says the terminal disconnected while running it and
-     reported no outcome, so the agent checks the state before trying again.
+     reported no outcome, so the agent checks the state before trying again. A client that dies
+     outright takes the commands it started with it (their process groups, ended by the kernel's
+     parent-death signal on Linux and by the client's watchdog on Linux and macOS; their job objects
+     on Windows), but a command may have finished or done part of its work first, which is why the
+     outcome stays unknown.
 3. When the device connects, the held calls are sent in order, `remote.waiting {"waiting": false}` is
    announced, and the turn goes on.
 4. The operator can end the wait from anywhere with **Stop** (`POST …/stop`): the held calls end with

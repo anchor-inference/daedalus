@@ -73,6 +73,15 @@ If the connection drops mid-turn, the turn pauses on the server and the client r
 run twice: the client keeps each call's result for fifteen minutes and tells the server, on
 reconnecting, which calls it holds and whether they finished.
 
+If the client itself dies — `kill -9`, the out-of-memory killer — the commands it started die with it
+and nothing keeps running unseen. Each command runs in a process group of its own; on Linux the kernel
+kills its leader the moment the client goes, and on Linux and macOS a small watchdog (the same program,
+started once per client, in a process group of its own) sees the client's end of a pipe close and
+hangs up each group still running, killing it two seconds later. On Windows each command's job object
+ends its tree when the client's handle to it closes. A command may still have finished, or done part
+of its work, before that, so the server reports such a call's outcome as unknown and the agent checks
+before trying again.
+
 ## Files and variables
 
 | | |

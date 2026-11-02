@@ -35,7 +35,24 @@ type Exec struct {
 	home    string
 	log     *slog.Logger
 	slots   chan struct{}
+	tether  Tether
 }
+
+// Tether ties the programs a runner starts to the life of the process that runs them, for a runner
+// that may be killed outright: daedalus-cli under `kill -9` left the commands it had started running
+// on, unseen, with the server reporting their outcome as unknown. Hold is told of each program's
+// process group (on Unix the leader's pid) as soon as it has started, and the function it returns
+// is called once the program has ended.
+type Tether interface {
+	Hold(pid int) (release func())
+}
+
+// Tie makes every program this runner starts from now on die with this process: on Linux the kernel
+// kills the group's leader when its parent dies, and the tether is there to end the rest of the
+// group. Without a tie, a program outlives a runner that dies, as ptyd's have always done, since a
+// daemon restart must not take a terminal's tool calls with it. On Windows each program's job
+// object already ends its tree when the runner's handle to it closes, which dying does.
+func (e *Exec) Tie(t Tether) { e.tether = t }
 
 // NewExec returns a runner that allows the default programs plus extra, in the environment
 // terminals inherit.
@@ -162,8 +179,16 @@ func (e *Exec) Run(ctx context.Context, r ExecRequest) (ExecResult, error) {
 	if r.Stdin != nil {
 		cmd.Stdin = bytes.NewReader(r.Stdin)
 	}
-	group := newGroup(cmd)
+	group := newGroup(cmd, e.tether != nil)
 	defer group.release()
+	if e.tether != nil && parentDeathPerThread {
+		// The kernel's parent-death signal follows the thread that started the child, not the
+		// process: a thread the runtime retired while the program ran would kill it then. Holding
+		// this goroutine on its thread until the program has been waited for keeps that thread
+		// alive and keeps every other goroutine off it.
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+	}
 	// A daemonised grandchild that keeps the pipes open must not keep the call open after the
 	// program itself has exited.
 	cmd.WaitDelay = killGrace
@@ -172,6 +197,9 @@ func (e *Exec) Run(ctx context.Context, r ExecRequest) (ExecResult, error) {
 		return ExecResult{}, fmt.Errorf("starting %s: %w", filepath.Base(path), err)
 	}
 	group.started()
+	if e.tether != nil {
+		defer e.tether.Hold(cmd.Process.Pid)()
+	}
 	waited := make(chan error, 1)
 	go func() { waited <- cmd.Wait() }()
 

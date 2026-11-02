@@ -101,6 +101,10 @@ func New(log *slog.Logger) (*Executor, error) {
 	return &Executor{exec: sidechan.NewOpenExec(os.Environ(), home, log), fs: fs, home: home, roots: map[string]string{}}, nil
 }
 
+// Tie makes the commands this executor starts die with this process (package tether, and
+// sidechan.Exec.Tie). Call it before the first command runs.
+func (e *Executor) Tie(t sidechan.Tether) { e.exec.Tie(t) }
+
 // CheckRoot says why a folder cannot be a session's root, or nil when it can: it must be an
 // absolute, existing directory, and neither the filesystem's root nor the home folder nor anything
 // above it, because the deny list names the credentials it knows of and a jail that wide would put
