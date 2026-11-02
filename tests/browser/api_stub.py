@@ -489,16 +489,6 @@ KEYPROXY_CLIENT_UPDATED: dict[str, object] = {
 """What ``POST /api/keyproxy/clients/claude/update`` answers: the version moved, three header values kept."""
 
 
-CLI_DEVICE: dict[str, object] = {
-    "id": "d0c1a2b3c4d5", "name": "Work laptop", "hostname": "laptop", "os": "linux", "arch": "amd64", "client_version": "0.1.0",
-    "paired_at": "2026-11-01T09:00:00+00:00", "token_issued_at": "2026-11-01T09:00:00+00:00", "approved_via": "app", "last_seen_at": "2026-11-02T09:00:00+00:00", "last_address": "127.0.0.1",
-    "expires_at": "2027-01-31T09:00:00+00:00", "revoked_at": None, "connected": True, "disconnected_at": None, "sessions": 2,
-}
-CLI_PAIRING: dict[str, object] = {
-    "id": "p0a1b2c3d4e5", "user_code": "WDJB-MJHT", "name": "desktop", "hostname": "desktop", "os": "windows", "arch": "amd64", "client_version": "0.1.0",
-    "address": "127.0.0.1", "created_at": "2026-11-02T09:00:00+00:00", "expires_at": "2026-11-02T09:10:00+00:00", "state": "pending",
-}
-"""The terminal client's paired device and pending pairing request, as ``/api/cli/*`` answers them."""
 
 
 GATES: dict[str, object] = {
@@ -558,11 +548,6 @@ GATES: dict[str, object] = {
     "/api/notifications/preferences": notification_preferences(),
     "/api/terminals/load": terminal_load(),
     "/api/commands": [],
-    # The terminal client's devices (docs/architecture/cli.md): one paired laptop, connected, for
-    # Settings → Devices. No request waits by default, so no screen draws an approval card it was not
-    # asked to; the QR link's request (``CLI_PAIRING``) answers by its code below.
-    "/api/cli/devices": {"devices": [CLI_DEVICE]},
-    "/api/cli/pairs": {"requests": []},
     # The model list outside the app's settings (the terminal's /model): no address, no key.
     "/api/models": {"default": "default", "presets": [{"id": "default", "label": "Test model", "provider": "keyproxy", "model": "test-model", "thinking": True, "reasoning_effort": "medium", "images": False, "context_window": 128000, "max_output_tokens": 32000, "provider_kind": "openai", "billing": ""}],
                     "providers": [{"id": "keyproxy", "kind": "openai", "name": "Key proxy", "billing": ""}], "efforts": ["low", "medium", "high", "xhigh"]},
@@ -700,10 +685,11 @@ class CliStub:
     def device(id_: str, name: str, os_name: str, arch: str, *, days: float = 0, connected: bool = False, sessions: int = 0) -> dict[str, object]:
         """A paired computer as ``GET /api/cli/devices`` lists it."""
         now = datetime.now(UTC)
+        paired = (now - timedelta(days=days)).isoformat()
         return {"id": id_, "name": name, "hostname": name, "os": os_name, "arch": arch, "client_version": "0.1.0",
-                "paired_at": (now - timedelta(days=days)).isoformat(), "approved_via": "app", "last_seen_at": now.isoformat(),
+                "paired_at": paired, "token_issued_at": paired, "approved_via": "app", "last_seen_at": now.isoformat(),
                 "last_address": "127.0.0.1", "expires_at": (now + timedelta(days=90)).isoformat(), "revoked_at": None,
-                "connected": connected, "sessions": sessions}
+                "connected": connected, "disconnected_at": None, "sessions": sessions}
 
     @staticmethod
     def request(code: str = "WDJB-MJHT", name: str = "studio-mac", os_name: str = "darwin", arch: str = "arm64", *, minutes: float = 10) -> dict[str, object]:
@@ -1051,22 +1037,6 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     if path == "/api/sessions" and method.upper() == "POST":
         status, created = create_session(body)
         return status, "application/json", json.dumps(created)
-    if len(parts) >= 5 and parts[2] == "cli" and parts[3] == "pair":
-        # One pairing request, as the approval card opens it from the QR link, and the operator's answer.
-        known = str(CLI_PAIRING["user_code"]).replace("-", "")
-        if parts[4].upper().replace("-", "") != known:
-            return 404, "application/json", json.dumps({"detail": "no such pairing request, or it ran out"})
-        if len(parts) == 5 and method.upper() == "GET":
-            return 200, "application/json", json.dumps(CLI_PAIRING)
-        if len(parts) == 6 and parts[5] in ("approve", "deny") and method.upper() == "POST":
-            return 200, "application/json", json.dumps({"ok": True, "request": {**CLI_PAIRING, "state": "approved" if parts[5] == "approve" else "denied"}})
-    if len(parts) == 5 and parts[2] == "cli" and parts[3] == "devices" and method.upper() in ("PATCH", "DELETE"):
-        if parts[4] != CLI_DEVICE["id"]:
-            return 404, "application/json", json.dumps({"detail": "no such device"})
-        if method.upper() == "DELETE":
-            return 200, "application/json", json.dumps({"ok": True})
-        name = (body or {}).get("name") if isinstance(body, dict) else None
-        return 200, "application/json", json.dumps({**CLI_DEVICE, "name": name or CLI_DEVICE["name"]})
     if len(parts) == 5 and parts[2] == "sessions" and parts[4] == "tasks" and method.upper() == "GET":
         return 200, "application/json", json.dumps(session_tasks(parts[3]))
     if len(parts) == 7 and parts[2] == "sessions" and parts[4] == "tasks" and parts[6] == "stop" and method.upper() == "POST":
