@@ -112,11 +112,13 @@ function ResultArtifacts({ artifacts }: { artifacts: ResultReceipt["artifacts"] 
   </div>;
 }
 
+/** The digests that pin a result down, in small type under its evidence. They sit inside the evidence
+ *  fold already; a "Details" fold of their own was a fold inside a fold. */
 function Fingerprints({ artifacts, original }: { artifacts: ResultReceipt["artifacts"]; original: string }) {
-  return <details><summary>{t("common.details")}</summary>
+  return <div className="result-fingerprints">
     <ul>{artifacts.map((artifact) => <li key={artifact.id} className="mono">{artifact.artifact_key} · {artifact.digest}</li>)}</ul>
     <div className="mono">{original}</div>
-  </details>;
+  </div>;
 }
 
 export type AcceptedResultReference = { resultId: string; revision: number; attemptId: string; digest: string };
@@ -483,11 +485,16 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
             <option value="">{t("result.wholeResult")}</option>
             {result.artifacts.map((artifact) => <option key={artifact.id} value={artifact.id}>{artifact.artifact_key}</option>)}
           </select>}
-          {task.branch && <details className="result-comment-location" open={locationOpen} onToggle={(event) => setLocationOpen(event.currentTarget.open)}><summary>{t("result.commentLocation")}</summary>
-            <input className="field" aria-label={t("result.commentPath")} value={commentPath} onChange={(event) => setCommentPath(event.target.value)} placeholder={t("result.commentPath")} />
-            <input className="field" type="number" min="1" aria-label={t("result.commentLine")} value={commentLine} onChange={(event) => setCommentLine(event.target.value)} placeholder={t("result.commentLine")} />
-            <p className="sub">{t("result.commentLocationHint")}</p>
-          </details>}
+          {/* A button that shows the line fields, not a fold: the note form already sits inside the
+              annotations fold, and a fold inside it was the nesting the task dialog got rid of. */}
+          {task.branch && <div className="result-comment-location">
+            <button type="button" className="linkbtn" aria-expanded={locationOpen} onClick={() => setLocationOpen((value) => !value)}>{t("result.commentLocation")}</button>
+            {locationOpen && <>
+              <input className="field" aria-label={t("result.commentPath")} value={commentPath} onChange={(event) => setCommentPath(event.target.value)} placeholder={t("result.commentPath")} />
+              <input className="field" type="number" min="1" aria-label={t("result.commentLine")} value={commentLine} onChange={(event) => setCommentLine(event.target.value)} placeholder={t("result.commentLine")} />
+              <p className="sub">{t("result.commentLocationHint")}</p>
+            </>}
+          </div>}
           <button type="button" className="btn small" disabled={busy || offline || !commentText.trim() || !contract.data || (!!commentLine && (!commentPath.trim() || !review.data?.head_sha || !Number.isInteger(Number(commentLine)) || Number(commentLine) < 1))} onClick={() => void addComment()}>{t("result.addComment")}</button>
         </div>
       </details>

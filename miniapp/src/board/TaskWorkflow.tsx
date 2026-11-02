@@ -42,9 +42,11 @@ function definition(steps: StepDraft[]): Definition {
 }
 
 /** A task's persisted workflow is available only when the operator opens its details. */
-export function TaskWorkflow({ projectId, task, tasks }: { projectId: string; task: ProjectTask; tasks: ProjectTask[] }) {
+export function TaskWorkflow({ projectId, task, tasks, bare = false }: { projectId: string; task: ProjectTask; tasks: ProjectTask[]; bare?: boolean }) {
   const offline = useOffline();
   const [open, setOpen] = useState(false);
+  // `bare` is the workflow opened from the task's menu, already open and without its heading button.
+  if (bare) return <section className="task-workflow task-workflow-section"><WorkflowContent projectId={projectId} task={task} tasks={tasks} offline={offline} /></section>;
   return <section className="task-workflow task-workflow-section">
     <button type="button" className="pboard-fold section-title" aria-expanded={open} onClick={() => setOpen(!open)}>{t("taskWorkflow.title")}</button>
     {open && <WorkflowContent projectId={projectId} task={task} tasks={tasks} offline={offline} />}

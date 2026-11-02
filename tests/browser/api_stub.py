@@ -1581,6 +1581,24 @@ class TeamStub:
             return 200, row
         return None
 
+TASK_ACTIONS = {"en": "Task actions", "ru": "Действия с задачей"}
+
+
+def open_task_tool(page, title: str, lang: str = "en"):  # type: ignore[no-untyped-def]
+    """Open one of a project task's rare tools from the task dialog's menu; return the panel it opens in.
+
+    The tools (stopping owned work, a comparison, another worker, the workflow, the context, a manual
+    result, the execution record) wait behind the dialog's menu rather than folding open in it, and a
+    chosen one takes the place of the task's text. A phone's menu is a bottom sheet with the same rows.
+    """
+    sheet = page.locator(".sheet.pboard-sheet")
+    sheet.get_by_role("button", name=TASK_ACTIONS[lang], exact=True).first.click()
+    page.locator("[role='menu']").get_by_text(title, exact=True).first.click()
+    tool = sheet.locator(".ptask-tool")
+    tool.wait_for(state="visible")
+    return tool
+
+
 class BoardStub:
     """A project's board, answered the way the host answers it, and kept between requests.
 

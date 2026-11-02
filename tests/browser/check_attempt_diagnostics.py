@@ -6,7 +6,7 @@ import json
 import os
 from urllib.parse import urlsplit
 
-from api_stub import DEFAULT_APP, BoardStub, Unhandled, expect_app
+from api_stub import DEFAULT_APP, BoardStub, Unhandled, expect_app, open_task_tool
 from check_project_board import PID, project, serve
 from playwright.sync_api import expect, sync_playwright
 
@@ -46,10 +46,9 @@ def scenario(language: str, width: int) -> None:
         page.route("**/api/**", diagnostics)
         page.goto(f"{BASE}/project/{PID}/board?task=task-one&token=t&lang={language}")
         sheet = page.locator(".sheet.pboard-sheet")
-        details = sheet.locator("details.result-details", has_text="Execution details" if language == "en" else "Сведения о выполнении")
-        expect(details).to_be_visible()
+        expect(sheet).to_be_visible()
         assert reads == []
-        details.locator("summary").click()
+        details = open_task_tool(page, "Execution details" if language == "en" else "Сведения о выполнении", language)
         expect(details).to_contain_text("needs recovery" if language == "en" else "требует восстановления")
         expect(details).to_contain_text("Launch failed" if language == "en" else "Сбой запуска")
         expect(details).to_contain_text("fault-3")
