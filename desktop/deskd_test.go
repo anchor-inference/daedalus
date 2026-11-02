@@ -317,3 +317,65 @@ func TestAWaylandSessionIsToldApartAsTheDaemonTellsIt(t *testing.T) {
 		}
 	}
 }
+
+// The lock names one archive for each platform a package is built for, each with a full digest, and
+// the release it pins by version and by commit: the staging script trusts it, and a platform left
+// out would ship a package whose tree tools are silently missing. The Mac bundle declares the tool
+// and its helper universal already, as the workflow makes them, or electron-builder would try to
+// merge two identical files.
+func TestTheAccessibilityToolIsPinnedForEveryPackagedPlatform(t *testing.T) {
+	body, err := os.ReadFile("agent-desktop.lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields := map[string]string{}
+	for _, line := range strings.Split(string(body), "\n") {
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			t.Fatalf("a line that is not key=value: %q", line)
+		}
+		fields[key] = value
+	}
+	if !regexp.MustCompile(`^1\.\d+\.\d+$`).MatchString(fields["version"]) {
+		t.Fatalf("version %q: deskd accepts agent-desktop 1.x", fields["version"])
+	}
+	if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(fields["commit"]) {
+		t.Fatalf("commit %q is not a full commit id", fields["commit"])
+	}
+	if fields["repo"] != "vercel-labs/agent-desktop" || fields["workflow"] != ".github/workflows/release.yml" {
+		t.Fatalf("the provenance is checked against %s/%s", fields["repo"], fields["workflow"])
+	}
+	if !strings.HasPrefix(fields["url"], "https://github.com/"+fields["repo"]+"/releases/download/") ||
+		!strings.Contains(fields["url"], "{version}") || !strings.Contains(fields["url"], "{target}") {
+		t.Fatalf("url %q", fields["url"])
+	}
+	targets := map[string]string{
+		"linux-amd64":   "x86_64-unknown-linux-gnu",
+		"linux-arm64":   "aarch64-unknown-linux-gnu",
+		"darwin-amd64":  "x86_64-apple-darwin",
+		"darwin-arm64":  "aarch64-apple-darwin",
+		"windows-amd64": "x86_64-pc-windows-msvc",
+	}
+	digest := regexp.MustCompile(`^[0-9a-f]{64}$`)
+	for platform, target := range targets {
+		got, want, _ := strings.Cut(fields[platform], " ")
+		if got != target || !digest.MatchString(want) {
+			t.Fatalf("%s=%q, want %s and a sha256", platform, fields[platform], target)
+		}
+	}
+	for key := range fields {
+		if _, known := targets[key]; !known && strings.Contains(key, "-") {
+			t.Fatalf("%s is pinned but no package is built for it", key)
+		}
+	}
+	builder, err := os.ReadFile(filepath.Join("shell", "electron-builder.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`x64ArchFiles: "Contents/MacOS/\{[^}]*\bagent-desktop,agent-desktop-macos-helper\b`).Match(builder) {
+		t.Fatal("electron-builder.yml does not declare agent-desktop and its helper universal")
+	}
+}

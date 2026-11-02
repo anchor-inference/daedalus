@@ -1,0 +1,15 @@
+# agent-desktop (https://github.com/vercel-labs/agent-desktop, Apache-2.0): the accessibility backend
+# deskd runs for the tree tools. Every desktop package carries the release named here, staged by
+# desktop/stage-agent-desktop.sh, which refuses an archive whose sha256 is not the one below or whose
+# build provenance is not the release workflow's at the commit below. To move to another release,
+# change version= and commit= and the five digests; desktop/README.md (Computer use) has the steps.
+version=1.0.2
+commit=a47ed664e0db00d1d4df364eb3fe8a5599882f3c
+repo=vercel-labs/agent-desktop
+workflow=.github/workflows/release.yml
+url=https://github.com/vercel-labs/agent-desktop/releases/download/v{version}/agent-desktop-v{version}-{target}.tar.gz
+linux-amd64=x86_64-unknown-linux-gnu ad661b7a3fd8f990a769243f4889a240ca0e2c8dab3ef5bddd6019086c71e0b4
+linux-arm64=aarch64-unknown-linux-gnu 864cb782e0afc8bf0df19622016b24bdbd1a83fc7749f784ee82aa49a7f845eb
+darwin-amd64=x86_64-apple-darwin 8edda6df17eafc042395502a823dbb8415bc8ac14835a6731e4d8becc9cb4121
+darwin-arm64=aarch64-apple-darwin 7bee385196d7b478de80cf05ca4304aaa38f0eba593b3406ad3c247c1773be19
+windows-amd64=x86_64-pc-windows-msvc 2186c76e7df197c0e67365e45d36d869f74714c56bb8a73817e2a66f3e18e222
