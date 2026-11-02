@@ -43,8 +43,10 @@ type Options struct {
 	Guard string
 	// Plain and ASCII come from theme.Environment unless the caller decides.
 	Plain, ASCII bool
-	Store        Store
-	Start        StartRequest
+	// Platform is the GOOS whose markers are drawn; empty is the running system.
+	Platform string
+	Store    Store
+	Start    StartRequest
 	// Now is the clock; tests fix it so frames are reproducible.
 	Now func() time.Time
 	// Editor is the external editor for Ctrl+G; empty reads $VISUAL and $EDITOR.
@@ -228,7 +230,7 @@ func New(backend Backend, options Options) *Model {
 }
 
 func (m *Model) applyTheme() {
-	m.theme = theme.New(theme.Options{Name: m.prefs.Theme, Dark: m.dark, Plain: m.options.Plain, ASCII: m.options.ASCII})
+	m.theme = theme.New(theme.Options{Name: m.prefs.Theme, Dark: m.dark, Plain: m.options.Plain, ASCII: m.options.ASCII, Platform: m.options.Platform})
 	m.md = markdown.New(m.theme)
 	for _, b := range m.blocks {
 		if b.stream != nil {

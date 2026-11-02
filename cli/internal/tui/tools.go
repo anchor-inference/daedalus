@@ -98,12 +98,23 @@ func firstArg(input map[string]any, cwd string) string {
 	return ""
 }
 
+// A path that sits under the folder in slash form is cut textually first. The server writes POSIX
+// paths, and filepath on Windows does not call "/work/project/x" absolute, so the call lines kept
+// the whole path there and every frame with a tool in it differed on the Windows runner. A native
+// Windows path still goes through filepath.Rel.
 func relPath(p, cwd string) string {
-	if p == "" || cwd == "" || !filepath.IsAbs(p) {
+	if p == "" || cwd == "" {
+		return p
+	}
+	slashCwd := strings.TrimSuffix(filepath.ToSlash(cwd), "/")
+	if slashP := filepath.ToSlash(p); strings.HasPrefix(slashP, slashCwd+"/") {
+		return slashP[len(slashCwd)+1:]
+	}
+	if !filepath.IsAbs(p) {
 		return p
 	}
 	if rel, err := filepath.Rel(cwd, p); err == nil && !strings.HasPrefix(rel, "..") {
-		return rel
+		return filepath.ToSlash(rel)
 	}
 	return p
 }

@@ -2,10 +2,12 @@ package tui
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -38,7 +40,10 @@ func newHarness(t *testing.T, width, height int, configure ...func(*Options)) *h
 	fake := NewFake("/work/project")
 	fake.Now = clock.now
 	dark := true
-	options := Options{Cwd: "/work/project", Store: &MemoryStore{}, Now: clock.now, Dark: &dark}
+	// Everything a frame could take from the machine is pinned: the clock, the background, colour and
+	// character set, and the platform whose markers are drawn. The golden frames are one set for
+	// every runner, so nothing in them may depend on where the test runs.
+	options := Options{Cwd: "/work/project", Store: &MemoryStore{}, Now: clock.now, Dark: &dark, Platform: "linux"}
 	for _, c := range configure {
 		c(&options)
 	}
@@ -202,6 +207,11 @@ var timestamps = regexp.MustCompile(`\b\d{2}:\d{2}:\d{2}\b`)
 // golden compares the plain frame with testdata/<name>.golden, rewriting it under -update.
 func (h *harness) golden(name string) {
 	h.t.Helper()
+	if on, _ := strconv.ParseBool(os.Getenv("RUNEWIDTH_EASTASIAN")); on {
+		// The width tables read this once, when the process starts, and count ambiguous characters
+		// such as ● as two cells; no test can set it back. The frames are drawn for the default.
+		h.t.Skip("RUNEWIDTH_EASTASIAN changes cell widths for the whole process")
+	}
 	got := timestamps.ReplaceAllString(h.plain(), "hh:mm:ss") + "\n"
 	path := filepath.Join("testdata", name+".golden")
 	if *update {
@@ -217,9 +227,31 @@ func (h *harness) golden(name string) {
 	if err != nil {
 		h.t.Fatalf("missing golden frame %s (run go test -update): %v", path, err)
 	}
-	if string(want) != got {
-		h.t.Errorf("frame %s differs from the golden frame\n--- want\n%s\n--- got\n%s", name, want, got)
+	// .gitattributes keeps the frames LF in every checkout; a checkout made before that rule, or by
+	// a tool that ignores it, must still compare as the same text.
+	wantText := strings.ReplaceAll(string(want), "\r\n", "\n")
+	if wantText != got {
+		h.t.Errorf("frame %s differs from the golden frame: %s\n--- want\n%s\n--- got\n%s", name, firstDifference(wantText, got), wantText, got)
 	}
+}
+
+// firstDifference names the first line two frames disagree on, quoted so an invisible difference
+// (a carriage return, a different marker, a trailing space) shows in a CI log.
+func firstDifference(want, got string) string {
+	wl, gl := strings.Split(want, "\n"), strings.Split(got, "\n")
+	for i := 0; i < max(len(wl), len(gl)); i++ {
+		var w, g string
+		if i < len(wl) {
+			w = wl[i]
+		}
+		if i < len(gl) {
+			g = gl[i]
+		}
+		if w != g {
+			return fmt.Sprintf("line %d: want %q, got %q", i+1, w, g)
+		}
+	}
+	return "no line differs"
 }
 
 func (h *harness) contains(want string) {
