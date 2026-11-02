@@ -422,3 +422,10 @@ prompt — or resumes the one still unfinished; `message` is its first turn when
 "path", "at"}` once the coach has saved the prompt to `prompts/<date>-<title>.md` in the chat's
 workspace. The coach reads the chat's files and writes none of its own; no session list shows it, and
 it is deleted with its chat.
+
+**A terminal of your own.** `daedalus-cli` pairs with the server by a device code the operator approves
+in the app or in Telegram, and then holds a per-device token (`Authorization: Device dcl_…`) that
+reaches the conversations started from that terminal or opened from it with `/resume`, and nothing of
+the installation's settings. `GET /api/models` lists the model presets, providers and efforts without
+any address or key. The pairing, the device list (`/api/cli/devices`), what a device token reaches and
+the relay its tools run over are in [architecture/cli.md](architecture/cli.md).

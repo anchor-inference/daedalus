@@ -39,9 +39,10 @@ LENT_KEY = "daedalus.lent_from"
 what the app draws — never holds it, so the window shows the question and its answers, not a second copy
 of the conversation they are about."""
 
-SESSION_KINDS = ("chat", "computer", "chrome")
+SESSION_KINDS = ("chat", "computer", "chrome", "remote")
 """What a conversation was made for, as the ``sessions.kind`` column's check allows: an ordinary chat,
-work on the operator's own computer under their grant, or work in their Chrome. Set at creation and
+work on the operator's own computer under their grant, work in their Chrome, or work started from the
+terminal client, whose tools run on the operator's machine (``daedalus.remote``). Set at creation and
 never changed: a chat that later borrows the operator's Chrome or computer used to be re-marked for
 good, and the extension then announced every later turn of it as a Chrome conversation's. What a
 session controls right now is a separate, live fact (:mod:`daedalus.host.control_marks`). The sidebar
@@ -236,7 +237,7 @@ class SqliteSessionStore(ISessionStore):
         await self._db.execute("UPDATE sessions SET title = ? WHERE id = ?", (title, session_id))
 
     async def kind(self, session_id: str) -> str:
-        """What the conversation is for: ``chat``, ``computer`` or ``chrome`` (see :data:`SESSION_KINDS`)."""
+        """What the conversation is for: ``chat``, ``computer``, ``chrome`` or ``remote`` (see :data:`SESSION_KINDS`)."""
         row = await self._db.fetchone("SELECT kind FROM sessions WHERE id = ?", (session_id,))
         return str(row["kind"]) if row is not None else "chat"
 
