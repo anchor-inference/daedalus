@@ -40,9 +40,12 @@ what the app draws — never holds it, so the window shows the question and its 
 of the conversation they are about."""
 
 SESSION_KINDS = ("chat", "computer", "chrome")
-"""What a conversation is for, as the ``sessions.kind`` column's check allows: an ordinary chat, work on
-the operator's own computer under their grant, or work in their Chrome. The sidebar sorts by it; the
-agent's turn context and preloaded tools follow from it."""
+"""What a conversation was made for, as the ``sessions.kind`` column's check allows: an ordinary chat,
+work on the operator's own computer under their grant, or work in their Chrome. Set at creation and
+never changed: a chat that later borrows the operator's Chrome or computer used to be re-marked for
+good, and the extension then announced every later turn of it as a Chrome conversation's. What a
+session controls right now is a separate, live fact (:mod:`daedalus.host.control_marks`). The sidebar
+sorts by both; the agent's turn context and preloaded tools follow from the kind."""
 
 UNFINISHED_RUN_STATUSES = ", ".join(f"'{status.value}'" for status in (RunStatus.queued, RunStatus.running, RunStatus.paused))
 """The statuses of a run that is not over. Its events are what the live view reads and what a resume
@@ -140,7 +143,11 @@ class SqliteSessionStore(ISessionStore):
         self._view = view
         self._media = media
 
-    async def create(self, session: Session, *, project_id: str | None = None) -> None:
+    async def create(self, session: Session, *, project_id: str | None = None, kind: str = "chat") -> None:
+        """Store a new session. ``kind`` is written here once and never changed: what a conversation
+        was made for is a fact of its creation (see :data:`SESSION_KINDS`)."""
+        if kind not in SESSION_KINDS:
+            raise ValueError(f"a session's kind is one of {', '.join(SESSION_KINDS)}, not {kind!r}")
         if project_id is None:
             project_id = session.id
             async with self._db.transaction() as conn:
@@ -158,8 +165,8 @@ class SqliteSessionStore(ISessionStore):
                     (f"f-{project_id}", project_id, str(self._db.workspaces_dir / session.id), self._db.local_env, session.created_at.isoformat()),
                 )
         await self._db.execute(
-            "INSERT OR REPLACE INTO sessions(id, tenant_id, title, created_at, last_message_at, metadata, project_id)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO sessions(id, tenant_id, title, created_at, last_message_at, metadata, project_id, kind)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 session.id,
                 session.tenant_id,
@@ -168,6 +175,7 @@ class SqliteSessionStore(ISessionStore):
                 session.last_message_at.isoformat(),
                 json.dumps(session.metadata),
                 project_id,
+                kind,
             ),
         )
 
@@ -241,19 +249,6 @@ class SqliteSessionStore(ISessionStore):
         else:
             rows = await self._db.fetchall("SELECT id, kind FROM sessions WHERE id IN (" + ",".join("?" for _ in ids) + ")", tuple(ids))
         return {str(r["id"]): str(r["kind"]) for r in rows}
-
-    async def set_kind(self, session_id: str, kind: str, *, only_from: str | None = None) -> bool:
-        """Change the kind; with ``only_from``, only a session of that kind changes, which is how a
-        mark that sticks (a computer grant, a switch to the operator's Chrome) leaves a kind the
-        operator chose alone. ``True`` when the row changed."""
-        if kind not in SESSION_KINDS:
-            raise ValueError(f"a session's kind is one of {', '.join(SESSION_KINDS)}, not {kind!r}")
-        async with self._db.transaction() as conn:
-            if only_from is None:
-                cursor = await conn.execute("UPDATE sessions SET kind = ? WHERE id = ? AND kind != ?", (kind, session_id, kind))
-            else:
-                cursor = await conn.execute("UPDATE sessions SET kind = ? WHERE id = ? AND kind = ?", (kind, session_id, only_from))
-            return bool(cursor.rowcount)
 
     # -- transcript (display history, append-only) ------------------------------
 

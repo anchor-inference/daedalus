@@ -9,6 +9,11 @@ makes Computer the default, sending creates a session of kind "computer" and lan
 Computer sheet open, and Browser creates one of kind "chrome". On a phone the Chats page has the same
 tabs, and the drawer's recent chats carry the marks. In English and Russian.
 
+The kind is what a chat was started as; what it controls now comes beside it. The stub's "Bakery site"
+is an ordinary chat driving the operator's Chrome right now: it is listed under Browser as well as
+under Chats, its plate is the Chrome mark drawn hollow and live with the "controlling now" words, and
+an ordinary chat that controls nothing stays out of Browser.
+
     cd miniapp && npm run build
     mkdir -p /tmp/app-root && ln -sfn "$PWD/miniapp/dist" /tmp/app-root/app
     python3 tests/browser/serve_app.py 8163 /tmp/app-root &
@@ -34,8 +39,8 @@ from api_stub import ComputerStub, expect_app  # noqa: E402
 BASE = shots.BASE
 SHOTS = os.environ.get("SHOTS", "")
 WORDS = {
-    "en": {"tabs": ["All", "Chats", "Computer", "Browser"], "computer": "Computer", "browser": "Browser", "consent": "Use my Chrome"},
-    "ru": {"tabs": ["Все", "Обычные", "Компьютер", "Браузер"], "computer": "Компьютер", "browser": "Браузер", "consent": "Использовать мой Chrome"},
+    "en": {"tabs": ["All", "Chats", "Computer", "Browser"], "computer": "Computer", "browser": "Browser", "consent": "Use my Chrome", "live": "Controlling your Chrome now"},
+    "ru": {"tabs": ["Все", "Обычные", "Компьютер", "Браузер"], "computer": "Компьютер", "browser": "Браузер", "consent": "Использовать мой Chrome", "live": "Сейчас управляет вашим Chrome"},
 }
 CHROME = {"configured": True, "enabled": True, "daemon": True, "reason": "", "detail": "", "relay": {"connected": True, "profile_name": "Work"}, "native": True,
           "launcher": None, "launcher_error": "", "devices": [], "server_url": "", "consent": ""}
@@ -92,6 +97,12 @@ def main() -> int:
             chrome_plate = side.locator(f"[data-session='{shots.S4}'] .sb-plate")
             check(chrome_plate.get_attribute("data-kind") == "chrome" and bool(chrome_plate.get_attribute("title")), f"{lang}: under All the Chrome chat's plate carries its mark and a tooltip")
             check(side.locator(f"[data-session='{shots.S6}'] .sb-plate[data-kind]").count() == 0, f"{lang}: an ordinary chat carries no mark")
+            borrowed = side.locator(f"[data-session='{shots.S1}'] > .sb-plate").get_attribute("class") or ""
+            check(all(c in borrowed.split() for c in ("kind-chrome", "kind-live", "kind-borrowed")), f"{lang}: the ordinary chat driving Chrome now borrows its mark, hollow and live ({borrowed})")
+            ring = side.locator(f"[data-session='{shots.S1}'] > .sb-plate").evaluate("el => getComputedStyle(el).boxShadow")
+            check("inset" in ring, f"{lang}: the borrowed mark is drawn as a ring, not a fill ({ring})")
+            live_plate = page.locator(f".start [data-session='{shots.S1}'] .start-live-plate")
+            check(live_plate.count() == 1 and live_plate.get_attribute("title") == words["live"], f"{lang}: the start screen's live row says it controls Chrome now ({live_plate.get_attribute('title') if live_plate.count() else 'no row'})")
             shot(page, f"desktop-all-{lang}")
 
             tabs.nth(2).click()
@@ -108,7 +119,8 @@ def main() -> int:
             tabs.nth(3).click()
             page.wait_for_timeout(300)
             sessions = side.locator("[data-session]").evaluate_all("els => els.map((e) => e.dataset.session)")
-            check(sessions == [shots.S4], f"{lang}: Browser keeps the Chrome chat ({sessions})")
+            check(shots.S4 in sessions and shots.S1 in sessions, f"{lang}: Browser keeps the Chrome chat and the ordinary chat controlling Chrome now ({sessions})")
+            check(shots.S6 not in sessions and shots.S2 not in sessions, f"{lang}: Browser leaves out chats that do not control Chrome ({sessions})")
             # On a server neither kind can start: the chip opens on Chat, the two others greyed with why.
             page.locator(".start .kind-select").click()
             menu = page.locator(".kind-menu")
@@ -123,6 +135,7 @@ def main() -> int:
             page.wait_for_timeout(250)
             sessions = side.locator("[data-session]").evaluate_all("els => els.map((e) => e.dataset.session)")
             check(shots.S2 not in sessions and shots.S4 not in sessions and shots.S6 in sessions, f"{lang}: Chats leaves the computer and Chrome chats out ({sessions})")
+            check(shots.S1 in sessions, f"{lang}: the ordinary chat controlling Chrome is still under Chats ({sessions})")
             tabs.nth(0).click()
             context.close()
 
@@ -184,6 +197,8 @@ def main() -> int:
             wide = page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
             check(wide, f"{lang}: the tabs fit the phone's width")
             check(page.locator(f"[data-session='{shots.S4}'] .ph-sicon[data-kind=chrome]").count() == 1, f"{lang}: the phone's row of the Chrome chat carries its mark")
+            phone_live = page.locator(f"[data-session='{shots.S1}'] .ph-sicon.kind-borrowed").first
+            check(phone_live.count() == 1 and phone_live.get_attribute("title") == words["live"], f"{lang}: the phone's row of the chat controlling Chrome says so")
             shot(page, f"phone-chats-all-{lang}")
             page.locator(".ph-kinds [data-kind-tab=computer]").click()
             page.wait_for_timeout(300)

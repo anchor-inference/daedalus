@@ -228,3 +228,31 @@ def test_the_test_button_reaches_every_channel_there_is() -> None:
     assert (d.toast, d.push, d.desktop, d.telegram) == (True, True, True, "general")
     none = route(Candidate("system", "normal", force=True), presence=PresenceSnapshot(present=False), telegram=TelegramFacts(), channels=Channels())
     assert (none.push, none.desktop, none.telegram) == (False, False, "none")
+
+
+def test_a_conversation_followed_in_chrome_sounds_there_once_instead_of_push_and_desktop() -> None:
+    d = route(Candidate("run_finished", "normal", session_id="s1", chrome=True))
+    assert (d.chrome, d.push, d.desktop, d.toast) == (True, False, False, True)
+    assert d.reasons["chrome"] == "sent" and d.reasons["push"] == d.reasons["desktop"] == "skipped: shown in Chrome"
+    # Without a launcher or a device it still sounds: the extension is the way out then.
+    alone = route(Candidate("run_finished", "normal", session_id="s1", chrome=True), presence=PresenceSnapshot(present=False), channels=Channels())
+    assert alone.chrome is True
+    # Any other conversation goes as before, and nothing is shown in Chrome.
+    other = route(Candidate("run_finished", "normal", session_id="s1"))
+    assert (other.chrome, other.push, other.desktop) == (False, True, True) and "chrome" not in other.reasons
+
+
+def test_chrome_keeps_the_rules_of_the_push_it_replaces() -> None:
+    def sounds(**kw) -> bool:  # type: ignore[no-untyped-def]
+        candidate = kw.pop("candidate", Candidate("run_finished", "normal", session_id="s1", chrome=True))
+        return route(candidate, **kw).chrome
+
+    assert not sounds(presence=PRESENT)  # a window in front of the operator says it already
+    assert not sounds(presence=ATTENDING)
+    assert not sounds(prefs=NotificationsConfig(quiet_hours="11:00-13:00"))
+    assert not sounds(prefs=NotificationsConfig(matrix={"run_finished": NotifyCells(push="off", desktop="off")}))
+    assert not sounds(candidate=Candidate("run_finished", "normal", session_id="s1", chrome=True, merged=True))
+    assert not sounds(candidate=Candidate("question", "normal", session_id="s1", chrome=True), prefs=NotificationsConfig(telegram_covers_push=True))
+    limiter = RateLimiter(1, timedelta(minutes=10), 100)
+    assert sounds(limiter=limiter) and not sounds(limiter=limiter)
+    assert route(Candidate("run_finished", "normal", session_id="s1", chrome=True), prefs=NotificationsConfig(quiet_hours="11:00-13:00")).reasons["chrome"] == "skipped: quiet hours"

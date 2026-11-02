@@ -133,6 +133,17 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         error = {"code": exc.code, "message": exc.message, "data": exc.data, "explanation": explanation, "words": refusals.words(exc.code, exc.data)}
         return JSONResponse({"detail": explanation, "error": error}, status_code=409)
 
+    async def control_changed() -> None:
+        """Who controls the computer may have changed: the Computer tab hears of it now rather than on
+        the watcher's next read."""
+        control = getattr(app, "extensions", {}).get("computer_control")
+        if control is None:
+            return
+        try:
+            await control.refresh()  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001 — the watcher's next read corrects it
+            logger.warning("could not recompute who controls the computer", exc_info=True)
+
     async def call(method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any] | JSONResponse:
         found = await launcher()
         try:
@@ -193,12 +204,14 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         scope = body.scope.model_dump(exclude_none=True)
         answer = await call("POST", "/api/computer/grant", {"session": body.session_id, "scope": scope, "ttl_ms": body.minutes * 60_000})
         if not isinstance(answer, JSONResponse):
-            # The conversation becomes a computer one, its next run starts with the tools loaded, and a
-            # run already going is told; a failure there leaves the grant standing.
+            # The conversation's next run starts with the tools loaded, and a run already going is
+            # told; a failure there leaves the grant standing. It keeps its kind and is marked as
+            # controlling the computer while it does.
             try:
                 await manager.computer_granted(body.session_id)
             except Exception:  # noqa: BLE001 — the grant is the operator's and it was made
                 logger.exception("after granting the computer to session %s", body.session_id)
+            await control_changed()
         return answer
 
     @api.get("/api/computer/preview")
@@ -226,13 +239,17 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     @api.post("/api/computer/revoke")
     async def computer_revoke(body: RevokeBody, _: dict[str, Any] = Depends(auth)) -> Any:
         """Take control back: from the named conversation only, or from whichever holds it."""
-        return await call("POST", "/api/computer/revoke", {"session": body.session_id} if body.session_id else {})
+        answer = await call("POST", "/api/computer/revoke", {"session": body.session_id} if body.session_id else {})
+        await control_changed()
+        return answer
 
     @api.post("/api/computer/stop")
     async def computer_stop(_body: EmptyBody, _: dict[str, Any] = Depends(auth)) -> Any:
         """The kill switch: the action in flight is cut short, everything held down is released, and
         the lease ends. Nothing more happens until a new grant."""
-        return await call("POST", "/api/computer/stop", {})
+        answer = await call("POST", "/api/computer/stop", {})
+        await control_changed()
+        return answer
 
     @api.post("/api/computer/resume")
     async def computer_resume(_body: EmptyBody, _: dict[str, Any] = Depends(auth)) -> Any:

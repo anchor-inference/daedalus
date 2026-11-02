@@ -67,6 +67,10 @@ class RunFinished(TypedDict):
     title: str
     summary: NotRequired[str]
     error: NotRequired[str]
+    controlling: NotRequired[list[str]]
+    """What the session controlled as the run ended (``chrome``, ``computer``). Taken before the end
+    closes the run's tabs in the operator's Chrome, so the notification of this end still goes where
+    the run was working, though the control is gone by the time it is posted."""
 
 
 class SessionStatus(TypedDict):
@@ -79,11 +83,12 @@ class SessionUnreadResult(TypedDict):
     run_id: NotRequired[str]
 
 
-class SessionKind(TypedDict):
-    """What the conversation is for changed (``chat``, ``computer``, ``chrome``): the sidebar moves it
-    to its tab without waiting for the next poll."""
+class SessionControlling(TypedDict):
+    """What the session controls right now changed (``chrome``, ``computer``; empty when nothing): the
+    sidebar moves it into or out of the Browser and Computer tabs without waiting for the next poll.
+    Its kind, what it was made for, never changes (:mod:`daedalus.host.control_marks`)."""
 
-    kind: str
+    controlling: list[str]
 
 
 class SessionCreated(TypedDict):
@@ -685,7 +690,7 @@ REGISTRY: dict[str, EventSpec] = {
     "run.finished": EventSpec(RunFinished),
     "session.status": EventSpec(SessionStatus),
     "session.unread_result": EventSpec(SessionUnreadResult),
-    "session.kind": EventSpec(SessionKind),
+    "session.controlling": EventSpec(SessionControlling),
     "session.created": EventSpec(SessionCreated),
     "session.deleted": EventSpec(SessionDeleted),
     "session.jobs": EventSpec(SessionJobs),

@@ -3291,6 +3291,101 @@ CREATE INDEX IF NOT EXISTS agent_messages_by_sender ON agent_messages(sender_sta
 CREATE INDEX IF NOT EXISTS agent_messages_by_target ON agent_messages(target_staff_id, created_at);
 """, True))
 
+
+# What a conversation was made for stops following what it once touched. Until now the first switch
+# of an ordinary chat to the operator's Chrome, or the first computer grant to it, made it a Chrome or
+# computer conversation for good; the kind is now fixed at creation and what a session controls is a
+# live mark beside it (``daedalus.host.control_marks``). The conversations marked only by such a later
+# touch go back to ordinary chats; see ``_born_as`` for how the two are told apart.
+TURN_CONTEXT = "<turn-context>"
+BORN_IN_CHROME_LINES = ("\n- Side panel: ", "\n- Chrome chat: ")
+"""Lines of a turn context said only to a conversation made in the side panel or made a Chrome chat
+(``daedalus.browser.panel``), as they read when this migration was written."""
+BORN_FOR_COMPUTER_LINE = "\n- Computer: "
+"""The turn context's computer line (``daedalus.computer.awareness``): said to a computer chat with or
+without a lease, and to any other only while it holds one."""
+
+
+def _instant(text: Any) -> datetime | None:
+    try:
+        at = datetime.fromisoformat(str(text or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return at if at.tzinfo is not None else at.replace(tzinfo=UTC)
+
+
+def _born_as(kind: str, opening: tuple[datetime | None, str] | None, choice: Any) -> bool:
+    """Whether a session stored as a Chrome or computer conversation was made as one.
+
+    Nothing stored says how a session was made, so it is read from what its making left behind:
+
+    - A Chrome conversation is moved to the operator's Chrome by its own creation, before its first
+      message (the app's Browser chat, the side panel, *Ask Daedalus about this page*), and the
+      first move stamps ``consented_at`` on the session's browser choice. A chat moved there later,
+      by the operator's switch or their yes to the agent's ask, was moved after its first message.
+      So: made in Chrome when that stamp is no later than the first message, or when the first
+      message's turn context carries a line only such a conversation is told (for a choice that was
+      dropped, past the bound the store keeps). A session with no message yet and a stamp was made
+      in Chrome and never used.
+    - A computer conversation is told about the computer in its first turn, granted or not; an
+      ordinary chat is told only while it holds the lease, which a later grant does not reach back
+      to. So: made for the computer when its first message carries the computer line, or when it has
+      no message yet. A chat granted the computer before it said anything is counted as made for it,
+      which is what such a chat is.
+    """
+    first_at, text = opening if opening is not None else (None, "")
+    context = text[text.find(TURN_CONTEXT):] if TURN_CONTEXT in text else ""
+    if kind == "computer":
+        return opening is None or BORN_FOR_COMPUTER_LINE in context
+    consented = _instant(choice.get("consented_at")) if isinstance(choice, dict) else None
+    if consented is not None and (first_at is None or consented <= first_at):
+        return True
+    return any(line in context for line in BORN_IN_CHROME_LINES)
+
+
+async def _session_origin_kinds(conn: aiosqlite.Connection) -> None:
+    """The Chrome and computer conversations marked so only by a later touch become ordinary chats.
+
+    Reads each candidate's first message from ``transcript``, the display history, which is only ever
+    appended to, so a compaction has not taken it away; the per-conversation browser choices are one
+    kv row, read once and guarded, so a malformed value decides nothing rather than failing the start.
+    A second run finds the moved ones already ordinary and decides the rest as before."""
+    rows = await (await conn.execute("SELECT id, kind FROM sessions WHERE kind IN ('chrome', 'computer')")).fetchall()
+    if not rows:
+        return
+    saved = await (await conn.execute("SELECT value FROM kv WHERE key = 'browser.user.sessions'")).fetchone()
+    try:
+        choices = json.loads(saved[0]) if saved is not None else {}
+    except (TypeError, ValueError):
+        choices = {}
+    if not isinstance(choices, dict):
+        choices = {}
+    plain: list[str] = []
+    for session_id, kind in rows:
+        first = await (await conn.execute(
+            "SELECT key, message FROM transcript WHERE session_id = ? AND key LIKE 'user:%' ORDER BY seq LIMIT 1", (session_id,),
+        )).fetchone()
+        opening: tuple[datetime | None, str] | None = None
+        if first is not None:
+            try:
+                message = json.loads(first[1])
+            except (TypeError, ValueError):
+                message = {}
+            message = message if isinstance(message, dict) else {}
+            blocks = message.get("content_blocks") if isinstance(message.get("content_blocks"), list) else []
+            text = "\n".join(str(b.get("text") or "") for b in blocks if isinstance(b, dict))
+            opening = (_instant(str(first[0]).partition(":")[2]) or _instant(message.get("created_at")), text)
+        if not _born_as(str(kind), opening, choices.get(session_id)):
+            plain.append(str(session_id))
+    for start in range(0, len(plain), 500):
+        part = plain[start:start + 500]
+        await conn.execute(f"UPDATE sessions SET kind = 'chat' WHERE id IN ({','.join('?' for _ in part)})", part)  # noqa: S608 — placeholders only
+    if plain:
+        logger.info("%d of %d Chrome or computer conversation(s) were marked so only by a later touch and are ordinary chats again", len(plain), len(rows))
+
+
+MIGRATIONS.append(DataMigration("SELECT 1;", _session_origin_kinds))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { BrowserUserStatus, SessionSummary } from "./api";
 import type { ComputerState } from "./computer";
 import { setLang } from "./i18n";
-import { KindMark, KindTabs, byTab, defaultKind, kindIcon, kindOffers, kindTab, parseTab, requestComputerSheet, sessionKind, setKindTab, tabCounts, takeComputerSheet } from "./chatkind";
+import { KindMark, KindTabs, byTab, defaultKind, kindIcon, kindOffers, kindPlate, kindTab, liveControls, parseTab, requestComputerSheet, sessionKind, setKindTab, shownKind, tabCounts, takeComputerSheet } from "./chatkind";
 
 function row(id: string, extra: Partial<SessionSummary> = {}): SessionSummary {
   return { id, title: id, status: "idle", created_at: "2026-10-21T10:00:00Z", last_message_at: "2026-10-21T10:00:00Z", run_id: null, project_id: "p", project: "p", ...extra };
@@ -52,6 +52,58 @@ describe("which chats a tab shows", () => {
 
   it("counts top-level, unarchived chats per tab", () => {
     expect(tabCounts(LIST)).toEqual({ all: 5, chat: 3, computer: 1, chrome: 1 });
+  });
+});
+
+// The origin is what a chat was started as and never changes; `controlling` is what it holds now. An
+// ordinary chat that once used the operator's Chrome used to become a Browser chat for good.
+describe("a control held now", () => {
+  const driving = [
+    row("plain"),
+    row("borrow", { controlling: ["chrome"] }),
+    row("web", { kind: "chrome" }),
+    row("desk", { kind: "computer" }),
+    row("lead"),
+    row("lead-helper", { metadata: { subagent_of: "lead" }, controlling: ["chrome"] }),
+  ];
+
+  it("lists an ordinary chat under Browser while it controls Chrome, and under Chats as well", () => {
+    expect(byTab(driving, "chrome").map((s) => s.id)).toEqual(["borrow", "web", "lead", "lead-helper"]);
+    expect(byTab(driving, "chat").map((s) => s.id)).toEqual(["plain", "borrow", "lead", "lead-helper"]);
+  });
+
+  it("takes it out of Browser once control ends", () => {
+    const released = driving.map((s) => ({ ...s, controlling: [] as ("chrome" | "computer")[] }));
+    expect(byTab(released, "chrome").map((s) => s.id)).toEqual(["web"]);
+    expect(byTab(released, "chat").map((s) => s.id)).toEqual(["plain", "borrow", "lead", "lead-helper"]);
+  });
+
+  it("keeps a computer chat under Computer without any control", () => {
+    expect(byTab(driving, "computer").map((s) => s.id)).toEqual(["desk"]);
+  });
+
+  it("brings a helper's leader into Browser with it, so the helper is never an orphan", () => {
+    expect(byTab(driving, "chrome")).toContainEqual(expect.objectContaining({ id: "lead" }));
+  });
+
+  it("counts a controlling chat under its own kind and under the control", () => {
+    expect(tabCounts(driving)).toEqual({ all: 5, chat: 3, computer: 1, chrome: 3 });
+  });
+
+  it("reads only the controls it knows", () => {
+    expect(liveControls(row("a", { controlling: ["computer", "printer" as never, "chrome"] }))).toEqual(["chrome", "computer"]);
+    expect(liveControls(row("a"))).toEqual([]);
+  });
+
+  it("shows the origin, a borrowed control, or nothing", () => {
+    expect(shownKind(row("a", { kind: "chrome" }))).toEqual({ kind: "chrome", live: false, borrowed: false });
+    expect(shownKind(row("a", { kind: "chrome", controlling: ["chrome"] }))).toEqual({ kind: "chrome", live: true, borrowed: false });
+    expect(shownKind(row("a", { kind: "computer", controlling: ["chrome"] }))).toEqual({ kind: "computer", live: false, borrowed: false });
+    expect(shownKind(row("a", { controlling: ["computer"] }))).toEqual({ kind: "computer", live: true, borrowed: true });
+    expect(shownKind(row("a", { controlling: ["computer", "chrome"] }))).toEqual({ kind: "chrome", live: true, borrowed: true });
+    expect(shownKind(row("a"))).toEqual({ kind: "chat", live: false, borrowed: false });
+    expect(kindPlate(row("a", { controlling: ["chrome"] })).className).toBe("kind-chrome kind-live kind-borrowed");
+    expect(kindPlate(row("a")).className).toBe("");
   });
 });
 
@@ -134,11 +186,18 @@ describe("the tabs and the mark", () => {
   });
 
   it("draws a mark only on a computer or Chrome chat, with its tooltip", () => {
-    act(() => root.render(<>{(["chat", "computer", "chrome"] as const).map((k) => <KindMark key={k} kind={k} />)}</>));
+    act(() => root.render(<>{(["chat", "computer", "chrome"] as const).map((k) => <KindMark key={k} s={{ kind: k }} />)}</>));
     const marks = [...host.querySelectorAll(".kind-mark")];
     expect(marks.map((m) => m.className)).toEqual(["kind-mark kind-computer", "kind-mark kind-chrome"]);
     expect(marks[0].getAttribute("title")).toMatch(/компьютер/i);
     expect(kindIcon("chat")).toBeNull();
+  });
+
+  it("draws an ordinary chat's mark hollow and live only while it controls the browser", () => {
+    act(() => root.render(<><KindMark s={{ kind: "chat", controlling: ["chrome"] }} /><KindMark s={{ kind: "chat", controlling: [] }} /></>));
+    const marks = [...host.querySelectorAll(".kind-mark")];
+    expect(marks.map((m) => m.className)).toEqual(["kind-mark kind-chrome kind-live kind-borrowed"]);
+    expect(marks[0].getAttribute("title")).toMatch(/сейчас управляет вашим chrome/i);
   });
 
   it("names the four tabs in Russian, marks the chosen one and walks them with the arrows", () => {
