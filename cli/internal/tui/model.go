@@ -156,8 +156,10 @@ type Model struct {
 	// viewed is set once a frame has been drawn. Inline mode prints nothing into the scrollback
 	// before that: Bubble Tea clears the lines already on screen when a print precedes the first
 	// frame, which the renderer gate measured as a wiped shell history.
-	viewed bool
-	branch string
+	viewed        bool
+	viewedAt      time.Time
+	commitPending bool
+	branch        string
 	// manual is set by tests that feed events and frames by hand: no event reader and no ticker run,
 	// so a frame is a function of the events applied and nothing else.
 	manual bool
@@ -430,6 +432,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.editor.SetValue(strings.TrimRight(msg.text, "\n"))
 		}
 		return m, m.tickIfNeeded()
+	case commitMsg:
+		m.commitPending = false
+		return m, m.commit()
 	case dialogMsg:
 		if m.dialog != nil {
 			return m, m.dialog.update(m, msg)

@@ -339,25 +339,55 @@ func (m *Model) notify(text string) tea.Cmd {
 
 // commit prints finished blocks into the terminal's scrollback in inline mode. Blocks are committed
 // strictly in order, so a finished tool call below a still-streaming answer waits for the answer:
-// what reaches the scrollback can never be reordered or redrawn.
+// what reaches the scrollback can never be reordered or redrawn. A streaming answer is printed a
+// finished Markdown block at a time, so the live region holds only the block being written; a live
+// region that grows taller than the window makes the terminal scroll half-drawn frames into the
+// scrollback, where they stay as duplicates.
 func (m *Model) commit() tea.Cmd {
 	if !m.inline() || m.width == 0 || !m.viewed {
 		return nil
 	}
-	var cmds []tea.Cmd
+	// Nothing is printed until the first frame has surely reached the terminal: Bubble Tea clears
+	// the lines already on screen when a print precedes the first flush, which the renderer gate
+	// measured as a wiped shell history.
+	if wait := firstFlushDelay - time.Since(m.viewedAt); wait > 0 {
+		if m.commitPending {
+			return nil
+		}
+		m.commitPending = true
+		return tea.Tick(wait, func(time.Time) tea.Msg { return commitMsg{} })
+	}
+	var printed []string
 	ctx := m.renderContext(m.width, false)
 	for m.committed < len(m.blocks) {
 		b := m.blocks[m.committed]
+		lines := b.render(ctx)
 		if b.live() {
+			if b.kind == blockAssistant {
+				stable := b.stream.StableLines(max(m.width-gutter, 10))
+				if stable > b.printed {
+					if b.printed == 0 && m.committed > 0 {
+						printed = append(printed, "")
+					}
+					printed = append(printed, lines[b.printed:stable]...)
+					b.printed = stable
+				}
+			}
 			break
 		}
-		lines := b.render(ctx)
-		text := strings.Join(lines, "\n")
-		if m.committed > 0 {
-			text = "\n" + text
+		if b.printed == 0 && m.committed > 0 {
+			printed = append(printed, "")
 		}
-		cmds = append(cmds, tea.Println(text))
+		printed = append(printed, lines[min(b.printed, len(lines)):]...)
 		m.committed++
 	}
-	return tea.Sequence(cmds...)
+	if len(printed) == 0 {
+		return nil
+	}
+	return tea.Println(strings.Join(printed, "\n"))
 }
+
+// firstFlushDelay is how long inline mode waits after the first frame before printing anything.
+const firstFlushDelay = 300 * time.Millisecond
+
+type commitMsg struct{}

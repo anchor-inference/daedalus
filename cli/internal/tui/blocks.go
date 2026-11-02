@@ -55,6 +55,9 @@ type block struct {
 	tool  *toolCall
 	todos []Todo
 
+	// printed is how many of the block's lines inline mode has already put into the scrollback.
+	printed int
+
 	// version counts changes; the cache is valid for one version.
 	version int
 	cache   renderCache

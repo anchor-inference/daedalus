@@ -112,6 +112,32 @@ func (s *Stream) Reset() {
 	s.chunks = nil
 }
 
+// StableLines is how many of Render's lines at width belong to finished blocks: the lines that will
+// not change however the answer continues. Inline mode prints those into the terminal's scrollback
+// while the answer is still streaming and keeps only the rest live.
+func (s *Stream) StableLines(width int) int {
+	n := 0
+	for i := range s.chunks {
+		c := &s.chunks[i]
+		if c.width != width {
+			c.lines = splitRendered(s.renderer.Render(c.source, width))
+			c.width = width
+		}
+		if len(c.lines) == 0 {
+			continue
+		}
+		if n > 0 {
+			n++
+		}
+		n += len(c.lines)
+	}
+	if n > 0 && strings.TrimSpace(s.text.String()[s.committed:]) != "" {
+		// The blank line that joins the last finished block to the open one is finished too.
+		n++
+	}
+	return n
+}
+
 // Render draws the answer at width. Finished chunks are rendered again only when the width changes;
 // the open tail is rendered on every call. Chunks are joined by one blank line, which is what the
 // blank line that ended each of them would have rendered as in one document.

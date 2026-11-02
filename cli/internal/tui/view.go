@@ -49,7 +49,9 @@ func (m *Model) View() tea.View {
 		v.MouseMode = tea.MouseModeCellMotion
 		return v
 	}
-	m.viewed = true
+	if !m.viewed {
+		m.viewed, m.viewedAt = true, time.Now()
+	}
 	bottom, cursorRow, cursorCol := m.bottom()
 	var lines []string
 	if m.inline() {
@@ -130,10 +132,28 @@ func (m *Model) transcriptWindow(height int) []string {
 // scrollback, cut to their last lines so the live region stays shorter than the window. A live
 // region taller than the window forces the terminal to scroll a redraw, which loses scrollback.
 func (m *Model) liveLines(limit int) []string {
-	lines := m.transcriptLines(m.width, m.committed)
-	if m.committed > 0 && len(lines) > 0 {
-		lines = append([]string{""}, lines...)
+	ctx := m.renderContext(m.width, false)
+	var lines []string
+	for i := m.committed; i < len(m.blocks); i++ {
+		b := m.blocks[i]
+		if b.kind == blockWelcome {
+			// The banner is printed straight into the scrollback a moment after start and never
+			// drawn live: inserting thirteen lines above a frame that already fills most of the
+			// window trips Bubble Tea's inline renderer, which then leaves the banner's top rows
+			// behind twice.
+			continue
+		}
+		rendered := b.render(ctx)
+		if b.printed > 0 {
+			rendered = rendered[min(b.printed, len(rendered)):]
+		} else if i > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, rendered...)
 	}
+	// Half the window at most: the open block of a streaming answer is usually a paragraph, and a
+	// long code block shows its tail until it closes and is printed whole.
+	limit = min(limit, max(m.height/2, 6))
 	if len(lines) > limit {
 		lines = lines[len(lines)-limit:]
 	}
