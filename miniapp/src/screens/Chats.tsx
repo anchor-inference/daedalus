@@ -25,7 +25,7 @@ import type { MenuItem } from "../ui/dialogs";
 import { ActionSheet, Banner, Chip, ChipBar, EmptyState, IconButton, ListRow, NewChatPill, SectionHeader, TopBar } from "../ui/phone";
 import { NewAgentSheet, useSessionCommands } from "./Sessions";
 import { asChatCommand } from "../chatproject";
-import { KindTabs, byTab, kindIcon, sessionKind, tabCounts, useKindTab } from "../chatkind";
+import { KindTabs, byTab, kindIcon, kindPlate, tabCounts, useKindTab } from "../chatkind";
 
 type View = "all" | "attention" | "working" | "loops" | "archive";
 type SearchList = SessionList & { semantic: boolean; reason: string; partial: boolean; indexing: boolean };
@@ -70,11 +70,12 @@ function loopLine(s: SessionSummary): string {
 /** The status icon of a row: what kind of chat it is, and a dot for its state. */
 function RowIcon({ s, fork }: { s: SessionSummary; fork?: boolean }) {
   // A computer or Chrome chat says so on its icon, as on the desktop's plate (chatkind.tsx).
-  const kind = sessionKind(s);
+  const plate = kindPlate(s);
+  const kind = plate.kind;
   const icon = s.archived ? "archive" : s.metadata?.loop ? "loop" : kindIcon(kind) ?? (fork || s.metadata?.forked_from ? "fork" : "bots");
   const state = s.status === "waiting" || s.status === "running" || s.status === "failed" ? s.status : s.status === "compacting" ? "running" : "";
-  const label = kind === "chat" ? undefined : t(`kind.mark.${kind}`);
-  return <span className={`ph-sicon ${kind === "chat" ? "" : `kind-${kind}`}`} data-kind={kind === "chat" ? undefined : kind} title={label} role={label ? "img" : undefined} aria-label={label}><Icon name={icon} size={18} />{state && <span className={`ph-st ${state}`} />}</span>;
+  const label = plate.title;
+  return <span className={`ph-sicon ${plate.className}`} data-kind={kind === "chat" ? undefined : kind} title={label} role={label ? "img" : undefined} aria-label={label}><Icon name={icon} size={18} />{state && <span className={`ph-st ${state}`} />}</span>;
 }
 
 /** The meta line: the state in its colour when it asks for attention, then the model and what hangs off the chat. */

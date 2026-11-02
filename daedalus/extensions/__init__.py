@@ -53,6 +53,7 @@ EXTENSIONS = (
     "daedalus.extensions.folder_moves",
     "daedalus.extensions.harness",
     "daedalus.extensions.browser",
+    "daedalus.extensions.computer_control",
     "daedalus.extensions.project_environment",
     "daedalus.extensions.edit_board",
     "daedalus.extensions.pages",

@@ -806,8 +806,13 @@ export type SessionSummary = {
   /** The program the session was imported from, for its plate's corner mark. */
   imported_from?: string | null;
   /** An ordinary chat, one about the operator's computer, or one in their Chrome (chatkind.tsx);
-   *  absent from a host older than the column, which is the same as "chat". */
+   *  absent from a host older than the column, which is the same as "chat". What the chat was started
+   *  as: fixed at creation, never changed by what it later does. */
   kind?: "chat" | "computer" | "chrome";
+  /** What the chat controls right now: a live tab group in the operator's Chrome, a live lease on their
+   *  computer. Derived by the host and cleared once control is released or the chat goes idle, so a
+   *  chat that drove the browser once is not a browser chat forever (chatkind.tsx). */
+  controlling?: ("chrome" | "computer")[];
 };
 
 export type TaskView = {

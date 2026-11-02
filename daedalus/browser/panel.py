@@ -16,6 +16,18 @@ conversations that use the paired Chrome, and nothing else of the installation.
 
 The same relay carries the panel's news: a conversation in this Chrome needs the operator, or
 finished (``relay.call panel.event``), which the extension turns into a notification and the badge.
+
+Which conversations are this Chrome's (:func:`follows_in_chrome`): the ones the operator made for it
+(the side panel, *Ask Daedalus about this page*, a Browser chat from the app), and any other while it
+is controlling this Chrome now (:mod:`daedalus.host.control_marks`). Any conversation the operator ever
+gave their Chrome used to count, for good, so the main chat that once opened a page was announced in
+Chrome after every turn it took.
+
+The news is not a second notifier. It is a channel of the app's notifications (:class:`ChromeChannel`):
+the same router decides whether a turn's end or a question is worth a sound at all — the operator's
+matrix, quiet hours, mutes, what they are looking at — and an entry the extension shows is not pushed
+or raised by the desktop as well. The extension used to be told of every turn's end by a hook of its
+own while the app announced the same end through its channels, and the operator heard each one twice.
 """
 
 from __future__ import annotations
@@ -26,7 +38,7 @@ import hashlib
 import hmac
 import logging
 import secrets
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -244,4 +256,80 @@ async def mark_panel_session(manager: Any, session_id: str) -> None:
     await manager.sessions.update_metadata(session_id, state.session.metadata)
 
 
-__all__ = ["CHROME_CHAT_LINE", "EXTENSION_ID", "IDLE", "NATIVE_DEVICE", "PANEL_LINE", "PANEL_SESSION_KEY", "PanelGrants", "PanelHerald", "mark_panel_session"]
+def follows_in_chrome(kind: str, controlling: Iterable[str]) -> bool:
+    """Whether a conversation given the operator's Chrome is one this Chrome's side panel lists and
+    the extension announces: made for their Chrome, or controlling it now."""
+    return kind == "chrome" or "chrome" in controlling
+
+
+def waits_for_operator(state: Any) -> bool:
+    """A loaded conversation that waits for the operator: a question, or an action they must approve."""
+    return state is not None and (state.pending is not None or bool(state.metadata.get("policy_pending")))
+
+
+class ChromeChannel:
+    """The app's notifications, out through the extension: its notification and its badge.
+
+    Registered with the notification service as ``chrome``. ``covers`` says whether an entry's
+    conversation is one this Chrome follows; the router then gives the entry to this channel instead
+    of the push and the desktop, which on the same computer would be the same sound twice. ``held``
+    is what the conversation controlled when the thing happened, for an entry posted after the control
+    ended: a turn's end is posted once the turn's tabs are already closed.
+    """
+
+    name = "chrome"
+
+    def __init__(self, herald: PanelHerald, *, manager: Any, using: Callable[[], Awaitable[list[str]]], offered: Callable[[], bool]) -> None:
+        self.herald = herald
+        self.manager = manager
+        self.using = using
+        self.offered = offered
+
+    def available(self) -> bool:
+        return bool(self.herald.device())
+
+    async def _kind(self, session_id: str) -> str:
+        state = self.manager.live_state(session_id)
+        return str(state.kind) if state is not None else await self.manager.sessions.kind(session_id)
+
+    async def covers(self, session_id: str, held: Iterable[str] = ()) -> bool:
+        if not self.offered() or session_id not in await self.using():
+            return False
+        return follows_in_chrome(await self._kind(session_id), [*self.manager.control_marks.of(session_id), *held])
+
+    async def waiting(self) -> int:
+        """How many of this Chrome's conversations wait for the operator: the badge's number."""
+        ids = await self.using()
+        kinds = await self.manager.sessions.kinds(ids)
+        return sum(
+            1 for sid in ids
+            if follows_in_chrome(kinds.get(sid, "chat"), self.manager.control_marks.of(sid)) and waits_for_operator(self.manager.live_state(sid))
+        )
+
+    async def deliver(self, view: Any, *, more: int) -> Any:
+        session_id = str(view.get("session_id") or "")
+        if not session_id:
+            return "skipped: no conversation"
+        # The extension words its notification itself, in the operator's language, with two sentences:
+        # it waits for them, or it is done. What it is named by is the conversation's own title.
+        kind = "needs_you" if view.get("needs_you") or view.get("category") in ("question", "permission") else "done"
+        state = self.manager.live_state(session_id)
+        title = str(state.session.title) if state is not None else str(view.get("title") or "")
+        await self.herald.event(session_id, kind, title, waiting=await self.waiting())
+        return "sent"
+
+
+__all__ = [
+    "CHROME_CHAT_LINE",
+    "EXTENSION_ID",
+    "IDLE",
+    "NATIVE_DEVICE",
+    "PANEL_LINE",
+    "PANEL_SESSION_KEY",
+    "ChromeChannel",
+    "PanelGrants",
+    "PanelHerald",
+    "follows_in_chrome",
+    "mark_panel_session",
+    "waits_for_operator",
+]

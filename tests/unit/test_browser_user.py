@@ -614,22 +614,22 @@ async def test_a_chrome_conversation_is_made_moved_and_marked_through_the_api(ri
         assert listed[made["id"]] == "chrome"
         computer = (await client.post("/api/sessions", json={"title": "Desk", "kind": "computer"}, headers=headers)).json()
         assert computer["kind"] == "computer" and await rig.service.choices.env(computer["id"]) != USER
-        changed = await client.post(f"/api/sessions/{computer['id']}/kind", json={"kind": "chat"}, headers=headers)
-        assert changed.status_code == 200 and changed.json() == {"id": computer["id"], "kind": "chat"}
-        assert (await client.post(f"/api/sessions/{computer['id']}/kind", json={"kind": "robot"}, headers=headers)).status_code == 422
-        assert (await client.post("/api/sessions/nope/kind", json={"kind": "chat"}, headers=headers)).status_code == 404
-        # A plain chat the operator moves to their Chrome becomes a Chrome conversation, and stays one.
+        # The kind is the creation's: no route changes it afterwards.
+        assert (await client.post(f"/api/sessions/{computer['id']}/kind", json={"kind": "chat"}, headers=headers)).status_code in (404, 405)
+        # A plain chat the operator moves to their Chrome stays a plain chat: it shows the Chrome only
+        # while it controls it, and its turns are not told it was made for Chrome.
         plain = await rig.session()
         await client.put(f"/api/browser/user/sessions/{plain}", json={"env": "user", "consent": True}, headers=headers)
         state = await rig.manager.get_state(plain)
-        assert state is not None and state.kind == "chrome"
-        await client.put(f"/api/browser/user/sessions/{plain}", json={"env": "agent"}, headers=headers)
-        assert state.kind == "chrome"
-    # Its turns carry the side panel's browser-first rule, in words fit for the app.
+        assert state is not None and state.kind == "chat"
+        listed = {row["id"]: row["kind"] for row in (await client.get("/api/sessions", headers=headers)).json()["sessions"]}
+        assert listed[plain] == "chat"
+        made_state = await rig.manager.get_state(made["id"])
+        assert made_state is not None
     lines = [await hook(state) for hook in rig.manager.turn_line_hooks]
     assert not any(CHROME_CHAT_LINE in line for line in lines)
-    await rig.switch(plain)
-    lines = [await hook(state) for hook in rig.manager.turn_line_hooks]
+    # A Chrome chat's turns carry the side panel's browser-first rule, in words fit for the app.
+    lines = [await hook(made_state) for hook in rig.manager.turn_line_hooks]
     assert any(CHROME_CHAT_LINE in line for line in lines)
 
 

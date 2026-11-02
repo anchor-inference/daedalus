@@ -4,6 +4,13 @@
 // tabs over the chat lists, the mark a computer or Chrome chat carries where kinds are listed mixed,
 // and the mode a new chat starts in.
 //
+// The kind is the chat's origin: what it was started as (from the side panel, or as a computer or
+// browser chat in New chat), and it never changes afterwards. Beside it the host sends `controlling`,
+// what the chat holds right now — a live tab group in the operator's Chrome, a live computer lease —
+// which clears as soon as control is released or the chat goes idle. An ordinary chat that drives the
+// operator's Chrome for one task is listed under Browser and marked only while it does; before, the
+// first touch made it a Browser chat forever, and the extension notified about it for good.
+//
 // The chosen tab is remembered per viewer, in this browser only: it is a way of looking at the list,
 // not a fact about the chats, and a private window that cannot store it simply starts on All. The same
 // tab is the new chat's default mode, so an operator looking at their computer chats who presses New
@@ -29,21 +36,59 @@ export function sessionKind(s: Pick<SessionSummary, "kind">): ChatKind {
   return s.kind && KINDS.includes(s.kind) ? s.kind : "chat";
 }
 
+/** What the session controls right now, as the host derives it; anything else in the list is dropped. */
+export function liveControls(s: Pick<SessionSummary, "controlling">): ChatKind[] {
+  const held = Array.isArray(s.controlling) ? s.controlling : [];
+  return (["chrome", "computer"] as const).filter((k) => held.includes(k));
+}
+
+/** The kind a plate shows. Its own kind when it was started as one (`live` while it also holds that
+ *  control now); otherwise the control it holds now, `borrowed`, so an ordinary chat driving the
+ *  operator's Chrome says so for exactly as long as it does. Chrome wins when it holds both: the
+ *  browser is where the operator watches it act. */
+export function shownKind(s: Pick<SessionSummary, "kind" | "controlling">): { kind: ChatKind; live: boolean; borrowed: boolean } {
+  const kind = sessionKind(s);
+  const live = liveControls(s);
+  if (kind !== "chat") return { kind, live: live.includes(kind), borrowed: false };
+  if (live.length) return { kind: live[0], live: true, borrowed: true };
+  return { kind: "chat", live: false, borrowed: false };
+}
+
+/** The class and the words of a plate: `kind-<kind>`, with `kind-live` and `kind-borrowed` for a
+ *  control held now, and the tooltip that says which. Nothing for a plain chat. */
+export function kindPlate(s: Pick<SessionSummary, "kind" | "controlling">): { kind: ChatKind; className: string; title: string | undefined } {
+  const shown = shownKind(s);
+  if (shown.kind === "chat") return { kind: "chat", className: "", title: undefined };
+  const className = `kind-${shown.kind}${shown.live ? " kind-live" : ""}${shown.borrowed ? " kind-borrowed" : ""}`;
+  return { kind: shown.kind, className, title: t(shown.live ? `kind.live.${shown.kind}` : `kind.mark.${shown.kind}`) };
+}
+
 /** The icon a kind is drawn with; an ordinary chat has none of its own, its plate says the rest. */
 export function kindIcon(kind: ChatKind): IconName | null {
   return kind === "computer" ? "monitor" : kind === "chrome" ? "globe" : null;
 }
 
 /**
- * The sessions a tab shows. A subagent or a fork is judged by the chat it hangs under, so a computer
- * chat keeps its helpers and its forks under it: judged by their own kind, a helper (always an
- * ordinary chat) would have been dropped and its leader shown without the fold that reveals it, or,
- * with the leader filtered out, listed alone as an orphan.
+ * The sessions a tab shows: those started as that kind, and those holding that control now. A subagent
+ * or a fork is judged by the chat it hangs under, so a computer chat keeps its helpers and its forks
+ * under it: judged by their own kind, a helper (always an ordinary chat) would have been dropped and
+ * its leader shown without the fold that reveals it, or, with the leader filtered out, listed alone as
+ * an orphan. For the same reason a helper driving the operator's Chrome brings its whole chat into
+ * Browser, not itself alone.
  */
 export function byTab<T extends SessionSummary>(sessions: T[], tab: KindTab): T[] {
   if (tab === "all") return sessions;
+  const root = rootOf(sessions);
+  const active = activeRoots(sessions, root, tab);
+  return sessions.filter((s) => {
+    const top = root(s);
+    return sessionKind(top) === tab || active.has(top.id);
+  });
+}
+
+function rootOf<T extends SessionSummary>(sessions: T[]): (s: T) => T {
   const ids = new Map(sessions.map((s) => [s.id, s]));
-  const root = (s: T): T => {
+  return (s: T): T => {
     let at = s;
     const seen = new Set<string>();
     for (;;) {
@@ -54,14 +99,28 @@ export function byTab<T extends SessionSummary>(sessions: T[], tab: KindTab): T[
       at = next;
     }
   };
-  return sessions.filter((s) => sessionKind(root(s)) === tab);
 }
 
-/** How many top-level chats each tab would show, for the tabs' counts. */
+/** The chats one of whose sessions (the chat itself, a helper, a fork) holds the tab's control now. */
+function activeRoots<T extends SessionSummary>(sessions: T[], root: (s: T) => T, tab: KindTab): Set<string> {
+  const out = new Set<string>();
+  if (tab !== "computer" && tab !== "chrome") return out;
+  for (const s of sessions) if (liveControls(s).includes(tab)) out.add(root(s).id);
+  return out;
+}
+
+/** How many top-level chats each tab would show, for the tabs' counts: a chat holding a control now is
+ *  counted under its own kind and under that control, as the two tabs list it. */
 export function tabCounts(sessions: SessionSummary[]): Record<KindTab, number> {
   const top = sessions.filter((s) => !s.metadata?.subagent_of && !s.archived);
+  const root = rootOf(sessions);
+  const active = { computer: activeRoots(sessions, root, "computer"), chrome: activeRoots(sessions, root, "chrome") };
   const counts: Record<KindTab, number> = { all: top.length, chat: 0, computer: 0, chrome: 0 };
-  for (const s of top) counts[sessionKind(s)] += 1;
+  for (const s of top) {
+    const kind = sessionKind(s);
+    counts[kind] += 1;
+    for (const k of ["computer", "chrome"] as const) if (k !== kind && active[k].has(root(s).id)) counts[k] += 1;
+  }
   return counts;
 }
 
@@ -224,12 +283,13 @@ export function KindTabs({ tab, onChange, counts, className = "" }: { tab: KindT
 }
 
 /** The small mark a computer or Chrome chat carries where kinds are listed together; nothing for a
- *  plain chat, which is what a list is mostly made of and needs no mark to say so. */
-export function KindMark({ kind, size = 12 }: { kind: ChatKind; size?: number }) {
-  const icon = kindIcon(kind);
+ *  plain chat, which is what a list is mostly made of and needs no mark to say so. An ordinary chat
+ *  holding a control now carries that control's mark, drawn hollow and live, until it lets go. */
+export function KindMark({ s, size = 12 }: { s: Pick<SessionSummary, "kind" | "controlling">; size?: number }) {
+  const plate = kindPlate(s);
+  const icon = kindIcon(plate.kind);
   if (!icon) return null;
-  const label = t(`kind.mark.${kind}`);
-  return <span className={`kind-mark kind-${kind}`} role="img" aria-label={label} title={label}><Icon name={icon} size={size} /></span>;
+  return <span className={`kind-mark ${plate.className}`} role="img" aria-label={plate.title} title={plate.title}><Icon name={icon} size={size} /></span>;
 }
 
 const MODE_ICON: Record<ChatKind, IconName> = { chat: "bots", computer: "monitor", chrome: "globe" };
