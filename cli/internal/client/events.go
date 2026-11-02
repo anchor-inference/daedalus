@@ -25,7 +25,9 @@ type AppEvent struct {
 // EventItem is what FollowEvents reports: an event, or a resync (re-read what the events describe,
 // because some were lost), or a fatal end.
 type EventItem struct {
-	Event  AppEvent
+	Event AppEvent
+	// Hello is a connection made: from here on nothing published is missed.
+	Hello  bool
 	Resync bool
 	Fatal  error
 }
@@ -168,6 +170,11 @@ func (c *Client) eventsOnce(ctx context.Context, opt EventsOptions, after **int6
 				if json.Unmarshal([]byte(f.data), &h) == nil && *after == nil {
 					v := h.Head
 					*after = &v
+				}
+				select {
+				case out <- EventItem{Hello: true}:
+				case <-ctx.Done():
+					return delivered, ctx.Err()
 				}
 				continue
 			case "resync":

@@ -325,6 +325,22 @@ func (b *Backend) open(ctx context.Context, id string) (tui.Session, error) {
 		stop()
 		return tui.Session{}, first.Err
 	}
+	// The global stream too is live only from its hello: an approval raised between the read below
+	// and a later subscription would never reach the screen, so it is open before the read.
+	events := b.opt.Client.FollowEvents(sctx, client.EventsOptions{Session: id, Client: b.clientID,
+		Types: []string{"permission.", "ask.", "session.", "run.", "remote."}})
+	select {
+	case item, ok := <-events:
+		if ok && item.Fatal != nil {
+			stop()
+			return tui.Session{}, item.Fatal
+		}
+	case <-time.After(10 * time.Second):
+		// A server slow to open it still gets the session on screen; the snapshot covers what is open.
+	case <-ctx.Done():
+		stop()
+		return tui.Session{}, ctx.Err()
+	}
 	detail, err := b.opt.Client.Session(ctx, id, b.opt.Tail)
 	if err != nil {
 		stop()
@@ -345,7 +361,7 @@ func (b *Backend) open(ctx context.Context, id string) (tui.Session, error) {
 	b.streamUp = first.Signal == client.SignalHello
 	b.mu.Unlock()
 	go b.follow(sctx, id, stream)
-	go b.followEvents(sctx, id)
+	go b.followEvents(id, events)
 	go b.presence(sctx, id)
 	if b.opt.Link != nil {
 		b.opt.Link.NotifySessions(ctx)
@@ -700,14 +716,13 @@ func (b *Backend) translate(ctx context.Context, id string, env client.Envelope)
 
 // followEvents reads the global stream for what the session stream does not carry: approvals and
 // questions, including their answers from the app or Telegram.
-func (b *Backend) followEvents(ctx context.Context, id string) {
-	items := b.opt.Client.FollowEvents(ctx, client.EventsOptions{Session: id, Client: b.clientID,
-		Types: []string{"permission.", "ask.", "session.", "run.", "remote."}})
+func (b *Backend) followEvents(id string, items <-chan client.EventItem) {
+	ctx := b.ctx
 	for item := range items {
 		if item.Fatal != nil {
 			return
 		}
-		if item.Resync {
+		if item.Resync || item.Hello {
 			continue
 		}
 		ev := item.Event
