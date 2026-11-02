@@ -2,6 +2,7 @@ package desk
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -81,9 +82,25 @@ type Target struct {
 	App    backend.App `json:"app"`
 }
 
+// What an action's input did, for the host to know whether repeating the action is safe. A result
+// says delivered; a refusal carries one of the three in its data.
+const (
+	// Delivered is every event of the action taken by the system. It says nothing of what the program
+	// under it made of them: physical input is never read back, so the screenshot is the judge.
+	Delivered = "delivered"
+	// NotDelivered is no event sent at all: the action was refused before its first, or stopped before
+	// it. Only this makes an automatic retry safe.
+	NotDelivered = "not_delivered"
+	// DeliveryUnknown is an action that failed or was cut short after its first event was sent: some
+	// of it may have landed (half a typed text, a button that went down), so repeating it may do twice.
+	DeliveryUnknown = "unknown"
+)
+
 // ActResult is act's answer.
 type ActResult struct {
 	Action string `json:"action"`
+	// Delivery is Delivered.
+	Delivery string `json:"delivery"`
 	// Points are where the action went, in desktop units.
 	Points [][2]float64 `json:"points,omitempty"`
 	Target *Target      `json:"target,omitempty"`
@@ -112,12 +129,48 @@ func (d *Desk) Act(ctx context.Context, p ActParams) (ActResult, error) {
 	start := d.now()
 	pl, lease, err := d.check(ctx, p)
 	var res ActResult
+	sent := false
 	if err == nil {
-		res, err = d.run(ctx, pl, lease)
+		res, sent, err = d.run(ctx, pl, lease)
 	}
 	res.DurationMs = d.now().Sub(start).Milliseconds()
 	d.auditAct(p, pl, lease, err)
-	return res, err
+	if err != nil {
+		delivery := NotDelivered
+		if sent {
+			delivery = DeliveryUnknown
+		}
+		return res, withDelivery(err, delivery)
+	}
+	res.Delivery = Delivered
+	return res, nil
+}
+
+// Undelivered marks an act refused before the daemon looked at it (parameters that do not decode) as
+// one that sent nothing, so every refusal of act says whether it may be repeated.
+func Undelivered(err error) error { return withDelivery(err, NotDelivered) }
+
+// withDelivery adds "delivery" to a refusal's data, keeping whatever the data said.
+func withDelivery(err error, delivery string) error {
+	var we *wire.Error
+	if !errors.As(err, &we) {
+		we = &wire.Error{Code: wire.CodeInternal, Message: err.Error()}
+	}
+	data := map[string]any{}
+	switch v := we.Data.(type) {
+	case nil:
+	case map[string]any:
+		for k, x := range v {
+			data[k] = x
+		}
+	default:
+		// A struct (the pause's state): its fields as JSON names them, so the data stays one object.
+		if raw, merr := json.Marshal(v); merr == nil {
+			_ = json.Unmarshal(raw, &data)
+		}
+	}
+	data["delivery"] = delivery
+	return &wire.Error{Code: we.Code, Message: we.Message, Data: data}
 }
 
 func (d *Desk) auditAct(p ActParams, pl *plan, lease Lease, err error) {
@@ -173,7 +226,15 @@ func (d *Desk) check(ctx context.Context, p ActParams) (*plan, Lease, error) {
 	if l != nil {
 		lease = *l
 	}
-	if err == nil && d.paused {
+	d.mu.Unlock()
+	if err != nil {
+		return pl, lease, err
+	}
+	if err := d.checkBlocked(pl, lease); err != nil {
+		return pl, lease, err
+	}
+	d.mu.Lock()
+	if d.paused {
 		err = d.pausedErrLocked()
 	}
 	d.mu.Unlock()
@@ -241,6 +302,28 @@ func (d *Desk) check(ctx context.Context, p ActParams) (*plan, Lease, error) {
 		return pl, lease, err
 	}
 	return pl, lease, nil
+}
+
+// checkBlocked refuses a chord that closes, locks or leaves the session (keys.Blocked), whatever the
+// host asked: the host's prompts can be answered yes in a hurry, and these keys are the ones after
+// which no screenshot can show the operator what was lost. A chord that only leaves the window
+// in front passes under a lease over the whole desktop, which a click could leave as well.
+func (d *Desk) checkBlocked(pl *plan, lease Lease) error {
+	system := d.be.Platform().OS
+	for _, c := range pl.chords {
+		b, ok := keys.Blocked(system, c)
+		if !ok || (b.Leaves && lease.Scope.Kind == ScopeDesktop) {
+			continue
+		}
+		msg := fmt.Sprintf("%s is a key the daemon never presses: it %s", c, b.Why)
+		reason := "ends"
+		if b.Leaves {
+			msg = fmt.Sprintf("%s is a key the daemon does not press under this lease: it %s, outside what the lease covers", c, b.Why)
+			reason = "leaves"
+		}
+		return refuse(CodeBlockedKey, msg, map[string]any{"keys": c.String(), "reason": reason, "why": b.Why})
+	}
+	return nil
 }
 
 // validate checks the parameters of the action alone.
@@ -473,8 +556,9 @@ func (d *Desk) pausedErrLocked() error {
 	return refuse(CodeHumanDriving, "the operator is using the mouse or keyboard: wait for them to stop, or for the operator to resume", h)
 }
 
-// run sends a checked action's input.
-func (d *Desk) run(ctx context.Context, pl *plan, lease Lease) (ActResult, error) {
+// run sends a checked action's input, and reports whether any of it was sent: the first step's call
+// to the backend counts, whether or not it succeeded, since a call that failed may have sent part.
+func (d *Desk) run(ctx context.Context, pl *plan, lease Lease) (ActResult, bool, error) {
 	d.input.Lock()
 	defer d.input.Unlock()
 	actx, cancel := context.WithCancel(ctx)
@@ -482,12 +566,12 @@ func (d *Desk) run(ctx context.Context, pl *plan, lease Lease) (ActResult, error
 	d.mu.Lock()
 	if d.lease == nil || d.lease.ID != lease.ID {
 		d.mu.Unlock()
-		return ActResult{}, refuse(CodeNoLease, "the lease ended", map[string]any{"reason": d.ended.reason})
+		return ActResult{}, false, refuse(CodeNoLease, "the lease ended", map[string]any{"reason": d.ended.reason})
 	}
 	if d.paused {
 		err := d.pausedErrLocked()
 		d.mu.Unlock()
-		return ActResult{}, err
+		return ActResult{}, false, err
 	}
 	d.actCancel = cancel
 	d.mu.Unlock()
@@ -501,7 +585,7 @@ func (d *Desk) run(ctx context.Context, pl *plan, lease Lease) (ActResult, error
 		d.mu.Unlock()
 	}()
 
-	r := runner{d: d, ctx: actx, lease: lease.ID}
+	r := &runner{d: d, ctx: actx, lease: lease.ID}
 	err := r.do(pl)
 	if err != nil {
 		// Whatever the action left down comes up, so a stopped drag never leaves a button held.
@@ -524,7 +608,7 @@ func (d *Desk) run(ctx context.Context, pl *plan, lease Lease) (ActResult, error
 		res.ActionsLeft = d.lease.MaxActions - d.lease.Actions
 	}
 	d.mu.Unlock()
-	return res, err
+	return res, r.sent, err
 }
 
 // runner sends the events of one action, looking before each step at whether it must stop.
@@ -532,11 +616,13 @@ type runner struct {
 	d     *Desk
 	ctx   context.Context
 	lease string
+	// sent is whether a step has called the backend yet: what the action's delivery is judged by.
+	sent bool
 }
 
 // interrupted is why the action must stop now: the kill switch, the lease's end, or the operator's
 // hand.
-func (r runner) interrupted() error {
+func (r *runner) interrupted() error {
 	d := r.d
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -553,7 +639,7 @@ func (r runner) interrupted() error {
 	return nil
 }
 
-func (r runner) sleep(t time.Duration) error {
+func (r *runner) sleep(t time.Duration) error {
 	select {
 	case <-time.After(t):
 		return r.interrupted()
@@ -564,10 +650,11 @@ func (r runner) sleep(t time.Duration) error {
 
 // step runs one backend call after checking that the action may go on, and marks the input as the
 // daemon's own.
-func (r runner) step(f func(ctx context.Context) error) error {
+func (r *runner) step(f func(ctx context.Context) error) error {
 	if err := r.interrupted(); err != nil {
 		return err
 	}
+	r.sent = true
 	r.d.mu.Lock()
 	r.d.injecting = true
 	r.d.injectSerial++
@@ -589,7 +676,7 @@ func (r runner) step(f func(ctx context.Context) error) error {
 
 // move moves the pointer and records where it left it, which is what the watch for the operator's
 // hand compares the pointer with between steps.
-func (r runner) move(x, y float64) error {
+func (r *runner) move(x, y float64) error {
 	err := r.step(func(ctx context.Context) error { return r.d.be.Move(ctx, x, y) })
 	if err == nil {
 		r.d.mu.Lock()
@@ -599,7 +686,7 @@ func (r runner) move(x, y float64) error {
 	return err
 }
 
-func (r runner) button(b backend.Button, down bool) error {
+func (r *runner) button(b backend.Button, down bool) error {
 	err := r.step(func(ctx context.Context) error { return r.d.be.Button(ctx, b, down) })
 	if err == nil {
 		r.d.mu.Lock()
@@ -613,7 +700,7 @@ func (r runner) button(b backend.Button, down bool) error {
 	return err
 }
 
-func (r runner) key(k keys.Key, down bool) error {
+func (r *runner) key(k keys.Key, down bool) error {
 	err := r.step(func(ctx context.Context) error { return r.d.be.Key(ctx, k, down) })
 	if err == nil {
 		r.d.mu.Lock()
@@ -632,7 +719,7 @@ func (r runner) key(k keys.Key, down bool) error {
 	return err
 }
 
-func (r runner) chord(c keys.Chord) error {
+func (r *runner) chord(c keys.Chord) error {
 	for _, m := range c.Mods {
 		if err := r.key(keys.Key{Name: string(m)}, true); err != nil {
 			return err
@@ -652,7 +739,7 @@ func (r runner) chord(c keys.Chord) error {
 	return nil
 }
 
-func (r runner) do(pl *plan) error {
+func (r *runner) do(pl *plan) error {
 	p := pl.p
 	switch p.Action {
 	case ActWait:

@@ -6,10 +6,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, type Project } from "../api";
 import { Skeleton, copyText } from "../ui/components";
-import { OverflowMenu, Sheet } from "../ui/dialogs";
+import { OverflowMenu, Sheet, type MenuItem } from "../ui/dialogs";
 import { useEvent, useStreamUp } from "../events";
 import { absTime, relTime } from "../format";
-import { Icon } from "../icons";
+import { Icon, type IconName } from "../icons";
 import { plural, t } from "../i18n";
 import { navigate, pathFor, projectHome, projectPagePath, projectSessionPath, useRoute } from "../router";
 import { PageHeader, useMedia } from "../shell";
@@ -34,6 +34,8 @@ import { ManualReopenRecovery } from "./ManualReopen";
 import { ChatFinish } from "./ChatFinish";
 import { IssueImport } from "./IssueImport";
 import { PhoneTaskPage } from "./TaskPage";
+import { AutoTextarea, BriefBlock, Prop, ToolPanel } from "./TaskDialogParts";
+import "./taskdialog.css";
 import { Harness, statusTone } from "../team/team";
 import { confirmAsync, errorText } from "../ui";
 import { closeItems } from "./operatorClose";
@@ -41,6 +43,7 @@ import {
   Arranged,
   BRIEF_FIELDS,
   Brief,
+  BriefField,
   Column,
   NEXT,
   NeedsYou,
@@ -484,7 +487,21 @@ function RequirementsSection({ requirements }: { requirements: Requirement[] }) 
   );
 }
 
-/** Creating a task and changing one: the same sheet, because a task is its title, its brief, who does it and what it waits for. */
+/** The rare tools of a task, each opened from its menu in the place of the task's text. */
+type Tool = "lifecycle" | "comparison" | "handoff" | "workflow" | "context" | "manual" | "diagnostics";
+
+/** The chip tone of a task's column, so review and a block stand out from the work flowing past them. */
+const STATUS_TONE: Record<TaskStatus, string> = { todo: "", doing: "accent", review: "attn", done: "ok", blocked: "bad", dropped: "quiet" };
+
+/**
+ * Creating a task and changing one. A new task is a form, since everything in it is still to be
+ * written. An existing task is a view to track it in: its state across the top; its brief, its
+ * requirements, its result and its notes as text in a wide main column; its properties and the one
+ * thing to do next in a narrow side column. A field turns into an editor only when its Edit button is
+ * pressed, Save and Cancel appear only while something is changed, and the rare tools wait behind the
+ * menu. It used to be one narrow column of every control at once, with folds inside folds and the
+ * brief cut off in two-line boxes, and the operator could not find the task in it.
+ */
 export function TaskSheet({ projectId, data, task, resultReference, onClose, onDone, toast, onImport }: { projectId: string; data: BoardResponse; task?: ProjectTask; resultReference?: AcceptedResultReference | null; onClose: () => void; onDone: () => void; toast: (text: string) => void; onImport?: () => void }) {
   const route = useRoute();
   const offline = useOffline();
@@ -493,6 +510,7 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
   const launchOperation = useRef<{ fingerprint: string; id: string } | null>(null);
   const stopOperation = useRef<string | null>(null);
   const createRevision = useRef<number | null>(null);
+  const resultAnchor = useRef<HTMLDivElement>(null);
   const intentId = (body: Record<string, unknown>) => {
     const fingerprint = JSON.stringify(body);
     if (operation.current?.fingerprint !== fingerprint) operation.current = { fingerprint, id: crypto.randomUUID() };
@@ -502,6 +520,8 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
   const [brief, setBrief] = useState<Brief>(task?.brief ?? emptyBrief());
   const [assignee, setAssignee] = useState(task?.assignee_staff_id ?? "");
   const [folderId, setFolderId] = useState(task?.folder_id ?? "");
+  // A new task shows its folder choice outright; an existing one shows its folder and a Change button,
+  // because the choice there has to ask the host first whether a comparison holds the folder.
   const [folderOpen, setFolderOpen] = useState(false);
   const projects = useQuery<Project[]>("/api/projects", { staleMs: 15000 });
   const folders = projects.data?.find((project) => project.id === projectId)?.folders ?? [];
@@ -512,10 +532,18 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
   const folderBlocked = !!task && (task.status !== "todo" || !comparisons.data || !!comparisons.error ||
     comparisons.data.groups.some((group) => ["planned", "active", "ready", "unknown"].includes(group.state)));
   const [deps, setDeps] = useState<string[]>(task?.depends_on ?? []);
+  const [depsOpen, setDepsOpen] = useState(!task);
   const [priority, setPriority] = useState(task?.priority ?? 3);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  // Which parts of an existing task are open for editing: "title" and the brief's fields.
+  const [editing, setEditing] = useState<ReadonlySet<string>>(() => new Set());
+  const [tool, setTool] = useState<Tool | null>(null);
+  // Saved, and the board not yet read again: the drafts already hold what was saved, and the footer
+  // would otherwise flash Save back for the moment the old task is still the one in hand.
+  const [syncing, setSyncing] = useState(false);
   const [resumeFrom, setResumeFrom] = useState("");
+  const [resumeOpen, setResumeOpen] = useState(!task);
   const [resumeSessions, setResumeSessions] = useState<ResumeSession[]>([]);
   const [resumeBefore, setResumeBefore] = useState("");
   const [resumeMore, setResumeMore] = useState(false);
@@ -577,6 +605,46 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
       note.trim() !== ""
     : title.trim() !== "";
   const changed = editorChanged || !!resumeFrom;
+  const canStart = !!task && (task.status === "todo" || task.status === "blocked");
+  const offersResume = !!chosenMember && chosenMember.harness !== "daedalus" && (!!task || chosenMember.isolation !== "worktree");
+
+  /** Every draft back to the task as it stands: Cancel, and the board read again after a save. */
+  function reset(from: ProjectTask) {
+    setTitle(from.title);
+    setBrief(from.brief);
+    setAssignee(from.assignee_staff_id ?? "");
+    setFolderId(from.folder_id ?? "");
+    setDeps(from.depends_on);
+    setPriority(from.priority);
+    setNote("");
+    setResumeFrom("");
+    setEditing(new Set());
+    setDepsOpen(false);
+    setFolderOpen(false);
+    setResumeOpen(false);
+  }
+  // A newer revision of the task replaces the drafts only when nothing is being edited or the change
+  // is our own save coming back: the event stream reads the board again whenever anything in the
+  // project moves, and an edit in progress must survive a worker's status changing elsewhere.
+  const seenRevision = useRef(task?.entity_revision);
+  const dirty = useRef(false);
+  dirty.current = changed;
+  useEffect(() => {
+    if (!task || task.entity_revision === seenRevision.current) return;
+    seenRevision.current = task.entity_revision;
+    if (dirty.current && !syncing) return;
+    reset(task);
+    setSyncing(false);
+  }, [task?.entity_revision]);
+  useEffect(() => {
+    if (!syncing) return;
+    const timer = window.setTimeout(() => setSyncing(false), 5000);
+    return () => window.clearTimeout(timer);
+  }, [syncing]);
+  const edit = (part: string) => setEditing((open) => new Set(open).add(part));
+  // A task that moved shows where it moved to: a submitted result put the task in review behind the
+  // very tool that submitted it, and the result to judge stayed out of sight.
+  useEffect(() => { setTool(null); }, [task?.status]);
 
   async function launch(taskId: string, revision: number) {
     const chosen = { staff_id: assignee, resume_from: resumeFrom || null };
@@ -634,6 +702,8 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
         createRevision.current = null;
         toast(t("pboard.saved"));
         await launchAfterSave(made);
+        onDone();
+        onClose();
       } else {
         const body: Record<string, unknown> = {};
         if (title.trim() !== task.title) body.title = title.trim();
@@ -654,9 +724,14 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
           toast(t("pboard.saved"));
         }
         if (assignee && (assignee !== (task.assignee_staff_id ?? "") || !!resumeFrom)) await launchAfterSave(saved);
+        // The dialog stays open on the task: an edit is a moment in tracking it, not the end of it.
+        setEditing(new Set());
+        setNote("");
+        setResumeFrom("");
+        setResumeOpen(false);
+        setSyncing(editorChanged);
+        onDone();
       }
-      onDone();
-      onClose();
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) { operation.current = null; createRevision.current = null; }
       toast(errorText(e));
@@ -691,6 +766,13 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
       toast(errorText(error));
     } finally { setBusy(false); }
   }
+  async function startTask() {
+    if (!task || typeof task.entity_revision !== "number") return;
+    setBusy(true);
+    try { await launch(task.id, task.entity_revision); onDone(); }
+    catch (error) { if (error instanceof ApiError && error.status === 409) launchOperation.current = null; toast(errorText(error)); }
+    finally { setBusy(false); }
+  }
   const toggleDep = (id: string) => setDeps(deps.includes(id) ? deps.filter((d) => d !== id) : [...deps, id]);
 
   if (granting && task) return (
@@ -701,228 +783,374 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
     </Sheet>
   );
 
-  // The sheet's parts, named so a phone can lay them out as the review page's three tabs (Task,
-  // Result, Diff) while the desktop keeps them in this one order.
-  const taskHead = <>
-      {task && (
-        <div className="erow-meta pboard-sheet-status">
-          <span className="chip">{t(`board.col.${task.status}`)}</span>
-          {task.branch && <code className="pcard-branch">{task.branch}</code>}
-          {task.issue && <IssueChip issue={task.issue} />}
-          <span className="sep">·</span>
-          <span title={absTime(task.updated_at)}>{t("board.updated", { t: relTime(task.updated_at) })}</span>
-        </div>
-      )}
-      {/* Hiring or assigning the first member must not hide the remaining coordinator permission. */}
-      {task && !gone && (task.status === "todo" || task.status === "blocked") && (
-        <div className="sub">
-          {team.length === 0 && !task.assignee && <div>{t("pboard.assignee.none")} <button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "team"))}>{t("pboard.team.hire")}</button></div>}
-          {asksFirst && <button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "board", { task: task.id, grant: task.assignee ? "execution" : "assignment_execution" }))}>{t(task.assignee ? "pboard.grant.execution.open" : "pboard.grant.open")}</button>}
-        </div>
-      )}
+  // Pieces both a new task's form and an existing task's side column use.
+  const assigneeControl = team.length === 0 && !gone ? (
+    <div className="sub">
+      {canStart ? t("pboard.assignee.nobody") : <>{t("pboard.assignee.none")} <button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "team"))}>{t("pboard.team.hire")}</button></>}
+    </div>
+  ) : (
+    <select id="ptask-assignee" className="field ptask-select" value={assignee} onChange={(e) => setAssignee(e.target.value)}>
+      <option value="">{t("pboard.assignee.nobody")}</option>
+      {team.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+      {gone && <option value={gone.id}>{t("pboard.assignee.gone", { name: gone.name })}</option>}
+    </select>
+  );
+  const missingNote = assignee && missing.length > 0 && (
+    <div className="sub attn">{t("pboard.brief.missing", { parts: missing.map((field) => t(`pboard.brief.${field}`)).join(", ") })}</div>
+  );
+  const resumeControl = offersResume && resumeOpen && (
+    <div className="ptask-resume">
+      <label className="field" htmlFor="ptask-resume">{t("pboard.resume.label")}</label>
+      <select id="ptask-resume" className="field ptask-select" value={resumeFrom} onChange={(event) => setResumeFrom(event.target.value)}>
+        <option value="">{t("pboard.resume.fresh")}</option>
+        {resumeSessions.map((session) => <option key={session.id} value={session.id} disabled={!session.can_resume}>
+          {session.started_at.slice(0, 16).replace("T", " ")} · {session.owner_name} · {session.task_title || t("goal.card.untitled")} {session.can_resume ? "" : `· ${t(`pboard.resume.reason.${session.resume_reason}`)}`}
+        </option>)}
+      </select>
+      <div className="sub">{t("pboard.resume.hint")}</div>
+      {resumeMore && <button className="linkbtn" type="button" onClick={olderSessions}>{t("pboard.resume.older")}</button>}
+      {resumeError && <div className="sub attn">{resumeError}</div>}
+    </div>
+  );
+  const depsPicker = candidates.length === 0 ? (
+    <div className="sub">{t("pboard.depends.none")}</div>
+  ) : (
+    <div className="pboard-deps" role="group" aria-label={t("pboard.depends")}>
+      {candidates.map((other) => (
+        <button key={other.id} type="button" className="chip select" aria-pressed={deps.includes(other.id)} onClick={() => toggleDep(other.id)} title={other.title}>
+          <span className="ptask-chip-text">{other.title}</span>
+        </button>
+      ))}
+    </div>
+  );
+  const priorityControl = (
+    <div className="segmented inline ptask-priority" role="radiogroup" aria-label={t("board.priority")}>
+      {[1, 2, 3, 4, 5].map((p) => (
+        <button key={p} type="button" role="radio" aria-checked={priority === p} className={priority === p ? "on" : ""} onClick={() => setPriority(p)}>P{p}</button>
+      ))}
+    </div>
+  );
+  const folderName = (id: string) => folders.find((folder) => folder.id === id)?.label || folders.find((folder) => folder.id === id)?.path || t("pboard.folder.pinned");
+  const folderControl = <>
+    <p className="sub">{t("pboard.folder.hint")}</p>
+    {projects.error && <div className="result-warning">{t("pboard.folder.unavailable")}</div>}
+    {task && comparisons.error && <div className="result-warning">{t("pboard.folder.unavailable")}</div>}
+    {folderBlocked && <div className="result-warning">{t("pboard.folder.blocked")}</div>}
+    <select id="ptask-folder" className="field ptask-select" aria-label={t("pboard.folder.choose")} value={folderId} disabled={busy || offline || !!projects.error || !projects.data || folderBlocked} onChange={(event) => setFolderId(event.target.value)}>
+      {!task?.folder_id && <option value="">{t("pboard.folder.none")}</option>}
+      {task?.folder_id && !folders.some((folder) => folder.id === task.folder_id) && <option value={task.folder_id}>{t("pboard.folder.pinned")}</option>}
+      {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.label || folder.path}{folder.readonly ? ` · ${t("pboard.folder.readonly")}` : ""}</option>)}
+    </select>
   </>;
-  const diffPart = <>
-      {task && task.status === "review" && task.branch && (
-        <ReviewPanel taskId={task.id} onChanged={onDone} toast={toast} />
-      )}
-  </>;
-  const resultPart = <>
-      {task && <ChatFinish task={task} onOpenSession={(id) => navigate(projectSessionPath(projectId, id))} onChanged={onDone} toast={toast} />}
-      {task && resultReference && <AcceptedResultDetail task={task} reference={resultReference} />}
-      {task && !resultReference && (task.status === "review" || task.acceptance_state === "operator_approved") && <ResultFlow task={task} onAccepted={onDone} toast={toast} />}
-      {task?.status === "done" && task.acceptance_state === "operator_approved" && (
-        <p className="sub pboard-attempt-cost" title={t("pboard.cost.scope")}>
-          {t("pboard.cost.label")} · <strong>{acceptedResultCost(task.accepted_result_cost_microusd)}</strong>
-          {task.accepted_result_cost_microusd == null && (task.accepted_result_known_cost_microusd ?? 0) > 0 && (
-            <span> · {t("pboard.cost.known", { usd: acceptedResultCost(task.accepted_result_known_cost_microusd) })}</span>
-          )}
-          {task.accepted_result_cost_unknown_reasons?.map((reason) => (
-            <span key={reason}> · {t(`pboard.cost.reason.${reason}`)}</span>
-          ))}
-          <span> · <button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "journal"))}>{t("pboard.cost.coordination")}</button></span>
-        </p>
-      )}
-  </>;
-  const taskMiddle = <>
-      {task && (NEXT[task.status].length > 0 || task.status === "review") && (
-        <div className="btnrow pboard-moves" role="group" aria-label={t("board.moveto")}>
-          {NEXT[task.status].length > 0 && <span className="sub">{t("board.moveto")}</span>}
-          {NEXT[task.status].map((status) => (
-            <button key={status} className="btn small" disabled={writeBlocked} onClick={() => move(status)}>{t(`board.col.${status}`)}</button>
-          ))}
-        </div>
-      )}
-      {task?.status === "doing" && <div className="btnrow"><button type="button" className="btn small warn" disabled={writeBlocked || busy || !!stopEffectId} onClick={() => void stopTask()}>{t("result.stopTaskAction")}</button><span className="sub">{t("result.stopTaskScope")}</span></div>}
-      {stopEffectId && <div className="result-warning" role="status">{t(stopEffect.error ? "result.stopTaskUnconfirmed" : stopEffect.data?.state === "completed" ? "result.stopTaskObserved" : stopEffect.data?.state === "unknown" ? "result.stopTaskUnconfirmed" : "result.stopTaskPending")} <button type="button" className="linkbtn" onClick={() => stopEffect.refresh()}>{t("common.retry")}</button></div>}
-      {task && <LifecycleCancel kind="task" id={task.id} projectId={projectId} onDone={onDone} toast={toast} />}
-      {task && <TaskWorkflow projectId={projectId} task={task} tasks={data.tasks} />}
-      {task && <TaskDiagnostics task={task} toast={toast} />}
-      {task && <TaskContext task={task} staff={data.staff} />}
-      {task && !task.branch && (task.status === "todo" || task.status === "blocked" || task.status === "review") && <ManualResult task={task} toast={toast} onChanged={onDone} />}
-      {task && task.status !== "done" && <ManualReopenRecovery task={task} toast={toast} onChanged={onDone} />}
-      {task && <TaskComparison task={task} staff={data.staff} onChanged={onDone} toast={toast} />}
-      {task && <TaskExplorations task={task} />}
-      {task && <RuntimeHandoff task={task} onChanged={onDone} toast={toast} />}
+  const launchNotice = task && launchEffectId && <div className="result-warning" role="status">
+    {t(launchStatus.key)}
+    {launchStatus.wait && <div>{t(waitKey(launchStatus.wait))}</div>}
+    {launchStatus.detail && <div className="sub">{launchStatus.detail}</div>}
+    {launchStatus.blocked && launchStatus.key === "pboard.launch.unconfirmed" && <div className="sub">{t("pboard.launch.inspectFirst")}</div>}
+    {launchStatus.key === "pboard.launch.deliveryFailed" && <div className="sub">{t("pboard.launch.repairFirst")}</div>}
+    <button type="button" className="linkbtn" onClick={() => launchEffect.refresh()}>{t("pboard.launch.refresh")}</button>
+  </div>;
 
-  </>;
-  const acceptancePart = <>
-      {task && hasAcceptance(task) && <AcceptanceSection task={task} />}
-
-  </>;
-  const formPart = <>
+  if (!task) {
+    // A new task: a form, since everything in it is still to be written.
+    const form = <>
       {/* Bringing in work that is already written down as issues sits beside making a card by hand,
           rather than as another button in the board's header. */}
-      {!task && onImport && <button type="button" className="linkbtn pboard-import" onClick={onImport}>{t("issues.open")}</button>}
-
+      {onImport && <button type="button" className="linkbtn pboard-import" onClick={onImport}>{t("issues.open")}</button>}
       <label className="field" htmlFor="ptask-title">{t("board.title")}</label>
-      <input id="ptask-title" className="field" autoFocus={!task} value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} />
-
+      <input id="ptask-title" className="field" autoFocus value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} />
       <fieldset className="pboard-brief">
         <legend>{t("pboard.brief")}</legend>
         {BRIEF_FIELDS.map((field) => (
           <div key={field}>
             <label className="field" htmlFor={`ptask-${field}`}>{t(`pboard.brief.${field}`)}</label>
-            <textarea id={`ptask-${field}`} className="field" rows={2} maxLength={4000} value={brief[field]} placeholder={t(`pboard.brief.${field}.placeholder`)} onChange={(e) => setBrief({ ...brief, [field]: e.target.value })} />
+            <AutoTextarea id={`ptask-${field}`} rows={2} maxLength={4000} value={brief[field]} placeholder={t(`pboard.brief.${field}.placeholder`)} onChange={(e) => setBrief({ ...brief, [field]: e.target.value })} />
           </div>
         ))}
       </fieldset>
-
-      <details open={folderOpen} onToggle={(event) => setFolderOpen(event.currentTarget.open)}>
-        <summary>{t("pboard.folder")}{folderId ? ` · ${folders.find((folder) => folder.id === folderId)?.label || folders.find((folder) => folder.id === folderId)?.path || t("pboard.folder.pinned")}` : ""}</summary>
-        <p className="sub">{t("pboard.folder.hint")}</p>
-        {projects.error && <div className="result-warning">{t("pboard.folder.unavailable")}</div>}
-        {folderOpen && task && comparisons.error && <div className="result-warning">{t("pboard.folder.unavailable")}</div>}
-        {folderOpen && folderBlocked && <div className="result-warning">{t("pboard.folder.blocked")}</div>}
-        <label className="field" htmlFor="ptask-folder">{t("pboard.folder.choose")}</label>
-        <select id="ptask-folder" className="field" value={folderId} disabled={busy || offline || !!projects.error || !projects.data || folderBlocked} onChange={(event) => setFolderId(event.target.value)}>
-          {!task?.folder_id && <option value="">{t("pboard.folder.none")}</option>}
-          {task?.folder_id && !folders.some((folder) => folder.id === task.folder_id) && <option value={task.folder_id}>{t("pboard.folder.pinned")}</option>}
-          {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.label || folder.path}{folder.readonly ? ` · ${t("pboard.folder.readonly")}` : ""}</option>)}
-        </select>
-      </details>
-
-      {task && (task.requirements?.length ?? 0) > 0 && <RequirementsSection requirements={task.requirements!} />}
-
+      <label className="field" htmlFor="ptask-folder">{t("pboard.folder")}</label>
+      {folderControl}
       <label className="field" htmlFor="ptask-assignee">{t("pboard.assignee")}</label>
-      {team.length === 0 && !gone ? (
-        <div className="sub">
-          {task && (task.status === "todo" || task.status === "blocked") ? t("pboard.assignee.nobody") : <>{t("pboard.assignee.none")} <button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "team"))}>{t("pboard.team.hire")}</button></>}
-        </div>
-      ) : (
-        <select id="ptask-assignee" className="field" value={assignee} onChange={(e) => setAssignee(e.target.value)}>
-          <option value="">{t("pboard.assignee.nobody")}</option>
-          {team.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-          {gone && <option value={gone.id}>{t("pboard.assignee.gone", { name: gone.name })}</option>}
-        </select>
-      )}
-      {assignee && missing.length > 0 && (
-        <div className="sub attn">{t("pboard.brief.missing", { parts: missing.map((field) => t(`pboard.brief.${field}`)).join(", ") })}</div>
-      )}
-      {chosenMember && chosenMember.harness !== "daedalus" && (task || chosenMember.isolation !== "worktree") && (
-        <>
-          <label className="field" htmlFor="ptask-resume">{t("pboard.resume.label")}</label>
-          <select id="ptask-resume" className="field" value={resumeFrom} onChange={(event) => setResumeFrom(event.target.value)}>
-            <option value="">{t("pboard.resume.fresh")}</option>
-            {resumeSessions.map((session) => <option key={session.id} value={session.id} disabled={!session.can_resume}>
-              {session.started_at.slice(0, 16).replace("T", " ")} · {session.owner_name} · {session.task_title || t("goal.card.untitled")} {session.can_resume ? "" : `· ${t(`pboard.resume.reason.${session.resume_reason}`)}`}
-            </option>)}
-          </select>
-          <div className="sub">{t("pboard.resume.hint")}</div>
-          {resumeMore && <button className="linkbtn" type="button" onClick={olderSessions}>{t("pboard.resume.older")}</button>}
-          {resumeError && <div className="sub attn">{resumeError}</div>}
-        </>
-      )}
-      {task && assignee && ((task.status === "todo" || task.status === "blocked") || launchPending) &&
-        <HostCapacity projectId={projectId} pending={launchPending} />}
-      {task && assignee && (task.status === "todo" || task.status === "blocked") && (
-        <div className="btnrow">
-          <button type="button" className="btn small" disabled={busy || writeBlocked || editorChanged || launchPending} onClick={async () => {
-            if (typeof task.entity_revision !== "number") return;
-            setBusy(true);
-            try { await launch(task.id, task.entity_revision); onDone(); }
-            catch (error) { if (error instanceof ApiError && error.status === 409) launchOperation.current = null; toast(errorText(error)); }
-            finally { setBusy(false); }
-          }}>{t(storedLaunchIntent(task.id) ? "pboard.launch.retry" : "pboard.launch.action")}</button>
-          {editorChanged && <span className="sub">{t("pboard.launch.saveFirst")}</span>}
-        </div>
-      )}
-      {task && launchEffectId && <div className="result-warning" role="status">
-        {t(launchStatus.key)}
-        {launchStatus.wait && <div>{t(waitKey(launchStatus.wait))}</div>}
-        {launchStatus.detail && <div className="sub">{launchStatus.detail}</div>}
-        {launchStatus.blocked && launchStatus.key === "pboard.launch.unconfirmed" && <div className="sub">{t("pboard.launch.inspectFirst")}</div>}
-        {launchStatus.key === "pboard.launch.deliveryFailed" && <div className="sub">{t("pboard.launch.repairFirst")}</div>}
-        <button type="button" className="linkbtn" onClick={() => launchEffect.refresh()}>{t("pboard.launch.refresh")}</button>
-      </div>}
-
+      {assigneeControl}
+      {missingNote}
+      {resumeControl}
       <label className="field">{t("pboard.depends")}</label>
-      {candidates.length === 0 ? (
-        <div className="sub">{t("pboard.depends.none")}</div>
-      ) : (
-        <div className="pboard-deps" role="group" aria-label={t("pboard.depends")}>
-          {candidates.map((other) => (
-            <button key={other.id} type="button" className="chip select" aria-pressed={deps.includes(other.id)} onClick={() => toggleDep(other.id)} title={other.title}>
-              <span className="truncate">{other.title}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
+      {depsPicker}
       <label className="field">{t("board.priority")}</label>
-      <div className="segmented inline" role="radiogroup" aria-label={t("board.priority")}>
-        {[1, 2, 3, 4, 5].map((p) => (
-          <button key={p} type="button" role="radio" aria-checked={priority === p} className={priority === p ? "on" : ""} onClick={() => setPriority(p)}>P{p}</button>
-        ))}
-      </div>
-
-      {task && (
-        <>
-          <label className="field" htmlFor="ptask-note">{t("pboard.note")}</label>
-          <textarea id="ptask-note" className="field" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("pboard.note.placeholder")} />
-          {task.notes && <pre className="inbox-text pboard-notes">{task.notes}</pre>}
-        </>
-      )}
-
+      {priorityControl}
       <div className="sheet-foot">
         <button className="btn ghost" onClick={onClose}>{t("common.cancel")}</button>
-        <button className="btn primary" disabled={busy || writeBlocked || !title.trim() || !changed} onClick={save}>{task ? t("common.save") : t("common.create")}</button>
+        <button className="btn primary" disabled={busy || writeBlocked || !title.trim() || !changed} onClick={save}>{t("common.create")}</button>
       </div>
       {writeBlocked && <div className="result-warning" role="status">{t("result.block.unconfirmed")}</div>}
-  </>;
-  if (phone && task) return (
-    <PhoneTaskPage projectId={projectId} task={task} onClose={onClose} toast={toast} busy={busy} writeBlocked={writeBlocked} onDone={onDone} onMove={(status) => void move(status)}
-      taskTab={<>{taskHead}{taskMiddle}{formPart}</>} resultTab={task.status === "review" || task.acceptance_state === "operator_approved" || !!resultReference || hasAcceptance(task) ? <>{resultPart}{acceptancePart}</> : null}
-      diffTab={task.status === "review" && task.branch ? diffPart : null} />
-  );
-  return (
-    <Sheet
-      title={task ? task.title : t("pboard.new")}
-      onClose={onClose}
-      className={`pboard-sheet ${task ? "" : "new"}`}
-      head={
+    </>;
+    return (
+      <Sheet title={t("pboard.new")} onClose={onClose} className="pboard-sheet new"
         // A phone's new task is decided at the top, where the thumb starts: Create beside the title,
         // the close button as Cancel. The footer's pair stays for the desktop.
-        !task && phone ? <button className="ph-btn accent sm pboard-create" disabled={busy || writeBlocked || !title.trim() || !changed} onClick={save}>{t("common.create")}</button> :
-        task && (
-          <OverflowMenu
-            small
-            label={t("board.actions")}
-            items={[
-              ...(task.assignee?.session_id ? [{ label: t("pboard.open.staff", { name: task.assignee.name }), icon: "bots" as const, onSelect: () => navigate(projectSessionPath(projectId, task.assignee!.session_id!)) }] : []),
-              { label: t("board.copyid"), icon: "copy", onSelect: async () => toast((await copyText(task.id)) ? t("board.copied") : task.id) },
-              "-",
-              ...closeItems(task, writeBlocked || busy, { onDone, toast, onRemoved: onClose }),
-            ]}
-          />
-        )
-      }
-    >
-      {taskHead}
-      {diffPart}
-      {resultPart}
-      {taskMiddle}
-      {acceptancePart}
-      {formPart}
+        head={phone ? <button className="ph-btn accent sm pboard-create" disabled={busy || writeBlocked || !title.trim() || !changed} onClick={save}>{t("common.create")}</button> : undefined}>
+        {form}
+      </Sheet>
+    );
+  }
+
+  // An existing task: the view.
+  const titles = Object.fromEntries(data.tasks.map((other) => [other.id, other]));
+  const waitingOn = task.depends_on.filter((id) => titles[id] && titles[id].status !== "done" && titles[id].status !== "dropped");
+  const asked = data.needs_you.filter((need) => need.task_id === task.id);
+  const handoffApplies = ["todo", "blocked", "doing"].includes(task.status) && !!task.project_id;
+  const manualApplies = !task.branch && (task.status === "todo" || task.status === "blocked" || task.status === "review");
+  const diagnosticsApply = !!task.current_attempt_id && task.status !== "done" && task.status !== "dropped";
+  const showResultTab = task.status === "review" || task.acceptance_state === "operator_approved" || !!resultReference || hasAcceptance(task) || !!task.finished_by;
+  const toolLabels: Record<Tool, string> = {
+    lifecycle: t("lifecycle.task.title"), comparison: t("pair.title"), handoff: t("handoff.title"), workflow: t("taskWorkflow.title"),
+    context: t("taskContext.title"), manual: t("manual.title"), diagnostics: t("pboard.attempt.title"),
+  };
+  const openTool = (next: Tool) => { setTool(next); setResumeOpen(false); };
+  // The rare actions, each in the menu and nowhere else until it is chosen; a CLI conversation to
+  // continue is chosen beside Start, where it takes effect.
+  const toolItems: { label: string; icon: IconName; onSelect: () => void }[] = [
+    ...(offersResume && canStart ? [{ label: t("pboard.resume.label"), icon: "terminal" as const, onSelect: () => { setTool(null); setResumeOpen(true); } }] : []),
+    ...(handoffApplies ? [{ label: toolLabels.handoff, icon: "forward" as const, onSelect: () => openTool("handoff") }] : []),
+    { label: toolLabels.comparison, icon: "split", onSelect: () => openTool("comparison") },
+    { label: toolLabels.workflow, icon: "loop", onSelect: () => openTool("workflow") },
+    { label: toolLabels.context, icon: "book", onSelect: () => openTool("context") },
+    ...(manualApplies ? [{ label: toolLabels.manual, icon: "check" as const, onSelect: () => openTool("manual") }] : []),
+    ...(diagnosticsApply ? [{ label: toolLabels.diagnostics, icon: "wrench" as const, onSelect: () => openTool("diagnostics") }] : []),
+    { label: toolLabels.lifecycle, icon: "stop", onSelect: () => openTool("lifecycle") },
+  ];
+  const toolPanel = tool && (
+    <ToolPanel title={toolLabels[tool]} onClose={() => setTool(null)}>
+      {tool === "lifecycle" && <LifecycleCancel bare kind="task" id={task.id} projectId={projectId} onDone={onDone} toast={toast} />}
+      {tool === "comparison" && <TaskComparison bare task={task} staff={data.staff} onChanged={onDone} toast={toast} />}
+      {tool === "handoff" && <RuntimeHandoff bare task={task} onChanged={onDone} toast={toast} />}
+      {tool === "workflow" && <TaskWorkflow bare projectId={projectId} task={task} tasks={data.tasks} />}
+      {tool === "context" && <TaskContext bare task={task} staff={data.staff} />}
+      {/* A submitted result is the thing to look at next, so the form gives way to it. */}
+      {tool === "manual" && <ManualResult bare task={task} toast={toast} onChanged={() => { setTool(null); onDone(); }} />}
+      {tool === "diagnostics" && <TaskDiagnostics bare task={task} toast={toast} />}
+    </ToolPanel>
+  );
+
+  const titleBlock = editing.has("title") ? (
+    <input id="ptask-title" className="field ptask-title-input" autoFocus value={title} maxLength={200} aria-label={t("board.title")}
+      onChange={(e) => setTitle(e.target.value)}
+      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); setEditing((open) => { const next = new Set(open); next.delete("title"); return next; }); } }} />
+  ) : (
+    <div className="ptask-title-row">
+      <h3 className="ptask-title">{title.trim() || task.title}</h3>
+      <button type="button" className="iconbtn small ptask-edit" onClick={() => edit("title")} aria-label={t("ptask.edit.title")} title={t("ptask.edit.title")}><Icon name="pen" size={14} /></button>
+    </div>
+  );
+  const meta = (
+    <div className="ptask-meta">
+      <span className={`chip ${STATUS_TONE[task.status]}`}>{t(`board.col.${task.status}`)}</span>
+      {task.issue && <IssueChip issue={task.issue} />}
+      <span className="sub" title={absTime(task.updated_at)}>{t("board.updated", { t: relTime(task.updated_at) })}</span>
+    </div>
+  );
+
+  // Where the task stands, in a line: who has it, what it waits for, and anything waiting on the
+  // operator, which is the one thing drawn loud.
+  const who = task.assignee?.on_task
+    ? <span className={`status ${statusTone(task.assignee.status)}`}><span className="dot" aria-hidden />{t("ptask.state.working", { name: task.assignee.name, status: t(`team.status.${task.assignee.status}`) })}{task.assignee.status_at && <> · {relTime(task.assignee.status_at)}</>}</span>
+    : task.assignee && canStart ? <span>{t("ptask.state.next", { name: task.assignee.name })}</span>
+    : task.assignee ? <span>{t("ptask.state.assigned", { name: task.assignee.name })}</span>
+    : task.status !== "done" && task.status !== "dropped" ? <span className="faint">{t("ptask.state.nobody")}</span> : null;
+  const state = (
+    <div className="ptask-state">
+      <div className="ptask-state-line">
+        {task.assignee && <StaffAvatar name={task.assignee.name} color={task.assignee.color} size="small" />}
+        {who}
+        {waitingOn.length > 0 && <span className="ptask-waits">{t("ptask.state.waits", { titles: waitingOn.map((id) => t("ptask.state.quoted", { title: titles[id].title })).join(", ") })}</span>}
+      </div>
+      {asked.map((need) => (
+        <div key={need.id} className="ptask-needs" role="status">
+          <Icon name="question" size={16} />
+          <span className="grow">{need.staff ? t("pboard.need.from", { kind: t(`pboard.need.kind.${need.kind}`), name: need.staff.name }) : t("pboard.need.orchestrator", { kind: t(`pboard.need.kind.${need.kind}`) })}: {need.text}</span>
+          {need.session_id && <button type="button" className="btn small warn" onClick={() => navigate(answerPath(projectId, need))}>{t("pboard.need.answer")}</button>}
+        </div>
+      ))}
+      {task.status === "review" && (
+        <div className="ptask-needs" role="status">
+          <Icon name="eye" size={16} />
+          <span className="grow">{t("ptask.state.review")}</span>
+          {!phone && <button type="button" className="btn small warn" onClick={() => resultAnchor.current?.scrollIntoView({ behavior: "smooth", block: "start" })}>{t("result.openReview")}</button>}
+        </div>
+      )}
+    </div>
+  );
+
+  // The brief as text, the parts that say what the work is first. A part nobody wrote is not drawn as
+  // an empty heading; it is offered once, in the line under the others, to be added.
+  const order: BriefField[] = ["objective", "deliverable", "done_when", "boundaries"];
+  const shown = order.filter((field) => brief[field].trim() || editing.has(field));
+  const absent = order.filter((field) => !shown.includes(field));
+  const briefPart = <>
+    {shown.map((field) => (
+      <BriefBlock key={field} field={field} label={t(`pboard.brief.${field}`)} value={brief[field]} editing={editing.has(field)}
+        placeholder={t(`pboard.brief.${field}.placeholder`)} onEdit={() => edit(field)} onChange={(value) => setBrief({ ...brief, [field]: value })} />
+    ))}
+    {absent.length > 0 && (
+      <div className="ptask-add">
+        <span className="sub">{t("ptask.brief.add")}</span>
+        {absent.map((field) => <button key={field} type="button" className="btn small ghost" onClick={() => edit(field)}><Icon name="plus" size={14} />{t(`pboard.brief.${field}`)}</button>)}
+      </div>
+    )}
+  </>;
+  const requirementsPart = (task.requirements?.length ?? 0) > 0 && <RequirementsSection requirements={task.requirements!} />;
+  const acceptancePart = hasAcceptance(task) && <AcceptanceSection task={task} />;
+  const resultPart = <>
+    <ChatFinish task={task} onOpenSession={(id) => navigate(projectSessionPath(projectId, id))} onChanged={onDone} toast={toast} />
+    {resultReference && <AcceptedResultDetail task={task} reference={resultReference} />}
+    {!resultReference && (task.status === "review" || task.acceptance_state === "operator_approved") && <ResultFlow task={task} onAccepted={onDone} toast={toast} />}
+    {task.status === "done" && task.acceptance_state === "operator_approved" && (
+      <p className="sub pboard-attempt-cost" title={t("pboard.cost.scope")}>
+        {t("pboard.cost.label")} · <strong>{acceptedResultCost(task.accepted_result_cost_microusd)}</strong>
+        {task.accepted_result_cost_microusd == null && (task.accepted_result_known_cost_microusd ?? 0) > 0 && (
+          <span> · {t("pboard.cost.known", { usd: acceptedResultCost(task.accepted_result_known_cost_microusd) })}</span>
+        )}
+        {task.accepted_result_cost_unknown_reasons?.map((reason) => (
+          <span key={reason}> · {t(`pboard.cost.reason.${reason}`)}</span>
+        ))}
+        <span> · <button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "journal"))}>{t("pboard.cost.coordination")}</button></span>
+      </p>
+    )}
+  </>;
+  const diffPart = task.status === "review" && task.branch && <ReviewPanel taskId={task.id} onChanged={onDone} toast={toast} />;
+  const notesPart = (
+    <section className="ptask-block ptask-notes">
+      <h4 className="ptask-label">{t("board.notes")}</h4>
+      {task.notes && <pre className="inbox-text ptask-notes-text">{task.notes}</pre>}
+      <AutoTextarea id="ptask-note" rows={1} value={note} aria-label={t("pboard.note")} placeholder={t("pboard.note.placeholder")} onChange={(e) => setNote(e.target.value)} />
+    </section>
+  );
+
+  const depsValue = (
+    <>
+      {deps.length > 0 ? (
+        <ul className="ptask-deps">
+          {deps.map((id) => {
+            const other = titles[id];
+            return <li key={id} className={other && (other.status === "done" || other.status === "dropped") ? "met" : ""}>
+              <span className={`ptask-dep-dot ${other?.status ?? ""}`} aria-hidden />
+              <span className="ptask-dep-title">{other?.title ?? id}</span>
+              {other && <span className="sub">{t(`board.col.${other.status}`)}</span>}
+            </li>;
+          })}
+        </ul>
+      ) : !depsOpen && <span className="faint">{t("ptask.deps.none")}</span>}
+      {depsOpen && depsPicker}
+    </>
+  );
+  const props = (
+    <div className="ptask-props">
+      <Prop label={t("ptask.prop.status")}>
+        <span className={`chip ${STATUS_TONE[task.status]}`}>{t(`board.col.${task.status}`)}</span>
+        {NEXT[task.status].length > 0 && (
+          <div className="pboard-moves" role="group" aria-label={t("board.moveto")}>
+            <span className="sub">{t("board.moveto")}</span>
+            {NEXT[task.status].map((status) => (
+              <button key={status} type="button" className="btn small" disabled={writeBlocked} onClick={() => void move(status)}>{t(`board.col.${status}`)}</button>
+            ))}
+          </div>
+        )}
+      </Prop>
+      <Prop label={t("pboard.assignee")} htmlFor={team.length === 0 && !gone ? undefined : "ptask-assignee"}>{assigneeControl}</Prop>
+      <Prop label={t("board.priority")}>{priorityControl}</Prop>
+      <Prop label={t("pboard.depends")} action={!depsOpen && candidates.length > 0 && <button type="button" className="linkbtn" onClick={() => setDepsOpen(true)}>{t("common.edit")}</button>}>{depsValue}</Prop>
+      <Prop label={t("pboard.folder")} htmlFor={folderOpen ? "ptask-folder" : undefined}
+        action={!folderOpen && <button type="button" className="linkbtn" onClick={() => setFolderOpen(true)}>{t("common.edit")}</button>}>
+        {folderOpen ? folderControl : <span className={`ptask-folder ${folderId ? "" : "faint"}`}>{folderId ? folderName(folderId) : t("ptask.folder.unset")}</span>}
+      </Prop>
+      {task.branch && <Prop label={t("ptask.prop.branch")}><code className="pcard-branch">{task.branch}</code></Prop>}
+    </div>
+  );
+  // The one thing to do next, by where the task stands.
+  const action = (
+    <div className="ptask-action">
+      {canStart && !gone && asksFirst && <button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "board", { task: task.id, grant: task.assignee ? "execution" : "assignment_execution" }))}>{t(task.assignee ? "pboard.grant.execution.open" : "pboard.grant.open")}</button>}
+      {canStart && !gone && team.length === 0 && !task.assignee && <div className="sub">{t("pboard.assignee.none")} <button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "team"))}>{t("pboard.team.hire")}</button></div>}
+      {canStart && assignee && <>
+        <button type="button" className="btn primary ptask-primary" disabled={busy || writeBlocked || editorChanged || launchPending} onClick={() => void startTask()}>{t(storedLaunchIntent(task.id) ? "pboard.launch.retry" : "pboard.launch.action")}</button>
+        {editorChanged && <span className="sub">{t("pboard.launch.saveFirst")}</span>}
+        {missingNote}
+        {resumeControl}
+        {offersResume && !resumeOpen && resumeSessions.length > 0 && <button type="button" className="linkbtn" onClick={() => setResumeOpen(true)}>{t("pboard.resume.label")}</button>}
+      </>}
+      {canStart && !assignee && team.length > 0 && <div className="sub">{t("ptask.action.assign")}</div>}
+      {assignee && (canStart || launchPending) && <HostCapacity projectId={projectId} pending={launchPending} />}
+      {launchNotice}
+      {task.status === "doing" && <>
+        <button type="button" className="btn warn ptask-primary" disabled={writeBlocked || busy || !!stopEffectId} onClick={() => void stopTask()}>{t("result.stopTaskAction")}</button>
+        <span className="sub">{t("result.stopTaskScope")}</span>
+        {task.assignee?.session_id && <button type="button" className="btn ghost small" onClick={() => navigate(projectSessionPath(projectId, task.assignee!.session_id!))}>{t("pboard.open.staff", { name: task.assignee.name })}</button>}
+      </>}
+      {stopEffectId && <div className="result-warning" role="status">{t(stopEffect.error ? "result.stopTaskUnconfirmed" : stopEffect.data?.state === "completed" ? "result.stopTaskObserved" : stopEffect.data?.state === "unknown" ? "result.stopTaskUnconfirmed" : "result.stopTaskPending")} <button type="button" className="linkbtn" onClick={() => stopEffect.refresh()}>{t("common.retry")}</button></div>}
+      {writeBlocked && <div className="result-warning" role="status">{t("result.block.unconfirmed")}</div>}
+    </div>
+  );
+  const foot = changed && !syncing && (
+    <div className="sheet-foot ptask-foot">
+      <span className="sub grow">{t("ptask.unsaved")}</span>
+      <button type="button" className="btn ghost" disabled={busy} onClick={() => reset(task)}>{t("common.cancel")}</button>
+      <button type="button" className="btn primary" disabled={busy || writeBlocked || !title.trim()} onClick={save}>{t("common.save")}</button>
+    </div>
+  );
+  const menuItems: MenuItem[] = [
+    ...(task.assignee?.session_id ? [{ label: t("pboard.open.staff", { name: task.assignee.name }), icon: "bots" as const, onSelect: () => navigate(projectSessionPath(projectId, task.assignee!.session_id!)) }] : []),
+    { label: t("board.copyid"), icon: "copy", onSelect: async () => toast((await copyText(task.id)) ? t("board.copied") : task.id) },
+    "-",
+    ...toolItems,
+    "-",
+    ...closeItems(task, writeBlocked || busy, { onDone, toast, onRemoved: onClose }),
+  ];
+
+  if (phone) return (
+    <PhoneTaskPage projectId={projectId} task={task} onClose={onClose} toast={toast} busy={busy} writeBlocked={writeBlocked} onDone={onDone} onMove={(status) => void move(status)}
+      tools={toolItems}
+      taskTab={<div className="ptask ptask-phone">
+        {titleBlock}
+        {state}
+        <ManualReopenRecovery task={task} toast={toast} onChanged={onDone} />
+        {toolPanel || <>
+          {briefPart}
+          {requirementsPart}
+          {props}
+          {action}
+          {notesPart}
+          <TaskExplorations task={task} />
+        </>}
+        {foot}
+      </div>}
+      resultTab={showResultTab ? <div className="ptask ptask-phone">{resultPart}{acceptancePart}</div> : null}
+      diffTab={diffPart || null} />
+  );
+  return (
+    <Sheet ariaLabel={task.title} onClose={onClose} className="pboard-sheet ptask"
+      head={<>
+        <div className="ptask-head">{meta}{titleBlock}</div>
+        <OverflowMenu small label={t("board.actions")} items={menuItems} />
+      </>}>
+      {state}
+      <div className="ptask-grid">
+        <div className="ptask-main">
+          <ManualReopenRecovery task={task} toast={toast} onChanged={onDone} />
+          {toolPanel || <>
+            {briefPart}
+            {requirementsPart}
+            {acceptancePart}
+            <div ref={resultAnchor} className="ptask-result">{resultPart}{diffPart}</div>
+            <TaskExplorations task={task} />
+            {notesPart}
+          </>}
+        </div>
+        <aside className="ptask-side" aria-label={t("ptask.side")}>
+          {props}
+          {action}
+        </aside>
+      </div>
+      {foot}
     </Sheet>
   );
 }

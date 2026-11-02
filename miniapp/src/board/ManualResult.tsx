@@ -26,8 +26,11 @@ function blocker(code: string): string {
   return t(`manual.block.${["status", "branch", "attempt_bound", "execution_owned", "dependencies", "missing_contract"].includes(code) ? code : "other"}`);
 }
 
-export function ManualResult({ task, toast, onChanged }: { task: ProjectTask; toast: (message: string) => void; onChanged: () => void }) {
+export function ManualResult({ task, toast, onChanged, bare = false }: { task: ProjectTask; toast: (message: string) => void; onChanged: () => void; bare?: boolean }) {
   const [open, setOpen] = useState(false);
+  // `bare` is the form opened from the task's menu: a heading button over it would be a heading over
+  // the very thing the reader just asked for.
+  if (bare) return <section className="task-workflow"><ManualContent task={task} toast={toast} onChanged={onChanged} /></section>;
   return <section className="task-workflow">
     <button type="button" className="pboard-fold section-title" aria-expanded={open} onClick={() => setOpen(!open)}>{t("manual.title")}</button>
     {open && <ManualContent task={task} toast={toast} onChanged={onChanged} />}

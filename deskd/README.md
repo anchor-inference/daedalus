@@ -4,8 +4,9 @@ The desktop daemon of the native application. It captures the operator's screens
 and the apps behind them, and sends synthetic mouse and keyboard input for the Daedalus host, within a
 lease only the operator can grant, over an authenticated local socket. The framing, handshake and
 event log are `ptyd`'s (`ptyd/proto`), which this module builds against. The daemon refuses input to
-Daedalus's own windows, on a locked screen and outside the lease's scope, pauses the moment the
-operator touches the machine, and keeps an audit of metadata only.
+Daedalus's own windows and outside the lease's scope, refuses the chords that close, lock or leave
+the session, ends the lease when the screen locks, pauses the moment the operator touches the
+machine, and keeps an audit of metadata only.
 
 ```sh
 go build ./cmd/deskd
@@ -23,7 +24,7 @@ The protocol, the coordinates, the roles and the rules are specified in
 |---|---|
 | `cmd/deskd` | flags, signals, shutdown, the selftest command |
 | `internal/geom` | the arithmetic between screenshot pixels and the desktop, pure, with the traps in its table |
-| `internal/keys` | key names in every dialect, parsed to one chord; how text is cut up before it is typed |
+| `internal/keys` | key names in every dialect, parsed to one chord; how text is cut up before it is typed; the chords no lease may press, per system |
 | `internal/shot` | the downscale and the encoding of a capture |
 | `internal/backend` | what a system's desktop offers; `x11`, `win` and `quartz` are the systems, `fake` one in memory |
 | `internal/native` | the backend of the system the binary was built for |

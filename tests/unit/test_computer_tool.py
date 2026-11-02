@@ -249,14 +249,18 @@ async def test_the_pointer_is_read_back_in_the_models_frame(desk: FakeDeskd, age
 @pytest.mark.parametrize(("code", "data"), [
     (1101, {"paused": True}),
     (1200, {"reason": "stopped"}),
+    (1200, {"reason": "locked"}),
     (1202, {"scope": {"kind": "window"}}),
     (1203, {"app": "com.example.daedalus"}),
     (1204, {"reason": "lock_screen"}),
+    (1204, {"reason": "secure_desktop", "lease_ended": True}),
     (1205, {"which": "accessibility", "hint": "System Settings → Privacy & Security → Accessibility"}),
     (1206, {"limit": "per_second", "retry_after_ms": 250}),
     (1206, {"limit": "lease_actions", "max": 200}),
     (1207, {"reason": "elevated"}),
     (1208, {"role": "host"}),
+    (1212, {"keys": "alt+f4", "reason": "ends", "why": "closes the window in front", "delivery": "not_delivered"}),
+    (1212, {"keys": "alt+tab", "reason": "leaves", "why": "switches to another window", "delivery": "not_delivered"}),
     (1001, None),
     (1003, None),
     (1007, None),
@@ -269,8 +273,47 @@ async def test_every_refusal_is_said_in_words(desk: FakeDeskd, agent: ComputerAg
     assert outcome.failed and outcome.image is None
     assert outcome.text == refusals.explain(code, "terse daemon words", data)
     assert outcome.metadata["code"] == code
-    # Said once: a rate refusal is not retried in a loop behind the model's back.
+    # Said once: a refusal that does not say nothing was delivered is never sent again behind the
+    # model's back, the rate's included (a daemon too old to say counts as maybe delivered).
     assert desk.methods().count("act") == 1
+
+
+async def test_a_rate_refusal_that_delivered_nothing_is_sent_again_after_the_wait(desk: FakeDeskd, agent: ComputerAgent) -> None:
+    desk.grant(SESSION)
+    await agent.computer(caller(), {"action": "screenshot"})
+    waits: list[float] = []
+
+    async def sleep(seconds: float) -> None:
+        waits.append(seconds)
+
+    agent.sleep = sleep
+    desk.fail["act"] = (1206, "more than 4 actions a second", {"limit": "per_second", "retry_after_ms": 120, "delivery": "not_delivered"})
+    outcome = await agent.computer(caller(), {"action": "left_click", "coordinate": [10, 10]})
+    assert not outcome.failed, outcome.text
+    assert desk.methods().count("act") == 2 and len(desk.acts) == 1
+    assert waits[0] == pytest.approx(0.12)
+
+
+@pytest.mark.parametrize(("code", "data"), [
+    # The input may have landed: repeating it could click twice.
+    (1206, {"limit": "per_second", "retry_after_ms": 120, "delivery": "unknown"}),
+    (1200, {"reason": "stopped", "delivery": "unknown"}),
+    # Nothing was sent, but the cure is not a wait.
+    (1101, {"paused": True, "delivery": "not_delivered"}),
+    (1212, {"keys": "alt+f4", "reason": "ends", "delivery": "not_delivered"}),
+    (1206, {"limit": "lease_actions", "max": 200, "delivery": "not_delivered"}),
+    # A wait longer than the host sits out by itself is the model's to decide on.
+    (1206, {"limit": "per_second", "retry_after_ms": 60_000, "delivery": "not_delivered"}),
+])
+async def test_only_an_undelivered_rate_refusal_is_sent_again(desk: FakeDeskd, agent: ComputerAgent, code: int, data: Any) -> None:
+    desk.grant(SESSION)
+    await agent.computer(caller(), {"action": "screenshot"})
+    desk.fail["act"] = (code, "terse daemon words", data)
+    outcome = await agent.computer(caller(), {"action": "left_click", "coordinate": [10, 10]})
+    assert outcome.failed
+    assert desk.methods().count("act") == 1
+    if data.get("delivery") == "unknown":
+        assert "may already have happened" in outcome.text
 
 
 async def test_a_stale_screenshot_refusal_brings_the_new_one(desk: FakeDeskd, agent: ComputerAgent) -> None:

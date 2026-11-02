@@ -36,9 +36,10 @@ function keep(taskId: string, intent: Intent | null): void {
   catch { /* the mounted intent still keeps its exact operation identity */ }
 }
 
-export function RuntimeHandoff({ task, onChanged, toast }: { task: ProjectTask;
-  onChanged: () => void; toast: (message: string) => void }) {
-  const [open, setOpen] = useState(false);
+export function RuntimeHandoff({ task, onChanged, toast, bare = false }: { task: ProjectTask;
+  onChanged: () => void; toast: (message: string) => void; bare?: boolean }) {
+  // `bare` is the handoff opened from the task's menu, already open and without a fold of its own.
+  const [open, setOpen] = useState(bare);
   const [targetId, setTargetId] = useState("");
   const [pending, setPending] = useState<Intent | null>(() => saved(task.id));
   const [effectId, setEffectId] = useState("");
@@ -101,8 +102,7 @@ export function RuntimeHandoff({ task, onChanged, toast }: { task: ProjectTask;
   }
 
   if (!["todo", "blocked", "doing"].includes(task.status) || !task.project_id) return null;
-  return <details className="result-details" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
-    <summary>{t("handoff.title")}</summary>
+  const body = <>
     <p className="sub">{t("handoff.help")}</p>
     {options.error && <p className="result-warning" role="alert">{errorText(options.error)}</p>}
     {open && options.data && <>
@@ -151,5 +151,10 @@ export function RuntimeHandoff({ task, onChanged, toast }: { task: ProjectTask;
     {effectId && <p className="sub" role="status">{t("handoff.effect", { state: t(effect.data || effect.error ? launchFeedback(effect.data, !!effect.error).key : "pboard.launch.pending") })}
       {effect.data?.error && ` · ${effect.data.error}`}</p>}
     {warning && <p className="result-warning" role="alert">{warning}</p>}
+  </>;
+  if (bare) return <div className="runtime-handoff">{body}</div>;
+  return <details className="result-details" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <summary>{t("handoff.title")}</summary>
+    {body}
   </details>;
 }

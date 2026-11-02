@@ -132,8 +132,10 @@ export function EvidenceReview({ task, result, contract, review, blockingComment
     } finally { setBusy(false); }
   }
 
-  return <details className="result-details" open>
-    <summary>{t("result.reviewEvidence")}</summary>
+  // Always open, so a section with a heading rather than a fold that was never folded: as a fold it
+  // put each check's own fold inside another.
+  return <section className="result-details result-review" aria-label={t("result.reviewEvidence")}>
+    <h4>{t("result.reviewEvidence")}</h4>
     <p className="sub">{t("result.manualEvidence")}</p>
     {evidence.error && <div className="result-warning" role="status">{t("result.block.unconfirmed")} <button type="button" className="linkbtn" onClick={() => evidence.refresh()}>{t("common.retry")}</button></div>}
     <ul>{(evidence.data ?? []).map((row) => <li key={row.evidence_id}>{checks.find((check) => check.id === row.criterion_id)?.text ?? row.criterion_id} · {row.observation} · {t(`result.verification.${row.verification}`)}</li>)}</ul>
@@ -170,5 +172,5 @@ export function EvidenceReview({ task, result, contract, review, blockingComment
       {blockingComments > 0 && <div className="result-warning" role="status">{t("result.block.comments")}</div>}
       {!branchCurrent && <div className="result-warning" role="status">{t("result.block.changedBranch")}</div>}
     </div>
-  </details>;
+  </section>;
 }

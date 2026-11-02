@@ -52,8 +52,10 @@ export function ResultTransfer({ projectId, artifacts, toast }: { projectId: str
     } finally { setBusy(false); }
   }
 
-  return <details className="result-transfer">
-    <summary>{t("transfer.title")}</summary>
+  // A block, not a fold: it is mounted only inside the result's opened evidence, and a fold there was
+  // a fold inside a fold.
+  return <section className="result-transfer" aria-label={t("transfer.title")}>
+    <b>{t("transfer.title")}</b>
     <p className="sub">{t("transfer.intro")}</p>
     <label className="field">{t("transfer.artifact")}
       <select className="field" value={artifactId} onChange={(event) => { setArtifactId(event.target.value); operation.current = null; setConflict(false); }}>
@@ -73,11 +75,11 @@ export function ResultTransfer({ projectId, artifacts, toast }: { projectId: str
       {t(`transfer.state.${selected.state}`)}
       {selected.error_code ? ` · ${selected.error_code}` : ""}
     </p>}
-    {selected?.state === "published" && selected.published_digest && <details><summary>{t("common.details")}</summary>
-      <div className="mono">{selected.verified_bytes}/{selected.total_bytes} · {selected.published_digest}</div></details>}
+    {selected?.state === "published" && selected.published_digest &&
+      <div className="mono sub">{selected.verified_bytes}/{selected.total_bytes} · {selected.published_digest}</div>}
     {selected?.state === "unknown" && <p className="sub">{t("transfer.unknownHint")}</p>}
     {canStart && !selected && <button type="button" className="btn small" disabled={busy} onClick={() => void send(false)}>{t("transfer.start")}</button>}
     {canStart && (selected?.state === "failed" || selected?.state === "unknown") && <button type="button" className="btn small" disabled={busy} onClick={() => void send(true)}>{t("transfer.retry")}</button>}
     {conflict && <button type="button" className="linkbtn" onClick={() => { operation.current = null; setConflict(false); revision.refresh(); readiness.refresh(); }}>{t("transfer.refreshIntent")}</button>}
-  </details>;
+  </section>;
 }

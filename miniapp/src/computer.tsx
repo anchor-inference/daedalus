@@ -51,7 +51,7 @@ export type ComputerState = {
   session_type?: string;
   permissions?: { screen?: PermissionState; accessibility?: PermissionState; input_monitoring?: PermissionState };
   secure?: { locked: boolean; reason?: string };
-  lease?: { active: boolean; lease?: ComputerLease; remaining_ms?: number };
+  lease?: { active: boolean; lease?: ComputerLease; remaining_ms?: number; last_ended?: string };
   human?: { paused: boolean; since?: string; resumes_at?: string };
   settings_links?: { screen?: string; accessibility?: string };
   displays?: ComputerDisplay[];
@@ -239,6 +239,9 @@ export function ComputerSheet({ sessionId, toast, onClose }: { sessionId: string
         <>
           <div className="sub">{t("cu.sub")}</div>
           {state?.secure?.locked && <div className="setting-notice tone-warning computer-note"><Icon name="lock" size={14} /><span className="setting-notice-text">{t("cu.locked")}</span></div>}
+          {/* The daemon ends a grant when the screen locks; said here, or the operator coming back to an
+              unlocked screen would wonder where the agent went. */}
+          {view === "free" && state?.lease?.last_ended === "locked" && <div className="setting-notice computer-note" data-ended="locked"><Icon name="lock" size={14} /><span className="setting-notice-text">{t("cu.ended.locked")}</span></div>}
           {(view === "mine" || view === "paused") && (
             <div className="setting-notice tone-warning computer-status" data-computer={view}>
               <Icon name={view === "paused" ? "pause" : "monitor"} size={14} />

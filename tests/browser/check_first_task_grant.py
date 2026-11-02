@@ -84,7 +84,8 @@ def scenario(language: str, width: int, coordinator: bool, staff_state: str, pre
         else:
             expect(sheet.get_by_role("button", name="Hire someone" if language == "en" else "Нанять сотрудника")).to_be_visible()
         grant = sheet.get_by_role("button", name=grant_name)
-        assert grant.evaluate("(node) => !!(node.compareDocumentPosition(document.querySelector('.pboard-sheet .task-workflow')) & Node.DOCUMENT_POSITION_FOLLOWING)")
+        # The permission is the task's next step, so it stands with the next step, not under the rest.
+        expect(sheet.locator(".ptask-action").get_by_role("button", name=grant_name)).to_be_visible()
         grant.click()
         expect(page).to_have_url(f"{BASE}/orchestration/project/{PID}/board?task=first-task&grant={bundle_id}")
         expect(sheet).to_contain_text("Prepare menu")

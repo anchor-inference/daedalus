@@ -231,6 +231,38 @@ func (d *Desk) Stop(by string) {
 	d.write(audit.Record{Role: by, Event: "stop", Lease: id})
 }
 
+// EndedLocked is the reason a lease ends when the screen locks, a secure desktop comes up (Windows'
+// UAC or Ctrl+Alt+Del screen) or the screen saver starts: whatever the system calls it, the operator
+// has left or the system has taken the screen, and the grant was for the desktop as it was.
+const EndedLocked = "locked"
+
+// endForSecure ends the lease because the desktop became one the agent may not see, the way Stop
+// does: the action in flight is cancelled, everything held is released, and the lease ends for good,
+// so unlocking the screen does not hand the desktop back. It reports whether a lease ended.
+func (d *Desk) endForSecure(sec backend.Secure) bool {
+	d.mu.Lock()
+	l := d.lease
+	if l == nil {
+		d.mu.Unlock()
+		return false
+	}
+	if d.actCancel != nil {
+		d.actCancel()
+	}
+	d.endLocked(EndedLocked)
+	d.mu.Unlock()
+	d.input.Lock()
+	d.release()
+	d.input.Unlock()
+	d.events.Publish("lease.ended", "", map[string]any{"lease_id": l.ID, "session": l.Session, "reason": EndedLocked, "by": "daemon",
+		"actions": l.Actions, "secure": sec.Reason})
+	d.write(audit.Record{Role: "daemon", Event: "lease.ended", Session: l.Session, Lease: l.ID, Reason: EndedLocked, Count: l.Actions})
+	// The same event Stop sends, so a subscriber that follows the kill switch learns of this one too.
+	d.events.Publish("stopped", "", map[string]any{"by": "daemon", "lease_id": l.ID, "reason": EndedLocked, "secure": sec.Reason})
+	d.log.Info("lease ended: the desktop is locked or secure", "lease", l.ID, "secure", sec.Reason)
+	return true
+}
+
 // Resume ends a pause for the operator's hand.
 func (d *Desk) Resume(by string) bool {
 	d.mu.Lock()

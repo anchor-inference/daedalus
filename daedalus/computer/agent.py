@@ -16,6 +16,11 @@ better rule and is left for later.
 What the model is told of the screen — window titles, app names — is fenced as screen content, in the
 browser fence's form and with its quoting rule, because a window title is text anyone can set. Typed
 text is never repeated in a result or a log line: only its length is.
+
+The host repeats an action by itself only when deskd says none of it was sent (``delivery:
+not_delivered``) and the refusal is the per-second rate, whose cure is the wait the daemon names. Every
+other refusal goes to the model, and an action that may have partly landed is never repeated here: a
+click that went through once must not go through twice because the answer was lost.
 """
 
 from __future__ import annotations
@@ -62,6 +67,10 @@ DEFAULT_TYPE_CHARS = 2000
 SETTLE_SECONDS = 0.3
 """How long after an action the screenshot of its effect is taken: long enough for a menu to open or a
 button to redraw, short enough not to slow every step."""
+RATE_RETRIES = 2
+"""How many times an action refused by the per-second rate is sent again after the daemon's wait."""
+MAX_RATE_WAIT_MS = 2000
+"""The longest wait the host sits out for the rate by itself; a longer one is the model's to decide on."""
 JPEG_QUALITY = 80
 ZOOM_MAX_CAPTURE = 8192
 """The largest long edge the daemon captures at. A zoom asks for the target at its own resolution so the
@@ -226,6 +235,17 @@ def _modifiers(text: Any) -> list[str]:
         if mod not in out:
             out.append(mod)
     return out
+
+
+def _rate_wait(exc: DeskError) -> int | None:
+    """The milliseconds to wait before sending an action again, or None when it must not be resent."""
+    data = exc.data if isinstance(exc.data, dict) else {}
+    if exc.code != refusals.RATE or data.get("limit") != "per_second" or data.get("delivery") != refusals.NOT_DELIVERED:
+        return None
+    wait = data.get("retry_after_ms")
+    if not isinstance(wait, (int, float)) or isinstance(wait, bool) or not 0 <= wait <= MAX_RATE_WAIT_MS:
+        return None
+    return int(wait)
 
 
 def _inside(bounds: dict[str, Any], x: float, y: float) -> bool:
@@ -440,7 +460,7 @@ class ComputerAgent:
             timeout += seconds
             said = f"waited {seconds:g} s"
         logger.info("computer %s for session %s", params.get("action"), session)
-        answer = await self.client.call("act", params, timeout=timeout)
+        answer = await self._act(params, timeout)
         shot = await self._after(caller)
         listed = await self.client.call("apps.list", {"session": session})
         lines = [said[:1].upper() + said[1:] + "."]
@@ -455,6 +475,20 @@ class ComputerAgent:
         if front:
             lines.append(front.strip())
         return Outcome(self._with_shot(caller, "\n".join(lines), shot), image=shot)
+
+    async def _act(self, params: dict[str, Any], timeout: float) -> Any:
+        """``act``, sent again after the daemon's wait while it is refused for the per-second rate with
+        nothing delivered. Anything else, and a daemon too old to say ``delivery``, is raised as is."""
+        for attempt in range(RATE_RETRIES + 1):
+            try:
+                return await self.client.call("act", params, timeout=timeout)
+            except DeskError as exc:
+                wait = _rate_wait(exc)
+                if wait is None or attempt == RATE_RETRIES:
+                    raise
+                logger.info("computer %s waits %d ms for the rate", params.get("action"), wait)
+                await self.sleep(wait / 1000)
+        raise AssertionError("unreachable")
 
     def _read_point(self, caller: Caller, value: Any, what: str = "coordinate") -> tuple[Shot, tuple[int, int]]:
         shot = self.shots.get(caller.session_id)
