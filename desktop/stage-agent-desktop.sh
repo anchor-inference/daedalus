@@ -44,7 +44,10 @@ fail() {
   exit 1
 }
 
-field() { sed -n "s/^$1=//p" "$lock"; }
+# The lock as text with every line trimmed of a carriage return and surrounding blanks: a Windows
+# checkout that converts line ends hands it over with CRLF, and "1.0.2\r" is not a version.
+locktext="$(tr -d '\r' <"$lock" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+field() { sed -n "s/^$1=//p" <<<"$locktext"; }
 version="$(field version)"
 commit="$(field commit)"
 repo="$(field repo)"
@@ -58,7 +61,7 @@ if [ "$#" -eq 0 ]; then
   # A loop, not mapfile: the Mac's own bash is 3.2.
   while read -r platform; do
     set -- "$@" "$platform"
-  done < <(sed -n 's/^\([a-z]*-[a-z0-9]*\)=.*/\1/p' "$lock")
+  done < <(sed -n 's/^\([a-z]*-[a-z0-9]*\)=.*/\1/p' <<<"$locktext")
 fi
 [ "$#" -gt 0 ] || fail "$lock names no platform"
 
@@ -81,7 +84,7 @@ rm -rf "$out"
 mkdir -p "$out"
 
 for platform in "$@"; do
-  line="$(sed -n "s/^$platform=//p" "$lock")"
+  line="$(field "$platform")"
   [ -n "$line" ] || fail "$lock has no line for $platform"
   target="${line% *}"
   want="${line#* }"
