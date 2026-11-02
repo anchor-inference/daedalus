@@ -31,6 +31,7 @@ import { UncertainLaunches } from "./UncertainLaunches";
 import { TaskContext } from "./TaskContext";
 import { ManualResult } from "./ManualResult";
 import { ManualReopenRecovery } from "./ManualReopen";
+import { ChatFinish } from "./ChatFinish";
 import { IssueImport } from "./IssueImport";
 import { PhoneTaskPage } from "./TaskPage";
 import { Harness, statusTone } from "../team/team";
@@ -726,6 +727,7 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
       )}
   </>;
   const resultPart = <>
+      {task && <ChatFinish task={task} onOpenSession={(id) => navigate(projectSessionPath(projectId, id))} onChanged={onDone} toast={toast} />}
       {task && resultReference && <AcceptedResultDetail task={task} reference={resultReference} />}
       {task && !resultReference && (task.status === "review" || task.acceptance_state === "operator_approved") && <ResultFlow task={task} onAccepted={onDone} toast={toast} />}
       {task?.status === "done" && task.acceptance_state === "operator_approved" && (

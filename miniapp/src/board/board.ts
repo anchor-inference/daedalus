@@ -3,6 +3,7 @@
 // what a card's status line says. Pure, so every one is tested without a browser.
 
 import type { Harness, StaffStatus } from "../team/team";
+import type { ChatFinishInfo } from "./ChatFinish";
 
 export type TaskStatus = "todo" | "doing" | "review" | "done" | "blocked" | "dropped";
 
@@ -75,6 +76,8 @@ export type ProjectTask = {
   assignee: Assignee | null;
   /** How far the work was accepted; absent from a host older than the task contract. */
   acceptance_state?: AcceptanceState;
+  /** The chat that finished this card itself, with its result note; absent when anyone else closed it. */
+  finished_by?: ChatFinishInfo | null;
   /** Priced worker inference across attempts through the accepted receipt; null if any cost is unknown. */
   accepted_result_cost_microusd?: number | null;
   accepted_result_known_cost_microusd?: number;
