@@ -2,7 +2,7 @@
 
 A fresh install has an empty preset table (``RuntimeConfig.presets``): a provider endpoint is an
 address, not a choice of model. Everything that would run a model — the chat commands, the HTTP API,
-Telegram, a schedule, a subagent, the voice concierge, ``daedalus check``, the doctor — has to say so
+Telegram, a schedule, a subagent, the voice concierge, ``daedalus-server check``, the doctor — has to say so
 in a sentence that names the fix. The parametrised test below is the guard: it walks every call site
 of ``config.preset()`` with the table empty and asserts on what came back.
 """
@@ -302,7 +302,7 @@ async def test_every_entry_point_says_a_model_is_missing_and_where_to_add_one(in
 
 
 async def test_check_reports_no_model_without_falling_over(install: Install, capsys: pytest.CaptureFixture[str]) -> None:
-    """``daedalus check`` prints the state of an installation; an empty table is one of its states."""
+    """``daedalus-server check`` prints the state of an installation; an empty table is one of its states."""
     from daedalus import __main__ as cli
 
     args = SimpleNamespace(state_dir=str(install.settings.state_dir), workspaces_dir=str(install.settings.workspaces_dir))

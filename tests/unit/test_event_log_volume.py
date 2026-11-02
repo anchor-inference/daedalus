@@ -95,7 +95,7 @@ async def test_the_sweep_keeps_the_log_under_its_ceiling(db: Database) -> None:
 async def test_a_freelist_nothing_can_reclaim_is_named_once_with_the_command(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """An existing database keeps the auto_vacuum it was created with, so incremental reclaim does
     nothing on it and says nothing. The space is real — hundreds of megabytes on a long-lived
-    install — and `daedalus db vacuum` is the only way back, which nothing ever mentioned."""
+    install — and `daedalus-server db vacuum` is the only way back, which nothing ever mentioned."""
     path = tmp_path / "legacy.sqlite"
     raw = sqlite3.connect(path)
     raw.execute("PRAGMA auto_vacuum=NONE")
@@ -113,7 +113,7 @@ async def test_a_freelist_nothing_can_reclaim_is_named_once_with_the_command(tmp
         with caplog.at_level(logging.WARNING):
             assert await db.reclaim() == 0
             assert await db.reclaim() == 0
-        said = [r.getMessage() for r in caplog.records if "daedalus db vacuum" in r.getMessage()]
+        said = [r.getMessage() for r in caplog.records if "daedalus-server db vacuum" in r.getMessage()]
         assert len(said) == 1, "the operator is told once per process, not on every maintenance tick"
         assert "cannot be given back" in said[0]
 

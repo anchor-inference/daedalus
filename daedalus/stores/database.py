@@ -3531,7 +3531,7 @@ class Database:
             await self._conn.execute("PRAGMA synchronous=NORMAL")
             await self._conn.execute("PRAGMA foreign_keys=ON")
             # Takes effect for a database created here; an existing one keeps whatever it was made
-            # with until a full VACUUM rewrites it (``daedalus db vacuum``).
+            # with until a full VACUUM rewrites it (``daedalus-server db vacuum``).
             await self._conn.execute("PRAGMA auto_vacuum=INCREMENTAL")
             await self._conn.execute(f"PRAGMA cache_size={CACHE_PAGES}")
             await self._conn.execute("PRAGMA temp_store=MEMORY")
@@ -3577,7 +3577,7 @@ class Database:
         page_size = await self.fetchone("PRAGMA page_size")
         bytes_free = pages * (int(page_size[0]) if page_size else 4096)
         logger.warning(
-            "%.0f MB of %s (%d free pages) cannot be given back: this database was created before incremental auto-vacuum and keeps that setting until the file is rewritten. Run `daedalus db vacuum` to reclaim it.",
+            "%.0f MB of %s (%d free pages) cannot be given back: this database was created before incremental auto-vacuum and keeps that setting until the file is rewritten. Run `daedalus-server db vacuum` to reclaim it.",
             bytes_free / 1e6,
             self.path,
             pages,

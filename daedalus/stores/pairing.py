@@ -3,9 +3,9 @@
 The server mints one code at every start that finds no Telegram bot and writes the link it belongs
 to next to the database (``<state_dir>/pairing-url``, readable by the operator only); the log names
 the file, never the link. Opening that link once turns the browser into a signed-in one (after the
-two-factor code, when that is on). ``daedalus auth pair`` makes another at any time.
+two-factor code, when that is on). ``daedalus-server auth pair`` makes another at any time.
 
-The desktop launcher mints its own with ``daedalus auth pair --window`` for the window it runs beside.
+The desktop launcher mints its own with ``daedalus-server auth pair --window`` for the window it runs beside.
 Such a code is marked, lives two minutes, is never written to the file, and skips the two-factor step:
 minting one takes running a command inside the installation, which is more than a code would guard.
 

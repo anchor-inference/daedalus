@@ -20,7 +20,7 @@ because nothing here is published. The app then shows **"Changes are ready — r
 summary and a **Restart** button; the launcher's status page shows the same and its **Restart to apply**
 goes the same way. The restart is not a leap of faith: the supervisor checks out that commit into a
 detached worktree of its own, runs `uv sync` (only if `uv.lock` or `pyproject.toml` changed, in either
-repository), `compileall`, `daedalus check` and the smoke tests there — in a virtualenv of its own, so a
+repository), `compileall`, `daedalus-server check` and the smoke tests there — in a virtualenv of its own, so a
 change that is refused has touched nothing the running bot imports — and stops the running bot only once
 they pass. The launcher's plain **Stop** and **Start**, and closing the window and opening it again, are a
 different thing: they bring the stack back up on whatever the checkout holds, with none of that run. They
@@ -48,4 +48,4 @@ the bytes in the branch, an `execution_path` that names the code running it, and
 a large change replaces. What local mode drops is the review — there is no reviewer and nothing is
 published — so the restart is where you see the change, and the rollback is what catches what you did not.
 
-What follows the mode: the `Self*` tools (absent in `off`, `SelfWorkspace` and `SelfApply` in `local`, the pull-request four in `server`), the self-development extension, `/api/proposals`, `POST /api/self/restart`, the Changes screen and the restart banner in the app, the self-development part of the system prompt, and the doctor's GitHub checks. `GET /api/capabilities` and `daedalus doctor` both say which mode is running and why. Setting the mode explicitly overrides the resolution; the doctor then warns about whatever the chosen mode is missing. A change of mode takes effect on the next restart.
+What follows the mode: the `Self*` tools (absent in `off`, `SelfWorkspace` and `SelfApply` in `local`, the pull-request four in `server`), the self-development extension, `/api/proposals`, `POST /api/self/restart`, the Changes screen and the restart banner in the app, the self-development part of the system prompt, and the doctor's GitHub checks. `GET /api/capabilities` and `daedalus-server doctor` both say which mode is running and why. Setting the mode explicitly overrides the resolution; the doctor then warns about whatever the chosen mode is missing. A change of mode takes effect on the next restart.

@@ -607,7 +607,7 @@ whole of applying a change.
 
 **What protects you.** The restart is not a leap. The supervisor checks out the agent's commit into a
 detached worktree of its own and runs there: `uv sync` (only when `uv.lock` or `pyproject.toml` changed —
-the virtualenv lives on the `daedalus-venv` volume and survives), `compileall`, `daedalus check` and the
+the virtualenv lives on the `daedalus-venv` volume and survives), `compileall`, `daedalus-server check` and the
 smoke tests. Only if all of that passes is the running bot stopped. A change that fails is taken back out
 of the checkout and the app says so with the reason. A change that passes but cannot stay up — three
 starts dying within ten minutes — puts the last known-good commit back on its own and tells you; the
@@ -618,7 +618,7 @@ system packages is applied as far as a restart can take it, and says the rest ne
 Give the install a `GITHUB_TOKEN` with Contents and Pull requests on both forks and it
 resolves to `server` instead — the full worktree → pull request → approval → rebuild workflow.
 Set `mode = "off"` in the configuration and the subsystem is not there at all: no tools, no screen, no
-`/api/proposals`, and nothing in the prompt about changing its own code. `daedalus doctor` names the
+`/api/proposals`, and nothing in the prompt about changing its own code. `daedalus-server doctor` names the
 mode it resolved and what a mode you chose yourself is missing.
 
 ## Native mode
@@ -712,7 +712,7 @@ Desktop — a ~600 MB application with a multi-gigabyte VM disk behind it — at
 Everything in the agent still applies, because it was never the container doing it: the policy
 engine with its ASK and DENY rules, the approval gates, the protected paths, the egress allowlist,
 the per-run and per-day spending caps the supervisor enforces from its own environment, and the
-public-text gate. `daedalus doctor` prints the same sentence.
+public-text gate. `daedalus-server doctor` prints the same sentence.
 
 What is gone is the wall behind them:
 
@@ -747,7 +747,7 @@ not in the container at all:
 
 Everything else is where it was: the egress allowlist still escalates a host it does not know, the
 spend caps are still the supervisor's and not the agent's to edit, and `GOVERNANCE.md` is still the
-one file the agent can read and cannot change. `daedalus doctor` prints the isolation in one line,
+one file the agent can read and cannot change. `daedalus-server doctor` prints the isolation in one line,
 and so does the launcher's status page.
 
 If any of that matters more than 500 MB and a second of start-up, use Docker mode. That is the
@@ -811,7 +811,7 @@ skills drive (Playwright's headless launch looks for that one and does not start
   app's API, the key proxy, the daemons' hook ports, the launcher's page), on loopback and on your
   machine's other addresses alike. Your other local ports are a question you answer once; the
   services the agent starts are open. **That proxy is the only wall** between a page and your
-  machine: `daedalus doctor` says so under "browser walls (host)".
+  machine: `daedalus-server doctor` says so under "browser walls (host)".
 - **The sandbox.** Chromium's own sandbox is always on. On Ubuntu 23.10 and later a downloaded
   Chromium cannot make the user namespaces it sandboxes with, so the launcher hands it the setuid
   helper of a Chrome or Chromium installed on the system (`/opt/google/chrome/chrome-sandbox` and
@@ -1022,7 +1022,7 @@ Budget **about half a gigabyte for the image**, plus the volumes: the database a
 memory are megabytes, but the per-session workspaces grow with what the agent downloads and builds.
 `uninstall` without `--keep-data` removes the volumes; images are removed with `docker image prune -a`.
 Token estimation runs on the core's pure-Python estimator in this image — its optional compiled
-extension has no published wheel yet, so there is nothing to install; `daedalus doctor` reports
+extension has no published wheel yet, so there is nothing to install; `daedalus-server doctor` reports
 which one is active under "token counter".
 
 What is not in it, and what it costs to add:

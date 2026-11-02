@@ -76,7 +76,7 @@ again on each call, so a saved value holds from the next request with no restart
 The browser skills — driving a page with Playwright, drawing with Pillow — are not in the default
 image either: they are two thirds of one and most sessions never open a page. Run the `:browser` tag
 instead (`ghcr.io/ascorblack/daedalus:browser`, 368 MB to pull) where they are wanted; without it the
-skills say so instead of writing scripts that cannot run, and `daedalus doctor` says it too.
+skills say so instead of writing scripts that cannot run, and `daedalus-server doctor` says it too.
 
 ## Terminals
 
@@ -92,7 +92,7 @@ agent. What survives what:
 
 - **The first deploy that has it needs `docker compose -f deploy/compose.yaml --env-file .env up -d --build`**,
   not a restart of the agent's container: the service is new, the agent gains a volume, and an image
-  built before the service existed has no daemon in it. Until then `daedalus doctor` reports the
+  built before the service existed has no daemon in it. Until then `daedalus-server doctor` reports the
   container terminals as not installed and names that command.
 - **Updating the daemon.** A deploy never recreates the service, so after a rebuild the image can hold a
   newer `ptyd` than the one running. The app and the doctor say so, and the update — recreating the
@@ -122,7 +122,7 @@ A Chromium the agent drives and you watch live in the app: the `browser` service
 It is behind a profile, so an installation that never browses pulls nothing extra: add
 `COMPOSE_PROFILES=browser` to `.env` (it then holds for every compose command, the rebuilder's
 included) and run `docker compose -f deploy/compose.yaml --env-file .env up -d --build`. Until then
-`daedalus doctor` says the browser is not installed and names that line.
+`daedalus-server doctor` says the browser is not installed and names that line.
 
 - **Its walls.** The service is on a network of its own, `browser`, with **no route to the key proxy,
   SearXNG, the agent or the terminals**, and it mounts no workspace and no project folder: a file
@@ -187,7 +187,7 @@ where that needs polkit, it prints the one `sudo loginctl enable-linger` to run)
   daemon to the image's) end every host terminal; setup asks before it does.
 - **Removing it:** `systemctl --user disable --now daedalus-ptyd`, or `bash deploy/host-terminal.sh
   remove`, which also deletes the unit and the binary. `bash deploy/host-terminal.sh status` says where
-  it stands, and `daedalus doctor` names the fix for each way it can be down.
+  it stands, and `daedalus-server doctor` names the fix for each way it can be down.
 
 ## Host terminals on the desktop
 
@@ -258,7 +258,7 @@ it has to start again from the link.
 What it does not cover, on purpose: Telegram's Mini App (Telegram vouches for each request, and the bot's chat
 already gives the agent's whole power with no code), the API token (a script's credential that could switch
 two-factor off anyway), and the desktop window, which signs in through its launcher with a short-lived link of
-its own (`daedalus auth pair --window`) and offers no enrolment. Minting such a link means running a command
+its own (`daedalus-server auth pair --window`) and offers no enrolment. Minting such a link means running a command
 inside the installation, which is more than the code would guard.
 
 ## With Telegram
@@ -288,7 +288,7 @@ Providers are OpenAI-compatible endpoints (DeepSeek, OpenRouter, a self-hosted v
 
 **llama.cpp** is a first-class self-hosted provider. Add a `llamacpp` endpoint such as `http://127.0.0.1:8080/v1` or `http://<host>:<port>/v1`; no key is needed unless the server was started with one. Daedalus reads `/props` and `/v1/models` to prefill the model id, context window and image support, and reports tool support, slots, build and sleep state in the doctor. Older servers and proxies that expose only `/v1` still work: whatever they do not publish stays editable. Calls run on your hardware, are recorded at zero cost, and never consume a spending cap.
 
-**An installation ships no preset at all.** The endpoints are configured; which model runs on one — and what it costs per million tokens — is the first thing you decide, in *Add a model* (the app opens there until a model exists, and Settings → Models → **Add a model** is the same screen). The first model added becomes the default. Until then every way in says so and names the fix rather than failing: the chat commands, the API (409), `daedalus doctor`, `daedalus check`.
+**An installation ships no preset at all.** The endpoints are configured; which model runs on one — and what it costs per million tokens — is the first thing you decide, in *Add a model* (the app opens there until a model exists, and Settings → Models → **Add a model** is the same screen). The first model added becomes the default. Until then every way in says so and names the fix rather than failing: the chat commands, the API (409), `daedalus-server doctor`, `daedalus-server check`.
 
 Keys never reach the agent's process: the **key proxy** injects them (one path per upstream — `/deepseek`, `/openrouter`, `/opencode`, `/opencode_zen`, plus any `KEYPROXY_UPSTREAM_<NAME>` — under `http://keyproxy:3200` in a container and `http://127.0.0.1:3201` natively), meters the calls, and refuses model calls once the daily budget is spent. OpenCode is sold two ways, and one `OPENCODE_API_KEY` serves both. An [OpenCode Go](https://opencode.ai/go) subscription is the `opencode` provider (`/opencode`, `billing = "subscription"`): its models (DeepSeek, GLM, Qwen, Kimi, MiniMax, GPT-5.6 Luna …) are prepaid, so their calls are recorded at $0 and never count against a dollar cap, and what is left of the plan's 5-hour, weekly and monthly allowance shows on the Usage screen. [OpenCode Zen](https://opencode.ai/zen) is the `opencode_zen` provider (`/opencode_zen`): pay per token at Zen's prices, refreshed daily from [models.dev](https://models.dev) and capped like any priced provider, with its free models free. Every request to either carries the session id the gateway routes and caches by. Your **ChatGPT (Codex), SuperGrok and Claude Code** logins are read from the CLIs' own auth files, refreshed in place, and exposed as the `codex`, `grok` and `claude` providers — their quota windows show on the Usage screen and beside every session that uses them. Each is called the way that vendor's own CLI would call it, version included, and a vendor refuses a version it considers too old: the key proxy looks for new CLI releases every six hours, the app offers the update as a notification and under Settings → Models → Providers, and the new version is stored in `keyproxy.env` (`KEYPROXY_CLIENT_<NAME>`) and used from the next request without a restart. If the first request after an update is refused for its version, the previous one comes back by itself. `KEYPROXY_CLAUDE_CLI_VERSION`, `KEYPROXY_CODEX_CLI_VERSION` and `KEYPROXY_GROK_CLIENT_VERSION` pin a version by hand.
 

@@ -1,7 +1,7 @@
 """Text that is not in the machine's code page, and stops that come in the right order.
 
 On Windows a pipe or a log file takes the locale's code page — cp1252 on an English machine —
-unless Python runs in UTF-8 mode. `daedalus check` ended on the arrow of its no-model sentence, and
+unless Python runs in UTF-8 mode. `daedalus-server check` ended on the arrow of its no-model sentence, and
 because it ended half-way it closed the database under the background work its manager had started.
 """
 

@@ -60,7 +60,7 @@ dev = [
 ]
 
 [project.scripts]
-daedalus = "daedalus.__main__:main"
+daedalus-server = "daedalus.__main__:main"
 
 [tool.uv.sources]
 protocore = { path = "../protocore-exp", editable = true }

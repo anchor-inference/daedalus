@@ -35,7 +35,7 @@ reaches it. The **egress allowlist** turns an unknown host into a question and l
 way; the **spend caps**
 are the supervisor's, from its own environment, and the agent cannot edit them; `GOVERNANCE.md` — the
 rules the agent always sees — is a protected path it cannot write, and a read-only mount on top of
-that in a container. `daedalus doctor` prints what this installation's boundary actually is in one
+that in a container. `daedalus-server doctor` prints what this installation's boundary actually is in one
 line, and the desktop launcher's status page prints the same one.
 
 ## Action rules

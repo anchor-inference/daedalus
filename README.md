@@ -158,7 +158,7 @@ or **deny**. A denial is final. An *ask* is a denial you can lift: the refusal c
 The built-in rules are in the repository (`daedalus/host/policy.py`), so they change only through a
 reviewed change; your own rules in `config.toml` can add denials and questions and can never lift a
 built-in one. A **project** contains every path a session resolves, the **spend caps** belong to a
-supervisor the agent cannot edit, and `daedalus doctor` prints what this installation's boundary
+supervisor the agent cannot edit, and `daedalus-server doctor` prints what this installation's boundary
 actually is in one line. The native-only rules, what a project does and does not contain, and the
 egress allowlist: [docs/POLICY.md](docs/POLICY.md).
 
