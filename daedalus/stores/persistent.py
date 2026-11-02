@@ -19,13 +19,16 @@ from typing import Any
 
 from protocore.contracts.memory import MemoryHit, MemoryRecord, MemoryScope, MemoryWriteDecision, MemoryWriteResult
 from protocore.contracts.workspace import WorkspaceUnit, WorkspaceWriteOutcome
-from protocore.tests_support.adapters import InMemoryMemory, InMemoryWorkspace
+from protocore.tests_support.adapters import InMemoryMemory, InMemoryWorkspace, _token_jaccard
 
+from daedalus.memory import polarity
 from daedalus.memory.taxonomy import normalise_topics, record_topics
 from daedalus.stores.database import Database
 
 _WORD = re.compile(r"[\w][\w'-]*", re.UNICODE)
 _MEMORY_ID = re.compile(r"^mem-(\d+)$")
+NEVER_MERGE = 1.1
+"""A similarity threshold no pair reaches, which makes the store's write create a new record."""
 
 
 def _tokens(text: str) -> list[str]:
@@ -54,7 +57,30 @@ class PersistentMemory(InMemoryMemory):
             (record.tenant_id, record.id, record.model_dump_json()),
         )
 
+    def _would_merge_a_reversal(self, tenant_id: str, scope: MemoryScope, scope_key: str, text: str, kwargs: dict[str, Any]) -> bool:
+        """Whether the base write is about to merge ``text`` into a record that says the opposite.
+
+        The base write merges into the most word-alike record of the bucket at a word share of 0.85 and
+        keeps the longer text. A rule of a dozen words and the same rule with "не" or "not" added share
+        more than that, so an agent's Remember of a correction either vanished into the old rule or,
+        being one word longer, overwrote it unseen. This picks the record the base write would pick, by
+        its own measure, and a reversal is written as a record of its own for the tidying to file as a
+        contradiction."""
+        threshold = kwargs.get("similarity_threshold")
+        threshold = self.default_similarity_threshold if threshold is None else threshold
+        if threshold > 1.0:
+            return False
+        key = "" if scope is MemoryScope.global_ else scope_key
+        best, best_score = None, 0.0
+        for record in self._bucket(tenant_id, scope, key, kwargs.get("kind", "fact")):
+            score = _token_jaccard(record.text, text)
+            if score > best_score:
+                best, best_score = record, score
+        return best is not None and best_score >= threshold and polarity.differ(best.text, text)
+
     async def write(self, tenant_id: str, scope: MemoryScope, scope_key: str, text: str, **kwargs: Any) -> MemoryWriteResult:  # type: ignore[override]
+        if text and self._would_merge_a_reversal(tenant_id, scope, scope_key, text, kwargs):
+            kwargs["similarity_threshold"] = NEVER_MERGE
         metadata = dict(kwargs.get("metadata") or {})
         if "topics" in metadata:
             metadata["topics"] = normalise_topics(metadata["topics"])
