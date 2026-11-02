@@ -269,7 +269,9 @@ export function NewTerminalSheet({ envs, lens, projects, toast, onClose }: { env
   // Suggestions are the projects' folders in the chosen environment: a container path means nothing
   // on the host and the other way round.
   const suggestions = projects.flatMap((p) => p.folders.filter((f) => f.env === where).map((f) => ({ path: f.path, project: p })));
-  const chosenProject = suggestions.find((s) => s.path === path.trim())?.project.id ?? null;
+  // A folder may belong to several projects: the one in view wins, then the first that has it.
+  const matching = suggestions.filter((s) => s.path === path.trim());
+  const chosenProject = (matching.find((s) => s.project.id === lens?.id) ?? matching[0])?.project.id ?? null;
   const browse = async () => {
     const picked = await pick?.();
     if (picked) setPath(picked);

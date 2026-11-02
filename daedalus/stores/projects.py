@@ -1293,6 +1293,7 @@ class ProjectStore:
             if project is None:
                 raise KeyError(project_id)
             await self._refuse_overlap(target, project_id, mode=_mode(project.settings))
+            await self._refuse_namesakes(target, project_id)
             folder = ProjectFolder(
                 id=f"f-{uuid.uuid4().hex[:12]}",
                 project_id=project_id,
@@ -1517,6 +1518,32 @@ class ProjectStore:
                 raise ProjectError(f"that folder contains the project {row['name']} ({other})")
             if other in path.parents:
                 raise ProjectError(f"that folder is inside the project {row['name']} ({other})")
+
+    async def _refuse_namesakes(self, path: Path, project_id: str, conn: Any = None) -> None:
+        """A folder shared with other projects may not bring two members whose worktrees would be one.
+
+        A member's worktree is ``<folder>/.agents/worktrees/<slug>``, named by the member alone, so two
+        projects on one folder with a member of the same slug would share a worktree: the second to
+        start a task would switch the first one's checkout to its own branch. Hiring refuses such a
+        namesake (:meth:`StaffStore.hire`); this is the same rule for a folder added to a project
+        whose team is already there."""
+        from daedalus.host.worktrees import staff_slug  # Lazy: the worktrees module imports this one.
+
+        query = ("SELECT m.project_id, m.name, p.name AS project FROM staff m JOIN projects p ON p.id = m.project_id"
+                 " WHERE m.archived_at IS NULL AND (m.project_id = ? OR m.project_id IN"
+                 " (SELECT project_id FROM project_folders WHERE path = ? AND project_id != ?))")
+        parameters = (project_id, str(path), project_id)
+        if conn is not None:
+            # Inside the caller's write transaction, so the check and its insert see one table.
+            async with conn.execute(query, parameters) as cursor:
+                rows = list(await cursor.fetchall())
+        else:
+            rows = await self._db.fetchall(query, parameters)
+        mine = {staff_slug(r["name"]): r["name"] for r in rows if r["project_id"] == project_id}
+        for row in rows:
+            if row["project_id"] != project_id and (ours := mine.get(staff_slug(row["name"]))) is not None:
+                raise ProjectError(f"{ours} here and {row['name']} of the project {row['project']} would share one worktree in {path}; "
+                                   "dismiss one of them first")
 
     # -- the brief and the journal ---------------------------------------------------
 

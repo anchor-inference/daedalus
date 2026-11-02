@@ -349,8 +349,8 @@ function AddFolder({ project, environments, onDone, toast, write, canWrite }: { 
   const [label, setLabel] = useState("");
   const [readonly, setReadonly] = useState(false);
   const [busy, setBusy] = useState(false);
-  // A folder some project already owns is refused here as in the new-project dialog: two records of
-  // one folder are two sets of rules for the same files.
+  // A folder another project has is asked about in the browser, as in the new-project dialog, and
+  // usable once the operator chose to share it; one this project has already is not.
   const usable = !!choice && !choice.problem;
   async function add() {
     if (!usable || busy || !canWrite || !choice) return;
@@ -361,7 +361,7 @@ function AddFolder({ project, environments, onDone, toast, write, canWrite }: { 
   }
   return (
     <div className="dir-form">
-      <FolderBrowser environments={environments} choice={choice} onChoice={setChoice} toast={toast} launcher={!!window.daedalus?.window} />
+      <FolderBrowser environments={environments} choice={choice} onChoice={setChoice} toast={toast} launcher={!!window.daedalus?.window} current={project.id} />
       <label className="field" htmlFor="folder-label">{t("folder.label")}</label>
       <input id="folder-label" className="field" value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t("folder.label.placeholder")} />
       <label className="toggle-row">

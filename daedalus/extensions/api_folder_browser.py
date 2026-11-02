@@ -25,7 +25,7 @@ import asyncio
 import logging
 import os
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -130,23 +130,27 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
 
     # -- what is known about folders ------------------------------------------------------------
 
-    async def owners(env: str) -> tuple[dict[str, Project], list[Project]]:
-        """Every folder of ``env`` that a project has, by its path, and the projects in order of
-        creation, newest first. A local folder is keyed by its resolved path as well, since the
-        listing compares resolved paths."""
-        projects = await manager.projects.list()
-        by_path: dict[str, Project] = {}
+    async def owners(env: str) -> tuple[dict[str, list[Project]], list[Project]]:
+        """Every folder of ``env`` that a project has, by its path, with every project that has it in
+        order of creation, and the projects newest first. A folder may belong to several projects;
+        keying one project by path once made the listing name whichever came last alphabetically. A
+        local folder is keyed by its resolved path as well, since the listing compares resolved paths."""
+        projects = sorted(await manager.projects.list(), key=lambda p: (p.created_at, p.id))
+        by_path: dict[str, list[Project]] = {}
         for project in projects:
+            keys: set[str] = set()
             for folder in project.folders:
                 if folder.env != env:
                     continue
-                by_path[str(folder.path)] = project
+                keys.add(str(folder.path))
                 if env == local_env():
                     try:
-                        by_path.setdefault(str(folder.path.resolve()), project)
+                        keys.add(str(folder.path.resolve()))
                     except OSError:
                         pass
-        return by_path, sorted(projects, key=lambda p: p.created_at, reverse=True)
+            for key in keys:
+                by_path.setdefault(key, []).append(project)
+        return by_path, projects[::-1]
 
     async def chat_titles(projects: Iterable[Project]) -> dict[str, str]:
         """The title of the chat each scratch project belongs to; a chat renamed after it started is
@@ -159,20 +163,24 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             titles[project.id] = str(sessions[0].get("title") or project.name) if sessions else project.name
         return titles
 
-    def describe(entry: dict[str, Any], project: Project | None, titles: dict[str, str]) -> dict[str, Any]:
+    def describe(entry: dict[str, Any], holders: Sequence[Project], titles: dict[str, str]) -> dict[str, Any]:
         """One folder of a listing with what owns it: ``kind`` is ``folder``, ``chat`` (a chat's
         scratch folder, offered only through the chat's own "keep as a project") or ``service``
-        (one of the installation's own projects); neither of the last two can be chosen."""
-        kind = "folder"
-        if project is not None and (project.settings.system or project.setup_by == "dispatcher"):
-            kind = "service"
-        elif project is not None and project.settings.ephemeral:
-            kind = "chat"
-        view = {**entry, "kind": kind, "project": None}
-        if project is not None:
-            view["project"] = {"id": project.id, "name": project.name}
+        (one of the installation's own projects); neither of the last two can be chosen.
+
+        ``projects`` is every ordinary project that has the folder, and ``project`` the first of them:
+        the app asks before a second project shares it rather than refusing. A chat's scratch folder
+        that an ordinary project took as well is that project's folder, not the chat's."""
+        service = [p for p in holders if p.settings.system or p.setup_by == "dispatcher"]
+        rest = [p for p in holders if not (p.settings.system or p.setup_by == "dispatcher")]
+        ordinary = [p for p in rest if not p.settings.ephemeral]
+        chats = [p for p in rest if p.settings.ephemeral]
+        kind, first = ("service", service[0]) if service else ("folder", ordinary[0]) if ordinary else ("chat", chats[0]) if chats else ("folder", None)
+        view = {**entry, "kind": kind, "project": None, "projects": [{"id": p.id, "name": p.name} for p in ordinary]}
+        if first is not None:
+            view["project"] = {"id": first.id, "name": first.name}
             if kind == "chat":
-                view["chat_title"] = titles.get(project.id, project.name)
+                view["chat_title"] = titles.get(first.id, first.name)
         return view
 
     async def favourites(env: str | None = None) -> list[dict[str, str]]:
@@ -215,7 +223,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             roots.append({"name": real.name or str(real), "path": str(real), "kind": kind})
         return roots
 
-    async def offered(by_path: dict[str, Project]) -> list[Path]:
+    async def offered(by_path: dict[str, list[Project]]) -> list[Path]:
         """The trees a Docker container's listing may enter: the roots, and every project folder here."""
         trees = [Path(root["path"]) for root in local_roots()]
         projects = await manager.projects.list()
@@ -279,7 +287,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         entries.sort(key=lambda entry: entry["name"].lower())
         return entries, truncated
 
-    async def local_target(raw: str, by_path: dict[str, Project]) -> tuple[Path, Path | None]:
+    async def local_target(raw: str, by_path: dict[str, list[Project]]) -> tuple[Path, Path | None]:
         """The directory a local listing may show, and the tree it was offered from (Docker only)."""
         text = (raw or "").strip()
         if not text:
@@ -386,13 +394,13 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             "truncated": bool(listed.get("truncated")), "roots": places,
         }, by_path, ordered, resolve=False)
 
-    async def finish(env: str, listing: dict[str, Any], by_path: dict[str, Project], ordered: list[Project], *, resolve: bool) -> dict[str, Any]:
-        """Name each folder's owner and add the places: the newest projects' folders and the favourites."""
-        def owner(path: str) -> Project | None:
-            return by_path.get(path)
-        involved = [p for p in (owner(e["path"]) for e in listing["entries"]) if p is not None]
+    async def finish(env: str, listing: dict[str, Any], by_path: dict[str, list[Project]], ordered: list[Project], *, resolve: bool) -> dict[str, Any]:
+        """Name each folder's owners and add the places: the newest projects' folders and the favourites."""
+        def owner(path: str) -> list[Project]:
+            return by_path.get(path, [])
+        involved = [p for e in listing["entries"] for p in owner(e["path"])]
         here = owner(listing["path"])
-        titles = await chat_titles([*involved, *([here] if here else [])])
+        titles = await chat_titles({p.id: p for p in [*involved, *here]}.values())
         listing["entries"] = [describe(entry, owner(entry["path"]), titles) for entry in listing["entries"]]
         listing["here"] = describe({"path": listing["path"]}, here, titles)
         listing["env"] = env
@@ -443,9 +451,9 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             else:
                 missing = await missing_here(str(normal))
                 result.update(mount=missing["mount"], on_host=missing["on_host"])
-            owner = by_path.get(str(normal))
-            if owner is None and normal.exists():
-                owner = by_path.get(str(normal.resolve()))
+            owner = by_path.get(str(normal), [])
+            if not owner and normal.exists():
+                owner = by_path.get(str(normal.resolve()), [])
         else:
             bridge = bridge_or_fail()
             try:
@@ -456,8 +464,8 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
                 pass
             except (OSError, ConnectionError) as exc:
                 raise host_failure(exc) from None
-            owner = by_path.get(result["path"])
-        titles = await chat_titles([owner] if owner else [])
+            owner = by_path.get(result["path"], [])
+        titles = await chat_titles(owner)
         return {**result, **{key: value for key, value in describe({}, owner, titles).items() if key != "path"}}
 
     @api.post("/api/folders/mkdir")

@@ -15,7 +15,7 @@ import pytest
 
 from daedalus.config import StaffConfig
 from daedalus.stores.database import Database
-from daedalus.stores.projects import FolderSpec, ProjectSettings, ProjectStore
+from daedalus.stores.projects import FolderSpec, ProjectError, ProjectSettings, ProjectStore
 from daedalus.stores.staff import (
     PALETTE,
     AsksStore,
@@ -392,3 +392,22 @@ async def test_who_is_working_on_a_cli_across_projects_and_where(db: Database, t
     ]
     assert [s["name"] for s in await store.live_by_harness("codex")] == ["Cy"]
     assert await store.live_by_harness("grok") == []
+
+
+async def test_a_namesake_in_another_project_on_the_same_folder_is_refused(db: Database, tmp_path: Path) -> None:
+    """A folder may belong to several projects, and a worktree is named by the member's slug alone:
+    two projects' Annas on one repository would be handed one checkout. Hiring refuses the second,
+    adding the folder to a project whose team has a namesake is refused too, and a project on a
+    folder of its own may hire the name freely."""
+    projects, bakery = await _project(db, tmp_path)
+    store = _store(db)
+    await store.hire(bakery, name="Anna")
+    site = await projects.create("Site", [str(tmp_path / "bakery")])
+    with pytest.raises(StaffError, match="share the worktree 'anna' with Anna of the project Bakery"):
+        await store.hire(site.id, name="Анна")
+    await store.hire(site.id, name="Boris")
+    _, elsewhere = await _project(db, tmp_path, name="Elsewhere")
+    await store.hire(elsewhere, name="Anna")
+    with pytest.raises(ProjectError, match="Anna here and Anna of the project Bakery would share one worktree"):
+        await projects.add_folder(elsewhere, str(tmp_path / "bakery"))
+    assert len((await projects.get(elsewhere)).folders) == 1  # type: ignore[union-attr]

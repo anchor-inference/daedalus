@@ -187,7 +187,10 @@ class DiskGuard:
 
         db = self.app.db
         sessions = await db.fetchall("SELECT id, project_id, title, metadata, last_message_at FROM sessions")
-        folders = await db.fetchall("SELECT f.project_id AS project_id, f.path AS path, p.name AS name FROM project_folders f JOIN projects p ON p.id = f.project_id")
+        # A folder may belong to several projects; newest first, so the one written last below is the
+        # project that had it first, as every other "project of this folder" answer has it.
+        folders = await db.fetchall("SELECT f.project_id AS project_id, f.path AS path, p.name AS name FROM project_folders f"
+                                    " JOIN projects p ON p.id = f.project_id ORDER BY f.created_at DESC, f.id DESC")
         busy = self.app.manager.busy_sessions() if self.app.manager is not None else set()
         now = time.time()
         latest: dict[str, tuple[float, str]] = {}

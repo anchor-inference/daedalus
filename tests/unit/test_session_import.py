@@ -267,6 +267,20 @@ async def test_pulling_in_what_is_new_appends_to_both_layers(settings: Settings,
         assert host.reads[-1][1] == len(session), "a refresh reads on from where the last one stopped"
 
 
+async def test_a_folder_of_several_projects_joins_the_one_asked_for(settings: Settings, db: Database, manager: SessionManager) -> None:
+    """A folder may belong to several projects. Unasked, a session joins the oldest ordinary one,
+    never the first by name; asked, it joins the one named, which the import used to refuse as "not a
+    folder of that project" because only the first by name was ever considered."""
+    host_of(manager)
+    importer = SessionImporter(manager)
+    zebra = await manager.projects.create("Zebra", [FolderSpec(DOOR, env="host")])
+    alpha = await manager.projects.create("Alpha", [FolderSpec(DOOR, env="host")])
+    unasked = await importer.destination(DOOR)
+    assert unasked.kind == "project" and unasked.project is not None and unasked.project.id == zebra.id
+    asked = await importer.destination(f"{DOOR}/firmware", prefer=alpha.id)
+    assert asked.project is not None and asked.project.id == alpha.id and asked.worktree_cwd == f"{DOOR}/firmware"
+
+
 async def test_the_folder_decides_the_project(settings: Settings, db: Database, manager: SessionManager) -> None:
     host = host_of(manager)
     importer = SessionImporter(manager)

@@ -2,7 +2,7 @@
 
 A new folder named after the project; an existing folder chosen in the container and on the machine;
 chat folders folded away and refused; the machine not answering, its daemon too old, and a container
-folder that is not mounted; an empty name, a folder another project owns, and a server that does not
+folder that is not mounted; an empty name, a folder another project has (asked about, then shared), and a server that does not
 answer, with the draft kept and one project made on "Try again"; the extras; Ctrl+Enter; a native
 install without the container switch; orchestration mode's own dialog; and a phone.
 """
@@ -26,14 +26,14 @@ CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 
 WORDS = {
     "en": {"existing": "Existing folder", "new": "New folder", "create": "Create project", "host": "Host", "container": "Container",
-           "taken": "already the project", "open": "Open the project", "retry": "Try again", "kept": "your draft is kept",
+           "taken": "already uses this folder", "share": "Use the same folder", "shared": "shared with “Cafe landing”", "open": "Open the project", "retry": "Try again", "kept": "your draft is kept",
            "name_missing": "Name the project", "chats": "Chat folders", "chat_hint": "Keep as a project", "down": "The machine is not answering",
            "check": "Check again", "type": "Type a path", "old": "The host daemon needs updating", "missing": "There is no such folder in the container",
            "onhost": "exists on the machine", "howto": "Show the line", "use": "Use it", "more": "More", "snapshots": "File snapshots",
            "readonly": "Read-only", "rename": "Rename the folder", "orch": "New orchestration project", "orch_create": "Create project and first task",
            "chosen": "Chosen", "writable": "writable", "hosttag": "HOST", "service": "Service"},
     "ru": {"existing": "Существующая папка", "new": "Новая папка", "create": "Создать проект", "host": "Хост", "container": "Контейнер",
-           "taken": "уже проект", "open": "Открыть проект", "retry": "Ещё раз", "kept": "черновик сохранён",
+           "taken": "уже использует проект", "share": "Использовать эту же папку", "shared": "общая с «Cafe landing»", "open": "Открыть проект", "retry": "Ещё раз", "kept": "черновик сохранён",
            "name_missing": "Назовите проект", "chats": "Папки чатов", "chat_hint": "Оставить как проект", "down": "Машина не отвечает",
            "check": "Проверить снова", "type": "Ввести путь", "old": "Демон на хосте нужно обновить", "missing": "В контейнере такой папки нет",
            "onhost": "есть на машине", "howto": "Показать строку", "use": "Использовать", "more": "Дополнительно", "snapshots": "Снимки файлов",
@@ -158,11 +158,16 @@ def existing_folders(playwright, language: str) -> None:  # type: ignore[no-unty
     expect(foot).to_contain_text("/srv/projects/esp32-door")
     expect(foot).to_contain_text(words["writable"])
     expect(sheet.locator(".fb-row", has_text="notes-archive").locator(".fb-badge.warn")).to_be_visible()
-    # A folder another project owns cannot be chosen, and says which project.
+    # A folder another project has is asked about, not refused: the question names the project and
+    # offers the same folder or that project, and Create waits for the answer.
     sheet.locator(".fb-row", has_text="landing-cafe").click()
-    expect(foot).to_contain_text(words["taken"])
-    expect(foot.get_by_role("button", name=words["open"])).to_be_visible()
+    shared = sheet.locator(".fb-shared")
+    expect(shared).to_contain_text(words["taken"])
+    expect(shared.get_by_role("button", name=words["open"])).to_be_visible()
     expect(sheet.get_by_role("button", name=words["create"])).to_be_disabled()
+    shared.get_by_role("button", name=words["share"]).click()
+    expect(foot).to_contain_text(words["shared"])
+    expect(sheet.get_by_role("button", name=words["create"])).to_be_enabled()
     # Into a folder by a double click, back, and a new folder inside it.
     sheet.locator(".fb-row", has_text="scripts").dblclick()
     expect(sheet.locator(".fb-crumb.last")).to_have_text("scripts")
