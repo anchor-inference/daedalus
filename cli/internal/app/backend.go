@@ -113,6 +113,20 @@ func randomHex(n int) string {
 	return hex.EncodeToString(buf)
 }
 
+// blocksText joins the text of a tool result's content blocks; blocks of another type (an image)
+// have no text to show here.
+func blocksText(v any) string {
+	blocks, _ := v.([]any)
+	var parts []string
+	for _, item := range blocks {
+		block, _ := item.(map[string]any)
+		if text, ok := block["text"].(string); ok && text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
 // ClientID is this process's id, the same in presence, the event stream and the device connection.
 func (b *Backend) ClientID() string { return b.clientID }
 
@@ -633,9 +647,12 @@ func (b *Backend) translate(ctx context.Context, id string, env client.Envelope)
 		input, _ := p["final_input"].(map[string]any)
 		out = append(out, tui.ToolStarted{ID: callID, Name: name, Input: input, Parent: str("subagent_id"), At: now})
 	case "tool_result":
-		content := str("content")
+		// The host's stream carries the result as the core's content blocks; only the transcript
+		// view flattens them into one content string. Reading content alone showed every live
+		// result as empty.
+		content := blocksText(p["content_blocks"])
 		if content == "" {
-			content = str("output")
+			content = str("content")
 		}
 		isErr, _ := p["is_error"].(bool)
 		out = append(out, tui.ToolFinished{ID: str("tool_call_id"), Output: content, IsError: isErr, At: now})

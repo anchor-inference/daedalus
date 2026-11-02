@@ -70,7 +70,9 @@ func TestTranslateFoldsServerEvents(t *testing.T) {
 	if s, ok := got[0].(tui.ToolStarted); !ok || s.Name != "Exec" || s.Input["command"] != "ls" {
 		t.Fatalf("%#v", got)
 	}
-	got = feed("tool_result", "r1", map[string]any{"tool_call_id": "c1", "content": "a\nb", "is_error": false})
+	// The host's shape: the text in content blocks, as the core records a result.
+	got = feed("tool_result", "r1", map[string]any{"tool_call_id": "c1", "is_error": false,
+		"content_blocks": []any{map[string]any{"type": "text", "text": "a\nb"}}})
 	if f, ok := got[0].(tui.ToolFinished); !ok || f.Output != "a\nb" {
 		t.Fatalf("%#v", got)
 	}

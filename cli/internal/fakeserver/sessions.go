@@ -487,7 +487,9 @@ func (t *Turn) Tool(tool, method, intent string, params map[string]any, input ma
 	ss.addMessage(map[string]any{"role": "assistant", "text": "", "run_id": t.RunID,
 		"tool_calls": []map[string]any{{"id": callID, "name": tool, "arguments": input}}})
 	ss.addMessage(map[string]any{"role": "tool", "run_id": t.RunID, "tool_results": []map[string]any{{"id": callID, "content": content, "is_error": isErr}}})
-	ss.publish("tool_result", t.RunID, map[string]any{"tool_call_id": callID, "content": content, "is_error": isErr}, false)
+	// As the host's stream has it: the result's text in content blocks, no content string.
+	ss.publish("tool_result", t.RunID, map[string]any{"tool_call_id": callID, "is_error": isErr,
+		"content_blocks": []map[string]any{{"type": "text", "text": content}}}, false)
 	return result, rpcErr, outcome
 }
 
