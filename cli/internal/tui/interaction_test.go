@@ -78,6 +78,21 @@ func TestCtrlDTwiceExitsOnlyOnAnEmptyPrompt(t *testing.T) {
 	}
 }
 
+func TestAChosenGuardWinsOverTheRememberedOne(t *testing.T) {
+	// The last Shift+Tab is remembered as plan; --guard ask is what this start asked for, and it is
+	// what the executor gets when the session loads.
+	h := newHarness(t, 100, 30, func(o *Options) {
+		o.Store = &MemoryStore{Prefs: Prefs{Guard: "plan"}}
+		o.Guard = "ask"
+	})
+	h.contains("⏸ ask before acting")
+	if h.fake.Guard() != GuardAsk {
+		t.Fatalf("the executor guard is %v", h.fake.Guard())
+	}
+	remembered := newHarness(t, 100, 30, func(o *Options) { o.Store = &MemoryStore{Prefs: Prefs{Guard: "plan"}} })
+	remembered.contains("⏸ plan mode on")
+}
+
 func TestShiftTabCyclesTheLocalGuard(t *testing.T) {
 	h := newHarness(t, 100, 30)
 	h.contains("⏵⏵ auto-accept on")

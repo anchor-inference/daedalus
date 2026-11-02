@@ -22,5 +22,9 @@ func runScreen(ctx context.Context, b *app.Backend, e *env, req tui.StartRequest
 	}
 	// The interface's prefs and prompt history live beside the configuration.
 	dir, _ := config.Dir()
-	return tui.Run(ctx, b, tui.Options{Cwd: e.cwd, AgentName: "Daedalus", Version: version, Start: req, Store: &tui.FileStore{Dir: dir}})
+	options := tui.Options{Cwd: e.cwd, AgentName: "Daedalus", Version: version, Start: req, Store: &tui.FileStore{Dir: dir}}
+	if e.guardChosen {
+		options.Guard = e.guard.String()
+	}
+	return tui.Run(ctx, b, options)
 }

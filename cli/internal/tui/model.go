@@ -37,6 +37,10 @@ type Options struct {
 	Inline *bool
 	// Dark is the terminal's background when the caller has detected it; nil asks the terminal.
 	Dark *bool
+	// Guard, when set (ask, auto or plan), is the guard to start in, over the one the prefs remember:
+	// the --guard flag or the profile's choice. The interface pushes its guard to the backend when a
+	// session loads, so without this the remembered level silently replaced the flag.
+	Guard string
 	// Plain and ASCII come from theme.Environment unless the caller decides.
 	Plain, ASCII bool
 	Store        Store
@@ -200,6 +204,9 @@ func New(backend Backend, options Options) *Model {
 	}
 	if options.Inline != nil {
 		m.prefs.Inline = *options.Inline
+	}
+	if options.Guard != "" {
+		m.prefs.Guard = options.Guard
 	}
 	switch m.prefs.Guard {
 	case "ask":

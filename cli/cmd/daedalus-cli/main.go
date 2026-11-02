@@ -126,6 +126,10 @@ type env struct {
 	cwd      string
 	guard    guard.Level
 	executor *exec.Executor
+
+	// guardChosen is whether the guard came from --guard or the profile rather than the default:
+	// a chosen one wins over the level the interface remembers from its last Shift+Tab.
+	guardChosen bool
 }
 
 func setup(g globals, needToken bool) (*env, error) {
@@ -173,6 +177,7 @@ func setup(g globals, needToken bool) (*env, error) {
 	if e.guard, err = guard.ParseLevel(levelName); err != nil {
 		return nil, err
 	}
+	e.guardChosen = levelName != ""
 	return e, nil
 }
 
