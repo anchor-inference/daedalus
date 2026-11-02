@@ -165,6 +165,18 @@ func (m *Model) applyEvent(event Event, replay bool) tea.Cmd {
 		if !replay {
 			m.flash("Model: " + e.Model + effortSuffix(e.Effort))
 		}
+	case DeviceWaiting:
+		if e.Waiting {
+			m.waitingDevice = e.Device
+			if m.waitingDevice == "" {
+				m.waitingDevice = "the terminal"
+			}
+		} else {
+			if m.waitingDevice != "" && m.running {
+				m.flash(m.waitingDevice + " is back · turn resumed")
+			}
+			m.waitingDevice = ""
+		}
 	case LoginChanged:
 		if d, ok := m.dialog.(*loginDialog); ok {
 			d.state, d.device, d.err = e.State, e.Device, e.Err

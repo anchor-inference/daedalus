@@ -214,3 +214,13 @@ func TestFrameLightAndPlainThemesKeepTheLayout(t *testing.T) {
 		t.Error("a plain terminal got colour")
 	}
 }
+
+func TestFrameWaitingForTheHomeDevice(t *testing.T) {
+	h := newHarness(t, 100, 20)
+	startTurn(h, "keep going")
+	h.apply(DeviceWaiting{Device: "laptop", Waiting: true})
+	h.contains("Waiting for laptop to reconnect… turn paused")
+	h.apply(DeviceWaiting{Device: "laptop", Waiting: false})
+	h.lacks("turn paused")
+	h.contains("laptop is back · turn resumed")
+}

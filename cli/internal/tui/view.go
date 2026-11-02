@@ -191,6 +191,10 @@ func (m *Model) statusRows() []string {
 		out = append(out, t.Faint().Render(g.Prompt+" "+text))
 	}
 	switch {
+	case m.running && m.waitingDevice != "" && m.conn == Online:
+		line := t.Fg(t.Palette.Warning).Render(g.Pause+" Waiting for "+m.waitingDevice+" to reconnect"+g.Ellipsis+" turn paused") +
+			t.Dim().Render(" (its tools run there · esc to stop)")
+		out = append(out, "", ansi.Truncate(line, m.width, g.Ellipsis))
 	case m.running && m.conn == Reconnecting:
 		retry := ""
 		if m.connRetry > 0 {
@@ -362,9 +366,9 @@ func (m *Model) guardIndicator() string {
 	hint := t.Dim().Render(" (shift+tab to cycle)")
 	switch m.guard {
 	case GuardAsk:
-		return t.Fg(t.Palette.Permission).Render("? ask before edits on") + hint
+		return t.Fg(t.Palette.Permission).Render(g.Pause+" ask before acting") + hint
 	case GuardPlan:
-		return t.Fg(t.Palette.Plan).Render(g.Pause+" plan mode on") + hint
+		return t.Fg(t.Palette.Plan).Render(g.Pause+" plan mode on · read-only") + hint
 	}
 	return t.Fg(t.Palette.Auto).Render(g.Play+" auto-accept on") + hint
 }

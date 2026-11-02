@@ -85,7 +85,7 @@ func TestShiftTabCyclesTheLocalGuard(t *testing.T) {
 		t.Fatalf("the executor guard is %v", h.fake.Guard())
 	}
 	h.key("shift+tab")
-	h.contains("ask before edits on")
+	h.contains("⏸ ask before acting")
 	h.key("shift+tab")
 	h.contains("auto-accept on")
 	if h.m.store.LoadPrefs().Guard != "auto" {

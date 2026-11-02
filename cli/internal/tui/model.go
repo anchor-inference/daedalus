@@ -111,6 +111,8 @@ type Model struct {
 	connRetry   time.Duration
 	connErr     string
 	connSince   time.Time
+	// waitingDevice names the session's home device while the server holds the turn for it.
+	waitingDevice string
 
 	usage    Usage
 	queue    []QueuedMessage

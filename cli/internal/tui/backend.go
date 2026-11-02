@@ -372,6 +372,15 @@ type ConnectionChanged struct {
 	Err     string
 }
 
+// DeviceWaiting reports the server holding the turn for the session's home device: its tools run on
+// a machine whose link is down. This terminal's own drop is a ConnectionChanged; this is the case of
+// a session whose tools run elsewhere, viewed from here while that machine is away.
+type DeviceWaiting struct {
+	Device  string
+	Waiting bool
+	Since   time.Time
+}
+
 // SessionUpdated reports a changed title, model or binding.
 type SessionUpdated struct{ Info SessionInfo }
 
@@ -543,6 +552,7 @@ type LoginChanged struct {
 
 func (ConnectionChanged) isEvent()   {}
 func (SessionUpdated) isEvent()      {}
+func (DeviceWaiting) isEvent()       {}
 func (HistoryReset) isEvent()        {}
 func (UserMessage) isEvent()         {}
 func (TurnStarted) isEvent()         {}
