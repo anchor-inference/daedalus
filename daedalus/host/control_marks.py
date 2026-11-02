@@ -1,4 +1,4 @@
-"""What a session controls right now: the operator's Chrome, or their computer.
+"""What a session controls right now: the operator's Chrome, their computer, or a terminal of theirs.
 
 A session's kind (``sessions.kind``) says what it was made for and never changes. That a chat is
 working in the operator's Chrome, or holds their computer, is a different fact: live, and over as soon
@@ -24,6 +24,10 @@ operator's Chrome closes its tabs when it ends, so there the mark normally goes 
 minutes are for a browser left open (tab closing turned off) or a lease granted for an hour, so a chat
 that stopped using them does not keep the mark until the grant runs out, and a run that pauses between
 two clicks does not flicker out of the tab.
+
+A terminal (``remote``) follows a simpler rule of its own (``daedalus.remote.control``): a session is
+marked while a connected terminal client shows it, and the mark goes with the client. A terminal is
+either there or not; there is no lease to hold idle.
 """
 
 from __future__ import annotations
@@ -34,7 +38,7 @@ from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
-CONTROLS = ("chrome", "computer")
+CONTROLS = ("chrome", "computer", "remote")
 """What a session can control, spelled as the session kinds that are made for it."""
 IDLE_AFTER = timedelta(minutes=5)
 """How long after its last use a held control still marks a session that has no run going."""

@@ -115,7 +115,7 @@ The operator's routes (any operator credential; a device token is refused):
 |---|---|
 | `GET /api/cli/pairs` | `{"requests": [Pairing]}`: the pending requests, newest first |
 | `GET /api/cli/pair/{user_code}` | one request, for the approval card; 404 when unknown or expired |
-| `POST /api/cli/pair/{user_code}/approve` | `{"name"?: str}` renames the device; → `{"ok": true, "request": Pairing}`; 409 when already decided |
+| `POST /api/cli/pair/{user_code}/approve` | optional body `{"name": str}` (at most 80 characters) names the device other than the name it gave; no body keeps its own; → `{"ok": true, "request": Pairing}`; 409 when already decided |
 | `POST /api/cli/pair/{user_code}/deny` | → `{"ok": true, "request": Pairing}` |
 
 `Pairing` is `{id, user_code, name, hostname, os, arch, client_version, address, created_at,
@@ -135,14 +135,18 @@ it stops working when the device is revoked, or after **90 days** in which it wa
 | `GET /api/cli/me` | device | `{"device": Device, "server": {"version", "contract": 1, "public_url"}, "sessions": [id]}` |
 | `POST /api/cli/token/rotate` | device | `{"token": "dcl_…"}`; the old token stops at once |
 
-`Device` is `{id, name, hostname, os, arch, client_version, paired_at, approved_via: "app" |
-"telegram", last_seen_at, last_address, expires_at, revoked_at, connected, sessions}`; `connected` is
-whether its relay is up now, `sessions` how many conversations it is bound to.
+`Device` is `{id, name, hostname, os, arch, client_version, paired_at, token_issued_at, approved_via:
+"app" | "telegram", last_seen_at, last_address, expires_at, revoked_at, connected, disconnected_at,
+sessions}`. `token_issued_at` is when the token in use was handed out: the pairing, then each rotation.
+`connected` is whether its relay is up now; `disconnected_at` is when the relay went down while it
+stays down, and `null` while it is up or when the device has not connected since the server started.
+A window shows a recent `disconnected_at` as reconnecting and an old one, or `null` with `connected`
+false, as offline; the threshold is the window's. `sessions` is how many conversations it is bound to.
 
 `last_seen_at` and `last_address` move with any authenticated request or relay frame, written at most
 once a minute. Every change to the list is announced as `device.changed {device_id, change: "paired"
 | "renamed" | "revoked"}`; the relay coming up or going down as `device.connection {device_id,
-connected}`.
+connected, disconnected_at}`, announced by the server when the relay's state changes.
 
 Telegram: `/devices` lists the paired devices with a **Revoke** button each.
 
@@ -226,7 +230,7 @@ What it changes on the server:
 
 - a focused client showing a session counts as **attending** it, so push and desktop notifications of
   that session are held back, as for an app window in front of the operator;
-- a client that reported a session within the last 60 seconds, or whose relay is up and bound to it,
+- a client that reported a session within the last 60 seconds, or whose relay connection carries it,
   gives that session the live **`remote`** control mark (`session.controlling`), which the app draws
   as the Remote mark, hollow with a breathing dot on a session of another kind.
 
@@ -244,7 +248,11 @@ POST /api/sessions
   operator credential the body must also name `device_id` (an operator script or the app opening a
   conversation on a laptop); otherwise 400.
 - `cwd` is the absolute folder on the device, as the device spells it (`/home/you/x`, `C:\Users\you\x`),
-  at most 4096 characters, required for `remote`.
+  at most 4096 characters, required for `remote`. It may not be a whole disk (`/`, `C:\`, a share's
+  root): the server refuses those with 400. The client also refuses, before it asks the server, the
+  home folder and any folder that holds it, as ptyd refuses them as roots (`terminals.md`, `fs.*`):
+  a jail there would be the operator's whole account. The server does not know the device's home, so
+  that half of the rule is the client's.
 - A remote session names no project, folder or environment (400 if it does): its hands are the device.
   On the server it has a scratch folder like any chat without a project, which holds its attachments
   and checkpoints, not its work.
@@ -260,11 +268,15 @@ home device, and `null` otherwise:
 
 ```
 "remote": {"device_id": "…", "device_name": "laptop", "cwd": "/home/you/project",
-           "connected": true, "guard": "auto", "waiting": null}
+           "connected": true, "disconnected_at": null, "guard": "auto", "waiting": null}
 ```
 
-`waiting` is `null`, or `{"since": "<iso>", "calls": [{"tool_call_id", "tool"}]}` while the turn is
-parked on this device (see Disconnects). The rows of the list carry `waiting` as a boolean.
+`connected` is whether a connection of the home device carries this session now, which is what its
+calls need (a laptop that is up with this conversation closed has it `false`); `disconnected_at` is
+when it stopped being carried, while it is not, else `null`, read as in `Device`. `guard` is `null` until the
+device reports one, which counts as `auto`. `waiting` is `null`, or
+`{"since": "<iso>", "calls": [{"tool_call_id", "tool"}]}` while the turn is parked on this device (see
+Disconnects). The rows of the list carry `waiting` as a boolean.
 
 ### `/resume`
 
@@ -301,7 +313,7 @@ does. A device token reaches it for sessions in scope.
 | Permission box | a refusal arrives as a `tool_result` carrying the approval key, and the key is in `open_approvals`: **Yes** → `POST …/policy/grant {"key"}`; **Yes, and don't ask again** → `GET …/policy/similar/{key}` for the label, then `POST …/policy/grant-similar {"key"}`; **No, and tell it what to do** → `POST …/policy/refuse {"key"}` then `POST …/messages` with the text |
 | Pasted images, files | `POST …/upload` (multipart), then the message names them |
 | `/model` | `GET /api/models`; `POST …/model {"preset"}` or `{"reasoning_effort"}`, `{"thinking"}` |
-| `/compact`, `/clear` | `POST …/compact {"focus"?}`, `POST …/clear` |
+| `/compact`, `/clear` | `POST …/compact {"instructions"?: "<what to keep>"}` (the field the app sends too; send only this one), `POST …/clear` |
 | The `/` palette | `GET /api/commands` (server commands: `name, args, description, scope, confirm`) and `GET /api/skills`; run one with `POST …/command {"line"}` → `{"text"}` |
 | `/rewind` (conversation) | `GET …/checkpoints`, `POST …/revert`, `POST …/fork`; the code side is the client's own snapshots |
 | `/rename`, archive | `PATCH /api/sessions/{id} {"title"}` / `{"archived": true}` |
@@ -349,9 +361,17 @@ No provider's address or key, as for the side panel. Presets are sorted by label
 
 The client opens `wss://<server>/api/cli/relay` with `Authorization: Device <token>`, keeps it open
 while it runs, and reconnects with backoff (1 s doubling to 30 s, with jitter) when it drops. A socket
-opened with an `http://` or `https://` `Origin` (a web page) is refused before anything is read. One
-link per device: a second connection of the same device replaces the first, which is closed with
-`4409`.
+opened with an `http://` or `https://` `Origin` (a web page) is refused before anything is read.
+
+**One connection per process.** Each running client holds its own connection, named by `client` in
+its `device.hello` (the same per-process id it uses for presence), and carries the sessions that
+process shows. Two terminals open on one laptop are two connections and do not replace each other. A
+session's calls go to the connection of its home device that carries it; when two processes show the
+same session, to the one that declared it last. A new connection with the `client` of one that is
+still open (the same process reconnecting over a half-open socket) replaces it, and the old one is
+closed with `4409`, which the client treats as final for that socket. A device holds at most 8
+connections; a ninth is closed with `4429`. A home session that no connection carries is offline for
+its tools: its turn waits (see Disconnects) even while other processes of the device are connected.
 
 **Frames.** Text frames carry JSON-RPC 2.0 messages, exactly ptyd's control channel
 (`docs/architecture/terminals.md`, "The control channel") without the length prefix, which the
@@ -363,14 +383,15 @@ at most 1 MiB.
 
 ```
 {"jsonrpc": "2.0", "method": "device.hello", "params": {
-   "protocol": 1, "client_version": "0.1.0", "os": "linux", "arch": "amd64", "shell": "/bin/zsh",
+   "protocol": 1, "client": "<per-process id>", "client_version": "0.1.0", "os": "linux", "arch": "amd64", "shell": "/bin/zsh",
    "home": "/home/you",
    "capabilities": {"exec": true, "fs": ["stat", "list", "read", "write", "mkdir"], "pty": false},
    "sessions": [{"session_id": "…", "guard": "ask"}],
    "known": [{"id": "<request id>", "state": "running" | "done"}]}}
 ```
 
-`sessions` are the sessions this process shows with their guards; `known` the requests it still holds
+`sessions` are the sessions this process shows with their guards, which is what this connection
+carries; `known` the requests it still holds
 from before a drop (see Disconnects). The server answers with a notification:
 
 ```
@@ -401,15 +422,19 @@ Every request's `params` also carry `_meta`, which ptyd does not have:
           "title": "npm test"}
 ```
 
-`intent` is the server's account of what the call does (a file read through the shell is `read`), so
-the guard can decide without parsing shell; `title` is what the client shows in its own prompt.
+`intent` is the server's account of what the call does (a file read through the shell is `read`);
+`title` is what the client shows in its own prompt. The client trusts its own reading first: `intent`
+may only make the guard **stricter**, never looser. A request counts as a read only when both the
+client's reading and `intent` say so; a `write` or `exec` intent is honoured even when the client's
+own parse would have called the command read-only.
 
 Request ids are strings, unique on the server and stable across a reconnect:
 `"<session id>:<tool call id>:<n>"`.
 
 **The jail.** Every path, every `cwd`, and every `exec.run` working directory must lie under the
 folder the session is bound to, both as written and as the filesystem resolves it; the client refuses
-anything else with `1004`. The client's deny list (keys, credentials, other tools' logins, as ptyd's)
+anything else with `1004`. A session whose folder is a whole disk, the home folder or a folder holding
+it is refused by the client before it is created or resumed (see Starting one). The client's deny list (keys, credentials, other tools' logins, as ptyd's)
 applies inside the jail too. The jail is the client's and the server cannot widen it.
 
 **Errors.** ptyd's codes: `1001` not found, `1003` limit, `1004` forbidden, `1005` timeout, `1007`
@@ -427,8 +452,8 @@ the server turns it into the tool's result for the agent (`The operator refused 
 frame for 60 seconds reconnects.
 
 **Closing codes.** `4400` protocol error, `4401` token invalid or revoked (log in again), `4403` not
-allowed, `4409` replaced by a newer connection of the same device, `1001` server going away
-(reconnect).
+allowed, `4409` replaced by a newer connection of the same process (do not reconnect this socket),
+`4429` too many connections from this device, `1001` server going away (reconnect).
 
 ## Disconnects: the turn pauses until the device is back
 
@@ -469,7 +494,12 @@ approvals apply under every level.
 |---|---|---|
 | `ask` | asks the operator in the terminal before every `write` and `exec` request; `read` runs | `⏸ ask before acting` |
 | `auto` | runs every request; the server's policy is the only gate | `⏵⏵ auto` |
-| `plan` | refuses `write` and `exec` requests with `1004 plan_guard`, except `exec` the client recognises as read-only (`ls`, `cat`, `rg`, `grep`, `find`, `git status`, `git log`, `git diff`, `git show`) | `⏸ plan, read-only` |
+| `plan` | refuses `write` and `exec` requests with `1004 plan_guard`, except `exec` the client recognises as read-only (`ls`, `cat`, `rg`, `grep`, `find`, `git status`, `git log`, `git diff`, `git show`) and the server's `intent` calls `read`; native `fs.read`, `fs.list`, `fs.stat` always run | `⏸ plan, read-only` |
+
+Which requests are reads is decided by the stricter of the client's own parse and `_meta.intent` (see
+Requests). On Windows the client recognises no command as read-only, so `plan` refuses every `exec`
+there; this is accepted: the native file reads still run, which is what planning needs, and a shell
+that is merely believed to be harmless is not run under a guard that promised read-only.
 
 Shift+Tab cycles `ask → auto → plan → ask`. A new client starts in `auto`, or in the level of
 `--guard` or its configuration.
@@ -481,7 +511,8 @@ in `device.hello`, and on every change (`device.guard`, or `PUT /api/cli/session
 - announces it as `remote.guard {"guard", "device_id"}` and shows it in the session's `remote.guard`;
 - for `plan`, tells the agent in its turn context that the operator's terminal refuses writes and
   commands that change things, so it plans instead of trying;
-- treats a session's guard as unknown (`auto`) until its device reports one after a restart.
+- shows `null` (counted as `auto`) for a session whose device has not reported a guard since the
+  server started.
 
 The guard of the home device is the one that matters for a session's tools; a client that only views
 a resumed session reports its guard for display.
@@ -490,7 +521,7 @@ a resumed session reports its guard for display.
 
 | Part | Where | State |
 |---|---|---|
-| Pairing, devices, tokens, the door, scope, presence, the kind, `/api/models`, `/api/cli/*` except the relay | `daedalus/remote/`, `daedalus/extensions/api_remote.py` | being built |
-| The relay, the device link as an `ExecBackend` and `DeviceFS`, binding a session's hands, the pause | the relay's unit | to come |
+| Pairing, devices, tokens, the door, scope, presence, the kind, `/api/models`, `/api/cli/*` except the relay, the guard and wait registry (`RemoteControl.set_guard`, `set_waiting`, `linked`) | `daedalus/remote/`, `daedalus/extensions/remote.py`, `daedalus/extensions/api_remote.py` | in place |
+| The relay, the device link as an `ExecBackend` and `DeviceFS`, binding a session's hands, the pause, the plan note in the turn context | the relay's unit; it authenticates through the door (`request.scope["daedalus.device"]`), admits a connection with `RemoteControl.may_link(device, client)` (else `4429`), reports it with `RemoteControl.linked(device, sessions, client=…)` / `unlinked(device, client=…)` (which keep `disconnected_at` and announce `device.connection`, so the relay publishes neither), routes a call to `RemoteControl.carrier(device, session)`, parks with `set_waiting`, and closes a revoked device's link from `Devices.revoked_hooks` | to come |
 | The client | `cli/` (Go) | to come |
 | The Remote tab and mark, the approval card, Settings → Devices | `miniapp/` | to come |

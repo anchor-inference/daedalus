@@ -3386,6 +3386,81 @@ async def _session_origin_kinds(conn: aiosqlite.Connection) -> None:
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _session_origin_kinds))
 
+
+async def _remote_kind(conn: aiosqlite.Connection) -> None:
+    """A conversation started from the terminal client is of kind ``remote``, which the column's check
+    must take; SQLite cannot widen a CHECK in place.
+
+    Not the twelve-step table rebuild: fifteen tables name ``sessions`` as their parent, and a rebuild
+    would have to switch foreign keys off and copy every row. The kind is its own column with a check
+    of its own, so a new column with the wider check takes the values, the old one is dropped and the
+    new one renamed into its place, which rewrites the check to the old name. The other columns, the
+    rowids and every child row stay as they are. Read from the table's own SQL, so a second run on a
+    database whose check already takes the kind changes nothing."""
+    row = await (await conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'sessions'")).fetchone()
+    if row is None or "'remote'" in str(row[0]):
+        return
+    await conn.execute("ALTER TABLE sessions ADD COLUMN kind_widened TEXT NOT NULL DEFAULT 'chat' CHECK (kind_widened IN ('chat', 'computer', 'chrome', 'remote'))")
+    await conn.execute("UPDATE sessions SET kind_widened = kind")
+    await conn.execute("ALTER TABLE sessions DROP COLUMN kind")
+    await conn.execute("ALTER TABLE sessions RENAME COLUMN kind_widened TO kind")
+
+
+MIGRATIONS.append(DataMigration("SELECT 1;", _remote_kind))
+
+# The terminal client's devices (``daedalus.remote.devices``). A pairing is the device-code request a
+# client starts and the operator approves; only the hash of its device code is kept, and the user code
+# is kept as it is, because it is no credential (the operator reads it off the terminal to compare) and
+# the approval card and the Telegram message show it. A device's token exists in plain only in the one
+# answer that hands it out; ``token_hash`` is NULL once it is revoked, and the row stays so the
+# conversations it made can still name it. ``cli_device_sessions`` is a device's scope: ``home`` is the
+# one device a remote conversation's tools run on, ``resumed`` a conversation the operator opened from it.
+MIGRATIONS.append("""
+CREATE TABLE IF NOT EXISTS cli_devices (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    hostname TEXT NOT NULL DEFAULT '',
+    os TEXT NOT NULL DEFAULT '',
+    arch TEXT NOT NULL DEFAULT '',
+    client_version TEXT NOT NULL DEFAULT '',
+    token_hash TEXT UNIQUE,
+    token_issued_at TEXT NOT NULL,
+    paired_at TEXT NOT NULL,
+    approved_via TEXT NOT NULL CHECK (approved_via IN ('app', 'telegram')),
+    last_seen_at TEXT NOT NULL,
+    last_address TEXT NOT NULL DEFAULT '',
+    revoked_at TEXT
+);
+CREATE TABLE IF NOT EXISTS cli_pairings (
+    id TEXT PRIMARY KEY,
+    device_code_hash TEXT NOT NULL UNIQUE,
+    user_code TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    hostname TEXT NOT NULL DEFAULT '',
+    os TEXT NOT NULL DEFAULT '',
+    arch TEXT NOT NULL DEFAULT '',
+    client_version TEXT NOT NULL DEFAULT '',
+    address TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    polled_at TEXT,
+    state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'approved', 'denied', 'delivered')),
+    decided_via TEXT CHECK (decided_via IN ('app', 'telegram')),
+    device_id TEXT REFERENCES cli_devices(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS cli_pairings_by_user_code ON cli_pairings(user_code);
+CREATE TABLE IF NOT EXISTS cli_device_sessions (
+    device_id TEXT NOT NULL REFERENCES cli_devices(id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK (role IN ('home', 'resumed')),
+    cwd TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (device_id, session_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS cli_device_sessions_one_home ON cli_device_sessions(session_id) WHERE role = 'home';
+CREATE INDEX IF NOT EXISTS cli_device_sessions_by_session ON cli_device_sessions(session_id);
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

@@ -53,7 +53,7 @@ class PresenceReport:
     client: str
     """A per-tab id the app keeps in ``sessionStorage``; the same id it sends to ``/api/events``."""
     kind: str = "browser"
-    """browser · pwa · telegram · window"""
+    """browser · pwa · telegram · window · cli (the terminal client, ``docs/architecture/cli.md``)"""
     visible: bool = False
     focused: bool = False
     sessions: tuple[str, ...] = ()
@@ -200,6 +200,20 @@ class Presence:
         before = self._attended(now)
         del self._clients[client]
         if was is not None and was.attends():
+            await self._publish(PresenceReport(client=client, kind=entry.kind), before, now)
+
+    async def drop(self, client: str) -> None:
+        """Forget a client at once, without its grace: a terminal whose device was revoked is no longer
+        the operator, whatever it reported a moment ago."""
+        entry = self._clients.pop(client, None)
+        if entry is None:
+            return
+        now = self._clock()
+        was = entry.report if self._fresh(entry, now) else None
+        if was is not None and was.attends():
+            self._clients[client] = entry
+            before = self._attended(now)
+            del self._clients[client]
             await self._publish(PresenceReport(client=client, kind=entry.kind), before, now)
 
     # -- the answers -------------------------------------------------------------------------

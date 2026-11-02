@@ -110,6 +110,7 @@ HELP_TAIL = """/main — the main orchestrator: in a group it lives in General; 
 /prompt — show the editable working rules (edit them in the Mini App → Settings)
 /memory · /remember &lt;text&gt; — what memory holds; add a note to it
 /settings · /app — configuration, Mini App link
+/devices — the paired terminals (daedalus-cli), each with a Revoke button
 """
 
 
@@ -1027,7 +1028,7 @@ class TelegramFront:
         r.message.register(self.cmd_settings, Command("settings"))
         r.message.register(self.cmd_bind, Command("bind"))
         r.message.register(self.cmd_detach, Command("detach"))
-        r.message.register(self.cmd_operator, Command("rebuild", "rollback", "panic", "schedules", "verbosity", "approval", "balance", "schedule", "inbox", "heartbeat", "doctor", "intents", "board", "peer", "allow"))
+        r.message.register(self.cmd_operator, Command("rebuild", "rollback", "panic", "schedules", "verbosity", "approval", "balance", "schedule", "inbox", "heartbeat", "doctor", "intents", "board", "peer", "allow", "devices"))
         r.message.register(self.cmd_yagni, Command("yagni"))
         r.message.register(self.cmd_secret, Command("secret"))
         r.message.register(
