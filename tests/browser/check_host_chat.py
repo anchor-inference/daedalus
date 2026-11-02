@@ -4,9 +4,12 @@ English and Russian, 1440 px desktop and 390 px phone.
 What is checked:
 
 - in Docker with the host terminal daemon answering, the start composer offers where the chat runs
-  (the pill beside the model on a desktop, a row of the + sheet on a phone), and a chat started on
-  the host is created with ``env: "host"``;
+  (the pill beside the model on a desktop, a chip under the heading beside the project and the mode
+  on a phone), and a chat started on the host is created with ``env: "host"``;
 - with the daemon down the host is offered greyed out, with the reason;
+- on a phone with a project picked, the chip shows the side of the project's folder, its sheet says
+  the folder decides and opens the project's settings, where the folder is moved; the chat is created
+  in the project and sends no ``env`` of its own;
 - natively there is no choice at all, since everything already runs on the host;
 - a session that runs on the host carries the host pill on its sidebar row and in its Details panel.
 
@@ -24,16 +27,17 @@ from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
-from screenshots import S1, S4, UNHANDLED, detail, listing, stub  # noqa: E402
+from screenshots import P1, PROJECTS, S1, S4, UNHANDLED, detail, listing, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
+SHOTS = os.environ.get("SHOTS", "")
 DOCKER = {"local": "container", "available": ["container", "host"], "host_bridge": True, "docker": True}
 DOWN = {"local": "container", "available": ["container"], "host_bridge": False, "docker": True}
 NATIVE = {"local": "host", "available": ["host"], "host_bridge": False, "docker": False}
 WORDS = {
-    "en": {"host": "On the host", "down": "not answering", "row": "Run on the host"},
-    "ru": {"host": "На хосте", "down": "не отвечает", "row": "Запустить на хосте"},
+    "en": {"host": "On the host", "down": "not answering", "decides": "run where its folder is", "settings": "Project settings"},
+    "ru": {"host": "На хосте", "down": "не отвечает", "decides": "работают там же, где его папка", "settings": "Настройки проекта"},
 }
 
 
@@ -41,6 +45,7 @@ class Host:
     def __init__(self, environments: dict) -> None:
         self.environments = environments
         self.created: list[dict] = []
+        self.host_folder = False
 
 
 def serve(page: Page, host: Host) -> None:
@@ -50,6 +55,10 @@ def serve(page: Page, host: Host) -> None:
         path = path[path.index("/api/"):]
         if path == "/api/project-environments":
             return r.fulfill(status=200, content_type="application/json", body=json.dumps(host.environments))
+        if path == "/api/projects" and request.method == "GET" and host.host_folder:
+            # The first project's folder moved to the host: its chats run there.
+            answer = [{**p, "folders": [{**f, "env": "host"} for f in p["folders"]]} if p["id"] == P1 else p for p in PROJECTS]
+            return r.fulfill(status=200, content_type="application/json", body=json.dumps(answer))
         if path == "/api/sessions" and request.method == "POST":
             host.created.append(request.post_data_json or {})
             return r.fulfill(status=200, content_type="application/json", body=json.dumps({"id": S1}))
@@ -89,12 +98,26 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
     composer = page.locator(".start-composer")
     expect(composer).to_be_visible(timeout=15000)
     if phone:
-        composer.locator(".plus").click()
-        row = page.locator(".ph-plus-sheet [data-runon='host']")
+        # Beside the project and the mode under the heading, where it is seen before typing.
+        chip = page.locator(".ph-hero-picks .runon-chip")
+        expect(chip).to_have_attribute("data-runon-chip", "container")
+        box = chip.bounding_box()
+        if not box or box["height"] < 32:
+            say(f"the chip is not touch-sized: {box}")
+        chip.click()
+        row = page.locator(".runon-sheet [data-runon='host']")
         expect(row).to_be_visible()
-        expect(row).to_contain_text(words["row"])
+        expect(row).to_contain_text(words["host"])
+        if row.is_disabled():
+            say("the host is greyed out while the daemon answers")
+        if SHOTS:
+            page.wait_for_timeout(400)  # the sheet's rise, so the picture is not of it half-way
+            page.screenshot(path=f"{SHOTS}/phone-runon-sheet-{lang}.png")
         row.click()
-        expect(page.locator(".ph-hero .runon-hero .term-env.host")).to_be_visible()
+        expect(page.locator(".runon-sheet")).to_have_count(0)
+        expect(chip).to_have_attribute("data-runon-chip", "host")
+        if SHOTS:
+            page.screenshot(path=f"{SHOTS}/phone-runon-host-{lang}.png")
     else:
         select = composer.locator(".runon-select")
         expect(select).to_be_visible()
@@ -121,8 +144,8 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
     composer = page.locator(".start-composer")
     expect(composer).to_be_visible(timeout=15000)
     if phone:
-        composer.locator(".plus").click()
-        row = page.locator(".ph-plus-sheet [data-runon='host']")
+        page.locator(".ph-hero-picks .runon-chip").click()
+        row = page.locator(".runon-sheet [data-runon='host']")
         expect(row).to_be_disabled()
         expect(row).to_contain_text(words["down"])
     else:
@@ -140,12 +163,40 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
     page.wait_for_timeout(500)
     if composer.locator(".runon-select").count():
         say("the choice is offered natively")
-    if phone:
-        composer.locator(".plus").click()
-        expect(page.locator(".ph-plus-sheet")).to_be_visible()
-        if page.locator(".ph-plus-sheet [data-runon]").count():
-            say("the + sheet offers the host natively")
+    if phone and page.locator(".runon-chip").count():
+        say("the phone offers a side natively")
     context.close()
+
+    # A phone with a project picked: the folder decides, the chip says which side, and the sheet
+    # leads to the project's settings, where the folder is moved.
+    if phone:
+        for on_host in (False, True):
+            context, page, host = start(browser, lang, phone, DOCKER)
+            host.host_folder = on_host
+            side = "host" if on_host else "container"
+            page.goto(f"{BASE}/agents?token=t&lang={lang}&in={P1}")
+            chip = page.locator(".ph-hero-picks .runon-chip")
+            expect(chip).to_have_attribute("data-runon-chip", side, timeout=15000)
+            chip.click()
+            panel = page.locator(f".runon-sheet [data-runon-project='{P1}']")
+            expect(panel).to_contain_text(words["decides"])
+            expect(panel.locator(f".term-env.{side}")).to_be_visible()
+            if page.locator(".runon-sheet [data-runon]").count():
+                say("a project's chat offers a side the server would refuse")
+            if SHOTS:
+                page.wait_for_timeout(400)
+                page.screenshot(path=f"{SHOTS}/phone-runon-project-{side}-{lang}.png")
+            panel.get_by_role("button", name=words["settings"]).click()
+            expect(page.locator(".sheet").filter(has=page.locator("[data-folder]"))).to_be_visible()
+            page.keyboard.press("Escape")
+            composer = page.locator(".start-composer")
+            composer.locator("textarea").fill("Check the oven timer")
+            composer.locator(".roundbtn.primary").click()
+            page.wait_for_timeout(600)
+            made = host.created[-1] if host.created else {}
+            if made.get("project_id") != P1 or "env" in made:
+                say(f"the project's chat was not created in the project alone: {host.created}")
+            context.close()
 
     # The mark: the host session's row, and its Details on a desktop.
     if not phone:

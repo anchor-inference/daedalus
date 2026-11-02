@@ -28,10 +28,10 @@ import { screenTitle, useMedia } from "../ui/index";
 import { Banner, IconButton, ListRow, SectionHeader, SheetRow, TopBar } from "../ui/phone";
 import { enterSends, errorText } from "../ui";
 import { t } from "../i18n";
-import { EnvPill } from "../envpill";
-import { HostMark, RunOn, RunOnRow, RunOnSelect, useRunOn } from "../runon";
+import { HostMark, RunOn, RunOnChip, RunOnSelect, useRunOn } from "../runon";
 import { PrivateChip, PrivateMark, isPrivate, privateBody } from "../privatechat";
 import { projectReachable } from "../folders";
+import { ProjectSettingsSheet } from "../projects";
 import { ProjectsPage } from "./Projects";
 import { PhoneImportCard, StartImportCard } from "../imports/ImportedChat";
 import { Sheet } from "../ui/dialogs";
@@ -240,6 +240,7 @@ function PhoneHome({ onOpen, toast, project, projects, model }: { onOpen: (id: s
   const [target, setTarget] = useState(asked || project);
   useEffect(() => setTarget(asked || project), [asked, project]);
   const [picking, setPicking] = useState(false);
+  const [settingsOf, setSettingsOf] = useState<Project | null>(null);
   const picked = choosable.find((p) => p.id === target && projectReachable(p));
   const run = useRunOn(picked ? target : "");
   const offers = useKindOffers();
@@ -278,9 +279,8 @@ function PhoneHome({ onOpen, toast, project, projects, model }: { onOpen: (id: s
             {/* The new chat's mode stands beside where it starts: at rest the phone's composer is one
                 row with no room for it, and a computer chat begun unawares as a plain one is a wasted turn. */}
             <KindSelect kind={kind} offers={offers} onChoose={setKind} sheet className="ph-btn sm ph-kind" />
+            <RunOnChip run={run} project={picked} onSettings={() => setSettingsOf(picked ?? null)} />
           </div>
-          {/* The host is picked in the + sheet; said here too, since the composer at rest has no room for it. */}
-          {run.env === "host" && <span className="runon-hero" aria-label={`${t("runon.label")}: ${t("term.env.host")}`}><EnvPill env="host" /></span>}
         </div>
         {shown.length > 0 && (
           <>
@@ -304,6 +304,7 @@ function PhoneHome({ onOpen, toast, project, projects, model }: { onOpen: (id: s
           <ProjectPickList projects={choosable} target={picked ? target : ""} onPick={(id) => { setTarget(id); setPicking(false); }} />
         </Sheet>
       )}
+      {settingsOf && <ProjectSettingsSheet project={settingsOf} onClose={() => setSettingsOf(null)} onRemoved={() => { setSettingsOf(null); setTarget(""); }} toast={toast} />}
     </div>
   );
 }
@@ -599,8 +600,7 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
           onPhoto={() => photoInput.current?.click()}
           onFiles={() => fileInput.current?.click()}
           onRecord={asr?.configured && note.supported && note.state.phase === "idle" ? () => void note.start() : undefined}
-          extra={<><RunOnRow run={run} onDone={() => setPlusOpen(false)} />
-            <SheetRow icon="eyeoff" label={t("private.menu")} hint={t("private.menu.hint")} checked={secret} data={{ private: "" }} onClick={() => { setSecret(!secret); setPlusOpen(false); }} />
+          extra={<><SheetRow icon="eyeoff" label={t("private.menu")} hint={t("private.menu.hint")} checked={secret} data={{ private: "" }} onClick={() => { setSecret(!secret); setPlusOpen(false); }} />
             <SheetRow icon="settings" label={t("ph.plus.options")} hint={t("ph.plus.options.hint")} chevron onClick={() => { setPlusOpen(false); navigate(pathFor("agents", null, { new: "1" })); }} /></>} />
       )}
     </div>

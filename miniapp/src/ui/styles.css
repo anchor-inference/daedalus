@@ -745,7 +745,6 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .menu .runon-option.on > .ic { color:var(--accent); margin-top:2px; }
 /* A session that runs on the host, on its row and in its details: the host pill, never squeezed. */
 .host-mark { display:inline-flex; flex:none; }
-.runon-hero { display:inline-flex; }
 /* The fallback's two names: the stand-in, then an arrow and the configured model. */
 .model-select .model-label.model-fallback { display:inline-flex; align-items:baseline; gap:4px; }
 .model-select .model-to, .model-select .model-from { min-width:0; }
@@ -5573,3 +5572,15 @@ body.resizing .kind-tabs-pill { transition: none; }
 @media (prefers-reduced-motion: reduce) {
   .kind-tabs-pill, .kind-tab { transition: none; }
 }
+/* The phone's "where it runs" chip beside the project and the mode under the new chat's heading: the
+   host in the amber the host pill wears everywhere, so the side reads before the word does. */
+.ph-hero .runon-chip { max-width: none; }
+.ph-hero .runon-chip .ic { color: var(--fg-2); }
+.ph-hero .runon-chip.host { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, var(--surface-2)); }
+.ph-hero .runon-chip.host .ic { color: var(--warn); }
+.runon-project { display: flex; flex-direction: column; gap: var(--space-2); padding: 0 var(--space-3) var(--space-3); }
+.runon-project-why { margin: 0; font-size: var(--fs-14); }
+.runon-project-folder { display: flex; align-items: center; gap: var(--space-2); min-height: var(--row-h-touch); }
+.runon-project-folder > .ic { flex: none; color: var(--fg-2); }
+.runon-project-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.runon-project-settings { align-self: flex-start; }
