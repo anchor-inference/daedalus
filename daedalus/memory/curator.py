@@ -12,6 +12,11 @@ words around different values — "the API listens on port 8765" and later "… 
 the newer one wins: the agent learned the second after the first. Everything that merely looks
 alike, or sits in different scopes (a session's note and a global one), is a suggestion, because
 merging across scopes changes who can recall the record.
+
+Two records that look alike but differ in polarity (:func:`daedalus.memory.polarity.differ`: "always
+answer in Russian" and "never answer in Russian") are never sure, however close their words or
+vectors: they are filed as a contradiction for the operator, who decides which one holds. Before this
+the word line merged a long note with its one-"не" negation and kept the longer text, the negated one.
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ from typing import TYPE_CHECKING, Any
 
 from protocore.contracts.memory import MemoryRecord, MemoryScope
 
+from daedalus.memory import polarity
 from daedalus.memory.entries import (
     ARCHIVED_KEY,
     LOCKED_KEY,
@@ -139,7 +145,7 @@ def _learned_print(kind: str, records: Sequence[MemoryRecord], text: str, detail
 @dataclass(frozen=True)
 class Finding:
     kind: str
-    """``duplicate`` or ``contradiction``."""
+    """``duplicate`` or ``contradiction`` (a changed value, or one record negating the other)."""
     records: tuple[MemoryRecord, MemoryRecord]
     keep: MemoryRecord
     text: str
@@ -177,10 +183,19 @@ def find(records: Sequence[MemoryRecord], vectors: dict[str, list[float]] | None
                 continue
             if va and vb and va != vb and len(words_a | words_b) >= 3 and _jaccard(words_a, words_b) >= CONTRADICTION_WORDS:
                 newer = a if a.updated_at >= b.updated_at else b
-                sure = same_bucket and words_a == words_b
+                # The same set of words can still hold a different number of negations ("не X, не Y"
+                # against "не X, Y"), and then the newer value is not the only change.
+                sure = same_bucket and words_a == words_b and not polarity.differ(a.text, b.text)
                 candidates.append(Finding("contradiction", (a, b), newer, newer.text, _jaccard(words_a, words_b), sure, "same statement, different values"))
                 continue
             if lexical >= DUPLICATE_MAYBE or cosine >= COSINE_MAYBE:
+                if polarity.differ(a.text, b.text):
+                    # A negation shares nearly every word and scores a cosine of about 0.99, so it lands
+                    # here; merging it would keep the longer text, which is the negated one whenever
+                    # the negation added a word. The operator decides; applying it keeps the newer.
+                    newer = a if a.updated_at >= b.updated_at else b
+                    candidates.append(Finding("contradiction", (a, b), newer, newer.text, max(lexical, cosine), False, "one says the opposite of the other"))
+                    continue
                 sure = same_bucket and (lexical >= DUPLICATE_SURE or cosine >= COSINE_SURE)
                 keep = _broadest_then_newest((a, b))
                 longer = max((a, b), key=lambda r: len(r.text))

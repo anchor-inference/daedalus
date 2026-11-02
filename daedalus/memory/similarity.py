@@ -18,6 +18,11 @@ The comparison here works in tiers, cheapest first:
   budget. Without a model or past the budget a candidate counts as a different fact: a duplicate costs
   a slot, a wrong merge loses a fact.
 
+Neither the words nor the cosine can see a negation, so no pair that differs in polarity
+(:func:`daedalus.memory.polarity.differ`: one negates, forbids or reverses what the other says) is
+decided without the model. Such a pair stays a candidate; when the model calls it the same claim, it
+is the claim with its value changed, and the newer statement wins rather than the longer text.
+
 The judge takes the vectors as a plain callable; with none, the lexical shortlist and the model call do
 the work alone. The cosine thresholds, though, belong to one model (:data:`CALIBRATED_FOR`): every
 model spreads its scores differently, and a line drawn for one is meaningless on the next.
@@ -35,6 +40,7 @@ from typing import Any
 
 from protocore.contracts.memory import MemoryRecord
 
+from daedalus.memory import polarity
 from daedalus.memory.entries import fingerprint
 
 logger = logging.getLogger(__name__)
@@ -69,9 +75,10 @@ shade of meaning ("almost never leaves home" against "never leaves home"), as we
 (a mother and a father living in one city 0.83, "always" and "never answer in Russian" 0.83). From 0.88
 up every merged pair read as the same fact; 0.9 decides a third of them without a call and keeps a
 margin over the nearest distinct pair. The cosine cannot read a negation: a real note with one "not"
-added or one "can" turned to "cannot" scores 0.89 to 1.0, median 0.99, so no line separates the two.
-The lexical tier above has the same blind spot for a one-word change. A note reversed in new words
-scores 0.57 to 0.83, below this line and inside the model's shortlist, which is where it belongs: a
+added or one "can" turned to "cannot" scores 0.89 to 1.0, median 0.99, so no line separates the two;
+the lexical tier above has the same blind spot for a one-word change. Both tiers therefore pass over
+a note :func:`daedalus.memory.polarity.differ` flags and leave it to the model. A note reversed in new
+words scores 0.57 to 0.83, below this line and inside the model's shortlist, which is where it belongs: a
 lower line to save calls would start merging those. E5 needed 0.92 because all of its scores sat
 between 0.75 and 0.95."""
 COSINE_MAYBE = 0.55
@@ -140,11 +147,13 @@ def overlap(a: str, b: str) -> tuple[float, float]:
 
 
 def surely_same(a: str, b: str) -> bool:
-    """Whether two notes are one fact without asking anyone."""
+    """Whether two notes are one fact without asking anyone. Never for two notes of opposite polarity,
+    however many words they share: "не" is too short to be a stem, so "не отвечай на русском" and
+    "отвечай на русском" have every stem in common."""
     if fingerprint(a) == fingerprint(b):
         return True
     jaccard, contained = overlap(a, b)
-    return jaccard >= STEMS_SURE or contained >= CONTAINED_SURE
+    return (jaccard >= STEMS_SURE or contained >= CONTAINED_SURE) and not polarity.differ(a, b)
 
 
 def values_differ(a: str, b: str) -> bool:
@@ -199,6 +208,9 @@ NOT the same fact:
     procedure for it; a rule and the reason for another rule; a goal and a constraint of one project);
   - a related but different thing ("grows tomatoes" and "grows peppers");
   - a general note and a specific one when the specific one adds a decision of its own.
+A note that says the opposite of a candidate (always and never, allowed and forbidden, does and does
+not) is the same claim with its value changed: pick it with "values_differ" true, and never call it
+the same claim unchanged.
 When unsure, answer null: a duplicate costs little, a wrong match loses a fact. Pick at most one
 candidate per item. "values_differ" is true when it is the same claim with a changed value.
 Return exactly {"answers": [{"item": 1, "same": 2, "values_differ": false}]}, with "same": null when no
@@ -244,8 +256,11 @@ class Judge:
             if vectors is not None:
                 mine = vectors.get(text)
                 scored = sorted(((_cosine(mine, vectors[n.text]), n) for n in pool if mine is not None and n.text in vectors), key=lambda p: -p[0])
-                if scored and scored[0][0] >= COSINE_SURE:
-                    found[index] = Match(scored[0][1], "cosine", values_differ(text, scored[0][1].text), scored[0][0])
+                # Only a note of the same polarity is the same fact by cosine: its negation scores 0.99.
+                # The negation stays on the shortlist below, so the model reads the two side by side.
+                agreeing = [(score, n) for score, n in scored if score >= COSINE_SURE and not polarity.differ(text, n.text)]
+                if agreeing and agreeing[0][0] == scored[0][0]:
+                    found[index] = Match(agreeing[0][1], "cosine", values_differ(text, agreeing[0][1].text), agreeing[0][0])
                     self._count("cosine")
                     continue
                 shortlist = [n for score, n in scored if score >= COSINE_MAYBE][:SHORTLIST_SIZE]
@@ -266,7 +281,7 @@ class Judge:
                 return Match(note, "words", False, 1.0)
             jaccard, contained = overlap(text, note.text)
             score = max(jaccard, contained)
-            if (jaccard >= STEMS_SURE or contained >= CONTAINED_SURE) and (best is None or score > best[0]):
+            if (jaccard >= STEMS_SURE or contained >= CONTAINED_SURE) and (best is None or score > best[0]) and not polarity.differ(text, note.text):
                 best = (score, note)
         return Match(best[1], "words", values_differ(text, best[1].text), best[0]) if best else None
 
@@ -334,7 +349,12 @@ class Judge:
                     continue
                 index, shortlist = batch[number - 1]
                 if same is not None and 1 <= same <= len(shortlist):
-                    out[index] = Match(shortlist[same - 1], "model", differ or values_differ(queries[index][0], shortlist[same - 1].text), 0.0)
+                    chosen, text = shortlist[same - 1], queries[index][0]
+                    # A reversal the model accepts as the same claim is a changed value whatever the
+                    # model said about values: the callers then keep the newer statement, where an
+                    # unchanged claim would keep the longer text, which may be the negated one.
+                    changed = differ or values_differ(text, chosen.text) or polarity.differ(text, chosen.text)
+                    out[index] = Match(chosen, "model", changed, 0.0)
                     self._count("model")
         return out
 
