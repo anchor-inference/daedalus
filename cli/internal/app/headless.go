@@ -181,6 +181,17 @@ func (h *Headless) Run(ctx context.Context, prompt string) int {
 			}
 			stream(Record{Type: "question", SessionID: sid, RunID: run, ID: e.Question.ID, Text: text})
 			return h.finish(enc, start, sid, run, tools, ExitWaiting, "", errors.New("the agent asks: "+text+" (answer it in the app, or run without -p)"))
+		case tui.DeviceWaiting:
+			state := "resumed"
+			if e.Waiting {
+				state = "waiting"
+				progress("the turn waits for the device %s to reconnect", e.Device)
+			}
+			stream(Record{Type: "device", SessionID: sid, RunID: run, State: state, Name: e.Device})
+		case tui.ToolProgress:
+			if h.Verbose {
+				stream(Record{Type: "tool_output", SessionID: sid, RunID: run, ID: e.ID, Text: e.Text})
+			}
 		case tui.Notice:
 			stream(Record{Type: "notice", SessionID: sid, RunID: run, Text: e.Text})
 			if e.Level == tui.NoticeError {

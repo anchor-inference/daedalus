@@ -47,6 +47,7 @@ type Server struct {
 	guards    []string
 	calls     map[string]chan rpcResponse
 	sent      map[string]int
+	output    map[string]string
 	streams   map[chan struct{}]bool
 	appSubs   map[chan appEvent]bool
 	appSeq    int64
@@ -101,6 +102,7 @@ func New() *Server {
 		sessions:  map[string]*Session{},
 		calls:     map[string]chan rpcResponse{},
 		sent:      map[string]int{},
+		output:    map[string]string{},
 		streams:   map[chan struct{}]bool{},
 		appSubs:   map[chan appEvent]bool{},
 		approvals: map[string]chan string{},

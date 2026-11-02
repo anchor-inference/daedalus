@@ -138,6 +138,17 @@ func (s *Server) relayHandler(w http.ResponseWriter, r *http.Request) {
 		if json.Unmarshal(data, &msg) != nil {
 			continue
 		}
+		if msg.Method == "exec.output" {
+			var p struct {
+				ID   string `json:"id"`
+				Data string `json:"data"`
+			}
+			_ = json.Unmarshal(msg.Params, &p)
+			s.mu.Lock()
+			s.output[p.ID] += p.Data
+			s.mu.Unlock()
+			continue
+		}
 		if msg.Method == "device.guard" {
 			var p struct {
 				Guard string `json:"guard"`
@@ -262,4 +273,24 @@ func (s *Server) connLost(gen int) <-chan struct{} {
 		close(out)
 	}()
 	return out
+}
+
+// Output is what the device streamed for a request with exec.output.
+func (s *Server) Output(id string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.output[id]
+}
+
+// Cancel tells the device to end a running request, as the server does when the operator stops the
+// turn.
+func (s *Server) Cancel(ctx context.Context, id string) error {
+	s.mu.Lock()
+	conn := s.relay
+	s.mu.Unlock()
+	if conn == nil {
+		return nil
+	}
+	msg, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": "request.cancel", "params": map[string]any{"id": id}})
+	return conn.Write(ctx, websocket.MessageText, msg)
 }

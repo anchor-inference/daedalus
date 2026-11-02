@@ -45,8 +45,9 @@ on stdin is read too (`git diff | dae -p "review this"`). `-c` and `-r <session>
 - `text` (default): the final answer on stdout. With `--verbose`, the tool calls on stderr.
 - `json`: one object when the turn ends, of type `result`.
 - `stream-json`: one object per line as things happen: `init`, `text` (a piece of the answer),
-  `tool_use`, `tool_result`, `permission`, `question`, `notice`, `connection` (and `thinking` with
-  `--verbose`), and last a `result`.
+  `tool_use`, `tool_result`, `permission`, `question`, `notice`, `connection`, `device` (the turn
+  waiting for a device to reconnect, and resuming), with `--verbose` also `thinking` and `tool_output`
+  (a running command's output), and last a `result`.
 
 A `result` carries `subtype` (`success`, `error`, `unauthorized`, `unreachable`, `waiting_for_operator`,
 `timeout`, `interrupted`), `is_error`, `result` (the answer), `session_id`, `run_id`, `exit_code`,

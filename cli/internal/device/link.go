@@ -155,6 +155,8 @@ type call struct {
 	result json.RawMessage
 	err    *exec.Error
 	ended  time.Time
+	// cancel ends the call on the server's request.cancel (the operator stopped the turn).
+	cancel context.CancelFunc
 }
 
 // New returns a link; Run connects it.
@@ -393,7 +395,9 @@ func (l *Link) session(ctx context.Context) (bool, error) {
 			continue
 		}
 		if len(msg.ID) == 0 || string(msg.ID) == "null" {
-			// A notification from the server: none is defined yet beyond the welcome.
+			if msg.Method == "request.cancel" {
+				l.cancelCall(msg.Params)
+			}
 			continue
 		}
 		var id string
@@ -503,10 +507,12 @@ func (l *Link) serve(ctx context.Context, conn *websocket.Conn, rawID json.RawMe
 		return
 	}
 
+	callCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	l.mu.Lock()
 	c, seen := l.calls[id]
 	if !seen {
-		c = &call{id: id, done: make(chan struct{})}
+		c = &call{id: id, done: make(chan struct{}), cancel: cancel}
 		l.calls[id] = c
 	}
 	l.mu.Unlock()
@@ -522,7 +528,7 @@ func (l *Link) serve(ctx context.Context, conn *websocket.Conn, rawID json.RawMe
 	if l.opt.OnCall != nil {
 		l.opt.OnCall(CallEvent{ID: id, Method: method, Action: action})
 	}
-	result, callErr := l.run(ctx, method, params, action)
+	result, callErr := l.run(callCtx, id, method, params, action)
 	l.mu.Lock()
 	c.result, c.err, c.ended = result, callErr, time.Now()
 	close(c.done)
@@ -550,7 +556,7 @@ func (l *Link) awaitAndReply(ctx context.Context, c *call, rawID json.RawMessage
 }
 
 // run decides and performs one call.
-func (l *Link) run(ctx context.Context, method string, params json.RawMessage, action guard.Action) (json.RawMessage, *exec.Error) {
+func (l *Link) run(ctx context.Context, id, method string, params json.RawMessage, action guard.Action) (json.RawMessage, *exec.Error) {
 	if l.opt.Guard != nil {
 		if err := l.opt.Guard.Check(ctx, action); err != nil {
 			var refusal *guard.Refusal
@@ -564,7 +570,21 @@ func (l *Link) run(ctx context.Context, method string, params json.RawMessage, a
 			return nil, &exec.Error{Code: exec.CodeInternal, Message: err.Error()}
 		}
 	}
-	res, err := l.opt.Executor.Handle(ctx, exec.Request{Method: method, Params: params, Session: action.Session})
+	req := exec.Request{Method: method, Params: params, Session: action.Session}
+	if method == "exec.run" {
+		out := newOutputStream(l, id)
+		defer out.close()
+		req.Output = out
+	}
+	res, err := l.opt.Executor.Handle(ctx, req)
+	if err == nil && ctx.Err() != nil {
+		// Stopped by request.cancel: the command was ended, and its partial result says so.
+		var wrapped map[string]any
+		if raw, merr := json.Marshal(res); merr == nil && json.Unmarshal(raw, &wrapped) == nil {
+			wrapped["cancelled"] = true
+			res = wrapped
+		}
+	}
 	if err != nil {
 		var own *exec.Error
 		if errors.As(err, &own) {
@@ -577,6 +597,21 @@ func (l *Link) run(ctx context.Context, method string, params json.RawMessage, a
 		return nil, &exec.Error{Code: exec.CodeInternal, Message: merr.Error()}
 	}
 	return raw, nil
+}
+
+// cancelCall ends a running call the server no longer wants. Its result, the command ended part way,
+// is still filed under its id, so a later device.result answers it.
+func (l *Link) cancelCall(params json.RawMessage) {
+	var p struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(params, &p)
+	l.mu.Lock()
+	c := l.calls[p.ID]
+	l.mu.Unlock()
+	if c != nil && c.cancel != nil {
+		c.cancel()
+	}
 }
 
 // reply sends a response on whatever connection is current. With none, the result stays held for

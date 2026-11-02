@@ -78,6 +78,7 @@ type Backend struct {
 	local      map[string]chan guard.Decision
 	localN     int
 	streamUp   bool
+	parked     bool
 	device     device.Status
 	closed     bool
 }
@@ -576,6 +577,11 @@ func (b *Backend) translate(ctx context.Context, id string, env client.Envelope)
 		b.msgIndex = 0
 		out = append(out, tui.TurnStarted{RunID: env.RunID, At: now})
 	}
+	if b.parked && (env.Kind == "message_start" || env.Kind == "tool_result") {
+		// The parked call came back: the device reconnected and the turn goes on.
+		b.parked = false
+		out = append(out, tui.DeviceWaiting{Waiting: false, Since: now})
+	}
 	msgID := b.run + ":" + strconv.Itoa(b.msgIndex)
 	b.mu.Unlock()
 
@@ -614,7 +620,22 @@ func (b *Backend) translate(ctx context.Context, id string, env client.Envelope)
 		}
 		isErr, _ := p["is_error"].(bool)
 		out = append(out, tui.ToolFinished{ID: str("tool_call_id"), Output: content, IsError: isErr, At: now})
+	case "remote_output":
+		if delta := str("delta"); delta != "" {
+			out = append(out, tui.ToolProgress{ID: str("tool_call_id"), Text: delta})
+		}
 	case "tool_call_pending":
+		if str("kind") == "external_call" {
+			// The call waits for the session's home device. When that is this terminal, the
+			// reconnect resumes it on its own; the screen says what the turn is waiting for.
+			ext, _ := p["external_call_payload"].(map[string]any)
+			name, _ := ext["device_name"].(string)
+			b.mu.Lock()
+			b.parked = true
+			b.mu.Unlock()
+			out = append(out, tui.DeviceWaiting{Device: name, Waiting: true, Since: now})
+			break
+		}
 		ask, _ := p["ask_user_payload"].(map[string]any)
 		raw, _ := json.Marshal(ask["questions"])
 		var items []client.Question
@@ -623,6 +644,17 @@ func (b *Backend) translate(ctx context.Context, id string, env client.Envelope)
 			out = append(out, tui.QuestionAsked{Question: b.question(str("tool_call_id"), items)})
 		}
 	case "run_settled":
+		b.mu.Lock()
+		parked := b.parked && str("status") == "awaiting"
+		if !parked {
+			b.parked = false
+		}
+		b.mu.Unlock()
+		if parked {
+			// Parked on the device, not finished: the server resumes the turn when the device is
+			// back, and the turn's end comes then.
+			break
+		}
 		outcome := tui.TurnCompleted
 		errText := ""
 		switch str("status") {

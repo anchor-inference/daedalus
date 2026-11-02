@@ -183,6 +183,8 @@ type Request struct {
 	Params json.RawMessage
 	// Session is _meta.session_id: whose jail applies.
 	Session string
+	// Output, for exec.run, receives the command's output as it is written (see sidechan.ExecRequest).
+	Output io.Writer
 }
 
 // Handle runs one call. The error is always an *Error.
@@ -193,7 +195,7 @@ func (e *Executor) Handle(ctx context.Context, r Request) (any, error) {
 	}
 	switch r.Method {
 	case "exec.run":
-		return e.execRun(ctx, root, r.Params)
+		return e.execRun(ctx, root, r.Params, r.Output)
 	case "fs.stat":
 		var p struct {
 			Path string `json:"path"`
@@ -264,7 +266,7 @@ func (e *Executor) Handle(ctx context.Context, r Request) (any, error) {
 	return nil, &Error{Code: CodeMethodNotFound, Message: "this terminal does not serve " + r.Method}
 }
 
-func (e *Executor) execRun(ctx context.Context, root string, raw json.RawMessage) (any, error) {
+func (e *Executor) execRun(ctx context.Context, root string, raw json.RawMessage, output io.Writer) (any, error) {
 	var p struct {
 		Argv      []string          `json:"argv"`
 		Cwd       string            `json:"cwd"`
@@ -286,7 +288,7 @@ func (e *Executor) execRun(ctx context.Context, root string, raw json.RawMessage
 		return nil, err
 	}
 	res, err := e.exec.Run(ctx, sidechan.ExecRequest{Argv: p.Argv, Cwd: p.Cwd, Env: p.Env,
-		Timeout: time.Duration(p.TimeoutMs) * time.Millisecond, Stdin: p.Stdin, MaxOutput: p.MaxOutput})
+		Timeout: time.Duration(p.TimeoutMs) * time.Millisecond, Stdin: p.Stdin, MaxOutput: p.MaxOutput, Output: output})
 	if err != nil {
 		return nil, sideError(err)
 	}

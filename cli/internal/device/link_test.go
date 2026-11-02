@@ -273,3 +273,39 @@ func TestDescribeStripsTheServerPrelude(t *testing.T) {
 		t.Error("an unknown program passed as read-only")
 	}
 }
+
+func TestCancelEndsTheCommandAndOutputStreams(t *testing.T) {
+	r := newRig(t, guard.Auto, nil)
+	id := r.session + ":call-c:1"
+	got := make(chan map[string]any, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		res, _, _ := r.srv.Call(ctx, id, "exec.run", map[string]any{
+			"argv":  []string{"bash", "-c", "echo started; sleep 30; echo never"},
+			"_meta": map[string]any{"session_id": r.session, "tool_call_id": "call-c", "intent": "exec"}})
+		got <- res
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(r.srv.Output(id), "started") {
+		if time.Now().After(deadline) {
+			t.Fatal("no output was streamed")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	start := time.Now()
+	if err := r.srv.Cancel(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case res := <-got:
+		if res["cancelled"] != true || strings.Contains(res["stdout"].(string), "never") {
+			t.Errorf("result: %v", res)
+		}
+		if time.Since(start) > 10*time.Second {
+			t.Errorf("the cancel took %s", time.Since(start))
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("the command outlived its cancel")
+	}
+}

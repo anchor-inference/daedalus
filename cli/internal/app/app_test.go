@@ -105,3 +105,37 @@ func TestHistoryFromTranscript(t *testing.T) {
 		t.Errorf("%#v", h[2])
 	}
 }
+
+func TestAParkedTurnIsNotAnEndedOne(t *testing.T) {
+	b := New(Options{Client: client.New("http://127.0.0.1:1", "")})
+	defer b.Close()
+	ctx := context.Background()
+	feed := func(kind, run string, payload map[string]any) []tui.Event {
+		raw, _ := json.Marshal(payload)
+		return b.translate(ctx, "s1", client.Envelope{Kind: kind, RunID: run, Payload: raw})
+	}
+	feed("message_start", "r1", map[string]any{})
+	got := feed("tool_call_pending", "r1", map[string]any{"kind": "external_call", "external_call_payload": map[string]any{"device_name": "laptop"}})
+	if w, ok := got[0].(tui.DeviceWaiting); !ok || !w.Waiting || w.Device != "laptop" {
+		t.Fatalf("%#v", got)
+	}
+	if got := feed("run_settled", "r1", map[string]any{"status": "awaiting"}); len(got) != 0 {
+		t.Fatalf("a parked turn ended: %#v", got)
+	}
+	got = feed("message_start", "r2", map[string]any{})
+	var resumed, started bool
+	for _, e := range got {
+		if w, ok := e.(tui.DeviceWaiting); ok && !w.Waiting {
+			resumed = true
+		}
+		if _, ok := e.(tui.TurnStarted); ok {
+			started = true
+		}
+	}
+	if !resumed || !started {
+		t.Fatalf("the resumed turn: %#v", got)
+	}
+	if got := feed("run_settled", "r2", map[string]any{"status": "completed"}); len(got) != 1 {
+		t.Fatalf("the resumed turn's end: %#v", got)
+	}
+}
