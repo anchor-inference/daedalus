@@ -70,7 +70,7 @@ def test_the_end_is_written_as_the_turn_context_writes_its_clock_and_the_actions
     assert awareness.until_words({"remaining_ms": 30 * 60_000}, now) == "09:30 UTC"
     line = awareness.granted_line("the whole desktop", {**lease, "actions": 50}, loaded=True)
     assert line.startswith("- Computer: the operator has given you control of the whole desktop until 14:05 UTC (150 actions left).")
-    assert "Computer and ComputerApps (loaded), not with Exec or your own browser" in line
+    assert "Computer, ComputerUI and ComputerApps (loaded), not with Exec or your own browser" in line
 
 
 # -- the column -------------------------------------------------------------------------------------

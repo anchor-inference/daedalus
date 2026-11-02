@@ -26,7 +26,7 @@ from daedalus.security.untrusted import injection_signs
 logger = logging.getLogger(__name__)
 
 TOOLS_WORDS = (
-    "They expect on-screen work on their computer to be done with Computer and ComputerApps{loaded}, not with Exec "
+    "They expect on-screen work on their computer to be done with Computer, ComputerUI and ComputerApps{loaded}, not with Exec "
     "or your own browser; your other tools stay available for work that needs them."
 )
 NOT_GRANTED = (
@@ -164,7 +164,7 @@ def grant_steer(scope: str, lease: dict[str, Any], now: datetime | None = None) 
     before the grant, and the tools are loaded only from the next run."""
     return (
         f"[computer] The operator has just given you control of {scope} on their computer until {until_words(lease, now)} "
-        f"({actions_left(lease)}). On-screen work on their computer is now expected to be done with Computer and ComputerApps, "
+        f"({actions_left(lease)}). On-screen work on their computer is now expected to be done with Computer, ComputerUI and ComputerApps, "
         "not with Exec or your own browser. If they are not loaded yet, load them with ToolSearch(group=\"computer\")."
     )
 

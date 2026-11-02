@@ -8,6 +8,14 @@ are the contract's: the lease names a session or the call is ``1200``; a point n
 daemon handed out or it is ``1201``; a point off the picture is ``1202``; parameters are decoded
 strictly, so a misspelt one is ``-32602`` as the real daemon's is. ``fail`` makes a method's next call
 answer with any refusal a test wants.
+
+The accessibility tree is the contract's ``ax.*``: a window's ``tree`` is a list of nodes (dicts with
+``role``, ``name``, ``value``, ``states``, ``secure`` and ``children``), and each read hands out
+``@<snapshot>:e<N>`` references to the nodes one can act on (every node but a ``static`` one). A secure
+node's value is kept and never sent. A node may script what pressing it does: ``closes`` removes its
+window, ``unverified`` makes the action unconfirmed, ``needs_pointer`` refuses it with ``1007``.
+``ax`` set to ``None`` is a daemon older than trees: every ``ax.*`` method is ``-32601`` and ``info``
+says nothing of them; ``{"available": False, "reason": …}`` refuses each with ``1209``.
 """
 
 from __future__ import annotations
@@ -33,7 +41,12 @@ PARAMS: dict[str, set[str]] = {
     "apps.focus": {"session", "app", "window"},
     "lease.revoke": {"session"},
     "stop": set(),
+    "ax.snapshot": {"session", "window", "root", "surface", "depth", "interactive", "bounds", "timeout_ms"},
+    "ax.find": {"session", "window", "root", "role", "name", "value", "text", "exact", "limit", "timeout_ms"},
+    "ax.get": {"session", "ref", "property"},
+    "ax.act": {"session", "ref", "action", "text", "direction", "amount", "timeout_ms"},
 }
+AX_ACTIONS = {"click", "set_value", "clear", "type", "select", "toggle", "check", "uncheck", "expand", "collapse", "scroll", "scroll_to", "focus"}
 """Each method's parameters; anything else is refused as the daemon's strict decoding refuses it."""
 
 
@@ -53,6 +66,8 @@ class Window:
     app: dict[str, Any]
     color: tuple[int, int, int] = (200, 200, 200)
     minimized: bool = False
+    tree: list[dict[str, Any]] | None = field(default_factory=list)
+    """The window's accessibility tree under its root; ``None`` is a window with none at all."""
 
 
 @dataclass
@@ -82,6 +97,10 @@ class FakeDeskd:
     """Method → the error its next call answers with, once."""
     cursor: tuple[float, float] = (500.0, 400.0)
     shots: dict[str, Shot] = field(default_factory=dict)
+    ax: dict[str, Any] | None = field(default_factory=lambda: {"available": True, "version": "1.0.2"})
+    refs: dict[str, tuple[str, dict[str, Any]]] = field(default_factory=dict)
+    """Reference → the window id and the node it names, for every read under the lease."""
+    ax_acts: list[dict[str, Any]] = field(default_factory=list)
     token: str = field(default_factory=lambda: secrets.token_hex(32))
     _server: asyncio.AbstractServer | None = None
     _writers: set[asyncio.StreamWriter] = field(default_factory=set)
@@ -125,6 +144,7 @@ class FakeDeskd:
         self.lease = {"id": f"lease-{secrets.token_hex(3)}", "session": session, "granted_at": "2026-10-20T10:00:00Z",
                       "expires_at": "2026-10-20T10:30:00Z", "scope": scope or {"kind": "desktop"}, "max_actions": max_actions, "actions": 0}
         self.shots.clear()
+        self.refs.clear()
         return self.lease
 
     def end(self, reason: str = "expired") -> None:
@@ -200,12 +220,15 @@ class FakeDeskd:
         unknown = set(params) - PARAMS[method]
         if unknown:
             raise _Fail(-32602, f"params: json: unknown field {sorted(unknown)[0]!r}")
+        if method.startswith("ax.") and self.ax is None:
+            raise _Fail(-32601, f"method not found: {method}")
         if method in self.fail:
             code, message, data = self.fail.pop(method)
             raise _Fail(code, message, data)
         if method == "info":
             return {"version": "fake", "protocol": 1, "role": self.role, "platform": {"os": "linux", "session_type": "fake", "units": "pixels"},
-                    "displays": [self.display], "permissions": {}, "secure": {"locked": False}, **self._status(), "limits": self.limits}
+                    "displays": [self.display], "permissions": {}, "secure": {"locked": False}, **self._status(), "limits": self.limits,
+                    **({"ax": dict(self.ax)} if self.ax is not None else {})}
         if method == "lease.status":
             return self._status()
         if method == "lease.revoke":
@@ -241,6 +264,8 @@ class FakeDeskd:
             return out
         if method == "act":
             return self._act(params, lease)
+        if method.startswith("ax."):
+            return self._ax(method, params, lease)
         raise _Fail(-32601, f"no method {method}")
 
     def _window_view(self, window: Window, order: int) -> dict[str, Any]:
@@ -330,4 +355,186 @@ class FakeDeskd:
         return out
 
 
-__all__ = ["FakeDeskd", "Window"]
+    # -- the accessibility tree ----------------------------------------------------------------
+
+    def _ax(self, method: str, params: dict[str, Any], lease: dict[str, Any]) -> dict[str, Any]:
+        assert self.ax is not None
+        if not self.ax.get("available"):
+            raise _Fail(1209, "ax unavailable", {"reason": self.ax.get("reason") or "off"})
+        if method == "ax.act":
+            return self._ax_act(params, lease)
+        if method == "ax.get":
+            _, node = self._ref(str(params.get("ref") or ""))
+            prop = str(params.get("property") or "")
+            if prop in ("text", "value") and node.get("secure"):
+                return {"ref": params["ref"], "property": prop, "value": None, "secure": True}
+            return {"ref": params["ref"], "property": prop, "value": node.get(prop if prop != "text" else "value")}
+        self._serial += 1
+        snapshot = f"s{self._serial}"
+        counter = [0]
+        if params.get("root"):
+            if params.get("window") or params.get("surface"):
+                raise _Fail(-32602, "root takes no window or surface")
+            window_id, root = self._ref(str(params["root"]))
+            window = next(w for w in self.windows if w.id == window_id)
+            nodes = [root]
+            keep_root = str(params["root"])
+        else:
+            window = self._ax_window(params, lease)
+            if window.tree is None:
+                raise _Fail(1209, "no tree for this window", {"reason": "no_window"})
+            nodes = [{"role": "window", "name": window.title, "static": True, "children": window.tree}]
+            keep_root = ""
+        bounds = bool(params.get("bounds"))
+        if method == "ax.find":
+            found = [n for n in self._flat(nodes) if self._matches(n, params)]
+            matches = [self._view(n, window.id, snapshot, counter, bounds, depth=None, children=False) for n in found[: int(params.get("limit") or 50)]]
+            out: dict[str, Any] = {"snapshot_id": snapshot, "window": window.id, "matches": matches}
+            if not matches and params.get("role"):
+                out["roles_present"] = sorted({str(n.get("role")) for n in self._flat(nodes)})
+            return out
+        skeleton = params.get("depth") == "skeleton"
+        tree = self._view(nodes[0], window.id, snapshot, counter, bounds, depth=3 if skeleton else None, keep=keep_root)
+        return {"snapshot_id": snapshot, "window": window.id, "complete": True, "ref_count": counter[0], "tree": tree}
+
+    def _ax_window(self, params: dict[str, Any], lease: dict[str, Any]) -> Window:
+        wanted = str(params.get("window") or "")
+        if not wanted:
+            scope = lease["scope"]
+            if scope.get("kind") != "window":
+                raise _Fail(-32602, "window is needed under a lease wider than one window")
+            wanted = str(scope.get("window"))
+        window = next((w for w in self.windows if w.id == wanted), None)
+        if window is None:
+            raise _Fail(1001, "no such window")
+        return window
+
+    def _ref(self, ref: str) -> tuple[str, dict[str, Any]]:
+        if ref not in self.refs:
+            raise _Fail(1210, "stale ref", {"ref": ref, "reason": "unknown"})
+        window_id, node = self.refs[ref]
+        if not any(w.id == window_id for w in self.windows):
+            raise _Fail(1210, "stale ref", {"ref": ref, "reason": "window_gone"})
+        if node.get("gone"):
+            raise _Fail(1210, "stale ref", {"ref": ref, "reason": "changed"})
+        return window_id, node
+
+    def _flat(self, nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for node in nodes:
+            out.append(node)
+            out.extend(self._flat(node.get("children") or []))
+        return out
+
+    @staticmethod
+    def _matches(node: dict[str, Any], params: dict[str, Any]) -> bool:
+        exact = bool(params.get("exact"))
+
+        def like(have: Any, want: Any) -> bool:
+            a, b = str(have or "").lower(), str(want).lower()
+            return a == b if exact else b in a
+
+        if params.get("role") and str(node.get("role") or "").lower() != str(params["role"]).lower():
+            return False
+        if params.get("name") and not like(node.get("name"), params["name"]):
+            return False
+        return not (params.get("text") and not like(f"{node.get('name') or ''} {node.get('value') or ''}", params["text"]))
+
+    def _view(self, node: dict[str, Any], window: str, snapshot: str, counter: list[int], bounds: bool, *, depth: int | None, keep: str = "", children: bool = True, level: int = 0) -> dict[str, Any]:
+        view: dict[str, Any] = {"role": node.get("role")}
+        for key in ("name", "states", "secure"):
+            if node.get(key):
+                view[key] = node[key]
+        if node.get("value") not in (None, "") and not node.get("secure"):
+            view["value"] = node["value"]
+        if not node.get("static"):
+            if level == 0 and keep:
+                ref = keep
+            else:
+                counter[0] += 1
+                ref = f"@{snapshot}:e{counter[0]}"
+            self.refs[ref] = (window, node)
+            view["ref"] = ref
+        if bounds and node.get("bounds"):
+            view["bounds"] = node["bounds"]
+        kids = node.get("children") or []
+        if children and kids:
+            if depth is not None and level + 1 >= depth:
+                view["children_count"] = len(kids)
+            else:
+                view["children"] = [self._view(k, window, snapshot, counter, bounds, depth=depth, level=level + 1) for k in kids]
+        return view
+
+    def _ax_act(self, params: dict[str, Any], lease: dict[str, Any]) -> dict[str, Any]:
+        action = str(params.get("action") or "")
+        if action not in AX_ACTIONS:
+            raise _Fail(-32602, f"unknown action {action!r}")
+        window_id, node = self._ref(str(params.get("ref") or ""))
+        if action in ("set_value", "type", "select") and not params.get("text"):
+            raise _Fail(-32602, f"{action} needs text")
+        if node.get("needs_pointer"):
+            raise _Fail(1007, "needs pointer", {"reason": "needs_pointer", "delivery": "not_delivered"})
+        lease["actions"] += 1
+        self.ax_acts.append(dict(params))
+        states = list(node.get("states") or [])
+        delivery = "delivered"
+        if action == "set_value":
+            node["value"] = params["text"]
+        elif action == "clear":
+            node["value"] = ""
+        elif action == "select":
+            node["value"] = params["text"]
+        elif action in ("check", "uncheck", "toggle"):
+            on = "checked" in states
+            want = not on if action == "toggle" else action == "check"
+            if want == on:
+                delivery = "not_delivered"
+            elif want:
+                states.append("checked")
+            else:
+                states.remove("checked")
+        elif action in ("expand", "collapse"):
+            states = [s for s in states if s not in ("expanded", "collapsed")] + ["expanded" if action == "expand" else "collapsed"]
+            if action == "expand" and node.get("hidden_children"):
+                node["children"] = node.pop("hidden_children")
+        node["states"] = states
+        out: dict[str, Any] = {"action": action, "ref": params["ref"], "window": window_id, "delivery": delivery,
+                               "verified": not node.get("unverified"), "actions_left": lease["max_actions"] - lease["actions"], "duration_ms": 1}
+        if action == "click" and node.get("closes"):
+            node["gone"] = True
+            self.windows = [w for w in self.windows if w.id != window_id]
+            self.focused = self.windows[0].id if self.windows else ""
+            return out
+        post: dict[str, Any] = {"role": node.get("role"), "states": states}
+        if node.get("value") not in (None, "") and not node.get("secure"):
+            post["value"] = node["value"]
+        out["post_state"] = post
+        if node.get("opens"):
+            out["surfaces"] = [node["opens"]]
+        return out
+
+
+def contact_form(window_id: str = "30") -> Window:
+    """A five-field form with a Send button, as a native app draws one: the window the tree's tests and
+    its token measurement drive. Pressing Send closes it."""
+    def field_(name: str, role: str = "text field") -> dict[str, Any]:
+        return {"role": role, "name": name, "value": "", "states": ["enabled", "focusable", "editable"]}
+
+    tree = [
+        {"role": "toolbar", "name": "Formatting", "static": True, "children": [
+            {"role": "button", "name": "Bold", "states": ["enabled"]},
+            {"role": "button", "name": "Italic", "states": ["enabled"]},
+            {"role": "button", "name": "Attach file", "states": ["enabled"]},
+        ]},
+        {"role": "group", "name": "Contact details", "static": True, "children": [
+            field_("Name"), field_("Email"), field_("Phone"), field_("Subject"), field_("Message", "text area"),
+            {"role": "check box", "name": "Send me a copy", "states": ["enabled"]},
+        ]},
+        {"role": "button", "name": "Cancel", "states": ["enabled"]},
+        {"role": "button", "name": "Send", "states": ["enabled"], "closes": True},
+    ]
+    return Window(window_id, "Contact us — Example App", {"x": 200, "y": 120, "w": 720, "h": 640},
+                  {"id": "com.example.app", "name": "Example App", "pid": 503, "bundle_id": "com.example.app"}, (240, 240, 240), tree=tree)
+
+
+__all__ = ["FakeDeskd", "Window", "contact_form"]

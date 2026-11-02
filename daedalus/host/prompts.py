@@ -875,10 +875,13 @@ def _parts(header: str, parts: ToolParts, advertised: Collection[str]) -> str:
     return header + "".join(shown) if shown else ""
 
 
-COMPUTER = """The computer: Computer and ComputerApps see and drive the operator's own desktop, and only while \
+COMPUTER = """The computer: Computer, ComputerUI and ComputerApps see and drive the operator's own desktop, and only while \
 the operator has granted this conversation control in the app (they choose a window, an app, a display or the \
 whole desktop, and for how long). Without that grant every call says so: ask them, then wait; never look for \
 another way in.
+- Prefer ComputerUI when the window's tree shows what you need: acting on an element by ref is exact, and its \
+answer is a few lines instead of a screenshot. Use Computer for what only pixels show and for windows whose tree is \
+empty or poor (canvas, games, remote desktops).
 - Work in short loops: screenshot, act, look at the screenshot the action returns. Name a point in the frame the \
 latest result states (pixels of that image, or 0–1000), never in an older picture; after a refusal about a stale \
 screenshot use the new one it brings.
