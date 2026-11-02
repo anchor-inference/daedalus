@@ -2329,6 +2329,12 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             # Bound before the first message, so its first turn already knows where its hands are.
             devices, device_id = remote_home
             await devices.bind_home(device_id, state.session.id, body.cwd)
+            # The relay keeps its own map of whose hands a session has, read once at start, and the
+            # session's tools were built when it was made, pointing at this server: binding re-points
+            # them at the device before the first turn, which would otherwise run on the server.
+            remote_turns = app.extensions.get("remote_turns")
+            if remote_turns is not None:
+                remote_turns.bind(state.session.id, device_id, body.cwd)
             remote_live = app.extensions.get("remote_control")
             if body.guard is not None and remote_live is not None:
                 await remote_live.set_guard(device_id, state.session.id, body.guard)  # type: ignore[attr-defined]

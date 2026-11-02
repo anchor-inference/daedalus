@@ -289,6 +289,28 @@ async def test_resume_lists_the_operators_conversations_and_hands_move_on_reques
     assert laptop_id != desktop_id
 
 
+async def test_a_conversation_made_or_moved_from_a_terminal_runs_its_tools_on_that_terminal(rig: Rig) -> None:
+    # The relay's own map of whose hands a session has is told by the create and hands routes; without
+    # it the session's tools stay pointed at this server.
+    from daedalus.extensions import remote_relay as relay_extension
+    from daedalus.remote.hands import DeviceExecBackend
+
+    await relay_extension.install(rig.app)  # type: ignore[arg-type]
+    turns = rig.app.extensions["remote_turns"]
+    laptop_id, laptop = await rig.pair("laptop")
+    desktop_id, desktop = await rig.pair("desktop")
+    sid = await rig.remote(laptop, "/home/you/a")
+    state = rig.manager.live_state(sid)
+    assert state is not None and turns.home_of(state) == {"device_id": laptop_id, "cwd": "/home/you/a"}
+    backend = state.services.exec_backend if state.services is not None else None
+    assert isinstance(backend, DeviceExecBackend) and backend.device_id == laptop_id
+    assert (await rig.client.post(f"/api/cli/sessions/{sid}/attach", headers=device(desktop))).status_code == 200
+    assert (await rig.client.post(f"/api/cli/sessions/{sid}/hands", headers=device(desktop), json={"cwd": "/srv/you/a"})).status_code == 200
+    assert turns.home_of(state) == {"device_id": desktop_id, "cwd": "/srv/you/a"}
+    backend = state.services.exec_backend if state.services is not None else None
+    assert isinstance(backend, DeviceExecBackend) and backend.device_id == desktop_id
+
+
 async def test_the_guard_presence_and_the_live_mark(rig: Rig) -> None:
     _, token = await rig.pair()
     sid = await rig.remote(token)

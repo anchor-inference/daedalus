@@ -344,6 +344,9 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         if session_id in manager.active_sessions():
             raise HTTPException(409, "a turn of this conversation is running; stop it or wait for it to end")
         await devices().move_home(device_id, session_id, body.cwd)
+        remote_turns = app.extensions.get("remote_turns")
+        if remote_turns is not None:
+            remote_turns.bind(session_id, device_id, body.cwd)
         return await one_row(session_id, device_id)
 
     @api.put("/api/cli/sessions/{session_id}/guard")
