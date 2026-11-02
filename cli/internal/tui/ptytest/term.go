@@ -93,6 +93,11 @@ func Start(t testing.TB, cmd *exec.Cmd, cols, rows int, opts ...Option) (*Term, 
 	}
 	cmd.Env = append(cmd.Env, "TERM=xterm-256color", "COLORTERM=truecolor")
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
+	if errors.Is(err, pty.ErrUnsupported) && t != nil {
+		// Windows has ConPTY, not the Unix pseudo-terminal this harness drives. The interface's
+		// screens are still covered there by the golden frames and the model-level tests.
+		t.Skip("no Unix pseudo-terminal on this system")
+	}
 	if err != nil {
 		return nil, fmt.Errorf("start %s in a pty: %w", cmd.Path, err)
 	}

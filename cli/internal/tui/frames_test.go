@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -223,4 +224,39 @@ func TestFrameWaitingForTheHomeDevice(t *testing.T) {
 	h.apply(DeviceWaiting{Device: "laptop", Waiting: false})
 	h.lacks("turn paused")
 	h.contains("laptop is back · turn resumed")
+}
+
+// The frames do not depend on the system the test runs on: a macOS run draws the macOS bullet only
+// when asked to, and the golden frames pin the portable one.
+func TestFramesPinThePlatformMarkers(t *testing.T) {
+	h := newHarness(t, 100, 30)
+	startTurn(h, "x")
+	h.apply(ToolStarted{ID: "t1", Name: "Read", Input: map[string]any{"path": "/work/project/a.go"}})
+	if !strings.Contains(h.plain(), "● Read(a.go)") {
+		t.Fatalf("the pinned frame lacks the portable bullet and the relative path:\n%s", h.plain())
+	}
+	mac := newHarness(t, 100, 30, func(o *Options) { o.Platform = "darwin" })
+	if mac.m.theme.Glyphs.Bullet != "⏺" {
+		t.Fatalf("macOS draws %q", mac.m.theme.Glyphs.Bullet)
+	}
+}
+
+func TestRelPathCutsTheFolderInEitherSlashForm(t *testing.T) {
+	for _, tc := range []struct{ p, cwd, want string }{
+		{"/work/project/internal/a.go", "/work/project", "internal/a.go"},
+		{"/work/project/internal/a.go", "/work/project/", "internal/a.go"},
+		{"/work/projectx/a.go", "/work/project", "/work/projectx/a.go"},
+		{"/elsewhere/a.go", "/work/project", "/elsewhere/a.go"},
+		{"relative/a.go", "/work/project", "relative/a.go"},
+	} {
+		if got := relPath(tc.p, tc.cwd); got != tc.want {
+			t.Errorf("relPath(%q, %q) = %q, want %q", tc.p, tc.cwd, got, tc.want)
+		}
+	}
+	// A backslash is a separator only on Windows; there a native path is cut and shown with slashes.
+	if runtime.GOOS == "windows" {
+		if got := relPath(`C:\work\project\internal\a.go`, `C:\work\project`); got != "internal/a.go" {
+			t.Errorf("a native Windows path gave %q", got)
+		}
+	}
 }

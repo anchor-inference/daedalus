@@ -1,13 +1,13 @@
 package theme
 
-import "runtime"
-
 // Glyphs are the markers that open each kind of line, in two sets that occupy the same cells.
 //
 // The drawn set copies Claude Code's markers. The one deliberate difference is the tool bullet:
 // Claude Code draws U+23FA on macOS, but no widely installed monospace font on Linux carries it, so
 // it renders as a notdef box there; the filled circle is in every font and is what Claude Code
-// itself falls back to off macOS.
+// itself falls back to off macOS. The set below is the portable one; New swaps in U+23FA for a
+// macOS platform. The platform is an option rather than read here, so a test pins it: reading the
+// running system made every golden frame differ on the macOS runner.
 type Glyphs struct {
 	// Bullet opens a tool call and an answer.
 	Bullet string
@@ -40,7 +40,7 @@ type Glyphs struct {
 
 // UnicodeGlyphs is the drawn set.
 var UnicodeGlyphs = Glyphs{
-	Bullet:     bullet(),
+	Bullet:     "●",
 	Result:     "⎿",
 	Prompt:     ">",
 	Pointer:    "❯",
@@ -88,12 +88,8 @@ var ASCIIGlyphs = Glyphs{
 	Corner:     "+",
 }
 
-func bullet() string {
-	if runtime.GOOS == "darwin" {
-		return "⏺"
-	}
-	return "●"
-}
+// macBullet is the record mark Claude Code draws on macOS, where the system fonts carry it.
+const macBullet = "⏺"
 
 // SpinnerFrame is the n-th frame of the spinner, played forward and then back so the animation
 // breathes rather than jumping from the last glyph to the first.

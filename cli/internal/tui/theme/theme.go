@@ -11,6 +11,7 @@ package theme
 import (
 	"image/color"
 	"os"
+	"runtime"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -176,12 +177,22 @@ type Options struct {
 	Plain bool
 	// ASCII draws the fallback markers.
 	ASCII bool
+	// Platform is the GOOS whose markers are drawn; empty is the running system. Tests pin it so a
+	// frame is the same on every runner.
+	Platform string
 }
 
 // New builds the theme an Options names. An unknown name falls back to auto rather than failing:
 // a settings file from a newer version must not stop the program from starting.
 func New(o Options) *Theme {
 	t := &Theme{Plain: o.Plain, Glyphs: UnicodeGlyphs}
+	platform := o.Platform
+	if platform == "" {
+		platform = runtime.GOOS
+	}
+	if platform == "darwin" {
+		t.Glyphs.Bullet = macBullet
+	}
 	if o.ASCII {
 		t.Glyphs = ASCIIGlyphs
 	}

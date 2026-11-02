@@ -34,3 +34,7 @@ desktop/testdata/** -text
 # that tree as an archive on its first run: 84 MB, minutes on a home connection, for files nothing at
 # runtime reads. GitHub still shows them in the README; only the archive leaves them out.
 docs/screenshots/** export-ignore
+
+# The terminal client's golden frames are compared with what its code draws, line for line. A
+# Windows checkout turning them into CRLF made every frame differ on the Windows runner.
+cli/**/testdata/** text eol=lf
