@@ -103,7 +103,11 @@ type Options struct {
 	// Server is the API's base URL (http or https); the relay is at /api/cli/relay under it.
 	Server string
 	// Token is the device token. The static API token cannot open the relay.
-	Token         string
+	Token string
+	// Client names this process to the server, the id its presence reports carry: a device holds one
+	// connection per process, so two terminals on one machine do not replace each other. New makes one
+	// up when it is empty.
+	Client        string
 	ClientVersion string
 	Executor      *exec.Executor
 	Guard         *guard.Guard
@@ -175,6 +179,9 @@ func New(opt Options) *Link {
 	}
 	if opt.Sessions == nil {
 		opt.Sessions = func() []SessionGuard { return nil }
+	}
+	if opt.Client == "" {
+		opt.Client = fmt.Sprintf("cli-%012x", rand.Uint64()&0xffffffffffff)
 	}
 	log := opt.Log
 	if log == nil {
@@ -442,6 +449,7 @@ func (l *Link) hello() map[string]any {
 	}
 	return map[string]any{
 		"protocol":       Protocol,
+		"client":         l.opt.Client,
 		"client_version": l.opt.ClientVersion,
 		"os":             runtime.GOOS,
 		"arch":           runtime.GOARCH,

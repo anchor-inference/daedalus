@@ -113,6 +113,9 @@ func randomHex(n int) string {
 	return hex.EncodeToString(buf)
 }
 
+// ClientID is this process's id, the same in presence, the event stream and the device connection.
+func (b *Backend) ClientID() string { return b.clientID }
+
 // Events is the stream the interface reads.
 func (b *Backend) Events() <-chan tui.Event { return b.events }
 

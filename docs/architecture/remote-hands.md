@@ -24,6 +24,17 @@ service has no daemon on a device yet and refuses a terminal there by that name.
 
 A subagent of a remote conversation works on its leader's device, in the same folder.
 
+## Which connection
+
+A device holds one relay connection per running client process (`client` in its `device.hello`), so
+`DeviceHub.links` is keyed by device and client. Every connection carries the device's home sessions as
+well as the ones its process shows; `RemoteControl` (`daedalus/remote/control.py`) records what each
+carries and names a session's carrier, the newest connection that carries it, and that is the link
+the backend sends to. Binding a conversation to a device (`RemoteTurns.bind`, called by the create and
+hands routes) re-declares the device's connections at once, so the first call of a new conversation does
+not wait for the client to say it shows it. The control book, not the hub, announces
+`device.connection` when a device's first connection comes up and its last goes.
+
 ## One request
 
 Each tool invocation opens a `CallScope` (`daedalus/host/call_scope.py`): its session, its tool call

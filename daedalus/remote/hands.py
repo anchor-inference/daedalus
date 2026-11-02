@@ -161,7 +161,7 @@ class DeviceExecBackend:
         )
 
     def _windows(self) -> bool:
-        link = self.hub.link_of(self.device_id)
+        link = self.hub.link_of(self.device_id, self.session_id)
         return link is not None and link.hello.os.lower().startswith("windows")
 
     # -- the commands ----------------------------------------------------------------------------
@@ -227,7 +227,7 @@ class DeviceExecBackend:
         sink = self._sink(scope.tool_call_id) if stream else None
         if entry is not None and entry.state == entries.SENT:
             return await self._account(scope, request_id, method, timeout=timeout, sink=sink)
-        link = self.hub.link_of(self.device_id)
+        link = self.hub.link_of(self.device_id, self.session_id)
         record = {"session_id": self.session_id, "tool_call_id": scope.tool_call_id, "seq": seq, "device_id": self.device_id, "tool": scope.tool, "method": method, "intent": intent, "title": title}
         if link is None:
             await self.journal.record(request_id, **record, state=entries.HELD)
@@ -260,7 +260,7 @@ class DeviceExecBackend:
 
     async def _account(self, scope: call_scope.CallScope, request_id: str, method: str, *, timeout: float, sink: _OutputSink | None) -> Any:
         """A request an earlier link carried and nobody heard the answer to: what the terminal says of it."""
-        link = self.hub.link_of(self.device_id)
+        link = self.hub.link_of(self.device_id, self.session_id)
         if link is None:
             raise self._pause(scope, request_id, method, entries.UNKNOWN)
         held = link.hello.known.get(request_id)
@@ -294,7 +294,7 @@ class DeviceExecBackend:
         """A request of the host's own (a notes file read at a run's start, an attachment put in place):
         audited like the rest, never parked, failing as an ``OSError`` when the terminal is away."""
         request_id = f"{self.session_id}:host-{secrets.token_hex(6)}:1"
-        link = self.hub.link_of(self.device_id)
+        link = self.hub.link_of(self.device_id, self.session_id)
         if link is None:
             raise ConnectionError(OFFLINE)
         await self.journal.record(request_id, session_id=self.session_id, tool_call_id="", seq=1, device_id=self.device_id, tool="Daedalus", method=method, intent=intent, title=title, state=entries.SENT)
@@ -402,7 +402,7 @@ class DeviceFS(ShellFS):
         self._intent = "read"
 
     def _native(self, name: str) -> bool:
-        link = self.backend.hub.link_of(self.backend.device_id)
+        link = self.backend.hub.link_of(self.backend.device_id, self.backend.session_id)
         if link is None:
             # Away: assume the calls every client serves, so the request is journaled and the call parks
             # on it; the fallback would park on a shell command instead, which says less of what it was.

@@ -64,6 +64,7 @@ class RemoteTurns:
         self._read_homes = homes
         self._homes: dict[str, tuple[str, str]] = {}
         self._output_tails: dict[str, asyncio.Task[None]] = {}
+        self._rebinds: set[asyncio.Task[None]] = set()
         hub.on_connect.append(self.device_connected)
 
     async def load(self) -> None:
@@ -133,10 +134,19 @@ class RemoteTurns:
         machine). A loaded session is pointed there at once; its next call goes to the new device."""
         if not cwd.strip():
             raise ValueError("a remote conversation needs the folder it works in")
+        before = self._homes.get(session_id)
         self._homes[session_id] = (device_id, cwd)
         state = self.manager.live_state(session_id)
         if state is not None:
             self.manager.register_services(state)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:  # bound before the host runs: the links carry it from their hello
+            return
+        for device in {device_id, *((before[0],) if before is not None else ())}:
+            task = loop.create_task(self.hub.rebound(device), name=f"relay-rebound:{device}")
+            self._rebinds.add(task)
+            task.add_done_callback(self._rebinds.discard)
 
     async def bound_to(self, device_id: str) -> list[dict[str, str]]:
         """The conversations whose own hands are on ``device_id``, for ``device.welcome``."""

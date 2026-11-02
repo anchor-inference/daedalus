@@ -32,8 +32,10 @@ from daedalus.extensions import api_remote_relay
 
 
 class FakeTerminal:
-    def __init__(self, url: str, token: str, root: Path, *, fs: tuple[str, ...] = ("stat", "list", "read", "write", "mkdir"), guard: str = "auto") -> None:
+    def __init__(self, url: str, token: str, root: Path, *, fs: tuple[str, ...] = ("stat", "list", "read", "write", "mkdir"), guard: str = "auto", client: str = "") -> None:
         self.url = url
+        self.client = client
+        """The process this client says it is; one link per process of a device."""
         self.token = token
         self.root = root
         self.fs = fs
@@ -52,6 +54,7 @@ class FakeTerminal:
         self.running: dict[str, asyncio.Task[None]] = {}
         self.welcome: dict[str, Any] | None = None
         self._ws: ClientConnection | None = None
+        self.close_code: int | None = None
         self._reader: asyncio.Task[None] | None = None
         self.closed = asyncio.Event()
 
@@ -67,7 +70,7 @@ class FakeTerminal:
         self.closed = asyncio.Event()
         self._ws = await connect(self.url, additional_headers=headers, open_timeout=5)
         params = hello if hello is not None else {
-            "protocol": 1, "client_version": "test", "os": "linux", "arch": "amd64", "shell": "/bin/bash", "home": str(self.root),
+            "protocol": 1, "client": self.client, "client_version": "test", "os": "linux", "arch": "amd64", "shell": "/bin/bash", "home": str(self.root),
             "capabilities": {"exec": True, "fs": list(self.fs), "pty": False},
             "sessions": [{"session_id": sid, "guard": self.guard} for sid in self.sessions],
             "known": self.known(),
@@ -101,6 +104,7 @@ class FakeTerminal:
         except Exception:  # noqa: BLE001 — a closed socket ends the reader
             pass
         finally:
+            self.close_code = ws.close_code
             self.closed.set()
 
     async def _send(self, ws: ClientConnection | None, message: dict[str, Any]) -> bool:

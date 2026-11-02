@@ -16,8 +16,9 @@ import (
 // which the server's own test suite drives: it connects the device link to the server named by
 // DAEDALUS_TEST_RELAY_SERVER (the API's http base) with DAEDALUS_TEST_RELAY_TOKEN, under the guard of
 // DAEDALUS_TEST_RELAY_GUARD, and serves until the file DAEDALUS_TEST_RELAY_STOP appears or the server
-// ends the link for good, writing how it ended into DAEDALUS_TEST_RELAY_STATUS. Without the variables
-// it skips.
+// ends the link for good, writing how it ended into DAEDALUS_TEST_RELAY_STATUS.
+// DAEDALUS_TEST_RELAY_CLIENT names the process, so the server's test can replace it on purpose.
+// Without the variables it skips.
 func TestServeAnExternalRelay(t *testing.T) {
 	server := os.Getenv("DAEDALUS_TEST_RELAY_SERVER")
 	if server == "" {
@@ -34,7 +35,8 @@ func TestServeAnExternalRelay(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	link := device.New(device.Options{Server: server, Token: os.Getenv("DAEDALUS_TEST_RELAY_TOKEN"), ClientVersion: "test",
+	link := device.New(device.Options{Server: server, Token: os.Getenv("DAEDALUS_TEST_RELAY_TOKEN"),
+		Client: os.Getenv("DAEDALUS_TEST_RELAY_CLIENT"), ClientVersion: "test",
 		Executor: ex, Guard: guard.New(level, nil), MinBackoff: 300 * time.Millisecond, MaxBackoff: time.Second,
 		OnStatus: func(s device.Status) { t.Logf("link %s %v", s.State, s.Err) }})
 	ended := make(chan error, 1)

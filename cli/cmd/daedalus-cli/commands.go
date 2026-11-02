@@ -358,7 +358,8 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) int {
 		check("contract", nil, strconv.Itoa(me.Server.Contract))
 	}
 	if me.Device.Connected {
-		// Opening a second connection would replace the running client's.
+		// A running client's connection already proves the relay; there is nothing more to learn by
+		// opening one of its own.
 		check("device connection", nil, "up (held by a running daedalus-cli)")
 	} else {
 		linkCtx, stop := context.WithTimeout(ctx, 10*time.Second)

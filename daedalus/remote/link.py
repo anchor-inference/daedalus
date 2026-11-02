@@ -38,6 +38,7 @@ CLOSE_PROTOCOL = 4400
 CLOSE_UNAUTHORIZED = 4401
 CLOSE_FORBIDDEN = 4403
 CLOSE_REPLACED = 4409
+CLOSE_TOO_MANY = 4429
 CLOSE_GOING_AWAY = 1001
 CLOSE_UNRESPONSIVE = 1011
 
@@ -99,6 +100,8 @@ class Hello:
     """What the client said about itself in ``device.hello``."""
 
     protocol: int = PROTOCOL
+    client: str = ""
+    """The process's own id (the one its presence reports carry): a device holds one link per process."""
     client_version: str = ""
     os: str = ""
     arch: str = ""
@@ -127,6 +130,7 @@ class Hello:
         capabilities = params.get("capabilities")
         return cls(
             protocol=int(params.get("protocol") or PROTOCOL),
+            client=str(params.get("client") or "")[:128],
             client_version=str(params.get("client_version") or "")[:64],
             os=str(params.get("os") or "")[:32],
             arch=str(params.get("arch") or "")[:32],
@@ -322,6 +326,7 @@ __all__ = [
     "CLOSE_GOING_AWAY",
     "CLOSE_PROTOCOL",
     "CLOSE_REPLACED",
+    "CLOSE_TOO_MANY",
     "CLOSE_UNAUTHORIZED",
     "CLOSE_UNRESPONSIVE",
     "CONTRACT",

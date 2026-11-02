@@ -365,13 +365,15 @@ opened with an `http://` or `https://` `Origin` (a web page) is refused before a
 
 **One connection per process.** Each running client holds its own connection, named by `client` in
 its `device.hello` (the same per-process id it uses for presence), and carries the sessions that
-process shows. Two terminals open on one laptop are two connections and do not replace each other. A
-session's calls go to the connection of its home device that carries it; when two processes show the
-same session, to the one that declared it last. A new connection with the `client` of one that is
+process shows and every home session of the device (those in `device.welcome`'s `bound`, and any bound
+later while it is up). Two terminals open on one laptop are two connections and do not replace each
+other. A session's calls go to the connection of its home device that carries it; when two carry it,
+to the one that declared it last. A new connection with the `client` of one that is
 still open (the same process reconnecting over a half-open socket) replaces it, and the old one is
 closed with `4409`, which the client treats as final for that socket. A device holds at most 8
-connections; a ninth is closed with `4429`. A home session that no connection carries is offline for
-its tools: its turn waits (see Disconnects) even while other processes of the device are connected.
+connections; a ninth is closed with `4429`. Since every connection carries the home sessions, a home
+session's tools are offline only when no process of its device is connected, and then its turn waits
+(see Disconnects).
 
 **Frames.** Text frames carry JSON-RPC 2.0 messages, exactly ptyd's control channel
 (`docs/architecture/terminals.md`, "The control channel") without the length prefix, which the
@@ -412,8 +414,11 @@ channels, with these differences:
 | `fs.stat` | `{path}` → `{exists, type, size, mtime, mode}` | |
 | `fs.list` | `{path, glob?, sort?, limit? ≤ 5000}` → `{entries[{name, type, size, mtime}], truncated}` | |
 | `fs.read` | `{path, offset?, max? ≤ 4 MiB}` → `{data_b64, offset, size, eof}` | |
-| `fs.write` | `{path, offset, data_b64, final?}` → `{size, created}` | anywhere under the root, not only an inbox; offset 0 writes a temporary file beside the target, and the piece with `final: true` renames it over the target, so a dropped write never leaves a cut file |
+| `fs.write` | `{path, offset, data_b64, final?}` → `{size, created}` (pieces of at most 384 KiB raw; an empty file is one piece) | anywhere under the root, not only an inbox; offset 0 writes a temporary file beside the target, and the piece with `final: true` renames it over the target, so a dropped write never leaves a cut file |
 | `fs.mkdir` | `{path}` → `{created}` | anywhere under the root |
+| `fs.find` | `{path, pattern, limit}` → `{paths: [<relative path>]}` | not in ptyd; optional, sent only when `capabilities.fs` lists `find`, otherwise the server runs `find` through `exec.run` |
+| `fs.search` | `{path, pattern, glob?, case_insensitive, limit}` → `{lines: ["<path>:<line>:<text>"]}` | not in ptyd; optional, as `fs.find`; `pattern` is a regular expression, `limit` caps the lines in all |
+| `device.result` | `{id}` → the result or the error the request with that id ended with | not in ptyd; the request's own id is `"<request id>/result"`; `1001` when the client no longer holds it (see Disconnects) |
 
 Every request's `params` also carry `_meta`, which ptyd does not have:
 
@@ -447,9 +452,19 @@ the server turns it into the tool's result for the agent (`The operator refused 
 - `device.guard {"session_id", "guard"}`: the operator moved the guard (Shift+Tab). The same as
   `PUT /api/cli/sessions/{id}/guard`; either may be used.
 - `device.sessions {"sessions": [{"session_id", "guard"}]}`: the sessions this process shows changed.
+- `exec.output {"id": "<request id>", "data": "<text>"}`: output of a running `exec.run` as it is
+  written, sent for requests whose `intent` is `exec`. The server shows it live (`remote_output` on the
+  session stream, never stored); the request's result still carries all of it. Best effort: nothing
+  is replayed after a drop.
 
-**Keepalive.** The server pings every 20 seconds (the WebSocket's own ping); a client that sees no
-frame for 60 seconds reconnects.
+**Notifications, server to device.**
+
+- `request.cancel {"id"}`: the operator stopped the turn while the request ran; the client ends the
+  command (its process group) and answers the request with what it had.
+
+**Keepalive.** The server's WebSocket pings every 20 seconds (the WebSocket's own ping); a client that
+sees no frame for 60 seconds reconnects, and pings the server itself halfway through such a silence, so
+a proxy that swallows the server's pings does not cost a reconnect a minute.
 
 **Closing codes.** `4400` protocol error, `4401` token invalid or revoked (log in again), `4403` not
 allowed, `4409` replaced by a newer connection of the same process (do not reconnect this socket),

@@ -157,6 +157,37 @@ async def test_a_second_connection_of_the_same_device_replaces_the_first(setting
         await second.disconnect()
 
 
+async def test_two_processes_of_one_device_each_keep_their_link_and_the_newest_serves(settings: Settings, db: Database, root: Path) -> None:
+    provider = ScriptedProvider([{"tool": "Exec", "args": {"command": "echo one"}}, {"text": "done"}, {"tool": "Exec", "args": {"command": "echo two"}}, {"text": "done"}])
+    async with rig(settings, db, provider, root) as built:
+        older, newer = built.terminal(client="p1"), built.terminal(client="p2")
+        await older.connect()
+        await newer.connect()
+        # Bound while both are up: the links carry it at once, without the clients declaring it.
+        session_id = await built.session()
+        await until(lambda: built.hub.link_of(DEVICE, session_id) is not None, "the new conversation is carried", timeout=5)
+        assert not older.closed.is_set() and not newer.closed.is_set()
+        await built.manager.submit(session_id, "first")
+        assert await built.settled(1) == ["completed"]
+        assert (len(older.executed), len(newer.executed)) == (0, 1), "the newest link carries the session"
+        # The newest process goes: the other one serves, and the device stays connected.
+        await newer.disconnect()
+        await until(lambda: built.hub.link_of(DEVICE, session_id) is not None and built.hub.link_of(DEVICE, session_id).hello.client == "p1", timeout=5)
+        assert [p["connected"] for name, p in built.published if name == "device.connection"] == [True]
+        await built.manager.submit(session_id, "second")
+        assert await built.settled(2) == ["completed", "completed"]
+        assert (len(older.executed), len(newer.executed)) == (1, 1)
+        # The same process reconnecting over a half-open socket replaces its own link, and only it.
+        again = built.terminal(client="p1")
+        await again.connect()
+        await asyncio.wait_for(older.closed.wait(), 5)
+        assert older.close_code == 4409
+        assert built.hub.connected(DEVICE)
+        await again.disconnect()
+        await until(lambda: not built.hub.connected(DEVICE), timeout=5)
+        assert [p["connected"] for name, p in built.published if name == "device.connection"] == [True, False]
+
+
 async def test_the_welcome_names_the_conversations_bound_to_the_device_and_guards_stay_in_scope(settings: Settings, db: Database, root: Path) -> None:
     async with rig(settings, db, ScriptedProvider([]), root) as built:
         session_id = await built.session()
@@ -400,7 +431,8 @@ async def test_revoking_the_device_ends_its_live_relay(settings: Settings, db: D
         await built.hub.revoked(DEVICE)
         await asyncio.wait_for(client.closed.wait(), 5)
         await until(lambda: not built.hub.connected(DEVICE), timeout=5)
-        assert ("device.connection", {"device_id": DEVICE, "connected": False}) in built.published
+        # Announced by the control book, which keeps when the device went.
+        assert [(p["connected"], bool(p["disconnected_at"])) for name, p in built.published if name == "device.connection"] == [(True, False), (False, True)]
 
 
 async def test_a_message_sent_while_the_turn_waits_is_queued_for_it_not_taken_as_an_answer(settings: Settings, db: Database, root: Path) -> None:

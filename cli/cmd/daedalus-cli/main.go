@@ -198,7 +198,7 @@ func (e *env) backend(ctx context.Context, interactive bool) (*app.Backend, *gua
 	b := app.New(app.Options{Client: e.client, Executor: executor, Guard: g, Cwd: e.cwd, Version: version,
 		Profile: e.sel.Name, Config: e.cfg, Store: e.store, StoreBackend: e.source, Interactive: interactive})
 	if client.IsDeviceToken(e.token) {
-		link := device.New(device.Options{Server: e.client.Base(), Token: e.token, ClientVersion: version,
+		link := device.New(device.Options{Server: e.client.Base(), Token: e.token, Client: b.ClientID(), ClientVersion: version,
 			Executor: executor, Guard: g, Sessions: b.ShownSessions, OnStatus: b.DeviceStatus, Log: e.log})
 		b.AttachLink(link)
 		ended := make(chan error, 1)

@@ -4,8 +4,11 @@
 :meth:`DeviceHub.serve`, which authenticates the device from the ``Authorization: Device <token>``
 of the upgrade request, reads its ``device.hello``, answers ``device.welcome`` with the
 conversations whose hands are on it, and carries the link until either side ends it. One link per
-device: a second connection of the same device replaces the first (``4409``), which is what a laptop
-that woke from sleep with a dead socket does.
+process of the client, named by ``client`` in its hello: two terminals open on one laptop are two links
+and do not take each other's place. A new connection with the ``client`` of a link that is still open
+replaces it (``4409``), which is what a laptop that woke from sleep with a dead socket does. A
+session's calls go to the link the control book names as its carrier, the newest of those that carry
+it; every link carries the device's home sessions, so any process of the device can serve them.
 
 Who a token belongs to is not this module's business: :class:`DeviceDirectory` answers it, and the
 pairing's store (``daedalus.remote.devices.Devices``) implements it. What a client reports about the
@@ -23,12 +26,14 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from daedalus.remote.link import (
     CLOSE_GOING_AWAY,
     CLOSE_PROTOCOL,
     CLOSE_REPLACED,
+    CLOSE_TOO_MANY,
     CLOSE_UNAUTHORIZED,
     CONTRACT,
     GUARDS,
@@ -69,11 +74,17 @@ class DeviceDirectory(Protocol):
 
 
 class ControlBook(Protocol):
-    """What the clients report about the conversations they show, kept for the marks and the session view."""
+    """What the clients report about the conversations they show, kept for the marks and the session
+    view. It announces ``device.connection`` when a device's first link comes up and its last goes, so
+    the relay announces nothing of its own."""
 
-    async def linked(self, device_id: str, sessions: Iterable[str]) -> None: ...
+    async def linked(self, device_id: str, sessions: Iterable[str], *, client: str) -> None: ...
 
-    async def unlinked(self, device_id: str) -> None: ...
+    async def unlinked(self, device_id: str, *, client: str) -> None: ...
+
+    def may_link(self, device_id: str, client: str) -> bool: ...
+
+    def carrier(self, device_id: str, session_id: str) -> str | None: ...
 
     async def set_guard(self, device_id: str, session_id: str, guard: str) -> bool: ...
 
@@ -83,19 +94,36 @@ class ControlBook(Protocol):
 
 
 class MemoryControl:
-    """:class:`ControlBook` in memory, announcing ``remote.guard`` and ``remote.waiting`` itself."""
+    """:class:`ControlBook` in memory, announcing ``device.connection``, ``remote.guard`` and
+    ``remote.waiting`` itself, with no limit on links."""
 
     def __init__(self, announce: Announce | None = None) -> None:
         self._announce = announce
-        self._linked: dict[str, frozenset[str]] = {}
+        self._linked: dict[tuple[str, str], tuple[int, frozenset[str]]] = {}
+        self._order = 0
         self._guards: dict[tuple[str, str], str] = {}
         self._waiting: dict[str, dict[str, Any]] = {}
 
-    async def linked(self, device_id: str, sessions: Iterable[str]) -> None:
-        self._linked[device_id] = frozenset(sessions)
+    def _has_link(self, device_id: str) -> bool:
+        return any(device == device_id for device, _ in self._linked)
 
-    async def unlinked(self, device_id: str) -> None:
-        self._linked.pop(device_id, None)
+    async def linked(self, device_id: str, sessions: Iterable[str], *, client: str) -> None:
+        had = self._has_link(device_id)
+        self._order += 1
+        self._linked[(device_id, client)] = (self._order, frozenset(sessions))
+        if not had:
+            await self._say("device.connection", {"device_id": device_id, "connected": True, "disconnected_at": None}, None)
+
+    async def unlinked(self, device_id: str, *, client: str) -> None:
+        if self._linked.pop((device_id, client), None) is not None and not self._has_link(device_id):
+            await self._say("device.connection", {"device_id": device_id, "connected": False, "disconnected_at": datetime.now(UTC).isoformat()}, None)
+
+    def may_link(self, device_id: str, client: str) -> bool:
+        return True
+
+    def carrier(self, device_id: str, session_id: str) -> str | None:
+        found = [(order, client) for (device, client), (order, sessions) in self._linked.items() if device == device_id and session_id in sessions]
+        return max(found)[1] if found else None
 
     async def set_guard(self, device_id: str, session_id: str, guard: str) -> bool:
         if guard not in GUARDS:
@@ -125,7 +153,7 @@ class MemoryControl:
         found = self._waiting.get(session_id)
         return {"since": found["since"], "calls": list(found["calls"])} if found is not None else None
 
-    async def _say(self, event_type: str, payload: dict[str, Any], session_id: str) -> None:
+    async def _say(self, event_type: str, payload: dict[str, Any], session_id: str | None) -> None:
         if self._announce is None:
             return
         try:
@@ -154,10 +182,12 @@ class DeviceHub:
     ) -> None:
         self._directory = directory
         self._bound = bound
-        self._announce = announce
         self.control: ControlBook = control if control is not None else MemoryControl(announce)
         self.server_version = server_version
-        self.links: dict[str, DeviceLink] = {}
+        self.links: dict[tuple[str, str], DeviceLink] = {}
+        """By ``(device id, client)``: one link per process of a device's client."""
+        self._shown: dict[tuple[str, str], list[str]] = {}
+        """The sessions each link said its process shows, beside the home sessions every link carries."""
         self._lock = asyncio.Lock()
         self._changed = asyncio.Condition()
         self.on_connect: list[Callable[[DeviceLink], Awaitable[None]]] = []
@@ -166,9 +196,15 @@ class DeviceHub:
 
     # -- what the rest of the host asks ----------------------------------------------------------
 
-    def link_of(self, device_id: str) -> DeviceLink | None:
-        link = self.links.get(device_id)
-        return link if link is not None and link.connected else None
+    def link_of(self, device_id: str, session_id: str | None = None) -> DeviceLink | None:
+        """The link a session's requests go to: the one the control book names as its carrier. Without
+        a session (what the device is, not what it runs), the newest live link of the device."""
+        if session_id is not None:
+            client = self.control.carrier(device_id, session_id)
+            link = self.links.get((device_id, client)) if client is not None else None
+            return link if link is not None and link.connected else None
+        live = [link for (device, _), link in self.links.items() if device == device_id and link.connected]
+        return live[-1] if live else None
 
     def connected(self, device_id: str) -> bool:
         return self.link_of(device_id) is not None
@@ -181,6 +217,15 @@ class DeviceHub:
         if guard in GUARDS:
             await self.control.set_guard(device_id, session_id, guard)
 
+    async def rebound(self, device_id: str) -> None:
+        """The device's home sessions changed (a conversation was bound to it or moved off it): every
+        link of it carries the new set at once, so the first call of a conversation just made does not
+        wait for the client to declare it."""
+        bound = await self._bound(device_id)
+        for key, link in list(self.links.items()):
+            if key[0] == device_id and link.connected:
+                await self._linked(link, [*self._shown.get(key, []), *(item["session_id"] for item in bound)])
+
     async def wait_connected(self, device_id: str, timeout: float) -> bool:
         """Whether the device is connected, waiting up to ``timeout`` seconds for it to be."""
         async with self._changed:
@@ -191,10 +236,10 @@ class DeviceHub:
         return True
 
     async def revoked(self, device_id: str) -> None:
-        """The device was revoked: its live relay ends with ``4401`` and it may not come back."""
-        link = self.links.get(device_id)
-        if link is not None:
-            await link.close(CLOSE_UNAUTHORIZED, "this terminal was revoked; pair it again")
+        """The device was revoked: every live link of it ends with ``4401`` and may not come back."""
+        for (device, _), link in list(self.links.items()):
+            if device == device_id:
+                await link.close(CLOSE_UNAUTHORIZED, "this terminal was revoked; pair it again")
 
     async def close_all(self) -> None:
         for link in list(self.links.values()):
@@ -215,10 +260,14 @@ class DeviceHub:
         hello = await self._hello(socket)
         if hello is None:
             return
+        key = (device.id, hello.client)
         link = DeviceLink(device.id, device.name, socket, hello, on_notify=lambda method, params: self._notified(link, method, params))
         async with self._lock:
-            old = self.links.get(device.id)
-            self.links[device.id] = link
+            if not self.control.may_link(device.id, hello.client):
+                await socket.close(CLOSE_TOO_MANY, "too many connections from this terminal")
+                return
+            old = self.links.get(key)
+            self.links[key] = link
         if old is not None and old.connected:
             await old.close(CLOSE_REPLACED, "this terminal connected again")
         bound = await self._bound(device.id)
@@ -227,10 +276,10 @@ class DeviceHub:
             shown = [session_id for session_id in hello.sessions if await self._may_show(device.id, session_id, bound)]
             for session_id in shown:
                 await self._set_guard(device.id, session_id, hello.sessions[session_id])
-            await self._linked(device.id, [*shown, *(item["session_id"] for item in bound)])
+            self._shown[key] = shown
+            await self._linked(link, [*shown, *(item["session_id"] for item in bound)])
             async with self._changed:
                 self._changed.notify_all()
-            await self._safe_announce("device.connection", {"device_id": device.id, "connected": True}, None)
             logger.info("terminal %s (%s) connected from %s, %d conversation(s) bound", device.id, device.name, address or "?", len(bound))
             carrying = asyncio.create_task(link.carry(), name=f"relay:{device.id}")
             for callback in list(self.on_connect):
@@ -242,14 +291,18 @@ class DeviceHub:
         finally:
             await link.close(CLOSE_GOING_AWAY, link.reason or "relay ended")
             async with self._lock:
-                if self.links.get(device.id) is link:
-                    self.links.pop(device.id, None)
+                mine = self.links.get(key) is link
+                if mine:
+                    self.links.pop(key, None)
+                    self._shown.pop(key, None)
             async with self._changed:
                 self._changed.notify_all()
-            if self.links.get(device.id) is None:
+            if mine:
+                # A replaced link's process is still connected by its successor: only the link that
+                # was current says the process went.
                 with contextlib.suppress(Exception):
-                    await self.control.unlinked(device.id)
-                await self._safe_announce("device.connection", {"device_id": device.id, "connected": False}, None)
+                    await self.control.unlinked(device.id, client=hello.client)
+            if not self.connected(device.id):
                 for callback in list(self.on_disconnect):
                     with contextlib.suppress(Exception):
                         await callback(device.id)
@@ -288,11 +341,11 @@ class DeviceHub:
         directory = self._directory()
         return bool(directory is not None and await directory.in_scope(device_id, session_id))
 
-    async def _linked(self, device_id: str, sessions: list[str]) -> None:
+    async def _linked(self, link: DeviceLink, sessions: list[str]) -> None:
         try:
-            await self.control.linked(device_id, list(dict.fromkeys(sessions)))
+            await self.control.linked(link.device_id, list(dict.fromkeys(sessions)), client=link.hello.client)
         except Exception:  # noqa: BLE001 — the marks are a courtesy; the link is the work
-            logger.warning("terminal %s: could not mark its conversations", device_id, exc_info=True)
+            logger.warning("terminal %s: could not mark its conversations", link.device_id, exc_info=True)
 
     async def _notified(self, link: DeviceLink, method: str, params: dict[str, Any]) -> None:
         if method == "device.guard":
@@ -307,15 +360,10 @@ class DeviceHub:
                 if isinstance(item, dict) and isinstance(item.get("session_id"), str) and await self._may_show(link.device_id, item["session_id"], bound):
                     shown.append(item["session_id"])
                     await self._set_guard(link.device_id, item["session_id"], str(item.get("guard") or "auto"))
-            await self._linked(link.device_id, [*shown, *(entry["session_id"] for entry in bound)])
-
-    async def _safe_announce(self, event_type: str, payload: dict[str, Any], session_id: str | None) -> None:
-        if self._announce is None:
-            return
-        try:
-            await self._announce(event_type, payload, session_id)
-        except Exception:  # noqa: BLE001 — an event is a courtesy to the app; the link is the work
-            logger.warning("could not announce %s", event_type, exc_info=True)
+            key = (link.device_id, link.hello.client)
+            if self.links.get(key) is link:
+                self._shown[key] = shown
+            await self._linked(link, [*shown, *(entry["session_id"] for entry in bound)])
 
 
 __all__ = ["ControlBook", "DeviceDirectory", "DeviceHub", "MemoryControl", "RemoteDevice", "device_token"]
