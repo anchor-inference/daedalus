@@ -195,3 +195,16 @@ func TestStreamMatchesWholeRender(t *testing.T) {
 		t.Fatalf("stream differs from whole render:\n%q\n%q", got, want)
 	}
 }
+
+func TestOpenSpansAreClosedForDrawing(t *testing.T) {
+	for in, want := range map[string]string{
+		"keeps **one cursor per": "keeps **one cursor per**",
+		"call `Next":             "call `Next`",
+		"**done** and `x`":       "**done** and `x`",
+		"```go\nx := **":         "```go\nx := **",
+	} {
+		if got := closeOpenSpans(in); got != want {
+			t.Errorf("closeOpenSpans(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

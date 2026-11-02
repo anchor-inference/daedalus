@@ -223,6 +223,9 @@ func (m *Model) statusRows() []string {
 		line := t.Fg(t.Palette.Warning).Render(g.Pause+" Reconnecting"+g.Ellipsis+" turn paused") +
 			t.Dim().Render(fmt.Sprintf(" (attempt %d%s · the server keeps the turn · esc to interrupt)", m.connAttempt, retry))
 		out = append(out, "", ansi.Truncate(line, m.width, g.Ellipsis))
+	case m.running && m.awaitingPerson():
+		// The turn waits on the dialog below, not on the model: a turning spinner would say the
+		// opposite, so it stops while the question is open, as Claude Code's does.
 	case m.running:
 		elapsed := m.now().Sub(m.turnStart)
 		tokens := max(m.turnTokens, m.turnChars/4)
@@ -506,4 +509,13 @@ func relativeTime(now, t time.Time) string {
 		return fmt.Sprintf("%dh ago", int(d/time.Hour))
 	}
 	return fmt.Sprintf("%dd ago", int(d/(24*time.Hour)))
+}
+
+// awaitingPerson reports a dialog the running turn is blocked on.
+func (m *Model) awaitingPerson() bool {
+	switch m.dialog.(type) {
+	case *permissionDialog, *questionDialog:
+		return true
+	}
+	return false
 }

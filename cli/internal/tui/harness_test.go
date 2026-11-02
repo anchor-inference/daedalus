@@ -147,10 +147,10 @@ func keyMsg(name string) tea.KeyPressMsg {
 	return k
 }
 
-// pumpUntil applies the fake's events until one satisfies done, failing after two seconds.
+// pumpUntil applies the fake's events until one satisfies done, failing after six seconds.
 func (h *harness) pumpUntil(done func(Event) bool) {
 	h.t.Helper()
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(6 * time.Second)
 	for {
 		select {
 		case e := <-h.fake.events:

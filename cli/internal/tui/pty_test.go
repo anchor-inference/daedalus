@@ -65,7 +65,13 @@ func start(t *testing.T, cols, rows int, args ...string) *ptytest.Term {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = term.Close() })
+	t.Cleanup(func() {
+		// TUI_CAST_DIR keeps an asciicast of each run, for looking at what a test saw.
+		if dir := os.Getenv("TUI_CAST_DIR"); dir != "" {
+			_ = term.WriteCast(filepath.Join(dir, t.Name()+".cast"))
+		}
+		_ = term.Close()
+	})
 	if err := term.WaitFor("Welcome to Daedalus", 5*time.Second); err != nil {
 		t.Fatal(err)
 	}

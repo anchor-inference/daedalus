@@ -161,7 +161,7 @@ func (s *Stream) Render(width int) []string {
 		add(c.lines)
 	}
 	if tail := s.text.String()[s.committed:]; strings.TrimSpace(tail) != "" {
-		add(splitRendered(s.renderer.Render(tail, width)))
+		add(splitRendered(s.renderer.Render(closeOpenSpans(tail), width)))
 	}
 	return out
 }
@@ -171,4 +171,20 @@ func splitRendered(s string) []string {
 		return nil
 	}
 	return strings.Split(s, "\n")
+}
+
+// closeOpenSpans closes a bold or code span the open block has begun and not yet ended, for drawing
+// only. Half a sentence like "keeps **one cursor per" would otherwise show its asterisks raw until
+// the closing pair arrives, and the line would jump from raw to bold mid-stream. Inside an open fence
+// nothing is touched: everything there is code already.
+func closeOpenSpans(tail string) string {
+	if strings.Contains(tail, "```") || strings.Contains(tail, "~~~") {
+		return tail
+	}
+	if strings.Count(tail, "`")%2 == 1 {
+		tail += "`"
+	} else if strings.Count(tail, "**")%2 == 1 {
+		tail += "**"
+	}
+	return tail
 }

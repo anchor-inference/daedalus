@@ -17,7 +17,8 @@ import (
 // What the scripted agent does depends on words in the prompt, so one fake can show every screen:
 // "edit" or "diff" makes a file edit, "test" or "permission" asks for permission to run a command,
 // "ask" asks a question, "todo" works through a todo list, "long" prints a long output, "agent"
-// runs a subagent, "drop" loses the connection mid-turn and comes back, "fail" fails the turn.
+// runs a subagent, "drop" or "connection" loses the connection mid-turn and comes back, "fail" fails
+// the turn.
 // Anything else gets a streamed answer after a couple of reads.
 type Fake struct {
 	// Delay is the base pause between streamed events. Zero streams with no pauses at all, which is
@@ -43,6 +44,7 @@ type Fake struct {
 	guard     Guard
 	prompts   []Checkpoint
 	sent      []Prompt
+	steered   []string
 	usage     Usage
 }
 
@@ -375,7 +377,8 @@ func (f *Fake) tool(ctx context.Context, name string, input map[string]any, outp
 	return id, true
 }
 
-// drainQueue reads the queued messages into the turn, as the server steers them in after a tool.
+// drainQueue reads the queued messages into the turn, as the server steers them in after a tool,
+// and remembers them so the turn answers them before it ends.
 func (f *Fake) drainQueue() {
 	f.mu.Lock()
 	queue := f.queue
@@ -387,7 +390,24 @@ func (f *Fake) drainQueue() {
 	f.emit(QueueChanged{})
 	for _, q := range queue {
 		f.emit(UserMessage{ID: q.ID, Text: q.Text, At: f.now()})
+		f.mu.Lock()
+		f.steered = append(f.steered, q.Text)
+		f.mu.Unlock()
 	}
+}
+
+// takeSteered returns the last message steered into the turn and forgets them all: a real agent
+// reads every steer, and the scripted one answers the last.
+func (f *Fake) takeSteered() string {
+	f.drainQueue()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.steered) == 0 {
+		return ""
+	}
+	last := f.steered[len(f.steered)-1]
+	f.steered = nil
+	return last
 }
 
 func (f *Fake) end(outcome TurnOutcome, err string) {
@@ -405,13 +425,31 @@ func (f *Fake) end(outcome TurnOutcome, err string) {
 func (f *Fake) turn(ctx context.Context, prompt string) {
 	runID := f.nextID("r")
 	f.emit(TurnStarted{RunID: runID, At: f.now()})
-	lower := strings.ToLower(prompt)
-	ok := true
-	defer func() {
+	for {
+		outcome, ok := f.scenario(ctx, prompt)
 		if !ok || ctx.Err() != nil {
 			f.end(TurnInterrupted, "")
+			return
 		}
-	}()
+		if outcome != "" {
+			f.end(TurnFailed, outcome)
+			return
+		}
+		// Messages steered in while the turn ran are answered before it ends, as the server's agent
+		// reads them; one that arrived after the last tool would otherwise go unanswered.
+		next := f.takeSteered()
+		if next == "" {
+			break
+		}
+		prompt = next
+	}
+	f.end(TurnCompleted, "")
+}
+
+// scenario plays the scripted reply to one prompt. It returns a failure text for a turn that fails,
+// and false when it was interrupted.
+func (f *Fake) scenario(ctx context.Context, prompt string) (string, bool) {
+	lower := strings.ToLower(prompt)
 	has := func(words ...string) bool {
 		for _, w := range words {
 			if strings.Contains(lower, w) {
@@ -420,14 +458,13 @@ func (f *Fake) turn(ctx context.Context, prompt string) {
 		}
 		return false
 	}
-	ok = f.stream(ctx, f.nextID("m"), "The person wants me to look at the code first. I should read the store and search for the cursor handling before changing anything.", true)
-	if !ok {
-		return
+	if !f.stream(ctx, f.nextID("m"), "The person wants me to look at the code first. I should read the store and search for the cursor handling before changing anything.", true) {
+		return "", false
 	}
+	ok := true
 	switch {
 	case has("fail"):
-		f.end(TurnFailed, "the model provider returned 529: overloaded")
-		return
+		return "the model provider returned 529: overloaded", true
 	case has("edit", "diff", "fix"):
 		ok = f.editTurn(ctx)
 	case has("test", "permission"):
@@ -443,16 +480,12 @@ func (f *Fake) turn(ctx context.Context, prompt string) {
 		}
 	case has("agent"):
 		ok = f.agentTurn(ctx)
-	case has("drop", "reconnect"):
+	case has("drop", "connection"):
 		ok = f.dropTurn(ctx)
 	default:
 		ok = f.answerTurn(ctx)
 	}
-	if !ok {
-		return
-	}
-	f.drainQueue()
-	f.end(TurnCompleted, "")
+	return "", ok
 }
 
 func (f *Fake) answerTurn(ctx context.Context) bool {
