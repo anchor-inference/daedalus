@@ -32,9 +32,30 @@ class ExecOutcome:
 
 
 class ExecBackend(Protocol):
-    """Runs one shell command somewhere else and returns its interleaved output."""
+    """Runs one shell command somewhere else and returns its interleaved output.
+
+    Beyond ``run``, a backend says what kind of elsewhere it is through attributes the host reads
+    with :func:`machine_of` and :func:`foreign_paths`, rather than by asking which class it is: the
+    host terminal and an operator's own terminal client are two machines the same code drives, and a
+    benchmark's container is a third that says nothing of itself. The optional ones are
+    ``machine`` (``host``, ``device:<id>``), ``foreign_paths``, ``put_bytes(path, data)`` for an
+    attachment, ``prompt_note(workdir)`` for the system prompt and ``filesystem(timeout)`` for a file
+    interface of its own instead of :class:`ShellFS`.
+    """
 
     async def run(self, command: str, *, cwd: str | None, env: dict[str, str] | None, timeout: float) -> ExecOutcome: ...
+
+
+def machine_of(backend: object | None) -> str:
+    """Where a backend runs its commands, as a session's environment names it (``host``,
+    ``device:<id>``); ``""`` for no backend and for one that does not say (a harness's container)."""
+    return str(getattr(backend, "machine", "") or "") if backend is not None else ""
+
+
+def foreign_paths(backend: object | None) -> bool:
+    """Whether the paths a session's tools name are paths of another machine, which this process
+    cannot open: its working directory, its notes files, what it sent and what it was sent are there."""
+    return bool(getattr(backend, "foreign_paths", False)) if backend is not None else False
 
 
 TEXT_MAX_BYTES = 32 << 20
@@ -234,6 +255,28 @@ def read_window_local(path: Path, *, start: int, max_lines: int, max_chars: int,
         shown, cut, more = fit_window(window(), max_lines=max_lines, max_chars=max_chars, line_chars=line_chars, decode=lambda item: _decode_line(item[0], cut=item[1]))
         total = _count_lines(handle) if size <= LINE_COUNT_MAX_BYTES else None
     return TextWindow(lines=shown, start=start, more=more, size=size, total_lines=total, cut=cut)
+
+
+def window_of_bytes(data: bytes, *, start: int, max_lines: int, max_chars: int, line_chars: int) -> TextWindow:
+    """The window of lines from ``start`` of a file whose bytes are already here, as :func:`read_window_local`
+    cuts it: the same line breaks, the same binary check, the same budget. For a backend that fetched a
+    file whole from another machine with a native read."""
+    head = data[:SNIFF_BYTES]
+    if b"\x00" in head:
+        at = head.index(b"\x00")
+        raise UnicodeDecodeError("utf-8", head, at, at + 1, "a NUL byte: the file is binary")
+    hold = line_chars * 4 + 4
+
+    def window() -> Iterator[tuple[tuple[bytes, bool], bool]]:
+        for index, (kept, length) in enumerate(_byte_lines([data], hold)):
+            if index >= start:
+                yield (kept, length > len(kept)), length > len(kept)
+
+    shown, cut, more = fit_window(window(), max_lines=max_lines, max_chars=max_chars, line_chars=line_chars, decode=lambda item: _decode_line(item[0], cut=item[1]))
+    total = data.count(b"\n") + data.count(b"\r") - data.count(b"\r\n")
+    if data and data[-1:] not in (b"\n", b"\r"):
+        total += 1
+    return TextWindow(lines=shown, start=start, more=more, size=len(data), total_lines=total, cut=cut)
 
 
 def _write_in_place(path: Path, data: bytes) -> None:
@@ -671,4 +714,17 @@ class ShellFS:
         return code, outcome.output, ""
 
 
-__all__ = ["ExecBackend", "ExecOutcome", "FileTooLarge", "LocalFS", "NotRegularFile", "ShellFS", "TextWindow", "open_regular", "write_untranslated"]
+__all__ = [
+    "ExecBackend",
+    "ExecOutcome",
+    "FileTooLarge",
+    "LocalFS",
+    "NotRegularFile",
+    "ShellFS",
+    "TextWindow",
+    "foreign_paths",
+    "machine_of",
+    "open_regular",
+    "window_of_bytes",
+    "write_untranslated",
+]

@@ -1,15 +1,18 @@
 // What kind of conversation a chat is: an ordinary chat, one about the operator's own computer
-// (`computer`, the Computer control), or one carried out in the operator's own Chrome (`chrome`). The
-// host keeps it on the session (`sessions.kind`); this file holds what the app does with it — the
-// tabs over the chat lists, the mark a computer or Chrome chat carries where kinds are listed mixed,
-// and the mode a new chat starts in.
+// (`computer`, the Computer control), one carried out in the operator's own Chrome (`chrome`), or one
+// started from daedalus-cli in a terminal, whose tools run on that machine (`remote`). The host keeps
+// it on the session (`sessions.kind`); this file holds what the app does with it — the tabs over the
+// chat lists, the mark such a chat carries where kinds are listed mixed, and the mode a new chat
+// starts in. A remote chat is born in the terminal only: New chat lists it greyed, with where it is
+// started instead.
 //
 // The kind is the chat's origin: what it was started as (from the side panel, or as a computer or
 // browser chat in New chat), and it never changes afterwards. Beside it the host sends `controlling`,
 // what the chat holds right now — a live tab group in the operator's Chrome, a live computer lease —
 // which clears as soon as control is released or the chat goes idle. An ordinary chat that drives the
 // operator's Chrome for one task is listed under Browser and marked only while it does; before, the
-// first touch made it a Browser chat forever, and the extension notified about it for good.
+// first touch made it a Browser chat forever, and the extension notified about it for good. A terminal
+// attached to any chat (`daedalus-cli attach`) is the same kind of live mark: `remote` while connected.
 //
 // The chosen tab is remembered per viewer, in this browser only: it is a way of looking at the list,
 // not a fact about the chats, and a private window that cannot store it simply starts on All. The same
@@ -25,11 +28,14 @@ import { Icon, type IconName } from "./icons";
 import { useQuery } from "./store";
 import { Popover, Sheet } from "./ui/dialogs";
 
-export type ChatKind = "chat" | "computer" | "chrome";
+export type ChatKind = "chat" | "computer" | "chrome" | "remote";
 export type KindTab = "all" | ChatKind;
 
-export const KIND_TABS: readonly KindTab[] = ["all", "chat", "computer", "chrome"];
-const KINDS: readonly ChatKind[] = ["chat", "computer", "chrome"];
+export const KIND_TABS: readonly KindTab[] = ["all", "chat", "computer", "chrome", "remote"];
+const KINDS: readonly ChatKind[] = ["chat", "computer", "chrome", "remote"];
+/** The kinds that are controls as well as origins: a chat of any kind can hold one of these now. */
+const CONTROLS = ["chrome", "computer", "remote"] as const;
+type Control = (typeof CONTROLS)[number];
 
 /** A session's kind; a host from before the column, or a row without it, is an ordinary chat. */
 export function sessionKind(s: Pick<SessionSummary, "kind">): ChatKind {
@@ -38,14 +44,15 @@ export function sessionKind(s: Pick<SessionSummary, "kind">): ChatKind {
 
 /** What the session controls right now, as the host derives it; anything else in the list is dropped. */
 export function liveControls(s: Pick<SessionSummary, "controlling">): ChatKind[] {
-  const held = Array.isArray(s.controlling) ? s.controlling : [];
-  return (["chrome", "computer"] as const).filter((k) => held.includes(k));
+  const held: string[] = Array.isArray(s.controlling) ? s.controlling : [];
+  return CONTROLS.filter((k) => held.includes(k));
 }
 
 /** The kind a plate shows. Its own kind when it was started as one (`live` while it also holds that
  *  control now); otherwise the control it holds now, `borrowed`, so an ordinary chat driving the
- *  operator's Chrome says so for exactly as long as it does. Chrome wins when it holds both: the
- *  browser is where the operator watches it act. */
+ *  operator's Chrome says so for exactly as long as it does. Chrome wins when it holds several: the
+ *  browser is where the operator watches it act; a terminal attached to a chat comes last, since it
+ *  watches the chat rather than acting somewhere the operator would look. */
 export function shownKind(s: Pick<SessionSummary, "kind" | "controlling">): { kind: ChatKind; live: boolean; borrowed: boolean } {
   const kind = sessionKind(s);
   const live = liveControls(s);
@@ -65,7 +72,7 @@ export function kindPlate(s: Pick<SessionSummary, "kind" | "controlling">): { ki
 
 /** The icon a kind is drawn with; an ordinary chat has none of its own, its plate says the rest. */
 export function kindIcon(kind: ChatKind): IconName | null {
-  return kind === "computer" ? "monitor" : kind === "chrome" ? "globe" : null;
+  return kind === "computer" ? "monitor" : kind === "chrome" ? "globe" : kind === "remote" ? "laptop" : null;
 }
 
 /**
@@ -104,8 +111,8 @@ function rootOf<T extends SessionSummary>(sessions: T[]): (s: T) => T {
 /** The chats one of whose sessions (the chat itself, a helper, a fork) holds the tab's control now. */
 function activeRoots<T extends SessionSummary>(sessions: T[], root: (s: T) => T, tab: KindTab): Set<string> {
   const out = new Set<string>();
-  if (tab !== "computer" && tab !== "chrome") return out;
-  for (const s of sessions) if (liveControls(s).includes(tab)) out.add(root(s).id);
+  if (!(CONTROLS as readonly string[]).includes(tab)) return out;
+  for (const s of sessions) if (liveControls(s).includes(tab as Control)) out.add(root(s).id);
   return out;
 }
 
@@ -114,12 +121,12 @@ function activeRoots<T extends SessionSummary>(sessions: T[], root: (s: T) => T,
 export function tabCounts(sessions: SessionSummary[]): Record<KindTab, number> {
   const top = sessions.filter((s) => !s.metadata?.subagent_of && !s.archived);
   const root = rootOf(sessions);
-  const active = { computer: activeRoots(sessions, root, "computer"), chrome: activeRoots(sessions, root, "chrome") };
-  const counts: Record<KindTab, number> = { all: top.length, chat: 0, computer: 0, chrome: 0 };
+  const active: Record<Control, Set<string>> = { chrome: activeRoots(sessions, root, "chrome"), computer: activeRoots(sessions, root, "computer"), remote: activeRoots(sessions, root, "remote") };
+  const counts: Record<KindTab, number> = { all: top.length, chat: 0, computer: 0, chrome: 0, remote: 0 };
   for (const s of top) {
     const kind = sessionKind(s);
     counts[kind] += 1;
-    for (const k of ["computer", "chrome"] as const) if (k !== kind && active[k].has(root(s).id)) counts[k] += 1;
+    for (const k of CONTROLS) if (k !== kind && active[k].has(root(s).id)) counts[k] += 1;
   }
   return counts;
 }
@@ -182,8 +189,9 @@ export function defaultKind(tab: KindTab, offers: Pick<KindOffers, "computer" | 
   return "chat";
 }
 
-/** What this installation offers: the Computer control only in the native application, and the
- *  operator's Chrome only where a daemon for it is configured and running. */
+/** What this installation offers: the Computer control only in the native application, the operator's
+ *  Chrome only where a daemon for it is configured and running, and a remote chat never from here — it
+ *  is started by daedalus-cli in the folder it should work in, so the row says where to go instead. */
 export function kindOffers(computer: ComputerState | undefined, chrome: BrowserUserStatus | undefined): KindOffers {
   const state = chromeState(chrome);
   return {
@@ -194,6 +202,7 @@ export function kindOffers(computer: ComputerState | undefined, chrome: BrowserU
     chrome: state === "none"
       ? { ok: false, reason: t("kind.chrome.off") }
       : state === "down" ? { ok: false, reason: t("kind.chrome.down") } : { ok: true, reason: "" },
+    remote: { ok: false, reason: t("kind.remote.off") },
     chromeConnected: state === "connected",
   };
 }
@@ -225,7 +234,7 @@ export function tabLabel(tab: KindTab): string {
 }
 
 /**
- * The tabs over a chat list: All, Chats, Computer, Browser. Drawn as a tab bar with an underline, not
+ * The tabs over a chat list: All, Chats, Computer, Browser, Remote. Drawn as a tab bar with an underline, not
  * as pills, so they do not read as one more row of the status chips under them. The underline slides
  * to the next tab rather than jumping, measured from the buttons themselves, because the labels are as wide
  * as their words and Russian ones are half as wide again. Arrows move between them, as a tab list's do.
@@ -238,7 +247,16 @@ export function KindTabs({ tab, onChange, counts, className = "" }: { tab: KindT
   // React commit once per pointer move for the whole drag.
   useLayoutEffect(() => {
     const place = () => {
-      const on = box.current?.querySelector<HTMLElement>(`[data-kind-tab="${tab}"]`);
+      const bar = box.current;
+      if (!bar) return;
+      // Five tabs do not fit a sidebar of the usual width with every label written out, least of all
+      // in Russian. Where they do not, the kinds that have an icon keep only the icon and the count,
+      // and the chosen one keeps its word: measured with the words out, so widening the column brings
+      // them back. The words stay in the page, clipped, for a screen reader and the tooltip says them.
+      delete bar.dataset.compact;
+      const cut = bar.scrollWidth > bar.clientWidth + 1 || [...bar.querySelectorAll<HTMLElement>(".kind-tab")].some((b) => b.scrollWidth > b.clientWidth + 1);
+      if (cut) bar.dataset.compact = "";
+      const on = bar.querySelector<HTMLElement>(`[data-kind-tab="${tab}"]`);
       const line = pill.current;
       if (!on || !line) return;
       // The first placement must not slide in from the left edge.
@@ -254,7 +272,7 @@ export function KindTabs({ tab, onChange, counts, className = "" }: { tab: KindT
     const observer = new ResizeObserver(place);
     observer.observe(box.current);
     return () => observer.disconnect();
-  }, [tab, counts?.all]);
+  }, [tab, counts?.all, counts?.remote]);
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
     e.preventDefault();
@@ -267,7 +285,7 @@ export function KindTabs({ tab, onChange, counts, className = "" }: { tab: KindT
     <div ref={box} className={`kind-tabs ${className}`} role="tablist" aria-label={t("kind.tabs.label")} onKeyDown={onKey}>
       <span ref={pill} className="kind-tabs-pill" data-on={tab} aria-hidden />
       {KIND_TABS.map((k) => {
-        const icon = k === "computer" || k === "chrome" ? kindIcon(k) : null;
+        const icon = k === "all" ? null : kindIcon(k);
         const n = counts?.[k];
         return (
           <button key={k} type="button" role="tab" data-kind-tab={k} aria-selected={tab === k} tabIndex={tab === k ? 0 : -1}
@@ -282,7 +300,7 @@ export function KindTabs({ tab, onChange, counts, className = "" }: { tab: KindT
   );
 }
 
-/** The small mark a computer or Chrome chat carries where kinds are listed together; nothing for a
+/** The small mark a computer, Chrome or remote chat carries where kinds are listed together; nothing for a
  *  plain chat, which is what a list is mostly made of and needs no mark to say so. An ordinary chat
  *  holding a control now carries that control's mark, drawn hollow and live, until it lets go. */
 export function KindMark({ s, size = 12 }: { s: Pick<SessionSummary, "kind" | "controlling">; size?: number }) {
@@ -292,10 +310,11 @@ export function KindMark({ s, size = 12 }: { s: Pick<SessionSummary, "kind" | "c
   return <span className={`kind-mark ${plate.className}`} role="img" aria-label={plate.title} title={plate.title}><Icon name={icon} size={size} /></span>;
 }
 
-const MODE_ICON: Record<ChatKind, IconName> = { chat: "bots", computer: "monitor", chrome: "globe" };
+const MODE_ICON: Record<ChatKind, IconName> = { chat: "bots", computer: "monitor", chrome: "globe", remote: "laptop" };
 
 /**
- * The new chat's mode: an ordinary chat, a chat about this computer, or one in the operator's Chrome.
+ * The new chat's mode: an ordinary chat, a chat about this computer, or one in the operator's Chrome;
+ * a remote chat is listed too, never offered, with the terminal command that starts one.
  * A kind this installation cannot start stays in the list, greyed, with the reason under its name, so
  * the operator learns where it would be offered rather than wondering why it is missing.
  */

@@ -46,6 +46,7 @@ import { pinCommand, setPinned } from "../pins";
 import { HostMark, RunEnv, useRunOn } from "../runon";
 import { PrivateMark, isPrivate, privateBody } from "../privatechat";
 import { KindTabs, byTab, kindIcon, kindPlate, tabCounts, useKindTab } from "../chatkind";
+import { remoteRowWords } from "../remote";
 
 type SearchList = SessionList & { semantic: boolean; reason: string; partial: boolean; indexing: boolean };
 type View = "all" | "attention" | "working" | "loops" | "archive";
@@ -618,6 +619,7 @@ type RowProps = {
 function sameRow(a: RowProps, b: RowProps): boolean {
   const l = a.row.s, r = b.row.s;
   if (l.id !== r.id || l.title !== r.title || l.status !== r.status || !!l.unread_result !== !!r.unread_result || l.last_message_at !== r.last_message_at || l.model !== r.model || l.env !== r.env || !!l.archived !== !!r.archived || l.kind !== r.kind) return false;
+  if (remoteRowWords(l) !== remoteRowWords(r) || (l.controlling ?? []).join() !== (r.controlling ?? []).join()) return false;
   if ((l.terminals ?? 0) !== (r.terminals ?? 0) || l.match?.snippet !== r.match?.snippet || l.project_id !== r.project_id) return false;
   if (a.projectName !== b.projectName || a.onNewIn !== b.onNewIn || a.onOpen !== b.onOpen) return false;
   if ((a.current === l.id || a.row.kids.some((k) => k.id === a.current)) !== (b.current === r.id || b.row.kids.some((k) => k.id === b.current))) return false;
@@ -697,6 +699,9 @@ const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, proj
     else if (e.key === "ArrowLeft" && plain && onParent) { e.preventDefault(); onParent(); }
   };
   const tail = [
+    // A remote chat says which computer it works on first: two chats in one folder on two laptops
+    // are told apart by nothing else on the row.
+    remoteRowWords(s),
     s.metadata?.loop ? loopLine(s) : "",
     fork ? t("agents.fork.at", { n: fork.seq }) : "",
     s.model ? shortModel(s.model, 28) : "",

@@ -2,7 +2,6 @@
 
 ``daedalus serve``  — run the bot (Telegram + API + scheduler).
 ``daedalus check``  — open the state, register tools and providers, exit.
-``daedalus run``    — run one agent session from the terminal (no Telegram).
 ``daedalus doctor`` — check the deployment (config, state, git, providers); ``--fix`` applies safe repairs.
 ``daedalus db checkpoints-prune`` — apply the workspace-snapshot retention bounds now.
 ``daedalus auth pair`` — mint a one-time link that signs a browser in, for an installation without Telegram.
@@ -101,14 +100,6 @@ async def cmd_doctor(args: argparse.Namespace) -> int:
     else:
         print(render_text(checks))
     return 1 if summarize(checks)["fail"] else 0
-
-
-async def cmd_run(args: argparse.Namespace) -> int:
-    from daedalus.host.cli_session import run_terminal_session  # Lazy: each subcommand imports only what it runs
-
-    settings = _settings(args)
-    config = RuntimeConfig.load(settings.config_path)
-    return await run_terminal_session(settings, config, prompt=args.prompt, title=args.title)
 
 
 async def cmd_bench(args: argparse.Namespace) -> int:
@@ -263,9 +254,6 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = sub.add_parser("doctor", help="check the deployment: config, state, git, providers")
     doctor.add_argument("--json", action="store_true")
     doctor.add_argument("--fix", action="store_true", help="apply the safe fixes (stale snapshots, orphan workspaces)")
-    run = sub.add_parser("run", help="run one session from the terminal")
-    run.add_argument("--prompt", "-p", default=None, help="first message; omit for interactive input")
-    run.add_argument("--title", default="terminal")
     sub.add_parser("serve", help="run the bot")
     auth = sub.add_parser("auth", help="ways into the app that need no Telegram")
     auth_sub = auth.add_subparsers(dest="auth_command", required=True)
@@ -353,7 +341,7 @@ def main(argv: list[str] | None = None) -> int:
         handler_.addFilter(_DiagFilter())
     install_logging_filter(shared())
     _install_task_dump()
-    handler = {"check": cmd_check, "run": cmd_run, "serve": cmd_serve, "doctor": cmd_doctor, "bench": cmd_bench, "auth": cmd_auth, "db": cmd_db, "self": cmd_self, "components": cmd_components}[args.command]
+    handler = {"check": cmd_check, "serve": cmd_serve, "doctor": cmd_doctor, "bench": cmd_bench, "auth": cmd_auth, "db": cmd_db, "self": cmd_self, "components": cmd_components}[args.command]
     return asyncio.run(handler(args))
 
 

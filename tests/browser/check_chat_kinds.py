@@ -1,10 +1,11 @@
 """Chat kinds in the lists and in New chat, in a real browser.
 
-The desktop column has tabs over its lists — All, Chats, Computer, Browser — and a chosen tab keeps
+The desktop column has tabs over its lists — All, Chats, Computer, Browser, Remote — and a chosen tab keeps
 only that kind (a project is listed while it holds one) and is remembered across a reload. Under All a
 computer or Chrome chat carries its mark on the plate, with a tooltip. New chat's mode chip offers
-Chat, Computer and Browser: on a server (the shared stub's default) Computer and Browser stand greyed
-with the reason; in the native application with the operator's Chrome configured, the Computer tab
+Chat, Computer and Browser, and Remote, which is only ever started from daedalus-cli and so always
+stands greyed with where it starts: on a server (the shared stub's default) Computer and Browser stand
+greyed with the reason too; in the native application with the operator's Chrome configured, the Computer tab
 makes Computer the default, sending creates a session of kind "computer" and lands on it with the
 Computer sheet open, and Browser creates one of kind "chrome". On a phone the Chats page has the same
 tabs, and the drawer's recent chats carry the marks. In English and Russian.
@@ -39,8 +40,8 @@ from api_stub import ComputerStub, expect_app  # noqa: E402
 BASE = shots.BASE
 SHOTS = os.environ.get("SHOTS", "")
 WORDS = {
-    "en": {"tabs": ["All", "Chats", "Computer", "Browser"], "computer": "Computer", "browser": "Browser", "consent": "Use my Chrome", "live": "Controlling your Chrome now"},
-    "ru": {"tabs": ["Все", "Обычные", "Компьютер", "Браузер"], "computer": "Компьютер", "browser": "Браузер", "consent": "Использовать мой Chrome", "live": "Сейчас управляет вашим Chrome"},
+    "en": {"tabs": ["All", "Chats", "Computer", "Browser", "Remote"], "computer": "Computer", "browser": "Browser", "consent": "Use my Chrome", "live": "Controlling your Chrome now"},
+    "ru": {"tabs": ["Все", "Обычные", "Компьютер", "Браузер", "Удалённо"], "computer": "Компьютер", "browser": "Браузер", "consent": "Использовать мой Chrome", "live": "Сейчас управляет вашим Chrome"},
 }
 CHROME = {"configured": True, "enabled": True, "daemon": True, "reason": "", "detail": "", "relay": {"connected": True, "profile_name": "Work"}, "native": True,
           "launcher": None, "launcher_error": "", "devices": [], "server_url": "", "consent": ""}
@@ -126,7 +127,7 @@ def main() -> int:
             menu = page.locator(".kind-menu")
             expect(menu).to_be_visible()
             disabled = menu.locator(".kind-row").evaluate_all("els => els.map((b) => [b.dataset.kind, b.disabled, !!b.title])")
-            check(disabled == [["chat", False, False], ["computer", True, True], ["chrome", True, True]], f"{lang}: on a server Computer and Browser are greyed with the reason ({disabled})")
+            check(disabled == [["chat", False, False], ["computer", True, True], ["chrome", True, True], ["remote", True, True]], f"{lang}: on a server Computer, Browser and Remote are greyed with the reason ({disabled})")
             check(page.locator(".start .kind-select").get_attribute("data-kind") == "chat", f"{lang}: the Browser tab cannot make Browser the default where it is not offered")
             page.wait_for_timeout(400)
             shot(page, f"desktop-mode-server-{lang}")
@@ -154,7 +155,7 @@ def main() -> int:
             check(True, f"{lang}: with the Computer tab chosen, New chat starts in Computer mode")
             chip.click()
             rows = page.locator(".kind-menu .kind-row").evaluate_all("els => els.map((b) => b.disabled)")
-            check(rows == [False, False, False], f"{lang}: natively, with Chrome configured, every mode is offered ({rows})")
+            check(rows == [False, False, False, True], f"{lang}: natively, with Chrome configured, every mode but Remote is offered ({rows})")
             page.wait_for_timeout(400)
             shot(page, f"desktop-mode-native-{lang}")
             page.keyboard.press("Escape")

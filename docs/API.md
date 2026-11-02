@@ -28,6 +28,17 @@ waiting — the session's event stream (`GET /api/sessions/{id}/stream`) carries
 event with the whole queue in its payload, so a composer draws its cards from the events and never
 polls.
 
+**What ran on your terminal.** A remote conversation's tools run on the operator's own machine through
+`daedalus-cli` (`docs/architecture/cli.md`), and every request the server sent there, or held while the
+terminal was away, is kept for 90 days: `GET /api/remote/calls?session=<id>&device=<id>&limit=` answers
+`{"calls": [{"id", "session_id", "tool_call_id", "seq", "device_id", "tool", "method", "intent", "title",
+"state", "delivery", "outcome", "created_at", "updated_at"}]}`, newest first. `state` is `held`, `sent`,
+`done`, `failed`, `refused` (the terminal's guard or folder said no), `lost` (sent, and the terminal came
+back without knowing it, so it was not run again) or `cancelled`; `delivery` is `not_delivered`,
+`delivered` or `unknown`. A terminal's own credential does not open it. While such a command runs, the
+session's event stream carries its output as `remote_output` events (`{tool_call_id, delta}`), live only
+and never replayed: the tool's result is the copy that counts.
+
 **Everything that happens, as one stream.** `GET /api/events` is a server-sent event stream of what
 happens to sessions, terminals, staff and notifications. It opens with a `hello` frame carrying
 `head` (the newest event number) and `oldest` (the oldest one still kept), then sends each event
@@ -422,3 +433,10 @@ prompt — or resumes the one still unfinished; `message` is its first turn when
 "path", "at"}` once the coach has saved the prompt to `prompts/<date>-<title>.md` in the chat's
 workspace. The coach reads the chat's files and writes none of its own; no session list shows it, and
 it is deleted with its chat.
+
+**A terminal of your own.** `daedalus-cli` pairs with the server by a device code the operator approves
+in the app or in Telegram, and then holds a per-device token (`Authorization: Device dcl_…`) that
+reaches the conversations started from that terminal or opened from it with `/resume`, and nothing of
+the installation's settings. `GET /api/models` lists the model presets, providers and efforts without
+any address or key. The pairing, the device list (`/api/cli/devices`), what a device token reaches and
+the relay its tools run over are in [architecture/cli.md](architecture/cli.md).

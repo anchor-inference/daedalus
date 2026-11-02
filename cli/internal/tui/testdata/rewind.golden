@@ -1,0 +1,30 @@
+
+
+
+
+
+
+╭──────────────────────────────────────────────────────────────╮
+│ ✻ Welcome to Daedalus!                                       │
+│                                                              │
+│ /help for help, /status for your current setup               │
+│                                                              │
+│ cwd: /work/project                                           │
+╰──────────────────────────────────────────────────────────────╯
+
+ Tips for getting started:
+
+ 1. Ask a question about this folder, or ask for a change
+ 2. Type @ to mention a file, ! to run a shell command, / for commands
+ 3. Shift+Tab cycles the local guard: ask, auto, plan
+
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Rewind                                                                                           │
+│ Restore the code and/or conversation to the point before…                                        │
+│                                                                                                  │
+│ ❯ Now run the tests  no code snapshot                                                   4m ago   │
+│   Split the cursor logic out of the store                                              12m ago   │
+│   Read the session store and tell me what it does                                      20m ago   │
+│                                                                                                  │
+│ enter to choose · esc to cancel                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

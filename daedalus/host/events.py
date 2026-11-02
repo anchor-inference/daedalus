@@ -84,8 +84,9 @@ class SessionUnreadResult(TypedDict):
 
 
 class SessionControlling(TypedDict):
-    """What the session controls right now changed (``chrome``, ``computer``; empty when nothing): the
-    sidebar moves it into or out of the Browser and Computer tabs without waiting for the next poll.
+    """What the session controls right now changed (``chrome``, ``computer``, ``remote``; empty when
+    nothing): the sidebar moves it into or out of the Browser, Computer and Remote tabs without waiting
+    for the next poll.
     Its kind, what it was made for, never changes (:mod:`daedalus.host.control_marks`)."""
 
     controlling: list[str]
@@ -345,6 +346,53 @@ class BrowserClosed(TypedDict):
     reason: str
     """closed · idle · crashed · memory · shutdown · lost · owner_gone"""
     by: str
+
+
+class DevicePairing(TypedDict):
+    """A terminal asked to pair, or its request was decided or ran out (``docs/architecture/cli.md``).
+    The app shows the approval card on ``pending`` and takes it down on anything else."""
+
+    id: str
+    user_code: str
+    name: str
+    hostname: str
+    os: str
+    address: str
+    expires_at: str
+    state: Literal["pending", "approved", "denied", "delivered", "expired"]
+
+
+class DeviceChanged(TypedDict):
+    """The list of paired terminals changed: a device was paired, renamed or revoked."""
+
+    device_id: str
+    change: Literal["paired", "renamed", "revoked"]
+
+
+class DeviceConnection(TypedDict):
+    """A paired terminal's relay came up or went down; ``disconnected_at`` is when it went down (None
+    when it came up), so a window that did not watch the drop can tell reconnecting from offline."""
+
+    device_id: str
+    connected: bool
+    disconnected_at: str | None
+
+
+class RemoteGuard(TypedDict):
+    """The local guard a terminal reports for a session it shows (``ask``, ``auto``, ``plan``)."""
+
+    device_id: str
+    guard: Literal["ask", "auto", "plan"]
+
+
+class RemoteWaiting(TypedDict):
+    """A remote session's turn started or stopped waiting for its device to come back: its tool calls
+    are held until the device reconnects (``docs/architecture/cli.md``, Disconnects)."""
+
+    waiting: bool
+    device_id: str
+    since: NotRequired[str]
+    calls: NotRequired[list[dict[str, Any]]]
 
 
 class StaffStatus(TypedDict):
@@ -721,6 +769,11 @@ REGISTRY: dict[str, EventSpec] = {
     "browser.activity": EventSpec(BrowserActivity, persist=False),
     "browser.workflow": EventSpec(BrowserWorkflow, persist=False),
     "browser.user": EventSpec(BrowserUser, persist=False),
+    "device.pairing": EventSpec(DevicePairing),
+    "device.changed": EventSpec(DeviceChanged),
+    "device.connection": EventSpec(DeviceConnection),
+    "remote.guard": EventSpec(RemoteGuard),
+    "remote.waiting": EventSpec(RemoteWaiting),
     "staff.status": EventSpec(StaffStatus),
     "staff.report": EventSpec(StaffReport),
     "staff.message": EventSpec(StaffMessage),

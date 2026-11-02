@@ -124,7 +124,13 @@ class SessionServices:
             if self.exec_backend is not None:
                 raise RuntimeError("a claimed local filesystem cannot write through a remote shell")
             return self.claimed_fs
-        return ShellFS(self.exec_backend, timeout=min(self.tool_timeout_seconds, 120.0)) if self.exec_backend is not None else LocalFS()
+        if self.exec_backend is None:
+            return LocalFS()
+        timeout = min(self.tool_timeout_seconds, 120.0)
+        # A backend with a file interface of its own (native file calls of an operator's terminal)
+        # hands it out; any other is reached with portable shell commands.
+        own = getattr(self.exec_backend, "filesystem", None)
+        return own(timeout) if own is not None else ShellFS(self.exec_backend, timeout=timeout)
 
     def resolve(self, path: str | None, *, write: bool = False) -> Path:
         """Resolve a tool path: absolute stays absolute, relative is workspace-relative.

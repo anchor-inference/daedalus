@@ -26,7 +26,7 @@ from contextlib import asynccontextmanager, closing, suppress
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PureWindowsPath
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, get_args
 from urllib.parse import parse_qsl, quote, urlencode
 
 import httpx
@@ -58,6 +58,7 @@ from daedalus.config import (
     ModelPresetConfig,
     NotificationsConfig,
     ProviderConfig,
+    ReasoningEffort,
     is_keyproxy_url,
     keyproxy_base,
     keyproxy_unresolved,
@@ -107,6 +108,8 @@ from daedalus.extensions import (
     api_prompt_coach,
     api_provider_holds,
     api_recurring,
+    api_remote,
+    api_remote_relay,
     api_resource_profiles,
     api_reveal,
     api_runtime,
@@ -155,7 +158,8 @@ from daedalus.host.deliverables import WORKTREE_PANE, parse_worktree_pane, secre
 from daedalus.host.deliverables import locate as locate_deliverable
 from daedalus.host.dependencies import DependencyPlanner
 from daedalus.host.events import EventFilter, event_stream, streamed_types
-from daedalus.host.host_exec import BRIDGE_DOWN, HostExecBackend
+from daedalus.host.filesystem import foreign_paths, machine_of
+from daedalus.host.host_exec import BRIDGE_DOWN
 from daedalus.host.policy import sealed_root
 from daedalus.host.predict import Predictor
 from daedalus.host.presence import MAX_ID_LENGTH, MAX_PROJECTS, MAX_SESSIONS, MAX_TERMINALS, PresenceReport
@@ -176,6 +180,8 @@ from daedalus.providers.free_catalog import catalog as free_catalog
 from daedalus.providers.image_fit import sniffed_mime
 from daedalus.providers.llamacpp import discover_llamacpp
 from daedalus.providers.openai_compat import UsageRecord
+from daedalus.remote import door as remote_door
+from daedalus.remote.turns import EXTERNAL_CALL
 from daedalus.search.service import ConversationSearch, SearchBusy
 from daedalus.security import redact
 from daedalus.speech import catalog as speech_catalog
@@ -255,6 +261,8 @@ VOICE_AUDIO_MAX = 25 << 20
 """One spoken utterance, not a recording session: anything larger is a mistake, not speech."""
 VOICE_NOTE_MAX = 50 << 20
 """A composer voice note. The site sends 16 kHz WAV, so this is over twenty minutes of talking."""
+SENT_FROM_MACHINE_MAX = 50 << 20
+"""The largest file a remote conversation sent that is read back whole from the operator's machine."""
 KEPT_RECORDINGS = ".voice-notes"
 """Where, under a session's inbox, a voice note waits until its words are in the composer."""
 KEPT_NAME = re.compile(r"[0-9a-f]{12}\.[a-z0-9]{1,5}")
@@ -453,7 +461,8 @@ class PresenceBody(BaseModel):
     """One window's account of itself: whether it is seen, and what it shows."""
 
     client: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
-    kind: Literal["browser", "pwa", "telegram", "window"] = "browser"
+    kind: Literal["browser", "pwa", "telegram", "window", "cli"] = "browser"
+    """``cli`` is the terminal client (``docs/architecture/cli.md``, Presence)."""
     visible: bool
     focused: bool
     sessions: list[str] = []
@@ -598,9 +607,16 @@ class NewSessionBody(BaseModel):
     env: Literal["container", "host"] | None = None
     """Where a chat that names no project runs: ``host`` puts its scratch folder on the host and runs
     every command there through the host terminal daemon. Only a Docker installation offers it."""
-    kind: Literal["chat", "computer", "chrome"] = "chat"
+    kind: Literal["chat", "computer", "chrome", "remote"] = "chat"
     """What the conversation is made for, fixed from here on. ``chrome`` also moves it to the operator's
-    Chrome: choosing a Chrome conversation is their yes, as pressing "new" in the side panel is."""
+    Chrome: choosing a Chrome conversation is their yes, as pressing "new" in the side panel is.
+    ``remote`` is a conversation whose tools run on a paired terminal (``docs/architecture/cli.md``)."""
+    cwd: str = Field(default="", max_length=api_remote.CWD_MAX)
+    """A remote conversation's folder on its device, absolute, as the device spells it."""
+    device_id: str = Field(default="", max_length=64)
+    """The device a remote conversation is bound to, when the operator (not the device) starts it."""
+    guard: Literal["ask", "auto", "plan"] | None = None
+    """The device's local guard for the new conversation, as its client starts it."""
     private: bool = False
     """A private chat: kept, but never learned from, indexed, handed memory or found from another chat.
     Only here, at creation: no route changes it later (:mod:`daedalus.memory.privacy` says why)."""
@@ -1557,6 +1573,11 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         panel = request.scope.get(api_panel.SCOPE_KEY)
         if isinstance(panel, dict):
             return {"user_id": settings.owner_user_id, "via": "panel", **panel}
+        # A terminal's credential, likewise checked by its own door, with the route and the session's
+        # scope, before this runs; the routes it does not open never get here (``daedalus.remote.door``).
+        device = request.scope.get(remote_door.SCOPE_KEY)
+        if isinstance(device, dict):
+            return {"user_id": settings.owner_user_id, "via": "device", **device}
         header = request.headers.get("authorization", "")
         if header.startswith("tma "):
             if not settings.telegram_bot_token:
@@ -1579,6 +1600,11 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if cookie and verify_session_cookie(await session_secret(), cookie) == settings.owner_user_id:
             return {"user_id": settings.owner_user_id, "via": "cookie"}
         raise HTTPException(401, "authentication required")
+
+    def front_of(who: dict[str, Any]) -> str:
+        """The front an answer, a grant or a message came through, as the events record it: a
+        terminal's credential is the terminal client, every other way in is the app."""
+        return "cli" if who.get("via") == "device" else "app"
 
     # -- auth: the site outside Telegram ---------------------------------------------
 
@@ -1742,6 +1768,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_browsers.register(api, app, auth)
     # The operator's own Chrome: its card, a conversation's switch, and a server's pairing and relay.
     api_browser_user.register(api, app, auth)
+    api_remote_relay.register(api, app, auth)
     # The operator's own desktop, natively: the Computer control's state, its grant, Stop and Resume.
     api_computer.register(api, app, auth)
 
@@ -2168,7 +2195,12 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         overrides_by_id = await manager.live.load_models([row["id"] for row in rows])
         terminals = app.extensions.get("terminals")
         running_terminals = await terminals.running_by_session([row["id"] for row in rows]) if terminals is not None else {}  # type: ignore[attr-defined]
+        remotes = await api_remote.remote_views(app, [row["id"] for row in rows])
         for row in rows:
+            # The device and folder of a remote conversation, for the subtitle on its row; the list
+            # says only whether a turn waits for the device, the session itself says on what.
+            remote = remotes.get(row["id"])
+            row["remote"] = {**remote, "waiting": remote["waiting"] is not None} if remote is not None else None
             # The directory the session works in, for the tooltip on its row and the chip that says
             # it has one of its own. The list groups by project now, not by workspace.
             project = next((p for p in projects if p.id == row["project_id"]), None)
@@ -2218,6 +2250,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     @api.post("/api/sessions")
     async def new_session(body: NewSessionBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        remote_home = await remote_binding(body, _)
         metadata: dict[str, Any] = {"tools_off": sorted(set(body.tools_off))} if body.tools_off else {}
         # A session opened here is not a Telegram session. Without this, private-chat mode
         # delivers the agent's replies into the operator's direct messages.
@@ -2292,8 +2325,21 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             # Moved before the first message, so its turn already works in the operator's Chrome, and
             # by the operator's own switch: the same path, event and consent record either way.
             await chrome_offered().switch_conversation(state.session.id, BROWSER_USER, consent=True)
+        if remote_home is not None:
+            # Bound before the first message, so its first turn already knows where its hands are.
+            devices, device_id = remote_home
+            await devices.bind_home(device_id, state.session.id, body.cwd)
+            # The relay keeps its own map of whose hands a session has, read once at start, and the
+            # session's tools were built when it was made, pointing at this server: binding re-points
+            # them at the device before the first turn, which would otherwise run on the server.
+            remote_turns = app.extensions.get("remote_turns")
+            if remote_turns is not None:
+                remote_turns.bind(state.session.id, device_id, body.cwd)
+            remote_live = app.extensions.get("remote_control")
+            if body.guard is not None and remote_live is not None:
+                await remote_live.set_guard(device_id, state.session.id, body.guard)  # type: ignore[attr-defined]
         if body.prompt:
-            await manager.submit(state.session.id, body.prompt)
+            await manager.submit(state.session.id, body.prompt, via=front_of(_))
         if body.loop is not None:
             loops = app.extensions.get("loops")
             if loops is None:
@@ -2302,7 +2348,36 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 await loops.create(state.session.id, instruction=body.loop.instruction, mode=body.loop.mode, interval_seconds=(body.loop.interval_minutes or 0) * 60 or None, max_runs=body.loop.max_runs, start_now=body.loop.start_now)
             except ValueError as exc:
                 raise HTTPException(422, str(exc)) from exc
-        return {"id": state.session.id, "title": title, "model": await session_model_label(state), "kind": state.kind}
+        remote = (await api_remote.remote_views(app, [state.session.id])).get(state.session.id)
+        return {"id": state.session.id, "title": title, "model": await session_model_label(state), "kind": state.kind, "remote": remote}
+
+    async def remote_binding(body: NewSessionBody, who: dict[str, Any]) -> tuple[Any, str] | None:
+        """The device and the devices' store a remote conversation is to be bound to, checked before
+        anything is made; None for a conversation of another kind. A terminal's credential starts
+        remote conversations only, bound to itself; the operator's names the device."""
+        from_device = who.get("via") == "device"
+        if body.kind != "remote":
+            if from_device:
+                raise HTTPException(403, "a terminal starts remote conversations only")
+            if body.cwd or body.device_id or body.guard is not None:
+                raise HTTPException(400, "cwd, device_id and guard belong to a remote conversation")
+            return None
+        if body.project_id or body.folder_id or body.env or body.own_directory or body.loop is not None:
+            raise HTTPException(400, "a remote conversation works in its device's folder: it names no project, folder, environment or loop")
+        if not body.cwd or not api_remote.absolute_folder(body.cwd) or api_remote.whole_disk(body.cwd):
+            raise HTTPException(400, "cwd: the absolute folder on the device the conversation works in, not a whole disk")
+        devices = app.extensions.get("remote_devices")
+        if devices is None:
+            raise HTTPException(503, "the terminal client's devices are not installed")
+        device_id = str(who.get("device") or "") if from_device else body.device_id
+        if from_device and body.device_id and body.device_id != device_id:
+            raise HTTPException(403, "a terminal binds the conversations it starts to itself")
+        if not device_id:
+            raise HTTPException(400, "device_id: the paired terminal the conversation's tools run on")
+        device = await devices.get(device_id)  # type: ignore[attr-defined]
+        if device is None or not device.live(devices.now()):  # type: ignore[attr-defined]
+            raise HTTPException(404, "no such paired terminal")
+        return devices, device_id
 
     def chrome_offered() -> Any:
         """The browser service, when this installation offers the operator's Chrome; 409 otherwise,
@@ -2385,7 +2460,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         """The question the session waits on, and, when it is a staff member's question someone
         already answered, who and with what: the member's card stayed open with its options while
         answering it only returned "already answered by the orchestrator"."""
-        if state.pending is None:
+        if state.pending is None or state.pending.kind == EXTERNAL_CALL:
+            # A turn waiting for its terminal is no question: the session's ``remote.waiting`` says it.
             return None
         view = dict(state.pending.payload)
         team = app.extensions.get("staff")
@@ -2461,6 +2537,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             # the transcript and offers it only when its key is here: read from the transcript alone,
             # every refusal in the last turns came back as an open card on each reload, answered or not.
             "open_approvals": list((state.metadata.get("policy_pending") or {}).keys()),
+            # The terminal a remote conversation's tools run on, its folder there, whether it is
+            # connected, its guard and a turn waiting for it; null for every other session.
+            "remote": (await api_remote.remote_views(app, [session_id])).get(session_id),
             "model": await session_model_label(state),
             "provider": await session_provider(state),
             **(await session_thinking(state)),
@@ -2646,15 +2725,17 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         request: Request,
         types: str = "",
         client: str = Query("", max_length=64, pattern=r"^[A-Za-z0-9_-]*$"),
-        kind: Literal["browser", "pwa", "telegram", "window", "launcher"] = "browser",
+        kind: Literal["browser", "pwa", "telegram", "window", "launcher", "cli"] = "browser",
         after: int | None = Query(None, ge=0),
+        session: str = Query("", max_length=64, pattern=r"^[A-Za-z0-9_-]*$"),
         _: dict[str, Any] = Depends(auth),
     ) -> StreamingResponse:
         """Everything that happens to sessions, terminals, staff and notifications, as one stream.
 
         ``after`` (or ``Last-Event-ID`` on a browser's own reconnect) resumes past a cursor; without
         either the stream is live from now. ``kind`` and ``client`` say who is listening, which the
-        presence of the operator will be read from.
+        presence of the operator will be read from. ``session`` narrows it to one session's events:
+        a terminal reads only the conversations it may drive, and its door requires it.
         """
         wanted = tuple(t for t in (part.strip() for part in types.split(",")) if t)
         if len(wanted) > EVENT_TYPES_MAX or not all(EVENT_TYPE_RE.fullmatch(t) for t in wanted):
@@ -2665,7 +2746,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             # (live from now), because the client cannot correct a header it did not write.
             last = request.headers.get("last-event-id", "").strip()
             cursor = int(last) if last.isdigit() else None
-        flt = EventFilter(types=wanted or streamed_types())
+        flt = EventFilter(types=wanted or streamed_types(), session_id=session or None)
         presence = manager.presence
 
         async def opened() -> None:
@@ -2692,13 +2773,23 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         for name, ids, most in limits:
             if len(ids) > most or any(not item or len(item) > MAX_ID_LENGTH for item in ids):
                 raise HTTPException(400, f"{name}: at most {most} ids of at most {MAX_ID_LENGTH} characters")
+        sessions = list(body.sessions)
+        device = str(_.get("device") or "") if _.get("via") == "device" else ""
+        if device:
+            # A terminal reports only conversations it may drive: what it names beyond them would
+            # mark them as followed by it, and hold back their notifications, without any right to.
+            devices = app.extensions.get("remote_devices")
+            sessions = [sid for sid in sessions if devices is not None and await devices.in_scope(device, sid)]  # type: ignore[attr-defined]
         await manager.presence.report(
             PresenceReport(
                 client=body.client, kind=body.kind, visible=body.visible, focused=body.focused,
-                sessions=tuple(body.sessions), terminals=tuple(body.terminals), projects=tuple(body.projects),
+                sessions=tuple(sessions), terminals=tuple(body.terminals), projects=tuple(body.projects),
                 screen=body.screen, lang=body.lang, tz=body.tz,
             )
         )
+        remote_live = app.extensions.get("remote_control")
+        if device and remote_live is not None:
+            await remote_live.reported(device, body.client, sessions if body.visible else [])  # type: ignore[attr-defined]
         return Response(status_code=204)
 
     @api.get("/api/sessions/{session_id}/tool-results/{call_id}")
@@ -2788,9 +2879,13 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                         raise HTTPException(404, "the call named no file")
                     if state.project is not None and manager.is_orchestrator(state):
                         return await _sent_by_orchestrator(state.project, raw.strip(), request.headers.get("range", ""))
-                    if state.services is not None and isinstance(state.services.exec_backend, HostExecBackend):
+                    backend = state.services.exec_backend if state.services is not None else None
+                    if machine_of(backend) == "host":
                         # The call ran on the host and named a file there, which this process cannot open.
                         return await _sent_from_host(state, raw.strip(), request.headers.get("range", ""))
+                    if foreign_paths(backend):
+                        # The call ran on the operator's terminal: the file is read back through it.
+                        return await _sent_from_machine(state, raw.strip())
                     candidate = Path(raw).expanduser()
                     target = candidate if candidate.is_absolute() else state.workspace / candidate
                     # The path is read back out of the transcript, so it is checked again rather than
@@ -2865,6 +2960,31 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             if target == root or target.startswith(root.rstrip("/") + "/"):
                 return await _host_pane(root).download(posixpath.relpath(target, root), range_header)
         raise HTTPException(403, "that file is outside this project")
+
+    async def _sent_from_machine(state: Any, raw: str) -> Response:
+        """A file a remote conversation sent, read back from the operator's machine through its
+        terminal, whole and bounded: inside the folder the conversation is bound to, as its tools
+        were. A terminal that is away answers 503; the file is still there when it is back."""
+        services = state.services
+
+        def slashed(path: str) -> str:
+            # A Windows terminal spells its paths with backslashes; compared here in one spelling.
+            return posixpath.normpath(path.replace("\\", "/"))
+
+        work = str(services.workspace_dir)
+        target = raw if raw.startswith("/") or (len(raw) > 2 and raw[1] == ":") else f"{work}/{raw}"
+        if slashed(target) != slashed(work) and not slashed(target).startswith(slashed(work).rstrip("/") + "/"):
+            raise HTTPException(403, "that file is outside this conversation's folder")
+        try:
+            data = await services.fs.read_bytes(Path(target), limit=SENT_FROM_MACHINE_MAX)
+        except FileNotFoundError:
+            raise HTTPException(404, "the file is gone") from None
+        except ValueError as exc:
+            raise HTTPException(413, str(exc)) from None
+        except OSError as exc:
+            raise HTTPException(503, str(exc)) from None
+        name = posixpath.basename(slashed(target)) or "file"
+        return Response(data, media_type=mimetypes.guess_type(name)[0] or "application/octet-stream", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
     @api.post("/api/media/access")
     async def media_access(request: Request, _: dict[str, Any] = Depends(auth)) -> JSONResponse:
@@ -2952,6 +3072,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 client_message_id=body.client_message_id or None,
                 reply_to=reply,
                 secrets=body.secrets,
+                via=front_of(_),
             )
         except KeyError as exc:
             raise HTTPException(404, "no such session") from exc
@@ -4168,7 +4289,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     @api.post("/api/sessions/{session_id}/answer")
     async def answer(session_id: str, body: AnswerBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            run_id = await manager.answer(session_id, body.answers, via="app")
+            run_id = await manager.answer(session_id, body.answers, via=front_of(_))
         except RuntimeError as exc:
             raise HTTPException(409, str(exc)) from exc
         return {"run_id": run_id}
@@ -4776,6 +4897,38 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         """Only what this installation can run: a palette entry that answers with a refusal is a lie."""
         return [{"name": c.name, "args": c.args, "description": c.description, "scope": c.scope, "confirm": c.confirm} for c in slash.available(app)]
 
+    @api.get("/api/models")
+    async def list_models(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """What a model picker outside the app reads (the terminal client's ``/model``): the presets,
+        each provider's kind and name, the default and the efforts. No address and no key, as for the
+        side panel: a terminal's credential reaches this and nothing of the settings."""
+        raw = app.config.model_dump(mode="json")
+        providers = raw.get("providers") or {}
+        presets = [
+            {
+                "id": pid,
+                "label": preset.display(pid),
+                "provider": preset.provider,
+                "model": preset.model,
+                "thinking": preset.thinking,
+                "reasoning_effort": preset.reasoning_effort,
+                "images": preset.images,
+                "context_window": preset.context_window,
+                "max_output_tokens": preset.max_output_tokens,
+                "provider_kind": str((providers.get(preset.provider) or {}).get("kind") or ""),
+                "billing": str((providers.get(preset.provider) or {}).get("billing") or ""),
+            }
+            for pid, preset in app.config.presets.items()
+        ]
+        presets.sort(key=lambda entry: (str(entry["label"]).lower(), entry["id"]))
+        default = app.config.default_preset()
+        return {
+            "default": default[0] if default else "",
+            "presets": presets,
+            "providers": [{"id": pid, "kind": str(conf.get("kind") or ""), "name": str(conf.get("name") or ""), "billing": str(conf.get("billing") or "")} for pid, conf in providers.items()],
+            "efforts": list(get_args(ReasoningEffort)),
+        }
+
     @api.get("/api/skills")
     async def list_skills(_: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
         """The enabled skills, for the composer to offer by name and description."""
@@ -5040,7 +5193,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     async def policy_grant(session_id: str, body: dict[str, Any], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """Let one refused call through: ``{"key": "<approval key from the refusal>"}``."""
         try:
-            grants = await manager.grant(session_id, str(body.get("key") or ""), via="app")
+            grants = await manager.grant(session_id, str(body.get("key") or ""), via=front_of(_))
         except KeyError as exc:
             raise HTTPException(404, "no such session") from exc
         except ValueError as exc:
@@ -5061,7 +5214,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     async def policy_grant_similar(session_id: str, body: dict[str, Any], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """Allow calls like a refused one until the session ends: ``{"key": "<approval key>"}``."""
         try:
-            return await manager.grant_similar(session_id, str(body.get("key") or ""), via="app")
+            return await manager.grant_similar(session_id, str(body.get("key") or ""), via=front_of(_))
         except KeyError as exc:
             raise HTTPException(404, "no such session") from exc
         except ValueError as exc:
@@ -5071,7 +5224,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     async def policy_refuse(session_id: str, body: dict[str, Any], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """Leave one refused call refused: ``{"key": "<approval key>"}``. The request stops being open."""
         try:
-            return await manager.refuse(session_id, str(body.get("key") or ""), via="app")
+            return await manager.refuse(session_id, str(body.get("key") or ""), via=front_of(_))
         except KeyError as exc:
             raise HTTPException(404, "no such session") from exc
         except ValueError as exc:
@@ -5450,7 +5603,10 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         services = state.services
         on_host = False
         if not folder_id:
-            if services is not None and isinstance(services.exec_backend, HostExecBackend):
+            backend = services.exec_backend if services is not None else None
+            if foreign_paths(backend) and machine_of(backend) != "host":
+                raise HTTPException(409, "this conversation's files are on the operator's machine, where its terminal works; the pane does not reach them yet")
+            if services is not None and machine_of(backend) == "host":
                 root = services.workspace_dir
                 on_host = True
             else:
@@ -6724,6 +6880,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     # The side panel's door goes last: it looks up the operator's handlers it forwards to.
     api_panel.register(api, app, new_body=NewSessionBody)
+    api_remote.register(api, app, auth)
 
     # -- static mini app ------------------------------------------------------------
 

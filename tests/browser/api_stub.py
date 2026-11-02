@@ -489,6 +489,8 @@ KEYPROXY_CLIENT_UPDATED: dict[str, object] = {
 """What ``POST /api/keyproxy/clients/claude/update`` answers: the version moved, three header values kept."""
 
 
+
+
 GATES: dict[str, object] = {
     "/api/terminals/envs": {"envs": [
         {"env": "container", "available": True, "sandbox": "ok", "containment": {"kind": "cgroup_v2", "available": True}},
@@ -546,6 +548,9 @@ GATES: dict[str, object] = {
     "/api/notifications/preferences": notification_preferences(),
     "/api/terminals/load": terminal_load(),
     "/api/commands": [],
+    # The model list outside the app's settings (the terminal's /model): no address, no key.
+    "/api/models": {"default": "default", "presets": [{"id": "default", "label": "Test model", "provider": "keyproxy", "model": "test-model", "thinking": True, "reasoning_effort": "medium", "images": False, "context_window": 128000, "max_output_tokens": 32000, "provider_kind": "openai", "billing": ""}],
+                    "providers": [{"id": "keyproxy", "kind": "openai", "name": "Key proxy", "billing": ""}], "efforts": ["low", "medium", "high", "xhigh"]},
     # The composer's palette offers these next to the slash commands.
     "/api/skills": [{"id": "web-design-reviewer", "name": "web-design-reviewer", "description": "Review a page's layout and accessibility"}],
     "/api/asr": {"configured": False, "reason": "", "provider": "", "model": "", "max_seconds": 120, "autosend": False},
@@ -658,6 +663,87 @@ COMPANION = CompanionStub("companion-1")
 MEMORY = MemoryStub()
 """An empty memory for the harnesses that pass the Memory screen by; screenshots.py and
 check_memory_topics.py keep one with records of their own."""
+
+
+class CliStub:
+    """The computers paired with daedalus-cli and the terminals asking to be (docs/architecture/cli.md).
+
+    Every signed-in window reads the pairing requests, to announce one, so every harness answers them;
+    by default nobody asks and one laptop is paired. A harness that draws the pairing sheet or the
+    Devices page (check_devices.py) puts a request in ``requests`` and watches what the app sends:
+    approving pairs the computer, denying refuses it, renaming and revoking change the list the next
+    read returns, and ``sent`` keeps each write as ``(method, path, body)``. A decided request stays
+    in ``requests`` with its state, as on the host, and leaves the pending list.
+    """
+
+    def __init__(self) -> None:
+        self.devices: list[dict[str, object]] = [self.device("dev-laptop", "laptop-graceful-unicorn", "linux", "amd64", days=12, connected=True, sessions=2)]
+        self.requests: list[dict[str, object]] = []
+        self.sent: list[tuple[str, str, object]] = []
+
+    @staticmethod
+    def device(id_: str, name: str, os_name: str, arch: str, *, days: float = 0, connected: bool = False, sessions: int = 0) -> dict[str, object]:
+        """A paired computer as ``GET /api/cli/devices`` lists it."""
+        now = datetime.now(UTC)
+        paired = (now - timedelta(days=days)).isoformat()
+        return {"id": id_, "name": name, "hostname": name, "os": os_name, "arch": arch, "client_version": "0.1.0",
+                "paired_at": paired, "token_issued_at": paired, "approved_via": "app", "last_seen_at": now.isoformat(),
+                "last_address": "127.0.0.1", "expires_at": (now + timedelta(days=90)).isoformat(), "revoked_at": None,
+                "connected": connected, "disconnected_at": None, "sessions": sessions}
+
+    @staticmethod
+    def request(code: str = "WDJB-MJHT", name: str = "studio-mac", os_name: str = "darwin", arch: str = "arm64", *, minutes: float = 10) -> dict[str, object]:
+        """A terminal waiting to be paired, asked just now and good for ``minutes``."""
+        now = datetime.now(UTC)
+        return {"id": "pair-" + code.lower().replace("-", ""), "user_code": code, "name": name, "hostname": name, "os": os_name, "arch": arch,
+                "client_version": "0.1.0", "address": "127.0.0.1", "created_at": (now - timedelta(seconds=20)).isoformat(),
+                "expires_at": (now + timedelta(minutes=minutes)).isoformat(), "state": "pending"}
+
+    def _find(self, code: str) -> dict[str, object] | None:
+        want = unquote(code).upper().replace("-", "")
+        return next((r for r in self.requests if str(r["user_code"]).upper().replace("-", "") == want), None)
+
+    def answer(self, method: str, path: str, body: object) -> tuple[int, object] | None:
+        if not path.startswith("/api/cli/"):
+            return None
+        sent = body if isinstance(body, dict) else {}
+        if method != "GET":
+            self.sent.append((method, path, body))
+        parts = path.split("/")
+        if path == "/api/cli/pairs" and method == "GET":
+            return 200, {"requests": [r for r in reversed(self.requests) if r["state"] == "pending"]}
+        if len(parts) == 5 and parts[3] == "pair" and method == "GET":
+            found = self._find(parts[4])
+            return (200, found) if found and found["state"] == "pending" else (404, {"detail": "no such pairing request"})
+        if len(parts) == 6 and parts[3] == "pair" and parts[5] in ("approve", "deny") and method == "POST":
+            found = self._find(parts[4])
+            if found is None:
+                return 404, {"detail": "no such pairing request"}
+            if found["state"] != "pending":
+                return 409, {"detail": "this request was already decided"}
+            found["state"] = "approved" if parts[5] == "approve" else "denied"
+            if parts[5] == "approve":
+                # The host makes the device at the client's next poll; the list here has it at once.
+                code = str(found["user_code"]).lower().replace("-", "")
+                self.devices.append(self.device(f"dev-{code}", str(sent.get("name") or found["name"]), str(found["os"]), str(found["arch"])))
+            return 200, {"ok": True, "request": found}
+        if path == "/api/cli/devices" and method == "GET":
+            return 200, {"devices": self.devices}
+        if len(parts) == 5 and parts[3] == "devices":
+            device = next((d for d in self.devices if d["id"] == parts[4]), None)
+            if device is None:
+                return 404, {"detail": "no such device"}
+            if method == "PATCH":
+                device["name"] = str(sent.get("name", device["name"]))
+                return 200, device
+            if method == "DELETE":
+                self.devices.remove(device)
+                return 200, {"ok": True}
+        return None
+
+
+CLI = CliStub()
+"""The paired computers every harness shares: one laptop, and nobody asking to pair."""
 
 
 SHARED_WRITES: dict[tuple[str, str], tuple[int, str, str]] = {
@@ -876,7 +962,7 @@ def meeting_job(session_id: str, status: str) -> dict:
     }
 
 
-SESSION_KINDS = ("chat", "computer", "chrome")
+SESSION_KINDS = ("chat", "computer", "chrome", "remote")
 CREATED_SESSIONS: list[dict] = []
 """Every ``POST /api/sessions`` answered by ``create_session``, in order, with the body as sent: a check
 of New chat reads the kind the app asked for here."""
@@ -1033,6 +1119,10 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     if path.startswith("/api/companion"):
         # The companion's page and every list that draws its face; check_companion.py reads its writes back.
         answered = COMPANION.answer(method, path, query, body if isinstance(body, dict) else None)
+        if answered is not None:
+            return answered[0], "application/json", json.dumps(answered[1])
+    if path.startswith("/api/cli/"):
+        answered = CLI.answer(method.upper(), path, body)
         if answered is not None:
             return answered[0], "application/json", json.dumps(answered[1])
     if path == "/api/memory/export.zip":

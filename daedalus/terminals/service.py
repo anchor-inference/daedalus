@@ -60,6 +60,7 @@ from daedalus.terminals.model import (
     TimedOut,
     Unsupported,
     WriteReceipt,
+    unknown_env,
 )
 from daedalus.terminals.owners import Owners
 from daedalus.terminals.sidechannels import SideChannels
@@ -459,7 +460,7 @@ class Terminals(SideChannels):
     def _client(self, env: str) -> PtydClient:
         link = self.links.get(env)
         if link is None:
-            raise InvalidRequest(f"an environment is one of {', '.join(ENVS)}, not {env!r}")
+            raise InvalidRequest(unknown_env(env))
         if not link.available or link.client is None:
             raise EnvUnavailable(f"the {env} terminal service is not available: {link.detail or link.reason}", env=env, reason=link.reason)
         return link.client
@@ -764,7 +765,7 @@ class Terminals(SideChannels):
         cfg = self.config()
         link = self.links.get(spec.env)
         if link is None:
-            raise InvalidRequest(f"an environment is one of {', '.join(ENVS)}, not {spec.env!r}")
+            raise InvalidRequest(unknown_env(spec.env))
         self._client(spec.env)
         if not await self.owners.exists(spec.owner):
             raise NotFound(f"no {spec.owner.kind} {spec.owner.id}")

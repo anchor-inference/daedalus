@@ -5485,7 +5485,7 @@ button.coach-path:hover { color: var(--fg); }
 /* Chat kinds (chatkind.tsx): the tabs over a chat list, the tint a computer or Chrome chat carries on
    its plate, and the new chat's mode chip. The two kinds take two of the staff colours, apart from the
    accent, which stays the one colour for what to press. */
-:root { --kind-computer: var(--staff-violet); --kind-chrome: var(--staff-blue); }
+:root { --kind-computer: var(--staff-violet); --kind-chrome: var(--staff-blue); --kind-remote: var(--staff-teal); }
 .kind-tabs { position: relative; isolation: isolate; display: flex; align-items: stretch; gap: 2px; min-width: 0; box-shadow: inset 0 -1px 0 var(--line); }
 .kind-tabs-pill { position: absolute; z-index: 1; bottom: 0; left: 0; height: 2px; border-radius: 2px 2px 0 0; background: var(--fg); transition: transform var(--t-base) var(--ease-out), width var(--t-base) var(--ease-out), background-color var(--t-base) var(--ease-out); }
 /* Unplaced it would sit at the left edge at its natural width until measured. While a pane's edge is
@@ -5494,6 +5494,7 @@ button.coach-path:hover { color: var(--fg); }
 body.resizing .kind-tabs-pill { transition: none; }
 .kind-tabs-pill[data-on="computer"] { background: var(--kind-computer); }
 .kind-tabs-pill[data-on="chrome"] { background: var(--kind-chrome); }
+.kind-tabs-pill[data-on="remote"] { background: var(--kind-remote); }
 .kind-tab { flex: 1 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 0; height: var(--ctl-h-sm); padding: 0 5px; border: 0; border-radius: var(--radius-xs) var(--radius-xs) 0 0; background: none; color: var(--fg-3); font: inherit; font-size: var(--fs-12); font-weight: 500; white-space: nowrap; cursor: pointer; transition: color var(--t-fast) var(--ease-out); }
 .kind-tab:hover { color: var(--fg-2); }
 .kind-tab.on { color: var(--fg); }
@@ -5501,15 +5502,22 @@ body.resizing .kind-tabs-pill { transition: none; }
 .kind-tab.on .ic { opacity: 1; }
 .kind-tab[data-kind-tab="computer"].on .ic { color: var(--kind-computer); }
 .kind-tab[data-kind-tab="chrome"].on .ic { color: var(--kind-chrome); }
+.kind-tab[data-kind-tab="remote"].on .ic { color: var(--kind-remote); }
 .kind-tab b { font-weight: 500; font-size: var(--fs-11); color: var(--fg-3); }
+/* Too narrow for every word (chatkind.tsx measures it): an unchosen kind with an icon keeps the icon and
+   its count, its word clipped out of sight but not out of the page. */
+.kind-tabs[data-compact] .kind-tab:not(.on) > .ic + span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .kind-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .sb-plate.kind-computer, .ph-sicon.kind-computer, .start-live-plate.kind-computer { color: var(--kind-computer); background: color-mix(in srgb, var(--kind-computer) 16%, var(--surface-1)); }
 .sb-plate.kind-chrome, .ph-sicon.kind-chrome, .start-live-plate.kind-chrome { color: var(--kind-chrome); background: color-mix(in srgb, var(--kind-chrome) 16%, var(--surface-1)); }
+.sb-plate.kind-remote, .ph-sicon.kind-remote, .start-live-plate.kind-remote { color: var(--kind-remote); background: color-mix(in srgb, var(--kind-remote) 16%, var(--surface-1)); }
 .sb-row.current .sb-plate.kind-computer { background: color-mix(in srgb, var(--kind-computer) 26%, var(--surface-2)); }
 .sb-row.current .sb-plate.kind-chrome { background: color-mix(in srgb, var(--kind-chrome) 26%, var(--surface-2)); }
+.sb-row.current .sb-plate.kind-remote { background: color-mix(in srgb, var(--kind-remote) 26%, var(--surface-2)); }
 .kind-mark { display: inline-grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 50%; }
 .kind-mark.kind-computer { color: var(--kind-computer); background: color-mix(in srgb, var(--kind-computer) 15%, transparent); }
 .kind-mark.kind-chrome { color: var(--kind-chrome); background: color-mix(in srgb, var(--kind-chrome) 15%, transparent); }
+.kind-mark.kind-remote { color: var(--kind-remote); background: color-mix(in srgb, var(--kind-remote) 15%, transparent); }
 /* A control held now. An ordinary chat driving the operator's Chrome or computer borrows that kind's
    mark only while it does, drawn hollow — a ring in the kind's colour instead of the fill — so it never
    reads as a chat started for that work. Any chat holding the control now carries a small breathing
@@ -5518,6 +5526,7 @@ body.resizing .kind-tabs-pill { transition: none; }
 .sb-plate.kind-borrowed, .ph-sicon.kind-borrowed, .start-live-plate.kind-borrowed, .kind-mark.kind-borrowed { background: transparent; }
 .sb-plate.kind-borrowed.kind-computer, .ph-sicon.kind-borrowed.kind-computer, .start-live-plate.kind-borrowed.kind-computer, .kind-mark.kind-borrowed.kind-computer { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--kind-computer) 70%, transparent); }
 .sb-plate.kind-borrowed.kind-chrome, .ph-sicon.kind-borrowed.kind-chrome, .start-live-plate.kind-borrowed.kind-chrome, .kind-mark.kind-borrowed.kind-chrome { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--kind-chrome) 70%, transparent); }
+.sb-plate.kind-borrowed.kind-remote, .ph-sicon.kind-borrowed.kind-remote, .start-live-plate.kind-borrowed.kind-remote, .kind-mark.kind-borrowed.kind-remote { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--kind-remote) 70%, transparent); }
 .sb-row.current .sb-plate.kind-borrowed { background: transparent; }
 .kind-live { position: relative; }
 .kind-live::after { content: ""; position: absolute; top: -1px; left: -1px; width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 1.5px var(--surface-1); animation: kind-live 2.4s var(--ease-out) infinite; pointer-events: none; }
@@ -5549,6 +5558,7 @@ body.resizing .kind-tabs-pill { transition: none; }
 .sb-kind-empty-icon { display: grid; place-items: center; width: 36px; height: 36px; margin-bottom: 4px; border-radius: 50%; }
 .sb-kind-empty-icon.kind-computer { color: var(--kind-computer); background: color-mix(in srgb, var(--kind-computer) 15%, var(--surface-1)); }
 .sb-kind-empty-icon.kind-chrome { color: var(--kind-chrome); background: color-mix(in srgb, var(--kind-chrome) 15%, var(--surface-1)); }
+.sb-kind-empty-icon.kind-remote { color: var(--kind-remote); background: color-mix(in srgb, var(--kind-remote) 15%, var(--surface-1)); }
 .composer-mode.kind-select { gap: 5px; cursor: pointer; }
 .composer-row .composer-mode.kind-select > .ic, .composer-mode.kind-select > .ic { display: inline-block; flex: none; color: var(--fg-3); }
 .composer-mode.kind-select > .ic:last-child { opacity: .7; }
@@ -5559,11 +5569,13 @@ body.resizing .kind-tabs-pill { transition: none; }
 .kind-row-icon { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 50%; background: var(--surface-2); color: var(--fg-2); }
 .kind-row-icon.kind-computer { color: var(--kind-computer); background: color-mix(in srgb, var(--kind-computer) 15%, var(--surface-2)); }
 .kind-row-icon.kind-chrome { color: var(--kind-chrome); background: color-mix(in srgb, var(--kind-chrome) 15%, var(--surface-2)); }
+.kind-row-icon.kind-remote { color: var(--kind-remote); background: color-mix(in srgb, var(--kind-remote) 15%, var(--surface-2)); }
 .kind-row:disabled { cursor: not-allowed; opacity: .55; }
 .kind-row:disabled .kind-row-icon { filter: grayscale(1); }
 .kind-menu { min-width: 300px; max-width: 340px; }
 .ph-kinds { margin: 0 var(--gutter, 16px) 6px; }
-.ph-kinds .kind-tab { height: var(--row-h-touch); font-size: var(--fs-14); }
+/* A touch target is 44 px across as well as tall: with five tabs the shortest word, All, came out at 33. */
+.ph-kinds .kind-tab { min-width: var(--row-h-touch); height: var(--row-h-touch); font-size: var(--fs-14); }
 .ph-hero-picks { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: 100%; }
 .ph-hero-picks .ph-where { min-width: 0; max-width: 100%; }
 .ph-hero .kind-select.ph-btn { max-width: none; height: 32px; padding: 0 14px; background: var(--surface-2); border-radius: var(--radius-pill); font-size: var(--fs-14); font-weight: 600; }
@@ -5573,3 +5585,60 @@ body.resizing .kind-tabs-pill { transition: none; }
 @media (prefers-reduced-motion: reduce) {
   .kind-tabs-pill, .kind-tab { transition: none; }
 }
+
+/* Remote chats (remote.tsx). The header's line names the computer and the folder and says how the link
+   stands in the status colours; a paused turn is a warning strip under the header with its one action;
+   a terminal asking to pair is a notice at the top of the window until it is reviewed or put off. */
+.remote-head { display: inline-flex; align-items: center; gap: 5px; min-width: 0; flex: 0 1 auto; color: var(--fg-3); }
+.remote-head > .ic { flex: none; color: var(--kind-remote); }
+.remote-device { flex: 0 1 auto; min-width: 0; color: var(--fg-2); }
+.remote-folder { flex: 0 1 auto; min-width: 0; font-family: var(--mono); font-size: var(--fs-11); }
+.remote-state { display: inline-flex; align-items: center; gap: 4px; flex: none; margin-left: 2px; }
+.remote-dot { display: inline-block; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--fg-3); }
+.remote-head[data-remote-state="connected"] .remote-dot, .device-link.on .remote-dot { background: var(--ok); }
+.remote-head[data-remote-state="reconnecting"] .remote-dot { background: var(--warn); animation: kind-live 1.2s var(--ease-out) infinite; }
+.remote-head[data-remote-state="paused"] .remote-state { color: var(--warn); }
+.remote-head[data-remote-state="paused"] .remote-dot { background: var(--warn); }
+@media (prefers-reduced-motion: reduce) { .remote-head[data-remote-state="reconnecting"] .remote-dot { animation: none; } }
+.remote-guard { flex: none; padding: 0 6px; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--fg-2); font-size: var(--fs-11); }
+.remote-guard[data-guard="plan"] { color: var(--kind-remote); }
+.ph-chat-remote { overflow: hidden; text-overflow: ellipsis; }
+.remote-paused { display: flex; align-items: center; gap: var(--space-3); padding: 8px var(--gutter, 16px); border-bottom: 1px solid color-mix(in srgb, var(--warn) 30%, var(--line)); background: color-mix(in srgb, var(--warn) 10%, var(--bg)); }
+.remote-paused-icon { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 50%; color: var(--warn); background: color-mix(in srgb, var(--warn) 18%, transparent); }
+.remote-paused-text { display: flex; flex-direction: column; gap: 1px; flex: 1 1 auto; min-width: 0; font-size: var(--fs-13); line-height: 1.35; }
+.remote-paused-text > span { color: var(--fg-3); font-size: var(--fs-12); }
+.remote-paused .btn { flex: none; }
+.pair-notice { position: fixed; z-index: 60; top: calc(10px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; width: min(460px, calc(100vw - 24px)); padding: 8px 8px 8px 10px; border: 1px solid color-mix(in srgb, var(--kind-remote) 35%, var(--line)); border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--shadow-lg, 0 8px 28px rgba(0, 0, 0, .28)); }
+.pair-notice-icon { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 50%; color: var(--kind-remote); background: color-mix(in srgb, var(--kind-remote) 15%, transparent); }
+.pair-notice-text { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; font-size: var(--fs-13); line-height: 1.3; }
+.pair-notice-text > span { color: var(--fg-3); font-size: var(--fs-12); }
+.pair-notice .btn { flex: none; }
+.pair-device { display: flex; align-items: center; gap: 12px; margin-bottom: var(--space-4); }
+.pair-device-icon { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 50%; color: var(--kind-remote); background: color-mix(in srgb, var(--kind-remote) 15%, var(--surface-2)); }
+.pair-device-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pair-device-text b { font-size: var(--fs-14); }
+.pair-code-label { margin-bottom: 4px; }
+.pair-code { padding: 12px; border-radius: var(--radius-md); background: var(--surface-2); font-family: var(--mono); font-size: var(--fs-22); font-weight: 600; letter-spacing: .12em; text-align: center; user-select: all; }
+.pair-check { margin: var(--space-3) 0 4px; font-weight: 500; }
+.pair-grants { margin: 0 0 var(--space-2); line-height: 1.45; }
+.pair-when { margin-bottom: var(--space-3); }
+.pair-body[data-pair-state="expired"] .pair-when { color: var(--bad); }
+.pair-error { margin-bottom: var(--space-3); color: var(--bad); font-size: var(--fs-13); }
+.pair-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.pair-missing p { margin: var(--space-3) 0 0; line-height: 1.45; }
+.devices-steps { margin: 0 0 var(--space-4); padding-left: 1.3em; display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-13); line-height: 1.45; }
+.devices-cmd { display: flex; align-items: center; gap: 4px; max-width: 100%; margin-top: 4px; padding: 3px 4px 3px 10px; border-radius: var(--radius-sm); background: var(--surface-2); }
+.devices-cmd code { flex: 1 1 auto; min-width: 0; font-size: var(--fs-12); }
+.devices-code { display: flex; flex-direction: column; gap: 6px; padding-top: var(--space-3); border-top: 1px solid var(--line); }
+.devices-code-row { display: flex; gap: 8px; }
+.devices-code-row .field { flex: 1 1 auto; min-width: 0; max-width: 220px; letter-spacing: .08em; text-transform: uppercase; }
+.device-row .mtitle { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.device-row .mtitle > .ic { flex: none; color: var(--kind-remote); }
+.device-meta { font-family: inherit; }
+.device-link { display: inline-flex; align-items: center; gap: 4px; flex: none; color: var(--fg-3); font-size: var(--fs-12); font-weight: 400; }
+.device-link.on { color: var(--ok); }
+.device-rename { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.device-rename .field { flex: 1 1 auto; min-width: 0; }
+.device-confirm { display: flex; flex-direction: column; gap: 4px; padding: 4px 0 8px; font-size: var(--fs-13); }
+.device-confirm .sub { line-height: 1.45; }
+.device-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }

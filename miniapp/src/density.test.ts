@@ -143,7 +143,10 @@ function covered(selector: string, allowed: string[]): boolean {
 const LARGE_ALLOWED = [".answer", ".summary-body", ".preview-doc", ".composer-box textarea", "h1", "h2", "h3", ".kpi .value", ".dt-big", ".empty b", ".stat b", ".step-head b", ".dropzone", ".attachment-glyph", ".btn.big", ".chev", ".voice-", ".orb", ".onboard-head", ".login",
   // The task dialog's title is edited where it stands, so its field is drawn at the heading's size;
   // at 14 px the title shrank under the cursor the moment Edit was pressed.
-  ".ptask-title-input"];
+  ".ptask-title-input",
+  // The code a terminal asks to be paired with is the check itself: the operator compares it, letter by
+  // letter, with the one their terminal prints, so it is drawn at a heading's size on the sheet.
+  ".pair-code"];
 
 /** Surfaces that are meant to be large: a screen, a dialog, a stage, an empty state, a bar that holds
  *  rows rather than being one. Everything else is a row, a control or an avatar, and is held to the tokens. */

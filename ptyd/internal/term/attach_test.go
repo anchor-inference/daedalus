@@ -23,6 +23,7 @@ import (
 	"github.com/ascorblack/daedalus/ptyd/internal/emulator"
 	"github.com/ascorblack/daedalus/ptyd/internal/emulator/fake"
 	"github.com/ascorblack/daedalus/ptyd/internal/logx"
+	"github.com/ascorblack/daedalus/ptyd/internal/procenv"
 	"github.com/ascorblack/daedalus/ptyd/internal/scan"
 	"github.com/ascorblack/daedalus/ptyd/internal/wire"
 	protowire "github.com/ascorblack/daedalus/ptyd/proto/wire"
@@ -220,8 +221,8 @@ func newAttachHarness(t *testing.T, clock Clock, answer Answerer) *attachHarness
 
 func (h *attachHarness) start(t *testing.T, id string, ringBytes int, argv ...string) (*Terminal, *fake.Emulator) {
 	t.Helper()
-	env := BuildEnv(os.Environ(), nil, map[string]string{"PS1": "$ "}, id)
-	path, ok := LookPath(argv[0], env, "/")
+	env := procenv.BuildEnv(os.Environ(), nil, map[string]string{"PS1": "$ "}, id)
+	path, ok := procenv.LookPath(argv[0], env, "/")
 	if !ok {
 		t.Skipf("%s is not installed", argv[0])
 	}

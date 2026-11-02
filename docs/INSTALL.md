@@ -297,7 +297,6 @@ Keys never reach the agent's process: the **key proxy** injects them (one path p
 ```bash
 uv sync --extra dev
 uv run python -m daedalus check                  # configuration and tool registry
-uv run python -m daedalus run -p "say hello"     # one session in the terminal
 uv run python -m daedalus serve                  # the bot
 uv run python -m daedalus auth pair              # a one-time link that signs a browser in
 uv run python -m daedalus db vacuum              # reclaim the database file after a schema upgrade

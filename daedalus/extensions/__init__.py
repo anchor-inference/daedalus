@@ -54,6 +54,7 @@ EXTENSIONS = (
     "daedalus.extensions.harness",
     "daedalus.extensions.browser",
     "daedalus.extensions.computer_control",
+    "daedalus.extensions.remote",
     "daedalus.extensions.project_environment",
     "daedalus.extensions.edit_board",
     "daedalus.extensions.pages",
@@ -73,6 +74,7 @@ EXTENSIONS = (
     "daedalus.extensions.prompt_coach",
     "daedalus.extensions.btw",
     "daedalus.extensions.autopilot",
+    "daedalus.extensions.remote_relay",
     "daedalus.extensions.api",
 )
 

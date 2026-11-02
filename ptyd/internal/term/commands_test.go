@@ -9,6 +9,7 @@ import (
 
 	"github.com/ascorblack/daedalus/ptyd/internal/emulator"
 	"github.com/ascorblack/daedalus/ptyd/internal/emulator/fake"
+	"github.com/ascorblack/daedalus/ptyd/internal/procenv"
 	"github.com/ascorblack/daedalus/ptyd/internal/scan"
 	"github.com/ascorblack/daedalus/ptyd/internal/wire"
 )
@@ -236,8 +237,8 @@ func TestWaitForACommandToEnd(t *testing.T) {
 // A client that receives a snapshot receives the marks it needs to redraw, as of the same point.
 func TestSnapshotIsFollowedByTheMarks(t *testing.T) {
 	h := newAttachHarness(t, nil, nil)
-	env := BuildEnv(nil, nil, nil, "m1")
-	path, _ := LookPath("cat", append(env, "PATH=/usr/bin:/bin"), "/")
+	env := procenv.BuildEnv(nil, nil, nil, "m1")
+	path, _ := procenv.LookPath("cat", append(env, "PATH=/usr/bin:/bin"), "/")
 	term, err := h.reg.Create(Spec{ID: "m1", Path: path, Argv: []string{"cat"}, Cwd: h.dir, Env: env, Cols: 80,
 		Rows: 24, RingBytes: 1 << 20, Nonce: testNonce, Integration: "bash"})
 	if err != nil {

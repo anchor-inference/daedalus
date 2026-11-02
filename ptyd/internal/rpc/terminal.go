@@ -13,6 +13,7 @@ import (
 
 	"github.com/ascorblack/daedalus/ptyd/internal/config"
 	"github.com/ascorblack/daedalus/ptyd/internal/containment"
+	"github.com/ascorblack/daedalus/ptyd/internal/procenv"
 	"github.com/ascorblack/daedalus/ptyd/internal/ptyproc"
 	"github.com/ascorblack/daedalus/ptyd/internal/sandbox"
 	"github.com/ascorblack/daedalus/ptyd/internal/shellint"
@@ -138,7 +139,7 @@ func (d *Daemon) create(ctx context.Context, c *server.Conn, params json.RawMess
 	for k, v := range p.Env {
 		extra[k] = v
 	}
-	term.SetPWD(extra, cwd)
+	procenv.SetPWD(extra, cwd)
 	if _, set := extra["HISTFILE"]; box != nil && !set {
 		extra["HISTFILE"] = sandbox.HistoryFile
 	}
@@ -152,9 +153,9 @@ func (d *Daemon) create(ctx context.Context, c *server.Conn, params json.RawMess
 	extra[shellint.NonceEnv] = nonce
 	inherited := d.Environ
 	if p.InheritEnv != nil {
-		inherited = term.SelectInheritedEnv(inherited, *p.InheritEnv)
+		inherited = procenv.SelectInheritedEnv(inherited, *p.InheritEnv)
 	}
-	env := term.BuildEnv(inherited, p.StripEnv, extra, p.ID)
+	env := procenv.BuildEnv(inherited, p.StripEnv, extra, p.ID)
 
 	argv := p.Argv
 	shell, integration := "", ""
@@ -180,11 +181,11 @@ func (d *Daemon) create(ctx context.Context, c *server.Conn, params json.RawMess
 				for k, v := range l.Env {
 					extra[k] = v
 				}
-				env = term.BuildEnv(inherited, p.StripEnv, extra, p.ID)
+				env = procenv.BuildEnv(inherited, p.StripEnv, extra, p.ID)
 			}
 		}
 	}
-	path, ok := term.LookPath(argv[0], env, cwd)
+	path, ok := procenv.LookPath(argv[0], env, cwd)
 	if !ok {
 		return nil, bad("%q is not an executable on the terminal's PATH", argv[0])
 	}

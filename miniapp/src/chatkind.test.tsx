@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 // Chat kinds: which sessions each tab shows (a helper and a fork follow the chat they hang under), the
 // counts, the remembered tab read back safely, the new chat's default mode following the tab only
-// where that kind can be started, the reasons a kind is not offered, the mark drawn only on a computer
-// or Chrome chat, and the computer sheet asked for once.
+// where that kind can be started, the reasons a kind is not offered, the mark drawn only on a computer,
+// Chrome or remote chat, a remote chat never offered from the app, and the computer sheet asked for once.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -23,6 +23,7 @@ const LIST = [
   row("deskfork", { metadata: { forked_from: { session_id: "desk", seq: 4 } } }),
   row("web", { kind: "chrome" }),
   row("gone", { kind: "computer", archived: true }),
+  row("laptop", { kind: "remote", remote: { device_id: "d1", device_name: "laptop", cwd: "/home/you/site", connected: true } }),
 ];
 
 describe("which chats a tab shows", () => {
@@ -43,6 +44,7 @@ describe("which chats a tab shows", () => {
   it("leaves a computer chat's helper out of the ordinary chats", () => {
     expect(byTab(LIST, "chat").map((s) => s.id)).toEqual(["plain", "old"]);
     expect(byTab(LIST, "chrome").map((s) => s.id)).toEqual(["web"]);
+    expect(byTab(LIST, "remote").map((s) => s.id)).toEqual(["laptop"]);
   });
 
   it("survives a loop in the parent links", () => {
@@ -51,7 +53,7 @@ describe("which chats a tab shows", () => {
   });
 
   it("counts top-level, unarchived chats per tab", () => {
-    expect(tabCounts(LIST)).toEqual({ all: 5, chat: 3, computer: 1, chrome: 1 });
+    expect(tabCounts(LIST)).toEqual({ all: 6, chat: 3, computer: 1, chrome: 1, remote: 1 });
   });
 });
 
@@ -87,11 +89,11 @@ describe("a control held now", () => {
   });
 
   it("counts a controlling chat under its own kind and under the control", () => {
-    expect(tabCounts(driving)).toEqual({ all: 5, chat: 3, computer: 1, chrome: 3 });
+    expect(tabCounts(driving)).toEqual({ all: 5, chat: 3, computer: 1, chrome: 3, remote: 0 });
   });
 
   it("reads only the controls it knows", () => {
-    expect(liveControls(row("a", { controlling: ["computer", "printer" as never, "chrome"] }))).toEqual(["chrome", "computer"]);
+    expect(liveControls(row("a", { controlling: ["remote", "computer", "printer" as never, "chrome"] }))).toEqual(["chrome", "computer", "remote"]);
     expect(liveControls(row("a"))).toEqual([]);
   });
 
@@ -104,6 +106,19 @@ describe("a control held now", () => {
     expect(shownKind(row("a"))).toEqual({ kind: "chat", live: false, borrowed: false });
     expect(kindPlate(row("a", { controlling: ["chrome"] })).className).toBe("kind-chrome kind-live kind-borrowed");
     expect(kindPlate(row("a")).className).toBe("");
+  });
+
+  // A terminal attached to a chat is a live mark like a browser or a computer held: an ordinary chat
+  // with daedalus-cli connected to it is listed under Remote while it is, and a remote chat whose
+  // terminal is connected is drawn live.
+  it("lists a chat a terminal is attached to under Remote only while it is", () => {
+    const attached = [row("plain"), row("watched", { controlling: ["remote"] }), row("born", { kind: "remote" })];
+    expect(byTab(attached, "remote").map((s) => s.id)).toEqual(["watched", "born"]);
+    expect(tabCounts(attached)).toEqual({ all: 3, chat: 2, computer: 0, chrome: 0, remote: 2 });
+    expect(shownKind(row("a", { kind: "remote", controlling: ["remote"] }))).toEqual({ kind: "remote", live: true, borrowed: false });
+    expect(shownKind(row("a", { controlling: ["remote"] }))).toEqual({ kind: "remote", live: true, borrowed: true });
+    // The browser the chat drives outranks the terminal watching it.
+    expect(shownKind(row("a", { controlling: ["remote", "chrome"] })).kind).toBe("chrome");
   });
 });
 
@@ -159,6 +174,13 @@ describe("what a new chat can be", () => {
     expect(defaultKind("chat", both)).toBe("chat");
     expect(defaultKind("computer", none)).toBe("chat");
     expect(defaultKind("chrome", none)).toBe("chat");
+    expect(defaultKind("remote", both)).toBe("chat");
+  });
+
+  it("never offers a remote chat here, and says where one starts", () => {
+    const offer = kindOffers(NATIVE, chrome({})).remote;
+    expect(offer.ok).toBe(false);
+    expect(offer.reason).toMatch(/daedalus-cli/);
   });
 
   it("opens the computer sheet once, for the chat it was asked for", () => {
@@ -185,10 +207,11 @@ describe("the tabs and the mark", () => {
     setLang("en");
   });
 
-  it("draws a mark only on a computer or Chrome chat, with its tooltip", () => {
-    act(() => root.render(<>{(["chat", "computer", "chrome"] as const).map((k) => <KindMark key={k} s={{ kind: k }} />)}</>));
+  it("draws a mark only on a computer, Chrome or remote chat, with its tooltip", () => {
+    act(() => root.render(<>{(["chat", "computer", "chrome", "remote"] as const).map((k) => <KindMark key={k} s={{ kind: k }} />)}</>));
     const marks = [...host.querySelectorAll(".kind-mark")];
-    expect(marks.map((m) => m.className)).toEqual(["kind-mark kind-computer", "kind-mark kind-chrome"]);
+    expect(marks.map((m) => m.className)).toEqual(["kind-mark kind-computer", "kind-mark kind-chrome", "kind-mark kind-remote"]);
+    expect(marks[2].getAttribute("title")).toMatch(/daedalus-cli/);
     expect(marks[0].getAttribute("title")).toMatch(/компьютер/i);
     expect(kindIcon("chat")).toBeNull();
   });
@@ -200,14 +223,14 @@ describe("the tabs and the mark", () => {
     expect(marks[0].getAttribute("title")).toMatch(/сейчас управляет вашим chrome/i);
   });
 
-  it("names the four tabs in Russian, marks the chosen one and walks them with the arrows", () => {
+  it("names the five tabs in Russian, marks the chosen one and walks them with the arrows", () => {
     const chosen: string[] = [];
-    act(() => root.render(<KindTabs tab="computer" onChange={(t) => chosen.push(t)} counts={{ all: 5, chat: 3, computer: 1, chrome: 1 }} />));
+    act(() => root.render(<KindTabs tab="computer" onChange={(t) => chosen.push(t)} counts={{ all: 6, chat: 3, computer: 1, chrome: 1, remote: 1 }} />));
     const tabs = [...host.querySelectorAll<HTMLButtonElement>("[role=tab]")];
-    expect(tabs.map((b) => b.querySelector("span")?.textContent)).toEqual(["Все", "Обычные", "Компьютер", "Браузер"]);
-    expect(tabs.map((b) => b.getAttribute("aria-selected"))).toEqual(["false", "false", "true", "false"]);
-    // A count only on the two kinds a list holds few of; All and Chats would be one more number to read.
-    expect(tabs.map((b) => b.querySelector("b")?.textContent ?? "")).toEqual(["", "", "1", "1"]);
+    expect(tabs.map((b) => b.querySelector("span")?.textContent)).toEqual(["Все", "Обычные", "Компьютер", "Браузер", "Удалённо"]);
+    expect(tabs.map((b) => b.getAttribute("aria-selected"))).toEqual(["false", "false", "true", "false", "false"]);
+    // A count only on the kinds a list holds few of; All and Chats would be one more number to read.
+    expect(tabs.map((b) => b.querySelector("b")?.textContent ?? "")).toEqual(["", "", "1", "1", "1"]);
     act(() => tabs[2].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })));
     act(() => tabs[0].click());
     expect(chosen).toEqual(["chrome", "all"]);

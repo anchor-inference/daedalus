@@ -19,6 +19,7 @@ import (
 	"github.com/ascorblack/daedalus/ptyd/internal/answer"
 	"github.com/ascorblack/daedalus/ptyd/internal/config"
 	"github.com/ascorblack/daedalus/ptyd/internal/emulator/production"
+	"github.com/ascorblack/daedalus/ptyd/internal/procenv"
 	"github.com/ascorblack/daedalus/ptyd/internal/ptyproc"
 	"github.com/ascorblack/daedalus/ptyd/internal/scan/scantest"
 	"github.com/ascorblack/daedalus/ptyd/proto/events"
@@ -59,8 +60,8 @@ func catThrough(t *testing.T, reg *Registry, id, path string, ringBytes int) ([]
 	before := heapInUse()
 	resetPeakRSS()
 	baseRSS := peakRSS()
-	env := BuildEnv(os.Environ(), nil, nil, id)
-	cat, ok := LookPath("cat", env, "/")
+	env := procenv.BuildEnv(os.Environ(), nil, nil, id)
+	cat, ok := procenv.LookPath("cat", env, "/")
 	if !ok {
 		t.Skip("no cat")
 	}
@@ -230,8 +231,8 @@ func throughputScript(total int) []string {
 // output read and thrown away, no scanner, ring or emulator.
 func BenchmarkPTYAlone(b *testing.B) {
 	const total = 100_000_000
-	env := BuildEnv(os.Environ(), nil, nil, "bench")
-	sh, _ := LookPath("sh", env, "/")
+	env := procenv.BuildEnv(os.Environ(), nil, nil, "bench")
+	sh, _ := procenv.LookPath("sh", env, "/")
 	b.SetBytes(total)
 	buf := make([]byte, readBytes)
 	for i := 0; i < b.N; i++ {
@@ -265,8 +266,8 @@ func BenchmarkThroughput(b *testing.B) {
 	}, 4)
 	defer reg.Shutdown(100 * time.Millisecond)
 	const total = 100_000_000
-	env := BuildEnv(os.Environ(), nil, nil, "bench")
-	sh, _ := LookPath("sh", env, "/")
+	env := procenv.BuildEnv(os.Environ(), nil, nil, "bench")
+	sh, _ := procenv.LookPath("sh", env, "/")
 	b.SetBytes(total)
 	for i := 0; i < b.N; i++ {
 		id := "bench" + strconv.Itoa(i)
