@@ -344,6 +344,8 @@ class BrowserUser(TypedDict):
 class BrowserClosed(TypedDict):
     group_id: str
     reason: str
+    """closed · idle · crashed · memory · shutdown · lost · owner_gone"""
+    by: str
 
 
 class DevicePairing(TypedDict):
@@ -391,8 +393,6 @@ class RemoteWaiting(TypedDict):
     device_id: str
     since: NotRequired[str]
     calls: NotRequired[list[dict[str, Any]]]
-    """closed · idle · crashed · memory · shutdown · lost · owner_gone"""
-    by: str
 
 
 class StaffStatus(TypedDict):
