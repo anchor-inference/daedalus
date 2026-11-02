@@ -666,6 +666,30 @@ class PagesEmit(TypedDict):
     ``Daedalus.on(event)`` unchanged."""
 
 
+class DeviceConnection(TypedDict):
+    """A paired terminal client's relay came up or went down (``daedalus.remote.relay``)."""
+
+    device_id: str
+    connected: bool
+
+
+class RemoteWaiting(TypedDict):
+    """A remote conversation's turn is parked on its terminal, or no longer is: ``calls`` are the tool
+    calls held until the terminal reconnects (``{tool_call_id, tool, delivery}``), empty once it did."""
+
+    waiting: bool
+    device_id: str
+    since: str
+    calls: list[dict[str, Any]]
+
+
+class RemoteGuard(TypedDict):
+    """The operator moved the local guard of a remote conversation on their terminal (``ask``, ``auto``, ``plan``)."""
+
+    guard: str
+    device_id: str
+
+
 class CalendarChanged(TypedDict):
     change: str
     """``created`` · ``updated`` · ``deleted`` · ``blocks`` · ``status`` · ``type`` · ``group`` · ``synced``."""
@@ -745,6 +769,9 @@ REGISTRY: dict[str, EventSpec] = {
     "dispatch.updated": EventSpec(DispatchUpdated),
     "dispatch.closed": EventSpec(DispatchClosed),
     "dispatch.stalled": EventSpec(DispatchStalled),
+    "device.connection": EventSpec(DeviceConnection),
+    "remote.waiting": EventSpec(RemoteWaiting),
+    "remote.guard": EventSpec(RemoteGuard),
     "notify": EventSpec(Notify),
     "notify.seen": EventSpec(NotifySeen),
     "notify.resolved": EventSpec(NotifyResolved),

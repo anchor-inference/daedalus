@@ -13,7 +13,7 @@ import shutil
 import tempfile
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import ExitStack, suppress
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -21,6 +21,7 @@ from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from protocore.contracts.interrupt import InterruptKind
 from protocore.contracts.llm import (
     LLMError,
     LLMObservabilityContext,
@@ -52,6 +53,7 @@ from protocore.runtime.events.envelope import TurnEvent
 from protocore.runtime.events.types import EventType
 from protocore.runtime.live_control import new_queued_prompt
 from protocore.runtime.loop_state import LoopState
+from protocore.runtime.query import redispatch_external_calls
 from protocore.runtime.query_engine import QueryEngine
 from protocore.runtime.soft_stop import CAUSE_MODEL_NO_PROGRESS, CAUSE_PROVIDER_ERROR
 from protocore.runtime.tool_registry import ToolRegistry
@@ -106,6 +108,7 @@ from daedalus.host.deliverables import locate as locate_deliverable
 from daedalus.host.deliverables import secret_part
 from daedalus.host.engine_factory import TENANT, EngineDeps, PolicyAdapter, build_engine
 from daedalus.host.events import AppEvent, EventBus, EventFilter
+from daedalus.host.filesystem import foreign_paths
 from daedalus.host.foreign_sessions import harness_name
 from daedalus.host.handoff import Handoff
 from daedalus.host.hooks import DaedalusHookManager
@@ -143,6 +146,7 @@ from daedalus.providers.free_catalog import catalog as free_catalog
 from daedalus.providers.image_fit import FittedImages
 from daedalus.providers.openai_compat import CACHE_ROUTING
 from daedalus.providers.registry import ProviderRegistry
+from daedalus.remote.turns import EXTERNAL_CALL, RemoteTurns
 from daedalus.security import operator_secrets, redact
 from daedalus.stores.blobs import FileBlobStore
 from daedalus.stores.database import Database
@@ -180,6 +184,7 @@ from daedalus.stores.staff import AsksStore, StaffStore
 from daedalus.stores.update_drains import UpdateDrainActive, UpdateDrainPaused, assert_admission_open_in
 from daedalus.terminals import endpoint as terminal_endpoint
 from daedalus.terminals.bridge import HostBridge
+from daedalus.terminals.model import device_env
 from daedalus.tools import TOOL_GROUPS, discover_tools
 from daedalus.tools.dispatcher import build as build_dispatcher_tools
 from daedalus.tools.shell import RemoteJob, stop_job
@@ -257,6 +262,8 @@ class HostEventType(StrEnum):
     COMPACTION_BACKGROUND = "compaction_background"
     """A summary being written ahead of the trigger: its progress, then ``None`` when it is ready or gone.
     Not a state change: the session goes on running or waiting for the operator meanwhile."""
+    REMOTE_OUTPUT = "remote_output"
+    """A command running on the operator's terminal printed something: ``{tool_call_id, delta}``, live only."""
 
 
 @dataclass(slots=True)
@@ -536,6 +543,17 @@ class SessionState:
     @property
     def running(self) -> bool:
         return self.task is not None and not self.task.done()
+
+
+async def _redispatched(engine: QueryEngine) -> AsyncIterator[TurnEvent]:
+    """A turn that waited for the operator's terminal, going on: its parked calls are handed to the
+    terminal again (it answers the ones it already ran from its journal), and the turn continues with
+    their results. A call whose terminal went away again parks again, and the turn waits again."""
+    async for event in redispatch_external_calls(engine):
+        yield event
+    if engine.state is LoopState.RUNNING:
+        async for event in engine.run(None):
+            yield event
 
 
 def _status_word(state: SessionState) -> str:
@@ -876,6 +894,9 @@ class SessionManager:
         self.host_bridge: HostBridge | None = None
         """The host through its terminal daemon, set when the terminals are installed: what a session
         working in a host folder runs its commands and file tools through."""
+        self.remote: RemoteTurns | None = None
+        """The operator's terminal clients, set when the relay is installed: what a remote conversation
+        runs its commands and file tools through (``daedalus.remote``)."""
         self.delete_hooks: list[Callable[[str], Awaitable[None]]] = []
         self.control_marks = ControlMarks(self._announce_controls)
         """What each session controls right now (the operator's Chrome, their computer), kept apart from
@@ -1564,14 +1585,18 @@ class SessionManager:
         commands run there. What the prompt names as the working directory and what a reviewer's
         diff is taken in."""
         services = state.services
-        if services is not None and isinstance(services.exec_backend, HostExecBackend):
+        if services is not None and foreign_paths(services.exec_backend):
             return services.workspace_dir
         return state.workspace
 
     def env_of(self, session_id: str, metadata: dict[str, Any], project: Project | None) -> str:
         """Where the session's commands and file tools run: ``host`` for one working in a host folder
-        through the daemon, else this process's own environment. A project's coordinator with a home
-        of its own only reads the host, and runs here."""
+        through the daemon, ``device:<id>`` for a remote conversation whose tools run on an operator's
+        terminal, else this process's own environment. A project's coordinator with a home of its own
+        only reads the host, and runs here."""
+        device = self.remote.device_of(session_id) if self.remote is not None else None
+        if device:
+            return device_env(device)
         if not home_of(metadata) and self.host_folder_of(session_id, metadata, project) is not None:
             return "host"
         return self.projects.local_env
@@ -1735,6 +1760,10 @@ class SessionManager:
     def live_state(self, session_id: str) -> SessionState | None:
         """The state of a session this process already holds; ``None`` for one it would have to load."""
         return self._states.get(session_id)
+
+    def loaded_states(self) -> list[tuple[str, SessionState]]:
+        """Every session this process holds, as a list it may change while the caller walks it."""
+        return list(self._states.items())
 
     async def project_of(self, session_id: str) -> Project | None:
         """The project a session works in, for anything that makes a child of it.
@@ -3382,7 +3411,10 @@ class SessionManager:
             extra={"skill_store": self.skills_for(state), "manager": self, "vision": _LiveVision(self), "jobs": self.jobs.setdefault(state.session.id, {})},
         )
         host_folder = self.host_folder_of(state.session.id, state.session.metadata, state.project)
-        if host_folder is not None:
+        remote_home = self.remote.home_of(state) if self.remote is not None else None
+        if remote_home is not None and self.remote is not None:
+            self.remote.drive(services, state, remote_home)
+        elif host_folder is not None:
             self._drive_host(services, state, host_folder)
         elif services.walls is not None and not services.workspace_writable:
             # The host writes a read-only folder's command logs to the state volume instead, and the
@@ -3870,8 +3902,9 @@ class SessionManager:
                 # nothing for a file before, and printed the list written for the model in the bubble.
                 words = {**words, attached_files.METADATA_KEY: shown}
             if state.pending is not None:
-                if as_answer:
-                    # Free-text reply to a pending question counts as a custom answer.
+                if as_answer and state.pending.kind != EXTERNAL_CALL:
+                    # Free-text reply to a pending question counts as a custom answer. A turn that
+                    # waits for its terminal asked nothing: the message waits for the turn instead.
                     if client_message_id:
                         receipt, created = await self.live.accept(session_id, client_message_id, "input", receipt_payload)
                         if not created and receipt["status"] != "accepted":
@@ -4154,9 +4187,10 @@ class SessionManager:
             attachment.stored_name = target.name
             shown = target
             backend = state.services.exec_backend if state.services is not None else None
-            if isinstance(backend, HostExecBackend) and state.services is not None:
-                # The session's tools work on the host, where the copy here cannot be opened; the
-                # file is passed on into the folder's inbox there and named by that path.
+            if foreign_paths(backend) and hasattr(backend, "put_bytes") and state.services is not None:
+                # The session's tools work on another machine (the host, the operator's terminal), where
+                # the copy here cannot be opened; the file is passed on into the folder's inbox there and
+                # named by that path.
                 shown = state.services.workspace_dir / "inbox" / target.name
                 await backend.put_bytes(str(shown), await asyncio.to_thread(target.read_bytes))
             size = target.stat().st_size
@@ -4187,6 +4221,10 @@ class SessionManager:
         state = await self.get_state(session_id)
         if state is None or state.pending is None or state.engine is None:
             raise RuntimeError("no pending question for this session")
+        if state.pending.kind == EXTERNAL_CALL:
+            # A turn waiting for the operator's terminal asked nothing: its calls are answered by the
+            # terminal when it reconnects, or ended with Stop.
+            raise RuntimeError("this conversation waits for its terminal to reconnect, not for an answer; Stop ends the wait")
         if state.running:
             raise RuntimeError("the run is still finishing; try again in a moment")
         pending = state.pending
@@ -4225,6 +4263,112 @@ class SessionManager:
         await self.db.execute("DELETE FROM pending_questions WHERE session_id = ?", (session_id,))
         await self._publish(state, "ask.answered", {"request_id": pending.tool_call_id, "request_ref": f"ask:{session_id}:{pending.tool_call_id}", "via": via})
         return await self._start_run(state, None, continue_turn=True)
+
+    async def _park_remote(self, state: SessionState, event: TurnEvent) -> None:
+        """A tool call of a remote conversation parked because its terminal is away: the turn waits.
+
+        Recorded like a question (one ``pending_questions`` row, kind ``external_call``), so the session
+        reads as waiting, nothing else starts a run in it, and a restart restores the wait; announced as
+        ``remote.waiting``. A batch parks every call of the message, and each joins the one record."""
+        current = state.pending
+        if current is not None and current.kind != EXTERNAL_CALL:
+            # A question of the same message already waits; the call waits behind it, and the
+            # terminal's return hands it over once the answer has let the turn go on.
+            logger.warning("session %s: a call parked for its terminal behind an open question", state.session.id)
+            return
+        call_id = str(event.payload.get("tool_call_id") or "")
+        record = RemoteTurns.parked(current.payload if current is not None else None, dict(event.payload.get("external_call_payload") or {}), call_id)
+        pending = PendingQuestion(
+            session_id=state.session.id,
+            run_id=event.run_id,
+            tool_call_id=current.tool_call_id if current is not None else call_id,
+            kind=EXTERNAL_CALL,
+            payload=record,
+        )
+        state.pending = pending
+        await self.db.execute(
+            "INSERT OR REPLACE INTO pending_questions(session_id, run_id, tool_call_id, kind, payload, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (pending.session_id, pending.run_id, pending.tool_call_id, pending.kind, json.dumps(pending.payload), datetime.now(UTC).isoformat()),
+        )
+        if self.remote is not None:
+            await self.remote.waiting(state.session.id, record, waiting=True)
+
+    async def resume_remote(self, session_id: str) -> str | None:
+        """Go on with a turn that waited for its terminal: its parked calls are handed to the terminal
+        again and the turn continues. ``None`` when the session waits for nothing of the kind."""
+        state = await self.get_state(session_id)
+        if state is None or state.engine is None:
+            return None
+        pending = state.pending
+        if pending is None or pending.kind != EXTERNAL_CALL or state.running:
+            return None
+        # Taken before the first await, so a second reconnect racing this one finds nothing to resume.
+        # The row and the announcement go before the run starts: a call that parks again at once
+        # writes its own, and must not be followed by this one's "no longer waiting".
+        state.pending = None
+        await self.db.execute("DELETE FROM pending_questions WHERE session_id = ? AND kind = ?", (session_id, EXTERNAL_CALL))
+        if self.remote is not None:
+            await self.remote.waiting(session_id, pending.payload, waiting=False)
+        try:
+            return await self._start_run(state, None, continue_turn=True, redispatch=True)
+        except BaseException:
+            state.pending = pending
+            await asyncio.shield(self.db.execute(
+                "INSERT OR REPLACE INTO pending_questions(session_id, run_id, tool_call_id, kind, payload, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (pending.session_id, pending.run_id, pending.tool_call_id, pending.kind, json.dumps(pending.payload), datetime.now(UTC).isoformat()),
+            ))
+            if self.remote is not None:
+                await self.remote.waiting(session_id, pending.payload, waiting=True)
+            raise
+
+    CANCELLED_WHILE_AWAY = "Cancelled by the operator while their terminal was offline; it did not run."
+    CANCELLED_MAYBE_RAN = (
+        "Cancelled by the operator while their terminal was offline. It had already been sent to the terminal when the "
+        "connection dropped, so it may have run, partly or fully: check the state on their machine before repeating it."
+    )
+
+    async def cancel_remote_wait(self, session_id: str) -> bool:
+        """The operator's Stop on a turn that waits for its terminal: each parked call ends with what is
+        known of it, the turn ends as a stopped turn does, and the next message starts a fresh one."""
+        state = self._states.get(session_id)
+        if state is None or state.engine is None or state.running:
+            return False
+        pending = state.pending
+        if pending is None or pending.kind != EXTERNAL_CALL:
+            return False
+        state.pending = None
+        engine = state.engine
+        run_id = pending.run_id or state.run_id or ""
+        for interrupt in list(engine.pending_interrupts):
+            if interrupt.kind is not InterruptKind.external_call:
+                continue
+            delivery = str(interrupt.payload.get("delivery") or "unknown")
+            text = self.CANCELLED_WHILE_AWAY if delivery == "not_delivered" else self.CANCELLED_MAYBE_RAN
+            await engine.answer_pending(interrupt.tool_call_id, text, is_error=True, operator_words=False)
+            if self.remote is not None:
+                await self.remote.journal.cancel_call(session_id, interrupt.tool_call_id)
+        engine.stop()
+        await self.db.execute("DELETE FROM pending_questions WHERE session_id = ? AND kind = ?", (session_id, EXTERNAL_CALL))
+        # Written now: no drive will write the calls' closing results, and the next turn reads them.
+        await self._persist_history(state, list(engine.history), state.history_keys)
+        state.history_keys = [self.sessions.transcript_key(m) for m in engine.history]
+        if self.remote is not None:
+            await self.remote.waiting(session_id, pending.payload, waiting=False)
+        if run_id:
+            await self.runs.update_status(run_id, TENANT, RunStatus.cancelled)
+            await self._announce_settled(state, run_id, "cancelled", housekeeping=True)
+            state.settled.clear()
+            state.housekeeping = asyncio.create_task(self._settle_run(state, run_id, "cancelled"), name=f"settle:{run_id}")
+            state.housekeeping.add_done_callback(_log_task_failure)
+        return True
+
+    async def remote_output(self, session_id: str, tool_call_id: str, text: str) -> None:
+        """A running command's output on the operator's terminal, to the session's open screens: a
+        live-only ``remote_output`` event, never stored or replayed."""
+        state = self._states.get(session_id)
+        payload = {"session_id": session_id, "tool_call_id": tool_call_id, "message_id": tool_call_id, "block_id": "remote_output", "delta": text}
+        await self._notify_sinks(session_id, HostEvent(HostEventType.REMOTE_OUTPUT, (state.run_id if state is not None else "") or "", payload))
 
     async def small_model(self, prompt: str, preset: str, *, purpose: str, session_id: str | None = None, max_tokens: int = 200, temperature: float = 0.0, instructions: str = "") -> str:
         """One short request to a preset for a helper around the operator's messages.
@@ -4337,6 +4481,8 @@ class SessionManager:
 
     async def stop(self, session_id: str) -> bool:
         state = self._states.get(session_id)
+        if state is not None and not state.running and state.pending is not None and state.pending.kind == EXTERNAL_CALL:
+            return await self.cancel_remote_wait(session_id)
         if state is None or not state.running or state.engine is None:
             return False
         state.engine.stop()
@@ -4873,23 +5019,23 @@ class SessionManager:
         await self._memory_history_rewritten(state, engine.history)
 
     async def _start_run(
-        self, state: SessionState, message: Message | None, *, continue_turn: bool = False
+        self, state: SessionState, message: Message | None, *, continue_turn: bool = False, redispatch: bool = False
     ) -> str:
         async with state.lock:
-            return await self._start_run_locked(state, message, continue_turn=continue_turn)
+            return await self._start_run_locked(state, message, continue_turn=continue_turn, redispatch=redispatch)
 
     async def _start_run_locked(
-        self, state: SessionState, message: Message | None, *, continue_turn: bool = False
+        self, state: SessionState, message: Message | None, *, continue_turn: bool = False, redispatch: bool = False
     ) -> str:
         # A bounded indexing chunk yields before an agent starts; the index checks busy again
         # under this same lock, so background inference cannot overlap an active run.
         async with self.idle_work:
             if (self.settings.state_dir / "dependencies" / "maintenance").exists():
                 raise RuntimeError("dependencies are being installed; wait for the application to restart")
-            return await self._start_run_ready(state, message, continue_turn=continue_turn)
+            return await self._start_run_ready(state, message, continue_turn=continue_turn, redispatch=redispatch)
 
     async def _start_run_ready(
-        self, state: SessionState, message: Message | None, *, continue_turn: bool = False
+        self, state: SessionState, message: Message | None, *, continue_turn: bool = False, redispatch: bool = False
     ) -> str:
         async with self.db.transaction() as conn:
             await assert_admission_open_in(conn)
@@ -4971,7 +5117,7 @@ class SessionManager:
         else:
             await self.runs.update_status(run_id, TENANT, RunStatus.running)
             state.run_id = run_id
-        state.task = asyncio.create_task(self._drive(state, engine, message, continue_turn), name=f"run:{run_id}")
+        state.task = asyncio.create_task(self._drive(state, engine, message, continue_turn, redispatch=redispatch), name=f"run:{run_id}")
         state.task.add_done_callback(_log_task_failure)
         await self._publish_status(state, "running")
         return run_id
@@ -5241,7 +5387,7 @@ class SessionManager:
         )
 
     async def _drive(
-        self, state: SessionState, engine: QueryEngine, message: Message | None, continue_turn: bool
+        self, state: SessionState, engine: QueryEngine, message: Message | None, continue_turn: bool, *, redispatch: bool = False
     ) -> None:
         run_id = engine.config.run_id
         status = "completed"
@@ -5266,7 +5412,10 @@ class SessionManager:
                     engine.transition_to(LoopState.RUNNING)
                 await engine.persist_snapshot()
                 raise UpdateDrainPaused(str(closed)) from closed
-            iterator = engine.run(None) if continue_turn else engine.run(message)
+            if redispatch:
+                iterator = _redispatched(engine)
+            else:
+                iterator = engine.run(None) if continue_turn else engine.run(message)
             async for event in iterator:
                 await self._dispatch_event(state, event)
                 if event.type is EventType.COMPACTION_STARTED:
@@ -5875,6 +6024,11 @@ class SessionManager:
                 (pending.session_id, pending.run_id, pending.tool_call_id, pending.kind, json.dumps(pending.payload), datetime.now(UTC).isoformat()),
             )
             await self._publish(state, "ask.pending", self._ask_payload(state, pending))
+        elif event.type is EventType.TOOL_CALL_PENDING and event.payload.get("kind") == EXTERNAL_CALL:
+            await self._park_remote(state, event)
+        elif event.type is EventType.TOOL_RESULT and self.remote is not None and state.services is not None and getattr(state.services.exec_backend, "journal", None) is not None:
+            # The call has its result: the answers kept for a repeat of its requests to the terminal go.
+            self._spawn_background(self.remote.journal.close_call(state.session.id, str(event.payload.get("tool_call_id") or "")), "remote-call-closed")
         self._time_tool(state, event)
         self._track_tool_groups(state, event)
         self._redact_event(state, event)
@@ -6650,14 +6804,10 @@ class SessionManager:
         with, and what an imported session carries from the program it came from (loaded beforehand into
         ``state.standing`` by :func:`standing.load`)."""
         parts = [state.extra_notes.strip()] if state.extra_notes.strip() else []
-        if state.services is not None and isinstance(state.services.exec_backend, HostExecBackend):
+        note = getattr(state.services.exec_backend, "prompt_note", None) if state.services is not None else None
+        if note is not None and state.services is not None:
             # The sandbox line of the environment section describes this process's commands, not these.
-            parts.append(
-                f"- You work on the operator's own machine (the host), in {state.services.workspace_dir}: Exec, Verify, "
-                "background jobs and the file tools run there through the host terminal, with no sandbox around them, "
-                "so take the care you would take on someone's own computer. ServiceStart is not available there; "
-                "start a server with Exec(background=true)."
-            )
+            parts.append(note(state.services.workspace_dir))
         available = set(self.providers.available())
         models = [pid for pid, preset in self.config.presets.items() if preset.provider in available and preset.model]
         if models:
@@ -6725,7 +6875,7 @@ class SessionManager:
         so its file is read through its tools' own filesystem."""
         services = state.services
         try:
-            if services is not None and isinstance(services.exec_backend, HostExecBackend):
+            if services is not None and foreign_paths(services.exec_backend):
                 return (await services.fs.read_text(services.workspace_dir / name)).strip()
             path = state.workspace / name
             if not path.is_file():
@@ -7550,6 +7700,15 @@ class SessionManager:
                 kind=row["kind"],
                 payload=json.loads(row["payload"]),
             )
+            if state.pending.kind == EXTERNAL_CALL:
+                # A turn waiting for its terminal: announced as such, never as a question to answer.
+                # A terminal already connected again has nothing to reconnect for, so it goes on now.
+                device = str(state.pending.payload.get("device_id") or "")
+                if self.remote is not None:
+                    await self.remote.waiting(session_id, state.pending.payload, waiting=True)
+                if self.remote is not None and device and self.remote.hub.connected(device):
+                    self._spawn_background(self.resume_remote(session_id), f"remote-resume:{session_id}")
+                return
             # Again after a restart: a subscriber that keeps its own list of open requests dedupes by
             # the reference, and one that started with this process has never heard of it.
             await self._publish(state, "ask.pending", self._ask_payload(state, state.pending))

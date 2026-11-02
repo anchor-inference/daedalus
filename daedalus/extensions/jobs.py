@@ -32,7 +32,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from daedalus.host.host_exec import HostExecBackend
+from daedalus.host.filesystem import machine_of
 from daedalus.tools._common import plain_output
 from daedalus.tools.shell import Job, RemoteJob, grew, outcome, outcome_words, title
 
@@ -115,7 +115,7 @@ def _from_record(record: dict[str, Any], backend: Any, now_wall: float, now_mono
         "stopped_by": record.get("stopped_by") or "", "lost": bool(record.get("lost")), "flags": list(record.get("flags") or []),
         "grown_at": now_mono,
     }
-    if record["where"] == "host":
+    if record["where"] != "local":
         return RemoteJob(pid=int(record["pid"]), backend=backend, exit_code=record.get("exit_code"), **common)
     job = Job(process=None, **common)
     if record.get("exit_code") is None and not job.lost:
@@ -182,8 +182,8 @@ class JobWatch:
         for record in records:
             if record["id"] in jobs:
                 continue
-            if record["where"] == "host" and not isinstance(backend, HostExecBackend):
-                continue  # the session no longer works on the host: nobody could ask after this job
+            if record["where"] != "local" and machine_of(backend) != record["where"]:
+                continue  # the session no longer works on that machine: nobody could ask after this job
             jobs[record["id"]] = _from_record(record, backend, now_wall, now_mono)
         # What had ended before this process started is no news to a list that reads it fresh.
         self._ended.update((session_id, job_id) for job_id, job in jobs.items() if not job.running)

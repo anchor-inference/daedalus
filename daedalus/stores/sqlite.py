@@ -798,8 +798,10 @@ class SqliteEventStream(IEventStream):
     their own table (latest wins) rather than appended to the log.
     """
 
-    LIVE_ONLY = ("content_block_delta", "tool_use_input_delta")
+    LIVE_ONLY = ("content_block_delta", "tool_use_input_delta", "remote_output")
     """Streaming fragments: a subscriber that is watching wants them, and nothing else ever does.
+    ``remote_output`` is a command's output while it runs on the operator's terminal; its result
+    carries what counts.
 
     They were the larger part of the event log — one autocommit transaction per token, kept
     for the fifteen minutes until the run ended and the log was trimmed — and the text they

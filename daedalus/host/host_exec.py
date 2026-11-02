@@ -61,6 +61,10 @@ class HostExecBackend:
     :class:`~daedalus.host.filesystem.ShellFS` name none.
     """
 
+    machine = HOST
+    foreign_paths = True
+    """The paths its tools name are the host's, which this process (in its container) cannot open."""
+
     def __init__(self, bridge: Callable[[], HostBridge | None], root: str) -> None:
         # The bridge is asked on each call: the terminals service may be installed after the session
         # is loaded, and the daemon comes and goes while this process runs.
@@ -89,6 +93,15 @@ class HostExecBackend:
         if code < 0 and result.signal:
             output += f"\n[ended by {result.signal}]"
         return ExecOutcome(exit_code=code, output=output, timed_out=bool(result.timed_out))
+
+    def prompt_note(self, workdir: object) -> str:
+        """What the system prompt says of where this session's tools run."""
+        return (
+            f"- You work on the operator's own machine (the host), in {workdir}: Exec, Verify, "
+            "background jobs and the file tools run there through the host terminal, with no sandbox around them, "
+            "so take the care you would take on someone's own computer. ServiceStart is not available there; "
+            "start a server with Exec(background=true)."
+        )
 
     async def put_bytes(self, path: str, data: bytes) -> None:
         """Write ``data`` to ``path`` on the host byte for byte: what the operator attached to a message.
