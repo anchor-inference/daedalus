@@ -8,7 +8,7 @@
 import { type ReactNode, useState } from "react";
 import { Sheet } from "../ui/dialogs";
 import { copyText } from "../ui/components";
-import { Icon } from "../icons";
+import { Icon, type IconName } from "../icons";
 import { plural, t } from "../i18n";
 import { navigate, projectSessionPath } from "../router";
 import { useQuery } from "../store";
@@ -23,9 +23,11 @@ import { closeItems } from "./operatorClose";
 type Tab = "task" | "result" | "diff";
 const STEPS = ["handed_in", "accepted", "operator_approved"] as const;
 
-export function PhoneTaskPage({ projectId, task, onClose, toast, busy, writeBlocked, onDone, onMove, taskTab, resultTab, diffTab }: {
+export function PhoneTaskPage({ projectId, task, onClose, toast, busy, writeBlocked, onDone, onMove, taskTab, resultTab, diffTab, tools = [] }: {
   projectId: string; task: ProjectTask; onClose: () => void; toast: (text: string) => void; busy: boolean; writeBlocked: boolean;
   onDone: () => void; onMove: (status: TaskStatus) => void; taskTab: ReactNode; resultTab: ReactNode | null; diffTab: ReactNode | null;
+  /** The task's rare tools, which open on the Task tab; the menu turns to that tab when one is chosen. */
+  tools?: { label: string; icon: IconName; onSelect: () => void }[];
 }) {
   const { project } = useProject(projectId);
   // The same key the review panel reads, so the tab's file count costs no second request.
@@ -74,6 +76,8 @@ export function PhoneTaskPage({ projectId, task, onClose, toast, busy, writeBloc
           { label: t("board.copyid"), icon: "copy", onSelect: async () => toast((await copyText(task.id)) ? t("board.copied") : task.id) },
           ...NEXT[task.status].map((status) => ({ label: t("pbph.moveto", { column: t(`board.col.${status}`) }), icon: "forward" as const, disabled: writeBlocked, onSelect: () => onMove(status) })),
           "-",
+          ...tools.map((item) => ({ ...item, onSelect: () => { setTab("task"); item.onSelect(); } })),
+          ...(tools.length ? ["-" as const] : []),
           ...closeItems(task, writeBlocked || busy, { onDone, toast, onRemoved: onClose }),
         ]} />
       )}

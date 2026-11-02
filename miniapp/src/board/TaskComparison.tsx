@@ -77,9 +77,10 @@ function blocker(code: string): string {
   return t(`pair.block.${["cost_unknown", "cost_cap_exceeded", "exit_unknown", "result_missing", "alternatives_missing", "contract_stale"].includes(kind) ? kind : "other"}`);
 }
 
-export function TaskComparison({ task, staff, onChanged, toast }: { task: ProjectTask; staff: TeamMember[];
-  onChanged: () => void; toast: (message: string) => void }) {
-  const [open, setOpen] = useState(false);
+export function TaskComparison({ task, staff, onChanged, toast, bare = false }: { task: ProjectTask; staff: TeamMember[];
+  onChanged: () => void; toast: (message: string) => void; bare?: boolean }) {
+  // `bare` is the comparison opened from the task's menu, already open and without a fold of its own.
+  const [open, setOpen] = useState(bare);
   const [preparing, setPreparing] = useState(false);
   const [capacityOpenedAt, setCapacityOpenedAt] = useState(0);
   const [capacityBusy, setCapacityBusy] = useState(false);
@@ -244,9 +245,7 @@ export function TaskComparison({ task, staff, onChanged, toast }: { task: Projec
   const resultRows = Array.isArray(results.data) ? results.data : [];
   const noRead = offline || !!history.error || !!contract.error || !!detail.error || !!results.error;
 
-  return <details className="result-details" onToggle={(event) => setOpen(event.currentTarget.open)}>
-    <summary>{t("pair.title")}</summary>
-    {open && <div className="project-extension-list">
+  const body = open && <div className="project-extension-list">
       <p className="sub">{t("pair.intro")}</p>
       {(offline || history.error || contract.error) && <div className="result-warning" role="status">{t("pair.readFailed")} <button type="button" className="linkbtn" onClick={() => { history.refresh(); contract.refresh(); }}>{t("common.retry")}</button></div>}
       {pending && <div className="result-warning" role="status">{t("pair.pending")} <button type="button" className="linkbtn" disabled={offline || busy} onClick={() => void sendLaunch(pending)}>{t("common.retry")}</button> <button type="button" className="linkbtn" disabled={offline || busy || !history.data || !!history.error} onClick={() => void abandonPending()}>{t("pair.abandon")}</button></div>}
@@ -308,7 +307,9 @@ export function TaskComparison({ task, staff, onChanged, toast }: { task: Projec
           const latest = alternative?.results.at(-1);
           const result = latest && alternative ? resultRows.find((item) => item.result_id === latest.result_id && item.attempt_id === alternative.attempt_id) ?? null : null;
           const worker = staff.find((item) => item.id === slot.staff_id)?.name ?? t("pair.workerUnknown");
-          return <details key={slot.slot} className="result-details"><summary>{worker} · {t("pair.slot", { n: slot.slot })}</summary>
+          // A block per worker rather than a fold: the review inside has folds of its own, and a fold
+          // inside a fold buried the one button that mattered two clicks deep.
+          return <section key={slot.slot} className="pair-slot" data-slot={slot.slot}><h4>{worker} · {t("pair.slot", { n: slot.slot })}</h4>
             <div className="sub">{t("pair.launchState", { state: slot.launch_state ? t(`pair.effect.${slot.launch_state}`) : t("pair.unknown") })}</div>
             <div className="sub">{t("pair.cost", { amount: money(alternative?.observed_cost_microusd), allowance: money(alternative?.reserved_microusd) })}</div>
             <div className="sub">{alternative?.physical_exit_verified ? t("pair.exitObserved") : t("pair.exitUnknown")}</div>
@@ -321,7 +322,7 @@ export function TaskComparison({ task, staff, onChanged, toast }: { task: Projec
               slot={slot.slot} candidate={result} contract={current} attemptId={alternative?.attempt_id ?? null}
               groupOpen={["planned", "active", "ready"].includes(selected.state)} groupReady={selected.blockers.length === 0 && costBound(selected) === "within" &&
                 ["active", "ready"].includes(selected.state)} onChanged={() => { detail.refresh(); results.refresh(); contract.refresh(); onChanged(); }} toast={toast} />
-          </details>;
+          </section>;
         })}
         {(["planned", "active", "ready"].includes(selected.state) || pendingClose?.group_id === selected.group_id) && <div className="btnrow">
           <button type="button" className="btn small" disabled={offline || busy || (!current && !pendingClose) || (!!pendingClose && pendingClose.group_id !== selected.group_id)}
@@ -334,6 +335,10 @@ export function TaskComparison({ task, staff, onChanged, toast }: { task: Projec
       </>}
       {groupId && !selected && <div className="result-warning" role="status">{t("pair.readFailed")} <button type="button" className="linkbtn" onClick={() => detail.refresh()}>{t("common.retry")}</button></div>}
       {noRead && <div className="sub">{t("pair.uncertain")}</div>}
-    </div>}
+    </div>;
+  if (bare) return <div className="task-comparison">{body}</div>;
+  return <details className="result-details" onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <summary>{t("pair.title")}</summary>
+    {body}
   </details>;
 }

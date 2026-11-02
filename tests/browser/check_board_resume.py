@@ -55,14 +55,18 @@ def check(lang: str, width: int, browser: object, unhandled: Unhandled) -> None:
 
     page.route("**/api/**", route)
     page.goto(f"{BASE}/project/{PID}/board?task=t-menu&token=t&lang={lang}")
+    # The conversation to continue is chosen beside Start, offered once a CLI member has one.
+    page.locator(".ptask-action").get_by_role("button", name="Continue a CLI conversation" if lang == "en" else "Продолжить разговор CLI").click()
     chooser = page.locator("#ptask-resume")
     expect(chooser).to_be_visible()
     expect(chooser.locator('option[value="ss-old"]')).to_be_enabled()
     expect(chooser.locator('option[value="ss-other"]')).to_be_disabled()
     chooser.select_option("ss-old")
     page.locator(".sheet-foot .btn.primary").click()
-    expect(page.locator(".sheet")).to_have_count(0)
+    expect(page.locator(".sheet-foot")).to_have_count(0)
     assert board.launched[-1][0] == "t-menu" and board.launched[-1][1]["resume_from"] == "ss-old"
+    page.keyboard.press("Escape")
+    expect(page.locator(".sheet")).to_have_count(0)
     page.get_by_role("button", name="New task" if lang == "en" else "Новая задача").first.click()
     page.locator("#ptask-title").fill("Another menu")
     page.locator("#ptask-assignee").select_option("st-ada")

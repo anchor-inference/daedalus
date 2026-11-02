@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, BoardStub, Unhandled, expect_app, folders, fulfil_shared  # noqa: E402
+from api_stub import DEFAULT_APP, BoardStub, Unhandled, expect_app, folders, fulfil_shared, open_task_tool  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -169,10 +169,8 @@ def scenario(page: Page, language: str, unhandled: Unhandled) -> None:
 
     page.route("**/api/**", stub)
     page.goto(f"{BASE}/project/p1/board?task=task&token=t&lang={language}")
-    section = page.locator(".sheet.pboard-sheet details.result-details", has=page.get_by_text(words["pair"])).first
-    section.locator("summary").first.click()
-    first = section.locator("details.result-details", has=page.get_by_text("Ira"))
-    first.locator("summary").first.click()
+    section = open_task_tool(page, words["pair"], language)
+    first = section.locator(".pair-slot", has=page.get_by_text("Ira"))
     first.get_by_role("button", name=words["original"]).click()
     expect(first.get_by_text("Complete original report")).to_be_visible()
     first.get_by_text(words["review"]).click()
@@ -183,27 +181,21 @@ def scenario(page: Page, language: str, unhandled: Unhandled) -> None:
     expect(first.get_by_role("button", name=words["choose"])).to_be_enabled()
     state["over"] = True
     page.reload()
-    section = page.locator(".sheet.pboard-sheet details.result-details", has=page.get_by_text(words["pair"])).first
-    section.locator("summary").first.click()
-    first = section.locator("details.result-details", has=page.get_by_text("Ira"))
-    first.locator("summary").first.click()
+    section = open_task_tool(page, words["pair"], language)
+    first = section.locator(".pair-slot", has=page.get_by_text("Ira"))
     expect(first.get_by_role("button", name=words["choose"])).to_be_disabled()
     expect(section.get_by_text("Observed costs exceed" if language == "en" else "Фактические затраты превышают", exact=False)).to_be_visible()
     state["over"] = False
     page.reload()
-    section = page.locator(".sheet.pboard-sheet details.result-details", has=page.get_by_text(words["pair"])).first
-    section.locator("summary").first.click()
-    first = section.locator("details.result-details", has=page.get_by_text("Ira"))
-    first.locator("summary").first.click()
+    section = open_task_tool(page, words["pair"], language)
+    first = section.locator(".pair-slot", has=page.get_by_text("Ira"))
     expect(first.get_by_role("button", name=words["choose"])).to_be_enabled()
     first.get_by_role("button", name=words["choose"]).click()
     page.locator(".dialog[role='alertdialog']").get_by_role("button", name=words["choose"]).click()
     expect(first.get_by_text(words["unknown"], exact=False)).to_be_visible()
     page.reload()
-    section = page.locator(".sheet.pboard-sheet details.result-details", has=page.get_by_text(words["pair"])).first
-    section.locator("summary").first.click()
-    first = section.locator("details.result-details", has=page.get_by_text("Ira"))
-    first.locator("summary").first.click()
+    section = open_task_tool(page, words["pair"], language)
+    first = section.locator(".pair-slot", has=page.get_by_text("Ira"))
     first.get_by_role("status").filter(has_text=words["unknown"]).get_by_role("button").first.click()
     expect(first.get_by_role("status").filter(has_text=words["unknown"])).to_have_count(0)
     assert len(state["requests"]) == 2 and state["requests"][0] == state["requests"][1]

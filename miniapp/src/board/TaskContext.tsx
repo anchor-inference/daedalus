@@ -41,8 +41,10 @@ function PacketView({ packet }: { packet: Packet }) {
   </div>;
 }
 
-export function TaskContext({ task, staff }: { task: ProjectTask; staff: TeamMember[] }) {
+export function TaskContext({ task, staff, bare = false }: { task: ProjectTask; staff: TeamMember[]; bare?: boolean }) {
   const [open, setOpen] = useState(false);
+  // `bare` is the context opened from the task's menu, already open and without its heading button.
+  if (bare) return <section className="task-context"><ContextContent task={task} staff={staff} /></section>;
   return <section className="task-context">
     <button type="button" className="pboard-fold section-title" aria-expanded={open} onClick={() => setOpen(!open)}>{t("taskContext.title")}</button>
     {open && <ContextContent task={task} staff={staff} />}
@@ -84,7 +86,9 @@ function ContextContent({ task, staff }: { task: ProjectTask; staff: TeamMember[
       {currentPreview && <><div className="btnrow"><span className="sub">{t(offline ? "taskContext.cachedPreview" : staffId && role === "worker" ? "taskContext.memberPreview" : "taskContext.genericPreview")}</span><button type="button" className="linkbtn" disabled={offline} onClick={() => void preview.refresh()}>{t("taskContext.refresh")}</button></div>
         <PacketView packet={currentPreview} /></>}
     </div>
-    <details><summary>{t("taskContext.supplied")}</summary>
+    {/* A block rather than a fold: each packet below carries its own technical fold, and a fold
+        inside a fold is the maze the task dialog was rebuilt to get rid of. */}
+    <div className="project-extension task-context-supplied"><b>{t("taskContext.supplied")}</b>
       <p className="sub">{t("taskContext.suppliedHelp")}</p>
       {history.error && <div className="result-warning" role="status">{t("taskContext.historyUnavailable")} <button type="button" className="linkbtn" onClick={() => void history.refresh()}>{t("common.retry")}</button></div>}
       {!currentHistory && !history.error && <p className="sub">{t("common.loading")}</p>}
@@ -101,6 +105,6 @@ function ContextContent({ task, staff }: { task: ProjectTask; staff: TeamMember[
         {!currentSupplied && !supplied.error && <p className="sub">{t("common.loading")}</p>}
         {currentSupplied && <><p className="sub">{t("taskContext.suppliedAt", { time: new Date(currentSupplied.created_at).toLocaleString() })}</p><PacketView packet={currentSupplied.packet} /></>}
       </div>}
-    </details>
+    </div>
   </div>;
 }

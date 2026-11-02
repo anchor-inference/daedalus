@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, BoardStub, TeamStub, Unhandled, expect_app, folders, fulfil_shared  # noqa: E402
+from api_stub import DEFAULT_APP, BoardStub, TeamStub, Unhandled, expect_app, folders, fulfil_shared, open_task_tool  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -35,6 +35,12 @@ WORDS = {
         "answer": "Ответить", "accept": "Принять", "merge": "Слить", "new": "Новая задача", "create": "Создать", "save": "Сохранить", "working": "работает",
         "after": "после «Checkout»", "accepted": "готово", "queued": "Запускаем задачу", "missing": "Не заполнено", "started": "Запускаем задачу",
     },
+}
+
+
+BRIEF_LABELS = {
+    "en": {"objective": "Objective", "deliverable": "Deliverable", "done_when": "Done when", "boundaries": "Boundaries"},
+    "ru": {"objective": "Цель", "deliverable": "Результат", "done_when": "Готово, когда", "boundaries": "Границы"},
 }
 
 
@@ -148,8 +154,7 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     expect(page.locator(".toast")).to_contain_text("Stop requested" if lang == "en" else "Остановка запрошена")
     assert stub.stops and stub.stops[-1][0] == "t-checkout" and stub.stops[-1][1]["client_operation_id"], stub.stops
     expect(cols.locator(".pboard-col.doing .pcard", has_text="Checkout")).to_be_visible()
-    owned = sheet.locator("details.sheet-section", has_text="Stop work owned by this task" if lang == "en" else "Остановить связанную работу задачи")
-    owned.locator("summary").first.click()
+    owned = open_task_tool(page, "Stop work owned by this task" if lang == "en" else "Остановить связанную работу задачи", lang)
     expect(owned).to_contain_text("Owned run" if lang == "en" else "Связанный запуск")
     owned.locator("textarea").fill("Operator requested a clean stop")
     owned.get_by_role("button", name="Request stop" if lang == "en" else "Запросить остановку").click()
@@ -170,7 +175,6 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     sheet.locator("#ptask-deliverable").fill("A zones page and a check at checkout")
     sheet.locator("#ptask-boundaries").fill("Only the site folder")
     sheet.locator("#ptask-done_when").fill("An address outside the zones is refused politely")
-    sheet.locator("details > summary").filter(has_text="Work folder" if lang == "en" else "Рабочая папка").click()
     sheet.locator("#ptask-folder").select_option(project()["folders"][0]["id"])
     expect(sheet.locator(".sub.attn")).to_have_count(0)
     sheet.locator(".pboard-deps").get_by_role("button", name="Checkout").click()
@@ -221,11 +225,15 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     assert "task=t-photos" in page.url, page.url
     sheet.locator("#ptask-assignee").select_option("st-max")
     sheet.locator(".sheet-foot").get_by_role("button", name=words["save"]).click()
-    expect(sheet).to_have_count(0)
+    # The dialog stays on the task after a save; the footer goes, with nothing left to save.
+    expect(sheet.locator(".sheet-foot")).to_have_count(0)
+    expect(sheet).to_be_visible()
     edited_id, edited = stub.updated[-1]
     assert edited_id == "t-photos" and edited["assignee_staff_id"] == "st-max" and edited["expected_entity_revision"] == 1 and edited["client_operation_id"], stub.updated[-1]
     assert stub.launched[-1][0] == "t-photos" and stub.launched[-1][1]["staff_id"] == "st-max"
     expect(page.locator(".toast")).to_contain_text(words["started"])
+    page.keyboard.press("Escape")
+    expect(sheet).to_have_count(0)
 
     # The task command is durable even if the distinct launch command is refused. A later Start
     # uses the saved card's current revision rather than creating a duplicate task.
@@ -323,8 +331,11 @@ def phone(page: Page, lang: str, unhandled: Unhandled) -> None:
     page.locator(".ph-board .ph-row", has_text="Old price list").click()
     sheet = page.locator(".ph-taskpage")
     expect(sheet).to_be_visible()
-    for field in ("objective", "deliverable", "boundaries", "done_when"):
+    # A part nobody wrote is offered once, under the others, and opens its editor in place.
+    for field, label in BRIEF_LABELS[lang].items():
+        sheet.locator(".ptask-add").get_by_role("button", name=label, exact=True).click()
         expect(sheet.locator(f"#ptask-{field}")).to_be_attached()
+    expect(sheet.locator(".ptask-add")).to_have_count(0)
     fits(page, f"{lang} phone sheet")
     page.keyboard.press("Escape")
 

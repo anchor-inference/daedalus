@@ -20,8 +20,9 @@ export function stopReason(resources: Resources | null | undefined): string | nu
 }
 
 /** Load only the host's allowlisted fault categories when the operator opens an attempt. */
-export function TaskDiagnostics({ task, toast }: { task: ProjectTask; toast?: (text: string) => void }) {
-  const [open, setOpen] = useState(false);
+export function TaskDiagnostics({ task, toast, bare = false }: { task: ProjectTask; toast?: (text: string) => void; bare?: boolean }) {
+  // `bare` is the record opened from the task's menu, already open and without a fold of its own.
+  const [open, setOpen] = useState(bare);
   const attemptId = task.current_attempt_id;
   const base = attemptId ? `/api/board/${encodeURIComponent(task.id)}/attempts/${encodeURIComponent(attemptId)}` : "";
   const query = useQuery<Diagnostics>(open && attemptId ? `${base}/diagnostics` : null);
@@ -33,9 +34,7 @@ export function TaskDiagnostics({ task, toast }: { task: ProjectTask; toast?: (t
     const ok = await copyText(JSON.stringify({ task_id: task.id, diagnostics: query.data, resources: resources.data ?? null }, null, 2));
     toast?.(t(ok ? "pboard.attempt.copied" : "pboard.attempt.copyFailed"));
   }
-  return <details className="result-details" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
-    <summary>{t("pboard.attempt.title")}</summary>
-    {open && (query.loading ? <p className="sub">{t("common.loading")}</p>
+  const body = open && (query.loading ? <p className="sub">{t("common.loading")}</p>
       : query.error ? <p className="result-warning" role="alert">{t("pboard.attempt.unavailable")} <button type="button" className="linkbtn" onClick={() => void query.refresh()}>{t("common.retry")}</button></p>
         : query.data ? <div className="sub">
           <p>{t("pboard.attempt.state", { state: t(`pboard.attempt.state.${query.data.state}`) })}</p>
@@ -46,6 +45,10 @@ export function TaskDiagnostics({ task, toast }: { task: ProjectTask; toast?: (t
             </li>)}</ul>}
           {query.data.truncated && <p>{t("pboard.attempt.more")}</p>}
           <button type="button" className="btn small" onClick={() => void copy()}>{t("pboard.attempt.copy")}</button>
-        </div> : null)}
+        </div> : null);
+  if (bare) return <div className="task-diagnostics">{body}</div>;
+  return <details className="result-details" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <summary>{t("pboard.attempt.title")}</summary>
+    {body}
   </details>;
 }

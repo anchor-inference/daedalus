@@ -33,14 +33,16 @@ function stateText(state: string): string {
   return t("lifecycle.unknown");
 }
 
-export function LifecycleCancel({ kind, id, projectId, onDone, toast }: {
+export function LifecycleCancel({ kind, id, projectId, onDone, toast, bare = false }: {
   kind: "task" | "project_goal";
   id: string;
   projectId: string;
   onDone?: () => void;
   toast: (message: string) => void;
+  /** Opened from a menu: already open and without a fold of its own. */
+  bare?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(bare);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const operation = useRef<{ fingerprint: string; id: string } | null>(null);
@@ -80,8 +82,7 @@ export function LifecycleCancel({ kind, id, projectId, onDone, toast }: {
     } finally { setBusy(false); }
   }
 
-  return <details className="sheet-section" onToggle={(event) => setOpen(event.currentTarget.open)}>
-    <summary>{t(kind === "project_goal" ? "lifecycle.project.title" : "lifecycle.task.title")}</summary>
+  const body = <>
     <p className="sub">{t(kind === "project_goal" ? "lifecycle.project.scope" : "lifecycle.task.scope")}</p>
     {open && <>
       {preview.error && <div className="result-warning" role="status">{t("lifecycle.read.failed")} <button type="button" className="linkbtn" onClick={() => preview.refresh()}>{t("common.retry")}</button></div>}
@@ -104,5 +105,10 @@ export function LifecycleCancel({ kind, id, projectId, onDone, toast }: {
       </>}
       {offline && <div className="result-warning" role="status">{t("result.block.unconfirmed")}</div>}
     </>}
+  </>;
+  if (bare) return <div className="lifecycle-cancel">{body}</div>;
+  return <details className="sheet-section" onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <summary>{t(kind === "project_goal" ? "lifecycle.project.title" : "lifecycle.task.title")}</summary>
+    {body}
   </details>;
 }

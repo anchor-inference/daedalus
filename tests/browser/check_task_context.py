@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, BoardStub, TeamStub, Unhandled, expect_app, folders, fulfil_shared  # noqa: E402
+from api_stub import DEFAULT_APP, BoardStub, TeamStub, Unhandled, expect_app, folders, fulfil_shared, open_task_tool  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -84,16 +84,14 @@ def check(language: str, width: int) -> None:
         page.goto(f"{BASE}/project/p1/board?token=t&lang={language}")
         page.locator(".pcard, .ph-row", has_text="Prepare catalog").first.click()
         sheet = page.locator(".sheet.pboard-sheet")
-        control = sheet.get_by_role("button", name="Task context" if language == "en" else "Контекст задачи")
-        control.focus()
-        page.keyboard.press("Enter")
+        open_task_tool(page, "Task context" if language == "en" else "Контекст задачи", language)
         expect(sheet).to_contain_text("Current context is unavailable" if language == "en" else "Текущий контекст недоступен")
         sheet.get_by_role("button", name="Try again" if language == "en" else "Ещё раз").first.click()
         expect(sheet).to_contain_text("Fresh catalog")
         sheet.get_by_label("Worker context" if language == "en" else "Контекст исполнителя").select_option("one")
         sheet.get_by_label("Role" if language == "en" else "Роль").select_option("reviewer")
         expect(sheet).to_contain_text("Fresh catalog")
-        sheet.get_by_text("Packets supplied to workers" if language == "en" else "Пакеты, выданные исполнителям", exact=True).click()
+        expect(sheet.get_by_text("Packets supplied to workers" if language == "en" else "Пакеты, выданные исполнителям", exact=True)).to_be_visible()
         sheet.get_by_label("Worker launch" if language == "en" else "Запуск исполнителя").select_option("session-one")
         expect(sheet).to_contain_text("Original catalog")
         expect(sheet).to_contain_text("no longer matches current sources" if language == "en" else "больше не соответствует текущим источникам")

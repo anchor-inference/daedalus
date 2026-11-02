@@ -44,10 +44,11 @@ import terminals from "./terminal/workspace.css?raw";
 import terminalSide from "./terminal/sidepanel.css?raw";
 import terminalCompose from "./terminal/compose.css?raw";
 import agentFeed from "./staff/agentfeed.css?raw";
+import taskDialog from "./board/taskdialog.css?raw";
 // The browser's phone sheet, the session import, the agent's question card, the desktop's Quick
-// Chat, the widgets in an answer, the annotated snapshot, the Computer control's scope picker and the
-// Terminals page keep their looks beside their components; they answer to the same scale.
-const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop + "\n" + phone + "\n" + browserPhone + "\n" + newProject + "\n" + imports + "\n" + ask + "\n" + quick + "\n" + widget + "\n" + annotate + "\n" + computer + "\n" + schedules + "\n" + terminals;
+// Chat, the widgets in an answer, the annotated snapshot, the Computer control's scope picker, the
+// Terminals page and the task dialog keep their looks beside their components; they answer to the same scale.
+const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop + "\n" + phone + "\n" + browserPhone + "\n" + newProject + "\n" + imports + "\n" + ask + "\n" + quick + "\n" + widget + "\n" + annotate + "\n" + computer + "\n" + schedules + "\n" + terminals + "\n" + taskDialog;
 
 type Rule = { selector: string; media: string; body: string };
 
@@ -139,7 +140,10 @@ function covered(selector: string, allowed: string[]): boolean {
 
 /** Where text is allowed to be larger than the UI: running prose, headings, numbers meant to be read from across a room (a
  *  Details card opens on its one headline number, the reason that card exists), and glyphs. */
-const LARGE_ALLOWED = [".answer", ".summary-body", ".preview-doc", ".composer-box textarea", "h1", "h2", "h3", ".kpi .value", ".dt-big", ".empty b", ".stat b", ".step-head b", ".dropzone", ".attachment-glyph", ".btn.big", ".chev", ".voice-", ".orb", ".onboard-head", ".login"];
+const LARGE_ALLOWED = [".answer", ".summary-body", ".preview-doc", ".composer-box textarea", "h1", "h2", "h3", ".kpi .value", ".dt-big", ".empty b", ".stat b", ".step-head b", ".dropzone", ".attachment-glyph", ".btn.big", ".chev", ".voice-", ".orb", ".onboard-head", ".login",
+  // The task dialog's title is edited where it stands, so its field is drawn at the heading's size;
+  // at 14 px the title shrank under the cursor the moment Edit was pressed.
+  ".ptask-title-input"];
 
 /** Surfaces that are meant to be large: a screen, a dialog, a stage, an empty state, a bar that holds
  *  rows rather than being one. Everything else is a row, a control or an avatar, and is held to the tokens. */

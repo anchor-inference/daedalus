@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, BoardStub, Unhandled, expect_app, folders, fulfil_shared  # noqa: E402
+from api_stub import DEFAULT_APP, BoardStub, Unhandled, expect_app, folders, fulfil_shared, open_task_tool  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -131,9 +131,9 @@ def scenario(page: Page, language: str, unhandled: Unhandled) -> None:
 
     page.route("**/api/**", stub)
     page.goto(f"{BASE}/project/p1/board?task=task&token=t&lang={language}")
-    section = page.locator(".sheet.pboard-sheet details.result-details", has=page.get_by_text(words["title"])).first
-    assert page.get_by_role("button", name=words["raise"]).count() == 0, "capacity control escaped collapsed comparison"
-    section.locator("summary").first.click()
+    expect(page.locator(".sheet.pboard-sheet")).to_be_visible()
+    assert page.get_by_role("button", name=words["raise"]).count() == 0, "capacity control escaped the closed comparison"
+    section = open_task_tool(page, words["title"], language)
     assert section.get_by_role("button", name=words["raise"]).count() == 0, "capacity control escaped collapsed preparation"
     section.get_by_text(words["prepare"]).click()
     expect(section.get_by_text(words["capacity"], exact=False)).to_be_visible()
@@ -164,16 +164,15 @@ def scenario(page: Page, language: str, unhandled: Unhandled) -> None:
     dialog.get_by_role("button", name=words["start"]).click()
     expect(section.get_by_text("Couldn't confirm the comparison started" if language == "en" else "Не удалось подтвердить запуск сравнения", exact=False)).to_be_visible()
     page.reload()
-    section = page.locator(".sheet.pboard-sheet details.result-details", has=page.get_by_text(words["title"])).first
-    section.locator("summary").first.click()
+    section = open_task_tool(page, words["title"], language)
     pending_status = section.get_by_role("status").filter(has_text="Couldn't confirm the comparison started" if language == "en" else "Не удалось подтвердить запуск сравнения")
     pending_status.get_by_role("button").first.click()
     expect(page.get_by_text(words["queued"], exact=False)).to_be_visible()
     assert len(state["commands"]) == 2 and state["commands"][0] == state["commands"][1]
     expect(section.get_by_text("Both alternatives have not been admitted" if language == "en" else "Ещё не приняты оба варианта", exact=False)).to_be_visible()
     assert section.get_by_role("button", name="Choose" if language == "en" else "Выбрать").count() == 0
-    first = section.locator("details.result-details", has=page.get_by_text("Ira"))
-    first.locator("summary").first.click()
+    # Each worker of the comparison is a block of its own, open, with its review inside.
+    first = section.locator(".pair-slot", has=page.get_by_text("Ira"))
     first.get_by_role("button", name="Stop this worker" if language == "en" else "Остановить этого исполнителя").click()
     page.locator(".dialog[role='alertdialog']").get_by_role("button", name="Stop this worker" if language == "en" else "Остановить этого исполнителя").click()
     assert len(state["stops"]) == 1 and state["group"]["slots"][1]["launch_state"] == "pending"
@@ -182,8 +181,7 @@ def scenario(page: Page, language: str, unhandled: Unhandled) -> None:
     state["capacity"] = 1
     state["orchestrator"] = False
     page.reload()
-    section = page.locator(".sheet.pboard-sheet details.result-details", has=page.get_by_text(words["title"])).first
-    section.locator("summary").first.click()
+    section = open_task_tool(page, words["title"], language)
     section.get_by_text(words["prepare"]).click()
     expect(section.get_by_text(words["capacity"], exact=False)).to_be_visible()
     assert section.get_by_role("button", name=words["raise"]).count() == 0, "disabled orchestrator cannot accept a PATCH"

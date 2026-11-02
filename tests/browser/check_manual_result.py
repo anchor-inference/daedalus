@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, BoardStub, TeamStub, Unhandled, expect_app, folders, fulfil_shared  # noqa: E402
+from api_stub import DEFAULT_APP, BoardStub, TeamStub, Unhandled, expect_app, folders, fulfil_shared, open_task_tool  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -176,7 +176,7 @@ def scenario(language: str, width: int, file_bound: bool) -> None:
         # A desktop's card, or the row of a phone's list.
         page.locator(".pcard, .ph-row", has_text="Update catalog").first.click()
         sheet = page.locator(".sheet.pboard-sheet")
-        reveal(page, sheet.get_by_role("button", name="Submit my result" if language == "en" else "Сдать мой результат")).click()
+        open_task_tool(page, "Submit my result" if language == "en" else "Сдать мой результат", language)
         if file_bound:
             sheet.get_by_role("button", name="Use attached prices.csv" if language == "en" else "Использовать прикреплённый prices.csv").click()
             expect(sheet.get_by_label("prices.csv")).to_be_visible()
@@ -186,14 +186,14 @@ def scenario(language: str, width: int, file_bound: bool) -> None:
         page.reload()
         sheet = page.locator(".sheet.pboard-sheet")
         expect(sheet).to_be_visible()
-        reveal(page, sheet.get_by_role("button", name="Submit my result" if language == "en" else "Сдать мой результат")).click()
+        open_task_tool(page, "Submit my result" if language == "en" else "Сдать мой результат", language)
         expect(sheet.get_by_label("What was completed?" if language == "en" else "Что выполнено?")).to_have_value("Updated all catalog prices")
         sheet.get_by_role("button", name="Submit for review" if language == "en" else "Сдать на проверку").click()
         expect(sheet).to_contain_text("Couldn't confirm" if language == "en" else "Не удалось подтвердить")
         page.reload()
         sheet = page.locator(".sheet.pboard-sheet")
         expect(sheet).to_be_visible()
-        reveal(page, sheet.get_by_role("button", name="Submit my result" if language == "en" else "Сдать мой результат")).click()
+        open_task_tool(page, "Submit my result" if language == "en" else "Сдать мой результат", language)
         sheet.get_by_role("button", name="Try again" if language == "en" else "Ещё раз").last.click()
         expect(reveal(page, sheet.locator(".result-flow"))).to_be_visible()
         assert calls[0] == calls[1] and len(calls) == 2
