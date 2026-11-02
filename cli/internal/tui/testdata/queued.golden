@@ -1,0 +1,24 @@
+
+╭──────────────────────────────────────────────────────────────╮
+│ ✻ Welcome to Daedalus!                                       │
+│                                                              │
+│ /help for help, /status for your current setup               │
+│                                                              │
+│ cwd: /work/project                                           │
+╰──────────────────────────────────────────────────────────────╯
+
+ Tips for getting started:
+
+ 1. Ask a question about this folder, or ask for a change
+ 2. Type @ to mention a file, ! to run a shell command, / for commands
+ 3. Shift+Tab cycles the local guard: ask, auto, plan
+
+> refactor the store
+> also rename the package
+
+· Pondering… (esc to interrupt · 0s)
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ > Type to steer · tab to queue for after this turn                                               │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ ⏵⏵ auto-accept on (shift+tab to cycle) · ↑ to edit queued                         91% context left
+ claude-sonnet (medium) · /work/project · ● online
