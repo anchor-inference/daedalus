@@ -1924,7 +1924,7 @@ export type Settings = {
   asr: { provider: string; url: string; api_key: string; api_key_set?: boolean; model: string; language: string; timeout_seconds: number; max_seconds: number; autosend: boolean; transcriber?: string; fallback?: string; chunk_seconds?: number };
   tools: {
     web: { fetch_timeout_seconds: number; proxy: string; user_agent: string; fetch_max_chars: number; search: WebSearchConf };
-    exec: { max_output_chars: number };
+    exec: { max_output_chars: number; background_after_seconds: number };
   };
   self_change: { approval: string; auto_rebuild: boolean };
   limits: { max_iterations: number; tool_timeout_seconds: number; usd_per_run: number; usd_total: number; usd_total_per_provider: Record<string, number>; total_since: string };

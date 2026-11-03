@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { TaskView } from "./api";
 import { setLang } from "./i18n";
 import { taskSub, tasksAside, touchesJobs } from "./jobs";
+import { execJob, type ToolItem } from "./turns";
 
 const NOW = Date.parse("2026-09-11T12:00:00Z");
 
@@ -63,5 +64,21 @@ describe("which events read the Jobs list again", () => {
     expect(touchesJobs(ev("session.created", "child2", { parent: "lead" }), "lead")).toBe(false);
     expect(touchesJobs(ev("session.status", "lead", { status: "running" }), "lead")).toBe(false);
     expect(touchesJobs(ev("run.finished", "child1"), "lead")).toBe(false);
+  });
+});
+
+describe("execJob", () => {
+  const exec = (result: string, over: Partial<ToolItem> = {}): ToolItem => ({ kind: "tool", id: "c", name: "Exec", args: { command: "make" }, result, running: false, ...over });
+
+  it("finds the job a foreground command was kept as, and one started in the background", () => {
+    const kept = "still running after 120.0s cwd=/w — moved to the background as job-3-482913 (pid 77), the same process carrying on; …\nYou are woken…";
+    expect(execJob(exec(kept))).toEqual({ id: "job-3-482913", moved: true });
+    expect(execJob(exec("job-2-1: running (pid 9); output in /w/.jobs/job-2-1.log (…)"))).toEqual({ id: "job-2-1", moved: false });
+  });
+
+  it("says nothing of a command that ended, a running call or another tool", () => {
+    expect(execJob(exec("exit_code=0 elapsed=0.1s cwd=/w\nmoved to the background as job-1-1"))).toBeNull();
+    expect(execJob(exec("", { running: true }))).toBeNull();
+    expect(execJob(exec("job-2-1: running", { name: "Verify" }))).toBeNull();
   });
 });

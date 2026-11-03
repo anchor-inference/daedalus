@@ -690,3 +690,15 @@ export function createLiveStore(): LiveStore {
     },
   };
 }
+
+/** The job an Exec became: one started with background=true, or a foreground command still running
+ *  at its foreground time, which the host kept as a job instead of killing it. Read from the result's
+ *  first line, which the host writes for the model and which says so in fixed words. */
+export function execJob(item: ToolItem): { id: string; moved: boolean } | null {
+  if (item.name !== "Exec" || item.running || item.error || !item.result) return null;
+  const first = item.result.split("\n", 1)[0];
+  const moved = /moved to the background as (job-[\w-]+)/.exec(first);
+  if (moved) return { id: moved[1], moved: true };
+  const started = /^(job-[\w-]+): /.exec(first);
+  return started ? { id: started[1], moved: false } : null;
+}
