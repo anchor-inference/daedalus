@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import re
@@ -374,14 +375,18 @@ def _with_secrets(session_id: str, command: str, env: dict[str, str] | None, *, 
         "Run a shell command with bash. The working directory defaults to the session "
         "workspace. Output (stdout and stderr, interleaved) is returned; very long output "
         "is clipped to its head and tail and the whole of it is kept in a file the result names. "
-        "background=true starts the command as a job and returns at once with a job id: "
-        "JobOutput reads its output, JobKill stops it, JobList shows the jobs. Start anything "
-        "longer than a minute or two (a build, a render, a test suite) this way — the long process "
-        "itself, not a waiter for it — and end your turn: when the job ends you are woken with its "
-        "outcome and the last lines of its log, whether you are mid-turn or idle. Never poll it, "
-        "never start it with `nohup … &` (nothing reports such a process), never wait with "
-        "`pgrep -f` (it matches its own shell); JobWait waits for a pid, a file, a log line or a port. "
-        "service=true starts a server as a job that is expected to keep running."
+        "A command still running after a couple of minutes is not stopped: it moves to the background "
+        "by itself, the same process carrying on as a job, and the result gives its job id and its "
+        "output so far. timeout_seconds sets how long this call blocks before that happens; it never "
+        "kills the command (put `timeout 30 …` in the command for a hard deadline). "
+        "background=true starts the command as a job and returns at once with a job id — the right "
+        "call for what you know will run long or never end (a dev server, a watcher, a long build "
+        "you do not need to watch start). JobOutput reads a job's output, JobKill stops it, JobList "
+        "shows the jobs. When a job ends you are woken with its outcome and the last lines of its "
+        "log, whether you are mid-turn or idle, so end your turn or do other work rather than wait. "
+        "Never poll it, never start it with `nohup … &` (nothing reports such a process), never wait "
+        "with `pgrep -f` (it matches its own shell); JobWait waits for a pid, a file, a log line or a "
+        "port. service=true starts a server as a job that is expected to keep running."
     ),
 )
 async def exec_command(
@@ -414,26 +419,72 @@ async def start_job(context: ToolContext, command: str, cwd: str | None, env: di
     return await _start_job(context, services, command, workdir, env, kind=kind, label=label)
 
 
-async def _run(context: ToolContext, command: str, cwd: str | None, timeout_seconds: int | None, env: dict[str, str] | None) -> ToolResult:
-    """One command in the foreground, to its end or its timeout."""
+def _foreground_seconds(context: ToolContext, services: Any, timeout_seconds: int | None) -> float:
+    """How long a command holds the call before it moves to the background.
+
+    An explicit ``timeout_seconds`` is how long the model is willing to block on this command, not a
+    deadline to kill it at: the command is kept at that moment like any other. Killing it would throw
+    away the work the operator wanted kept, and a model that asked for more time was asking to wait
+    longer, never to lose the build at the end of the wait; a command that must not outlive a
+    deadline says so itself (``timeout 30 make``). Either way the wait is held under the tool's own
+    timeout, which cancels the call, and a cancelled call still kills its command.
+    """
+    asked = float(timeout_seconds) if timeout_seconds else float(tool_config(context).exec.background_after_seconds)
+    room = max(1.0, float(services.tool_timeout_seconds) - FOREGROUND_WAIT_MARGIN)
+    return max(0.1, min(asked, room))
+
+
+def _hands_over(backend: Any) -> bool:
+    """Whether the machine a session's commands run on can keep one past its foreground time."""
+    can = getattr(backend, "can_hand_over", None)
+    return callable(can) and bool(can()) and callable(getattr(backend, "run_or_hand_over", None))
+
+
+def _new_job(services: Any, context: ToolContext | None = None) -> tuple[str, Path]:
+    """A job id unique in the session, and the log its output goes to.
+
+    Given the tool call, the id comes from the call's own id, so the same call made again gets the
+    same one: a remote conversation's call parked by a dropped link is made again when the terminal is
+    back, and the terminal, which may already have taken the first request and kept its command as a
+    job, knows that job by the id the first request named. Elsewhere the clock tells jobs apart.
+    """
+    jobs = _jobs(services)
+    call = str(context.metadata.get("tool_call_id") or "") if context is not None else ""
+    tag = int(hashlib.sha1(call.encode()).hexdigest()[:8], 16) % 1000000 if call else int(time.time() * 1000) % 1000000
+    job_id = f"job-{len(jobs) + 1}-{tag}"
+    return job_id, services.logs_dir(".jobs") / f"{job_id}.log"
+
+
+def _on(job: RemoteJob) -> str:
+    """Where a job of another machine runs, as a result says it."""
+    where = job.where
+    if where == "host":
+        return " on the host"
+    return " on the operator's terminal" if where.startswith("device:") else f" on {where}"
+
+
+def _moved_header(elapsed: float, workdir: Path, job: Job | RemoteJob, *, where: str = "") -> str:
+    """The first lines of a result whose command went on as a job: what happened, and what not to do now."""
+    pid = job.pid if isinstance(job, RemoteJob) else (job.process.pid if job.process is not None else 0)
+    return (
+        f"still running after {elapsed:.1f}s cwd={workdir}{where} — moved to the background as {job.id} (pid {pid}), "
+        f"the same process carrying on; its output so far is below and all of it, with what follows, is in {job.log}.\n"
+        f"You are woken with its outcome when it ends: end your turn or get on with other work, and do not poll it "
+        f"or wait for it. JobOutput reads it, JobKill stops it."
+    )
+
+
+async def _run(context: ToolContext, command: str, cwd: str | None, timeout_seconds: int | None, env: dict[str, str] | None, *, kind: str = "job", label: str = "") -> ToolResult:
+    """One command in the foreground, to its end, or to its foreground time and on as a job of ``kind``."""
     services = services_for(context)
     workdir = services.resolve(cwd)
-    limit = float(timeout_seconds or services.tool_timeout_seconds)
-    started = time.monotonic()
     command, env = _with_secrets(context.session_id, command, env, remote=services.exec_backend is not None)
     if services.exec_backend is not None:
-        outcome = await services.exec_backend.run(command, cwd=str(workdir), env=env, timeout=limit)
-        elapsed = time.monotonic() - started
-        body = clip(plain_output(outcome.output), max(services.max_tool_output_chars - FRAME_CHARS, FRAME_CHARS), note="write to a file for the full output")
-        header = f"exit_code={outcome.exit_code} elapsed={elapsed:.1f}s cwd={workdir}" + (f" TIMED OUT after {limit:.0f}s" if outcome.timed_out else "")
-        if outcome.timed_out:
-            header += REMOTE_TIMEOUT_HINT
-        text = f"{header}\n{body}" if body else header
-        if outcome.timed_out or outcome.exit_code != 0:
-            return error(context, text, exit_code=outcome.exit_code, timed_out=outcome.timed_out)
-        return ok(context, text, exit_code=outcome.exit_code)
+        return await _run_elsewhere(context, services, command, workdir, timeout_seconds, env, kind=kind, label=label)
     if not workdir.exists():
         return error(context, f"working directory does not exist: {workdir}")
+    after = _foreground_seconds(context, services, timeout_seconds)
+    started = time.monotonic()
     environment = shell_environment(context.session_id, env, cwd=workdir)
     try:
         argv, sandboxed = await sandbox_argv(command, tool_config(context).exec, writable=services.sandbox_writable(), session_id=context.session_id)
@@ -466,9 +517,10 @@ async def _run(context: ToolContext, command: str, cwd: str | None, timeout_seco
     spill = _spill_path(services, context)
     spill_fh = None
     spill_written = 0
+    spill_capped = False
 
     async def _pump() -> None:
-        nonlocal total, tail_size, spill_fh, spill_written
+        nonlocal total, tail_size, spill_fh, spill_written, spill_capped
         assert proc.stdout is not None
         last_progress = time.monotonic()
         while True:
@@ -494,10 +546,12 @@ async def _run(context: ToolContext, command: str, cwd: str | None, timeout_seco
                         except OSError:
                             spill_fh.close()
                             spill_fh = None
+                            spill_capped = True
                     else:
                         spill_fh.write(b"\n[... spill capped at %d bytes ...]\n" % SPILL_MAX_BYTES)
                         spill_fh.close()
                         spill_fh = None
+                        spill_capped = True
             if total < head_cap:
                 chunks.append(chunk[: head_cap - total])
             else:
@@ -512,20 +566,53 @@ async def _run(context: ToolContext, command: str, cwd: str | None, timeout_seco
                 if tail:
                     await services.progress(tail[-1][:160])
 
-    timed_out = False
+    def _so_far() -> bytes:
+        """Everything the command wrote before it moved to the background, as far as it was kept."""
+        if total <= head_cap:
+            return b"".join(chunks)
+        if spill_fh is not None:
+            spill_fh.flush()
+        if spill_written == total and not spill_capped:
+            try:
+                return spill.read_bytes()
+            except OSError:
+                pass
+        kept = sum(len(c) for c in chunks) + tail_size
+        return b"".join(chunks) + b"\n[... %d bytes written before this went to the background were not kept ...]\n" % max(0, total - kept) + b"".join(tail_chunks)
+
     output_ended = True
+    job: Job | None = None
     pump = asyncio.create_task(_pump())
+    reading = asyncio.ensure_future(read_until_exit(proc, pump))
     try:
-        try:
-            output_ended = await asyncio.wait_for(read_until_exit(proc, pump), timeout=limit)
-        except TimeoutError:
-            timed_out = True
+        done, _ = await asyncio.wait({reading}, timeout=after)
+        if not done and proc.returncode is not None:
+            # The shell has ended and only the short wait for its last output is left: let it finish,
+            # so a child left holding the pipe is still named rather than a job made of a dead shell.
+            done, _ = await asyncio.wait({reading})
+        if done:
+            output_ended = reading.result()
+        else:
+            # Stopped where it stands, between two reads: whatever it read is counted, and the pipe
+            # holds the rest for the job's reader.
+            reading.cancel()
+            pump.cancel()
+            await asyncio.gather(reading, pump, return_exceptions=True)
+            if spill_fh is not None:
+                spill_fh.close()
+                spill_fh = None
+            job = _keep_as_job(context, services, proc, command, workdir, sandboxed, _so_far(), started=started, kind=kind, label=label)
     finally:
+        if not reading.done():
+            reading.cancel()
+            await asyncio.gather(reading, return_exceptions=True)
         if not pump.done():
             pump.cancel()
             await asyncio.gather(pump, return_exceptions=True)
-        if proc.returncode is None:
-            # A timeout, a cancelled run or a failed write: the process group never outlives the call.
+        if job is None and proc.returncode is None:
+            # A cancelled run (the operator's stop, a steer, a withdrawn message) or a failed write: a
+            # command the run no longer wants dies with the call. Only its foreground time running out
+            # keeps it, as the job above; it was killed then too, and a long build had to start over.
             try:
                 end_tree(proc.pid, hard=True)
             except ProcessLookupError:
@@ -533,29 +620,125 @@ async def _run(context: ToolContext, command: str, cwd: str | None, timeout_seco
             await proc.wait()
         if spill_fh is not None:
             spill_fh.close()
+    elapsed = time.monotonic() - started
     head_text = b"".join(chunks).decode("utf-8", "replace")[:head_chars]
     tail_text = b"".join(tail_chunks).decode("utf-8", "replace")[-tail_chars:] if tail_chars else ""
-    elapsed = time.monotonic() - started
     # What the model is actually shown, measured back in bytes so the figure
     # below and the spill file speak the same unit as the stream they describe.
     shown = len(head_text.encode("utf-8", "replace")) + len(tail_text.encode("utf-8", "replace"))
     head_text, tail_text = plain_output(head_text), plain_output(tail_text)  # after the count: the figure speaks of the raw stream
     if total > shown:
-        where = f"full output in {spill}" if spill_written else "the rest was not kept; write the output to a file"
-        if spill_written and spill_written < total:
-            where = f"the first {spill_written} bytes are in {spill}; write the output to a file for the rest"
+        if job is not None:
+            where = f"all of it is in {job.log}"
+        else:
+            where = f"full output in {spill}" if spill_written else "the rest was not kept; write the output to a file"
+            if spill_written and spill_written < total:
+                where = f"the first {spill_written} bytes are in {spill}; write the output to a file for the rest"
         body = head_text + f"\n\n[... {total - shown} of {total} bytes omitted — {where} ...]\n\n" + tail_text
     else:
         body = head_text + tail_text
+    if job is not None:
+        await _track(services, context.session_id, job)
+        header = _moved_header(elapsed, workdir, job, where=" sandbox=workspace" if sandboxed else "")
+        return ok(context, f"{header}\n{body}".rstrip(), job_id=job.id, pid=proc.pid, handed_over=True, running=True)
     header = f"exit_code={proc.returncode} elapsed={elapsed:.1f}s cwd={workdir}" + (" sandbox=workspace" if sandboxed else "")
-    if timed_out:
-        header += f" TIMED OUT after {limit:.0f}s (process group killed)" + LOCAL_TIMEOUT_HINT
     if not output_ended:
         body = (body + "\n" if body else "") + BACKGROUND_HOLDER_NOTE.format(group=proc.pid)
     text = f"{header}\n{body}" if body else header
-    if timed_out or (proc.returncode or 0) != 0:
-        return error(context, text, exit_code=proc.returncode, timed_out=timed_out)
+    if (proc.returncode or 0) != 0:
+        return error(context, text, exit_code=proc.returncode)
     return ok(context, text, exit_code=proc.returncode)
+
+
+def _keep_as_job(context: ToolContext, services: Any, proc: asyncio.subprocess.Process, command: str, workdir: Path, sandboxed: bool, so_far: bytes, *, started: float, kind: str, label: str) -> Job:
+    """Make a foreground command that is still running a background job of the session, as it runs.
+
+    Its log starts with what it wrote so far, and a reader of its own copies the rest of the pipe in
+    as it comes, until the command ends; the job counts as running until that reader is done, so the
+    report of its end never misses its last lines. Synchronous on purpose: the caller's cleanup kills
+    a command that is not a job yet, and a cancellation landing in an await here would have killed
+    the job this was making.
+    """
+    job_id, log = _new_job(services)
+    log.parent.mkdir(parents=True, exist_ok=True)
+    _prune_spills(log.parent)
+    fh = log.open("wb")
+    try:
+        fh.write(so_far)
+        fh.flush()
+    except OSError:
+        pass
+    # Its age counts from the command's start, not from the moment it was kept: "ended after 4m" is
+    # how long the build took.
+    job = Job(id=job_id, command=command, cwd=workdir, log=log, process=proc, started=started, sandboxed=sandboxed,
+              started_at=time.time() - (time.monotonic() - started), kind=kind, label=label, grown_at=time.monotonic())
+    job.drain = asyncio.create_task(_drain(proc, fh), name=f"job-drain:{job_id}")
+    _jobs(services)[job_id] = job
+    return job
+
+
+async def _drain(proc: asyncio.subprocess.Process, fh: Any) -> None:
+    """Copy a kept command's output into its log until the command has ended and its output with it.
+
+    A write that fails (the disk is full) stops the copying but not the reading: a pipe nobody reads
+    fills up and stalls the command, which would turn a full disk into a hung build.
+    """
+    assert proc.stdout is not None
+    stream = proc.stdout
+    writing = True
+
+    async def _copy() -> None:
+        nonlocal writing
+        while chunk := await stream.read(65536):
+            if writing:
+                try:
+                    fh.write(chunk)
+                    fh.flush()
+                except OSError:
+                    writing = False
+
+    try:
+        await read_until_exit(proc, asyncio.create_task(_copy()))
+    except Exception:  # noqa: BLE001 — the job's end is still seen from the process; only its last lines may be short
+        logging.getLogger(__name__).debug("the output of a kept command stopped being read", exc_info=True)
+    finally:
+        await proc.wait()
+        fh.close()
+
+
+async def _run_elsewhere(context: ToolContext, services: Any, command: str, workdir: Path, timeout_seconds: int | None, env: dict[str, str] | None, *, kind: str, label: str) -> ToolResult:
+    """One command on the machine the session drives: kept as a job of that machine at its foreground
+    time where the machine can keep one, ended at the call's timeout where it cannot."""
+    backend = services.exec_backend
+    started = time.monotonic()
+    budget = max(services.max_tool_output_chars - FRAME_CHARS, FRAME_CHARS)
+    if _hands_over(backend):
+        job_id, log = _new_job(services, context)
+        after = _foreground_seconds(context, services, timeout_seconds)
+        outcome = await backend.run_or_hand_over(command, cwd=str(workdir), env=env, after=after, job_id=job_id, log=str(log), output_chars=budget)
+        elapsed = time.monotonic() - started
+        if outcome.handed_over:
+            job = RemoteJob(id=job_id, command=command, cwd=workdir, log=log, pid=outcome.pid, started=time.monotonic() - elapsed, backend=backend, started_at=time.time() - elapsed, kind=kind, label=label, grown_at=time.monotonic())
+            _jobs(services)[job_id] = job
+            await _track(services, context.session_id, job)
+            body = clip(plain_output(outcome.output), budget, note=f"all of it is in {log}")
+            header = _moved_header(elapsed, workdir, job, where=_on(job))
+            return ok(context, f"{header}\n{body}".rstrip(), job_id=job_id, pid=outcome.pid, handed_over=True, running=True)
+        limit = after
+    else:
+        limit = float(timeout_seconds or services.tool_timeout_seconds)
+        outcome = await backend.run(command, cwd=str(workdir), env=env, timeout=limit)
+        elapsed = time.monotonic() - started
+    body = clip(plain_output(outcome.output), budget, note="write to a file for the full output")
+    header = f"exit_code={outcome.exit_code} elapsed={elapsed:.1f}s cwd={workdir}"
+    if outcome.timed_out:
+        # Only a machine that cannot keep a command gets here: a benchmark's container, or a terminal
+        # client too old to run jobs, ends it with the call.
+        header += f" TIMED OUT after {limit:.0f}s: this machine ends a command with its call"
+    text = f"{header}\n{body}" if body else header
+    if outcome.timed_out or outcome.exit_code != 0:
+        return error(context, text, exit_code=outcome.exit_code, timed_out=outcome.timed_out)
+    return ok(context, text, exit_code=outcome.exit_code)
 
 
 BACKGROUND_HOLDER_NOTE = (
@@ -566,11 +749,6 @@ BACKGROUND_HOLDER_NOTE = (
 )
 """Said when a command's ``&`` child outlives the shell: the call returns instead of waiting for the
 child to close the pipe, which a server never does."""
-
-LOCAL_TIMEOUT_HINT = " — waiting this long in the foreground is the mistake, not the command: start it again with background=true and end your turn (you are woken when it ends), or pass a larger timeout_seconds if it must block"
-REMOTE_TIMEOUT_HINT = LOCAL_TIMEOUT_HINT
-"""The same advice on the host: it once said `nohup … &` and poll the log, from before host sessions had
-jobs, and an agent that followed it started a render nothing watched and slept waiting for its end."""
 
 SPILL_MAX_BYTES = 20 * 1024 * 1024
 """The most of one command's output kept on disk; beyond it the file says it was capped."""
@@ -632,10 +810,31 @@ class Job:
     log_size: int = -1
     grown_at: float = 0.0
     """The monotonic moment the log was last seen to grow: the clock of the "possibly stuck" nudge."""
+    drain: asyncio.Task[None] | None = None
+    """For a foreground command kept as a job, the reader that copies its pipe into the log. A job
+    started in the background writes its log itself and has none."""
 
     @property
     def running(self) -> bool:
-        return self.process is not None and self.process.returncode is None
+        # A kept command counts as running until its last output is in the log, so the note of its end
+        # quotes the lines it ended with, not the ones before them.
+        if self.process is None:
+            return False
+        return self.process.returncode is None or (self.drain is not None and not self.drain.done())
+
+    async def wait_ended(self, timeout: float) -> None:
+        """Wait up to ``timeout`` seconds for the job to end, its log complete."""
+        if self.process is None:
+            return
+        waits: set[asyncio.Future[Any]] = {asyncio.ensure_future(self.process.wait())}
+        if self.drain is not None:
+            waits.add(self.drain)
+        try:
+            await asyncio.wait(waits, timeout=timeout, return_when=asyncio.ALL_COMPLETED)
+        finally:
+            for waiting in waits:
+                if waiting is not self.drain and not waiting.done():
+                    waiting.cancel()
 
     @property
     def exit_code(self) -> int | None:
@@ -697,6 +896,9 @@ class RemoteJob:
         """
         if not self.running:
             return
+        if callable(getattr(self.backend, "job_status", None)):
+            await self._refresh_owned()
+            return
         done = shlex.quote(f"{self.log}.exit")
         log = shlex.quote(str(self.log))
         size = f"$(stat -c %s {log} 2>/dev/null || stat -f %z {log} 2>/dev/null || echo -1)"
@@ -725,10 +927,48 @@ class RemoteJob:
         if self.ended is None:
             self.ended = float(words[1]) if len(words) > 1 and words[1].isdigit() else time.time()
 
+    async def _refresh_owned(self) -> None:
+        """Ask a machine that runs its jobs itself (the operator's terminal client) how this one stands.
+
+        A machine that is not reachable now says nothing, and the job stays running until it can be
+        asked. One that answers it holds no such job has lost it: the client was restarted, and its
+        jobs end with it.
+        """
+        try:
+            answer = await self.backend.job_status(self.id)
+        except LookupError:
+            answer = {"state": "lost"}
+        except (ConnectionError, OSError, TimeoutError):
+            return
+        state = str(answer.get("state") or "")
+        if state == "running":
+            size = answer.get("size")
+            if isinstance(size, int):
+                grew(self, size)
+            return
+        if state == "lost":
+            self.exit_code = -1 if self.stopped_by else None
+            self.lost = not self.stopped_by
+            if self.ended is None:
+                self.ended = time.time()
+            return
+        code = answer.get("exit_code")
+        self.exit_code = int(code) if isinstance(code, int) else -1
+        if self.ended is None:
+            ended = answer.get("ended_at")
+            self.ended = float(ended) if isinstance(ended, int | float) and ended > 0 else time.time()
+
     async def kill(self) -> None:
         """The hangup to the job's group (or to the job alone where it has none), the kill after a grace."""
         await self.refresh()
         if not self.running:
+            return
+        if callable(getattr(self.backend, "job_kill", None)):
+            try:
+                await self.backend.job_kill(self.id)
+            except (LookupError, ConnectionError, OSError, TimeoutError):
+                pass
+            await self.refresh()
             return
         pid = self.pid
         await self.backend.run(
@@ -740,6 +980,13 @@ class RemoteJob:
         await self.refresh()
 
     async def tail(self, lines: int) -> str:
+        if callable(getattr(self.backend, "job_tail", None)):
+            try:
+                return plain_output(await self.backend.job_tail(self.id, max(1, lines))).rstrip("\n")
+            except LookupError:
+                return ""
+            except (ConnectionError, OSError, TimeoutError) as exc:
+                return f"[the log could not be read now: {exc}]"
         outcome = await self.backend.run(f"tail -n {max(1, lines)} {shlex.quote(str(self.log))} 2>/dev/null", cwd=None, env=None, timeout=30.0)
         return plain_output(outcome.output).rstrip("\n")
 
@@ -782,6 +1029,8 @@ def outcome_words(job: Job | RemoteJob) -> str:
     if word == "timed_out":
         return "timed out"
     if word == "lost":
+        if isinstance(job, RemoteJob) and job.where.startswith("device:"):
+            return "was lost: the operator's terminal client exited or restarted while it ran, and a client's jobs end with it"
         if isinstance(job, RemoteJob):
             return "vanished without an exit code (killed from outside together with its group, or the machine restarted)"
         return "was lost: the bot restarted while it ran, and a job of the bot's own process does not outlive it"
@@ -812,15 +1061,26 @@ because nothing on this side is the job's parent and could wait for it."""
 
 async def _start_remote_job(context: ToolContext, services: Any, command: str, workdir: Path, env: dict[str, str] | None, *, kind: str = "job", label: str = "") -> ToolResult:
     jobs = _jobs(services)
-    job_id = f"job-{len(jobs) + 1}-{int(time.time() * 1000) % 1000000}"
-    log = services.logs_dir(".jobs") / f"{job_id}.log"
     backend = services.exec_backend
-    start = REMOTE_JOB_START.format(logdir=shlex.quote(str(log.parent)), command=shlex.quote(command), log=shlex.quote(str(log)))
-    outcome = await backend.run(start, cwd=str(workdir), env=env, timeout=60.0)
-    last = outcome.output.strip().splitlines()[-1:] if outcome.output.strip() else []
-    if outcome.exit_code != 0 or not last or not last[0].isdigit():
-        return error(context, f"the job did not start: {outcome.output.strip() or f'exit code {outcome.exit_code}'}")
-    job = RemoteJob(id=job_id, command=command, cwd=workdir, log=log, pid=int(last[0]), started=time.monotonic(), backend=backend, started_at=time.time(), kind=kind, label=label, grown_at=time.monotonic())
+    owned = callable(getattr(backend, "job_status", None))
+    job_id, log = _new_job(services, context if owned else None)
+    if owned:
+        # A machine that runs its jobs itself (the terminal client) starts one as a command handed
+        # over at once; the shell wrapper below would be a job nobody there knows of.
+        if not _hands_over(backend):
+            return error(context, "the operator's terminal client is too old to run background jobs; ask them to update daedalus-cli")
+        outcome = await backend.run_or_hand_over(command, cwd=str(workdir), env=env, after=0.0, job_id=job_id, log=str(log))
+        if not outcome.handed_over:
+            return error(context, f"the job did not start: {outcome.output.strip() or f'exit code {outcome.exit_code}'}")
+        pid = outcome.pid
+    else:
+        start = REMOTE_JOB_START.format(logdir=shlex.quote(str(log.parent)), command=shlex.quote(command), log=shlex.quote(str(log)))
+        outcome = await backend.run(start, cwd=str(workdir), env=env, timeout=60.0)
+        last = outcome.output.strip().splitlines()[-1:] if outcome.output.strip() else []
+        if outcome.exit_code != 0 or not last or not last[0].isdigit():
+            return error(context, f"the job did not start: {outcome.output.strip() or f'exit code {outcome.exit_code}'}")
+        pid = int(last[0])
+    job = RemoteJob(id=job_id, command=command, cwd=workdir, log=log, pid=pid, started=time.monotonic(), backend=backend, started_at=time.time(), kind=kind, label=label, grown_at=time.monotonic())
     jobs[job_id] = job
     await _track(services, context.session_id, job)
     await asyncio.sleep(0.3)  # long enough for an immediate failure (a typo, a missing binary) to show up in the answer
@@ -828,7 +1088,7 @@ async def _start_remote_job(context: ToolContext, services: Any, command: str, w
     head = (await job.tail(40))[:1500]
     status = f"running (pid {job.pid})" if job.running else outcome_words(job)
     job.reported = not job.running  # the answer below is how it ended
-    return ok(context, f"{job_id}: {status} on the host; output in {log} ({_promise(job)}; the job outlives a restart of the bot)\n{head}".rstrip(), job_id=job_id, pid=job.pid)
+    return ok(context, f"{job_id}: {status}{_on(job)}; output in {log} ({_promise(job)}; the job outlives a restart of the bot)\n{head}".rstrip(), job_id=job_id, pid=job.pid)
 
 
 def _promise(job: Job | RemoteJob) -> str:
@@ -842,8 +1102,7 @@ def _promise(job: Job | RemoteJob) -> str:
 
 async def _start_job(context: ToolContext, services: Any, command: str, workdir: Path, env: dict[str, str] | None, *, kind: str = "job", label: str = "") -> ToolResult:
     jobs = _jobs(services)
-    job_id = f"job-{len(jobs) + 1}-{int(time.time() * 1000) % 1000000}"
-    log = services.logs_dir(".jobs") / f"{job_id}.log"
+    job_id, log = _new_job(services)
     log.parent.mkdir(parents=True, exist_ok=True)
     _prune_spills(log.parent)  # the same bound as the spill directory: the newest logs stay
     try:
@@ -965,6 +1224,7 @@ async def stop_job(job: Job | RemoteJob, *, by: str) -> None:
         except ProcessLookupError:
             pass
         await job.process.wait()
+    await job.wait_ended(5)
 
 
 @search_hint(
@@ -1053,7 +1313,9 @@ async def job_wait(
     if background:
         started = await start_job(context, script, None, None, kind="wait", label=label)
         return started if started.is_error else started.model_copy(update={"content": moved + started.content})
-    result = await _run(context, script, None, timeout + 10, None)
+    result = await _run(context, script, None, timeout + 10, None, kind="wait", label=label)
+    if isinstance(result.metadata, dict) and result.metadata.get("handed_over"):
+        return result
     code = result.metadata.get("exit_code") if isinstance(result.metadata, dict) else None
     body = result.content.split("\n", 1)[1] if "\n" in result.content else ""
     if code == 0:
@@ -1073,10 +1335,7 @@ async def _wait_for_job(context: ToolContext, job: Job | RemoteJob, limit: float
         if time.monotonic() >= deadline:
             return ok(context, f"{job.id} is still running after {limit:.0f}s of waiting; it wakes you when it ends, so end your turn rather than wait again", running=True)
         if isinstance(job, Job) and job.process is not None:
-            try:
-                await asyncio.wait_for(job.process.wait(), timeout=min(WAIT_POLL_SECONDS * 5, max(0.1, deadline - time.monotonic())))
-            except TimeoutError:
-                pass
+            await job.wait_ended(min(WAIT_POLL_SECONDS * 5, max(0.1, deadline - time.monotonic())))
         else:
             await asyncio.sleep(min(WAIT_POLL_SECONDS, max(0.1, deadline - time.monotonic())))
     tail = await job.tail(20) if isinstance(job, RemoteJob) else _tail(job.log, 20)

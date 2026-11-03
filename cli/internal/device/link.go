@@ -455,7 +455,7 @@ func (l *Link) hello() map[string]any {
 		"arch":           runtime.GOARCH,
 		"shell":          shell,
 		"home":           home,
-		"capabilities":   map[string]any{"exec": true, "fs": exec.FSMethods, "pty": false},
+		"capabilities":   map[string]any{"exec": true, "fs": exec.FSMethods, "jobs": true, "pty": false},
 		"sessions":       nonNil(l.opt.Sessions()),
 		"known":          l.known(),
 	}

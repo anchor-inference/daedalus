@@ -39,6 +39,8 @@ max_run_tokens = 0           # cap on tokens per run, every call counted (0 = no
 
 [tools.exec]
 max_output_chars = 60000     # the most one tool call returns to the model
+background_after_seconds = 120  # a foreground command still running this long becomes a background
+                             # job (same process, output so far returned, its end wakes the agent)
 sandbox = "off"              # off | workspace — bubblewrap: the filesystem read-only except this
                              # session's own directory, a private /tmp, its own PID namespace.
                              # Defaults to "workspace" on a native install where bubblewrap can

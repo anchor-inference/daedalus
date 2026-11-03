@@ -33,8 +33,13 @@ func newExecutor(t *testing.T) (*Executor, string) {
 
 func call(t *testing.T, e *Executor, method string, params map[string]any) (map[string]any, *Error) {
 	t.Helper()
+	return callAs(t, e, "s1", method, params)
+}
+
+func callAs(t *testing.T, e *Executor, session, method string, params map[string]any) (map[string]any, *Error) {
+	t.Helper()
 	raw, _ := json.Marshal(params)
-	res, err := e.Handle(context.Background(), Request{Method: method, Params: raw, Session: "s1"})
+	res, err := e.Handle(context.Background(), Request{Method: method, Params: raw, Session: session})
 	if err != nil {
 		var own *Error
 		if !errors.As(err, &own) {

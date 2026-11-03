@@ -7,6 +7,10 @@ watcher here looks at every session's jobs every couple of seconds and, for each
 whose end the agent has not read itself, submits one note to the session — the same way a finished
 subagent reports to its leader: a steer while a turn runs, a new turn when the session is idle.
 
+A foreground command still running at its foreground time is kept as a job the same way (see
+``daedalus.tools.shell``), wherever it runs — this process, the host, the operator's terminal client —
+and from then on it is watched, recorded and told like any job started in the background.
+
 One note per burst: jobs of one session that end close together are told in one message, so ten
 parallel builds ending within a second wake the agent once and not ten times. A job is told once: the
 mark that it was is set before the note is submitted, and the agent's own JobOutput, JobKill or JobList

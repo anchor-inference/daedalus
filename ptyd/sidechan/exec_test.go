@@ -202,3 +202,88 @@ func TestFitReplyMeasuresEncoded(t *testing.T) {
 		t.Fatalf("%d + %d", encodedLen(a), encodedLen(b))
 	}
 }
+
+// A program still running at its hand-over time is kept, not ended: the call answers with what it
+// wrote so far, and the log holds that and everything after, to the program's own end.
+func TestExecHandOverKeepsTheProgramAndLogsAllOfItsOutput(t *testing.T) {
+	e := NewOpenExec(os.Environ(), t.TempDir(), quietLog())
+	var log lockedBuffer
+	res, job, err := e.RunOrHandOver(context.Background(), ExecRequest{Argv: []string{"sh", "-c", "echo early; sleep 0.6; echo late; exit 3"}},
+		HandOver{After: 200 * time.Millisecond, Log: &log})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.HandedOver || job == nil || res.Pid != job.Pid || !strings.Contains(res.Stdout, "early") || strings.Contains(res.Stdout, "late") {
+		t.Fatalf("%+v %v", res, job)
+	}
+	if syscall.Kill(job.Pid, 0) != nil {
+		t.Fatal("the program did not go on")
+	}
+	select {
+	case <-job.Done():
+	case <-time.After(10 * time.Second):
+		t.Fatal("the job never ended")
+	}
+	if end := job.Result(); end.ExitCode != 3 {
+		t.Fatalf("%+v", end)
+	}
+	if got := log.String(); !strings.Contains(got, "early") || !strings.Contains(got, "late") || strings.Count(got, "early") != 1 {
+		t.Fatalf("log %q", got)
+	}
+}
+
+func TestExecHandOverEndsInTimeLikeRun(t *testing.T) {
+	e := NewOpenExec(os.Environ(), t.TempDir(), quietLog())
+	var log lockedBuffer
+	res, job, err := e.RunOrHandOver(context.Background(), ExecRequest{Argv: []string{"sh", "-c", "echo quick"}}, HandOver{After: 5 * time.Second, Log: &log})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job != nil || res.HandedOver || res.ExitCode != 0 || strings.TrimSpace(res.Stdout) != "quick" || log.String() != "" {
+		t.Fatalf("%+v %v %q", res, job, log.String())
+	}
+}
+
+func TestExecHandOverAtOnceAndStopEndsTheGroup(t *testing.T) {
+	dir := t.TempDir()
+	pidFile := filepath.Join(dir, "child")
+	e := NewOpenExec(os.Environ(), dir, quietLog())
+	var log lockedBuffer
+	_, job, err := e.RunOrHandOver(context.Background(), ExecRequest{Argv: []string{"sh", "-c", "sleep 60 & echo $! > " + pidFile + "; wait"}}, HandOver{Log: &log})
+	if err != nil || job == nil {
+		t.Fatal(err, job)
+	}
+	var child int
+	deadline := time.Now().Add(5 * time.Second)
+	for child == 0 && time.Now().Before(deadline) {
+		data, _ := os.ReadFile(pidFile)
+		child, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+		time.Sleep(20 * time.Millisecond)
+	}
+	job.Stop()
+	if end := job.Result(); end.ExitCode != -1 || end.Signal == "" {
+		t.Fatalf("%+v", end)
+	}
+	for syscall.Kill(child, 0) == nil {
+		if time.Now().After(deadline) {
+			t.Fatalf("the background child %d outlived the stop", child)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// Cancelled before its hand-over time, the call still ends the program: only the time running out
+// keeps one.
+func TestExecHandOverCancelledBeforeItsTimeEndsTheProgram(t *testing.T) {
+	e := NewOpenExec(os.Environ(), t.TempDir(), quietLog())
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(200*time.Millisecond, cancel)
+	var log lockedBuffer
+	res, job, err := e.RunOrHandOver(ctx, ExecRequest{Argv: []string{"sh", "-c", "sleep 60"}}, HandOver{After: time.Minute, Log: &log})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job != nil || res.HandedOver || res.ExitCode == 0 {
+		t.Fatalf("%+v %v", res, job)
+	}
+}

@@ -18,7 +18,9 @@ import base64
 import contextlib
 import json
 import os
+import signal
 import socket
+import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,7 +34,8 @@ from daedalus.extensions import api_remote_relay
 
 
 class FakeTerminal:
-    def __init__(self, url: str, token: str, root: Path, *, fs: tuple[str, ...] = ("stat", "list", "read", "write", "mkdir"), guard: str = "auto", client: str = "") -> None:
+    def __init__(self, url: str, token: str, root: Path, *, fs: tuple[str, ...] = ("stat", "list", "read", "write", "mkdir"), guard: str = "auto", client: str = "",
+                 jobs: bool = True) -> None:
         self.url = url
         self.client = client
         """The process this client says it is; one link per process of a device."""
@@ -57,6 +60,10 @@ class FakeTerminal:
         self.close_code: int | None = None
         self._reader: asyncio.Task[None] | None = None
         self.closed = asyncio.Event()
+        self.jobs_capable = jobs
+        """Whether it keeps commands past their calls (``capabilities.jobs``), as daedalus-cli does."""
+        self.jobs: dict[str, dict[str, Any]] = {}
+        """The jobs it keeps, by the server's id: their process, log and end."""
 
     # -- the link ---------------------------------------------------------------------------------
 
@@ -71,7 +78,7 @@ class FakeTerminal:
         self._ws = await connect(self.url, additional_headers=headers, open_timeout=5)
         params = hello if hello is not None else {
             "protocol": 1, "client": self.client, "client_version": "test", "os": "linux", "arch": "amd64", "shell": "/bin/bash", "home": str(self.root),
-            "capabilities": {"exec": True, "fs": list(self.fs), "pty": False},
+            "capabilities": {"exec": True, "fs": list(self.fs), "pty": False, **({"jobs": True} if self.jobs_capable else {})},
             "sessions": [{"session_id": sid, "guard": self.guard} for sid in self.sessions],
             "known": self.known(),
         }
@@ -165,16 +172,88 @@ class FakeTerminal:
 
     async def _exec_run(self, rid: str, params: dict[str, Any]) -> dict[str, Any]:
         self.executed.append(rid)
-        process = await asyncio.create_subprocess_exec(*params["argv"], cwd=params.get("cwd") or str(self.root), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        job = params.get("job") if self.jobs_capable else None
+        process = await asyncio.create_subprocess_exec(*params["argv"], cwd=params.get("cwd") or str(self.root), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+                                                       start_new_session=True)
         assert process.stdout is not None
         chunks: list[bytes] = []
-        while chunk := await process.stdout.read(4096):
-            chunks.append(chunk)
-            text = chunk.decode("utf-8", "replace")
-            self.output_sent.append(text)
-            await self._send(None, {"jsonrpc": "2.0", "method": "exec.output", "params": {"id": rid, "data": text}})
+        stream = process.stdout
+
+        async def pump() -> None:
+            while chunk := await stream.read(4096):
+                chunks.append(chunk)
+                text = chunk.decode("utf-8", "replace")
+                self.output_sent.append(text)
+                await self._send(None, {"jsonrpc": "2.0", "method": "exec.output", "params": {"id": rid, "data": text}})
+
+        reading = asyncio.create_task(pump())
+        after = (int(job.get("after_ms") or 0) / 1000) if isinstance(job, dict) else None
+        if after is not None:
+            done, _ = await asyncio.wait({reading}, timeout=after) if after > 0 else (set(), set())
+            if not done:
+                return await self._keep(job, process, reading, chunks)
+        await reading
         code = await process.wait()
         return {"exit_code": code, "signal": "", "stdout": b"".join(chunks).decode("utf-8", "replace"), "stderr": "", "truncated": False, "timed_out": False, "duration_ms": 1}
+
+    async def _keep(self, job: dict[str, Any], process: asyncio.subprocess.Process, reading: asyncio.Task[None], chunks: list[bytes]) -> dict[str, Any]:
+        """The command goes on as a job: the reader stops streaming and writes into the job's log."""
+        reading.cancel()
+        await asyncio.gather(reading, return_exceptions=True)
+        log = self._inside(str(job["log"]))
+        log.parent.mkdir(parents=True, exist_ok=True)
+        so_far = b"".join(chunks)
+        log.write_bytes(so_far)
+        record: dict[str, Any] = {"process": process, "log": log, "exit_code": None, "ended_at": None}
+        assert process.stdout is not None
+        stream = process.stdout
+
+        async def keep() -> None:
+            with log.open("ab") as handle:
+                while chunk := await stream.read(4096):
+                    handle.write(chunk)
+                    handle.flush()
+            record["exit_code"] = await process.wait()
+            record["ended_at"] = time.time()
+
+        record["task"] = asyncio.create_task(keep())
+        self.jobs[str(job["id"])] = record
+        return {"exit_code": -1, "signal": "", "stdout": so_far.decode("utf-8", "replace"), "stderr": "", "truncated": False, "timed_out": False,
+                "duration_ms": 1, "handed_over": True, "pid": process.pid}
+
+    def _job(self, params: dict[str, Any]) -> dict[str, Any]:
+        record = self.jobs.get(str(params.get("job")))
+        if record is None:
+            raise FileNotFoundError(f"this terminal holds no job {params.get('job')}")
+        return record
+
+    async def _job_status(self, rid: str, params: dict[str, Any]) -> dict[str, Any]:
+        record = self._job(params)
+        size = record["log"].stat().st_size if record["log"].exists() else -1
+        if record["exit_code"] is None:
+            return {"state": "running", "size": size, "pid": record["process"].pid}
+        return {"state": "exited", "exit_code": record["exit_code"], "signal": "", "ended_at": record["ended_at"], "size": size}
+
+    async def _job_tail(self, rid: str, params: dict[str, Any]) -> dict[str, Any]:
+        record = self._job(params)
+        lines = record["log"].read_text(errors="replace").splitlines()[-int(params.get("lines") or 100):]
+        return {"text": "\n".join(lines)}
+
+    async def _job_kill(self, rid: str, params: dict[str, Any]) -> dict[str, Any]:
+        record = self._job(params)
+        if record["exit_code"] is None:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(record["process"].pid, signal.SIGTERM)
+            await record["task"]
+        return await self._job_status(rid, params)
+
+    async def stop_jobs(self) -> None:
+        """End what it still keeps, as a client that exits takes its jobs with it."""
+        for record in self.jobs.values():
+            if record["exit_code"] is None:
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(record["process"].pid, signal.SIGKILL)
+                await asyncio.gather(record["task"], return_exceptions=True)
 
     async def _fs_stat(self, rid: str, params: dict[str, Any]) -> dict[str, Any]:
         path = self._inside(params["path"])

@@ -97,7 +97,7 @@ def test_a_running_launcher_is_found_on_windows(tmp_path: Path, monkeypatch: pyt
 
 
 @posix_only
-async def test_exec_timeout_and_job_kill_do_not_reach_for_killpg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_stopped_exec_and_job_kill_do_not_reach_for_killpg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from daedalus.tools.shell import exec_command, job_kill, job_output
 
     real_killpg = os.killpg
@@ -118,12 +118,19 @@ async def test_exec_timeout_and_job_kill_do_not_reach_for_killpg(tmp_path: Path,
     locator.register(SessionServices(session_id="win-kill", workspace_dir=tmp_path))
     ctx = ToolContext(tenant_id="t", run_id="r", session_id="win-kill", metadata={"tool_call_id": "c"})
     try:
-        timed = await exec_command().invoke(ctx, {"command": "sleep 30", "timeout_seconds": 1})
-        assert timed.is_error and "TIMED OUT" in timed.content and len(killed) == 1
+        cancelled = asyncio.create_task(exec_command().invoke(ctx, {"command": "sleep 30"}))
+        await asyncio.sleep(0.5)
+        cancelled.cancel()
+        await asyncio.gather(cancelled, return_exceptions=True)
+        assert len(killed) == 1, "a stopped run ends its command through taskkill"
+        kept = await exec_command().invoke(ctx, {"command": "sleep 30", "timeout_seconds": 1})
+        assert kept.metadata.get("handed_over") is True and len(killed) == 1, "a command past its time is kept, not killed"
+        stopped = await job_kill().invoke(ctx, {"job_id": str(kept.metadata["job_id"])})
+        assert not stopped.is_error and len(killed) == 2
         started = await exec_command().invoke(ctx, {"command": "sleep 30", "background": True})
         job_id = str(started.metadata["job_id"])
         stopped = await job_kill().invoke(ctx, {"job_id": job_id})
-        assert not stopped.is_error and len(killed) == 2
+        assert not stopped.is_error and len(killed) == 3
         assert (await job_output().invoke(ctx, {"job_id": job_id})).metadata["running"] is False
     finally:
         locator.unregister("win-kill")

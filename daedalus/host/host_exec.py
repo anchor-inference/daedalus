@@ -9,6 +9,7 @@ environment; it is the operator's machine, so nothing here adds a sandbox of its
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 import shlex
 from collections.abc import Callable
@@ -23,7 +24,42 @@ HOST = "host"
 
 DAEMON_MAX_TIMEOUT = 30 * 60.0
 """The longest one ``exec.run`` may be given (the daemon's own ``MaxExecTimeout``); a longer call is
-refused outright, so a longer wait is cut to this and the command is told to go to the background."""
+refused outright, so a longer wait is cut to this."""
+
+HAND_OVER_GRACE = 30.0
+"""Seconds the daemon gives the waiting call beyond its own deadline: the script ends itself at the
+deadline, and the daemon's timeout is only the backstop for a host that stalled."""
+
+MARK = "@@daedalus-exec@@"
+"""The line the hand-over script prints between its own words and the command's output."""
+
+HAND_OVER = (
+    "mkdir -p {logdir} && "
+    "if command -v setsid >/dev/null 2>&1; then detach=setsid; else detach=; fi; "
+    "$detach nohup bash -c 'bash -c \"$0\"; echo $? > \"$1.exit\"' {command} {log} > {log} 2>&1 < /dev/null & "
+    "pid=$!; echo $pid > {log}.pid; n={ticks}; "
+    "while [ $n -gt 0 ] && [ ! -s {log}.exit ] && kill -0 $pid 2>/dev/null; do sleep 0.1; n=$((n-1)); done; "
+    "if [ -s {log}.exit ]; then state=\"exited $(cat {log}.exit)\"; elif kill -0 $pid 2>/dev/null; then state=running; else state=gone; fi; "
+    "size=$(wc -c < {log} | tr -d ' '); printf '%s %s %s %s\\n' {mark} \"$state\" $pid $size; "
+    "if [ $size -le {whole} ]; then cat {log}; else head -c {head} {log}; "
+    "printf '\\n\\n[... %s of %s bytes omitted — all of it is in %s ...]\\n\\n' $((size - {head} - {tail})) $size {log}; tail -c {tail} {log}; fi; "
+    "rm -f {log}.pid; if [ \"$state\" != running ]; then rm -f {log}.exit; if [ $size -le {whole} ]; then rm -f {log}; fi; fi; true"
+)
+"""Runs a command on the host as a detached job from the start and waits for it, up to ``ticks``
+tenths of a second, in one call to the daemon. A command that ends in time is answered like any;
+one still running is already a job, with the same wrapper and exit file a background job has, so
+nothing has to be moved when its foreground time is up — the daemon's one-shot ``exec.run`` ends what
+it started at its timeout, and a command it ran directly could not have been kept. The process id
+goes to a file at once, so a call cancelled while it waits can still end the command it started. A
+command that ended leaves nothing behind but a log too long to have been shown whole, which the
+answer names."""
+
+KILL_BY_PIDFILE = (
+    "pid=$(cat {log}.pid 2>/dev/null) || exit 0; [ -n \"$pid\" ] || exit 0; "
+    "kill -TERM -- -$pid 2>/dev/null || kill -TERM $pid 2>/dev/null; "
+    "for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 $pid 2>/dev/null || exit 0; sleep 0.5; done; "
+    "kill -KILL -- -$pid 2>/dev/null || kill -KILL $pid 2>/dev/null; true"
+)
 
 STDIN_CHUNK = 256 * 1024
 """Bytes sent per call when a file is put on the host: under the daemon's 512 KiB cap on stdin
@@ -94,6 +130,44 @@ class HostExecBackend:
             output += f"\n[ended by {result.signal}]"
         return ExecOutcome(exit_code=code, output=output, timed_out=bool(result.timed_out))
 
+    def can_hand_over(self) -> bool:
+        return True
+
+    async def run_or_hand_over(self, command: str, *, cwd: str | None, env: dict[str, str] | None, after: float, job_id: str, log: str,
+                               output_chars: int = 60_000) -> ExecOutcome:
+        """Run ``command`` on the host for up to ``after`` seconds and keep it as a job if it is still
+        running then (see :data:`HAND_OVER`); ``log`` is the job's log on the host. A call cancelled
+        while it waits (the operator's stop) ends the command, as a cancelled foreground command ends."""
+        quoted = shlex.quote(log)
+        whole = max(1024, output_chars)
+        script = HAND_OVER.format(
+            logdir=shlex.quote(log.rpartition("/")[0] or "/"), command=shlex.quote(command), log=quoted,
+            ticks=max(1, int(round(after * 10))), mark=MARK, whole=whole, head=int(whole * 0.7), tail=int(whole * 0.25),
+        )
+        try:
+            outcome = await self.run(script, cwd=cwd, env=env, timeout=min(after + HAND_OVER_GRACE, DAEMON_MAX_TIMEOUT))
+        except asyncio.CancelledError:
+            await asyncio.shield(self._end_started(log))
+            raise
+        before, marked, rest = outcome.output.partition(MARK)
+        if not marked:
+            return outcome
+        line, _, body = rest.lstrip(" ").partition("\n")
+        words = line.split()
+        output = (before.strip() + "\n" if before.strip() else "") + body
+        if words[:1] == ["running"] and len(words) > 1 and words[1].isdigit():
+            return ExecOutcome(exit_code=-1, output=output, handed_over=True, pid=int(words[1]))
+        if words[:1] == ["exited"] and len(words) > 1 and words[1].lstrip("-").isdigit():
+            return ExecOutcome(exit_code=int(words[1]), output=output)
+        # The wrapper died without writing the code: ended from outside, together with its group.
+        return ExecOutcome(exit_code=-1, output=output + "\n[the command vanished without an exit code: ended from outside]")
+
+    async def _end_started(self, log: str) -> None:
+        try:
+            await self.run(KILL_BY_PIDFILE.format(log=shlex.quote(log)), cwd=None, env=None, timeout=30.0)
+        except Exception:  # noqa: BLE001 — the stop goes on; a command the host could not be reached to end is the host's
+            pass
+
     def prompt_note(self, workdir: object) -> str:
         """What the system prompt says of where this session's tools run."""
         return (
@@ -136,4 +210,4 @@ class HostExecBackend:
             raise
 
 
-__all__ = ["BRIDGE_DOWN", "DAEMON_MAX_TIMEOUT", "OLD_DAEMON", "PRELUDE", "HostExecBackend"]
+__all__ = ["BRIDGE_DOWN", "DAEMON_MAX_TIMEOUT", "HAND_OVER", "OLD_DAEMON", "PRELUDE", "HostExecBackend"]

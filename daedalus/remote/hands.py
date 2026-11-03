@@ -170,12 +170,20 @@ class DeviceExecBackend:
 
     async def run(self, command: str, *, cwd: str | None, env: dict[str, str] | None, timeout: float, intent: str = "exec") -> ExecOutcome:
         limit = min(max(float(timeout), 1.0), MAX_TIMEOUT)
+        params = self._exec_params(command, cwd, env)
+        params["timeout_ms"] = int(limit * 1000)
+        return await self._exec(command, params, intent=intent, timeout=limit + ANSWER_GRACE)
+
+    def _exec_params(self, command: str, cwd: str | None, env: dict[str, str] | None) -> dict[str, Any]:
         argv = ["powershell", "-NoProfile", "-Command", command] if self._windows() else ["bash", "-c", PRELUDE + command]
-        params: dict[str, Any] = {"argv": argv, "cwd": cwd or self.root, "timeout_ms": int(limit * 1000)}
+        params: dict[str, Any] = {"argv": argv, "cwd": cwd or self.root}
         if env:
             params["env"] = dict(env)
+        return params
+
+    async def _exec(self, command: str, params: dict[str, Any], *, intent: str, timeout: float) -> ExecOutcome:
         try:
-            result = await self.call("exec.run", params, intent=intent, title=_first_line(command), timeout=limit + ANSWER_GRACE, stream=intent == "exec")
+            result = await self.call("exec.run", params, intent=intent, title=_first_line(command), timeout=timeout, stream=intent == "exec")
         except RemoteLost as exc:
             return ExecOutcome(exit_code=255, output=str(exc))
         except (RemoteError, OSError) as exc:
@@ -183,6 +191,9 @@ class DeviceExecBackend:
             # folder, a program it cannot start. A failed command, which the agent reads as such.
             return ExecOutcome(exit_code=255, output=f"the operator's terminal could not run the command: {exc}")
         result = result if isinstance(result, dict) else {}
+        if result.get("handed_over"):
+            output = str(result.get("stdout") or "") + (("\n" + str(result["stderr"])) if str(result.get("stderr") or "").strip() else "")
+            return ExecOutcome(exit_code=-1, output=output, handed_over=True, pid=int(result.get("pid") or 0))
         stdout, stderr = str(result.get("stdout") or ""), str(result.get("stderr") or "")
         output = stdout + (("\n" + stderr) if stderr.strip() else "")
         if result.get("truncated"):
@@ -191,6 +202,65 @@ class DeviceExecBackend:
         if code < 0 and result.get("signal"):
             output += f"\n[ended by {result['signal']}]"
         return ExecOutcome(exit_code=code, output=output, timed_out=bool(result.get("timed_out")))
+
+    # -- the jobs the terminal keeps ----------------------------------------------------------------
+
+    def can_hand_over(self) -> bool:
+        """Whether the terminal keeps a command past its foreground time (``capabilities.jobs``). With
+        no link now, yes: the call parks until one is up, and is made again then with what it says."""
+        link = self.hub.link_of(self.device_id, self.session_id)
+        return link is None or link.hello.capabilities.get("jobs") is True
+
+    async def run_or_hand_over(self, command: str, *, cwd: str | None, env: dict[str, str] | None, after: float, job_id: str, log: str, output_chars: int = 0) -> ExecOutcome:
+        """``exec.run`` with ``job``: the terminal answers when the command ends or, still running after
+        ``after`` seconds, at once with what it wrote so far, and keeps it running as job ``job_id``,
+        its output going on into ``log`` in the bound folder. ``after`` 0 starts a background job."""
+        params = self._exec_params(command, cwd, env)
+        params["job"] = {"id": job_id, "log": log, "after_ms": int(max(0.0, after) * 1000)}
+        return await self._exec(command, params, intent="exec", timeout=after + ANSWER_GRACE)
+
+    async def job_status(self, job_id: str) -> dict[str, Any]:
+        """``{state: running | exited | lost, exit_code, signal, size, ended_at}``; ``LookupError`` for a
+        job the terminal does not know, ``ConnectionError`` while it is away."""
+        return await self._job_call("job.status", job_id)
+
+    async def job_tail(self, job_id: str, lines: int) -> str:
+        answer = await self._job_call("job.tail", job_id, lines=int(lines))
+        return str(answer.get("text") or "")
+
+    async def job_kill(self, job_id: str) -> dict[str, Any]:
+        return await self._job_call("job.kill", job_id, audit=True)
+
+    async def _job_call(self, method: str, job_id: str, *, audit: bool = False, **params: Any) -> dict[str, Any]:
+        """One request about a job the terminal keeps, never parked and never refused for want of a turn.
+
+        A job outlives the turn that started it, and the watcher asks after it between turns, so these
+        go the way the host's own reads go: failing while the terminal is away rather than parking a
+        turn, and, for the status and the log that the watcher asks every few seconds, not journaled.
+        The kill is: it is the one that acts on the operator's machine. They change no file and start
+        nothing, which is why no turn has to stand behind them.
+        """
+        title = f"{method.removeprefix('job.')} {job_id}"
+        payload = {"job": job_id, **params}
+        try:
+            if audit:
+                result = await self._outside_call(method, payload, intent="read", title=title, timeout=FS_TIMEOUT)
+            else:
+                link = self.hub.link_of(self.device_id, self.session_id)
+                if link is None:
+                    raise ConnectionError(OFFLINE)
+                meta = self._meta("", "Daedalus", "read", title)
+                try:
+                    result = await link.request(f"{self.session_id}:job-{secrets.token_hex(6)}:1", method, {**payload, "_meta": meta}, timeout=FS_TIMEOUT)
+                except (LinkLost, TimeoutError):
+                    raise ConnectionError(OFFLINE) from None
+        except FileNotFoundError as exc:
+            raise LookupError(str(exc)) from None
+        except RemoteError as exc:
+            if exc.code == NOT_FOUND:
+                raise LookupError(exc.message) from None
+            raise OSError(exc.message) from None
+        return result if isinstance(result, dict) else {}
 
     async def put_bytes(self, path: str, data: bytes) -> None:
         """An attachment of the operator's own message, put into the folder on their machine."""

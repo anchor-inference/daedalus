@@ -728,9 +728,15 @@ own directories — in a container they are the same three."""
 
 
 class ExecToolsConfig(BaseModel):
-    """Exec / Read / Find output handling (the timeout itself is ``limits.tool_timeout_seconds``)."""
+    """Exec / Read / Find output handling, and when a foreground command moves to the background (the
+    call's own timeout is ``limits.tool_timeout_seconds``)."""
 
     max_output_chars: int = Field(default=60_000, ge=2_000, le=1_000_000)
+    background_after_seconds: float = Field(default=120.0, ge=1.0)
+    """How long a foreground Exec runs before the still-running command becomes a background job of
+    the session, the same process carrying on, and the call returns with its output so far. Kept well
+    under ``limits.tool_timeout_seconds``: that timeout cancels the call, and a command it reached used
+    to be killed with it, so a long build started in the foreground had to run again from the start."""
     sandbox: Literal["off", "workspace"] = Field(default_factory=native_sandbox_default)
     """``workspace``: run Exec inside bubblewrap with the whole filesystem read-only except the session
     workspace and a private /tmp, in its own PID namespace. Needs ``bwrap`` in the image; falls back to

@@ -343,3 +343,69 @@ func TestAQuietLinkStaysUp(t *testing.T) {
 		t.Errorf("the link connected %d times in 2 s of silence", connects)
 	}
 }
+
+// A command still running at its hand-over time is answered at that moment and kept as a job: the
+// server reads its status and its log afterwards, between turns, and hears its exit.
+func TestAForegroundCommandIsKeptAsAJobAndReportsItsEnd(t *testing.T) {
+	r := newRig(t, guard.Ask, &refuser{})
+	log := filepath.Join(r.root, ".jobs", "job-1-1.log")
+	// The ask guard refuses commands, so this one runs under auto; the job calls below run under ask.
+	r.guard.Set(guard.Auto)
+	res, rpcErr, _ := r.call(t, "exec.run", "exec", map[string]any{
+		"argv": []string{"bash", "-c", "echo early; sleep 1; echo late; exit 4"},
+		"job":  map[string]any{"id": "job-1-1", "log": log, "after_ms": 300}})
+	if rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	if res["handed_over"] != true || res["pid"] == nil || !strings.Contains(res["stdout"].(string), "early") || strings.Contains(res["stdout"].(string), "late") {
+		t.Fatalf("exec: %v", res)
+	}
+	r.guard.Set(guard.Ask)
+	status, rpcErr, _ := r.call(t, "job.status", "read", map[string]any{"job": "job-1-1"})
+	if rpcErr != nil || status["state"] != "running" {
+		t.Fatalf("status while running: %v %v", status, rpcErr)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for status["state"] == "running" && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+		status, rpcErr, _ = r.call(t, "job.status", "read", map[string]any{"job": "job-1-1"})
+		if rpcErr != nil {
+			t.Fatal(rpcErr)
+		}
+	}
+	if status["state"] != "exited" || status["exit_code"] != float64(4) {
+		t.Fatalf("status at the end: %v", status)
+	}
+	tail, rpcErr, _ := r.call(t, "job.tail", "read", map[string]any{"job": "job-1-1", "lines": 10})
+	if rpcErr != nil || tail["text"] != "early\nlate" {
+		t.Fatalf("tail: %v %v", tail, rpcErr)
+	}
+	if _, rpcErr, _ := r.call(t, "job.status", "read", map[string]any{"job": "job-9-9"}); rpcErr == nil || rpcErr.Code != 1001 {
+		t.Fatalf("an unknown job: %v", rpcErr)
+	}
+	hellos := r.srv.Hellos()
+	if len(hellos) == 0 || hellos[0].Capabilities["jobs"] != true {
+		t.Errorf("the hello did not say this client keeps jobs: %+v", hellos)
+	}
+}
+
+// A background job is a command handed over at once; job.kill ends it whatever the guard.
+func TestABackgroundJobStartsAtOnceAndJobKillEndsIt(t *testing.T) {
+	r := newRig(t, guard.Auto, nil)
+	log := filepath.Join(r.root, ".jobs", "job-2-2.log")
+	res, rpcErr, _ := r.call(t, "exec.run", "exec", map[string]any{
+		"argv": []string{"bash", "-c", "echo serving; sleep 30"},
+		"job":  map[string]any{"id": "job-2-2", "log": log, "after_ms": 0}})
+	if rpcErr != nil || res["handed_over"] != true {
+		t.Fatalf("exec: %v %v", res, rpcErr)
+	}
+	r.guard.Set(guard.Plan)
+	killed, rpcErr, _ := r.call(t, "job.kill", "read", map[string]any{"job": "job-2-2"})
+	if rpcErr != nil || killed["state"] != "exited" {
+		t.Fatalf("kill: %v %v", killed, rpcErr)
+	}
+	again, rpcErr, _ := r.call(t, "job.status", "read", map[string]any{"job": "job-2-2"})
+	if rpcErr != nil || again["state"] != "exited" || again["signal"] == "" {
+		t.Fatalf("status after the kill: %v %v", again, rpcErr)
+	}
+}
