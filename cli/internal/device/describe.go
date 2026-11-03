@@ -43,6 +43,9 @@ func Describe(method string, params json.RawMessage) guard.Action {
 	case "fs.write", "fs.mkdir":
 		a.Kind = guard.Write
 	default:
+		// A read, and so are job.status, job.tail and job.kill: they read or end a command this
+		// guard already let run, and they come between turns, when nobody may be at the terminal to
+		// answer a question. Plan mode refusing the kill of a runaway build would only keep it running.
 		a.Kind = guard.Read
 	}
 	return a

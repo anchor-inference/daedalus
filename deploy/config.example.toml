@@ -154,6 +154,11 @@ tool_timeout_seconds = 900.0
 # The most one tool call may return to the model. Exec streams past it into a spill file and
 # shows a head and a tail; Read pages; every other tool is clipped to it.
 max_output_chars = 60000
+# A foreground Exec still running after this many seconds is not stopped: the same process becomes a
+# background job of the session, the call returns with its output so far, and its end wakes the
+# agent like any job's. An explicit timeout_seconds on the call replaces it for that call. Either is
+# held under limits.tool_timeout_seconds, which cancels the call itself.
+# background_after_seconds = 120
 # Whether Exec runs inside bubblewrap: the filesystem read-only except the session's own
 # directory, a private /tmp, a PID namespace of its own. "workspace" is the default on a native
 # installation with bwrap on the machine — there is no container there to be the wall instead —

@@ -1123,8 +1123,10 @@ def environment_section(
         "command again when you need it, rather than answering from what you remember it said"
     )
     lines.append(
-        "- Background work, one contract: start the long process itself with Exec(background=true) — a build, a render, a "
-        "test suite — and end your turn. When it ends (exit, crash, kill, or lost to a restart) you are woken once with "
+        "- Background work, one contract: a job's end wakes you. A foreground Exec still running after a couple of minutes "
+        "moves to the background by itself as a job, the same process carrying on; what you know will run long (a build, "
+        "a render, a test suite, a server) you start as one with Exec(background=true) — the long process itself — and "
+        "end your turn. When a job ends (exit, crash, kill, or lost to a restart) you are woken once with "
         "its outcome and the last lines of its log, mid-turn or idle; a job silent for a long time earns one nudge. Never "
         "poll with sleep loops, never `nohup … &` inside a plain Exec (nothing reports it), never `pgrep -f` a pattern your "
         "own command line contains (it finds itself and never ends). To wait for a pid, a file, a log line or a port, use "

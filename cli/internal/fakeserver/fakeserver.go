@@ -57,9 +57,10 @@ type Server struct {
 
 // Hello is a device.hello the fake received.
 type Hello struct {
-	Sessions []map[string]string `json:"sessions"`
-	Known    []map[string]string `json:"known"`
-	Protocol int                 `json:"protocol"`
+	Sessions     []map[string]string `json:"sessions"`
+	Known        []map[string]string `json:"known"`
+	Protocol     int                 `json:"protocol"`
+	Capabilities map[string]any      `json:"capabilities"`
 }
 
 type pair struct {

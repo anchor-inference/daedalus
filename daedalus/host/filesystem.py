@@ -29,6 +29,10 @@ class ExecOutcome:
     exit_code: int
     output: str
     timed_out: bool = False
+    handed_over: bool = False
+    """The command was still running when its foreground time was up and was kept, not ended: it goes
+    on as a job of the other machine (process ``pid``), and ``output`` is what it had written so far."""
+    pid: int = 0
 
 
 class ExecBackend(Protocol):
@@ -41,6 +45,13 @@ class ExecBackend(Protocol):
     ``machine`` (``host``, ``device:<id>``), ``foreign_paths``, ``put_bytes(path, data)`` for an
     attachment, ``prompt_note(workdir)`` for the system prompt and ``filesystem(timeout)`` for a file
     interface of its own instead of :class:`ShellFS`.
+
+    A backend that can keep a command past its foreground time has ``can_hand_over()`` and
+    ``run_or_hand_over(command, cwd=, env=, after=, job_id=, log=)``, whose outcome says
+    ``handed_over`` when the command went on as a job. One that runs its jobs itself, rather than
+    through a shell wrapper on the other machine, also has ``job_status``, ``job_tail`` and
+    ``job_kill``, which :class:`daedalus.tools.shell.RemoteJob` asks instead of the shell. A backend
+    with neither (a benchmark's container) ends a command at its timeout, as every backend once did.
     """
 
     async def run(self, command: str, *, cwd: str | None, env: dict[str, str] | None, timeout: float) -> ExecOutcome: ...

@@ -387,7 +387,7 @@ at most 1 MiB.
 {"jsonrpc": "2.0", "method": "device.hello", "params": {
    "protocol": 1, "client": "<per-process id>", "client_version": "0.1.0", "os": "linux", "arch": "amd64", "shell": "/bin/zsh",
    "home": "/home/you",
-   "capabilities": {"exec": true, "fs": ["stat", "list", "read", "write", "mkdir"], "pty": false},
+   "capabilities": {"exec": true, "fs": ["stat", "list", "read", "write", "mkdir"], "jobs": true, "pty": false},
    "sessions": [{"session_id": "…", "guard": "ask"}],
    "known": [{"id": "<request id>", "state": "running" | "done"}]}}
 ```
@@ -410,7 +410,10 @@ channels, with these differences:
 
 | Method | Params → result | Differences from ptyd |
 |---|---|---|
-| `exec.run` | `{argv, cwd?, env{}, timeout_ms? ≤ 1 800 000, stdin_b64?, max_output? ≤ 4 MiB}` → `{exit_code, signal, stdout, stderr, truncated, timed_out, duration_ms}` | no program list: the guard and the jail decide; `argv` is `["bash", "-c", <prelude + command>]` on Unix and `["powershell", "-NoProfile", "-Command", …]` on Windows, as the server's backend writes it |
+| `exec.run` | `{argv, cwd?, env{}, timeout_ms? ≤ 1 800 000, stdin_b64?, max_output? ≤ 4 MiB, job?}` → `{exit_code, signal, stdout, stderr, truncated, timed_out, duration_ms, handed_over?, pid?}` | no program list: the guard and the jail decide; `argv` is `["bash", "-c", <prelude + command>]` on Unix and `["powershell", "-NoProfile", "-Command", …]` on Windows, as the server's backend writes it; `job` keeps the command as a job (see Jobs) |
+| `job.status` | `{job}` → `{job, state: "running" \| "exited" \| "lost", pid, started_at, size, exit_code?, signal?, ended_at?}` | not in ptyd; see Jobs |
+| `job.tail` | `{job, lines?}` → `{text}`: the last lines of the job's log, read from its last 64 KiB | not in ptyd |
+| `job.kill` | `{job}` → as `job.status`, once the job's group has ended (the hangup, the kill two seconds later) | not in ptyd |
 | `fs.stat` | `{path}` → `{exists, type, size, mtime, mode}` | |
 | `fs.list` | `{path, glob?, sort?, limit? ≤ 5000}` → `{entries[{name, type, size, mtime}], truncated}` | |
 | `fs.read` | `{path, offset?, max? ≤ 4 MiB}` → `{data_b64, offset, size, eof}` | |
@@ -446,6 +449,46 @@ applies inside the jail too. The jail is the client's and the server cannot wide
 unsupported, and the JSON-RPC ones. A refusal by the guard is `1004` with
 `data: {"reason": "refused_by_operator" | "plan_guard" | "outside_root" | "denied_path", "message"?: "<what the operator typed>"}`;
 the server turns it into the tool's result for the agent (`The operator refused this in their terminal: …`).
+
+**Jobs.** A client whose hello says `capabilities.jobs: true` keeps a command past its call when the
+server asks it to, which is how a remote conversation's long build is kept instead of killed. The
+server sends `exec.run` with
+
+```
+"job": {"id": "job-3-482913", "log": "/home/you/project/.jobs/job-3-482913.log", "after_ms": 120000}
+```
+
+and no `timeout_ms`, which a job ignores. The command runs as any `exec.run` does, its output streamed
+as `exec.output`, until it ends or until `after_ms` has passed. Ended in time, it is answered as any
+command is and leaves nothing behind. Still running, it is answered at that moment with
+`handed_over: true`, its `pid` and its output so far, and it goes on as job `id`: what it wrote so far
+and everything after go into `log`, which must lie in the session's jail like every path, and only
+`job.kill` ends it. `after_ms: 0` keeps it at once, which is how `Exec(background=true)` starts a job
+there. Cancelling the request before the hand-over (`request.cancel`) still ends the command.
+
+The server asks after a job with `job.status`, `job.tail` and `job.kill`, between turns as well as in
+them: a job outlives the turn that started it, and the server's watcher asks every few seconds until
+it has heard how the job ended, then wakes the agent with the outcome. These three come with `_meta`
+`intent: "read"` and outside any tool call (`tool_call_id` empty); the guard lets them through at every
+level, since they read or end only what it already let run. A job of another session is unknown to
+them (`1001`), as is one the client never had.
+
+A job belongs to the client process that started it and is tied to it like every command it runs: a
+client that exits, or is killed, takes its jobs with it. The client keeps a record of each job in its
+cache folder, and every process of the machine answers from it, because a session's calls go to
+whichever connection carries it: `running` while the job's process is alive, `exited` once its process
+recorded the end, and `lost` when that process is gone and recorded none. A client restarted later
+knows the job the same way. What happens to a kept job when the link drops:
+
+- the link drops and comes back (a network change, a sleeping laptop): the job runs on, its output
+  still going into its log; the server's questions fail while the link is down and are asked again
+  once it is back, and the job's end, if it came meanwhile, is reported then;
+- the client exits or is restarted: the job ends with it, and the next `job.status` answers `lost` (or
+  `1001` from a client with no record of it); the agent is told the job was lost with its client;
+- the device never comes back: the server keeps the job running in its list until it can ask.
+
+A client without `capabilities.jobs` is sent no `job`: its commands end at their timeout, as before,
+and `Exec(background=true)` is refused with a request to update the client.
 
 **Notifications, device to server.**
 

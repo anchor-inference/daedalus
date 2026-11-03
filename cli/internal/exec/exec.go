@@ -83,6 +83,8 @@ type Executor struct {
 	roots map[string]string
 	// writing serialises the pieces of writes, so two pieces of one file cannot interleave.
 	writing sync.Mutex
+	// jobs are the commands kept past their calls (jobs.go).
+	jobs *jobTable
 }
 
 // New returns an executor for this user, with no session bound yet.
@@ -98,7 +100,7 @@ func New(log *slog.Logger) (*Executor, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Executor{exec: sidechan.NewOpenExec(os.Environ(), home, log), fs: fs, home: home, roots: map[string]string{}}, nil
+	return &Executor{exec: sidechan.NewOpenExec(os.Environ(), home, log), fs: fs, home: home, roots: map[string]string{}, jobs: newJobTable(defaultJobDir())}, nil
 }
 
 // Tie makes the commands this executor starts die with this process (package tether, and
@@ -202,7 +204,13 @@ func (e *Executor) Handle(ctx context.Context, r Request) (any, error) {
 	}
 	switch r.Method {
 	case "exec.run":
-		return e.execRun(ctx, root, r.Params, r.Output)
+		return e.execRun(ctx, r.Session, root, r.Params, r.Output)
+	case "job.status":
+		return e.jobStatus(r.Session, r.Params)
+	case "job.tail":
+		return e.jobTail(r.Session, root, r.Params)
+	case "job.kill":
+		return e.jobKill(r.Session, r.Params)
 	case "fs.stat":
 		var p struct {
 			Path string `json:"path"`
@@ -295,7 +303,7 @@ func (e *Executor) Handle(ctx context.Context, r Request) (any, error) {
 	return nil, &Error{Code: CodeMethodNotFound, Message: "this terminal does not serve " + r.Method}
 }
 
-func (e *Executor) execRun(ctx context.Context, root string, raw json.RawMessage, output io.Writer) (any, error) {
+func (e *Executor) execRun(ctx context.Context, session, root string, raw json.RawMessage, output io.Writer) (any, error) {
 	var p struct {
 		Argv      []string          `json:"argv"`
 		Cwd       string            `json:"cwd"`
@@ -303,6 +311,8 @@ func (e *Executor) execRun(ctx context.Context, root string, raw json.RawMessage
 		TimeoutMs int64             `json:"timeout_ms"`
 		Stdin     []byte            `json:"stdin_b64"`
 		MaxOutput int               `json:"max_output"`
+		// Job, when present, keeps the command as a job instead of ending it at a timeout (jobs.go).
+		Job *jobParams `json:"job"`
 	}
 	if err := decode(raw, &p); err != nil {
 		return nil, err
@@ -316,8 +326,12 @@ func (e *Executor) execRun(ctx context.Context, root string, raw json.RawMessage
 	if err := e.jail(root, p.Cwd); err != nil {
 		return nil, err
 	}
-	res, err := e.exec.Run(ctx, sidechan.ExecRequest{Argv: p.Argv, Cwd: p.Cwd, Env: p.Env,
-		Timeout: time.Duration(p.TimeoutMs) * time.Millisecond, Stdin: p.Stdin, MaxOutput: p.MaxOutput, Output: output})
+	req := sidechan.ExecRequest{Argv: p.Argv, Cwd: p.Cwd, Env: p.Env,
+		Timeout: time.Duration(p.TimeoutMs) * time.Millisecond, Stdin: p.Stdin, MaxOutput: p.MaxOutput, Output: output}
+	if p.Job != nil {
+		return e.runJob(ctx, session, root, p.Job, req)
+	}
+	res, err := e.exec.Run(ctx, req)
 	if err != nil {
 		return nil, sideError(err)
 	}

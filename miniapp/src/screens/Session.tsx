@@ -15,7 +15,7 @@ import { Icon, IconName } from "../icons";
 import { AuthImg, FilePreview, PreviewSource, canPreview, downloadHref, fileGlyph, previewKind, sessionBase } from "../preview";
 import { followSession } from "../sessionstream";
 import { useEvent } from "../events";
-import { Activity, LiveStore, Segment, SummaryItem, SystemNote, ToolItem, Turn, activitySummary, applyLive, buildTurns, createLiveStore, familyCounts, isOlderPage, liveAfter, liveBase, prepend, producedFiles, reconcile, splitActivity } from "../turns";
+import { Activity, LiveStore, Segment, SummaryItem, SystemNote, ToolItem, Turn, activitySummary, applyLive, buildTurns, createLiveStore, execJob, familyCounts, isOlderPage, liveAfter, liveBase, prepend, producedFiles, reconcile, splitActivity } from "../turns";
 import { uiStep } from "../computerstep";
 import { Explorer } from "../explorerpanel";
 import { DiffView } from "../previewparts";
@@ -3113,6 +3113,7 @@ function ToolRow({ item, nested }: { item: ToolItem; nested?: boolean }) {
   const subagentRef = SUBAGENT_STEPS.includes(item.name) ? subagentOfStep(item) : null;
   const step = useFocusChat()?.orchestrator ? stepDescription(item) : null;
   const d = step ?? describe(item, workspace);
+  const job = execJob(item);
   const expanded = open || (item.running && item.name === "Exec");
   // The file a step names is the evidence: it opens where the answer's citations open.
   const path = FILE_TOOLS.includes(item.name) ? toolSource(item, sessionId, workspace, folders) : null;
@@ -3137,6 +3138,12 @@ function ToolRow({ item, nested }: { item: ToolItem; nested?: boolean }) {
           {item.error && !item.running && <span className="failed">{t("turn.failed")}</span>}
           {item.name === "Verify" && !item.running && (
             <button type="button" className="receipt-link" onClick={(e) => { e.stopPropagation(); openJobs(); }}>{t("turn.receipt")}</button>
+          )}
+          {job && (
+            <button type="button" className="receipt-link exec-job" title={job.moved ? `${t("turn.exec.moved.hint")} · ${job.id}` : job.id} onClick={(e) => { e.stopPropagation(); openJobs(); }}>
+              <span className="exec-job-long">{t(job.moved ? "turn.exec.moved" : "turn.exec.background")} · {job.id}</span>
+              <span className="exec-job-short">{t("turn.exec.background")}</span>
+            </button>
           )}
           {openSubagent && subagentRef && (
             <button type="button" className="receipt-link subagent-link" onClick={(e) => { e.stopPropagation(); openSubagent(subagentRef); }}>{t("subagents.open.one")}</button>
