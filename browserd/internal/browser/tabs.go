@@ -119,8 +119,12 @@ func (m *Manager) setupTab(g *Group, session string, info targetInfo, opener str
 		m.mu.Unlock()
 	}()
 	// The page's size is its window's: in the pinned Chromium the screencast shows the window whatever
-	// Emulation says, so an emulated viewport would put every click beside what the frame shows.
-	_ = m.sizeWindow(ctx, g, info.TargetID, g.ViewportNow())
+	// Emulation says, so an emulated viewport would put every click beside what the frame shows. A
+	// window of the operator's Chrome is never sized: the group takes the page's own size instead
+	// (followPage, below).
+	if !b.attached {
+		_ = m.sizeWindow(ctx, g, info.TargetID, g.ViewportNow())
+	}
 	var replies []<-chan error
 	var methods []string
 	type call struct {
@@ -179,7 +183,11 @@ func (m *Manager) setupTab(g *Group, session string, info targetInfo, opener str
 		}
 	}
 	m.recordScripts(t, session, scripts)
-	m.measureFrame(ctx, g, session, info.TargetID, g.ViewportNow())
+	if b.attached {
+		m.followPage(ctx, g, session, true)
+	} else {
+		m.measureFrame(ctx, g, session, info.TargetID, g.ViewportNow())
+	}
 	if !asked {
 		m.probeScreen(ctx, b, t)
 		if script := b.screenScript(ctx); script != "" {
@@ -402,7 +410,8 @@ func (m *Manager) RunTitles(stop <-chan struct{}) {
 // The picture the operator watches is this window drawn into the pane. A page left at the size it
 // was opened (1280×800) in a taller pane leaves an empty band under the picture, and scaling the
 // picture to cover the band would crop sides the agent can still click. The agent's reads use this
-// same size, so the page it sees is the page in the pane.
+// same size, so the page it sees is the page in the pane. In the operator's Chrome nothing is
+// resized: the answer is the size the page has there.
 func (m *Manager) Resize(ctx context.Context, groupID string, vp Viewport) (Viewport, error) {
 	if vp.W < config.MinViewport || vp.W > config.MaxViewport || vp.H < config.MinViewport || vp.H > config.MaxViewport {
 		return Viewport{}, wire.Errorf(wire.CodeInvalidParams, "viewport sides must be %d-%d", config.MinViewport, config.MaxViewport)
@@ -410,6 +419,17 @@ func (m *Manager) Resize(ctx context.Context, groupID string, vp Viewport) (View
 	g, err := m.Group(groupID)
 	if err != nil {
 		return Viewport{}, err
+	}
+	if g.Browser.attached {
+		// The operator's Chrome keeps the size its window has; the answer is that size, so the pane
+		// fits the page rather than the page the pane.
+		for _, t := range g.Tabs() {
+			if !t.Closed() {
+				m.followPage(ctx, g, t.Session, true)
+				break
+			}
+		}
+		return g.ViewportNow(), nil
 	}
 	if g.ViewportNow() == vp {
 		return vp, nil
@@ -430,9 +450,35 @@ func (m *Manager) Resize(ctx context.Context, groupID string, vp Viewport) (View
 	return vp, nil
 }
 
-// errWindowFixed is a window the daemon may not size: in the operator's Chrome, the operator's own
-// window, which the extension refuses to resize.
-var errWindowFixed = errors.New("the window is the operator's to size")
+// errWindowFixed is a window the daemon may not size: every window of the operator's Chrome. On
+// macOS sizing a window takes Chrome out of a full-screen Space, and sizing the agent's window for
+// each tab it opened dropped the operator's full-screen Chrome to the desktop, shrank it and grew it
+// back every time the agent opened or closed a site.
+var errWindowFixed = errors.New("the operator's Chrome windows are theirs to size")
+
+// followPage makes the group's viewport the size the page has, for a page whose window the daemon
+// does not size (the operator's Chrome). The agent's coordinates, the screenshot's clip and the live
+// view's frames are all checked against the viewport, so it has to be what the page really is.
+// settled waits for the size to hold still, as after a window just opened; without it one read is
+// taken, which the next read corrects if the window was moving.
+func (m *Manager) followPage(ctx context.Context, g *Group, session string, settled bool) {
+	var inner [2]int
+	var ok bool
+	if settled {
+		inner, ok = m.settledInner(ctx, g.Browser, session)
+	} else {
+		inner, ok = m.readInner(ctx, g.Browser, session)
+	}
+	if !ok || inner[0] < 1 || inner[1] < 1 {
+		return
+	}
+	vp := Viewport{W: inner[0], H: inner[1]}
+	if g.ViewportNow() == vp {
+		return
+	}
+	g.setViewport(vp)
+	m.publish("group.resized", map[string]any{"group_id": g.ID})
+}
 
 // sizeWindow gives a page's window the size that makes its viewport vp, once the browser knows how
 // much of a window its frame takes (measureFrame).
@@ -475,16 +521,24 @@ func (m *Manager) measureFrame(ctx context.Context, g *Group, session, target st
 		b.mu.Lock()
 		b.frameW, b.frameH = max(0, ww-inner[0]), max(0, wh-inner[1])
 		b.mu.Unlock()
-		if err := m.sizeWindow(ctx, g, target, vp); errors.Is(err, errWindowFixed) {
-			// The page will never be resized to match, so the frame is what this one read: retrying
-			// only asked the extension again and warned that the sizes never matched.
-			b.mu.Lock()
-			b.frameKnown = true
-			b.mu.Unlock()
-			return
-		}
+		_ = m.sizeWindow(ctx, g, target, vp)
 	}
 	m.log.Warn("a page's size never matched its window", "browser", b.ID)
+}
+
+// readInner reads a page's size once.
+func (m *Manager) readInner(ctx context.Context, b *Browser, session string) ([2]int, bool) {
+	var r struct {
+		Result struct {
+			Value []int `json:"value"`
+		} `json:"result"`
+	}
+	err := b.conn.Call(ctx, session, "Runtime.evaluate", map[string]any{"expression": "[innerWidth, innerHeight]",
+		"returnByValue": true}, &r)
+	if err != nil || len(r.Result.Value) != 2 {
+		return [2]int{}, false
+	}
+	return [2]int{r.Result.Value[0], r.Result.Value[1]}, true
 }
 
 // settledInner reads a page's size until three reads 50 ms apart agree.
@@ -492,17 +546,10 @@ func (m *Manager) settledInner(ctx context.Context, b *Browser, session string) 
 	var last [2]int
 	same := 0
 	for i := 0; i < 40; i++ {
-		var r struct {
-			Result struct {
-				Value []int `json:"value"`
-			} `json:"result"`
-		}
-		err := b.conn.Call(ctx, session, "Runtime.evaluate", map[string]any{"expression": "[innerWidth, innerHeight]",
-			"returnByValue": true}, &r)
-		if err != nil || len(r.Result.Value) != 2 {
+		cur, ok := m.readInner(ctx, b, session)
+		if !ok {
 			return last, false
 		}
-		cur := [2]int{r.Result.Value[0], r.Result.Value[1]}
 		if cur == last {
 			same++
 			if same >= 2 {

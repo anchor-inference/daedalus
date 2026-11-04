@@ -95,6 +95,14 @@ func TestResizeChangesThePageTheViewerSees(t *testing.T) {
 		} `json:"viewport"`
 	}
 	h.must("group.resize", map[string]any{"group_id": "g1", "viewport": map[string]any{"w": 960, "h": 640}}, &resized)
+	if attachRun() {
+		// The operator's Chrome keeps the size its window has, and the answer is that size: no
+		// window there is ever sized (the calls the daemon makes are held in attach_rpc_test.go).
+		if resized.Viewport.W != 1280 || resized.Viewport.H != 800 {
+			t.Fatalf("resize in the operator's Chrome: %+v", resized.Viewport)
+		}
+		return
+	}
 	if resized.Viewport.W != 960 || resized.Viewport.H != 640 {
 		t.Fatalf("resize: %+v", resized.Viewport)
 	}

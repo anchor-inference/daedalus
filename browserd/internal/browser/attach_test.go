@@ -36,10 +36,8 @@ type scripted struct {
 	frames []map[string]any
 	next   int
 	closed bool
-	// fixedWindow refuses window.bounds with bounds, as the extension does while the agent works in
-	// the operator's window; inner is then the page's size, which no resize changes.
-	fixedWindow bool
-	inner       []int
+	// inner is the page's size, the operator's window's to decide and never the daemon's.
+	inner []int
 	// reply answers a DevTools method of the test's own; ok false leaves it to the defaults.
 	reply func(method string, params map[string]any) (value any, ok bool)
 	// given are the tabs tab.close lets go of rather than closes, as the extension does with a tab
@@ -128,15 +126,6 @@ func (s *scripted) answer(f map[string]any) {
 			args, _ := f["args"].(map[string]any)
 			group, _ := args["group"].(string)
 			result(relay.TabCreated{Tab: relay.Tab{ID: n, Group: group, URL: "about:blank"}})
-		case relay.OpWindowBounds:
-			s.mu.Lock()
-			fixed := s.fixedWindow
-			s.mu.Unlock()
-			if args, _ := f["args"].(map[string]any); fixed && args["bounds"] != nil {
-				s.send(relay.Result{T: relay.TResult, ID: int64(id), Error: &relay.Error{Code: relay.ErrRefused, Message: "the agent works in the operator's window"}})
-				return
-			}
-			result(relay.WindowBounds{Bounds: relay.Bounds{Width: config.DefaultViewportW, Height: config.DefaultViewportH}})
 		case relay.OpTabClose:
 			args, _ := f["args"].(map[string]any)
 			tab, _ := args["tab"].(float64)
@@ -413,17 +402,6 @@ func TestAttachOperatorInput(t *testing.T) {
 	_ = tab
 }
 
-// sizings counts the window.bounds calls that asked for a size.
-func (s *scripted) sizings() int {
-	n := 0
-	for _, f := range s.seen(relay.TCall) {
-		if args, _ := f["args"].(map[string]any); f["op"] == relay.OpWindowBounds && args["bounds"] != nil {
-			n++
-		}
-	}
-	return n
-}
-
 // lockedLog is a log written from the daemon's goroutines and read by the test.
 type lockedLog struct {
 	mu  sync.Mutex
@@ -442,51 +420,69 @@ func (l *lockedLog) String() string {
 	return l.buf.String()
 }
 
-// In the operator's own window the extension refuses to size it: the daemon asks once for the
-// group, measures the frame from what it read, and neither asks again for the next tabs nor warns.
-func TestAttachOperatorsWindowIsAskedOnce(t *testing.T) {
+// No window of the operator's Chrome is ever sized, moved or given a state, whichever window the
+// agent works in: on macOS that takes a full-screen Chrome out of its Space, and sizing the agent's
+// window for every tab it opened once dropped the operator's Chrome to the desktop, shrank it and grew
+// it back each time. The group takes the page's own size instead, and follows it when it changes.
+func TestAttachNeverSizesAWindow(t *testing.T) {
 	m, s, _ := attachManager(t)
 	logged := &lockedLog{}
 	m.log = slog.New(slog.NewTextHandler(logged, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	s.mu.Lock()
-	s.fixedWindow = true
-	// The operator's window holds a page of its own size, never the group's viewport.
 	s.inner = []int{1500, 900}
 	s.mu.Unlock()
 	g, _ := openAttached(t, m, "s-1")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	if vp := g.ViewportNow(); vp != (Viewport{W: 1500, H: 900}) {
+		t.Fatalf("the group's viewport is %+v, not the page's 1500x900", vp)
+	}
+	var second *Tab
 	for i := 0; i < 2; i++ {
-		if _, err := m.NewTab(ctx, g, "", true); err != nil {
+		tab, err := m.NewTab(ctx, g, "", true)
+		if err != nil {
 			t.Fatal(err)
 		}
+		second = tab
 	}
-	if _, err := m.Resize(ctx, g.ID, Viewport{W: 1000, H: 700}); err != nil {
+	vp, err := m.Resize(ctx, g.ID, Viewport{W: 1000, H: 700})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if n := s.sizings(); n != 1 {
-		t.Fatalf("the window was asked to be sized %d times", n)
+	if vp != (Viewport{W: 1500, H: 900}) {
+		t.Fatalf("resize answered %+v, not the page's own size", vp)
 	}
-	g.Browser.mu.Lock()
-	known := g.Browser.frameKnown
-	g.Browser.mu.Unlock()
-	if !known {
-		t.Fatal("the frame was never taken as measured")
-	}
-	out := logged.String()
-	if strings.Contains(out, "level=WARN") || strings.Count(out, "operator's window") != 1 {
-		t.Fatalf("the log:\n%s", out)
-	}
-	// A group opened again asks afresh: the operator may have moved the agent to a window of its own.
+	// The operator takes the window full screen: the group follows the page, by the next resize or
+	// the next refresh, without asking the window for anything.
 	s.mu.Lock()
-	s.fixedWindow = false
+	s.inner = []int{1440, 780}
 	s.mu.Unlock()
+	m.RefreshTargets(ctx, g.Browser)
+	if vp := g.ViewportNow(); vp != (Viewport{W: 1440, H: 780}) {
+		t.Fatalf("after the window changed the viewport is %+v", vp)
+	}
+	if err := m.CloseTab(ctx, second); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := m.CloseGroup(ctx, g.ID); err != nil {
 		t.Fatal(err)
 	}
-	openAttached(t, m, "s-1")
-	if n := s.sizings(); n != 2 {
-		t.Fatalf("the reopened group's window was asked to be sized %d times in all", n)
+	openAttached(t, m, "s-2")
+	for _, f := range s.seen(relay.TCall) {
+		switch f["op"] {
+		case relay.OpWindowEnsure, relay.OpTabCreate, relay.OpTabClose, relay.OpGroupClose:
+		default:
+			t.Errorf("a call of %v", f["op"])
+		}
+	}
+	for _, f := range s.seen(relay.TCDP) {
+		method, _ := f["method"].(string)
+		if strings.HasPrefix(method, "Browser.") || method == "Emulation.setDeviceMetricsOverride" {
+			t.Errorf("sent %s", method)
+		}
+	}
+	if out := logged.String(); strings.Contains(out, "level=WARN") {
+		t.Fatalf("the log:\n%s", out)
 	}
 }
 

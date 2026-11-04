@@ -55,7 +55,6 @@ const (
 	OpTabCreate       = "tab.create"
 	OpTabClose        = "tab.close"
 	OpTabActivate     = "tab.activate"
-	OpWindowBounds    = "window.bounds"
 	OpDownloadsSearch = "downloads.search"
 	OpCookiesNames    = "cookies.names"
 	OpGroupClose      = "group.close"
@@ -292,30 +291,6 @@ type TabArgs struct {
 // go, left open in their window, instead of being closed.
 type TabClosed struct {
 	Released bool `json:"released,omitempty"`
-}
-
-// Bounds are a window's, in screen pixels.
-type Bounds struct {
-	Left   int `json:"left"`
-	Top    int `json:"top"`
-	Width  int `json:"width"`
-	Height int `json:"height"`
-}
-
-// WindowBoundsArgs is window.bounds's: with Bounds the window is given that size (only width and
-// height are set), without it the bounds are read. Either way the answer is WindowBounds.
-type WindowBoundsArgs struct {
-	Group  string `json:"group"`
-	Bounds *Size  `json:"bounds,omitempty"`
-}
-
-type Size struct {
-	Width  int `json:"width"`
-	Height int `json:"height"`
-}
-
-type WindowBounds struct {
-	Bounds Bounds `json:"bounds"`
 }
 
 // DownloadsSearchArgs is downloads.search's: ID is the DevTools guid of the download, as
