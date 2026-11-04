@@ -12,7 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { api, setPanelCredential, type AsrStatus, type SessionDetail } from "../api";
 import { applyAppearance } from "../appearance";
 import { ApprovalChip, type ApprovalMode } from "../browser/approvals";
-import { type Approval, pendingApproval } from "../composer";
+import { type Approval, type QueuedMessage, pendingApproval, queuedAfter, readQueued, readReturned } from "../composer";
 import { Composer, type ComposerHandle } from "../composerbox";
 import type { ModelChoice } from "../modelselect";
 import { messageBody } from "../project/goalmodel";
@@ -421,13 +421,52 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
       setFailed(true);
     }
   }, [id]);
+  // The messages waiting for the running agent. The panel passed an empty list, so a message sent
+  // during a turn vanished from the panel until the agent read it, while the app showed its card.
+  const [queued, setQueued] = useState<QueuedMessage[]>([]);
+  const loadQueued = useCallback(async () => {
+    try {
+      setQueued(readQueued(await api.get<unknown>(`/api/sessions/${id}/steer`)));
+    } catch {
+      setQueued([]);
+    }
+  }, [id]);
+  const takeBack = useCallback(
+    async (message: QueuedMessage, edit: boolean) => {
+      try {
+        const r = await api.delete<{ message?: unknown }>(`/api/sessions/${id}/steer/${encodeURIComponent(message.id)}`);
+        setQueued((q) => q.filter((x) => x.id !== message.id));
+        if (edit) composer.current?.insert((readReturned([r?.message])[0] ?? message).text);
+        toast(t("composer.steer.withdrawn"));
+      } catch (e) {
+        toast(errorText(e));
+        void loadQueued();
+      }
+    },
+    [id, toast, loadQueued],
+  );
+  const steerNow = useCallback(
+    async (message: QueuedMessage) => {
+      try {
+        await api.post(`/api/sessions/${id}/steer/${encodeURIComponent(message.id)}`, {});
+        setQueued((q) => q.map((x) => (x.id === message.id ? { ...x, kind: "steer" } : x)));
+        toast(t("composer.delivery.steered"));
+      } catch (e) {
+        toast(errorText(e));
+        void loadQueued();
+      }
+    },
+    [id, toast, loadQueued],
+  );
 
   useEffect(() => {
     void load();
+    void loadQueued();
     let soon: number | null = null;
     const stop = followSession(id, {
       handle: (event, p) => {
         live.update((state) => liveAfter(state, event, p));
+        if (event === "steer_changed") setQueued((q) => queuedAfter(q, p));
         if (event === "message_start") setDetail((prev) => (prev && prev.status !== "running" ? { ...prev, status: "running", run_id: p.run_id || prev.run_id } : prev));
         if (event === "run_settled") {
           setDetail((prev) => (prev ? { ...prev, status: p.status === "awaiting" ? "waiting" : p.status === "failed" ? "failed" : "idle" } : prev));
@@ -443,6 +482,7 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
       onDrop: () => {
         live.reset();
         void load();
+        void loadQueued();
       },
     });
     return () => {
@@ -450,7 +490,7 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
       if (soon !== null) window.clearTimeout(soon);
       live.reset();
     };
-  }, [id, live, load, onChanged]);
+  }, [id, live, load, loadQueued, onChanged]);
 
   const status = statusOf(detail);
   const busy = status === "running" || status === "waiting" || status === "compacting";
@@ -521,6 +561,7 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
       result = await api.post<{ receipt?: { status: string } }>(`/api/sessions/${id}/messages`, messageBody(text, { followUp, clientMessageId: messageId }));
     }
     void load();
+    void loadQueued();
     return result.receipt?.status === "queued" ? "queued" : "sent";
   }
 
@@ -627,7 +668,10 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
           thinking={detail.thinking}
           reasoningEffort={detail.reasoning_effort}
           onChooseEffort={chooseEffort}
-          queued={[]}
+          queued={queued}
+          onWithdraw={(message) => void takeBack(message, false)}
+          onEdit={(message) => void takeBack(message, true)}
+          onSteer={(message) => void steerNow(message)}
           questions={detail.pending?.questions ?? null}
           answered={detail.pending?.answered ?? null}
           onAnswer={async (answers) => {
