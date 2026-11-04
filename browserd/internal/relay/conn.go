@@ -23,26 +23,85 @@ import (
 // own input can be told from the daemon's. A second NewConn replaces the first, whose connection
 // ends; so does drop.
 func (s *Session) NewConn(handler func(cdp.Event), dispatched func(tab int)) (conn *cdp.Conn, drop func()) {
+	conn, a := newAdapter(handler, dispatched, false)
+	a.bind(s)
+	return conn, a.close
+}
+
+// Line is a DevTools connection that outlives the relay it runs over: when the relay ends, the
+// calls waiting on it fail with why and the connection stays, refusing commands until Bind gives it
+// the relay the same Chrome made again. A relay that dropped for a second once ended the browser,
+// renumbered the operator's tabs and lost the conversation's grants; the attach backend keeps its
+// browser on a Line through a reconnect.
+type Line struct{ a *adapter }
+
+// NewLine returns a connection bound to no relay yet; Bind gives it one.
+func NewLine(handler func(cdp.Event), dispatched func(tab int)) (*cdp.Conn, *Line) {
+	conn, a := newAdapter(handler, dispatched, true)
+	return conn, &Line{a: a}
+}
+
+// Bind makes s the relay the connection's commands go over, and its events come from.
+func (l *Line) Bind(s *Session) { l.a.bind(s) }
+
+// Close ends the connection for good.
+func (l *Line) Close() { l.a.close() }
+
+// ErrDropped is the text of a call whose relay ended while it waited, on a Line.
+const ErrDropped = "the connection to Chrome dropped during the call; Chrome is reconnecting, so try the call again"
+
+// ErrReconnecting is the text of a command sent on a Line while it has no relay.
+const ErrReconnecting = "Chrome is reconnecting to Daedalus; try the call again in a moment"
+
+func newAdapter(handler func(cdp.Event), dispatched func(tab int), durable bool) (*cdp.Conn, *adapter) {
 	pr, pw := io.Pipe()
-	a := &adapter{s: s, pw: pw, wake: make(chan struct{}, 1), done: make(chan struct{}), dispatched: dispatched}
+	a := &adapter{pw: pw, wake: make(chan struct{}, 1), done: make(chan struct{}), dispatched: dispatched, durable: durable}
+	go a.pump()
+	return cdp.New(pr, a, handler), a
+}
+
+// bind makes s the adapter's relay. A relay holds one connection: one it held before is ended, or,
+// on a Line, let go.
+func (a *adapter) bind(s *Session) {
 	s.mu.Lock()
 	old := s.conn
 	ended := s.ended
 	s.conn = a
 	s.mu.Unlock()
-	if old != nil {
-		old.close()
+	if old != nil && old != a {
+		old.lost(s)
 	}
-	go a.pump()
-	conn = cdp.New(pr, a, handler)
+	a.mu.Lock()
+	a.s = s
+	a.mu.Unlock()
 	if ended {
-		a.close()
+		a.lost(s)
 	}
-	return conn, a.close
+}
+
+// lost is the relay s ending under the adapter: a connection of that relay alone ends with it, a
+// Line waits for the next.
+func (a *adapter) lost(s *Session) {
+	if !a.durable {
+		a.close()
+		return
+	}
+	a.mu.Lock()
+	if a.s == s {
+		a.s = nil
+	}
+	a.mu.Unlock()
+}
+
+func (a *adapter) session() *Session {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.s
 }
 
 type adapter struct {
-	s          *Session
+	s          *Session // under mu; nil on a Line between relays
+	durable    bool
 	pw         *io.PipeWriter
 	dispatched func(tab int)
 
@@ -97,12 +156,18 @@ func (a *adapter) Write(b []byte) (int, error) {
 		a.dispatched(tab)
 	}
 	id := m.ID
-	err := a.s.register(func(rid int64) any {
+	s := a.session()
+	if s == nil {
+		return refuse(ErrReconnecting)
+	}
+	err := s.register(func(rid int64) any {
 		return CDP{T: TCDP, ID: rid, Session: m.SessionID, Method: m.Method, Params: params}
 	}, func(r *Result) { a.result(id, r) })
 	switch {
 	case err == ErrTooLarge:
 		return refuse(fmt.Sprintf("%s is larger than the relay carries to Chrome (1 MB)", m.Method))
+	case err == ErrNotConnected && a.durable:
+		return refuse(ErrReconnecting)
 	case err != nil:
 		return 0, err
 	}
@@ -135,6 +200,10 @@ func localChild(params json.RawMessage, tab int) (json.RawMessage, error) {
 // kept, so a caller that tells errors apart by code still can.
 func (a *adapter) result(id int64, r *Result) {
 	if r == nil {
+		if a.durable {
+			// The relay ended; the connection waits for the next one, and the call is told why.
+			a.reply(message{ID: id, Error: &cdp.Error{Code: -32000, Message: ErrDropped}})
+		}
 		return // the relay ended: closing the pipe fails the call
 	}
 	if r.OK {

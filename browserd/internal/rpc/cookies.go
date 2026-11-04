@@ -63,7 +63,7 @@ type storedCookie struct {
 	SameSite string  `json:"sameSite"`
 }
 
-func (d *Daemon) registerCookies(s *server.Server) {
+func (d *Daemon) registerCookies(s handles) {
 	s.Handle("cookies.set", d.cookiesSet)
 	s.Handle("cookies.list", d.cookiesList)
 	s.Handle("cookies.clear", d.cookiesClear)

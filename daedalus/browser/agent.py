@@ -60,7 +60,7 @@ from daedalus.browser.monitor import InjectionMonitor
 from daedalus.browser.notes import ACTIVE, NOTE, PROCEDURE, SiteNotes
 from daedalus.browser.replay import RecordedSkills
 from daedalus.browser.replay import replay as run_replay
-from daedalus.browser.user import CONSENT, chrome_forbids, site_granted
+from daedalus.browser.user import ANTI_BOT_WORDS, CONSENT, anti_bot, chrome_forbids, site_granted
 from daedalus.browser.user import site_of as registrable_site
 from daedalus.host.policy import (
     ALLOW,
@@ -725,7 +725,13 @@ def explain(exc: BrowserError) -> str:
             "BrowserNetwork (the request that loaded it) or BrowserDownload. Do not retry this tab, and do not repeat the action that led here."
         )
     if isinstance(exc, NoSuchTab):
-        return f"There is no tab {exc.details.get('tab_id') or ''} in your browser; BrowserTabs(action='list') lists them."
+        tab = str(exc.details.get("tab_id") or "")
+        if exc.details.get("reason") == "no_tabs":
+            return "Your browser has no tab open now; BrowserTabs(action='new') opens one."
+        if not tab:
+            # Once "There is no tab  in your browser", naming nothing, after the relay to Chrome dropped.
+            return f"That tab is not in your browser ({exc.message}); BrowserTabs(action='list') lists them."
+        return f"There is no tab {tab} in your browser; BrowserTabs(action='list') lists them."
     if isinstance(exc, Blocked) and exc.details.get("reason") == "private":
         # The operator chose to keep the LAN out of reach; nobody can lift that for one request.
         return (
@@ -733,6 +739,13 @@ def explain(exc: BrowserError) -> str:
             "browser settings keep the LAN closed to the agent's browser (LAN sites: listed only). Do not work around it with another tool; "
             "say what the task needs there, and the operator can open it."
         )
+    if isinstance(exc, Blocked) and exc.details.get("by") == "daedalus":
+        # A redirect the page made, stopped by Daedalus's own guard. Chrome calls it ERR_BLOCKED_BY_CLIENT,
+        # and an agent told only that blamed the operator's ad blocker.
+        url = str(exc.details.get("url") or "")
+        if anti_bot(url):
+            return f"{exc.message}. The page was sending the tab to <{url[:200]}>. {ANTI_BOT_WORDS}"
+        return f"{exc.message}. If the task needs that site, BrowserNavigate there (the operator is asked), or carry on from another page."
     if isinstance(exc, Blocked):
         return f"The browser's network wall refused {exc.details.get('host') or 'that address'}: {exc.details.get('reason') or exc.message}. It is not reachable from the agent's browser."
     if isinstance(exc, Forbidden) and exc.details.get("covered_by"):
@@ -829,8 +842,21 @@ class BrowserAgent:
             (caller.owner.kind, caller.owner.id, int(user)),
         )
         if row is None:
+            if user and (why := await self._chrome_left(caller)):
+                # The agent was told only "no browser is open for you" after Chrome dropped, and
+                # spent ten calls finding out why.
+                raise NotFound(f"no browser is open for you: {why}. BrowserOpen opens it again in the operator's Chrome once it is connected")
             raise NotFound("no browser is open for you; BrowserOpen starts one" + (" in the operator's Chrome, which they gave this conversation" if user else ""))
         return dict(row)
+
+    async def _chrome_left(self, caller: Caller) -> str:
+        """Why the caller's last group in the operator's Chrome closed, when Chrome leaving closed it."""
+        row = await self.service.db.fetchone(
+            "SELECT close_reason FROM browser_groups WHERE owner_kind = ? AND owner_id = ? AND env = 'user' AND status = 'closed' ORDER BY last_activity_at DESC LIMIT 1",
+            (caller.owner.kind, caller.owner.id),
+        )
+        reason = str(row["close_reason"] or "") if row is not None else ""
+        return self.service._gone_text({"close_reason": reason}).removeprefix("this browser is not open: ").split(".")[0] if reason.startswith("chrome disconnected") else ""
 
     def _user_name(self) -> str:
         """The name the operator gave their Chrome in the extension's popup, as its relay reported it."""
@@ -893,7 +919,7 @@ class BrowserAgent:
             if item.get("id") == wanted:
                 return item
         if not tabs:
-            raise NoSuchTab("the browser has no tab open", tab_id=wanted)
+            raise NoSuchTab("the browser has no tab open; BrowserTabs(action='new') opens one", tab_id=wanted, reason="no_tabs")
         raise NoSuchTab(f"no tab {wanted}", tab_id=wanted)
 
     def _chrome_check(self, url: str | None) -> None:
@@ -1055,6 +1081,12 @@ class BrowserAgent:
         elif url:
             tab = opened.get("tab") or {}
             row = await self._group(caller)
+            if tab.get("given"):
+                # A tab the operator gave is theirs to read, never to send elsewhere: their own page
+                # was once taken to a storefront's captcha this way, after their Chrome reconnected
+                # and the group came back on it.
+                await self._site_ask(caller, row, url, why or "")
+                tab = await self.service.call(group["id"], "tab.new", {"group_id": group["id"], "url": "about:blank", "origin": self._origin(caller)}, what="opening a tab", timeout=40.0)
             await self._through_wall(caller, row, lambda: self.service.call(group["id"], "page.navigate", {"tab_id": tab.get("id"), "url": url, "origin": self._origin(caller), "timeout_ms": NAVIGATE_TIMEOUT_MS}, what="opening the page", timeout=NAVIGATE_TIMEOUT_MS / 1000 + 25), url=url, why=why or "", tab=str(tab.get("id") or ""))
         if url:
             await self._site_notes(caller, url)
@@ -1186,6 +1218,8 @@ class BrowserAgent:
         await self._audit(group, caller, "navigate", {"tab": current["id"], "go": go or "", "url": str(result.get("url") or url or "")[:2000]})
         reached = str(result.get("url") or url or "")
         await self._site_notes(caller, reached)
+        if anti_bot(reached):
+            caller.notes.append(f"Tab {current['id']} is on the site's anti-bot check. {ANTI_BOT_WORDS}")
         if not go and (hint := self.hints.went(self._who(caller), reached)):
             caller.notes.append(hint)
         status = f" (HTTP {result['status']})" if result.get("status") else ""

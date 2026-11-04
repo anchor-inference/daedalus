@@ -944,10 +944,19 @@ convention, and `internal/browser/attach_test.go` holds each one:
   `pid` 0, `chromium_version` `Chrome/<version>`, and `daemon.info.chromium` is `{kind: "relay",
   version: <the connected Chrome's>, path: ""}`.
 - With no Chrome connected, `browser.open` is `1007 {reason: "chrome_not_connected"}`. When the relay
-  ends, the browser ends with it: `browser.exited {reason: "chrome disconnected (<relay.lost reason>)"}`
-  and its groups answer `1108`. A group opened again after the extension reconnects takes up the tabs
-  its Chrome tab group still holds (`window.ensure` lists them), so a worker restart costs the agent
-  nothing but one `1108`.
+  ends, the browser waits 45 s for the same `profile_id` to connect again and is bound to that relay
+  before its `welcome`: the same browser, groups and grants, and the tabs the extension replays are
+  taken as the ones it has. A call waiting on the old relay fails with why; a `tab.*`, `page.*` or
+  `browser.open` call made while the relay is expected back waits up to 20 s for it, and a command
+  sent meanwhile is `1007 {reason: "chrome_reconnecting"}`. Past the 45 s the browser ends:
+  `browser.exited {reason: "chrome disconnected (<relay.lost reason>, and it did not connect again
+  within 45s)"}` and its groups answer `1108`. A group opened again after that takes up the tabs its
+  Chrome tab group still holds (`window.ensure` lists them).
+- A tab is named by Chrome's own tab id (`t<tabId>`), so a tab set up again keeps its id.
+- The operator's grants are kept by group, not by browser (`net.grant` and `net.revoke` take the
+  group as ever), and a grant covers its registrable site on any port; `host: "*"` covers every site,
+  which the host sends while the conversation's approval mode answers site questions itself. A
+  redirect the guard stops ends the navigation with `1102 {by: "daedalus", url, host, reason, …}`.
 - The operator's own input in an agent tab — the extension's content script reports trusted input
   the daemon did not send (`input`) — gives them control: `control {owner: "human", holder:
   "chrome"}` for 15 s, renewed while they keep at it, and the agent's calls wait and are refused with

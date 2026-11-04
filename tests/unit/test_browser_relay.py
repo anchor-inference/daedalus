@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import shutil
+import socket
 import tempfile
 from collections.abc import AsyncIterator, Iterable
 from datetime import UTC, datetime, timedelta
@@ -19,6 +20,10 @@ from typing import Any
 
 import httpx
 import pytest
+import uvicorn
+from fastapi import FastAPI, WebSocket
+from websockets.asyncio.client import connect
+from websockets.exceptions import ConnectionClosed
 
 from daedalus.browser.user import (
     CLOSE_BUSY,
@@ -33,6 +38,8 @@ from daedalus.browser.user import (
     split,
 )
 from daedalus.extensions import api_browser_user
+from daedalus.extensions.api import server_config
+from daedalus.extensions.socket_limits import SocketLimits
 from daedalus.stores.database import Database
 from tests.support.fake_browserd import FakeBrowserd
 
@@ -299,6 +306,65 @@ async def test_a_first_frame_that_is_not_hello_is_refused(desk: RelayDesk) -> No
     sock = FakeSocket()
     await asyncio.wait_for(start(desk, sock, {"t": "check", "n": 1}), 5)
     assert await sock.close_code() == 4400
+
+
+async def test_a_frame_past_a_megabyte_crosses_a_real_server_while_other_sockets_keep_their_cap(daemon: FakeBrowserd, pairing: Pairing, desk: RelayDesk) -> None:
+    """The relay through uvicorn as production configures it. The server's cap was once the terminal's
+    1 MiB for every socket: a snapshot's reply from Chrome closed the relay with 1009, browserd ended
+    the browser, and the agent was told there was no tab. A FakeSocket never met that cap."""
+    api = FastAPI()
+    app = SimpleNamespace(settings=SimpleNamespace(native=False, state_dir=Path("/nonexistent"), miniapp_public_url=""), extensions={"browser_pairing": pairing, "browser_relays": desk})
+
+    def auth() -> dict[str, Any]:
+        raise AssertionError("the relay takes no app session")
+
+    api_browser_user.register(api, app, auth)  # type: ignore[arg-type]
+
+    @api.websocket("/ws/echo")
+    async def echo(websocket: WebSocket) -> None:
+        await websocket.accept()
+        while True:
+            message = await websocket.receive()
+            if message["type"] == "websocket.disconnect":
+                return
+            await websocket.send_bytes(message.get("bytes") or b"")
+
+    api.add_middleware(SocketLimits)
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    host = f"127.0.0.1:{listener.getsockname()[1]}"
+    server = uvicorn.Server(server_config(api, lifespan="off"))
+    serving = asyncio.create_task(server.serve(sockets=[listener]))
+    try:
+        async with asyncio.timeout(5):
+            while not server.started:
+                await asyncio.sleep(0.02)
+        token = await paired(pairing)
+        async with connect(f"ws://{host}/api/browser/relay", max_size=None, open_timeout=5) as chrome:
+            await chrome.send(json.dumps({**HELLO, "token": token}))
+            async with asyncio.timeout(5):
+                while not daemon.relays:
+                    await asyncio.sleep(0.01)
+            relay = daemon.relays[-1]
+            assert (await daemon.relay_frame(relay))["t"] == "hello"
+            big = {"t": "result", "id": 9, "ok": True, "value": {"listeners": "x" * (5 << 20)}}
+            await chrome.send(json.dumps(big))
+            assert await daemon.relay_frame(relay, timeout=20) == big
+            # The relay is still up after it: a frame back reaches Chrome.
+            await daemon.relay_send(relay, {"t": "ping", "n": 1})
+            assert json.loads(await asyncio.wait_for(chrome.recv(), 5)) == {"t": "ping", "n": 1}
+        async with connect(f"ws://{host}/ws/echo", max_size=None, open_timeout=5) as other:
+            await other.send(b"a" * 1000)
+            assert await asyncio.wait_for(other.recv(), 5) == b"a" * 1000
+            await other.send(b"a" * ((1 << 20) + 1))
+            with pytest.raises(ConnectionClosed) as closed:
+                await asyncio.wait_for(other.recv(), 5)
+            assert closed.value.rcvd is not None and closed.value.rcvd.code == 1009
+    finally:
+        server.should_exit = True
+        await asyncio.wait_for(serving, 10)
+        listener.close()
 
 
 def test_pieces_split_and_join_as_the_daemon_does() -> None:

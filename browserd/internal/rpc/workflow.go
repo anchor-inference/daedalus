@@ -11,7 +11,7 @@ import (
 
 // registerWorkflow serves the recording of a person's steps (the contract's Recording a person's
 // steps). Without a recorder (a test's daemon) it is not served.
-func (d *Daemon) registerWorkflow(s *server.Server) {
+func (d *Daemon) registerWorkflow(s handles) {
 	if d.Workflow == nil {
 		return
 	}

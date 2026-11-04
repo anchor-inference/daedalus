@@ -16,7 +16,7 @@ import (
 // and unpacked extensions (extension.*), whose files reach the daemon through upload.put as an
 // archive. Each acts on the agent's own browser and profile only; on the operator's Chrome every one
 // is refused, since the agent works read-only there.
-func (d *Daemon) registerInject(s *server.Server) {
+func (d *Daemon) registerInject(s handles) {
 	for name, h := range map[string]server.Handler{
 		"page.evaluate":       d.evaluate,
 		"script.list":         d.scriptList,

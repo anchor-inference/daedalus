@@ -491,6 +491,10 @@ type Tab struct {
 	keeping int
 	keptSeq int64
 	kept    *Kept
+	// The navigations of the tab's own document the guard stopped (guard.go), numbered, and the
+	// newest: a navigation in progress ends with the block rather than waiting out its timeout.
+	blockSeq int64
+	blocked  *GuardBlock
 
 	// The page scripts given to its documents (scripts.go).
 	scriptIDs scriptSessions
@@ -560,6 +564,36 @@ func (t *Tab) keptSince(mark int64) *Kept {
 	}
 	k := *t.kept
 	return &k
+}
+
+// GuardBlock is a navigation of a tab's document the guard stopped: where to, and the wall's verdict.
+type GuardBlock struct {
+	URL     string
+	Verdict map[string]any
+}
+
+func (t *Tab) blockMark() int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.blockSeq
+}
+
+func (t *Tab) blockedSince(mark int64) *GuardBlock {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.blockSeq == mark || t.blocked == nil {
+		return nil
+	}
+	b := *t.blocked
+	return &b
+}
+
+func (t *Tab) recordBlock(b GuardBlock) {
+	t.mu.Lock()
+	t.blockSeq++
+	t.blocked = &b
+	t.broadcastLocked()
+	t.mu.Unlock()
 }
 
 // Pointer is the mouse's last position on the page, and whether there has been one.

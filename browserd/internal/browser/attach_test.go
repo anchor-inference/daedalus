@@ -43,6 +43,8 @@ type scripted struct {
 	// given are the tabs tab.close lets go of rather than closes, as the extension does with a tab
 	// the operator gave.
 	given map[int]bool
+	// ensured are the tabs window.ensure answers the group still holds in Chrome.
+	ensured []relay.Tab
 }
 
 func (s *scripted) Send(p []byte) error {
@@ -117,7 +119,10 @@ func (s *scripted) answer(f map[string]any) {
 	case relay.TCall:
 		switch f["op"] {
 		case relay.OpWindowEnsure:
-			result(relay.WindowEnsured{Window: 1, Tabs: []relay.Tab{}})
+			s.mu.Lock()
+			tabs := append([]relay.Tab{}, s.ensured...)
+			s.mu.Unlock()
+			result(relay.WindowEnsured{Window: 1, Tabs: tabs})
 		case relay.OpTabCreate:
 			s.mu.Lock()
 			s.next++
@@ -347,18 +352,94 @@ func TestAttachCloseBrowserDetaches(t *testing.T) {
 	}
 }
 
-// The relay's end is the browser's: its groups answer 1108 with why.
+// connectAgain is the same Chrome profile making a relay again, as its extension does after a drop.
+func connectAgain(t *testing.T, hub *relay.Hub) *scripted {
+	t.Helper()
+	s := &scripted{t: t, join: relay.Joiner{Max: relay.MaxToExtension}}
+	old := hub.Current()
+	s.link = hub.Open(s, relay.TransportNative, "")
+	s.send(relay.Hello{T: relay.THello, Proto: relay.Proto, ChromeVersion: "141.0", ProfileID: "p", ProfileName: "Home"})
+	deadline := time.Now().Add(5 * time.Second)
+	for hub.Current() == nil || hub.Current() == old {
+		if time.Now().After(deadline) {
+			t.Fatal("the relay was not accepted")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return s
+}
+
+// A relay that drops and comes back within the grace keeps the browser: the same group, the same tab
+// by the same name (Chrome's own id), the tabs the extension replays taken as they were, and the
+// calls going over the new relay. A call made while it was down waits for it.
+func TestAttachRelayComesBackWithinTheGrace(t *testing.T) {
+	m, s, hub := attachManager(t)
+	g, tab := openAttached(t, m, "s-1")
+	if tab.ID != "t1" {
+		t.Fatalf("the tab of Chrome's tab 1 is %s", tab.ID)
+	}
+	s.link.Closed()
+	waited := make(chan time.Duration, 1)
+	go func() {
+		begin := time.Now()
+		m.AwaitRelay(context.Background())
+		waited <- time.Since(begin)
+	}()
+	time.Sleep(100 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := tab.Call(ctx, "Runtime.evaluate", map[string]any{"expression": "1"}, nil); err == nil || !strings.Contains(err.Error(), "reconnecting") {
+		t.Fatalf("a command while Chrome reconnects: %v", err)
+	}
+	again := connectAgain(t, hub)
+	select {
+	case took := <-waited:
+		if took < 50*time.Millisecond {
+			t.Fatalf("the call did not wait for the relay (%s)", took)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the waiting call was not let go when Chrome came back")
+	}
+	again.send(relay.Tabs{T: relay.TTabs, Op: relay.TabsJoined, Tab: &relay.Tab{ID: 1, Group: "s-1", URL: "https://shop.example/"}})
+	deadline := time.Now().Add(5 * time.Second)
+	for !slices.Contains(again.methods(tab.Session), "Page.getNavigationHistory") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if g.Closed() || len(m.Browsers()) != 1 || m.Browsers()[0] != g.Browser {
+		t.Fatal("the browser did not outlive the drop")
+	}
+	if got, err := m.Tab("t1"); err != nil || got != tab {
+		t.Fatalf("the tab after the drop: %v %v", got, err)
+	}
+	if err := tab.Call(ctx, "Runtime.evaluate", map[string]any{"expression": "1"}, nil); err != nil {
+		t.Fatalf("a command after Chrome came back: %v", err)
+	}
+	if len(again.methods(tab.Session)) == 0 {
+		t.Fatal("the command did not go over the new relay")
+	}
+}
+
+// A relay that does not come back within the grace ends the browser: its groups answer 1108 saying
+// Chrome disconnected and did not come back.
 func TestAttachRelayLost(t *testing.T) {
 	m, s, _ := attachManager(t)
+	m.backend.(*attach).grace = 200 * time.Millisecond
 	g, _ := openAttached(t, m, "s-1")
 	s.link.Closed()
 	select {
 	case <-g.Browser.gone:
+		t.Fatal("the browser ended at once, with no grace for Chrome to come back")
+	case <-time.After(50 * time.Millisecond):
+	}
+	select {
+	case <-g.Browser.gone:
 	case <-time.After(5 * time.Second):
-		t.Fatal("the browser outlived its relay")
+		t.Fatal("the browser outlived its grace")
 	}
 	_, err := m.Group("s-1")
-	if codeOf(err) != CodeBrowserGone || !strings.Contains(err.Error(), "chrome disconnected") {
+	if codeOf(err) != CodeBrowserGone || !strings.Contains(err.Error(), "chrome disconnected") || !strings.Contains(err.Error(), "did not connect again") {
 		t.Fatalf("after the relay was lost: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -685,6 +766,36 @@ func TestAttachGivenTab(t *testing.T) {
 	}
 }
 
+// A group opened again on the tabs Chrome still holds, the operator's given tab among them and
+// active, sends an address to a new tab of the agent's: the operator's own page was once navigated
+// to a storefront's captcha after a reconnect.
+func TestAttachOpenNeverNavigatesAGivenTab(t *testing.T) {
+	m, s, _ := attachManager(t)
+	s.mu.Lock()
+	s.given = map[int]bool{50: true}
+	s.ensured = []relay.Tab{{ID: 50, Group: "s-1", URL: "https://mail.example/", Given: true}}
+	s.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	g, tab, _, err := m.Open(ctx, OpenParams{GroupID: "s-1", Profile: "project-a", URL: "https://news.example/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tab == nil || tab.Given || s.calls(relay.OpTabCreate) != 1 {
+		t.Fatalf("the address went to %+v after %d tab.create", tab, s.calls(relay.OpTabCreate))
+	}
+	for _, other := range g.Tabs() {
+		if !other.Given {
+			continue
+		}
+		for _, method := range s.methods(other.Session) {
+			if method == "Page.navigate" {
+				t.Fatal("the operator's given tab was navigated")
+			}
+		}
+	}
+}
+
 // A PDF is taken out of a response only in a tab of the agent's while the agent drives; the operator's
 // own tab, and any tab while control is theirs, gets it in Chrome as before.
 func TestPDFIsKeptOnlyWhileTheAgentDrives(t *testing.T) {
@@ -769,5 +880,56 @@ func TestPDFOfNoStatedLengthIsStreamed(t *testing.T) {
 	sent := s.methods(tab.Session)[before:]
 	if k.count() != 1 || n != 3 || !slices.Contains(sent, "Fetch.failRequest") || slices.Contains(sent, "Fetch.continueRequest") {
 		t.Fatalf("past the limit: kept %d, %d reads, sent %v", k.count(), n, sent)
+	}
+}
+
+// blockingWall refuses, as the wall's allowlist would, every address with "punish" in it.
+type blockingWall struct{}
+
+func (blockingWall) Open(string) (string, error) { return "", nil }
+func (blockingWall) Track(string)                {}
+func (blockingWall) Close(string)                {}
+func (blockingWall) Allowlist() bool             { return true }
+func (blockingWall) Navigation(ctx context.Context, key, url string) error {
+	if !strings.Contains(url, "punish") {
+		return nil
+	}
+	e := wire.Errorf(CodeBlocked, "outside the allowlist")
+	e.Data = map[string]any{"host": "login.shop.example", "port": 443, "decision": "ask", "reason": "egress_allow"}
+	return e
+}
+
+// The guard stopping a redirect ends the navigation at once, said as Daedalus's site rule: it once
+// waited out its whole 30 s for a load that never came, reported the tab on the blocked address,
+// and Chrome's ERR_BLOCKED_BY_CLIENT was put down to the operator's ad blocker.
+func TestAGuardBlockEndsTheNavigationAndIsNamedAsDaedalus(t *testing.T) {
+	m, s, _ := attachManager(t)
+	m.deps.Wall = blockingWall{}
+	_, tab := openAttached(t, m, "s-1")
+	s.mu.Lock()
+	s.reply = func(method string, params map[string]any) (any, bool) {
+		if method != "Page.navigate" {
+			return nil, false
+		}
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			m.guardPaused(tab, json.RawMessage(`{"requestId":"r2","frameId":"`+tab.TargetID+`","request":{"url":"https://login.shop.example/punish?x=1"}}`))
+		}()
+		return map[string]any{"frameId": tab.TargetID, "loaderId": "L1"}, true
+	}
+	s.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	begin := time.Now()
+	_, err := m.Navigate(ctx, tab, "https://shop.example/", 15*time.Second)
+	if codeOf(err) != CodeBlocked || !strings.Contains(err.Error(), "Daedalus stopped") || !strings.Contains(err.Error(), "login.shop.example") {
+		t.Fatalf("the blocked redirect: %v", err)
+	}
+	if took := time.Since(begin); took > 5*time.Second {
+		t.Fatalf("the navigation waited %s after the block", took)
+	}
+	var we *wire.Error
+	if !errors.As(err, &we) || we.Data.(map[string]any)["decision"] != "ask" || we.Data.(map[string]any)["by"] != "daedalus" {
+		t.Fatalf("the block's verdict: %#v", err)
 	}
 }

@@ -61,3 +61,12 @@ func ErrDialogOpen(d *Dialog) *wire.Error {
 func errLimit(limit string, max int, format string, args ...any) *wire.Error {
 	return errWith(wire.CodeLimit, map[string]any{"limit": limit, "max": max}, format, args...)
 }
+
+// DroppedMidCall is a call whose DevTools pipe ended under it: the browser went away, and the caller
+// is told why rather than given whatever the page package made of a closed pipe.
+func (m *Manager) DroppedMidCall() *wire.Error {
+	if m.Attached() {
+		return errBrowserGone("the connection to Chrome dropped during the call")
+	}
+	return errBrowserGone("the browser exited during the call")
+}

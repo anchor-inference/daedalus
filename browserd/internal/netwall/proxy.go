@@ -11,6 +11,7 @@ import (
 	"net/http/httputil"
 	"net/netip"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -174,6 +175,73 @@ func (p *Proxy) granted(host string, port int) bool {
 		return false
 	}
 	return ok
+}
+
+// AnySite is the grant that opens every site to a page of the operator's Chrome: the conversation's
+// approval mode answers site questions itself (auto or skip), and the redirects a page makes inside
+// the wall were blocked even then, though the agent's own navigation went through unasked.
+const AnySite = "*"
+
+// Unlistened reports whether the proxy only keeps the grants of a browser elsewhere.
+func (p *Proxy) Unlistened() bool { return p.ln == nil }
+
+// siteGranted is granted as a navigation of the operator's Chrome reads it: the operator approves a
+// site there, its subdomains with it (the host's site question), so a grant covers its registrable
+// site whatever the port, and AnySite covers every site. A proxy of a browser of the daemon's own
+// keeps its exact host and port: there a grant answers the wall's question about one destination.
+// Matched by exact host, a storefront's redirect from the approved host to another of its own was
+// blocked and reached the agent as Chrome's ERR_BLOCKED_BY_CLIENT, which it put down to an ad blocker.
+func (p *Proxy) siteGranted(host string, port int) bool {
+	if p.granted(host, port) {
+		return true
+	}
+	if !p.Unlistened() {
+		return false
+	}
+	site := SiteOf(host)
+	now := p.wall.now()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for key, until := range p.grants {
+		if now.After(until) {
+			continue
+		}
+		h, _, err := net.SplitHostPort(key)
+		if err != nil {
+			continue
+		}
+		if h == AnySite || (site != "" && SiteOf(h) == site) {
+			return true
+		}
+	}
+	return false
+}
+
+// secondLevel are the labels that, under a two-letter country domain, are a registry's own (co.uk,
+// com.au, spb.ru) rather than a site: the host's own list (daedalus/browser/user.py, SECOND_LEVEL),
+// so the daemon and the host name the same site.
+var secondLevel = map[string]bool{"co": true, "com": true, "net": true, "org": true, "gov": true, "edu": true, "ac": true, "or": true,
+	"ne": true, "go": true, "gob": true, "nic": true, "mil": true, "ltd": true, "plc": true, "spb": true, "msk": true}
+
+// SiteOf is the registrable site of a host, as the host's site_of names it: an address, or a name of
+// two labels, is its own site.
+func SiteOf(host string) string {
+	host = strings.Trim(normalHost(host), ".")
+	labels := strings.FieldsFunc(host, func(r rune) bool { return r == '.' })
+	digits := true
+	for _, l := range labels {
+		if strings.Trim(l, "0123456789") != "" {
+			digits = false
+		}
+	}
+	if len(labels) <= 2 || digits {
+		return host
+	}
+	n := len(labels)
+	if len(labels[n-1]) == 2 && secondLevel[labels[n-2]] {
+		return strings.Join(labels[n-3:], ".")
+	}
+	return strings.Join(labels[n-2:], ".")
 }
 
 type blockedError struct{ v Verdict }

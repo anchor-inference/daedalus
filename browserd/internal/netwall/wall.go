@@ -406,7 +406,7 @@ func (w *Wall) CheckNavigation(ctx context.Context, p *Proxy, raw string) Verdic
 		// The allowlist names hosts the operator trusts on the web. The installation's own services
 		// are not the web, and a grant is the operator's answer to exactly this ask.
 		services := isLoopbackName(v.Host) && r.inServices(port)
-		if !r.egressAllowed(v.Host) && !services && (p == nil || !p.granted(v.Host, port)) {
+		if !r.egressAllowed(v.Host) && !services && (p == nil || !p.siteGranted(v.Host, port)) {
 			v.Decision, v.Reason, v.Addrs = Ask, ReasonEgressAllow, nil
 		}
 	}

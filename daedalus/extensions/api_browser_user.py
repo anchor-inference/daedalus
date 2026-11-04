@@ -224,6 +224,8 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         ``skip`` answers 409 ``skip_confirm_needed`` with the warning until it carries ``confirm``."""
         await session_choice(session_id)
         await service().choices.set_approvals(session_id, body.mode, confirm=body.confirm)
+        # The guard in the operator's Chrome judges a page's redirects on its own: it hears of the mode now.
+        await service().sync_session_grants(session_id)
         return await browser_approvals(session_id, _)
 
     # -- the public doors ---------------------------------------------------------------------

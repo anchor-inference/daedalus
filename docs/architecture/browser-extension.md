@@ -69,7 +69,8 @@ file is the only copy: the extension's tests compare their own frames with it by
   daemon's `proto`: lower than the extension's means "update Daedalus", higher "update the
   extension"), `lost`, `bad_frame`; from the bridge `not_running` and `unavailable` (a daemon that
   takes no relay); from the host `unauthorized` (the pairing expired or was revoked). Each but the
-  last is followed by a reconnect, slower for a busy relay or a version mismatch.
+  last is followed by a reconnect, slower for a busy relay or a version mismatch, and every second
+  (then every two) for a minute after a connection that was up drops.
 - **`result.error.code`** is one of `refused` (the allowlist, a tab outside the agent's groups, or
   input into a group the operator paused), `no_tab` (a call named a tab that is gone or not the
   agent's), `cdp` (Chrome refused the command; its text is the message), `detached` (the tab's

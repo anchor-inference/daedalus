@@ -13,7 +13,7 @@ import (
 
 // registerRecord serves the recording (the contract's Recording) and the limits the host may change
 // while the daemon runs. Without a recorder (a test's daemon) the recording is not served.
-func (d *Daemon) registerRecord(s *server.Server) {
+func (d *Daemon) registerRecord(s handles) {
 	s.Handle("limits.set", d.limitsSet)
 	if d.Record == nil {
 		return

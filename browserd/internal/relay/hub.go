@@ -68,6 +68,43 @@ type Hub struct {
 	last      Status // the relay that was connected last, for a status while none is
 	lastError string
 	closed    bool
+	// lostAt is when a relay last ended by itself (not replaced, not the daemon stopping): while it
+	// is recent the same Chrome is expected back, and a call waits for it (Hub.Expected).
+	lostAt time.Time
+	// onSession is told of each relay accepted, before its welcome goes out and so before the tabs
+	// the extension replays after the welcome: the attach backend binds its browser to it there.
+	onSession func(*Session)
+	// connected is closed and made anew each time a relay is accepted.
+	connected chan struct{}
+}
+
+// OnSession names who is told of each relay accepted, before its welcome goes out.
+func (h *Hub) OnSession(f func(*Session)) {
+	h.mu.Lock()
+	h.onSession = f
+	h.mu.Unlock()
+}
+
+// Expected reports whether no relay is connected but one ended by itself less than within ago: the
+// same Chrome reconnecting, which its extension does within seconds.
+func (h *Hub) Expected(within time.Duration) (bool, time.Duration) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.cur != nil || h.closed || h.lostAt.IsZero() {
+		return false, 0
+	}
+	left := within - time.Since(h.lostAt)
+	return left > 0, left
+}
+
+// Connected is closed when the next relay is accepted.
+func (h *Hub) Connected() <-chan struct{} {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.connected == nil {
+		h.connected = make(chan struct{})
+	}
+	return h.connected
 }
 
 // NewHub returns a hub with no relay.
@@ -313,6 +350,10 @@ func (l *Link) hello(frame []byte) {
 		pending: map[int64]func(*Result){}, done: make(chan struct{}), observed: make(chan func(), 256)}
 	h.cur = s
 	h.lastError = ""
+	h.lostAt = time.Time{}
+	told := h.onSession
+	connected := h.connected
+	h.connected = nil
 	h.mu.Unlock()
 	if old != nil {
 		// The same Chrome profile again: its worker restarted, or its bridge outlived a Chrome that
@@ -322,6 +363,13 @@ func (l *Link) hello(frame []byte) {
 	l.mu.Lock()
 	l.s = s
 	l.mu.Unlock()
+	if told != nil {
+		told(s)
+	}
+	// After the browser is bound to it, so a call that waited for the relay finds it bound.
+	if connected != nil {
+		close(connected)
+	}
 	kind := InstallNative
 	if l.transport == TransportServer {
 		kind = InstallServer
@@ -467,6 +515,9 @@ func (s *Session) end(reason string, bye *Bye) {
 	}
 	if reason != LostReplaced && reason != LostShutdown {
 		h.lastError = lostWords(reason)
+		if h.cur == nil {
+			h.lostAt = time.Now()
+		}
 	}
 	h.mu.Unlock()
 	close(s.done)
@@ -474,7 +525,7 @@ func (s *Session) end(reason string, bye *Bye) {
 		f(nil)
 	}
 	if conn != nil {
-		conn.close()
+		conn.lost(s)
 	}
 	s.link.mu.Lock()
 	s.link.ended = true

@@ -43,7 +43,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 TERMINAL_WS_MAX_BYTES = 1 << 20
-"""The largest WebSocket message the server takes. The largest frame a browser legitimately sends is
+"""The largest WebSocket message a terminal socket takes, held there by the API's socket limits
+(``daedalus/extensions/socket_limits.py``, whose default it is). The largest frame a browser legitimately sends is
 32 KiB of typing; the daemon's frames to the browser are bounded by its own 1 MiB framing."""
 
 MAX_INPUT_BYTES = 32 << 10

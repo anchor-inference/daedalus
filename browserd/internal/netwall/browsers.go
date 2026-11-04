@@ -52,6 +52,17 @@ func (b *Browsers) Track(browserID string) {
 	b.mu.Unlock()
 }
 
+// Keep is Track for a key that may have its grants already: they are kept. The operator's Chrome keeps
+// its grants by group (Manager.WallKey), which outlives the browser a dropped relay ends.
+func (b *Browsers) Keep(key string) {
+	b.mu.Lock()
+	_, ok := b.proxies[key]
+	b.mu.Unlock()
+	if !ok {
+		b.Track(key)
+	}
+}
+
 // Close ends a browser's proxy, and with it every connection the browser still had.
 func (b *Browsers) Close(browserID string) {
 	b.mu.Lock()
