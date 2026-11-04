@@ -48,6 +48,8 @@ import { raiseFromError } from "./settinglink";
 import { AskCard, type AskCardHandle } from "./questions/AskCard";
 import { btwCommand, btwQuestion } from "./btw/btw";
 import type { Answer } from "./questions/ask";
+import { clearQuoteReplies, removeQuoteReply, replyPreview, serialiseReplies, useQuoteReplies } from "./quotereply";
+import { ReplyCard, ReplyDialog } from "./replyselect";
 
 export type { Answer } from "./questions/ask";
 
@@ -154,6 +156,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   // The operator's secrets on this draft, by name: the value went to the host when the form was sent.
   const [secrets, setSecrets] = useState<AttachedSecret[]>([]);
   const [secretOpen, setSecretOpen] = useState(false);
+  // Replies to passages of the agent's answers, added from the pill over a selection; kept per chat
+  // beside the draft, and sent ahead of the words in the field.
+  const replies = useQuoteReplies(sessionId);
+  const [replyOpen, setReplyOpen] = useState<string | null>(null);
+  const openReply = replies.find((reply) => reply.id === replyOpen) ?? null;
   const focus = useComposerFocus(phone);
   const focused = focus.focused;
   const offline = useOffline();
@@ -326,31 +333,35 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   }
 
   // ── send / stop / queue ──
-  const { action, enabled } = primaryAction({ status, hasDraft: !!draft.trim(), hasFiles: files.length > 0 || secrets.length > 0, asking, sending });
+  const { action, enabled } = primaryAction({ status, hasDraft: !!draft.trim() || replies.length > 0, hasFiles: files.length > 0 || secrets.length > 0, asking, sending });
   async function send(override?: string) {
     const text = (override ?? draft).trim();
     const going = files;
     const handed = secrets.map((secret) => secret.name);
-    if (sending || fileReadySession !== sessionId || (!text && going.length === 0 && handed.length === 0)) return;
+    const quoted = replies;
+    if (sending || fileReadySession !== sessionId || (!text && going.length === 0 && handed.length === 0 && quoted.length === 0)) return;
     if (sideQuestion(text)) return;
     const queue = status === "running";
-    if (text.startsWith("/") && going.length === 0 && commands.some((c) => c.name === text.slice(1).split(" ")[0].toLowerCase())) {
+    // A command is a line of its own: with replies in the pill the words are a message about them.
+    if (quoted.length === 0 && text.startsWith("/") && going.length === 0 && commands.some((c) => c.name === text.slice(1).split(" ")[0].toLowerCase())) {
       await runCommand(text);
       return;
     }
     setSending(true);
-    const fingerprint = JSON.stringify({ text, files: going.map((file) => [file.name, file.size, file.lastModified, file.type]), secrets: handed, target: currentTarget, queue });
+    const body = serialiseReplies(quoted, text);
+    const fingerprint = JSON.stringify({ text: body, files: going.map((file) => [file.name, file.size, file.lastModified, file.type]), secrets: handed, target: currentTarget, queue });
     const clientMessageId = sendIntent(sessionId, fingerprint);
     // Keep the complete draft until the server confirms it. A dropped reply may be an unknown
     // outcome; the same client message id is used if the operator explicitly retries.
     if (going.length) setProgress(0);
     try {
-      const delivery = await onSend(text, going, queue, clientMessageId, going.length ? setProgress : undefined, handed.length ? handed : undefined);
+      const delivery = await onSend(body, going, queue, clientMessageId, going.length ? setProgress : undefined, handed.length ? handed : undefined);
       clearSendIntent(sessionId);
       setDraftState("");
       clearDraft(sessionId);
       setFiles([]);
       setSecrets([]);
+      clearQuoteReplies(sessionId);
       setSavedTarget(null);
       writeDraftTarget(sessionId, null);
       if (fileInput.current) fileInput.current.value = "";
@@ -520,7 +531,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   // a toolbar once the field has the reader or holds anything. The white circle is Send, greyed while
   // the field is empty, and Stop while a run is on. It used to open Voice mode while the field was
   // empty; that is a beta with a chat of its own, and an ordinary chat offers only dictation.
-  const empty = !draft.trim() && files.length === 0 && secrets.length === 0;
+  const empty = !draft.trim() && files.length === 0 && secrets.length === 0 && replies.length === 0;
   // A question or a permission request does not open the field: they sit in the tray above it, and
   // the field stays the one 48 px row the reader can answer in with words of their own.
   const shape = !phone ? undefined : focused || !empty || progress !== null || needsReview ? "open" : "idle";
@@ -546,7 +557,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               <Icon name="forward" size={14} />
               <span className="steer-text clamp-2">
                 {s.files.length > 0 && <span className="steer-files" title={t("composer.queued.files", { names: s.files.join(", ") })}><Icon name="attach" size={12} />{s.files.join(", ")}</span>}
-                {s.text}
+                {replyPreview(s.text)}
               </span>
               <span className="steer-hint sub">{t(s.kind === "follow_up" ? "composer.queued.hint" : "composer.steered.hint")}</span>
               {s.kind === "follow_up" && props.onSteer && status === "running" && (
@@ -654,8 +665,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         {!phone && fileStorageError && files.length > 0 && <div className="sub upload-progress" role="status">{t("composer.attachments.unsaved")}</div>}
         {fileReadySession !== sessionId && <div className="sub upload-progress" role="status">{t("composer.attachments.restoring")}</div>}
         {!phone && needsReview && <div className="sub upload-progress" role="status">{t("composer.draft.targetChanged")}{moved ? ` ${moved}.` : ""} <button type="button" className="btn small" onClick={useCurrent}>{t("composer.draft.useCurrent")}</button></div>}
-        {(files.length > 0 || secrets.length > 0) && !voiceBar && (
+        {(files.length > 0 || secrets.length > 0 || replies.length > 0) && !voiceBar && (
           <div className="attachments" aria-label={t("session.attachments")}>
+            {replies.map((reply) => <ReplyCard key={reply.id} reply={reply} onOpen={() => setReplyOpen(reply.id)} onRemove={() => { if (!sending) removeQuoteReply(sessionId, reply.id); }} />)}
             {files.map((f, i) => (
               <AttachmentCard key={`${f.name}-${f.size}-${f.lastModified}-${i}`} file={f} onOpen={() => props.onPreviewFile?.(f)} onRemove={() => { if (!sending) setFiles((p) => p.filter((_, j) => j !== i)); }} />
             ))}
@@ -727,6 +739,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               {props.onBtw && <button type="button" role="menuitem" data-action="btw" onClick={() => { setHelpOpen(false); props.onBtw!(""); }}><Icon name="ask" size={16} />{t("btw.open")}<kbd className="menu-kbd">/btw</kbd></button>}
             </Popover>
           )}
+          {openReply && <ReplyDialog key={openReply.id} sessionId={sessionId} reply={openReply} phone={phone} onClose={() => setReplyOpen(null)} />}
           {secretOpen && <SecretSheet sessionId={sessionId} phone={phone} attached={secrets.map((secret) => secret.name)} onClose={() => setSecretOpen(false)}
             onAttach={(secret) => setSecrets((list) => [...list.filter((other) => other.name !== secret.name), secret])} />}
           {props.onYagni

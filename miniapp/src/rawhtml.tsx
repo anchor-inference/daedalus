@@ -16,7 +16,7 @@ import { createElement, memo, useLayoutEffect, useMemo, useRef } from "react";
  * operator's selection in it. The object is now made once per string, so an unchanged string keeps
  * its nodes, and with them the scroll position and the selection.
  */
-export const RawHtml = memo(function RawHtml({ html, className, as = "div", onWritten }: { html: string; className?: string; as?: "div" | "span"; onWritten?: (element: HTMLElement) => void }) {
+export const RawHtml = memo(function RawHtml({ html, className, as = "div", onWritten, quote }: { html: string; className?: string; as?: "div" | "span"; onWritten?: (element: HTMLElement) => void; quote?: string }) {
   const inner = useMemo(() => ({ __html: html }), [html]);
   // `onWritten` sees the nodes each time the string is written, for what markup cannot do alone: a
   // rich answer's site marks are fetched with the credential and painted in afterwards.
@@ -24,5 +24,6 @@ export const RawHtml = memo(function RawHtml({ html, className, as = "div", onWr
   useLayoutEffect(() => {
     if (onWritten && element.current) onWritten(element.current);
   }, [inner, onWritten]);
-  return createElement(as, { className, dangerouslySetInnerHTML: inner, ref: element });
+  // `quote` marks an agent's answer whose words may be selected and replied to (replyselect.tsx).
+  return createElement(as, { className, dangerouslySetInnerHTML: inner, ref: element, "data-quote": quote });
 });

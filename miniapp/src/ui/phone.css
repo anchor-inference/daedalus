@@ -696,6 +696,16 @@
   .composer[data-shape] .attachment-meta .sub { font-size: var(--fs-12); }
   .composer[data-shape] .attachment-glyph { font-size: var(--fs-17); }
   .composer[data-shape] .attachment-x { background: rgba(0, 0, 0, .6); color: #fff; }
+  /* A reply waits as a tile of the attachments' height, in the same sideways-scrolling row. */
+  .composer[data-shape] .reply-card .reply-card-open { width: 132px; border: 0; border-radius: 14px; background: var(--surface-2); flex: none; }
+  .composer[data-shape] .reply-card { flex: none; }
+  .sheet.ph-sheet.reply-sheet .sheet-body { padding: 0 var(--gutter) var(--space-4); }
+  .reply-sheet .reply-quote { font-size: var(--fs-15); }
+  .reply-sheet .reply-form { margin-top: var(--space-3); }
+  .reply-sheet .reply-input { height: var(--row-h-touch); font-size: var(--fs-16); }
+  .reply-sheet .reply-form .reply-add { width: var(--ctl-round); height: var(--ctl-round); }
+  .reply-sheet .reply-dialog-text { font-size: var(--fs-16); }
+  .reply-pill-btn { height: var(--ctl-round); padding: 0 var(--space-3); font-size: var(--fs-15); }
   /* The remove target grows up and to the right, out of the 64 px tile, not into it: grown inwards it
      covered the tile's middle, and a tap meant to open the picture removed it. */
   .composer[data-shape] .attachment-x::after { content: ""; position: absolute; inset: -8px -8px -2px -2px; }

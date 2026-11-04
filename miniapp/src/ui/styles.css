@@ -1574,6 +1574,49 @@ body.resizing iframe { pointer-events: none; }
 /* On touch the ✕ is pressed, not clicked: its hit area reaches 40 px around the 22 px circle the
    eye sees, so removing a file is not a matter of aim. */
 @media (pointer: coarse) { .attachment-x::after { content: ""; position: absolute; inset: -9px; } }
+/* Replies to a passage of an answer (replyselect.tsx): the pill over the selection, the popover the reply
+   is written in, the cards the replies wait as in the composer, and the quotes a sent message opens with.
+   The pill and the popover sit over the conversation like a menu, in the menu's layer. */
+.reply-pill { position: fixed; z-index: var(--z-menu); display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: var(--radius-pill); background: var(--surface-3); border: 1px solid var(--line-strong); box-shadow: var(--shadow-pop); animation: reply-rise .12s ease-out both; }
+.reply-pill[data-below] { animation-name: reply-drop; }
+.reply-pill-btn { display: inline-flex; align-items: center; gap: 6px; height: var(--ctl-h-sm); padding: 0 10px; border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-13); cursor: pointer; white-space: nowrap; }
+.reply-pill-btn:hover, .reply-pill-btn:focus-visible { background: var(--surface-4); }
+.reply-pill-sep { width: 1px; height: 16px; background: var(--line-strong); flex: none; }
+.reply-popover { position: fixed; z-index: var(--z-menu); width: min(360px, calc(100vw - 16px)); padding: 10px; display: flex; flex-direction: column; gap: 8px; border-radius: var(--radius-lg); background: var(--surface-2); border: 1px solid var(--line-strong); box-shadow: var(--shadow-pop); animation: reply-rise .14s ease-out both; }
+.reply-quote { border-left: 2px solid var(--accent); padding: 1px 0 1px 10px; color: var(--fg-2); font-size: var(--fs-13); line-height: var(--lh-ui); white-space: pre-wrap; overflow-wrap: anywhere; }
+.reply-form { display: flex; align-items: center; gap: 8px; }
+.reply-input { flex: 1; min-width: 0; height: var(--ctl-h); padding: 0 10px; border-radius: var(--radius-sm); border: 1px solid var(--line-strong); background: var(--bg); color: var(--fg); font: inherit; font-size: var(--fs-14); }
+.reply-input:focus { outline: none; border-color: var(--accent); }
+.reply-form .reply-add { width: var(--ctl-h); height: var(--ctl-h); flex: none; }
+/* The passage being answered stays lit while the popover holds the focus, and the passage a sent
+   quote leads back to is lit for a moment when it is reached. */
+::highlight(reply-pick) { background-color: color-mix(in srgb, var(--accent) 32%, transparent); }
+::highlight(reply-reveal) { background-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.reply-card .reply-card-open { display: flex; flex-direction: column; justify-content: space-between; gap: 6px; width: 132px; height: 72px; padding: 7px 26px 7px 9px; border-radius: var(--radius-md); border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--fg); font: inherit; font-size: var(--fs-12); line-height: var(--lh-ui); text-align: left; cursor: pointer; animation: reply-rise .14s ease-out both; }
+.reply-card .reply-card-open:hover { background: var(--surface-3); }
+.reply-card-text { overflow-wrap: anywhere; }
+.reply-card-chip { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; padding: 1px 6px; border-radius: var(--radius-xs); background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); font-size: var(--fs-11); }
+/* The ✕ shows on hover or focus, as Claude's does: a row of tiles each with a standing ✕ reads as a
+   row of things to remove. On touch there is no hover, and it stays. */
+.reply-card .reply-card-x { opacity: 0; transition: opacity .12s; }
+.reply-card:hover .reply-card-x, .reply-card:focus-within .reply-card-x { opacity: 1; }
+@media (pointer: coarse) { .reply-card .reply-card-x { opacity: 1; } }
+.reply-dialog { display: flex; flex-direction: column; gap: 12px; }
+.reply-dialog .reply-quote { max-height: 40vh; overflow-y: auto; }
+.reply-dialog-text { width: 100%; resize: vertical; min-height: 72px; }
+.reply-dialog-actions { display: flex; align-items: center; gap: 8px; }
+.sent-replies { display: flex; flex-direction: column; gap: 8px; margin-bottom: 6px; }
+.sent-reply { display: flex; flex-direction: column; gap: 3px; }
+.sent-reply-quote { display: block; width: 100%; padding: 1px 0 1px 10px; border: 0; border-left: 2px solid var(--accent); background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-13); line-height: var(--lh-ui); text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; cursor: pointer; }
+.sent-reply-quote:hover:not(:disabled) { color: var(--fg); }
+.sent-reply-quote:disabled { cursor: default; }
+.sent-reply-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+@keyframes reply-rise { from { opacity: 0; transform: translateY(4px) scale(.98); } }
+@keyframes reply-drop { from { opacity: 0; transform: translateY(-4px) scale(.98); } }
+@media (prefers-reduced-motion: reduce) {
+  .reply-pill, .reply-popover, .reply-card .reply-card-open { animation: none; }
+  .reply-card .reply-card-x { transition: none; }
+}
 /* The operator's secrets: a chip that names one (a draft's or a sent message's) and the form that keeps
    one. The value field is masked like a password field but takes several lines, which a password input
    cannot; the eye shows it while the operator checks what they pasted. */
