@@ -898,6 +898,9 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         # New chat: the id of a chat the pictures already have, so the app lands on a drawn page.
         status, created = create_session(json.loads(request.post_data or "{}"), S6)
         return respond(route, created, status=status)
+    # The Notes tab's writes, uploads and files are the shared host's (notes_stub.py), which keeps them.
+    if (rel.startswith("/api/notes/") or (rel.startswith("/api/sessions/") and "/notes" in rel)) and fulfil_shared(route):
+        return None
     if request.method != "GET":
         return respond(route, {"ok": True})
     if rel == "/api/events" and getattr(stub, "events", ""):
@@ -2379,7 +2382,81 @@ def run() -> int:
     details = run_details()
     modes = run_modes()
     voice = run_voice()
-    return run_focus() or notifications or phone or staff or harnesses or main or browser or imports or selfdev or details or modes or voice
+    notes = run_notes()
+    return run_focus() or notifications or phone or staff or harnesses or main or browser or imports or selfdev or details or modes or voice or notes
+
+
+def run_notes() -> int:
+    """The Notes tab of a project chat: the list under its sub-tabs, a note being written beside its
+    drawing, a note read, the files of the list, the conflict prompt; on a desktop and a phone, in the
+    dark scheme and the light one."""
+    import notes_seed
+    from api_stub import NOTES
+
+    def notes_shot(page: Page, name: str, scheme: str, before=None) -> None:  # type: ignore[no-untyped-def]
+        page.goto(f"{BASE}/agents/{S1}?token=t&scheme={scheme}&lang={LANG}&panel=notes")
+        page.wait_for_selector(".notes-panel .note-card", timeout=15000)
+        page.wait_for_timeout(500)
+        if before:
+            before(page)
+        page.wait_for_timeout(900)
+        page.screenshot(path=str(OUT / f"{name}.png"))
+        print("wrote", name)
+
+    def card(page: Page, key: str, mode: int | None = None) -> None:
+        page.locator(f".note-card[data-note='{ids[key]['id']}'] .note-open").click()
+        page.wait_for_selector(".ne-dialog")
+        if mode is not None:
+            page.locator(".ne-modes button").nth(mode).click()
+        page.wait_for_timeout(300)
+        page.evaluate("document.querySelectorAll('.ne-read .note-img').forEach((el) => el.classList.add('loaded'))")
+
+    def chat_tab(page: Page) -> None:
+        page.locator(".notes-subtab[data-scope='chat']").click()
+
+    def shelf(page: Page) -> None:
+        page.locator(".notes-shelf-toggle").click()
+        page.locator(".note-card").first.hover()
+
+    def conflict(page: Page) -> None:
+        card(page, "launch", 0)
+        # The agent ticks the last task meanwhile, in whichever language the list is written.
+        head, _, tail = NOTES.notes[ids["launch"]["id"]]["body"].rpartition("- [ ]")
+        NOTES.changed_elsewhere(ids["launch"]["id"], body=f"{head}- [x]{tail}", by="agent")
+        page.locator(".ne-field").press("Control+End")
+        page.keyboard.press("Enter")
+        page.keyboard.type("Menu photos on the home page" if LANG != "ru" else "Фото меню на главной")
+        page.wait_for_selector(".ne-conflict", timeout=5000)
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM)
+        for scheme in ("dark", "light"):
+            suffix = "" if scheme == "dark" else "-light"
+            desk = browser.new_context(viewport=DESK, device_scale_factor=2, color_scheme=scheme)
+            desk.add_init_script("try { localStorage.setItem('daedalus.notes.subtab', 'project'); localStorage.setItem('daedalus.notes.mode', 'split'); } catch (e) {}")
+            page = desk.new_page()
+            page.route("**/api/**", stub)
+            ids = notes_seed.seed(NOTES, LANG)
+            notes_shot(page, f"notes-panel{suffix}", scheme)
+            notes_shot(page, f"notes-editor-split{suffix}", scheme, lambda pg: card(pg, "brand", 1))
+            if scheme == "dark":
+                notes_shot(page, "notes-panel-chat", scheme, chat_tab)
+                notes_shot(page, "notes-editor-read", scheme, lambda pg: (chat_tab(pg), card(pg, "shoot")))
+                notes_shot(page, "notes-files", scheme, shelf)
+                notes_shot(page, "notes-conflict", scheme, conflict)
+                ids = notes_seed.seed(NOTES, LANG)
+            desk.close()
+            phone = browser.new_context(viewport=PHONE, device_scale_factor=3, color_scheme=scheme, is_mobile=True, has_touch=True)
+            phone.add_init_script("try { localStorage.setItem('daedalus.notes.subtab', 'project'); } catch (e) {}")
+            page = phone.new_page()
+            page.route("**/api/**", stub)
+            ids = notes_seed.seed(NOTES, LANG)
+            notes_shot(page, f"phone-notes{suffix}", scheme)
+            notes_shot(page, f"phone-notes-editor{suffix}", scheme, lambda pg: card(pg, "brand"))
+            phone.close()
+        browser.close()
+    NOTES.reset()
+    return UNHANDLED.report()
 
 
 def run_selfdev() -> int:
@@ -2668,4 +2745,4 @@ if __name__ == "__main__":
     # Before anything is driven: is the address the built app, or whatever else holds the port?
     expect_app(BASE)
     only = os.environ.get("ONLY")
-    sys.exit(run_pins() if only == "pins" else run_imports() if only == "imports" else run_modes() if only == "modes" else run_browser() if only == "browser" else run_harnesses() if only == "harnesses" else run_staff() if only == "staff" else run_details() if only == "details" else run_terminals() if only == "terminals" else run_focus() if only == "focus" else run_phone() if only == "phone" else run_main() if only == "main" else run_notifications() if only == "notifications" else run_composer() if only == "composer" else run_voice() if only == "voice" else run_selfdev() if only == "selfdev" else agents_shots() if only == "agents" else run_workspace() if only == "workspace" else run())
+    sys.exit(run_pins() if only == "pins" else run_imports() if only == "imports" else run_modes() if only == "modes" else run_browser() if only == "browser" else run_harnesses() if only == "harnesses" else run_staff() if only == "staff" else run_details() if only == "details" else run_terminals() if only == "terminals" else run_focus() if only == "focus" else run_phone() if only == "phone" else run_main() if only == "main" else run_notifications() if only == "notifications" else run_composer() if only == "composer" else run_voice() if only == "voice" else run_selfdev() if only == "selfdev" else agents_shots() if only == "agents" else run_workspace() if only == "workspace" else run_notes() if only == "notes" else run())

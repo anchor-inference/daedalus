@@ -35,6 +35,7 @@ from import_stub import DEFAULT as IMPORTS
 from import_stub import ImportStub
 from memory_stub import MemoryStub
 from move_stub import DEFAULT as MOVES
+from notes_stub import NotesStub
 from pages_stub import PagesStub
 
 # Outside services_port_range (8100-8119), the range this product hands to an agent's own preview
@@ -664,6 +665,10 @@ MEMORY = MemoryStub()
 """An empty memory for the harnesses that pass the Memory screen by; screenshots.py and
 check_memory_topics.py keep one with records of their own."""
 
+NOTES = NotesStub()
+"""The Notes tab's host: no notes until a harness seeds some, every chat a plain one until a harness
+names its project (``NOTES.project_of``); check_notes.py reads the writes back."""
+
 
 class CliStub:
     """The computers paired with daedalus-cli and the terminals asking to be (docs/architecture/cli.md).
@@ -1125,6 +1130,10 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         answered = CLI.answer(method.upper(), path, body)
         if answered is not None:
             return answered[0], "application/json", json.dumps(answered[1])
+    if "/notes" in path and (path.startswith("/api/notes/") or (parts[2:3] == ["sessions"] and parts[4:5] == ["notes"])):
+        answered = NOTES.answer(method, path, query, body)
+        if answered is not None:
+            return answered
     if path == "/api/memory/export.zip":
         return 200, "application/zip", MEMORY.export_zip()
     if path.startswith("/api/memory"):
@@ -1348,10 +1357,15 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
 def fulfil_shared(route) -> bool:  # type: ignore[no-untyped-def]
     """:func:`answer_shared` for a Playwright route: ``True`` when it answered."""
     request = route.request
-    try:
-        body = request.post_data_json if request.method in ("POST", "PUT", "PATCH") and request.post_data else None
-    except (ValueError, UnicodeDecodeError):
-        body = None  # an upload or a form: no route here answers by what such a body says
+    content_type = request.headers.get("content-type", "")
+    if request.method == "POST" and content_type.startswith("multipart/form-data"):
+        # An upload: the routes that take files (the notes' files) read the form themselves.
+        body = {"multipart": request.post_data_buffer or b"", "content_type": content_type}
+    else:
+        try:
+            body = request.post_data_json if request.method in ("POST", "PUT", "PATCH") and request.post_data else None
+        except (ValueError, UnicodeDecodeError):
+            body = None  # a form no route here answers by
     shared = answer_shared(request.method, request.url, body)
     if shared is None:
         return False

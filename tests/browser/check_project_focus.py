@@ -181,13 +181,14 @@ def desktop(page: Page, lang: str, width: int) -> None:
     fits(page, f"{lang} {width} orchestrator")
 
     # The panel beside the orchestrator: the questions first, its own Details, the project's files,
-    # then the project's four tabs.
+    # its notes, then the project's four tabs.
     tabs = page.locator(".panel .panel-tab")
-    expect(tabs).to_have_count(7)
+    expect(tabs).to_have_count(8)
     expect(tabs.nth(0)).to_contain_text(words["questions"])
     expect(tabs.nth(1)).to_have_attribute("data-tab", "details")
     expect(tabs.nth(2)).to_have_attribute("data-tab", "files")
-    expect(tabs.nth(3)).to_have_text(words["board"])
+    expect(tabs.nth(3)).to_have_attribute("data-tab", "notes")
+    expect(tabs.nth(4)).to_have_text(words["board"])
     page.locator(".panel .panel-tab[data-tab='board']").click()
     expect(page.locator(".panel .pboard.embedded .pcard.need")).to_contain_text("q4r8tz")
     page.locator(".panel .panel-tab[data-tab='brief']").click()
@@ -233,7 +234,7 @@ def desktop(page: Page, lang: str, width: int) -> None:
     expect(head).to_contain_text("agent/lev/photos")
     expect(page.locator(".staff-message").first).to_contain_text(words["accepted"])
     expect(page.locator(".chat textarea")).to_have_attribute("placeholder", words["lev"])
-    expect(page.locator(".panel .panel-tab")).to_have_count(8)
+    expect(page.locator(".panel .panel-tab")).to_have_count(9)
     head.get_by_role("button", name=words["pause"]).click()
     page.wait_for_timeout(300)
     assert ("st-lev", "pause") in focus.controls, focus.controls
