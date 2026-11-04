@@ -67,8 +67,13 @@ def build(app: Application) -> Browsers:
     manager = app.manager
     settings = app.settings
 
-    async def wake(owner: Owner, text: str) -> None:
-        """Tell the owner something without its asking: the one message a give-back is."""
+    async def wake(owner: Owner, text: str, *, only_if_running: bool = False) -> None:
+        """Tell the owner something without its asking: the one message a give-back is.
+
+        ``only_if_running`` is for news the owner did not ask for, such as the operator handing back
+        the controls they took without being asked: it goes into a turn that is running and is dropped
+        otherwise. Submitted to an idle session it started a new turn, so the agent woke up after its
+        work was done just to say it had seen the operator's changes."""
         team = app.extensions.get("staff")
         staff_id = owner.staff_id if owner.kind == "session" else owner.id
         if staff_id and team is not None:
@@ -77,6 +82,8 @@ def build(app: Application) -> Browsers:
                 # A staff member hears it the way it hears its team: as a message into the turn.
                 await team.tell(member, text, when="now", by="operator")  # type: ignore[attr-defined]
                 return
+        if only_if_running and not (owner.session_id and manager.is_running(owner.session_id)):
+            return
         if owner.kind == "session" and owner.session_id:
             await manager.submit(owner.session_id, text, as_answer=False, origin="browser")
 

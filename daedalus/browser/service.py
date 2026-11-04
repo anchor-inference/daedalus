@@ -1624,6 +1624,10 @@ class Browsers:
             return
         note, by = self._notes.pop(row["id"], ("", "operator"))
         told = self._returns.pop(row["id"], None)
+        # Whether the agent asked for this: a request was open (a handoff, a sign-in, a CAPTCHA), the
+        # app answered one, or the operator left a note. Otherwise the operator only took the controls
+        # for a while, and an owner whose turn is over is not woken for it.
+        asked = bool(row.get("needs_json")) or told is not None or bool(note)
         fresh = await self._row(row["id"])
         payload: dict[str, Any] = {"group_id": row["id"], "url": fresh["url"], "title": fresh["title"], "tabs": int(fresh["tabs"]), "by": by}
         if note:
@@ -1633,7 +1637,10 @@ class Browsers:
             where = f"{fresh['title']} — {fresh['url']}" if fresh["title"] else fresh["url"] or "a blank page"
             text = told or f"[browser] The operator gave the browser back. Now on {where}." + (f" Their note: {note}" if note else "") + " Take a BrowserSnapshot before acting: the page may have changed."
             try:
-                await self.wake(self.owner_of(fresh), text)
+                if asked:
+                    await self.wake(self.owner_of(fresh), text)
+                else:
+                    await self.wake(self.owner_of(fresh), text, only_if_running=True)
             except Exception:  # noqa: BLE001 — the browser is given back whether or not the owner could be woken
                 logger.exception("could not tell the owner of browser %s that it was given back", row["id"])
 
