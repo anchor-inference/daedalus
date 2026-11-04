@@ -1167,7 +1167,16 @@ class OpenAICompatibleProvider(ILLMProvider):
 
 
 def normalize_usage(raw: dict[str, Any]) -> dict[str, Any]:
-    """Map every OpenAI-compatible usage shape onto the keys the core reads."""
+    """Map every OpenAI-compatible usage shape onto the keys the core reads.
+
+    ``input_tokens`` is the whole prompt with the cached part inside it, which the core's hit rate
+    (``cache_read / input``) and every price (``fresh = input - cache_read``) read. An OpenAI-shaped
+    ``prompt_tokens`` already is that, whichever field names the cache (DeepSeek's
+    ``prompt_cache_hit_tokens``, ``prompt_tokens_details.cached_tokens``, or a gateway's
+    ``cache_read_input_tokens`` beside it). An Anthropic-shaped count, with no ``prompt_tokens`` and
+    the cache in ``cache_read_input_tokens`` or ``cache_creation_input_tokens``, leaves the cache out
+    of ``input_tokens``, so it is summed up to the whole prompt: read as it came, the cached part was
+    charged nothing at the input rate and then subtracted from the fresh part again."""
     prompt = int(raw.get("prompt_tokens") or raw.get("input_tokens") or 0)
     completion = int(raw.get("completion_tokens") or raw.get("output_tokens") or 0)
     details = raw.get("prompt_tokens_details") or {}
@@ -1177,6 +1186,9 @@ def normalize_usage(raw: dict[str, Any]) -> dict[str, Any]:
         or raw.get("cache_read_input_tokens")
         or 0
     )
+    cache_write = int(raw.get("cache_creation_input_tokens") or 0)
+    if "prompt_tokens" not in raw and ("cache_read_input_tokens" in raw or "cache_creation_input_tokens" in raw):
+        prompt += int(raw.get("cache_read_input_tokens") or 0) + cache_write
     completion_details = raw.get("completion_tokens_details") or {}
     reasoning = int(completion_details.get("reasoning_tokens") or 0)
     return {
@@ -1184,7 +1196,7 @@ def normalize_usage(raw: dict[str, Any]) -> dict[str, Any]:
         "output_tokens": completion,
         "cache_read_tokens": cache_hit,
         "cache_read_input_tokens": cache_hit,
-        "cache_creation_input_tokens": int(raw.get("cache_creation_input_tokens") or 0),
+        "cache_creation_input_tokens": cache_write,
         "reasoning_tokens": reasoning,
         "total_tokens": int(raw.get("total_tokens") or prompt + completion),
     }

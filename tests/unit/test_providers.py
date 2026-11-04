@@ -17,6 +17,7 @@ from daedalus.providers.openai_compat import (
     normalize_usage,
     parse_json_text,
 )
+from daedalus.providers.pricing import ModelPricing
 from daedalus.providers.wire import messages_to_wire, parse_json_arguments
 
 
@@ -140,6 +141,28 @@ def test_parse_json_arguments_repairs_truncation() -> None:
 def test_normalize_usage_openai_shape() -> None:
     n = normalize_usage({"prompt_tokens": 7, "completion_tokens": 3, "prompt_tokens_details": {"cached_tokens": 5}})
     assert n["input_tokens"] == 7 and n["cache_read_tokens"] == 5 and n["total_tokens"] == 10
+
+
+def test_the_whole_prompt_is_the_input_whichever_convention_the_provider_counts_in() -> None:
+    # DeepSeek through an OpenAI-compatible door: the prompt count holds the cached part.
+    deepseek = normalize_usage({"prompt_tokens": 1_000, "completion_tokens": 10, "prompt_cache_hit_tokens": 900})
+    # A gateway that names the cache the Anthropic way beside an OpenAI prompt count: still whole.
+    gateway = normalize_usage({"prompt_tokens": 1_000, "completion_tokens": 10, "cache_read_input_tokens": 900})
+    # Anthropic-shaped: the input count is only what the cache did not serve.
+    anthropic = normalize_usage({"input_tokens": 100, "output_tokens": 10, "cache_read_input_tokens": 900})
+    for n in (deepseek, gateway, anthropic):
+        assert n["input_tokens"] == 1_000 and n["cache_read_tokens"] == 900
+    written = normalize_usage({"input_tokens": 100, "output_tokens": 10, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 400})
+    assert written["input_tokens"] == 500 and written["cache_creation_input_tokens"] == 400
+
+
+def test_cached_tokens_are_charged_once_on_a_paid_openai_compatible_provider() -> None:
+    pricing = ModelPricing(input=1.0, output=2.0, cache_hit=0.1)
+    expected = (100 * 1.0 + 900 * 0.1 + 10 * 2.0) / 1_000_000
+    inclusive = normalize_usage({"prompt_tokens": 1_000, "completion_tokens": 10, "prompt_cache_hit_tokens": 900})
+    exclusive = normalize_usage({"input_tokens": 100, "output_tokens": 10, "cache_read_input_tokens": 900})
+    assert pricing.cost(inclusive) == pytest.approx(expected)
+    assert pricing.cost(exclusive) == pytest.approx(expected)
 
 
 async def test_messages_to_wire_roundtrips_tool_history() -> None:
