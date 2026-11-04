@@ -142,6 +142,15 @@ async def test_wrong_codes_are_limited_per_address_and_the_right_one_waits_too(p
     assert await pairing.redeem(code, address="5.6.7.8", profile_id="p", profile_name="", ext_version="", chrome_version="")
 
 
+async def test_a_stale_chrome_token_never_blocks_a_new_pairing(pairing: Pairing) -> None:
+    # Behind a reverse proxy every client has the proxy's address; a Chrome reconnecting with a
+    # revoked token used to spend the pairing's limit and the operator's right code was refused.
+    code = (await pairing.mint())["code"]
+    for _ in range(10):
+        assert await pairing.device_of("stale-token", address="10.0.0.1") is None
+    assert await pairing.redeem(code, address="10.0.0.1", profile_id="p", profile_name="", ext_version="", chrome_version="")
+
+
 def test_the_overall_bound_holds_a_guesser_with_many_addresses() -> None:
     clock = [0.0]
     attempts = Attempts(per_address=5, overall=30, window=600, clock=lambda: clock[0])
