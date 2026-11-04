@@ -20,6 +20,10 @@ import { Icon } from "../icons";
 import { setLang, t, useLang } from "../i18n";
 import { sessionPath } from "../router";
 import { onMicRefused } from "../voicebar";
+import { QuestionsPanel } from "../questions/QuestionsPanel";
+import { useQuestions } from "../questions/data";
+import { questionsKey } from "../questions/routes";
+import { invalidate } from "../store";
 import { LiveBar, TranscriptView } from "../screens/Session";
 import { buildTurns, createLiveStore, liveAfter, liveBase, type LiveStore, type Turn } from "../turns";
 import { followSession } from "../sessionstream";
@@ -424,6 +428,7 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
   // The messages waiting for the running agent. The panel passed an empty list, so a message sent
   // during a turn vanished from the panel until the agent read it, while the app showed its card.
   const [queued, setQueued] = useState<QueuedMessage[]>([]);
+  const sideAsked = useQuestions({ sessionId: id }).questions?.length ?? 0;
   const loadQueued = useCallback(async () => {
     try {
       setQueued(readQueued(await api.get<unknown>(`/api/sessions/${id}/steer`)));
@@ -467,6 +472,9 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
       handle: (event, p) => {
         live.update((state) => liveAfter(state, event, p));
         if (event === "steer_changed") setQueued((q) => queuedAfter(q, p));
+        // The panel has no app-wide event stream: a question the agent asks is read again when its
+        // step ends rather than at the next ten-second poll.
+        if (event === "message_stop" || event === "run_settled") invalidate(questionsKey({ sessionId: id }));
         if (event === "message_start") setDetail((prev) => (prev && prev.status !== "running" ? { ...prev, status: "running", run_id: p.run_id || prev.run_id } : prev));
         if (event === "run_settled") {
           setDetail((prev) => (prev ? { ...prev, status: p.status === "awaiting" ? "waiting" : p.status === "failed" ? "failed" : "idle" } : prev));
@@ -642,6 +650,9 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
           <button type="button" className="btn small" onClick={() => void giveTab()}>{t("sidepanel.tab.give")}</button>
         </div>
       )}
+      {/* The agent's side questions in this conversation. The panel never fetched them, so a question
+          asked here waited unseen while only the app showed it. */}
+      {sideAsked > 0 && <div className="sp-questions"><QuestionsPanel scope={{ sessionId: id }} toast={toast} /></div>}
       {approval && <ApprovalCard key={approval.key} approval={approval} similar={similar} onDecide={(how) => void decide(approval, how)} />}
       {shot && <ShotCrop shot={shot} onCancel={() => setShot(null)} onAttach={(file) => { composer.current?.addFiles([file]); setShot(null); }} />}
       {detail?.id === id && (

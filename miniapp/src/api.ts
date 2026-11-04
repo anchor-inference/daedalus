@@ -113,6 +113,9 @@ export function panelPath(path: string): string {
   // Dictation before a conversation exists: the app's start page path, through the panel's door.
   if (path === "/api/asr" || path === "/api/transcribe" || path.startsWith("/api/transcribe/")) return "/api/panel" + path.slice(4);
   if (path === "/api/sessions" || path.startsWith("/api/sessions/") || path.startsWith("/api/sessions?")) return "/api/panel" + path.slice(4);
+  // A conversation's side questions: the Questions list asks by query, the panel's door by path.
+  const asked = /^\/api\/questions\?session=([^&]+)$/.exec(path);
+  if (asked) return `/api/panel/sessions/${asked[1]}/questions`;
   return path;
 }
 

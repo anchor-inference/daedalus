@@ -62,6 +62,10 @@ FORWARDED: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         ("POST", _SESSION + "/upload"),
         ("POST", _SESSION + "/stop"),
         ("POST", _SESSION + "/answer"),
+        # The side questions the agent asked in this conversation, answered or put aside in the panel.
+        ("GET", _SESSION + "/questions"),
+        ("POST", _SESSION + "/asks/answer"),
+        ("POST", _SESSION + r"/asks/[A-Za-z0-9_.:-]{1,80}/dismiss"),
         # The waiting messages: the panel shows them over its composer, and takes back or steers one.
         ("GET", _SESSION + "/steer"),
         ("POST", _SESSION + r"/steer/[A-Za-z0-9_.:-]{1,200}"),
