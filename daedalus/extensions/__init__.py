@@ -59,6 +59,7 @@ EXTENSIONS = (
     "daedalus.extensions.edit_board",
     "daedalus.extensions.pages",
     "daedalus.extensions.notes",
+    "daedalus.extensions.manifest_retention",
     "daedalus.extensions.watches",
     "daedalus.extensions.plugins",
     "daedalus.extensions.skill_quality",

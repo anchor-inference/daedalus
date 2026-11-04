@@ -3535,6 +3535,30 @@ CREATE INDEX IF NOT EXISTS note_files_by_project ON note_files(project_id) WHERE
 CREATE INDEX IF NOT EXISTS note_files_by_digest ON note_files(sha256);
 """)
 
+# 150 — which blobs each request manifest names, so a blob is freed the moment no manifest names it
+#   instead of by reading every manifest's JSON. A session keeps its newest two manifests
+#   (``daedalus.host.request_manifests``); only those are backfilled here, because every older row is
+#   about to be deleted by the sweep the next start runs in the background, and a blob only they name
+#   is meant to go with them. The table has a rowid on purpose: ``Purge`` marks rows by rowid when a
+#   session is deleted. Deleting the backlog itself is not done here: tens of thousands of rows and
+#   gigabytes of files would hold the start for as long as that took.
+MIGRATIONS.append("""
+CREATE TABLE IF NOT EXISTS request_manifest_blobs (
+    manifest_seq INTEGER NOT NULL REFERENCES request_manifests(seq) ON DELETE CASCADE,
+    ref TEXT NOT NULL,
+    PRIMARY KEY (ref, manifest_seq)
+);
+CREATE INDEX IF NOT EXISTS request_manifest_blobs_by_manifest ON request_manifest_blobs(manifest_seq);
+INSERT OR IGNORE INTO request_manifest_blobs(manifest_seq, ref)
+SELECT r.seq, json_extract(slot.value, '$.blob_ref')
+FROM request_manifests AS r, json_each(CASE WHEN json_valid(r.manifest) THEN r.manifest ELSE '{}' END) AS slot
+WHERE r.seq IN (
+    SELECT seq FROM (SELECT seq, ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY seq DESC) AS newest FROM request_manifests)
+    WHERE newest <= 2
+)
+AND slot.type = 'object' AND json_extract(slot.value, '$.blob_ref') IS NOT NULL;
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""
@@ -3602,7 +3626,10 @@ class Database:
         before = await self.fetchone("PRAGMA freelist_count")
         if before is None or not int(before[0]):
             return 0
-        await self.execute(f"PRAGMA incremental_vacuum({VACUUM_PAGES})")
+        # The pragma frees one page per step of its statement, so it is read to the end. Executed
+        # without fetching, it was stepped once: every maintenance pass gave back a single page, and a
+        # freelist of tens of thousands of pages would have taken weeks of passes to return.
+        await self.fetchall(f"PRAGMA incremental_vacuum({VACUUM_PAGES})")
         after = await self.fetchone("PRAGMA freelist_count")
         return int(before[0]) - int(after[0]) if after is not None else 0
 

@@ -136,5 +136,50 @@ class FileBlobStore(IBlobStore):
     def path_of(self, tenant_id: str, ref: str) -> Path:
         return self._paths(tenant_id, ref)[0]
 
+    def described_refs(self, tenant_id: str) -> list[str]:
+        """Every ref in the tenant that has a metadata file, read from the directory listing alone.
+
+        Synchronous on purpose: a tenant holding a hundred thousand blobs is listed in a worker
+        thread by the caller, never on the event loop."""
+        base = self._root / tenant_id
+        if not base.is_dir():
+            return []
+        suffix = ".meta.json"
+        with os.scandir(base) as entries:
+            return [entry.name[: -len(suffix)] for entry in entries if entry.name.endswith(suffix) and not entry.name.startswith(".")]
+
+    def kind_of(self, tenant_id: str, ref: str) -> tuple[str | None, int]:
+        """The ``kind`` a blob's own metadata names, and the bytes its data and metadata take.
+
+        ``(None, 0)`` when there is no readable metadata: a blob nobody described belongs to nobody
+        this store can name, and every caller treats it as not theirs."""
+        data_path, meta_path = self._paths(tenant_id, ref)
+        try:
+            meta = json.loads(meta_path.read_bytes())
+            size = meta_path.stat().st_size + (data_path.stat().st_size if data_path.exists() else 0)
+        except (OSError, ValueError):
+            return None, 0
+        kind = (meta.get("metadata") or {}).get("kind") if isinstance(meta, dict) else None
+        return (kind if isinstance(kind, str) else None), size
+
+    def delete_of_kind(self, tenant_id: str, ref: str, kind: str) -> int:
+        """Delete a blob and its metadata only when that metadata still names ``kind``; returns the
+        bytes freed, 0 when the blob was kept or was already gone.
+
+        A digest is shared by every writer of the same bytes, and the metadata is whichever writer
+        came last, so the kind is read again at the moment of deletion rather than trusted from an
+        earlier scan: a blob some other part of the host wrote is never removed for being unreferenced
+        by the caller's records."""
+        found, size = self.kind_of(tenant_id, ref)
+        if found != kind:
+            return 0
+        data_path, meta_path = self._paths(tenant_id, ref)
+        for path in (data_path, meta_path):
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+        return size
+
 
 __all__ = ["FileBlobStore"]
