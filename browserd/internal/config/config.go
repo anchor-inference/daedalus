@@ -93,6 +93,9 @@ type Config struct {
 	Backend string
 	// InstallName is the installation's name the extension's popup shows; the attach backend's only.
 	InstallName string
+	// RelayGrace is how long the attach backend keeps its browser after the relay drops, waiting for
+	// the same Chrome to connect again; zero is the default (browser.RelayGrace). Only a test sets it.
+	RelayGrace time.Duration
 
 	Limits   Limits
 	Chromium Chromium

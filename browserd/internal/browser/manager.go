@@ -129,6 +129,9 @@ func New(deps Deps) *Manager {
 		// The operator's Chrome is the browser: the daemon neither looks for a Chromium of its own
 		// nor runs one to ask its version.
 		a := &attach{m: m, hub: deps.Relay, dispatched: map[int]time.Time{}, grace: RelayGrace}
+		if deps.Config.RelayGrace > 0 {
+			a.grace = deps.Config.RelayGrace
+		}
 		m.backend = a
 		if deps.Relay != nil {
 			deps.Relay.OnSession(a.onSession)

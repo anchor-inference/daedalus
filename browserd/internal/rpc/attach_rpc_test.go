@@ -247,8 +247,8 @@ func TestAttachSecondRelayRefused(t *testing.T) {
 	}
 }
 
-// The relay lost, the browser is gone and its groups say so; connected again, the group opens on the
-// tabs its Chrome tab group kept.
+// The relay lost and back within the grace: the browser, its group and its tab stay, and a call made
+// in the gap waits for the relay and then answers as if nothing happened.
 func TestAttachRelayLostAndBack(t *testing.T) {
 	attachOnly(t)
 	h := start(t, nil)
@@ -258,14 +258,59 @@ func TestAttachRelayLostAndBack(t *testing.T) {
 	if lost["reason"] != "closed" {
 		t.Fatalf("relay.lost %v", lost)
 	}
-	deadline := time.Now().Add(5 * time.Second)
+	type listed struct {
+		Tabs []struct {
+			ID string `json:"id"`
+		} `json:"tabs"`
+	}
+	answered := make(chan error, 1)
+	var list listed
+	begin := time.Now()
+	go func() { answered <- h.call("tab.list", map[string]any{"group_id": o.Group.ID}, &list) }()
+	time.Sleep(300 * time.Millisecond)
+	if err := h.fake.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-answered:
+		if err != nil {
+			t.Fatalf("the call made while Chrome reconnected: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("the call made while Chrome reconnected never answered")
+	}
+	if took := time.Since(begin); took < 250*time.Millisecond {
+		t.Fatalf("the call did not wait for the relay (%s)", took)
+	}
+	if len(list.Tabs) != 1 || list.Tabs[0].ID != o.Tab.ID {
+		t.Fatalf("the tabs after the relay came back: %+v, before %s", list.Tabs, o.Tab.ID)
+	}
+	again := h.open("g1", "project-a", "")
+	if again.Created || again.Group.ID != o.Group.ID {
+		t.Fatalf("the group did not outlive the drop: %+v", again)
+	}
+}
+
+// The relay lost for longer than the grace: the browser is gone and its groups say Chrome
+// disconnected; with no Chrome an open is refused; connected again, the group opens on the tabs its
+// Chrome tab group kept.
+func TestAttachRelayLostPastTheGrace(t *testing.T) {
+	attachOnly(t)
+	h := startFull(t, nil, nil, nil, func(c *config.Config) { c.RelayGrace = 500 * time.Millisecond })
+	o := h.open("g1", "project-a", "/still")
+	h.fake.Disconnect()
+	h.waitEventOf("relay.lost", 5*time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for {
 		err := h.call("tab.list", map[string]any{"group_id": o.Group.ID}, nil)
 		if code(err) == browser.CodeBrowserGone {
+			if !strings.Contains(err.Error(), "chrome disconnected") || !strings.Contains(err.Error(), "did not connect again") {
+				t.Fatalf("the group past the grace: %v", err)
+			}
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the group after the relay was lost: %v", err)
+			t.Fatalf("the group after the grace ran out: %v", err)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
