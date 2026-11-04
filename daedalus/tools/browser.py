@@ -220,9 +220,9 @@ def _caller(context: ToolContext) -> Caller | None:
         return bool(manager.ask_operator(context.session_id, key=key, tool=tool, text=text, on_answer=on_answer, card=card, extra=extra))
 
     def operator_words() -> list[str]:
-        # Lazy: the session runner imports the tools. The running engine's history is the one the
-        # model is reading, with the passages a compaction carried forward still marked as theirs.
-        from daedalus.host.session_runner import operator_passages  # noqa: PLC0415
+        # The running engine's history is the one the model is reading, with the passages a
+        # compaction carried forward still marked as theirs.
+        from daedalus.host.session_runner import operator_passages  # Lazy: the session runner imports the tools
 
         engine = getattr(state, "engine", None) if state is not None else None
         return [text for _, text in operator_passages(list(getattr(engine, "history", None) or ()))]
