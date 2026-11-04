@@ -123,7 +123,7 @@ unknown field is `-32602`. Errors use the JSON-RPC codes plus:
 | `browser.close` | `{browser_id}` → `{groups}`: ends the browser and forgets its groups |
 | `group.list` | `{browser_id?}` → `{groups: [Group]}` |
 | `group.close` | `{group_id}` → `{tabs}`: closes its tabs; an ephemeral group's context is disposed |
-| `group.resize` | `{group_id, viewport{w, h}}` → `{viewport{w, h}}`. Each side is 320–3840. Every page's window is sized the way `browser.open` sized it, and the group's viewport becomes that. The app calls it as the operator's picture changes size, so a tall pane is a tall page rather than a 1280×800 picture with an empty band under it. The agent's reads and actions are in that page's CSS pixels, so they follow |
+| `group.resize` | `{group_id, viewport{w, h}}` → `{viewport{w, h}}`. Each side is 320–3840. Every page's window is sized the way `browser.open` sized it, and the group's viewport becomes that; in the operator's Chrome no window is sized, and the answer is the size the page has there (The operator's Chrome). The app calls it as the operator's picture changes size, so a tall pane is a tall page rather than a 1280×800 picture with an empty band under it. The agent's reads and actions are in that page's CSS pixels, so they follow |
 | `profile.list` | → `{profiles: [{id, size_bytes, last_used_at, running, webgl}]}` |
 | `profile.webgl` | `{profile, mode?: off\|software\|gpu}` → `{profile, mode, relaunched, browser_id?, groups: [{id, tabs: [Tab], failed?: [url]}], graphics: {mode, webgl, available, renderer} \| null}`: the WebGL mode the profile's browser starts in (WebGL, under Which Chromium), changed when `mode` is given. A running browser in another mode is closed with the reason `relaunch` and started again in this one, each group reopened under its id with new tabs on the pages the old ones showed (`failed` names those that did not load); `1004` while the operator holds one of its groups, `1007` for the throwaway profile, for the operator's Chrome, and for `gpu` where no GPU is reachable (`gpu_reason`). `graphics` is the running browser's own `SystemInfo` report |
 | `profile.clear`, `profile.delete` | `{profile}` → `{}`; `1004` while its browser runs. Clear keeps the directory and removes cookies, storage and cache; delete removes it |
@@ -187,7 +187,8 @@ unknown field is `-32602`. Errors use the JSON-RPC codes plus:
   window's own frame measured on the browser's first page: a 1280×800 window in `--headless=new`
   holds a 1280×657 page, a headed Chrome for Testing's a 1280×713 one). It does not emulate a size: the pinned Chromium's screencast shows the
   window whatever `Emulation.setDeviceMetricsOverride` says, so an emulated viewport would put every
-  click beside what the frame shows. It stays that size until `group.resize`.
+  click beside what the frame shows. It stays that size until `group.resize`. In the operator's
+  Chrome `viewport` is not applied: see The operator's Chrome.
 - No Chromium is `1007 {reason}`; a Chromium that cannot start its sandbox is `1007` with the reason
   `capabilities.sandbox` gives.
 
@@ -953,9 +954,17 @@ convention, and `internal/browser/attach_test.go` holds each one:
   `1101` as for a person in the live view. Input the extension reports within 750 ms of the daemon's
   own input to that tab is taken for its echo (both are trusted events in the page). A pause, or a
   person already holding control in the live view, is left as it is.
-- A tab's address and title are read from its own history (`Page.getNavigationHistory`), and the
-  window is sized per group with `window.bounds`, since `Target.*` and `Browser.*` above a tab are
-  never sent.
+- A tab's address and title are read from its own history (`Page.getNavigationHistory`), since
+  `Target.*` and `Browser.*` above a tab are never sent.
+- No window is ever sized, moved, focused or given a state, the agent's own included: on macOS any
+  of these takes a full-screen Chrome out of its Space, and sizing the agent's window for each tab it
+  opened once dropped the operator's full-screen Chrome to the desktop, shrank it and grew it back
+  every time the agent opened or closed a site. The group's viewport is the page's own size instead
+  (`innerWidth`, `innerHeight`), read when a tab is set up, on `group.resize`, and once a second
+  while the browser is busy, so the agent's coordinates, the screenshot's clip and the live view's
+  frames follow the operator resizing their window or taking it full screen. While the operator's
+  window is full screen the extension puts a new group's tabs in the background of that window
+  rather than opening a window of the agent's, which on macOS would take them to the desktop.
 
 ### Methods
 
@@ -1017,10 +1026,9 @@ The calls:
 
 | `op` | `args` → `value` |
 |---|---|
-| `window.ensure` | `{group, session?, title?}` → `{window, tabs: [Tab]}`: the agent's own unfocused window and Chrome tab group for a daemon group, made if missing; `tabs` are the ones that group already holds. `session` and `title` are the host conversation the group works for and its name, from the group's labels (`session_id`, `title`): the tab group is titled with it, and the side panel shows the conversation whose group holds the active tab. A group the side panel made for the operator's tab (below) already has its window, the operator's, and is answered with that tab |
+| `window.ensure` | `{group, session?, title?}` → `{window, tabs: [Tab]}`: the agent's own unfocused window and Chrome tab group for a daemon group, made if missing (Chrome picks its size and place; while the operator's window is full screen, or `windowMode` is current, the group uses the operator's window instead); `tabs` are the ones that group already holds. `session` and `title` are the host conversation the group works for and its name, from the group's labels (`session_id`, `title`): the tab group is titled with it, and the side panel shows the conversation whose group holds the active tab. A group the side panel made for the operator's tab (below) already has its window, the operator's, and is answered with that tab |
 | `tab.create` | `{group, url, session?, title?}` → `{tab: Tab}`: a tab in the group's window, attached to the debugger before the answer. The extension opens it on `about:blank` whatever `url` says, and the daemon navigates once the tab is set up and its guard is on |
 | `tab.close`, `tab.activate` | `{tab, quiet?}` → `{}`. A tab the operator gave is let go on `tab.close` (detached, its border and Chrome tab group taken off, left open) and answered `{released: true}`. `quiet` (`tab.activate` only) leaves the operator's window as it is while the agent works there (`windowMode` current) |
-| `window.bounds` | `{group, bounds?{width, height}}` → `{bounds{left, top, width, height}}`: sizes the group's window when `bounds` is given, then reads it |
 | `downloads.search` | `{id}` → `{path, state, bytes}`: `id` is the DevTools guid of `Page.downloadWillBegin`; the extension finds the `chrome.downloads` item behind it |
 | `cookies.names` | `{url}` → `{cookies: [{name, domain, path, expires, secure, http_only, same_site?, session}]}`: `chrome.cookies.getAll({url})` without values |
 | `group.close` | `{group}` → `{}`: closes the agent's tabs of the group, its tab group and window; the tabs the operator gave are let go and stay open |

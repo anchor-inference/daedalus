@@ -128,7 +128,7 @@ func TestGoldenFrames(t *testing.T) {
 			t.Errorf("no golden frame of type %s", typ)
 		}
 	}
-	for _, op := range []string{OpWindowEnsure, OpTabCreate, OpTabClose, OpTabActivate, OpWindowBounds, OpDownloadsSearch, OpCookiesNames, OpGroupClose, OpNotify, OpPanelGrant, OpPanelEvent} {
+	for _, op := range []string{OpWindowEnsure, OpTabCreate, OpTabClose, OpTabActivate, OpDownloadsSearch, OpCookiesNames, OpGroupClose, OpNotify, OpPanelGrant, OpPanelEvent} {
 		if !ops[op] {
 			t.Errorf("no golden call of %s", op)
 		}
@@ -153,8 +153,6 @@ func argsOf(t *testing.T, op string) any {
 		return &TabCreateArgs{}
 	case OpTabClose, OpTabActivate:
 		return &TabArgs{}
-	case OpWindowBounds:
-		return &WindowBoundsArgs{}
 	case OpDownloadsSearch:
 		return &DownloadsSearchArgs{}
 	case OpCookiesNames:
@@ -178,8 +176,6 @@ func valueOf(op string) any {
 		return &TabCreated{}
 	case OpTabClose:
 		return &TabClosed{}
-	case OpWindowBounds:
-		return &WindowBounds{}
 	case OpDownloadsSearch:
 		return &Download{}
 	case OpCookiesNames:

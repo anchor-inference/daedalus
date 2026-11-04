@@ -30,10 +30,6 @@ type attach struct {
 	// setting are the tabs being prepared, by tab id, so a tab the extension announces while
 	// tab.create is still answering is prepared once.
 	setting map[int]chan *Tab
-	// fixedWindow are the groups whose window the extension refused to size: the agent works in the
-	// operator's own window (the extension's windowMode "current"). Asking again for every new tab
-	// and every measuring attempt filled the log with refusals and changed nothing.
-	fixedWindow map[string]bool
 }
 
 // ChromeHolder is the holder of human control the operator's own input in Chrome takes: a person at
@@ -180,11 +176,6 @@ func (a *attach) openGroup(ctx context.Context, g *Group) error {
 	if g.Profile == EphemeralProfile {
 		return ErrAttachRefused("a throwaway context")
 	}
-	// A group of the same id opened again asks afresh: the operator may have changed where the agent
-	// works since.
-	a.mu.Lock()
-	delete(a.fixedWindow, g.ID)
-	a.mu.Unlock()
 	s, err := a.sessionOf(g.Browser)
 	if err != nil {
 		return err
@@ -404,63 +395,36 @@ func (a *attach) refreshTab(ctx context.Context, t *Tab) {
 	}
 }
 
+// refresh also follows each group's page size: the operator resizes their window, takes it full
+// screen or out of it, and the agent's coordinates must follow the page they now have.
 func (a *attach) refresh(ctx context.Context, b *Browser) {
 	var wg sync.WaitGroup
 	for _, g := range b.groupList() {
+		followed := false
 		for _, t := range g.Tabs() {
+			follow := !followed && !t.Closed()
+			followed = followed || follow
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				a.refreshTab(ctx, t)
+				if follow {
+					a.m.followPage(ctx, g, t.Session, false)
+				}
 			}()
 		}
 	}
 	wg.Wait()
 }
 
-// The agent's tabs of a group share the agent's window, so a window's size is the group's.
+// Neither reads nor sets a window: the daemon never sizes one in the operator's Chrome (see
+// errWindowFixed), and takes the page's own size for the group instead (Manager.followPage).
 func (a *attach) windowSize(ctx context.Context, g *Group, target string) (int, int, error) {
-	s, err := a.sessionOf(g.Browser)
-	if err != nil {
-		return 0, 0, err
-	}
-	var r relay.WindowBounds
-	if err := s.Call(ctx, relay.OpWindowBounds, relay.WindowBoundsArgs{Group: g.ID}, &r); err != nil {
-		return 0, 0, relayErr(err)
-	}
-	return r.Bounds.Width, r.Bounds.Height, nil
+	return 0, 0, errWindowFixed
 }
 
 func (a *attach) setWindowSize(ctx context.Context, g *Group, target string, w, h int) error {
-	a.mu.Lock()
-	fixed := a.fixedWindow[g.ID]
-	a.mu.Unlock()
-	if fixed {
-		return errWindowFixed
-	}
-	s, err := a.sessionOf(g.Browser)
-	if err != nil {
-		return err
-	}
-	err = s.Call(ctx, relay.OpWindowBounds, relay.WindowBoundsArgs{Group: g.ID, Bounds: &relay.Size{Width: w, Height: h}}, nil)
-	var re *relay.Error
-	switch {
-	case err == nil:
-		return nil
-	case errors.As(err, &re) && re.Code == relay.ErrRefused:
-		// Remembered for the group's life: the window is the operator's, and its size is whatever
-		// they gave it.
-		a.mu.Lock()
-		if a.fixedWindow == nil {
-			a.fixedWindow = map[string]bool{}
-		}
-		a.fixedWindow[g.ID] = true
-		a.mu.Unlock()
-		a.m.log.Info("the agent works in the operator's window; its size is left to them", "group", g.ID)
-		return errWindowFixed
-	}
-	a.m.log.Warn("sizing the agent's window", "group", g.ID, "error", err.Error())
-	return relayErr(err)
+	return errWindowFixed
 }
 
 // cancelDownload has nothing to stop: a download in the operator's Chrome is theirs, in their

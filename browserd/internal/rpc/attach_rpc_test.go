@@ -114,7 +114,8 @@ func TestAttachRefusals(t *testing.T) {
 }
 
 // Everything the suite did went to the fake as per-tab commands on the allowlist and calls: the
-// daemon never needed the browser itself.
+// daemon never needed the browser itself, and never asked for a window to be sized, resizing a group
+// included.
 func TestAttachOnlyTabsAndCalls(t *testing.T) {
 	attachOnly(t)
 	h := start(t, nil)
@@ -123,6 +124,7 @@ func TestAttachOnlyTabsAndCalls(t *testing.T) {
 	h.mustAct(o.Tab.ID, map[string]any{"action": "click", "ref": refOf(t, s, "button", "Press"), "element": "press"})
 	h.must("page.screenshot", map[string]any{"tab_id": o.Tab.ID}, nil)
 	h.must("tab.new", map[string]any{"group_id": "g1", "url": h.site.URL + "/still"}, nil)
+	h.must("group.resize", map[string]any{"group_id": "g1", "viewport": map[string]any{"w": 960, "h": 640}}, nil)
 	var cdps int
 	for _, f := range h.fake.Seen() {
 		switch f.T {
@@ -131,7 +133,8 @@ func TestAttachOnlyTabsAndCalls(t *testing.T) {
 			if err := relay.Allowed(f.Method); err != nil {
 				t.Errorf("sent %s: %v", f.Method, err)
 			}
-			if f.Method == "Emulation.setUserAgentOverride" || f.Method == "Page.addScriptToEvaluateOnNewDocument" {
+			if f.Method == "Emulation.setUserAgentOverride" || f.Method == "Page.addScriptToEvaluateOnNewDocument" ||
+				f.Method == "Emulation.setDeviceMetricsOverride" {
 				t.Errorf("sent %s into the operator's page", f.Method)
 			}
 			if _, _, ok := relay.ParseSession(f.Session); !ok {
@@ -139,7 +142,7 @@ func TestAttachOnlyTabsAndCalls(t *testing.T) {
 			}
 		case "call":
 			switch f.Op {
-			case relay.OpWindowEnsure, relay.OpTabCreate, relay.OpWindowBounds, relay.OpTabActivate:
+			case relay.OpWindowEnsure, relay.OpTabCreate, relay.OpTabActivate:
 			default:
 				t.Errorf("a call of %s", f.Op)
 			}

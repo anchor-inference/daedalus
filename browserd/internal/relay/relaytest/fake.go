@@ -22,6 +22,7 @@ import (
 
 	"github.com/ascorblack/daedalus/browserd/internal/cdp"
 	"github.com/ascorblack/daedalus/browserd/internal/chrome"
+	"github.com/ascorblack/daedalus/browserd/internal/config"
 	"github.com/ascorblack/daedalus/browserd/internal/relay"
 	"github.com/ascorblack/daedalus/ptyd/proto/server/clienttest"
 	"github.com/ascorblack/daedalus/ptyd/proto/wire"
@@ -499,6 +500,59 @@ func (f *Fake) attach(target, group string) (*tab, error) {
 	return t, nil
 }
 
+// fitPage gives a new tab's window the size that makes its page the default viewport, as Chrome
+// gives the extension's new window a size of its own choosing. The daemon never sizes a window of
+// the operator's Chrome and takes whatever page it is given; a known size here keeps the suite's
+// pictures and coordinates the same over the relay as over the launch backend.
+func (f *Fake) fitPage(ctx context.Context, t *tab) error {
+	var w struct {
+		WindowID int `json:"windowId"`
+	}
+	if err := f.conn.Call(ctx, "", "Browser.getWindowForTarget", map[string]any{"targetId": t.target}, &w); err != nil {
+		return err
+	}
+	want := [2]int{config.DefaultViewportW, config.DefaultViewportH}
+	for attempt := 0; attempt < 5; attempt++ {
+		var wb struct {
+			Bounds struct {
+				Width  int `json:"width"`
+				Height int `json:"height"`
+			} `json:"bounds"`
+		}
+		if err := f.conn.Call(ctx, "", "Browser.getWindowBounds", map[string]any{"windowId": w.WindowID}, &wb); err != nil {
+			return err
+		}
+		var r struct {
+			Result struct {
+				Value []int `json:"value"`
+			} `json:"result"`
+		}
+		if err := f.conn.Call(ctx, t.session, "Runtime.evaluate", map[string]any{"expression": "[innerWidth, innerHeight]",
+			"returnByValue": true}, &r); err != nil {
+			return err
+		}
+		if len(r.Result.Value) != 2 {
+			return fmt.Errorf("the page's size: %v", r.Result.Value)
+		}
+		if r.Result.Value[0] == want[0] && r.Result.Value[1] == want[1] {
+			return nil
+		}
+		// A window's new size reaches its page a moment later; the next read sees it, or the frame
+		// measured from it sizes the window again.
+		if err := f.conn.Call(ctx, "", "Browser.setWindowBounds", map[string]any{"windowId": w.WindowID,
+			"bounds": map[string]any{"width": want[0] + wb.Bounds.Width - r.Result.Value[0],
+				"height": want[1] + wb.Bounds.Height - r.Result.Value[1], "windowState": "normal"}}, nil); err != nil {
+			return err
+		}
+		select {
+		case <-time.After(100 * time.Millisecond):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return fmt.Errorf("the page never took the size %dx%d", want[0], want[1])
+}
+
 func (f *Fake) groupTabs(group string) []*tab {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -559,6 +613,9 @@ func (f *Fake) do(ctx context.Context, op string, raw json.RawMessage) (any, err
 		if err != nil {
 			return nil, err
 		}
+		if err := f.fitPage(ctx, t); err != nil {
+			return nil, err
+		}
 		return relay.TabCreated{Tab: relay.Tab{ID: t.id, Group: a.Group, URL: "about:blank"}}, nil
 	case relay.OpTabClose, relay.OpTabActivate:
 		var a relay.TabArgs
@@ -574,40 +631,6 @@ func (f *Fake) do(ctx context.Context, op string, raw json.RawMessage) (any, err
 			method = "Target.activateTarget"
 		}
 		return map[string]any{}, f.conn.Call(ctx, "", method, map[string]any{"targetId": t.target}, nil)
-	case relay.OpWindowBounds:
-		var a relay.WindowBoundsArgs
-		if err := json.Unmarshal(raw, &a); err != nil {
-			return nil, err
-		}
-		tabs := f.groupTabs(a.Group)
-		if len(tabs) == 0 {
-			return nil, &relay.Error{Code: relay.ErrFailed, Message: "the group has no window yet"}
-		}
-		var first relay.Bounds
-		for i, t := range tabs {
-			var w struct {
-				WindowID int `json:"windowId"`
-			}
-			if err := f.conn.Call(ctx, "", "Browser.getWindowForTarget", map[string]any{"targetId": t.target}, &w); err != nil {
-				return nil, err
-			}
-			if a.Bounds != nil {
-				if err := f.conn.Call(ctx, "", "Browser.setWindowBounds", map[string]any{"windowId": w.WindowID,
-					"bounds": map[string]any{"width": a.Bounds.Width, "height": a.Bounds.Height, "windowState": "normal"}}, nil); err != nil {
-					return nil, err
-				}
-			}
-			if i == 0 {
-				var wb struct {
-					Bounds relay.Bounds `json:"bounds"`
-				}
-				if err := f.conn.Call(ctx, "", "Browser.getWindowBounds", map[string]any{"windowId": w.WindowID}, &wb); err != nil {
-					return nil, err
-				}
-				first = wb.Bounds
-			}
-		}
-		return relay.WindowBounds{Bounds: first}, nil
 	case relay.OpGroupClose:
 		var a relay.GroupArgs
 		if err := json.Unmarshal(raw, &a); err != nil {

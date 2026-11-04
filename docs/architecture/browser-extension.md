@@ -92,8 +92,11 @@ file is the only copy: the extension's tests compare their own frames with it by
   attached and set up its navigation guard, so the first page is judged like every other. The value
   is `{tab: {id, group, url}}`.
 - **`window.ensure {group}`** answers `{window, tabs}`, the tabs already in the group, so a daemon
-  that lost track of them starts from what is there. `window.bounds` answers `{bounds: {left, top,
-  width, height}}` and refuses to resize when the agent works in the operator's window.
+  that lost track of them starts from what is there. The agent's own window is opened unfocused,
+  once, at the size and place Chrome picks; while the operator's window is full screen the group
+  uses that window, its tabs in the background, since on macOS a new window would take the operator
+  out of their full-screen Space. No window is ever sized, moved, focused or given a state on the
+  agent's behalf.
 - **`downloads.search {id}`** takes the DevTools guid of `Page.downloadWillBegin`. The extension
   remembers the address each such event of an agent tab named and finds the newest
   `chrome.downloads` item of that address begun no earlier than shortly before it; the answer is
