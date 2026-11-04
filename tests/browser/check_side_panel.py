@@ -238,6 +238,13 @@ def run() -> int:
         page.keyboard.press("Enter")
         expect(card).to_have_count(0)
         assert door.posted("/api/panel/sessions/s1/policy/grant") == [{"key": "0123456789ab"}], door.posts
+        # The yellow chip folds the list away and brings it back.
+        chip = page.locator(".sp-asks-chip")
+        expect(chip).to_have_text("1")
+        chip.click()
+        expect(page.locator(".sp-questions")).to_have_count(0)
+        chip.click()
+        expect(page.locator(".sp-questions")).to_contain_text("Sign in to the shop")
         # The refusal stays in the transcript; a reload of the panel must not offer the answered request again.
         page.reload()
         expect(page.locator(".sp-title")).to_contain_text("Pay the electricity bill")

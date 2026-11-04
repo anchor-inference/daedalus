@@ -17,7 +17,7 @@ import { Composer, type ComposerHandle } from "../composerbox";
 import type { ModelChoice } from "../modelselect";
 import { messageBody } from "../project/goalmodel";
 import { Icon } from "../icons";
-import { setLang, t, useLang } from "../i18n";
+import { num, plural, setLang, t, useLang } from "../i18n";
 import { sessionPath } from "../router";
 import { onMicRefused } from "../voicebar";
 import { QuestionsPanel } from "../questions/QuestionsPanel";
@@ -334,12 +334,19 @@ function NewConversation({ shell, current, listing, toast, onCreated, onCancel }
 }
 
 /** The page's own offers over the composer: its text as a file, a screenshot, the selection quoted. */
-function AttachChips({ tab, attach }: { tab: { readable?: boolean } | null; attach: (kind: "page" | "screenshot" | "selection") => void }) {
+function AttachChips({ tab, attach, asks }: { tab: { readable?: boolean } | null; attach: (kind: "page" | "screenshot" | "selection") => void; asks?: { count: number; open: boolean; toggle: () => void } }) {
   return (
     <div className="sp-attach" role="group" aria-label={t("sidepanel.attach")}>
       <button type="button" className="chip" disabled={!tab?.readable} onClick={() => attach("page")}><Icon name="file" size={13} />{t("sidepanel.attach.page")}</button>
       <button type="button" className="chip" disabled={!tab?.readable} onClick={() => attach("screenshot")}><Icon name="camera" size={13} />{t("sidepanel.attach.screenshot")}</button>
       <button type="button" className="chip" disabled={!tab?.readable} onClick={() => attach("selection")}><Icon name="reply" size={13} />{t("sidepanel.attach.selection")}</button>
+      {/* The agent's waiting questions, at the end of the row: the list over the composer folds away
+          and this brings it back, so hiding it never means losing it. */}
+      {asks && asks.count > 0 && (
+        <button type="button" className={`chip sp-asks-chip ${asks.open ? "on" : ""}`} onClick={asks.toggle} aria-expanded={asks.open} title={plural("questions.line", asks.count)}>
+          <Icon name="ask" size={13} />{num(asks.count)}
+        </button>
+      )}
     </div>
   );
 }
@@ -429,6 +436,13 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
   // during a turn vanished from the panel until the agent read it, while the app showed its card.
   const [queued, setQueued] = useState<QueuedMessage[]>([]);
   const sideAsked = useQuestions({ sessionId: id }).questions?.length ?? 0;
+  // The list opens by itself when a new question arrives, and the chip folds it away or back.
+  const [asksOpen, setAsksOpen] = useState(true);
+  const seenAsked = useRef(sideAsked);
+  useEffect(() => {
+    if (sideAsked > seenAsked.current) setAsksOpen(true);
+    seenAsked.current = sideAsked;
+  }, [sideAsked]);
   const loadQueued = useCallback(async () => {
     try {
       setQueued(readQueued(await api.get<unknown>(`/api/sessions/${id}/steer`)));
@@ -652,7 +666,7 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
       )}
       {/* The agent's side questions in this conversation. The panel never fetched them, so a question
           asked here waited unseen while only the app showed it. */}
-      {sideAsked > 0 && <div className="sp-questions"><QuestionsPanel scope={{ sessionId: id }} toast={toast} /></div>}
+      {sideAsked > 0 && asksOpen && <div className="sp-questions"><QuestionsPanel scope={{ sessionId: id }} toast={toast} /></div>}
       {approval && <ApprovalCard key={approval.key} approval={approval} similar={similar} onDecide={(how) => void decide(approval, how)} />}
       {shot && <ShotCrop shot={shot} onCancel={() => setShot(null)} onAttach={(file) => { composer.current?.addFiles([file]); setShot(null); }} />}
       {detail?.id === id && (
@@ -666,7 +680,7 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
                 onShowTab={() => void shell.request("tab.focus", { session: id }).catch((e) => toast(t("sidepanel.tab.failed", { reason: shellReason(e) })))}
                 onOpenApp={() => void shell.request("open.app", { path: sessionPath(id) })} />
             )}
-            <AttachChips tab={tab} attach={attach} />
+            <AttachChips tab={tab} attach={attach} asks={{ count: sideAsked, open: asksOpen, toggle: () => setAsksOpen((o) => !o) }} />
             </>
           }
           beside={<ApprovalChip key={id} sessionId={id} toast={toast} />}
