@@ -3602,7 +3602,10 @@ class Database:
         before = await self.fetchone("PRAGMA freelist_count")
         if before is None or not int(before[0]):
             return 0
-        await self.execute(f"PRAGMA incremental_vacuum({VACUUM_PAGES})")
+        # The pragma frees one page per step of its statement, so it is read to the end. Executed
+        # without fetching, it was stepped once: every maintenance pass gave back a single page, and a
+        # freelist of tens of thousands of pages would have taken weeks of passes to return.
+        await self.fetchall(f"PRAGMA incremental_vacuum({VACUUM_PAGES})")
         after = await self.fetchone("PRAGMA freelist_count")
         return int(before[0]) - int(after[0]) if after is not None else 0
 

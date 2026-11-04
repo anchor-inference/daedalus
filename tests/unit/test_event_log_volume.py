@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from protocore.contracts.types import Event, Run, RunStatus
 
-from daedalus.stores.database import Database
+from daedalus.stores.database import VACUUM_PAGES, Database
 from daedalus.stores.sqlite import SqliteEventStream, SqliteRunStore
 
 
@@ -121,6 +121,24 @@ async def test_a_freelist_nothing_can_reclaim_is_named_once_with_the_command(tmp
         before, after = await db.vacuum()
         assert after < before
         assert int((await db.fetchone("PRAGMA auto_vacuum"))[0]) == 2
+    finally:
+        await db.close()
+
+
+async def test_one_reclaim_pass_gives_back_a_whole_batch_of_pages(tmp_path: Path) -> None:
+    """The pragma frees one page per step of its statement. Executed without being read, it freed one
+    page per maintenance pass, however large the freelist was."""
+    db = Database(tmp_path / "fresh.sqlite")
+    await db.open()
+    try:
+        await db.vacuum()  # the suite's databases start as a copy of a template, whatever it was made with
+        await db.execute("CREATE TABLE big (id INTEGER PRIMARY KEY, body TEXT)")
+        await db.executemany("INSERT INTO big(body) VALUES (?)", [("x" * 4000,) for _ in range(3000)])
+        await db.execute("DELETE FROM big")
+        free = int((await db.fetchone("PRAGMA freelist_count"))[0])
+        assert free > VACUUM_PAGES
+        assert await db.reclaim() == VACUUM_PAGES
+        assert int((await db.fetchone("PRAGMA freelist_count"))[0]) == free - VACUUM_PAGES
     finally:
         await db.close()
 
