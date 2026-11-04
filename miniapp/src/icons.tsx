@@ -9,7 +9,8 @@ export type IconName =
   | "hand" | "ffwd"
   | "monitor" | "laptop"
   | "utensils" | "cart" | "dumbbell" | "plane" | "home" | "list" | "heart" | "book" | "wand"
-  | "chat" | "headset" | "database" | "mail" | "cloud" | "checkcircle";
+  | "chat" | "headset" | "database" | "mail" | "cloud" | "checkcircle"
+  | "note" | "bold" | "italic" | "strike" | "code" | "heading" | "quote" | "olist" | "tasks" | "table" | "hr";
 
 const PATHS: Record<IconName, string> = {
   // The approval modes of a conversation in the operator's Chrome: a raised hand asks, a fast-forward
@@ -33,6 +34,18 @@ const PATHS: Record<IconName, string> = {
   mail: "M3 5h18v14H3zM3 7l9 6 9-6",
   cloud: "M17.5 19H9a7 7 0 1 1 6.7-9h1.8a4.5 4.5 0 1 1 0 9z",
   checkcircle: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM8 12l3 3 5-6",
+  // The Notes tab and its editor's toolbar: a page with a folded corner, then the marks of Markdown.
+  note: "M5 4h10l4 4v12H5zM15 4v4h4M8.5 12h7M8.5 16h4.5",
+  bold: "M7 5h6a3.5 3.5 0 0 1 0 7H7zM7 12h7a3.5 3.5 0 0 1 0 7H7z",
+  italic: "M10 5h8M6 19h8M14 5l-4 14",
+  strike: "M4 12h16M16 7c-.8-1.3-2.2-2-4-2-2.5 0-4.5 1.2-4.5 3.2 0 1.2.6 2 1.8 2.6M8 17c.8 1.3 2.3 2 4 2 2.6 0 4.5-1.2 4.5-3.3 0-.6-.1-1.1-.4-1.5",
+  code: "M8 7l-5 5 5 5M16 7l5 5-5 5",
+  heading: "M6 4v16M18 4v16M6 12h12",
+  quote: "M5 5v14M9.5 7H19M9.5 12H19M9.5 17H16",
+  olist: "M10 6h11M10 12h11M10 18h11M4 4.5h1.5V9M3.5 9h3.5M3.5 14.5c.3-.9 2.7-1 2.7.4 0 1.2-2.7 2-2.7 3.6h2.9",
+  tasks: "M3 4.5h5v5H3zM3 14.5h5v5H3zM4.3 17l1.2 1.2 2-2.4M11.5 7H21M11.5 17H21",
+  table: "M3 5h18v14H3zM3 10h18M3 15h18M9 10v9M15 10v9",
+  hr: "M3 12h18M7 7h10M7 17h10",
   back: "M15 18l-6-6 6-6",
   more: "M5 12h.01M12 12h.01M19 12h.01",
   plus: "M12 5v14M5 12h14",

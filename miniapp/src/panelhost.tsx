@@ -150,7 +150,7 @@ function Column(props: HostProps) {
   );
 }
 
-const TAB_ICON: Record<PanelTab, IconName> = { details: "settings", files: "folder", preview: "eye", jobs: "terminal", subagents: "spawn", board: "board", brief: "pen", wakeups: "clock", folders: "folder", questions: "ask", browser: "globe", sources: "link" };
+const TAB_ICON: Record<PanelTab, IconName> = { details: "settings", files: "folder", preview: "eye", jobs: "terminal", notes: "note", subagents: "spawn", board: "board", brief: "pen", wakeups: "clock", folders: "folder", questions: "ask", browser: "globe", sources: "link" };
 
 function Tabs({ state, onTab, onClose, onExpand, badges, marks, inSheet, local, tabs = PANEL_TABS }: HostProps & { inSheet?: boolean }) {
   const strip = useRef<HTMLDivElement>(null);

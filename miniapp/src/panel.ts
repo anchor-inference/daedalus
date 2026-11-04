@@ -3,10 +3,11 @@
 // should reproduce (`?panel=preview&path=reports/menu.md`), the browser remembers the width and the
 // last open tab, and the component in panel.tsx is the only thing that turns either into pixels.
 
-export type PanelTab = "details" | "files" | "preview" | "jobs" | "subagents" | "board" | "brief" | "wakeups" | "folders" | "questions" | "browser" | "sources";
+export type PanelTab = "details" | "files" | "preview" | "jobs" | "notes" | "subagents" | "board" | "brief" | "wakeups" | "folders" | "questions" | "browser" | "sources";
 
-/** A session's own tabs: what the agent is, the files it works on, one of them open, its jobs. */
-export const PANEL_TABS: PanelTab[] = ["details", "files", "preview", "jobs"];
+/** A session's own tabs: what the agent is, the files it works on, one of them open, its jobs, and the
+ *  operator's notes beside the conversation (the chat's, and its project's when it has one). */
+export const PANEL_TABS: PanelTab[] = ["details", "files", "preview", "jobs", "notes"];
 
 /** A project's tabs, beside a session in the project's focus mode. */
 export const PROJECT_TABS: PanelTab[] = ["board", "brief", "wakeups", "folders"];
@@ -45,8 +46,9 @@ export type PanelContext = "session" | "orchestrator" | "member" | "main";
 export function tabsFor(context: PanelContext, opts: { browser?: boolean; preview?: boolean; subagents?: boolean; questions?: boolean; sources?: boolean } = {}): PanelTab[] {
   // An answer's sources sit beside the browser: both are the web the turn read.
   const browser: PanelTab[] = [...(opts.browser ? (["browser"] as PanelTab[]) : []), ...(opts.sources ? (["sources"] as PanelTab[]) : [])];
-  const own: PanelTab[] = [...PANEL_TABS, ...(opts.subagents ? (["subagents"] as PanelTab[]) : [])];
-  if (context === "orchestrator") return ["questions", "details", "files", ...(opts.preview ? (["preview"] as PanelTab[]) : []), ...browser, ...PROJECT_TABS];
+  // Subagents stay right after Jobs, where they came from; Notes close the agent's own tabs.
+  const own: PanelTab[] = [...PANEL_TABS.filter((tab) => tab !== "notes"), ...(opts.subagents ? (["subagents"] as PanelTab[]) : []), "notes"];
+  if (context === "orchestrator") return ["questions", "details", "files", ...(opts.preview ? (["preview"] as PanelTab[]) : []), "notes", ...browser, ...PROJECT_TABS];
   if (context === "member") return [...own, ...browser, ...PROJECT_TABS];
   if (context === "main") return ["questions", ...own, ...browser];
   return [...(opts.questions ? (["questions"] as PanelTab[]) : []), ...own, ...browser];

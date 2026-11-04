@@ -51,6 +51,7 @@ const SAME_IN_BOTH = [
   "lang.name.en",
   "lang.name.ru",
   "login.title",
+  "notes.template.checklist.body",
   // Channel names that are product names in both languages, and rows made only of holes.
   "nset.cell.aria",
   "nset.channel.push",

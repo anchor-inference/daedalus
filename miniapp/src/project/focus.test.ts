@@ -48,9 +48,9 @@ describe("a project's route", () => {
 
 describe("the right panel in focus mode", () => {
   it("offers the questions and the project's tabs beside the orchestrator, and both sets beside a session of the project", () => {
-    expect(tabsFor("session")).toEqual(["details", "files", "preview", "jobs"]);
+    expect(tabsFor("session")).toEqual(["details", "files", "preview", "jobs", "notes"]);
     // The orchestrator's own Details follow its questions: what it costs and how full it is.
-    expect(tabsFor("orchestrator")).toEqual(["questions", "details", "files", "board", "brief", "wakeups", "folders"]);
+    expect(tabsFor("orchestrator")).toEqual(["questions", "details", "files", "notes", "board", "brief", "wakeups", "folders"]);
     expect(tabsFor("member")).toEqual([...PANEL_TABS, ...PROJECT_TABS]);
     // The main chat leads with every project's questions and keeps a session's own tabs behind them.
     expect(tabsFor("main")).toEqual(["questions", ...PANEL_TABS]);

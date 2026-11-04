@@ -228,7 +228,7 @@ describe("a file opened beside the orchestrator", () => {
 
   it("offers Preview in the strip only once something was opened", () => {
     expect(tabsFor("orchestrator")).not.toContain("preview");
-    expect(tabsFor("orchestrator", { preview: true })).toEqual(["questions", "details", "files", "preview", "board", "brief", "wakeups", "folders"]);
+    expect(tabsFor("orchestrator", { preview: true })).toEqual(["questions", "details", "files", "preview", "notes", "board", "brief", "wakeups", "folders"]);
     expect(routeTabsFor("orchestrator")).toContain("preview");
   });
 });
@@ -236,7 +236,7 @@ describe("a file opened beside the orchestrator", () => {
 describe("the Questions tab of an ordinary session", () => {
   it("is there only while side questions wait, first, and a link to it always opens it", () => {
     expect(tabsFor("session")).not.toContain("questions");
-    expect(tabsFor("session", { questions: true })).toEqual(["questions", "details", "files", "preview", "jobs"]);
+    expect(tabsFor("session", { questions: true })).toEqual(["questions", "details", "files", "preview", "jobs", "notes"]);
     expect(tabsFor("member", { questions: true })).not.toContain("questions");
     expect(routeTabsFor("session")).toContain("questions");
   });
@@ -245,14 +245,14 @@ describe("the Questions tab of an ordinary session", () => {
 describe("the Browser tab", () => {
   it("is offered only to a session that has had a browser, after the agent's own tabs", () => {
     expect(tabsFor("session")).not.toContain("browser");
-    expect(tabsFor("session", { browser: true })).toEqual(["details", "files", "preview", "jobs", "browser"]);
-    expect(tabsFor("member", { browser: true })).toEqual(["details", "files", "preview", "jobs", "browser", "board", "brief", "wakeups", "folders"]);
-    expect(tabsFor("main", { browser: true })).toEqual(["questions", "details", "files", "preview", "jobs", "browser"]);
-    expect(tabsFor("orchestrator", { browser: true })).toEqual(["questions", "details", "files", "browser", "board", "brief", "wakeups", "folders"]);
+    expect(tabsFor("session", { browser: true })).toEqual(["details", "files", "preview", "jobs", "notes", "browser"]);
+    expect(tabsFor("member", { browser: true })).toEqual(["details", "files", "preview", "jobs", "notes", "browser", "board", "brief", "wakeups", "folders"]);
+    expect(tabsFor("main", { browser: true })).toEqual(["questions", "details", "files", "preview", "jobs", "notes", "browser"]);
+    expect(tabsFor("orchestrator", { browser: true })).toEqual(["questions", "details", "files", "notes", "browser", "board", "brief", "wakeups", "folders"]);
   });
 
   it("gives the orchestrator its Details and a Files tab to read the project by, and no jobs it does not have", () => {
-    expect(tabsFor("orchestrator")).toEqual(["questions", "details", "files", "board", "brief", "wakeups", "folders"]);
+    expect(tabsFor("orchestrator")).toEqual(["questions", "details", "files", "notes", "board", "brief", "wakeups", "folders"]);
     expect(tabsFor("orchestrator")).not.toContain("jobs");
   });
 
@@ -274,8 +274,8 @@ describe("the Subagents tab", () => {
   const base = "/api/files/0123456789ab";
   it("is offered only to a session that has helpers, right after Jobs", () => {
     expect(tabsFor("session")).not.toContain("subagents");
-    expect(tabsFor("session", { subagents: true })).toEqual(["details", "files", "preview", "jobs", "subagents"]);
-    expect(tabsFor("session", { subagents: true, browser: true })).toEqual(["details", "files", "preview", "jobs", "subagents", "browser"]);
+    expect(tabsFor("session", { subagents: true })).toEqual(["details", "files", "preview", "jobs", "subagents", "notes"]);
+    expect(tabsFor("session", { subagents: true, browser: true })).toEqual(["details", "files", "preview", "jobs", "subagents", "notes", "browser"]);
     expect(tabsFor("orchestrator", { subagents: true })).not.toContain("subagents");
   });
   it("opens from a link on one helper, before the listing says there are helpers", () => {
