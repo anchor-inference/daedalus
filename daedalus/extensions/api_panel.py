@@ -62,6 +62,10 @@ FORWARDED: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         ("POST", _SESSION + "/upload"),
         ("POST", _SESSION + "/stop"),
         ("POST", _SESSION + "/answer"),
+        # The waiting messages: the panel shows them over its composer, and takes back or steers one.
+        ("GET", _SESSION + "/steer"),
+        ("POST", _SESSION + r"/steer/[A-Za-z0-9_.:-]{1,200}"),
+        ("DELETE", _SESSION + r"/steer/[A-Za-z0-9_.:-]{1,200}"),
         ("POST", _SESSION + "/model"),
         ("POST", _SESSION + "/policy/grant"),
         ("POST", _SESSION + "/policy/grant-similar"),
