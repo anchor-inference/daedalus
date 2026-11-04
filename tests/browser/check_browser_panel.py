@@ -70,8 +70,10 @@ def check(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ign
     page = open_page(context, bs, stub, f"{BASE}/agents/{S1}?token=t&scheme=dark&lang={lang}")
     tab = page.locator(".panel-tab[data-tab='browser']")
     tab.wait_for(timeout=10000)
-    if tab.inner_text().strip() != WORDS[lang]["tab"]:
-        say(f"the tab reads {tab.inner_text()!r}")
+    # Its name, not its drawn word: a narrow strip draws an inactive tab as its icon alone, named by
+    # its tooltip and accessible name (panelhost.tsx, useTabFit).
+    if (tab.get_attribute("aria-label") or "").strip() != WORDS[lang]["tab"] or tab.get_attribute("title") != WORDS[lang]["tab"]:
+        say(f"the tab is named {tab.get_attribute('aria-label')!r}")
     tab.click()
     page.wait_for_selector(f"{ROOT} .bv[data-state='live']", timeout=10000)
     if "panel=browser" not in page.url:

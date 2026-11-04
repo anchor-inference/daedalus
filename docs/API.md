@@ -39,6 +39,26 @@ back without knowing it, so it was not run again) or `cancelled`; `delivery` is 
 session's event stream carries its output as `remote_output` events (`{tool_call_id, delta}`), live only
 and never replayed: the tool's result is the copy that counts.
 
+**Notes beside a conversation.** Every chat has notes, and so does its project when it is a real one
+(a plain chat's scratch project has none). `GET /api/sessions/{id}/notes` answers both at once:
+`{"session_id", "project": {"id", "name"} | null, "chat": {"notes", "files"}, "project_scope": {"notes",
+"files"} | null}`, where a note is `{"id", "scope", "scope_id", "title", "body", "color", "pinned",
+"position", "version", "created_at", "updated_at", "updated_by"}` and its body is Markdown. `POST` to the
+same address with `{"scope", "title", "body"}` makes one; `PATCH /api/notes/{id}` changes its words with
+the `version` they were typed on and answers **409** with `{"detail": {"note": …}}` — the note as it now
+is — when someone saved in between (`force: true` keeps the sent words anyway). Pinning and a colour
+never move the version. `DELETE` keeps the note for a day so `POST …/restore` can bring it back. Files
+go up as multipart to `POST /api/sessions/{id}/notes/files` (`scope`, repeated `files`, 50 MB each) and
+come back from `GET /api/notes/files/{id}/download`. A note shows a file with plain relative Markdown,
+`![name](files/<file id>/<name>)` for a picture and `[name](files/<file id>/<name>)` for anything else:
+the id is what counts and the name is only there to be read, so renaming breaks nothing, a chat's note
+can show its project's files the same way, and a note exported as a zip keeps its files at exactly
+those paths, so the links work in any Markdown reader. `DELETE /api/notes/files/{id}` answers **409**
+with the notes that still show the file until `?force=true`. Each change is announced live as
+`notes.changed` on the event stream below. The agent reads and writes the same notes through its
+on-demand `notes` tool group (`NotesList`, `NoteRead`, `NoteWrite`, `NoteDelete`, `NoteAttach`); notes
+are never put into its prompt.
+
 **Everything that happens, as one stream.** `GET /api/events` is a server-sent event stream of what
 happens to sessions, terminals, staff and notifications. It opens with a `hello` frame carrying
 `head` (the newest event number) and `oldest` (the oldest one still kept), then sends each event

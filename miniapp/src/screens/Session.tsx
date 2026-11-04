@@ -1,5 +1,5 @@
 import { useContextActions } from "../ui/context-menu";
-import { Component, Fragment, createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Component, Fragment, Suspense, createContext, lazy, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { api, ApiError, AsrStatus, type AutopilotMark, type AutopilotStatus, ModelFallback, ProviderUsage, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, SessionDetail, Compacting, type SessionFolder, type Question } from "../api";
 import { Chevron, Dot, Status, copyText, fmtInt, statusWord, timeAgo } from "../ui/components";
@@ -96,6 +96,10 @@ import { SideQuestion } from "../btw/SideQuestion";
 import { COMPOSE_EVENT, ComposeTarget, type ComposeRequest } from "../annotate/compose";
 import { noticeFromEvent, raiseFromError, raiseSettingNotice, SettingNoticeLines, settingRef } from "../settinglink";
 import { MoveLive, useFolderMove } from "../project/moves";
+import { notesKey, type NotesListing } from "../notes/model";
+
+// The Notes tab's editor and renderer are a chunk of their own, fetched the first time the tab opens.
+const NotesPanel = lazy(() => import("../notes/NotesPanel").then((module) => ({ default: module.NotesPanel })));
 
 /**
  * Markdown parsed once per text. `cacheKey` names a message that will never change again, so its
@@ -1565,6 +1569,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     }
     return null;
   })();
+  // The phone's tile shows how many notes the chat has; a desktop has the tab itself for that.
+  const notesListing = useQuery<NotesListing>(phone && id && !pane ? notesKey(id) : null, { staleMs: 30000 }).data;
+  const notesCount = (notesListing?.chat?.notes?.length ?? 0) + (detail?.project && isProject(detail.project) ? notesListing?.project_scope?.notes?.length ?? 0 : 0);
   const lastSeq = detail?.messages.reduce<number | null>((last, message) => (typeof message.seq === "number" ? message.seq : last), null) ?? null;
   // The phone's bar and its ⋮ sheet hold the same commands as the desktop header above; a command
   // added there belongs in one of these two lists too, or a phone loses it.
@@ -1581,6 +1588,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     ...(hasDetails ? [{ id: "details", icon: "settings" as IconName, label: t("panel.tab.details"), onSelect: () => { setDetailsFocus("session"); panel.open("details"); } }] : []),
     ...(panelTabs.includes("preview") && panel.state.stack.length > 0 ? [{ id: "preview", icon: "eye" as IconName, label: t("panel.tab.preview"), onSelect: () => panel.open("preview") }] : []),
     ...(panelTabs.includes("jobs") && hasDetails ? [{ id: "jobs", icon: "clock" as IconName, label: t("panel.tab.jobs"), onSelect: () => panel.open("jobs") }] : []),
+    ...(panelTabs.includes("notes") ? [{ id: "notes", icon: "note" as IconName, label: t("panel.tab.notes"), count: notesCount || undefined, onSelect: () => panel.open("notes") }] : []),
     ...(panelTabs.includes("subagents") ? [{ id: "subagents", icon: "spawn" as IconName, label: t("panel.tab.subagents"), count: detail?.subagents?.length || undefined, onSelect: () => panel.openSubagent(null) }] : []),
     ...(hasDetails ? [{ id: "mcp", icon: "plug" as IconName, label: t("session.mcp"), onSelect: () => { setDetailsFocus("mcp"); panel.open("details"); } }] : []),
     ...(sessionDiagrams?.length ? [{ id: "diagrams", icon: "pen" as IconName, label: t("session.phone.diagrams"), count: sessionDiagrams.length, onSelect: () => navigate(pathFor("diagrams", null, { session: id })) }] : []),
@@ -1743,6 +1751,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                     ...(panelTabs.includes("files") ? [{ label: t("session.files"), icon: "folder" as IconName, onSelect: () => panel.open("files") }] : []),
                     ...(revealer ? [{ label: revealer.label, icon: "external" as IconName, onSelect: revealWorkspace }] : []),
                     ...(panelTabs.includes("jobs") ? [{ label: t("panel.tab.jobs"), icon: "terminal" as IconName, onSelect: () => panel.open("jobs") }] : []),
+                    ...(panelTabs.includes("notes") ? [{ label: t("panel.tab.notes"), icon: "note" as IconName, onSelect: () => panel.open("notes") }] : []),
                     { label: t("session.mcp"), icon: "plug" as IconName, onSelect: () => { setDetailsFocus("mcp"); panel.open("details"); } },
                   ]
                 : []),
@@ -1930,6 +1939,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               } : {}),
               ...(questionScope ? { questions: <QuestionsPanel scope={questionScope} toast={toast} /> } : {}),
               sources: <SourcesPanel key={sourcesOf ?? ""} sources={shownSources} />,
+              notes: <Suspense fallback={null}><NotesPanel sessionId={id} project={isProject(detail.project) ? { id: detail.project.id, name: detail.project.name } : null} phone={phone} toast={toast} /></Suspense>,
               browser: <BrowserTab groups={browsers.groups} toast={toast} phone={phone} sessionId={id ?? undefined} user={browsers.user} />,
               subagents: <SubagentsTab
                 leaderId={id}
@@ -2845,6 +2855,14 @@ function describe(item: ToolItem, workspace?: string): { verb: string; family: s
     case "Recall":
     case "Forget":
       return { verb: t(`tool.${item.name}`), family: item.name, detail: str("query") || str("text").slice(0, 60), icon: "bulb" };
+    case "NotesList":
+    case "NoteRead":
+    case "NoteDelete":
+      return { verb: verb(item.name, r), family: "notes", detail: str("query") || str("note_id"), icon: "note" };
+    case "NoteWrite":
+      return { verb: verb(str("note_id") ? "NoteWrite" : "NoteCreate", r), family: "notes", detail: str("title") || str("note_id"), icon: "note" };
+    case "NoteAttach":
+      return { verb: verb("NoteAttach", r), family: "notes", detail: base(str("path")), icon: "attach" };
     case "Verify":
       return { verb: r ? t("tool.Verify.on") : item.error ? t("tool.Verify.failed") : t("tool.Verify.off"), family: "Verify", detail: str("criterion"), icon: "wrench" };
     case "SubAgent":

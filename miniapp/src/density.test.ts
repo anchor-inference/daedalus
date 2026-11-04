@@ -45,10 +45,11 @@ import terminalSide from "./terminal/sidepanel.css?raw";
 import terminalCompose from "./terminal/compose.css?raw";
 import agentFeed from "./staff/agentfeed.css?raw";
 import taskDialog from "./board/taskdialog.css?raw";
+import notes from "./notes/notes.css?raw";
 // The browser's phone sheet, the session import, the agent's question card, the desktop's Quick
 // Chat, the widgets in an answer, the annotated snapshot, the Computer control's scope picker, the
 // Terminals page and the task dialog keep their looks beside their components; they answer to the same scale.
-const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop + "\n" + phone + "\n" + browserPhone + "\n" + newProject + "\n" + imports + "\n" + ask + "\n" + quick + "\n" + widget + "\n" + annotate + "\n" + computer + "\n" + schedules + "\n" + terminals + "\n" + taskDialog;
+const css = tokens + "\n" + legacy.replace(/@import[^;]+;/g, "") + "\n" + desktop + "\n" + phone + "\n" + browserPhone + "\n" + newProject + "\n" + imports + "\n" + ask + "\n" + quick + "\n" + widget + "\n" + annotate + "\n" + computer + "\n" + schedules + "\n" + terminals + "\n" + taskDialog + "\n" + notes;
 
 type Rule = { selector: string; media: string; body: string };
 
@@ -146,7 +147,11 @@ const LARGE_ALLOWED = [".answer", ".summary-body", ".preview-doc", ".composer-bo
   ".ptask-title-input",
   // The code a terminal asks to be paired with is the check itself: the operator compares it, letter by
   // letter, with the one their terminal prints, so it is drawn at a heading's size on the sheet.
-  ".pair-code"];
+  ".pair-code",
+  // A note's title is edited where it reads as the note's heading, and its words are prose written at
+  // the size the answers are read at (the composer's field is allowed the same for the same reason);
+  // the tinted copy under the field must match it letter for letter.
+  ".ne-title", ".ne-field", ".ne-tint"];
 
 /** Surfaces that are meant to be large: a screen, a dialog, a stage, an empty state, a bar that holds
  *  rows rather than being one. Everything else is a row, a control or an avatar, and is held to the tokens. */
@@ -158,6 +163,9 @@ const BOX_ALLOWED = [
   // The companion's canvas is a scene rather than a row or control; its measured height is the
   // viewport for a full 3D pose, and the phone version deliberately uses a smaller viewport.
   ".pet-host", ".pet-figure",
+  // The note editor is a dialog of its own, and its writing and reading panes are pages, not rows:
+  // the room under the last line is where the next one is written.
+  ".ne-dialog", ".ne-field", ".ne-tint", ".ne-read",
 ];
 
 /** The height a box is given outright, in px, or 0 where it is a token, a calc or a proportion. */
@@ -180,6 +188,9 @@ const CONTENT_BOXES = [
   { selector: ".turn-skeleton .sk-user", property: "height", max: 40 },
   { selector: ".files .tree-row.grep-row", property: "height", max: 48 },
   { selector: ".html-frame", property: "min-height", max: 400 },
+  // A note card's picture and the card-shaped placeholders the Notes tab shows while it loads.
+  { selector: ".note-thumb", property: "height", max: 52 },
+  { selector: ".notes-loading i", property: "height", max: 64 },
   // Not a box but the shade a sheet raises over its sticky footer while more waits below; shorter
   // than this it fell into the gap above the footer and said nothing.
   { selector: '.sheet-body[data-more="below"] .sheet-foot::before', property: "height", max: 56 },

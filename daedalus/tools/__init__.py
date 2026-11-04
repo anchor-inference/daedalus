@@ -187,6 +187,12 @@ TOOL_GROUPS: dict[str, ToolGroupSpec] = {
         "Create and edit native Excalidraw diagrams the operator can open in the app",
         "lazy",
     ),
+    "notes": ToolGroupSpec(
+        "The operator's notes in this chat's Notes tab and its project's, whenever they say 'my notes', 'write it down' or "
+        "'add to the notes': list, read, write, append to and delete Markdown notes (NotesList, NoteRead, NoteWrite, "
+        "NoteDelete) and add a workspace picture or file to them (NoteAttach). Not a file in the workspace, not Remember",
+        "lazy",
+    ),
     "settings": ToolGroupSpec(
         "Daedalus's own settings whenever the operator asks to change one ('answer in English', 'compact the history "
         "later', 'raise the iteration limit'): read them (SettingsGet) and change them (SettingsChange). Never edit "

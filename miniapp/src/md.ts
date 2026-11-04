@@ -42,6 +42,92 @@ function evidenceChip(kind: string, raw: string): string | null {
 // binary to git, and a source file nobody can read a diff of is its own defect.
 const STASH = "\uE000";
 
+/** What a note's rendering knows that an answer's does not: the files its references name. A note is
+ *  drawn by this same renderer (see `renderNote`), with three things only a note has: pictures and file
+ *  chips for `files/<id>/<name>` references, an anchor on every heading, and task boxes that toggle. */
+export type NoteFileInfo = { name: string; mime: string; size: number; width?: number | null; height?: number | null };
+export type NoteRender = { file: (id: string) => NoteFileInfo | null };
+
+/** The note being drawn, or null for an answer. Set only for the duration of `renderNote`, so every
+ *  helper below reads it without the option being threaded through each of them. */
+let noteCtx: (NoteRender & { slugs: Map<string, number> }) | null = null;
+
+/** The mark `renderNote` puts after a task's box in the source, carrying the task's line number: the
+ *  rendered box then names the very line it toggles. Counting boxes in order instead drifted the moment
+ *  the renderer and a separate scan disagreed about one line (a list inside a card, a continuation
+ *  line), and a tick landed on the wrong task. */
+const TASK_MARK = "\uE001";
+const TASK_MARK_RE = /\uE001(\d+)\uE001/g;
+
+const NOTE_ESC = String.raw`((?:\\.|[^\]\\\n])*)`;
+const NOTE_TARGET = String.raw`\(\s*(?:<files\/([a-z0-9]{12})(?:\/[^>\n]*)?>|files\/([a-z0-9]{12})(?:\/[^)\s]*)?)\s*\)`;
+const NOTE_IMAGE_RE = new RegExp(String.raw`!\[` + NOTE_ESC + String.raw`\]` + NOTE_TARGET, "g");
+const NOTE_LINK_RE = new RegExp(String.raw`\[` + NOTE_ESC + String.raw`\]` + NOTE_TARGET, "g");
+const UPLOADING_RE = new RegExp(String.raw`!?\[` + NOTE_ESC + String.raw`\]\(uploading:\d+\)`, "g");
+const REMOTE_IMAGE_RE = new RegExp(String.raw`!\[` + NOTE_ESC + String.raw`\]\((https?:\/\/[^)\s]+)\)`, "g");
+const ANCHOR_LINK_RE = new RegExp(String.raw`\[` + NOTE_ESC + String.raw`\]\(#([\p{L}\p{N}_-]+)\)`, "gu");
+
+function unescapeLabel(label: string): string {
+  return label.replace(/\\([\[\]\\])/g, "$1");
+}
+
+/** The family a file belongs to, for the colour of its square (the `--file-*` tokens). */
+export function fileFamily(info: Pick<NoteFileInfo, "name" | "mime">): string {
+  const n = info.name.toLowerCase();
+  if (/\.pdf$/.test(n)) return "pdf";
+  if (/\.(docx?|odt|rtf)$/.test(n)) return "document";
+  if (/\.(xlsx?|ods|csv|tsv)$/.test(n)) return "sheet";
+  if (/\.(pptx?|odp|key)$/.test(n)) return "slides";
+  if (/\.(zip|tar|gz|7z|rar)$/.test(n)) return "archive";
+  if (info.mime.startsWith("audio/")) return "audio";
+  if (info.mime.startsWith("video/")) return "video";
+  if (/\.(py|ts|tsx|js|go|rs|java|c|cpp|sh|json|ya?ml|toml)$/.test(n)) return "code";
+  if (info.mime.startsWith("text/") || /\.(md|txt)$/.test(n)) return "text";
+  return "other";
+}
+
+/** A file's kind as the chip names it: the extension, upper-cased, or the mime's own word. */
+function fileKind(info: NoteFileInfo): string {
+  const ext = /\.([A-Za-z0-9]{1,5})$/.exec(info.name)?.[1];
+  return (ext ?? info.mime.split("/")[1] ?? "file").slice(0, 4).toUpperCase();
+}
+
+function sizeWords(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function noteImage(label: string, id: string): string {
+  const info = noteCtx?.file(id) ?? null;
+  const alt = unescapeLabel(label) || info?.name || "";
+  if (!info) return noteMissing(alt);
+  const ratio = info.width && info.height ? ` style="aspect-ratio:${info.width} / ${info.height};--w:${info.width}px"` : "";
+  return `<button type="button" class="note-img" data-note-image="${escape(id)}" aria-label="${escape(alt)}" title="${escape(alt)}"${ratio}><img alt="${escape(alt)}" data-note-src="${escape(id)}" decoding="async"/></button>`;
+}
+
+function noteLink(label: string, id: string): string {
+  const info = noteCtx?.file(id) ?? null;
+  const text = unescapeLabel(label) || info?.name || "";
+  if (!info) return noteMissing(text);
+  if (info.mime.startsWith("image/") && !label) return noteImage(label, id);
+  return `<button type="button" class="note-file" data-note-file="${escape(id)}" title="${escape(info.name)}"><span class="note-file-kind" data-kind="${fileFamily(info)}" aria-hidden="true">${escape(fileKind(info))}</span><span class="note-file-name">${escape(text)}</span><span class="note-file-size">${sizeWords(info.size)}</span></button>`;
+}
+
+function noteMissing(name: string): string {
+  return `<span class="note-missing" title="${escape(t("notes.ref.missing"))}">${iconSvg("unlink", 13)}<span>${escape(name || t("notes.ref.missing"))}</span></span>`;
+}
+
+/** A heading's anchor: its words, lower-cased, spaces as dashes, letters of any script kept; a second
+ *  heading with the same words gets `-2`, as GitHub numbers them. */
+export function headingSlug(text: string, seen?: Map<string, number>): string {
+  const base = text.toLowerCase().replace(/<[^>]*>/g, "").replace(/&[a-z]+;|&#\d+;/g, "").replace(/[^\p{L}\p{N}\s_-]/gu, "").trim().replace(/\s+/g, "-") || "section";
+  if (!seen) return base;
+  const n = (seen.get(base) ?? 0) + 1;
+  seen.set(base, n);
+  return n === 1 ? base : `${base}-${n}`;
+}
+
 // An address inside the app: /app, its segments, a query of plain characters (`&` arrives escaped)
 // and a fragment that names a message or a settings row. Neither a segment nor the fragment ends in
 // punctuation, so the full stop after an address in a sentence stays in the sentence.
@@ -63,6 +149,22 @@ function inline(s: string): string {
     codes.push(place ? `<a href="${escape(place)}" data-app-link><code>${escape(c)}</code></a>` : `<code>${escape(c)}</code>`);
     return ` ${STASH}${codes.length - 1}${STASH} `;
   });
+  if (noteCtx) {
+    // A note's own references, before anything else reads the brackets as a plain link.
+    const stash = (html: string) => {
+      codes.push(html);
+      return ` ${STASH}${codes.length - 1}${STASH} `;
+    };
+    s = s.replace(NOTE_IMAGE_RE, (_, label: string, a?: string, b?: string) => stash(noteImage(label, (a || b) as string)));
+    s = s.replace(NOTE_LINK_RE, (_, label: string, a?: string, b?: string) => stash(noteLink(label, (a || b) as string)));
+    // The editor's stand-in while a pasted file is on its way up.
+    s = s.replace(UPLOADING_RE, (_, label: string) => stash(`<span class="note-uploading"><i aria-hidden="true"></i><span>${escape(unescapeLabel(label))}</span></span>`));
+    // A picture from the web is not fetched: a note can be the agent's, and a picture's address is the
+    // classic way to carry something out. It is a link the operator may open.
+    s = s.replace(REMOTE_IMAGE_RE, (_, label: string, url: string) => stash(`<a class="note-remote" href="${escape(url)}" target="_blank" rel="noreferrer">${iconSvg("image", 13)}<span>${escape(unescapeLabel(label) || siteOf(url))}</span></a>`));
+    s = s.replace(ANCHOR_LINK_RE, (_, label: string, slug: string) => stash(`<a href="#${escape(slug)}" data-note-anchor="${escape(slug)}">${escape(unescapeLabel(label))}</a>`));
+  }
+  s = s.replace(TASK_MARK_RE, "");
   // After the code stash, so a tag quoted in backticks stays quoted, and before the escape, so the
   // tag itself never reaches the reader as markup.
   s = s.replace(EVIDENCE_RE, (whole, kind: string, raw: string) => {
@@ -181,7 +283,11 @@ function renderList(lines: string[]): string {
   const tag = ordered ? "ol" : "ul";
   const html = items
     .map((it) => {
-      const check = it.task ? `<span class="check${it.checked ? " on" : ""}">${it.checked ? "✓" : ""}</span>` : "";
+      const line = it.task && noteCtx ? /^\uE001(\d+)\uE001/.exec(it.text)?.[1] : undefined;
+      const check = !it.task ? ""
+        // A note's box is a control: it names the source line it ticks (see TASK_MARK).
+        : line !== undefined ? `<button type="button" class="check task-toggle${it.checked ? " on" : ""}" role="checkbox" aria-checked="${it.checked ? "true" : "false"}" aria-label="${escape(t(it.checked ? "notes.task.undo" : "notes.task.do"))}" data-task-line="${line}">${it.checked ? "✓" : ""}</button>`
+        : `<span class="check${it.checked ? " on" : ""}">${it.checked ? "✓" : ""}</span>`;
       const kids = it.children.length ? renderList(it.children) : "";
       return `<li${it.task ? ' class="task"' : ""}>${check}${inline(it.text)}${kids}</li>`;
     })
@@ -325,7 +431,12 @@ export function renderMarkdown(text: string): string {
     if (heading) {
       flush();
       const level = Math.min(heading[1].length + 1, 4);
-      out.push(`<h${level}>${inline(heading[2])}</h${level}>`);
+      if (noteCtx) {
+        const words = inline(heading[2]);
+        const slug = headingSlug(words, noteCtx.slugs);
+        const link = escape(t("notes.heading.link"));
+        out.push(`<h${level} id="${escape(slug)}" class="note-heading">${words}<button type="button" class="note-anchor" data-note-heading="${escape(slug)}" aria-label="${link}" title="${link}">#</button></h${level}>`);
+      } else out.push(`<h${level}>${inline(heading[2])}</h${level}>`);
       i++;
       continue;
     }
@@ -371,6 +482,41 @@ export function renderMarkdown(text: string): string {
   const closed = (html.match(/<\/details>/g) ?? []).length;
   if (opened > closed) html += "</details>".repeat(opened - closed);
   return html;
+}
+
+/** The task lines of a note: the source line of every list item with a box, outside fences and flows.
+ *  A line inside a quote counts too, as the renderer draws it. */
+export function noteTaskLines(text: string): number[] {
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  const found: number[] = [];
+  let fence = false;
+  let flow = false;
+  lines.forEach((line, index) => {
+    if (/^\s*```/.test(line)) fence = !fence;
+    else if (!fence && FLOW_OPEN_RE.test(line)) flow = true;
+    else if (flow && CARD_CLOSE_RE.test(line)) flow = false;
+    else if (!fence && !flow && /^\s*(?:>\s?)*\s*(?:[-*+]|\d+[.)])\s+\[( |x|X)\]\s/.test(line)) found.push(index);
+  });
+  return found;
+}
+
+/**
+ * A note, drawn by the answer renderer with what only a note has (see `NoteRender`). The source is
+ * first marked: every task line carries its own line number after its box, so a tick in the drawing
+ * names exactly the line it changes.
+ */
+export function renderNote(text: string, ctx: NoteRender): string {
+  // A mark the text brought along could name a line it does not stand on; only ours count.
+  const clean = text.split(TASK_MARK).join("");
+  const lines = clean.replace(/\r\n?/g, "\n").split("\n");
+  for (const index of noteTaskLines(clean)) lines[index] = lines[index].replace(/\[( |x|X)\]\s/, (box) => `${box}${TASK_MARK}${index}${TASK_MARK}`);
+  const outer = noteCtx;
+  noteCtx = { ...ctx, slugs: new Map() };
+  try {
+    return renderMarkdown(lines.join("\n"));
+  } finally {
+    noteCtx = outer;
+  }
 }
 
 /** What a click on an evidence chip asks for; the session screen listens and opens the file or the run. */

@@ -3,10 +3,11 @@
 // should reproduce (`?panel=preview&path=reports/menu.md`), the browser remembers the width and the
 // last open tab, and the component in panel.tsx is the only thing that turns either into pixels.
 
-export type PanelTab = "details" | "files" | "preview" | "jobs" | "subagents" | "board" | "brief" | "wakeups" | "folders" | "questions" | "browser" | "sources";
+export type PanelTab = "details" | "files" | "preview" | "jobs" | "notes" | "subagents" | "board" | "brief" | "wakeups" | "folders" | "questions" | "browser" | "sources";
 
-/** A session's own tabs: what the agent is, the files it works on, one of them open, its jobs. */
-export const PANEL_TABS: PanelTab[] = ["details", "files", "preview", "jobs"];
+/** A session's own tabs: what the agent is, the files it works on, one of them open, its jobs, and the
+ *  operator's notes beside the conversation (the chat's, and its project's when it has one). */
+export const PANEL_TABS: PanelTab[] = ["details", "files", "preview", "jobs", "notes"];
 
 /** A project's tabs, beside a session in the project's focus mode. */
 export const PROJECT_TABS: PanelTab[] = ["board", "brief", "wakeups", "folders"];
@@ -45,8 +46,9 @@ export type PanelContext = "session" | "orchestrator" | "member" | "main";
 export function tabsFor(context: PanelContext, opts: { browser?: boolean; preview?: boolean; subagents?: boolean; questions?: boolean; sources?: boolean } = {}): PanelTab[] {
   // An answer's sources sit beside the browser: both are the web the turn read.
   const browser: PanelTab[] = [...(opts.browser ? (["browser"] as PanelTab[]) : []), ...(opts.sources ? (["sources"] as PanelTab[]) : [])];
-  const own: PanelTab[] = [...PANEL_TABS, ...(opts.subagents ? (["subagents"] as PanelTab[]) : [])];
-  if (context === "orchestrator") return ["questions", "details", "files", ...(opts.preview ? (["preview"] as PanelTab[]) : []), ...browser, ...PROJECT_TABS];
+  // Subagents stay right after Jobs, where they came from; Notes close the agent's own tabs.
+  const own: PanelTab[] = [...PANEL_TABS.filter((tab) => tab !== "notes"), ...(opts.subagents ? (["subagents"] as PanelTab[]) : []), "notes"];
+  if (context === "orchestrator") return ["questions", "details", "files", ...(opts.preview ? (["preview"] as PanelTab[]) : []), "notes", ...browser, ...PROJECT_TABS];
   if (context === "member") return [...own, ...browser, ...PROJECT_TABS];
   if (context === "main") return ["questions", ...own, ...browser];
   return [...(opts.questions ? (["questions"] as PanelTab[]) : []), ...own, ...browser];
@@ -259,6 +261,27 @@ function safeStorage(): Storage | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * How much of each tab the strip can draw, widest first: the icon and the word, the word alone, the
+ * word on the open tab only (the others as their icons, named by their tooltip), the icons alone. The
+ * strip takes the first that fits, measured, never a fixed count of tabs: a rule that dropped the icons
+ * past four tabs let the sixth tab (Notes) push the Russian strip into a scroll, and the first tab was
+ * drawn as a cut-off "…ия". A phone's sheet never draws the icon beside the word; there is no room.
+ */
+export const TAB_FITS = ["full", "words", "active", "icons"] as const;
+export type TabFit = (typeof TAB_FITS)[number];
+
+/** The fits a strip tries, in order. */
+export function fitsFor(inSheet: boolean): readonly TabFit[] {
+  return inSheet ? TAB_FITS.slice(1) : TAB_FITS;
+}
+
+/** The fit to try after `fit` when the strip still overflows, or null when it is the last. */
+export function nextFit(fit: TabFit, inSheet: boolean): TabFit | null {
+  const order = fitsFor(inSheet);
+  return order[order.indexOf(fit) + 1] ?? null;
 }
 
 // ── the keyboard ─────────────────────────────────────────────────────────────────────────────

@@ -130,6 +130,14 @@ A conversation is an ordinary chat, a computer chat or a browser chat. Tabs over
 <td align="center"><sub>Written during a run — queued for the end of the turn; Steer hands it to the agent now</sub></td>
 <td align="center"><sub>Health — each integration and check in one line, and the fix for the one that fails</sub></td>
 </tr>
+<tr>
+<td><img src="screenshots/notes-editor-split.png" alt="A note being written in Markdown beside its drawing: a picture pasted into it and a PDF shown as a file card" /></td>
+<td><img src="screenshots/notes-panel.png" alt="The Notes tab beside a chat: the project's notes and the chat's under two tabs, with colours, a pinned note, task progress and pictures" /></td>
+</tr>
+<tr>
+<td align="center"><sub>Notes — Markdown with pictures and files pasted in, drawn as the answers are; the agent can read and add to them</sub></td>
+<td align="center"><sub>The Notes tab — a chat's notes and its project's, searchable, pinned, saved as you type</sub></td>
+</tr>
 </table>
 
 <p align="center">

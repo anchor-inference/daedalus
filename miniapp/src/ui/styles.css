@@ -911,10 +911,14 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .panel-viewer .preview-frame { min-height: 0; flex: 1; }
 .panel.phone-width .panel-viewer { width: 390px; max-width: 100%; margin: 0 auto; border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
 .panel-files .files .crumbs { margin-top: 2px; }
-/* A phone's sheet has room for the four words or the four icons, not both. */
+/* How much of each tab the strip draws is measured (panelhost.tsx, useTabFit): the icon and the word,
+   the word alone, the word on the open tab only, or the icons alone; the first that fits wins. A phone's
+   sheet starts at the word alone. Every tab keeps its name as its tooltip and its accessible name. */
+.panel-tablist.fit-words .panel-tab .ic, .panel-tablist.fit-active .panel-tab.on .ic { display: none; }
+.panel-tablist.fit-active .panel-tab:not(.on) > span:not(.count), .panel-tablist.fit-icons .panel-tab > span:not(.count) { display: none; }
+.panel-tablist.fit-words .panel-tab, .panel-tablist.fit-active .panel-tab, .panel-tablist.fit-icons .panel-tab { padding: 0 8px; }
 @media (max-width: 1023px) {
   .panel-sheet .panel-tab { padding: 0 8px; }
-  .panel-sheet .panel-tab .ic { display: none; }
 }
 
 /* The Jobs tab's flat sections: a 12 px label and hairlines between. The Details tab started from the
@@ -1349,12 +1353,7 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
      grid column does not animate: the conversation reflows once, and the windowed list measures once. */
   .chat-body.with-panel { display: grid; grid-template-columns: minmax(0, 1fr) clamp(var(--panel-w-min), var(--panel-w), 65%); }
   .panel { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--line); background: var(--surface-1); opacity: 0; }
-  /* A narrow panel (the dual view's pane) keeps the tab icons and drops their words. */
   .panel { container-type: inline-size; }
-  @container (max-width: 420px) {
-    .panel-tab > span:not(.count) { display: none; }
-    .panel-tab { padding: 0 8px; }
-  }
   .panel.shown { opacity: 1; transition: opacity 200ms var(--ease-out); }
   .panel .pane-handle { position: absolute; top: 0; bottom: 0; left: -4px; margin: 0; }
   .panel.full { position: absolute; inset: 0; z-index: 5; border-left: 0; }
@@ -4102,8 +4101,7 @@ button.staff-row:hover { background: var(--surface-2); }
 .msg-state.failed { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
 .msg-state.submitted, .msg-state.written { color: var(--info); }
 
-/* The panel beside the orchestrator: its tabs, and the board drawn as one list inside it. */
-.panel-tablist.many .panel-tab { padding: 0 8px; }
+/* The panel beside the orchestrator: the board drawn as one list inside it. */
 .pboard-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px 0; }
 .pboard.embedded { padding: 4px 12px 16px; }
 
@@ -4758,16 +4756,8 @@ button.staff-row:hover { background: var(--surface-2); }
 .questions-empty b { font-size: var(--fs-14); color: var(--fg); }
 .questions-empty span:last-child { max-width: 280px; }
 .questions-empty-mark { display: inline-flex; align-items: center; justify-content: center; width: var(--ctl-h); height: var(--ctl-h); margin-bottom: 4px; border-radius: 50%; background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
-/* The badge on the tab: what waits for the operator, in the colour of a request. Beside the
-   orchestrator five tabs share the strip, and the words fit only without their icons. */
+/* The badge on the tab: what waits for the operator, in the colour of a request. */
 .panel-tab .count.attn { background: var(--warn); color: var(--primary-ink); }
-.panel-tablist.many .panel-tab .ic { display: none; }
-/* A narrow panel drops the words (the container rule beside the panel's grid column), so there the
-   icons come back whatever the count: with both gone a strip of five tabs, a session's four and its
-   Subagents, drew as nothing but the Details tab's number, and no tab could be reached at all. */
-@container (max-width: 420px) {
-  .panel-tablist.many .panel-tab .ic { display: block; }
-}
 
 /* The chat's one line for the whole list: how many wait, and the way to them. */
 /* The same notice as the main chat's setup line — solid frame, icon, sentence, a small button at the
