@@ -10,8 +10,10 @@ exactly as the bridge does. The daemon never listens on the network.
 
 A device token is made by spending a one-time code the operator reads in the app. Codes and tokens
 are kept as their SHA-256 only; a token is compared in constant time against every paired device, and
-the pairing and the relay's first frame share one limit on failed attempts per address and overall,
-because both are reachable by anyone who can reach the server. Nothing here logs a code, a token or
+the pairing and the relay's first frame each have a limit on failed attempts per address and overall,
+because both are reachable by anyone who can reach the server. They used to share one: behind a
+reverse proxy every client has the proxy's address, so a Chrome reconnecting with a stale token
+used it up and the operator's correct code was refused as "not accepted". Nothing here logs a code, a token or
 an address.
 """
 
@@ -325,6 +327,9 @@ class Pairing:
         self.db = db
         self.now = now
         self.attempts = Attempts()
+        """Wrong pairing codes."""
+        self.token_attempts = Attempts()
+        """Wrong device tokens at the relay; kept apart so a stale Chrome never blocks a new pairing."""
         self._lock = asyncio.Lock()
 
     async def _codes(self) -> list[dict[str, Any]]:
@@ -361,6 +366,7 @@ class Pairing:
                 match = hmac.compare_digest(wanted, str(entry.get("hash") or "")) or match
             if not match:
                 self.attempts.failed(address)
+                logger.warning("a pairing code was refused as wrong or expired")
                 raise PairingRefused("the code is wrong or has expired; make a new one in the app (Settings → Environments → Your Chrome)")
             await self.db.kv_set(self.CODES, [])
             token = secrets.token_urlsafe(32)
@@ -377,7 +383,7 @@ class Pairing:
     async def device_of(self, token: str, *, address: str) -> Device | None:
         """The paired device a token is, or None for a wrong, revoked or long-unused one. A wrong one
         counts against the address."""
-        if not token or self.attempts.blocked(address):
+        if not token or self.token_attempts.blocked(address):
             return None
         wanted = _digest(token)
         found: dict[str, Any] | None = None
@@ -385,7 +391,8 @@ class Pairing:
             if hmac.compare_digest(wanted, str(entry["token_hash"])):
                 found = entry
         if found is None or self._idle(found):
-            self.attempts.failed(address)
+            self.token_attempts.failed(address)
+            logger.warning("a Chrome offered a device token that is unknown, revoked or long unused; it must pair again")
             return None
         return self._device(found)
 
