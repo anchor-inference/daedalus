@@ -1062,6 +1062,7 @@ class SessionManager:
             if state.prepared_compaction is not None:
                 state.prepared_compaction.drop()
         await self.flush_background()
+        await self.request_manifests.close()
         await self.hooks.aclose()
         for task in (getattr(self, "_backfill_task", None), getattr(self, "_price_task", None)):
             if task is not None and not task.done():
@@ -2100,6 +2101,12 @@ class SessionManager:
                     end_tree(process.pid, hard=True)
                 except (ProcessLookupError, PermissionError):
                     pass
+        # Its request manifests go first, while their references still say which blobs were theirs;
+        # the cascade below would take the rows inside a transaction and leave the bytes on disk.
+        try:
+            await self.request_manifests.forget_session(session_id)
+        except Exception:  # noqa: BLE001 — leftovers are swept at the next start
+            logger.exception("could not free the request manifests of %s", session_id)
         runs = await self.db.fetchall("SELECT id FROM runs WHERE session_id = ?", (session_id,))
         async with self.db.transaction() as conn:
             for row in runs:
