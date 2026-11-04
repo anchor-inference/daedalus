@@ -272,7 +272,13 @@ function NewConversation({ shell, current, listing, toast, onCreated, onCancel }
     return "sent";
   }
 
-  const defaultLabel = settings ? settings.presets[settings.model.preset]?.label ?? settings.model.preset : "";
+  // A preset's label may be empty (one added from a provider's list is named by its model), and
+  // `??` kept the empty string: the pill then read the placeholder word "model" instead of a name.
+  const presetName = (id: string) => {
+    const p = settings?.presets[id];
+    return p ? p.label || `${p.provider}/${p.model}` : id;
+  };
+  const defaultLabel = settings ? presetName(settings.model.preset) : "";
   return (
     <div className="sp-new" onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }}
       onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); composer.current?.addFiles(e.dataTransfer.files); } }}>
@@ -304,7 +310,7 @@ function NewConversation({ shell, current, listing, toast, onCreated, onCancel }
         model={choices.label || defaultLabel}
         fallback={null}
         onChooseModel={async (choice) => {
-          const label = "preset" in choice ? settings?.presets[choice.preset]?.label ?? choice.preset : "model" in choice ? choice.model : "";
+          const label = "preset" in choice ? presetName(choice.preset) : "model" in choice ? choice.model : "";
           setChoices((c) => ({ ...c, model: "clear" in choice ? null : choice, label }));
         }}
         thinking={choices.effort !== "off"}
@@ -367,7 +373,7 @@ function useAsr(): AsrStatus | null {
   return asr;
 }
 
-type PanelSettings = { presets: Record<string, { label?: string }>; model: { preset: string } };
+type PanelSettings = { presets: Record<string, { label?: string; provider?: string; model?: string }>; model: { preset: string } };
 
 /** The model list's default, for a conversation that does not exist yet. */
 function usePanelSettings(): PanelSettings | null {
