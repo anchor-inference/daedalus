@@ -277,7 +277,7 @@ func (m *Manager) Navigate(ctx context.Context, t *Tab, url string, timeout time
 	// Judged before the navigation is made, so a refusal is the agent's 1102 with its reason rather
 	// than the proxy's error page. The proxy refuses the same destinations on its own either way.
 	if m.deps.Wall != nil {
-		if err := m.deps.Wall.Navigation(ctx, t.Group.Browser.ID, url); err != nil {
+		if err := m.deps.Wall.Navigation(ctx, m.WallKey(t.Group), url); err != nil {
 			return NavResult{}, err
 		}
 	}
@@ -288,8 +288,12 @@ func (m *Manager) Navigate(ctx context.Context, t *Tab, url string, timeout time
 	nctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	kept := t.keptMark()
+	blocks := t.blockMark()
 	if err := t.Call(nctx, "Page.navigate", map[string]any{"url": url}, &r); err != nil {
 		return NavResult{}, err
+	}
+	if b := t.blockedSince(blocks); b != nil {
+		return NavResult{}, ErrGuardBlocked(b)
 	}
 	if k := t.keptSince(kept); k != nil {
 		// The navigation was aborted on purpose once its PDF was kept, and Chromium reports that as
@@ -302,7 +306,29 @@ func (m *Manager) Navigate(ctx context.Context, t *Tab, url string, timeout time
 		return m.result(ctx, t, r.ErrorText), nil
 	}
 	if r.LoaderID != "" {
-		if err := t.WaitLifecycle(nctx, r.LoaderID, "load"); err != nil {
+		// The guard stopping a redirect ends the wait: the original document's load never comes, and
+		// the navigation once waited out its whole 30 s and reported the tab on the blocked address.
+		wctx, stop := context.WithCancel(nctx)
+		go func() {
+			for {
+				wake := t.Wake()
+				if t.blockedSince(blocks) != nil {
+					stop()
+					return
+				}
+				select {
+				case <-wake:
+				case <-wctx.Done():
+					return
+				}
+			}
+		}()
+		err := t.WaitLifecycle(wctx, r.LoaderID, "load")
+		stop()
+		if b := t.blockedSince(blocks); b != nil {
+			return NavResult{}, ErrGuardBlocked(b)
+		}
+		if err != nil {
 			if nctx.Err() != nil && ctx.Err() == nil {
 				// Slow pages are common; what has loaded is usable, and the agent is told.
 				return m.result(ctx, t, "the page was still loading after "+timeout.String()), nil

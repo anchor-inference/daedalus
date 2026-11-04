@@ -44,6 +44,38 @@ func (s fetchState) params() map[string]any {
 	return map[string]any{"patterns": patterns}
 }
 
+// WallKey is what the wall keeps a group's grants under: its browser, whose proxy they open, or, in the
+// operator's Chrome, the group itself. There the grants are the conversation's site approvals, kept
+// by the host per conversation; keyed by browser they went with the browser a dropped relay ended,
+// and one conversation's approvals let another's pages through.
+func (m *Manager) WallKey(g *Group) string {
+	if g.Browser.attached {
+		return g.ID
+	}
+	return g.Browser.ID
+}
+
+// ErrGuardBlocked is a navigation the guard stopped, said as Daedalus's rule and not as Chrome's
+// ERR_BLOCKED_BY_CLIENT: the agent blamed the operator's ad blocker for it.
+func ErrGuardBlocked(b *GuardBlock) *wire.Error {
+	data := map[string]any{"url": b.URL, "by": "daedalus"}
+	for k, v := range b.Verdict {
+		data[k] = v
+	}
+	host, _ := data["host"].(string)
+	if host == "" {
+		host = b.URL
+	}
+	why, _ := data["reason"].(string)
+	switch why {
+	case "egress_allow", "":
+		why = "the operator has not approved that site for this conversation"
+	default:
+		why = "the network wall's " + why + " rule"
+	}
+	return errWith(CodeBlocked, data, "Daedalus stopped this page's navigation to %s (%s). It is not the page's error, nor an ad blocker of the operator's", host, why)
+}
+
 // guarding reports whether the wall wants page navigations judged.
 func (m *Manager) guarding() bool {
 	return m.deps.Wall != nil && m.deps.Wall.Allowlist()
@@ -102,7 +134,7 @@ func (m *Manager) guardPaused(t *Tab, raw json.RawMessage) {
 	allow := p.FrameID != t.TargetID || m.deps.Wall == nil || t.Group.Control().Owner == OwnerHuman
 	var verdict map[string]any
 	if !allow {
-		err := m.deps.Wall.Navigation(ctx, t.Group.Browser.ID, p.Request.URL)
+		err := m.deps.Wall.Navigation(ctx, m.WallKey(t.Group), p.Request.URL)
 		allow = err == nil
 		var we *wire.Error
 		if errors.As(err, &we) {
@@ -114,6 +146,9 @@ func (m *Manager) guardPaused(t *Tab, raw json.RawMessage) {
 		return
 	}
 	_ = t.Call(ctx, "Fetch.failRequest", map[string]any{"requestId": p.RequestID, "errorReason": "BlockedByClient"}, nil)
+	// Chrome reports the failure as ERR_BLOCKED_BY_CLIENT, which a model reads as the operator's ad
+	// blocker; a navigation waiting on this tab ends with the block named as Daedalus's (tabs.go).
+	t.recordBlock(GuardBlock{URL: p.Request.URL, Verdict: verdict})
 	ev := map[string]any{"group_id": t.Group.ID, "tab_id": t.ID, "url": p.Request.URL, "from": t.URL(), "by": "page"}
 	for _, k := range []string{"host", "port", "decision", "reason"} {
 		if v, ok := verdict[k]; ok {

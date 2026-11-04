@@ -45,7 +45,13 @@ func (d *Daemon) netGrant(ctx context.Context, c *server.Conn, params json.RawMe
 	if err != nil {
 		return nil, err
 	}
-	if !d.Net.Grant(group.Browser.ID, g.Host, g.Port, g.TTL()) {
+	key := d.Manager.WallKey(group)
+	if group.Browser.Attached() {
+		d.Net.Keep(key)
+	} else if g.Host == netwall.AnySite {
+		return nil, wire.Errorf(wire.CodeInvalidParams, "every site at once is granted in the operator's Chrome only")
+	}
+	if !d.Net.Grant(key, g.Host, g.Port, g.TTL()) {
 		return nil, wire.Errorf(wire.CodeNotFound, "the browser of group %q has no network wall running", g.GroupID)
 	}
 	return map[string]any{}, nil
@@ -64,6 +70,6 @@ func (d *Daemon) netRevoke(ctx context.Context, c *server.Conn, params json.RawM
 	if err != nil {
 		return nil, err
 	}
-	d.Net.Revoke(group.Browser.ID, p.Host, p.Port)
+	d.Net.Revoke(d.Manager.WallKey(group), p.Host, p.Port)
 	return map[string]any{}, nil
 }

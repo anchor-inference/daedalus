@@ -60,7 +60,7 @@ from daedalus.browser.monitor import InjectionMonitor
 from daedalus.browser.notes import ACTIVE, NOTE, PROCEDURE, SiteNotes
 from daedalus.browser.replay import RecordedSkills
 from daedalus.browser.replay import replay as run_replay
-from daedalus.browser.user import CONSENT, chrome_forbids, site_granted
+from daedalus.browser.user import ANTI_BOT_WORDS, CONSENT, anti_bot, chrome_forbids, site_granted
 from daedalus.browser.user import site_of as registrable_site
 from daedalus.host.policy import (
     ALLOW,
@@ -739,6 +739,13 @@ def explain(exc: BrowserError) -> str:
             "browser settings keep the LAN closed to the agent's browser (LAN sites: listed only). Do not work around it with another tool; "
             "say what the task needs there, and the operator can open it."
         )
+    if isinstance(exc, Blocked) and exc.details.get("by") == "daedalus":
+        # A redirect the page made, stopped by Daedalus's own guard. Chrome calls it ERR_BLOCKED_BY_CLIENT,
+        # and an agent told only that blamed the operator's ad blocker.
+        url = str(exc.details.get("url") or "")
+        if anti_bot(url):
+            return f"{exc.message}. The page was sending the tab to <{url[:200]}>. {ANTI_BOT_WORDS}"
+        return f"{exc.message}. If the task needs that site, BrowserNavigate there (the operator is asked), or carry on from another page."
     if isinstance(exc, Blocked):
         return f"The browser's network wall refused {exc.details.get('host') or 'that address'}: {exc.details.get('reason') or exc.message}. It is not reachable from the agent's browser."
     if isinstance(exc, Forbidden) and exc.details.get("covered_by"):
@@ -1211,6 +1218,8 @@ class BrowserAgent:
         await self._audit(group, caller, "navigate", {"tab": current["id"], "go": go or "", "url": str(result.get("url") or url or "")[:2000]})
         reached = str(result.get("url") or url or "")
         await self._site_notes(caller, reached)
+        if anti_bot(reached):
+            caller.notes.append(f"Tab {current['id']} is on the site's anti-bot check. {ANTI_BOT_WORDS}")
         if not go and (hint := self.hints.went(self._who(caller), reached)):
             caller.notes.append(hint)
         status = f" (HTTP {result['status']})" if result.get("status") else ""

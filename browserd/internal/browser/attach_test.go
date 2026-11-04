@@ -806,3 +806,54 @@ func TestPDFOfNoStatedLengthIsStreamed(t *testing.T) {
 		t.Fatalf("past the limit: kept %d, %d reads, sent %v", k.count(), n, sent)
 	}
 }
+
+// blockingWall refuses, as the wall's allowlist would, every address with "punish" in it.
+type blockingWall struct{}
+
+func (blockingWall) Open(string) (string, error) { return "", nil }
+func (blockingWall) Track(string)                {}
+func (blockingWall) Close(string)                {}
+func (blockingWall) Allowlist() bool             { return true }
+func (blockingWall) Navigation(ctx context.Context, key, url string) error {
+	if !strings.Contains(url, "punish") {
+		return nil
+	}
+	e := wire.Errorf(CodeBlocked, "outside the allowlist")
+	e.Data = map[string]any{"host": "login.shop.example", "port": 443, "decision": "ask", "reason": "egress_allow"}
+	return e
+}
+
+// The guard stopping a redirect ends the navigation at once, said as Daedalus's site rule: it once
+// waited out its whole 30 s for a load that never came, reported the tab on the blocked address,
+// and Chrome's ERR_BLOCKED_BY_CLIENT was put down to the operator's ad blocker.
+func TestAGuardBlockEndsTheNavigationAndIsNamedAsDaedalus(t *testing.T) {
+	m, s, _ := attachManager(t)
+	m.deps.Wall = blockingWall{}
+	_, tab := openAttached(t, m, "s-1")
+	s.mu.Lock()
+	s.reply = func(method string, params map[string]any) (any, bool) {
+		if method != "Page.navigate" {
+			return nil, false
+		}
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			m.guardPaused(tab, json.RawMessage(`{"requestId":"r2","frameId":"`+tab.TargetID+`","request":{"url":"https://login.shop.example/punish?x=1"}}`))
+		}()
+		return map[string]any{"frameId": tab.TargetID, "loaderId": "L1"}, true
+	}
+	s.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	begin := time.Now()
+	_, err := m.Navigate(ctx, tab, "https://shop.example/", 15*time.Second)
+	if codeOf(err) != CodeBlocked || !strings.Contains(err.Error(), "Daedalus stopped") || !strings.Contains(err.Error(), "login.shop.example") {
+		t.Fatalf("the blocked redirect: %v", err)
+	}
+	if took := time.Since(begin); took > 5*time.Second {
+		t.Fatalf("the navigation waited %s after the block", took)
+	}
+	var we *wire.Error
+	if !errors.As(err, &we) || we.Data.(map[string]any)["decision"] != "ask" || we.Data.(map[string]any)["by"] != "daedalus" {
+		t.Fatalf("the block's verdict: %#v", err)
+	}
+}

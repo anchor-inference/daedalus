@@ -67,7 +67,7 @@ type Deps struct {
 type Wall interface {
 	Open(browserID string) (addr string, err error)
 	// Track keeps the grants of a browser that has no proxy of its own: the operator's Chrome, whose
-	// pages leave from the operator's machine. Close ends them with the browser.
+	// pages leave from the operator's machine, keeps them by group (WallKey). Close ends them.
 	Track(browserID string)
 	Close(browserID string)
 	Navigation(ctx context.Context, browserID, url string) error
@@ -598,8 +598,17 @@ func (m *Manager) CloseGroup(ctx context.Context, id string) (int, error) {
 	tabs := g.Tabs()
 	m.backend.closeGroup(ctx, g, tabs)
 	m.forgetGroup(g, tabs)
+	m.closeGrants(g)
 	m.publish("group.closed", map[string]any{"group_id": g.ID, "browser_id": g.Browser.ID, "profile": g.Profile, "labels": g.Labels})
 	return len(tabs), nil
+}
+
+// closeGrants ends the grants a group of the operator's Chrome keeps (WallKey), when the group itself
+// is closed. A group whose browser went away keeps them for when it opens again.
+func (m *Manager) closeGrants(g *Group) {
+	if g.Browser.attached && m.deps.Wall != nil {
+		m.deps.Wall.Close(g.ID)
+	}
 }
 
 // forgetGroup drops a closed group and its tabs from the model.

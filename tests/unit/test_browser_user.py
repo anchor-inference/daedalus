@@ -20,7 +20,15 @@ from protocore.contracts.tools import ToolContext
 
 from daedalus.browser.agent import SensitiveAsk, Step, _address
 from daedalus.browser.model import USER, InvalidRequest, Owner, group_id
-from daedalus.browser.user import CONSENT, ConsentNeeded, SkipNeedsConfirm, chrome_forbids, site_granted, site_of
+from daedalus.browser.user import (
+    CONSENT,
+    ConsentNeeded,
+    SkipNeedsConfirm,
+    anti_bot,
+    chrome_forbids,
+    site_granted,
+    site_of,
+)
 from daedalus.config import BrowserConfig, BrowserRuleConfig, BrowserUserConfig, RuntimeConfig, Settings
 from daedalus.extensions import browser as browser_extension
 from daedalus.extensions.api import build_app
@@ -1029,3 +1037,46 @@ async def test_browser_open_with_an_address_never_sends_the_operators_given_tab_
     assert not failed, text
     assert given.page.url == "https://mail.example.com/inbox"
     assert any(t.page.url == "https://news.example.com/" for t in chrome.groups[gid].tabs if t is not given)
+
+
+async def test_the_conversations_sites_and_its_mode_reach_the_guard_that_judges_redirects(rig: Rig, chrome: FakeBrowserd) -> None:
+    """The guard in the operator's Chrome judges a page's redirects without the host: a redirect inside
+    an approved site was blocked even under "skip all approvals", and a group opened again after Chrome
+    reconnected had lost every grant."""
+    sid = await rig.session()
+    await rig.switch(sid)
+    await rig.service.choices.grant_site(sid, "taobao.com")
+    await rig.call(sid, "BrowserOpen")
+    gid = group_id(Owner("session", sid), env=USER)
+    browser = chrome.groups[gid].browser_id
+    assert (browser, "taobao.com", 443) in chrome.grants and (browser, "*", 443) not in chrome.grants
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=build_app(rig.app, "tok")), base_url="http://test") as http:  # type: ignore[arg-type]
+        response = await http.put(f"/api/sessions/{sid}/browser-approvals", json={"mode": "auto"}, headers={"x-daedalus-token": "tok"})
+        assert response.status_code == 200, response.text
+        assert (browser, "*", 443) in chrome.grants
+        response = await http.put(f"/api/sessions/{sid}/browser-approvals", json={"mode": "manual"}, headers={"x-daedalus-token": "tok"})
+        assert response.status_code == 200, response.text
+        assert (browser, "*", 443) not in chrome.grants
+
+
+async def test_a_blocked_redirect_names_daedalus_and_a_captcha_is_handed_to_the_operator(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await rig.session()
+    await rig.switch(sid)
+    await rig.call(sid, "BrowserOpen")
+    gid = group_id(Owner("session", sid), env=USER)
+    chrome.block_navigation(gid, "https://login.taobao.com/member/punish?x5secdata=abc")
+    await wait_until(lambda: asyncio.sleep(0, bool(rig.service._notices)), True, timeout=5)
+    text, _ = await rig.call(sid, "BrowserSnapshot")
+    assert "Daedalus stopped it (not an ad blocker" in text and "BrowserHandoff" in text, text
+    chrome.block_navigation(gid, "https://s.shop.example.com/search")
+    await wait_until(lambda: asyncio.sleep(0, bool(rig.service._notices)), True, timeout=5)
+    text, _ = await rig.call(sid, "BrowserSnapshot")
+    assert "not been approved for in the operator's Chrome" in text and "BrowserHandoff" not in text, text
+
+
+def test_anti_bot_interstitials_are_known_by_their_address() -> None:
+    for url in ("https://login.taobao.com/member/punish?x5secdata=1", "https://s.taobao.com/_____tmd_____/punish?x=1", "https://cfe.m.jd.com/privatedomain/risk_handler/03101900/",
+                "https://example.com/cdn-cgi/challenge-platform/h/b/orchestrate", "https://www.google.com/sorry/index?continue=x"):
+        assert anti_bot(url), url
+    for url in ("https://s.taobao.com/search?q=5060", "https://item.jd.com/100.html", "https://example.com/", ""):
+        assert not anti_bot(url), url

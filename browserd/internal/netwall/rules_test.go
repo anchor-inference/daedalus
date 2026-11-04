@@ -643,3 +643,58 @@ func TestABrowserWithNoProxyKeepsItsGrants(t *testing.T) {
 		t.Fatal("the grant outlived the browser")
 	}
 }
+
+// The operator approves a site in their Chrome, its subdomains with it, so a grant there covers the
+// registrable site: a storefront's redirect from the granted host to another of its own was blocked,
+// and the agent blamed an ad blocker. AnySite is the conversation's approval mode answering every
+// site question. A browser of the daemon's own keeps its grants to the exact host and port.
+func TestTheOperatorsChromeGrantsASiteAndABrowserOfOurOwnOneHost(t *testing.T) {
+	allow := []string{"github.com"}
+	c := nativeConfig
+	c.EgressAllow = &allow
+	w := New(Options{Resolver: &fakeResolver{answers: map[string][]string{"world.shop.example": {"203.0.113.20"}, "s.shop.example": {"203.0.113.20"}}},
+		NamesUnresolved: true, LocalAddrs: func() []netip.Addr { return nil }})
+	if err := w.Configure(c); err != nil {
+		t.Fatal(err)
+	}
+	b := NewBrowsers(w)
+	ctx := context.Background()
+	b.Keep("group-1")
+	b.Grant("group-1", "s.shop.example", 443, time.Minute)
+	b.Keep("group-1") // kept, not replaced
+	for _, u := range []string{"https://world.shop.example/search?q=x", "http://shop.example/", "https://s.shop.example:8443/"} {
+		if err := b.Navigation(ctx, "group-1", u); err != nil {
+			t.Errorf("%s inside the granted site was refused: %v", u, err)
+		}
+	}
+	for _, u := range []string{"https://shop.example.net/", "https://other.example/"} {
+		if err := b.Navigation(ctx, "group-1", u); err == nil {
+			t.Errorf("%s outside the granted site opened", u)
+		}
+	}
+	if b.Navigation(ctx, "group-2", "https://world.shop.example/") == nil {
+		t.Error("one group's grant let another group's page through")
+	}
+	b.Keep("group-2")
+	b.Grant("group-2", AnySite, 443, time.Minute)
+	if err := b.Navigation(ctx, "group-2", "https://anything.example.org/"); err != nil {
+		t.Errorf("every site was granted, yet: %v", err)
+	}
+	if err := b.Navigation(ctx, "group-2", "http://169.254.169.254/"); err == nil {
+		t.Error("every site lifted the wall's own denial")
+	}
+	p, err := w.Listen("b1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	p.Grant("s.shop.example", 443, time.Now().Add(time.Minute))
+	if v := w.CheckNavigation(ctx, p, "https://world.shop.example/"); v.Allowed() {
+		t.Error("a browser of the daemon's own took a grant for its whole site")
+	}
+	for host, site := range map[string]string{"a.b.example.co.uk": "example.co.uk", "world.taobao.com": "taobao.com", "jd.com": "jd.com", "203.0.113.20": "203.0.113.20"} {
+		if got := SiteOf(host); got != site {
+			t.Errorf("SiteOf(%q) = %q, want %q", host, got, site)
+		}
+	}
+}

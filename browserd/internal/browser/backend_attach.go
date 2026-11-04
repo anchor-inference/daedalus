@@ -141,11 +141,7 @@ func (a *attach) start(ctx context.Context, profile string) (*Browser, error) {
 	// any page asks.
 	b.screenAsked = true
 	close(b.screenKnown)
-	if m.deps.Wall != nil {
-		// The operator's yes to a site is kept here; there is no proxy to keep it in. Without this a
-		// granted site was refused again ("has no network wall running") and never opened.
-		m.deps.Wall.Track(b.ID)
-	}
+	// The operator's yes to a site is kept by group, where net.grant puts it (Manager.WallKey).
 	conn, drop := s.NewConn(func(e cdp.Event) { m.onEvent(b, e) }, a.markDispatch)
 	b.conn = conn
 	p := &attachProc{a: a, b: b, s: s, drop: drop, done: make(chan struct{})}
@@ -591,6 +587,7 @@ func (o *attachObserver) RelayTabs(tb relay.Tabs) {
 		}
 		tabs := g.Tabs()
 		m.forgetGroup(g, tabs)
+		m.closeGrants(g)
 		m.publish("group.closed", map[string]any{"group_id": g.ID, "browser_id": g.Browser.ID, "profile": g.Profile, "labels": g.Labels,
 			"reason": "closed_in_chrome"})
 	}

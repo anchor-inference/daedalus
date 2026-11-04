@@ -77,6 +77,32 @@ def site_granted(host: str, sites: list[str] | tuple[str, ...] | set[str]) -> bo
     return bool(host) and any(host == s or host.endswith("." + s) for s in sites if s)
 
 
+ANTI_BOT_HOSTS = ("cfe.m.jd.com", "challenges.cloudflare.com", "geo.captcha-delivery.com", "sec.douyin.com", "verify.snssdk.com", "captcha.px-cdn.net")
+"""Hosts that serve only a site's anti-bot check: JD's risk handler, Cloudflare's challenge, DataDome,
+ByteDance's verification, PerimeterX."""
+ANTI_BOT_MARKS = ("/punish", "fantiseos", "x5secdata", "risk_handler", "riskhandler", "/cdn-cgi/challenge-platform", "__cf_chl_", "/captcha", "captcha=",
+                  "geetest", "/sorry/index", "px-captcha", "/verify/slider", "nocaptcha")
+"""Pieces of an address that mark an anti-bot interstitial: Taobao's punish page and its slider
+(``_____tmd_____/punish``, ``x5secdata``), Cloudflare's challenge, Google's "unusual traffic" page,
+the captcha paths of the rest."""
+
+ANTI_BOT_WORDS = (
+    "This is the site's anti-bot check (a captcha or a slider), not the page you wanted. Do not try to solve or get around it, "
+    "and do not blame an ad blocker: hand it to the operator with BrowserHandoff(reason, what), then end your turn."
+)
+
+
+def anti_bot(url: str) -> bool:
+    """Whether an address is a site's captcha or anti-bot interstitial, which only the operator gets past."""
+    text = (url or "").strip().lower()
+    if not text:
+        return False
+    host = urlsplit(text if "://" in text else f"https://{text}").hostname or ""
+    if any(host == h or host.endswith("." + h) for h in ANTI_BOT_HOSTS):
+        return True
+    return any(mark in text for mark in ANTI_BOT_MARKS)
+
+
 STORE_HOSTS = ("chrome.google.com", "chromewebstore.google.com")
 """The Chrome Web Store, old and new. Chrome keeps every extension's debugger and scripts off these hosts
 and all their subdomains (``extension_urls::IsWebstoreDomain``, which ``IsScriptableURL`` checks for the
@@ -652,6 +678,6 @@ def not_connected(reason: str) -> EnvUnavailable:
 
 
 __all__ = [
-    "AGENT", "CHOICES", "CLOSE_BUSY", "CLOSE_UNAUTHORIZED", "CONSENT", "Attempts", "ConsentNeeded", "Device", "Joiner", "Pairing", "PairingRefused",
-    "BROWSER_SCHEMES", "STORE_HOSTS", "RelayDesk", "RelaySocket", "TooMany", "UserChoices", "chrome_forbids", "normal_code", "not_connected", "site_granted", "site_of", "split",
+    "ANTI_BOT_WORDS", "AGENT", "CHOICES", "CLOSE_BUSY", "CLOSE_UNAUTHORIZED", "CONSENT", "Attempts", "ConsentNeeded", "Device", "Joiner", "Pairing", "PairingRefused",
+    "BROWSER_SCHEMES", "STORE_HOSTS", "RelayDesk", "RelaySocket", "TooMany", "UserChoices", "anti_bot", "chrome_forbids", "normal_code", "not_connected", "site_granted", "site_of", "split",
 ]
