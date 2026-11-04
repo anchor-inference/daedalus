@@ -23,7 +23,7 @@ import { toast as statusToast } from "../ui/dialogs";
 
 export const USER_STATUS = "/api/browser/user";
 
-export const DEFAULT_USER: BrowserUserSettings = { enabled: true, granted_sites: [], monitor: true, watch: true, bodies: false, read_only: true, close_tabs: true };
+export const DEFAULT_USER: BrowserUserSettings = { enabled: true, granted_sites: [], monitor: true, watch: true, bodies: false, read_only: true, close_tabs: false };
 
 /** Where the card stands: no daemon for it here, its daemon down, a Chrome connected, or waiting for one. */
 export type ChromeState = "none" | "down" | "connected" | "waiting";

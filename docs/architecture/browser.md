@@ -1724,8 +1724,9 @@ connected, so a model that opened the wrong one can see it.
   window. The agent keeps at most three tabs there: past that its dead and blank tabs are closed to
   make room, and otherwise it is refused with its tabs listed. Listings mark the new tab, a dead one
   and a second tab on an address another already shows. When a turn ends with nothing waiting for
-  the operator and the control the agent's, its group is closed (`turn_end`), unless
-  `[browser.user] close_tabs` is off. The operator closing the group in Chrome is recorded as
+  the operator and the control the agent's, its group is closed (`turn_end`) only when
+  `[browser.user] close_tabs` is on; it is off by default, because a turn often ends asking the
+  operator to check the page it left. The operator closing the group in Chrome is recorded as
   `closed_in_chrome`, by the operator.
 - A tab that lost its debugger (a PDF viewer, a browser page) is refused as `detached` with what to
   do: close it, fetch the document through BrowserNetwork or BrowserDownload, do not repeat what led
