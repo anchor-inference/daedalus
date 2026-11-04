@@ -3,6 +3,8 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  fitsFor,
+  nextFit,
   PANEL_CLOSED,
   PANEL_DEFAULT_PCT,
   PANEL_MAX_PCT,
@@ -295,5 +297,15 @@ describe("the Subagents tab", () => {
     const s = openSubagent(PANEL_CLOSED, "child1");
     const back = applyPanelQuery(s, readPanelQuery(new URLSearchParams("panel=subagents"), routeTabsFor("session")), base);
     expect(back.sub).toBeNull();
+  });
+});
+
+describe("how much of each tab the strip draws", () => {
+  it("steps from the widest fit to the icons alone, and a phone's sheet never draws icon and word together", () => {
+    expect(fitsFor(false)).toEqual(["full", "words", "active", "icons"]);
+    expect(fitsFor(true)).toEqual(["words", "active", "icons"]);
+    expect(nextFit("full", false)).toBe("words");
+    expect(nextFit("words", true)).toBe("active");
+    expect(nextFit("icons", false)).toBeNull();
   });
 });

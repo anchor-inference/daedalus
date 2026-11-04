@@ -3,12 +3,16 @@
 // On a desktop it is a column of the chat grid; on a phone the same tabs in a full-height sheet.
 // The state is a value (panel.ts); this file draws it and wires the pointer and the keys.
 
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { flushSync } from "react-dom";
 import { Sheet, toast as statusToast, useLayer } from "./ui/dialogs";
 import { useEdgeFade, useMoreBelow } from "./edgefade";
 import { Icon, IconName } from "./icons";
 import {
   PANEL_CLOSED,
+  fitsFor,
+  nextFit,
+  type TabFit,
   PANEL_TABS,
   PanelContext,
   PanelEntry,
@@ -152,8 +156,45 @@ function Column(props: HostProps) {
 
 const TAB_ICON: Record<PanelTab, IconName> = { details: "settings", files: "folder", preview: "eye", jobs: "terminal", notes: "note", subagents: "spawn", board: "board", brief: "pen", wakeups: "clock", folders: "folder", questions: "ask", browser: "globe", sources: "link" };
 
+/** Which fit the strip draws: the widest that fits, chosen again whenever the strip's width or what it
+ *  holds changes. Each try is laid out before the browser paints (a layout effect, and flushSync from
+ *  the resize observer), so a strip being dragged wider never shows the overflowing try. */
+function useTabFit(strip: RefObject<HTMLDivElement | null>, inSheet: boolean, content: string): TabFit {
+  const first = fitsFor(inSheet)[0];
+  const [fit, setFit] = useState<TabFit>(first);
+  const width = useRef(0);
+  const seen = useRef(content);
+  useLayoutEffect(() => {
+    const el = strip.current;
+    if (!el) return;
+    // Something in the strip changed: start again from the widest, rather than step on from a fit
+    // chosen for other words.
+    if (seen.current !== content) {
+      seen.current = content;
+      if (fit !== first) return setFit(first);
+    }
+    const next = nextFit(fit, inSheet);
+    if (next && el.scrollWidth > el.clientWidth + 1) setFit(next);
+  });
+  useEffect(() => {
+    const el = strip.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      const now = Math.round(entry.contentRect.width);
+      if (now === width.current) return;
+      width.current = now;
+      flushSync(() => setFit(first));
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [strip, first]);
+  return fit;
+}
+
 function Tabs({ state, onTab, onClose, onExpand, badges, marks, inSheet, local, tabs = PANEL_TABS }: HostProps & { inSheet?: boolean }) {
   const strip = useRef<HTMLDivElement>(null);
+  // What the strip holds and how long its words are: a new tab, a badge, the open tab, the language.
+  const fit = useTabFit(strip, !!inSheet, `${tabs.join()}|${state.tab}|${JSON.stringify(badges ?? {})}|${tabs.map((tab) => t(`panel.tab.${tab}`)).join()}`);
   // On a phone the sheet's eight tabs are wider than the screen: fade the edge with more behind it,
   // and bring the open tab into view, or a sheet opened on Folders showed a lone "F" at the edge.
   useEdgeFade(strip, state.tab);
@@ -171,7 +212,7 @@ function Tabs({ state, onTab, onClose, onExpand, badges, marks, inSheet, local, 
   };
   return (
     <div className="panel-tabs">
-      <div ref={strip} className={`panel-tablist ${tabs.length > PANEL_TABS.length ? "many" : ""}`} role="tablist" aria-label={t("panel.label")} onKeyDown={onKey}>
+      <div ref={strip} className={`panel-tablist fit-${fit}`} data-fit={fit} role="tablist" aria-label={t("panel.label")} onKeyDown={onKey}>
         {tabs.map((tab) => {
           const n = badges?.[tab] ?? 0;
           const label = t(`panel.tab.${tab}`);

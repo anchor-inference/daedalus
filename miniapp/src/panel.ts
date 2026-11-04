@@ -263,6 +263,27 @@ function safeStorage(): Storage | null {
   }
 }
 
+/**
+ * How much of each tab the strip can draw, widest first: the icon and the word, the word alone, the
+ * word on the open tab only (the others as their icons, named by their tooltip), the icons alone. The
+ * strip takes the first that fits, measured, never a fixed count of tabs: a rule that dropped the icons
+ * past four tabs let the sixth tab (Notes) push the Russian strip into a scroll, and the first tab was
+ * drawn as a cut-off "…ия". A phone's sheet never draws the icon beside the word; there is no room.
+ */
+export const TAB_FITS = ["full", "words", "active", "icons"] as const;
+export type TabFit = (typeof TAB_FITS)[number];
+
+/** The fits a strip tries, in order. */
+export function fitsFor(inSheet: boolean): readonly TabFit[] {
+  return inSheet ? TAB_FITS.slice(1) : TAB_FITS;
+}
+
+/** The fit to try after `fit` when the strip still overflows, or null when it is the last. */
+export function nextFit(fit: TabFit, inSheet: boolean): TabFit | null {
+  const order = fitsFor(inSheet);
+  return order[order.indexOf(fit) + 1] ?? null;
+}
+
 // ── the keyboard ─────────────────────────────────────────────────────────────────────────────
 
 /** `⌘.` / `Ctrl+.` toggles the panel; with Shift it covers the chat. Anything else is not ours. */
