@@ -191,6 +191,10 @@ const CONTENT_BOXES = [
   // A note card's picture and the card-shaped placeholders the Notes tab shows while it loads.
   { selector: ".note-thumb", property: "height", max: 52 },
   { selector: ".notes-loading i", property: "height", max: 64 },
+  // A reply waiting in the composer is a tile, not a row: two lines of its words over its "Reply" chip,
+  // as Claude draws it; and the field that edits one holds a few lines of them.
+  { selector: ".reply-card .reply-card-open", property: "height", max: 72 },
+  { selector: ".reply-dialog-text", property: "min-height", max: 72 },
   // Not a box but the shade a sheet raises over its sticky footer while more waits below; shorter
   // than this it fell into the gap above the footer and said nothing.
   { selector: '.sheet-body[data-more="below"] .sheet-foot::before', property: "height", max: 56 },

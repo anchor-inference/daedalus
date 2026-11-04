@@ -93,6 +93,8 @@ import { RenameSheet, SearchSheet, SessionMenuSheet, SessionTopBar, StateSub, ty
 import { SubagentsTab, subagentIdFor } from "../subagents";
 import { PromptCoach } from "../coach/PromptCoach";
 import { SideQuestion } from "../btw/SideQuestion";
+import { parseReplies, type SentReply } from "../quotereply";
+import { SelectionReply, SentReplies, revealPassage } from "../replyselect";
 import { COMPOSE_EVENT, ComposeTarget, type ComposeRequest } from "../annotate/compose";
 import { noticeFromEvent, raiseFromError, raiseSettingNotice, SettingNoticeLines, settingRef } from "../settinglink";
 import { MoveLive, useFolderMove } from "../project/moves";
@@ -105,10 +107,25 @@ const NotesPanel = lazy(() => import("../notes/NotesPanel").then((module) => ({ 
  * Markdown parsed once per text. `cacheKey` names a message that will never change again, so its
  * rendering survives the component: a turn scrolled out of the window and back in is not re-parsed.
  */
-const Md = memo(function Md({ text, className, cacheKey }: { text: string; className?: string; cacheKey?: string }) {
+const Md = memo(function Md({ text, className, cacheKey, quote }: { text: string; className?: string; cacheKey?: string; quote?: number | null }) {
   const html = useMemo(() => (cacheKey ? renderCached(cacheKey, text) : renderMarkdown(text)), [text, cacheKey]);
-  return <RawHtml className={className} html={html} onWritten={hydrateRich} />;
+  return <RawHtml className={className} html={html} onWritten={hydrateRich} quote={quote === undefined ? undefined : String(quote ?? "")} />;
 });
+
+/**
+ * The operator's words in their bubble. The replies a message opens with (quotereply.ts) are drawn as
+ * quotes that lead back to their passages, never as the comment markers and `>` lines the model reads.
+ */
+function UserWords({ text, cacheKey }: { text: string; cacheKey?: string }) {
+  const { reveal } = useContext(SessionContext);
+  const { replies, rest } = useMemo(() => parseReplies(text), [text]);
+  return (
+    <>
+      {replies.length > 0 && <SentReplies replies={replies} onReveal={reveal} />}
+      {rest.trim() && <Md className="msg-text" text={rest} cacheKey={cacheKey} />}
+    </>
+  );
+}
 
 /** How much of the end of the conversation a run's event is answered with. */
 const TAIL_AFTER_EVENT = 24;
@@ -209,7 +226,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   useEffect(() => setCoach(null), [id]);
   // The side question's window (/btw), with what was asked; `ask` changes with each /btw or press of the
   // button. Like the coach's, it belongs to this chat and closes when the chat changes.
-  const [btw, setBtw] = useState<{ question: string; ask: number } | null>(null);
+  const [btw, setBtw] = useState<{ question: string; ask: number; prefill?: string } | null>(null);
   useEffect(() => setBtw(null), [id]);
   // An ordinary session's side questions decide whether it has a Questions tab at all, so they are read
   // before the tabs are; the orchestrator's and the main chat's lists are read below, with their scope.
@@ -1003,6 +1020,22 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     },
     [jump],
   );
+  // A reply's quote in a sent message leads back to its passage: lit where it is drawn, or, when the
+  // windowed list has not drawn that answer, the chat is taken to it first and the passage lit once it is.
+  const revealReply = useCallback(
+    (reply: SentReply) => {
+      if (revealPassage(scroller.current, reply.seq, reply.quote) || reply.seq == null) return;
+      const seq = reply.seq;
+      openMessage(seq);
+      let tries = 0;
+      const again = () => {
+        if (revealPassage(scroller.current, seq, reply.quote) || ++tries >= 6) return;
+        window.setTimeout(again, 350);
+      };
+      window.setTimeout(again, 450);
+    },
+    [openMessage],
+  );
   // At the message: its turn is rendered, put a little below the top of the screen and lit for a
   // moment. The turns above it take their real heights over the next frames and move it, so it is put
   // back a few times — until the reader takes the list over with a finger or the wheel.
@@ -1514,8 +1547,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         composer.current.insert(text);
         return true;
       },
+      reveal: revealReply,
     }),
-    [id, detail?.workspace, paneFolders, openFromChat, panel.open, openSources, toast, link, detail?.pending?.questions],
+    [id, detail?.workspace, paneFolders, openFromChat, panel.open, openSources, toast, link, detail?.pending?.questions, revealReply],
   );
   const shownSources = useMemo(() => {
     if (panel.state.tab !== "sources") return null;
@@ -1816,7 +1850,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                 {busy && <LiveTurn base={tail} live={live} onTurnAction={turnAction} onRender={pinBottom} />}
                 {/* A message the host is holding is drawn once, as its card above the composer, where
                     its Steer and × are; the bubble here would be the same words a second time. */}
-                {sendingMessages.filter((pending) => !sentMessageReachedTranscript(detail?.messages, pending.id) && !queuedInput.some((queued) => queued.id === pending.id)).map((pending) => <div className="turn" key={pending.id}><div className="turn-content"><div className="msg-wrap"><div className="msg user"><Md text={pending.text} /></div></div></div></div>)}
+                {sendingMessages.filter((pending) => !sentMessageReachedTranscript(detail?.messages, pending.id) && !queuedInput.some((queued) => queued.id === pending.id)).map((pending) => <div className="turn" key={pending.id}><div className="turn-content"><div className="msg-wrap"><div className="msg user"><UserWords text={pending.text} /></div></div></div></div>)}
                 </SubagentOpener.Provider>
               </SessionContext.Provider>
               {flow}
@@ -1862,6 +1896,11 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           {staffId && <StaffMessages staffId={staffId} />}
           {/* A draft written before the first session read would bind to an empty model and workspace,
               then ask for target approval when those initial values arrived. */}
+          {/* Words selected in one of the agent's answers can be replied to from a pill over them: the
+              reply waits in this composer as a card, and the side question can take the passage instead. */}
+          {detail?.id === id && <SelectionReply sessionId={id} scroller={scroller} phone={phone}
+            onAskAside={bare || embedded || main || orchestrating || detail?.prompt_coach_of || detail?.btw_of ? undefined
+              : (quote) => setBtw((open) => ({ question: "", prefill: `${quote.split("\n").map((line) => (line ? `> ${line}` : ">")).join("\n")}\n\n`, ask: (open?.ask ?? 0) + 1 }))} />}
           {detail?.id === id && <Composer
             ref={composer}
             above={orchestrating ? <>{showGoalLine && <GoalStrip projectId={focus!.projectId} />}<ReplyChip sessionId={id} /></> : undefined}
@@ -2025,7 +2064,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           chat={(coachId) => <SessionScreen key={coachId} id={coachId} onBack={() => setCoach(null)} toast={toast} bare />} />
       )}
       {btw && (
-        <SideQuestion parentId={id} question={btw.question} ask={btw.ask} phone={phone} onClose={() => setBtw(null)}
+        <SideQuestion parentId={id} question={btw.question} prefill={btw.prefill} ask={btw.ask} phone={phone} onClose={() => setBtw(null)}
           chat={(btwId) => <SessionScreen key={btwId} id={btwId} onBack={() => setBtw(null)} toast={toast} placeholder={t("btw.followup")} bare />} />
       )}
 
@@ -2284,7 +2323,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
             {turn.user.autopilot && <span className="msg-origin msg-autopilot" data-autopilot={turn.user.autopilot.kind} title={autopilotTitle(turn.user.autopilot)}>{t(`turn.autopilot.${turn.user.autopilot.kind}`)}</span>}
             {turn.user.yagni && <span className="msg-origin msg-yagni" title={t("turn.yagni.title")}>{t(turn.user.yagni === "on" ? "turn.yagni.on" : "turn.yagni.off")}</span>}
             {turn.user.reply_to && <ReplyQuote reply={turn.user.reply_to} />}
-            {words.trim() && <Md className="msg-text" text={words} cacheKey={live ? undefined : `u${seq ?? turn.key}`} />}
+            {words.trim() && <UserWords text={words} cacheKey={live ? undefined : `u${seq ?? turn.key}`} />}
             {turn.user.secrets?.length ? <div className="msg-secrets">{turn.user.secrets.map((secret) => <SecretChip key={secret.name} name={secret.name} scope={secret.scope} />)}</div> : null}
           </UserBubble>}
           {focusChat?.orchestrator && <MessageFate message={turn.user} sessionId={sessionId} projectId={focusChat.projectId} />}
@@ -2321,19 +2360,19 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
         </Fragment>
       ) : (
         <Fragment key={`t${index}`}>
-          <Md className="answer interim" text={segment.text} cacheKey={live ? undefined : `r${turn.key}-${index}`} />
+          <Md className="answer interim" text={segment.text} cacheKey={live ? undefined : `r${turn.key}-${index}`} quote={segment.seq ?? null} />
           {!live && <KeptFiles text={segment.text} onOpen={preview} />}
           {closing === segment && <MessageActions text={segment.text} actions={answerActions(segment.text, segment.seq)} more={turnMenu} />}
         </Fragment>
       ))}
       {turn.fallback && (turn.answer || live) && <FallbackChip fallback={turn.fallback} />}
       {turn.answer && (turn.media?.length ? (
-        <div className={`answer answer-with-media ${live ? "streaming" : ""}`}>
+        <div className={`answer answer-with-media ${live ? "streaming" : ""}`} data-quote={turn.answerSeq ?? ""}>
           {splitMediaAnswer(turn.answer, turn.media).map((part, index) => part.kind === "text"
             ? <Md key={`text-${index}`} text={part.text} cacheKey={live ? undefined : `a${turn.key}-${index}`} />
             : <InlineMedia key={part.presentation.id} sessionId={sessionId} presentation={part.presentation} onPreview={preview} />)}
         </div>
-      ) : <Md className={`answer ${live ? "streaming" : ""}`} text={turn.answer} cacheKey={live ? undefined : `a${turn.key}`} />)}
+      ) : <Md className={`answer ${live ? "streaming" : ""}`} text={turn.answer} cacheKey={live ? undefined : `a${turn.key}`} quote={turn.answerSeq ?? null} />)}
       {turn.answer && !live && <KeptFiles text={turn.answer} onOpen={preview} />}
       {turn.answer && !live && <TurnSources turn={turn} />}
       {/* Outside the folded steps: a change that waits for the operator's Apply must be seen without
@@ -3262,7 +3301,7 @@ const NO_FOLDERS: SessionFolder[] = [];
  *  call that asked them reads as waiting and an older unanswered one does not. */
 /** `compose`: put text into the conversation's composer for the operator to send (a widget's ask);
  *  absent where the transcript has no composer of its own. */
-const SessionContext = createContext<{ id: string; workspace: string; folders: SessionFolder[]; preview: (src: PreviewSource) => void; openJobs: () => void; toast: (text: string) => void; link: string; asking: string; compose?: (text: string) => boolean; openSources?: (turnKey: string) => void }>({
+const SessionContext = createContext<{ id: string; workspace: string; folders: SessionFolder[]; preview: (src: PreviewSource) => void; openJobs: () => void; toast: (text: string) => void; link: string; asking: string; compose?: (text: string) => boolean; openSources?: (turnKey: string) => void; reveal?: (reply: SentReply) => void }>({
   id: "",
   workspace: "",
   folders: NO_FOLDERS,

@@ -17,6 +17,9 @@ export type SideQuestionProps = {
   parentId: string;
   /** What was asked after /btw, or nothing from the button (the window opens on its empty field). */
   question: string;
+  /** Words to start the empty field with instead of asking at once: a passage of an answer, quoted,
+   *  that the operator selected and wants to ask about. */
+  prefill?: string;
   /** Changes with every /btw and every press of the button: a question starts a new side question,
    *  and either brings a minimised window back up. */
   ask: number;
@@ -26,7 +29,7 @@ export type SideQuestionProps = {
   chat: (sessionId: string) => ReactNode;
 };
 
-export function SideQuestion({ parentId, question, ask, phone, onClose, chat }: SideQuestionProps) {
+export function SideQuestion({ parentId, question, prefill, ask, phone, onClose, chat }: SideQuestionProps) {
   const [current, setCurrent] = useState<BtwView | null>(null);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
@@ -50,9 +53,24 @@ export function SideQuestion({ parentId, question, ask, phone, onClose, chat }: 
   }, [path]);
   const asked = useRef(question);
   asked.current = question;
+  const filled = useRef(prefill);
+  filled.current = prefill;
+  const field = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     setMinimised(false);
     if (asked.current.trim()) void start(asked.current.trim());
+    else if (filled.current) {
+      // A new passage starts a new side question, as a new /btw does: the window comes back to its
+      // field with the quote in it and the caret after it, where the question is typed.
+      const text = filled.current;
+      setCurrent(null);
+      setError("");
+      setDraft(text);
+      window.setTimeout(() => {
+        const el = field.current;
+        if (el) { el.focus(); el.setSelectionRange(text.length, text.length); el.scrollTop = el.scrollHeight; }
+      }, 0);
+    }
   }, [ask, start]);
   // Closing the window, or leaving the chat, ends the side question: the host deletes its session and
   // stops an answer still being written, so nothing is left running that no window shows.
@@ -72,7 +90,7 @@ export function SideQuestion({ parentId, question, ask, phone, onClose, chat }: 
     : null;
   const form = (
     <form className="btw-ask" onSubmit={(e) => { e.preventDefault(); submit(); }}>
-      <textarea className="field" value={draft} rows={3} autoFocus maxLength={20000} placeholder={t("btw.placeholder")} aria-label={t("btw.placeholder")}
+      <textarea ref={field} className="field" value={draft} rows={3} autoFocus maxLength={20000} placeholder={t("btw.placeholder")} aria-label={t("btw.placeholder")}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && enterSends()) { e.preventDefault(); submit(); }
