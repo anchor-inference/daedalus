@@ -28,7 +28,7 @@ from websockets.typing import Origin
 
 from daedalus.config import RuntimeConfig, Settings
 from daedalus.extensions import terminals as terminals_extension
-from daedalus.extensions.api import build_app
+from daedalus.extensions.api import build_app, server_config
 from daedalus.host.session_runner import SessionManager
 from daedalus.stores import pairing
 from daedalus.stores.database import Database
@@ -127,7 +127,9 @@ async def served(app: Any, daemons: dict[str, FakePtyd]) -> AsyncIterator[Served
     listener.bind(("127.0.0.1", 0))
     listener.listen()
     port = listener.getsockname()[1]
-    server = uvicorn.Server(uvicorn.Config(api, log_level="warning", access_log=False, lifespan="off", ws_max_size=TERMINAL_WS_MAX_BYTES))
+    # The server as production runs it: its own cap is the relay's 64 MiB, so the terminal's 1 MiB is
+    # the socket limits' to hold (test_a_message_past_the_socket_limit_is_refused_by_the_server).
+    server = uvicorn.Server(server_config(api, lifespan="off"))
     task = asyncio.create_task(server.serve(sockets=[listener]))
     for _ in range(200):
         if server.started:

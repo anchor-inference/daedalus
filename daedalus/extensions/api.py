@@ -150,6 +150,7 @@ from daedalus.extensions.push import PushRefused, PushService
 from daedalus.extensions.quota_sampler import fetch_subscriptions
 from daedalus.extensions.review import ReviewRefused
 from daedalus.extensions.services import SHARE_COOKIE_PREFIX, SHARE_MODES, pid_alive
+from daedalus.extensions.socket_limits import SERVER_MAX_BYTES, SocketLimits
 from daedalus.harness import conditions as member_conditions
 from daedalus.harness.capabilities import CAPABILITIES
 from daedalus.host import attached_files, capabilities, component_install, launcher_bridge
@@ -211,7 +212,7 @@ from daedalus.stores.provider_speed import MAX_WINDOW_HOURS, provider_speed
 from daedalus.stores.quota import quota_forecast
 from daedalus.stores.sqlite import ReceiptConflict, message_text
 from daedalus.stores.staff import ACTIVE_STATUSES, HARNESSES, Staff, StaffBusy, StaffError
-from daedalus.terminals.gateway import TERMINAL_WS_MAX_BYTES, Gateway, SocketGone, ticket_who
+from daedalus.terminals.gateway import Gateway, SocketGone, ticket_who
 from daedalus.terminals.model import EnvUnavailable, TerminalError, TerminalSpec
 from daedalus.terminals.model import Owner as TerminalOwner
 from daedalus.tools import TOOL_GROUPS, websearch
@@ -1458,6 +1459,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     # difference the operator feels. The event stream is excluded by content type, so a token
     # still leaves the process the moment it arrives.
     api.add_middleware(GZipMiddleware, minimum_size=GZIP_MIN_BYTES)
+    # Each socket's own message cap; the server's is the largest of them (server_config).
+    api.add_middleware(SocketLimits)
 
     # The desktop launcher gives each start of the supervisor an id, and the bot inherits it. Echoing
     # it on the answers to /app and /app/ — what the launcher's health check asks for — is how the
@@ -6924,15 +6927,23 @@ class _AppServer(uvicorn.Server):
         self._on_exit()
 
 
+def server_config(api: FastAPI, **options: Any) -> uvicorn.Config:
+    """The API server's settings, which a test that serves the API takes too.
+
+    uvicorn's own 20 s WebSocket pings stay on: they are what notices a phone that dropped off the
+    network while a terminal was open. The size cap is the largest message any socket takes; each
+    socket is held to its own by ``SocketLimits``.
+    """
+    return uvicorn.Config(api, log_level="warning", access_log=False, ws_max_size=SERVER_MAX_BYTES, **options)
+
+
 async def install(app: Application) -> list[asyncio.Task[None]]:
     token = await app.db.kv_get("api_token")
     if not token:
         token = secrets.token_urlsafe(24)
         await app.db.kv_set("api_token", token)
     api = build_app(app, token)
-    # uvicorn's own 20 s WebSocket pings stay on: they are what notices a phone that dropped off the
-    # network while a terminal was open. The size cap is the largest frame a terminal socket takes.
-    config = uvicorn.Config(api, host=app.settings.api_host, port=app.settings.api_port, log_level="warning", access_log=False, ws_max_size=TERMINAL_WS_MAX_BYTES)
+    config = server_config(api, host=app.settings.api_host, port=app.settings.api_port)
     loop = asyncio.get_running_loop()
     server = _AppServer(config, lambda: loop.call_soon_threadsafe(app.stopping.set))
     app.extensions["api_token"] = token
