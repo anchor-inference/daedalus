@@ -107,8 +107,9 @@ def frequent_housekeeping(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 async def service(db: Database, run_dir: Path, owners: FakeOwners, bus: FakeBus, cfg: BrowserConfig, daemon: FakeBrowserd, woken: list[tuple[Owner, str]]) -> AsyncIterator[Browsers]:
-    async def wake(owner: Owner, text: str) -> None:
-        woken.append((owner, text))
+    async def wake(owner: Owner, text: str, *, only_if_running: bool = False) -> None:
+        if not only_if_running:
+            woken.append((owner, text))
 
     made = Browsers(db, run_dirs={"container": run_dir, "host": None}, config=lambda: cfg, owners=owners, bus=bus, wake=wake)  # type: ignore[arg-type]
     await made.start()
@@ -180,17 +181,18 @@ async def test_a_give_back_wakes_the_owner_exactly_once_with_the_note(service: B
     assert len(woken) == 1 and woken[0][0].session_id == "sess1"
     assert "gave the browser back" in woken[0][1] and "I signed in; go on." in woken[0][1] and "shop.test" in woken[0][1]
     assert bus.of("browser.returned")[0][0]["note"] == "I signed in; go on."
-    # The hold running out gives it back as well, and that too is told once.
+    # The hold running out gives it back as well, but nothing was asked and no note left: that goes
+    # only into a running turn (the fake owner has none), so nobody is woken after the work is done.
     daemon.set_control("s-sess1", "human", "v1")
     await wait_until(lambda: _control(service), "human")
     daemon.set_control("s-sess1", "agent")
-    await wait_until(lambda: _async(len(woken)), 2)
+    await wait_until(lambda: _async(len(bus.of("browser.returned"))), 2)
     await asyncio.sleep(0.1)
-    assert len(woken) == 2 and "Their note" not in woken[1][1]
+    assert len(woken) == 1
     # Giving back what the agent already holds wakes nobody.
     await service.control("s-sess1", "agent")
     await asyncio.sleep(0.1)
-    assert len(woken) == 2
+    assert len(woken) == 1
     audit = [e["action"] for e in await service.audit_log("s-sess1")]
     assert audit.count("take") == 1 and audit.count("give") == 2
 
