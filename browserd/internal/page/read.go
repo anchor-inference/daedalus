@@ -38,6 +38,48 @@ type Snapshot struct {
 	Viewport  Size     `json:"viewport"`
 	Scroll    Scrolled `json:"scroll"`
 	Loading   bool     `json:"loading"`
+	Blocker   *Blocker `json:"blocker,omitempty"`
+}
+
+// Blocker is a popup that covers the page: a modal dialog, or elements pinned over most of the
+// window (a sign-in box on a dimmed backdrop, a notice, a consent wall). Every read reports it, since
+// an agent that reads only the words under it waits for a page that will not move until the popup
+// is closed or answered.
+type Blocker struct {
+	Kind        string `json:"kind"` // "dialog" (marked as one) or "overlay" (found by hit tests)
+	Name        string `json:"name"` // its heading or first words, page content
+	Ref         string `json:"ref"`  // the popup itself, for BrowserSnapshot(scope=ref)
+	Close       string `json:"close,omitempty"`
+	Frame       string `json:"frame,omitempty"` // the frame inside it, whose refs begin with this
+	CrossOrigin bool   `json:"cross_origin,omitempty"`
+}
+
+// blocker is the tab's popup, or nil. It never fails a read: a page that cannot be asked is read as
+// it was before. A close control inside a frame of another site (a sign-in box from another domain)
+// is looked for in that frame's own world.
+func (p *Model) blocker(ctx context.Context, t *browser.Tab) *Blocker {
+	if t.Dialog() != nil {
+		// A page stopped under a JavaScript dialog answers nothing; the dialog is reported on its own.
+		return nil
+	}
+	bctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	raw, err := p.call(bctx, t, "blocker")
+	if err != nil || len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var b Blocker
+	if json.Unmarshal(raw, &b) != nil || b.Ref == "" {
+		return nil
+	}
+	if b.Close == "" && b.Frame != "" && b.CrossOrigin {
+		if c, err := p.child(bctx, t, top, b.Frame, false); err == nil {
+			if raw, err := p.callIn(bctx, t, c, "closerRef"); err == nil {
+				_ = json.Unmarshal(raw, &b.Close)
+			}
+		}
+	}
+	return &b
 }
 
 // Frame is a frame the snapshot met. Read says a frame of another site's document is in the outline.
@@ -135,6 +177,10 @@ func (p *Model) Snapshot(ctx context.Context, t *browser.Tab, scope string, max 
 	}
 	lines := p.splice(ctx, t, d, o, n-o.Used, opts, s, 0)
 	s.Text = strings.Join(append(append(o.Header, lines...), o.Tail...), "\n")
+	if scope == "" {
+		// After the outline, so the popup's refs are the ones the outline gave the same elements.
+		s.Blocker = p.blocker(ctx, t)
+	}
 	return s, nil
 }
 
@@ -230,10 +276,11 @@ func reason(err error) string {
 
 // Text is page.text's result.
 type Text struct {
-	URL       string `json:"url"`
-	Title     string `json:"title"`
-	Text      string `json:"text"`
-	Truncated bool   `json:"truncated"`
+	URL       string   `json:"url"`
+	Title     string   `json:"title"`
+	Text      string   `json:"text"`
+	Truncated bool     `json:"truncated"`
+	Blocker   *Blocker `json:"blocker,omitempty"`
 }
 
 // Text is the page's readable text, or one element's.
@@ -261,6 +308,10 @@ func (p *Model) Text(ctx context.Context, t *browser.Tab, ref string, max int) (
 	}
 	if d != top {
 		out.URL, out.Title = t.URL(), t.Title()
+	} else if local == "" {
+		// The readable text skips what is not the page's main content, and a sign-in box from another
+		// site is not in it at all: the words alone read as a page still loading.
+		out.Blocker = p.blocker(ctx, t)
 	}
 	return &out, nil
 }
@@ -278,11 +329,12 @@ type ScreenshotParams struct {
 
 // Screenshot is page.screenshot's result.
 type Screenshot struct {
-	Format string   `json:"format"`
-	Width  int      `json:"width"`
-	Height int      `json:"height"`
-	Data   string   `json:"data_b64"`
-	Masked []string `json:"masked"`
+	Format  string   `json:"format"`
+	Width   int      `json:"width"`
+	Height  int      `json:"height"`
+	Data    string   `json:"data_b64"`
+	Masked  []string `json:"masked"`
+	Blocker *Blocker `json:"blocker,omitempty"`
 }
 
 // Screenshot captures the viewport, the whole page, or one element, with every secret field hidden
@@ -391,8 +443,13 @@ func (p *Model) Screenshot(ctx context.Context, t *browser.Tab, sp ScreenshotPar
 	if err := t.Call(ctx, "Page.captureScreenshot", params, &shot); err != nil {
 		return nil, err
 	}
-	return &Screenshot{Format: format, Width: int(math.Round(w * scale)), Height: int(math.Round(h * scale)), Data: shot.Data,
-		Masked: masked}, nil
+	out := &Screenshot{Format: format, Width: int(math.Round(w * scale)), Height: int(math.Round(h * scale)), Data: shot.Data,
+		Masked: masked}
+	if sp.Ref == "" {
+		// The vision model may describe the popup or not; the refs to close it come from the page.
+		out.Blocker = p.blocker(ctx, t)
+	}
+	return out, nil
 }
 
 // Wait waits for a condition on the page, at most timeout.
@@ -400,7 +457,14 @@ func (p *Model) Wait(ctx context.Context, t *browser.Tab, what, value string, ti
 	wctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	result := func(matched string) map[string]any {
-		return map[string]any{"matched": matched, "url": t.URL()}
+		r := map[string]any{"matched": matched, "url": t.URL()}
+		if matched == "timeout" {
+			// What a page waited on most often never comes because a popup stands in its way.
+			if b := p.blocker(ctx, t); b != nil {
+				r["blocker"] = b
+			}
+		}
+		return r
 	}
 	switch what {
 	case "load", "idle":

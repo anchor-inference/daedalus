@@ -649,12 +649,13 @@ func (p *Model) covered(ctx context.Context, t *browser.Tab, d *doc, ref string,
 	var h struct {
 		OK        bool     `json:"ok"`
 		CoveredBy string   `json:"covered_by"`
+		CoverRef  string   `json:"covered_ref"`
 		X         *float64 `json:"x"`
 		Y         *float64 `json:"y"`
 	}
 	_ = json.Unmarshal(raw, &h)
 	if !h.OK {
-		return pt, coveredErr(ref, h.CoveredBy)
+		return pt, p.coveredErr(ctx, t, ref, h.CoveredBy, h.CoverRef)
 	}
 	if h.X != nil && h.Y != nil {
 		pt = point{X: *h.X + d.off.X, Y: *h.Y + d.off.Y}
@@ -668,18 +669,27 @@ func (p *Model) covered(ctx context.Context, t *browser.Tab, d *doc, ref string,
 		if err := checkScript(raw); err != nil {
 			return pt, err
 		}
-		h.OK, h.CoveredBy = false, ""
+		h.OK, h.CoveredBy, h.CoverRef = false, "", ""
 		_ = json.Unmarshal(raw, &h)
 		if !h.OK {
-			return pt, coveredErr(ref, h.CoveredBy)
+			return pt, p.coveredErr(ctx, t, ref, h.CoveredBy, h.CoverRef)
 		}
 	}
 	return pt, nil
 }
 
-func coveredErr(ref, by string) *wire.Error {
+// coveredErr names what covers ref, by its ref too, and the page's popup when there is one: an
+// agent told only "covered" clicked again, or read the page, and never closed the box in its way.
+func (p *Model) coveredErr(ctx context.Context, t *browser.Tab, ref, by, byRef string) *wire.Error {
 	e := wire.Errorf(wire.CodeForbidden, "%s is covered by %s at the point it would be clicked; deal with that first", ref, orDefault(by, "something else"))
-	e.Data = map[string]any{"ref": ref, "covered_by": by}
+	data := map[string]any{"ref": ref, "covered_by": by}
+	if byRef != "" {
+		data["covered_ref"] = byRef
+	}
+	if b := p.blocker(ctx, t); b != nil {
+		data["blocker"] = b
+	}
+	e.Data = data
 	return e
 }
 

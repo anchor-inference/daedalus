@@ -120,6 +120,8 @@ class Page:
     ``body`` key is its response's body, which ``page.request`` gives."""
     inspected: dict[str, dict[str, Any]] = field(default_factory=dict)
     """Ref or selector → what ``page.inspect`` answers for it."""
+    blocker: dict[str, Any] | None = None
+    """A popup over the page, as the daemon reports it on every read and on a wait that times out."""
 
     def outline(self) -> str:
         lines = [f'- heading "{self.heading}" [level=1]'] if self.heading else []
@@ -599,6 +601,10 @@ class FakeBrowserd:
         if group.control["owner"] == "paused":
             raise _Fail(1106, "the operator paused the agent in this browser", {"reason": group.control["reason"]})
 
+    @staticmethod
+    def _blocker(tab: Tab) -> dict[str, Any]:
+        return {"blocker": tab.page.blocker} if tab.page.blocker else {}
+
     def _page_call(self, tab: Tab) -> None:
         if tab.detached:
             raise _Fail(1104, f"tab {tab.id} no longer answers: its debugger was detached", {"tab_id": tab.id, "reason": "detached"})
@@ -644,7 +650,7 @@ class FakeBrowserd:
         known = self.pages.get(url)
         if known is not None:
             return Page(url=known.url, title=known.title, text=known.text, elements=dict(known.elements), heading=known.heading, logs=list(known.logs),
-                        requests=[dict(r) for r in known.requests], inspected=dict(known.inspected))
+                        requests=[dict(r) for r in known.requests], inspected=dict(known.inspected), blocker=known.blocker)
         return Page(url=url or "about:blank")
 
     async def _handle(self, method: str, params: dict[str, Any]) -> Any:  # noqa: C901 — one dispatcher, as the daemon's
@@ -783,19 +789,19 @@ class FakeBrowserd:
             self._page_call(tab)
             text = tab.page.outline()
             limit = int(params.get("max_chars") or 40_000)
-            return {"url": tab.page.url, "title": tab.page.title, "text": text[:limit], "refs": len(tab.page.elements), "truncated": len(text) > limit, "frames": []}
+            return {"url": tab.page.url, "title": tab.page.title, "text": text[:limit], "refs": len(tab.page.elements), "truncated": len(text) > limit, "frames": []} | self._blocker(tab)
         if method == "page.text":
             group, tab = self._tab(params)
             await self._held_back(group, params)
             self._page_call(tab)
             limit = int(params.get("max_chars") or 40_000)
-            return {"url": tab.page.url, "title": tab.page.title, "text": tab.page.text[:limit], "truncated": len(tab.page.text) > limit}
+            return {"url": tab.page.url, "title": tab.page.title, "text": tab.page.text[:limit], "truncated": len(tab.page.text) > limit} | self._blocker(tab)
         if method == "page.screenshot":
             group, tab = self._tab(params)
             await self._held_back(group, params)
             self._page_call(tab)
             masked = [e.ref for e in tab.page.elements.values() if e.secret]
-            return {"format": "jpeg", "width": 1280, "height": 800, "data_b64": base64.b64encode(self.screenshot).decode(), "masked": masked}
+            return {"format": "jpeg", "width": 1280, "height": 800, "data_b64": base64.b64encode(self.screenshot).decode(), "masked": masked} | self._blocker(tab)
         if method == "page.act":
             return await self._act(params)
         if method == "page.find" and not self.legacy:
@@ -809,7 +815,7 @@ class FakeBrowserd:
             wanted = str(params.get("for"))
             value = str(params.get("value") or "")
             matched = wanted in ("load", "idle") or (wanted == "text" and value in tab.page.text + tab.page.outline()) or (wanted == "url" and value in tab.page.url)
-            return {"matched": wanted if matched else "timeout", "url": tab.page.url}
+            return {"matched": wanted if matched else "timeout", "url": tab.page.url} | ({} if matched else self._blocker(tab))
         if method == "dialog.answer":
             group, tab = self._tab(params)
             if tab.dialog is None:
@@ -1312,7 +1318,7 @@ class FakeBrowserd:
             self.emit("needs_you", {"group_id": group.id, "tab_id": tab.id, "reason": "field_forbidden", "what": f"type into {element.name}", "url": tab.page.url, "by": "daemon"})
             raise _Fail(1105, "this is a secret field", {"ref": ref, "field": element.field_kind()})
         if element is not None and element.covered_by and action in ("click", "double_click", "right_click", "check", "uncheck"):
-            raise _Fail(1004, f"{ref} is covered by {element.covered_by}", {"ref": ref, "covered_by": element.covered_by})
+            raise _Fail(1004, f"{ref} is covered by {element.covered_by}", {"ref": ref, "covered_by": element.covered_by} | self._blocker(tab))
         self._next["action"] += 1
         action_id = f"a{self._next['action']}"
         text = str(params.get("text") or "")

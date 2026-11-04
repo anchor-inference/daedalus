@@ -198,6 +198,39 @@ def fenced(origin: str, body: str) -> str:
     return untrusted(body, kind="page content", origin=origin, source="the web", quoted_by="the page")
 
 
+def popup_banner(blocker: Any) -> str:
+    """The line every read opens with while a popup covers the page, or "".
+
+    It carries only refs, never the popup's words: those are page content and go inside the fence
+    (``popup_words``). An agent that read the words under a sign-in box for a whole turn, waiting for
+    search results that box held back, is why this comes first and says what to do."""
+    if not isinstance(blocker, dict) or not REF_SHAPE.fullmatch(str(blocker.get("ref") or "")):
+        return ""
+    what = "A dialog" if blocker.get("kind") == "dialog" else "A popup"
+    line = f"{what} covers this page (ref {blocker['ref']}"
+    frame = str(blocker.get("frame") or "")
+    if REF_SHAPE.fullmatch(frame):
+        line += f"; the frame in it is {frame}, and its fields and buttons have refs beginning {frame}"
+    line += ")."
+    close = str(blocker.get("close") or "")
+    if REF_SHAPE.fullmatch(close):
+        line += f" Its close control is ref {close}."
+    else:
+        line += f" No close control was found: BrowserSnapshot(scope={blocker['ref']}) reads it, and pressing Escape closes many."
+    return (
+        line + " Deal with it before anything else: close it if the task does not need it; if it asks you to sign in and the task needs that, "
+        "call BrowserLogin; for a CAPTCHA or anything else only the operator may do, BrowserHandoff. The page under it will not change while it is open."
+    )
+
+
+def popup_words(blocker: Any) -> str:
+    """The popup's own words, as the first line inside the fence: page content like the rest."""
+    if not popup_banner(blocker):
+        return ""
+    name = " ".join(str(blocker.get("name") or "").split())[:120]
+    return f"[over the page: “{name}”]\n" if name else ""
+
+
 def host_of(url: str) -> str:
     return (urlsplit(url or "").hostname or "").lower()
 
@@ -705,7 +738,14 @@ def explain(exc: BrowserError) -> str:
     if isinstance(exc, Forbidden) and exc.details.get("covered_by"):
         # A page may put something over an element to catch the click meant for it; the daemon
         # refuses rather than clicking whatever is on top.
-        return f"{exc.details.get('ref') or 'That element'} is covered by {exc.details['covered_by']}, so the click was not made. Deal with what covers it first (close it, scroll), take a new BrowserSnapshot, and try again."
+        said = f"{exc.details.get('ref') or 'That element'} is covered by {exc.details['covered_by']}"
+        cover = str(exc.details.get("covered_ref") or "")
+        if REF_SHAPE.fullmatch(cover):
+            said += f" (ref {cover})"
+        said += ", so the click was not made."
+        if banner := popup_banner(exc.details.get("blocker")):
+            return f"{said} {banner}"
+        return f"{said} Deal with what covers it first (close it, scroll), take a new BrowserSnapshot, and try again."
     if isinstance(exc, EnvUnavailable):
         return f"The browser is not available now: {exc.message}"
     return exc.message
@@ -1227,7 +1267,10 @@ class BrowserAgent:
             caller.notes.append(hint)
         head = f"Tab {current['id']} — {url} · {int(result.get('refs') or 0)} refs" + (f", scoped to {scope}" if scope else "")
         tail = "The outline was cut; pass scope=<ref> to read one part whole." if result.get("truncated") else "Act on an element with BrowserAct(action, ref, element)."
-        return f"{head}\n{fenced(origin_of(url), str(result.get('text') or '(an empty page)'))}\n{tail}"
+        popup = result.get("blocker")
+        banner = f"{popup_banner(popup)}\n" if popup_banner(popup) else ""
+        body = popup_words(popup) + str(result.get("text") or "(an empty page)")
+        return f"{head}\n{banner}{fenced(origin_of(url), body)}\n{tail}"
 
     async def text(
         self,
@@ -1263,12 +1306,17 @@ class BrowserAgent:
         body = str(result.get("text") or "")
         await self._screen(group, caller, url, body)
         await self._site_notes(caller, url)
+        popup = result.get("blocker")
+        banner = popup_banner(popup)
         if query:
-            return await self._extract(caller, group, current, url, body, query=query, schema=schema, truncated=bool(result.get("truncated")))
+            extracted = await self._extract(caller, group, current, url, body, query=query, schema=schema, truncated=bool(result.get("truncated")))
+            # What a popup holds back is not on the page yet: "nothing matches" alone reads as no goods.
+            return f"{banner}\n{extracted}" if banner else extracted
         if hint := self.hints.read(self._who(caller), f"text:{ref or ''}", url, body):
             caller.notes.append(hint)
         tail = f"\nThe text was cut at {limit} characters; pass ref=<ref> for one part, find= to search it, or query= to pull out what you need." if result.get("truncated") else ""
-        return f"Tab {current['id']} — {url}\n{fenced(origin_of(url), body or '(no readable text)')}{tail}"
+        lead = f"{banner}\n" if banner else ""
+        return f"Tab {current['id']} — {url}\n{lead}{fenced(origin_of(url), popup_words(popup) + (body or '(no readable text)'))}{tail}"
 
     async def _find(self, caller: Caller, group: dict[str, Any], current: dict[str, Any], find: str, *, regex: bool) -> str:
         """The page searched as a person's Ctrl+F does, the frames of other sites too: each match with
@@ -1382,7 +1430,8 @@ class BrowserAgent:
         answer = await caller.look(data, mime, question)
         await self._audit(group, caller, "look", {"tab": current["id"], "ref": ref or "", "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(), "masked": shot.get("masked") or []})
         url = str(current.get("url") or "")
-        return f"Tab {current['id']} — {url}; what the vision model saw:\n{fenced(origin_of(url), answer)}"
+        banner = popup_banner(shot.get("blocker"))
+        return f"Tab {current['id']} — {url}; what the vision model saw:\n{fenced(origin_of(url), answer)}" + (f"\n{banner}" if banner else "")
 
     async def act(self, caller: Caller, step: Step, *, tab: str | None = None) -> str:
         step.check()
@@ -2339,7 +2388,10 @@ class BrowserAgent:
         result = await self.service.call(group["id"], "page.wait", params, what="waiting on the page", timeout=timeout_ms / 1000 + 25)
         matched = str(result.get("matched") or "")
         if matched == "timeout":
-            return f"Waited {timeout_ms // 1000} s for {for_}{f' {value!r}' if value else ''}; it did not happen. The tab is on {result.get('url')}."
+            said = f"Waited {timeout_ms // 1000} s for {for_}{f' {value!r}' if value else ''}; it did not happen. The tab is on {result.get('url')}."
+            # The wait that motivated this: fifteen seconds for prices a sign-in box was holding back.
+            banner = popup_banner(result.get("blocker"))
+            return f"{said}\n{banner}" if banner else said
         return f"The page reached {for_}{f' {value!r}' if value else ''}; the tab is on {result.get('url')}."
 
     async def dialog(self, caller: Caller, *, accept: bool, text: str | None = None, tab: str | None = None) -> str:

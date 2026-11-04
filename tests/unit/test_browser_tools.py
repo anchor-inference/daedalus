@@ -54,6 +54,10 @@ def shop(daemon: FakeBrowserd) -> None:
         "e24": Element("e24", "button", "Apply coupon", covered_by='dialog "Subscribe to our newsletter"'),
         "e25": Element("e25", "checkbox", "Gift wrap", tag="input", type="checkbox", checked=True),
     })
+    # A search page under a sign-in box from another site, its fields in the box's frame.
+    daemon.page("https://shop.test/search", title="Search", text="Results 加载中...", elements={
+        "e40": Element("e40", "button", "Sort by price", covered_by='div.login-box "密码登录"'),
+    }, blocker={"kind": "overlay", "name": "密码登录 短信登录", "ref": "e41", "close": "f1e7", "frame": "f1", "cross_origin": True})
     daemon.page("https://login.test/", title="Sign in", elements={
         "e30": Element("e30", "textbox", "Email", tag="input", type="email"),
         "e31": Element("e31", "textbox", "Password", tag="input", type="password"),
@@ -564,3 +568,28 @@ async def test_the_injection_monitor_pauses_a_page_that_talks_to_the_agent(rig: 
     before = len(asked)
     await rig.call(sid, "BrowserText")
     assert len(asked) == before
+
+
+async def test_a_popup_over_the_page_opens_every_read_with_its_close_ref(rig: Rig) -> None:
+    sid = await rig.session()
+    await rig.call(sid, "BrowserOpen", url="https://shop.test/search")
+    text, failed = await rig.call(sid, "BrowserSnapshot")
+    assert not failed
+    banner = text.splitlines()[1]
+    assert banner.startswith("A popup covers this page (ref e41; the frame in it is f1") and "close control is ref f1e7" in banner
+    assert "BrowserLogin" in banner and "密码登录" not in banner
+    # The popup's words are page content: inside the fence, never in the banner.
+    assert text.index("[page content from") < text.index("[over the page: “密码登录 短信登录”]")
+    text, failed = await rig.call(sid, "BrowserText")
+    assert not failed and "close control is ref f1e7" in text and "加载中" in text
+    text, failed = await rig.call(sid, "BrowserWait", until="text", value="¥", timeout_s=1)
+    assert not failed and "it did not happen" in text and "close control is ref f1e7" in text
+    text, failed = await rig.call(sid, "BrowserAct", action="click", ref="e40", element="sort by price")
+    assert failed and 'covered by div.login-box "密码登录"' in text and "close control is ref f1e7" in text
+
+
+async def test_a_page_without_a_popup_reads_as_before(rig: Rig) -> None:
+    sid = await rig.session()
+    await rig.call(sid, "BrowserOpen", url="https://shop.test/shoes")
+    text, failed = await rig.call(sid, "BrowserSnapshot")
+    assert not failed and "covers this page" not in text and "[over the page" not in text
