@@ -744,9 +744,12 @@ def _exclude_artefacts(root: Path) -> None:
         logger.warning("could not write %s: %s", path, exc)
 
 
+# "Six words at most" alone pressed a small model into a row of keywords, which in an inflected
+# language reads as broken grammar ("a purchase into Astana"); the title is asked to be a phrase.
 TITLE_PROMPT = (
     "Write a short title for a chat that opens with the message below. "
-    "Use the same language as the message. Six words at most. "
+    "Use the same language as the message, as a grammatical phrase a native speaker would write, "
+    "not a row of keywords. Six words at most. "
     "No quotes and no trailing punctuation.\n\nMessage:\n"
 )
 
