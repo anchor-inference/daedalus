@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ascorblack/daedalus/browserd/internal/config"
+	"github.com/ascorblack/daedalus/browserd/internal/relay"
 	"github.com/ascorblack/daedalus/ptyd/proto/wire"
 )
 
@@ -109,7 +110,13 @@ func (m *Manager) setupTab(g *Group, session string, info targetInfo, opener str
 		return nil
 	}
 	m.tabSeq++
-	t := &Tab{ID: "t" + strconv.Itoa(m.tabSeq), Group: g, TargetID: info.TargetID, Session: session, Opener: opener,
+	id := "t" + strconv.Itoa(m.tabSeq)
+	if chromeTab, _, ok := relay.ParseSession(session); ok && g.Browser.attached && m.tabs["t"+strconv.Itoa(chromeTab)] == nil {
+		// In the operator's Chrome a tab is named by Chrome's own id, so the tab keeps its name when
+		// it is set up again: the same tab was once t8, t10, t12 and t14 across three reconnects.
+		id = "t" + strconv.Itoa(chromeTab)
+	}
+	t := &Tab{ID: id, Group: g, TargetID: info.TargetID, Session: session, Opener: opener,
 		CreatedAt: time.Now().UTC(), Given: info.given, url: info.URL, title: info.Title, life: map[string]bool{}, wake: make(chan struct{})}
 	m.settingUp[session] = t
 	m.mu.Unlock()

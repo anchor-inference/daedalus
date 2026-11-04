@@ -1080,3 +1080,15 @@ def test_anti_bot_interstitials_are_known_by_their_address() -> None:
         assert anti_bot(url), url
     for url in ("https://s.taobao.com/search?q=5060", "https://item.jd.com/100.html", "https://example.com/", ""):
         assert not anti_bot(url), url
+
+
+async def test_chrome_not_coming_back_within_the_grace_is_said_as_chrome_disconnecting(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await rig.session()
+    await rig.switch(sid)
+    await rig.call(sid, "BrowserOpen")
+    reason = "chrome disconnected (closed, and it did not connect again within 45s)"
+    chrome.fail["tab.list"] = (1108, f"the browser behind this group has exited ({reason}); open it again", {"reason": reason})
+    text, failed = await rig.call(sid, "BrowserSnapshot")
+    assert failed and "Chrome disconnected from Daedalus (closed, and it did not connect again within 45s)" in text, text
+    text, failed = await rig.call(sid, "BrowserTabs")
+    assert failed and "Chrome disconnected from Daedalus" in text and "once it is connected" in text, text

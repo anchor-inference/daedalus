@@ -352,18 +352,94 @@ func TestAttachCloseBrowserDetaches(t *testing.T) {
 	}
 }
 
-// The relay's end is the browser's: its groups answer 1108 with why.
+// connectAgain is the same Chrome profile making a relay again, as its extension does after a drop.
+func connectAgain(t *testing.T, hub *relay.Hub) *scripted {
+	t.Helper()
+	s := &scripted{t: t, join: relay.Joiner{Max: relay.MaxToExtension}}
+	old := hub.Current()
+	s.link = hub.Open(s, relay.TransportNative, "")
+	s.send(relay.Hello{T: relay.THello, Proto: relay.Proto, ChromeVersion: "141.0", ProfileID: "p", ProfileName: "Home"})
+	deadline := time.Now().Add(5 * time.Second)
+	for hub.Current() == nil || hub.Current() == old {
+		if time.Now().After(deadline) {
+			t.Fatal("the relay was not accepted")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return s
+}
+
+// A relay that drops and comes back within the grace keeps the browser: the same group, the same tab
+// by the same name (Chrome's own id), the tabs the extension replays taken as they were, and the
+// calls going over the new relay. A call made while it was down waits for it.
+func TestAttachRelayComesBackWithinTheGrace(t *testing.T) {
+	m, s, hub := attachManager(t)
+	g, tab := openAttached(t, m, "s-1")
+	if tab.ID != "t1" {
+		t.Fatalf("the tab of Chrome's tab 1 is %s", tab.ID)
+	}
+	s.link.Closed()
+	waited := make(chan time.Duration, 1)
+	go func() {
+		begin := time.Now()
+		m.AwaitRelay(context.Background())
+		waited <- time.Since(begin)
+	}()
+	time.Sleep(100 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := tab.Call(ctx, "Runtime.evaluate", map[string]any{"expression": "1"}, nil); err == nil || !strings.Contains(err.Error(), "reconnecting") {
+		t.Fatalf("a command while Chrome reconnects: %v", err)
+	}
+	again := connectAgain(t, hub)
+	select {
+	case took := <-waited:
+		if took < 50*time.Millisecond {
+			t.Fatalf("the call did not wait for the relay (%s)", took)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the waiting call was not let go when Chrome came back")
+	}
+	again.send(relay.Tabs{T: relay.TTabs, Op: relay.TabsJoined, Tab: &relay.Tab{ID: 1, Group: "s-1", URL: "https://shop.example/"}})
+	deadline := time.Now().Add(5 * time.Second)
+	for !slices.Contains(again.methods(tab.Session), "Page.getNavigationHistory") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if g.Closed() || len(m.Browsers()) != 1 || m.Browsers()[0] != g.Browser {
+		t.Fatal("the browser did not outlive the drop")
+	}
+	if got, err := m.Tab("t1"); err != nil || got != tab {
+		t.Fatalf("the tab after the drop: %v %v", got, err)
+	}
+	if err := tab.Call(ctx, "Runtime.evaluate", map[string]any{"expression": "1"}, nil); err != nil {
+		t.Fatalf("a command after Chrome came back: %v", err)
+	}
+	if len(again.methods(tab.Session)) == 0 {
+		t.Fatal("the command did not go over the new relay")
+	}
+}
+
+// A relay that does not come back within the grace ends the browser: its groups answer 1108 saying
+// Chrome disconnected and did not come back.
 func TestAttachRelayLost(t *testing.T) {
 	m, s, _ := attachManager(t)
+	m.backend.(*attach).grace = 200 * time.Millisecond
 	g, _ := openAttached(t, m, "s-1")
 	s.link.Closed()
 	select {
 	case <-g.Browser.gone:
+		t.Fatal("the browser ended at once, with no grace for Chrome to come back")
+	case <-time.After(50 * time.Millisecond):
+	}
+	select {
+	case <-g.Browser.gone:
 	case <-time.After(5 * time.Second):
-		t.Fatal("the browser outlived its relay")
+		t.Fatal("the browser outlived its grace")
 	}
 	_, err := m.Group("s-1")
-	if codeOf(err) != CodeBrowserGone || !strings.Contains(err.Error(), "chrome disconnected") {
+	if codeOf(err) != CodeBrowserGone || !strings.Contains(err.Error(), "chrome disconnected") || !strings.Contains(err.Error(), "did not connect again") {
 		t.Fatalf("after the relay was lost: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

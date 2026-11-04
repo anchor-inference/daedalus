@@ -128,7 +128,11 @@ func New(deps Deps) *Manager {
 	if deps.Config.Backend == BackendAttach {
 		// The operator's Chrome is the browser: the daemon neither looks for a Chromium of its own
 		// nor runs one to ask its version.
-		m.backend = &attach{m: m, hub: deps.Relay, dispatched: map[int]time.Time{}}
+		a := &attach{m: m, hub: deps.Relay, dispatched: map[int]time.Time{}, grace: RelayGrace}
+		m.backend = a
+		if deps.Relay != nil {
+			deps.Relay.OnSession(a.onSession)
+		}
 		return m
 	}
 	m.backend = &launch{m: m}
@@ -601,6 +605,29 @@ func (m *Manager) CloseGroup(ctx context.Context, id string) (int, error) {
 	m.closeGrants(g)
 	m.publish("group.closed", map[string]any{"group_id": g.ID, "browser_id": g.Browser.ID, "profile": g.Profile, "labels": g.Labels})
 	return len(tabs), nil
+}
+
+// AwaitRelay holds a call while the operator's Chrome is expected back: its relay ended by itself
+// moments ago and its extension reconnects within seconds. The call goes on when the relay is bound
+// again, or after RelayWait, or the rest of RelayGrace, whichever is first, and then fails as it
+// would have. A call made in that second once failed at once with "Chrome is not connected".
+func (m *Manager) AwaitRelay(ctx context.Context) {
+	a, ok := m.backend.(*attach)
+	if !ok || a.hub == nil {
+		return
+	}
+	connected := a.hub.Connected()
+	expected, left := a.hub.Expected(a.grace)
+	if !expected {
+		return
+	}
+	timer := time.NewTimer(min(left, RelayWait))
+	defer timer.Stop()
+	select {
+	case <-connected:
+	case <-timer.C:
+	case <-ctx.Done():
+	}
 }
 
 // closeGrants ends the grants a group of the operator's Chrome keeps (WallKey), when the group itself

@@ -24,6 +24,11 @@ type attach struct {
 	hub *relay.Hub
 
 	mu sync.Mutex
+	// cur is the browser of the operator's Chrome, which a relay the same Chrome makes again is
+	// bound to (onSession).
+	cur *attachProc
+	// grace is RelayGrace, shorter in a test.
+	grace time.Duration
 	// dispatched is when the daemon last sent input to each tab, by Chrome's tab id: the operator's
 	// own input is told from the echo of the daemon's by it.
 	dispatched map[int]time.Time
@@ -70,31 +75,152 @@ func relayErr(err error) error {
 	case errors.As(err, &re) && re.Code == relay.ErrRefused:
 		return errWith(wire.CodeForbidden, map[string]any{"reason": "refused_by_extension"}, "the extension refused: %s", re.Message)
 	case errors.Is(err, relay.ErrNotConnected):
-		return errBrowserGone("chrome disconnected")
+		// The relay ended under the call; the browser waits RelayGrace for it, and sessionOf says
+		// gone once it stops waiting.
+		return errReconnecting()
 	}
 	return err
 }
 
-// attachProc is the relayed Chrome as the manager waits for it: it is done when the relay ends or
-// the daemon lets go of it. Closing it closes the agent's groups, never the browser.
+// errReconnecting is a call made while the browser waits for its Chrome to connect again.
+func errReconnecting() *wire.Error {
+	return errWith(wire.CodeUnsupported, map[string]any{"reason": "chrome_reconnecting"}, "%s", relay.ErrReconnecting)
+}
+
+// RelayGrace is how long the browser of the operator's Chrome outlives its relay, waiting for the same
+// Chrome profile to connect again. The extension reconnects within seconds of a drop (a worker
+// restart, the host restarting, a frame the host's server refused); ending the browser at once closed
+// the agent's group, gave the same tabs new ids and lost the conversation's grants, three times in
+// one session.
+const RelayGrace = 45 * time.Second
+
+// RelayWait is the longest a call waits for a relay that is expected back (Manager.AwaitRelay). It is
+// less than the host's slack on a call to this daemon, so the host hears the answer, not its timeout.
+const RelayWait = 20 * time.Second
+
+// rebindSettle is how long after a rebind the tabs the extension replays are taken as the ones the
+// browser already has: its debugger stayed attached through the drop.
+const rebindSettle = 15 * time.Second
+
+// attachProc is the relayed Chrome as the manager waits for it: it is done when the relay ends and
+// the same Chrome does not connect again within RelayGrace, or the daemon lets go of it. Closing it
+// closes the agent's groups, never the browser.
 type attachProc struct {
 	a       *attach
 	b       *Browser
-	s       *relay.Session
-	drop    func()
+	line    *relay.Line
+	profile string
 	done    chan struct{}
 	once    sync.Once
 	closing sync.Mutex
+
+	mu        sync.Mutex
+	s         *relay.Session // the relay bound now, or the one that ended while none is
+	rebound   chan struct{}  // closed when another relay is bound
+	reboundAt time.Time
 }
 
 func (p *attachProc) Done() <-chan struct{} { return p.done }
 func (p *attachProc) ExitCode() int         { return 0 }
 
+func (p *attachProc) session() *relay.Session {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.s
+}
+
 func (p *attachProc) finish() {
 	p.once.Do(func() {
-		p.drop()
+		p.line.Close()
 		close(p.done)
 	})
+}
+
+// end gives the browser up: reason is what its groups answer from now on.
+func (p *attachProc) end(reason string) {
+	p.b.setClosing(reason)
+	p.finish()
+}
+
+// watch follows the relays the browser runs over: one that ends is waited for, and the browser
+// ends only when no relay of the same Chrome comes back within RelayGrace.
+func (p *attachProc) watch() {
+	for {
+		s := p.session()
+		select {
+		case <-p.done:
+			return
+		case <-s.Done():
+		}
+		p.mu.Lock()
+		rebound := p.rebound
+		same := p.s == s
+		p.mu.Unlock()
+		if !same {
+			continue // bound to the next relay already
+		}
+		reason := s.Reason()
+		if reason == relay.LostShutdown || p.profile == "" {
+			p.end("chrome disconnected (" + reason + ")")
+			return
+		}
+		grace := p.a.grace
+		p.a.m.log.Info("relay lost; the browser waits for Chrome to connect again", "browser", p.b.ID, "reason", reason, "grace", grace)
+		timer := time.NewTimer(grace)
+		select {
+		case <-rebound:
+			timer.Stop()
+		case <-timer.C:
+			p.end(fmt.Sprintf("chrome disconnected (%s, and it did not connect again within %s)", reason, grace))
+			return
+		case <-p.done:
+			timer.Stop()
+			return
+		}
+	}
+}
+
+// onSession binds the browser to a relay the hub accepted, before its welcome goes out and so before
+// the extension replays the tabs it holds. Another Chrome than the browser's ends it.
+func (a *attach) onSession(s *relay.Session) {
+	a.mu.Lock()
+	p := a.cur
+	a.mu.Unlock()
+	if p == nil {
+		return
+	}
+	select {
+	case <-p.done:
+		return
+	default:
+	}
+	if p.session() == s {
+		return
+	}
+	if p.profile == "" || s.Hello().ProfileID != p.profile {
+		p.end("chrome disconnected (another Chrome connected)")
+		return
+	}
+	p.line.Bind(s)
+	s.SetObserver(&attachObserver{a: a, b: p.b})
+	p.mu.Lock()
+	p.s = s
+	p.reboundAt = time.Now()
+	close(p.rebound)
+	p.rebound = make(chan struct{})
+	p.mu.Unlock()
+	a.m.log.Info("browser bound to the relay Chrome made again", "browser", p.b.ID)
+}
+
+// justRebound reports whether b was bound to a new relay moments ago.
+func (a *attach) justRebound(b *Browser) bool {
+	p, ok := b.proc.(*attachProc)
+	if !ok {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return !p.reboundAt.IsZero() && time.Since(p.reboundAt) < rebindSettle
 }
 
 // Close detaches: the agent's groups are closed through the extension (their tabs and the agent's
@@ -106,8 +232,9 @@ func (p *attachProc) Close(grace time.Duration) {
 	reason, _ := p.b.closeReason()
 	if reason != "shutdown" {
 		ctx, cancel := context.WithTimeout(context.Background(), grace)
+		s := p.session()
 		for _, id := range p.b.GroupIDs() {
-			_ = p.s.Call(ctx, relay.OpGroupClose, relay.GroupArgs{Group: id}, nil)
+			_ = s.Call(ctx, relay.OpGroupClose, relay.GroupArgs{Group: id}, nil)
 		}
 		cancel()
 	}
@@ -142,19 +269,16 @@ func (a *attach) start(ctx context.Context, profile string) (*Browser, error) {
 	b.screenAsked = true
 	close(b.screenKnown)
 	// The operator's yes to a site is kept by group, where net.grant puts it (Manager.WallKey).
-	conn, drop := s.NewConn(func(e cdp.Event) { m.onEvent(b, e) }, a.markDispatch)
+	conn, line := relay.NewLine(func(e cdp.Event) { m.onEvent(b, e) }, a.markDispatch)
 	b.conn = conn
-	p := &attachProc{a: a, b: b, s: s, drop: drop, done: make(chan struct{})}
+	p := &attachProc{a: a, b: b, line: line, profile: hi.ProfileID, s: s, done: make(chan struct{}), rebound: make(chan struct{})}
 	b.proc = p
+	line.Bind(s)
 	s.SetObserver(&attachObserver{a: a, b: b})
-	go func() {
-		select {
-		case <-s.Done():
-			b.setClosing("chrome disconnected (" + s.Reason() + ")")
-			p.finish()
-		case <-p.done:
-		}
-	}()
+	a.mu.Lock()
+	a.cur = p
+	a.mu.Unlock()
+	go p.watch()
 	m.log.Info("browser attached", "browser", b.ID, "profile", hi.ProfileName, "chrome", hi.ChromeVersion, "extension", hi.ExtVersion)
 	return b, nil
 }
@@ -196,10 +320,20 @@ func (a *attach) sessionOf(b *Browser) (*relay.Session, error) {
 	}
 	select {
 	case <-p.done:
-		return nil, errBrowserGone("chrome disconnected")
+		reason, _ := b.closeReason()
+		if reason == "" {
+			reason = "chrome disconnected"
+		}
+		return nil, errBrowserGone(reason)
 	default:
 	}
-	return p.s, nil
+	s := p.session()
+	select {
+	case <-s.Done():
+		return nil, errReconnecting()
+	default:
+	}
+	return s, nil
 }
 
 func (a *attach) closeGroup(ctx context.Context, g *Group, tabs []*Tab) {
@@ -553,6 +687,12 @@ func (o *attachObserver) RelayTabs(tb relay.Tabs) {
 		// the old attachment, so it is set up again as a new tab rather than trusted as it was.
 		if old := o.tab(tb.Tab.ID); old != nil {
 			if old.Group != g {
+				return
+			}
+			if tb.Op == relay.TabsJoined && o.a.justRebound(o.b) {
+				// Replayed after the relay came back: the debugger stayed attached through the drop,
+				// and the tab keeps its id and setup. Only what it shows may have changed meanwhile.
+				o.a.refreshTab(ctx, old)
 				return
 			}
 			o.a.forgetTab(old, "reattached")

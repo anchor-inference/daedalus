@@ -90,6 +90,9 @@ JUST_OPENED = timedelta(seconds=30)
 daemon before it writes the row, and the two can straddle the reconcile's listing."""
 CALL_SLACK = 10.0
 """What a call's own timeout exceeds the daemon's wait by, so the daemon's answer always arrives first."""
+RELAY_WAIT = 20.0
+"""How long the user daemon holds a call while the operator's Chrome is reconnecting
+(``browserd/internal/browser``, RelayWait): its calls get that much more slack."""
 DOWNLOAD_CHUNK = 512 << 10
 UPLOAD_CHUNK = 384 << 10
 """What one ``upload.put`` carries: base64 of it stays under the daemon's 512 KiB and one frame."""
@@ -950,7 +953,8 @@ class Browsers:
         if row["status"] != "open":
             raise BrowserGone(self._gone_text(row), reason=row["close_reason"] or row["status"])
         try:
-            result = await self._call(row["env"], method, dict(params or {}), what=what, timeout=timeout + CALL_SLACK)
+            slack = CALL_SLACK + (RELAY_WAIT if row["env"] == USER else 0.0)
+            result = await self._call(row["env"], method, dict(params or {}), what=what, timeout=timeout + slack)
         except BrowserGone as exc:
             if row["env"] == USER:
                 # The user daemon ends its browser when the extension's relay is lost; the agent is

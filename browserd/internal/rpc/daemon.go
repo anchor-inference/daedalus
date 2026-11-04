@@ -70,7 +70,8 @@ type handles interface {
 	Handle(name string, h server.Handler)
 }
 
-// droppedMidCall registers every method so that a call whose browser went away under it is told so.
+// droppedMidCall registers every method so that a call whose browser went away under it is told so,
+// and a call that drives a browser waits for a relay that is reconnecting.
 // A page's command failed then with the pipe's own "closed", wrapped in whatever the page package
 // made of it, and an agent whose relay to Chrome dropped mid-snapshot was told there was no tab,
 // naming none.
@@ -80,13 +81,25 @@ type droppedMidCall struct {
 }
 
 func (r droppedMidCall) Handle(name string, h server.Handler) {
+	waits := waitsForRelay(name)
 	r.s.Handle(name, func(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+		if waits {
+			// A call in the second the operator's Chrome is reconnecting waits for it rather than
+			// failing with "not connected" (Manager.AwaitRelay).
+			r.d.Manager.AwaitRelay(ctx)
+		}
 		out, err := h(ctx, c, params)
 		if err != nil && pipeClosed(err) {
 			return nil, r.d.Manager.DroppedMidCall()
 		}
 		return out, err
 	})
+}
+
+// waitsForRelay reports whether a method drives a browser and so waits for a reconnecting relay. The
+// relay's own methods never wait: relay.open is how the relay comes back.
+func waitsForRelay(name string) bool {
+	return strings.HasPrefix(name, "tab.") || strings.HasPrefix(name, "page.") || name == "browser.open"
 }
 
 // pipeClosed reports whether err is a DevTools pipe that ended under the call, however wrapped.
