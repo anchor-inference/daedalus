@@ -546,23 +546,26 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
     }
   }
 
-  async function send(text: string, files: File[], followUp: boolean, clientMessageId?: string, onProgress?: (fraction: number) => void): Promise<"sent" | "queued"> {
+  // A message sent while the agent works steers it at its next step (see `midRun` on the composer).
+  // It was a follow-up as in the app, and the operator's "only China" waited forty seconds, six model
+  // calls, until they pressed Steer on its card by hand. Its card still offers to withdraw it.
+  async function send(text: string, files: File[], running: boolean, clientMessageId?: string, onProgress?: (fraction: number) => void): Promise<"sent" | "queued" | "steered"> {
     const messageId = clientMessageId ?? crypto.randomUUID();
     let result: { receipt?: { status: string } };
     if (files.length) {
       const form = new FormData();
       form.append("text", text);
       form.append("client_message_id", messageId);
-      if (followUp) form.append("follow_up", "true");
-      form.append("expected_running", followUp ? "true" : "false");
+      if (running) form.append("steer", "true");
+      form.append("expected_running", running ? "true" : "false");
       for (const file of files) form.append("files", file, file.name);
       result = await api.upload<{ receipt?: { status: string } }>(`/api/sessions/${id}/upload`, form, onProgress);
     } else {
-      result = await api.post<{ receipt?: { status: string } }>(`/api/sessions/${id}/messages`, messageBody(text, { followUp, clientMessageId: messageId }));
+      result = await api.post<{ receipt?: { status: string } }>(`/api/sessions/${id}/messages`, messageBody(text, { steer: running, clientMessageId: messageId }));
     }
     void load();
     void loadQueued();
-    return result.receipt?.status === "queued" ? "queued" : "sent";
+    return result.receipt?.status === "queued" ? (running ? "steered" : "queued") : "sent";
   }
 
   async function stop() {
@@ -659,6 +662,7 @@ function Conversation({ session, shell, current, toast, onChanged, answered }: {
           sessionId={id}
           status={status}
           onSend={send}
+          midRun="steer"
           onStop={() => void stop()}
           commands={[]}
           onCommand={async () => toast(t("sidepanel.commands.app"))}

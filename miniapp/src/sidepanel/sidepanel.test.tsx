@@ -255,6 +255,26 @@ describe("the screen", { timeout: 20_000 }, () => {
     expect(host.querySelector(".sp-live")?.textContent).toContain(t("sidepanel.paused.short"));
   });
 
+  it("steers the running agent at its next step with a message typed mid-run, as the button says", async () => {
+    detail = { ...detail, status: "running", run_id: "r1", messages: refusal("0123456789ab").slice(0, 2), open_approvals: [] };
+    act(() => root.render(<SidePanel />));
+    await settle();
+    const field = host.querySelector<HTMLTextAreaElement>(".composer textarea")!;
+    expect(field.placeholder).toBe(t("session.composer.running.steer"));
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+      setter.call(field, "only China");
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const button = host.querySelector<HTMLButtonElement>('.composer .roundbtn.primary[data-action="queue"]')!;
+    expect(button.getAttribute("aria-label")).toBe(t("composer.steer.send"));
+    await act(async () => { button.click(); });
+    await settle();
+    const sent = posted.find((p) => p.url === "/api/panel/sessions/s1/messages")!.body as Record<string, unknown>;
+    expect(sent).toMatchObject({ text: "only China", steer: true, expected_running: true });
+    expect(sent.follow_up).toBeUndefined();
+  });
+
   it("follows the tab to another conversation", async () => {
     detail = { ...detail, id: "s2", title: "Flights", messages: [] };
     act(() => root.render(<SidePanel />));

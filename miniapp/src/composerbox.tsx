@@ -69,8 +69,13 @@ export type ComposerHandle = {
 export type ComposerProps = {
   sessionId: string;
   status: ComposerStatus;
-  /** Send the text and the files; with `queue` (a run is on) the host holds it for the end of the turn. Rejects on failure. */
-  onSend: (text: string, files: File[], queue: boolean, clientMessageId?: string, onProgress?: (fraction: number) => void, secrets?: string[]) => Promise<"sent" | "queued">;
+  /** Send the text and the files; `queue` says a run is on, and `midRun` what the message becomes then. Rejects on failure. */
+  onSend: (text: string, files: File[], queue: boolean, clientMessageId?: string, onProgress?: (fraction: number) => void, secrets?: string[]) => Promise<"sent" | "queued" | "steered">;
+  /** What a message sent during a run becomes, which the button and the field say: held for the end
+   *  of the turn (the app, where the card above offers to steer it instead), or read at the run's next
+   *  step (the side panel, where a correction typed mid-run is what the operator means, and one that
+   *  waited for the turn let six model calls go the wrong way). */
+  midRun?: "queue" | "steer";
   onStop: () => void;
   commands: SlashCommand[];
   /** Installed skills, offered in the same palette: picking one asks the agent to use it. */
@@ -524,7 +529,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   const ctx = props.context ?? null;
   const pct = ctx && ctx.window > 0 ? Math.round((100 * ctx.tokens) / ctx.window) : null;
-  const primaryLabel = action === "stop" ? t("session.stop") : action === "reply" ? t("composer.reply") : action === "queue" ? t("composer.queue") : t("session.send");
+  const steers = props.midRun === "steer";
+  const primaryLabel = action === "stop" ? t("session.stop") : action === "reply" ? t("composer.reply") : action === "queue" ? t(steers ? "composer.steer.send" : "composer.queue") : t("session.send");
+  const fieldWords = steers && status === "running" ? t("session.composer.running.steer") : t(placeholderKey(status, asking));
   const place = composerContext(props.place);
 
   // A phone draws the composer in two shapes (ui/phone.css): one 48 px row at rest, and the text over
@@ -682,11 +689,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           value={draft}
           disabled={sending || fileReadySession !== sessionId}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder={ghost ? ghost : phone && approval ? t("composer.tray.instead") : props.idlePlaceholder && placeholderKey(status, asking) === "session.composer.idle" ? props.idlePlaceholder : t(placeholderKey(status, asking))}
+          placeholder={ghost ? ghost : phone && approval ? t("composer.tray.instead") : props.idlePlaceholder && placeholderKey(status, asking) === "session.composer.idle" ? props.idlePlaceholder : fieldWords}
           rows={1}
           onPaste={onPaste}
           onKeyDown={onKeyDown}
-          aria-label={ghost ? t("composer.suggest.label", { text:ghost }) : props.idlePlaceholder && placeholderKey(status, asking) === "session.composer.idle" ? props.idlePlaceholder : t(placeholderKey(status, asking))}
+          aria-label={ghost ? t("composer.suggest.label", { text:ghost }) : props.idlePlaceholder && placeholderKey(status, asking) === "session.composer.idle" ? props.idlePlaceholder : fieldWords}
         />
         {ghost && <button type="button" className="composer-ghost-accept" onClick={acceptGhost} title={t("composer.suggest.accept")}>
           {phone ? t("composer.suggest.use") : <kbd>Tab</kbd>}

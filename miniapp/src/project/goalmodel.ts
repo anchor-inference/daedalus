@@ -202,12 +202,15 @@ export function excerptOf(text: string, max = EXCERPT_MAX): string {
   return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat;
 }
 
-/** The body a message is posted with, with what it answers when the operator chose something. */
-export function messageBody(text: string, opts: { followUp?: boolean; clientMessageId?: string; reply?: ReplyRef | null; secrets?: string[] }): Record<string, unknown> {
+/** The body a message is posted with, with what it answers when the operator chose something. A
+ *  follow-up waits for the end of the turn and a steer is read at the run's next step; either is
+ *  composed against a running agent, which the host checks still holds. */
+export function messageBody(text: string, opts: { followUp?: boolean; steer?: boolean; clientMessageId?: string; reply?: ReplyRef | null; secrets?: string[] }): Record<string, unknown> {
   return {
     text,
     ...(opts.followUp ? { follow_up: true } : {}),
-    expected_running: !!opts.followUp,
+    ...(opts.steer ? { steer: true } : {}),
+    expected_running: !!(opts.followUp || opts.steer),
     client_message_id: opts.clientMessageId,
     ...(opts.reply ? { reply_to: { seq: opts.reply.seq, excerpt: opts.reply.excerpt } } : {}),
     // The operator's secrets by name; their values went to the host on their own request.
