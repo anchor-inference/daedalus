@@ -435,7 +435,17 @@ async def test_a_turn_end_sounds_once_in_chrome_for_its_conversations_and_by_pus
     assert held is not None and held["delivered"]["chrome"] == "sent" and pushes.sent == [borrowed]
 
 
+async def test_the_turn_end_leaves_the_tabs_open_by_default(rig: Rig, chrome: FakeBrowserd) -> None:
+    # A turn often ends asking the operator to check the page it filled in; closing it lost that page.
+    mine = await rig.session(chrome=True)
+    owner = Owner("session", mine, session_id=mine)
+    await rig.service.open(owner, actor="operator")
+    await browser_extension.turn_ended(rig.manager, rig.service, mine, "completed")
+    assert (await rig.service.get_row(group_id(owner, env=USER)))["status"] == "open"
+
+
 async def test_the_turn_end_closes_the_tabs_of_a_turn_that_waits_for_nobody(rig: Rig, chrome: FakeBrowserd) -> None:
+    rig.manager.config.browser.user.close_tabs = True
     mine = await rig.session(chrome=True)
     owner = Owner("session", mine, session_id=mine)
     await rig.service.open(owner, actor="operator")

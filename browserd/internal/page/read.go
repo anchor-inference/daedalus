@@ -342,6 +342,13 @@ func (p *Model) Screenshot(ctx context.Context, t *browser.Tab, sp ScreenshotPar
 		return nil, wire.Errorf(wire.CodeForbidden, "the element has no size on the page")
 	}
 	scale := math.Min(1, float64(maxW)/w)
+	// Page.captureScreenshot draws in device pixels, so on the operator's high-density screen a
+	// 1280-wide viewport came back 2560 pixels wide while the result said 1280. The model then
+	// clicked at points read off the picture, twice the page's coordinates, and every such click was
+	// refused as outside the viewport. Dividing by the ratio makes one picture pixel one CSS pixel.
+	if ratio := p.pixelRatio(ctx, t); ratio > 1 {
+		scale /= ratio
+	}
 	// Every document's secret fields are hidden, the frames' of other sites too: each world masks
 	// its own.
 	cross, missed := p.crossDocs(ctx, t, top, maxMaskedFrames)
@@ -537,4 +544,20 @@ func (p *Model) AnswerDialog(ctx context.Context, t *browser.Tab, accept bool, t
 		}
 	}
 	return out, nil
+}
+
+// pixelRatio is the page's devicePixelRatio, or 1 when it cannot be read.
+func (p *Model) pixelRatio(ctx context.Context, t *browser.Tab) float64 {
+	var r struct {
+		Result struct {
+			Value float64 `json:"value"`
+		} `json:"result"`
+	}
+	if err := t.Call(ctx, "Runtime.evaluate", map[string]any{"expression": "devicePixelRatio", "returnByValue": true}, &r); err != nil {
+		return 1
+	}
+	if r.Result.Value <= 0 {
+		return 1
+	}
+	return r.Result.Value
 }

@@ -645,6 +645,8 @@ async def test_a_chrome_conversation_is_refused_where_chrome_is_not_offered(rig:
 # -- the agent's tabs there -------------------------------------------------------------------------
 
 GRANTED = user_config(granted_sites=["example.com"])
+# Closing the tabs at the end of a turn is off by default; these tests turn it on.
+CLOSING = user_config(granted_sites=["example.com"], close_tabs=True)
 
 
 def documents(chrome: FakeBrowserd) -> None:
@@ -788,7 +790,7 @@ async def test_closing_a_tab_the_operator_gave_hands_it_back(rig: Rig, chrome: F
     assert chrome.released == [given.id, again.id, third.id]
 
 
-@pytest.mark.parametrize("runtime", [GRANTED])
+@pytest.mark.parametrize("runtime", [CLOSING])
 async def test_the_turn_end_hands_back_the_operators_tab_with_the_group(rig: Rig, chrome: FakeBrowserd) -> None:
     sid = await opened(rig, chrome)
     gid = group_id(Owner("session", sid), env=USER)
@@ -859,7 +861,7 @@ async def test_with_read_only_off_a_posted_form_goes_through(rig: Rig, chrome: F
     assert not failed, text
 
 
-@pytest.mark.parametrize("runtime", [GRANTED])
+@pytest.mark.parametrize("runtime", [CLOSING])
 async def test_the_tabs_close_when_the_turn_ends_unless_the_operator_holds_them(rig: Rig, chrome: FakeBrowserd) -> None:
     sid = await opened(rig, chrome)
     gid = group_id(Owner("session", sid), env=USER)

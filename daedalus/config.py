@@ -2122,10 +2122,11 @@ class BrowserUserConfig(BaseModel):
     """Whether a form the agent submits by POST there waits for the operator's approval, as a purchase
     does. Reading and moving between pages stay free; what a posted form does is filed under the
     operator's name (an application, a draft), whatever the agent meant to do."""
-    close_tabs: bool = True
+    close_tabs: bool = False
     """Whether the agent's tabs there are closed when its turn ends, unless it waits for the operator
-    (a question, an approval, a handoff) or the operator holds the browser. They sit in the operator's
-    own window, and a turn that ends leaves nobody to close them."""
+    (a question, an approval, a handoff) or the operator holds the browser. Off by default: a turn
+    often ends by asking the operator in plain words to check or confirm what is on the page, and
+    closing the tabs then threw away the very page the agent had filled in for them."""
 
     @field_validator("granted_sites")
     @classmethod
