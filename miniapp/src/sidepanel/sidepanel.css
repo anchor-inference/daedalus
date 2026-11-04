@@ -160,6 +160,9 @@ body:has(.sidepanel) #root { height: 100%; min-height: 0; }
 .sp-attach .chip { display: inline-flex; align-items: center; gap: var(--space-1); padding: 2px var(--space-2); border-color: transparent; background: var(--surface-2); color: var(--fg-2); font: inherit; font-size: var(--fs-12); cursor: pointer; }
 .sp-attach .chip:hover:not(:disabled) { background: var(--surface-3); color: var(--fg); }
 .sp-attach .chip:disabled { opacity: 0.5; cursor: default; }
+.sp-attach .sp-asks-chip { margin-left: auto; border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); font-weight: 600; }
+.sp-attach .sp-asks-chip:hover { background: color-mix(in srgb, var(--warn) 22%, transparent); color: var(--warn); }
+.sp-attach .sp-asks-chip.on { background: color-mix(in srgb, var(--warn) 24%, transparent); }
 
 /* A new conversation: what it will work on above, the app's whole composer at the foot, as in an
    open conversation, so dictation, files, the model and the approval mode are all there from the start. */
