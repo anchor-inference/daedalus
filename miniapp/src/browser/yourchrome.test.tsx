@@ -85,16 +85,17 @@ describe("the card", () => {
     expect(card.querySelector<HTMLElement>(".bs-chrome-rtt")?.textContent).toBe("Chrome answered in 14 ms");
   });
 
-  it("offers read-only and closing the agent's tabs at the end of its turn, both on by default", async () => {
+  it("offers read-only, on by default, and closing the agent's tabs at the end of its turn, off by default", async () => {
+    // Closing the tabs is off by default: a turn often ends asking the operator to check the page.
     const changed: Partial<typeof DEFAULT_USER>[] = [];
     current = status();
     prime(USER_STATUS, current);
     await act(async () => root.render(<YourChrome user={DEFAULT_USER} setUser={(patch) => changed.push(patch)} toast={() => undefined} />));
-    for (const [setting, key] of [["browser.user.read_only", "read_only"], ["browser.user.close_tabs", "close_tabs"]] as const) {
+    for (const [setting, key, on] of [["browser.user.read_only", "read_only", true], ["browser.user.close_tabs", "close_tabs", false]] as const) {
       const toggle = host.querySelector<HTMLElement>(`[data-setting='${setting}'] [role=switch]`)!;
-      expect(toggle.getAttribute("aria-checked")).toBe("true");
+      expect(toggle.getAttribute("aria-checked")).toBe(String(on));
       await act(async () => toggle.click());
-      expect(changed.at(-1)).toEqual({ [key]: false });
+      expect(changed.at(-1)).toEqual({ [key]: !on });
     }
   });
 
