@@ -186,6 +186,7 @@ async def test_a_new_site_asks_the_operator_and_a_yes_grants_that_site_for_the_c
     assert tab.page.url == "about:blank", "nothing was opened before the yes"
     (key, asked), = rig.pending(sid).items()
     assert "example.com" in asked["text"] and "your own Chrome" in asked["text"]
+    assert asked["tool"] == "BrowserNavigate"
     await rig.manager.grant(sid, key, via="test")
     text, failed = await rig.call(sid, "BrowserNavigate", url="https://mail.example.com/", why="read the newest message")
     assert not failed, text
@@ -717,7 +718,9 @@ async def test_a_site_still_waiting_for_the_operator_leaves_no_blank_tab(rig: Ri
     text, failed = await rig.call(sid, "BrowserTabs", action="new", url="https://shop.example.co.uk/")
     assert failed and "Approval key" in text
     assert len(tabs_of(chrome, sid)) == 1, "nothing was opened before the yes"
-    (key, _), = rig.pending(sid).items()
+    (key, asked), = rig.pending(sid).items()
+    # The card names the call the agent made: it said BrowserNavigate for every site question.
+    assert asked["tool"] == "BrowserTabs"
     await rig.manager.grant(sid, key, via="test")
     text, failed = await rig.call(sid, "BrowserTabs", action="new", url="https://shop.example.co.uk/")
     assert not failed, text
