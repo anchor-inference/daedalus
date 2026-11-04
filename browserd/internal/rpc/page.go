@@ -12,7 +12,7 @@ import (
 )
 
 // registerPage adds the methods that read and act on pages.
-func (d *Daemon) registerPage(s *server.Server) {
+func (d *Daemon) registerPage(s handles) {
 	for name, h := range map[string]server.Handler{
 		"page.snapshot":   d.snapshot,
 		"page.find":       d.find,

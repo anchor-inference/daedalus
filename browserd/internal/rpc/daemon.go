@@ -10,10 +10,12 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/ascorblack/daedalus/browserd/internal/browser"
+	"github.com/ascorblack/daedalus/browserd/internal/cdp"
 	"github.com/ascorblack/daedalus/browserd/internal/config"
 	"github.com/ascorblack/daedalus/browserd/internal/netwall"
 	"github.com/ascorblack/daedalus/browserd/internal/page"
@@ -63,8 +65,42 @@ func (d *Daemon) Hello() any {
 // is confirmed to the extension only when the app can show it too.
 func (d *Daemon) HostSeen() bool { return d.listening.Load() > 0 }
 
+// handles is where the methods are registered: the server, through droppedMidCall.
+type handles interface {
+	Handle(name string, h server.Handler)
+}
+
+// droppedMidCall registers every method so that a call whose browser went away under it is told so.
+// A page's command failed then with the pipe's own "closed", wrapped in whatever the page package
+// made of it, and an agent whose relay to Chrome dropped mid-snapshot was told there was no tab,
+// naming none.
+type droppedMidCall struct {
+	s *server.Server
+	d *Daemon
+}
+
+func (r droppedMidCall) Handle(name string, h server.Handler) {
+	r.s.Handle(name, func(ctx context.Context, c *server.Conn, params json.RawMessage) (any, error) {
+		out, err := h(ctx, c, params)
+		if err != nil && pipeClosed(err) {
+			return nil, r.d.Manager.DroppedMidCall()
+		}
+		return out, err
+	})
+}
+
+// pipeClosed reports whether err is a DevTools pipe that ended under the call, however wrapped.
+func pipeClosed(err error) bool {
+	var we *wire.Error
+	if errors.As(err, &we) && we.Code == browser.CodeBrowserGone {
+		return false
+	}
+	return errors.Is(err, cdp.ErrClosed) || strings.Contains(err.Error(), cdp.ErrClosed.Error())
+}
+
 // Register adds every method to the server.
-func (d *Daemon) Register(s *server.Server) {
+func (d *Daemon) Register(srv *server.Server) {
+	s := droppedMidCall{s: srv, d: d}
 	d.sampler = procstat.NewSampler()
 	for name, h := range map[string]server.Handler{
 		"daemon.info":        d.info,

@@ -725,7 +725,13 @@ def explain(exc: BrowserError) -> str:
             "BrowserNetwork (the request that loaded it) or BrowserDownload. Do not retry this tab, and do not repeat the action that led here."
         )
     if isinstance(exc, NoSuchTab):
-        return f"There is no tab {exc.details.get('tab_id') or ''} in your browser; BrowserTabs(action='list') lists them."
+        tab = str(exc.details.get("tab_id") or "")
+        if exc.details.get("reason") == "no_tabs":
+            return "Your browser has no tab open now; BrowserTabs(action='new') opens one."
+        if not tab:
+            # Once "There is no tab  in your browser", naming nothing, after the relay to Chrome dropped.
+            return f"That tab is not in your browser ({exc.message}); BrowserTabs(action='list') lists them."
+        return f"There is no tab {tab} in your browser; BrowserTabs(action='list') lists them."
     if isinstance(exc, Blocked) and exc.details.get("reason") == "private":
         # The operator chose to keep the LAN out of reach; nobody can lift that for one request.
         return (
@@ -829,8 +835,21 @@ class BrowserAgent:
             (caller.owner.kind, caller.owner.id, int(user)),
         )
         if row is None:
+            if user and (why := await self._chrome_left(caller)):
+                # The agent was told only "no browser is open for you" after Chrome dropped, and
+                # spent ten calls finding out why.
+                raise NotFound(f"no browser is open for you: {why}. BrowserOpen opens it again in the operator's Chrome once it is connected")
             raise NotFound("no browser is open for you; BrowserOpen starts one" + (" in the operator's Chrome, which they gave this conversation" if user else ""))
         return dict(row)
+
+    async def _chrome_left(self, caller: Caller) -> str:
+        """Why the caller's last group in the operator's Chrome closed, when Chrome leaving closed it."""
+        row = await self.service.db.fetchone(
+            "SELECT close_reason FROM browser_groups WHERE owner_kind = ? AND owner_id = ? AND env = 'user' AND status = 'closed' ORDER BY last_activity_at DESC LIMIT 1",
+            (caller.owner.kind, caller.owner.id),
+        )
+        reason = str(row["close_reason"] or "") if row is not None else ""
+        return self.service._gone_text({"close_reason": reason}).removeprefix("this browser is not open: ").split(".")[0] if reason.startswith("chrome disconnected") else ""
 
     def _user_name(self) -> str:
         """The name the operator gave their Chrome in the extension's popup, as its relay reported it."""
@@ -893,7 +912,7 @@ class BrowserAgent:
             if item.get("id") == wanted:
                 return item
         if not tabs:
-            raise NoSuchTab("the browser has no tab open", tab_id=wanted)
+            raise NoSuchTab("the browser has no tab open; BrowserTabs(action='new') opens one", tab_id=wanted, reason="no_tabs")
         raise NoSuchTab(f"no tab {wanted}", tab_id=wanted)
 
     def _chrome_check(self, url: str | None) -> None:

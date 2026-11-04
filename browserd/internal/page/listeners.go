@@ -3,6 +3,7 @@ package page
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 
 	"github.com/ascorblack/daedalus/browserd/internal/browser"
@@ -14,6 +15,34 @@ var clickEvents = map[string]bool{"click": true, "mousedown": true, "mouseup": t
 
 // maxListened bounds the elements marked in one snapshot: each is a round trip on the pipe.
 const maxListened = 2000
+
+// maxPierced bounds the elements DOMDebugger.getEventListeners walks with pierce: the main document's
+// element count (listenerRoot) misses its shadow roots and same-origin frames, which pierce goes
+// through too. Its reply is one relay frame from the operator's Chrome; unbounded, a page of a
+// storefront made a frame of several megabytes, which once closed the relay mid-snapshot.
+const maxPierced = 10000
+
+// piercedCount counts, in the daemon's world, the elements a pierced walk from the document meets,
+// stopping past maxPierced. A closed shadow root is not seen here; Chromium walks it anyway.
+const piercedCount = `(() => {
+  const limit = %d;
+  let n = 0;
+  const walk = (root) => {
+    const all = root.querySelectorAll("*");
+    n += all.length;
+    for (const el of all) {
+      if (n > limit) return;
+      if (el.shadowRoot) walk(el.shadowRoot);
+      if (el.tagName === "IFRAME" || el.tagName === "FRAME") {
+        let inner = null;
+        try { inner = el.contentDocument; } catch (e) {}
+        if (inner) walk(inner);
+      }
+    }
+  };
+  walk(document);
+  return n;
+})()`
 
 // markGroup is the object group the marking's handles are made in, released together after it.
 const markGroup = "browserd-listeners"
@@ -46,6 +75,15 @@ func (p *Model) markListeners(ctx context.Context, t *browser.Tab, d *doc) {
 	defer func() {
 		_ = t.CallIn(ctx, d.session, "Runtime.releaseObjectGroup", map[string]any{"objectGroup": markGroup}, nil)
 	}()
+	var count struct {
+		Result struct {
+			Value int `json:"value"`
+		} `json:"result"`
+	}
+	if err := t.CallIn(ctx, d.session, "Runtime.evaluate", map[string]any{"expression": fmt.Sprintf(piercedCount, maxPierced),
+		"contextId": id, "returnByValue": true}, &count); err != nil || count.Result.Value > maxPierced {
+		return
+	}
 	var root evalResult
 	if err := t.CallIn(ctx, d.session, "Runtime.evaluate", map[string]any{"expression": "__browserd.listenerRoot()",
 		"contextId": id, "objectGroup": markGroup}, &root); err != nil || root.Result.ObjectID == "" {

@@ -14,7 +14,7 @@ import (
 // and relay.notify are the app's connection card and its "Check connection"; relay.call is the host
 // handing the extension's side panel its credential and a conversation's news.
 
-func (d *Daemon) registerRelay(s *server.Server) {
+func (d *Daemon) registerRelay(s handles) {
 	s.Handle("relay.open", d.relayOpen)
 	s.Handle("relay.status", d.relayStatus)
 	s.Handle("relay.notify", d.relayNotify)

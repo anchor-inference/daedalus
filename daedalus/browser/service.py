@@ -240,6 +240,13 @@ def _action_row(row: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _chrome_gone(reason: str) -> str:
+    """A close reason of the operator's Chrome (``chrome disconnected`` and the daemon's why, as
+    ``chrome disconnected (closed)``) in the agent's words."""
+    detail = reason.removeprefix("chrome disconnected").strip().strip("()").strip()
+    return "the operator's Chrome disconnected from Daedalus" + (f" ({detail})" if detail else "")
+
+
 def _stamp_after(hours: float = 0, days: float = 0) -> str:
     return (datetime.now(UTC) - timedelta(hours=hours, days=days)).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
@@ -935,12 +942,15 @@ class Browsers:
             raise BrowserGone(self._gone_text(row), reason=row["close_reason"] or row["status"])
         try:
             result = await self._call(row["env"], method, dict(params or {}), what=what, timeout=timeout + CALL_SLACK)
-        except BrowserGone:
+        except BrowserGone as exc:
             if row["env"] == USER:
                 # The user daemon ends its browser when the extension's relay is lost; the agent is
-                # told that the operator's Chrome went, not that someone closed its browser.
-                await self._mark_closed(row, "chrome disconnected", status="closed")
-                raise BrowserGone(self._gone_text({**row, "close_reason": "chrome disconnected"}), reason="chrome_disconnected") from None
+                # told that the operator's Chrome went, and the daemon's why, not that someone closed
+                # its browser.
+                detail = str(exc.details.get("reason") or "").strip()
+                reason = f"chrome disconnected ({detail})"[:80] if detail and not detail.startswith("chrome disconnected") else (detail or "chrome disconnected")[:80]
+                await self._mark_closed(row, reason, status="closed")
+                raise BrowserGone(self._gone_text({**row, "close_reason": reason}), reason="chrome_disconnected") from None
             await self._mark_closed(row, "closed", status="closed")
             raise
         except NotFound:
@@ -980,7 +990,7 @@ class Browsers:
             "owner_gone": "its owner is gone",
             "turn_end": "your tabs in the operator's Chrome are closed when your turn ends",
             "closed_in_chrome": "the operator closed your tabs in their Chrome",
-        }.get(str(reason), "the operator's Chrome disconnected from Daedalus" if str(reason).startswith("chrome disconnected") else "it was closed")
+        }.get(str(reason), _chrome_gone(str(reason)) if str(reason).startswith("chrome disconnected") else "it was closed")
         return f"this browser is not open: {why}. Its profile and logins are kept; BrowserOpen starts it again"
 
     def origin(self, *, actor: str, launch_id: str = "") -> dict[str, Any]:

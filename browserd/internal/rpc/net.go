@@ -11,7 +11,7 @@ import (
 
 // registerNet serves the network wall's methods (the contract's The network wall): the host's
 // rules, and its answers to the wall's asks. Without a wall (a test's daemon) they are not served.
-func (d *Daemon) registerNet(s *server.Server) {
+func (d *Daemon) registerNet(s handles) {
 	if d.Net == nil {
 		return
 	}

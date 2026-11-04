@@ -1000,3 +1000,18 @@ async def test_the_agents_own_browser_opens_the_store_as_any_site(rig: Rig, agen
 async def test_the_open_tool_says_the_limit_up_front(rig: Rig) -> None:
     description = rig.manager.tools.get("BrowserOpen").definition.description  # type: ignore[union-attr]
     assert "Chrome Web Store" in description and "your own browser opens the store" in description
+
+
+async def test_chrome_dropping_mid_call_is_said_with_its_reason_and_so_is_the_next_call(rig: Rig, chrome: FakeBrowserd) -> None:
+    """A snapshot whose relay dropped under it once read "There is no tab  in your browser", naming no
+    tab, and the next call "no browser is open for you" with no cause: ten calls went on finding out."""
+    sid = await rig.session()
+    await rig.switch(sid)
+    await rig.call(sid, "BrowserOpen")
+    chrome.fail["page.snapshot"] = (1108, "the browser behind this group has exited (the connection to Chrome dropped during the call); open it again",
+                                    {"reason": "the connection to Chrome dropped during the call"})
+    text, failed = await rig.call(sid, "BrowserSnapshot")
+    assert failed and "disconnected from Daedalus" in text and "dropped during the call" in text, text
+    assert "There is no tab" not in text
+    text, failed = await rig.call(sid, "BrowserSnapshot")
+    assert failed and "disconnected from Daedalus" in text and "dropped during the call" in text, text
