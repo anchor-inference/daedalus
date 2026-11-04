@@ -144,6 +144,47 @@ async def test_a_session_drops_only_its_own_and_says_what_became_of_the_rest(app
         await drop("withdraw", session_id=theirs, ids=[other.short_id], reason=" ")
 
 
+class AsksThenHangs(ScriptedProvider):
+    """Leaves a side question, then hangs in the next model call until the run is stopped."""
+
+    def __init__(self) -> None:
+        super().__init__([{"tool": "SideQuestion", "args": {"question": "Is the ad blocker yours?"}}])
+        self.hanging = asyncio.Event()
+
+    async def stream_with_tools(self, request: Any) -> Any:
+        if self.script:
+            async for delta in super().stream_with_tools(request):
+                yield delta
+            return
+        self.hanging.set()
+        await asyncio.Event().wait()
+        yield  # pragma: no cover — never reached; makes this a generator
+
+
+async def test_a_stopped_run_takes_back_the_side_questions_it_left_and_no_older_one(settings: Settings, db: Database) -> None:
+    provider = AsksThenHangs()
+    manager = await _manager(settings, db, provider)
+    application = SimpleNamespace(settings=settings, config=manager.config, db=db, manager=manager, front=None, extensions={}, guard=None, notifications=None)
+    await side_questions.install(application)  # type: ignore[arg-type]
+    try:
+        sid = (await manager.create_session("shopping")).session.id
+        # One asked outside this run (an earlier turn that ended on its own) is still the operator's.
+        await ask(application, sid, "Which currency do you want the prices in?")
+        await manager.submit(sid, "find the card")
+        await asyncio.wait_for(provider.hanging.wait(), SETTLE)
+        older, asked = await manager.asks.of_session(sid)
+        assert asked.heading == "Is the ad blocker yours?" and asked.detail["run_id"]
+        assert await manager.stop(sid)
+        await settled(manager)
+        closed = await manager.asks.get(asked.id)
+        assert closed is not None and not closed.open
+        assert closed.resolution == {"closed": side_questions.STOPPED_REASON, "via": "withdrawn", "by": "stop"}
+        assert (await manager.asks.get(older.id)).open  # type: ignore[union-attr]
+        assert {"change": "withdrawn", "ask_ids": [asked.id], "reason": side_questions.STOPPED_REASON} in await side_events(manager, sid)
+    finally:
+        await manager.close()
+
+
 async def test_the_store_keeps_side_questions_apart_from_projects(db: Database) -> None:
     asks = AsksStore(db)
     with pytest.raises(StaffError, match="names the session"):
