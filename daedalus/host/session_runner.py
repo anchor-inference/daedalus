@@ -744,9 +744,12 @@ def _exclude_artefacts(root: Path) -> None:
         logger.warning("could not write %s: %s", path, exc)
 
 
+# "Six words at most" alone pressed a small model into a row of keywords, which in an inflected
+# language reads as broken grammar ("a purchase into Astana"); the title is asked to be a phrase.
 TITLE_PROMPT = (
     "Write a short title for a chat that opens with the message below. "
-    "Use the same language as the message. Six words at most. "
+    "Use the same language as the message, as a grammatical phrase a native speaker would write, "
+    "not a row of keywords. Six words at most. "
     "No quotes and no trailing punctuation.\n\nMessage:\n"
 )
 
@@ -930,6 +933,9 @@ class SessionManager:
         runs the model its project names, which the operator changes on the project, not per chat."""
         self.run_started_hooks: list[Callable[[str, str], Awaitable[None]]] = []
         """``(session_id, run_id)`` after a run was actually created — the point where a prompt hook's side effects may be committed."""
+        self.stop_hooks: list[Callable[[str, str], Awaitable[None]]] = []
+        """``(session_id, run_id)`` once a run the operator stopped has ended, before it is announced as
+        over: what the run left open for the operator (its side questions) goes with it."""
         self.shutting_down = False
         self._update_parked_run_ids: set[str] = set()
         self.recovering = True
@@ -5501,6 +5507,11 @@ class SessionManager:
                     await self._give_back(state.session.id, await self._hand_back(state, "stop"), "stop")
                 except Exception:  # noqa: BLE001 — the messages stay queued and reach the next run instead
                     logger.exception("could not hand back the unsent messages of session %s", state.session.id)
+                for stop_hook in self.stop_hooks:
+                    try:
+                        await stop_hook(state.session.id, run_id)
+                    except Exception:  # noqa: BLE001 — what stays open is a leftover, not a reason to keep the run going
+                        logger.exception("stop hook failed for session %s", state.session.id)
             if status != "interrupted":
                 await self._announce_settled(state, run_id, status, housekeeping=True)
                 if status == "awaiting":

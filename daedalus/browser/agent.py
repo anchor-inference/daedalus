@@ -24,7 +24,7 @@ import re
 import time
 import zipfile
 from collections import OrderedDict, deque
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import urlsplit
@@ -640,6 +640,32 @@ MODE_WORDS = {
 }
 """How a result says why an action went through unasked."""
 
+NAMED_ADDRESS = re.compile(r"(?<![\w@./-])(?:https?://)?((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63})(?![\w-])", re.IGNORECASE)
+"""An address in the operator's words: a host with at least one dot, with or without its scheme. Not
+the part of an e-mail address after the ``@``: writing to someone there is no word on opening the site."""
+FILE_SUFFIXES = frozenset({"md", "sh", "py", "rs", "js", "ts", "go", "rb", "pl", "json", "txt", "pdf", "log", "yaml", "yml", "toml", "csv", "html", "css", "zip", "png", "jpg"})
+"""Endings that make a bare ``name.ext`` a file the operator mentioned rather than a site, though some
+are country domains too (``notes.md``, ``deploy.sh``). With a scheme in front it is an address all the same."""
+REPLY_QUOTE = re.compile(r"^\[In reply to: «.*?»\]\n?", re.DOTALL)
+"""The quote a reply carries in front of the operator's words: the agent's passage, not theirs."""
+
+
+def named_sites(passages: Iterable[str]) -> set[str]:
+    """The sites the operator named by address in their own words, each as a grant names it.
+
+    Only an address counts, never a bare name: "look on Taobao" reads as a site to a person and as
+    any domain whose first label is a word the operator happened to use to a matcher, which is the
+    hole the site question exists to close. The passages are the operator's alone (the host's
+    reading of who said what), so a page cannot name a site into this list."""
+    sites: set[str] = set()
+    for passage in passages:
+        for match in NAMED_ADDRESS.finditer(REPLY_QUOTE.sub("", passage)):
+            whole, host = match.group(0).lower(), match.group(1).lower()
+            if not whole.startswith(("http://", "https://")) and host.rsplit(".", 1)[-1] in FILE_SUFFIXES:
+                continue
+            sites.add(registrable_site(host))
+    return sites
+
 
 @dataclass(slots=True)
 class Caller:
@@ -663,6 +689,10 @@ class Caller:
     ask_operator: AskOperator | None = None
     """How the caller's request to work in the operator's Chrome reaches the operator, or ``None`` for
     a caller whose browser cannot move there (a command-line member has no conversation to switch)."""
+    operator_words: Callable[[], Sequence[str]] | None = None
+    """The operator's own passages in the caller's conversation, read when a site is about to be asked
+    about: a site they named by address there is theirs already. ``None`` for a caller with no
+    conversation of the operator's (a staff member's command-line browser)."""
 
     @property
     def scope(self) -> str:
@@ -872,12 +902,16 @@ class BrowserAgent:
             sites += (await self.service.choices.get(caller.owner.session_id))["sites"]
         return sites
 
-    async def _site_ask(self, caller: Caller, group: dict[str, Any], url: str, why: str) -> None:
+    async def _site_ask(self, caller: Caller, group: dict[str, Any], url: str, why: str, *, tool: str) -> None:
         """In the operator's Chrome, a site new to the conversation is asked about before the agent
         opens it: the core of what replaces the network wall there, since every site the operator is
         signed in to is one navigation away, and an address with data in its query is how a steered
         agent would carry it out. Asked of the operator, a staff member's too. A yes grants the site
-        (its subdomains with it) for this conversation."""
+        (its subdomains with it) for this conversation.
+
+        ``tool`` is the call that loads the site, which the card names: it named BrowserNavigate for a
+        tab BrowserTabs opened, and the operator was asked about a call the agent never made. The key
+        stays the one for every tool, so a site asked about by two calls at once is one question."""
         if group.get("env") != USER_ENV:
             return
         host = host_of(url)
@@ -887,6 +921,15 @@ class BrowserAgent:
             return
         site = registrable_site(host)
         decision = Decision(ASK, f"the agent asks to open {site} in your own Chrome, where you are signed in", "browser.site", key=approval_key("BrowserNavigate", {"group": group["id"], "site": site}))
+        if caller.operator_words is not None and site in named_sites(caller.operator_words()):
+            # The operator wrote the address in this conversation: asking whether the agent may open
+            # it was a second yes to what they had just said, and the shopping session that found
+            # this waited 15 and 34 seconds on two such questions.
+            await self._audit(group, caller, "sensitive", {"kinds": ["site"], "decision": "allow", "by": "operator_named", "key": decision.key, "host": host, "site": site})
+            if caller.owner.session_id:
+                await self.service.choices.grant_site(caller.owner.session_id, site)
+            caller.notes.append(f"Opened {site} without asking: the operator named it in this conversation.")
+            return
         mode = await self._approval_mode(caller, group)
         if approval_mode_lifts(mode, decision, ["site"]):
             # Granted as the operator's own yes would be, for the conversation, and recorded as granted
@@ -896,7 +939,7 @@ class BrowserAgent:
                 await self.service.choices.grant_site(caller.owner.session_id, site)
             caller.notes.append(f"Opened {site} without asking: {MODE_WORDS[mode]}.")
             return
-        ask = SensitiveAsk(decision, "BrowserNavigate", group["id"], "open", ["site"], f"https://{site}", site, host, 0, "", why=" ".join(why.split())[:300])
+        ask = SensitiveAsk(decision, tool, group["id"], "open", ["site"], f"https://{site}", site, host, 0, "", why=" ".join(why.split())[:300])
         allowed, said = await caller.gate(ask)
         await self._audit(group, caller, "sensitive", {"kinds": ["site"], "decision": "allow" if allowed else "ask", "key": decision.key, "host": host, "site": site})
         if not allowed:
@@ -1085,9 +1128,9 @@ class BrowserAgent:
                 # A tab the operator gave is theirs to read, never to send elsewhere: their own page
                 # was once taken to a storefront's captcha this way, after their Chrome reconnected
                 # and the group came back on it.
-                await self._site_ask(caller, row, url, why or "")
+                await self._site_ask(caller, row, url, why or "", tool="BrowserOpen")
                 tab = await self.service.call(group["id"], "tab.new", {"group_id": group["id"], "url": "about:blank", "origin": self._origin(caller)}, what="opening a tab", timeout=40.0)
-            await self._through_wall(caller, row, lambda: self.service.call(group["id"], "page.navigate", {"tab_id": tab.get("id"), "url": url, "origin": self._origin(caller), "timeout_ms": NAVIGATE_TIMEOUT_MS}, what="opening the page", timeout=NAVIGATE_TIMEOUT_MS / 1000 + 25), url=url, why=why or "", tab=str(tab.get("id") or ""))
+            await self._through_wall(caller, row, lambda: self.service.call(group["id"], "page.navigate", {"tab_id": tab.get("id"), "url": url, "origin": self._origin(caller), "timeout_ms": NAVIGATE_TIMEOUT_MS}, what="opening the page", timeout=NAVIGATE_TIMEOUT_MS / 1000 + 25), tool="BrowserOpen", url=url, why=why or "", tab=str(tab.get("id") or ""))
         if url:
             await self._site_notes(caller, url)
         if found:
@@ -1214,7 +1257,7 @@ class BrowserAgent:
             if not url:
                 raise InvalidRequest("give a url, or go='back', 'forward' or 'reload'")
             await self._watch(group, caller, url)
-            result = await self._through_wall(caller, group, lambda: self.service.call(group["id"], "page.navigate", {"tab_id": current["id"], "url": url, "origin": origin, "timeout_ms": NAVIGATE_TIMEOUT_MS}, what="opening the page", timeout=NAVIGATE_TIMEOUT_MS / 1000 + 25), url=url, why=why or "", tab=str(current["id"]))
+            result = await self._through_wall(caller, group, lambda: self.service.call(group["id"], "page.navigate", {"tab_id": current["id"], "url": url, "origin": origin, "timeout_ms": NAVIGATE_TIMEOUT_MS}, what="opening the page", timeout=NAVIGATE_TIMEOUT_MS / 1000 + 25), tool="BrowserNavigate", url=url, why=why or "", tab=str(current["id"]))
         await self._audit(group, caller, "navigate", {"tab": current["id"], "go": go or "", "url": str(result.get("url") or url or "")[:2000]})
         reached = str(result.get("url") or url or "")
         await self._site_notes(caller, reached)
@@ -1231,7 +1274,7 @@ class BrowserAgent:
             return f"{download} Tab {current['id']} stayed on {result.get('url') or current.get('url') or 'its page'}." + "".join(f"\n{line}" for line in said)
         return f"Tab {current['id']} is on {result.get('url') or url}{status}{failed}." + (f" Its title: {fenced(origin_of(str(result.get('url') or '')), title)}" if title else "") + "".join(f"\n{line}" for line in said) + "\nNext: BrowserSnapshot to see it."
 
-    async def _through_wall(self, caller: Caller, group: dict[str, Any], go: Callable[[], Awaitable[Any]], *, url: str = "", why: str = "", tab: str = "") -> Any:
+    async def _through_wall(self, caller: Caller, group: dict[str, Any], go: Callable[[], Awaitable[Any]], *, tool: str, url: str = "", why: str = "", tab: str = "") -> Any:
         """Run a call that loads an address; when the network wall asks rather than refuses (a host
         outside the allowlist, a port of this machine, an address on the LAN), ask the caller's gate —
         the operator, or a staff member's orchestrator for an address — and on a yes grant exactly that
@@ -1240,12 +1283,13 @@ class BrowserAgent:
 
         In the operator's Chrome an address Chrome keeps extensions off is refused before the site
         question, and Chrome's own refusal of one the host did not know is told in the same words;
-        ``tab`` is the tab the call loads, marked dead when Chrome dropped its debugger on the way."""
+        ``tab`` is the tab the call loads, marked dead when Chrome dropped its debugger on the way.
+        ``tool`` is the call that loads it, as the operator's card names it."""
         user = group.get("env") == USER_ENV
         if url and user:
             self._chrome_check(url)
         if url:
-            await self._site_ask(caller, group, url, why)
+            await self._site_ask(caller, group, url, why, tool=tool)
         try:
             return await go()
         except Blocked as exc:
@@ -1256,13 +1300,13 @@ class BrowserAgent:
             if group.get("env") == USER_ENV:
                 # The user daemon's navigation guard judges against the operator's always-list: a site
                 # this conversation was granted (or is granted now) is let through at the daemon too.
-                await self._site_ask(caller, group, f"https://{host}", why)
+                await self._site_ask(caller, group, f"https://{host}", why, tool=tool)
                 await self.service.grant(group["id"], host, port, by=caller.actor)
                 return await go()
             what = f"{host}:{port}" if port else host
             scheme = urlsplit(url).scheme.lower() if url else ""
             decision = Decision(ASK, f"the browser's network wall asks before it reaches {what} ({NETWORK_WORDS.get(reason, reason or 'not on the allowlist')})", "browser.network", key=approval_key("BrowserNavigate", {"group": group["id"], "host": host, "port": port}))
-            ask = SensitiveAsk(decision, "BrowserNavigate", group["id"], "open", ["network"], what, f"{scheme}://{what}" if scheme in ("http", "https") else what, host, 0, "", why=" ".join(why.split())[:300])
+            ask = SensitiveAsk(decision, tool, group["id"], "open", ["network"], what, f"{scheme}://{what}" if scheme in ("http", "https") else what, host, 0, "", why=" ".join(why.split())[:300])
             allowed, why = await caller.gate(ask)
             await self._audit(group, caller, "sensitive", {"kinds": ["network"], "decision": "allow" if allowed else "ask", "key": decision.key, "host": host, "port": port, "reason": reason})
             if not allowed:
@@ -2346,7 +2390,7 @@ class BrowserAgent:
             # Asked before the tab exists, so a site the operator has not answered about yet leaves
             # nothing behind in their window while the question waits.
             await self._watch(group, caller, url)
-            await self._site_ask(caller, group, url, "")
+            await self._site_ask(caller, group, url, "", tool="BrowserTabs")
         created = await self.service.call(gid, "tab.new", {"group_id": gid, "url": "about:blank", "origin": origin}, what="opening a tab", timeout=40.0)
         tid = str(created.get("id") or "")
         await self._audit(group, caller, "tab_new", {"tab": tid, "url": (url or "")[:2000]})
@@ -2357,7 +2401,7 @@ class BrowserAgent:
             try:
                 result = await self._through_wall(
                     caller, group, lambda: self.service.call(gid, "page.navigate", {"tab_id": tid, "url": url, "origin": origin, "timeout_ms": NAVIGATE_TIMEOUT_MS}, what="opening the page", timeout=NAVIGATE_TIMEOUT_MS / 1000 + 25),
-                    url=url,
+                    tool="BrowserTabs", url=url,
                 )
             except BrowserError:
                 # A tab that never reached its page is no use to anyone: it goes with the refusal.

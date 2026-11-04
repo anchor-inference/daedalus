@@ -104,9 +104,11 @@ async def ask(app: Application, *, session_id: str, question: str, why: str = ""
         raise Refused(f"{OPEN_MAX} side questions already wait for the operator ({listed}). Drop the ones you have settled "
                       "with DropSideQuestion, or decide this one yourself")
     text = words + (f"\n\n{reason}" if reason else "")
+    # The run that asked, so a stop can take back what that run left open and nothing older.
+    run_id = state.run_id if state.running else None
     try:
         made = await manager.asks.open(None, origin="session", kind="question", text=text, routed_to="operator",
-                                       detail={"options": list(dict.fromkeys(choices))}, session_id=session_id)
+                                       detail={"options": list(dict.fromkeys(choices)), "run_id": run_id}, session_id=session_id)
     except StaffError as exc:
         raise Refused(str(exc)) from exc
     await _announce(manager, session_id, "opened", [made.id])
@@ -148,6 +150,29 @@ async def withdraw(app: Application, *, session_id: str, ids: Sequence[str], rea
         raise Refused("nothing dropped: " + "; ".join(lines))
     head = "dropped " + ", ".join(f"[{a.short_id}]" for a in dropped)
     return head + ("; " + "; ".join(lines) if lines else "")
+
+
+STOPPED_REASON = "the operator stopped the run that asked it"
+
+
+async def withdraw_stopped(app: Application, session_id: str, run_id: str) -> list[Ask]:
+    """Take back the side questions a run the operator stopped left open.
+
+    A side question outlives the turn that asked it when the turn ends on its own: the answer starts
+    the next one. A stopped run is different: the operator ended the work the question was about,
+    and the question stayed in the panel asking about it (one blamed the operator's ad blocker for
+    a block of our own and was still waiting after the cancel). Questions from earlier runs, and
+    those made before questions carried their run, stay."""
+    manager = _manager(app)
+    dropped: list[Ask] = []
+    for found in await manager.asks.of_session(session_id):
+        if not run_id or found.detail.get("run_id") != run_id:
+            continue
+        if await manager.asks.resolve(found.id, "system", {"closed": STOPPED_REASON, "via": "withdrawn", "by": "stop"}):
+            dropped.append(found)
+    if dropped:
+        await _announce(manager, session_id, "withdrawn", [a.id for a in dropped], reason=STOPPED_REASON)
+    return dropped
 
 
 async def _own(manager: SessionManager, session_id: str, ref: str) -> Ask | None:
@@ -265,7 +290,12 @@ async def install(app: Application) -> list[Any]:
         return await service(app, op, **kwargs)
 
     manager.service_hooks["side_questions"] = hook
+
+    async def stopped(session_id: str, run_id: str) -> None:
+        await withdraw_stopped(app, session_id, run_id)
+
+    manager.stop_hooks.append(stopped)
     return []
 
 
-__all__ = ["OPEN_MAX", "ORIGIN", "Refused", "ask", "deliver", "delivery_text", "dismiss", "install", "may_ask", "record", "waiting", "withdraw"]
+__all__ = ["OPEN_MAX", "ORIGIN", "STOPPED_REASON", "Refused", "ask", "deliver", "delivery_text", "dismiss", "install", "may_ask", "record", "waiting", "withdraw", "withdraw_stopped"]

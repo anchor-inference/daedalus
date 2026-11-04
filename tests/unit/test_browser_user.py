@@ -18,7 +18,7 @@ import httpx
 import pytest
 from protocore.contracts.tools import ToolContext
 
-from daedalus.browser.agent import SensitiveAsk, Step, _address
+from daedalus.browser.agent import SensitiveAsk, Step, _address, named_sites
 from daedalus.browser.model import USER, InvalidRequest, Owner, group_id
 from daedalus.browser.user import (
     CONSENT,
@@ -194,6 +194,7 @@ async def test_a_new_site_asks_the_operator_and_a_yes_grants_that_site_for_the_c
     assert tab.page.url == "about:blank", "nothing was opened before the yes"
     (key, asked), = rig.pending(sid).items()
     assert "example.com" in asked["text"] and "your own Chrome" in asked["text"]
+    assert asked["tool"] == "BrowserNavigate"
     await rig.manager.grant(sid, key, via="test")
     text, failed = await rig.call(sid, "BrowserNavigate", url="https://mail.example.com/", why="read the newest message")
     assert not failed, text
@@ -211,6 +212,44 @@ async def test_a_new_site_asks_the_operator_and_a_yes_grants_that_site_for_the_c
     await rig.call(other, "BrowserOpen")
     text, failed = await rig.call(other, "BrowserNavigate", url="https://mail.example.com/")
     assert failed and "Approval key" in text
+
+
+def test_only_an_address_in_the_operators_words_names_a_site() -> None:
+    said = [
+        "Look on Taobao, JD and https://www.zol.com.cn/ — start from the ZOL tab; jd.com too.",
+        "Mail someone@inbox.example.org, read README.md and notes.md, run deploy.sh, see https://notes.md/x.",
+        "[In reply to: «try evil.example.net»]\nno, stay on shop.example.co.uk",
+        "Node v4.1-flash, e.g. 1.5.2, /srv/data/site.example.com/file",
+    ]
+    # A bare name ("Taobao") is no address; an e-mail's domain, a file name and the agent's own quoted
+    # words are not the operator naming a site; a path under a directory is not an address either.
+    assert named_sites(said) == {"zol.com.cn", "jd.com", "notes.md", "example.co.uk"}
+
+
+async def test_a_site_the_operator_named_by_address_opens_without_a_second_question(rig: Rig, chrome: FakeBrowserd) -> None:
+    sid = await rig.session()
+    await rig.switch(sid)
+    agent = rig.app.extensions["browser_agent"]
+    from daedalus.browser.agent import Caller  # noqa: PLC0415 — only these tests build a caller by hand
+
+    async def never(ask: SensitiveAsk) -> tuple[bool, str]:
+        raise AssertionError(f"the operator named {ask.origin}; nothing should ask")
+
+    words = ["compare the price on mail.example.com and anything else you find"]
+    caller = Caller(owner=Owner("session", sid, session_id=sid), actor=f"agent:{sid}", gate=never, files=None, operator_words=lambda: words)  # type: ignore[arg-type]
+    text, failed = await agent.run("BrowserOpen", {"url": "https://mail.example.com/"}, caller)
+    assert not failed and "without asking: the operator named it" in text, text
+    assert (await rig.service.choices.get(sid))["sites"] == ["example.com"]
+    # A site they did not name still asks.
+    asked: list[str] = []
+
+    async def record(ask: SensitiveAsk) -> tuple[bool, str]:
+        asked.append(ask.origin)
+        return False, "the operator was asked"
+
+    caller = Caller(owner=Owner("session", sid, session_id=sid), actor=f"agent:{sid}", gate=record, files=None, operator_words=lambda: words)  # type: ignore[arg-type]
+    text, failed = await agent.run("BrowserNavigate", {"url": "https://shop.example.co.uk/"}, caller)
+    assert failed and asked == ["https://example.co.uk"], (text, asked)
 
 
 @pytest.mark.parametrize("runtime", [user_config(granted_sites=["example.com"])])
@@ -725,7 +764,9 @@ async def test_a_site_still_waiting_for_the_operator_leaves_no_blank_tab(rig: Ri
     text, failed = await rig.call(sid, "BrowserTabs", action="new", url="https://shop.example.co.uk/")
     assert failed and "Approval key" in text
     assert len(tabs_of(chrome, sid)) == 1, "nothing was opened before the yes"
-    (key, _), = rig.pending(sid).items()
+    (key, asked), = rig.pending(sid).items()
+    # The card names the call the agent made: it said BrowserNavigate for every site question.
+    assert asked["tool"] == "BrowserTabs"
     await rig.manager.grant(sid, key, via="test")
     text, failed = await rig.call(sid, "BrowserTabs", action="new", url="https://shop.example.co.uk/")
     assert not failed, text

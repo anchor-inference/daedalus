@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MessageView } from "./api";
 import type { LiveState } from "./turns";
-import { activitySummary, applyLive, buildTurns, EMPTY_LIVE, isOlderPage, liveAfter, liveBase, prepend, reconcile, splitActivity, stripHeadline } from "./turns";
+import { activitySummary, applyLive, buildTurns, currentStep, EMPTY_LIVE, isOlderPage, liveAfter, liveBase, prepend, reconcile, splitActivity, stripHeadline } from "./turns";
 
 let clock = 1_700_000_000_000;
 
@@ -121,6 +121,38 @@ describe("buildTurns", () => {
     const turns = buildTurns([user(1, "go"), msg(2, { role: "system", text: "x" }), msg(3, { internal: true, text: "y" }), answer(4, "z")]);
     expect(turns).toHaveLength(1);
     expect(turns[0].answer).toBe("z");
+  });
+});
+
+describe("the step in progress", () => {
+  it("times the running call from when the stream named it, and the stretch between calls from the latest message or result", () => {
+    let state = liveAfter(EMPTY_LIVE, "message_start", { run_id: "r" });
+    const began = state.stepAt!;
+    expect(began).toBeGreaterThan(0);
+    state = liveAfter(state, "tool_use_start", { run_id: "r", tool_call_id: "w", tool_name: "BrowserWait" });
+    const turn = applyLive(liveBase(buildTurns([user(1, "go")])), state, Date.now());
+    const step = currentStep(turn, state);
+    expect(step.tool?.name).toBe("BrowserWait");
+    expect(step.since).toBe(state.tools[0].startedAt);
+    state = liveAfter(state, "tool_result", { run_id: "r", tool_call_id: "w", content: "found" });
+    const after = currentStep(applyLive(liveBase(buildTurns([user(1, "go")])), state, Date.now()), state);
+    expect(after.tool).toBeUndefined();
+    expect(after.since).toBe(state.stepAt);
+    expect(after.since).toBeGreaterThanOrEqual(began);
+  });
+
+  it("does not name a call read from the history as running once a later model message began without its result", () => {
+    // The process restarted under BrowserNavigate: its result never came over the stream, and the
+    // bar named it as the step in progress for the rest of the run.
+    const base = liveBase(buildTurns([user(1, "go"), call(2, "nav", "BrowserNavigate")]))!;
+    expect(currentStep(applyLive(base, EMPTY_LIVE, Date.now()), EMPTY_LIVE).tool?.id).toBe("nav");
+    const resumed = liveAfter(EMPTY_LIVE, "message_start", { run_id: "r" });
+    const turn = applyLive(base, resumed, Date.now());
+    expect(currentStep(turn, resumed).tool).toBeUndefined();
+    expect(turn.pendingTools).toBe(0);
+    // A call the stream did name stays running until its result.
+    const named = liveAfter(resumed, "tool_use_start", { run_id: "r", tool_call_id: "nav", tool_name: "BrowserNavigate" });
+    expect(currentStep(applyLive(base, named, Date.now()), named).tool?.id).toBe("nav");
   });
 });
 

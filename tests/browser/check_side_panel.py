@@ -283,7 +283,9 @@ def run() -> int:
         # One Stop only: the composer's round button. The line carries the tab buttons as icons.
         assert line.get_by_role("button", name="Stop").count() == 0, "the activity line has a Stop of its own beside the composer's"
         expect(line.get_by_role("button", name="Take over")).to_be_visible()
-        # The field holds the attached page, so the composer's Stop is the small one beside Queue.
+        # The field holds the attached page, so the composer's Stop is the small one beside the send
+        # circle, which in the panel steers the run at its next step rather than queueing for the turn.
+        expect(page.locator('.composer .roundbtn.primary[data-action="queue"]')).to_have_attribute("aria-label", "Steer at the next step")
         page.locator(".composer").get_by_role("button", name="Stop the run").first.click()
         assert door.posted("/api/panel/sessions/s1/stop"), door.posts
         expect(page.locator(".sp-live-warn")).to_contain_text("did not reach Daedalus", timeout=6000)

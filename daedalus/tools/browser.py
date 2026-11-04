@@ -219,10 +219,18 @@ def _caller(context: ToolContext) -> Caller | None:
         tool = "BrowserAskOperatorChrome" if on_answer == SWITCH_ASK else "BrowserOpen"
         return bool(manager.ask_operator(context.session_id, key=key, tool=tool, text=text, on_answer=on_answer, card=card, extra=extra))
 
+    def operator_words() -> list[str]:
+        # The running engine's history is the one the model is reading, with the passages a
+        # compaction carried forward still marked as theirs.
+        from daedalus.host.session_runner import operator_passages  # Lazy: the session runner imports the tools
+
+        engine = getattr(state, "engine", None) if state is not None else None
+        return [text for _, text in operator_passages(list(getattr(engine, "history", None) or ()))]
+
     budget = max(4000, output_limit(context) - FRAME_CHARS - 600)
     return Caller(
         owner=owner, actor=f"agent:{context.session_id}", gate=gate, files=SessionFiles(services, manager, owner), look=looked, budget=budget, note_scope=lasting, rules=rules,
-        ask_operator=ask_operator,
+        ask_operator=ask_operator, operator_words=operator_words,
     )
 
 

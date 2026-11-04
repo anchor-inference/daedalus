@@ -15,7 +15,7 @@ import { Icon, IconName } from "../icons";
 import { AuthImg, FilePreview, PreviewSource, canPreview, downloadHref, fileGlyph, previewKind, sessionBase } from "../preview";
 import { followSession } from "../sessionstream";
 import { useEvent } from "../events";
-import { Activity, LiveStore, Segment, SummaryItem, SystemNote, ToolItem, Turn, activitySummary, applyLive, buildTurns, createLiveStore, execJob, familyCounts, isOlderPage, liveAfter, liveBase, prepend, producedFiles, reconcile, splitActivity } from "../turns";
+import { Activity, LiveStore, Segment, SummaryItem, SystemNote, ToolItem, Turn, activitySummary, applyLive, buildTurns, createLiveStore, currentStep, execJob, familyCounts, isOlderPage, liveAfter, liveBase, prepend, producedFiles, reconcile, splitActivity } from "../turns";
 import { uiStep } from "../computerstep";
 import { Explorer } from "../explorerpanel";
 import { DiffView } from "../previewparts";
@@ -2717,9 +2717,14 @@ export function LiveBar({ status, saving, base, live, workspace, onJump, compact
       </button>
     );
   }
-  const turn = applyLive(base, state, Date.now());
+  const now = Date.now();
+  const turn = applyLive(base, state, now);
   const steps = stepCount(turn.activity);
-  const running = [...turn.activity].reverse().find((a) => a.kind === "tool" && a.running) as ToolItem | undefined;
+  const { tool: running, since } = currentStep(turn, state);
+  // Two clocks, each said as what it is: the step's own beside the step, the turn's beside the state
+  // word. The compact bar has room for one and shows the step's; the turn's is in its title.
+  const turnTime = duration(now - turn.startedAt);
+  const stepTime = since !== null && status !== "waiting" ? duration(Math.max(0, now - since)) : null;
   // A session waiting on the operator has nothing in progress, whatever its last turn holds.
   const step =
     status === "waiting"
@@ -2738,10 +2743,10 @@ export function LiveBar({ status, saving, base, live, workspace, onJump, compact
               : t("session.livebar.thinking");
   if (compact) {
     return (
-      <button className={`livebar head-status compact ${status}`} onClick={onJump} role="status" aria-live="polite" title={step || t("session.jump.step")}>
+      <button className={`livebar head-status compact ${status}`} onClick={onJump} role="status" aria-live="polite" title={`${step}${stepTime ? ` · ${t("session.livebar.steptime", { time: stepTime })}` : ""} · ${t("session.livebar.turntime", { time: turnTime })}`}>
         <Dot status={status} />
         <span className="truncate">{step}</span>
-        <span className="num">{duration(Date.now() - turn.startedAt)}</span>
+        {stepTime && <span className="num step-time">{stepTime}</span>}
       </button>
     );
   }
@@ -2749,9 +2754,10 @@ export function LiveBar({ status, saving, base, live, workspace, onJump, compact
     <button className={`livebar head-status ${status}`} onClick={onJump} role="status" aria-live="polite" title={t("session.jump.step")}>
       <Dot status={status} />
       <b>{statusWord(status === "waiting" ? "waiting" : "running")}</b>
-      <span className="num">{duration(Date.now() - turn.startedAt)}</span>
+      <span className="num" title={t("session.livebar.turntime", { time: turnTime })}>{turnTime}</span>
       {steps > 0 && <span>{t("session.livebar.step", { n: steps })}</span>}
       {step && <span className="truncate">· {step}</span>}
+      {step && stepTime && <span className="num step-time" title={t("session.livebar.steptime", { time: stepTime })}>{stepTime}</span>}
     </button>
   );
 }
