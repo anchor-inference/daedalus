@@ -108,6 +108,7 @@ class Door:
     """The panel's door: the conversations of this Chrome, and what was sent to each."""
 
     def __init__(self) -> None:
+        self.answered_side = False
         self.sessions = [
             {"id": "s1", "title": "Pay the electricity bill", "status": "idle", "last_message_at": "2026-10-20T10:00:03Z", "needs_you": True, "group": "s-s1-u"},
             {"id": "s2", "title": "Find flights to Lisbon", "status": "idle", "last_message_at": "2026-10-20T09:00:00Z", "needs_you": False, "group": "s-s2-u"},
@@ -169,6 +170,19 @@ class Door:
                 return self.json(route, {"mode": sent.get("mode", "manual"), "env": "user", "warning": ""})
             if tail == "tab":
                 return self.json(route, {"group": f"s-{sid}-u", "created": True})
+            if tail == "questions":
+                # A side question the agent asked in this conversation: the panel used to never show it.
+                asked = [] if sid != "s1" or self.answered_side else [{
+                    "id": "ask-taobao", "short_id": "qr2686", "project_id": None, "origin": "session", "kind": "question", "staff_id": None, "staff_session_id": None,
+                    "task_id": None, "request_ref": "", "text": "Sign in to the shop so I can sort by price?", "detail": {"options": ["Yes", "No"]}, "routed_to": "operator",
+                    "suggestion": "", "created_at": "2026-10-20T10:00:00Z", "routed_at": "2026-10-20T10:00:00Z", "resolved_at": None, "resolved_by": None, "resolution": {},
+                    "dispatch_id": None, "title": "", "heading": "Sign in to the shop so I can sort by price?", "session_id": sid, "project_name": "", "asker": "agent",
+                    "section": "questions", "options": ["Yes", "No"], "multi": False, "host": False, "always": False, "always_server": "", "urgent": False, "files": True,
+                }]
+                return self.json(route, {"questions": asked})
+            if tail == "asks/answer":
+                self.answered_side = True
+                return self.json(route, {"results": [{"id": "ask-taobao", "status": "answered"}]})
             return self.json(route, {"ok": True, "stopped": True})
         self.foreign.append(f"{request.method} {rel}")
         return route.fulfill(status=404, content_type="application/json", body="{}")
@@ -213,6 +227,7 @@ def run() -> int:
 
         door = Door()
         ctx, page = open_panel(browser, door)
+        expect(page.locator(".sp-questions")).to_contain_text("Sign in to the shop so I can sort by price?", timeout=10000)
         ready = page.evaluate("window.__shell.ready")
         assert ready["target"] == EXTENSION and len(ready["message"]["nonce"]) >= 16, ready
         expect(page.locator(".sp-title")).to_contain_text("Pay the electricity bill")

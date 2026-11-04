@@ -935,6 +935,14 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             await existing(project)
         return {"questions": await questions.waiting(app, project)}
 
+    @api.get("/api/sessions/{session_id}/questions")
+    async def session_questions(session_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """One session's side questions, at the session's own path: the Chrome side panel reaches the
+        operator's routes only under ``/api/panel/sessions/<id>``, and a question asked in a panel
+        conversation was otherwise never shown there."""
+        await existing_session(session_id)
+        return {"questions": await questions.waiting(app, session_id=session_id)}
+
     async def read_batch(request: Request, staged: list[Attachment]) -> list[AnswerItem]:
         """The answers of one send: a JSON list, or — when files come with them — multipart/form-data
         with the same list as ``items`` and the files as ``files``. The files are staged here the way
