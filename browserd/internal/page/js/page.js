@@ -1173,7 +1173,16 @@
         if (t && within(t, el)) return { ok: true, x: sx, y: sy };
       }
     }
-    return { ok: false, covered_by: target ? coverer(target, el) : "" };
+    return { ok: false, covered_by: target ? coverer(target, el) : "", covered_ref: target ? coverRef(target) : "" };
+  }
+
+  // coverRef is a ref for what was hit over an element: the control it belongs to, else the layer
+  // it is part of, so the agent can close or read the thing in the way.
+  function coverRef(t) {
+    for (let n = t, i = 0; n && i < 6; n = up(n), i++) {
+      if (n.nodeType === Node.ELEMENT_NODE && native(n, role(n))) return ref(n);
+    }
+    return ref(fixedLayer(t) || t);
   }
 
   // elementAt is what a click at (x, y) would act on: the control the element there belongs to, or
@@ -1532,7 +1541,7 @@
     if (!f) return { error: "stale", ref: fref };
     const t = topAt(x, y);
     if (t === f) return { ok: true };
-    return { ok: false, covered_by: t ? coverer(t, f) : "" };
+    return { ok: false, covered_by: t ? coverer(t, f) : "", covered_ref: t ? coverRef(t) : "" };
   }
 
   // crossFrames are the visible frames of another site this world's documents hold.
@@ -2138,7 +2147,180 @@
     return clip(h ? textOf(h, 0) : document.title, 160);
   }
 
+  // The words of a control that closes a popup, in the languages of the sites the operator uses: the
+  // whole of its name, so "Close account" is not taken for a close button.
+  const CLOSE_WORDS = /^(close|close dialog|close modal|dismiss|no,? thanks|not now|maybe later|later|skip|cancel|got it|×|✕|✖|╳|x|关闭|關閉|取消|知道了|稍后再说|跳过|закрыть|не сейчас|позже|пропустить|отмена|понятно|schließen|fermer|cerrar)$/i;
+  // How a page that draws its close button as an icon names it in its markup instead.
+  const CLOSE_MARK = /(^|[^a-z])(close|dismiss)([^a-z]|$)|关闭|закры/i;
+  // How many elements one search for a close control looks at: a popup is small, a page is not.
+  const CLOSER_ELEMENTS = 3000;
+
+  // fixedLayer is the outermost element above n that the page pins to the window (position fixed or
+  // sticky to the viewport), or null: what a popup and its dimmed backdrop are made of.
+  function fixedLayer(n) {
+    let found = null;
+    for (let i = 0; n && n.nodeType === Node.ELEMENT_NODE && i < 60; n = up(n), i++) {
+      const t = tag(n);
+      if (t === "body" || t === "html") break;
+      if (style(n).position === "fixed") found = n;
+    }
+    return found;
+  }
+
+  // closeName is what a control calls itself, for telling a close button: its accessible name, else
+  // its few words, else its title.
+  function closeName(el) {
+    const n = collapse(el.getAttribute("aria-label") || el.getAttribute("title") || "");
+    if (n) return n;
+    const words = collapse(el.textContent || "");
+    return words.length <= 20 ? words : "";
+  }
+
+  // closer is the control that closes the popup inside root, or null: a control named like one, or an
+  // icon whose markup says so; of several, the one nearest the popup's top right corner, where a
+  // close button sits.
+  function closer(root) {
+    root = root || document.body || document.documentElement;
+    if (!root) return null;
+    const b = box(root);
+    let best = null, bestScore = Infinity, seen = 0;
+    const all = [root, ...root.querySelectorAll("*")];
+    for (const el of all) {
+      if (++seen > CLOSER_ELEMENTS) break;
+      if (SKIP.has(tag(el)) || !visible(el)) continue;
+      const v = onScreen(el);
+      if (!v) continue;
+      const name = closeName(el);
+      const cls = typeof el.className === "string" ? el.className : (el.getAttribute("class") || "");
+      const marked = CLOSE_WORDS.test(name) || (CLOSE_MARK.test(cls + " " + (el.id || "")) && (v[2] - v[0]) <= 80 && (v[3] - v[1]) <= 80);
+      if (!marked) continue;
+      // A control is what is clicked: the icon's own clickable ancestor when it has one.
+      let target = el;
+      for (let n = el, i = 0; n && n !== root.parentElement && i < 4; n = up(n), i++) {
+        if (n.nodeType === Node.ELEMENT_NODE && native(n, role(n))) {
+          target = n;
+          break;
+        }
+      }
+      const tb = box(target);
+      const score = Math.hypot(b.x + b.w - (tb.x + tb.w / 2), tb.y + tb.h / 2 - b.y) + (CLOSE_WORDS.test(name) ? 0 : 40);
+      if (score < bestScore) {
+        best = target;
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+
+  // popupName is what a popup is about, in a few words: its own name, its heading, else its first words.
+  function popupName(el) {
+    const r = role(el);
+    let n = accessibleName(el, r, true);
+    if (!n) {
+      const h = el.querySelector("h1,h2,h3,h4,[role=heading]");
+      if (h && visible(h)) n = textOf(h, 0);
+    }
+    if (!collapse(n)) n = textOf(el, 0);
+    return clip(n, 80);
+  }
+
+  // blocker is the popup that covers the page, or null: a modal <dialog> in the top layer, an
+  // aria-modal or dialog that is shown and sizeable, or — what most sites build — elements pinned to
+  // the window over most of it (a dimmed backdrop and the box on it), found by hit tests across the
+  // viewport. An agent that reads only the words under it goes on waiting for a page that will not
+  // move: a login box over a search page left the results "loading" for good. A layer that holds most
+  // of the page's words is the page's own frame (an app pinned to the window), not a popup over it.
+  function blocker() {
+    const vw = innerWidth, vh = innerHeight;
+    if (vw < 50 || vh < 50 || !document.body) return null;
+    let box0 = null, kind = "";
+    try {
+      const d = document.querySelector("dialog:modal");
+      if (d && visible(d)) {
+        box0 = d;
+        kind = "dialog";
+      }
+    } catch (e) {}
+    if (!box0) {
+      for (const d of document.querySelectorAll("[aria-modal=true],[role=dialog],[role=alertdialog],dialog[open]")) {
+        if (!visible(d)) continue;
+        const v = onScreen(d);
+        if (!v || (v[2] - v[0]) * (v[3] - v[1]) < vw * vh * 0.06) continue;
+        const cx = (v[0] + v[2]) / 2, cy = (v[1] + v[3]) / 2;
+        const t = document.elementFromPoint(cx, cy);
+        if (t && (within(t, d) || (d.getAttribute("aria-modal") === "true" && fixedLayer(t)))) {
+          box0 = d;
+          kind = "dialog";
+          break;
+        }
+      }
+    }
+    const layers = new Set();
+    if (!box0) {
+      let pinned = 0;
+      let centre = null;
+      for (const fy of [0.25, 0.5, 0.75]) {
+        for (const fx of [0.25, 0.5, 0.75]) {
+          const t = document.elementFromPoint(vw * fx, vh * fy);
+          const l = t && fixedLayer(t);
+          if (!l) continue;
+          pinned++;
+          layers.add(l);
+          if (fx === 0.5 && fy === 0.5) centre = { t, l };
+        }
+      }
+      if (pinned < 5 || !centre) return null;
+      const all = collapse(document.body.innerText || "").length;
+      let held = 0;
+      for (const l of layers) held += collapse(l.innerText || "").length;
+      if (all > 400 && held > all * 0.6) return null;
+      // The box is the smallest part of the centre's layer that is a dialog, or holds a frame, or the
+      // layer itself.
+      box0 = centre.l;
+      for (let n = centre.t; n && n !== centre.l; n = up(n)) {
+        if (n.nodeType !== Node.ELEMENT_NODE) continue;
+        const r = role(n);
+        const v = onScreen(n);
+        if ((r === "dialog" || r === "alertdialog" || tag(n) === "dialog" || tag(n) === "form") ||
+            (v && (v[2] - v[0]) >= vw * 0.15 && (v[3] - v[1]) >= vh * 0.15 && style(n).position !== "static")) {
+          box0 = n;
+          break;
+        }
+      }
+      kind = "overlay";
+    }
+    const out = { kind, name: popupName(box0), ref: ref(box0), close: "", frame: "" };
+    // A sign-in box from another site is a frame: its refs are the frame's, and the daemon reads it.
+    const frames = [box0, ...box0.querySelectorAll("iframe,frame")].filter((f) => (tag(f) === "iframe" || tag(f) === "frame") && visible(f) && onScreen(f));
+    if (frames.length) {
+      frames.sort((a, b) => box(b).w * box(b).h - box(a).w * box(a).h);
+      out.frame = frameRef(frames[0]);
+      out.cross_origin = crossOrigin(frames[0]);
+      if (!out.name) out.name = clip(frames[0].getAttribute("title") || "", 80);
+      if (!out.name) {
+        try {
+          out.name = "a frame from " + new URL(frames[0].src).host;
+        } catch (e) {}
+      }
+    }
+    let c = closer(box0);
+    for (const l of layers) {
+      if (!c && l !== box0) c = closer(l);
+    }
+    if (!c && box0.parentElement && box0.parentElement !== document.body) c = closer(box0.parentElement);
+    if (c) out.close = ref(c);
+    return out;
+  }
+
+  // closerRef is the ref of the control that closes this document's popup, read in a frame of another
+  // site whose page put the frame in a popup.
+  function closerRef() {
+    const c = closer(document.body);
+    return c ? ref(c) : "";
+  }
+
   globalThis.__browserd = {
+    blocker, closerRef,
     recordInfo, recordValue, headline,
     snapshot, readable, prepare, measure, hit, hovered, focus, selectAll, selectOption, element, evidence, mask, markHumanTyped, selection,
     hasText, exists, captchas, ref, describe, focusedRef, region, find, elementAt, scrollInfo, scrollBy, scrollToText,

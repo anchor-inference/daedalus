@@ -77,6 +77,21 @@ func fixture(t *testing.T) *httptest.Server {
 		`addEventListener("scroll", () => { if (Math.abs(scrollY - seen.last) > 450) seen.jumps++; seen.last = scrollY; });</script>`)
 	page("/popup", "Popup", `<a id="a" href="/still" target="_blank" style="position:absolute;left:100px;top:100px;width:200px;height:60px;display:block">open</a>`)
 	page("/confirm-writes", "Confirm", `<button onclick="if (confirm('Reset?')) document.getElementById('m').textContent = 'Filters reset.'">Reset</button><p id="m">Four filters.</p>`)
+	// Popups over a page, in the shapes sites build them (popup_test.go): a modal <dialog>, an
+	// aria-modal box on a backdrop, plain pinned divs with an icon to close them, and an app whose
+	// whole page is pinned to the window, which is no popup at all.
+	page("/pop/dialog", "Pop dialog", `<h1>Shop</h1><p>Goods.</p><dialog id="d"><h2>Subscribe to our letter</h2><button onclick="d.close()">Close</button></dialog>`+
+		`<script>d.showModal()</script>`)
+	page("/pop/aria", "Pop aria", `<h1>News</h1><p>`+strings.Repeat("Words of the article. ", 40)+`</p>`+
+		`<div id="w" style="position:fixed;inset:0;background:rgba(0,0,0,.4)"><div role="dialog" aria-modal="true" aria-labelledby="t" `+
+		`style="position:absolute;left:200px;top:150px;width:500px;height:300px;background:#fff"><h2 id="t">Cookie settings</h2>`+
+		`<button aria-label="Close" onclick="w.remove()" style="position:absolute;right:4px;top:4px">x</button><button onclick="w.remove()">Accept all</button></div></div>`)
+	page("/pop/fixed", "Pop fixed", `<h1>Search</h1><button id="go" style="position:absolute;left:600px;top:500px;width:200px;height:50px" onclick="document.title='searched'">Search</button>`+
+		`<p>加载中...</p><div id="m" style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50"></div>`+
+		`<div id="n" style="position:fixed;left:25%;top:25%;width:50%;height:50%;background:#fff;z-index:51"><p>We have moved to a new address.</p>`+
+		`<span class="dlg-close" style="position:absolute;right:6px;top:6px;cursor:pointer" onclick="m.remove();n.remove()">×</span></div>`)
+	page("/pop/shell", "Pop shell", `<div style="position:fixed;inset:0;overflow:auto"><h1>Mail</h1>`+strings.Repeat("<p>A letter from a friend about the weekend.</p>", 30)+`</div>`)
+	page("/pop/alert", "Pop alert", `<button id="b" style="position:absolute;left:100px;top:100px;width:200px;height:60px" onclick="alert('Saved');document.title='after alert'">Save</button>`)
 	page("/dialog", "Dialog", `<button id="b" style="position:absolute;left:100px;top:100px;width:200px;height:60px" onclick="document.title=confirm('Leave?')?'yes':'no'">Ask</button>`)
 	mux.Handle("/site/", http.StripPrefix("/site/", http.FileServer(http.Dir("testdata/site"))))
 	// A PDF sent in chunks with no Content-Length, as a generated report is (attach_rpc_test.go).
@@ -144,6 +159,19 @@ func fixture(t *testing.T) *httptest.Server {
 		`<p id="st">unpaid</p></form>`+
 		`<iframe src="http://deep.example/xsite/deep" title="Deep" style="width:300px;height:50px;border:0"></iframe>`)
 	xsite("/xsite/deep", `<title>Deep</title><button onclick="this.textContent='deep clicked'">Deep button</button>`)
+	// A search page under a sign-in box from another site, as a marketplace shows a visitor: a dimmed
+	// backdrop, and on it a box holding the other site's frame, whose close button is its own
+	// (popup_test.go).
+	xsite("/xsite/login-modal", `<title>Search</title><h1>Results</h1><p>Loading…</p>`+strings.Repeat(`<p>Row of results waiting.</p>`, 20)+
+		`<div id="mask" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:999"></div>`+
+		`<div id="box" style="position:fixed;left:50%;top:50%;width:420px;height:360px;margin:-180px 0 0 -210px;background:#fff;z-index:1000">`+
+		`<iframe src="http://pay.example/xsite/login" title="" style="width:420px;height:360px;border:0"></iframe></div>`+
+		`<script>addEventListener("message", (e) => { if (e.data === "close") { mask.remove(); box.remove(); } });</script>`)
+	xsite("/xsite/login", `<title>Sign in</title><div style="position:relative;padding:16px"><h2>密码登录</h2>`+
+		`<i class="icon-close" style="position:absolute;right:8px;top:8px;width:20px;height:20px;cursor:pointer" onclick="parent.postMessage('close', '*')"></i>`+
+		`<p><input aria-label="账号" style="width:300px;height:30px"></p>`+
+		`<p><input type="password" aria-label="密码" style="width:300px;height:30px"></p>`+
+		`<button type="button" style="width:120px;height:30px">登录</button></div>`)
 	// A frame placed as a real page places one: centred, with a border, holding small controls, each
 	// page with the browser's own margins.
 	whole := func(path, doc string) {

@@ -305,8 +305,9 @@ async def browser_navigate(context: ToolContext, url: str | None = None, go: str
     description=(
         "See the page: an outline of its landmarks, headings, links, fields and buttons, each actionable one with a "
         "ref (e14, f2e4 inside a frame). Password and payment fields show as [secret], never their value. scope=<ref> "
-        "reads only that part, whole. view='viewport' reads only what is on screen and half a screen around it. Next: "
-        "BrowserAct with a ref from here."
+        "reads only that part, whole. view='viewport' reads only what is on screen and half a screen around it. A popup "
+        "over the page (a sign-in box, a notice) is named first with its close ref: deal with it before anything else. "
+        "Next: BrowserAct with a ref from here."
     ),
 )
 async def browser_snapshot(context: ToolContext, tab: str | None = None, scope: str | None = None, view: str | None = None) -> ToolResult:
@@ -327,7 +328,8 @@ async def browser_snapshot(context: ToolContext, tab: str | None = None, scope: 
         "that control may be a whole menu or list, so for an item inside it take BrowserSnapshot(scope=<ref>) first. "
         "query pulls out only what you ask ('every product with its price') through a smaller model reading the page "
         "part by part; schema (a JSON schema of one item) shapes the items; the same query on the next page adds to "
-        "what was collected. For acting on the page use BrowserSnapshot."
+        "what was collected. A popup over the page is named first with its close ref: the text under it will not change "
+        "until it is dealt with. For acting on the page use BrowserSnapshot."
     ),
 )
 async def browser_text(
@@ -353,7 +355,7 @@ async def browser_text(
     description=(
         "Ask a vision model about what the page shows — a chart, a canvas, a map, a layout — with your question; the "
         "answer is text, the picture never reaches you. ref pictures one element; full_page the whole length. Secret "
-        "fields are blanked first."
+        "fields are blanked first. A popup over the page is named after the answer with its close ref."
     ),
 )
 async def browser_look(context: ToolContext, question: str, tab: str | None = None, ref: str | None = None, full_page: bool = False) -> ToolResult:
@@ -379,7 +381,8 @@ async def browser_look(context: ToolContext, question: str, tab: str | None = No
         "navigation, a new tab, a dialog, a failure or a question. A purchase, a message sent, a deletion, terms "
         "accepted, an upload, or a form posted in the operator's Chrome while they keep it read-only is held for the "
         "operator's approval when you try it (do not ask first); a password, code or payment field refuses you (use "
-        "BrowserLogin to sign in, BrowserHandoff for the rest). Returns what changed."
+        "BrowserLogin to sign in, BrowserHandoff for the rest). A click on something covered is refused with what covers "
+        "it and, under a popup, the popup's close ref. Returns what changed."
     ),
 )
 async def browser_act(
@@ -431,7 +434,8 @@ async def browser_tabs(context: ToolContext, action: str = "list", tab: str | No
     name="BrowserWait",
     description=(
         "Wait for the page, at most timeout_s (up to 60): until='load', 'idle' (the network quiet), 'text' (value "
-        "appears), 'gone' (a ref or a text disappears) or 'url' (the address contains value). Never wait for time alone."
+        "appears), 'gone' (a ref or a text disappears) or 'url' (the address contains value). Never wait for time alone, "
+        "and never for a page a popup covers: a wait that times out names the popup, which is what to deal with."
     ),
 )
 async def browser_wait(context: ToolContext, until: str = "load", value: str | None = None, timeout_s: float = 10.0, tab: str | None = None) -> ToolResult:
