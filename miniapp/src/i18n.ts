@@ -5690,6 +5690,8 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "session.livebar.waiting": { en: "Waiting for your answer", ru: "Ждёт вашего ответа" },
   "session.livebar.thinking": { en: "Thinking", ru: "Думает" },
   "session.livebar.step": { en: "· step {n}", ru: "· шаг {n}" },
+  "session.livebar.steptime": { en: "this step {time}", ru: "этот шаг {time}" },
+  "session.livebar.turntime": { en: "this turn {time}", ru: "этот ход {time}" },
   "session.compacting.bar": { en: "Compacting", ru: "Сжимаем" },
   "session.compacting.messages": { en: "· {n} messages · {what}", ru: "· сообщений: {n} · {what}" },
   "session.compacting.writing": { en: "writing the summary", ru: "пишем выжимку" },

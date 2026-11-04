@@ -18,8 +18,10 @@ export type LiveTool = { id: string; name: string; args: string; result?: string
  * but nothing about the turn is live any more — no cursor under it, no dots over it — however long
  * the session takes to report itself idle afterwards.
  */
-export type LiveState = { runId?: string; text: string; thinking: string; tools: LiveTool[]; startedAt: number | null; lastActivityAt: number | null; ended: boolean; model: string; fallback: ModelFallback | null; groups?: GroupLoad[] };
-export const EMPTY_LIVE: LiveState = { text: "", thinking: "", tools: [], startedAt: null, lastActivityAt: null, ended: false, model: "", fallback: null };
+/** `stepAt` is when what the agent does now between tools began: the latest model message's start or
+ *  tool result, which the live bar times a step by when no tool is running. */
+export type LiveState = { runId?: string; text: string; thinking: string; tools: LiveTool[]; startedAt: number | null; stepAt?: number | null; lastActivityAt: number | null; ended: boolean; model: string; fallback: ModelFallback | null; groups?: GroupLoad[] };
+export const EMPTY_LIVE: LiveState = { text: "", thinking: "", tools: [], startedAt: null, stepAt: null, lastActivityAt: null, ended: false, model: "", fallback: null };
 
 export type ToolItem = { kind: "tool"; id: string; name: string; args: Record<string, unknown>; result?: string; error?: boolean; running: boolean; length?: number; clipped?: boolean; /** How long the step took, when both ends of it are known. */ ms?: number; /** The groups a ToolSearch call loaded, while the run that made it streams. */ groups?: GroupLoad[]; /** The name the call had in the program it was imported from. */ orig?: string; /** The pages a web tool returned, as the host read them out of the result, which the listing carries only the start of. */ sources?: WebSource[]; /** The pictures the tool returned with its result, drawn as thumbnails under it. */ images?: ToolImage[]; /** The files the operator's reply to an AskUser question carried. */ attachments?: MessageAttachment[] };
 export type NoteItem = { kind: "note"; text: string; seq?: number };
@@ -258,6 +260,18 @@ export function applyLive(base: Turn | null, live: LiveState, now: number): Turn
       return { ...a, result: lt.result, error: lt.error, running: false, length: lt.result.length, clipped: false, ms, groups: lt.groups, ...(lt.images?.length ? { images: lt.images } : {}) };
     });
   }
+  if (live.startedAt !== null && t.pendingTools > 0) {
+    // A model message began since the history was read, and the core starts one only once every
+    // call of the message before it has its result. A call the history still shows open that the
+    // stream never named is over, whatever the read said: an interrupted turn (the process restarted
+    // under it) never gets its result over the stream, and its call was named as the step in progress
+    // for the rest of the run, timed by the turn's clock.
+    t.activity = t.activity.map((a) => {
+      if (a.kind !== "tool" || !a.running || live.tools.some((x) => x.id === a.id)) return a;
+      t.pendingTools--;
+      return { ...a, running: false };
+    });
+  }
   // Only what streamed after the last step the history already shows is new. A streamed step older
   // than that and missing from the history is on a page the screen has not read; added here it went
   // to the end of the turn, below the steps and the words that came after it.
@@ -292,6 +306,16 @@ export function applyLive(base: Turn | null, live: LiveState, now: number): Turn
   t.endedAt = now;
   t.lastActivityAt = live.lastActivityAt;
   return t;
+}
+
+/** What the agent is doing now and since when: the newest call still running, timed from when the
+ *  stream named it, or the stretch between tools, timed from the latest model message or result.
+ *  `since` is null when the stream has not said (a call read from the history after a reload). The
+ *  live bar showed the turn's clock beside the step instead, and a 15 s wait read as "1m59s". */
+export function currentStep(turn: Turn, live: LiveState): { tool?: ToolItem; since: number | null } {
+  const tool = [...turn.activity].reverse().find((a): a is ToolItem => a.kind === "tool" && a.running);
+  if (tool) return { tool, since: live.tools.find((x) => x.id === tool.id)?.startedAt ?? null };
+  return { since: live.stepAt ?? null };
 }
 
 /** A stretch of a turn as the transcript draws it: the steps between two texts, or a text. */
@@ -609,7 +633,7 @@ export function liveAfter(state: LiveState, event: string, p: Record<string, any
     state = { ...EMPTY_LIVE, runId: p.run_id };
   }
   if (event === "queue_update" && p.placed?.length) return { ...EMPTY_LIVE, runId: state.runId, model: state.model, fallback: state.fallback };
-  if (event === "message_start") return { ...state, text: "", thinking: "", ended: false, startedAt: state.startedAt ?? meaningful, lastActivityAt: meaningful };
+  if (event === "message_start") return { ...state, text: "", thinking: "", ended: false, startedAt: state.startedAt ?? meaningful, stepAt: meaningful, lastActivityAt: meaningful };
   // Which model is speaking, said before the message it belongs to. `fallback: false` is the run coming
   // back to the model it was configured with, and it takes the note away rather than leaving it standing.
   if (event === "model_changed") return { ...state, model: String(p.to ?? p.model_name ?? ""), fallback: p.fallback ? { from: String(p.configured ?? p.from ?? ""), to: String(p.to ?? ""), reason: String(p.reason ?? "") } : null, lastActivityAt: meaningful };
@@ -633,7 +657,7 @@ export function liveAfter(state: LiveState, event: string, p: Record<string, any
   }
   if (event === "tool_result") {
     const images = streamedImages(p.images);
-    return { ...state, tools: state.tools.map((t) => (t.id === p.tool_call_id ? { ...t, result: String(p.content ?? p.output ?? ""), error: !!p.is_error, endedAt: meaningful, ...(images.length ? { images } : {}) } : t)), lastActivityAt: meaningful };
+    return { ...state, tools: state.tools.map((t) => (t.id === p.tool_call_id ? { ...t, result: String(p.content ?? p.output ?? ""), error: !!p.is_error, endedAt: meaningful, ...(images.length ? { images } : {}) } : t)), stepAt: meaningful, lastActivityAt: meaningful };
   }
   // A message that ended to make a tool call is not the end of the turn: the run goes on.
   if (event === "message_stop" && (p.stop_reason === "end_turn" || p.stop_reason === "max_tokens")) return { ...state, ended: true, lastActivityAt: meaningful };
