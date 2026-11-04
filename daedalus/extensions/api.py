@@ -99,6 +99,7 @@ from daedalus.extensions import (
     api_mcp,
     api_meetings,
     api_memory,
+    api_notes,
     api_pages,
     api_panel,
     api_plugins,
@@ -1764,6 +1765,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         api_meetings.register(api, app, auth)
         # The diagram editor: scenes, their history, previews and public links.
         api_diagrams.register(api, app, auth)
+        # The Notes tab: a chat's notes and its project's, with the files they show.
+        if getattr(app, "manager", None) is not None:
+            api_notes.register(api, app, auth)
     # The agent's browser: its groups, the live view's ticket and socket, control, the audit.
     api_browsers.register(api, app, auth)
     # The operator's own Chrome: its card, a conversation's switch, and a server's pairing and relay.

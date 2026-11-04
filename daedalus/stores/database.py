@@ -3489,6 +3489,52 @@ CREATE INDEX IF NOT EXISTS remote_calls_by_session ON remote_calls(session_id, c
 CREATE INDEX IF NOT EXISTS remote_calls_by_device ON remote_calls(device_id, state);
 """)
 
+# 149 — the operator's notes, on a chat or on a project, and the files they show. A note and a file
+#   belong to exactly one of the two, each through its own foreign key, so both go with their owner
+#   through the cascade every chat and project deletion already runs (Purge, and the plain delete of
+#   a chat's scratch project) instead of through a hook someone has to remember. ``version`` counts
+#   changes to the words only: pinning, a colour or a new place in the list never refuse an open
+#   editor's next save. ``deleted_at`` keeps a deleted note for the Undo any window may offer; such
+#   rows are purged a day later. A file's bytes are a blob under its digest, freed when no row names
+#   the digest any more.
+MIGRATIONS.append("""
+CREATE TABLE IF NOT EXISTS notes (
+    id TEXT PRIMARY KEY,
+    session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+    project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+    title TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL DEFAULT '',
+    color TEXT NOT NULL DEFAULT '',
+    pinned INTEGER NOT NULL DEFAULT 0,
+    position REAL NOT NULL DEFAULT 0,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by TEXT NOT NULL DEFAULT 'operator' CHECK (updated_by IN ('operator', 'agent')),
+    deleted_at TEXT,
+    CHECK ((session_id IS NULL) <> (project_id IS NULL))
+);
+CREATE INDEX IF NOT EXISTS notes_by_session ON notes(session_id, position) WHERE session_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS notes_by_project ON notes(project_id, position) WHERE project_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS note_files (
+    id TEXT PRIMARY KEY,
+    session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+    project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    width INTEGER,
+    height INTEGER,
+    created_at TEXT NOT NULL,
+    created_by TEXT NOT NULL DEFAULT 'operator' CHECK (created_by IN ('operator', 'agent')),
+    CHECK ((session_id IS NULL) <> (project_id IS NULL))
+);
+CREATE INDEX IF NOT EXISTS note_files_by_session ON note_files(session_id) WHERE session_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS note_files_by_project ON note_files(project_id) WHERE project_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS note_files_by_digest ON note_files(sha256);
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

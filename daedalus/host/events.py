@@ -723,6 +723,18 @@ class CalendarChanged(TypedDict):
     type_id: NotRequired[str]
 
 
+class NotesChanged(TypedDict):
+    scope: Literal["chat", "project"]
+    scope_id: str
+    change: str
+    """``created`` · ``updated`` · ``meta`` · ``order`` · ``deleted`` · ``restored`` · ``moved`` · ``files``."""
+    by: Literal["operator", "agent"]
+    note_id: NotRequired[str]
+    file_id: NotRequired[str]
+    version: NotRequired[int]
+    """The note's version after the change, so an open editor can tell its own save from another's."""
+
+
 @dataclass(frozen=True, slots=True)
 class EventSpec:
     payload: type
@@ -813,6 +825,9 @@ REGISTRY: dict[str, EventSpec] = {
     "pages.emit": EventSpec(PagesEmit, persist=False),
     # Live only: it tells an open calendar to read again, and a calendar opened later reads anyway.
     "calendar.changed": EventSpec(CalendarChanged, persist=False),
+    # Live only: an open panel reads its notes again, and one opened or reconnected later reads anyway.
+    # Stored, an editor's autosave would write a row about every second of typing.
+    "notes.changed": EventSpec(NotesChanged, persist=False),
 }
 
 GAP = "bus.gap"
