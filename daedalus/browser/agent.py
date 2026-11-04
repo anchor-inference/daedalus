@@ -24,7 +24,7 @@ import re
 import time
 import zipfile
 from collections import OrderedDict, deque
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import urlsplit
@@ -607,6 +607,32 @@ MODE_WORDS = {
 }
 """How a result says why an action went through unasked."""
 
+NAMED_ADDRESS = re.compile(r"(?<![\w@./-])(?:https?://)?((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63})(?![\w-])", re.IGNORECASE)
+"""An address in the operator's words: a host with at least one dot, with or without its scheme. Not
+the part of an e-mail address after the ``@``: writing to someone there is no word on opening the site."""
+FILE_SUFFIXES = frozenset({"md", "sh", "py", "rs", "js", "ts", "go", "rb", "pl", "json", "txt", "pdf", "log", "yaml", "yml", "toml", "csv", "html", "css", "zip", "png", "jpg"})
+"""Endings that make a bare ``name.ext`` a file the operator mentioned rather than a site, though some
+are country domains too (``notes.md``, ``deploy.sh``). With a scheme in front it is an address all the same."""
+REPLY_QUOTE = re.compile(r"^\[In reply to: «.*?»\]\n?", re.DOTALL)
+"""The quote a reply carries in front of the operator's words: the agent's passage, not theirs."""
+
+
+def named_sites(passages: Iterable[str]) -> set[str]:
+    """The sites the operator named by address in their own words, each as a grant names it.
+
+    Only an address counts, never a bare name: "look on Taobao" reads as a site to a person and as
+    any domain whose first label is a word the operator happened to use to a matcher, which is the
+    hole the site question exists to close. The passages are the operator's alone (the host's
+    reading of who said what), so a page cannot name a site into this list."""
+    sites: set[str] = set()
+    for passage in passages:
+        for match in NAMED_ADDRESS.finditer(REPLY_QUOTE.sub("", passage)):
+            whole, host = match.group(0).lower(), match.group(1).lower()
+            if not whole.startswith(("http://", "https://")) and host.rsplit(".", 1)[-1] in FILE_SUFFIXES:
+                continue
+            sites.add(registrable_site(host))
+    return sites
+
 
 @dataclass(slots=True)
 class Caller:
@@ -630,6 +656,10 @@ class Caller:
     ask_operator: AskOperator | None = None
     """How the caller's request to work in the operator's Chrome reaches the operator, or ``None`` for
     a caller whose browser cannot move there (a command-line member has no conversation to switch)."""
+    operator_words: Callable[[], Sequence[str]] | None = None
+    """The operator's own passages in the caller's conversation, read when a site is about to be asked
+    about: a site they named by address there is theirs already. ``None`` for a caller with no
+    conversation of the operator's (a staff member's command-line browser)."""
 
     @property
     def scope(self) -> str:
@@ -825,6 +855,15 @@ class BrowserAgent:
             return
         site = registrable_site(host)
         decision = Decision(ASK, f"the agent asks to open {site} in your own Chrome, where you are signed in", "browser.site", key=approval_key("BrowserNavigate", {"group": group["id"], "site": site}))
+        if caller.operator_words is not None and site in named_sites(caller.operator_words()):
+            # The operator wrote the address in this conversation: asking whether the agent may open
+            # it was a second yes to what they had just said, and the shopping session that found
+            # this waited 15 and 34 seconds on two such questions.
+            await self._audit(group, caller, "sensitive", {"kinds": ["site"], "decision": "allow", "by": "operator_named", "key": decision.key, "host": host, "site": site})
+            if caller.owner.session_id:
+                await self.service.choices.grant_site(caller.owner.session_id, site)
+            caller.notes.append(f"Opened {site} without asking: the operator named it in this conversation.")
+            return
         mode = await self._approval_mode(caller, group)
         if approval_mode_lifts(mode, decision, ["site"]):
             # Granted as the operator's own yes would be, for the conversation, and recorded as granted
