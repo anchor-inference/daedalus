@@ -374,8 +374,11 @@ func (m *Manager) Open(ctx context.Context, p OpenParams) (*Group, *Tab, bool, e
 	}
 	var t *Tab
 	if m.Attached() {
-		// A group taken up again in Chrome has its tabs already.
-		t = g.ActiveTab()
+		// A group taken up again in Chrome has its tabs already. A tab the operator gave is not
+		// where an address goes: it is theirs to read, and was once navigated off their own page.
+		if t = g.ActiveTab(); t != nil && t.Given && p.URL != "" {
+			t = nil
+		}
 	}
 	if t == nil {
 		if t, err = m.NewTab(ctx, g, "", false); err != nil {

@@ -1015,3 +1015,17 @@ async def test_chrome_dropping_mid_call_is_said_with_its_reason_and_so_is_the_ne
     assert "There is no tab" not in text
     text, failed = await rig.call(sid, "BrowserSnapshot")
     assert failed and "disconnected from Daedalus" in text and "dropped during the call" in text, text
+
+
+@pytest.mark.parametrize("runtime", [GRANTED])
+async def test_browser_open_with_an_address_never_sends_the_operators_given_tab_there(rig: Rig, chrome: FakeBrowserd) -> None:
+    """After the relay dropped, the group came back on the operator's own tab, active, and BrowserOpen(url)
+    navigated it: their page was taken to a storefront's captcha."""
+    sid = await opened(rig, chrome)
+    gid = group_id(Owner("session", sid), env=USER)
+    given = chrome.give(gid, "https://mail.example.com/inbox")
+    chrome.groups[gid].active = given.id
+    text, failed = await rig.call(sid, "BrowserOpen", url="https://news.example.com/")
+    assert not failed, text
+    assert given.page.url == "https://mail.example.com/inbox"
+    assert any(t.page.url == "https://news.example.com/" for t in chrome.groups[gid].tabs if t is not given)

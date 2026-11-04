@@ -43,6 +43,8 @@ type scripted struct {
 	// given are the tabs tab.close lets go of rather than closes, as the extension does with a tab
 	// the operator gave.
 	given map[int]bool
+	// ensured are the tabs window.ensure answers the group still holds in Chrome.
+	ensured []relay.Tab
 }
 
 func (s *scripted) Send(p []byte) error {
@@ -117,7 +119,10 @@ func (s *scripted) answer(f map[string]any) {
 	case relay.TCall:
 		switch f["op"] {
 		case relay.OpWindowEnsure:
-			result(relay.WindowEnsured{Window: 1, Tabs: []relay.Tab{}})
+			s.mu.Lock()
+			tabs := append([]relay.Tab{}, s.ensured...)
+			s.mu.Unlock()
+			result(relay.WindowEnsured{Window: 1, Tabs: tabs})
 		case relay.OpTabCreate:
 			s.mu.Lock()
 			s.next++
@@ -682,6 +687,36 @@ func TestAttachGivenTab(t *testing.T) {
 	}
 	if len(g.Tabs()) != 1 {
 		t.Fatalf("after letting go of the given tab: %d tabs", len(g.Tabs()))
+	}
+}
+
+// A group opened again on the tabs Chrome still holds, the operator's given tab among them and
+// active, sends an address to a new tab of the agent's: the operator's own page was once navigated
+// to a storefront's captcha after a reconnect.
+func TestAttachOpenNeverNavigatesAGivenTab(t *testing.T) {
+	m, s, _ := attachManager(t)
+	s.mu.Lock()
+	s.given = map[int]bool{50: true}
+	s.ensured = []relay.Tab{{ID: 50, Group: "s-1", URL: "https://mail.example/", Given: true}}
+	s.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	g, tab, _, err := m.Open(ctx, OpenParams{GroupID: "s-1", Profile: "project-a", URL: "https://news.example/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tab == nil || tab.Given || s.calls(relay.OpTabCreate) != 1 {
+		t.Fatalf("the address went to %+v after %d tab.create", tab, s.calls(relay.OpTabCreate))
+	}
+	for _, other := range g.Tabs() {
+		if !other.Given {
+			continue
+		}
+		for _, method := range s.methods(other.Session) {
+			if method == "Page.navigate" {
+				t.Fatal("the operator's given tab was navigated")
+			}
+		}
 	}
 }
 

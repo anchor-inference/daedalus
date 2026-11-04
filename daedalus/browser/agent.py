@@ -1074,6 +1074,12 @@ class BrowserAgent:
         elif url:
             tab = opened.get("tab") or {}
             row = await self._group(caller)
+            if tab.get("given"):
+                # A tab the operator gave is theirs to read, never to send elsewhere: their own page
+                # was once taken to a storefront's captcha this way, after their Chrome reconnected
+                # and the group came back on it.
+                await self._site_ask(caller, row, url, why or "")
+                tab = await self.service.call(group["id"], "tab.new", {"group_id": group["id"], "url": "about:blank", "origin": self._origin(caller)}, what="opening a tab", timeout=40.0)
             await self._through_wall(caller, row, lambda: self.service.call(group["id"], "page.navigate", {"tab_id": tab.get("id"), "url": url, "origin": self._origin(caller), "timeout_ms": NAVIGATE_TIMEOUT_MS}, what="opening the page", timeout=NAVIGATE_TIMEOUT_MS / 1000 + 25), url=url, why=why or "", tab=str(tab.get("id") or ""))
         if url:
             await self._site_notes(caller, url)
