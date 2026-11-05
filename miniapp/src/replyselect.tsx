@@ -59,6 +59,13 @@ export function pickedFrom(selection: Selection | null, scroller: HTMLElement | 
   return { quote, seq: Number.isFinite(seq) && seq > 0 ? seq : null, range: range.cloneRange() };
 }
 
+/** Whether two picks are the same passage: the same words of the same answer, between the same points. */
+function samePick(a: Picked, b: Picked): boolean {
+  return a.quote === b.quote && a.seq === b.seq
+    && a.range.startContainer === b.range.startContainer && a.range.startOffset === b.range.startOffset
+    && a.range.endContainer === b.range.endContainer && a.range.endOffset === b.range.endOffset;
+}
+
 /**
  * Where the pill goes: above the selection's first line, centred on the selection; below its last line
  * when there is no room above or on a touch screen, where the system's own copy menu takes the space
@@ -90,6 +97,8 @@ export function SelectionReply({ sessionId, scroller, phone, onAskAside }: { ses
   const pointerDown = useRef(false);
   const writingNow = useRef(false);
   writingNow.current = writing;
+  const pickedNow = useRef(picked);
+  pickedNow.current = picked;
   const touch = useRef(phone);
   touch.current = phone;
 
@@ -105,8 +114,15 @@ export function SelectionReply({ sessionId, scroller, phone, onAskAside }: { ses
   useEffect(() => {
     let timer = 0;
     const read = () => {
-      if (writingNow.current || pointerDown.current) return;
+      // A pane's edge being dragged is not a selection being made, and the drag is held to commit
+      // React no more than a still pointer does (check_pane_resize.py).
+      if (writingNow.current || pointerDown.current || document.body.classList.contains("resizing")) return;
       const next = pickedFrom(window.getSelection(), scroller.current);
+      // Every click anywhere on the page ends here. Nothing in an answer selected before or now, or
+      // the very same passage again, changes nothing, and setting state for it re-rendered the
+      // conversation's pill host for nothing.
+      const before = pickedNow.current;
+      if (next === null ? before === null : before !== null && samePick(before, next)) return;
       setPicked(next);
       if (!next) setPlace(null);
     };

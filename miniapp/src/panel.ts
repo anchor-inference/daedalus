@@ -273,15 +273,19 @@ function safeStorage(): Storage | null {
 export const TAB_FITS = ["full", "words", "active", "icons"] as const;
 export type TabFit = (typeof TAB_FITS)[number];
 
-/** The fits a strip tries, in order. */
+// One array for the sheet, not a fresh slice per call: the strip's measuring callback depends on it, and
+// a new array every render would rebuild the callback and re-run the measurement on every render.
+const SHEET_FITS: readonly TabFit[] = TAB_FITS.slice(1);
+
+/** The fits a strip tries, in order; the same array on every call. */
 export function fitsFor(inSheet: boolean): readonly TabFit[] {
-  return inSheet ? TAB_FITS.slice(1) : TAB_FITS;
+  return inSheet ? SHEET_FITS : TAB_FITS;
 }
 
-/** The fit to try after `fit` when the strip still overflows, or null when it is the last. */
-export function nextFit(fit: TabFit, inSheet: boolean): TabFit | null {
-  const order = fitsFor(inSheet);
-  return order[order.indexOf(fit) + 1] ?? null;
+/** The widest fit of `order` that `fits` accepts, or the last when none does: the icons are drawn even
+ *  when they overflow, because there is nothing narrower to fall back to. */
+export function widestFit(order: readonly TabFit[], fits: (fit: TabFit) => boolean): TabFit {
+  return order.find(fits) ?? order[order.length - 1];
 }
 
 // ── the keyboard ─────────────────────────────────────────────────────────────────────────────

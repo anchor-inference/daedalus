@@ -10,8 +10,9 @@ import { useEdgeFade, useMoreBelow } from "./edgefade";
 import { Icon, IconName } from "./icons";
 import {
   PANEL_CLOSED,
+  TAB_FITS,
   fitsFor,
-  nextFit,
+  widestFit,
   type TabFit,
   PANEL_TABS,
   PanelContext,
@@ -157,37 +158,55 @@ function Column(props: HostProps) {
 const TAB_ICON: Record<PanelTab, IconName> = { details: "settings", files: "folder", preview: "eye", jobs: "terminal", notes: "note", subagents: "spawn", board: "board", brief: "pen", wakeups: "clock", folders: "folder", questions: "ask", browser: "globe", sources: "link" };
 
 /** Which fit the strip draws: the widest that fits, chosen again whenever the strip's width or what it
- *  holds changes. Each try is laid out before the browser paints (a layout effect, and flushSync from
- *  the resize observer), so a strip being dragged wider never shows the overflowing try. */
+ *  holds changes. Every fit is tried on the strip's own class list and measured in one go, and React
+ *  hears only the answer, and only when it differs from what is drawn.
+ *
+ *  It used to step through the fits by state: a new width reset the fit to the widest with flushSync,
+ *  and a layout effect stepped one fit narrower per commit until the strip stopped overflowing. That is
+ *  two commits or more for every change of width, and dragging the sidebar's or the panel's edge
+ *  changes the strip's width on every frame, so the drag committed React twice a move and lagged the
+ *  pointer (check_pane_resize.py). The resize observer reports once a frame, after layout and before the
+ *  paint, which is both the coalescing and the moment to measure; flushSync is kept there so a changed
+ *  fit is drawn in the same frame and the overflowing one never paints. */
 function useTabFit(strip: RefObject<HTMLDivElement | null>, inSheet: boolean, content: string): TabFit {
-  const first = fitsFor(inSheet)[0];
-  const [fit, setFit] = useState<TabFit>(first);
-  const width = useRef(0);
-  const seen = useRef(content);
-  useLayoutEffect(() => {
+  const order = fitsFor(inSheet);
+  const [fit, setFit] = useState<TabFit>(order[0]);
+  const drawn = useRef(fit);
+  drawn.current = fit;
+  const measure = useCallback((): TabFit => {
     const el = strip.current;
-    if (!el) return;
-    // Something in the strip changed: start again from the widest, rather than step on from a fit
-    // chosen for other words.
-    if (seen.current !== content) {
-      seen.current = content;
-      if (fit !== first) return setFit(first);
-    }
-    const next = nextFit(fit, inSheet);
-    if (next && el.scrollWidth > el.clientWidth + 1) setFit(next);
-  });
+    // A strip that is not laid out (a hidden sheet) overflows at every fit: keep what is drawn.
+    if (!el || !el.clientWidth) return drawn.current;
+    const draw = (which: TabFit) => {
+      for (const other of TAB_FITS) el.classList.toggle(`fit-${other}`, other === which);
+    };
+    const chosen = widestFit(order, (which) => {
+      draw(which);
+      return el.scrollWidth <= el.clientWidth + 1;
+    });
+    // Hand the class list back as React drew it, so React's own record of it stays true.
+    draw(drawn.current);
+    return chosen;
+  }, [strip, order]);
+  // What the strip holds changed (a tab, a badge, the language): choose again before the paint.
+  useLayoutEffect(() => {
+    const chosen = measure();
+    if (chosen !== drawn.current) setFit(chosen);
+  }, [measure, content]);
   useEffect(() => {
     const el = strip.current;
     if (!el || typeof ResizeObserver === "undefined") return;
+    let width = Math.round(el.clientWidth);
     const observer = new ResizeObserver(([entry]) => {
       const now = Math.round(entry.contentRect.width);
-      if (now === width.current) return;
-      width.current = now;
-      flushSync(() => setFit(first));
+      if (now === width) return;
+      width = now;
+      const chosen = measure();
+      if (chosen !== drawn.current) flushSync(() => setFit(chosen));
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, [strip, first]);
+  }, [strip, measure]);
   return fit;
 }
 
