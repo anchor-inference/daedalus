@@ -3559,6 +3559,21 @@ WHERE r.seq IN (
 AND slot.type = 'object' AND json_extract(slot.value, '$.blob_ref') IS NOT NULL;
 """)
 
+# Who looked at, copied, changed or removed one of the operator's secrets, and when. Never a value, and no
+# foreign key: the trail of a removed secret is the one most worth keeping. ``via`` is the way in the
+# request came through (cookie, token, Telegram), which is the only "who" a single-operator host has.
+MIGRATIONS.append("""
+CREATE TABLE IF NOT EXISTS operator_secret_audit (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT NOT NULL,
+    secret_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    action TEXT NOT NULL,
+    via TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS operator_secret_audit_by_secret ON operator_secret_audit(secret_id, seq);
+""")
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

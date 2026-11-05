@@ -360,6 +360,91 @@ class OperatorSecrets:
         self._refresh()
         return True
 
+    async def update(self, secret_id: str, *, name: str | None = None, value: str | None = None, note: str | None = None) -> tuple[Secret, list[str]] | None:
+        """Change a secret in place: its name, its value, its note, any of them. ``(secret, what changed)``,
+        None when there is no such secret.
+
+        A new value replaces the old one in the database; the old value is kept only in this process's
+        redactor, as :meth:`put` does, so a command that still prints it reads the placeholder. A new name
+        re-seals the value, because the name is part of the associated data and the old sealing would not
+        open under it; the placeholder changes with it, and a message that named the old one no longer
+        resolves.
+        """
+        secret = self._by_id.get(secret_id)
+        if secret is None:
+            return None
+        new_name = normalise_name(name) if name is not None else secret.name
+        if new_name != secret.name and any(
+            other.id != secret.id and (other.scope_kind, other.scope_id, other.name) == (secret.scope_kind, secret.scope_id, new_name) for other in self._by_id.values()
+        ):
+            raise SecretError(f"there is already a secret named {new_name} here")
+        if value is not None:
+            if not isinstance(value, str) or not value.strip():
+                raise SecretError("the value is empty")
+            if len(value) > MAX_VALUE:
+                raise SecretError(f"a value is at most {MAX_VALUE} characters; put larger material in a file")
+        new_value = value if value is not None else secret.value
+        new_note = str(note).strip()[:MAX_NOTE] if note is not None else secret.note
+        changed = [field for field, differs in (("name", new_name != secret.name), ("value", new_value != secret.value), ("note", new_note != secret.note)) if differs]
+        if not changed:
+            return secret, []
+        if new_value is None:
+            # Re-sealing needs the value, and a value that does not open cannot be carried to a new name.
+            raise SecretError("this secret's value cannot be opened; give it a new value first")
+        now = _now()
+        sealed = self.seal(secret.id, secret.scope_kind, secret.scope_id, new_name, new_value)
+        await self.db.execute(
+            "UPDATE operator_secrets SET name = ?, sealed = ?, note = ?, updated_at = ? WHERE id = ?", (new_name, sealed, new_note, now, secret.id),
+        )
+        if "value" in changed and secret.value:
+            self._retired[secret.value] = placeholder(new_name)
+        secret.name, secret.value, secret.note, secret.updated_at = new_name, new_value, new_note, now
+        self._refresh()
+        return secret, changed
+
+    async def reveal(self, secret_id: str, *, purpose: str, via: str) -> tuple[Secret, str] | None:
+        """The value, for the operator's own eyes or clipboard, with the look written down first.
+
+        The audit row is written before the value is handed back and a failed write refuses the reveal:
+        a look that left no trace is the one thing this must never be. None when there is no such secret
+        or its value does not open."""
+        secret = self._by_id.get(secret_id)
+        if secret is None or secret.value is None:
+            return None
+        await self.audit(secret, purpose, via)
+        return secret, secret.value
+
+    async def audit(self, secret: Secret, action: str, via: str) -> None:
+        """One line of who did what to a secret: never the value."""
+        await self.db.execute(
+            "INSERT INTO operator_secret_audit(at, secret_id, name, action, via) VALUES (?, ?, ?, ?, ?)",
+            (_now(), secret.id, secret.name, action[:32], via[:32]),
+        )
+
+    async def audit_trail(self, secret_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        rows = await self.db.fetchall(
+            "SELECT at, name, action, via FROM operator_secret_audit WHERE secret_id = ? ORDER BY seq DESC LIMIT ?", (secret_id, limit),
+        )
+        return [dict(row) for row in rows]
+
+    async def references(self, secret: Secret, limit: int = 5) -> tuple[int, list[dict[str, str]]]:
+        """The conversations in the secret's scope whose history names its placeholder: where removing it
+        would leave a message pointing at nothing. ``(how many, the first few as id and title)``.
+
+        Read from the stored messages on demand — the operator is about to remove it — rather than kept as a
+        count on every list: a chat's history is the one record that already says it, and a counter beside
+        it would drift the moment a conversation was cleared or forked."""
+        if secret.scope_kind == "session":
+            where, argument = "s.id = ?", secret.scope_id
+        else:
+            where, argument = "s.project_id = ?", secret.scope_id
+        rows = await self.db.fetchall(
+            f"SELECT s.id, s.title FROM sessions AS s WHERE {where} AND EXISTS "  # noqa: S608 — the two clauses are fixed text
+            "(SELECT 1 FROM session_messages AS m WHERE m.session_id = s.id AND instr(m.message, ?) > 0) ORDER BY s.last_message_at DESC",
+            (argument, secret.placeholder),
+        )
+        return len(rows), [{"id": row["id"], "title": row["title"] or ""} for row in rows[:limit]]
+
     def get(self, secret_id: str) -> Secret | None:
         return self._by_id.get(secret_id)
 

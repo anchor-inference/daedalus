@@ -1638,8 +1638,55 @@ button.secret-chip:hover { background: var(--card-2); }
 .secret-value.shown { -webkit-text-security: none; }
 .secret-eye { position: absolute; top: 4px; right: 4px; }
 .secret-eye[aria-pressed="true"] { color: var(--accent); }
-.secret-reuse { margin-top: 12px; }
 .secret-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+/* The manager: a search and "Add secret" over a list of rows. A row's value is a fixed run of dots, so
+   it says nothing of the length; the eye swaps in the value for half a minute, which the bar under it
+   counts down, and Attach on the right of the name stays the first thing the eye lands on. */
+.secrets-manager { display: flex; flex-direction: column; gap: var(--space-2); }
+.secrets-manager .secret-why { margin: 0; }
+.secrets-toolbar { display: flex; gap: var(--space-2); align-items: center; }
+.secrets-search { flex: 1; min-width: 0; position: relative; display: flex; align-items: center; }
+.secrets-search .ic { position: absolute; left: 10px; color: var(--muted); pointer-events: none; }
+.secrets-search input.field { width: 100%; padding-left: 30px; }
+.secrets-add-open { flex: none; display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.secret-add, .secret-edit { padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); animation: secret-in .14s ease-out; }
+.secret-edit { border: 0; padding: 0; background: transparent; }
+.secret-form-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-3); }
+.secrets-group { display: flex; flex-direction: column; gap: 4px; }
+.secrets-group > .secret-heading { margin: var(--space-2) 0 0; color: var(--muted); font-size: var(--fs-12); }
+.secrets-others-toggle { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; border: 0; background: transparent; padding: 0; font: inherit; cursor: pointer; }
+.secrets-others-toggle .ic { transform: rotate(-90deg); transition: transform .14s ease; }
+.secrets-others-toggle[aria-expanded="true"] .ic { transform: none; }
+.secrets-list { display: flex; flex-direction: column; gap: 6px; }
+.secrets-none { padding: var(--space-2) 0; }
+.secret-row { display: flex; flex-direction: column; gap: 4px; padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card); animation: secret-in .14s ease-out; min-width: 0; }
+.secret-row[data-scope="project"] { border-left: 2px solid color-mix(in srgb, var(--info) 55%, var(--line)); }
+.secret-row-head { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.secret-row-head > .ic { flex: none; color: var(--fg-2); }
+.secret-row-name { font-family: var(--mono); font-size: var(--fs-14); font-weight: 600; overflow-wrap: anywhere; }
+.secret-row-scope { flex: 1 1 auto; min-width: 0; color: var(--muted); font-size: var(--fs-12); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.secret-row-attach { flex: none; }
+.secret-row-attached { flex: none; display: inline-flex; align-items: center; gap: 4px; color: var(--ok); font-size: var(--fs-12); }
+.secret-row-note { color: var(--fg-2); font-size: var(--fs-13); overflow-wrap: anywhere; }
+.secret-row-value { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.secret-row-dots { flex: 1; min-width: 0; padding: 2px 8px; border-radius: var(--radius-xs); background: var(--surface-2); font-family: var(--mono); font-size: var(--fs-13); letter-spacing: 0.08em; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.secret-row-dots.shown { letter-spacing: normal; color: var(--fg); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 7.5em; overflow: auto; user-select: all; }
+.secret-row-dots.bad { background: transparent; color: var(--bad); letter-spacing: normal; }
+.secret-row-tools { flex: none; display: inline-flex; gap: 2px; }
+.secret-row-tools .iconbtn.on { color: var(--accent); background: var(--surface-2); }
+.secret-timer { height: 2px; border-radius: 2px; background: var(--accent); transform-origin: left; animation: secret-countdown 30s linear forwards; }
+.secret-row-meta { color: var(--muted); font-size: var(--fs-12); overflow-wrap: anywhere; }
+.secret-confirm { margin-top: 4px; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--bad) 8%, transparent); border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent); animation: secret-in .14s ease-out; }
+.secret-confirm-text { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-13); }
+.secret-confirm-text .warn { color: var(--warn); }
+.secret-confirm .secret-form-actions { margin-top: var(--space-2); }
+@keyframes secret-in { from { opacity: 0; transform: translateY(-2px); } }
+@keyframes secret-countdown { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+@media (prefers-reduced-motion: reduce) {
+  .secret-row, .secret-add, .secret-confirm { animation: none; }
+  /* No moving bar for a reader who asked for stillness; the value still hides on time. */
+  .secret-timer { display: none; }
+}
 .dropzone { position: absolute; inset: 0; z-index: 25; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: color-mix(in srgb, var(--bg) 80%, transparent); backdrop-filter: blur(4px); border: 2px dashed var(--info); border-radius: var(--radius-lg); margin: 8px; color: var(--fg); font-size: var(--fs-15); pointer-events: none; }
 .chat { position: relative; }
 

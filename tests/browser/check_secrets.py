@@ -79,7 +79,7 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
                     "env": "DAEDALUS_SECRET_" + name.upper(), "created_at": "2026-10-08T12:00:00Z", "updated_at": "2026-10-08T12:00:00Z", "last_used_at": None, "last_used_by": "", "uses": 0, "readable": True}
             HOST.secrets.append(kept)
             return answer(kept)
-        if rel.startswith("/api/secrets/") and req.method == "DELETE":
+        if rel.startswith("/api/secrets/") and req.method == "DELETE" and rel.count("/") == 3:
             HOST.secrets = [s for s in HOST.secrets if s["id"] != rel.rsplit("/", 1)[1]]
             return answer({"ok": True})
         if rel == f"/api/sessions/{SESSION}/messages" and isinstance(data, dict):
@@ -153,7 +153,7 @@ def fill_form(page: Page, where: str, problems: list[str]) -> None:
         problems.append(f"{where}: the value is not masked ({masked})")
     page.locator("#secret-note").fill("ISP router web admin, user admin")
     shot(page, f"form-{where}")
-    page.locator(".secret-sheet .btn.primary").click()
+    page.locator(".secret-add .btn.primary").click()
     page.locator(".secret-sheet").wait_for(state="detached", timeout=5000)
 
 
@@ -215,9 +215,11 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     page.locator(".composer .plus").click()
     page.locator(".plus-menu [role='menuitem']").last.click()
     page.locator(".secret-sheet").wait_for(timeout=5000)
+    # With a secret already there the sheet opens on the list, and the form is one press away.
+    page.locator(".secret-sheet .secrets-add-open").click()
     page.locator("#secret-name").fill("wifi")
     page.locator("#secret-value").fill("wifi-password-9")
-    page.locator(".secret-sheet .btn.primary").click()
+    page.locator(".secret-add .btn.primary").click()
     page.locator(".composer .attachments .secret-chip").wait_for(timeout=5000)
     before = len([1 for method, rel, _ in HOST.posted if method == "DELETE" and rel.startswith("/api/secrets/")])
     page.locator(".composer .attachments .secret-chip .secret-chip-x").click()

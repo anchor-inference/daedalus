@@ -419,7 +419,7 @@
     {
       "section": "security", "anchor": "security.secrets", "config": null,
       "title": { "en": "Secrets you handed the agent", "ru": "Секреты, переданные агенту" },
-      "about": { "en": "The encrypted secrets the agent uses by name without seeing their values; remove one to revoke it at once.", "ru": "Зашифрованные секреты, которыми агент пользуется по имени, не видя значений; удаление отзывает секрет сразу." },
+      "about": { "en": "The encrypted secrets the agent uses by name without seeing their values: add, look at, copy, edit or remove one; removing revokes it at once.", "ru": "Зашифрованные секреты, которыми агент пользуется по имени, не видя значений: добавить, посмотреть, скопировать, изменить или удалить; удаление отзывает секрет сразу." },
       "synonyms": ["secrets", "passwords", "tokens", "credentials", "vault", "секреты", "пароли", "токены", "учётные данные"]
     },
     {

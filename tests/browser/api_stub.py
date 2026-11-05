@@ -502,9 +502,6 @@ GATES: dict[str, object] = {
     # Settings → Tools opens on the tool groups.
     "/api/tool-groups": TOOL_GROUP_CATALOGUE,
     "/api/maintenance": {"notice": None},
-    # Settings → Security lists the secrets handed to the agent, and the composer's Secret form reads the
-    # chat's; none here. check_secrets.py keeps a host of its own that stores them.
-    "/api/secrets": {"secrets": [], "logins": [], "project_id": None, "project_name": None},
     "/api/conversation-search/settings": {"mode": "off", "paused": False, "reason": "off", "busy": False, "indexed": 0, "pending": 0, "label": "ruBERT mini FRIDA", "size_bytes": 131205411, "licence": "MIT", "installed": False},
     # Drawn before any screen: no model means the whole app is the "Add a model" flow.
     "/api/onboarding": {"has_model": True, "presets": 1, "default_preset": "p", "providers": [], "keyproxy_base": "", "needs": [], "message": ""},
@@ -1010,6 +1007,87 @@ def agent_message(id_: str, sender: tuple[str, str | None], target: tuple[str, s
             "wait_s": wait_s, "state": state, "detail": detail, "staff_message_id": f"m-{id_}" if state != "refused" else None, "delivery": delivery, "created_at": at, "updated_at": at}
 
 
+FAKE_SECRET_VALUE = "fake-value-not-a-secret"
+"""The only value the stub ever reveals: obviously invented, so a screenshot or a log that shows it
+shows nothing, and a check can search for it to prove the list never carried it."""
+
+
+class FakeSecrets:
+    """The host's secrets routes over a list held here, values included, as the host keeps them.
+
+    Settings → Security and the composer's Secret sheet read the list; the reveal answers the stored
+    value, a list never does. Empty unless a check seeds it (``check_secrets_manage.py``), so every
+    other run draws the screens with no secret at all. ``revealed`` records who asked for a value.
+    """
+
+    def __init__(self) -> None:
+        self.items: list[dict] = []
+        self.values: dict[str, str] = {}
+        self.usage: dict[str, list[dict]] = {}
+        self.revealed: list[tuple[str, str]] = []
+        self.deleted: list[str] = []
+        self.patched: list[tuple[str, dict]] = []
+        self.chat = "sess-1"
+        self.project: dict | None = None
+        self.projects: list[dict] = []
+
+    def seed(self, name: str, *, scope: str = "session", scope_id: str = "", scope_title: str = "", note: str = "",
+             value: str = FAKE_SECRET_VALUE, used: str | None = None, uses: int = 0, by: str = "") -> dict:
+        row = {"id": f"s{len(self.values) + 1}", "name": name, "scope": scope, "scope_id": scope_id or self.chat, "scope_title": scope_title, "note": note,
+               "placeholder": f"«secret:{name}»", "env": "DAEDALUS_SECRET_" + name.upper(), "created_at": "2026-10-28T09:00:00Z",
+               "updated_at": "2026-11-03T18:20:00Z", "last_used_at": used, "last_used_by": by, "uses": uses, "readable": True}
+        self.items.append(row)
+        self.values[row["id"]] = value
+        return row
+
+    def _here(self, row: dict) -> bool:
+        return (row["scope"] == "session" and row["scope_id"] == self.chat) or (row["scope"] == "project" and self.project is not None and row["scope_id"] == self.project["id"])
+
+    def answer(self, method: str, path: str, body: object, session_id: str) -> tuple[int, object] | None:
+        method = method.upper()
+        parts = path.split("/")
+        data = body if isinstance(body, dict) else {}
+        if path == "/api/secrets" and method == "GET":
+            if session_id:
+                return 200, {"secrets": [r for r in self.items if self._here(r)], "others": [r for r in self.items if not self._here(r)],
+                             "project_id": self.project["id"] if self.project else None, "project_name": self.project["name"] if self.project else None}
+            return 200, {"secrets": self.items, "logins": [], "projects": self.projects}
+        if path == "/api/secrets" and method == "POST":
+            scope = str(data.get("scope") or "session")
+            scope_id = str(data.get("project_id") or (self.project["id"] if scope == "project" and self.project else data.get("session_id") or self.chat))
+            row = self.seed(str(data.get("name")), scope=scope, scope_id=scope_id, note=str(data.get("note") or ""), value=str(data.get("value") or ""))
+            return 200, row
+        row = next((r for r in self.items if len(parts) >= 4 and r["id"] == parts[3]), None)
+        if len(parts) == 5 and parts[2:4] == ["secrets", "logins"]:
+            return None
+        if row is None:
+            return (404, {"detail": "no such secret"}) if len(parts) >= 4 else None
+        if len(parts) == 4 and method == "PATCH":
+            self.patched.append((row["id"], dict(data)))
+            if data.get("name"):
+                row["name"], row["placeholder"] = data["name"], f"«secret:{data['name']}»"
+            if "note" in data:
+                row["note"] = data["note"]
+            if data.get("value"):
+                self.values[row["id"]] = data["value"]
+            row["updated_at"] = datetime.now(UTC).isoformat(timespec="seconds")
+            return 200, {**row, "changed": [k for k in ("name", "value", "note") if k in data]}
+        if len(parts) == 4 and method == "DELETE":
+            self.items = [r for r in self.items if r["id"] != row["id"]]
+            self.deleted.append(row["id"])
+            return 200, {"ok": True}
+        if len(parts) == 5 and parts[4] == "reveal" and method == "POST":
+            self.revealed.append((row["id"], str(data.get("purpose") or "reveal")))
+            return 200, {"value": self.values[row["id"]]}
+        if len(parts) == 5 and parts[4] == "usage" and method == "GET":
+            titles = self.usage.get(row["id"], [])
+            return 200, {"conversations": len(titles), "titles": titles, "audit": []}
+        return None
+
+
+SECRETS = FakeSecrets()
+
+
 def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str, str | bytes] | None:
     """The answer every harness gives the same way: ``(status, content type, body)``, or ``None``.
 
@@ -1039,6 +1117,11 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
             return 404, "application/json", json.dumps({"detail": "no picture"})
         return 200, "image/png", preview_png(address.split("?", 1)[0], 160, 160)
     parts = path.split("/")
+    if path == "/api/secrets" or path.startswith("/api/secrets/"):
+        session_id = dict(pair.split("=", 1) for pair in query.split("&") if "=" in pair).get("session_id", "")
+        answered = SECRETS.answer(method, path, body, session_id)
+        if answered is not None:
+            return answered[0], "application/json", json.dumps(answered[1])
     if path == "/api/sessions" and method.upper() == "POST":
         status, created = create_session(body)
         return status, "application/json", json.dumps(created)
