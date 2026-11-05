@@ -27,7 +27,7 @@ from daedalus.processes import end_tree
 from daedalus.security import redact
 from daedalus.tools import search_hint
 from daedalus.tools._common import FRAME_CHARS, clip, error, ok, services_for, tool_config
-from daedalus.tools.shell import SandboxUnavailable, sandbox_argv, shell_environment
+from daedalus.tools.shell import SandboxUnavailable, _with_secrets, sandbox_argv, shell_environment
 
 OUTPUT_HEAD_CHARS = 2000
 #: How much of a model-written string the receipt line repeats. The criterion
@@ -360,11 +360,17 @@ async def verify(context: ToolContext, criterion: str, command: str, cwd: str | 
     workdir = services.resolve(cwd)
     limit = float(timeout_seconds or services.tool_timeout_seconds)
     started = time.monotonic()
+    # The same door Exec goes through. Without it a check on the operator's host ran with none of the chat's
+    # secrets: the variable was empty, ssh answered "Permission denied" to a password Exec had just logged in
+    # with, and the agent told the operator the password had stopped working. The receipt keeps the command as
+    # the agent wrote it, so a reader still checks it against the criterion.
+    written = command
+    command, env = _with_secrets(context.session_id, command, env, remote=services.exec_backend is not None, tool="Verify")
     if services.exec_backend is not None:
         # The check runs where the work is (a benchmark container); the receipt is recorded the same way.
         outcome = await services.exec_backend.run("set -o pipefail\n" + command, cwd=str(workdir), env=env, timeout=limit)
         raw = outcome.output.encode("utf-8", "replace")
-        return await _receipt(context, services, manager, criterion, command, workdir, outcome.exit_code, hashlib.sha256(raw).hexdigest(), raw[: max(OUTPUT_HEAD_CHARS, services.max_tool_output_chars) * 4], raw[-OUTPUT_TAIL_CHARS:], len(raw), time.monotonic() - started, outcome.timed_out, False, False, dependencies)
+        return await _receipt(context, services, manager, criterion, written, workdir, outcome.exit_code, hashlib.sha256(raw).hexdigest(), raw[: max(OUTPUT_HEAD_CHARS, services.max_tool_output_chars) * 4], raw[-OUTPUT_TAIL_CHARS:], len(raw), time.monotonic() - started, outcome.timed_out, False, False, dependencies)
     if not workdir.exists():
         return error(context, f"working directory does not exist: {workdir}")
     # A failure anywhere in a pipeline fails the check; `pytest | tail` must not pass on tail's exit code.
@@ -419,7 +425,7 @@ async def verify(context: ToolContext, criterion: str, command: str, cwd: str | 
         except TimeoutError:
             kill_failed = True
     exit_code = -1 if timed_out else int(proc.returncode or 0)
-    return await _receipt(context, services, manager, criterion, command, workdir, exit_code, hasher.hexdigest(), bytes(head), bytes(tail), total_bytes, time.monotonic() - started, timed_out, kill_failed, sandboxed, dependencies)
+    return await _receipt(context, services, manager, criterion, written, workdir, exit_code, hasher.hexdigest(), bytes(head), bytes(tail), total_bytes, time.monotonic() - started, timed_out, kill_failed, sandboxed, dependencies)
 
 
 def _counts_from_output(tail_text: str, head_text: str) -> tuple[int | None, int | None]:

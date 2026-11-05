@@ -446,3 +446,44 @@ async def test_orphan_sweep_keeps_ancestors_of_project_roots(settings: Settings,
         assert (root / "work.txt").read_text() == "keep"
     finally:
         await manager.close()
+
+
+async def test_verify_gets_the_chats_secrets_wherever_the_command_runs(settings: Settings, db: Database, tmp_path: Path) -> None:
+    """A check on the operator's host used to run with none of them, so a password Exec had just logged in
+    with came back "Permission denied" and the agent reported the password as changed."""
+    from daedalus.host.host_exec import ExecOutcome
+    from daedalus.security import operator_secrets
+    from daedalus.security.redact import Redactor
+
+    seen: dict[str, Any] = {}
+
+    class Host:
+        async def run(self, command: str, cwd: str | None, env: dict[str, str] | None, timeout: float) -> ExecOutcome:
+            seen.update(command=command, env=env)
+            return ExecOutcome(exit_code=0, output="ok")
+
+    manager = await _manager(settings, db)
+    store = operator_secrets.OperatorSecrets(db, tmp_path / "secrets" / operator_secrets.KEY_FILE, Redactor())
+    await store.load()
+    operator_secrets.install(store)
+    try:
+        state = await manager.create_session("verify secret")
+        await store.put("session", state.session.id, "router_admin", "not-a-real-password")
+        state.services.extra["manager"] = manager  # type: ignore[union-attr]
+        ctx = ToolContext(tenant_id="daedalus", run_id="r1", session_id=state.session.id)
+        placeholder = "«secret:router_admin»"
+
+        state.services.exec_backend = Host()  # type: ignore[union-attr, assignment]
+        result = await verify().invoke(ctx, {"criterion": "router logs in", "command": f'login "{placeholder}"'})
+        assert not result.is_error
+        assert seen["env"]["DAEDALUS_SECRET_ROUTER_ADMIN"] == "not-a-real-password"
+        assert "${DAEDALUS_SECRET_ROUTER_ADMIN}" in seen["command"] and placeholder not in seen["command"]
+
+        state.services.exec_backend = None  # type: ignore[union-attr]
+        local = await verify().invoke(ctx, {"criterion": "the value arrives", "command": f'test "{placeholder}" = not-a-real-password'})
+        assert not local.is_error
+        row = await db.fetchone("SELECT command FROM verifications WHERE session_id = ? ORDER BY id DESC LIMIT 1", (state.session.id,))
+        assert row is not None and placeholder in row["command"]
+    finally:
+        operator_secrets.install(None)
+        await manager.close()

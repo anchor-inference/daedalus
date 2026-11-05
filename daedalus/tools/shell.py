@@ -349,7 +349,7 @@ def shell_environment(session_id: str, extra: dict[str, str] | None = None, *, c
     return env
 
 
-def _with_secrets(session_id: str, command: str, env: dict[str, str] | None, *, remote: bool) -> tuple[str, dict[str, str] | None]:
+def _with_secrets(session_id: str, command: str, env: dict[str, str] | None, *, remote: bool, tool: str = "Exec") -> tuple[str, dict[str, str] | None]:
     """The command with the operator's secrets' placeholders turned into their variables, and the
     environment it runs with. A local command gets the variables from :func:`shell_environment`; a
     command on another machine (the operator's host) gets them here, without the file paths, which name
@@ -359,7 +359,7 @@ def _with_secrets(session_id: str, command: str, env: dict[str, str] | None, *, 
         return command, env
     command, named = store.rewrite_command(command, session_id)
     if named:
-        store.record_use(named, f"Exec in {session_id}")
+        store.record_use(named, f"{tool} in {session_id}")
     if remote and (variables := store.environment(session_id, files=False)):
         env = {**variables, **(env or {})}
     return command, env
