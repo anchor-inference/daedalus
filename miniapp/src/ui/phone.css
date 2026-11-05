@@ -1236,6 +1236,16 @@
   .secret-sheet input.field { height: var(--tap); }
   .secret-sheet .secret-form .sub { font-size: var(--fs-13); }
   .secret-sheet .secret-chip, .msg-secrets .secret-chip { font-size: var(--fs-13); }
+  .secret-sheet .secrets-manager { padding: 0 var(--gutter) var(--space-4); }
+  .secret-sheet .secret-add { padding: var(--space-3); }
+  .secret-sheet .secret-edit { padding: 0; }
+  .secrets-search input.field { font-size: var(--fs-16); height: var(--tap); }
+  .secret-row { padding: var(--space-3); }
+  .secret-row-name { font-size: var(--fs-15); }
+  .secret-row-note, .secret-row-dots, .secret-confirm-text { font-size: var(--fs-14); }
+  .secret-row-scope, .secret-row-meta, .secret-row-attached, .secrets-group > .secret-heading { font-size: var(--fs-13); }
+  .secret-row-tools .iconbtn { width: var(--tap); height: var(--tap); }
+  .secret-row-tools { gap: 0; }
 
   /* Settings → Navigation: a phone's browser has no drag and drop, so the grip goes and its width is
      the name's; the arrows and the place selector do the moving. */

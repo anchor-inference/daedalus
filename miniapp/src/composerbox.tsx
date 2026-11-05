@@ -748,7 +748,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           )}
           {openReply && <ReplyDialog key={openReply.id} sessionId={sessionId} reply={openReply} phone={phone} onClose={() => setReplyOpen(null)} />}
           {secretOpen && <SecretSheet sessionId={sessionId} phone={phone} attached={secrets.map((secret) => secret.name)} onClose={() => setSecretOpen(false)}
-            onAttach={(secret) => setSecrets((list) => [...list.filter((other) => other.name !== secret.name), secret])} />}
+            onAttach={(secret) => setSecrets((list) => [...list.filter((other) => other.name !== secret.name), secret])}
+            onChanged={(id, name) => setSecrets((list) => (name === null ? list.filter((other) => other.id !== id) : list.map((other) => (other.id === id ? { ...other, name } : other))))} />}
           {props.onYagni
             ? <TogglesSelect yagni={!!props.yagni} onYagni={props.onYagni} autopilot={props.autopilot} onAutopilot={props.onAutopilot} sheet={phone} />
             : <span className="composer-mode">{t("composer.mode.agent")}</span>}

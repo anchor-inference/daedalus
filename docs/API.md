@@ -426,11 +426,21 @@ pushed request is answered anywhere else, the other devices are told to close it
 
 **Secrets the agent uses without reading.** `POST /api/secrets` with `{"session_id", "scope":
 "session"|"project", "name", "value", "note"}` keeps a value for that chat or for its project (staff
-included); the value is sealed with AES-GCM under a key in the secrets directory and is never sent
-back. `GET /api/secrets` lists every one — `{"id", "name", "scope", "scope_title", "note",
-"placeholder", "env", "last_used_at", "last_used_by", "uses", "readable"}` — and `?session_id=` lists
-the ones that chat may use, with the project it could file one under. `DELETE /api/secrets/{id}` takes
-one back at once. A message names the secrets it carries in `secrets` (a list on
+included); from Settings, where there is no chat, `{"project_id", "scope": "project", …}` files it
+under that project. The value is sealed with AES-GCM under a key in the secrets directory and no list
+or write ever sends it back. `GET /api/secrets` lists every one — `{"id", "name", "scope",
+"scope_title", "note", "placeholder", "env", "created_at", "updated_at", "last_used_at",
+"last_used_by", "uses", "readable"}` — with `projects`, the ones a secret can be filed under; and
+`?session_id=` lists the ones that chat may use, with the project it could file one under and
+`others`, every secret it cannot attach. `PATCH /api/secrets/{id}` with any of `{"name", "value",
+"note"}` changes it in place: a new value replaces the old one (nothing keeps the old one but the
+redactor, which goes on masking it), and a new name re-seals the value and changes the placeholder.
+`POST /api/secrets/{id}/reveal` with `{"purpose": "reveal"|"copy"}` answers `{"value"}` for the
+operator to read or copy, marked `Cache-Control: no-store`, after writing who and when to
+`operator_secret_audit` (never the value); the side panel's and a terminal's credentials are refused.
+`GET /api/secrets/{id}/usage` names the conversations in the secret's scope whose history carries its
+placeholder, and the last lines of that audit, which the app shows before a removal.
+`DELETE /api/secrets/{id}` takes one back at once. A message names the secrets it carries in `secrets` (a list on
 `/messages`, comma-separated on `/upload`); the model is told the name, the note and the placeholder
 `«secret:name»`, never the value. The whole list also carries `logins`: the sign-ins saved from the
 browser's private form (`{"id", "site", "name": "login:<site>", "last_used_at", "uses", "readable"}`,
