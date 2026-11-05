@@ -75,6 +75,33 @@ export function shortDateTime(iso: string | number | Date | null | undefined): s
   return new Date(at).toLocaleString(locale(), { dateStyle: "short", timeStyle: "short" });
 }
 
+/** How long a message's time reads as an age before it reads as a clock: past a few hours "7h" says
+ *  less than "08:10" does. */
+const STAMP_RELATIVE_MS = 6 * 3600_000;
+
+/**
+ * A message's time beside it: "now", "35m", "3h" while it is recent, then "15:20" if it was today,
+ * then "11 Sep, 15:20". A time ahead of `now` reads as now: it is the host's clock against the
+ * browser's, and a message is never written in the future.
+ */
+export function stamp(iso: string | number | Date | null | undefined, now = Date.now()): string {
+  const at = toMs(iso);
+  if (at === null) return "";
+  const age = Math.max(0, now - at);
+  if (age < STAMP_RELATIVE_MS) return relTime(at, at + age);
+  const d = new Date(at);
+  const today = new Date(now);
+  if (d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate()) return clock(at);
+  return absTime(at);
+}
+
+/** The whole local date and time, for a tooltip: "Thursday, 5 November 2026 at 13:10:03". */
+export function fullTime(iso: string | number | Date | null | undefined): string {
+  const at = toMs(iso);
+  if (at === null) return "";
+  return new Date(at).toLocaleString(locale(), { dateStyle: "full", timeStyle: "medium" });
+}
+
 /** "today", "yesterday", or the date. */
 export function dayLabel(iso: string | number | Date | null | undefined): string {
   const at = toMs(iso);

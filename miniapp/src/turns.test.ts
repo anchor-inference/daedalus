@@ -467,7 +467,7 @@ describe("splitActivity", () => {
     const segments = splitActivity(turn.activity);
     expect(segments.map((s) => s.kind)).toEqual(["work", "text", "work"]);
     expect(segments[0].kind === "work" && segments[0].items.map((a) => (a.kind === "tool" ? a.name : a.kind))).toEqual(["Exec", "Read"]);
-    expect(segments[1]).toEqual({ kind: "text", text: "The long answer.", seq: 6 });
+    expect(segments[1]).toEqual({ kind: "text", text: "The long answer.", seq: 6, at: expect.any(Number) });
     expect(segments[2].kind === "work" && segments[2].items.map((a) => (a.kind === "tool" ? a.name : a.kind))).toEqual(["Write"]);
     expect(turn.answer).toBe("The sources are in sources.md.");
   });

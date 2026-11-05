@@ -4,7 +4,8 @@ import type { ReactElement, ReactNode } from "react";
 import { api, ApiError, AsrStatus, type AutopilotMark, type AutopilotStatus, ModelFallback, ProviderUsage, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, SessionDetail, Compacting, type SessionFolder, type Question } from "../api";
 import { Chevron, Dot, Status, copyText, fmtInt, statusWord, timeAgo } from "../ui/components";
 import { MenuItem, OverflowMenu, confirmDialog, Overlay } from "../ui/dialogs";
-import { absDate, clock, commandPreview, duration, plainPreview, shortDateTime } from "../format";
+import { absDate, clock, commandPreview, duration, fullTime, plainPreview, shortDateTime, stamp } from "../format";
+import { useMinute } from "../minute";
 import { HostMark } from "../runon";
 import { PrivateBadge, isPrivate } from "../privatechat";
 import { isProject } from "../grouping";
@@ -15,7 +16,7 @@ import { Icon, IconName } from "../icons";
 import { AuthImg, FilePreview, PreviewSource, canPreview, downloadHref, fileGlyph, previewKind, sessionBase } from "../preview";
 import { followSession } from "../sessionstream";
 import { useEvent } from "../events";
-import { Activity, LiveStore, Segment, SummaryItem, SystemNote, ToolItem, Turn, activitySummary, applyLive, buildTurns, createLiveStore, currentStep, execJob, familyCounts, isOlderPage, liveAfter, liveBase, prepend, producedFiles, reconcile, splitActivity } from "../turns";
+import { Activity, LiveStore, Segment, SummaryItem, SystemNote, ToolItem, Turn, activitySummary, answerTime, applyLive, buildTurns, closingText, createLiveStore, currentStep, execJob, familyCounts, isOlderPage, liveAfter, liveBase, prepend, producedFiles, reconcile, splitActivity } from "../turns";
 import { uiStep } from "../computerstep";
 import { Explorer } from "../explorerpanel";
 import { DiffView } from "../previewparts";
@@ -2280,14 +2281,14 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
   // While the run works past its last reply there is a block for what it is doing now to live in.
   if (split && live && !turn.answer && segments.at(-1)?.kind !== "work") segments.push({ kind: "work", items: [] });
   let lastWork = -1;
-  let lastText = -1;
   segments.forEach((segment, index) => {
     if (segment.kind === "work") lastWork = index;
-    else lastText = index;
   });
   // The copy, link and retry row goes under the last text of the turn: the answer, or, when the
   // turn ended on a step, the last reply before it.
-  const closing = turn.answer ? null : lastText >= 0 && !live ? (segments[lastText] as Extract<Segment, { kind: "text" }>) : null;
+  const closing = closingText(turn, segments, live);
+  const answered = answerTime(turn, closing, live);
+  const answeredStamp = answered ? <MessageTime at={answered.at} took={answered.took} /> : undefined;
   const answerActions = (text: string, answerSeq: number | undefined): MessageAction[] => [
     ...(seq ? [{ icon: "link" as IconName, label: t("turn.link"), onSelect: copyLink }] : []),
     ...(answerSeq && focusChat?.reply ? [{ icon: "reply" as IconName, label: t("reply.action"), onSelect: () => focusChat.reply!({ seq: answerSeq, excerpt: excerptOf(text) }) }] : []),
@@ -2330,6 +2331,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
           {/* Under the message, not beside it: a row beside the bubble is off-screen on a phone. */}
           <MessageActions
             text={words || turn.user.text}
+            lead={<MessageTime at={turn.user.created_at} />}
             actions={
               settled
                 ? ([
@@ -2362,7 +2364,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
         <Fragment key={`t${index}`}>
           <Md className="answer interim" text={segment.text} cacheKey={live ? undefined : `r${turn.key}-${index}`} quote={segment.seq ?? null} />
           {!live && <KeptFiles text={segment.text} onOpen={preview} />}
-          {closing === segment && <MessageActions text={segment.text} actions={answerActions(segment.text, segment.seq)} more={turnMenu} />}
+          {closing === segment && <MessageActions text={segment.text} actions={answerActions(segment.text, segment.seq)} more={turnMenu} trail={answeredStamp} />}
         </Fragment>
       ))}
       {turn.fallback && (turn.answer || live) && <FallbackChip fallback={turn.fallback} />}
@@ -2386,7 +2388,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
           point of showing it is that the operator can open it while the agent goes on. */}
       <PageCards pages={turnPages(turn.activity)} />
       <SavedToMemory activity={turn.activity} />
-      {turn.answer && !live && <MessageActions text={mediaCopyText(turn.answer, turn.media ?? [])} actions={answerActions(turn.answer, turn.answerSeq)} more={turnMenu} />}
+      {turn.answer && !live && <MessageActions text={mediaCopyText(turn.answer, turn.media ?? [])} actions={answerActions(turn.answer, turn.answerSeq)} more={turnMenu} trail={answeredStamp} />}
       </div>
       {/* Outside the folded content: a loop's turn is folded by default, and this line is the one
           thing about it that must be seen without unfolding it. */}
@@ -2800,8 +2802,24 @@ function useClock(ms: number): void {
 
 type MessageAction = { icon: IconName; label: string; danger?: boolean; onSelect: () => void };
 
-/** The row of small buttons under a message: copy it, and whatever else the turn allows; the rest behind ⋯. */
-function MessageActions({ text, actions = [], more }: { text: string; actions?: MessageAction[]; more?: MenuItem[] }) {
+/**
+ * When a message was sent or an answer given, as the row under it says it: an age while it is recent,
+ * a clock or a date after, and the whole date and time on hover. It reads the page's one minute clock,
+ * so the time repaints itself and the turn around it, which is memoised, is left alone.
+ */
+function MessageTime({ at, took }: { at: string | number; took?: number | null }) {
+  const now = useMinute();
+  const label = stamp(at, Math.max(now, Date.now()));
+  if (!label) return null;
+  const whole = fullTime(at);
+  const title = took != null ? `${whole} · ${t("turn.time.took", { t: duration(took) })}` : whole;
+  return <time className="msg-time" dateTime={new Date(typeof at === "number" ? at : Date.parse(at)).toISOString()} title={title}>{label}</time>;
+}
+
+/** The row of small buttons under a message: copy it, and whatever else the turn allows; the rest behind ⋯.
+ *  `lead` and `trail` stand before and after the buttons: the message's time, on the side of the row
+ *  away from the text it answers to. */
+function MessageActions({ text, actions = [], more, lead, trail }: { text: string; actions?: MessageAction[]; more?: MenuItem[]; lead?: ReactNode; trail?: ReactNode }) {
   // A phone shows the same icons as a desktop, in 44 px targets (ui/phone.css): the word "Copy"
   // beside one icon and every other action behind ⋯ made the turn's commands a hunt.
   const menu = more ?? [];
@@ -2822,6 +2840,7 @@ function MessageActions({ text, actions = [], more }: { text: string; actions?: 
   useContextActions(context, [{ label:t("common.copy"), icon:"copy", onSelect:() => void copy() }, ...actions, ...(more ?? [])]);
   return (
     <div ref={controls} className="msg-actions">
+      {lead}
       <button className="iconbtn small" onClick={copy} aria-label={t(copied ? "common.copied" : "common.copy")} title={t(copied ? "common.copied" : "common.copy")}>
         <Icon name={copied ? "check" : "copy"} size={15} />
       </button>
@@ -2831,6 +2850,7 @@ function MessageActions({ text, actions = [], more }: { text: string; actions?: 
         </button>
       ))}
       {menu.length > 0 && <OverflowMenu small label={t("turn.more")} items={menu} />}
+      {trail}
     </div>
   );
 }

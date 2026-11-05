@@ -5896,6 +5896,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "chatsearch.role.tool": { en: "Tool", ru: "Инструмент" },
   "chatsearch.role.system": { en: "System", ru: "Система" },
   "turn.retry": { en: "Regenerate", ru: "Перегенерировать" },
+  "turn.time.took": { en: "answered in {t}", ru: "ответ за {t}" },
   "session.status.preparing": { en: "Preparing the next step", ru: "Готовит следующий шаг" },
   "session.status.responding": { en: "Writing the answer", ru: "Пишет ответ" },
   "session.status.stale": { en: "No new events for {n}s", ru: "Нет новых событий {n} с" },
