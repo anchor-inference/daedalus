@@ -688,6 +688,9 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .msg-actions .iconbtn.small { width:24px; height:24px; background:transparent; color:var(--fg-2); }
 .msg-actions .iconbtn.small:hover { background:var(--surface-2); color:var(--fg); }
 .msg-wrap .msg-actions { justify-content:flex-end; padding-right:4px; }
+/* When the message was sent or the answer given. It lives in the row that is already there, so a turn
+   is no taller for it, and it shows when the row does: on hover on a desk, always on touch. */
+.msg-time { padding-inline:var(--space-2); font-size:var(--fs-12); color:var(--fg-3); white-space:nowrap; font-variant-numeric:tabular-nums; cursor:default; }
 /* The one undoing action turns red when it is pointed at, not before: red at rest it was the loudest
    mark in a row of grey ones and read as an alert with no word to explain it. The confirmation it
    opens says what it removes. */

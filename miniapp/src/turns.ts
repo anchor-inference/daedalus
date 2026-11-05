@@ -24,7 +24,7 @@ export type LiveState = { runId?: string; text: string; thinking: string; tools:
 export const EMPTY_LIVE: LiveState = { text: "", thinking: "", tools: [], startedAt: null, stepAt: null, lastActivityAt: null, ended: false, model: "", fallback: null };
 
 export type ToolItem = { kind: "tool"; id: string; name: string; args: Record<string, unknown>; result?: string; error?: boolean; running: boolean; length?: number; clipped?: boolean; /** How long the step took, when both ends of it are known. */ ms?: number; /** The groups a ToolSearch call loaded, while the run that made it streams. */ groups?: GroupLoad[]; /** The name the call had in the program it was imported from. */ orig?: string; /** The pages a web tool returned, as the host read them out of the result, which the listing carries only the start of. */ sources?: WebSource[]; /** The pictures the tool returned with its result, drawn as thumbnails under it. */ images?: ToolImage[]; /** The files the operator's reply to an AskUser question carried. */ attachments?: MessageAttachment[] };
-export type NoteItem = { kind: "note"; text: string; seq?: number };
+export type NoteItem = { kind: "note"; text: string; seq?: number; /** When the message that carried it was written. */ at?: number };
 export type ThinkItem = { kind: "thinking"; text: string };
 export type SummaryItem = { kind: "summary"; text: string; reason: string };
 /** A group the run loaded without a search of its own to show for it: a held-back tool called by name. */
@@ -42,6 +42,11 @@ export type Turn = {
   activity: Activity[];
   answer: string;
   answerSeq?: number;
+  /** When the message carrying the answer was written: the time the answer was given. */
+  answerAt?: number;
+  /** The run went on past this turn: an operator's message steered it, and that message opened the
+   *  next turn. Its last text was not the run's final answer, so it gets no time of its own. */
+  steered?: boolean;
   startedAt: number;
   endedAt: number;
   pendingTools: number;
@@ -178,15 +183,20 @@ export function buildTurns(messages: MessageView[], previous: readonly Turn[] = 
       // The core compacted mid-run: a step inside the turn, where the summarised work used to be.
       if (!current) current = open(`a${m.seq ?? i}`, at);
       if (current.answer) {
-        current.activity.push({ kind: "note", text: current.answer, seq: current.answerSeq });
+        current.activity.push({ kind: "note", text: current.answer, seq: current.answerSeq, at: current.answerAt });
         current.answer = "";
         current.answerSeq = undefined;
+        current.answerAt = undefined;
       }
       current.activity.push({ kind: "summary", text: m.text, reason: "core" });
       mark(`x${m.seq ?? i}:${m.text.length}`);
       return;
     }
     if (m.role === "user") {
+      if (current && (m.delivery === "steer" || (m.run_id && current.runId === m.run_id))) {
+        current.steered = true;
+        mark("steered");
+      }
       current = open(`u${m.seq ?? i}`, at);
       current.runId = m.run_id || undefined;
       current.user = m;
@@ -209,13 +219,14 @@ export function buildTurns(messages: MessageView[], previous: readonly Turn[] = 
     mark(`m${m.imported?.harness ?? ""}:${m.seq ?? i}:${m.text.length}:${m.thinking.length}:${m.model ?? ""}:${m.fallback?.reason ?? ""}:${m.run_id ?? ""}:${m.media?.map((p) => p.id).join(",") ?? ""}`);
     if (current.answer) {
       // Text that turned out not to be final becomes a note.
-      current.activity.push({ kind: "note", text: current.answer, seq: current.answerSeq });
+      current.activity.push({ kind: "note", text: current.answer, seq: current.answerSeq, at: current.answerAt });
       current.answer = "";
       current.answerSeq = undefined;
+      current.answerAt = undefined;
     }
     if (m.thinking) current.activity.push({ kind: "thinking", text: m.thinking });
-    if (m.text && m.tool_calls.length) current.activity.push({ kind: "note", text: m.text, seq: m.seq ?? undefined });
-    else if (m.text) { current.answer = m.text; current.answerSeq = m.seq ?? undefined; }
+    if (m.text && m.tool_calls.length) current.activity.push({ kind: "note", text: m.text, seq: m.seq ?? undefined, at: at || undefined });
+    else if (m.text) { current.answer = m.text; current.answerSeq = m.seq ?? undefined; current.answerAt = at || undefined; }
     for (const c of m.tool_calls) {
       const r = results.get(c.id);
       const running = r === undefined;
@@ -283,9 +294,10 @@ export function applyLive(base: Turn | null, live: LiveState, now: number): Turn
   const thinkingKnown = t.activity.some((a) => a.kind === "thinking" && a.text === live.thinking);
   if (t.answer && ((live.text && live.text !== t.answer) || (live.thinking && !thinkingKnown) || fresh.length)) {
     // Something newer is streaming, so the text before it was not the final answer.
-    t.activity.push({ kind: "note", text: t.answer, seq: t.answerSeq });
+    t.activity.push({ kind: "note", text: t.answer, seq: t.answerSeq, at: t.answerAt });
     t.answer = "";
     t.answerSeq = undefined;
+    t.answerAt = undefined;
   }
   if (live.thinking && !thinkingKnown) t.activity.push({ kind: "thinking", text: live.thinking });
   for (const lt of fresh) {
@@ -319,7 +331,7 @@ export function currentStep(turn: Turn, live: LiveState): { tool?: ToolItem; sin
 }
 
 /** A stretch of a turn as the transcript draws it: the steps between two texts, or a text. */
-export type Segment = { kind: "work"; items: Activity[] } | { kind: "text"; text: string; seq?: number };
+export type Segment = { kind: "work"; items: Activity[] } | { kind: "text"; text: string; seq?: number; at?: number };
 
 /**
  * The turn's activity cut at every text the agent wrote between its steps, for the transcript
@@ -339,10 +351,41 @@ export function splitActivity(items: readonly Activity[]): Segment[] {
     }
     if (work.length) out.push({ kind: "work", items: work });
     work = [];
-    out.push({ kind: "text", text: item.text, seq: item.seq });
+    out.push({ kind: "text", text: item.text, seq: item.seq, at: item.at });
   }
   if (work.length) out.push({ kind: "work", items: work });
   return out;
+}
+
+export type TextSegment = Extract<Segment, { kind: "text" }>;
+
+/**
+ * The reply the turn's copy, link and retry row goes under when the turn has no answer of its own:
+ * the last text before the step it ended on. A live turn has none yet, and split replies are the only
+ * way a text stands apart from the steps.
+ */
+export function closingText(turn: Turn, segments: readonly Segment[], live: boolean): TextSegment | null {
+  if (turn.answer || live) return null;
+  for (let i = segments.length - 1; i >= 0; i--) if (segments[i].kind === "text") return segments[i] as TextSegment;
+  return null;
+}
+
+/**
+ * When the turn's final answer was given, and how long after the message that opened the turn.
+ *
+ * Only the closing answer has a time: the texts between steps, the steps and the reasoning are the
+ * way to it. A turn still running has no final answer yet, nor does one a steer carried on past or
+ * one that broke off without answering — a time there would say the agent answered when it did not.
+ * The answer's own message carries the time; `took` is null when the turn did not open with a
+ * message or the clocks disagree.
+ */
+export function answerTime(turn: Turn, closing: TextSegment | null, live: boolean): { at: number; took: number | null } | null {
+  if (live || turn.summary || turn.steered) return null;
+  if (turn.outcome && !turn.outcome.answered) return null;
+  const at = turn.answer ? turn.answerAt : closing?.at;
+  if (!at) return null;
+  const opened = turn.user ? Date.parse(turn.user.created_at) : NaN;
+  return { at, took: Number.isFinite(opened) && at >= opened ? at - opened : null };
 }
 
 // ── what a turn is made of, read for the reader ───────────────────────────────────────────
