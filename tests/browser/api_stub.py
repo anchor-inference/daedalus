@@ -20,6 +20,7 @@ port. It is checked once, in a sentence, rather than discovered as a selector th
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import sys
 import time
@@ -422,6 +423,110 @@ class ComputerStub:
         return None
 
 
+class PublicAddressStub:
+    """Settings → Public address of a native installation: off, on Cloudflare, nothing kept yet, with
+    the writes in ``puts`` and the reads counted in ``reads``.
+
+    A write answers the same view, as the host does, and turning it on comes up on the address given
+    (``state`` and the rest can be set by a harness to any moment of a tunnel's life). ``refuse`` makes
+    the next write a 400 in the launcher's words. A token is kept as a yes or no and never comes back.
+
+    ``ways`` are what a phone's QR offers; ``phones`` and ``forgotten`` keep which service was asked for
+    and forgotten."""
+
+    ADDRESS = "https://quiet-river.example.test"
+
+    def __init__(self, **view: object) -> None:
+        self.puts: list[dict] = []
+        self.reads = 0
+        self.refuse = ""
+        self.phones: list[str] = []
+        self.forgotten: list[str] = []
+        self.view: dict[str, object] = {
+            "native": True, "available": True, "tunneld": True, "enabled": False, "provider": "cloudflare", "state": "off",
+            "address": "", "confirmed": False, "wakes": 0, "exposed": {"links": 2, "services": 1}, "qr": [],
+            "providers": {"ngrok": {"client": True, "token": False}, "tailscale": {"client": True, "signed_in": False},
+                          "cloudflare": {"client": True, "token": False}, "frp": {"client": True, "token": False, "server": "", "domain": ""}},
+        }
+        self.view.update(view)
+        self.ways: list[dict] = [
+            {"kind": "wifi", "url": "http://198.51.100.7:8123/s/abc/?phone=code", "qr": qr_rows("wifi")},
+            {"kind": "tunnel", "url": f"{self.ADDRESS}/s/abc/?phone=code", "qr": qr_rows("tunnel")},
+        ]
+
+    def provider(self, name: str) -> dict:
+        return self.view["providers"][name]  # type: ignore[index]
+
+    def apply(self, sent: dict) -> None:
+        if "provider" in sent:
+            self.view["provider"] = sent["provider"]
+        if "ngrok_token" in sent:
+            self.provider("ngrok")["token"] = bool(sent["ngrok_token"])
+        if "frp_token" in sent:
+            self.provider("frp")["token"] = bool(sent["frp_token"])
+        if "frp_server" in sent:
+            self.provider("frp")["server"] = sent["frp_server"]
+        if "frp_domain" in sent:
+            self.provider("frp")["domain"] = sent["frp_domain"]
+        if sent.get("sign_out"):
+            self.provider("tailscale")["signed_in"] = False
+        if sent.get("enabled") is True:
+            self.view.update(enabled=True, state="up", address=self.ADDRESS, confirmed=True, qr=qr_rows(self.ADDRESS))
+        if sent.get("enabled") is False:
+            self.view.update(enabled=False, state="off", address="", confirmed=False, qr=[])
+
+    def answer(self, method: str, path: str, body: object) -> tuple[int, object] | None:
+        if path == "/api/public-address":
+            if method == "GET":
+                self.reads += 1
+                return 200, self.view
+            if method == "PUT":
+                sent = body if isinstance(body, dict) else {}
+                self.puts.append(sent)
+                if self.refuse:
+                    detail, self.refuse = self.refuse, ""
+                    return 400, {"detail": detail}
+                self.apply(sent)
+                return 200, self.view
+        parts = path.split("/")
+        if len(parts) == 7 and parts[2] == "sessions" and parts[4] == "services" and parts[6] == "phone":
+            if method == "POST":
+                self.phones.append(parts[5])
+                return 200, phone_answer(self.ways)
+            if method == "DELETE":
+                self.forgotten.append(parts[5])
+                return 200, {"ok": True}
+        return None
+
+    def fulfil(self, route) -> bool:  # type: ignore[no-untyped-def]
+        request = route.request
+        path = request.url.split("?", 1)[0]
+        path = path[path.index("/api/"):] if "/api/" in path else path
+        body = request.post_data_json if request.method == "PUT" and request.post_data else None
+        answered = self.answer(request.method, path, body)
+        if answered is None:
+            return False
+        route.fulfill(status=answered[0], content_type="application/json", body=json.dumps(answered[1]))
+        return True
+
+
+def qr_rows(text: str, size: int = 29) -> list[str]:
+    """Rows of a QR-shaped picture of ``text``, as the host's ``qr_rows`` shapes them: the three corner
+    squares and a scatter the text decides. It is for the eye and the drawing code, no scanner reads it."""
+    digest = hashlib.sha256(text.encode()).digest()
+    rows = [[digest[(x * 7 + y * 13) % len(digest)] >> (x + y) % 8 & 1 for x in range(size)] for y in range(size)]
+    for top, left in ((0, 0), (0, size - 7), (size - 7, 0)):
+        for y in range(7):
+            for x in range(7):
+                rows[top + y][left + x] = 0 if x in (1, 5) and 0 < y < 6 or y in (1, 5) and 0 < x < 6 else 1
+    return ["".join(str(cell) for cell in row) for row in rows]
+
+
+def phone_answer(ways: list[dict], mode: str = "local") -> dict[str, object]:
+    """``POST …/services/<name>/phone``: a code lasts ten minutes and its pass twelve hours, as in the host."""
+    return {"ways": ways, "mode": mode, "code_minutes": 10, "pass_hours": 12}
+
+
 SAMPLE_PAGE: dict[str, object] = {
     "slug": "dosing", "title": {"en": "Dosing calculator", "ru": "Калькулятор дозировки"}, "icon": None,
     "icon_path": "M5 19L19 5M7 3h4v4H7zM13 17h4v4h-4z", "path": "/app/p/dosing", "version": 1, "updated_at": "2026-10-11T08:00:00Z",
@@ -590,6 +695,9 @@ GATES: dict[str, object] = {
     # drawn. check_computer.py installs ComputerStub for the native case.
     "/api/computer": {"native": False, "available": False, "reason": "Computer use is offered only in the Daedalus desktop app, on the computer it runs on.", "reason_words": {"key": "cu.reason.not_native", "vars": {}}},
     "/api/computer/apps": {"apps": []},
+    # Settings → Public address is the native application's alone too: here a server, which has an
+    # address of its own. check_public_address.py installs PublicAddressStub for the native case.
+    "/api/public-address": {"native": False},
     # Settings → Rules: the categories and levels the host knows, and two review decisions to list.
     "/api/action-rules": ACTION_RULES,
     # Remote identity is optional and empty until a real host is paired.
@@ -1301,6 +1409,14 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     write = SHARED_WRITES.get((method.upper(), path))
     if write is not None:
         return write
+    if len(parts) == 7 and parts[2] == "sessions" and parts[4] == "services" and parts[6] == "phone":
+        # A service's QR on a server with no address to offer; PublicAddressStub offers the two ways.
+        if method.upper() == "POST":
+            return 200, "application/json", json.dumps(phone_answer([]))
+        if method.upper() == "DELETE":
+            return 200, "application/json", json.dumps({"ok": True})
+    if method.upper() == "PUT" and path == "/api/public-address":
+        return 404, "application/json", json.dumps({"detail": "a server has an address of its own"})
     widget = answer_widget(method.upper(), parts, body)
     if widget is not None:
         return widget
