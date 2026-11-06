@@ -186,7 +186,7 @@ over:
 | the supervisor (`DAEDALUS_SUPERVISOR_PORT`), where it listens on TCP | 8769 | native, Windows |
 | the agent's services (`SERVICES_PORT_RANGE`) | 8100–8119 | both modes |
 | the services door (`SERVICES_DOOR_PORT`) | 8766 | both modes |
-| the guest door (`GUEST_DOOR_PORT`) | 8764 | both modes; Docker's `guest` profile runs it, natively it is kept free for now |
+| the guest door (`GUEST_DOOR_PORT`) | 8764 | both modes; Docker's `guest` profile runs it, natively the launcher does, on loopback only |
 | servers in a container terminal (`TERMINALS_PORT_RANGE`) | 8120–8139 | Docker |
 | the launcher's own page | 8770 | both modes |
 

@@ -289,7 +289,14 @@ type Native struct {
 	// browserdUser is the second browser daemon, for the operator's own Chrome (userbrowser.go).
 	browserdUser child
 	deskd        child
-	git          string
+	// guestDoor and guestFront are the door strangers' agents arrive at, and the process that holds its
+	// port (guest.go); nil when this checkout carries no door.
+	guestDoor  child
+	guestFront child
+	git        string
+
+	// guestWall names what the door runs inside, for the Health screen (guest.go).
+	guestWall string
 
 	// bootID is the id the running supervisor was given, which the app echoes (ready.go).
 	bootID string
@@ -853,11 +860,16 @@ func (n *Native) Start(ctx context.Context) error {
 			Name:    "key proxy",
 			Argv:    []string{n.venvPython(), filepath.Join(n.paths.Bot, "deploy", "keyproxy", "proxy.py")},
 			Dir:     n.paths.Bot,
-			Env:     keyproxyEnv(n.paths, base, readEnv(readFile(n.paths.KeyproxyEnv)), settings, home),
+			Env:     guestProxyEnv(n.paths, keyproxyEnv(n.paths, base, readEnv(readFile(n.paths.KeyproxyEnv)), settings, home), settings),
 			LogPath: filepath.Join(n.paths.RuntimeLogs, "keyproxy.log"),
 			Log:     n.log,
 			PidFile: filepath.Join(pidsDir(n.paths), "keyproxy.json"),
 		}
+	}
+	if n.guestDoor == nil {
+		var wall guestWall
+		n.guestDoor, n.guestFront, wall = n.newGuestDoor(ctx, settings)
+		n.guestWall = wall.name
 	}
 	if n.supervisor == nil {
 		n.bootID = newBootID()
@@ -866,7 +878,7 @@ func (n *Native) Start(ctx context.Context) error {
 			Name:    "supervisor",
 			Argv:    []string{n.venvPython(), filepath.Join(n.paths.Bot, "launcher", "supervisor.py")},
 			Dir:     n.paths.Bot,
-			Env:     append(supervisorEnv(n.paths, base, settings), "DAEDALUS_BOOT_ID="+n.bootID),
+			Env:     append(guestHostEnv(n.paths, supervisorEnv(n.paths, base, settings), settings, n.guestDoor != nil, n.guestWall), "DAEDALUS_BOOT_ID="+n.bootID),
 			LogPath: filepath.Join(n.paths.RuntimeLogs, "supervisor.log"),
 			Log:     n.log,
 			PidFile: filepath.Join(pidsDir(n.paths), "supervisor.json"),
@@ -912,6 +924,11 @@ func (n *Native) Start(ctx context.Context) error {
 		waitForPtyd(ctx, deskdRunDir(n.paths), 5*time.Second)
 	}
 	n.keyproxy.Start(ctx)
+	// The door after the proxy it asks for a stand-in's words, and it waits for the token the app writes.
+	if n.guestDoor != nil {
+		n.guestDoor.Start(ctx)
+		n.guestFront.Start(ctx)
+	}
 	n.supervisor.Start(ctx)
 	n.enter(StageStart)
 	n.log("waiting for the app to answer")
@@ -1063,9 +1080,10 @@ const nativeReadyTimeout = 90 * time.Second
 // ends any lease and lets go of every key and button it holds; then the user browser daemon, which
 // lets go of the operator's Chrome and closes nothing in it; then the browser daemon, which closes
 // every browser; then the terminal daemon, which ends every host terminal; then the key proxy,
-// which the agent needed until it stopped.
+// which the agent needed until it stopped. The guest door goes right after the supervisor, front first,
+// so a stranger is refused at the door rather than left waiting behind it.
 func (n *Native) Stop(ctx context.Context) {
-	for _, c := range []child{n.supervisor, n.deskd, n.browserdUser, n.browserd, n.ptyd, n.keyproxy} {
+	for _, c := range []child{n.supervisor, n.guestFront, n.guestDoor, n.deskd, n.browserdUser, n.browserd, n.ptyd, n.keyproxy} {
 		if c != nil {
 			c.Stop(ctx)
 		}
@@ -1075,6 +1093,7 @@ func (n *Native) Stop(ctx context.Context) {
 	// an edit to the ports and a start would otherwise bring the old ports back up and then wait on
 	// the new ones, which is a launcher hanging on a port nothing is serving.
 	n.supervisor, n.keyproxy, n.ptyd, n.browserd, n.browserdUser, n.deskd = nil, nil, nil, nil, nil, nil
+	n.guestDoor, n.guestFront = nil, nil
 }
 
 // Running counts what is answering rather than what this process started. A `status` from a second
